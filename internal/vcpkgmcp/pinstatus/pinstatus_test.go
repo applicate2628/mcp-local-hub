@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -1342,5 +1343,63 @@ vcpkg_from_github(REPO ${ORG_NAME}/widget REF `+commitA+` SHA512 0)`)
 	}
 	if p.Status != evidence.StatusOK {
 		t.Fatalf("status=%v reason=%v, want ok", p.Status, p.Reason)
+	}
+}
+
+// PR #591 P1 (redact.go): url.Parse rejects a URL for reasons that have
+// NOTHING to do with its query — an invalid %-escape in the path, a control
+// character, a space in the host, a bad escape in the fragment. The old
+// unparsable fallback scrubbed only the userinfo, so every case below was
+// returned VERBATIM, secret and all, and hasEmbeddedCredential likewise saw
+// nothing to refuse. This file's whole contract is that it is TOTAL: a URL we
+// cannot model is the case where we must redact MORE, never less.
+//
+// Each case asserts its own precondition (url.Parse really does reject it) so
+// the test cannot quietly degrade into an exercise of the parse path if Go's
+// URL parser ever becomes more permissive.
+func TestRedactURL_UnparsableURLStillScrubsQueryCredentials(t *testing.T) {
+	cases := []struct {
+		name   string
+		in     string
+		secret string
+	}{
+		{"invalid percent escape in path", "https://host/re%zzpo?access_token=SECRETVAL", "SECRETVAL"},
+		{"control character in query", "https://host/repo?access_token=SECRETVAL\x7f", "SECRETVAL"},
+		{"space in host", "https://ho st/repo?access_token=SECRETVAL", "SECRETVAL"},
+		{"invalid escape in fragment", "https://host/repo?access_token=SECRETVAL#%zz", "SECRETVAL"},
+		{"unparsable userinfo plus secret query", "https://%zz@host/repo?token=SECRETVAL", "SECRETVAL"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := url.Parse(tc.in); err == nil {
+				t.Fatalf("precondition failed: url.Parse(%q) succeeded, so this case never reaches redactUnparsable and proves nothing", tc.in)
+			}
+			got := redactURL(tc.in)
+			if strings.Contains(got, tc.secret) {
+				t.Fatalf("redactURL(%q) = %q, still leaks %q — failing to parse must never mean failing to redact", tc.in, got, tc.secret)
+			}
+			if !hasEmbeddedCredential(tc.in) {
+				t.Fatalf("hasEmbeddedCredential(%q) = false, want true — an unparsable credential-bearing remote must be REFUSED, not handed to git ls-remote's argv", tc.in)
+			}
+		})
+	}
+}
+
+// PR #591 P1 (redact.go), the equal-and-opposite guard: making the unparsable
+// path total must not make it destructive. An unparsable URL carrying NO
+// credential must come back byte-for-byte, so an operator can still read the
+// malformed value that caused the failure.
+func TestRedactURL_UnparsableURLWithoutCredentialIsUnchanged(t *testing.T) {
+	for _, clean := range []string{
+		"https://ho st/repo.git",
+		"https://host/re%zzpo.git",
+		"https://host/repo.git?depth=1&branch=main",
+	} {
+		if got := redactURL(clean); got != clean {
+			t.Fatalf("redactURL(%q) = %q, want it unchanged — over-redaction destroys the diagnostic", clean, got)
+		}
+		if hasEmbeddedCredential(clean) {
+			t.Fatalf("hasEmbeddedCredential(%q) = true, want false — a credential-free remote must not be refused", clean)
+		}
 	}
 }

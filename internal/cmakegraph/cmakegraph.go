@@ -811,7 +811,7 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 		return absStart, nil
 	}
 	w.visited[key] = true
-	w.files[canonStart] = true
+	// w.files is populated inside walkFile, once the read succeeds — see there.
 	w.walkFile(absStart, ctx, 0, []string{canonStart})
 	return absStart, nil
 }
@@ -863,6 +863,14 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 		return
 	}
 	canonSelf := w.canonicalize(file)
+	// Recorded as SCANNED only here, after the read actually succeeded. This is
+	// the single owner of w.files: both callers (walkRoot for a root, the
+	// resolve loop for an include target) used to insert BEFORE calling
+	// walkFile, so a file that exceeded MaxFileBytes or could not be read was
+	// listed in files[] as scanned while simultaneously appearing in
+	// unscanned_files[] as a coverage hole. Reporting a file as both is worse
+	// than either: files[] is what a caller trusts to mean "this was examined".
+	w.files[canonSelf] = true
 	listDir := filepath.Dir(canonSelf)
 
 	condDepth := 0
@@ -1005,7 +1013,7 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 		default:
 			e.Status = StatusResolved
 			w.visited[key] = true
-			w.files[canonTarget] = true
+			// w.files is populated inside walkFile, once the read succeeds.
 			w.edges = append(w.edges, e)
 			nextAncestors := make([]string, len(ancestors)+1)
 			copy(nextAncestors, ancestors)
@@ -1096,9 +1104,38 @@ func readBounded(path string, maxBytes int64) ([]byte, error) {
 	if info.Size() > maxBytes {
 		return nil, fmt.Errorf("%w: %s (%d > %d)", errByteCapExceeded, path, info.Size(), maxBytes)
 	}
-	// io.LimitReader is belt-and-braces against a file that GREW between the
-	// Stat above and the read: the size check alone is a TOCTOU window.
-	return io.ReadAll(io.LimitReader(f, maxBytes))
+	// The Stat above is a TOCTOU window: a file that GROWS between it and the
+	// read is the case the LimitReader has to catch. Reading maxBytes exactly
+	// could not catch it — a grown file returns exactly maxBytes with a nil
+	// error, byte-for-byte indistinguishable from a complete read of a file
+	// that happens to be exactly that size. The graph was then built from a
+	// SILENTLY TRUNCATED file and reported as complete coverage: every
+	// include() past the cut simply did not exist as far as the result was
+	// concerned, with nothing in unscanned_files[] to say so.
+	//
+	// Reading maxBytes+1 makes the overflow observable — the same limit+1 idiom
+	// lastfailure's readLogLimited uses — so it can be reported as the byte-cap
+	// coverage hole it is.
+	return readBoundedFrom(f, path, maxBytes)
+}
+
+// readBoundedFrom is the post-Stat read, split out from readBounded so the
+// TOCTOU case it exists for is directly exercisable.
+//
+// The growth race cannot be reproduced deterministically through the
+// filesystem: by the time a test could append, the read has happened. Passing
+// a reader that yields MORE than the preceding Stat promised is exactly what a
+// grown file looks like from here, and is the only honest way to prove the
+// bound rather than merely asserting the Stat gate that precedes it.
+func readBoundedFrom(r io.Reader, path string, maxBytes int64) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("%w: %s (grew past %d during read)", errByteCapExceeded, path, maxBytes)
+	}
+	return data, nil
 }
 
 // readCoverageReason maps a readBounded error onto the CLOSED CoverageReason
@@ -1443,9 +1480,40 @@ func isSpace(c byte) bool {
 // an unterminated quote, or CMake bracket-argument syntax (recognized, but
 // its content is never extracted as a path — P1-4).
 func firstArgument(argText []byte) (string, bool) {
+	// Skip leading whitespace AND comments. scanArgList already understands
+	// both CMake comment forms, so a call like
+	//
+	//	include( # pick the platform variant
+	//	        Foo.cmake)
+	//
+	// is a perfectly ordinary, well-formed call it scans correctly — but this
+	// function only skipped whitespace, so it returned "#" as the first
+	// argument and the edge was misparsed. The two must agree about what is
+	// argument text and what is a comment.
 	i := 0
-	for i < len(argText) && isSpace(argText[i]) {
-		i++
+	for i < len(argText) {
+		if isSpace(argText[i]) {
+			i++
+			continue
+		}
+		if argText[i] != '#' {
+			break
+		}
+		if contentStart, eq, ok := matchBracketOpen(argText, i+1); ok {
+			// Bracket comment: #[[ ... ]]. An unterminated one means the rest
+			// of the text is uninterpreted content, so there is no first
+			// argument to find — malformed, exactly as scanArgList treats it.
+			end := findBracketClose(argText, contentStart, eq)
+			if end < 0 {
+				return "", false
+			}
+			i = end
+			continue
+		}
+		// Line comment: runs to the newline (or to the end of the arg text).
+		for i < len(argText) && argText[i] != '\n' {
+			i++
+		}
 	}
 	if i >= len(argText) {
 		return "", false

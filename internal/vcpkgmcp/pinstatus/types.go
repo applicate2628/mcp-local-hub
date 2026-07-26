@@ -39,6 +39,19 @@ const (
 	// full confidence (equal -> current, unequal -> pin_not_at_tip,
 	// carrying both SHAs, never a direction).
 	RefShapeCommit40Hex RefShape = "commit_40hex"
+	// RefShapeCommitAbbrev: REF is a literal pure-hex token of 7..39
+	// characters — an ABBREVIATED commit SHA. It is a commit, and is named as
+	// one, but it can never enter the comparison path: `git ls-remote`
+	// advertises full 40-hex SHAs only, so matching an abbreviation against a
+	// tip would require resolving it server-side (a fetch), which this package
+	// never does. The verdict is therefore always
+	// unknown(commit_pin_abbreviated).
+	//
+	// The alternative — letting it fall through to RefShapeTag/RefShapeBranch,
+	// which is what used to happen — reported an abbreviated commit as a
+	// missing tag/branch: a confidently WRONG kind AND a confidently wrong
+	// verdict.
+	RefShapeCommitAbbrev RefShape = "commit_abbrev"
 	// RefShapeTag: REF is a literal, non-hex token that looks like a
 	// version tag (heuristic classification only — see looksLikeTag).
 	RefShapeTag RefShape = "tag"
@@ -103,6 +116,19 @@ const (
 	// purely local parsing problem — this one required a live query to
 	// discover.
 	ReasonRefNotFoundOnRemote Reason = "ref_not_found_on_remote"
+	// ReasonCommitPinAbbreviated: REF (or its resolved literal) is an
+	// abbreviated commit SHA (see RefShapeCommitAbbrev) that the remote does
+	// not advertise under that literal name. It is an unresolvable COMMIT, not
+	// a missing ref: ls-remote lists full SHAs and named refs, so there is
+	// nothing here to look an abbreviation up against.
+	//
+	// It exists because the honest kind matters to the operator. Reporting
+	// ref_not_found_on_remote for an abbreviated pin asserts "the remote no
+	// longer has a ref by that name", which sends someone hunting for a
+	// deleted tag that never existed; the pin is fine, this tool simply cannot
+	// verify it without a fetch. The remedy is to widen the pin to the full
+	// 40-hex SHA, which IS comparable.
+	ReasonCommitPinAbbreviated Reason = "commit_pin_abbreviated"
 	// ReasonNamedRefNotComparable: REF (or its resolved literal) is a named
 	// tag or branch that the remote still advertises. Its current target can
 	// be observed, but that does not prove the port's pin is current.

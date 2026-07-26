@@ -49,7 +49,7 @@ var secretQueryKeys = []string{
 
 // redactURL returns raw with any embedded userinfo and any secret-shaped
 // query-parameter value replaced. It is total: a URL that does not parse is
-// still scrubbed of anything that looks like userinfo, because failing to
+// still scrubbed of BOTH channels (see redactUnparsable), because failing to
 // parse must never mean failing to redact.
 func redactURL(raw string) string {
 	if raw == "" {
@@ -111,27 +111,73 @@ func isSecretQueryKey(key string) bool {
 }
 
 // redactUnparsable is the fail-closed path for a string url.Parse rejected.
-// It cannot reason about structure, so it applies the crude rule that is
-// still sound: everything between the scheme separator and the LAST '@'
-// before the first '/' of the path is userinfo, and is dropped.
+//
+// It must scrub EVERY channel the parse path scrubs, because "the URL did not
+// parse" is not a reason to emit a secret — it is the case where we understand
+// LEAST and must therefore redact MOST. url.Parse rejects a URL for reasons
+// that have nothing to do with the query (an invalid %-escape in the path, a
+// control character, a space in the host, a bad escape in the fragment), so a
+// credential-bearing query survives that rejection intact. Scrubbing only the
+// userinfo here — which is what this function used to do — meant
+// "https://host/re%zzpo?access_token=SECRET" was returned VERBATIM.
+//
+// It cannot reason about structure, so it applies the crude rules that are
+// still sound on any RFC-3986-shaped string:
+//
+//   - fragment: everything from the first '#' is split off untouched ('#'
+//     terminates the query, so a '?' after it is not a query delimiter);
+//   - query: everything after the first '?' in the remainder goes through the
+//     SAME redactQuery the parse path uses — one owner for the secret-key rule;
+//   - userinfo: everything between the scheme separator and the LAST '@'
+//     before the first '/' of the path is userinfo, and is dropped.
+//
+// Unlike the previous version this never early-returns the raw string on a
+// missing scheme or a missing '@': those only mean there is no userinfo to
+// drop, not that there is no query to scrub.
 func redactUnparsable(raw string) string {
-	schemeEnd := strings.Index(raw, "://")
-	if schemeEnd < 0 {
-		return raw
+	body, fragment := raw, ""
+	if hash := strings.IndexByte(raw, '#'); hash >= 0 {
+		body, fragment = raw[:hash], raw[hash:]
 	}
-	rest := raw[schemeEnd+3:]
-	authorityEnd := strings.IndexAny(rest, "/?#")
+	query, hasQuery := "", false
+	if q := strings.IndexByte(body, '?'); q >= 0 {
+		query, hasQuery = body[q+1:], true
+		body = body[:q]
+	}
+
+	body = redactUnparsableUserinfo(body)
+	if hasQuery {
+		if scrubbed, changed := redactQuery(query); changed {
+			query = scrubbed
+		}
+	}
+
+	out := body
+	if hasQuery {
+		out += "?" + query
+	}
+	return out + fragment
+}
+
+// redactUnparsableUserinfo drops the userinfo component of an unparsable URL
+// whose query and fragment have already been split off by redactUnparsable.
+func redactUnparsableUserinfo(body string) string {
+	schemeEnd := strings.Index(body, "://")
+	if schemeEnd < 0 {
+		return body
+	}
+	rest := body[schemeEnd+3:]
 	authority := rest
 	tail := ""
-	if authorityEnd >= 0 {
+	if authorityEnd := strings.IndexByte(rest, '/'); authorityEnd >= 0 {
 		authority = rest[:authorityEnd]
 		tail = rest[authorityEnd:]
 	}
 	at := strings.LastIndex(authority, "@")
 	if at < 0 {
-		return raw
+		return body
 	}
-	return raw[:schemeEnd+3] + redactedUserinfo + "@" + authority[at+1:] + tail
+	return body[:schemeEnd+3] + redactedUserinfo + "@" + authority[at+1:] + tail
 }
 
 // hasEmbeddedCredential reports whether raw carries a credential this package
@@ -153,8 +199,11 @@ func hasEmbeddedCredential(raw string) bool {
 		}
 		return false
 	}
-	// Unparsable: fall back to the same crude authority scan redaction uses,
-	// so a URL we cannot model is refused rather than trusted.
+	// Unparsable: fall back to the same crude authority+query scan redaction
+	// uses, so a URL we cannot model is refused rather than trusted. Because
+	// redactUnparsable covers the query too, an unparsable URL carrying only a
+	// secret-shaped query parameter is now refused here as well — previously
+	// it was neither refused NOR redacted.
 	return redactUnparsable(raw) != raw
 }
 

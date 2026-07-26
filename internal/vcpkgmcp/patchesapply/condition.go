@@ -132,11 +132,14 @@ func (p *condParser) parseAtom() Tri {
 // for embedded ${VAR} references.
 func resolveOperand(tok token, env *varEnv) (*string, []string) {
 	if tok.Quoted {
-		expanded, unresolved := env.expandToken(tok)
-		return &expanded, unresolved
+		return operandFromExpansion(env.expandToken(tok))
 	}
 	if m := reVarRefFull.FindStringSubmatch(tok.Text); m != nil {
-		v := env.lookup(m[1])
+		// lookupCertain, not lookup: a variable assigned under a guard this
+		// parser could not decide has no certain value, so a condition reading
+		// it is itself undecidable and must report Unknown rather than
+		// evaluating against a value that may never have been assigned.
+		v := env.lookupCertain(m[1])
 		if v == nil {
 			return nil, []string{m[1]}
 		}
@@ -148,14 +151,25 @@ func resolveOperand(tok token, env *varEnv) (*string, []string) {
 		return &s, nil
 	}
 	if rePlainIdent.MatchString(tok.Text) {
-		v := env.lookup(tok.Text)
+		v := env.lookupCertain(tok.Text)
 		if v == nil {
 			return nil, []string{tok.Text}
 		}
 		return v, nil
 	}
-	expanded, unresolved := env.expandToken(tok)
-	return &expanded, unresolved
+	return operandFromExpansion(env.expandToken(tok))
+}
+
+// operandFromExpansion turns an expansion into an if()-operand. An expansion
+// that substituted an uncertain scalar yields NO value: the same rule as
+// lookupCertain, applied to a token that merely EMBEDS such a variable rather
+// than being one.
+func operandFromExpansion(ex expansion) (*string, []string) {
+	if ex.certainty != TriTrue {
+		return nil, dedupStrings(append(append([]string{}, ex.unresolved...), ex.uncertainVars...))
+	}
+	text := ex.text
+	return &text, ex.unresolved
 }
 
 var rePlainIdent = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)

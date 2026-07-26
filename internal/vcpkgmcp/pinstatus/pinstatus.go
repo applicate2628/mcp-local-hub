@@ -305,6 +305,21 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 		res.NamedRefSHA = sha
 		return res
 	}
+	// No ref by this literal name. Before concluding "the remote no longer has
+	// it", ask whether it was ever a NAME: an abbreviated commit SHA is a
+	// commit, and ls-remote advertises only full SHAs, so its absence from the
+	// ref list is expected and says nothing about the pin. Reporting
+	// ref_not_found_on_remote here asserted a deletion that never happened.
+	//
+	// The shape test runs AFTER the name lookup on purpose: a branch or tag
+	// that happens to be pure hex is classified by the evidence that the remote
+	// advertises it, never by its spelling.
+	if isAbbreviatedCommitHex(effectiveRef) {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonCommitPinAbbreviated
+		res.PinnedSHA = effectiveRef
+		return res
+	}
 	res.Status = evidence.StatusUnknown
 	res.Reason = ReasonRefNotFoundOnRemote
 	return res

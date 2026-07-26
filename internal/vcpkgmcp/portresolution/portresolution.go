@@ -13,12 +13,55 @@
 package portresolution
 
 import (
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
+
+// portNameRE is the documented vcpkg port-name rule: "The name must be
+// lowercase ASCII letters, digits, or hyphens (-). It must not start nor end
+// with a hyphen." (Microsoft Learn, vcpkg.json Reference, "name" field:
+// https://learn.microsoft.com/en-us/vcpkg/reference/vcpkg-json).
+//
+// A port name is used as ONE path segment under each root, so it must be
+// validated as one BEFORE being joined: filepath.Join(root, port) happily
+// normalises "../../outside" into a path outside the root, which would make
+// this tool probe and report directories the caller never granted it.
+var portNameRE = regexp.MustCompile(`^[a-z0-9]+(?:-+[a-z0-9]+)*$`)
+
+// errPortEscapesRoot marks a port whose joined path leaves the root.
+var errPortEscapesRoot = errors.New("port path escapes the root")
+
+// portDirWithin validates port as a single legal vcpkg port-name segment and
+// returns its directory under root, guaranteeing the result stays beneath that
+// root.
+//
+// Both checks are kept, deliberately: the name rule rejects the input shape,
+// and the containment check is the actual security boundary — it holds even if
+// the name rule is ever loosened, and it catches platform-specific path
+// normalisation (Windows alternate separators, trailing dots/spaces, 8.3
+// aliases) that a charset regex alone cannot reason about.
+func portDirWithin(root, port string) (string, error) {
+	if !portNameRE.MatchString(port) {
+		return "", fmt.Errorf("%q is not a legal vcpkg port name "+
+			"(lowercase ASCII letters, digits and hyphens; must not start or end with a hyphen)", port)
+	}
+	cleanRoot := filepath.Clean(root)
+	joined := filepath.Clean(filepath.Join(cleanRoot, port))
+	rel, err := filepath.Rel(cleanRoot, joined)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", errPortEscapesRoot, err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return "", fmt.Errorf("%w: %q resolves to %q, outside %q", errPortEscapesRoot, port, joined, cleanRoot)
+	}
+	return joined, nil
+}
 
 // Args is the input contract for ResolvePort.
 type Args struct {
@@ -49,6 +92,17 @@ const (
 	ReasonRootUnreadable Reason = "root_unreadable"
 	// ReasonEmptyPort: the port name is empty or whitespace-only.
 	ReasonEmptyPort Reason = "empty_port"
+	// ReasonInvalidPortName: port is not ONE legal vcpkg port-name segment, or
+	// the path it joins to would leave the root it was joined under.
+	//
+	// Only an EMPTY port used to be rejected, so a traversal name like
+	// "../../outside" was normalised BY the join and the resulting path — a
+	// sibling of the overlay root, entirely outside it — was then stat'ed,
+	// listed and reported as a resolved candidate location. That turns a port
+	// LOOKUP into an arbitrary-directory probe against whatever the daemon can
+	// read. Same gate, and the same reason spelling, as lastfailure's
+	// invalid_port_name for its buildtrees root.
+	ReasonInvalidPortName Reason = "invalid_port_name"
 	// ReasonRelativeRoot: a supplied root was relative, which would make
 	// resolution depend on the process working directory.
 	ReasonRelativeRoot Reason = "relative_root"
@@ -124,6 +178,9 @@ type Result struct {
 	// InvalidRoot identifies the supplied relative root rejected as invalid
 	// input, so callers do not need to infer it from ambient working state.
 	InvalidRoot string `json:"invalid_root,omitempty"`
+	// InvalidPort echoes the rejected port name when Reason is
+	// ReasonInvalidPortName, so the caller sees exactly what was refused.
+	InvalidPort string `json:"invalid_port,omitempty"`
 	// Shadows lists every lower-precedence definition of this port that was
 	// shadowed by the winner. Populated only when Status == ok and at least
 	// one shadowed definition exists.
@@ -234,6 +291,19 @@ func ResolvePort(args Args, deps Deps) Result {
 
 	port := strings.TrimSpace(args.Port)
 
+	// Gate 1b: the port must be ONE legal path segment. Validated BEFORE any
+	// join, because the join is what launders a traversal name into a
+	// plausible-looking absolute path that later code then probes and reports.
+	// The per-root containment check below is the real boundary; this is the
+	// cheap shape rejection that fails the whole call rather than silently
+	// skipping roots one at a time.
+	if !portNameRE.MatchString(port) {
+		res.Status = evidence.StatusFailed
+		res.Reason = ReasonInvalidPortName
+		res.InvalidPort = port
+		return res
+	}
+
 	// Roots are an explicit absolute-path contract. Never call Abs here: doing
 	// so would silently bind relative inputs to the process working directory.
 	for _, overlayPath := range args.OverlayPorts {
@@ -275,7 +345,16 @@ func ResolvePort(args Args, deps Deps) Result {
 			continue
 		}
 
-		portPath := filepath.Join(overlayPath, port)
+		// Containment is re-verified per root: filepath.Rel is what actually
+		// proves the joined path stays beneath THIS root, and it holds even for
+		// platform-specific normalisation a charset regex cannot reason about.
+		portPath, portErr := portDirWithin(overlayPath, port)
+		if portErr != nil {
+			res.Status = evidence.StatusFailed
+			res.Reason = ReasonInvalidPortName
+			res.InvalidPort = port
+			return res
+		}
 		res.Evidence.AddPath(portPath)
 
 		if state, reason := inspectRoot(deps, overlayPath); state == CandidateStateUnreadable {
@@ -331,7 +410,13 @@ func ResolvePort(args Args, deps Deps) Result {
 	// Check builtin (only if vcpkg_root is supplied).
 	if hasVcpkg {
 		vcpkgRoot := strings.TrimSpace(args.VcpkgRoot)
-		builtinPortPath := filepath.Join(vcpkgRoot, "ports", port)
+		builtinPortPath, portErr := portDirWithin(filepath.Join(vcpkgRoot, "ports"), port)
+		if portErr != nil {
+			res.Status = evidence.StatusFailed
+			res.Reason = ReasonInvalidPortName
+			res.InvalidPort = port
+			return res
+		}
 		res.Evidence.AddPath(builtinPortPath)
 		if state, reason := inspectRoot(deps, vcpkgRoot); state == CandidateStateUnreadable {
 			builtinUnreadable = true

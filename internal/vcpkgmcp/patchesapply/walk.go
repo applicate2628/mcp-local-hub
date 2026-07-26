@@ -177,23 +177,38 @@ func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unreso
 	name := toks[0].Text
 	var parts []string
 	var items []listItem
+	// The assignment is only as applicable as the branch it sits in, AND as
+	// the values it reads: a set() under an undecided if() is uncertain, and so
+	// is one whose value splices a variable that was itself assigned under one.
+	valueCertainty := TriTrue
+	valueUncertainVars := append([]string{}, unresolvedVars...)
 	for _, t := range toks[1:] {
 		if !t.Quoted && (t.Text == "CACHE" || t.Text == "PARENT_SCOPE" || t.Text == "FORCE") {
 			break
 		}
-		expanded, pathUnresolved := env.expandToken(t)
-		parts = append(parts, expanded)
-		if expanded != "" {
+		ex := env.expandToken(t)
+		valueCertainty = kleeneAnd(valueCertainty, ex.certainty)
+		valueUncertainVars = append(valueUncertainVars, ex.uncertainVars...)
+		parts = append(parts, ex.text)
+		if ex.text != "" {
 			items = append(items, listItem{
-				text:           expanded,
-				guard:          active,
+				text:           ex.text,
+				guard:          kleeneAnd(active, ex.certainty),
 				guardText:      guardText,
-				unresolvedVars: unresolvedVars,
-				pathUnresolved: pathUnresolved,
+				unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
+				pathUnresolved: ex.unresolved,
 			})
 		}
 	}
-	env.scalars[name] = strings.Join(parts, ";")
+	assignedGuard := kleeneAnd(active, valueCertainty)
+	// setScalar carries the value AND its guard together. Writing env.scalars
+	// directly here is what used to lose the tri-state on the scalar shape
+	// while the list items beside it kept theirs.
+	env.setScalar(name, strings.Join(parts, ";"), scalarTaint{
+		guard:          assignedGuard,
+		guardText:      guardText,
+		unresolvedVars: dedupStrings(valueUncertainVars),
+	})
 	// CMake set(VAR value...) establishes a list value, replacing any prior
 	// value; later list(APPEND VAR ...) extends this declaration in source
 	// order. Keeping the declaration here lets PATCHES ${VAR} expand both.
@@ -215,12 +230,17 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri) {
 		return
 	}
 	name := toks[0].Text
-	inputExpanded, _ := env.expandToken(toks[1])
+	ex := env.expandToken(toks[1])
 	mode := toks[2].Text
 	if mode != "ABSOLUTE" {
 		return
 	}
-	env.scalars[name] = env.getFilenameComponentAbsolute(inputExpanded)
+	// Same tri-state rule as handleSet: the derived path is only as applicable
+	// as the branch this call sits in and the variables it read.
+	env.setScalar(name, env.getFilenameComponentAbsolute(ex.text), scalarTaint{
+		guard:          kleeneAnd(active, ex.certainty),
+		unresolvedVars: ex.uncertainVars,
+	})
 }
 
 // handleListAppend implements list(APPEND <listvar> item...). Only the
@@ -242,13 +262,13 @@ func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string,
 	}
 	listName := toks[1].Text
 	for _, t := range toks[2:] {
-		expanded, pathUnresolved := env.expandToken(t)
+		ex := env.expandToken(t)
 		env.lists[listName] = append(env.lists[listName], listItem{
-			text:           expanded,
-			guard:          active,
+			text:           ex.text,
+			guard:          kleeneAnd(active, ex.certainty),
 			guardText:      guardText,
-			unresolvedVars: unresolvedVars,
-			pathUnresolved: pathUnresolved,
+			unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
+			pathUnresolved: ex.unresolved,
 		})
 	}
 }
@@ -293,14 +313,14 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 					}
 				}
 			}
-			expanded, pathUnresolved := env.expandToken(t)
+			ex := env.expandToken(t)
 			items = append(items, declaredPatch{
 				raw:            t.Text,
-				expanded:       expanded,
-				guard:          active,
+				expanded:       ex.text,
+				guard:          kleeneAnd(active, ex.certainty),
 				guardText:      guardText,
-				unresolvedVars: unresolvedVars,
-				pathUnresolved: pathUnresolved,
+				unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
+				pathUnresolved: ex.unresolved,
 			})
 			j++
 		}

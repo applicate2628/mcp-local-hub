@@ -86,8 +86,31 @@ const (
 	ReasonEmptyPortDir Reason = "empty_port_dir"
 	// ReasonEmptyTriplet: Triplet was empty/whitespace-only. Failed.
 	ReasonEmptyTriplet Reason = "empty_triplet"
-	// ReasonPortDirMissing: PortDir does not exist or is not a directory.
+	// ReasonRelativePortDir: PortDir is not absolute. Failed (bad caller
+	// input), and refused BEFORE the path is used.
+	//
+	// The schema has always required an absolute path, but the value went
+	// straight to Stat, which resolves a relative path against the process
+	// working directory — the hub daemon's, not the caller's. That silently
+	// answers about a DIFFERENT port directory than the one asked about, and
+	// on a daemon whose cwd the caller cannot see it is not even diagnosable.
+	// Same posture, and the same reason spelling, as lastfailure's
+	// relative_root gate for root/buildtrees_root.
+	ReasonRelativePortDir Reason = "relative_port_dir"
+	// ReasonPortDirMissing: the OS positively reported that PortDir does not
+	// exist, or that it exists but is not a directory. A VERIFIED negative —
+	// never a probe that merely failed (see ReasonPortDirUnreadable).
 	ReasonPortDirMissing Reason = "port_dir_missing"
+	// ReasonPortDirUnreadable: the probe of PortDir itself failed (permission
+	// denied, sharing violation, disconnected network path), so whether the
+	// directory exists is UNKNOWN.
+	//
+	// It is distinct from ReasonPortDirMissing because the remedy is different
+	// — fix access, versus correct the path — and because collapsing the two
+	// tells an operator their port directory is gone when it is merely locked.
+	// This is the evidence.Presence distinction the shared owner already
+	// models; every other probe in this package routes through it.
+	ReasonPortDirUnreadable Reason = "port_dir_unreadable"
 	// ReasonPortfileUnreadable: PortDir exists but portfile.cmake could not
 	// be read (missing, permission denied, ...).
 	ReasonPortfileUnreadable Reason = "portfile_unreadable"
@@ -132,6 +155,9 @@ const (
 	UnreadablePatchPath   UnreadableKind = "patch_path"
 	UnreadableOrphanDir   UnreadableKind = "orphan_scan_dir"
 	UnreadableTripletFile UnreadableKind = "triplet_file"
+	// UnreadablePortDir: the port directory itself could not be probed, so
+	// nothing below it could be inspected either.
+	UnreadablePortDir UnreadableKind = "port_dir"
 )
 
 // UnreadablePath is one path whose existence or contents could not be
@@ -253,6 +279,10 @@ func ApplyOrder(args Args) Result {
 
 func applyOrder(args Args, deps Deps) Result {
 	var ev evidence.Evidence
+	// Declared up front because the port-dir probe below can already produce
+	// an entry: an unreadable port dir is the FIRST question the filesystem
+	// can decline to answer, and it must be listed like every other.
+	var unreadable []UnreadablePath
 
 	portDir := strings.TrimSpace(args.PortDir)
 	triplet := strings.TrimSpace(args.Triplet)
@@ -263,13 +293,37 @@ func applyOrder(args Args, deps Deps) Result {
 	if triplet == "" {
 		return Result{Status: evidence.StatusFailed, Reason: ReasonEmptyTriplet, Evidence: ev}
 	}
+	// Refused BEFORE the path is used for anything: a relative port_dir would
+	// bind to the hub daemon's working directory and silently answer about a
+	// different port. Never call filepath.Abs to "fix" it — that IS the bind.
+	if !filepath.IsAbs(portDir) {
+		return Result{
+			Status: evidence.StatusFailed, Reason: ReasonRelativePortDir,
+			Triplet: triplet, PortDir: portDir, Evidence: ev,
+		}
+	}
 
 	ev.AddPath(portDir)
-	fi, err := deps.Stat(portDir)
-	if err != nil || !fi.IsDir() {
+	// Tri-state, via the shared owner: an access-denied Stat is not evidence
+	// that the port directory is absent, and reporting it as missing sends the
+	// operator to fix the wrong thing.
+	portDirPresence, portDirErr := evidence.ProbeDir(evidence.StatFunc(deps.Stat), portDir)
+	if portDirPresence != evidence.PresenceExists {
+		reason := ReasonPortDirMissing
+		if portDirPresence == evidence.PresenceUnreadable {
+			reason = ReasonPortDirUnreadable
+			errText := ""
+			if portDirErr != nil {
+				errText = portDirErr.Error()
+			}
+			unreadable = append(unreadable, UnreadablePath{
+				Path: portDir, Kind: UnreadablePortDir, Error: errText,
+			})
+		}
 		return Result{
-			Status: evidence.StatusUnknown, Reason: ReasonPortDirMissing,
+			Status: evidence.StatusUnknown, Reason: reason,
 			Triplet: triplet, PortDir: portDir, Evidence: ev,
+			Unreadable: unreadable,
 		}
 	}
 
@@ -294,7 +348,6 @@ func applyOrder(args Args, deps Deps) Result {
 	// triplet name — see triplet.go. No file found means every triplet
 	// variable stays unresolved, which surfaces as undecidable guards rather
 	// than as invented ON/OFF/static/dynamic values.
-	var unreadable []UnreadablePath
 	var tripletFacts map[string]string
 	tripletFile, tripletPresence, tripletErr := resolveTripletFile(deps, triplet, args.OverlayTriplets, vcpkgRoot)
 	switch tripletPresence {

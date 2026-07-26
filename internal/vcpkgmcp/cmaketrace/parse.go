@@ -80,6 +80,13 @@ func (p parseResult) incompleteReasons() []Reason {
 // hundred-megabyte file.
 const cancellationCheckInterval = 4096
 
+// readChunkBytes is the size of the bufio.Reader buffer, and therefore the
+// largest single allocation one ReadSlice can hand back. It is stated
+// explicitly rather than left to bufio's default so the memory ceiling
+// readLine documents (maxBytes + readChunkBytes) is a property of this file
+// and not of a library default that could change.
+const readChunkBytes = 64 << 10 // 64 KiB
+
 // parseTraceStream parses json-v1 JSON Lines defensively AS IT READS, under
 // the MaxTraceBytes / MaxLineBytes / MaxParsedRecords ceilings.
 //
@@ -106,7 +113,7 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 
 	// +1 so consuming exactly MaxTraceBytes is not itself reported as a trip.
 	limited := &io.LimitedReader{R: r, N: lim.MaxTraceBytes + 1}
-	br := bufio.NewReader(limited)
+	br := bufio.NewReaderSize(limited, readChunkBytes)
 	consumed := int64(0)
 	lineNo := 0
 
@@ -204,25 +211,43 @@ func (p *parseResult) consumeLine(raw string, maxRecords int) (stop bool) {
 // consumed counts every byte read from br, INCLUDING a drained oversized
 // line: it feeds the whole-file byte ceiling, which would otherwise be
 // trivially bypassed by one enormous line.
+//
+// The read is bounded BEFORE the line is materialized. bufio.Reader.ReadString
+// (what this used to call) has no ceiling of its own: it appends until it finds
+// the delimiter, so a single 256 MiB line was fully allocated and only THEN
+// compared against maxBytes — the cap could report the overflow but could not
+// bound the memory it was there to bound. ReadSlice instead returns at most one
+// reader-buffer's worth and reports bufio.ErrBufferFull, so an oversized line
+// arrives as a sequence of readChunkBytes-sized pieces that are counted,
+// discarded once the ceiling trips, and never concatenated. Peak retention is
+// therefore maxBytes + readChunkBytes regardless of how long the line is.
 func readLine(br *bufio.Reader, maxBytes int) (line string, consumed int, tooLong bool, err error) {
 	var b strings.Builder
 	overflowed := false
 	for {
-		chunk, readErr := br.ReadString('\n')
+		chunk, readErr := br.ReadSlice('\n')
 		consumed += len(chunk)
 		if !overflowed {
 			if b.Len()+len(chunk) > maxBytes {
 				overflowed = true
+				// Release what was accumulated so far: the line is already
+				// known unusable, so retaining its prefix would keep exactly
+				// the memory this ceiling exists to cap.
 				b.Reset()
 			} else {
-				b.WriteString(chunk)
+				// Write COPIES chunk, which is required: ReadSlice hands back a
+				// slice aliasing br's internal buffer, invalidated by the next
+				// read.
+				b.Write(chunk)
 			}
 		}
-		if readErr != nil {
-			return b.String(), consumed, overflowed, readErr
+		if errors.Is(readErr, bufio.ErrBufferFull) {
+			// No delimiter within one buffer: keep draining this same line in
+			// bounded pieces. Not an error and not EOF.
+			continue
 		}
-		if strings.HasSuffix(chunk, "\n") {
-			return b.String(), consumed, overflowed, nil
-		}
+		// Any other outcome ends the line: nil means the delimiter was found,
+		// io.EOF means the stream ended, anything else is a real read error.
+		return b.String(), consumed, overflowed, readErr
 	}
 }

@@ -37,6 +37,16 @@ import "strings"
 // with args as the raw, comment-stripped text between the outermost
 // parentheses (not yet tokenized — different callers tokenize differently:
 // condition text vs. call-argument text).
+//
+// Name is always LOWER-CASE. cmake-language(7) states "Command names are
+// case-insensitive", so a portfile writing IF(...) / SET(...) / LIST(...) is
+// ordinary valid CMake. Normalizing at the single point statements are
+// produced makes every consumer's comparison correct by construction; folding
+// at each call site instead is what let walkPortfile's switch stay
+// case-SENSITIVE (so an upper-case IF()/SET() was silently misattributed to
+// the default branch, giving every patch inside it the WRONG guard) while
+// parseTripletFacts beside it was already folded. The original spelling is not
+// retained because nothing in this package displays a command name.
 type statement struct {
 	Name string
 	Args string
@@ -192,7 +202,8 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 				argEnd = argStart
 			}
 			args := src[argStart:argEnd]
-			out = append(out, statement{Name: name, Args: args, Line: nameLine})
+			// Lower-cased HERE, once — see the statement type's doc comment.
+			out = append(out, statement{Name: strings.ToLower(name), Args: args, Line: nameLine})
 			countLines(j, k)
 			i = k
 		default:

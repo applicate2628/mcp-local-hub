@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -725,5 +726,81 @@ func TestF26_ByteCeilingStopsTheReadAndIsReported(t *testing.T) {
 	}
 	if len(res.Records) == 0 {
 		t.Fatal("records read before the ceiling must be retained as positive evidence")
+	}
+}
+
+// oversizedLineGenerator streams `remaining` bytes of 'a' followed by a single
+// newline, then EOF. It fills the caller's buffer in place and allocates
+// NOTHING itself, so every byte the parse is charged with in the test below is
+// the parser's own retention, not the fixture's.
+type oversizedLineGenerator struct {
+	remaining int64
+	wroteNL   bool
+}
+
+func (g *oversizedLineGenerator) Read(p []byte) (int, error) {
+	if g.remaining > 0 {
+		n := int64(len(p))
+		if n > g.remaining {
+			n = g.remaining
+		}
+		for i := int64(0); i < n; i++ {
+			p[i] = 'a'
+		}
+		g.remaining -= n
+		return int(n), nil
+	}
+	if !g.wroteNL {
+		g.wroteNL = true
+		p[0] = '\n'
+		return 1, nil
+	}
+	return 0, io.EOF
+}
+
+// PR #591 P1 (parse.go): MaxLineBytes must bound the READ, not merely classify
+// a line that was already materialized. bufio.Reader.ReadString — what readLine
+// used to call — appends until it finds the delimiter, so a single 64 MiB line
+// was fully allocated (twice: the collected fragments plus the joined string)
+// and only THEN compared against a 1 KiB cap. The ceiling could report the
+// overflow but could not bound the memory it exists to bound, which is exactly
+// the DoS an attacker-supplied trace file gets for free.
+//
+// TotalAlloc is cumulative and GC-independent, so this measures allocation
+// CHURN rather than live heap: the pre-fix implementation must charge at least
+// the line length, the fixed post-fix implementation charges roughly one
+// reader buffer. The budget sits two orders of magnitude below the former and
+// two above the latter, so it is decisive without being flaky.
+func TestF26_LineCeilingBoundsTheReadNotJustTheClassification(t *testing.T) {
+	const lineBytes = 64 << 20 // one 64 MiB line, no newline until the very end
+	const allocBudget = 8 << 20
+	lim := Limits{MaxTraceBytes: 1 << 30, MaxLineBytes: 1 << 10, MaxParsedRecords: 10}
+
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+
+	res, err := parseTraceStream(context.Background(), &oversizedLineGenerator{remaining: lineBytes}, lim)
+	if err != nil {
+		t.Fatalf("parseTraceStream: unexpected error %v", err)
+	}
+	runtime.ReadMemStats(&after)
+
+	// Behaviour must be unchanged: the oversized line is still drained, still
+	// counted as a ceiling trip, and still counted as unusable input.
+	if !res.hitLineLimit {
+		t.Fatalf("hitLineLimit = false, want true — the oversized line must still be REPORTED, not silently dropped")
+	}
+	if res.malformedCount != 1 {
+		t.Fatalf("malformedCount = %d, want 1", res.malformedCount)
+	}
+	if len(res.records) != 0 {
+		t.Fatalf("records = %d, want 0 — an over-cap line is never parsed", len(res.records))
+	}
+
+	allocated := after.TotalAlloc - before.TotalAlloc
+	if allocated > allocBudget {
+		t.Fatalf("parsing ONE %d-byte line allocated %d bytes, over the %d-byte budget: MaxLineBytes (%d) is bounding the classification but not the READ — the line is being materialized before the cap is consulted",
+			lineBytes, allocated, allocBudget, lim.MaxLineBytes)
 	}
 }

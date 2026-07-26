@@ -5,12 +5,57 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
+
+// PORTABILITY (PR #591 P1)
+//
+// These tests inject GOOS, so they deliberately exercise the WINDOWS rules
+// (vcpkg.exe, the C:\vcpkg heuristic list) on whatever host runs them — that
+// injected-GOOS logic is the thing under test and it is worth covering on the
+// ubuntu-latest leg of the build-and-test matrix, not just the windows one.
+//
+// What is NOT injected is `path/filepath`, which follows the HOST. Fixture
+// paths were previously hand-typed with backslashes (`C:\explicit\vcpkg.exe`),
+// so on Linux `filepath.Clean` left them as ONE opaque component while the
+// production code computed `filepath.Join(root, "vcpkg.exe")` = a different
+// string — the probe missed and the tests failed. `filepath.Dir` on such a
+// path returns "." on Linux, which also broke the manifest walk-up.
+//
+// The fix is to build every fixture path through the SAME filepath helpers the
+// production code uses, from an OS-appropriate absolute base (testRoot). Both
+// sides then agree on any host, and no coverage is lost.
+//
+// Build tags were rejected: `//go:build windows` would silence these tests on
+// Linux entirely, deleting the ubuntu coverage of injected-GOOS logic that has
+// nothing host-specific about it. The defect was hand-typed separators, not the
+// tests' subject matter.
+//
+// The heuristic literals (`C:\vcpkg`, `/opt/vcpkg`) are deliberately kept
+// verbatim where a test asserts a CANDIDATE PATH: those strings are emitted by
+// heuristicPathsFor itself, so the assertion must compare against the same
+// literal. Only the derived BINARY path is built with filepath.Join.
+
+// testRoot builds an absolute fixture path that is well-formed on the host, so
+// the package's own filepath.Join/Dir/Clean calls agree with it.
+func testRoot(parts ...string) string {
+	base := "/fixture"
+	if runtime.GOOS == "windows" {
+		base = `C:\fixture`
+	}
+	return filepath.Join(append([]string{base}, parts...)...)
+}
+
+// binIn returns the path the package will probe for a vcpkg binary under dir,
+// computed exactly as probeVcpkgBinary computes it.
+func binIn(dir, goos string) string {
+	return filepath.Join(dir, vcpkgBinaryName(goos))
+}
 
 // fakeFileInfo is a minimal os.FileInfo for tests that never touch a real
 // filesystem — this is the "Determinism and ambient-input control" seam:
@@ -39,6 +84,16 @@ func (fs fakeFS) stat(path string) (os.FileInfo, error) {
 	return nil, os.ErrNotExist
 }
 
+// newFakeFS builds a fakeFS whose keys are cleaned the same way stat cleans
+// its lookups, so a caller never has to remember to do it.
+func newFakeFS(paths ...string) fakeFS {
+	out := fakeFS{}
+	for _, p := range paths {
+		out[filepath.Clean(p)] = true
+	}
+	return out
+}
+
 // errPermission is a non-ErrNotExist Stat failure, the shape a permission
 // denial / sharing violation / transient I/O error takes. It must never be
 // read as "absent".
@@ -62,85 +117,92 @@ func baseDeps(goos string, files fakeFS) Deps {
 	return Deps{
 		Getenv:      func(string) string { return "" },
 		LookPath:    func(string) (string, error) { return "", errors.New("not found") },
-		Getwd:       func() (string, error) { return `C:\work\project`, nil },
+		Getwd:       func() (string, error) { return testRoot("work", "project"), nil },
 		Stat:        files.stat,
 		GOOS:        goos,
-		UserHomeDir: func() (string, error) { return `C:\Users\op`, nil },
+		UserHomeDir: func() (string, error) { return testRoot("Users", "op"), nil },
 	}
 }
 
 func TestDiscoverRoot_ExplicitParamWins(t *testing.T) {
-	files := fakeFS{filepath.Clean(`C:\explicit\vcpkg.exe`): true}
+	explicit := testRoot("explicit")
+	envRoot := testRoot("env-root")
+	files := newFakeFS(binIn(explicit, "windows"))
 	deps := baseDeps("windows", files)
 	// Also seed a valid env root to prove explicit still wins over it.
 	deps.Getenv = func(k string) string {
 		if k == "VCPKG_ROOT" {
-			return `C:\env-root`
+			return envRoot
 		}
 		return ""
 	}
 
-	res := DiscoverRoot(`C:\explicit`, deps)
+	res := DiscoverRoot(explicit, deps)
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("status = %v, want ok", res.Status)
 	}
 	if res.RuleFired != RuleExplicit {
 		t.Fatalf("rule = %v, want %v", res.RuleFired, RuleExplicit)
 	}
-	if res.Root != `C:\explicit` {
-		t.Fatalf("root = %q", res.Root)
+	if res.Root != explicit {
+		t.Fatalf("root = %q, want %q", res.Root, explicit)
 	}
 }
 
 func TestDiscoverRoot_EnvVarWhenNoExplicit(t *testing.T) {
-	files := fakeFS{filepath.Clean(`C:\env-root\vcpkg.exe`): true}
+	envRoot := testRoot("env-root")
+	files := newFakeFS(binIn(envRoot, "windows"))
 	deps := baseDeps("windows", files)
 	deps.Getenv = func(k string) string {
 		if k == "VCPKG_ROOT" {
-			return `C:\env-root`
+			return envRoot
 		}
 		return ""
 	}
 
 	res := DiscoverRoot("", deps)
-	if res.Status != evidence.StatusOK || res.RuleFired != RuleEnv || res.Root != `C:\env-root` {
-		t.Fatalf("got %+v", res)
+	if res.Status != evidence.StatusOK || res.RuleFired != RuleEnv || res.Root != envRoot {
+		t.Fatalf("got %+v, want ok/vcpkg_root_env/%q", res, envRoot)
 	}
 }
 
 func TestDiscoverRoot_PathLookup(t *testing.T) {
-	deps := baseDeps("windows", fakeFS{})
+	pathRoot := testRoot("path-root")
+	deps := baseDeps("windows", newFakeFS())
 	deps.LookPath = func(file string) (string, error) {
 		if file == "vcpkg" {
-			return `C:\path-root\vcpkg.exe`, nil
+			return binIn(pathRoot, "windows"), nil
 		}
 		return "", errors.New("not found")
 	}
 	res := DiscoverRoot("", deps)
-	if res.Status != evidence.StatusOK || res.RuleFired != RulePath || res.Root != `C:\path-root` {
-		t.Fatalf("got %+v", res)
+	if res.Status != evidence.StatusOK || res.RuleFired != RulePath || res.Root != pathRoot {
+		t.Fatalf("got %+v, want ok/path_lookup/%q", res, pathRoot)
 	}
 }
 
 func TestDiscoverRoot_ManifestWalkup(t *testing.T) {
-	files := fakeFS{
-		filepath.Clean(`C:\work\project\vcpkg.json`):      true,
-		filepath.Clean(`C:\work\project\vcpkg\vcpkg.exe`): true,
-	}
+	projectDir := testRoot("work", "project")
+	submodule := filepath.Join(projectDir, "vcpkg")
+	files := newFakeFS(
+		filepath.Join(projectDir, "vcpkg.json"),
+		binIn(submodule, "windows"),
+	)
 	deps := baseDeps("windows", files)
 	res := DiscoverRoot("", deps)
 	if res.Status != evidence.StatusOK || res.RuleFired != RuleManifest {
-		t.Fatalf("got %+v", res)
+		t.Fatalf("got %+v, want ok/manifest_walkup", res)
 	}
-	if res.Root != filepath.Clean(`C:\work\project\vcpkg`) {
-		t.Fatalf("root = %q", res.Root)
+	if res.Root != submodule {
+		t.Fatalf("root = %q, want %q", res.Root, submodule)
 	}
 }
 
 func TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough(t *testing.T) {
 	// Manifest present, but no co-located vcpkg/ binary, and no heuristic
 	// hit either -> must NOT guess the manifest dir as root; falls to none.
-	files := fakeFS{filepath.Clean(`C:\work\project\vcpkg.json`): true}
+	projectDir := testRoot("work", "project")
+	files := newFakeFS(filepath.Join(projectDir, "vcpkg.json"))
 	deps := baseDeps("windows", files)
 	res := DiscoverRoot("", deps)
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoneFound {
@@ -165,7 +227,11 @@ func TestDiscoverRoot_ManifestFoundButNoSubmoduleBinary_FallsThrough(t *testing.
 // unrelated C:\vcpkg on the box made the tool answer ok and sent every
 // downstream tool to analyse that installation.
 func TestDiscoverRoot_HeuristicSingleHit_NeverSelected(t *testing.T) {
-	files := fakeFS{filepath.Clean(`C:\vcpkg\vcpkg.exe`): true}
+	// `C:\vcpkg` is the literal heuristicPathsFor itself emits, so the
+	// candidate assertion must compare against it verbatim; only the derived
+	// binary path is joined.
+	const heuristic = `C:\vcpkg`
+	files := newFakeFS(binIn(heuristic, "windows"))
 	deps := baseDeps("windows", files)
 	res := DiscoverRoot("", deps)
 	if res.Status != evidence.StatusUnknown {
@@ -181,17 +247,17 @@ func TestDiscoverRoot_HeuristicSingleHit_NeverSelected(t *testing.T) {
 		t.Fatalf("rule_fired = %q, want empty — no rule concluded", res.RuleFired)
 	}
 	// The candidate must still be surfaced so the caller can confirm it.
-	if len(res.Candidates) != 1 || res.Candidates[0].Path != `C:\vcpkg` ||
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != heuristic ||
 		res.Candidates[0].Rule != RuleHeuristic {
 		t.Fatalf("candidates = %+v, want the single heuristic candidate reported", res.Candidates)
 	}
 }
 
 func TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks(t *testing.T) {
-	files := fakeFS{
-		filepath.Clean(`C:\vcpkg\vcpkg.exe`):     true,
-		filepath.Clean(`C:\dev\vcpkg\vcpkg.exe`): true,
-	}
+	files := newFakeFS(
+		binIn(`C:\vcpkg`, "windows"),
+		binIn(`C:\dev\vcpkg`, "windows"),
+	)
 	deps := baseDeps("windows", files)
 	res := DiscoverRoot("", deps)
 	if res.Status != evidence.StatusUnknown {
@@ -206,7 +272,7 @@ func TestDiscoverRoot_HeuristicMultipleHits_ReportsAllNeverPicks(t *testing.T) {
 }
 
 func TestDiscoverRoot_NoneFound_OffersManualSpecification(t *testing.T) {
-	deps := baseDeps("windows", fakeFS{})
+	deps := baseDeps("windows", newFakeFS())
 	res := DiscoverRoot("", deps)
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoneFound {
 		t.Fatalf("got %+v, want unknown/no_candidates_found (never \"not installed\")", res)
@@ -215,24 +281,26 @@ func TestDiscoverRoot_NoneFound_OffersManualSpecification(t *testing.T) {
 
 // TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough is the
 // mutation proof for "an explicit root is TERMINAL". The caller asks about
-// C:\wanted; a valid VCPKG_ROOT AND a valid heuristic hit both point
-// somewhere else. Answering ok for either would silently redirect every
-// downstream tool to an installation the caller never named.
+// a root; a valid VCPKG_ROOT AND a valid heuristic hit both point somewhere
+// else. Answering ok for either would silently redirect every downstream tool
+// to an installation the caller never named.
 func TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough(t *testing.T) {
-	files := fakeFS{
-		filepath.Clean(`D:\other\vcpkg.exe`): true, // valid env root
-		filepath.Clean(`C:\vcpkg\vcpkg.exe`): true, // valid heuristic candidate
-	}
+	wanted := testRoot("wanted")
+	other := testRoot("other")
+	files := newFakeFS(
+		binIn(other, "windows"),      // valid env root
+		binIn(`C:\vcpkg`, "windows"), // valid heuristic candidate
+	)
 	deps := baseDeps("windows", files)
 	deps.Getenv = func(k string) string {
 		if k == "VCPKG_ROOT" {
-			return `D:\other`
+			return other
 		}
 		return ""
 	}
-	deps.LookPath = func(string) (string, error) { return `D:\other\vcpkg.exe`, nil }
+	deps.LookPath = func(string) (string, error) { return binIn(other, "windows"), nil }
 
-	res := DiscoverRoot(`C:\wanted`, deps)
+	res := DiscoverRoot(wanted, deps)
 	if res.Status != evidence.StatusUnknown {
 		t.Fatalf("status = %v, want unknown — an invalid EXPLICIT root is terminal", res.Status)
 	}
@@ -243,7 +311,7 @@ func TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough(t *testing.T)
 		t.Fatalf("root = %q, want empty — resolving ANY other installation answers a question nobody asked", res.Root)
 	}
 	// The rejected explicit value must be the one thing reported back.
-	if len(res.Candidates) != 1 || res.Candidates[0].Path != `C:\wanted` ||
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != wanted ||
 		res.Candidates[0].Rule != RuleExplicit {
 		t.Fatalf("candidates = %+v, want exactly the rejected explicit root", res.Candidates)
 	}
@@ -258,10 +326,11 @@ func TestDiscoverRoot_ExplicitInvalid_IsTerminal_NeverFallsThrough(t *testing.T)
 // FAILS is not evidence of absence, and the two cases have different
 // remedies (fix access vs. correct the path), so they get different reasons.
 func TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid(t *testing.T) {
-	deps := baseDeps("windows", fakeFS{})
-	deps.Stat = unreadableFS{base: fakeFS{}, prefix: `C:\locked`}.stat
+	locked := testRoot("locked")
+	deps := baseDeps("windows", newFakeFS())
+	deps.Stat = unreadableFS{base: newFakeFS(), prefix: locked}.stat
 
-	res := DiscoverRoot(`C:\locked`, deps)
+	res := DiscoverRoot(locked, deps)
 	if res.Status != evidence.StatusUnknown {
 		t.Fatalf("status = %v, want unknown", res.Status)
 	}
@@ -272,14 +341,16 @@ func TestDiscoverRoot_ExplicitUnreadable_DistinctFromInvalid(t *testing.T) {
 }
 
 func TestDiscoverRoot_POSIXHeuristics_NeverSelected(t *testing.T) {
-	files := fakeFS{filepath.Clean("/opt/vcpkg/vcpkg"): true}
+	// "/opt/vcpkg" is heuristicPathsFor's own literal for a non-windows GOOS.
+	const heuristic = "/opt/vcpkg"
+	files := newFakeFS(binIn(heuristic, "linux"))
 	deps := baseDeps("linux", files)
-	deps.UserHomeDir = func() (string, error) { return "/home/op", nil }
+	deps.UserHomeDir = func() (string, error) { return testRoot("home", "op"), nil }
 	res := DiscoverRoot("", deps)
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonHeuristicOnly {
 		t.Fatalf("got status=%v reason=%v, want unknown/heuristic_only", res.Status, res.Reason)
 	}
-	if len(res.Candidates) != 1 || res.Candidates[0].Path != "/opt/vcpkg" {
-		t.Fatalf("candidates = %+v, want /opt/vcpkg reported as a candidate", res.Candidates)
+	if len(res.Candidates) != 1 || res.Candidates[0].Path != heuristic {
+		t.Fatalf("candidates = %+v, want %q reported as a candidate", res.Candidates, heuristic)
 	}
 }

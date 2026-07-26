@@ -127,8 +127,10 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 
 	depth := 0
 	for _, st := range stmts {
-		// CMake command names are case-insensitive (cmake-language(7)).
-		switch strings.ToLower(st.Name) {
+		// st.Name is already lower-cased by splitStatementsChecked — CMake
+		// command names are case-insensitive (cmake-language(7)) and the lexer
+		// is the single owner of that normalization.
+		switch st.Name {
 		case "if", "foreach", "while", "function", "macro":
 			depth++
 			continue
@@ -158,12 +160,12 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			if !t.Quoted && (t.Text == "CACHE" || t.Text == "PARENT_SCOPE" || t.Text == "FORCE") {
 				break
 			}
-			expanded, unresolved := env.expandToken(t)
-			if len(unresolved) > 0 {
+			ex := env.expandToken(t)
+			if len(ex.unresolved) > 0 {
 				unresolvedSeen = true
 				break
 			}
-			parts = append(parts, expanded)
+			parts = append(parts, ex.text)
 		}
 		if unresolvedSeen {
 			// Do not let a partially-expanded value masquerade as a fact.

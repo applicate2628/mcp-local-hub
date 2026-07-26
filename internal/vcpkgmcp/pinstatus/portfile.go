@@ -11,6 +11,11 @@ import (
 // have delimiter-matched closing brackets, bracket values are Raw, and a
 // quoted trailing-backslash newline is a continuation, not a token boundary.
 
+// statement is one `name(args...)` call found in a portfile. Name is always
+// LOWER-CASE: CMake command names are case-insensitive (cmake-language(7)),
+// and normalizing once in splitStatementsChecked is what keeps every consumer
+// from having to remember to fold. The original spelling is not retained
+// because nothing in this package displays a command name.
 type statement struct {
 	Name string
 	Args string
@@ -84,10 +89,26 @@ var (
 	// produce, so containment, not equality, is the correct test.
 	embeddedVarRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 	commitHexRE   = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
-	tagLikeRE     = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,3}`)
+	// abbrevCommitHexRE matches a pure-hex token too short to be a full SHA
+	// but long enough to be an ABBREVIATED commit. The lower bound is 7, git's
+	// own default short-SHA length (`--short` / core.abbrev): below that a
+	// pure-hex token in a portfile is far more likely to be a name that merely
+	// happens to be hex ("beef", "2024") than a commit abbreviation, and this
+	// package must not manufacture a commit out of a tag.
+	abbrevCommitHexRE = regexp.MustCompile(`^[0-9a-fA-F]{7,39}$`)
+	tagLikeRE         = regexp.MustCompile(`^v?[0-9]+(\.[0-9]+){1,3}`)
 )
 
-func isCommitHex(ref string) bool  { return commitHexRE.MatchString(ref) }
+func isCommitHex(ref string) bool { return commitHexRE.MatchString(ref) }
+
+// isAbbreviatedCommitHex reports whether ref has the SHAPE of an abbreviated
+// commit. It is a syntactic claim only, exactly like looksLikeTag — the caller
+// decides what it means, and pinstatus.go deliberately consults it only AFTER
+// the remote has been asked whether it advertises a ref by this literal name,
+// so a real branch/tag that happens to be hex is classified by evidence rather
+// than by shape.
+func isAbbreviatedCommitHex(ref string) bool { return abbrevCommitHexRE.MatchString(ref) }
+
 func looksLikeTag(ref string) bool { return tagLikeRE.MatchString(ref) }
 
 // stripComments is retained for focused parser callers. Unlike the former
@@ -225,7 +246,16 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 			if depth != 0 {
 				return out, false
 			}
-			out = append(out, statement{Name: name, Args: src[argStart : k-1]})
+			// Name is LOWER-CASED here, at the single point statements are
+			// produced, because cmake-language(7) states "Command names are
+			// case-insensitive" — a portfile writing IF(...) / SET(...) /
+			// VCPKG_FROM_GITHUB(...) is ordinary valid CMake. Normalizing at
+			// the lexer makes every downstream comparison correct by
+			// construction; comparing case-insensitively at each call site
+			// instead is what let vcpkg_from_* dispatch stay case-SENSITIVE
+			// (so an upper-case fetch call was silently invisible) while the
+			// if/endif handling beside it was already folded.
+			out = append(out, statement{Name: strings.ToLower(name), Args: src[argStart : k-1]})
 			i = k
 		default:
 			i++
@@ -404,21 +434,68 @@ func extractKeyedArgs(tokens []string) map[string]string {
 	return out
 }
 
+// blockOpeners / blockClosers are the CMake commands that open and close a
+// scope whose body may or may not execute (if/elseif/else bodies, loop
+// bodies) or executes only when invoked (function/macro bodies). A set()
+// inside any of them is CONDITIONALLY assigned.
+var (
+	blockOpeners = map[string]bool{"if": true, "foreach": true, "while": true, "function": true, "macro": true}
+	blockClosers = map[string]bool{"endif": true, "endforeach": true, "endwhile": true, "endfunction": true, "endmacro": true}
+)
+
+// resolveSetVariable resolves set(NAME <value>) to a literal, and FAILS CLOSED
+// whenever the portfile does not make that value certain.
+//
+// It used to return the FIRST matching set() found anywhere in the file, with
+// no regard for the conditional context it sat in. A set() inside an if()
+// branch that did not fire is NOT the variable's value — CMake never executed
+// that line — yet the pin resolved from it was then compared against the
+// remote as though it were certain. That is exactly the confident-wrong-answer
+// class this package exists to avoid, and it is worse than the undecidable
+// answer it replaces: a wrong "this ref does not exist upstream" is acted on,
+// an honest "unresolvable" is investigated.
+//
+// The rule is therefore: a value is resolved only when EVERY set() of that
+// name in the file is unconditional AND they all agree. A conditional
+// assignment, or two unconditional assignments that disagree (where the value
+// in effect depends on where the REF is used, which this textual scan does not
+// model), yields ok=false — which surfaces to the caller as
+// ReasonRefUnresolvable naming the variable, so an operator is told which
+// variable to pin down rather than handed a guess.
 func resolveSetVariable(content, varName string) (string, bool) {
 	statements, ok := splitStatementsChecked(content)
 	if !ok {
 		return "", false
 	}
+	depth := 0
+	value := ""
+	found := false
 	for _, st := range statements {
-		if !strings.EqualFold(st.Name, "set") {
+		switch {
+		case blockOpeners[st.Name]:
+			depth++
+			continue
+		case blockClosers[st.Name]:
+			if depth > 0 {
+				depth--
+			}
+			continue
+		case st.Name != "set":
 			continue
 		}
 		tokens := tokenize(st.Args)
-		if len(tokens) >= 2 && tokens[0].Text == varName && !tokens[1].Raw {
-			return tokens[1].Text, true
+		if len(tokens) < 2 || tokens[0].Text != varName || tokens[1].Raw {
+			continue
 		}
+		if depth > 0 {
+			return "", false
+		}
+		if found && value != tokens[1].Text {
+			return "", false
+		}
+		value, found = tokens[1].Text, true
 	}
-	return "", false
+	return value, found
 }
 
 // expandVariables is the SINGLE OWNER of ${NAME} substitution for every
@@ -546,6 +623,14 @@ func buildPin(content string, manifest []byte, portName string, ref argValue) Pi
 	}
 	if isCommitHex(refRaw) {
 		return Pin{Ref: refRaw, Shape: RefShapeCommit40Hex, Literal: ref.Raw}
+	}
+	if isAbbreviatedCommitHex(refRaw) {
+		// Named as the commit it is, NOT demoted to tag/branch. The comparison
+		// path still refuses it (see RefShapeCommitAbbrev): ls-remote
+		// advertises only full SHAs, so an abbreviation cannot be matched
+		// against a tip without resolving it server-side, which this package
+		// never does.
+		return Pin{Ref: refRaw, Shape: RefShapeCommitAbbrev, Literal: ref.Raw}
 	}
 	if looksLikeTag(refRaw) {
 		return Pin{Ref: refRaw, Shape: RefShapeTag, Literal: ref.Raw}
@@ -700,7 +785,10 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 	var viableCandidates []FetchCandidate
 	var unresolved string
 	for _, st := range statements {
-		switch strings.ToLower(st.Name) {
+		// st.Name is already lower-cased by splitStatementsChecked, so this
+		// switch, the fetchFuncNames lookup, and parseFetchCandidate's own
+		// dispatch are all case-correct without re-folding at each site.
+		switch st.Name {
 		case "if":
 			tokens := tokenize(st.Args)
 			condition := conditionText(tokens)

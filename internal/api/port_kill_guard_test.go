@@ -60,19 +60,32 @@ import (
 //
 // # Live bands (anchored to real runtime code, not magic numbers)
 //
-//   - 9121–9133  global daemon ports, incl. the legacy serena 9121/9122 split.
-//     Source: configs/ports.yaml (11 globals) + serena_dynamic_pool.go:69
-//     ("clears 9121–9132") + defaultLegacySerenaPort = 9121 + fetch on 9133
-//     (PR #287 moved it off the legacy serena port).
+//   - 9121–9138  global daemon ports, incl. the legacy serena 9121/9122 split.
+//     Source: configs/ports.yaml, whose declared globals now span 9121–9138
+//     (…9133 fetch, 9134 oneapi-run, 9135 drmemory, 9136 vtune, 9137 the route
+//     daemon, 9138 vcpkg) + serena_dynamic_pool.go:69 ("clears 9121–9132") +
+//     defaultLegacySerenaPort = 9121 + fetch on 9133 (PR #287 moved it off the
+//     legacy serena port).
+//
+//     The upper bound is anchored to configs/ports.yaml's highest declared
+//     global, NOT to a hand-maintained number: every registration in that file
+//     makes a port a LIVE production daemon port, so a band that lags the file
+//     leaves the newest daemons unguarded. It lagged by four (9134/9135/9136
+//     were registered by earlier PRs, 9138 by this one) while the comment below
+//     still described the whole 9134+ range as an intentional gap.
+//     When a new global is registered above 9138, raise this bound with it.
+//
 //   - 9150–9199  serena dynamic pool. Source: serena_dynamic_pool.go:77-78
 //     (serenaDefaultPortPoolStart / serenaDefaultPortPoolEnd).
+//
 //   - 9200–9299  legacy LSP workspace-proxy pool. Existing registries may still
 //     hold rows there after upgrade, so tests must keep treating it as live.
+//
 //   - 9400–9599  current LSP workspace-proxy pool. Source:
 //     servers/mcp-language-server/manifest.yaml.
 //
-// Note 9134–9149 is an intentional gap (not a live band), so the guard checks
-// three ranges: [9121,9133], [9150,9299], and [9400,9599].
+// Note 9139–9149 is an intentional gap (not a live band), so the guard checks
+// three ranges: [9121,9138], [9150,9299], and [9400,9599].
 //
 // # Scope: SINK-SCOPED, deliberately NOT a blanket `9xxx` grep
 //
@@ -139,7 +152,7 @@ func TestNoLiveBandLiteralReachesKillOrListenSink(t *testing.T) {
 
 	// inLiveBand reports whether p falls in a live daemon-port band.
 	inLiveBand := func(p int) bool {
-		return (p >= 9121 && p <= 9133) || (p >= 9150 && p <= 9299) || (p >= 9400 && p <= 9599)
+		return (p >= 9121 && p <= 9138) || (p >= 9150 && p <= 9299) || (p >= 9400 && p <= 9599)
 	}
 
 	// litPort extracts the integer port from an *ast.BasicLit if it is a

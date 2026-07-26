@@ -128,16 +128,34 @@ type boundedWriter struct {
 	remaining int
 }
 
+// Write retains at most `remaining` further bytes and DISCARDS the rest, but
+// always reports the full len(p) on success.
+//
+// io.Writer's contract is "Write must return a non-nil error if it returns
+// n < len(p)". Returning the truncated length with a nil error is a SHORT
+// WRITE, which os/exec treats as an I/O failure on the stderr copy — so
+// capping the diagnostic tail would have started failing the very ls-remote
+// calls it exists to keep cheap. The bug was masked only because the previous
+// return used len(p) AFTER p had been resliced to the retained prefix, which
+// reads like the full length but is not.
+//
+// A real error from the underlying writer is still propagated with the count
+// actually written, which is the correct short-write report.
 func (b *boundedWriter) Write(p []byte) (int, error) {
+	full := len(p)
 	if b.remaining <= 0 {
-		return len(p), nil // discard, but never signal an error back to exec
+		return full, nil // discard, but never signal an error back to exec
 	}
-	if len(p) > b.remaining {
-		p = p[:b.remaining]
+	retained := p
+	if len(retained) > b.remaining {
+		retained = retained[:b.remaining]
 	}
-	n, err := b.w.Write(p)
+	n, err := b.w.Write(retained)
 	b.remaining -= n
-	return len(p), err
+	if err != nil {
+		return n, err
+	}
+	return full, nil
 }
 
 // parseLsRemoteStream parses `git ls-remote`'s "<sha>\t<refname>" output as it

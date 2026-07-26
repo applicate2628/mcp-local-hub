@@ -138,13 +138,16 @@ func registerTools(vs *VcpkgServer) {
 	vs.server.AddTool(&mcp.Tool{
 		Name: "vcpkg_port_resolution",
 		Description: "Determine which port definition wins across overlay ports and builtin ports, and report every location checked. " +
-			"When vcpkg_root is omitted, the builtin fallback is NOT checked; the result states only what the supplied overlays established.",
+			"When vcpkg_root is omitted, the builtin fallback is NOT checked; the result states only what the supplied overlays established. " +
+			"port must be ONE legal vcpkg port-name segment (lowercase ASCII letters, digits and hyphens, not leading/trailing) AND its joined path " +
+			"must stay beneath each root -> failed(invalid_port_name), with the rejected value echoed in invalid_port. A traversal name is refused " +
+			"before the join, never normalised into a directory outside the roots the caller granted.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"port": map[string]any{
 					"type":        "string",
-					"description": "Required port name to resolve.",
+					"description": "Required port name to resolve. Must be one legal vcpkg port-name segment; a path-traversal value returns failed(invalid_port_name).",
 				},
 				"vcpkg_root": map[string]any{
 					"type":        "string",
@@ -165,9 +168,13 @@ func registerTools(vs *VcpkgServer) {
 			"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. " +
 			"It is not a staleness checker. The call carries its OWN status/reason separate from each port's: an omitted or empty port_dirs is " +
 			"unknown(no_port_dirs), never an ok result with an empty list. Per-port unknown reasons are a closed enum: not_git_comparable, " +
-			"pin_not_at_tip, ref_unresolvable, ref_not_found_on_remote, named_ref_not_comparable, head_ref_unresolvable, remote_query_failed, " +
+			"pin_not_at_tip, ref_unresolvable, ref_not_found_on_remote, commit_pin_abbreviated, named_ref_not_comparable, head_ref_unresolvable, remote_query_failed, " +
 			"remote_query_timeout, remote_query_canceled, remote_ref_limit, remote_url_credential_bearing, network_disabled, portfile_unparsable, " +
-			"guard_unresolvable, multiple_fetch_calls. Remote URLs are redacted on every emitted field, and a credential-bearing remote is " +
+			"guard_unresolvable, multiple_fetch_calls. An ABBREVIATED commit pin (7..39 hex, pin.shape commit_abbrev) is reported as " +
+			"unknown(commit_pin_abbreviated) — an unresolvable COMMIT, never as a missing tag/branch: ls-remote advertises only full 40-hex SHAs, " +
+			"so an abbreviation has nothing to be matched against. A ${VARIABLE} REF assigned only inside an if()/foreach()/macro() body is " +
+			"unknown(ref_unresolvable), never resolved from a branch that may not have executed. Remote URLs are redacted on every emitted field " +
+			"— including ones url.Parse rejects — and a credential-bearing remote is " +
 			"refused rather than queried (its secret would otherwise appear in the child process's command line).",
 		InputSchema: map[string]any{
 			"type": "object",
@@ -199,13 +206,18 @@ func registerTools(vs *VcpkgServer) {
 			"VERIFIED absence is reported in missing[]. Paths the filesystem refused to answer for go " +
 			"in unreadable[] and force unknown(triplet_file_unreadable|patch_path_unreadable|" +
 			"orphan_scan_incomplete) — every bucket is still returned, so a partial inventory is never " +
-			"silently presented as a complete one.",
+			"silently presented as a complete one. " +
+			"port_dir MUST be absolute (a relative one would bind to the hub daemon's working directory and " +
+			"answer about a different port) -> failed(relative_port_dir). An unreadable port_dir is " +
+			"unknown(port_dir_unreadable), NEVER the verified-absence reason port_dir_missing. " +
+			"A patch reached through a set() made under an undecided guard lands in undecidable[] exactly like " +
+			"a conditionally appended list item — the scalar and list shapes carry the same tri-state.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"port_dir": map[string]any{
 					"type":        "string",
-					"description": "Required absolute port directory containing portfile.cmake.",
+					"description": "Required ABSOLUTE port directory containing portfile.cmake. A relative value returns failed(relative_port_dir).",
 				},
 				"triplet": map[string]any{
 					"type":        "string",
