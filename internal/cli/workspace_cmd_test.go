@@ -145,9 +145,23 @@ func withStateDir(t *testing.T) string {
 		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
-	origIntentCheck := serenaRegisterIntentCheckFn
-	serenaRegisterIntentCheckFn = func(string) (bool, error) { return true, nil }
-	t.Cleanup(func() { serenaRegisterIntentCheckFn = origIntentCheck })
+	origIntentCheck := serenaRegisterSettledCheckFn
+	serenaRegisterSettledCheckFn = func(wsKey string) (serenaRegisterSettledResult, error) {
+		// Report the ACTUAL registry port when available (most of these tests
+		// don't inspect it, but a couple of newer assertions do) instead of a
+		// hardcoded placeholder.
+		port := 0
+		if regPath, err := api.DefaultRegistryPath(); err == nil {
+			reg := api.NewRegistry(regPath)
+			if lerr := reg.Load(); lerr == nil {
+				if row, ok := reg.GetSerena(wsKey); ok {
+					port = row.Port
+				}
+			}
+		}
+		return serenaRegisterSettledResult{Settled: true, RegistryRowPresent: true, Port: port}, nil
+	}
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = origIntentCheck })
 
 	return dir
 }

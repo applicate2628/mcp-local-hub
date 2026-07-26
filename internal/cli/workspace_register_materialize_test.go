@@ -5,8 +5,9 @@
 // reconcile, no spawn, and no observable signal that anything was wrong.
 //
 // This file tests runWorkspaceRegister's new step 8 (workspace_cmd.go): the
-// reconcile-apply nudge + spec-bearing-intent-row gate that must hold BOTH
-// before an unqualified success is printed. The SERVER side of the
+// reconcile-apply nudge + settled-tuple gate (registry row present, intent
+// spec-bearing row present, ports agree — BLOCKING 2, REVISE round 2) that
+// must hold before an unqualified success is printed. The SERVER side of the
 // materialization (handleReconcile's apply-mode self-heal via
 // api.RepairSerenaIntentFromRegistry) is tested separately in
 // supervise_reconcile_serena_repair_test.go.
@@ -17,7 +18,7 @@
 // "the supervisor received the reconcile-apply request and self-healed"
 // without a live process boundary, while still exercising the real
 // registry/intent materialization logic the fix wires together.
-// serenaRegisterIntentCheckFn is left UNSTUBBED (real) throughout, so the
+// serenaRegisterSettledCheckFn is left UNSTUBBED (real) throughout, so the
 // CLI's own post-materialize verification runs against whatever the stub
 // actually left on disk.
 package cli
@@ -84,20 +85,20 @@ func seedHealthySerenaIntentRow(t *testing.T, workspacePath string, port int) {
 	}
 }
 
-// useRealSerenaRegisterIntentCheck restores serenaRegisterIntentCheckFn to
-// its REAL production behavior (realSerenaRegisterIntentCheck,
+// useRealSerenaRegisterIntentCheck restores serenaRegisterSettledCheckFn to
+// its REAL production behavior (realSerenaRegisterSettledCheck,
 // workspace_cmd.go) for the duration of the test. withStateDir installs a
-// default "assume materialized" stub for this seam so the MANY existing
-// register tests that don't care about the new materialization gate keep
-// passing without also having to fake supervisor IPC by hand — but every
-// composition test in THIS file needs the ACTUAL post-materialize check to
-// run against whatever the reconcile stub really left on disk, so each one
-// calls this right after withStateDir.
+// default "assume settled" stub for this seam so the MANY existing register
+// tests that don't care about the new materialization gate keep passing
+// without also having to fake supervisor IPC by hand — but every composition
+// test in THIS file needs the ACTUAL post-materialize check to run against
+// whatever the reconcile stub really left on disk, so each one calls this
+// right after withStateDir.
 func useRealSerenaRegisterIntentCheck(t *testing.T) {
 	t.Helper()
-	orig := serenaRegisterIntentCheckFn
-	serenaRegisterIntentCheckFn = realSerenaRegisterIntentCheck
-	t.Cleanup(func() { serenaRegisterIntentCheckFn = orig })
+	orig := serenaRegisterSettledCheckFn
+	serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = orig })
 }
 
 // stubSerenaRegisterReconcileWithRealRepair installs a serenaRegisterReconcileFn
@@ -436,5 +437,167 @@ func TestWorkspaceRegisterSerena_LostReplyAfterIntentCommit_KeepsRegistryReports
 	}
 	if !found {
 		t.Fatalf("registry row for %s must be KEPT despite the lost reply", wsKey)
+	}
+}
+
+// TestWorkspaceRegisterSerena_ConcurrentUnregisterDeletesRow_HonestAbsenceMessage
+// is the BLOCKING 2 + medium-item fix test (mcphub-register-intent REVISE
+// round 2): a concurrent `mcphub workspace unregister` deletes the registry
+// row in the SAME window as this register's reconcile-apply nudge (modeled by
+// deleting the row from inside the stubbed serenaRegisterReconcileFn, which
+// runs in the same place a real IPC round trip would). The settled check must
+// report RegistryRowPresent=false, and the partial-state error must NOT
+// falsely claim "the registration was kept" — the medium-item bug this fixes.
+func TestWorkspaceRegisterSerena_ConcurrentUnregisterDeletesRow_HonestAbsenceMessage(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+	useRealSerenaRegisterIntentCheck(t)
+
+	healthyWS := t.TempDir()
+	seedHealthySerenaIntentRow(t, healthyWS, 9150)
+
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"python"})
+	wsKey := api.WorkspaceKey(ws)
+
+	orig := serenaRegisterReconcileFn
+	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+		if !apply {
+			t.Fatal("register must always request apply=true")
+		}
+		// Simulate a CONCURRENT unregister deleting the registry row in the
+		// SAME window as this reconcile-apply nudge, before the settled check
+		// (which runs right after this function returns) re-reads it.
+		regPath, err := api.DefaultRegistryPath()
+		if err != nil {
+			t.Fatalf("resolve registry path inside stub: %v", err)
+		}
+		reg := api.NewRegistry(regPath)
+		unlock, err := reg.Lock()
+		if err != nil {
+			t.Fatalf("lock registry inside stub: %v", err)
+		}
+		if err := reg.Load(); err != nil {
+			t.Fatalf("load registry inside stub: %v", err)
+		}
+		reg.RemoveByBackend(wsKey, "serena")
+		if err := reg.Save(); err != nil {
+			t.Fatalf("save registry inside stub: %v", err)
+		}
+		unlock()
+		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+	}
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("register must NOT report success when the registry row was concurrently deleted; output: %s", out)
+	}
+	if strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("must never print the unqualified success line; got %q", out)
+	}
+	if strings.Contains(err.Error(), "was kept") {
+		t.Errorf("error must NOT falsely claim the registration was kept when the row is confirmed gone; got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "concurrent") {
+		t.Errorf("error should name a concurrent actor as the likely cause; got %q", err.Error())
+	}
+}
+
+// TestWorkspaceRegisterSerena_PortMismatch_NotSettled is the BLOCKING 2 fix
+// test for the port-agreement half of the settled tuple: registry and intent
+// both carry a row for the workspace, but their ports DISAGREE (modeling a
+// port reallocation racing this register). The command must not certify
+// settlement or print success.
+func TestWorkspaceRegisterSerena_PortMismatch_NotSettled(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+	useRealSerenaRegisterIntentCheck(t)
+
+	healthyWS := t.TempDir()
+	seedHealthySerenaIntentRow(t, healthyWS, 9150)
+
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"python"})
+
+	orig := serenaRegisterReconcileFn
+	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+		// Run the REAL repair to materialize the target's intent row, then
+		// rewrite its port so it DISAGREES with the registry's committed
+		// port — modeling a port reallocation racing this register.
+		stateDir, err := api.DaemonStateDir()
+		if err != nil {
+			t.Fatalf("resolve state dir: %v", err)
+		}
+		if _, _, err := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir); err != nil {
+			t.Fatalf("real repair inside stub: %v", err)
+		}
+		intentPath, err := api.DefaultSupervisorIntentPath()
+		if err != nil {
+			t.Fatalf("resolve intent path: %v", err)
+		}
+		intent, err := api.ReadSupervisorIntent(intentPath)
+		if err != nil {
+			t.Fatalf("read intent: %v", err)
+		}
+		mutated := false
+		for i := range intent.Daemons {
+			if intent.Daemons[i].RuntimeSpec != nil && intent.Daemons[i].Workspace == ws {
+				intent.Daemons[i].Port = 55555
+				intent.Daemons[i].RuntimeSpec.ExternalPort = 55555
+				mutated = true
+			}
+		}
+		if !mutated {
+			t.Fatal("precondition: repair did not materialize a daemon for the target workspace")
+		}
+		if err := api.WriteSupervisorIntent(intentPath, intent); err != nil {
+			t.Fatalf("write mutated intent: %v", err)
+		}
+		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+	}
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("register must NOT report success when registry/intent ports disagree; output: %s", out)
+	}
+	if strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("must never print the unqualified success line on a port mismatch; got %q", out)
+	}
+}
+
+// TestWorkspaceRegisterSerena_SettledCheckError_ReportsActionableText is the
+// medium-item fix test: the checkErr != nil branch of
+// workspaceRegisterPartialStateError previously gave no recovery command.
+func TestWorkspaceRegisterSerena_SettledCheckError_ReportsActionableText(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+
+	orig := serenaRegisterSettledCheckFn
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = orig })
+	simulatedErr := errors.New("simulated I/O failure reading supervisor-intent.json")
+	serenaRegisterSettledCheckFn = func(string) (serenaRegisterSettledResult, error) {
+		return serenaRegisterSettledResult{}, simulatedErr
+	}
+
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"python"})
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("register must NOT report success when the settled check itself errors; output: %s", out)
+	}
+	if strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("must never print the unqualified success line; got %q", out)
+	}
+	if !strings.Contains(err.Error(), "simulated I/O failure") {
+		t.Errorf("error should surface the underlying check failure; got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "mcphub reconcile --apply") {
+		t.Errorf("error should give an actionable recovery command; got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "mcphub workspace list") {
+		t.Errorf("error should suggest checking current state; got %q", err.Error())
 	}
 }

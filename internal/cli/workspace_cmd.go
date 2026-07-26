@@ -364,26 +364,36 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	//    it only ever wrote workspaces.yaml and printed an unconditional
 	//    success, regardless of whether any daemon would ever spawn.
 	//
-	//    Gate the final success message on BOTH: the reconcile request being
-	//    acknowledged (no error) AND a spec-bearing supervisor-intent row
-	//    actually present for this workspace key afterward. Printing an
-	//    unqualified success without both would reproduce the exact defect
-	//    this fixes. On anything short of full success, KEEP the registry
-	//    row (it is a valid, durable registration — the supervisor's own
-	//    startup self-heal or a later `mcphub reconcile --apply` will still
-	//    pick it up) and report an explicit, actionable partial-state error
-	//    instead of rolling back.
+	//    Gate the final success message on the COMPLETE SETTLED TUPLE (BLOCKING
+	//    2 fix, mcphub-register-intent REVISE round 2): the reconcile request
+	//    acknowledged (no error) AND, re-read FRESH from disk, the registry row
+	//    STILL exists AND a spec-bearing supervisor-intent row exists for the
+	//    SAME workspace key AND the two AGREE on port. A bare intent-presence
+	//    boolean is not enough — it cannot tell a healthy registration apart
+	//    from one whose registry row a concurrent unregister deleted in the
+	//    same window, nor detect a stale captured port (a port reallocation
+	//    after entry.Port was captured at step 5, or two descriptors converging
+	//    on one port). Printing an unqualified success without the full tuple
+	//    would reproduce the exact defect this fixes. On anything short of
+	//    settled, KEEP the registry row (unless the settled check itself
+	//    confirms it is already gone) and report an explicit, actionable
+	//    partial-state error instead of rolling back.
 	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultReconcileTimeout)
 	defer cancel()
 	_, reconcileErr := serenaRegisterReconcileFn(reconcileCtx, true)
-	materialized, checkErr := serenaRegisterIntentCheckFn(wsKey)
-	if reconcileErr != nil || checkErr != nil || !materialized {
-		return workspaceRegisterPartialStateError(canonical, wsKey, entry, reconcileErr, checkErr)
+	settled, checkErr := serenaRegisterSettledCheckFn(wsKey)
+	if reconcileErr != nil || checkErr != nil || !settled.Settled {
+		return workspaceRegisterPartialStateError(canonical, wsKey, entry, settled, reconcileErr, checkErr)
 	}
 
+	// Print what is ACTUALLY committed (settled.Port, re-read fresh from the
+	// registry by the settled check), never the entry.Port captured at
+	// allocation time — the two agree here by construction (settled.Settled is
+	// only true when they do), but settled.Port is the value the check itself
+	// verified, so it is the honest one to print.
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Registered serena workspace %s (key %s)\n  port: %d\n  task: %s\n  languages: %s\n",
-		canonical, wsKey, entry.Port, entry.TaskName, strings.Join(languages, ", "))
+		canonical, wsKey, settled.Port, entry.TaskName, strings.Join(languages, ", "))
 	if setDefault {
 		fmt.Fprintln(cmd.OutOrStdout(), "  default: yes")
 	}
@@ -401,49 +411,124 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 // TestWorkspaceRegisterSerena_LiveSupervisorMaterializesBeforeSuccess.
 var serenaRegisterReconcileFn = api.DialSupervisorIPCReconcile
 
-// serenaRegisterIntentCheckFn is the test-injectable seam that checks
-// whether a spec-bearing supervisor-intent daemon row exists for a serena
-// workspace key, called AFTER the reconcile-apply nudge (step 8 above) to
-// gate the final success message. Defaults to the named production function
-// below (rather than an inline closure) so a test that stubs it for one
-// scenario can restore the REAL check for another by referencing
-// realSerenaRegisterIntentCheck directly, instead of duplicating its body.
-var serenaRegisterIntentCheckFn = realSerenaRegisterIntentCheck
+// serenaRegisterSettledResult is the outcome of the post-materialize SETTLED
+// check (step 8): the complete tuple workspaceRegisterPartialStateError and
+// the success print both need, instead of a bare presence boolean (BLOCKING 2
+// fix, mcphub-register-intent REVISE round 2).
+type serenaRegisterSettledResult struct {
+	// Settled is true ONLY when RegistryRowPresent is true AND the intent
+	// carries a matching spec-bearing daemon row AND the two AGREE on port.
+	Settled bool
+	// RegistryRowPresent reports whether THIS re-read (not the earlier
+	// in-memory entry the command allocated) still finds the registry row.
+	// Lets the partial-state error say honestly whether the registration is
+	// still on disk, instead of unconditionally claiming "the registration
+	// was kept" — false under a concurrent unregister.
+	RegistryRowPresent bool
+	// Port is the registry's currently-committed port when RegistryRowPresent
+	// is true (0 otherwise) — what the command should PRINT on success, never
+	// the entry.Port captured at allocation time (step 5), which a
+	// concurrent port reallocation could have made stale by now.
+	Port int
+}
 
-// realSerenaRegisterIntentCheck is the production body of
-// serenaRegisterIntentCheckFn: it reads supervisor-intent.json fresh through
-// the single-owner predicate
-// (api.SupervisorIntentFile).HasSpecBearingSerenaDaemonForWorkspaceKey. A
-// missing intent file means "not yet materialized" (false, nil) rather than
-// an error — the caller already has an explicit reconcileErr to report when
-// the IPC call itself failed; this seam only answers the observable
-// after-the-fact question "is the daemon row there now".
-func realSerenaRegisterIntentCheck(wsKey string) (bool, error) {
+// serenaRegisterSettledCheckFn is the test-injectable seam that computes the
+// settled tuple AFTER the reconcile-apply nudge (step 8 above) to gate the
+// final success message. Defaults to the named production function below
+// (rather than an inline closure) so a test that stubs it for one scenario
+// can restore the REAL check for another by referencing
+// realSerenaRegisterSettledCheck directly, instead of duplicating its body.
+var serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
+
+// realSerenaRegisterSettledCheck is the production body of
+// serenaRegisterSettledCheckFn. It re-reads BOTH the registry and
+// supervisor-intent.json fresh (no caller-supplied snapshot) so the verdict
+// reflects what is ACTUALLY committed at the moment of the call:
+//
+//  1. The registry row for wsKey must still exist — a concurrent unregister
+//     racing this register would otherwise leave an intent-presence-only
+//     check reporting success for a workspace with NO registry row backing
+//     it (worse than the original bug: an operator-invisible daemon).
+//  2. The intent must carry a spec-bearing daemon row for the SAME key
+//     (api.SupervisorIntentFile.SpecBearingSerenaDaemonForWorkspaceKey — the
+//     single-owner matching loop shared with the bare presence predicate).
+//  3. The registry's Port and the matched daemon's api.EffectiveDaemonPort
+//     must AGREE — catching a port reallocation that raced this register, or
+//     (pre-BLOCKING-1-fix) a resurrected duplicate descriptor converging on
+//     someone else's port.
+//
+// A missing intent file or a missing daemon row means "not settled" (false,
+// nil error) rather than an error — the caller already has an explicit
+// reconcileErr to report when the IPC call itself failed; this seam only
+// answers the observable after-the-fact question "is this workspace's
+// registration fully settled right now".
+func realSerenaRegisterSettledCheck(wsKey string) (serenaRegisterSettledResult, error) {
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		return serenaRegisterSettledResult{}, err
+	}
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return serenaRegisterSettledResult{}, err
+	}
+	defer unlock()
+	if err := reg.Load(); err != nil {
+		return serenaRegisterSettledResult{}, err
+	}
+	row, ok := reg.GetSerena(wsKey)
+	if !ok {
+		// The registry row is gone — a concurrent unregister beat this
+		// register to it. Never settled regardless of intent state.
+		return serenaRegisterSettledResult{}, nil
+	}
+	result := serenaRegisterSettledResult{RegistryRowPresent: true, Port: row.Port}
+
 	intentPath, err := api.DefaultSupervisorIntentPath()
 	if err != nil {
-		return false, err
+		return result, err
 	}
 	intent, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return false, nil
+			return result, nil
 		}
-		return false, err
+		return result, err
 	}
-	return intent.HasSpecBearingSerenaDaemonForWorkspaceKey(wsKey), nil
+	daemon := intent.SpecBearingSerenaDaemonForWorkspaceKey(wsKey)
+	if daemon == nil {
+		return result, nil
+	}
+	effPort, ok := api.EffectiveDaemonPort(*daemon)
+	if !ok || effPort != row.Port {
+		// Present on both sides but DISAGREEING — report the registry's port
+		// for diagnostics but do not certify settlement.
+		return result, nil
+	}
+	result.Settled = true
+	return result, nil
 }
 
 // workspaceRegisterPartialStateError builds the operator-facing error for a
-// serena register whose registry row is committed and KEPT, but whose
-// supervisor-intent daemon row is not (yet) confirmed spec-bearing. Per the
+// serena register whose registration is NOT (yet) confirmed settled. Per the
 // design this fixes: never print an unqualified success while the workspace
 // is unusable — either it converged, or the message says plainly what did
-// not happen and what to run next.
-func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, reconcileErr, checkErr error) error {
+// not happen and what to run next. The FIRST line is gated on
+// settled.RegistryRowPresent (medium-item fix): claiming "the registration
+// was kept" is only honest when THIS re-read actually confirmed the registry
+// row is still there; a concurrent unregister that deleted it gets a
+// different, accurate statement instead.
+func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, settled serenaRegisterSettledResult, reconcileErr, checkErr error) error {
 	var b strings.Builder
-	fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
-		"but no spec-bearing supervisor daemon row is confirmed yet — the registration was kept, "+
-		"nothing was rolled back.\n", canonical, wsKey, entry.Port, entry.TaskName)
+	if settled.RegistryRowPresent {
+		fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
+			"but no settled spec-bearing supervisor daemon row is confirmed yet — the registration was "+
+			"kept (this process did not roll it back).\n", canonical, wsKey, settled.Port, entry.TaskName)
+	} else {
+		fmt.Fprintf(&b, "workspace %s (key %s): the registry row could not be confirmed present on "+
+			"re-check — a concurrent `mcphub workspace unregister` (or other process) may have removed "+
+			"it. This process did NOT delete it and did not create a new one.\n", canonical, wsKey)
+	}
 	switch {
 	case reconcileErr != nil && errors.Is(reconcileErr, api.ErrSupervisorIPCUnavailable):
 		b.WriteString("  reason: no supervisor is running. Start it with `mcphub supervise` " +
@@ -455,12 +540,19 @@ func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.Works
 			"to retry materializing this workspace.\n")
 	case checkErr != nil:
 		fmt.Fprintf(&b, "  reason: could not verify the supervisor intent afterward: %v\n", checkErr)
+		b.WriteString("  next step: once the underlying I/O issue is resolved, run `mcphub workspace list` " +
+			"to check the current state, then `mcphub reconcile --apply` to retry materializing this " +
+			"workspace if it is still unsettled.\n")
+	case !settled.RegistryRowPresent:
+		b.WriteString("  next step: if you intended to keep this workspace registered, run `mcphub " +
+			"workspace register` again; if the unregister was intentional, no action is needed.\n")
 	default:
-		b.WriteString("  reason: the supervisor acknowledged the reconcile request but reported no " +
-			"spec-bearing daemon row for this workspace yet — this happens when this is the FIRST " +
-			"serena workspace and the dynamic pool has not been introduced (run `mcphub migrate serena " +
-			"legacy-to-dynamic-pool`), or when the self-heal was skipped due to a momentarily contended " +
-			"lock (retry with `mcphub reconcile --apply`). Check supervisor-events.log for a " +
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request but no settled " +
+			"spec-bearing daemon row is confirmed for this workspace yet — this happens when this is the " +
+			"FIRST serena workspace and the dynamic pool has not been introduced (run `mcphub migrate " +
+			"serena legacy-to-dynamic-pool`), when the self-heal was skipped due to a momentarily " +
+			"contended lock, or when the registry and intent ports disagree (a concurrent port " +
+			"reallocation). Retry with `mcphub reconcile --apply`; check supervisor-events.log for a " +
 			"`serena-intent-repair-*` entry naming the exact cause.\n")
 	}
 	return errors.New(b.String())

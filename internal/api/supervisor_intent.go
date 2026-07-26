@@ -503,29 +503,40 @@ func (f *SupervisorIntentFile) HasSerenaDaemonForWorkspaceKey(key string) bool {
 	return false
 }
 
-// HasSpecBearingSerenaDaemonForWorkspaceKey reports whether this intent
-// carries a serena per-workspace daemon row for the given workspace key WITH
-// a non-nil RuntimeSpec — i.e. a row the reconciler will actually spawn. A
-// bare HasSerenaDaemonForWorkspaceKey match is NOT sufficient: a legacy
-// pre-redesign nil-RuntimeSpec serena row occupies the task name, but the
-// reconciler excludes it from the spawn-desired set
+// SpecBearingSerenaDaemonForWorkspaceKey returns a pointer to the serena
+// per-workspace daemon row for the given workspace key WITH a non-nil
+// RuntimeSpec — i.e. a row the reconciler will actually spawn — or nil when no
+// such row exists. A bare HasSerenaDaemonForWorkspaceKey match is NOT
+// sufficient: a legacy pre-redesign nil-RuntimeSpec serena row occupies the
+// task name, but the reconciler excludes it from the spawn-desired set
 // (internal/cli/supervise_reconcile.go), so it is not a live daemon.
 //
-// Single owner of this predicate (C1): RepairSerenaIntentFromRegistry
-// (serena_intent_repair.go) and the explicit `mcphub workspace register`
-// post-materialize success gate (internal/cli/workspace_cmd.go) both call
-// this rather than re-deriving the task-name-plus-spec check locally.
-func (f *SupervisorIntentFile) HasSpecBearingSerenaDaemonForWorkspaceKey(key string) bool {
+// Single owner of this predicate (C1): HasSpecBearingSerenaDaemonForWorkspaceKey
+// (the bare presence check RepairSerenaIntentFromRegistry uses) and the
+// explicit `mcphub workspace register` post-materialize SETTLED-tuple gate
+// (internal/cli/workspace_cmd.go, which additionally needs the matched row's
+// port to confirm registry/intent agreement) both resolve through this ONE
+// matching loop rather than re-deriving the task-name-plus-spec check.
+func (f *SupervisorIntentFile) SpecBearingSerenaDaemonForWorkspaceKey(key string) *SupervisorDaemon {
 	if f == nil {
-		return false
+		return nil
 	}
 	want := "mcp-local-hub-serena-" + key
 	for i := range f.Daemons {
 		if strings.TrimPrefix(f.Daemons[i].TaskName, `\`) == want && f.Daemons[i].RuntimeSpec != nil {
-			return true
+			return &f.Daemons[i]
 		}
 	}
-	return false
+	return nil
+}
+
+// HasSpecBearingSerenaDaemonForWorkspaceKey reports whether this intent
+// carries a serena per-workspace daemon row for the given workspace key WITH
+// a non-nil RuntimeSpec. Thin bool wrapper over
+// SpecBearingSerenaDaemonForWorkspaceKey so callers that only need presence
+// (not the matched row itself) keep their existing call shape.
+func (f *SupervisorIntentFile) HasSpecBearingSerenaDaemonForWorkspaceKey(key string) bool {
+	return f.SpecBearingSerenaDaemonForWorkspaceKey(key) != nil
 }
 
 // StopsAsDaemonIntentFile returns the supervisor-intent stops sub-block
