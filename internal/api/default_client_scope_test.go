@@ -109,6 +109,30 @@ weekly_refresh: false
 	preflightPortInUse = func(int) bool { return false }
 	t.Cleanup(func() { preflightPortInUse = prevPortInUse })
 
+	// Isolate the canonical binary through the SAME seam newRegisterHarness uses.
+	// Without it this test is host-coupled and outright FAILS on a clean checkout:
+	// AdmissionCheck ends with `ensureCanonicalMcphubPresent()` adding a
+	// NON-optional "canonical-mcphub" finding (internal/api/admission_check.go),
+	// so Preflight returns an AdmissionError and installUsingEmbedFirst never
+	// reaches BuildPlanWithOpts — the dry-run output is empty and the
+	// client-scope assertions below never execute. It passes on a developer host
+	// only because ~/.local/bin/mcphub.exe happens to exist there. Reproduced by
+	// redirecting USERPROFILE/HOME to an empty dir:
+	//
+	//	installUsingEmbedFirst dry-run: …\.local\bin\mcphub.exe not present —
+	//	run `mcphub setup` once to install the canonical binary
+	//
+	// A regression guard whose verdict depends on the machine it runs on is not
+	// a guard. The stub only has to EXIST (os.Stat is the whole check); it is
+	// never executed.
+	stubMcphub := filepath.Join(t.TempDir(), mcphubShortName)
+	if err := os.WriteFile(stubMcphub, []byte("stub-binary\n"), 0o755); err != nil {
+		t.Fatalf("create stub mcphub binary: %v", err)
+	}
+	prevCanonical := testCanonicalMcphubPathOverride
+	testCanonicalMcphubPathOverride = stubMcphub
+	t.Cleanup(func() { testCanonicalMcphubPathOverride = prevCanonical })
+
 	a := NewAPI()
 	if err := a.SetDefaultInstallClientNames([]string{"claude-code", "cursor"}); err != nil {
 		t.Fatalf("persist default-install override: %v", err)
@@ -191,7 +215,8 @@ func TestRegisterBindings_HonorPersistedDefaultClientsOverride(t *testing.T) {
 	// client_bindings, so register falls through to the implicit default set.
 	// That fallback is the code path under test.
 	registerScope := map[string]bool{}
-	for _, b := range effectiveClientBindings(&config.ServerManifest{Name: "mcp-language-server"}) {
+	registerBindings, _ := effectiveClientBindings(&config.ServerManifest{Name: "mcp-language-server"})
+	for _, b := range registerBindings {
 		registerScope[b.Client] = true
 	}
 

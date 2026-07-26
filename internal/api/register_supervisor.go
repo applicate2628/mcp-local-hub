@@ -193,6 +193,7 @@ func (a *API) registerOneLanguageSupervised(
 	reg *Registry,
 	sch testScheduler,
 	allClients map[string]registerClient,
+	bindings []config.ClientBinding,
 	w io.Writer,
 	rollback *[]func(),
 ) (WorkspaceEntry, error) {
@@ -265,14 +266,13 @@ func (a *API) registerOneLanguageSupervised(
 	}
 	legacyTaskDeleted = len(priorXML) > 0
 
-	bindingsPre := effectiveClientBindings(m)
 	entryNameByClient := map[string]string{}
 	if had {
 		for k, v := range prior.ClientEntries {
 			entryNameByClient[k] = v
 		}
 	}
-	for _, b := range bindingsPre {
+	for _, b := range bindings {
 		client, ok := allClients[b.Client]
 		if !ok || !client.Exists() {
 			continue
@@ -341,7 +341,7 @@ func (a *API) registerOneLanguageSupervised(
 	if _, ok := reg.Get(wsKey, lang); !ok {
 		return WorkspaceEntry{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
 	}
-	for _, b := range bindingsPre {
+	for _, b := range bindings {
 		client, ok := allClients[b.Client]
 		if !ok || !client.Exists() {
 			continue

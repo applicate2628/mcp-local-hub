@@ -166,7 +166,15 @@ func (s *Server) toggleWorkspaceLSP(w http.ResponseWriter, req projectToggleRequ
 	a := api.NewAPI()
 	resp := projectToggleResponse{Scope: req.Scope, Server: req.Server}
 	if req.Enable {
-		rep, err := a.Register(req.Root, req.Languages, api.RegisterOpts{})
+		// GUIPort: this handler is the ONE Register caller that knows the LIVE
+		// bound GUI-server port, and the post-register cleanup gate needs it to
+		// judge a shared LSP-router entry. Those entries are WRITTEN with
+		// s.Port() (see lsp_router_control.go's LSPClientRouterOpts{GUIPort:
+		// s.Port()}), and an explicit `--port` beats the persisted
+		// gui_server.port, so leaving this 0 would make the gate compare against
+		// a setting the running server may not be using — matching a stale entry
+		// and deleting the client's live direct entry.
+		rep, err := a.Register(req.Root, req.Languages, api.RegisterOpts{GUIPort: s.Port()})
 		if err != nil {
 			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
 			return

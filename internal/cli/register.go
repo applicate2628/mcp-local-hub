@@ -13,13 +13,34 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 )
+
+// relayStdioClientNamesForHelp renders the relay-stdio client ids for
+// `mcphub register --help`, DERIVED from the client registry rather than
+// re-typed. The carve-out the help describes is enforced by
+// clients.IsRelayStdio (api.defaultClientBindingsNow filters on it), so
+// enumerating the names by hand here would silently go stale the first time a
+// relay-stdio adapter is added or reclassified — help that contradicts the
+// behavior is worse than help that omits it. Order follows
+// clients.SupportedClientNames() (registry order), matching every other
+// client-ordered surface.
+func relayStdioClientNamesForHelp() string {
+	var names []string
+	for _, name := range clients.SupportedClientNames() {
+		if clients.IsRelayStdio(name) {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
 
 // newRegisterCmdReal is the concrete cobra.Command wired by root.go's stub.
 // Usage: `mcphub register <workspace> [language...] [--no-weekly-refresh]`.
@@ -37,9 +58,18 @@ surface, and write managed entries into every default-install MCP client config
 (claude-code, codex-cli by default). Cursor and the other clients are opt-in:
 add them to your default-install set in the GUI under Settings -> Clients
 (persisted as ` + "`clients.default_install`" + ` in gui-preferences.yaml) and register
-will bind them too, exactly as ` + "`mcphub install`" + ` does. There is no --clients
-flag on register, and editing the shipped mcp-language-server manifest does not
-work — it is embedded in the binary.
+will bind them too. There is no --clients flag on register, and editing the
+shipped mcp-language-server manifest does not work — it is embedded in the
+binary.
+
+One carve-out versus ` + "`mcphub install`" + `: register SKIPS relay-stdio clients
+(` + relayStdioClientNamesForHelp() + `) even when your default-install set
+selects them, and prints a warning naming each one. A workspace LSP proxy is
+reached by URL, and those clients accept only a stdio relay entry — not the
+URL-only binding register writes. Reach them with ` + "`mcphub install`" + `, which
+does emit the stdio relay form. If your default-install set names ONLY
+relay-stdio clients, register still creates the proxy but binds no client at
+all, and says so.
 
 Lazy mode:
   - No LSP binary preflight at register time. A missing binary surfaces

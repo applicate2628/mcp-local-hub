@@ -66,20 +66,65 @@ import (
 //
 // Relay-stdio adapters (e.g. Antigravity's stdio-relay model) are excluded by
 // the IsRelayStdio filter because they require relay context, not a URL-only
-// workspace binding.
-func defaultClientBindingsNow() []config.ClientBinding {
+// workspace binding. Those dropped names are RETURNED alongside the bindings —
+// see relayStdioBindingWarning for why they must never be dropped silently.
+func defaultClientBindingsNow() ([]config.ClientBinding, []string) {
 	names := clients.DefaultInstallClientNames()
 	if eff, err := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); err == nil && len(eff) > 0 {
 		names = eff
 	}
 	bindings := make([]config.ClientBinding, 0, len(names))
+	var droppedRelayStdio []string
 	for _, name := range names {
 		if clients.IsRelayStdio(name) {
+			droppedRelayStdio = append(droppedRelayStdio, name)
 			continue
 		}
 		bindings = append(bindings, config.ClientBinding{Client: name, URLPath: "/mcp"})
 	}
-	return bindings
+	return bindings, droppedRelayStdio
+}
+
+// relayStdioBindingWarning renders the operator-visible warning for
+// default-install clients this register structurally CANNOT bind.
+//
+// SetDefaultInstallClientNames accepts any non-empty subset of
+// clients.SupportedClientNames(), and the Settings → Clients panel
+// (ClientInstallToggleViewIn) renders EVERY supported client as a toggle —
+// including the relay-stdio ones. So `clients.default_install = zed` is a
+// reachable, VALID operator state in which the IsRelayStdio filter above drops
+// every name and register writes ZERO client entries. Before register learned
+// to read the override this state was unreachable (the compile-time fallback is
+// {claude-code, codex-cli}, both URL-native); honoring the override made it
+// reachable, so honoring it must also make it visible.
+//
+// POSTURE: warn, do NOT substitute. The tempting alternative — mirror
+// DefaultInstallClientNamesOverrideIn's "nothing valid survived ⇒ no override"
+// fallback to the compile-time set — does NOT apply here and would be worse.
+// That fallback fires when the operator's intent is UNRECOVERABLE (every
+// persisted name blank/unknown, i.e. nothing was validly expressed). Here the
+// intent is valid and precise; it is register that cannot honor part of it.
+// Substituting {claude-code, codex-cli} would write entries into clients the
+// operator explicitly DESELECTED, and would re-open the very cross-lane
+// divergence this branch closed — pointing the other way, with register binding
+// clients `mcphub install` would not. Guessing an intent the operator did not
+// express is not a fix; saying plainly what was skipped is.
+//
+// The string goes to BOTH surfaces: the writer (CLI stderr) and
+// RegisterReport.Warnings, which the GUI project-LSP toggle returns to the
+// browser (internal/gui/projects_toggle.go → projectToggleResponse.Warnings).
+func relayStdioBindingWarning(bindings []config.ClientBinding, droppedRelayStdio []string) string {
+	if len(droppedRelayStdio) == 0 {
+		return ""
+	}
+	msg := fmt.Sprintf(
+		"default-install client(s) %s are relay-stdio and cannot take the URL-only entry `mcphub register` writes (they need a stdio relay entry); they were skipped",
+		strings.Join(droppedRelayStdio, ", "))
+	if len(bindings) > 0 {
+		return msg + " — install them with `mcphub install` instead"
+	}
+	return msg + ", leaving NO client bound by this registration: the workspace proxy will run with no client config pointing at it. " +
+		"Add a URL-capable client (claude-code, codex-cli, cursor, …) in Settings → Clients, or reach the relay-stdio client(s) via `mcphub install`"
 }
 
 // effectiveClientBindings is the SINGLE owner of "which clients does THIS
@@ -99,9 +144,27 @@ func defaultClientBindingsNow() []config.ClientBinding {
 // with a working hub-managed replacement": a binding here is one way to get
 // one, an already-live shared LSP-router entry is the other. See
 // lspCleanupAliasesForClient.
-func effectiveClientBindings(m *config.ServerManifest) []config.ClientBinding {
+//
+// RESOLVE ONCE PER REGISTER. Being the single owner is not enough if the owner
+// is CONSULTED repeatedly: this reads gui-preferences.yaml at call time, and a
+// register spans tens of seconds (sch.Create + sch.Run + a readiness probe with
+// a 10s ceiling, per language). Inside the GUI process `POST
+// /api/client-install-prefs` and the project-LSP toggle that calls Register are
+// independent handlers sharing no lock, so an operator ticking a client mid-loop
+// used to make the write path and the cleanup gate disagree ACROSS TIME: early
+// languages written without the new client, cleanup then judging every language
+// against the NEW set and deleting that client's live direct entries with no
+// replacement. Same defect class as the original list divergence, reached
+// through timing instead. So registerWithManifest calls this ONCE, before the
+// language loop, and threads the result into registerOneLanguage /
+// registerOneLanguageSupervised and the cleanup — exactly as routerPort is
+// already resolved once per cleanup run.
+//
+// The second return value is the relay-stdio client names dropped from the
+// operator's selection; see relayStdioBindingWarning.
+func effectiveClientBindings(m *config.ServerManifest) ([]config.ClientBinding, []string) {
 	if len(m.ClientBindings) > 0 {
-		return m.ClientBindings
+		return m.ClientBindings, nil
 	}
 	return defaultClientBindingsNow()
 }
@@ -150,11 +213,19 @@ func boundClientNames(bindings []config.ClientBinding) map[string]bool {
 //
 // Without it the probe degenerated to "an entry with the reserved name exists,
 // is enabled, and its URL parses as /lsp/<lang>/mcp" — at ANY port. An operator
-// who changed gui_server.port (pending-restart) or ran `mcphub gui --reset-port`
-// leaves stale-port router entries behind until EnsureLSPRouterClientEntries
-// re-runs; register would read routed=true and delete the client's LIVE direct
-// entry, leaving one dead router entry and no working LSP — exactly the
-// "removed with nothing put in its place" defect this gate exists to prevent.
+// who changed gui_server.port (in Settings, pending-restart) or launched the GUI
+// with an explicit `--port` that beats the persisted value leaves stale-port
+// router entries behind until EnsureLSPRouterClientEntries re-runs; register
+// would read routed=true and delete the client's LIVE direct entry, leaving one
+// dead router entry and no working LSP — exactly the "removed with nothing put
+// in its place" defect this gate exists to prevent.
+//
+// `mcphub gui --reset-port` is NOT one of those scenarios, despite the name: it
+// clears the HUB-AGGREGATE port in hub-mcp.endpoint.json (ResetHubPortContext
+// sets ep.Port = 0) and refuses outright while a GUI holds the single-instance
+// lock, whereas router entries encode the GUI SERVER port via
+// LSPRouterURL(guiPort, language). Two different ports; --reset-port cannot
+// strand a router entry.
 //
 // routerPort is resolved ONCE per cleanup run by the caller (rather than per
 // probe) so every client/language decision in one register is judged against
@@ -162,6 +233,11 @@ func boundClientNames(bindings []config.ClientBinding) map[string]bool {
 // non-positive routerPort means the caller could not resolve it; we then fail
 // CLOSED (no provable replacement → keep the operator's working direct entry),
 // matching the GetEntry-error posture above.
+//
+// SCOPE OF THE GATE: port EQUALITY against the port this process knows the
+// router is serving — deliberately NOT a liveness probe of that port. See
+// cleanupDirectLanguageServerEntriesAfterRegister's routerPort resolution for
+// why a dial would be the wrong instrument here.
 func clientHasActiveLSPRouterReplacement(client registerClient, language string, routerPort int) (bool, error) {
 	entryName := LSPRouterEntryName(language)
 	live, err := client.GetEntry(entryName)
@@ -201,6 +277,27 @@ type RegisterOpts struct {
 	// supervisor path makes the proxy process a Job-protected child of the
 	// hub supervisor, matching Serena's daemon ownership model.
 	SupervisedProxy bool
+
+	// GUIPort is the LIVE GUI-server port the caller knows the shared LSP
+	// router is serving on, or 0 for "resolve it from gui_server.port".
+	//
+	// It exists because the post-register cleanup gate must judge a router
+	// entry against the port that entry was WRITTEN with, and the writer uses
+	// the live bound port, not the persisted setting: every
+	// EnsureLSPRouterClientEntries / Enable / Disable call from the GUI passes
+	// LSPClientRouterOpts{GUIPort: s.Port()} (internal/gui/lsp_router_control.go),
+	// and resolveGuiPort (internal/cli/gui_port.go) lets an explicit `--port`
+	// flag beat the persisted value outright. With gui_server.port = 9125 and
+	// the GUI actually running on --port 9200, a settings-only resolution reads
+	// 9125, matches a STALE 9125 router entry, and deletes the client's live
+	// direct entry — the dead-replacement deletion the port gate exists to stop,
+	// re-entered through the port's own provenance.
+	//
+	// Mirrors LSPClientRouterOpts.GUIPort exactly (same 0-means-resolve
+	// contract), so callers that already hold a live port thread it through one
+	// seam rather than two. Zero keeps the pre-existing settings-read behavior,
+	// so every existing caller is unchanged.
+	GUIPort int
 
 	Writer io.Writer // progress output; nil = os.Stderr
 }
@@ -386,8 +483,18 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 			return report, err
 		}
 	}
+	// ONE client-scope decision for the WHOLE registration (see
+	// effectiveClientBindings' RESOLVE ONCE PER REGISTER note). Resolved here —
+	// before the first language, before any client write, before the cleanup
+	// gate — and threaded down, so no consumer can observe a different answer
+	// than another because the operator changed Settings → Clients mid-loop.
+	bindings, droppedRelayStdio := effectiveClientBindings(m)
+	if warning := relayStdioBindingWarning(bindings, droppedRelayStdio); warning != "" {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+		report.Warnings = append(report.Warnings, warning)
+	}
 	for _, lang := range languages {
-		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
+		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, bindings, w, &rollback)
 		if err != nil {
 			runRollback()
 			return report, fmt.Errorf("register language %s: %w", lang, err)
@@ -402,7 +509,7 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	// what left a router-routed opt-in client's superseded entry live next to
 	// its router entry. See lspCleanupAliasesForClient.
 	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(
-		bySpec, languages, canonical, allClients, boundClientNames(effectiveClientBindings(m)), w)...)
+		bySpec, languages, canonical, allClients, boundClientNames(bindings), opts.GUIPort, w)...)
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
 	// gate. This is the operator-action seed: after an explicit register
@@ -448,6 +555,7 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	canonicalWorkspace string,
 	allClients map[string]registerClient,
 	boundClients map[string]bool,
+	guiPort int,
 	w io.Writer,
 ) []string {
 	keepN := a.EffectiveBackupKeepN()
@@ -459,7 +567,34 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	// port and costs one settings read instead of one per probe. On a resolution
 	// failure we pass 0 (fail closed: no router-based replacement is provable, so
 	// direct entries are kept) and warn once rather than per client/language.
-	routerPort, routerPortErr := a.lspRouterGUIPort(0)
+	//
+	// guiPort is the CALLER's live bound port when it knows one
+	// (RegisterOpts.GUIPort — the GUI project-LSP toggle passes s.Port()); 0
+	// falls back to reading gui_server.port, which is the best a CLI register
+	// with no live server in-process can do.
+	//
+	// WHY PORT EQUALITY AND NOT A LIVENESS DIAL. The gate's question is "would
+	// removing this direct entry disconnect the client", and the honest answer
+	// is decided by CONFIGURATION, not by whether a socket answers right now.
+	// A dial cannot separate the two failure modes that matter: a stale-PORT
+	// entry is permanently wrong (nothing will ever serve 9199) while a
+	// correct-port entry whose GUI is merely not running this second is a fully
+	// working replacement the moment the operator starts the GUI — and the CLI
+	// `mcphub register` case has NO GUI running by construction, so a liveness
+	// probe there would fail CLOSED on every single client and silently disable
+	// the cleanup half of this gate (superseded direct entries would then
+	// accumulate beside router entries forever — the exact over-correction
+	// TestRegister_CleanupCoversOptInClientRoutedThroughSharedLSPRouter pins
+	// against). A dial is also a TOCTOU read: the listener can die one
+	// millisecond after it answers, so a green probe proves nothing durable
+	// while costing a network timeout per (client, language). Port equality
+	// against the port THIS process knows the router serves is the strongest
+	// check that is both decidable offline and stable — and the liveness
+	// concern is already owned elsewhere and end-to-end: the hub listener
+	// health watcher + bounded restart driver (internal/gui/hub_listener.go)
+	// own "is the listener up", and EnsureLSPRouterClientEntries owns
+	// re-stamping entries when the port changes.
+	routerPort, routerPortErr := a.lspRouterGUIPort(guiPort)
 	if routerPortErr != nil {
 		routerPort = 0
 		warnings = append(warnings, fmt.Sprintf(
@@ -798,6 +933,11 @@ func stringSliceContainsFold(values []string, want string) bool {
 // (b) creates the scheduler task, (c) writes each client entry, and
 // accumulates rollback closures in order. Returns the entry ready to be
 // Put in the registry.
+//
+// bindings is the registration-wide client scope resolved ONCE by
+// registerWithManifest. It is a PARAMETER, not a re-resolution, so language N+1
+// binds exactly what language 1 did even when the operator edits Settings →
+// Clients while this loop is running (see effectiveClientBindings).
 func (a *API) registerOneLanguage(
 	m *config.ServerManifest,
 	canonical, wsKey, lang string,
@@ -805,6 +945,7 @@ func (a *API) registerOneLanguage(
 	reg *Registry,
 	sch testScheduler,
 	allClients map[string]registerClient,
+	bindings []config.ClientBinding,
 	w io.Writer,
 	rollback *[]func(),
 ) (WorkspaceEntry, error) {
@@ -816,7 +957,7 @@ func (a *API) registerOneLanguage(
 		}
 	}
 	if opts.SupervisedProxy {
-		return a.registerOneLanguageSupervised(m, spec, canonical, wsKey, lang, opts, reg, sch, allClients, w, rollback)
+		return a.registerOneLanguageSupervised(m, spec, canonical, wsKey, lang, opts, reg, sch, allClients, bindings, w, rollback)
 	}
 	// Phase 1: registry write window — acquire flock, load current state,
 	// do all port/task/registry work, release flock BEFORE sch.Run so the
@@ -980,14 +1121,13 @@ func (a *API) registerOneLanguage(
 	// composed BEFORE we start the proxy. The daemon launched by sch.Run
 	// loads workspaces.yaml on startup and exits if its (workspaceKey,
 	// language) is absent — persisting-before-Run closes that race.
-	bindingsPre := effectiveClientBindings(m)
 	entryNameByClient := map[string]string{}
 	if had {
 		for k, v := range prior.ClientEntries {
 			entryNameByClient[k] = v
 		}
 	}
-	for _, b := range bindingsPre {
+	for _, b := range bindings {
 		client, ok := allClients[b.Client]
 		if !ok || !client.Exists() {
 			continue
@@ -1118,7 +1258,7 @@ func (a *API) registerOneLanguage(
 	// 2. Write client entries. Names + entry were pre-composed above;
 	// this loop just pushes entries into each client's config and
 	// registers per-client rollbacks.
-	for _, b := range bindingsPre {
+	for _, b := range bindings {
 		client, ok := allClients[b.Client]
 		if !ok || !client.Exists() {
 			continue
