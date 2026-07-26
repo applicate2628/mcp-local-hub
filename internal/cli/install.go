@@ -89,6 +89,21 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// redirected). The restore defer clears the process-level port.
 			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
 
+			// codex bot PR #588 P2 closure: --rollback is a MODIFIER of
+			// --reconcile-mcp-front, not a mode of its own. Its dependency
+			// must be validated BEFORE any mode dispatch, not after — the
+			// per-mode exclusivity lists below each enumerate the OTHER
+			// mode flags, and adding `rollbackMCPFront` to each of them is
+			// the shape that already failed: `--upgrade --rollback` and
+			// `--reconcile-hub-mode --rollback` both fell through to a real,
+			// mutating upgrade/reconcile with `--rollback` silently ignored.
+			// One gate at the top is the single owner: every present and
+			// future mode is covered by construction, so an invalid rollback
+			// combination can never execute an unrelated mutating operation.
+			if rollbackMCPFront && !reconcileMCPFront {
+				return fmt.Errorf("--rollback requires --reconcile-mcp-front")
+			}
+
 			// Bug-bash A7 minimal closure (#4): --upgrade is the
 			// one-shot binary replacement entry point. Pre-A7 the
 			// operator had to stop daemons, run `mcphub setup` to
@@ -163,9 +178,11 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				}
 				return runReconcileMCPFront(cmd, rollbackMCPFront)
 			}
-			if rollbackMCPFront {
-				return fmt.Errorf("--rollback requires --reconcile-mcp-front")
-			}
+			// NOTE: the `--rollback requires --reconcile-mcp-front` gate is
+			// NOT repeated here — it now runs at the TOP of RunE, before any
+			// mode dispatch (see the codex bot PR #588 P2 comment there). A
+			// second copy at this depth is unreachable and would re-create
+			// the impression that late validation is sufficient.
 			// --check: read-only readiness probe. Print the report (blockers +
 			// optional advisories) for --server and exit 0 WITHOUT installing,
 			// bootstrapping, or mutating anything. Handled BEFORE the bootstrap

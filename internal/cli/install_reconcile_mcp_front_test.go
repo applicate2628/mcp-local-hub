@@ -133,11 +133,18 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 // Honest scoping note: the reviewer's literal scenario — the operator
 // changes mcp_front.port to a DIFFERENT VALID port between forward and
 // rollback, orphaning the OLD port's LSP router entry — does not reproduce
-// in this codebase. See TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed
-// in internal/api: RollbackLSPRouterClientEntries's entry-removal check is
-// keyed by the entry's fixed canonical name, not by the GUIPort value
-// passed in, so it recognizes and removes the entry regardless of port
-// drift — confirmed empirically before this hardening was written. Also,
+// in this codebase, because the LSP rollback's entry lookup is keyed by the
+// entry's fixed canonical name rather than by the GUIPort value passed in
+// (the port is ownership evidence only). That was true of the
+// RollbackLSPRouterClientEntries routine this command used at the time this
+// test was written, and remains true of
+// api.RestoreLSPRouterClientEntriesSnapshot, which REPLACED it in the codex
+// bot PR #588 P1 fix — see that function's doc comment, and
+// TestMCPFrontPR588_RollbackRestoresPriorLSPRouterURL for why the swap was
+// necessary. (The api-side guard
+// TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed still
+// pins the property for the demotion routine, which remains the owner of its
+// own, different operation.) Also,
 // a.SettingsSet validates against the registry's [1024,65535] range on
 // every write, so an actually out-of-range value can never reach the
 // settings file through the normal write path; and a corrupted-but-in-range

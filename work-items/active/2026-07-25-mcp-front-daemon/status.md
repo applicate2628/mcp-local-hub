@@ -343,15 +343,22 @@ GUI-lifecycle code touched.
    (internal/cli/install_reconcile_mcp_front.go): thin composition over
    `api.ReconcileSerenaClientsToRouter` (Port path) +
    `a.EnsureLSPRouterClientEntries` (forward) and
-   `api.RestoreSerenaReconcileApplied` + `a.RollbackLSPRouterClientEntries`
-   (rollback) — no reconcile/backup/rollback logic reimplemented. Fail-closed:
-   serena's own liveness proof runs first and gates the WHOLE command (LSP is
-   never touched if the route isn't proven live). The forward run persists
-   its serena `MigrateReport` to `<state-dir>/mcp-front-reconcile-serena-report.json`
-   (hardened `WriteStateFileAtomic`) so a later, separate `--rollback`
-   invocation can restore each client from its captured backup; rollback
-   deletes the report on success. Emits `mcp-front-reconciled` events
-   (source install, `action: reconcile|rollback`).
+   `api.RestoreSerenaReconcileApplied` + `a.RestoreLSPRouterClientEntriesSnapshot`
+   (rollback) — no reconcile/backup/rollback logic reimplemented. Fail-closed
+   on TWO gates before any client write: a port-ownership check (mcp_front.port
+   must not be the GUI's own port or another supervisor-intent daemon's port),
+   then serena's own liveness proof, which gates the WHOLE command (LSP is
+   never touched if the route isn't proven live). The forward run persists a
+   versioned pre-reconcile record to
+   `<state-dir>/mcp-front-reconcile-serena-report.json` (hardened
+   `WriteStateFileAtomic`) carrying the first generation's port, the serena
+   `Applied` rows with their captured backups, and the per-(client, language)
+   LSP router pre-state; re-runs MERGE into it and never overwrite a recorded
+   row; rollback deletes the record on success. Emits `mcp-front-reconciled`
+   events (source install, `action: reconcile|rollback`).
+   (The rollback composition and the artifact shape above are the POST-PR-#588
+   state — see the "codex bot PR #588 review round" section at the end of this
+   file for what changed and why.)
 5. **I6 regression guard**: `internal/cli/route_i6_readonly_test.go`
    mirrors the F1 falsifying test but exercises the real, extracted
    `buildRouteServer` construction path — an unregistered-workspace
@@ -495,6 +502,11 @@ mcpFrontPort); reverted back, all pass.
 
 ### F2 (P3) — investigated, hardened anyway per architect decision; commit 21cc7f78
 
+> PARTIALLY SUPERSEDED by the codex bot PR #588 round (see the end of this
+> file): the persisted-port hardening described below still stands, but the
+> LSP leg of `--rollback` no longer calls `RollbackLSPRouterClientEntries`.
+> The narrative below is the record of THIS round, not the current shape.
+
 Reviewer's claim: rollback re-resolves the CURRENT `mcp_front.port` setting
 and passes it to `RollbackLSPRouterClientEntries`'s `GUIPort`; if the
 operator changes the setting between the forward run and a later
@@ -572,3 +584,88 @@ NOT pushed — still held for Tuesday's bot.
 
 Report F1/F2 fix round back to the coordinator/architect. Still HELD for
 Tuesday's bot; no push/PR this session.
+
+## codex bot PR #588 review round (2026-07-26)
+
+Seven open bot threads (2xP1, 5xP2) on PR #588. All seven verified against the
+cited `file:line` before any edit; all seven were factually correct.
+
+**P1 (a) — a forward RE-RUN destroyed the pre-reconcile record.**
+`ReconcileSerenaClientsToRouter` takes a fresh per-client backup on EVERY run,
+and the forward command overwrote the persisted artifact wholesale. Since the
+command's own per-client-failure message tells the operator to RE-RUN to retry
+the failed clients, the recommended retry replaced each already-migrated
+client's recorded backup with one capturing the FRONT-port config —
+`--rollback` then restored the front URL and the original state was
+unrecoverable. Fixed by making the artifact a cumulative FIRST-generation
+record: `mergeMCPFrontReconcileReport` only ever ADDS rows (serena keyed by
+client, LSP keyed by (client, language)), and an existing-but-unreadable
+artifact is a hard refusal rather than a fresh start.
+
+**P1 (b) — rollback did not restore the prior LSP router URL.** The LSP leg
+called `api.RollbackLSPRouterClientEntries`, the router-to-LEGACY demotion
+routine: it reconstructs per-workspace entries from the registry and REMOVES
+the canonical `mcp-language-server-<language>` entry. On an already-migrated
+host the forward pass only changes that entry's PORT, so its inverse is "put
+the previous port back" — the demotion instead deleted the client's shared LSP
+route outright. Fixed with a new single owner in
+`internal/api/lsp_client_router_snapshot.go`:
+`SnapshotLSPRouterClientEntries` (fail-closed pre-write capture) +
+`RestoreLSPRouterClientEntriesSnapshot` (recorded-URL restore, or removal when
+the pre-state was absent, both behind the same hub-owned ownership guard).
+`RollbackLSPRouterClientEntries` is untouched and remains the owner of its own,
+different operation.
+
+**P2 (settings registry)** — the `mcp_front.port` entry claimed the "advanced"
+placement made it visible in the GUI "via the generic FieldRenderer".
+`SectionAdvanced` destructures its snapshot as `_` and has no registry-field
+iteration, and `FieldRenderer` is referenced by no section at all. The false
+claim is retracted, the real (CLI-only) surface is pinned by a positive test,
+and a cross-language drift gate fails when the rendering path lands. The GUI
+control itself is NOT implemented — it would touch the dirty-guard surface the
+Playwright settings E2E suite covers, which could not be run in this pass;
+tracked in
+`work-items/bugs/2026-07-26-mcp-front-port-not-rendered-in-gui-advanced-section.md`.
+
+**P2 (install flag ordering)** — `rollbackMCPFront` was absent from the early
+mode-exclusivity checks, so `mcphub install --upgrade --rollback` ran a REAL
+binary upgrade with `--rollback` silently ignored (same for
+`--reconcile-hub-mode --rollback`). Fixed by moving the dependency check to the
+TOP of `RunE`, before any mode dispatch, instead of enumerating the flag in
+each mode's exclusivity list — one gate covers every present and future mode by
+construction. The now-unreachable late check was removed.
+
+**P2 (reserved `route` manifest name)** — only SHIPPED manifests were checked.
+`checkManifestName` now rejects `BuiltinRouteServer`, closing the operator/dev
+manifest half (a `route`/`front` manifest daemon carries the same identity pair
+as the built-in row, so `ErrBuiltinRouteTaskNameCollision` — which fires on
+identity MISMATCH — would never have fired).
+
+**P2 (shared gate too weak)** — the liveness probe only proves the /serena/mcp
+protocol shape, which the GUI also serves, so `mcp_front.port ==
+gui_server.port` passed while the route child could never bind. New
+`assertMCPFrontPortNotForeignOwned` refuses a collision with the gui_server.port
+setting, the GUI's live pidport-bound port, or any other supervisor-intent
+descriptor's port, BEFORE the probe. Deliberately not a "supervisor state says
+the route task owns it" check: the command's own not-live error documents
+standalone `mcphub route` as a supported way to satisfy the gate.
+
+**P2 (route daemon in generic health probes)** — the descriptor has a nonzero
+port and is not maintenance-classified, so `mergeSupervisorOnlyDaemonRows` fed
+it to `singleHealthProbe`, which POSTs to `/mcp` — an endpoint `RouteHandler`
+never mounts. A healthy front daemon therefore rendered as a FAILED probe.
+`probeDaemonHealth` now routes the built-in row to `routeFrontHealthProbe`,
+which reuses `defaultRouterReadinessPing` (the SAME predicate the reconcile
+gate requires, so "healthy" and "safe to reconcile onto" cannot drift into two
+predicates). `tools/list` is deliberately excluded: /serena/mcp's tools/list
+needs a minted session and a registered workspace, so including it would fail
+on every host without one. Results carry `Source: RouteFrontHealthSource` so
+the CLI renders `OK (lifecycle)` rather than a phantom `OK (0)`, and the
+capability path reports `unsupported` with a reason instead of three spurious
+errors.
+
+All six code fixes are mutation-proven (each guard broken, the specific test
+confirmed failing with its specific message, then restored). The
+`--upgrade --rollback` mutation stubbed `dispatchUpgrade` /
+`runReconcileHubMode` with sentinel errors so the proof never executed a real
+upgrade on the host.

@@ -200,15 +200,40 @@ var SettingsRegistry = []SettingDef{
 	// (internal/gui/frontend/src/screens/Settings.tsx) is a fixed, hand-
 	// maintained list with a dedicated component per section, and adding a
 	// new section is a frontend concern out of scope for this (backend-only)
-	// sub-increment. Placing it under the existing "advanced" section keeps
-	// it visible in the GUI via the generic FieldRenderer (same renderer
-	// gui_server.port uses) and fully manageable via `mcphub settings
-	// {list,get,set}` without any frontend change. Key name intentionally
-	// does NOT follow the "prefix must match Section" convention every other
-	// entry in this table uses — nothing in the codebase enforces that
-	// convention mechanically, and the bare "mcp_front.port" key is the
-	// literal key name the front-daemon decision record + every resolver in
-	// this codebase already reference (api.MCPFrontPortSettingKey).
+	// sub-increment.
+	//
+	// THIS KEY IS CLI-MANAGED ONLY TODAY (codex bot PR #588 P2 correction).
+	// An earlier revision of this comment claimed the "advanced" placement
+	// "keeps it visible in the GUI via the generic FieldRenderer (same
+	// renderer gui_server.port uses)". That was wrong twice over, and the
+	// claim is retracted here rather than left to mislead the next reader:
+	//
+	//   - SectionAdvanced (internal/gui/frontend/src/components/settings/
+	//     SectionAdvanced.tsx) destructures its snapshot prop as `_` and
+	//     renders only hard-coded actions, diagnostics, and the state-relax
+	//     toggle. There is NO registry-field iteration in it, so nothing in
+	//     this table reaches the GUI by declaring `Section: "advanced"`.
+	//   - gui_server.port is not rendered by FieldRenderer either —
+	//     SectionGuiServer hand-rolls its control markup against a hard-coded
+	//     key list. FieldRenderer is currently referenced by no section at
+	//     all.
+	//
+	// So the supported management surface for this key is `mcphub settings
+	// {list,get,set}` (which IS registry-driven and works today, pinned by
+	// TestMCPFrontPortSetting_IsManageableThroughTheSettingsCLI). Rendering
+	// it in the GUI needs a real frontend control or a generic-field
+	// rendering path; that work is tracked in
+	// work-items/bugs/2026-07-26-mcp-front-port-not-rendered-in-gui-advanced-section.md.
+	// TestSectionAdvanced_StillHasNoGenericRegistryFieldRendering is the
+	// cross-language drift gate that fails when that work lands, so this
+	// comment cannot silently go stale again.
+	//
+	// Key name intentionally does NOT follow the "prefix must match Section"
+	// convention every other entry in this table uses — nothing in the
+	// codebase enforces that convention mechanically, and the bare
+	// "mcp_front.port" key is the literal key name the front-daemon decision
+	// record + every resolver in this codebase already reference
+	// (api.MCPFrontPortSettingKey).
 	{Key: MCPFrontPortSettingKey, Section: "advanced", Type: TypeInt,
 		Default: strconv.Itoa(DefaultMCPFrontPort), Min: intPtr(1024), Max: intPtr(65535),
 		Help: "Port for the supervisor-managed MCP front daemon (`mcphub route`) that serves /serena/mcp + /lsp/<language>/mcp independently of the GUI process, so serena+LSP MCP survive GUI restarts/exits. Restart of `mcphub route` (or the supervisor) is required to take effect. This setting alone does not rewrite any client config — run `mcphub install --reconcile-mcp-front` to repoint installed clients at the new port."},

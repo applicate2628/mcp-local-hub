@@ -1089,6 +1089,21 @@ func probeDaemonHealth(rows []DaemonStatus) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			// codex bot PR #588 P2 closure: the built-in `mcphub route` front
+			// daemon is an ordinary global descriptor (nonzero Port, not
+			// maintenance-classified), so mergeSupervisorOnlyDaemonRows feeds
+			// it here — but it serves ONLY /serena/mcp and /lsp/<language>/mcp
+			// (internal/gui/route_adapter.go RouteHandler). The generic probe
+			// POSTs to /mcp, which that mux never mounts, so a perfectly
+			// healthy front daemon rendered as a FAILED probe in
+			// `mcphub status --health` and the GUI health view. Route it to
+			// the endpoint it actually serves instead of excluding it (an
+			// excluded row loses the "is the data plane up?" signal precisely
+			// where an operator goes looking for it).
+			if canonicalIntentTaskKey(rows[idx].TaskName) == BuiltinRouteTaskName {
+				rows[idx].Health = routeFrontHealthProbeFn(rows[idx].Port)
+				return
+			}
 			h := singleHealthProbeFn(rows[idx].Port)
 			// Mark lazy-proxy probes by task-name structure, not by
 			// registry-populated Language. Language can be empty when
@@ -1114,6 +1129,49 @@ func probeDaemonHealth(rows []DaemonStatus) {
 // callers go through it; tests swap the var so the HTTP round-trip path
 // is not exercised and the probe result is deterministic.
 var singleHealthProbeFn = singleHealthProbe
+
+// RouteFrontHealthSource tags a HealthProbe produced by routeFrontHealthProbe
+// rather than the generic /mcp singleHealthProbe. Consumers MUST NOT read
+// ToolCount off such a row: the front daemon is a ROUTER, so its tool catalog
+// is whatever the currently-registered serena workspaces expose, and
+// enumerating it would require a live workspace + a materialized backend. The
+// probe therefore proves the MCP LIFECYCLE only, and leaves ToolCount at 0
+// with this Source set so no renderer prints a phantom "OK (0)".
+const RouteFrontHealthSource = "route-front"
+
+// routeFrontHealthProbeTimeout bounds routeFrontHealthProbe. It is larger than
+// singleHealthProbe's 3s because defaultRouterReadinessPing performs TWO
+// sequential round-trips, each with its own 2s budget derived from the context
+// passed in; a 3s parent would sever the second one on a slow host and report
+// a false failure.
+const routeFrontHealthProbeTimeout = 6 * time.Second
+
+// routeFrontHealthProbeFn is the test seam for routeFrontHealthProbe, mirroring
+// singleHealthProbeFn.
+var routeFrontHealthProbeFn = routeFrontHealthProbe
+
+// routeFrontHealthProbe health-probes the built-in `mcphub route` front daemon
+// on the ONE endpoint it actually serves. It reuses defaultRouterReadinessPing
+// — the SAME predicate `mcphub install --reconcile-mcp-front` requires before
+// it will point any client config at this port (HEAD -> 405 + `Allow: POST` on
+// /serena/mcp, then a real MCP `initialize` round-trip that must return a
+// JSON-RPC result). Single owner: "the front daemon is healthy" and "the front
+// daemon is safe to reconcile clients onto" are the same claim, so they must
+// not drift into two predicates.
+//
+// tools/list is deliberately NOT part of the probe: /serena/mcp's tools/list
+// requires a minted session AND at least one registered serena workspace
+// (internal/gui/serena_router_lifecycle.go handleToolsList returns the
+// no-workspace error otherwise), so including it would report a healthy front
+// daemon as failed on every host that has not registered a workspace yet.
+func routeFrontHealthProbe(port int) *HealthProbe {
+	ctx, cancel := context.WithTimeout(context.Background(), routeFrontHealthProbeTimeout)
+	defer cancel()
+	if err := defaultRouterReadinessPing(ctx, port); err != nil {
+		return &HealthProbe{Source: RouteFrontHealthSource, Err: "route front " + SerenaRouterURLPath + ": " + err.Error()}
+	}
+	return &HealthProbe{OK: true, Source: RouteFrontHealthSource}
+}
 
 const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
 

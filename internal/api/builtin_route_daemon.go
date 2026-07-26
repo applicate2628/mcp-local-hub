@@ -40,13 +40,16 @@ const BuiltinRouteTaskName = `\mcp-local-hub-route-front`
 
 // BuiltinRouteServer and BuiltinRouteDaemonName are the reserved (Server,
 // Daemon) identity pair stamped on the built-in route daemon's descriptor.
-// "route" is not a manifest/catalog server name (mechanically re-verified by
+// "route" is not a manifest/catalog server name, on BOTH halves of the
+// namespace: no SHIPPED manifest claims it (mechanically re-verified by
 // TestBuiltinRouteDaemon_ReservedServerNameNotClaimedByAnyShippedManifest in
-// internal/api/builtin_route_daemon_test.go): reserving it here means
-// buildMergedSupervisorIntent's per-server ownership scan (which only claims
-// rows matching a REAL installed server name, or a blank-Server row whose
-// task name carries that server's prefix) never claims or drops this row
-// during any OTHER server's install/uninstall.
+// internal/api/builtin_route_daemon_test.go), and checkManifestName
+// (internal/api/manifest.go) REJECTS it, so no operator/dev manifest can
+// claim it either. Reserving it means buildMergedSupervisorIntent's
+// per-server ownership scan (which only claims rows matching a REAL installed
+// server name, or a blank-Server row whose task name carries that server's
+// prefix) never claims or drops this row during any OTHER server's
+// install/uninstall.
 const (
 	BuiltinRouteServer     = "route"
 	BuiltinRouteDaemonName = "front"
