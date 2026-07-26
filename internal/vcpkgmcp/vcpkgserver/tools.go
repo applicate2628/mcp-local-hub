@@ -59,11 +59,20 @@ func registerTools(vs *VcpkgServer) {
 			"diagnostic). Recognized shapes cover MSVC with or without a diagnostic code, clang-cl, " +
 			"GCC/Clang, link.exe/lld-link and ninja FAILED. Scanned phase logs are extract, patch, " +
 			"config, build (build-<triplet>-<cfg>-*.log, written by non-ninja/autotools/NMAKE ports) " +
-			"and install. Causeless build-wrapper lines (NMAKE's U-series) are never eligible to be " +
-			"the headline. " +
-			"RANKING: diagnostics[] is ORDERED by severity (error, then warning, then note) and by " +
-			"first occurrence within a severity — the actionable line is always reachable without " +
-			"filtering, and first_error carries it directly. Warnings are never dropped, only sorted " +
+			"and install. Causeless build-wrapper lines (NMAKE's U-series) carry no cause at all and " +
+			"are never returned as diagnostics — a stricter exclusion than the aggregate tier below, " +
+			"which IS returned. " +
+			"RANKING: every diagnostic carries tier=specific|aggregate. An AGGREGATE only summarises " +
+			"other diagnostics, carrying a count or a sub-tool exit code instead of a cause (LNK1120 " +
+			"\"N unresolved externals\", LNK1169, \"clang-cl: error: linker command failed with exit " +
+			"code N\", ninja's \"FAILED: <target>\"); a SPECIFIC names a cause (LNK2019/LNK2001/LNK2005, " +
+			"\"lld-link: error: undefined symbol: X\", any file:line diagnostic). diagnostics[] is " +
+			"ORDERED by severity (error, then warning, then note), then by tier (specific before " +
+			"aggregate), then by first occurrence — so a driver's \"linker command failed\" never " +
+			"outranks the undefined symbol that caused it. first_error carries that headline error " +
+			"directly and always equals diagnostics[0] when any error exists; diagnostic_log names the " +
+			"log the headline actually came from. When EVERY error is an aggregate the aggregate is " +
+			"still the headline — it is better than nothing. Warnings are never dropped, only sorted " +
 			"after errors. Per-log capping is per SEVERITY CLASS, so an error trailing a flood of " +
 			"repeated warnings can never be squeezed out of the answer. " +
 			"COMMANDS: exact_command is the reproducible TOP-LEVEL vcpkg invocation and is recovered " +

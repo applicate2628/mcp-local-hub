@@ -130,6 +130,73 @@ func isWrapperNoise(line string) bool {
 	return wrapperNoiseRE.MatchString(line)
 }
 
+// --- Aggregate tier recognizers -----------------------------------------
+//
+// See DiagnosticTier for the rule, the full per-shape sweep, and why an
+// aggregate is a legitimate fallback headline while wrapper noise is not.
+// The two patterns below are the only places a tier is not fixed by the
+// matched shape alone.
+
+// aggregateLinkCodeRE is the CLOSED set of MSVC linker codes Microsoft
+// documents as summarising a preceding series of specific errors. Each entry is
+// cited, and the set is deliberately tight: wrongly demoting a specific error
+// would bury a real cause, whereas omitting an aggregate merely leaves today's
+// behavior in place.
+//
+//   - LNK1120 "<number> unresolved externals" — "reports the NUMBER of
+//     unresolved external symbol errors in the current link. Each unresolved
+//     external symbol first gets reported by a LNK2001 or LNK2019 error. The
+//     LNK1120 message comes last... You don't need to fix this error."
+//     (learn.microsoft.com/cpp/error-messages/tool-errors/linker-tools-error-lnk1120,
+//     view=msvc-170)
+//   - LNK1169 "one or more multiply defined symbols found" — "This error is
+//     PRECEDED BY error LNK2005."
+//     (learn.microsoft.com/cpp/error-messages/tool-errors/linker-tools-error-lnk1169,
+//     view=msvc-170)
+//
+// Their specific counterparts (LNK2001/LNK2019 unresolved external symbol
+// '<symbol>', LNK2005 '<symbol>' already defined) name the symbol and so stay
+// specific, as does every cause-naming fatal (LNK1104 cannot open file,
+// LNK1181 cannot open input file, LNK1112 machine type conflict).
+var aggregateLinkCodeRE = regexp.MustCompile(`^LNK(?:1120|1169)$`)
+
+// aggregateDriverMsgRE matches a compiler/linker DRIVER message that relays
+// only the exit status of a sub-tool the driver launched. clang's driver
+// diagnostic is "%0 command failed with exit code %1", where %0 is the sub-tool
+// role (linker / assembler / clang frontend / ...), so the tier is decided by
+// the literal phrase rather than by enumerating roles.
+//
+// Verified in the target environment (clang 21, msys2 ucrt64, this session):
+//
+//	$ clang++ undef.cpp -o undef.exe
+//	C:/msys64/ucrt64/bin/ld: undef.cpp:(.text+0x17): undefined reference to `missing_fn()'
+//	clang++: error: linker command failed with exit code 1 (use -v to see invocation)
+//
+// The operator's own field line is the clang-cl spelling of the same
+// diagnostic: `clang-cl: error: linker command failed with exit code 1120`.
+//
+// Everything else a driver says stays specific, because it names its own cause:
+// `lld-link: error: undefined symbol: X`, `clang-cl: warning: unknown argument
+// ignored in clang-cl: '-fopenmp'`, `clang: error: no such file or directory`.
+var aggregateDriverMsgRE = regexp.MustCompile(`^[A-Za-z][A-Za-z ]* command failed with exit code \d+`)
+
+// msvcLinkTier classifies an MSVC-linker-shaped diagnostic by its LNK code.
+// The code is matched uppercase by msvcLinkDiagRE, so no folding is needed.
+func msvcLinkTier(code string) DiagnosticTier {
+	if aggregateLinkCodeRE.MatchString(code) {
+		return TierAggregate
+	}
+	return TierSpecific
+}
+
+// driverTier classifies a compiler/linker-driver diagnostic by its message.
+func driverTier(msg string) DiagnosticTier {
+	if aggregateDriverMsgRE.MatchString(msg) {
+		return TierAggregate
+	}
+	return TierSpecific
+}
+
 // DetectInterrupted reports whether content carries a ninja user-interrupt
 // marker. A "FAILED:" line in the same log must NOT be reported as a real
 // build failure when this is true — the build was stopped, not broken.
@@ -167,7 +234,9 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			File:     m[gccClangDiagRE.SubexpIndex("file")],
 			Line:     lineNum,
 			Severity: normalizeSeverity(m[gccClangDiagRE.SubexpIndex("sev")]),
-			Text:     line,
+			// A source position IS the cause's address; never an aggregate.
+			Tier: TierSpecific,
+			Text: line,
 		}, true
 	}
 	if m := msvcCompileDiagRE.FindStringSubmatch(line); m != nil {
@@ -176,6 +245,7 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			File:     strings.TrimSpace(m[msvcCompileDiagRE.SubexpIndex("file")]),
 			Line:     lineNum,
 			Severity: normalizeSeverity(m[msvcCompileDiagRE.SubexpIndex("sev")]),
+			Tier:     TierSpecific,
 			Text:     line,
 		}, true
 	}
@@ -183,6 +253,7 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 		return Diagnostic{
 			File:     strings.TrimSpace(m[msvcLinkDiagRE.SubexpIndex("file")]),
 			Severity: normalizeSeverity(m[msvcLinkDiagRE.SubexpIndex("sev")]),
+			Tier:     msvcLinkTier(m[msvcLinkDiagRE.SubexpIndex("code")]),
 			Text:     line,
 		}, true
 	}
@@ -193,6 +264,7 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			// the ninja branch below, which reports the failing target.
 			File:     strings.TrimSpace(m[toolDiagRE.SubexpIndex("file")]),
 			Severity: normalizeSeverity(m[toolDiagRE.SubexpIndex("sev")]),
+			Tier:     driverTier(m[toolDiagRE.SubexpIndex("msg")]),
 			Text:     line,
 		}, true
 	}
@@ -200,7 +272,12 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 		return Diagnostic{
 			File:     strings.TrimSpace(m[ninjaFailedRE.SubexpIndex("target")]),
 			Severity: "error",
-			Text:     line,
+			// ninja names the failed TARGET and an exit code, never the cause
+			// — which is the compiler output ninja prints immediately after
+			// this line. In file order the summary therefore always precedes
+			// the diagnostic it summarises.
+			Tier: TierAggregate,
+			Text: line,
 		}, true
 	}
 	return Diagnostic{}, false
@@ -314,9 +391,40 @@ func severityRank(sev string) int {
 	}
 }
 
+// tierRank orders tiers within one severity: the line that names a cause
+// first. An unset tier sorts last rather than silently ahead of a classified
+// one — the same fail-safe posture as severityRank's default.
+func tierRank(t DiagnosticTier) int {
+	switch t {
+	case TierSpecific:
+		return 0
+	case TierAggregate:
+		return 1
+	default:
+		return 2
+	}
+}
+
+// diagnosticOutranks reports whether a ranks STRICTLY ahead of b under the
+// tool's documented presentation order: severity first, then tier.
+//
+// This is the single owner of that order. rankDiagnostics, the headline error,
+// and the headline SOURCE log all consult it, so the returned diagnostics[0],
+// first_error and diagnostic_log can never disagree about which line is the
+// headline — which is exactly what diagnostic_log exists to guarantee.
+// First-occurrence order is deliberately NOT part of this predicate: it is the
+// caller's tiebreak (a stable sort, or a strict-improvement-only loop), which
+// keeps "equal rank" and "earlier in the log" separable.
+func diagnosticOutranks(a, b Diagnostic) bool {
+	if ra, rb := severityRank(a.Severity), severityRank(b.Severity); ra != rb {
+		return ra < rb
+	}
+	return tierRank(a.Tier) < tierRank(b.Tier)
+}
+
 // rankDiagnostics returns diags ordered by the tool's documented presentation
-// rule: SEVERITY first (error, warning, note), then FIRST-OCCURRENCE order
-// preserved within a severity.
+// rule: SEVERITY first (error, warning, note), then TIER within a severity
+// (specific before aggregate), then FIRST-OCCURRENCE order.
 //
 // This exists because the tool's whole purpose is to spare the caller a
 // filtering pass. Verified field failure (2026-07-26): a real answer carried
@@ -327,9 +435,15 @@ func severityRank(sev string) int {
 // raw scan order, and severity was consulted only by the boolean
 // ContainsFailureDiagnostic, which decides the VERDICT and never the order.
 //
-// The sort is STABLE on purpose: within one severity, the log's own order is
-// meaningful (in a nested build the first error is the cause and the rest are
-// usually its cascade), so it must survive ranking untouched.
+// The tier key is the 2026-07-27 refinement of the same principle one level
+// in: severity got the errors to the front, but among ERRORS a driver's
+// `linker command failed with exit code 1120` was still outranking the
+// `lld-link: error: undefined symbol: gzopen_w` it was merely reporting. See
+// DiagnosticTier.
+//
+// The sort is STABLE on purpose: within one severity AND tier, the log's own
+// order is meaningful (in a nested build the first error is the cause and the
+// rest are usually its cascade), so it must survive ranking untouched.
 func rankDiagnostics(diags []Diagnostic) []Diagnostic {
 	if len(diags) < 2 {
 		return diags
@@ -337,19 +451,30 @@ func rankDiagnostics(diags []Diagnostic) []Diagnostic {
 	out := make([]Diagnostic, len(diags))
 	copy(out, diags)
 	sort.SliceStable(out, func(i, j int) bool {
-		return severityRank(out[i].Severity) < severityRank(out[j].Severity)
+		return diagnosticOutranks(out[i], out[j])
 	})
 	return out
 }
 
-// firstErrorDiagnostic returns the first error-severity diagnostic in
-// FIRST-OCCURRENCE order, or nil when the set holds no error at all.
-func firstErrorDiagnostic(diags []Diagnostic) *Diagnostic {
+// headlineErrorDiagnostic returns the HEADLINE error — the highest-ranked
+// error-severity diagnostic under diagnosticOutranks, which is the first
+// CAUSE-NAMING error when one exists and otherwise the first aggregate. Nil
+// when the set holds no error at all.
+//
+// The strict-improvement comparison is what preserves first-occurrence order
+// within a tier: an equally-ranked later error never displaces an earlier one.
+// The result is by construction the same diagnostic rankDiagnostics puts at
+// index 0 whenever any error is present.
+func headlineErrorDiagnostic(diags []Diagnostic) *Diagnostic {
+	var best *Diagnostic
 	for i := range diags {
-		if diags[i].Severity == SeverityError {
+		if diags[i].Severity != SeverityError {
+			continue
+		}
+		if best == nil || diagnosticOutranks(diags[i], *best) {
 			d := diags[i]
-			return &d
+			best = &d
 		}
 	}
-	return nil
+	return best
 }

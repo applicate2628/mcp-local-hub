@@ -109,8 +109,11 @@ func TestLastFailure_ErrorRankedFirst_AboveWarningFlood(t *testing.T) {
 }
 
 // TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence pins the
-// documented ordering rule itself: severity first, then first-occurrence
-// order preserved WITHIN a severity (a stable sort, not an arbitrary one).
+// SEVERITY and FIRST-OCCURRENCE keys of the documented ordering rule: severity
+// first, then (all four lines here being tier=specific source-position
+// diagnostics) first-occurrence order preserved — a stable sort, not an
+// arbitrary one. The tier key that sits between the two is pinned separately
+// in diagnostic_tier_test.go.
 func TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence(t *testing.T) {
 	root := writeBuildPhasePort(t, "orderlib", map[string]string{
 		"cl.vcpkg_abi_info.txt": "abi\n",
@@ -129,8 +132,8 @@ func TestLastFailure_DiagnosticOrdering_SeverityThenFirstOccurrence(t *testing.T
 	wantFiles := []string{"e1.cpp", "e2.cpp", "w1.cpp", "w2.cpp"}
 	for i, want := range wantFiles {
 		if res.Diagnostics[i].File != want {
-			t.Errorf("diagnostics[%d].File = %q, want %q — ordering must be severity, "+
-				"then first-occurrence within a severity", i, res.Diagnostics[i].File, want)
+			t.Errorf("diagnostics[%d].File = %q, want %q — ordering must be severity, then "+
+				"tier, then first-occurrence", i, res.Diagnostics[i].File, want)
 		}
 	}
 }

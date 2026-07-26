@@ -311,12 +311,74 @@ const (
 	PhaseInstall Phase = "install"
 )
 
+// DiagnosticTier says whether a recognized diagnostic NAMES A CAUSE or only
+// SUMMARISES causes reported elsewhere in the same failure. Closed enum, part
+// of the wire contract, and the secondary ranking key after severity.
+//
+// # Why severity alone is not enough (2026-07-27 field refinement)
+//
+// Severity-then-first-occurrence is right as far as it goes, but among
+// error-severity lines some are pure consequences. Verified field failure: on
+// a real clang-cl/lld-link link failure the headline was
+//
+//	clang-cl: error: linker command failed with exit code 1120
+//
+// while the actual cause sat third in the list:
+//
+//	lld-link: error: undefined symbol: __declspec(dllimport) gzopen_w
+//
+// The driver line reports only the exit status of a sub-tool it launched; it
+// cannot tell the operator anything they can act on. Ranking specific ahead of
+// aggregate puts the actionable line first without dropping either.
+//
+// # The sweep (every recognized shape, tier stated)
+//
+//	gccClangDiagRE  file:line:col: sev: msg          -> ALWAYS specific (names a source position)
+//	msvcCompileDiagRE  file(line[,col]): sev [C]: msg -> ALWAYS specific (names a source position)
+//	msvcLinkDiagRE  file : sev LNKnnnn: msg          -> aggregate iff LNKnnnn is in
+//	                                                    aggregateLinkCodeRE, else specific
+//	toolDiagRE      <driver>: sev: msg               -> aggregate iff msg matches
+//	                                                    aggregateDriverMsgRE, else specific
+//	ninjaFailedRE   FAILED: [code=N] <target>        -> ALWAYS aggregate (names the failed
+//	                                                    target and an exit code, never a cause;
+//	                                                    ninja prints it BEFORE the compiler
+//	                                                    output it summarises, so in file order
+//	                                                    it would otherwise always win)
+//
+// # Two tiers, not one, and a stricter third class that is not a tier
+//
+// An aggregate is a LEGITIMATE fallback headline: when it is the only error
+// present it is strictly better than nothing, and the earlier round's
+// `fparser_parse-opt.exe : fatal error LNK1120: 4 unresolved externals` case
+// depends on exactly that. Causeless build-wrapper noise (NMAKE's U-series) is
+// a STRICTER class and is deliberately NOT modelled as a third tier value: it
+// carries no information at all, can never be a headline under any
+// circumstance, and is therefore excluded one layer earlier by isWrapperNoise
+// so it never becomes a Diagnostic. A tier value for it would be unreachable
+// on the wire and would blur the two rules together.
+type DiagnosticTier string
+
+const (
+	// TierSpecific: the line names a concrete cause an operator can act on —
+	// a source position, an undefined symbol, an unopenable file.
+	TierSpecific DiagnosticTier = "specific"
+	// TierAggregate: the line only summarises other diagnostics, carrying a
+	// COUNT or a sub-tool EXIT CODE instead of a cause. Real information, so
+	// it is returned and may be the headline when nothing more specific
+	// exists — but it loses to any specific line in the same failure.
+	TierAggregate DiagnosticTier = "aggregate"
+)
+
 // Diagnostic is one extracted compiler/linker diagnostic line.
 type Diagnostic struct {
 	File     string `json:"file"`
 	Line     int    `json:"line,omitempty"`
 	Severity string `json:"severity"`
-	Text     string `json:"text"`
+	// Tier is always populated on a returned diagnostic (never omitempty), so
+	// a consumer can rely on reading it rather than re-deriving the
+	// distinction from Text with its own substring guesses.
+	Tier DiagnosticTier `json:"tier"`
+	Text string         `json:"text"`
 }
 
 // Args is the vcpkg_last_failure tool's input contract.
@@ -371,23 +433,34 @@ type Result struct {
 	// configuration) build step named by DiagnosticLog.
 	BuildCommand string `json:"build_command,omitempty"`
 	// DiagnosticLog is the log file the HEADLINE diagnostic (FirstError, or
-	// the first diagnostic when none is an error) was read from. It makes the
-	// association between the returned diagnostics and the returned
+	// the top-ranked diagnostic when none is an error) was read from. It makes
+	// the association between the returned diagnostics and the returned
 	// BuildCommand explicit rather than incidental — the predecessor took the
 	// command from whichever log the phase loop happened to touch last, which
 	// need not be the one the reported diagnostic came from.
 	DiagnosticLog string `json:"diagnostic_log,omitempty"`
-	// FirstError is the first ERROR-severity diagnostic in first-occurrence
-	// order, or omitted when the set holds none. Additive convenience over
-	// Diagnostics: the single actionable line, reachable without scanning or
-	// filtering the array at all.
+	// FirstError is the HEADLINE error, or omitted when the set holds none.
+	// Additive convenience over Diagnostics: the single actionable line,
+	// reachable without scanning or filtering the array at all. It is always
+	// the same diagnostic as Diagnostics[0] whenever any error is present.
+	//
+	// "First" means first under the tool's documented ranking — the first
+	// error that NAMES A CAUSE (Tier specific), falling back to the first
+	// aggregate when every error is one. It is not raw file order: a driver's
+	// `linker command failed with exit code 1120` physically precedes the
+	// `lld-link: error: undefined symbol` that caused it, and reporting the
+	// consequence as the headline is the defect this ordering exists to
+	// prevent. See DiagnosticTier.
 	FirstError *Diagnostic `json:"first_error,omitempty"`
 	// Diagnostics is ORDERED: by severity (error, then warning, then note),
-	// and by first-occurrence within a severity. See rankDiagnostics.
+	// then by tier within a severity (specific before aggregate), then by
+	// first-occurrence. See rankDiagnostics and DiagnosticTier.
 	//
 	// The ordering is part of the wire contract. Warnings are never dropped —
 	// a -Werror build's warning is genuinely interesting, and filtering is
-	// the caller's choice — they simply sort after the errors.
+	// the caller's choice — they simply sort after the errors. Aggregates are
+	// never dropped either: an aggregate is real information (a count, an exit
+	// code) and is the honest headline when nothing more specific was found.
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 	// ExitCode is a pointer so "0" and "not known" are distinguishable in
 	// JSON (omitted entirely when unknown).

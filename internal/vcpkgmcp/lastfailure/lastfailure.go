@@ -469,10 +469,12 @@ func LastFailure(args Args, deps Deps) Result {
 
 	// Diagnostics found are always returned, whatever the verdict — they are
 	// the evidence the caller judges, and withholding them on an `unknown`
-	// would force a re-read of the same logs. They are RANKED (errors first)
-	// so the actionable line never has to be dug out of a warning flood, and
-	// the single first error is additionally surfaced on its own.
-	base.FirstError = firstErrorDiagnostic(chosenDiags)
+	// would force a re-read of the same logs. They are RANKED (errors first,
+	// and cause-naming errors ahead of summarising ones) so the actionable
+	// line never has to be dug out of a warning flood or out from behind a
+	// driver's exit-code report, and the headline error is additionally
+	// surfaced on its own.
+	base.FirstError = headlineErrorDiagnostic(chosenDiags)
 	base.Diagnostics = rankDiagnostics(chosenDiags)
 
 	reportedPhase := chosenPhase
@@ -599,20 +601,30 @@ type scannedLog struct {
 }
 
 // headlineSource returns the scanned log that produced the HEADLINE
-// diagnostic — the first error-severity one, or the first diagnostic of any
-// severity when the set holds no error.
+// diagnostic — the highest-ranked diagnostic across every scanned log, under
+// the same diagnosticOutranks order the returned diagnostics[] is sorted by,
+// with earlier logs winning a tie.
+//
+// It MUST consult that shared order rather than re-deriving its own rule: the
+// headline can legitimately live in a later log than the first log holding any
+// error (a specific error in the second log outranks an aggregate in the
+// first). A private "first log with an error wins" rule would then name a log
+// that does not contain first_error — reintroducing exactly the diagnostic /
+// command mis-association that DiagnosticLog was added to eliminate.
 func headlineSource(scans []scannedLog) (scannedLog, bool) {
+	var (
+		bestScan scannedLog
+		bestDiag Diagnostic
+		found    bool
+	)
 	for _, s := range scans {
-		if firstErrorDiagnostic(s.diags) != nil {
-			return s, true
+		for _, d := range s.diags {
+			if !found || diagnosticOutranks(d, bestDiag) {
+				bestScan, bestDiag, found = s, d, true
+			}
 		}
 	}
-	for _, s := range scans {
-		if len(s.diags) > 0 {
-			return s, true
-		}
-	}
-	return scannedLog{}, false
+	return bestScan, found
 }
 
 // buildCommandForConfig returns the build sub-invocation recorded by the same
