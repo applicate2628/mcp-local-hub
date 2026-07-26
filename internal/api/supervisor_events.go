@@ -498,10 +498,28 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// that needs idempotency against a late-but-successful write can await
 	// this SAME operation instead of racing an independent duplicate.
 	done := make(chan error, 1)
+	// Capture the write function BEFORE spawning, and never re-read the
+	// package-level variable from inside the worker.
+	//
+	// On the timeout path this goroutine is deliberately ABANDONED — it keeps
+	// running and commits the row whenever the stall clears. That means its
+	// lifetime is unbounded from the caller's point of view, so any global it
+	// reads at write time it may read arbitrarily late. The only writer of
+	// supervisorEventWriteFn is SetSupervisorEventWriteFnForTest, whose
+	// returned uninstall runs in a test's Cleanup — so an abandoned worker
+	// racing that restore is a real data race, and `-race` reports it in both
+	// internal/api and internal/daemonrecovery.
+	//
+	// Production never rewrites the variable after init, so this was not a
+	// production correctness bug — but it made the whole package unrunnable
+	// under `-race`, and `-race` is exactly what proved the resolver
+	// generation-ordering defect on this branch. Losing that tool is not an
+	// acceptable trade.
+	writeFn := supervisorEventWriteFn
 	go func() {
 		defer l.mu.Unlock()
 		defer func() { _ = l.lock.Unlock() }()
-		done <- supervisorEventWriteFn(l, raw)
+		done <- writeFn(l, raw)
 	}()
 	select {
 	case err := <-done:
