@@ -3810,3 +3810,78 @@ func verifyReadinessPromptly(t *testing.T, port int, timeout time.Duration, allo
 		return nil
 	}
 }
+
+// TestRegister_CleanupSkipsClientsThatGotNoReplacement pins the invariant that
+// broke when cursor became opt-in (bot PR #583 finding 7): the post-register
+// direct-LSP cleanup must only touch clients this registration actually WROTE
+// to.
+//
+// Before the fix, registerWithManifest handed the FULL all-clients map to
+// cleanupDirectLanguageServerEntriesAfterRegister while the write path narrowed
+// to the effective bindings. While cursor was still a default the two agreed by
+// accident. Once it became opt-in they diverged, and cursor's working direct
+// entry was backed up and deleted with nothing put in its place — leaving that
+// client disconnected. Deleting a working entry and supplying no replacement is
+// strictly worse than leaving it alone.
+//
+// Both directions are asserted, because a fix that simply stopped cleaning
+// everything would be just as wrong: the BOUND client's superseded entry must
+// still be removed.
+func TestRegister_CleanupSkipsClientsThatGotNoReplacement(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+
+	direct := func(name string) map[string]clients.LanguageServerStdioEntry {
+		return map[string]clients.LanguageServerStdioEntry{
+			name: {
+				Name:     name,
+				Command:  "mcp-language-server",
+				Language: "gopls",
+				Args:     []string{"--lsp", "gopls", "--workspace", canonical},
+			},
+		}
+	}
+	// codex-cli is in the derived default bindings; cursor is opt-in and is
+	// NOT, so a bare register writes a managed entry only to the former.
+	h.fakeClients.stdioEntries["codex-cli"] = direct("legacy-go-bound")
+	h.fakeClients.stdioEntries["cursor"] = direct("legacy-go-optin")
+
+	// The shipped mcp-language-server manifest declares NO client_bindings, so
+	// a bare register falls back to the derived defaults — that is the exact
+	// path the bot's finding describes. Clear them here to reproduce it.
+	m := nineLanguageManifest()
+	m.ClientBindings = nil
+
+	bound := map[string]bool{}
+	for _, b := range effectiveClientBindings(m) {
+		bound[b.Client] = true
+	}
+	if !bound["codex-cli"] {
+		t.Fatalf("test premise broken: codex-cli must be in the effective bindings; got %v", bound)
+	}
+	if bound["cursor"] {
+		t.Fatalf("test premise broken: cursor must be opt-in (absent from the effective bindings); got %v", bound)
+	}
+
+	if _, err := mustNewAPI(t).registerWithManifest(
+		m, ws, []string{"go"}, RegisterOpts{Writer: &bytes.Buffer{}},
+	); err != nil {
+		t.Fatalf("registerWithManifest: %v", err)
+	}
+
+	if _, ok := h.fakeClients.stdioEntries["cursor"]["legacy-go-optin"]; !ok {
+		t.Errorf("cursor's direct LSP entry was removed even though cursor received no managed replacement " +
+			"— that leaves the client disconnected (bot PR #583 finding 7)")
+	}
+	if h.fakeClients.backupKeepCalls["cursor"] != 0 {
+		t.Errorf("cursor was backed up for a cleanup it should never have been part of (%d BackupKeep calls)",
+			h.fakeClients.backupKeepCalls["cursor"])
+	}
+	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["legacy-go-bound"]; ok {
+		t.Errorf("codex-cli's superseded direct LSP entry survived; the bound client's entry IS replaced " +
+			"and must still be cleaned up")
+	}
+}

@@ -64,6 +64,39 @@ func buildDefaultClientBindings() []config.ClientBinding {
 	return bindings
 }
 
+// effectiveClientBindings is the SINGLE owner of "which clients does THIS
+// registration touch". Both consumers must read it: the write path (which
+// creates the managed entries) and the post-register direct-LSP cleanup
+// (which deletes the entries those managed ones replace).
+//
+// Splitting that question between two call sites is what made cursor's move to
+// opt-in unsafe: the write path narrowed to the bound set while
+// cleanupDirectLanguageServerEntriesAfterRegister kept looping over EVERY
+// installed client, so an opt-in client's working direct entry was backed up
+// and removed with nothing put in its place — leaving that client disconnected
+// (bot PR #583 finding 7). While cursor was still a default the two agreed by
+// accident and the divergence was invisible.
+func effectiveClientBindings(m *config.ServerManifest) []config.ClientBinding {
+	if len(m.ClientBindings) > 0 {
+		return m.ClientBindings
+	}
+	return defaultClientBindings
+}
+
+// clientsForBindings narrows the all-clients map to exactly those the supplied
+// bindings name. A binding whose client is not installed on this host is simply
+// absent from the result — the register path already skips it, and the cleanup
+// must not touch a client it never wrote to either way.
+func clientsForBindings(all map[string]registerClient, bindings []config.ClientBinding) map[string]registerClient {
+	out := make(map[string]registerClient, len(bindings))
+	for _, b := range bindings {
+		if c, ok := all[b.Client]; ok {
+			out[b.Client] = c
+		}
+	}
+	return out
+}
+
 // RegisterOpts controls a Register invocation.
 type RegisterOpts struct {
 	// WeeklyRefreshExplicit selects between two interpretation modes:
@@ -135,9 +168,9 @@ type UnregisterReport struct {
 //  1. Allocate port from registry (first-free in the manifest's pool).
 //  2. Create scheduler task whose command is
 //     `mcphub daemon workspace-proxy --port <p> --workspace <ws> --language <lang>`.
-//  3. Write managed entries into each client config (codex-cli, claude-code,
-//     gemini-cli by default, or whatever the manifest declares in
-//     client_bindings).
+//  3. Write managed entries into each client config (the registry-derived
+//     defaults claude-code and codex-cli, or whatever the manifest declares in
+//     client_bindings). Cursor requires an explicit binding.
 //
 // Registry is saved once at the end; a mid-loop failure leaves the registry
 // untouched on disk.
@@ -276,7 +309,11 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 		report.Entries = append(report.Entries, entry)
 	}
-	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
+	// Cleanup is narrowed to the clients this registration actually WROTE to.
+	// Passing the full allClients map here is what left an opt-in client's
+	// direct entry deleted with no managed replacement (see
+	// effectiveClientBindings).
+	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, clientsForBindings(allClients, effectiveClientBindings(m)), w)...)
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
 	// gate. This is the operator-action seed: after an explicit register
@@ -786,10 +823,7 @@ func (a *API) registerOneLanguage(
 	// composed BEFORE we start the proxy. The daemon launched by sch.Run
 	// loads workspaces.yaml on startup and exits if its (workspaceKey,
 	// language) is absent — persisting-before-Run closes that race.
-	bindingsPre := m.ClientBindings
-	if len(bindingsPre) == 0 {
-		bindingsPre = defaultClientBindings
-	}
+	bindingsPre := effectiveClientBindings(m)
 	entryNameByClient := map[string]string{}
 	if had {
 		for k, v := range prior.ClientEntries {
