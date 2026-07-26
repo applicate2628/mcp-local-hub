@@ -234,6 +234,29 @@ const (
 // the only allowed write path.
 var guiOwnerAliveFn = probeGUIOwnerAlive
 
+// guiOwnerLockUnheldProbeFn is the injectable SEAM for residual 1(b)'s
+// bounded independent confirmation path. Production resolves the GUI's
+// pidport path and probes its OWN single-instance flock — NOT pidport file
+// CONTENT, which is exactly what guiOwnerStateUnknown means is untrustworthy
+// (missing/garbage/out-of-range, or an unresolvable path). The flock is a
+// kernel-enforced exclusivity primitive independent of that content: it
+// reads "unheld" if and only if no process currently owns it. The unit test
+// swaps in a recording fake so the real %LOCALAPPDATA% pidport lock is never
+// touched. Production callers MUST NOT reassign this var directly —
+// setGUIOwnerLockUnheldProbeFnForTest is the only allowed write path.
+var guiOwnerLockUnheldProbeFn = probeGUIOwnerLockUnheld
+
+// probeGUIOwnerLockUnheld resolves the canonical pidport path and probes its
+// flock via gui.ProbeSingleInstanceLockUnheld. A path-resolution failure
+// reports err (fail-closed — the caller must treat it the same as "held").
+func probeGUIOwnerLockUnheld() (unheld bool, err error) {
+	pidportPath, err := gui.PidportPath()
+	if err != nil {
+		return false, err
+	}
+	return gui.ProbeSingleInstanceLockUnheld(pidportPath)
+}
+
 // ensureAliveGUIRecoveryStore is the narrow marker authority Phase I needs:
 // validated observation plus the one exact nonterminal CAS. It deliberately
 // exposes no Begin/Reserve/Commit/general Interrupt surface.
@@ -289,6 +312,15 @@ func setGUIOwnerAliveFnForTest(fn func() (guiOwnerProbeState, int, int)) func() 
 	prev := guiOwnerAliveFn
 	guiOwnerAliveFn = fn
 	return func() { guiOwnerAliveFn = prev }
+}
+
+// setGUIOwnerLockUnheldProbeFnForTest installs a test flock-unheld probe
+// (residual 1(b)). Returns an "uninstall" function tests defer to restore
+// production wiring. Only supervise_ensure_alive_test.go invokes this.
+func setGUIOwnerLockUnheldProbeFnForTest(fn func() (bool, error)) func() {
+	prev := guiOwnerLockUnheldProbeFn
+	guiOwnerLockUnheldProbeFn = fn
+	return func() { guiOwnerLockUnheldProbeFn = prev }
 }
 
 // setEnsureAliveGUIRecoveryDependenciesForTest installs the Phase-I fakes as
@@ -734,7 +766,33 @@ const (
 	// diagnostic only (see probeGUIServingWithinTimeout) and must never let
 	// a hung dial/response stall the ensure-alive tick.
 	ensureAliveHeadlessFleetServingProbeTimeout = 5 * time.Second
+
+	// guiOwnerUnknownConfirmationWindow bounds residual 1(b): the
+	// running-supervisor branch used to suppress guiOwnerStateUnknown
+	// FOREVER (every tick, no independent confirmation path), so a
+	// genuinely dead GUI owner with corrupt/missing/unresolvable pidport
+	// metadata could never be recovered. This window requires the
+	// INDEPENDENT flock-unheld signal (guiOwnerLockUnheldProbeFn) — which
+	// does NOT depend on pidport CONTENT, only on the kernel-enforced flock
+	// itself — to persist for more than one ~1-min liveness-tick period
+	// before recovery is authorized. A single-tick observation only arms
+	// the confirmation marker; it never authorizes recovery by itself. This
+	// is deliberate defense-in-depth beyond what the flock signal alone
+	// would need (a single confirmed-unheld read is already a complete,
+	// kernel-guaranteed fact) — it guards against any momentary flock
+	// release window this codebase has not yet modeled beyond the
+	// restart-v3 handoff marker (which runEnsureAliveHeadlessFleet's own
+	// live-handoff suppressor already covers once escalation delegates to
+	// it below).
+	guiOwnerUnknownConfirmationWindow = 90 * time.Second
 )
+
+// guiOwnerUnknownConfirmationFileLeaf names the durable marker residual 1(b)
+// uses to persist "since when has the GUI owner state been Unknown AND the
+// flock independently confirmed unheld" ACROSS ticks — each `--ensure-alive`
+// invocation is a separate one-shot process (see this file's header), so
+// nothing survives in memory between ticks.
+const guiOwnerUnknownConfirmationFileLeaf = "gui-owner-unknown-confirmation"
 
 // runEnsureAliveHeadlessFleet is invoked from runEnsureAlive's `if running`
 // branch once guiOwnerAliveFn has already reported no live GUI owner. It
@@ -899,6 +957,115 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 	return now.Before(phaseDeadline), nil
 }
 
+// runEnsureAliveGUIOwnerUnknownEscalation implements residual 1(b): a
+// persistently Unknown GUI-owner state (corrupt/missing/unresolvable pidport
+// metadata) used to suppress headless-fleet recovery FOREVER, with no
+// independent path to confirm the owner is actually gone. This establishes
+// death via a signal that does NOT depend on pidport CONTENT: the GUI's own
+// single-instance flock (guiOwnerLockUnheldProbeFn) is a kernel-enforced
+// exclusivity primitive that reads "unheld" if and only if no process
+// currently holds it, regardless of whatever garbage (or nothing) sits in
+// the pidport file itself.
+//
+// Bounded, and cannot become a loop:
+//   - The flock-unheld signal must persist across
+//     guiOwnerUnknownConfirmationWindow (90s, comfortably more than one
+//     ~1-min liveness tick) before recovery is authorized — a single-tick
+//     observation only arms the durable confirmation marker and returns
+//     false so the caller falls back to its normal suppression message.
+//   - Any tick where the flock IS held (a live process owns it), or the
+//     probe itself errors (still undeterminable), clears the marker and
+//     returns false: the window must be observed with NO interruption.
+//   - Once the window elapses, recovery is delegated to
+//     runEnsureAliveHeadlessFleet, which applies its OWN existing
+//     live-handoff and boot-grace suppressors — the exact protections the
+//     confirmed-dead path already relies on — before actually relaunching;
+//     this escalation path does not bypass them.
+//   - The marker is cleared unconditionally once escalation is attempted
+//     (whether the delegated relaunch succeeds, fails, or is itself
+//     suppressed by live-handoff/boot-grace): a successful relaunch
+//     naturally stops observing Unknown+unheld on the next tick (pidport
+//     gets rewritten by the new owner); on any other outcome the next
+//     occurrence starts a fresh confirmation window rather than retrying in
+//     a tight loop.
+//
+// Returns true when this function has already reported the tick's outcome
+// (it delegated to runEnsureAliveHeadlessFleet), false when the caller
+// should print its standard "undeterminable; no action" message because
+// escalation could not establish an unheld-and-confirmed flock this tick.
+func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int) bool {
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+
+	unheld, probeErr := guiOwnerLockUnheldProbeFn()
+	if probeErr != nil || !unheld {
+		// Held by a live process, or the probe itself is undeterminable —
+		// either way we cannot confirm death independently this tick. Clear
+		// any in-progress confirmation window: the condition must be
+		// observed WITHOUT interruption.
+		_ = os.Remove(markerPath)
+		return false
+	}
+
+	now := time.Now().UTC()
+	firstObserved, readErr := readGUIOwnerUnknownConfirmationMarker(markerPath)
+	if readErr != nil || firstObserved.IsZero() {
+		// First observation (or a corrupt/missing marker — treated
+		// identically to "start fresh," never as proof of an
+		// already-elapsed window).
+		if writeErr := writeGUIOwnerUnknownConfirmationMarker(markerPath, now); writeErr != nil {
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"gui-owner-unknown-confirmation-write-failed",
+				"could not durably record the start of the GUI-owner-unknown confirmation window; will retry next tick",
+				map[string]any{"supervisor_pid": supervisorPID, "error": writeErr.Error()})
+		}
+		return false
+	}
+
+	if now.Sub(firstObserved) < guiOwnerUnknownConfirmationWindow {
+		// Confirmation window still open — fall back to the standard
+		// undeterminable/no-action message.
+		return false
+	}
+
+	// Confirmed: the flock has read unheld for longer than the bounded
+	// confirmation window. Clear the marker before delegating (every
+	// outcome below starts fresh on the next occurrence) and route through
+	// the SAME recovery path + suppressors the confirmed-dead branch uses.
+	_ = os.Remove(markerPath)
+	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
+		"gui-owner-unknown-escalated-to-recovery",
+		"GUI owner state was ambiguous (pidport malformed/unresolvable) but the single-instance lock was independently confirmed unheld across the bounded confirmation window; treating as confirmed-dead for recovery purposes",
+		map[string]any{
+			"supervisor_pid":        supervisorPID,
+			"gui_pidport_pid":       guiPID,
+			"confirmation_window_s": guiOwnerUnknownConfirmationWindow.Seconds(),
+		})
+	runEnsureAliveHeadlessFleet(stateDir, out, supervisorPID, guiPID, guiPort)
+	return true
+}
+
+// readGUIOwnerUnknownConfirmationMarker returns the zero time (not an error)
+// when the marker is absent — that is the ordinary "no confirmation window
+// open yet" state, not a failure.
+func readGUIOwnerUnknownConfirmationMarker(path string) (time.Time, error) {
+	raw, err := api.ReadStateFileInodeAnchored(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return time.Time{}, nil
+		}
+		return time.Time{}, err
+	}
+	ts, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
+	if err != nil {
+		return time.Time{}, err
+	}
+	return ts, nil
+}
+
+func writeGUIOwnerUnknownConfirmationMarker(path string, at time.Time) error {
+	return api.WriteStateFileBytesAtomic(path, []byte(at.Format(time.RFC3339Nano)))
+}
+
 // guiServingProbeFn is the injectable non-gating serving-attestation SEAM
 // (P1-3 review fix). Production dials the real port via
 // probeGUIServingWithinTimeout; the unit test swaps in a recording fake so
@@ -996,6 +1163,17 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort)
 			return nil
 		case guiOwnerStateUnknown:
+			// Residual 1(b): before printing the standard suppression
+			// message, give the bounded independent confirmation path a
+			// chance to establish death via a signal that does NOT depend
+			// on the untrustworthy pidport metadata (the GUI's own
+			// single-instance flock). If it confirms (across its bounded
+			// window) it delegates to runEnsureAliveHeadlessFleet and
+			// reports the outcome itself; otherwise fall through to the
+			// unchanged undeterminable/no-action message below.
+			if runEnsureAliveGUIOwnerUnknownEscalation(stateDir, out, pid, guiPID, guiPort) {
+				return nil
+			}
 			fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); GUI owner state undeterminable (pidport malformed/unresolvable); no action (will retry next tick)\n", pid)
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"gui-owner-probe-undeterminable",

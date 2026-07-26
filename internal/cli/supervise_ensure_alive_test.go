@@ -649,6 +649,189 @@ func TestEnsureAlive_HeadlessFleet_UnknownGUIOwnerStateSuppresses(t *testing.T) 
 	assertSupervisorEvent(t, stateDir, "gui-owner-probe-undeterminable")
 }
 
+// ---------------------------------------------------------------------------
+// Residual 1(b) review fix: guiOwnerStateUnknown used to suppress
+// headless-fleet recovery FOREVER with no independent confirmation path, so
+// a genuinely dead GUI owner with corrupt/missing/unresolvable pidport
+// metadata could never be recovered. runEnsureAliveGUIOwnerUnknownEscalation
+// establishes death via the GUI's own single-instance flock (independent of
+// pidport CONTENT) across a bounded confirmation window
+// (guiOwnerUnknownConfirmationWindow) persisted in a durable per-tick
+// marker file. These tests exercise all three observable states: first
+// observation (arm, do not escalate), interrupted (flock held — clear and
+// suppress), and window-elapsed (escalate through the SAME
+// runEnsureAliveHeadlessFleet suppressors/relaunch path ConfirmedDead uses).
+// ---------------------------------------------------------------------------
+
+// TestEnsureAlive_HeadlessFleet_UnknownFirstObservationArmsMarkerWithoutEscalating
+// proves the confirmation window cannot be skipped: the FIRST tick that
+// observes Unknown+unheld must only ARM the durable marker, never relaunch.
+//
+// MUTATION: make runEnsureAliveGUIOwnerUnknownEscalation escalate
+// immediately on any unheld observation (skip the elapsed-time check) — this
+// test's "want 0 relaunches" assertion fails.
+func TestEnsureAlive_HeadlessFleet_UnknownFirstObservationArmsMarkerWithoutEscalating(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	unknownGUIOwnerState(t, 0, 0)
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times on the FIRST unheld observation; want 0 (the bounded confirmation window must not be skipped)", got)
+	}
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	raw, statErr := os.ReadFile(markerPath)
+	if statErr != nil {
+		t.Fatalf("expected the confirmation marker to be armed on first observation: %v", statErr)
+	}
+	if _, perr := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw))); perr != nil {
+		t.Errorf("marker content %q did not parse as RFC3339Nano: %v", raw, perr)
+	}
+	if !strings.Contains(out.String(), "undeterminable") {
+		t.Errorf("output should still report the GUI owner state as undeterminable on the arming tick; got %q", out.String())
+	}
+}
+
+// TestEnsureAlive_HeadlessFleet_UnknownFlockHeldClearsMarkerNeverEscalates
+// proves the OTHER safety direction: if the flock is reported HELD (a live
+// process may own it), escalation must clear any in-progress confirmation
+// window and never relaunch — even if a stale marker from an EARLIER
+// observation would otherwise already be past the bounded window.
+//
+// MUTATION: remove the `!unheld` branch's `os.Remove(markerPath)` (or the
+// `probeErr != nil || !unheld` guard entirely) — the pre-seeded stale marker
+// then survives and this test's "want 0 relaunches" assertion fails on this
+// tick, or a LATER tick reusing the stale marker escalates incorrectly.
+func TestEnsureAlive_HeadlessFleet_UnknownFlockHeldClearsMarkerNeverEscalates(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	unknownGUIOwnerState(t, 0, 0)
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return false, nil }) // held by a live process
+	defer restoreLockProbe()
+
+	// Pre-seed a confirmation marker well past the window — it must be
+	// IGNORED and CLEARED because the flock is reported HELD this tick.
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	// Seed via the SAME hardened writer production uses (not a plain
+	// os.WriteFile): the hardened writer installs an owner-only DACL at
+	// create time regardless of a broadened parent directory, which the
+	// hardened READER's file-DACL gate requires — a plain os.WriteFile
+	// inherits the parent's (possibly broadened) DACL and gets refused on
+	// read, silently making the marker look "absent" instead of "stale".
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+		t.Fatalf("seed confirmation marker: %v", err)
+	}
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Errorf("relaunch seam called %d times while the flock is reported HELD; want 0", got)
+	}
+	if _, statErr := os.Stat(markerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("confirmation marker still present after a HELD observation; want it cleared (the window must be observed without interruption)")
+	}
+}
+
+// TestEnsureAlive_HeadlessFleet_UnknownEscalatesAfterConfirmationWindow
+// reproduces the OTHER P1-1 danger directly (residual 1(b)): a persistently
+// Unknown GUI-owner state whose independent flock-unheld signal has ALREADY
+// been observed for longer than guiOwnerUnknownConfirmationWindow must
+// eventually recover — a genuinely dead GUI with corrupt/missing metadata
+// must not be stuck suppressed forever. Delegates through
+// runEnsureAliveHeadlessFleet, so this also proves the escalation path does
+// not bypass the existing boot-grace/live-handoff suppressors (both are
+// satisfied here — old supervisor start, no handoff marker — so the
+// relaunch proceeds).
+//
+// MUTATION: make runEnsureAliveGUIOwnerUnknownEscalation return false
+// unconditionally (or remove its call from the guiOwnerStateUnknown branch
+// in runEnsureAlive) — this test's "want exactly 1 relaunch" assertion
+// fails (0 relaunches; a genuinely dead GUI never recovers).
+func TestEnsureAlive_HeadlessFleet_UnknownEscalatesAfterConfirmationWindow(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	unknownGUIOwnerState(t, 0, 0)
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+
+	// Pre-seed the confirmation marker well past the bounded window so this
+	// tick is the one that escalates.
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	// Seed via the SAME hardened writer production uses (not a plain
+	// os.WriteFile): the hardened writer installs an owner-only DACL at
+	// create time regardless of a broadened parent directory, which the
+	// hardened READER's file-DACL gate requires — a plain os.WriteFile
+	// inherits the parent's (possibly broadened) DACL and gets refused on
+	// read, silently making the marker look "absent" instead of "stale".
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+		t.Fatalf("seed confirmation marker: %v", err)
+	}
+
+	var relaunches int32
+	restoreSeam := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreSeam()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v (must always return nil / exit 0)", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Errorf("relaunch seam called %d times after the confirmation window elapsed; want exactly 1 (a genuinely dead GUI with corrupt metadata must eventually recover)", got)
+	}
+	if _, statErr := os.Stat(markerPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("confirmation marker still present after escalation; want it cleared so a subsequent tick does not loop")
+	}
+	assertSupervisorEvent(t, stateDir, "gui-owner-unknown-escalated-to-recovery")
+	assertSupervisorEvent(t, stateDir, "liveness-relaunched-gui-headless-fleet")
+}
+
 // TestEnsureAlive_FreeLock_UnknownGUIOwnerState_UsesStandaloneRelaunch covers
 // the second P1-1 call site: the supervisor is DOWN (confirmed — the free
 // flock) and the GUI-owner probe is ambiguous. Recovery is still warranted

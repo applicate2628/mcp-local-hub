@@ -186,6 +186,42 @@ func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, er
 	return &SingleInstanceLock{pidport: pidportPath, fl: fl}, nil
 }
 
+// ProbeSingleInstanceLockUnheld reports whether the GUI's own single-instance
+// flock (pidportPath + ".lock") is currently held by ANY process — a signal
+// that is INDEPENDENT of whatever CONTENT sits in the pidport file itself
+// (missing, corrupt, or out of range does not matter: the flock is a
+// kernel-enforced exclusivity primitive tied to an open file descriptor, not
+// to the bytes on disk, and the OS releases it automatically when the
+// holding process exits or the descriptor is closed).
+//
+// This mirrors api.SupervisorRunningUnderStateDir's exact idiom for the
+// supervisor's own lock: a non-blocking TryLock that is released immediately
+// on success (proving no holder existed) or refused (proving a live holder
+// exists). Residual 1(b)'s bounded confirmation path
+// (internal/cli/supervise_ensure_alive.go) uses this to establish GUI-owner
+// death when pidport metadata itself cannot be trusted (VerdictMalformed /
+// VerdictIndeterminate / an unresolvable pidport path).
+//
+// Returns:
+//   - (true, nil)  — definitively unheld: no process currently owns the GUI
+//     single-instance lock.
+//   - (false, nil) — definitively held: a live process owns it.
+//   - (false, err) — UNDETERMINABLE (the flock probe itself errored, e.g. a
+//     locked-down filesystem). Callers gating a destructive/unsafe decision
+//     on this MUST treat err != nil the same as "held" (fail closed) — the
+//     same contract SupervisorRunningUnderStateDir documents.
+func ProbeSingleInstanceLockUnheld(pidportPath string) (unheld bool, err error) {
+	lease, acquireErr := tryAcquireSingleInstanceLockAt(pidportPath)
+	if acquireErr != nil {
+		if errors.Is(acquireErr, ErrSingleInstanceBusy) {
+			return false, nil
+		}
+		return false, acquireErr
+	}
+	lease.Release()
+	return true, nil
+}
+
 // Release releases ONLY the flock — it does NOT remove the pidport file.
 // Idempotent.
 //
@@ -560,6 +596,19 @@ const (
 	VerdictKillRefused                         // three-part identity gate failed
 	VerdictKillFailed                          // SIGKILL/TerminateProcess returned error
 	VerdictRaceLost                            // post-kill, a competitor won the new acquire
+	// VerdictIndeterminate is appended LAST (not inserted among the existing
+	// values) so its numeric JSON encoding never renumbers an already-shipped
+	// class — Verdict.Class serializes to the GUI's /api/force-kill/probe
+	// response. residual 1(a): the per-platform identity probe
+	// (processIDImpl) returned a PLATFORM-LEVEL error that is NOT proof the
+	// recorded PID is gone (a transient OpenProcess/kill(2) failure other
+	// than the platform's OWN definitive "no such process" signal). Before
+	// this class existed, probeOnce collapsed every such ambiguous error
+	// into VerdictDeadPID (id.Alive's zero value), which AUTHORIZES the
+	// headless-fleet relaunch on a merely-transient platform hiccup. Callers
+	// MUST treat VerdictIndeterminate exactly like VerdictMalformed — never
+	// as proof of death.
+	VerdictIndeterminate
 )
 
 func (c VerdictClass) String() string {
@@ -580,6 +629,8 @@ func (c VerdictClass) String() string {
 		return "KillFailed"
 	case VerdictRaceLost:
 		return "RaceLost"
+	case VerdictIndeterminate:
+		return "Indeterminate"
 	}
 	return fmt.Sprintf("VerdictClass(%d)", int(c))
 }
@@ -945,6 +996,27 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 		return v
 	}
 
+	// Residual 1(a) fix: id.Indeterminate marks a platform-level identity
+	// probe error that is NOT the platform's own definitive "no such
+	// process" signal (see probe_windows.go's classifyOpenProcessError /
+	// probe_linux.go's classifyKillError — only ERROR_INVALID_PARAMETER /
+	// ESRCH may claim id.Alive=false; every other OpenProcess/kill(2) error
+	// sets Indeterminate instead). Checked BEFORE the !id.Alive cascade so a
+	// transient platform hiccup can never fall through to VerdictDeadPID,
+	// which is the ONLY class that authorizes a destructive relaunch/kill
+	// downstream (probeGUIOwnerAlive, KillRecordedHolder's skip-list below).
+	if id.Indeterminate {
+		v.Class = VerdictIndeterminate
+		v.PIDAlive = false
+		if idErr != nil {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: liveness probe returned an ambiguous platform error (%v); this is NOT proof the process is dead", pid, idErr)
+		} else {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: liveness probe returned an ambiguous result; this is NOT proof the process is dead", pid)
+		}
+		v.Hint = "The identity probe could not determine whether the previous incumbent is alive or dead (a transient platform error, not a confirmed exit). Retry, or use OS tools (Task Manager/ps) to check the PID directly."
+		return v
+	}
+
 	if !id.Alive {
 		v.Class = VerdictDeadPID
 		v.Diagnose = fmt.Sprintf("recorded PID %d is not alive", pid)
@@ -1004,7 +1076,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 
 	v := probe(ctx, pidportPath, opts.PingTimeout)
 	switch v.Class {
-	case VerdictMalformed, VerdictDeadPID:
+	case VerdictMalformed, VerdictDeadPID, VerdictIndeterminate:
+		// VerdictIndeterminate (residual 1(a)) MUST skip the kill exactly
+		// like Malformed/DeadPID: an ambiguous platform-level identity
+		// error is not proof of anything, and this switch has NO default
+		// arm — any class that falls through here proceeds straight into
+		// the destructive identity gate below.
 		return nil, v, fmt.Errorf("kill skipped: %s", v.Class)
 	case VerdictHealthy:
 		// Codex r5 #7b: incumbent is healthy — do NOT kill. Caller

@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -735,6 +736,112 @@ func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(killV.Diagnose, "macOS") {
 		t.Errorf("Diagnose = %q; want macOS-specific message (not the image-gate cascade)", killV.Diagnose)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Residual 1(a) review fix: probeOnce must map id.Indeterminate to
+// VerdictIndeterminate, never VerdictDeadPID, and KillRecordedHolder must
+// skip the kill for it exactly like VerdictMalformed/VerdictDeadPID. These
+// tests inject ProcessIdentity{Indeterminate: true} via the processIDOverride
+// seam, so they exercise the CONSUMER side (single_instance.go) independent
+// of platform — the platform-specific PRODUCER side (only
+// ERROR_INVALID_PARAMETER / ESRCH may claim definitive death) is covered by
+// probe_windows_test.go's classifyOpenProcessError tests (and
+// probe_linux_test.go's classifyKillError tests, cross-compile-verified but
+// not executed on this Windows host).
+// ---------------------------------------------------------------------------
+
+// TestProbe_IndeterminateIdentity_ClassifiesIndeterminate reproduces the
+// residual 1(a) danger directly at the consumer layer: BEFORE this fix,
+// probeOnce's `if !id.Alive { v.Class = VerdictDeadPID }` cascade had no way
+// to distinguish "the platform proved this PID doesn't exist" from "the
+// platform probe itself failed ambiguously" — both collapsed to
+// id.Alive==false. VerdictDeadPID is the ONLY class that authorizes a
+// destructive relaunch downstream (probeGUIOwnerAlive maps it to
+// guiOwnerStateConfirmedDead). A transient platform error must never reach
+// it.
+//
+// MUTATION: delete the `if id.Indeterminate { v.Class = VerdictIndeterminate;
+// ...; return v }` branch in probeOnce (single_instance.go) — id.Alive's
+// zero-value false then falls straight into the `if !id.Alive` cascade and
+// this test's "want VerdictIndeterminate" assertion fails (got
+// VerdictDeadPID instead).
+func TestProbe_IndeterminateIdentity_ClassifiesIndeterminate(t *testing.T) {
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{Indeterminate: true}, errors.New("injected ambiguous platform failure")
+	})
+
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	// Port 1 has no listener — ping will fail, so the identity probe result
+	// is what decides classification.
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate so the startup-window retry loop doesn't fire.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictIndeterminate {
+		t.Fatalf("Class = %v, want VerdictIndeterminate (NOT DeadPID — an ambiguous platform error is not proof of death). Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if v.PIDAlive {
+		t.Errorf("PIDAlive = true, want false")
+	}
+}
+
+// TestKillRecordedHolder_IndeterminateIdentity_SkipsKill proves the
+// destructive path also refuses on VerdictIndeterminate: KillRecordedHolder's
+// top-of-function switch has NO default arm, so a class it does not
+// explicitly list falls through into the destructive identity-gate cascade
+// below instead of refusing at the early skip-list.
+//
+// MUTATION: remove VerdictIndeterminate from KillRecordedHolder's
+// `case VerdictMalformed, VerdictDeadPID, VerdictIndeterminate:` skip-list —
+// execution then falls through into the identity-gate cascade below, which
+// refuses for a DIFFERENT reason (empty ImagePath fails matchBasename), so
+// this test's "err contains kill skipped" assertion fails: the error message
+// becomes the image-gate's "is not an mcphub binary" wording instead.
+func TestKillRecordedHolder_IndeterminateIdentity_SkipsKill(t *testing.T) {
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{Indeterminate: true}, errors.New("injected ambiguous platform failure")
+	})
+
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err == nil {
+		t.Fatalf("KillRecordedHolder on an indeterminate identity returned nil error; expected refused")
+	}
+	if v.Class != VerdictIndeterminate {
+		t.Fatalf("Class = %v, want VerdictIndeterminate", v.Class)
+	}
+	if !strings.Contains(err.Error(), "kill skipped") {
+		t.Errorf("err = %q, want the early skip-list message (\"kill skipped: ...\"), not a cascade into the destructive identity gate", err.Error())
 	}
 }
 

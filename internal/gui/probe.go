@@ -49,6 +49,15 @@ type ProcessIdentity struct {
 	Cmdline   []string  // argv split honoring CommandLineToArgvW (Win) / NUL-delimited (Linux)
 	StartTime time.Time // process creation time; opaque token for identity equality
 
+	// Indeterminate marks a platform-level probe error that is NOT the
+	// platform's own definitive "no such process" signal (residual 1(a) —
+	// see probe_windows.go's classifyOpenProcessError and probe_linux.go's
+	// classifyKillError). Alive is meaningless (false, zero value) when
+	// this is true. probeOnce (single_instance.go) maps it to
+	// VerdictIndeterminate, never VerdictDeadPID — a transient OS error
+	// must never be treated as proof the recorded process exited.
+	Indeterminate bool
+
 	// Handle is the kernel reference taken at probe time. While held,
 	// the OS pins the PID-table entry (Windows: PROCESS handle reserves
 	// the PID; Linux: pidfd reserves analogous state), preventing

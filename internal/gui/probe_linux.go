@@ -69,6 +69,31 @@ func systemBootTime() (time.Time, bool) {
 	return bootTimeValue, bootTimeOK
 }
 
+// classifyKillError maps a Kill(pid, 0) failure to the appropriate
+// ProcessIdentity result. Extracted as a pure function (no syscalls) so its
+// polarity is directly unit-testable with synthetic errors, without needing
+// a real ambiguous kernel failure. Residual 1(a): ESRCH is kill(2)'s
+// documented definitive "no such process" signal — the ONLY error this
+// classifier may treat as proof of death. EPERM means the process exists but
+// signaling it is denied (mirrors Windows ERROR_ACCESS_DENIED). kill(2)
+// documents only EINVAL/EPERM/ESRCH as possible errors, and EINVAL cannot
+// occur for signal 0 (always a valid signal number) — but a future
+// kernel/libc surprise, or any errno this classifier does not recognize,
+// must still fail safe: NOT proof of death, so it returns Indeterminate,
+// never Alive:false. UNVERIFIED on a live Linux host this session (this
+// codebase's implementer environment is Windows-only) — verification step:
+// reproduce classifyKillError's ESRCH mapping against a real just-exited PID
+// on a Linux runner before relying on it beyond this static/logical review.
+func classifyKillError(err error) (ProcessIdentity, error) {
+	if errors.Is(err, syscall.EPERM) {
+		return ProcessIdentity{Alive: true, Denied: true}, nil
+	}
+	if errors.Is(err, syscall.ESRCH) {
+		return ProcessIdentity{Alive: false}, nil
+	}
+	return ProcessIdentity{Indeterminate: true}, err
+}
+
 // processIDImpl is the Linux implementation. Uses Kill(0) for
 // liveness; reads /proc/<pid>/exe + /proc/<pid>/cmdline +
 // /proc/<pid>/stat for image, argv, and start-time. macOS is split
@@ -83,11 +108,7 @@ func systemBootTime() (time.Time, bool) {
 // alive=true,denied=true to mirror Windows ACCESS_DENIED handling.
 func processIDImpl(pid int) (ProcessIdentity, error) {
 	if err := syscall.Kill(pid, 0); err != nil {
-		if errors.Is(err, syscall.EPERM) {
-			return ProcessIdentity{Alive: true, Denied: true}, nil
-		}
-		// ESRCH or other: not alive.
-		return ProcessIdentity{Alive: false}, nil
+		return classifyKillError(err)
 	}
 
 	// /proc/<pid>/exe
