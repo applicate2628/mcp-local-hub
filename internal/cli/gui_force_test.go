@@ -1217,3 +1217,117 @@ func TestExecExitError_DoesNotShortCircuitMain(t *testing.T) {
 		)
 	}
 }
+
+// ---------------------------------------------------------------
+// Verdict-class → exit-code mapping (review finding: the new
+// gui.VerdictIndeterminate class was unhandled by both switches)
+// ---------------------------------------------------------------
+
+// TestForceKillVerdictExitMaps_CoverEveryVerdictClass pins BOTH runForceKill
+// mappings against the FULL gui.VerdictClass enum, so a class can never again
+// be added upstream and silently land in an "internal: unexpected/unrecognized
+// verdict class" arm — which is what happened to gui.VerdictIndeterminate: a
+// legitimate, expected outcome (an ambiguous platform identity probe) was
+// reported to the operator as an mcphub bug with exit 1, and the Verdict's own
+// retry guidance was dropped.
+//
+// The mappings are exercised directly because runForceKill has no probe seam
+// (it runs a real gui.Probe against a real pidport), and gui.VerdictIndeterminate
+// requires a platform-level OpenProcess/kill(2) failure that a test cannot
+// manufacture on demand.
+//
+// MUTATION: delete the `case gui.VerdictIndeterminate` arm from either helper —
+// that helper's Indeterminate subtest fails with "terminal/mapped=false, want a
+// non-destructive exit 4".
+func TestForceKillVerdictExitMaps_CoverEveryVerdictClass(t *testing.T) {
+	// Every class the enum defines today. If a new class is appended upstream
+	// without extending this list, the exhaustiveness check at the bottom
+	// fails.
+	allClasses := []gui.VerdictClass{
+		gui.VerdictHealthy,
+		gui.VerdictLiveUnreachable,
+		gui.VerdictDeadPID,
+		gui.VerdictMalformed,
+		gui.VerdictKilledRecovered,
+		gui.VerdictKillRefused,
+		gui.VerdictKillFailed,
+		gui.VerdictRaceLost,
+		gui.VerdictIndeterminate,
+	}
+
+	t.Run("preKill", func(t *testing.T) {
+		want := map[gui.VerdictClass]struct {
+			code     int
+			terminal bool
+		}{
+			// Non-destructive terminal outcomes: no kill is attempted.
+			gui.VerdictMalformed:     {4, true},
+			gui.VerdictIndeterminate: {4, true}, // review finding
+			gui.VerdictDeadPID:       {3, true},
+			// Proceeds to the kill path.
+			gui.VerdictLiveUnreachable: {0, false},
+			// Handled before the mapping, or genuinely unexpected from Probe.
+			gui.VerdictHealthy:         {0, false},
+			gui.VerdictKilledRecovered: {0, false},
+			gui.VerdictKillRefused:     {0, false},
+			gui.VerdictKillFailed:      {0, false},
+			gui.VerdictRaceLost:        {0, false},
+		}
+		for _, class := range allClasses {
+			exp, ok := want[class]
+			if !ok {
+				t.Fatalf("class %q has no expectation — extend this table when a VerdictClass is added", class)
+			}
+			code, terminal := preKillVerdictExit(class)
+			if code != exp.code || terminal != exp.terminal {
+				t.Errorf("preKillVerdictExit(%q) = (%d, %v), want (%d, %v)",
+					class, code, terminal, exp.code, exp.terminal)
+			}
+		}
+		// gui.VerdictIndeterminate must NEVER authorize the kill path, and must
+		// never be reported as an internal error.
+		if code, terminal := preKillVerdictExit(gui.VerdictIndeterminate); !terminal || code != 4 {
+			t.Fatalf("preKillVerdictExit(Indeterminate) = (%d, %v), want a non-destructive exit 4 — an ambiguous liveness probe must not fall into the 'internal: unexpected verdict class' arm", code, terminal)
+		}
+	})
+
+	t.Run("postKill", func(t *testing.T) {
+		want := map[gui.VerdictClass]struct {
+			code   int
+			mapped bool
+		}{
+			gui.VerdictKillRefused:   {7, true},
+			gui.VerdictKillFailed:    {4, true},
+			gui.VerdictMalformed:     {4, true},
+			gui.VerdictIndeterminate: {4, true}, // review finding
+			gui.VerdictRaceLost:      {3, true},
+			gui.VerdictDeadPID:       {3, true},
+			// Handled by runForceKill before this mapping (both exit 0).
+			gui.VerdictHealthy:         {0, false},
+			gui.VerdictKilledRecovered: {0, false},
+			// Never produced by KillRecordedHolder as a failure verdict.
+			gui.VerdictLiveUnreachable: {0, false},
+		}
+		for _, class := range allClasses {
+			exp, ok := want[class]
+			if !ok {
+				t.Fatalf("class %q has no expectation — extend this table when a VerdictClass is added", class)
+			}
+			code, mapped := postKillVerdictExit(class)
+			if code != exp.code || mapped != exp.mapped {
+				t.Errorf("postKillVerdictExit(%q) = (%d, %v), want (%d, %v)",
+					class, code, mapped, exp.code, exp.mapped)
+			}
+		}
+		if code, mapped := postKillVerdictExit(gui.VerdictIndeterminate); !mapped || code != 4 {
+			t.Fatalf("postKillVerdictExit(Indeterminate) = (%d, %v), want a non-destructive exit 4 — a SKIPPED kill must not be reported as an unrecognized class", code, mapped)
+		}
+	})
+
+	// Exhaustiveness: String() falls through to "VerdictClass(%d)" for any
+	// value the enum does not name, so scanning past the last known class
+	// proves the list above is complete.
+	if next := gui.VerdictIndeterminate + 1; !strings.HasPrefix(next.String(), "VerdictClass(") {
+		t.Fatalf("gui.VerdictClass gained a new member %q after VerdictIndeterminate; extend allClasses and both expectation tables", next)
+	}
+}

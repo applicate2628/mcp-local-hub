@@ -1814,7 +1814,14 @@ Exit codes:
 1 — non-force startup error
 2 — bare --force exited after diagnostic
 3 — race lost or pidport changed mid-prompt
-4 — kill failed / pidport unrecoverable
+4 — kill failed / pidport unrecoverable / liveness indeterminate.
+    The last case is the VerdictIndeterminate class: the identity probe
+    returned an ambiguous PLATFORM error that is NOT the platform's own
+    "no such process" signal, so no kill is attempted and the result is
+    NOT proof the holder is dead. Same non-destructive exit as a
+    malformed pidport, per VerdictClass's "treat exactly like
+    VerdictMalformed" contract. Retry, or check the PID with Task
+    Manager / ps.
 5 — RESERVED (not emitted)
 6 — non-interactive shell with --kill but no --yes
 7 — --kill refused by identity gate

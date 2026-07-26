@@ -362,9 +362,15 @@ func setEnsureAliveGUIRecoveryDependenciesForTest(deps ensureAliveGUIRecoveryDep
 //     (LiveUnreachable is an alive-but-not-answering-ping owner, e.g. a GUI
 //     mid-restart — still a live process, never safe to kill via the
 //     GUI-owner-killing autostart relaunch.)
-//   - gui.VerdictMalformed, or gui.PidportPath() error     → guiOwnerStateUnknown
-//     (pidport missing/garbage/out-of-range port, or the path itself could
-//     not be resolved — the probe genuinely cannot tell if an owner exists.)
+//   - gui.VerdictMalformed, gui.VerdictIndeterminate, or a
+//     gui.PidportPath() error                              → guiOwnerStateUnknown
+//     (pidport missing/garbage/out-of-range port, an identity probe that
+//     returned an ambiguous PLATFORM error rather than the platform's own
+//     "no such process" signal, or the path itself could not be resolved —
+//     the probe genuinely cannot tell if an owner exists. Indeterminate
+//     reaches the default arm below, which is the CORRECT mapping and the
+//     whole reason that class exists: before it, such an error collapsed into
+//     VerdictDeadPID and AUTHORIZED the GUI-owner-killing relaunch.)
 //
 // PLATFORM NOTE: on platforms where the OS identity probe is unsupported
 // (macOS, Windows non-amd64), processIDImpl returns a sentinel error and
@@ -393,7 +399,7 @@ func probeGUIOwnerAlive() (guiOwnerProbeState, int, int) {
 		return guiOwnerStateConfirmedDead, v.PID, v.Port
 	case gui.VerdictHealthy, gui.VerdictLiveUnreachable:
 		return guiOwnerStateAlive, v.PID, v.Port
-	default: // gui.VerdictMalformed, or any class this mapping does not expect.
+	default: // gui.VerdictMalformed, gui.VerdictIndeterminate, or any class this mapping does not expect.
 		return guiOwnerStateUnknown, v.PID, v.Port
 	}
 }

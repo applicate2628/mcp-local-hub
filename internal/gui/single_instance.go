@@ -207,18 +207,56 @@ func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, er
 //     single-instance lock.
 //   - (false, nil) — definitively held: a live process owns it.
 //   - (false, err) — UNDETERMINABLE (the flock probe itself errored, e.g. a
-//     locked-down filesystem). Callers gating a destructive/unsafe decision
+//     locked-down filesystem, OR the probe's own tentative lease could not be
+//     released — see below). Callers gating a destructive/unsafe decision
 //     on this MUST treat err != nil the same as "held" (fail closed) — the
 //     same contract SupervisorRunningUnderStateDir documents.
+//
+// RELEASING THE PROBE LEASE IS PART OF THE ANSWER, NOT CLEANUP (review
+// finding). Acquiring the flock only proves nobody ELSE held it at that
+// instant; returning (true, nil) additionally asserts that the lock is unheld
+// NOW — which is false if this probe still owns it. release()'s bounded Unlock
+// retries and its Close() fallback can both fail (gofrs/flock's Close()
+// delegates to Unlock(), so a persistent syscall error leaves the descriptor
+// open and the OS lock held until this process exits — see release()'s comment
+// and work-items/backlog/2026-07-18-flock-persistent-unlock-residual.md). The
+// old code discarded that error via Release() and still reported "definitively
+// unheld", so residual 1(b)'s confirmation window
+// (runEnsureAliveGUIOwnerUnknownEscalation) could consume its marker and launch
+// a replacement GUI while THIS process still owned the single-instance lock —
+// the replacement then loses acquisition and exits, while the tick reports a
+// successful relaunch.
+//
+// Fail closed instead: any release failure is reported as UNDETERMINABLE. This
+// matches every other release() call site in this file, all of which classify a
+// non-nil release() as Unknown. Note release() deliberately reports the FIRST
+// Unlock error even when a later retry succeeded (pinned by
+// TestSingleInstanceLock_ReleaseRecoversTransientUnlockFailure), so a recovered
+// transient also lands here — conservative in the safe direction: a missed
+// recovery tick, never a relaunch against a lock this process still holds.
 func ProbeSingleInstanceLockUnheld(pidportPath string) (unheld bool, err error) {
-	lease, acquireErr := tryAcquireSingleInstanceLockAt(pidportPath)
+	return probeSingleInstanceLockUnheld(pidportPath, tryAcquireSingleInstanceLockAt)
+}
+
+// probeSingleInstanceLockUnheld is ProbeSingleInstanceLockUnheld with the
+// acquire step passed in, so a test can supply a lease whose Unlock/Close fail
+// persistently and exercise the fail-closed release branch without needing a
+// real locked-down filesystem. Taking the seam as a PARAMETER (rather than a
+// package-level var) keeps it off the production global state.
+func probeSingleInstanceLockUnheld(
+	pidportPath string,
+	acquire func(string) (*SingleInstanceLock, error),
+) (unheld bool, err error) {
+	lease, acquireErr := acquire(pidportPath)
 	if acquireErr != nil {
 		if errors.Is(acquireErr, ErrSingleInstanceBusy) {
 			return false, nil
 		}
 		return false, acquireErr
 	}
-	lease.Release()
+	if releaseErr := lease.release(); releaseErr != nil {
+		return false, fmt.Errorf("release single-instance probe lease %s: %w", pidportPath+".lock", releaseErr)
+	}
 	return true, nil
 }
 

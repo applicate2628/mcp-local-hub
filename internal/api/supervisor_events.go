@@ -426,42 +426,77 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	} else {
 		l.mu.Lock()
 	}
-	// l.mu is now held by this goroutine. Every return path below releases
-	// it EXACTLY once — either directly here (lock-acquisition failure, or
-	// the synchronous emitBlocking/emitTry write below) or, on the bounded
-	// emitTimeout success path, by handing ownership to a spawned worker
-	// goroutine (never both — see the mode-specific branch further down).
+	// l.mu is now held by this goroutine.
+	//
+	// SINGLE-OWNER RELEASE DISCIPLINE (P1 review fix). Both locks are owned
+	// by the releaser below on EVERY exit path out of this function —
+	// success, bounded timeout, a genuine non-timeout flock error, and a
+	// panic — with EXACTLY ONE exception: the emitTimeout hand-off path,
+	// which transfers ownership of both locks to the spawned worker
+	// goroutine and records that transfer in `handedOff`.
+	//
+	// Before this fix each branch unlocked l.mu itself, and the emitTimeout
+	// branch's `!locked` arm unlocked and then FELL THROUGH into the shared
+	// `lockErr != nil` arm, which unlocked a second time. On a genuine
+	// non-timeout flock error — e.g. gofrs/flock's setFh failing because the
+	// state directory disappeared or is inaccessible — that second unlock hit
+	// an already-unlocked sync.Mutex, which is an UNRECOVERABLE runtime fatal
+	// ("sync: unlock of unlocked mutex"), not a catchable panic. Because
+	// daemon recovery emits its audit row AFTER terminating a daemon but
+	// BEFORE respawning it, that fatal left the daemon stopped.
+	//
+	// `flockHeld` (rather than a re-read of l.lock's internal state) is the
+	// authoritative record of whether THIS call owns the cross-process flock,
+	// so the theoretical (true, err) return that gofrs/flock does not
+	// currently produce still releases the flock instead of leaking it.
+	flockHeld := false
+	handedOff := false
+	defer func() {
+		if handedOff {
+			return
+		}
+		if flockHeld {
+			_ = l.lock.Unlock()
+		}
+		l.mu.Unlock()
+	}()
 
 	// OS-level serialization across processes (e.g. supervisor +
-	// install CLI emitting migration events concurrently).
-	var lockErr error
+	// install CLI emitting migration events concurrently). Each arm either
+	// returns (releaser runs) or leaves BOTH locks held with flockHeld true.
 	switch mode {
 	case emitBlocking:
-		lockErr = l.lock.Lock()
+		if err := l.lock.Lock(); err != nil {
+			return nil, fmt.Errorf("supervisor event log flock: %w", err)
+		}
+		flockHeld = true
 	case emitTry:
-		var locked bool
-		locked, lockErr = l.lock.TryLock()
-		if lockErr == nil && !locked {
-			l.mu.Unlock()
+		locked, err := l.lock.TryLock()
+		flockHeld = locked
+		if err != nil {
+			return nil, fmt.Errorf("supervisor event log flock: %w", err)
+		}
+		if !locked {
 			return nil, nil
 		}
 	case emitTimeout:
-		var locked bool
-		locked, lockErr = l.lock.TryLockContext(ctx, eventLogEmitRetryDelay)
+		locked, err := l.lock.TryLockContext(ctx, eventLogEmitRetryDelay)
+		flockHeld = locked
 		if !locked {
 			// Timed out under contention (DeadlineExceeded) or a defensive
 			// (false, nil): report the bounded skip so a mutation-audit caller
-			// can fall back after leaving its critical path. Only a genuine
-			// non-timeout lock error falls through to be reported below.
-			l.mu.Unlock()
-			if lockErr == nil || errors.Is(lockErr, context.DeadlineExceeded) {
+			// can fall back after leaving its critical path. A genuine
+			// non-timeout lock error is reported as itself — and, unlike
+			// before, returns from THIS arm instead of falling through into a
+			// second unlock.
+			if err == nil || errors.Is(err, context.DeadlineExceeded) {
 				return nil, ErrSupervisorEventEmitTimeout
 			}
+			return nil, fmt.Errorf("supervisor event log flock: %w", err)
 		}
-	}
-	if lockErr != nil {
-		l.mu.Unlock()
-		return nil, fmt.Errorf("supervisor event log flock: %w", lockErr)
+		if err != nil {
+			return nil, fmt.Errorf("supervisor event log flock: %w", err)
+		}
 	}
 
 	// Both locks are held by this goroutine. The remaining work — rotation
@@ -474,9 +509,9 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// ACQUISITION, never the write itself). emitBlocking/emitTry already
 	// accept an unbounded wait by contract (see their own doc comments), so
 	// only emitTimeout gets the bounded wrapper below.
+	// Both locks stay owned by the deferred releaser above, which frees them
+	// after the write returns — including when the write panics.
 	if mode != emitTimeout {
-		defer l.mu.Unlock()
-		defer func() { _ = l.lock.Unlock() }()
 		return nil, supervisorEventWriteFn(l, raw)
 	}
 
@@ -516,6 +551,11 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// generation-ordering defect on this branch. Losing that tool is not an
 	// acceptable trade.
 	writeFn := supervisorEventWriteFn
+	// Ownership of both locks transfers to the worker HERE. Setting the flag
+	// before the `go` statement (both are touched only by this goroutine, so
+	// there is no race with the worker) is what keeps the deferred releaser
+	// from unlocking out from under a write that is still in flight.
+	handedOff = true
 	go func() {
 		defer l.mu.Unlock()
 		defer func() { _ = l.lock.Unlock() }()

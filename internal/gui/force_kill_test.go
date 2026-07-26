@@ -113,6 +113,52 @@ func TestForceKill_KillFailed_500(t *testing.T) {
 	}
 }
 
+// TestForceKill_Indeterminate_503 pins the review finding that the new
+// VerdictIndeterminate class needs explicit HTTP handling. KillRecordedHolder
+// SKIPS the kill on that class (its Malformed/DeadPID/Indeterminate arm), so
+// falling into the default arm reported a skipped operation as 500
+// `kill_failed` — implying both that a kill was attempted and that the server
+// broke. Neither is true: liveness simply could not be established.
+//
+// MUTATION: delete the `case VerdictIndeterminate` arm in forceKillHandler —
+// this test then fails with "status = 500, want 503".
+func TestForceKill_Indeterminate_503(t *testing.T) {
+	if runtime.GOOS == "darwin" {
+		t.Skip("macOS returns 501")
+	}
+	srv := newDaemonsTestServer(t)
+	srv.killForRoute = func() (Verdict, error) {
+		v := Verdict{
+			Class:    VerdictIndeterminate,
+			PID:      1234,
+			Diagnose: "recorded PID 1234: liveness probe returned an ambiguous platform error",
+		}
+		return v, errors.New("kill skipped: Indeterminate")
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/force-kill", nil)
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error   string  `json:"error"`
+		Verdict Verdict `json:"verdict"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// The error key is load-bearing: the frontend branches on it to say
+	// "Kill skipped" rather than "Kill failed".
+	if body.Error != "liveness_indeterminate" {
+		t.Errorf("error key = %q, want %q", body.Error, "liveness_indeterminate")
+	}
+	if body.Verdict.Class != VerdictIndeterminate {
+		t.Errorf("verdict class = %v, want VerdictIndeterminate", body.Verdict.Class)
+	}
+}
+
 func TestForceKill_Recovered_200(t *testing.T) {
 	if runtime.GOOS == "darwin" {
 		t.Skip("macOS returns 501")

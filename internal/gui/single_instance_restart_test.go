@@ -197,6 +197,69 @@ func TestSingleInstanceLock_ReleaseReturnsFirstUnlockErrorAfterRetry(t *testing.
 	}
 }
 
+// TestProbeSingleInstanceLockUnheld_UnreleasableProbeLeaseFailsClosed pins the
+// review finding: acquiring the flock proves only that nobody ELSE held it at
+// that instant. Reporting (true, nil) additionally asserts the lock is unheld
+// NOW, which is FALSE while the probe's own lease is still held. The old code
+// called the error-discarding Release(), so a lease whose bounded Unlock
+// retries AND Close() fallback both failed still reported "definitively
+// unheld"; residual 1(b)'s confirmation window then consumed its marker and
+// launched a replacement GUI that lost acquisition to this very process and
+// exited — while the tick logged a successful relaunch.
+//
+// MUTATION: swap `lease.release()` back to `lease.Release()` (discarding the
+// error) in probeSingleInstanceLockUnheld — this test then fails with
+// "unheld=true err=<nil>, want fail-closed".
+func TestProbeSingleInstanceLockUnheld_UnreleasableProbeLeaseFailsClosed(t *testing.T) {
+	persistent := errors.New("injected persistent probe-lease unlock failure")
+	// Every bounded retry AND the Close() fallback fail — gofrs/flock's Close()
+	// delegates to Unlock(), so the descriptor stays open and the OS lock stays
+	// held until process exit.
+	unlockErrors := make([]error, singleInstanceUnlockAttempts+1)
+	for i := range unlockErrors {
+		unlockErrors[i] = persistent
+	}
+	fl := &phaseEUnlockScriptFlock{unlockErrors: unlockErrors}
+	acquired := &SingleInstanceLock{pidport: "probe.pidport", fl: fl}
+
+	unheld, err := probeSingleInstanceLockUnheld("probe.pidport",
+		func(string) (*SingleInstanceLock, error) { return acquired, nil })
+
+	if unheld || err == nil {
+		t.Fatalf("probe over an unreleasable lease = unheld=%v err=%v, want fail-closed (false, non-nil): a caller treats (true, nil) as proof no process holds the lock and relaunches the GUI against a lock THIS process still owns", unheld, err)
+	}
+	if !errors.Is(err, persistent) {
+		t.Fatalf("probe error = %v, want it to wrap the underlying Unlock failure %v", err, persistent)
+	}
+	if fl.unlockCalls != singleInstanceUnlockAttempts+1 {
+		t.Fatalf("Unlock calls = %d, want %d bounded retries + 1 Close-delegated Unlock", fl.unlockCalls, singleInstanceUnlockAttempts+1)
+	}
+}
+
+// TestProbeSingleInstanceLockUnheld_ReleasableLeaseReportsUnheld pins the other
+// half: the ordinary path still reports a definitively-unheld lock, so the
+// fail-closed branch above cannot be satisfied by simply never returning true.
+func TestProbeSingleInstanceLockUnheld_ReleasableLeaseReportsUnheld(t *testing.T) {
+	dir := apitest.HardenedTempDir(t)
+	pidportPath := filepath.Join(dir, "gui.pidport")
+
+	unheld, err := ProbeSingleInstanceLockUnheld(pidportPath)
+	if err != nil || !unheld {
+		t.Fatalf("probe over a free lock = unheld=%v err=%v, want (true, nil)", unheld, err)
+	}
+
+	// And a live holder still reads as definitively held, with no error.
+	held, err := tryAcquireSingleInstanceLockAt(pidportPath)
+	if err != nil {
+		t.Fatalf("hold the lock: %v", err)
+	}
+	t.Cleanup(func() { held.Release() })
+	unheld, err = ProbeSingleInstanceLockUnheld(pidportPath)
+	if err != nil || unheld {
+		t.Fatalf("probe over a held lock = unheld=%v err=%v, want (false, nil)", unheld, err)
+	}
+}
+
 func TestRestartV3_RejectedLeaseUnlockFailureIsUnknownAndReleased(t *testing.T) {
 	unlockErr := errors.New("injected rejected-lease unlock failure")
 	fl := &phaseEUnlockScriptFlock{unlockErrors: []error{unlockErr, nil}}

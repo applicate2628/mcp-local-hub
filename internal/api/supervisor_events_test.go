@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -433,12 +434,40 @@ func TestSupervisorEventLog_EmitWithTimeoutBoundsStalledWrite(t *testing.T) {
 	defer func() { _ = logger.Close() }()
 
 	release := make(chan struct{})
+	// workerCommitDelay makes the teardown join below a DETERMINISTIC assertion
+	// instead of a scheduling coin-flip. The underlying defect (review finding:
+	// teardown restored the seam and returned while the abandoned worker was
+	// still inside writeEventLine, creating the log file underneath t.TempDir's
+	// concurrent RemoveAll — "TempDir RemoveAll cleanup: directory not empty")
+	// only manifests when the worker happens to lose that race, which is
+	// host-dependent: it reproduced 4/20 in review but 0/40 here. Holding the
+	// worker for a bounded delay AFTER the release removes the luck: an
+	// unjoined teardown returns microseconds after close(release) and therefore
+	// CANNOT observe workerCommitted, while a joined one always can.
+	const workerCommitDelay = 50 * time.Millisecond
+	var workerCommitted atomic.Bool
 	restore := SetSupervisorEventWriteFnForTest(func(l *SupervisorEventLog, raw []byte) error {
 		<-release // simulates a filesystem/AV stall that outlives the caller's budget
-		return l.writeEventLine(raw)
+		time.Sleep(workerCommitDelay)
+		writeErr := l.writeEventLine(raw)
+		workerCommitted.Store(true)
+		return writeErr
 	})
 	defer func() {
 		close(release) // let the abandoned worker goroutine finish so it releases l's locks and does not leak past this test
+		// JOIN the abandoned worker before this test returns — closing
+		// `release` only UNBLOCKS it. logger.mu is the precise join point: the
+		// worker registers `defer l.mu.Unlock()` FIRST, so it runs LAST.
+		// Acquiring it here therefore proves the worker finished the write AND
+		// released the flock, i.e. it can no longer touch anything under dir
+		// when t.TempDir's RemoveAll fires. If no worker was ever spawned (an
+		// earlier assertion failed), the mutex is free and this is a no-op
+		// rather than a deadlock.
+		logger.mu.Lock()
+		logger.mu.Unlock()
+		if !workerCommitted.Load() {
+			t.Errorf("teardown returned without joining the abandoned write worker: the worker can still create files under %s while t.TempDir removes it", dir)
+		}
 		restore()
 	}()
 
@@ -493,6 +522,12 @@ func TestSupervisorEventLog_EmitWithTimeoutTrackedPendingObservesLateWrite(t *te
 	})
 	defer func() {
 		safeRelease() // no-op if the in-test goroutine below already released it
+		// Same join as the sibling test above: pending.Wait returns as soon as
+		// the worker sends on `done`, which is BEFORE its deferred flock/mutex
+		// unlocks run. Acquiring logger.mu here waits for that last unlock, so
+		// the worker holds nothing under dir when t.TempDir's RemoveAll fires.
+		logger.mu.Lock()
+		logger.mu.Unlock()
 		restore()
 	}()
 
@@ -531,6 +566,100 @@ func TestSupervisorEventLog_EmitWithTimeoutTrackedPendingObservesLateWrite(t *te
 	}
 	if got := strings.Count(string(raw), "emit-timeout-tracked-stalled-write"); got != 1 {
 		t.Fatalf("event log has %d rows for this event, want exactly 1", got)
+	}
+}
+
+// TestSupervisorEventLog_GenuineFlockErrorReleasesMutexExactlyOnce reproduces
+// the P1 review finding on this branch: emit's emitTimeout arm unlocked l.mu
+// on the `!locked` path and then FELL THROUGH into the shared `lockErr != nil`
+// arm, which unlocked it a SECOND time. gofrs/flock returns (false, err) —
+// never (false, nil) — when its own setFh cannot open the lock file (v0.13.0
+// flock_windows.go:140-146 / flock.go tryCtx), so any genuine non-timeout
+// flock error (state directory gone, path inaccessible) took that path. The
+// second unlock of an already-unlocked sync.Mutex is an UNRECOVERABLE runtime
+// fatal, not a catchable panic — daemon recovery emits its audit row after
+// terminating a daemon but before respawning it, so the fatal left the daemon
+// stopped.
+//
+// A missing parent directory is the deterministic, portable way to force that
+// genuine error: flock.New opens the lock path with O_CREATE, which cannot
+// create a file inside a directory that does not exist.
+//
+// All three emit modes are exercised, not just the reported emitTimeout one:
+// the defect is a lock-OWNERSHIP defect, and every mode reaches the same
+// shared release discipline.
+//
+// MUTATION: restore the pre-fix shape in emit's emitTimeout arm — unlock l.mu
+// inside `if !locked` and let a genuine error fall through to a second
+// `l.mu.Unlock()`. The emitTimeout subtest then dies with
+// `fatal error: sync: unlock of unlocked mutex` and takes the whole test
+// binary with it.
+func TestSupervisorEventLog_GenuineFlockErrorReleasesMutexExactlyOnce(t *testing.T) {
+	cases := []struct {
+		name string
+		emit func(l *SupervisorEventLog, evt SupervisorEvent) error
+	}{
+		{"Emit", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.Emit(evt)
+		}},
+		{"TryEmit", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.TryEmit(evt)
+		}},
+		{"EmitWithTimeout", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.EmitWithTimeout(evt, 5*time.Second)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The parent directory deliberately does NOT exist, so the flock's
+			// own O_CREATE open fails with a genuine, non-timeout error.
+			path := filepath.Join(t.TempDir(), "no-such-dir", "supervisor-events.log")
+			logger, err := OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = logger.Close() }()
+
+			evt := SupervisorEvent{
+				Severity: "info",
+				Source:   "autostart",
+				Event:    "emit-genuine-flock-error",
+			}
+
+			emitErr := tc.emit(logger, evt)
+			if emitErr == nil {
+				t.Fatalf("%s over an unopenable lock path returned nil; want a reported flock error", tc.name)
+			}
+			// A genuine flock error must be reported AS ITSELF, never laundered
+			// into the bounded-skip sentinel — a caller that sees
+			// ErrSupervisorEventEmitTimeout is told to retry/await a worker that
+			// was never spawned.
+			if errors.Is(emitErr, ErrSupervisorEventEmitTimeout) {
+				t.Fatalf("%s reported a genuine flock error as the bounded-skip sentinel: %v", tc.name, emitErr)
+			}
+			if !strings.Contains(emitErr.Error(), "supervisor event log flock") {
+				t.Fatalf("%s error = %v, want it wrapped as a supervisor event log flock error", tc.name, emitErr)
+			}
+
+			// The actual P1 assertion: l.mu was released EXACTLY once, so it is
+			// neither still held (leak) nor double-unlocked (fatal). TryLock
+			// succeeding proves it is unlocked and this goroutine can own it.
+			if !logger.mu.TryLock() {
+				t.Fatalf("%s left l.mu held after a genuine flock error", tc.name)
+			}
+			logger.mu.Unlock()
+
+			// And the log handle stays usable: a second call takes the same
+			// failing path and must behave identically rather than deadlocking
+			// on a leaked mutex.
+			if secondErr := tc.emit(logger, evt); secondErr == nil {
+				t.Fatalf("%s second call over an unopenable lock path returned nil", tc.name)
+			}
+			if !logger.mu.TryLock() {
+				t.Fatalf("%s left l.mu held after the second genuine flock error", tc.name)
+			}
+			logger.mu.Unlock()
+		})
 	}
 }
 

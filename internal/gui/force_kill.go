@@ -9,6 +9,7 @@
 //   - VerdictKilledRecovered / VerdictHealthy  -> 200 + Verdict JSON
 //   - VerdictKillRefused (identity gate fail)  -> 403 + verdict body
 //   - VerdictRaceLost   (lock changed mid)     -> 412 + verdict body
+//   - VerdictIndeterminate (liveness unknown)  -> 503 + verdict body
 //   - VerdictKillFailed / VerdictMalformed     -> 500 + verdict body
 //   - any other err != nil                     -> 500 + verdict body
 //
@@ -122,6 +123,22 @@ func (s *Server) forceKillHandler(w http.ResponseWriter, r *http.Request) {
 		// mid-flight").
 		writeJSON(w, http.StatusPreconditionFailed, map[string]any{
 			"error":   "lock_changed_mid_flight",
+			"detail":  err.Error(),
+			"verdict": v,
+		})
+	case VerdictIndeterminate:
+		// The identity probe hit an ambiguous PLATFORM error that is NOT
+		// the platform's own "no such process" signal, so KillRecordedHolder
+		// SKIPPED the kill entirely (single_instance.go's
+		// Malformed/DeadPID/Indeterminate arm). Reporting that as the
+		// default arm's 500 `kill_failed` was doubly wrong: no kill was
+		// attempted, and nothing failed on the server — we simply could not
+		// establish liveness. 503 carries the honest, retryable semantic
+		// that matches the Verdict's own hint; the GUI must re-probe rather
+		// than treat this as a terminal error or as proof the holder is
+		// gone.
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "liveness_indeterminate",
 			"detail":  err.Error(),
 			"verdict": v,
 		})
