@@ -35,11 +35,43 @@ func TestDefaultRouteDaemonPort_NotInPortsYAMLOrGUIOrSerenaPool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse configs/ports.yaml: %v", err)
 	}
+	// FOREIGN rows only. The original guard rejected the port appearing in
+	// configs/ports.yaml at all, which conflated two opposite facts: another
+	// server holding this port (the F2 defect — 9126 vs godbolt) versus the
+	// route daemon declaring its OWN port in the ledger (correct, and the whole
+	// reason the ledger exists). The un-narrowed form made the two mutually
+	// exclusive, so registering route/front:9137 turned this guard red even
+	// though nothing collided.
+	//
+	// That registration is load-bearing, not bookkeeping: 9137 was claimed only
+	// as a CONSTANT IN CODE (DefaultRouteDaemonPort here, DefaultMCPFrontPort in
+	// internal/api/mcp_front_port.go), so a ledger scan could not see it and the
+	// vcpkg daemon was nearly assigned the same port. The ledger row is what
+	// makes the claim visible to the next assignment; keep it, and narrow the
+	// guard to what it was always meant to catch.
+	//
+	// The `daemon` field is deliberately NOT matched — any daemon under the
+	// route server is this server's own port to declare, and pinning the daemon
+	// name would make a future rename look like a foreign collision.
+	var ownRows int
 	for _, g := range reg.Global {
-		if g.Port == DefaultRouteDaemonPort {
-			t.Fatalf("DefaultRouteDaemonPort (%d) collides with configs/ports.yaml entry %s/%s",
-				DefaultRouteDaemonPort, g.Server, g.Daemon)
+		if g.Port != DefaultRouteDaemonPort {
+			continue
 		}
+		if g.Server == api.BuiltinRouteServer {
+			ownRows++
+			continue
+		}
+		t.Fatalf("DefaultRouteDaemonPort (%d) collides with configs/ports.yaml entry %s/%s owned by a DIFFERENT server",
+			DefaultRouteDaemonPort, g.Server, g.Daemon)
+	}
+	// Positive assertion, not merely the absence of a foreign row: the whole
+	// point of the fix above is that the route daemon's port IS declared in the
+	// ledger. Without this, silently deleting the row would leave the guard
+	// green and re-open the invisible-claim gap that nearly cost vcpkg its port.
+	if ownRows == 0 {
+		t.Errorf("DefaultRouteDaemonPort (%d) is not declared in configs/ports.yaml under server %q; an unregistered port is invisible to the next hand-assignment (this is exactly how the vcpkg daemon nearly took 9137)",
+			DefaultRouteDaemonPort, api.BuiltinRouteServer)
 	}
 
 	// The serena dynamic pool (internal/api/serena_dynamic_pool.go) reserves
