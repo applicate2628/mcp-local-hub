@@ -101,3 +101,98 @@ func TestPruneWorkspacePhases_SetSerenaPendingRemoval_OrderingAndFailureClear(t 
 		}
 	})
 }
+
+// TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow pins the
+// placement of the liveness fence, which is the whole basis of the repair's
+// "is this teardown alive?" answer (serena_removal_fence.go):
+//
+//   - ACQUIRED BEFORE SetSerenaPendingRemoval(true). Acquiring it after would
+//     leave an instant where the mark is set and the fence is free — the exact
+//     shape the repair reads as reclaimable crash debris.
+//   - RELEASED AFTER the row delete (and, on the failure path, after the mark is
+//     cleared back to false). Releasing earlier would expose the same window
+//     from the other end.
+func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing.T) {
+	newTD := func(calls *[]string, removeErr error) PruneWorkspaceTeardown {
+		return PruneWorkspaceTeardown{
+			AcquireSerenaRemovalFence: func() (func(), error) {
+				*calls = append(*calls, "fence.acquire")
+				return func() { *calls = append(*calls, "fence.release") }, nil
+			},
+			SetSerenaPendingRemoval: func(pending bool) error {
+				if pending {
+					*calls = append(*calls, "mark(true)")
+				} else {
+					*calls = append(*calls, "mark(false)")
+				}
+				return nil
+			},
+			RemoveSerenaIntent: func(string) (bool, error) {
+				*calls = append(*calls, "removeSerenaIntent")
+				return removeErr == nil, removeErr
+			},
+			DeleteSerenaRow: func() (int, error) {
+				*calls = append(*calls, "deleteSerenaRow")
+				return 1, nil
+			},
+		}
+	}
+	assertOrder := func(t *testing.T, calls, want []string) {
+		t.Helper()
+		if len(calls) != len(want) {
+			t.Fatalf("calls = %v, want %v", calls, want)
+		}
+		for i := range want {
+			if calls[i] != want[i] {
+				t.Errorf("calls[%d] = %q, want %q (full: %v)", i, calls[i], want[i], calls)
+			}
+		}
+	}
+
+	t.Run("success path: fence wraps mark through delete", func(t *testing.T) {
+		var calls []string
+		if err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, newTD(&calls, nil), &PruneReport{}); err != nil {
+			t.Fatalf("PruneWorkspacePhases: %v", err)
+		}
+		assertOrder(t, calls, []string{
+			"fence.acquire", "mark(true)", "removeSerenaIntent", "deleteSerenaRow", "fence.release",
+		})
+	})
+
+	t.Run("failure path: fence outlives the mark clear", func(t *testing.T) {
+		var calls []string
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true,
+			newTD(&calls, errors.New("simulated teardown failure")), &PruneReport{})
+		if err == nil {
+			t.Fatal("PruneWorkspacePhases must surface the RemoveSerenaIntent failure")
+		}
+		assertOrder(t, calls, []string{
+			"fence.acquire", "mark(true)", "removeSerenaIntent", "mark(false)", "fence.release",
+		})
+	})
+
+	t.Run("acquire failure aborts before any mutation", func(t *testing.T) {
+		fenceErr := errors.New("simulated fence acquire failure")
+		var calls []string
+		td := newTD(&calls, nil)
+		td.AcquireSerenaRemovalFence = func() (func(), error) {
+			calls = append(calls, "fence.acquire")
+			return nil, fenceErr
+		}
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+		if err == nil || !errors.Is(err, fenceErr) {
+			t.Fatalf("err = %v, want a wrap of %v — proceeding unfenced would silently reinstate the race", err, fenceErr)
+		}
+		assertOrder(t, calls, []string{"fence.acquire"})
+	})
+
+	t.Run("nil fence seam is tolerated", func(t *testing.T) {
+		var calls []string
+		td := newTD(&calls, nil)
+		td.AcquireSerenaRemovalFence = nil
+		if err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{}); err != nil {
+			t.Fatalf("PruneWorkspacePhases with a nil fence seam: %v", err)
+		}
+		assertOrder(t, calls, []string{"mark(true)", "removeSerenaIntent", "deleteSerenaRow"})
+	})
+}

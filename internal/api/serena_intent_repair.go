@@ -51,29 +51,40 @@ const (
 
 // serenaPendingRemovalLeaseTTL bounds how long a WorkspaceEntry's
 // PendingSerenaRemoval mark is honored as "an unregister is tearing this row
-// down right now" before the repair treats it as debris from an INTERRUPTED
-// unregister and recovers.
+// down right now" WITHOUT consulting the liveness fence, before the repair asks
+// whether the teardown is actually still alive.
 //
 // Sizing: the marked window is [SetSerenaPendingRemoval(true) ->
 // RemoveSerenaIntent -> DeleteSerenaRow] in PruneWorkspacePhases. Its slow leg
 // is RemoveSerenaIntent's live-supervisor reconcile nudge, bounded by
 // DefaultReconcileTimeout (30s); the two registry writes around it are
-// sub-second. 10 minutes is ~20x that worst case, so a genuinely in-flight
-// teardown can never be mistaken for debris, while a lost one is recovered on
-// the next startup self-heal or apply-mode reconcile past the TTL rather than
-// never.
+// sub-second. 10 minutes is ~20x that worst case.
+//
+// The TTL is NO LONGER the reclaim decision — the fence is (see
+// serena_removal_fence.go). Elapsed time cannot separate a teardown that
+// CRASHED from one that is merely SLOW, and both legs above sit behind BLOCKING
+// flock acquires with no timeout, so a teardown can genuinely outlive any TTL
+// while remaining perfectly alive. The TTL survives only as the cheap fast path:
+// inside it the mark is honored outright with no probe at all, past it the fence
+// is consulted. Every reclaim now additionally requires the fence to prove the
+// owner is gone.
 const serenaPendingRemovalLeaseTTL = 10 * time.Minute
 
 // pendingSerenaRemovalLeaseFresh reports whether a PendingSerenaRemoval mark
-// stamped at stampedAt is still within its lease at now.
+// stamped at stampedAt is still within its lease at now — i.e. whether the mark
+// may be honored WITHOUT probing the liveness fence.
 //
-// Both tails fail toward RECOVERY, never toward the permanent skip this lease
-// exists to end:
+// Both tails fail toward CONSULTING THE FENCE, never toward the permanent skip
+// this lease exists to end:
 //   - a ZERO stamp cannot be aged (an older binary's write, or a hand edit), so
 //     it is expired;
 //   - a stamp in the FUTURE (clock step or skew) is honored only while it is
 //     less than one TTL ahead, so a clock jumped far forward and then back
 //     cannot pin a row as "being removed" indefinitely.
+//
+// "Expired" no longer means "reclaim" on its own: past the lease the caller asks
+// the fence whether a live teardown still owns the row, and only a fence that
+// proves the owner is GONE authorizes the reclaim.
 func pendingSerenaRemovalLeaseFresh(stampedAt, now time.Time) bool {
 	if stampedAt.IsZero() {
 		return false
@@ -89,6 +100,17 @@ type serenaIntentRepairEvent struct {
 	event    string
 	taskName string
 	body     map[string]any
+}
+
+// pendingRemovalFenceSkip records one row whose pending-removal mark outlived
+// its lease but whose LIVENESS FENCE refused the reclaim. probeErr is nil when
+// the fence was cleanly observed as HELD (a live teardown), and non-nil when the
+// probe itself failed (liveness undeterminable — also a fail-closed skip). The
+// two are audited under one event with distinct counts so an operator can tell a
+// genuinely long-running unregister apart from a broken fence.
+type pendingRemovalFenceSkip struct {
+	workspaceKey string
+	probeErr     error
 }
 
 // RepairSerenaIntentFromRegistry re-reads the workspace registry and the
@@ -212,6 +234,12 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		return 0, nil, fmt.Errorf("serena intent repair: resolve registry path: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+	// The per-workspace unregister fences are co-located with the registry (the
+	// same rule the default-workspace marker follows), NOT with the supervisor
+	// state dir: the unregister side resolves only a registry path, and the two
+	// roots can diverge under a test/override seam. Deriving both sides from the
+	// registry directory keeps the fence a single shared rendezvous.
+	registryDir := filepath.Dir(regPath)
 
 	// 2. Registry flock with a BRIEF BOUNDED RETRY, HELD across the WHOLE repair.
 	//    A single TryLock-then-skip is too eager: a non-mutating registry READER —
@@ -278,6 +306,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	var skippedDivergent []string
 	var deferredLegacy []string
 	var expiredRemovalMarks []WorkspaceEntry
+	var fenceSkips []pendingRemovalFenceSkip
 	for i := range rows {
 		ws := rows[i]
 		if ws.Language != SerenaLanguageSentinel || ws.WorkspacePath == "" {
@@ -295,19 +324,51 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		// DeleteSerenaRow commits, or the flag clears if the teardown fails and a
 		// normal orphan classification applies on the next pass).
 		//
-		// The mark is honored only while its LEASE is fresh. "Self-resolving"
-		// holds for a teardown that RUNS to a verdict; it does NOT hold for one
-		// that is INTERRUPTED after the mark and the descriptor removal but
-		// before DeleteSerenaRow (the process is killed, or that delete's
-		// registry write fails) — nothing then ever clears the flag, and an
-		// unconditional skip here would strand the row forever: no daemon in the
-		// intent, the resolver still routing to it, and `mcphub workspace
-		// register` still rejecting it as already registered. Past the lease the
-		// row is classified as the ordinary crash-orphan it is (exactly the state
-		// an interruption BEFORE the mark would have left) and the stale mark is
-		// cleared below.
+		// "Self-resolving" holds for a teardown that RUNS to a verdict; it does
+		// NOT hold for one that is INTERRUPTED after the mark and the descriptor
+		// removal but before DeleteSerenaRow (the process is killed, or that
+		// delete's registry write fails) — nothing then ever clears the flag, and
+		// an unconditional skip here would strand the row forever: no daemon in
+		// the intent, the resolver still routing to it, and `mcphub workspace
+		// register` still rejecting it as already registered. So the mark must be
+		// reclaimable — but ONLY once its owner is provably gone.
+		//
+		// Two conditions gate that reclaim, in cost order:
+		//
+		//  1. The LEASE must have expired. Inside it the mark is honored with no
+		//     probe at all (the overwhelmingly common case: a teardown finishes in
+		//     well under a second).
+		//  2. The FENCE must be free. This is the load-bearing one. A wall-clock
+		//     lease measures elapsed time, not liveness, and both slow legs of the
+		//     teardown sit behind BLOCKING flock acquires with no timeout — so a
+		//     teardown blocked past the lease is indistinguishable from a dead one
+		//     by the clock alone. Reclaiming there produced a resurrected
+		//     descriptor with no registry row: the repair cleared the mark, the
+		//     unblocked teardown's own reconcile re-appended the now-unmarked
+		//     "orphan", and its DeleteSerenaRow then removed only the registry
+		//     row. The fence answers the liveness question directly — the kernel
+		//     releases it when its holder dies — so a live-but-slow teardown keeps
+		//     its row and a killed one releases it (serena_removal_fence.go).
+		//
+		// The fence is consulted ONLY to ADD skips, never to remove the lease's
+		// protection: an unobservable fence, or a mark written by an older binary
+		// that took no fence at all, still gets the full lease window before
+		// anything reclaims it.
 		if ws.PendingSerenaRemoval {
 			if pendingSerenaRemovalLeaseFresh(ws.PendingSerenaRemovalAt, now) {
+				continue
+			}
+			held, ferr := serenaRemovalFenceHeldFn(registryDir, ws.WorkspaceKey)
+			if ferr != nil || held {
+				// held → a live teardown owns this row; ferr → liveness could not
+				// be determined. Fail closed on both: the cost of skipping is one
+				// more pass before recovery, the cost of reclaiming wrongly is the
+				// resurrected-descriptor split above. Audit it either way — a mark
+				// this old is anomalous regardless of which branch fired.
+				fenceSkips = append(fenceSkips, pendingRemovalFenceSkip{
+					workspaceKey: ws.WorkspaceKey,
+					probeErr:     ferr,
+				})
 				continue
 			}
 			expiredRemovalMarks = append(expiredRemovalMarks, ws)
@@ -357,9 +418,11 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 			missing = append(missing, ws)
 		}
 	}
-	// 4b. Crash recovery for the pending-removal lease. Every row above whose
-	//     mark had aged out is debris from an unregister that never reached its
-	//     DeleteSerenaRow; it has ALREADY been reclassified normally (as an
+	// 4b. Crash recovery for the pending-removal mark. Every row here cleared BOTH
+	//     gates: its mark aged out of the lease AND its liveness fence was
+	//     observed FREE, so the unregister that set the mark is provably gone
+	//     (the kernel releases a flock on holder death) — it never reached its
+	//     DeleteSerenaRow. Each has ALREADY been reclassified normally (as an
 	//     orphan / healthy / deferred row, whichever it is). Clear the stale
 	//     mark so the registry stops asserting a teardown that is not happening
 	//     — we still hold the registry flock, so this write cannot race another
@@ -380,7 +443,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 			"expired_count":     len(expiredKeys),
 			"expired_workspace": expiredKeys,
 			"lease_ttl":         serenaPendingRemovalLeaseTTL.String(),
-			"reason":            "registry row carries a pending_serena_removal mark older than the lease; the unregister that set it never reached its registry-row delete (killed process, or a failed delete write), so the row is reclassified as an ordinary crash-orphan and the stale mark is cleared",
+			"reason":            "registry row carries a pending_serena_removal mark older than the lease AND its unregister fence is free, so the unregister that set it is provably gone and never reached its registry-row delete (killed process, or a failed delete write); the row is reclassified as an ordinary crash-orphan and the stale mark is cleared",
 			"operator_action":   "no action required — re-run `mcphub workspace unregister <path> --backend serena` if the removal was still intended",
 		}
 		if commit {
@@ -391,6 +454,47 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		repairEvents = append(repairEvents, serenaIntentRepairEvent{
 			severity: SupervisorEventSeverityWarn,
 			event:    "serena-pending-removal-lease-expired",
+			body:     body,
+		})
+	}
+
+	// 4c. Fence-refused reclaims. The mark outlived its lease, but the liveness
+	//     fence says the teardown that set it is still alive (or could not be
+	//     observed at all), so the row was skipped rather than reclaimed. This is
+	//     the event that distinguishes "a teardown has been blocked for over ten
+	//     minutes" from a silent no-op — without it, a wedged unregister would
+	//     look identical to a healthy pass.
+	//
+	//     Emitted in BOTH modes' event slice but, like every other event here,
+	//     flushed only when commit is true (preview never writes the audit log).
+	if len(fenceSkips) > 0 {
+		liveKeys := make([]string, 0, len(fenceSkips))
+		var probeErrKeys []string
+		var probeErrs []string
+		for _, s := range fenceSkips {
+			if s.probeErr == nil {
+				liveKeys = append(liveKeys, s.workspaceKey)
+				continue
+			}
+			probeErrKeys = append(probeErrKeys, s.workspaceKey)
+			probeErrs = append(probeErrs, s.probeErr.Error())
+		}
+		body := map[string]any{
+			"skipped_count":     len(fenceSkips),
+			"live_fence_count":  len(liveKeys),
+			"live_workspace":    liveKeys,
+			"probe_error_count": len(probeErrKeys),
+			"lease_ttl":         serenaPendingRemovalLeaseTTL.String(),
+			"reason":            "registry row carries a pending_serena_removal mark older than the lease, but its per-workspace unregister fence is still held (a live teardown) or could not be probed; the row was skipped instead of reclaimed, because reclaiming a LIVE teardown's row resurrects its descriptor with no registry row behind it",
+			"operator_action":   "no action required if an `mcphub workspace unregister` / auto-prune is genuinely in flight; if none is, check for a teardown blocked on supervisor-intent.json.lock or workspaces.yaml.lock",
+		}
+		if len(probeErrKeys) > 0 {
+			body["probe_error_workspace"] = probeErrKeys
+			body["probe_error"] = probeErrs
+		}
+		repairEvents = append(repairEvents, serenaIntentRepairEvent{
+			severity: SupervisorEventSeverityWarn,
+			event:    "serena-pending-removal-fence-held",
 			body:     body,
 		})
 	}

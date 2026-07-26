@@ -699,6 +699,15 @@ func workspaceRegisterNoSupervisorAdvice(settled serenaRegisterSettledResult, ch
 // serenaRegisterBlessTrustedRootFn).
 var writeDefaultWorkspaceFn = writeDefaultWorkspace
 
+// clearDefaultWorkspaceIfMatchesFn is the test-injectable seam over the
+// unregister-side default-marker clear. It mirrors writeDefaultWorkspaceFn and
+// exists for the same reason: the whole point of that clear is WHEN it happens
+// (inside DeleteSerenaRow's registry-lock hold, ordered against the row delete
+// it depends on), and lock-hold state at that instant is not observable from
+// outside the critical section — so without a hook the ordering could only be
+// asserted by racing it.
+var clearDefaultWorkspaceIfMatchesFn = clearDefaultIfMatches
+
 // serenaRegisterBlessTrustedRootFn is the explicit-serena-register bless seam
 // (area-5 co-design). Production blesses the workspace's canonical root in the
 // shared trusted-roots store via api.BlessDefaultTrustedRoot — the SAME owner
@@ -829,6 +838,14 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			reg := api.NewRegistry(regPath)
 			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
 		},
+		// Per-workspace unregister LIVENESS FENCE, held by the sequencer across
+		// the whole marked window so the supervisor's repair can tell this
+		// teardown apart from a crashed one even when it blocks past the
+		// pending-removal lease (api/serena_removal_fence.go). Fenced on the
+		// CANONICAL key only — the legacy key names the same workspace.
+		AcquireSerenaRemovalFence: func() (func(), error) {
+			return api.AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
+		},
 		DeleteSerenaRow: func() (int, error) {
 			reg := api.NewRegistry(regPath)
 			unlock, err := reg.Lock()
@@ -846,6 +863,43 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			if err := reg.Save(); err != nil {
 				return 0, err
 			}
+			// Clear the default marker HERE — inside this delete's registry-lock
+			// hold, and only for a delete that actually removed a row. This is
+			// the mirror image of register's step 6a, and it closes the same
+			// ordering defect from the other side.
+			//
+			// Outside the hold (where this used to run, after PruneWorkspacePhases
+			// had returned) a concurrent `workspace register --default` could
+			// recreate BOTH the row and its marker in the gap, and this older
+			// unregister would then clear the NEW marker even though that
+			// registration succeeded — leaving the operator registered with no
+			// default and nothing to blame it on. Under the lock the two commands
+			// can only sequence: a register that lands BEFORE this delete has its
+			// row removed here (so clearing its marker is correct), and one that
+			// lands AFTER writes its marker at its own step 6a, after this clear.
+			//
+			// Gating on n > 0 makes the clear an OWNERSHIP statement rather than a
+			// blanket cleanup: only the process that actually removed the serena
+			// row clears the marker naming it. A racing unregister that finds the
+			// row already gone (n == 0) is not the remover and must not touch a
+			// marker someone else may have just legitimately written. This does
+			// drop the previous opportunistic clear of an ALREADY-dangling marker
+			// on a `--backend all` run that had no serena row to remove — that
+			// clear was itself the racy one, and the marker it targeted was
+			// dangling before the command started.
+			//
+			// Lock order stays registry -> marker, matching register step 6a and
+			// `workspace set-default`; nothing takes them the other way round.
+			// Errors are non-fatal: the rows ARE removed, and failing the
+			// unregister over marker bookkeeping would misreport a completed
+			// teardown.
+			if n > 0 {
+				if cerr := clearDefaultWorkspaceIfMatchesFn(filepath.Dir(regPath), canonical); cerr != nil {
+					fmt.Fprintf(cmd.OutOrStderr(),
+						"warning: registry rows removed but failed to clear the default-workspace marker for %s: %v\n",
+						canonical, cerr)
+				}
+			}
 			return n, nil
 		},
 	}
@@ -857,12 +911,8 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	}
 	removed := len(report.LSPRemoved) + report.SerenaRemoved
 
-	// If the default marker pointed at this workspace AND we removed the
-	// serena row (or --backend all), clear the marker. Otherwise stale
-	// default would route Phase F to a workspace that no longer exists.
-	if backend == "all" || backend == "serena" {
-		_ = clearDefaultIfMatches(filepath.Dir(regPath), canonical)
-	}
+	// (The default marker is cleared inside DeleteSerenaRow above, under the
+	// registry-lock hold that commits the row delete it depends on.)
 
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Removed %d registry row(s) for workspace %s (key %s) with --backend=%q\n",

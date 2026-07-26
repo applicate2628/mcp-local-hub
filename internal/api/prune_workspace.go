@@ -40,6 +40,7 @@ package api
 
 import (
 	"fmt"
+	"path/filepath"
 )
 
 // PruneReport summarizes what PruneWorkspace removed. It mirrors the
@@ -81,11 +82,21 @@ type PruneReport struct {
 //     re-appending the very row this teardown is removing. Nil is tolerated
 //     (a caller with no serena row in scope, or a test that does not care)
 //     and simply skips the mark/clear step.
+//   - AcquireSerenaRemovalFence takes the per-workspace unregister LIVENESS
+//     FENCE (production: api.AcquireSerenaRemovalFence) and returns its release
+//     closure. PruneWorkspacePhases holds it across the ENTIRE marked window so
+//     RepairSerenaIntentFromRegistry can distinguish a teardown that is merely
+//     SLOW from one that CRASHED: the mark alone cannot, and the wall-clock
+//     lease that used to answer it measured elapsed time, not liveness (see
+//     serena_removal_fence.go). Nil is tolerated and simply skips the fence,
+//     which leaves the pre-fence lease-only behavior — the marked row is still
+//     protected for the lease window, just not beyond it.
 type PruneWorkspaceTeardown struct {
-	LSPUnregister           func(workspacePath string, languages []string) (*UnregisterReport, error)
-	RemoveSerenaIntent      func(canonicalWorkspacePath string) (bool, error)
-	DeleteSerenaRow         func() (int, error)
-	SetSerenaPendingRemoval func(pending bool) error
+	LSPUnregister             func(workspacePath string, languages []string) (*UnregisterReport, error)
+	RemoveSerenaIntent        func(canonicalWorkspacePath string) (bool, error)
+	DeleteSerenaRow           func() (int, error)
+	SetSerenaPendingRemoval   func(pending bool) error
+	AcquireSerenaRemovalFence func() (release func(), err error)
 }
 
 // PruneWorkspace tears down a workspace's daemon rows in the SAME order the CLI
@@ -157,6 +168,14 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 		SetSerenaPendingRemoval: func(pending bool) error {
 			reg := NewRegistry(regPath)
 			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
+		},
+		// Fence on the CANONICAL key only. The legacy key names the same
+		// workspace, so a second leaf would be a second mutex for one resource,
+		// and the repair probes with the row's own WorkspaceKey — which the
+		// divergence guard requires to equal WorkspaceKey(WorkspacePath), i.e.
+		// the canonical key. One key, one fence.
+		AcquireSerenaRemovalFence: func() (func(), error) {
+			return AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
 		},
 		DeleteSerenaRow: func() (int, error) {
 			reg := NewRegistry(regPath)
@@ -238,6 +257,14 @@ func (a *API) ListAllWorkspaceRows() ([]*WorkspaceEntry, error) {
 //     mistake this deliberate teardown for a crash-orphan and resurrect the row
 //     (unregister-resurrects-serena-intent fix); a RemoveSerenaIntent failure
 //     clears the mark back to false so a retry sees a normal orphan row again.
+//   - WRAPPING the whole serena phase, td.AcquireSerenaRemovalFence is taken
+//     BEFORE the mark and released only after the row delete (or after the
+//     failure path has cleared the mark). The fence is the LIVENESS half of the
+//     same guard: the mark says "a teardown claims this row", the fence says
+//     "and that teardown is still alive". Acquiring it after the mark, or
+//     releasing it before the delete, would leave a window in which the mark is
+//     set with no live holder — which is precisely the shape the repair reads
+//     as reclaimable crash debris.
 //
 // wantLSP / wantSerena gate the two phases (the caller decides scope from its
 // own classification). report accumulates the per-backend outcome + warnings;
@@ -255,6 +282,25 @@ func PruneWorkspacePhases(workspacePath, canonical string, lspLangs []string, wa
 	}
 
 	if wantSerena {
+		// Liveness fence FIRST — before the mark, and held past the row delete.
+		// The deferred release runs at function exit, which is the end of the
+		// serena phase (nothing follows it), so every early return below —
+		// including the RemoveSerenaIntent failure path that clears the mark —
+		// releases the fence only AFTER the registry has been left in a state no
+		// repair can misread.
+		//
+		// A fence failure ABORTS before any mutation. Proceeding unfenced would
+		// silently reinstate the exact race this closes, and nothing has been
+		// changed yet at this point, so the abort is free.
+		if td.AcquireSerenaRemovalFence != nil {
+			release, ferr := td.AcquireSerenaRemovalFence()
+			if ferr != nil {
+				return fmt.Errorf("acquire serena removal fence for workspace %s: %w", canonical, ferr)
+			}
+			if release != nil {
+				defer release()
+			}
+		}
 		if td.RemoveSerenaIntent != nil {
 			if td.SetSerenaPendingRemoval != nil {
 				if merr := td.SetSerenaPendingRemoval(true); merr != nil {
