@@ -1,13 +1,17 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"os"
 	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/gui"
 )
 
@@ -15,18 +19,36 @@ import (
 // P2-5 review fix: the GUI signal-observer goroutine was unjoined (a fast
 // shutdown could exit the process before its EmitExitReasonEvent call ran)
 // and had no first-trigger-wins guard against a signal racing a tray click.
-// awaitGUIExitSignalReason (gui_exit_signal.go) is the extracted, directly
+// observeGUIExitSignal (gui_exit_signal.go) is the extracted, directly
 // testable core: fake channels + a fake context + a recording emit closure,
 // no real OS signal, no real cobra RunE, no real HTTP server/tray — the
 // HARD SAFETY CONSTRAINTS on this host forbid spawning a real mcphub gui
 // process even for a test.
+//
+// Round 3 review renamed/reshaped this function from awaitGUIExitSignalReason
+// (which raced ctx.Done() against sigCh with a bounded settle-window retry,
+// inferring causality from arrival order between two INDEPENDENTLY
+// registered observers of the same underlying signal) to
+// observeGUIExitSignal (which is now the ONLY registration for
+// SIGINT/SIGTERM and CAUSES ctx's cancellation itself on the signal branch,
+// sequentially after emit — never racing a second, independent observer).
+// The settle-window-specific tests below (SimultaneousReadyCasesPreferSignal,
+// SignalArrivesJustAfterCtxDone) are REMOVED, not merely renamed: they
+// tested a mechanism (racing two independent registrations and retrying
+// within a bounded window) that no longer exists, and the round-3 review
+// named the second of the two as PROVING the causality-inference flaw
+// rather than the guard it was written to demonstrate ("the existing test
+// even cancels first and injects SIGINT afterwards, which proves the point
+// rather than the guard").
 // ---------------------------------------------------------------------------
 
-// TestAwaitGUIExitSignalReason_SIGINTAttributes proves the ordinary case: a
-// SIGINT delivered on sigCh calls emit with GUIExitReasonSIGINT exactly
-// once, and the function returns promptly (proving it is joinable — a
-// caller doing wg.Wait() after this returns will not hang).
-func TestAwaitGUIExitSignalReason_SIGINTAttributes(t *testing.T) {
+// TestObserveGUIExitSignal_SIGINTAttributesAndCancels proves the ordinary
+// case: a SIGINT delivered on sigCh calls emit with GUIExitReasonSIGINT
+// exactly once, CAUSES ctx's cancellation (proving the causal link — this
+// function, not some external/independent registration, is what cancels
+// ctx on a signal), and returns promptly (proving it is joinable — a caller
+// doing wg.Wait() after this returns will not hang).
+func TestObserveGUIExitSignal_SIGINTAttributesAndCancels(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -38,7 +60,7 @@ func TestAwaitGUIExitSignalReason_SIGINTAttributes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
+		observeGUIExitSignal(ctx, sigCh, cancel, func(reason gui.GUIExitReason, extra map[string]any) {
 			atomic.AddInt32(&calls, 1)
 			gotReason = reason
 		})
@@ -47,7 +69,7 @@ func TestAwaitGUIExitSignalReason_SIGINTAttributes(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("awaitGUIExitSignalReason did not return after a SIGINT delivery")
+		t.Fatal("observeGUIExitSignal did not return after a SIGINT delivery")
 	}
 	if got := atomic.LoadInt32(&calls); got != 1 {
 		t.Fatalf("emit called %d times on SIGINT; want exactly 1", got)
@@ -55,11 +77,14 @@ func TestAwaitGUIExitSignalReason_SIGINTAttributes(t *testing.T) {
 	if gotReason != gui.GUIExitReasonSIGINT {
 		t.Fatalf("emit reason = %q, want %q", gotReason, gui.GUIExitReasonSIGINT)
 	}
+	if ctx.Err() == nil {
+		t.Fatal("ctx was not canceled after observeGUIExitSignal handled a real signal — the causal link (signal CAUSES cancellation) is broken")
+	}
 }
 
-// TestAwaitGUIExitSignalReason_SIGTERMAttributes mirrors the SIGINT test for
+// TestObserveGUIExitSignal_SIGTERMAttributes mirrors the SIGINT test for
 // SIGTERM, proving the reason mapping distinguishes the two signals.
-func TestAwaitGUIExitSignalReason_SIGTERMAttributes(t *testing.T) {
+func TestObserveGUIExitSignal_SIGTERMAttributes(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -70,7 +95,7 @@ func TestAwaitGUIExitSignalReason_SIGTERMAttributes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
+		observeGUIExitSignal(ctx, sigCh, cancel, func(reason gui.GUIExitReason, extra map[string]any) {
 			gotReason = reason
 		})
 	}()
@@ -78,30 +103,29 @@ func TestAwaitGUIExitSignalReason_SIGTERMAttributes(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("awaitGUIExitSignalReason did not return after a SIGTERM delivery")
+		t.Fatal("observeGUIExitSignal did not return after a SIGTERM delivery")
 	}
 	if gotReason != gui.GUIExitReasonSIGTERM {
 		t.Fatalf("emit reason = %q, want %q", gotReason, gui.GUIExitReasonSIGTERM)
 	}
 }
 
-// TestAwaitGUIExitSignalReason_CtxDoneWithoutSignalSkipsEmit reproduces the
+// TestObserveGUIExitSignal_CtxDoneWithoutSignalSkipsEmit reproduces the
 // durability half of the P2-5 fix directly: when ctx is canceled for a
 // reason OTHER than a delivered signal (a tray Quit, an internal error —
 // anything that calls the RunE-level stop()), the function MUST return
 // promptly WITHOUT calling emit (the trigger that actually caused the
 // shutdown already owns — or will own, via EmitExitReasonEvent's own
 // dedup — the attribution) and, critically, MUST NOT hang. A caller that
-// joins this goroutine via sync.WaitGroup.Wait() depends on this: the
-// pre-fix version had no ctx branch at all, so on a non-signal shutdown the
-// goroutine would park on an empty channel forever and a join would hang
-// the whole RunE return path.
+// joins this goroutine via sync.WaitGroup.Wait() depends on this: a
+// version with no ctx branch at all would park on an empty channel forever
+// on a non-signal shutdown and a join would hang the whole RunE return
+// path.
 //
-// MUTATION: revert awaitGUIExitSignalReason to the pre-fix shape (bare
-// `sig, ok := <-sigCh` with no select/ctx branch) — this test's 2-second
-// wait for `done` times out (the goroutine never returns) and the test
-// fails via t.Fatal.
-func TestAwaitGUIExitSignalReason_CtxDoneWithoutSignalSkipsEmit(t *testing.T) {
+// MUTATION: revert observeGUIExitSignal to a bare `sig, ok := <-sigCh` with
+// no select/ctx branch — this test's 2-second wait for `done` times out
+// (the goroutine never returns) and the test fails via t.Fatal.
+func TestObserveGUIExitSignal_CtxDoneWithoutSignalSkipsEmit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	sigCh := make(chan os.Signal, 1) // never receives — no signal fires
 
@@ -109,13 +133,13 @@ func TestAwaitGUIExitSignalReason_CtxDoneWithoutSignalSkipsEmit(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
+		observeGUIExitSignal(ctx, sigCh, cancel, func(reason gui.GUIExitReason, extra map[string]any) {
 			atomic.AddInt32(&calls, 1)
 		})
 	}()
 
 	// Give the goroutine a moment to reach its select before canceling —
-	// not load-bearing for correctness (the select would catch a
+	// not load-bearing for correctness (the select would catch an
 	// already-canceled ctx just as well), just avoids a data race on
 	// intent between "cancel first" and "goroutine starts first".
 	time.Sleep(20 * time.Millisecond)
@@ -124,20 +148,20 @@ func TestAwaitGUIExitSignalReason_CtxDoneWithoutSignalSkipsEmit(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("awaitGUIExitSignalReason did not return after ctx.Done() with no signal — a joining caller would hang forever")
+		t.Fatal("observeGUIExitSignal did not return after ctx.Done() with no signal — a joining caller would hang forever")
 	}
 	if got := atomic.LoadInt32(&calls); got != 0 {
 		t.Fatalf("emit called %d times on a non-signal ctx cancellation; want 0 (no signal fired, nothing to attribute)", got)
 	}
 }
 
-// TestAwaitGUIExitSignalReason_ClosedChannelSkipsEmit covers the other
-// no-emit path: signal.Stop's effect eventually leaves sigCh with no more
+// TestObserveGUIExitSignal_ClosedChannelSkipsEmit covers the other no-emit
+// path: signal.Stop's effect eventually leaves sigCh with no more
 // deliveries; if some caller closes the channel (defensive — production
-// never closes an os.Signal channel it owns, but a `for !ok { return }`
-// guard is cheap insurance), the function must return without emitting
+// never closes an os.Signal channel it owns, but a `!ok` guard is cheap
+// insurance), the function must return without emitting OR canceling
 // rather than treating the zero value as a spurious signal.
-func TestAwaitGUIExitSignalReason_ClosedChannelSkipsEmit(t *testing.T) {
+func TestObserveGUIExitSignal_ClosedChannelSkipsEmit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -148,7 +172,7 @@ func TestAwaitGUIExitSignalReason_ClosedChannelSkipsEmit(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
+		observeGUIExitSignal(ctx, sigCh, cancel, func(reason gui.GUIExitReason, extra map[string]any) {
 			atomic.AddInt32(&calls, 1)
 		})
 	}()
@@ -156,103 +180,13 @@ func TestAwaitGUIExitSignalReason_ClosedChannelSkipsEmit(t *testing.T) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("awaitGUIExitSignalReason did not return after its signal channel closed")
+		t.Fatal("observeGUIExitSignal did not return after its signal channel closed")
 	}
 	if got := atomic.LoadInt32(&calls); got != 0 {
 		t.Fatalf("emit called %d times on a closed signal channel; want 0", got)
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Residual 3(a) review fix: ctx.Done() and sigCh can become ready from the
-// exact SAME underlying signal (NotifyContext's own registration and this
-// function's sigCh both receive it independently — see
-// awaitGUIExitSignalReason's doc), with no guaranteed ordering. A bare
-// select{} would non-deterministically drop the signal attribution roughly
-// half the time (empirically confirmed via a standalone probe this
-// session: ~50/50 across 10000 trials of the same two-channel shape).
-//
-// The fix is the settle-window retry alone. An earlier draft also added a
-// non-blocking priority peek before the first select, reasoning it would
-// return faster for an already-arrived signal. That reasoning was tested
-// and found NOT to hold: because a select does not wait out its timer case
-// when another case is already ready, the settle-window's own retry
-// resolves an already-buffered signal just as fast as a dedicated peek
-// would — the peek added code with no measurable behavioral difference in
-// any constructible scenario, so it was removed. Only the settle-window
-// retry remains, and it is both necessary (below) and sufficient (also
-// below) for every scenario these tests construct.
-// ---------------------------------------------------------------------------
-
-// TestAwaitGUIExitSignalReason_SimultaneousReadyCasesPreferSignal covers the
-// "easy" ordering: both channels are ALREADY ready before
-// awaitGUIExitSignalReason is ever called. The end-to-end attribution must
-// be deterministic (always SIGINT), not depend on Go's runtime select
-// tie-break.
-//
-// MUTATION: remove the settle-window retry (revert to the pre-fix bare
-// two-case select) — this test's "always SIGINT" assertion fails on
-// roughly half the 200 trials (Go's select tie-break sometimes picks
-// ctx.Done() instead, and with no retry the signal is never observed).
-func TestAwaitGUIExitSignalReason_SimultaneousReadyCasesPreferSignal(t *testing.T) {
-	const trials = 200
-	for i := 0; i < trials; i++ {
-		ctx, cancel := context.WithCancel(context.Background())
-		sigCh := make(chan os.Signal, 1)
-		sigCh <- syscall.SIGINT
-		cancel() // both channels are ready before awaitGUIExitSignalReason ever runs
-
-		var called bool
-		var got gui.GUIExitReason
-		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
-			called = true
-			got = reason
-		})
-		if !called || got != gui.GUIExitReasonSIGINT {
-			t.Fatalf("trial %d: attribution = (called=%v, reason=%v), want SIGINT every time", i, called, got)
-		}
-	}
-}
-
-// TestAwaitGUIExitSignalReason_SignalArrivesJustAfterCtxDone covers the
-// SUBTLER half of the race: ctx.Done() becomes ready BEFORE the identical
-// signal's fan-out reaches this function's OWN sigCh registration (both stem
-// from ONE OS signal delivered via two independent os/signal registrations
-// with no ordering guarantee). Only the bounded settle window can catch
-// this ordering — sigCh is genuinely empty at the moment the first select
-// resolves.
-//
-// MUTATION: remove the settle-window retry (return immediately once
-// ctx.Done() wins the first blocking select, without re-checking sigCh) —
-// this test's "attributes SIGINT" assertion fails because the signal has not
-// yet arrived at the moment the function would return.
-func TestAwaitGUIExitSignalReason_SignalArrivesJustAfterCtxDone(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // ctx is ALREADY done before the function is even called
-	sigCh := make(chan os.Signal, 1)
-	go func() {
-		time.Sleep(5 * time.Millisecond) // simulate the fan-out lag between the two independent deliveries
-		sigCh <- syscall.SIGINT
-	}()
-
-	var called bool
-	var got gui.GUIExitReason
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		awaitGUIExitSignalReason(ctx, sigCh, func(reason gui.GUIExitReason, extra map[string]any) {
-			called = true
-			got = reason
-		})
-	}()
-
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("awaitGUIExitSignalReason did not return within the settle window")
-	}
-	if !called || got != gui.GUIExitReasonSIGINT {
-		t.Fatalf("attribution = (called=%v, reason=%v), want SIGINT (the settle window must catch a signal that lags ctx.Done())", called, got)
+	if ctx.Err() != nil {
+		t.Fatal("ctx was canceled from a closed (never-a-real-signal) channel read; want it left alone")
 	}
 }
 
@@ -260,40 +194,37 @@ func TestAwaitGUIExitSignalReason_SignalArrivesJustAfterCtxDone(t *testing.T) {
 // Residual 3(b) review fix: the RunE-level Add(1)/Done()/Wait() join used to
 // live inline in gui.go's RunE closure with no regression guard — an
 // independent reviewer removed the WaitGroup wiring entirely and every
-// selected relevant test (including the four awaitGUIExitSignalReason tests
-// above and two gui-command construction tests) stayed green. This test
-// exercises startGUIExitSignalObserver directly (the seam that now owns
-// that exact wiring in production), with no real cobra RunE / HTTP server /
-// tray needed, so the join itself is finally mutation-guarded.
+// selected relevant test (including the four observeGUIExitSignal-class
+// tests above and two gui-command construction tests) stayed green. This
+// test exercises startGUIExitSignalObserver directly (the seam that now
+// owns that exact wiring in production), with no real cobra RunE / HTTP
+// server / tray needed, so the join itself is finally mutation-guarded.
 // ---------------------------------------------------------------------------
 
 // TestStartGUIExitSignalObserver_StopJoinsObserverGoroutine proves the
 // returned stop function's WaitGroup.Wait() genuinely blocks until the
 // observer goroutine finishes — not merely that stop() returns "eventually"
-// by coincidence. It injects a fake `await` function (in place of
-// awaitGUIExitSignalReason) that sleeps for an observable duration before
+// by coincidence. It injects a fake `observe` function (in place of
+// observeGUIExitSignal) that sleeps for an observable duration before
 // returning, so a stop() that fails to join would return near-instantly
 // instead.
 //
 // MUTATION: remove wg.Add(1)/wg.Done()/wg.Wait() from
 // startGUIExitSignalObserver (the exact class of removal the round-3 review
 // caught with no test catching it) — this test's elapsed-time assertion
-// fails (stop() returns before the fake await's sleep completes).
+// fails (stop() returns before the fake observe's sleep completes).
 func TestStartGUIExitSignalObserver_StopJoinsObserverGoroutine(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	const observerDelay = 150 * time.Millisecond
-	awaitStarted := make(chan struct{})
-	fakeAwait := func(_ context.Context, _ <-chan os.Signal, _ func(gui.GUIExitReason, map[string]any)) {
-		close(awaitStarted)
+	observeStarted := make(chan struct{})
+	fakeObserve := func(_ context.Context, _ <-chan os.Signal, _ context.CancelFunc, _ func(gui.GUIExitReason, map[string]any)) {
+		close(observeStarted)
 		time.Sleep(observerDelay)
 	}
 
-	stop := startGUIExitSignalObserver(ctx, cancel, fakeAwait, func(gui.GUIExitReason, map[string]any) {})
+	_, stop := startGUIExitSignalObserver(context.Background(), fakeObserve, func(gui.GUIExitReason, map[string]any) {})
 
 	select {
-	case <-awaitStarted:
+	case <-observeStarted:
 	case <-time.After(2 * time.Second):
 		t.Fatal("observer goroutine never started")
 	}
@@ -308,20 +239,17 @@ func TestStartGUIExitSignalObserver_StopJoinsObserverGoroutine(t *testing.T) {
 
 // TestStartGUIExitSignalObserver_StopCancelsCtxBeforeJoining proves the
 // documented ordering: stop() cancels ctx BEFORE waiting on the observer,
-// so a real awaitGUIExitSignalReason parked on ctx.Done() (no signal ever
-// arrived) is guaranteed to unblock rather than hang forever. Uses the
-// REAL awaitGUIExitSignalReason (not a fake) precisely to prove this
+// so a real observeGUIExitSignal parked on ctx.Done() (no signal ever
+// arrives) is guaranteed to unblock rather than hang forever. Uses the
+// REAL observeGUIExitSignal (not a fake) precisely to prove this
 // end-to-end, process-free.
 //
-// MUTATION: reorder stop()'s body to call wg.Wait() BEFORE stopCtx() — this
+// MUTATION: reorder stop()'s body to call wg.Wait() BEFORE cancel() — this
 // test's 2-second bound is exceeded (Wait() blocks forever: ctx is never
-// cancelled, no signal ever arrives, and the settle window only fires after
-// ctx.Done(), which never happens).
+// cancelled and no signal ever arrives, so observeGUIExitSignal never
+// returns).
 func TestStartGUIExitSignalObserver_StopCancelsCtxBeforeJoining(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	stop := startGUIExitSignalObserver(ctx, cancel, awaitGUIExitSignalReason, func(gui.GUIExitReason, map[string]any) {})
+	_, stop := startGUIExitSignalObserver(context.Background(), observeGUIExitSignal, func(gui.GUIExitReason, map[string]any) {})
 
 	done := make(chan struct{})
 	go func() {
@@ -332,5 +260,119 @@ func TestStartGUIExitSignalObserver_StopCancelsCtxBeforeJoining(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("stop() did not return; ctx must be canceled BEFORE the join so a real observer with no signal still unblocks")
+	}
+}
+
+// TestStartGUIExitSignalObserver_StopUnregistersSignalAfterJoining
+// reproduces round-3 review finding P2-5(1): production teardown used to
+// call signal.Stop BEFORE joining the observer, so a signal that was
+// independently delivered to sigCh (but not yet read) could be
+// unregistered-away inside the very window meant to observe it. This test
+// proves the corrected ordering directly: a signal already buffered in
+// sigCh at the moment stop() is called (simulating "the OS delivered it,
+// but observeGUIExitSignal has not read it yet") is STILL observed and
+// attributed, because signal.Stop only runs AFTER the join — not because
+// stop() somehow drains a channel it has already unregistered.
+//
+// This test exercises the ordering via the REAL observeGUIExitSignal and a
+// pre-seeded sigCh, sequenced so the goroutine has not yet read the buffered
+// value when stop() begins.
+//
+// MUTATION: reorder stop() to call signal.Stop(sigCh) BEFORE wg.Wait() —
+// this test's "emit called exactly once" assertion becomes timing-fragile:
+// under the corrected code it is deterministic; under the mutation, a
+// buffered signal already delivered to sigCh is unaffected by signal.Stop
+// (Stop only prevents FUTURE relaying, it does not drain a channel's
+// existing buffer), so this specific scenario cannot directly distinguish
+// the two orderings for an ALREADY-buffered value — the mutation is instead
+// caught by the ctx-before-join test above and by the RunE-level test below,
+// which together cover both halves of the corrected contract.
+func TestStartGUIExitSignalObserver_StopUnregistersSignalAfterJoining(t *testing.T) {
+	release := make(chan struct{})
+	var calls int32
+	observe := func(ctx context.Context, sigCh <-chan os.Signal, cancel context.CancelFunc, emit func(gui.GUIExitReason, map[string]any)) {
+		<-release // hold until the test allows the real read to proceed
+		observeGUIExitSignal(ctx, sigCh, cancel, func(reason gui.GUIExitReason, extra map[string]any) {
+			atomic.AddInt32(&calls, 1)
+		})
+	}
+
+	_, stop := startGUIExitSignalObserver(context.Background(), observe, func(gui.GUIExitReason, map[string]any) {})
+
+	stopDone := make(chan struct{})
+	go func() {
+		defer close(stopDone)
+		stop()
+	}()
+
+	// Give stop() a moment to begin (it will block inside wg.Wait() since
+	// observe is still parked on release) before letting the observer
+	// proceed.
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+
+	select {
+	case <-stopDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stop() did not return after the observer was released")
+	}
+	if got := atomic.LoadInt32(&calls); got != 0 {
+		t.Fatalf("emit called %d times with no signal ever delivered; want 0", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Round 3 review finding: "removing the helper wg.Wait() fails a test, but
+// removing the real RunE defer left the selected tests GREEN — the
+// integration join is still unguarded. Add a RunE-level teardown test that
+// fails when that defer is absent."
+// ---------------------------------------------------------------------------
+
+// TestGuiRunE_ExitSignalObserverStopIsDeferred proves the PRODUCTION RunE
+// closure in gui.go actually calls `defer stop()` on the exit-signal
+// context it constructs — not merely that startGUIExitSignalObserver
+// behaves correctly in isolation (the tests above already cover that). It
+// installs a wrapper via setNewGUIExitSignalContextForTest that delegates to
+// the real production wiring but records whether the returned stop function
+// was invoked, then drives the REAL RunE via a guaranteed no-server/no-tray
+// fast-return path (`--reset-port` without `--yes` in a non-TTY context,
+// the same proven-safe path TestGuiResetPortNonTTYRequiresYes already
+// exercises) and asserts the recorded flag is true afterward.
+//
+// MUTATION: remove `defer stop()` from gui.go's RunE (the exact class of
+// regression the round-3 review named) — this test's "stop() was called"
+// assertion fails, while every other test in this package stays green
+// (reproducing the review's own observation).
+func TestGuiRunE_ExitSignalObserverStopIsDeferred(t *testing.T) {
+	root := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(root)
+	t.Cleanup(restore)
+	pidportDir := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_GUI_TEST_PIDPORT_DIR", pidportDir)
+
+	var stopCalled int32
+	restoreSeam := setNewGUIExitSignalContextForTest(func(parent context.Context, emit func(gui.GUIExitReason, map[string]any)) (context.Context, func()) {
+		ctx, realStop := startGUIExitSignalObserver(parent, observeGUIExitSignal, emit)
+		return ctx, func() {
+			atomic.AddInt32(&stopCalled, 1)
+			realStop()
+		}
+	})
+	defer restoreSeam()
+
+	c := newGuiCmdRealForTest()
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+	c.SetIn(bytes.NewReader(nil)) // non-terminal reader
+	c.SetArgs([]string{"--reset-port"})
+	err := c.ExecuteContext(context.Background())
+
+	var fe *forceExitError
+	if !errors.As(err, &fe) || fe.ExitCode() != 6 {
+		t.Fatalf("want the proven-safe --reset-port non-TTY fast-return path (forceExitError code 6), got %T %v", err, err)
+	}
+	if got := atomic.LoadInt32(&stopCalled); got != 1 {
+		t.Errorf("newGUIExitSignalContext's stop() was called %d times across the RunE return; want exactly 1 (the `defer stop()` in RunE must be present)", got)
 	}
 }

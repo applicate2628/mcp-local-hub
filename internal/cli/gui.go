@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -470,27 +469,24 @@ activates the first window and exits 0.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
-
-			// GUI exit-reason attribution: an ADDITIONAL signal.Notify
-			// observer alongside NotifyContext above. Go's signal package
-			// fans out each incoming OS signal to every registered channel,
-			// so this receives the exact same SIGINT/SIGTERM NotifyContext
-			// does — it does not steal, delay, or duplicate delivery.
-			// Second-signal handling is unchanged from the pre-existing
-			// NotifyContext registration (this observer adds no new signal
-			// semantics). NotifyContext's own ctx.Done() carries no
-			// information about WHICH signal fired; this is the only way to
-			// attribute the exit to sigint vs sigterm without rewriting
-			// NotifyContext itself.
-			//
-			// startGUIExitSignalObserver (gui_exit_signal.go) owns the
-			// observer goroutine + its join as one seam, so the wiring
-			// itself is unit-testable (residual 3(b) review fix — the
-			// inline Add/Done/Wait this replaced had NO regression guard:
-			// removing it left every existing test green).
-			stopExitSignalObserver := startGUIExitSignalObserver(ctx, stop, awaitGUIExitSignalReason, gui.EmitExitReasonEvent)
-			defer stopExitSignalObserver()
+			// GUI exit-reason attribution + signal-aware shutdown context,
+			// as ONE causal observer (gui_exit_signal.go; round 3
+			// consolidation of residual 3). This used to be TWO independent
+			// signal registrations racing each other — signal.NotifyContext's
+			// own internal one (driving ctx.Done()) plus a separate
+			// signal.Notify observer here — with causality between them
+			// inferred from a timing race (which channel becomes ready
+			// first). newGUIExitSignalContext removes that race
+			// structurally: there is exactly one SIGINT/SIGTERM
+			// registration, and the SAME goroutine that observes it is the
+			// one that cancels ctx because of it, so "ctx is done because
+			// of a signal" is caused, in order, never inferred after the
+			// fact. ctx behaves exactly like signal.NotifyContext's own
+			// return value for every OTHER consumer in this file
+			// (ctx.Done(), context.WithoutCancel(ctx), the stop()-calling
+			// tray Quit / QuitAndStopAll closures below).
+			ctx, stop := newGUIExitSignalContext(cmd.Context(), gui.EmitExitReasonEvent)
+			defer stop()
 
 			// Phase 5 Task 5.3: --reset-port is a state-dir operation
 			// (clears the persisted Port in hub-mcp.endpoint.json)
@@ -695,7 +691,7 @@ activates the first window and exits 0.`,
 				if force {
 					if kill {
 						// Codex iter-10 P2 #1: pass signal-aware ctx
-						// (from signal.NotifyContext above) so Ctrl+C
+						// (from newGUIExitSignalContext above) so Ctrl+C
 						// during the kill path actually cancels the
 						// destructive operation. cmd.Context() is the
 						// cobra parent context and ignores SIGINT.
@@ -1688,7 +1684,7 @@ func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath str
 // (acquiredLock, exitCode). On success acquiredLock is non-nil and
 // exitCode==0; the caller continues into Phase B.
 //
-// ctx is the signal-aware context from RunE (from signal.NotifyContext)
+// ctx is the signal-aware context from RunE (from newGUIExitSignalContext)
 // so Ctrl+C/SIGTERM during the kill path is honored — including the
 // post-kill wait-for-exit loop and the acquire-poll loop inside
 // KillRecordedHolder. cmd.Context() would NOT receive SIGINT.
