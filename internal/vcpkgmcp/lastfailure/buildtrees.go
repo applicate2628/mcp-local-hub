@@ -3,6 +3,7 @@ package lastfailure
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -50,10 +51,16 @@ import (
 
 // FS abstracts the filesystem calls this package needs, so tests exercise
 // fixtures under testdata/ without ever touching the real machine.
+//
+// Open exists alongside ReadFile so LOG reads can be bounded BEFORE the bytes
+// are materialized — see readLogLimited. ReadFile is retained for the small,
+// known-shape files (a wrapper summary, a vcpkg-configuration.json) where the
+// whole content is the unit of work.
 type FS interface {
 	Stat(path string) (os.FileInfo, error)
 	ReadDir(path string) ([]os.DirEntry, error)
 	ReadFile(path string) ([]byte, error)
+	Open(path string) (io.ReadCloser, error)
 }
 
 type osFS struct{}
@@ -61,9 +68,51 @@ type osFS struct{}
 func (osFS) Stat(p string) (os.FileInfo, error)      { return os.Stat(p) }
 func (osFS) ReadDir(p string) ([]os.DirEntry, error) { return os.ReadDir(p) }
 func (osFS) ReadFile(p string) ([]byte, error)       { return os.ReadFile(p) }
+func (osFS) Open(p string) (io.ReadCloser, error)    { return os.Open(p) }
 
 // DefaultFS wires FS to the real OS.
 func DefaultFS() FS { return osFS{} }
+
+// maxLogBytes bounds how much of ONE log file this package materializes.
+//
+// A buildtrees log is attacker-shaped only in the loosest sense, but it IS
+// unbounded in size: a verbose nested build can emit hundreds of megabytes,
+// and the previous code read every phase log with a single whole-file
+// ReadFile before any cap applied — the 50-diagnostic output cap bounded the
+// ANSWER, never the allocation. 32 MiB is far above every log observed in the
+// scout pass over 618 real files (largest: a few MiB) while keeping the worst
+// case per call bounded.
+//
+// Exceeding the limit is NOT silently truncated into a confident verdict: the
+// unread tail could hold a later error, or an interrupt marker that turns a
+// failure into a stopped build, so the caller reports
+// unknown(phase_log_size_limit_exceeded) — the same fail-closed rule already
+// applied to an unreadable log.
+const maxLogBytes int64 = 32 << 20
+
+// readLogLimited reads at most limit bytes from path, reporting whether the
+// file had more content than that. It reads limit+1 bytes so "exactly at the
+// limit" is distinguishable from "over it" without a second Stat — and so the
+// bound holds even against a stream whose length cannot be known in advance
+// (a Stat-then-read gate would still hand io.ReadAll an unbounded reader).
+//
+// limit is a parameter rather than a direct read of maxLogBytes so the bound
+// is exercisable at test sizes without mutating package state.
+func readLogLimited(fsys FS, path string, limit int64) (data []byte, truncated bool, err error) {
+	rc, err := fsys.Open(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rc.Close()
+	data, err = io.ReadAll(io.LimitReader(rc, limit+1))
+	if err != nil {
+		return nil, false, err
+	}
+	if int64(len(data)) > limit {
+		return data[:limit], true, nil
+	}
+	return data, false, nil
+}
 
 // probeDir reports whether path is an existing directory, TRI-STATE.
 //

@@ -59,8 +59,22 @@ func registerTools(vs *VcpkgServer) {
 			"diagnostic). Recognized shapes cover MSVC with or without a diagnostic code, clang-cl, " +
 			"GCC/Clang, link.exe/lld-link and ninja FAILED. Scanned phase logs are extract, patch, " +
 			"config, build (build-<triplet>-<cfg>-*.log, written by non-ninja/autotools/NMAKE ports) " +
-			"and install. In a nested build the FIRST recognized diagnostic is the headline, and " +
-			"causeless build-wrapper lines (NMAKE's U-series) are never eligible to be it. " +
+			"and install. Causeless build-wrapper lines (NMAKE's U-series) are never eligible to be " +
+			"the headline. " +
+			"RANKING: diagnostics[] is ORDERED by severity (error, then warning, then note) and by " +
+			"first occurrence within a severity — the actionable line is always reachable without " +
+			"filtering, and first_error carries it directly. Warnings are never dropped, only sorted " +
+			"after errors. Per-log capping is per SEVERITY CLASS, so an error trailing a flood of " +
+			"repeated warnings can never be squeezed out of the answer. " +
+			"COMMANDS: exact_command is the reproducible TOP-LEVEL vcpkg invocation and is recovered " +
+			"ONLY from an authoritative record of it (a build_failed_log's `command:` line); it is " +
+			"NEVER lifted out of a phase log, which holds a nested build tool's output rather than " +
+			"vcpkg's own command line. When none is recoverable the field is omitted and " +
+			"exact_command_not_recovered is noted — a wrong command an operator pastes into a shell " +
+			"is worse than no command. build_command separately carries the build-layer " +
+			"sub-invocation (CMake's \"Run Build Command(s):\") read from the same (phase, " +
+			"configuration) build step as the reported diagnostic; diagnostic_log names the log the " +
+			"headline diagnostic came from, so both are traceable. " +
 			"Returns tri-state ok|failed|unknown(reason) plus log_paths[] so an agent can " +
 			"always read further itself, context_source[] naming exactly which sources the answer " +
 			"rests on, and overlay_chain[] echoed back (never resolved to a winner — that is the " +
@@ -69,15 +83,26 @@ func registerTools(vs *VcpkgServer) {
 			"primary phase log. A warning-only log -> unknown(no_failure_diagnostic) (that is the normal " +
 			"state of a successful C++ build); an error found ONLY in a CMakeConfigureLog.yaml.log " +
 			"try_compile dump -> unknown(capability_probe_only) (a failing capability probe is normal " +
-			"feature detection); an unreadable relevant log -> unknown(phase_log_unreadable); an " +
+			"feature detection); an unreadable relevant log -> unknown(phase_log_unreadable); a log " +
+			"only partly examined (over the 32 MiB read bound, or a line the scanner could not take) " +
+			"-> unknown(phase_log_size_limit_exceeded), never a confident verdict from the prefix; an " +
 			"unreadable root or port directory -> unknown(buildtrees_root_unreadable|port_dir_unreadable), " +
-			"NEVER the verified-absence reasons buildtrees_cleaned|port_dir_not_found. root and " +
+			"NEVER the verified-absence reasons buildtrees_root_absent|port_dir_not_found. root and " +
 			"buildtrees_root MUST be absolute (a relative root would bind to the hub daemon's working " +
 			"directory) -> unknown(relative_root); port must be one legal vcpkg port name -> " +
-			"unknown(invalid_port_name). A build_failed_log's failed_ports list can prove a port did NOT " +
+			"unknown(invalid_port_name); no root resolvable at all -> unknown(vcpkg_root_not_resolved). " +
+			"A build_failed_log's failed_ports list can prove a port did NOT " +
 			"fail only when it is provably exhaustive (clean scan AND len(failed_ports) == " +
 			"build_failed_count); otherwise the tool falls back to buildtree evidence and notes " +
-			"wrapper_failed_ports_list_incomplete. Diagnostics found are returned whatever the verdict.",
+			"wrapper_failed_ports_list_completeness_unproven. Diagnostics found are returned whatever " +
+			"the verdict. " +
+			"VOCABULARY RULE: every reason and note names what the tool OBSERVED — a verified fact, " +
+			"something not supplied to it, or something not found where it looked — never a " +
+			"conclusion about the build. In particular overlay_chain_not_supplied means no chain was " +
+			"supplied or found in any consulted source; it does NOT claim the build used no overlays " +
+			"(buildtrees records no overlay chain, so this tool cannot know that), and " +
+			"buildtrees_root_absent reports a verified absent directory without attributing it to " +
+			"--clean-buildtrees-after-build.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

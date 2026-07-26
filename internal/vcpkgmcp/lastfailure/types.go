@@ -33,26 +33,59 @@ import (
 )
 
 // Reason is populated only when Status == evidence.StatusUnknown. Closed enum.
+//
+// # Naming rule (2026-07-26 vocabulary audit)
+//
+// Every value here names WHAT THE TOOL OBSERVED, never what it inferred about
+// the world. Three observation kinds are allowed, and they must stay
+// distinguishable in the name itself:
+//
+//   - a VERIFIED FACT — the tool looked and saw the thing it names
+//     (build_interrupted: an interrupt marker was actually read);
+//   - an OBSERVATION ABOUT ITS OWN INPUT — something was not supplied
+//     (port_not_specified);
+//   - an OBSERVATION ABOUT ITS OWN SEARCH — something was not found where it
+//     looked (port_dir_not_found, no_diagnostic_found).
+//
+// The last two may never be phrased as a fact about the build. A value that
+// converts "I was not given X" or "I did not find X" into "X is not so" is
+// the defect this rule exists to prevent; it hands the operator a confident
+// denial in place of an honest "I do not know", which is strictly worse than
+// saying nothing because it stops them looking.
 type Reason string
 
 const (
-	// ReasonRootNotSpecified: neither root, buildtrees_root, nor a usable
-	// wrapper file was supplied, and vcpkg-root discovery did not resolve
-	// one either — nothing to locate buildtrees from.
-	ReasonRootNotSpecified Reason = "root_not_specified"
+	// ReasonVcpkgRootNotResolved: no vcpkg root (and hence no buildtrees
+	// location) could be RESOLVED — either nothing was supplied and discovery
+	// found no unambiguous candidate, or an explicit root was supplied and
+	// discovery refused it (no vcpkg binary under it, or the probe failed).
+	//
+	// Named for the tool's own search, not for its input: the predecessor
+	// value `root_not_specified` also fired for an explicitly SUPPLIED root
+	// that discovery rejected, telling the caller they had specified nothing
+	// when they had. Which discovery rule refused it is available in full
+	// from vcpkg_discover_root, which owns that vocabulary.
+	ReasonVcpkgRootNotResolved Reason = "vcpkg_root_not_resolved"
 	// ReasonPortNotSpecified: port omitted, and no wrapper file (or a
 	// wrapper with != 1 failed port entries) was available to infer it.
 	ReasonPortNotSpecified Reason = "port_not_specified"
 	// ReasonMultipleFailedPortsAmbiguous: port omitted, wrapper file parsed
 	// and named MORE than one failed port. The tool never silently picks.
 	ReasonMultipleFailedPortsAmbiguous Reason = "multiple_failed_ports_ambiguous"
-	// ReasonBuildtreesCleaned: the buildtrees root (or the specific port's
-	// subdirectory) does not exist on disk at all — almost always because
-	// --clean-buildtrees-after-build removed it after a successful build,
-	// or the whole triplet's tree was cleaned. Verified real case: a
-	// wrapper invocation naming --clean-buildtrees-after-build whose
-	// --x-buildtrees-root no longer exists post-run.
-	ReasonBuildtreesCleaned Reason = "buildtrees_cleaned"
+	// ReasonBuildtreesRootAbsent: the buildtrees root does not exist on disk
+	// at all (a VERIFIED absence — evidence.PresenceAbsent, never a failed
+	// probe, which is ReasonBuildtreesRootUnreadable).
+	//
+	// The most common CAUSE is --clean-buildtrees-after-build removing it
+	// after the run; verified real case: a wrapper invocation naming that
+	// flag whose --x-buildtrees-root no longer existed post-run. But the
+	// probe establishes the absence, NOT its cause — a wrong --x-buildtrees-
+	// root, a wrong triplet, or a tree on an unmounted volume produce the
+	// identical observation. The predecessor value `buildtrees_cleaned`
+	// asserted the cause, which sent an operator whose real mistake was a
+	// mistyped root hunting for a cleanup flag instead. Callers wanting the
+	// remedy for the common case get it from the tool description.
+	ReasonBuildtreesRootAbsent Reason = "buildtrees_root_absent"
 	// ReasonPortDirNotFound: the buildtrees root DOES exist, but this
 	// specific port never has a subdirectory under it — a different cause
 	// than cleanup (wrong port name, wrong triplet, wrong root, or the
@@ -118,6 +151,16 @@ const (
 	// or an interrupt marker (changing a failure into a stopped build) —
 	// so a confident verdict cannot be produced while one is unread.
 	ReasonPhaseLogUnreadable Reason = "phase_log_unreadable"
+	// ReasonPhaseLogSizeLimitExceeded: a relevant log is larger than this
+	// package will materialize (maxLogBytes), or its content defeated the
+	// line scanner, so part of it was never examined. Sibling of
+	// ReasonPhaseLogUnreadable and fail-closed for the same reason: the
+	// unread tail can hold a later error, the only error, or an interrupt
+	// marker. Kept SEPARATE because the operator remedy differs — this one
+	// says "read the log yourself, it is too big for me", not "fix an ACL".
+	// Named for the observation (a limit of ours was exceeded), not for a
+	// judgement that the file is "too large".
+	ReasonPhaseLogSizeLimitExceeded Reason = "phase_log_size_limit_exceeded"
 	// ReasonNoFailureDiagnostic: recognized diagnostics WERE found, but not
 	// one of them has error severity. Warnings and notes are evidence, not
 	// failures. Deliberately distinct from ReasonNoDiagnosticFound (nothing
@@ -138,18 +181,76 @@ const (
 // was present but malformed, so it was ignored" even though buildtrees
 // alone still produced an ok answer. Kept closed (not free text) so it
 // stays auditable.
+//
+// The Reason naming rule above binds these identically, and notes are where
+// it was most often broken: a note is easy to write as a conclusion because
+// it does not carry the verdict. It still reaches the operator.
 type Note string
 
 const (
-	NoteWrapperAbsent               Note = "wrapper_absent"
+	// NoteWrapperNotSupplied: the caller passed no build_failed_log. The
+	// tool NEVER auto-discovers one (there is no vcpkg convention naming
+	// where a wrapper would put it), so it has not looked and cannot know
+	// whether such a file exists. The predecessor value `wrapper_absent`
+	// asserted the file's absence from the parameter's absence.
+	NoteWrapperNotSupplied Note = "wrapper_not_supplied"
+	// NoteWrapperNotFound: a build_failed_log path WAS supplied and does not
+	// exist on disk. A verified absence of that specific path, distinct from
+	// NoteWrapperNotSupplied above (nothing was looked for) and from
+	// NoteWrapperUnreadable below (looked, blocked).
+	NoteWrapperNotFound Note = "wrapper_not_found"
+	// NoteWrapperUnreadable: a supplied build_failed_log exists but could not
+	// be read (permission denied, sharing violation, I/O error). NOT
+	// malformed — the tool never saw its content, so it can say nothing about
+	// its shape; folding this into NoteWrapperMalformed sent the operator to
+	// fix a wrapper script when the actual remedy is an ACL.
+	NoteWrapperUnreadable Note = "wrapper_unreadable"
+	// NoteWrapperMalformed: the wrapper file WAS read end to end and nothing
+	// recognizable was recovered from it. A verified fact about content.
 	NoteWrapperMalformed            Note = "wrapper_malformed_ignored"
 	NoteWrapperUsedForContext       Note = "wrapper_used_for_invocation_context"
 	NotePortAutoSelectedFromWrapper Note = "port_auto_selected_from_wrapper_single_failure"
 	NoteTripletAutoSelectedFromDir  Note = "triplet_auto_selected_from_buildtrees_dir"
 	NoteOverlayChainFromWrapper     Note = "overlay_chain_from_wrapper_invocation"
 	NoteOverlayChainFromEnv         Note = "overlay_chain_from_env"
-	NoteOverlayChainFromParam       Note = "overlay_chain_from_explicit_param"
-	NoteOverlayChainNone            Note = "overlay_chain_none_builtin_ports_only"
+	// NoteOverlayChainFromParam: the chain came from the caller's own
+	// overlays parameter.
+	NoteOverlayChainFromParam Note = "overlay_chain_from_explicit_param"
+	// NoteOverlayChainFromVcpkgConfiguration: the chain came from an
+	// overlay-ports array in a vcpkg-configuration.json under the resolved
+	// vcpkg root. Previously this ALSO reported
+	// overlay_chain_from_explicit_param, naming a parameter the caller never
+	// passed — a provenance claim the caller cannot verify by checking the
+	// source it names.
+	NoteOverlayChainFromVcpkgConfiguration Note = "overlay_chain_from_vcpkg_configuration"
+	// NoteOverlayChainNotSupplied: no overlay chain was supplied by the
+	// caller, recovered from a wrapper invocation, or found in any source
+	// this call consulted.
+	//
+	// It says NOTHING about whether the BUILD used overlays, because this
+	// tool cannot know that: the buildtrees layout does not record the
+	// overlay chain, so absent a wrapper file there is no artifact to read it
+	// from. The predecessor value `overlay_chain_none_builtin_ports_only`
+	// asserted the build used builtin ports only. Verified field failure
+	// (2026-07-26): it was emitted for a build that actually used FOUR
+	// overlay directories, purely because the caller had not passed the
+	// overlays parameter.
+	NoteOverlayChainNotSupplied Note = "overlay_chain_not_supplied"
+	// NoteOverlayChainConfigNotConsulted: the vcpkg-configuration.json
+	// fallback could not be consulted at all because no vcpkg root is known
+	// (buildtrees was located directly, from buildtrees_root or a wrapper's
+	// --x-buildtrees-root, so root discovery never ran). Emitted ALONGSIDE
+	// NoteOverlayChainNotSupplied so the two "no chain" outcomes stay
+	// distinguishable: one consulted every documented source, the other could
+	// not reach one of them.
+	NoteOverlayChainConfigNotConsulted Note = "overlay_chain_vcpkg_configuration_not_consulted_no_root"
+	// NoteExactCommandNotRecovered: no reproducible top-level vcpkg
+	// invocation could be recovered. vcpkg does not record its own argv
+	// anywhere in buildtrees, so without a wrapper file there is nothing to
+	// read it from. Stated explicitly rather than left as a bare empty field,
+	// so "the tool could not recover it" is not confused with "the tool
+	// forgot" — and so the remedy (pass build_failed_log) is visible.
+	NoteExactCommandNotRecovered Note = "exact_command_not_recovered"
 	// NoteWrapperConfirmsNoFailure: the wrapper's failed_ports list is
 	// present and does NOT name this port — real evidence the port did
 	// not fail in that run, not a guess.
@@ -164,12 +265,19 @@ const (
 	// a diagnostic from this source may describe a probe, not the port's
 	// actual build failure. Surfaced so a caller does not over-trust it.
 	NoteDiagnosticFromCapabilityProbeLog Note = "diagnostic_from_capability_probe_log"
-	// NoteWrapperFailedPortsIncomplete: the wrapper's failed_ports list could
-	// not be proven exhaustive (scan error, missing build_failed_count, or a
-	// count that disagrees with the number of entries), so its silence about
-	// the queried port was NOT accepted as proof the port did not fail. The
-	// tool fell through to buildtree evidence instead.
-	NoteWrapperFailedPortsIncomplete Note = "wrapper_failed_ports_list_incomplete"
+	// NoteWrapperFailedPortsCompletenessUnproven: the wrapper's failed_ports
+	// list could not be PROVEN exhaustive (scan error, missing
+	// build_failed_count, or a count that disagrees with the number of
+	// entries), so its silence about the queried port was NOT accepted as
+	// proof the port did not fail. The tool fell through to buildtree
+	// evidence instead.
+	//
+	// Named for the proof, not the list: the predecessor value
+	// `wrapper_failed_ports_list_incomplete` asserted the list IS incomplete,
+	// which the tool cannot know. A wrapper that simply never writes
+	// build_failed_count emits a perfectly complete list that this guard
+	// still (correctly) declines to rely on.
+	NoteWrapperFailedPortsCompletenessUnproven Note = "wrapper_failed_ports_list_completeness_unproven"
 )
 
 // ContextSource names one input the answer actually rests on. Closed enum,
@@ -237,10 +345,50 @@ type Result struct {
 	Status Status `json:"status"`
 	Reason Reason `json:"reason,omitempty"`
 
-	Phase        Phase        `json:"phase,omitempty"`
-	FailedTarget string       `json:"failed_target,omitempty"`
-	ExactCommand string       `json:"exact_command,omitempty"`
-	Diagnostics  []Diagnostic `json:"diagnostics,omitempty"`
+	Phase        Phase  `json:"phase,omitempty"`
+	FailedTarget string `json:"failed_target,omitempty"`
+	// ExactCommand is the reproducible TOP-LEVEL vcpkg invocation — the line
+	// an operator can paste into a shell to re-run the failing install.
+	//
+	// It is recovered ONLY from an authoritative record of that invocation
+	// (currently: a wrapper file's `command:` line). It is NEVER lifted out
+	// of a phase log, because a phase log holds a NESTED build tool's output,
+	// not vcpkg's own command line. Verified field failure (2026-07-26): the
+	// predecessor returned the first non-empty line of the chosen phase log,
+	// which for a make-driven port is make's trace —
+	// `Makefile:36039: update target 'all-recursive' due to: target is
+	// .PHONY`. A wrong command an operator pastes into a shell is worse than
+	// no command, so when nothing authoritative is available this field is
+	// omitted and NoteExactCommandNotRecovered says so.
+	ExactCommand string `json:"exact_command,omitempty"`
+	// BuildCommand is the build-layer sub-invocation recorded by CMake
+	// ("Run Build Command(s): ..."), when the log that produced the reported
+	// diagnostics carries one. Deliberately a SEPARATE field: it is a real,
+	// useful command, but it belongs to the build step rather than to vcpkg,
+	// and reporting it as exact_command would misstate its layer.
+	//
+	// Its provenance is stateable: it is read from the same (phase,
+	// configuration) build step named by DiagnosticLog.
+	BuildCommand string `json:"build_command,omitempty"`
+	// DiagnosticLog is the log file the HEADLINE diagnostic (FirstError, or
+	// the first diagnostic when none is an error) was read from. It makes the
+	// association between the returned diagnostics and the returned
+	// BuildCommand explicit rather than incidental — the predecessor took the
+	// command from whichever log the phase loop happened to touch last, which
+	// need not be the one the reported diagnostic came from.
+	DiagnosticLog string `json:"diagnostic_log,omitempty"`
+	// FirstError is the first ERROR-severity diagnostic in first-occurrence
+	// order, or omitted when the set holds none. Additive convenience over
+	// Diagnostics: the single actionable line, reachable without scanning or
+	// filtering the array at all.
+	FirstError *Diagnostic `json:"first_error,omitempty"`
+	// Diagnostics is ORDERED: by severity (error, then warning, then note),
+	// and by first-occurrence within a severity. See rankDiagnostics.
+	//
+	// The ordering is part of the wire contract. Warnings are never dropped —
+	// a -Werror build's warning is genuinely interesting, and filtering is
+	// the caller's choice — they simply sort after the errors.
+	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
 	// ExitCode is a pointer so "0" and "not known" are distinguishable in
 	// JSON (omitted entirely when unknown).
 	ExitCode *int `json:"exit_code,omitempty"`

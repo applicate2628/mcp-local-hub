@@ -1,6 +1,7 @@
 package lastfailure
 
 import (
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -45,6 +46,16 @@ func (f failingFS) ReadFile(p string) ([]byte, error) {
 		return nil, errDenied
 	}
 	return f.inner.ReadFile(p)
+}
+
+// Open must honour failRead identically: log reads go through Open (bounded),
+// small known-shape files through ReadFile, and a fixture that denies one but
+// not the other would silently stop exercising the denial it was written for.
+func (f failingFS) Open(p string) (io.ReadCloser, error) {
+	if f.failRead && f.hit(p) {
+		return nil, errDenied
+	}
+	return f.inner.Open(p)
 }
 
 // writePortLogs builds a synthetic buildtrees port directory.
@@ -153,8 +164,8 @@ func TestLastFailure_BuildtreesRootUnreadable_NotReportedAsCleaned(t *testing.T)
 	deps.FS = failingFS{inner: DefaultFS(), failSub: "failing_port/buildtrees", failStat: true}
 
 	res := LastFailure(Args{Port: "somelib", BuildtreesRoot: root}, deps)
-	if res.Reason == ReasonBuildtreesCleaned {
-		t.Fatal("an unreadable buildtrees root was reported as buildtrees_cleaned — " +
+	if res.Reason == ReasonBuildtreesRootAbsent {
+		t.Fatal("an unreadable buildtrees root was reported as absent — " +
 			"that is a VERIFIED-absence claim manufactured from a failure to look")
 	}
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonBuildtreesRootUnreadable {
@@ -290,8 +301,8 @@ func TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure(t *testing.T) 
 		t.Fatal("an INCOMPLETE wrapper list (build_failed_count=2, 1 entry) was used to PROVE " +
 			"the omitted port did not fail — its silence is not evidence")
 	}
-	if !containsNote(res.Notes, NoteWrapperFailedPortsIncomplete) {
-		t.Errorf("notes = %v, want wrapper_failed_ports_list_incomplete recorded", res.Notes)
+	if !containsNote(res.Notes, NoteWrapperFailedPortsCompletenessUnproven) {
+		t.Errorf("notes = %v, want wrapper_failed_ports_list_completeness_unproven recorded", res.Notes)
 	}
 }
 

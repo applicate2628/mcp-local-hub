@@ -272,8 +272,8 @@ func TestLastFailure_Case_B_BuildtreesOnly_NoWrapper(t *testing.T) {
 	if !hasErrorDiagnostic(res.Diagnostics, "C2065") {
 		t.Errorf("diagnostics = %+v, want a C2065 error present from buildtrees alone", res.Diagnostics)
 	}
-	if !containsNote(res.Notes, NoteWrapperAbsent) {
-		t.Errorf("notes = %v, want wrapper_absent noted", res.Notes)
+	if !containsNote(res.Notes, NoteWrapperNotSupplied) {
+		t.Errorf("notes = %v, want wrapper_not_supplied noted", res.Notes)
 	}
 }
 
@@ -296,18 +296,20 @@ func TestLastFailure_Case_C_WrapperMalformed_Degrades(t *testing.T) {
 	}
 }
 
-// (d) buildtrees cleaned: --clean-buildtrees-after-build removed the whole
-// triplet's tree. Mutation proof: BuildtreesRoot deliberately points at a
+// (d) buildtrees root absent — the shape --clean-buildtrees-after-build
+// leaves behind. Mutation proof: BuildtreesRoot deliberately points at a
 // path that does not exist (the exact real-world shape observed:
-// r:\b\cl did not exist at all while r:\b\wingpl survived).
-func TestLastFailure_Case_D_BuildtreesCleaned(t *testing.T) {
+// r:\b\cl did not exist at all while r:\b\wingpl survived). The REASON names
+// the verified absence only; attributing it to the cleanup flag would be a
+// causal claim a presence probe cannot make (see ReasonBuildtreesRootAbsent).
+func TestLastFailure_Case_D_BuildtreesRootAbsent(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
 		BuildtreesRoot: absPath(t, "testdata/this_buildtrees_root_does_not_exist"),
 	}
 	res := LastFailure(args, testDeps())
-	if res.Status != evidence.StatusUnknown || res.Reason != ReasonBuildtreesCleaned {
-		t.Fatalf("got status=%v reason=%v, want unknown/buildtrees_cleaned", res.Status, res.Reason)
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonBuildtreesRootAbsent {
+		t.Fatalf("got status=%v reason=%v, want unknown/buildtrees_root_absent", res.Status, res.Reason)
 	}
 }
 

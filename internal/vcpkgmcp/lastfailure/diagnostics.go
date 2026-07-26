@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -231,19 +232,46 @@ func ContainsFailureDiagnostic(diags []Diagnostic) bool {
 	return false
 }
 
-// maxDiagnosticsPerLog bounds how many matches ScanDiagnostics returns from
-// one file, so an adversarial or pathologically noisy log cannot inflate
-// the result unboundedly.
+// maxDiagnosticsPerLog bounds how many matches of EACH severity class
+// ScanDiagnostics returns from one file, so an adversarial or pathologically
+// noisy log cannot inflate the result unboundedly.
+//
+// The cap is per severity CLASS, not per file, and that distinction is the
+// whole point. A single flat cap applied in file order is spent by whatever
+// comes first — which in a real clang-cl build is a flood of repeated
+// warnings. Verified field failure (2026-07-26): a build log holding 50
+// `clang-cl: warning: unknown argument ignored ... '-fopenmp'` lines followed
+// by `fparser_parse-opt.exe : fatal error LNK1120: 4 unresolved externals`
+// returned the 50 warnings and DROPPED the error, after which the tool
+// reported unknown(no_failure_diagnostic) — a confident denial of a failure
+// that plainly happened. Reserving a separate error budget makes a trailing
+// error unloseable to leading noise.
 const maxDiagnosticsPerLog = 50
 
 // ScanDiagnostics scans content line by line and returns every recognized
-// diagnostic, in file order, capped at maxDiagnosticsPerLog. The first
-// element is "the FIRST real diagnostic" the design doc calls the
-// headline finding; the rest are returned too since the tool's schema is
-// diagnostics[] (plural) — an agent that wants more than the first one
-// does not have to re-read the file itself.
+// diagnostic IN FILE ORDER, keeping at most maxDiagnosticsPerLog of each
+// severity class (see the const doc for why the cap is per class).
+//
+// File order is deliberately preserved here: this function reports what the
+// log says, in the order the log says it. RANKING for presentation is a
+// separate concern owned by rankDiagnostics at the result boundary, so the
+// two never have to be reasoned about together.
 func ScanDiagnostics(content []byte) []Diagnostic {
+	diags, _ := scanDiagnostics(content)
+	return diags
+}
+
+// scanDiagnostics is the internal form that also reports a SCANNER failure.
+//
+// bufio.Scanner stops at the first line exceeding its buffer and reports it
+// only via Err(). Ignoring that (as the exported wrapper's predecessor did)
+// silently converts "the rest of this log was never examined" into "nothing
+// else matched" — the same silent-truncation defect as an unbounded read, one
+// layer down. Callers that issue a verdict must treat a non-nil error as
+// incomplete evidence.
+func scanDiagnostics(content []byte) ([]Diagnostic, error) {
 	var out []Diagnostic
+	errBudget, otherBudget := maxDiagnosticsPerLog, maxDiagnosticsPerLog
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -252,10 +280,76 @@ func ScanDiagnostics(content []byte) []Diagnostic {
 		if !ok {
 			continue
 		}
+		if d.Severity == SeverityError {
+			if errBudget == 0 {
+				continue
+			}
+			errBudget--
+		} else {
+			if otherBudget == 0 {
+				continue
+			}
+			otherBudget--
+		}
 		out = append(out, d)
-		if len(out) >= maxDiagnosticsPerLog {
+		if errBudget == 0 && otherBudget == 0 {
 			break
 		}
 	}
+	return out, scanner.Err()
+}
+
+// severityRank orders severities for presentation: the actionable line first.
+// Anything unrecognized sorts last rather than silently ahead of a warning.
+func severityRank(sev string) int {
+	switch sev {
+	case SeverityError:
+		return 0
+	case "warning":
+		return 1
+	case "note":
+		return 2
+	default:
+		return 3
+	}
+}
+
+// rankDiagnostics returns diags ordered by the tool's documented presentation
+// rule: SEVERITY first (error, warning, note), then FIRST-OCCURRENCE order
+// preserved within a severity.
+//
+// This exists because the tool's whole purpose is to spare the caller a
+// filtering pass. Verified field failure (2026-07-26): a real answer carried
+// 51 diagnostics — 50 repeated clang-cl warnings and ONE `LNK1120: 4
+// unresolved externals`, the only actionable line, returned LAST. The
+// package's own prose called the first recognized diagnostic "the headline",
+// but nothing anywhere expressed that in the returned document: the list was
+// raw scan order, and severity was consulted only by the boolean
+// ContainsFailureDiagnostic, which decides the VERDICT and never the order.
+//
+// The sort is STABLE on purpose: within one severity, the log's own order is
+// meaningful (in a nested build the first error is the cause and the rest are
+// usually its cascade), so it must survive ranking untouched.
+func rankDiagnostics(diags []Diagnostic) []Diagnostic {
+	if len(diags) < 2 {
+		return diags
+	}
+	out := make([]Diagnostic, len(diags))
+	copy(out, diags)
+	sort.SliceStable(out, func(i, j int) bool {
+		return severityRank(out[i].Severity) < severityRank(out[j].Severity)
+	})
 	return out
+}
+
+// firstErrorDiagnostic returns the first error-severity diagnostic in
+// FIRST-OCCURRENCE order, or nil when the set holds no error at all.
+func firstErrorDiagnostic(diags []Diagnostic) *Diagnostic {
+	for i := range diags {
+		if diags[i].Severity == SeverityError {
+			d := diags[i]
+			return &d
+		}
+	}
+	return nil
 }

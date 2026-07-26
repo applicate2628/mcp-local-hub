@@ -137,8 +137,15 @@ Their command carries `--clean-buildtrees-after-build`, which **deletes the per-
 Verified: `R:\b\cl` does not exist at all while `R:\b\wingpl` survives with 618 logs.
 ⇒ the 3-4 rounds of digging per failure are spent hunting evidence their own flag already erased.
 Remedy: drop that flag for diagnostic runs (or clean only successful ports).
-`vcpkg_last_failure` must return `unknown(reason: buildtrees_cleaned)` + this remedy — never a
+`vcpkg_last_failure` must return `unknown(reason: buildtrees_root_absent)` + this remedy — never a
 fabricated or confidently-empty answer.
+
+> Reason value updated 2026-07-26 (vocabulary audit). It was `buildtrees_cleaned`, which asserted
+> the CAUSE of the absence. The probe establishes only that the directory is not there; a mistyped
+> `--x-buildtrees-root`, a wrong triplet, or an unmounted volume produce the identical observation,
+> and naming the cleanup flag sent those operators hunting the wrong thing. The remedy above is
+> still the right one for the common case and now lives in the tool description rather than in the
+> reason value.
 
 ## 7. VERIFIED operator-environment finding — 17 dead patch files across 4 ports
 

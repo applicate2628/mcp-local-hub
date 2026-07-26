@@ -2,6 +2,8 @@ package lastfailure
 
 import (
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,23 +90,33 @@ func LastFailure(args Args, deps Deps) Result {
 	var sources []ContextSource
 
 	// --- Step 1: optional wrapper enrichment -------------------------------
+	// Four DISTINCT observations, kept apart because each names a different
+	// operator remedy and none of them may borrow another's claim: nothing
+	// was supplied (the tool never looked), a supplied path is absent, a
+	// supplied path could not be read, or its content yielded nothing.
 	var wrapperInfo WrapperInfo
 	wrapperOK := false
-	if strings.TrimSpace(args.BuildFailedLog) != "" {
-		if data, err := deps.FS.ReadFile(args.BuildFailedLog); err == nil {
+	wrapperPath := strings.TrimSpace(args.BuildFailedLog)
+	switch {
+	case wrapperPath == "":
+		notes = append(notes, NoteWrapperNotSupplied)
+	default:
+		data, err := deps.FS.ReadFile(wrapperPath)
+		switch {
+		case err == nil:
 			wrapperInfo, wrapperOK, _ = ParseWrapperContent(data)
 			if wrapperOK {
 				notes = append(notes, NoteWrapperUsedForContext)
 				sources = append(sources, SourceWrapperSummary)
-				ev.AddPath(args.BuildFailedLog)
+				ev.AddPath(wrapperPath)
 			} else {
 				notes = append(notes, NoteWrapperMalformed)
 			}
-		} else {
-			notes = append(notes, NoteWrapperMalformed)
+		case errors.Is(err, fs.ErrNotExist):
+			notes = append(notes, NoteWrapperNotFound)
+		default:
+			notes = append(notes, NoteWrapperUnreadable)
 		}
-	} else {
-		notes = append(notes, NoteWrapperAbsent)
 	}
 
 	// --- Step 2: determine port ---------------------------------------------
@@ -160,7 +172,7 @@ func LastFailure(args Args, deps Deps) Result {
 				Evidence:      ev,
 			}
 		}
-		notes = append(notes, NoteWrapperFailedPortsIncomplete)
+		notes = append(notes, NoteWrapperFailedPortsCompletenessUnproven)
 	}
 
 	// --- Step 3: determine buildtrees root -----------------------------------
@@ -170,6 +182,19 @@ func LastFailure(args Args, deps Deps) Result {
 		// relative --x-buildtrees-root against the shell that ran it, whose
 		// working directory this tool has no way to know.
 		buildtreesRoot = wrapperInfo.BuildtreesRoot
+	}
+	// vcpkgRoot is the vcpkg root this call actually knows, whether it was
+	// supplied or discovered. It is tracked separately from buildtreesRoot
+	// because the two are independent: buildtrees can be located directly
+	// (buildtrees_root, or a wrapper's --x-buildtrees-root) with no vcpkg root
+	// ever resolved. The overlay-chain fallback needs the vcpkg root, and
+	// previously read args.Root only — so the documented
+	// vcpkg-configuration.json source was silently skipped on the discovered-
+	// root path, and consulted on a relative args.Root that binds to the hub
+	// daemon's working directory. Both are fixed by resolving it once here.
+	vcpkgRoot := ""
+	if r := strings.TrimSpace(args.Root); r != "" && absoluteRoot(r) {
+		vcpkgRoot = r
 	}
 	if buildtreesRoot == "" {
 		// An explicit but relative root would be resolved against the daemon's
@@ -183,9 +208,10 @@ func LastFailure(args Args, deps Deps) Result {
 		discRes := discovery.DiscoverRoot(args.Root, deps.Discovery)
 		if discRes.Status != evidence.StatusOK {
 			ev.Paths = append(ev.Paths, discRes.Evidence.Paths...)
-			res := unknownResult(ReasonRootNotSpecified, ev, notes, sources)
+			res := unknownResult(ReasonVcpkgRootNotResolved, ev, notes, sources)
 			return res
 		}
+		vcpkgRoot = discRes.Root
 		buildtreesRoot = filepath.Join(discRes.Root, "buildtrees")
 	}
 	if !absoluteRoot(buildtreesRoot) {
@@ -200,12 +226,12 @@ func LastFailure(args Args, deps Deps) Result {
 	// almost certainly removed it) -------------------------------------------
 	switch p, _ := probeDir(deps.FS, buildtreesRoot); p {
 	case evidence.PresenceAbsent:
-		res := unknownResult(ReasonBuildtreesCleaned, ev, notes, sources)
+		res := unknownResult(ReasonBuildtreesRootAbsent, ev, notes, sources)
 		res.FailedTarget = port
 		if wrapperOK && wrapperInfo.ExitCode != nil {
 			res.ExitCode = wrapperInfo.ExitCode
 		}
-		chain, notesOut := resolveOverlayChain(args, wrapperInfo, wrapperOK, deps)
+		chain, notesOut := resolveOverlayChain(args, wrapperInfo, wrapperOK, vcpkgRoot, deps)
 		res.OverlayChain = chain
 		res.Notes = append(res.Notes, notesOut...)
 		return res
@@ -290,45 +316,63 @@ func LastFailure(args Args, deps Deps) Result {
 	phaseOrder := []Phase{PhaseExtract, PhasePatch, PhaseConfig, PhaseBuild, PhaseInstall}
 	var errPhase, anyPhase Phase
 	var errDiags, anyDiags []Diagnostic
+	var errScans, anyScans []scannedLog
 	var allLogPaths []string
-	var errOutLog, errErrLog string
-	var anyOutLog, anyErrLog string
-	var unreadableLogs []string
+	var unreadableLogs, truncatedLogs []string
 	interrupted := false
+
+	// scan reads ONE log under the size bound and records what it yielded,
+	// keeping each diagnostic attached to the file it came from.
+	scan := func(pf phaseLogFile) (scannedLog, bool) {
+		data, truncated, rerr := readLogLimited(deps.FS, pf.Path, maxLogBytes)
+		if rerr != nil {
+			unreadableLogs = append(unreadableLogs, pf.Path)
+			return scannedLog{}, false
+		}
+		if truncated {
+			truncatedLogs = append(truncatedLogs, pf.Path)
+		}
+		if DetectInterrupted(data) {
+			interrupted = true
+		}
+		d, serr := scanDiagnostics(data)
+		if serr != nil {
+			// The line scanner gave up partway (an over-long line). The rest
+			// of this log was never examined, which is the same evidential
+			// gap as a size-bounded read — never a silent "nothing matched".
+			truncatedLogs = append(truncatedLogs, pf.Path)
+		}
+		sl := scannedLog{file: pf, diags: d}
+		if cmd, ok := findRunBuildCommandLine(data); ok {
+			// Captured HERE, during the single bounded pass, so reporting a
+			// build command never costs a second read of a large log.
+			sl.buildCommand = cmd
+		}
+		return sl, true
+	}
 
 	for _, ph := range phaseOrder {
 		var thisPhaseDiags []Diagnostic
-		var thisOut, thisErr string
+		var thisScans []scannedLog
 		for _, pf := range phases {
 			if pf.Phase != ph {
 				continue
 			}
 			allLogPaths = append(allLogPaths, pf.Path)
 			ev.AddPath(pf.Path)
-			data, rerr := deps.FS.ReadFile(pf.Path)
-			if rerr != nil {
-				unreadableLogs = append(unreadableLogs, pf.Path)
+			sl, ok := scan(pf)
+			if !ok {
 				continue
 			}
-			if DetectInterrupted(data) {
-				interrupted = true
-			}
-			d := ScanDiagnostics(data)
-			thisPhaseDiags = append(thisPhaseDiags, d...)
-			if pf.Stream == "out" {
-				thisOut = pf.Path
-			} else {
-				thisErr = pf.Path
-			}
+			thisPhaseDiags = append(thisPhaseDiags, sl.diags...)
+			thisScans = append(thisScans, sl)
 		}
 		if len(thisPhaseDiags) == 0 {
 			continue
 		}
-		anyPhase, anyDiags = ph, thisPhaseDiags
-		anyOutLog, anyErrLog = thisOut, thisErr
+		anyPhase, anyDiags, anyScans = ph, thisPhaseDiags, thisScans
 		if ContainsFailureDiagnostic(thisPhaseDiags) {
-			errPhase, errDiags = ph, thisPhaseDiags
-			errOutLog, errErrLog = thisOut, thisErr
+			errPhase, errDiags, errScans = ph, thisPhaseDiags, thisScans
 		}
 	}
 
@@ -339,21 +383,12 @@ func LastFailure(args Args, deps Deps) Result {
 		ev.AddPath(stdoutNarration)
 	}
 	if len(errDiags) == 0 && stdoutNarration != "" {
-		data, rerr := deps.FS.ReadFile(stdoutNarration)
-		if rerr != nil {
-			unreadableLogs = append(unreadableLogs, stdoutNarration)
-		} else {
-			if DetectInterrupted(data) {
-				interrupted = true
+		if sl, ok := scan(phaseLogFile{Phase: PhaseInstall, Stream: "out", Path: stdoutNarration}); ok && len(sl.diags) > 0 {
+			if len(anyDiags) == 0 {
+				anyPhase, anyDiags, anyScans = PhaseInstall, sl.diags, []scannedLog{sl}
 			}
-			if d := ScanDiagnostics(data); len(d) > 0 {
-				if len(anyDiags) == 0 {
-					anyPhase, anyDiags, anyOutLog = PhaseInstall, d, stdoutNarration
-				}
-				if ContainsFailureDiagnostic(d) {
-					errPhase, errDiags, errOutLog = PhaseInstall, d, stdoutNarration
-					errErrLog = ""
-				}
+			if ContainsFailureDiagnostic(sl.diags) {
+				errPhase, errDiags, errScans = PhaseInstall, sl.diags, []scannedLog{sl}
 			}
 		}
 	}
@@ -367,22 +402,13 @@ func LastFailure(args Args, deps Deps) Result {
 	usedCapabilityProbeLog := false
 	if len(errDiags) == 0 {
 		for _, p := range configureLogYAMLPaths {
-			data, rerr := deps.FS.ReadFile(p)
-			if rerr != nil {
-				unreadableLogs = append(unreadableLogs, p)
+			sl, ok := scan(phaseLogFile{Phase: PhaseConfig, Stream: "out", Path: p})
+			if !ok || !ContainsFailureDiagnostic(sl.diags) {
 				continue
 			}
-			if DetectInterrupted(data) {
-				interrupted = true
-			}
-			d := ScanDiagnostics(data)
-			if !ContainsFailureDiagnostic(d) {
-				continue
-			}
-			errPhase, errDiags, errOutLog = PhaseConfig, d, p
-			errErrLog = ""
+			errPhase, errDiags, errScans = PhaseConfig, sl.diags, []scannedLog{sl}
 			if len(anyDiags) == 0 {
-				anyPhase, anyDiags, anyOutLog = PhaseConfig, d, p
+				anyPhase, anyDiags, anyScans = PhaseConfig, sl.diags, []scannedLog{sl}
 			}
 			usedCapabilityProbeLog = true
 			break
@@ -391,24 +417,46 @@ func LastFailure(args Args, deps Deps) Result {
 
 	// Resolve which set the answer is built from: an error-bearing selection
 	// when one exists, otherwise the warning-only evidence.
-	chosenPhase, chosenDiags := errPhase, errDiags
-	chosenOutLog, chosenErrLog := errOutLog, errErrLog
+	chosenPhase, chosenDiags, chosenScans := errPhase, errDiags, errScans
 	if len(chosenDiags) == 0 {
-		chosenPhase, chosenDiags = anyPhase, anyDiags
-		chosenOutLog, chosenErrLog = anyOutLog, anyErrLog
+		chosenPhase, chosenDiags, chosenScans = anyPhase, anyDiags, anyScans
 	}
 
-	overlayChain, overlayNotes := resolveOverlayChain(args, wrapperInfo, wrapperOK, deps)
+	overlayChain, overlayNotes := resolveOverlayChain(args, wrapperInfo, wrapperOK, vcpkgRoot, deps)
 	notes = append(notes, overlayNotes...)
 	if usedCapabilityProbeLog {
 		notes = append(notes, NoteDiagnosticFromCapabilityProbeLog)
 	}
 
-	exactCommand := extractExactCommand(deps.FS, chosenPhase, chosenOutLog, chosenErrLog, wrapperOK, wrapperInfo)
+	// exact_command is the reproducible TOP-LEVEL vcpkg invocation and comes
+	// only from an authoritative record of it. See Result.ExactCommand: a
+	// phase log holds a nested build tool's output, never vcpkg's own command
+	// line, so nothing is lifted out of one here.
+	exactCommand := ""
+	if wrapperOK && wrapperInfo.Command != "" {
+		exactCommand = wrapperInfo.Command
+		ev.AddCommand(exactCommand)
+	} else {
+		notes = append(notes, NoteExactCommandNotRecovered)
+	}
+
+	// The build-layer sub-invocation is reported separately, and only from
+	// the SAME (phase, configuration) build step that produced the headline
+	// diagnostic — so its provenance can be stated, not guessed.
+	var buildCommand, diagnosticLog string
+	if headline, ok := headlineSource(chosenScans); ok {
+		diagnosticLog = headline.file.Path
+		buildCommand = buildCommandForConfig(chosenScans, headline.file.Config)
+		if buildCommand != "" {
+			ev.AddCommand(buildCommand)
+		}
+	}
 
 	base := Result{
 		FailedTarget:  port,
 		ExactCommand:  exactCommand,
+		BuildCommand:  buildCommand,
+		DiagnosticLog: diagnosticLog,
 		LogPaths:      dedupStrings(append(allLogPaths, otherLogPaths...)),
 		OverlayChain:  overlayChain,
 		ContextSource: dedupSources(sources),
@@ -421,8 +469,11 @@ func LastFailure(args Args, deps Deps) Result {
 
 	// Diagnostics found are always returned, whatever the verdict — they are
 	// the evidence the caller judges, and withholding them on an `unknown`
-	// would force a re-read of the same logs.
-	base.Diagnostics = chosenDiags
+	// would force a re-read of the same logs. They are RANKED (errors first)
+	// so the actionable line never has to be dug out of a warning flood, and
+	// the single first error is additionally surfaced on its own.
+	base.FirstError = firstErrorDiagnostic(chosenDiags)
+	base.Diagnostics = rankDiagnostics(chosenDiags)
 
 	reportedPhase := chosenPhase
 	if reportedPhase == PhaseInstall {
@@ -449,6 +500,15 @@ func LastFailure(args Args, deps Deps) Result {
 		// may be issued. The readable evidence is still returned.
 		base.Status = evidence.StatusUnknown
 		base.Reason = ReasonPhaseLogUnreadable
+		base.Phase = reportedPhase
+
+	case len(truncatedLogs) > 0:
+		// Same rule for a log only PARTLY examined (over the size bound, or
+		// a line the scanner could not take). The unread tail can hold a
+		// later error or an interrupt marker, so the confident verdicts below
+		// are withheld exactly as they are for an unreadable log.
+		base.Status = evidence.StatusUnknown
+		base.Reason = ReasonPhaseLogSizeLimitExceeded
 		base.Phase = reportedPhase
 
 	case usedCapabilityProbeLog:
@@ -494,7 +554,13 @@ func portListedAsFailed(failedPorts []string, port, triplet string) bool {
 // (when present and it recovered an overlay chain) is the ACTUAL invocation
 // and is trusted above every other source; absent that, explicit param ->
 // VCPKG_OVERLAY_PORTS -> vcpkg-configuration.json overlay-ports -> none.
-func resolveOverlayChain(args Args, wrapperInfo WrapperInfo, wrapperOK bool, deps Deps) ([]string, []Note) {
+//
+// vcpkgRoot is the root resolved by the caller (supplied or discovered), and
+// is "" when this call never resolved one. Each outcome returns a note naming
+// the source it actually used, so the caller can verify the chain against
+// that source; when NO chain was found the notes say whether every documented
+// source was consulted or one was out of reach.
+func resolveOverlayChain(args Args, wrapperInfo WrapperInfo, wrapperOK bool, vcpkgRoot string, deps Deps) ([]string, []Note) {
 	if wrapperOK && len(wrapperInfo.OverlayPorts) > 0 {
 		return wrapperInfo.OverlayPorts, []Note{NoteOverlayChainFromWrapper}
 	}
@@ -506,36 +572,60 @@ func resolveOverlayChain(args Args, wrapperInfo WrapperInfo, wrapperOK bool, dep
 			return filepath.SplitList(val), []Note{NoteOverlayChainFromEnv}
 		}
 	}
-	if args.Root != "" {
-		if data, err := deps.FS.ReadFile(filepath.Join(args.Root, "vcpkg-configuration.json")); err == nil {
-			var cfg vcpkgConfiguration
-			if json.Unmarshal(data, &cfg) == nil && len(cfg.OverlayPorts) > 0 {
-				return cfg.OverlayPorts, []Note{NoteOverlayChainFromParam}
-			}
+	if vcpkgRoot == "" {
+		return nil, []Note{NoteOverlayChainNotSupplied, NoteOverlayChainConfigNotConsulted}
+	}
+	if data, err := deps.FS.ReadFile(filepath.Join(vcpkgRoot, "vcpkg-configuration.json")); err == nil {
+		var cfg vcpkgConfiguration
+		if json.Unmarshal(data, &cfg) == nil && len(cfg.OverlayPorts) > 0 {
+			return cfg.OverlayPorts, []Note{NoteOverlayChainFromVcpkgConfiguration}
 		}
 	}
-	return nil, []Note{NoteOverlayChainNone}
+	return nil, []Note{NoteOverlayChainNotSupplied}
 }
 
-// extractExactCommand recovers the most specific "exact failing command"
-// available: the phase's own invocation line when a phase log was read,
-// falling back to the wrapper's whole-batch command when nothing more
-// specific is available.
-func extractExactCommand(fsys FS, phase Phase, outLog, errLog string, wrapperOK bool, wrapperInfo WrapperInfo) string {
-	if outLog != "" {
-		if data, err := fsys.ReadFile(outLog); err == nil {
-			if phase == PhaseInstall || phase == PhaseBuild {
-				if cmd, ok := findRunBuildCommandLine(data); ok {
-					return cmd
-				}
-			}
-			if line, ok := firstNonEmptyLine(data); ok {
-				return line
-			}
+// scannedLog is one phase log together with everything one bounded pass over
+// it produced. Keeping the diagnostics attached to their OWN file is what
+// makes the reported command traceable to the reported diagnostic: the
+// predecessor tracked only "the last out log and the last err log touched in
+// this phase", which across several build configurations need not be the log
+// the reported diagnostic came from at all.
+type scannedLog struct {
+	file  phaseLogFile
+	diags []Diagnostic
+	// buildCommand is the "Run Build Command(s): ..." line this log recorded,
+	// captured during the same bounded pass that scanned it.
+	buildCommand string
+}
+
+// headlineSource returns the scanned log that produced the HEADLINE
+// diagnostic — the first error-severity one, or the first diagnostic of any
+// severity when the set holds no error.
+func headlineSource(scans []scannedLog) (scannedLog, bool) {
+	for _, s := range scans {
+		if firstErrorDiagnostic(s.diags) != nil {
+			return s, true
 		}
 	}
-	if wrapperOK && wrapperInfo.Command != "" {
-		return wrapperInfo.Command
+	for _, s := range scans {
+		if len(s.diags) > 0 {
+			return s, true
+		}
+	}
+	return scannedLog{}, false
+}
+
+// buildCommandForConfig returns the build sub-invocation recorded by the same
+// build STEP as the headline diagnostic. A step writes two streams
+// (`...-<cfg>-out.log` and `...-<cfg>-err.log`) that share a configuration
+// token, and CMake echoes the command on stdout while the compiler writes
+// diagnostics to stderr — so the command and the diagnostic legitimately live
+// in sibling files, but never across different configurations.
+func buildCommandForConfig(scans []scannedLog, config string) string {
+	for _, s := range scans {
+		if s.file.Config == config && s.buildCommand != "" {
+			return s.buildCommand
+		}
 	}
 	return ""
 }
@@ -546,16 +636,6 @@ func findRunBuildCommandLine(data []byte) (string, bool) {
 		trimmed := strings.TrimRight(line, "\r")
 		if idx := strings.Index(trimmed, marker); idx >= 0 {
 			return strings.TrimSpace(trimmed[idx+len(marker):]), true
-		}
-	}
-	return "", false
-}
-
-func firstNonEmptyLine(data []byte) (string, bool) {
-	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimSpace(strings.TrimRight(line, "\r"))
-		if trimmed != "" {
-			return trimmed, true
 		}
 	}
 	return "", false
