@@ -176,30 +176,20 @@ func TestMCPFrontPR588_ForwardRerunPreservesFirstGenerationRecord(t *testing.T) 
 		t.Fatalf("after forward #1 the serena entry should point at the front port: got %q (present=%v), want %q", got, ok, frontSerenaURL)
 	}
 	first := readPersistedMCPFrontReport(t, reportPath)
-	if first.Serena == nil || len(first.Serena.Applied) == 0 {
-		t.Fatalf("forward #1 must record an applied serena row; got %+v", first.Serena)
+	serenaKey := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")
+	firstRow, ok := first.Rows[serenaKey]
+	if !ok || firstRow.Pin == nil || firstRow.Pin.Path == "" {
+		t.Fatalf("forward #1 must record a row-owned serena pin; row=%+v", firstRow)
 	}
-	firstBackup := ""
-	for _, row := range first.Serena.Applied {
-		if row.Client == "claude-code" {
-			firstBackup = row.BackupPath
-		}
-	}
-	if firstBackup == "" {
-		t.Fatalf("forward #1 must record a backup path for claude-code; applied=%+v", first.Serena.Applied)
-	}
+	firstBackup := firstRow.Pin.Path
 
 	// --- forward run #2 (the documented retry) --------------------------
 	if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
 		t.Fatalf("forward reconcile #2: %v", err)
 	}
 	second := readPersistedMCPFrontReport(t, reportPath)
-	secondBackup := ""
-	for _, row := range second.Serena.Applied {
-		if row.Client == "claude-code" {
-			secondBackup = row.BackupPath
-		}
-	}
+	secondRow := second.Rows[serenaKey]
+	secondBackup := secondRow.Pin.Path
 	if secondBackup != firstBackup {
 		t.Fatalf("forward re-run REPLACED the first generation's recorded backup for claude-code: first=%q second=%q; the second-run backup captures the ALREADY-REWRITTEN front-port config, so rollback would restore the front URL and the original state would be unrecoverable", firstBackup, secondBackup)
 	}
@@ -408,95 +398,30 @@ func TestMCPFrontPR588_RollbackRefusesUnknownArtifactVersion(t *testing.T) {
 // recorded IS added (that is the retry of a previously-failed client, whose
 // captured state genuinely is its original pre-state).
 func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
-	prior := &mcpFrontReconcileReport{
-		Version: mcpFrontReconcileReportVersion,
-		Port:    9137,
-		Serena: &api.MigrateReport{Applied: []api.AppliedMigration{
-			{Server: "serena", Client: "claude-code", URL: "front", BackupPath: "GEN1-BACKUP"},
-		}},
-		LSP: &[]api.LSPRouterEntrySnapshot{
-			{Client: "claude-code", Language: "go", EntryName: "mcp-language-server-go", Present: true, URL: "GEN1-URL"},
-		},
-		Pins: []mcpFrontSerenaPin{
-			{Client: "claude-code", Origin: "GEN1-ROLLING", Path: "GEN1-BACKUP", SHA256: "GEN1-SUM"},
-		},
+	name := api.LSPRouterEntryName("go")
+	gen1 := v3LSPSnapshot("claude-code", "go", name, true, "GEN1-URL")
+	first := v3Journal(t, 9137, nil,
+		v3LSPAdd("claude-code", "go", name, gen1,
+			v3LSPSnapshot("claude-code", "go", name, true, "FRONT-A")),
+	)
+	gen2 := v3LSPSnapshot("claude-code", "go", name, true, "FRONT-A")
+	cursor := v3LSPSnapshot("cursor", "go", name, true, "CURSOR-URL")
+	retry := v3Journal(t, 9200, &first.record,
+		v3LSPAdd("claude-code", "go", name, gen2,
+			v3LSPSnapshot("claude-code", "go", name, true, "FRONT-B")),
+		v3LSPAdd("cursor", "go", name, cursor,
+			v3LSPSnapshot("cursor", "go", name, true, "FRONT-B")),
+	)
+	claudeKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", name)
+	cursorKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "cursor", "go", name)
+	if got := retry.record.Rows[claudeKey].Baseline.LSP.URL; got != "GEN1-URL" {
+		t.Fatalf("retry overwrote first immutable baseline: %q", got)
 	}
-	// Generation 2 re-reports claude-code (now carrying POST-generation-1
-	// state) and additionally reports cursor, which generation 1 failed on.
-	serena := &api.MigrateReport{Applied: []api.AppliedMigration{
-		{Server: "serena", Client: "claude-code", URL: "front", BackupPath: "GEN2-BACKUP"},
-		{Server: "serena", Client: "cursor", URL: "front", BackupPath: "CURSOR-BACKUP"},
-	}}
-	lsp := []api.LSPRouterEntrySnapshot{
-		{Client: "claude-code", Language: "go", EntryName: "mcp-language-server-go", Present: true, URL: "GEN2-URL"},
-		{Client: "cursor", Language: "go", EntryName: "mcp-language-server-go", Present: true, URL: "CURSOR-URL"},
+	if got := retry.record.Rows[cursorKey].Baseline.LSP.URL; got != "CURSOR-URL" {
+		t.Fatalf("retry omitted new row baseline: %q", got)
 	}
-
-	pins := []mcpFrontSerenaPin{
-		{Client: "claude-code", Origin: "GEN2-ROLLING", Path: "GEN2-BACKUP", SHA256: "GEN2-SUM"},
-		{Client: "cursor", Origin: "CURSOR-ROLLING", Path: "CURSOR-BACKUP", SHA256: "CURSOR-SUM"},
-	}
-
-	merged := mergeMCPFrontReconcileReport(prior, 9200, serena, lsp, pins)
-
-	// The port polarity is the OPPOSITE of the pre-state fields below, and
-	// this assertion was inverted when the record was first written (it
-	// demanded the FIRST generation's 9137). Port does not describe the
-	// pre-reconcile state — it describes what the most recent forward run
-	// WROTE into the live client configs, and generation 2 really did move
-	// them to 9200. Keeping 9137 made the rollback judge the live entries
-	// against a port the command had stopped writing, so its absent-row
-	// removal guard stopped matching and the entries the cutover created were
-	// left behind pointing at a retired port (codex bot PR #588).
-	if merged.Port != 9200 {
-		t.Fatalf("merge must adopt the LATEST generation's port (that is the port now written into the live client configs): got %d, want 9200", merged.Port)
-	}
-	if !merged.SnapshotComplete {
-		t.Fatalf("every record this merge produces carries both recovery sections, so it must be marked snapshot-complete; the rollback refuses one that is not")
-	}
-	if merged.LSP == nil {
-		t.Fatalf("the merged record's lsp section must be non-nil (an explicit empty section, never a missing one) — a nil slice marshals to `null`, which the rollback cannot tell apart from a lost section")
-	}
-	pinPaths := map[string]string{}
-	for _, pin := range merged.Pins {
-		if _, dup := pinPaths[pin.Client]; dup {
-			t.Fatalf("merge produced a duplicate pin for %s: %+v", pin.Client, merged.Pins)
-		}
-		pinPaths[pin.Client] = pin.Path
-	}
-	if pinPaths["claude-code"] != "GEN1-BACKUP" {
-		t.Fatalf("merge overwrote the recorded pin for claude-code: got %q, want GEN1-BACKUP (the generation-2 pin copies the already-rewritten config)", pinPaths["claude-code"])
-	}
-	if pinPaths["cursor"] != "CURSOR-BACKUP" {
-		t.Fatalf("merge dropped the pin for a client generation 1 never migrated: got %q, want CURSOR-BACKUP", pinPaths["cursor"])
-	}
-	backups := map[string]string{}
-	for _, row := range merged.Serena.Applied {
-		if _, dup := backups[row.Client]; dup {
-			t.Fatalf("merge produced a duplicate serena row for %s: %+v", row.Client, merged.Serena.Applied)
-		}
-		backups[row.Client] = row.BackupPath
-	}
-	if backups["claude-code"] != "GEN1-BACKUP" {
-		t.Fatalf("merge overwrote a recorded serena row: claude-code backup = %q, want GEN1-BACKUP (the generation-2 backup captures the already-rewritten config)", backups["claude-code"])
-	}
-	if backups["cursor"] != "CURSOR-BACKUP" {
-		t.Fatalf("merge dropped the retry row for a client generation 1 never migrated: cursor backup = %q, want CURSOR-BACKUP", backups["cursor"])
-	}
-
-	urls := map[string]string{}
-	for _, row := range *merged.LSP {
-		key := lspSnapshotKey(row)
-		if _, dup := urls[key]; dup {
-			t.Fatalf("merge produced a duplicate lsp row for %s/%s", row.Client, row.Language)
-		}
-		urls[key] = row.URL
-	}
-	if urls["claude-code\x00go"] != "GEN1-URL" {
-		t.Fatalf("merge overwrote a recorded lsp pre-state row: got %q, want GEN1-URL", urls["claude-code\x00go"])
-	}
-	if urls["cursor\x00go"] != "CURSOR-URL" {
-		t.Fatalf("merge dropped a new lsp pre-state row: got %q, want CURSOR-URL", urls["cursor\x00go"])
+	if retry.record.ActivePlan.Port != 9200 {
+		t.Fatalf("active generation port=%d, want 9200", retry.record.ActivePlan.Port)
 	}
 }
 

@@ -1,23 +1,24 @@
 ---
-template: review
-orchestration: light
+template: full-delivery
+orchestration: full-lead
 started: 2026-07-26
-updated: 2026-07-26 00:00
+updated: 2026-07-27 08:07
 ---
 
 ## Current state
 
-- **Primary task**: re-verify the seven prior findings after commits `3f72365d`
-  and `d6c0501f`.
+- **Primary task**: close all live Codex-bot findings on PR #588 and commit the
+  verified fixes without pushing.
 - **Primary task status**: active
 - **Interruption marker**: none
-- **Stage**: architecture gate complete — REVISE
-- **Main conv role**: final reconciliation
-- **Last accepted artifact**: `qa-adversarial-falsifiers.md` (QA artifact PASS;
-  product closure REVISE)
-- **Open obligations before closeout**: fix request-time shared audit writes,
-  resolver generation regression, and seeder committed-generation/nil-failure
-  convergence; re-run QA and architecture gates
+- **Stage**: two external R2 architecture gates
+- **Main conv role**: orchestrating
+- **Last accepted artifact**: `qa-live-findings-2026-07-27.md`
+  (R2 QA PASS; SHA-256
+  `BD72AD3996DB35FD25044C96AB47EBCB51E97CB6FBFEA12B4E54DEE1AD9A2F64`)
+- **Open obligations before closeout**: classification; class sweeps; any needed
+  design and implementation; mutation proofs; scoped tagged tests; build; vet;
+  independent architecture gate; commit; no push
 - **Epic**: none
 - **Depends-on**: none
 - **Priority**: high
@@ -26,7 +27,8 @@ updated: 2026-07-26 00:00
 
 | Agent | Role | Model/effort | Status | Launched |
 | --- | --- | --- | --- | --- |
-| none | none | none | not launched | n/a |
+| architecture-claim-live-findings-r2 | external-reviewer replacing architecture-reviewer | direct Codex CLI, `gpt-5.6-sol`/xhigh | launching | pending |
+| architecture-adversarial-live-findings-r2 | external-reviewer replacing architecture-reviewer | direct Codex CLI, `gpt-5.6-sol`/xhigh | launching | pending |
 
 ## Completed agents
 
@@ -39,11 +41,32 @@ updated: 2026-07-26 00:00
 | architecture-claim-reverify | architecture-reviewer | REVISE | `architecture-claim-reverify.md` |
 | architecture-adversarial-reverify | architecture-reviewer | REVISE | `architecture-adversarial-reverify.md` |
 | qa-adversarial-falsifiers | qa-engineer | PASS (product closure REVISE) | `qa-adversarial-falsifiers.md` |
+| workitems-recovery-audit | knowledge-archivist | PASS | `work-items-recovery-audit-2026-07-27.md` |
+| analyst-current-findings | analyst | PASS | `research-live-findings-2026-07-27.md` |
+| architect-open-recovery-classes | architect | RETURN(lead), INPUT_ONLY | `design-advisor-internal-2026-07-27.md` |
+| analyst-adapter-cas-seam | analyst | PASS, RETURN(lead) | `research-adapter-cas-seam-2026-07-27.md` |
+| panel-journal | external-worker replacing architect | RETURN(lead), INPUT_ONLY, exit 0 | `.scratch/design-panel/design-journal-r3.md` |
+| panel-ownership | external-worker replacing architect | RETURN(lead), INPUT_ONLY, exit 0 | `.scratch/design-panel/design-ownership-r3.md` |
+| design-panel-synthesis | lead | PASS | `design.md` |
+| reliability-open-recovery-classes-r1 | reliability-engineer | REVISE | `reliability-live-findings-2026-07-27.md` |
+| reliability-open-recovery-classes-r2 | reliability-engineer | PASS, planner-eligible | `reliability-live-findings-2026-07-27.md` |
+| planner-open-recovery-classes | planner | PASS, planner-eligible | `plan-live-findings-2026-07-27.md` |
+| planner-open-recovery-classes-amendment | planner | PASS; narrow stale-fixture amendment | `plan-live-findings-2026-07-27.md` |
+| backend-open-recovery-classes | backend-engineer, integration owner | PASS, RETURN(lead) | `implementation-live-findings-2026-07-27.md` |
+| qa-open-recovery-classes | qa-engineer | PASS, RETURN(lead) | `qa-live-findings-2026-07-27.md` |
+| architecture-claim-live-findings-r1 | external-reviewer replacing architecture-reviewer | REVISE evidence; counted gate UNVERIFIED (missing exit record) | `.scratch/external-reviews/claim.out` |
+| architecture-adversarial-live-findings-r1 | external-reviewer replacing architecture-reviewer | REVISE evidence; counted gate UNVERIFIED (missing exit record) | `.scratch/external-reviews/adversarial.out` |
+| architect-pr588-r2-contract | architect | PASS, accepted-ready | `work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md` |
+| planner-pr588-r2-delta | planner | PASS, planner-eligible | `plan-live-findings-2026-07-27.md` |
+| backend-open-recovery-classes-r2 | backend-engineer, integration owner | PASS, RETURN(lead) | `implementation-live-findings-2026-07-27.md` |
+| qa-open-recovery-classes-r2 | qa-engineer | REVISE at mutation 1/7; source restored | `qa-live-findings-2026-07-27.md` |
+| backend-open-recovery-classes-r2a | backend-engineer, integration owner | PASS; caller-level oracle now falsifies stale-memory mutation | `implementation-live-findings-2026-07-27.md` |
+| qa-open-recovery-classes-r2-restart | qa-engineer | PASS; 7/7 mutations, 133 restored PASS markers, build/vet exit 0 | `qa-live-findings-2026-07-27.md` |
 
 ## Next action
 
-Return the three design-decision blockers to `$architect`; after fixes, repeat
-the exact mutation/falsifier matrix and both architecture review angles.
+Obtain two completion-verified external R2 architecture PASS verdicts against
+the same code, ADR, implementation, and QA artifact hashes.
 
 ---
 

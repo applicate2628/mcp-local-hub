@@ -14,7 +14,6 @@ package cli
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -169,7 +168,7 @@ func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 	if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
 		t.Fatalf("forward reconcile at port A: %v", err)
 	}
-	if got := readPersistedMCPFrontReport(t, reportPath).Port; got != portA {
+	if got := readPersistedMCPFrontReport(t, reportPath).ActivePlan.Port; got != portA {
 		t.Fatalf("generation 1 recorded port %d, want %d", got, portA)
 	}
 	cleanupA()
@@ -191,12 +190,13 @@ func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 	}
 
 	rec := readPersistedMCPFrontReport(t, reportPath)
-	if rec.Port != portB {
-		t.Fatalf("the record must name the port the LATEST generation wrote into the live client configs (%d), not the first one (%d) — the rollback judges the live entries against it, so a stale value leaves the entries this cutover created behind on a retired port. got %d", portB, portA, rec.Port)
+	if rec.ActivePlan.Port != portB {
+		t.Fatalf("active plan port=%d, want latest %d (first %d)", rec.ActivePlan.Port, portB, portA)
 	}
 	// The pre-state must NOT have moved with it: opposite polarity, same record.
-	if len(rec.Pins) == 0 {
-		t.Fatalf("expected the first generation's pinned pre-state to survive the re-run; pins=%+v", rec.Pins)
+	serenaKey := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")
+	if rec.Rows[serenaKey].Pin == nil {
+		t.Fatalf("expected the first generation's row-owned pin to survive the re-run; row=%+v", rec.Rows[serenaKey])
 	}
 }
 
@@ -370,8 +370,14 @@ func TestMCPFrontR2_PinIsReclaimedWhenItsRecordCannotBePublished(t *testing.T) {
 		t.Fatalf("seed backup: %v", err)
 	}
 
-	journal := newMCPFrontReconcileJournal(reportPath, nil, 9137, nil)
-	err := journal.recordSerenaBackup("claude-code", backupPath)
+	journal, journalErr := newMCPFrontV3Journal(reportPath, nil, 9137, &api.LSPRouterClientPlan{Port: 9137})
+	if journalErr != nil {
+		t.Fatal(journalErr)
+	}
+	err := journal.prepareSerenaAttempt(api.SerenaReconcileAttemptResult{
+		Client: "claude-code", BackupPath: backupPath,
+		PreFingerprint: "pre", IntendedFingerprint: "post",
+	})
 	if err == nil {
 		t.Fatalf("the journal must refuse when its recovery row cannot be made durable; it returned nil, which would let the client be mutated with no way back")
 	}
@@ -387,125 +393,5 @@ func TestMCPFrontR2_PinIsReclaimedWhenItsRecordCannotBePublished(t *testing.T) {
 	})
 	if len(survivors) > 0 {
 		t.Fatalf("a pinned copy of the client config survived a generation that published NO record referencing it: %v. Nothing will ever reference or clean it, and it holds a verbatim copy of %s (which may contain tokens or env secrets)", survivors, backupPath)
-	}
-}
-
-// writeLegacyV1Record writes a version-1 recovery record by hand, the way the
-// immediately preceding build would have left one.
-func writeLegacyV1Record(t *testing.T, reportPath, client, backupPath string, lsp *[]api.LSPRouterEntrySnapshot, port int) {
-	t.Helper()
-	// Built from the REAL record struct rather than a hand-rolled map, so the
-	// on-disk JSON field names are exactly what the production reader expects.
-	// (A hand-rolled map silently mis-spelled backup_path and produced a record
-	// whose serena row looked like a dry-run — the test then proved nothing.)
-	rec := mcpFrontReconcileReport{
-		Version: mcpFrontReconcileLegacyReportVersion,
-		Port:    port,
-		Serena: &api.MigrateReport{Applied: []api.AppliedMigration{
-			{Server: "serena", Client: client, URL: "front", BackupPath: backupPath},
-		}},
-		LSP: lsp,
-		// Deliberately no Pins and no SnapshotComplete: a version-1 record
-		// predates both. That is the whole point of the legacy-admission path.
-	}
-	raw, err := json.MarshalIndent(rec, "", "  ")
-	if err != nil {
-		t.Fatalf("marshal v1 record: %v", err)
-	}
-	// Written through the hardened owner-only state-file pipeline, which is
-	// how the previous build produced it — a plain os.WriteFile leaves a DACL
-	// the inode-anchored reader refuses, which would make this test fail for
-	// a reason that has nothing to do with artifact versioning.
-	if err := api.WriteStateFileBytesAtomic(reportPath, raw); err != nil {
-		t.Fatalf("write v1 record: %v", err)
-	}
-}
-
-// TestMCPFrontR2_LegacyV1RecordWithVerifiedInputsCanStillRollBack is the P1
-// guard for the blanket v1 refusal stranding a recoverable host.
-//
-// A host cut over by the immediately preceding build holds a v1 record with an
-// explicit LSP section and its serena backup still on disk — demonstrably
-// sufficient recovery inputs. Refusing both the rollback and the forward retry
-// leaves that operator cut over with no way back, which is strictly worse than
-// the defect the refusal protects against.
-func TestMCPFrontR2_LegacyV1RecordWithVerifiedInputsCanStillRollBack(t *testing.T) {
-	tmp := mcpFrontPR588Env(t)
-	assertRedirectedStateDir(t, tmp)
-	reportPath := withMCPFrontReportPathSeam(t)
-
-	configPath := seedClaudeCodeConfig(t, tmp, map[string]any{
-		"serena": map[string]any{"url": "http://127.0.0.1:9137/serena/mcp"},
-	})
-	// The pre-reconcile backup the v1 record names: the ORIGINAL GUI-port entry.
-	backupPath := filepath.Join(tmp, "claude-code.bak-mcp-local-hub-20260725-120000")
-	backup := []byte(`{"mcpServers":{"serena":{"url":"http://127.0.0.1:9125/serena/mcp"}}}`)
-	if err := os.WriteFile(backupPath, backup, 0o600); err != nil {
-		t.Fatalf("write backup: %v", err)
-	}
-	empty := []api.LSPRouterEntrySnapshot{}
-	writeLegacyV1Record(t, reportPath, "claude-code", backupPath, &empty, 9137)
-
-	if err := runReconcileMCPFront(newMCPFrontTestCmd(), true); err != nil {
-		t.Fatalf("a version-1 record whose LSP section is EXPLICIT and whose serena backup is present on disk carries verified-sufficient recovery inputs; refusing it strands the operator cut over with no way back: %v", err)
-	}
-	if got, _ := claudeCodeEntryURL(t, configPath, "serena"); !strings.Contains(got, "9125") {
-		t.Fatalf("the v1 rollback did not restore the pre-reconcile serena URL: got %q, want the 9125 GUI-port entry from the backup", got)
-	}
-	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
-		t.Fatalf("a completed rollback must retire the record; stat err = %v", statErr)
-	}
-}
-
-// TestMCPFrontR2_LegacyV1RecordWithoutAnLSPSectionIsStillRefused pins the
-// other half of the distinction: v1 is admitted only when its completeness is
-// VERIFIED, never assumed. An absent LSP section is the one thing v1 genuinely
-// cannot express, so it stays refused.
-func TestMCPFrontR2_LegacyV1RecordWithoutAnLSPSectionIsStillRefused(t *testing.T) {
-	tmp := mcpFrontPR588Env(t)
-	assertRedirectedStateDir(t, tmp)
-	reportPath := withMCPFrontReportPathSeam(t)
-
-	seedClaudeCodeConfig(t, tmp, map[string]any{
-		"serena": map[string]any{"url": "http://127.0.0.1:9137/serena/mcp"},
-	})
-	backupPath := filepath.Join(tmp, "claude-code.bak-mcp-local-hub-20260725-120000")
-	if err := os.WriteFile(backupPath, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
-		t.Fatalf("write backup: %v", err)
-	}
-	writeLegacyV1Record(t, reportPath, "claude-code", backupPath, nil, 9137)
-
-	err := runReconcileMCPFront(newMCPFrontTestCmd(), true)
-	if err == nil {
-		t.Fatalf("a version-1 record with NO lsp section must stay refused: consuming it would restore serena and delete the only evidence the LSP entries are still on the front port")
-	}
-	if _, statErr := os.Stat(reportPath); statErr != nil {
-		t.Fatalf("the refused record must be KEPT: %v", statErr)
-	}
-}
-
-// TestMCPFrontR2_LegacyV1RecordWithAPrunedBackupIsRefused pins the third leg:
-// v1 names rolling backups, which retention prunes. Admission requires the
-// named input to be present RIGHT NOW.
-func TestMCPFrontR2_LegacyV1RecordWithAPrunedBackupIsRefused(t *testing.T) {
-	tmp := mcpFrontPR588Env(t)
-	assertRedirectedStateDir(t, tmp)
-	reportPath := withMCPFrontReportPathSeam(t)
-
-	configPath := seedClaudeCodeConfig(t, tmp, map[string]any{
-		"serena": map[string]any{"url": "http://127.0.0.1:9137/serena/mcp"},
-	})
-	before, _ := os.ReadFile(configPath)
-	empty := []api.LSPRouterEntrySnapshot{}
-	// The backup path is named but was pruned — never created here.
-	writeLegacyV1Record(t, reportPath, "claude-code", filepath.Join(tmp, "gone.bak-mcp-local-hub-20260725-120000"), &empty, 9137)
-
-	err := runReconcileMCPFront(newMCPFrontTestCmd(), true)
-	if err == nil {
-		t.Fatalf("a version-1 record whose recorded rolling backup has been pruned must be refused BEFORE any write, not discovered halfway through the restore")
-	}
-	after, _ := os.ReadFile(configPath)
-	if string(before) != string(after) {
-		t.Fatalf("the refusal must happen before any client write.\nbefore: %s\nafter:  %s", string(before), string(after))
 	}
 }

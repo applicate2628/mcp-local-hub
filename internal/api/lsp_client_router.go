@@ -112,6 +112,304 @@ type lspClientRouterOp struct {
 	entry     clients.MCPEntry
 }
 
+// LSPRouterPlannedOperation is one exact, immutable mutation captured before a
+// front-reconcile generation writes any client configuration.
+type LSPRouterPlannedOperation struct {
+	Client        string                 `json:"client"`
+	Language      string                 `json:"language"`
+	EntryName     string                 `json:"entry_name"`
+	Operation     string                 `json:"operation"`
+	PreState      LSPRouterEntrySnapshot `json:"pre_state"`
+	IntendedState LSPRouterEntrySnapshot `json:"intended_state"`
+	entry         clients.MCPEntry
+}
+
+// LSPRouterClientPlan freezes the client population and exact entry states for
+// one operation. The adapter map is deliberately private and never persisted;
+// applying a plan can only use the same concrete population captured here.
+type LSPRouterClientPlan struct {
+	Port            int                         `json:"port"`
+	Operations      []LSPRouterPlannedOperation `json:"operations"`
+	CaptureFailures []LSPClientRouterFailure    `json:"capture_failures,omitempty"`
+	clientMap       map[string]clients.Client
+	keepN           int
+	opts            LSPClientRouterOpts
+}
+
+type LSPRouterMutationObservation struct {
+	Operation            LSPRouterPlannedOperation
+	ObservedState        LSPRouterEntrySnapshot
+	Invoked              bool
+	PreconditionConflict bool
+	PreparationErr       error
+	AdapterErr           error
+	ObservationErr       error
+}
+
+type LSPRouterApplyCallbacks struct {
+	OnPrepared             func(LSPRouterPlannedOperation) error
+	OnFinished             func(LSPRouterMutationObservation) error
+	OnPreconditionConflict func(LSPRouterMutationObservation) error
+}
+
+var ErrLSPRouterPlanPreconditionConflict = errors.New("lsp router plan precondition no longer matches")
+
+// PlanLSPRouterClientEntries captures one complete eligible client population,
+// its exact canonical/legacy pre-state, and every operation the forward pass
+// may perform. It calls clients.AllClients at most once; application never
+// enumerates or re-admits clients.
+func (a *API) PlanLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPRouterClientPlan, error) {
+	languages, err := loadLSPRouterLanguages(opts.Languages)
+	if err != nil {
+		return nil, err
+	}
+	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	if err != nil {
+		return nil, err
+	}
+	opts.GUIPort = port
+	regEntries, err := loadLSPRouterRegistryEntries()
+	if err != nil {
+		return nil, err
+	}
+	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
+	disabledClients, err := a.LSPRouterDisabledClientSet()
+	if err != nil {
+		return nil, err
+	}
+	enabledClients, err := a.ClientInstallEnabledSet()
+	if err != nil {
+		return nil, err
+	}
+	keepN := opts.BackupKeepN
+	if keepN == 0 {
+		keepN = a.EffectiveBackupKeepN()
+	}
+	clientMap := opts.Clients
+	if clientMap == nil {
+		clientMap = clients.AllClients()
+	}
+	capturedClients := make(map[string]clients.Client, len(clientMap))
+	for clientName, adapter := range clientMap {
+		capturedClients[clientName] = adapter
+	}
+	plan := &LSPRouterClientPlan{
+		Port:      port,
+		clientMap: capturedClients,
+		keepN:     keepN,
+		opts:      opts,
+	}
+	forceClientName := strings.TrimSpace(opts.ForceClientName)
+	for _, clientName := range sortedLSPClientNames(capturedClients) {
+		adapter := capturedClients[clientName]
+		if adapter == nil || !adapter.Exists() || disabledClients[clientName] {
+			continue
+		}
+		if !enabledClients[clientName] && clientName != forceClientName {
+			hasEvidence, evidenceErr := clientHasLSPRouterEnablementEvidence(
+				clientName, adapter, languages, port, regEntries, portsByLanguage)
+			if evidenceErr != nil {
+				plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, "", "", "enablement", evidenceErr))
+				continue
+			}
+			if !hasEvidence {
+				continue
+			}
+		}
+		for _, language := range languages {
+			targetName := LSPRouterEntryName(language)
+			targetURL := LSPRouterURL(port, language)
+			current, readErr := adapter.GetEntry(targetName)
+			if readErr != nil {
+				plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "read", readErr))
+				continue
+			}
+			canonicalPre := lspSnapshotFromEntry(clientName, language, targetName, current)
+			if !entryMatchesLSPRouter(current, targetURL) {
+				if current != nil && !entryIsHubOwnedLSPClientEntry(targetName, current, language, port, portsByLanguage[language]) {
+					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "ownership",
+						errors.New("live entry is not hub-owned; refusing to overwrite")))
+					continue
+				}
+				entry, prepErr := lspRouterMCPEntryForClient(opts, adapter, targetName, targetURL)
+				if prepErr != nil {
+					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "prepare", prepErr))
+					continue
+				}
+				plan.Operations = append(plan.Operations, LSPRouterPlannedOperation{
+					Client: clientName, Language: language, EntryName: targetName, Operation: "add",
+					PreState: canonicalPre, IntendedState: lspSnapshotFromEntry(clientName, language, targetName, &entry),
+					entry: entry,
+				})
+			}
+			legacyEntries, legacyReadErrs := collectLegacyLSPEntriesToMigrate(
+				adapter, regEntries, portsByLanguage[language], language, clientName, targetName)
+			if len(legacyReadErrs) > 0 {
+				for _, legacyReadErr := range legacyReadErrs {
+					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, legacyReadErr.Name, "read", legacyReadErr.Err))
+				}
+				continue
+			}
+			for _, legacy := range legacyEntries {
+				plan.Operations = append(plan.Operations, LSPRouterPlannedOperation{
+					Client: clientName, Language: language, EntryName: legacy.Name, Operation: "remove",
+					PreState:      lspSnapshotFromEntry(clientName, language, legacy.Name, legacy.Entry),
+					IntendedState: LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacy.Name},
+				})
+			}
+		}
+	}
+	return plan, nil
+}
+
+// ApplyLSPRouterClientPlan applies only the frozen operations and adapters in
+// plan. Every write is preceded by an exact pre-state check and a durable
+// OnPrepared callback; OnFinished is total over adapter success and error.
+// A pre-state mismatch invokes the separate OnPreconditionConflict callback
+// because no mutation attempt was prepared or made.
+func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPRouterApplyCallbacks) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
+	if plan == nil {
+		return report, errors.New("nil lsp router client plan")
+	}
+	report.Failed = append(report.Failed, plan.CaptureFailures...)
+	backedUp := map[string]bool{}
+	canonicalReady := map[string]bool{}
+	for _, op := range plan.Operations {
+		group := op.Client + "\x00" + op.Language
+		if _, ok := canonicalReady[group]; !ok {
+			canonicalReady[group] = true
+		}
+		if op.Operation == "remove" && !canonicalReady[group] {
+			continue
+		}
+		adapter := plan.clientMap[op.Client]
+		if adapter == nil {
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "unavailable",
+				errors.New("planned adapter is unavailable")))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		mutator, ok := adapter.(clients.ConditionalEntryMutator)
+		if !ok {
+			capabilityErr := errors.New("planned adapter lacks conditional entry mutation capability")
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "capability", capabilityErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		var backupKeepN *int
+		if !backedUp[op.Client] {
+			backupKeepN = &plan.keepN
+		}
+		var prepareCallbackErr error
+		mutation := clients.EntryMutationOperation(op.Operation)
+		observed := mutator.ConditionalEntryMutation(clients.ConditionalEntryMutationRequest{
+			EntryName: op.EntryName,
+			ExpectedLive: func(live *clients.MCPEntry) bool {
+				return lspSnapshotStateEqual(
+					lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, live),
+					op.PreState,
+				)
+			},
+			BackupKeepN: backupKeepN,
+			Operation:   mutation,
+			Entry:       op.entry,
+			BeforeMutation: func(clients.EntryMutationPreparation) error {
+				if callbacks.OnPrepared != nil {
+					prepareCallbackErr = callbacks.OnPrepared(op)
+				}
+				return prepareCallbackErr
+			},
+		})
+		observation := LSPRouterMutationObservation{
+			Operation:            op,
+			Invoked:              observed.Invoked,
+			PreconditionConflict: observed.PreconditionConflict,
+			PreparationErr:       observed.PreparationErr,
+			AdapterErr:           observed.MutationErr,
+			ObservationErr:       observed.ObservationErr,
+			ObservedState:        lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.After),
+		}
+		if observed.BackupPath != "" {
+			report.Backups = append(report.Backups, LSPClientRouterBackup{Client: op.Client, Path: observed.BackupPath})
+			backedUp[op.Client] = true
+		}
+		if observed.PreconditionConflict {
+			observation.AdapterErr = ErrLSPRouterPlanPreconditionConflict
+			observation = LSPRouterMutationObservation{
+				Operation: op, ObservedState: lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.Before),
+				Invoked: false, PreconditionConflict: true, PreparationErr: observed.PreparationErr,
+				AdapterErr: ErrLSPRouterPlanPreconditionConflict,
+			}
+			if callbacks.OnPreconditionConflict != nil {
+				if callbackErr := callbacks.OnPreconditionConflict(observation); callbackErr != nil {
+					return report, callbackErr
+				}
+			}
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "precondition",
+				ErrLSPRouterPlanPreconditionConflict))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		if prepareCallbackErr != nil {
+			return report, prepareCallbackErr
+		}
+		if observed.PreparationErr != nil {
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "prepare", observed.PreparationErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		if callbacks.OnFinished != nil {
+			if callbackErr := callbacks.OnFinished(observation); callbackErr != nil {
+				return report, callbackErr
+			}
+		}
+		if observed.ObservationErr != nil {
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "readback", observed.ObservationErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			if callbacks.OnFinished != nil {
+				return report, fmt.Errorf("lsp router plan readback %s/%s/%s: %w", op.Client, op.Language, op.EntryName, observed.ObservationErr)
+			}
+			continue
+		}
+		if !lspSnapshotStateEqual(observation.ObservedState, op.IntendedState) {
+			err := observed.MutationErr
+			if err == nil {
+				err = errors.New("post-write state differs from intended state")
+			}
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, op.Operation, err))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			if callbacks.OnFinished != nil {
+				return report, fmt.Errorf("lsp router plan ownership unknown for %s/%s/%s", op.Client, op.Language, op.EntryName)
+			}
+			continue
+		}
+		if op.Operation == "add" {
+			canonicalReady[group] = true
+			report.Applied = append(report.Applied, LSPClientRouterChange{
+				Client: op.Client, Language: op.Language, EntryName: op.EntryName, URL: snapshotPriorURL(op.IntendedState),
+			})
+		} else {
+			report.Removed = append(report.Removed, LSPClientRouterChange{
+				Client: op.Client, Language: op.Language, EntryName: op.EntryName,
+			})
+		}
+	}
+	return report, lspRouterReportError(report, "lsp client router plan")
+}
+
 // EnsureLSPRouterClientEntries ensures every effectively-enabled present
 // client has one mcp-language-server-<language> entry pointing at the GUI LSP
 // router. Effective enablement is the single rule for setup writes:
@@ -123,34 +421,11 @@ type lspClientRouterOp struct {
 // migrated away after a per-client backup. The workspace registry is kept
 // intact; those rows are harmless warm preregistrations.
 func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
-	report := &LSPClientRouterReport{}
-	languages, err := loadLSPRouterLanguages(opts.Languages)
+	plan, err := a.PlanLSPRouterClientEntries(opts)
 	if err != nil {
-		return report, err
+		return &LSPClientRouterReport{}, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
-	if err != nil {
-		return report, err
-	}
-	opts.GUIPort = port
-	regEntries, err := loadLSPRouterRegistryEntries()
-	if err != nil {
-		return report, err
-	}
-	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
-	disabledClients, err := a.LSPRouterDisabledClientSet()
-	if err != nil {
-		return report, err
-	}
-	enabledClients, err := a.ClientInstallEnabledSet()
-	if err != nil {
-		return report, err
-	}
-	keepN := opts.BackupKeepN
-	if keepN == 0 {
-		keepN = a.EffectiveBackupKeepN()
-	}
-	return a.ensureLSPRouterClientEntriesWithLoaded(opts, languages, port, regEntries, portsByLanguage, disabledClients, enabledClients, keepN)
+	return a.ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
 }
 
 func (a *API) ensureLSPRouterClientEntriesWithState(

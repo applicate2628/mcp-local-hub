@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 
@@ -155,11 +156,6 @@ func IsLiveSerenaRouterURLAnyPort(endpoint string, ports ...int) bool {
 func IsSerenaServer(server string) bool {
 	return server == serenaEntryName
 }
-
-// defaultLegacySerenaPort is the legacy global serena daemon port that
-// dynamic-pool clients must be moved OFF of. Used only when
-// SerenaReconcileOpts.LegacyPort is zero.
-const defaultLegacySerenaPort = 9121
 
 // serenaReconcileClientSet is the O2 client set for the serena router
 // rewrite — the clients the legacy serena manifest bound
@@ -286,19 +282,17 @@ type SerenaReconcileOpts struct {
 	// MigrateFrom).
 	McphubExePath string
 
-	// LegacyPort is the legacy global serena daemon port to remove clients
-	// off of after a successful router rewrite. 0 → defaultLegacySerenaPort
-	// (9121).
+	// LegacyPort is retained for source compatibility with callers from the
+	// pre-row-journal reconcile. Every supported adapter owns exactly one
+	// "serena" entry, so the conditional router rewrite replaces that entry
+	// in place and no second cleanup mutation is legal.
 	LegacyPort int
 
-	// RemoveLegacy, when true, removes the legacy localhost:<LegacyPort>
-	// serena entry from a client AFTER that client's router rewrite
-	// succeeds (claim #9). When false, the rewrite happens but the legacy
-	// entry (if distinct) is left in place. Because every in-scope client
-	// uses the SAME entry name ("serena"), the router rewrite already
-	// overwrites the legacy entry in-place for URL clients; RemoveLegacy is
-	// the explicit knob for callers that key legacy + router under
-	// different names or want the removal observable in the report.
+	// RemoveLegacy is retained for source compatibility. It is intentionally
+	// a no-op: every in-scope client uses the same "serena" entry name, so a
+	// successful conditional add already replaced the legacy endpoint. A
+	// later GetEntry/RemoveEntry cleanup would have no distinct legacy entry
+	// to target and could delete a concurrent operator edit.
 	RemoveLegacy bool
 
 	// BackupKeepN bounds the per-adapter rolling backup count. 0 → no
@@ -330,10 +324,63 @@ type SerenaReconcileOpts struct {
 	// nil (every pre-existing caller) preserves the previous behavior exactly.
 	OnBackupCaptured func(client, backupPath string) error
 
+	// OnAttemptPrepared persists the exact pre/intended tuple after the
+	// backup hand-off and immediately before AddEntry. A non-nil error aborts
+	// the client without mutation.
+	OnAttemptPrepared func(SerenaReconcileAttemptResult) error
+
+	// OnAttemptFinished is the total post-attempt hand-off used by durable
+	// recovery callers. It runs exactly once after AddEntry returns, on both
+	// success and error, and before this function advances to another client.
+	// A callback error stops the whole run: the caller could not make the
+	// observed ownership result durable, so later writes must not overtake it.
+	OnAttemptFinished func(SerenaReconcileAttemptResult) error
+
 	// DryRun reports the intended rewrites without touching any config
 	// file. Discovery (pidport + ping) still runs so a dry-run surfaces the
 	// "start the GUI first" failure too.
 	DryRun bool
+}
+
+// SerenaReconcileAttemptResult is the complete observable result of one
+// prepared Serena rewrite. Fingerprints use the same stable projection as
+// SerenaClientEntryFingerprint; an empty fingerprint means an absent entry.
+type SerenaReconcileAttemptResult struct {
+	Client               string
+	BackupPath           string
+	PreFingerprint       string
+	IntendedFingerprint  string
+	ObservedFingerprint  string
+	Invoked              bool
+	PreconditionConflict bool
+	PreparationErr       error
+	AdapterErr           error
+	ObservationErr       error
+}
+
+type SerenaOwnedRestoreStatus string
+
+const (
+	SerenaOwnedRestoreRestored SerenaOwnedRestoreStatus = "restored"
+	SerenaOwnedRestoreConflict SerenaOwnedRestoreStatus = "skipped-conflict"
+	SerenaOwnedRestoreFailed   SerenaOwnedRestoreStatus = "failed"
+)
+
+// SerenaOwnedRestoreResult is one front-reconcile rollback outcome.
+type SerenaOwnedRestoreResult struct {
+	Client string
+	Status SerenaOwnedRestoreStatus
+	Err    error
+}
+
+// SerenaOwnedRestoreRequest is one row-owned front-reconcile inverse. It is
+// deliberately independent of MigrateReport: version-3 Rows are the persisted
+// authority, and BaselinePresent selects the exact restore-vs-remove inverse.
+type SerenaOwnedRestoreRequest struct {
+	Client                     string
+	BackupPath                 string
+	ExpectedAppliedFingerprint string
+	BaselinePresent            bool
 }
 
 // ErrSerenaReconcileGUINotLive is the fail-closed sentinel returned when the
@@ -392,11 +439,6 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 
 	routerURL := fmt.Sprintf("http://127.0.0.1:%d%s", port, SerenaRouterURLPath)
 
-	legacyPort := opts.LegacyPort
-	if legacyPort == 0 {
-		legacyPort = defaultLegacySerenaPort
-	}
-
 	allClients := opts.Clients
 	if allClients == nil {
 		allClients = clients.AllClients()
@@ -448,41 +490,133 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			continue
 		}
 
-		// Back up before mutating, same discipline as MigrateFrom. The
-		// returned path is threaded onto the Applied row so a partial-failure
-		// caller (the serena migrate driver) can restore this client to its
-		// pre-rewrite entry via RestoreSerenaReconcileApplied.
-		backupPath, berr := adapter.BackupKeep(opts.BackupKeepN)
-		if berr != nil {
+		preFingerprint, preErr := serenaEntryFingerprint(adapter, serenaEntryName)
+		if preErr != nil {
 			report.Failed = append(report.Failed, FailedMigration{
-				Server: serenaEntryName, Client: clientName, Err: berr.Error(),
+				Server: serenaEntryName, Client: clientName, Err: preErr.Error(),
+			})
+			continue
+		}
+		// Fingerprint the adapter's actual persisted/readback projection, not
+		// the generic write DTO. The generic entry deliberately carries both
+		// URL and relay fields so every adapter can consume its own shape, while
+		// URL adapters discard relay fields and Antigravity discards URL plus
+		// the manifest lookup fields when RelayURL selects the direct form.
+		// Hashing the generic value would therefore make every successful write
+		// look like an unknown third state at readback.
+		intendedEntry := serenaIntendedEntryProjection(adapter, entry)
+		intendedFingerprint, intendedErr := fingerprintSerenaEntry(&intendedEntry)
+		if intendedErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName, Err: intendedErr.Error(),
 			})
 			continue
 		}
 
-		// 2b. WRITE-AHEAD hand-off. The backup now exists but the config is
-		//     still untouched, so this is the last instant at which the
-		//     caller's recovery record can be made durable while the mutation
-		//     is still preventable. A refusal here leaves the client exactly
-		//     as it was — the strongest possible compensation, since there is
-		//     nothing committed to compensate for.
-		if opts.OnBackupCaptured != nil {
-			if jerr := opts.OnBackupCaptured(clientName, backupPath); jerr != nil {
-				report.Failed = append(report.Failed, FailedMigration{
-					Server: serenaEntryName, Client: clientName,
-					Err: fmt.Sprintf("write-ahead recovery record: %v (this client's config was NOT modified)", jerr),
-				})
-				continue
+		mutator, ok := adapter.(clients.ConditionalEntryMutator)
+		if !ok {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName,
+				Err: "adapter lacks conditional entry mutation capability",
+			})
+			continue
+		}
+		var prepareCallbackErr error
+		observed := mutator.ConditionalEntryMutation(clients.ConditionalEntryMutationRequest{
+			EntryName: serenaEntryName,
+			ExpectedLive: func(live *clients.MCPEntry) bool {
+				fingerprint, err := fingerprintSerenaEntry(live)
+				return err == nil && fingerprint == preFingerprint
+			},
+			BackupKeepN: &opts.BackupKeepN,
+			Operation:   clients.EntryMutationAdd,
+			Entry:       entry,
+			BeforeMutation: func(preparation clients.EntryMutationPreparation) error {
+				exactPre, fingerprintErr := fingerprintSerenaEntry(preparation.Before)
+				if fingerprintErr != nil {
+					return fingerprintErr
+				}
+				if opts.OnBackupCaptured != nil {
+					if callbackErr := opts.OnBackupCaptured(clientName, preparation.BackupPath); callbackErr != nil {
+						prepareCallbackErr = callbackErr
+						return callbackErr
+					}
+				}
+				if opts.OnAttemptPrepared != nil {
+					prepareCallbackErr = opts.OnAttemptPrepared(SerenaReconcileAttemptResult{
+						Client:              clientName,
+						BackupPath:          preparation.BackupPath,
+						PreFingerprint:      exactPre,
+						IntendedFingerprint: intendedFingerprint,
+					})
+					return prepareCallbackErr
+				}
+				return nil
+			},
+		})
+		observedFingerprint := ""
+		if observed.ObservationErr == nil {
+			var fingerprintErr error
+			observedFingerprint, fingerprintErr = fingerprintSerenaEntry(observed.After)
+			if fingerprintErr != nil {
+				observed.ObservationErr = fingerprintErr
 			}
 		}
-
-		// 3. Router rewrite. On failure, DO NOT remove the legacy entry —
-		//    the client stays on its still-functional legacy endpoint
-		//    (claim #9) and the failure is reported for retry.
-		if aerr := adapter.AddEntry(entry); aerr != nil {
-			report.Failed = append(report.Failed, FailedMigration{
-				Server: serenaEntryName, Client: clientName, Err: aerr.Error(),
+		if opts.OnAttemptFinished != nil && prepareCallbackErr == nil {
+			finishErr := opts.OnAttemptFinished(SerenaReconcileAttemptResult{
+				Client:               clientName,
+				BackupPath:           observed.BackupPath,
+				PreFingerprint:       preFingerprint,
+				IntendedFingerprint:  intendedFingerprint,
+				ObservedFingerprint:  observedFingerprint,
+				Invoked:              observed.Invoked,
+				PreconditionConflict: observed.PreconditionConflict,
+				PreparationErr:       observed.PreparationErr,
+				AdapterErr:           observed.MutationErr,
+				ObservationErr:       observed.ObservationErr,
 			})
+			if finishErr != nil {
+				report.Failed = append(report.Failed, FailedMigration{
+					Server: serenaEntryName, Client: clientName,
+					Err: fmt.Sprintf("persist post-attempt recovery result: %v", finishErr),
+				})
+				return report, fmt.Errorf("serena client-reconcile: post-attempt result for %s was not durable: %w", clientName, finishErr)
+			}
+		}
+		if prepareCallbackErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName,
+				Err: fmt.Sprintf("prepare recovery attempt: %v (this client's config was NOT modified)", prepareCallbackErr),
+			})
+			return report, fmt.Errorf("serena client-reconcile: attempt for %s was not durable: %w", clientName, prepareCallbackErr)
+		}
+		if observed.PreconditionConflict {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName,
+				Err: clients.ErrEntryMutationPreconditionConflict.Error(),
+			})
+			continue
+		}
+		if observed.PreparationErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName, Err: observed.PreparationErr.Error(),
+			})
+			continue
+		}
+		if observed.MutationErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName, Err: observed.MutationErr.Error(),
+			})
+			continue
+		}
+		if observed.ObservationErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName,
+				Err: fmt.Sprintf("post-write readback: %v", observed.ObservationErr),
+			})
+			if opts.OnAttemptFinished != nil {
+				return report, fmt.Errorf("serena client-reconcile: post-write state for %s is unreadable: %w", clientName, observed.ObservationErr)
+			}
 			continue
 		}
 
@@ -502,32 +636,27 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			})
 		}
 
-		// 5. Legacy-endpoint removal — ONLY after the rewrite above
-		//    succeeded (claim #9). For URL clients the router rewrite
-		//    already overwrote the same-named "serena" entry in place, so
-		//    there is nothing distinct to remove; RemoveLegacy is honored
-		//    for callers whose legacy entry lives under a different name or
-		//    who want the ordering invariant exercised explicitly. A removal
-		//    failure does NOT undo the successful rewrite — it is a soft
-		//    warning, since the client is already on the router URL.
-		if opts.RemoveLegacy {
-			if rerr := removeLegacySerenaEntry(adapter, routerURL, legacyPort); rerr != nil {
-				_ = LogHubMcpEvent("warn", "serena-legacy-endpoint-removal-failed", map[string]any{
-					"server":      serenaEntryName,
-					"client":      clientName,
-					"legacy_port": legacyPort,
-					"err":         rerr.Error(),
-					"note":        "router rewrite already succeeded; client is on the /serena/mcp router, legacy entry cleanup deferred",
-				})
-			}
-		}
-
 		report.Applied = append(report.Applied, AppliedMigration{
-			Server: serenaEntryName, Client: clientName, URL: routerURL, BackupPath: backupPath,
+			Server: serenaEntryName, Client: clientName, URL: routerURL, BackupPath: observed.BackupPath,
 		})
 	}
 
 	return report, nil
+}
+
+func serenaIntendedEntryProjection(adapter clients.Client, entry clients.MCPEntry) clients.MCPEntry {
+	if adapter.IsRelayStdio() {
+		return clients.MCPEntry{
+			Name:         entry.Name,
+			RelayExePath: entry.RelayExePath,
+			RelayURL:     entry.RelayURL,
+		}
+	}
+	return clients.MCPEntry{
+		Name:    entry.Name,
+		URL:     entry.URL,
+		Headers: entry.Headers,
+	}
 }
 
 // RestoreSerenaReconcileApplied undoes a partially-successful
@@ -559,13 +688,87 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 // variant bypasses that guard to put the exact pre-reconcile bytes back; the
 // demigrate guard stays in force for the normal demigrate flow.
 func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]clients.Client) error {
+	_, err := restoreSerenaReconcileApplied(report, allClients, nil)
+	return err
+}
+
+// RestoreSerenaReconcileAppliedOwned is the persisted front-reconcile inverse.
+// Unlike the synchronous migrate compensator above, each row supplies the
+// exact fingerprint written by the forward generation. The compare and restore
+// occur under the adapter's existing config lock through CASEntryMutator.
+func RestoreSerenaReconcileAppliedOwned(
+	requests []SerenaOwnedRestoreRequest,
+	allClients map[string]clients.Client,
+) ([]SerenaOwnedRestoreResult, error) {
+	if allClients == nil {
+		allClients = clients.AllClients()
+	}
+	var errs []error
+	var results []SerenaOwnedRestoreResult
+	for _, request := range requests {
+		adapter := allClients[request.Client]
+		if adapter == nil {
+			err := fmt.Errorf("restore serena/%s: no adapter on this host", request.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		if request.ExpectedAppliedFingerprint == "" {
+			err := fmt.Errorf("restore serena/%s: missing expected applied fingerprint", request.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		mutator, ok := clients.AsCASEntryMutator(adapter)
+		if !ok {
+			err := fmt.Errorf("restore serena/%s: adapter lacks rollback CAS capability", request.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		match := func(live *clients.MCPEntry) bool {
+			sum, err := fingerprintSerenaEntry(live)
+			return err == nil && sum == request.ExpectedAppliedFingerprint
+		}
+		var inverseErr error
+		if request.BaselinePresent {
+			snapshotBytes, readErr := os.ReadFile(request.BackupPath)
+			if readErr != nil {
+				inverseErr = fmt.Errorf("read pinned backup: %w", readErr)
+			} else {
+				inverseErr = mutator.CASRestoreEntryFromBytesForRollback(serenaEntryName, match, snapshotBytes)
+			}
+		} else {
+			inverseErr = mutator.CASGuardedRemoveEntry(serenaEntryName, match)
+		}
+		if inverseErr != nil {
+			if errors.Is(inverseErr, clients.ErrCASConflict) {
+				results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreConflict, Err: inverseErr})
+				continue
+			}
+			err := fmt.Errorf("restore serena/%s: %w", request.Client, inverseErr)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreRestored})
+	}
+	return results, errors.Join(errs...)
+}
+
+func restoreSerenaReconcileApplied(
+	report *MigrateReport,
+	allClients map[string]clients.Client,
+	expectedApplied map[string]string,
+) ([]SerenaOwnedRestoreResult, error) {
 	if report == nil {
-		return nil
+		return nil, nil
 	}
 	if allClients == nil {
 		allClients = clients.AllClients()
 	}
 	var errs []error
+	var results []SerenaOwnedRestoreResult
 	for _, app := range report.Applied {
 		if app.BackupPath == "" {
 			// No snapshot to restore from (dry-run row, or a producer that
@@ -574,14 +777,55 @@ func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]
 		}
 		adapter := allClients[app.Client]
 		if adapter == nil {
-			errs = append(errs, fmt.Errorf("restore %s/%s: no adapter on this host", app.Server, app.Client))
+			err := fmt.Errorf("restore %s/%s: no adapter on this host", app.Server, app.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
 			continue
 		}
-		if rerr := adapter.RestoreEntryFromBackupForRollback(app.BackupPath, serenaEntryName); rerr != nil {
-			errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
+		if expectedApplied == nil {
+			if rerr := adapter.RestoreEntryFromBackupForRollback(app.BackupPath, serenaEntryName); rerr != nil {
+				errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
+			}
+			continue
 		}
+		expected, ok := expectedApplied[app.Client]
+		if !ok || expected == "" {
+			err := fmt.Errorf("restore %s/%s: missing expected applied fingerprint", app.Server, app.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		mutator, ok := clients.AsCASEntryMutator(adapter)
+		if !ok {
+			err := fmt.Errorf("restore %s/%s: adapter lacks rollback CAS capability", app.Server, app.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		snapshotBytes, readErr := os.ReadFile(app.BackupPath)
+		if readErr != nil {
+			err := fmt.Errorf("restore %s/%s: read pinned backup: %w", app.Server, app.Client, readErr)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		match := func(live *clients.MCPEntry) bool {
+			sum, err := fingerprintSerenaEntry(live)
+			return err == nil && sum == expected
+		}
+		if rerr := mutator.CASRestoreEntryFromBytesForRollback(serenaEntryName, match, snapshotBytes); rerr != nil {
+			if errors.Is(rerr, clients.ErrCASConflict) {
+				results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreConflict, Err: rerr})
+				continue
+			}
+			err := fmt.Errorf("restore %s/%s: %w", app.Server, app.Client, rerr)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
+		results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreRestored})
 	}
-	return errors.Join(errs...)
+	return results, errors.Join(errs...)
 }
 
 // SerenaClientEntryFingerprint returns a stable content hash of ONE client's
@@ -617,16 +861,27 @@ func SerenaClientEntryFingerprint(clientName string, allClients map[string]clien
 	if !adapter.Exists() {
 		return "", nil
 	}
-	entry, err := adapter.GetEntry(serenaEntryName)
+	return serenaEntryFingerprint(adapter, serenaEntryName)
+}
+
+func serenaEntryFingerprint(adapter clients.Client, entryName string) (string, error) {
+	entry, err := adapter.GetEntry(entryName)
 	if err != nil {
-		return "", fmt.Errorf("serena entry fingerprint %s: %w", clientName, err)
+		return "", err
 	}
+	if entry == nil {
+		return "", nil
+	}
+	return fingerprintSerenaEntry(entry)
+}
+
+func fingerprintSerenaEntry(entry *clients.MCPEntry) (string, error) {
 	if entry == nil {
 		return "", nil
 	}
 	raw, merr := json.Marshal(entry)
 	if merr != nil {
-		return "", fmt.Errorf("serena entry fingerprint %s: %w", clientName, merr)
+		return "", merr
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
@@ -872,44 +1127,4 @@ func mcpInitializeProbe(ctx context.Context, port int) error {
 		return fmt.Errorf("%w — the router must synthesize/handle the non-tool lifecycle before clients are pointed at it", err)
 	}
 	return nil
-}
-
-// removeLegacySerenaEntry removes a client's pre-dynamic-pool serena entry
-// when it still points at the legacy localhost:<legacyPort> daemon and is
-// NOT already the router entry we just wrote. This is the explicit
-// legacy-cleanup step (claim #9), invoked ONLY after the router rewrite for
-// the client succeeded.
-//
-// Because every in-scope client uses the same entry name ("serena"), the
-// router AddEntry already overwrote the legacy entry in place for URL
-// clients — so in the common case GetEntry now returns the router URL and
-// this is a no-op. The guard below prevents deleting the freshly-written
-// router entry: it removes only when the live entry still resolves to the
-// legacy port.
-func removeLegacySerenaEntry(adapter clients.Client, routerURL string, legacyPort int) error {
-	cur, err := adapter.GetEntry(serenaEntryName)
-	if err != nil {
-		return err
-	}
-	if cur == nil {
-		return nil // nothing to remove
-	}
-	// Never remove the router entry we just wrote.
-	if cur.URL == routerURL {
-		return nil
-	}
-	// Antigravity relay entries carry no URL; the router rewrite already
-	// replaced its args, so leave it alone here.
-	if cur.URL == "" {
-		return nil
-	}
-	legacyMarker := fmt.Sprintf(":%d", legacyPort)
-	if !strings.Contains(cur.URL, legacyMarker) {
-		// The live entry points somewhere else (a user-configured remote, or
-		// already-migrated state). Do not touch it — fail-closed against
-		// deleting an entry we do not positively recognize as the legacy
-		// daemon.
-		return nil
-	}
-	return adapter.RemoveEntry(serenaEntryName)
 }

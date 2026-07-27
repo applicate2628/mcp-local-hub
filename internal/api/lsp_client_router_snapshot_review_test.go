@@ -18,6 +18,7 @@
 package api
 
 import (
+	"errors"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
@@ -37,10 +38,15 @@ type snapshotFakeClient struct {
 	entries     map[string]clients.MCPEntry
 	addCalls    int
 	removeCalls int
+	addErrs     map[string]error
+	removeErrs  map[string]error
 }
 
 func newSnapshotFakeClient(name string, exists bool) *snapshotFakeClient {
-	return &snapshotFakeClient{name: name, exists: exists, entries: map[string]clients.MCPEntry{}}
+	return &snapshotFakeClient{
+		name: name, exists: exists, entries: map[string]clients.MCPEntry{},
+		addErrs: map[string]error{}, removeErrs: map[string]error{},
+	}
 }
 
 func (f *snapshotFakeClient) put(entry clients.MCPEntry) { f.entries[entry.Name] = entry }
@@ -65,6 +71,9 @@ func (f *snapshotFakeClient) LatestBackupPath() (string, bool, error) {
 // else.
 func (f *snapshotFakeClient) AddEntry(e clients.MCPEntry) error {
 	f.addCalls++
+	if err := f.addErrs[e.Name]; err != nil {
+		return err
+	}
 	stored := e
 	stored.Disabled = false
 	if e.Raw != nil {
@@ -84,6 +93,9 @@ func (f *snapshotFakeClient) AddEntry(e clients.MCPEntry) error {
 
 func (f *snapshotFakeClient) RemoveEntry(name string) error {
 	f.removeCalls++
+	if err := f.removeErrs[name]; err != nil {
+		return err
+	}
 	delete(f.entries, name)
 	return nil
 }
@@ -95,6 +107,42 @@ func (f *snapshotFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 	}
 	cp := entry
 	return &cp, nil
+}
+
+func (f *snapshotFakeClient) ConditionalEntryMutation(req clients.ConditionalEntryMutationRequest) (out clients.EntryMutationObserved) {
+	before, err := f.GetEntry(req.EntryName)
+	out.Before = before
+	if err != nil {
+		out.ObservationErr = err
+		return out
+	}
+	if req.ExpectedLive == nil || !req.ExpectedLive(before) {
+		out.PreconditionConflict = true
+		out.PreparationErr = clients.ErrEntryMutationPreconditionConflict
+		return out
+	}
+	if req.BackupKeepN != nil {
+		out.BackupPath, out.PreparationErr = f.BackupKeep(*req.BackupKeepN)
+		if out.PreparationErr != nil {
+			return out
+		}
+	}
+	if req.BeforeMutation != nil {
+		out.PreparationErr = req.BeforeMutation(clients.EntryMutationPreparation{
+			Before: before, BackupPath: out.BackupPath,
+		})
+		if out.PreparationErr != nil {
+			return out
+		}
+	}
+	out.Invoked = true
+	if req.Operation == clients.EntryMutationAdd {
+		out.MutationErr = f.AddEntry(req.Entry)
+	} else {
+		out.MutationErr = f.RemoveEntry(req.EntryName)
+	}
+	out.After, out.ObservationErr = f.GetEntry(req.EntryName)
+	return out
 }
 
 func (f *snapshotFakeClient) RestoreEntryFromBackup(string, string) error            { return nil }
@@ -167,28 +215,281 @@ func TestSnapshotRestore_UnreachableClientIsPendingNotSilentlyRestored(t *testin
 	}
 }
 
-// TestSnapshotRestore_UnreachableClientWithAbsentPreStateIsNotPending pins the
-// precision of the finding-4 rule: only a row that still OWES a restore blocks
-// consumption.
-//
-// A row whose pre-state was "entry absent" is already satisfied when the whole
-// client config is gone — there is no entry to remove. Reporting it Pending
-// would block every rollback on a host that has since uninstalled a client,
-// which is a false positive, not caution.
-func TestSnapshotRestore_UnreachableClientWithAbsentPreStateIsNotPending(t *testing.T) {
-	a := NewAPI()
-	report, err := a.RestoreLSPRouterClientEntriesSnapshot([]LSPRouterEntrySnapshot{
-		{Client: "cursor", Language: "go", EntryName: LSPRouterEntryName("go"), Present: false},
-	}, LSPClientRouterOpts{
-		GUIPort:     9137,
-		BackupKeepN: 3,
-		Clients:     map[string]clients.Client{},
-	})
-	if err != nil {
-		t.Fatalf("restore: %v", err)
+func TestSnapshotRestore_AppliedOrUncertainAbsentBaselineUnreachableIsPending(t *testing.T) {
+	baseline := LSPRouterEntrySnapshot{
+		Client: "cursor", Language: "go", EntryName: LSPRouterEntryName("go"),
 	}
-	if len(report.Pending) != 0 {
-		t.Fatalf("an absent-pre-state row for a vanished client is already satisfied and must NOT block consumption; got %+v", report.Pending)
+	applied := LSPRouterEntrySnapshot{
+		Client: "cursor", Language: "go", EntryName: LSPRouterEntryName("go"),
+		Present: true, URL: LSPRouterURL(9137, "go"),
+	}
+	tests := []struct {
+		name        string
+		row         LSPRouterRecoveryRow
+		wantStatus  LSPRouterRestoreStatus
+		wantPending int
+	}{
+		{
+			name:        "applied-receipt",
+			row:         LSPRouterRecoveryRow{Baseline: baseline, Applied: &applied},
+			wantStatus:  LSPRouterRestorePending,
+			wantPending: 1,
+		},
+		{
+			name:        "uncertain-write",
+			row:         LSPRouterRecoveryRow{Baseline: baseline, Uncertain: true},
+			wantStatus:  LSPRouterRestorePending,
+			wantPending: 1,
+		},
+		{
+			name:        "baseline-only",
+			row:         LSPRouterRecoveryRow{Baseline: baseline},
+			wantStatus:  LSPRouterRestoreBaselineOnly,
+			wantPending: 0,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			report, results, err := NewAPI().RestoreLSPRouterRecoveryRows(
+				[]LSPRouterRecoveryRow{tc.row},
+				LSPClientRouterOpts{Clients: map[string]clients.Client{}},
+				LSPRouterRestoreCallbacks{},
+			)
+			if err != nil {
+				t.Fatalf("restore: %v", err)
+			}
+			if len(results) != 1 || results[0].Status != tc.wantStatus {
+				t.Fatalf("results=%+v, want one %s row", results, tc.wantStatus)
+			}
+			if len(report.Pending) != tc.wantPending {
+				t.Fatalf("Pending=%+v, want %d row(s)", report.Pending, tc.wantPending)
+			}
+		})
+	}
+}
+
+func TestMCPFrontV3_LegacyRestoreFailureKeepsCanonicalRoute(t *testing.T) {
+	const legacyName = "mcp-language-server-go-abcd"
+	canonicalName := LSPRouterEntryName("go")
+	client := newSnapshotFakeClient("codex-cli", true)
+	client.put(clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, "go")})
+	client.addErrs[legacyName] = errors.New("induced legacy restore failure")
+
+	legacyBaseline := LSPRouterEntrySnapshot{
+		Client: "codex-cli", Language: "go", EntryName: legacyName,
+		Present: true, URL: "http://localhost:9200/mcp",
+	}
+	legacyApplied := LSPRouterEntrySnapshot{
+		Client: "codex-cli", Language: "go", EntryName: legacyName,
+	}
+	canonicalBaseline := LSPRouterEntrySnapshot{
+		Client: "codex-cli", Language: "go", EntryName: canonicalName,
+	}
+	canonicalApplied := LSPRouterEntrySnapshot{
+		Client: "codex-cli", Language: "go", EntryName: canonicalName,
+		Present: true, URL: LSPRouterURL(9137, "go"),
+	}
+
+	report, results, err := NewAPI().RestoreLSPRouterRecoveryRows(
+		[]LSPRouterRecoveryRow{
+			{Baseline: canonicalBaseline, Applied: &canonicalApplied},
+			{Baseline: legacyBaseline, Applied: &legacyApplied},
+		},
+		LSPClientRouterOpts{Clients: map[string]clients.Client{"codex-cli": client}},
+		LSPRouterRestoreCallbacks{},
+	)
+	if err == nil {
+		t.Fatal("legacy inverse failure must be reported")
+	}
+	if len(results) != 2 ||
+		results[0].EntryName != legacyName || results[0].Status != LSPRouterRestoreFailed ||
+		results[1].EntryName != canonicalName || results[1].Status != LSPRouterRestorePending {
+		t.Fatalf("results=%+v, want legacy failed then canonical pending", results)
+	}
+	if len(report.Pending) != 1 || report.Pending[0].EntryName != canonicalName {
+		t.Fatalf("Pending=%+v, want canonical route-preservation row", report.Pending)
+	}
+	if got, ok := client.entries[canonicalName]; !ok || got.URL != LSPRouterURL(9137, "go") {
+		t.Fatalf("canonical route was removed after legacy restore failed: %+v", client.entries)
+	}
+}
+
+func TestMCPFrontV3_LSPDependencyBarrierSurvivesRetry(t *testing.T) {
+	const clientName = "codex-cli"
+	const language = "go"
+	const legacyName = "mcp-language-server-go-abcd"
+	canonicalName := LSPRouterEntryName(language)
+	legacyBaseline := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: legacyName,
+		Present: true, URL: "http://127.0.0.1:9200/mcp",
+	}
+	legacyApplied := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: legacyName,
+	}
+	canonicalBaseline := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: canonicalName,
+	}
+	canonicalApplied := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: canonicalName,
+		Present: true, URL: LSPRouterURL(9137, language),
+	}
+
+	t.Run("terminal-conflict-blocks-canonical-on-every-call", func(t *testing.T) {
+		client := newSnapshotFakeClient(clientName, true)
+		client.put(clients.MCPEntry{Name: legacyName, URL: "https://operator.example/lsp/go"})
+		client.put(clients.MCPEntry{Name: canonicalName, URL: canonicalApplied.URL})
+		rows := []LSPRouterRecoveryRow{
+			{Baseline: canonicalBaseline, Applied: &canonicalApplied},
+			{Baseline: legacyBaseline, Applied: &legacyApplied},
+		}
+
+		_, first, err := NewAPI().RestoreLSPRouterRecoveryRows(
+			rows,
+			LSPClientRouterOpts{Clients: map[string]clients.Client{clientName: client}},
+			LSPRouterRestoreCallbacks{},
+		)
+		if err != nil {
+			t.Fatalf("first rollback: %v", err)
+		}
+		if len(first) != 2 ||
+			first[0].EntryName != legacyName || first[0].Status != LSPRouterRestoreConflict ||
+			first[1].EntryName != canonicalName || first[1].Status != LSPRouterRestoreConflict ||
+			first[1].Reason != "skipped-dependency-conflict" {
+			t.Fatalf("first results=%+v, want legacy conflict then canonical dependency conflict", first)
+		}
+		if client.removeCalls != 0 {
+			t.Fatalf("first rollback canonical removeCalls=%d, want 0", client.removeCalls)
+		}
+
+		rows[0].Disposition = string(first[1].Status)
+		rows[0].DispositionReason = first[1].Reason
+		rows[1].Disposition = string(first[0].Status)
+		rows[1].DispositionReason = first[0].Reason
+		_, second, err := NewAPI().RestoreLSPRouterRecoveryRows(
+			rows,
+			LSPClientRouterOpts{Clients: map[string]clients.Client{clientName: client}},
+			LSPRouterRestoreCallbacks{},
+		)
+		if err != nil {
+			t.Fatalf("second rollback: %v", err)
+		}
+		if len(second) != 2 ||
+			second[0].EntryName != legacyName || second[0].Status != LSPRouterRestoreConflict ||
+			second[1].EntryName != canonicalName || second[1].Status != LSPRouterRestoreConflict ||
+			second[1].Reason != "skipped-dependency-conflict" {
+			t.Fatalf("second results=%+v, want the same durable dependency barrier", second)
+		}
+		if client.removeCalls != 0 {
+			t.Fatalf("canonical removeCalls=%d across both calls, want 0", client.removeCalls)
+		}
+		if got := client.entries[canonicalName].URL; got != canonicalApplied.URL {
+			t.Fatalf("canonical route changed across retry: %q", got)
+		}
+	})
+
+	for _, tc := range []struct {
+		name                string
+		legacyDisposition   LSPRouterRestoreStatus
+		baseline            LSPRouterEntrySnapshot
+		legacy              *clients.MCPEntry
+		reachable           bool
+		wantLegacy          LSPRouterRestoreStatus
+		wantCanonical       LSPRouterRestoreStatus
+		wantCanonicalWrites int
+	}{
+		{
+			name: "baseline-only-missing", reachable: true,
+			wantLegacy: LSPRouterRestoreConflict, wantCanonical: LSPRouterRestoreConflict,
+		},
+		{
+			name: "baseline-only-unreachable", reachable: false,
+			wantLegacy: LSPRouterRestorePending, wantCanonical: LSPRouterRestorePending,
+		},
+		{
+			name: "baseline-only-disabled", reachable: true,
+			baseline: LSPRouterEntrySnapshot{
+				Client: clientName, Language: language, EntryName: legacyName,
+				Present: true, URL: legacyBaseline.URL, Disabled: true,
+			},
+			legacy: &clients.MCPEntry{
+				Name: legacyName, URL: legacyBaseline.URL, Disabled: true,
+			},
+			wantLegacy: LSPRouterRestoreConflict, wantCanonical: LSPRouterRestoreConflict,
+		},
+		{
+			name: "baseline-only-non-routable", reachable: true,
+			baseline: LSPRouterEntrySnapshot{
+				Client: clientName, Language: language, EntryName: legacyName,
+				Present: true,
+			},
+			legacy: &clients.MCPEntry{
+				Name: legacyName,
+			},
+			wantLegacy: LSPRouterRestoreConflict, wantCanonical: LSPRouterRestoreConflict,
+		},
+		{
+			name: "baseline-only-live-ready", reachable: true,
+			legacy: &clients.MCPEntry{
+				Name: legacyName, URL: legacyBaseline.URL,
+			},
+			wantLegacy: LSPRouterRestoreBaselineOnly, wantCanonical: LSPRouterRestoreRestored,
+			wantCanonicalWrites: 1,
+		},
+		{
+			name: "restored-live-ready", reachable: true,
+			legacyDisposition: LSPRouterRestoreRestored,
+			legacy: &clients.MCPEntry{
+				Name: legacyName, URL: legacyBaseline.URL,
+			},
+			wantLegacy: LSPRouterRestoreRestored, wantCanonical: LSPRouterRestoreRestored,
+			wantCanonicalWrites: 1,
+		},
+		{
+			name: "restored-but-now-missing", reachable: true,
+			legacyDisposition: LSPRouterRestoreRestored,
+			wantLegacy:        LSPRouterRestoreConflict, wantCanonical: LSPRouterRestoreConflict,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newSnapshotFakeClient(clientName, tc.reachable)
+			if tc.legacy != nil {
+				client.put(*tc.legacy)
+			}
+			client.put(clients.MCPEntry{Name: canonicalName, URL: canonicalApplied.URL})
+			baseline := tc.baseline
+			if baseline.EntryName == "" {
+				baseline = legacyBaseline
+			}
+			legacyRow := LSPRouterRecoveryRow{Baseline: baseline}
+			if tc.legacyDisposition != "" {
+				legacyRow.Applied = &legacyApplied
+				legacyRow.Disposition = string(tc.legacyDisposition)
+				legacyRow.DispositionReason = "inverse-verified"
+			}
+			_, results, err := NewAPI().RestoreLSPRouterRecoveryRows(
+				[]LSPRouterRecoveryRow{
+					{Baseline: canonicalBaseline, Applied: &canonicalApplied},
+					legacyRow,
+				},
+				LSPClientRouterOpts{Clients: map[string]clients.Client{clientName: client}},
+				LSPRouterRestoreCallbacks{},
+			)
+			if err != nil {
+				t.Fatalf("rollback: %v", err)
+			}
+			if len(results) != 2 ||
+				results[0].EntryName != legacyName || results[0].Status != tc.wantLegacy ||
+				results[1].EntryName != canonicalName || results[1].Status != tc.wantCanonical {
+				t.Fatalf("results=%+v, want legacy=%s canonical=%s", results, tc.wantLegacy, tc.wantCanonical)
+			}
+			if client.removeCalls != tc.wantCanonicalWrites {
+				t.Fatalf("canonical removeCalls=%d, want %d", client.removeCalls, tc.wantCanonicalWrites)
+			}
+			_, canonicalPresent := client.entries[canonicalName]
+			if wantPresent := tc.wantCanonicalWrites == 0; canonicalPresent != wantPresent {
+				t.Fatalf("canonical present=%v, want %v", canonicalPresent, wantPresent)
+			}
+		})
 	}
 }
 

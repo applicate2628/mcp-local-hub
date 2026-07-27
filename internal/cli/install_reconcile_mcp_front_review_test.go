@@ -84,15 +84,12 @@ func TestMCPFrontReview_RetentionCannotPruneTheRecordedRollbackInput(t *testing.
 		t.Fatalf("forward reconcile #1: %v", err)
 	}
 	first := readPersistedMCPFrontReport(t, reportPath)
-	origin := ""
-	for _, pin := range first.Pins {
-		if pin.Client == "claude-code" {
-			origin = pin.Origin
-		}
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")
+	row := first.Rows[key]
+	if row.Pin == nil || row.Pin.Origin == "" {
+		t.Fatalf("forward #1 must record the rolling backup origin in its row-owned pin; row=%+v", row)
 	}
-	if origin == "" {
-		t.Fatalf("forward #1 must record the rolling backup it pinned FROM, so this test can prove retention deleted it; pins=%+v", first.Pins)
-	}
+	origin := row.Pin.Origin
 
 	// The documented retry, twice. Each run takes a fresh rolling backup per
 	// leg, so with keep_n=1 the first generation's is pruned.
@@ -518,18 +515,28 @@ func TestMCPFrontReview_RollbackKeepsTheRecordWhileAnyRowIsPending(t *testing.T)
 
 	// No client config is seeded at all, so the recorded client is present in
 	// the record and unreachable on disk.
-	if werr := api.WriteStateFileAtomic(reportPath, map[string]any{
-		"version":           mcpFrontReconcileReportVersion,
-		"port":              9137,
-		"snapshot_complete": true,
-		"serena":            map[string]any{"applied": []any{}},
-		"lsp": []any{
-			map[string]any{
-				"client": "claude-code", "language": "go",
-				"entry_name": api.LSPRouterEntryName("go"),
-				"present":    true, "url": api.LSPRouterURL(9125, "go"),
+	entryName := api.LSPRouterEntryName("go")
+	baseline := api.LSPRouterEntrySnapshot{
+		Client: "claude-code", Language: "go", EntryName: entryName,
+		Present: true, URL: api.LSPRouterURL(9125, "go"),
+	}
+	applied := api.LSPRouterEntrySnapshot{
+		Client: "claude-code", Language: "go", EntryName: entryName,
+		Present: true, URL: api.LSPRouterURL(9137, "go"),
+	}
+	rowKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", entryName)
+	if werr := api.WriteStateFileAtomic(reportPath, mcpFrontReconcileReport{
+		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true, Generation: 1,
+		Rows: map[string]mcpFrontReconcileRow{
+			rowKey: {
+				Surface: mcpFrontSurfaceLSP, Client: "claude-code", Language: "go", EntryName: entryName,
+				Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
+				Applied: &mcpFrontAppliedReceipt{
+					Generation: 1, Port: 9137, PostState: mcpFrontLSPState(applied),
+				},
 			},
 		},
+		ActivePlan: &mcpFrontReconcilePlan{Generation: 1, Port: 9137},
 	}); werr != nil {
 		t.Fatalf("seed record: %v", werr)
 	}
@@ -565,12 +572,23 @@ func TestMCPFrontReview_RollbackFailsWhenTheRecordCannotBeRetired(t *testing.T) 
 	assertRedirectedStateDir(t, tmp)
 	reportPath := withMCPFrontReportPathSeam(t)
 
-	if werr := api.WriteStateFileAtomic(reportPath, map[string]any{
-		"version":           mcpFrontReconcileReportVersion,
-		"port":              9137,
-		"snapshot_complete": true,
-		"serena":            map[string]any{"applied": []any{}},
-		"lsp":               []any{},
+	entryName := api.LSPRouterEntryName("go")
+	baseline := api.LSPRouterEntrySnapshot{
+		Client: "claude-code", Language: "go", EntryName: entryName,
+	}
+	rowKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", entryName)
+	if werr := api.WriteStateFileAtomic(reportPath, mcpFrontReconcileReport{
+		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true, Generation: 1,
+		Rows: map[string]mcpFrontReconcileRow{
+			rowKey: {
+				Surface: mcpFrontSurfaceLSP, Client: "claude-code", Language: "go", EntryName: entryName,
+				Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
+				Disposition: &mcpFrontRollbackDisposition{
+					State: mcpFrontDispositionBaselineOnly, Reason: "no-effective-applied-receipt",
+				},
+			},
+		},
+		ActivePlan: &mcpFrontReconcilePlan{Generation: 1, Port: 9137},
 	}); werr != nil {
 		t.Fatalf("seed record: %v", werr)
 	}
@@ -681,15 +699,12 @@ func TestMCPFrontReview_ForwardRefusesToMergeIntoARetiredGeneration(t *testing.T
 // serenaBackupFor returns the recorded restore input for one client.
 func serenaBackupFor(t *testing.T, record mcpFrontReconcileReport, client string) string {
 	t.Helper()
-	if record.Serena == nil {
-		t.Fatalf("record carries no serena section: %+v", record)
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, client, "", "serena")
+	row, ok := record.Rows[key]
+	if ok && row.Pin != nil {
+		return row.Pin.Path
 	}
-	for _, row := range record.Serena.Applied {
-		if row.Client == client {
-			return row.BackupPath
-		}
-	}
-	t.Fatalf("record carries no serena row for %s: %+v", client, record.Serena.Applied)
+	t.Fatalf("record carries no row-owned serena pin for %s: %+v", client, row)
 	return ""
 }
 
@@ -732,16 +747,20 @@ func TestMCPFrontReview_PersistedRecordIsSelfDescribing(t *testing.T) {
 	if _, ok := loose["snapshot_complete"]; !ok {
 		t.Fatalf("the record must carry the completeness marker; keys = %v", keysOf(loose))
 	}
-	lspRaw, ok := loose["lsp"]
-	if !ok || string(lspRaw) == "null" {
-		t.Fatalf("the lsp section must be an explicit array, never absent or null — `null` is indistinguishable from a lost section; got %q", string(lspRaw))
+	for _, forbidden := range []string{"serena", "lsp", "pins", "applied", "port"} {
+		if _, ok := loose[forbidden]; ok {
+			t.Fatalf("version-3 record carries superseded top-level projection %q", forbidden)
+		}
 	}
 
 	record := readPersistedMCPFrontReport(t, reportPath)
-	if len(record.Pins) == 0 {
-		t.Fatalf("the record must pin the backup each serena row restores from; pins are empty")
-	}
-	for _, pin := range record.Pins {
+	pinCount := 0
+	for _, row := range record.Rows {
+		if row.Pin == nil {
+			continue
+		}
+		pinCount++
+		pin := *row.Pin
 		if pin.Path == pin.Origin {
 			t.Fatalf("the pin for %s points at the rolling backup itself (%s); that file is governed by backups.keep_n, which does not know this record exists", pin.Client, pin.Path)
 		}
@@ -751,6 +770,9 @@ func TestMCPFrontReview_PersistedRecordIsSelfDescribing(t *testing.T) {
 		if pin.SHA256 == "" {
 			t.Fatalf("the pin for %s must carry a checksum so a changed backup fails closed instead of driving a client write", pin.Client)
 		}
+	}
+	if pinCount == 0 {
+		t.Fatal("the record must carry a row-owned Serena pin")
 	}
 	if got := serenaBackupFor(t, record, "claude-code"); !strings.Contains(got, mcpFrontReconcilePinDirLeaf) {
 		t.Fatalf("the serena row's restore input must be the PINNED copy, not the rolling backup; got %s", got)

@@ -95,14 +95,18 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -145,103 +149,189 @@ const mcpFrontReconcilePinDirLeaf = "mcp-front-reconcile-pins"
 // interpret must never be used to drive writes into client configs. Bump on
 // any change to what the fields mean.
 //
-// Version 2 added the three fields that make the record's trustworthiness
-// CHECKABLE rather than assumed — SnapshotComplete, the pointer-typed LSP
-// section, and Pins. A version-1 artifact is refused (not upgraded in place)
-// because the properties it is missing cannot be reconstructed after the fact:
-// its serena rows point at rolling backups that retention may already have
-// deleted, and nothing in it distinguishes "no LSP rows" from "no LSP
-// section".
-const mcpFrontReconcileReportVersion = 2
+// Version 3 makes recovery authority per exact row. Versions 1 and 2 lack the
+// immutable `(surface, client, language, entry_name)` row, active plan,
+// pre/intended attempt, and effective applied receipt needed to distinguish a
+// successful write from a retry that did not write. They are read-only refused
+// with `legacy-ownership-unproven`; neither is upgraded in place.
+const mcpFrontReconcileReportVersion = 3
+
+const mcpFrontReconcileVersion2 = 2
 
 // mcpFrontReconcileLegacyReportVersion is the pre-pinning artifact schema.
-//
-// It is REFUSED for forward migration (readMCPFrontReconcileReport) — the
-// properties version 2 added cannot be reconstructed after the fact, so a v1
-// record must never be merged into and re-blessed as trustworthy. It IS
-// admitted for ROLLBACK, but only after its completeness is VERIFIED rather
-// than assumed: see admitLegacyMCPFrontRecordForRollback for the distinction
-// and for why a blanket rollback refusal was the worse failure.
 const mcpFrontReconcileLegacyReportVersion = 1
 
 // mcpFrontReconcileReport is the persisted pre-reconcile record.
 //
-// It is a CUMULATIVE record of the FIRST generation's pre-reconcile state,
-// not a snapshot of the most recent run (codex bot PR #588 P1). The forward
-// command is explicitly re-runnable — its own per-client-failure message tells
-// the operator to re-run to retry the failed clients — and the pre-fix code
-// re-captured and re-wrote this artifact wholesale on every run. On the second
-// run the already-migrated clients were backed up AGAIN, so their recorded
-// backups then contained the FRONT-port URL rather than the original one, and
-// `--rollback` restored the front URL: the original state was destroyed by the
-// very retry the command recommends. mergeMCPFrontReconcileReport therefore
-// only ever ADDS rows; a row an earlier generation recorded is never
-// overwritten, and the whole artifact is retired only by a COMPLETE rollback.
+// Rows own the durable contract. Each row keeps its first baseline immutable,
+// its current generation's exact prepared attempt, the latest proven applied
+// receipt for that row, and its durable rollback disposition. ActivePlan is
+// one complete captured population for Generation; it is published before the
+// first write and cannot be replaced while any attempt is uncertain.
 //
-// Fields:
-//
-//   - Port: the mcp_front.port the LATEST forward generation actually wrote
-//     into the live client configs. Recording it (rather than re-resolving the
-//     live setting at rollback time) closes the footgun of an operator
-//     changing the setting between the forward run and the rollback — "the hub
-//     remembers, not the human". A Port of 0 means "not recorded" and the
-//     rollback falls back to re-resolving the live setting.
-//
-//   - SnapshotComplete: the completeness marker. True only on a record whose
-//     writer had BOTH recovery sections in hand. The rollback refuses a record
-//     without it before performing any restoration write, so a record that
-//     covers one surface can never be consumed (and deleted) while the other
-//     surface is still on the front port.
-//
-//   - Serena: the merged Applied rows, each carrying the per-client backup
-//     path api.RestoreSerenaReconcileApplied restores from — which for a
-//     version-2 record is the PINNED copy, not the rolling one. Failed rows
-//     are deliberately NOT persisted: a client whose rewrite failed was never
-//     mutated, so it has nothing to restore.
-//
-//   - LSP: the per-(client, language) pre-state of each canonical
-//     `mcp-language-server-<language>` entry, captured before the forward LSP
-//     write. See api.LSPRouterEntrySnapshot for why this exists rather than
-//     reusing api.RollbackLSPRouterClientEntries. It is a POINTER so a missing
-//     section (`null`) is distinguishable from a present-but-empty one (`[]`);
-//     conflating the two is what let an LSP-less record be consumed.
-//
-//   - Pins: provenance and integrity for each pinned backup. Origin is the
-//     rolling backup the pin copies (diagnostics only — it may well be gone by
-//     rollback time, which is the entire point), SHA256 is verified before the
-//     pin is allowed to drive a client write.
-//
-//   - Applied: the fingerprint of each rewritten serena entry AS THIS COMMAND
-//     LEFT IT, so the rollback can tell "still exactly what I wrote" from "the
-//     operator has edited this since". See mcpFrontSerenaApplied.
-//
-// # First-generation vs latest-generation fields
-//
-// The record spans an arbitrary number of forward generations, and its fields
-// split cleanly by which one they belong to (codex bot PR #588):
-//
-//   - WHAT WAS HERE BEFORE — the serena Applied rows, their Pins, and the LSP
-//     pre-state — is FIRST-generation and immutable. That is the state
-//     `--rollback` must restore, and a later generation's view of it is
-//     already the post-cutover state.
-//
-//   - WHAT THIS COMMAND LEFT BEHIND — Port and Applied — tracks the LATEST
-//     generation. Both describe the live host as the most recent forward run
-//     left it, and a re-run at a different mcp_front.port genuinely moves both.
-//     Pinning them to the first generation is what made the record lie: the
-//     rollback compared the live entries against a port the forward pass had
-//     since stopped writing, so its ABSENT-row removal guard
-//     (entryMatchesLSPRouter against LSPRouterURL(port, language)) no longer
-//     matched, and the entries the cutover created were left behind pointing
-//     at a retired port instead of being removed.
+// No top-level compatibility projection is persisted: Rows are the only
+// mutation and rollback authority. A rollback retires the artifact only after
+// a durable re-read shows every row in a terminal disposition.
 type mcpFrontReconcileReport struct {
-	Version          int                           `json:"version"`
-	Port             int                           `json:"port"`
-	SnapshotComplete bool                          `json:"snapshot_complete"`
-	Serena           *api.MigrateReport            `json:"serena"`
-	LSP              *[]api.LSPRouterEntrySnapshot `json:"lsp"`
-	Pins             []mcpFrontSerenaPin           `json:"pins"`
-	Applied          []mcpFrontSerenaApplied       `json:"applied"`
+	Version          int                             `json:"version"`
+	SnapshotComplete bool                            `json:"snapshot_complete"`
+	Generation       int                             `json:"generation,omitempty"`
+	Rows             map[string]mcpFrontReconcileRow `json:"rows,omitempty"`
+	ActivePlan       *mcpFrontReconcilePlan          `json:"active_plan,omitempty"`
+}
+
+type mcpFrontReconcileRow struct {
+	Surface     string                       `json:"surface"`
+	Client      string                       `json:"client"`
+	Language    string                       `json:"language,omitempty"`
+	EntryName   string                       `json:"entry_name"`
+	Baseline    mcpFrontEntryState           `json:"baseline"`
+	BaselineSet bool                         `json:"baseline_set"`
+	Pin         *mcpFrontSerenaPin           `json:"pin,omitempty"`
+	Attempt     *mcpFrontReconcileAttempt    `json:"attempt,omitempty"`
+	Applied     *mcpFrontAppliedReceipt      `json:"applied,omitempty"`
+	Disposition *mcpFrontRollbackDisposition `json:"disposition,omitempty"`
+}
+
+type mcpFrontReconcilePlan struct {
+	Generation int                       `json:"generation"`
+	Port       int                       `json:"port"`
+	Rows       []string                  `json:"rows"`
+	Operations []mcpFrontReconcilePlanOp `json:"operations"`
+}
+
+type mcpFrontReconcilePlanOp struct {
+	RowKey        string             `json:"row_key"`
+	Operation     string             `json:"operation"`
+	PreState      mcpFrontEntryState `json:"pre_state"`
+	IntendedState mcpFrontEntryState `json:"intended_state"`
+}
+
+type mcpFrontEntryState struct {
+	Present     bool                        `json:"present"`
+	Fingerprint string                      `json:"fingerprint,omitempty"`
+	LSP         *api.LSPRouterEntrySnapshot `json:"lsp,omitempty"`
+}
+
+type mcpFrontReconcileAttempt struct {
+	Generation    int                `json:"generation"`
+	Operation     string             `json:"operation"`
+	PreState      mcpFrontEntryState `json:"pre_state"`
+	IntendedState mcpFrontEntryState `json:"intended_state"`
+	State         string             `json:"state"`
+}
+
+type mcpFrontAppliedReceipt struct {
+	Generation int                `json:"generation"`
+	Port       int                `json:"port"`
+	PostState  mcpFrontEntryState `json:"post_state"`
+}
+
+type mcpFrontRollbackDisposition struct {
+	State  string `json:"state"`
+	Reason string `json:"reason,omitempty"`
+}
+
+const (
+	mcpFrontSurfaceSerena = "serena"
+	mcpFrontSurfaceLSP    = "lsp"
+
+	mcpFrontAttemptPrepared             = "prepared"
+	mcpFrontAttemptConfirmedNoWrite     = "confirmed-no-write"
+	mcpFrontAttemptApplied              = "applied"
+	mcpFrontAttemptConflict             = "conflict"
+	mcpFrontAttemptPreconditionConflict = "precondition-conflict"
+
+	mcpFrontDispositionBaselineOnly = "baseline-only"
+	mcpFrontDispositionRestored     = "restored"
+	mcpFrontDispositionConflict     = "skipped-conflict"
+	mcpFrontDispositionPending      = "pending"
+	mcpFrontDispositionFailed       = "failed"
+)
+
+func mcpFrontReconcileRowKey(surface, client, language, entryName string) string {
+	return surface + "\x00" + client + "\x00" + language + "\x00" + entryName
+}
+
+func mcpFrontRowKey(row mcpFrontReconcileRow) string {
+	return mcpFrontReconcileRowKey(row.Surface, row.Client, row.Language, row.EntryName)
+}
+
+func snapshotEntryNameCLI(row api.LSPRouterEntrySnapshot) string {
+	if row.EntryName != "" {
+		return row.EntryName
+	}
+	return api.LSPRouterEntryName(row.Language)
+}
+
+func mcpFrontLSPState(row api.LSPRouterEntrySnapshot) mcpFrontEntryState {
+	copy := row
+	return mcpFrontEntryState{Present: row.Present, LSP: &copy}
+}
+
+func mcpFrontSerenaState(fingerprint string) mcpFrontEntryState {
+	return mcpFrontEntryState{Present: fingerprint != "", Fingerprint: fingerprint}
+}
+
+func mcpFrontStateEqual(a, b mcpFrontEntryState) bool {
+	return a.Present == b.Present &&
+		a.Fingerprint == b.Fingerprint &&
+		reflect.DeepEqual(a.LSP, b.LSP)
+}
+
+func effectiveMCPFrontAppliedReceipt(row mcpFrontReconcileRow) (*mcpFrontAppliedReceipt, bool) {
+	if row.Attempt != nil {
+		switch row.Attempt.State {
+		case mcpFrontAttemptPrepared, mcpFrontAttemptConflict:
+			return nil, true
+		case mcpFrontAttemptPreconditionConflict:
+			return nil, false
+		case mcpFrontAttemptApplied:
+			if row.Applied == nil {
+				return nil, true
+			}
+		case mcpFrontAttemptConfirmedNoWrite:
+			// The previous successful receipt remains the effective owner.
+		default:
+			return nil, true
+		}
+	}
+	return row.Applied, false
+}
+
+// settleMCPFrontReconcileAttempts refuses every prepared attempt that survived
+// process re-entry. Current value equality is not mutation causation: only the
+// same-call ConditionalEntryMutator observation may create an applied receipt.
+func settleMCPFrontReconcileAttempts(reportPath string, report *mcpFrontReconcileReport) error {
+	if report == nil {
+		return nil
+	}
+	changed := false
+	var uncertain []string
+	for key, row := range report.Rows {
+		if row.Attempt == nil || row.Attempt.State != mcpFrontAttemptPrepared {
+			continue
+		}
+		if row.Disposition == nil ||
+			row.Disposition.State != mcpFrontDispositionPending ||
+			row.Disposition.Reason != "pending-ownership-unknown" {
+			row.Disposition = &mcpFrontRollbackDisposition{
+				State: mcpFrontDispositionPending, Reason: "pending-ownership-unknown",
+			}
+			report.Rows[key] = row
+			changed = true
+		}
+		uncertain = append(uncertain, key)
+	}
+	if changed {
+		if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
+			return fmt.Errorf("settle recovery attempts: %w", err)
+		}
+	}
+	if len(uncertain) > 0 {
+		return fmt.Errorf("forward-previous-attempt-uncertain: %d prepared row(s) have no same-call mutation receipt", len(uncertain))
+	}
+	return nil
 }
 
 // mcpFrontSerenaPin is one client's retention-immune pre-reconcile backup.
@@ -250,30 +340,6 @@ type mcpFrontSerenaPin struct {
 	Origin string `json:"origin"`
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
-}
-
-// mcpFrontSerenaApplied is the post-write fingerprint of one client's serena
-// entry: what the most recent forward generation left in the live config.
-//
-// It is the serena counterpart of a guard the LSP side already had. A recovery
-// record can stay active indefinitely — the forward run and its `--rollback`
-// are separate operator actions — so by rollback time the operator may have
-// edited that entry themselves. RestoreSerenaReconcileApplied overwrites it
-// unconditionally, silently discarding their work. Comparing this fingerprint
-// against the live entry before any restoration write turns that silent
-// clobber into an explicit refusal.
-//
-// SHA256 empty means the entry was ABSENT when the forward run finished (a
-// real state, distinct from "not recorded" — see Recorded).
-//
-// Recorded=false means the forward run could not compute a fingerprint for
-// this client at all (its adapter or config was unreachable at commit time).
-// Such a row carries no baseline, so the rollback cannot judge divergence for
-// it and says so rather than either refusing or silently overwriting.
-type mcpFrontSerenaApplied struct {
-	Client   string `json:"client"`
-	SHA256   string `json:"sha256"`
-	Recorded bool   `json:"recorded"`
 }
 
 // mcpFrontReconcileTimeout bounds the whole reconcile-mcp-front run
@@ -435,19 +501,32 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	if priorErr != nil {
 		return fmt.Errorf("reconcile-mcp-front: a prior reconcile report exists at %s but could not be read: %w; refusing to run (overwriting it would destroy the pre-reconcile state `--rollback` restores from) — roll back or move that file aside first", reportPath, priorErr)
 	}
-
-	// Capture the LSP pre-state BEFORE any write, so an unreadable client
-	// config aborts the run with ZERO side effects rather than after the
-	// serena rewrite has already committed. Read-only.
-	lspSnapshot, snapErr := a.SnapshotLSPRouterClientEntries(api.LSPClientRouterOpts{})
-	if snapErr != nil {
-		return fmt.Errorf("reconcile-mcp-front: capture lsp pre-state: %w (nothing was written)", snapErr)
+	if prior != nil {
+		if settleErr := settleMCPFrontReconcileAttempts(reportPath, prior); settleErr != nil {
+			return fmt.Errorf("reconcile-mcp-front: %w", settleErr)
+		}
 	}
 
-	// The journal holds the accumulating record in memory and makes it durable
-	// on every addition. Nothing has been written yet, and nothing will be
-	// unless a client is actually about to be mutated.
-	journal := newMCPFrontReconcileJournal(reportPath, prior, port, lspSnapshot)
+	// Freeze the complete eligible LSP population and every exact pre-state
+	// once. Apply uses only this plan and never re-enumerates clients.
+	lspPlan, planErr := a.PlanLSPRouterClientEntries(api.LSPClientRouterOpts{
+		GUIPort:     port,
+		BackupKeepN: keepN,
+	})
+	if planErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: capture-incomplete: %w (nothing was written)", planErr)
+	}
+	if len(lspPlan.CaptureFailures) > 0 {
+		return fmt.Errorf("reconcile-mcp-front: capture-incomplete: %d lsp row(s) could not be captured (nothing was written)", len(lspPlan.CaptureFailures))
+	}
+	journal, journalErr := newMCPFrontV3Journal(reportPath, prior, port, lspPlan)
+	if journalErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: build recovery plan: %w", journalErr)
+	}
+	// The complete LSP plan is durable before the first Serena or LSP mutation.
+	if persistErr := journal.persist(); persistErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: persist active recovery plan: %w (nothing was written)", persistErr)
+	}
 
 	// Serena first. Its own port-liveness proof (Port>0 path,
 	// serena_client_reconcile.go's resolveSerenaReconcilePort) still runs
@@ -463,9 +542,10 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	// a failure there aborts THAT CLIENT'S rewrite rather than leaving it
 	// mutated with no durable way back.
 	serenaReport, serr := api.ReconcileSerenaClientsToRouter(ctx, api.SerenaReconcileOpts{
-		Port:             port,
-		BackupKeepN:      keepN,
-		OnBackupCaptured: journal.recordSerenaBackup,
+		Port:              port,
+		BackupKeepN:       keepN,
+		OnAttemptPrepared: journal.prepareSerenaAttempt,
+		OnAttemptFinished: journal.finishSerenaAttempt,
 	})
 	if serr != nil {
 		if errors.Is(serr, api.ErrSerenaReconcileRouteNotLive) {
@@ -474,18 +554,10 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 		return fmt.Errorf("reconcile-mcp-front: serena client reconcile: %w", serr)
 	}
 
-	// Make the record durable before the LSP reconcile runs. For a host with
-	// at least one serena client this is already true (the journal wrote it),
-	// and this call is a no-op re-write; for a host with none it is the write
-	// that puts the LSP pre-state on disk ahead of the LSP mutation. It also
-	// re-asserts the every-applied-row-was-journaled invariant.
-	if werr := journal.commit(serenaReport); werr != nil {
-		return fmt.Errorf("reconcile-mcp-front: persist reconcile report to %s: %w (serena client configs were already rewritten; rollback needs this file)", reportPath, werr)
-	}
-
-	lspReport, lerr := a.EnsureLSPRouterClientEntries(api.LSPClientRouterOpts{
-		GUIPort:     port,
-		BackupKeepN: keepN,
+	lspReport, lerr := a.ApplyLSPRouterClientPlan(lspPlan, api.LSPRouterApplyCallbacks{
+		OnPrepared:             journal.prepareLSPOperation,
+		OnFinished:             journal.finishLSPOperation,
+		OnPreconditionConflict: journal.finishLSPOperation,
 	})
 	if lerr != nil {
 		// The serena rewrite already committed (each client individually
@@ -516,6 +588,96 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	return nil
 }
 
+func persistMCPFrontDisposition(
+	reportPath string,
+	report *mcpFrontReconcileReport,
+	key, state, reason string,
+) error {
+	row, ok := report.Rows[key]
+	if !ok {
+		return fmt.Errorf("unknown recovery row %q", key)
+	}
+	row.Disposition = &mcpFrontRollbackDisposition{State: state, Reason: reason}
+	report.Rows[key] = row
+	if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
+		return fmt.Errorf("persist rollback disposition for %q: %w", key, err)
+	}
+	return nil
+}
+
+func terminalMCPFrontDisposition(disposition *mcpFrontRollbackDisposition) bool {
+	if disposition == nil {
+		return false
+	}
+	switch disposition.State {
+	case mcpFrontDispositionBaselineOnly, mcpFrontDispositionRestored, mcpFrontDispositionConflict:
+		return true
+	default:
+		return false
+	}
+}
+
+func canRetireMCPFrontReconcileReport(report *mcpFrontReconcileReport) bool {
+	if report == nil || len(report.Rows) == 0 {
+		return false
+	}
+	for _, row := range report.Rows {
+		if !terminalMCPFrontDisposition(row.Disposition) {
+			return false
+		}
+	}
+	return true
+}
+
+func describePendingMCPFrontRows(report *mcpFrontReconcileReport) string {
+	if report == nil {
+		return ""
+	}
+	var labels []string
+	for _, row := range report.Rows {
+		if terminalMCPFrontDisposition(row.Disposition) {
+			continue
+		}
+		label := row.Client
+		if row.Language != "" {
+			label += "/" + row.Language
+		} else {
+			label += "/" + row.EntryName
+		}
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	return strings.Join(labels, ", ")
+}
+
+func conflictMCPFrontRowLabels(report *mcpFrontReconcileReport) []string {
+	if report == nil {
+		return nil
+	}
+	var labels []string
+	for _, row := range report.Rows {
+		if row.Disposition == nil || row.Disposition.State != mcpFrontDispositionConflict {
+			continue
+		}
+		labels = append(labels, strings.Join([]string{
+			row.Surface, row.Client, row.Language, row.EntryName,
+		}, "/"))
+	}
+	sort.Strings(labels)
+	return labels
+}
+
+func sortedMCPFrontRowKeys(report *mcpFrontReconcileReport, surface string) []string {
+	var keys []string
+	for key, row := range report.Rows {
+		if row.Surface == surface {
+			keys = append(keys, key)
+		}
+	}
+	sort.Strings(keys)
+	return keys
+}
+
 func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) error {
 	raw, rerr := api.ReadStateFileInodeAnchored(reportPath)
 	if rerr != nil {
@@ -524,10 +686,11 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 		}
 		return fmt.Errorf("reconcile-mcp-front --rollback: read %s: %w", reportPath, rerr)
 	}
-	var persisted mcpFrontReconcileReport
-	if uerr := json.Unmarshal(raw, &persisted); uerr != nil {
-		return fmt.Errorf("reconcile-mcp-front --rollback: parse %s: %w", reportPath, uerr)
+	decoded, decodeErr := decodeMCPFrontReconcileReport(raw, reportPath)
+	if decodeErr != nil {
+		return fmt.Errorf("reconcile-mcp-front --rollback: parse %s: %w", reportPath, decodeErr)
 	}
+	persisted := *decoded
 
 	// EVERY required section is validated, and every pinned input is proven
 	// present and intact, BEFORE the first restoration write. A rollback that
@@ -537,79 +700,130 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 	if verr := validateMCPFrontReconcileReport(&persisted, reportPath); verr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
 	}
+	if settleErr := settleMCPFrontReconcileAttempts(reportPath, &persisted); settleErr != nil {
+		return fmt.Errorf("reconcile-mcp-front --rollback: %w", settleErr)
+	}
 	if verr := verifyMCPFrontSerenaPins(&persisted, reportPath); verr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
 	}
-	// Operator-edit gate. Also BEFORE the first write, for the same reason as
-	// the two gates above: a refusal must leave the host exactly as it was.
-	if verr := verifyMCPFrontSerenaNotEdited(cmd, &persisted, reportPath); verr != nil {
-		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
-	}
-	serenaReport := persisted.Serena
-
-	if rerr := api.RestoreSerenaReconcileApplied(serenaReport, nil); rerr != nil {
-		return fmt.Errorf("reconcile-mcp-front --rollback: restore serena clients: %w", rerr)
-	}
-
-	// LSP rollback drives each canonical `mcp-language-server-<language>`
-	// entry back to the URL the forward run recorded for it (or removes it
-	// when the forward run recorded it as absent).
-	//
-	// It deliberately does NOT call api.RollbackLSPRouterClientEntries: that
-	// is the router-to-LEGACY demotion routine (reconstruct per-workspace
-	// entries from the registry, then delete the canonical router entry), not
-	// the inverse of this command's port rewrite. On an already-migrated host
-	// the forward pass only changes the canonical entry's PORT, so its
-	// inverse is "put the previous port back" — the demotion routine instead
-	// removed the shared router entry outright, leaving the client with no
-	// LSP route at all (codex bot PR #588 P1).
-	//
-	// The port passed here is ownership evidence for the pre-write guard, and
-	// comes from the PERSISTED forward-run record rather than the live
-	// mcp_front.port setting, so an operator changing that setting between the
-	// forward run and this rollback cannot strand the entries the forward run
-	// actually wrote. Port==0 means an artifact that predates the field — fall
-	// back to the live setting rather than failing.
-	port := persisted.Port
-	if port <= 0 {
-		var err error
-		port, err = a.ResolveMCPFrontPort()
-		if err != nil {
-			return fmt.Errorf("reconcile-mcp-front --rollback: resolve mcp_front.port (no port recorded in %s): %w", reportPath, err)
+	serenaRestored := 0
+	for _, key := range sortedMCPFrontRowKeys(&persisted, mcpFrontSurfaceSerena) {
+		row := persisted.Rows[key]
+		if terminalMCPFrontDisposition(row.Disposition) {
+			continue
+		}
+		receipt, uncertain := effectiveMCPFrontAppliedReceipt(row)
+		if uncertain {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "pending-ownership-unknown"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+			continue
+		}
+		if receipt == nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, "no-effective-applied-receipt"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+			continue
+		}
+		results, restoreErr := api.RestoreSerenaReconcileAppliedOwned(
+			[]api.SerenaOwnedRestoreRequest{{
+				Client:                     row.Client,
+				BackupPath:                 row.Pin.Path,
+				ExpectedAppliedFingerprint: receipt.PostState.Fingerprint,
+				BaselinePresent:            row.Baseline.Present,
+			}},
+			nil,
+		)
+		if restoreErr != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-write-failed"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+			continue
+		}
+		if len(results) != 1 {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-result-missing"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+			continue
+		}
+		switch results[0].Status {
+		case api.SerenaOwnedRestoreRestored:
+			live, liveErr := api.SerenaClientEntryFingerprint(row.Client, nil)
+			if liveErr != nil || !mcpFrontStateEqual(mcpFrontSerenaState(live), row.Baseline) {
+				if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-verify-failed"); err != nil {
+					return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+				}
+				continue
+			}
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionRestored, "inverse-verified"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+			serenaRestored++
+		case api.SerenaOwnedRestoreConflict:
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionConflict, "rollback-cas-conflict"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+		default:
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-write-failed"); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
 		}
 	}
-	lspReport, lerr := a.RestoreLSPRouterClientEntriesSnapshot(*persisted.LSP, api.LSPClientRouterOpts{
-		GUIPort:     port,
-		BackupKeepN: effectiveBackupKeepN(),
-	})
-	if lerr != nil {
+
+	var recoveryRows []api.LSPRouterRecoveryRow
+	for _, key := range sortedMCPFrontRowKeys(&persisted, mcpFrontSurfaceLSP) {
+		row := persisted.Rows[key]
+		receipt, uncertain := effectiveMCPFrontAppliedReceipt(row)
+		recovery := api.LSPRouterRecoveryRow{Baseline: *row.Baseline.LSP, Uncertain: uncertain}
+		if row.Disposition != nil {
+			recovery.Disposition = row.Disposition.State
+			recovery.DispositionReason = row.Disposition.Reason
+		}
+		if receipt != nil && receipt.PostState.LSP != nil {
+			applied := *receipt.PostState.LSP
+			recovery.Applied = &applied
+		}
+		recoveryRows = append(recoveryRows, recovery)
+	}
+	lspReport, _, lerr := a.RestoreLSPRouterRecoveryRows(
+		recoveryRows,
+		api.LSPClientRouterOpts{BackupKeepN: effectiveBackupKeepN()},
+		api.LSPRouterRestoreCallbacks{
+			BeforeMutation: func(result api.LSPRouterRestoreRowResult) error {
+				key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, result.Client, result.Language, result.EntryName)
+				return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, result.Reason)
+			},
+			OnDisposition: func(result api.LSPRouterRestoreRowResult) error {
+				key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, result.Client, result.Language, result.EntryName)
+				switch result.Status {
+				case api.LSPRouterRestoreBaselineOnly:
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, result.Reason)
+				case api.LSPRouterRestoreRestored:
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionRestored, result.Reason)
+				case api.LSPRouterRestoreConflict:
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionConflict, result.Reason)
+				default:
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, result.Reason)
+				}
+			},
+		},
+	)
+	lspRestored := len(lspReport.Applied) + len(lspReport.Restored)
+	if lerr != nil && len(lspReport.Pending) == 0 && len(lspReport.Failed) == 0 {
 		return fmt.Errorf("reconcile-mcp-front --rollback: lsp rollback: %w", lerr)
 	}
 
-	// RestoreLSPRouterClientEntriesSnapshot reports a URL rewrite as an "add"
-	// op (Applied); Restored is the backup-file restore kind applyLSPRouterOps
-	// shares with the demotion path. Both are "put back" from this command's
-	// point of view, so the operator-facing count is their sum.
-	lspRestored := len(lspReport.Applied) + len(lspReport.Restored)
-
-	// CONSUMPTION GATE. The record is retired only when the restoration it
-	// describes is COMPLETE. A pending row (a recorded client whose adapter or
-	// config file is not reachable right now) is the case that motivated this:
-	// the pre-fix restore silently skipped such a client, the caller saw a
-	// clean report, deleted the record, and that client's rollback row was
-	// gone for good the moment it came back.
-	if len(lspReport.Pending) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "mcp-front rollback: serena(restored=%d) lsp(restored=%d removed=%d pending=%d)\n",
-			len(serenaReport.Applied), lspRestored, len(lspReport.Removed), len(lspReport.Pending))
-		return fmt.Errorf("reconcile-mcp-front --rollback: %d recorded lsp entr(ies) could not be restored because their client is not reachable right now (%s); the reconcile report %s has been KEPT so re-running `--rollback` after the client is back finishes the job. To abandon those rows deliberately, move that file aside by hand",
-			len(lspReport.Pending), describeLSPChanges(lspReport.Pending), reportPath)
+	durable, durableErr := mcpFrontReadReportForRetirementFn(reportPath)
+	if durableErr != nil {
+		return fmt.Errorf("reconcile-mcp-front --rollback: re-read durable report: %w", durableErr)
 	}
-
-	if len(lspReport.Failed) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(), "mcp-front rollback: serena(restored=%d) lsp(restored=%d removed=%d failed=%d)\n",
-			len(serenaReport.Applied), lspRestored, len(lspReport.Removed), len(lspReport.Failed))
-		return fmt.Errorf("reconcile-mcp-front --rollback: %d lsp per-client failure(s); the reconcile report %s has been KEPT so the rollback can be re-run once the cause is cleared", len(lspReport.Failed), reportPath)
+	if !canRetireMCPFrontReconcileReport(durable) {
+		fmt.Fprintf(cmd.OutOrStdout(), "mcp-front rollback: serena(restored=%d) lsp(restored=%d removed=%d pending=%d failed=%d)\n",
+			serenaRestored, lspRestored, len(lspReport.Removed), len(lspReport.Pending), len(lspReport.Failed))
+		return fmt.Errorf("reconcile-mcp-front --rollback: recovery remains pending; rows not reachable right now or with unresolved ownership/write evidence: %s; the active report %s was kept",
+			describePendingMCPFrontRows(durable), reportPath)
 	}
+	conflictRows := conflictMCPFrontRowLabels(durable)
 
 	// ATOMIC RETIREMENT. Move the record out of the active namespace before
 	// reporting success, and FAIL if that transition cannot complete. The
@@ -633,15 +847,19 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 
 	_ = api.LogHubMcpEvent("info", "mcp-front-reconciled", map[string]any{
 		"action":          "rollback",
-		"port":            port,
-		"serena_restored": len(serenaReport.Applied),
+		"port":            persisted.ActivePlan.Port,
+		"serena_restored": serenaRestored,
 		"lsp_restored":    lspRestored,
 		"lsp_removed":     len(lspReport.Removed),
 		"lsp_failed":      len(lspReport.Failed),
 	})
 
 	fmt.Fprintf(cmd.OutOrStdout(), "mcp-front rollback: serena(restored=%d) lsp(restored=%d removed=%d failed=%d)\n",
-		len(serenaReport.Applied), lspRestored, len(lspReport.Removed), len(lspReport.Failed))
+		serenaRestored, lspRestored, len(lspReport.Removed), len(lspReport.Failed))
+	if len(conflictRows) > 0 {
+		return fmt.Errorf("reconcile-mcp-front --rollback: rollback completed with %d skipped-conflict row(s): %s; operator state was preserved",
+			len(conflictRows), strings.Join(conflictRows, ", "))
+	}
 	return nil
 }
 
@@ -662,81 +880,192 @@ func describeLSPChanges(changes []api.LSPClientRouterChange) string {
 // answers are independent — which is why they are enumerated rather than
 // collapsed into one "looks fine" predicate.
 func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportPath string) error {
-	// A version-1 record is ACCEPTED FOR ROLLBACK when — and only when — the
-	// completeness version 2 records as a marker can be VERIFIED directly from
-	// its contents. See admitLegacyMCPFrontRecordForRollback.
-	if persisted.Version == mcpFrontReconcileLegacyReportVersion {
-		return admitLegacyMCPFrontRecordForRollback(persisted, reportPath)
-	}
 	if persisted.Version != mcpFrontReconcileReportVersion {
-		return fmt.Errorf("%s carries artifact version %d, this build understands version %d — refusing to drive client-config writes from a pre-reconcile record it cannot fully interpret (the file was written by an incompatible build; restore those clients by hand or move the file aside)", reportPath, persisted.Version, mcpFrontReconcileReportVersion)
+		return fmt.Errorf("legacy-ownership-unproven: %s carries artifact version %d; version %d row ownership is required and no automatic client write is authorized", reportPath, persisted.Version, mcpFrontReconcileReportVersion)
 	}
 	if !persisted.SnapshotComplete {
 		return fmt.Errorf("%s is not marked snapshot-complete: the run that wrote it did not finish capturing every recovery section, so consuming it would restore only part of the host and then delete the record of the rest. Re-run `mcphub install --reconcile-mcp-front` (which merges into this record without overwriting it) so the missing section is captured, or move the file aside and restore by hand", reportPath)
 	}
-	if persisted.Serena == nil {
-		return fmt.Errorf("%s carries no serena section (corrupt or unrecognized artifact); refusing to restore half the host and delete the record of the other half", reportPath)
+	if persisted.Generation <= 0 {
+		return fmt.Errorf("%s has no valid generation", reportPath)
 	}
-	if persisted.LSP == nil {
-		return fmt.Errorf("%s carries no lsp section (the key is absent, which is NOT the same as an empty one); a record with no LSP pre-state cannot put the LSP router entries back, and consuming it would delete the only evidence they are still on the front port. Refusing", reportPath)
+	if persisted.Rows == nil {
+		return fmt.Errorf("%s carries no version-3 row map", reportPath)
+	}
+	if persisted.ActivePlan == nil || persisted.ActivePlan.Generation <= 0 {
+		return fmt.Errorf("%s carries no active generation plan", reportPath)
+	}
+	if persisted.ActivePlan.Generation != persisted.Generation {
+		return fmt.Errorf("%s active plan generation %d does not match artifact generation %d",
+			reportPath, persisted.ActivePlan.Generation, persisted.Generation)
+	}
+	if persisted.ActivePlan.Port <= 0 {
+		return fmt.Errorf("%s active generation plan has no valid port", reportPath)
+	}
+	if len(persisted.ActivePlan.Rows) != len(persisted.ActivePlan.Operations) {
+		return fmt.Errorf("%s active generation plan has %d row references but %d operations",
+			reportPath, len(persisted.ActivePlan.Rows), len(persisted.ActivePlan.Operations))
+	}
+	planRows := make(map[string]bool, len(persisted.ActivePlan.Rows))
+	for _, key := range persisted.ActivePlan.Rows {
+		if key == "" || planRows[key] {
+			return fmt.Errorf("%s active generation plan has an empty or duplicate row reference %q", reportPath, key)
+		}
+		if _, ok := persisted.Rows[key]; !ok {
+			return fmt.Errorf("%s active generation plan references missing row %q", reportPath, key)
+		}
+		planRows[key] = true
+	}
+	planOps := make(map[string]mcpFrontReconcilePlanOp, len(persisted.ActivePlan.Operations))
+	for _, op := range persisted.ActivePlan.Operations {
+		row, ok := persisted.Rows[op.RowKey]
+		if !ok || !planRows[op.RowKey] {
+			return fmt.Errorf("%s active generation operation references unplanned row %q", reportPath, op.RowKey)
+		}
+		if _, duplicate := planOps[op.RowKey]; duplicate {
+			return fmt.Errorf("%s active generation has duplicate operation for row %q", reportPath, op.RowKey)
+		}
+		if err := validateMCPFrontOperation(row.Surface, op.Operation); err != nil {
+			return fmt.Errorf("%s active generation row %q: %w", reportPath, op.RowKey, err)
+		}
+		if err := validateMCPFrontEntryState(row, op.PreState); err != nil {
+			return fmt.Errorf("%s active generation row %q has invalid pre-state: %w", reportPath, op.RowKey, err)
+		}
+		if err := validateMCPFrontEntryState(row, op.IntendedState); err != nil {
+			return fmt.Errorf("%s active generation row %q has invalid intended state: %w", reportPath, op.RowKey, err)
+		}
+		if op.Operation == "add" && !op.IntendedState.Present {
+			return fmt.Errorf("%s active generation add row %q has an absent intended state", reportPath, op.RowKey)
+		}
+		if op.Operation == "remove" && op.IntendedState.Present {
+			return fmt.Errorf("%s active generation remove row %q has a present intended state", reportPath, op.RowKey)
+		}
+		planOps[op.RowKey] = op
+	}
+	for key, row := range persisted.Rows {
+		if key != mcpFrontRowKey(row) {
+			return fmt.Errorf("%s row %q does not match its exact identity", reportPath, key)
+		}
+		switch row.Surface {
+		case mcpFrontSurfaceSerena:
+			if row.Client == "" || row.Language != "" || row.EntryName != "serena" || row.Pin == nil {
+				return fmt.Errorf("%s row %q has an incomplete serena baseline", reportPath, key)
+			}
+		case mcpFrontSurfaceLSP:
+			if row.Client == "" || row.Language == "" || row.EntryName == "" || row.Pin != nil {
+				return fmt.Errorf("%s row %q has an incomplete lsp baseline", reportPath, key)
+			}
+		default:
+			return fmt.Errorf("%s row %q has unknown surface %q", reportPath, key, row.Surface)
+		}
+		if !row.BaselineSet {
+			return fmt.Errorf("%s row %q has no immutable baseline marker", reportPath, key)
+		}
+		if err := validateMCPFrontEntryState(row, row.Baseline); err != nil {
+			return fmt.Errorf("%s row %q has invalid immutable baseline: %w", reportPath, key, err)
+		}
+		if row.Attempt != nil {
+			if row.Attempt.Generation <= 0 || row.Attempt.Generation > persisted.Generation {
+				return fmt.Errorf("%s row %q has an incomplete attempt", reportPath, key)
+			}
+			if err := validateMCPFrontOperation(row.Surface, row.Attempt.Operation); err != nil {
+				return fmt.Errorf("%s row %q attempt: %w", reportPath, key, err)
+			}
+			if err := validateMCPFrontEntryState(row, row.Attempt.PreState); err != nil {
+				return fmt.Errorf("%s row %q has invalid attempt pre-state: %w", reportPath, key, err)
+			}
+			if err := validateMCPFrontEntryState(row, row.Attempt.IntendedState); err != nil {
+				return fmt.Errorf("%s row %q has invalid attempt intended state: %w", reportPath, key, err)
+			}
+			switch row.Attempt.State {
+			case mcpFrontAttemptPrepared, mcpFrontAttemptConfirmedNoWrite,
+				mcpFrontAttemptApplied, mcpFrontAttemptConflict,
+				mcpFrontAttemptPreconditionConflict:
+			default:
+				return fmt.Errorf("%s row %q has unknown attempt state %q", reportPath, key, row.Attempt.State)
+			}
+			if row.Attempt.Generation == persisted.ActivePlan.Generation {
+				op, ok := planOps[key]
+				if !ok {
+					return fmt.Errorf("%s current-generation attempt row %q is not referenced by the active plan", reportPath, key)
+				}
+				if op.Operation != row.Attempt.Operation ||
+					!mcpFrontStateEqual(op.PreState, row.Attempt.PreState) ||
+					!mcpFrontStateEqual(op.IntendedState, row.Attempt.IntendedState) {
+					return fmt.Errorf("%s current-generation attempt row %q differs from its active-plan operation", reportPath, key)
+				}
+			}
+			if (row.Attempt.State == mcpFrontAttemptPrepared || row.Attempt.State == mcpFrontAttemptConflict) &&
+				row.Attempt.Generation != persisted.ActivePlan.Generation {
+				return fmt.Errorf("%s uncertain row %q belongs to generation %d, not the active generation %d",
+					reportPath, key, row.Attempt.Generation, persisted.ActivePlan.Generation)
+			}
+		}
+		if row.Applied != nil {
+			if row.Applied.Generation <= 0 || row.Applied.Generation > persisted.Generation || row.Applied.Port <= 0 {
+				return fmt.Errorf("%s row %q has an invalid applied receipt", reportPath, key)
+			}
+			if err := validateMCPFrontEntryState(row, row.Applied.PostState); err != nil {
+				return fmt.Errorf("%s row %q has an invalid applied post-state: %w", reportPath, key, err)
+			}
+			if row.Attempt != nil && row.Attempt.State == mcpFrontAttemptApplied &&
+				(row.Applied.Generation != row.Attempt.Generation ||
+					!mcpFrontStateEqual(row.Applied.PostState, row.Attempt.IntendedState)) {
+				return fmt.Errorf("%s row %q applied receipt differs from its applied attempt", reportPath, key)
+			}
+		}
+		if row.Disposition != nil {
+			switch row.Disposition.State {
+			case mcpFrontDispositionBaselineOnly, mcpFrontDispositionRestored,
+				mcpFrontDispositionConflict, mcpFrontDispositionPending, mcpFrontDispositionFailed:
+			default:
+				return fmt.Errorf("%s row %q has unknown rollback disposition %q",
+					reportPath, key, row.Disposition.State)
+			}
+		}
 	}
 	return nil
 }
 
-// admitLegacyMCPFrontRecordForRollback decides whether a version-1 record may
-// drive a ROLLBACK.
-//
-// The v1 refusal exists because v2 added three properties that make a record's
-// trustworthiness checkable, and a v1 record cannot be UPGRADED in place — its
-// serena rows point at rolling backups that retention may already have pruned,
-// and it cannot distinguish "no LSP rows" from "no LSP section". Refusing to
-// TRUST those properties by assumption is right, and forward migration stays
-// refused for exactly that reason (readMCPFrontReconcileReport).
-//
-// But a blanket refusal of ROLLBACK was too strong, and its failure mode is
-// the worst one available: a host cut over by the immediately preceding build
-// can hold a v1 record with an explicit LSP section and every serena backup
-// still on disk — demonstrably sufficient recovery inputs — and the new binary
-// refuses both the rollback and the forward retry, stranding the operator cut
-// over with no way back. That is strictly worse than the defect the refusal
-// protects against.
-//
-// So the distinction is TRUST vs VERIFY. Every property v2 asserts by marker,
-// this admits only after checking it directly on the record in hand:
-//
-//   - the LSP section must be EXPLICITLY PRESENT (a non-nil pointer). This is
-//     the one v1 could not express, so it is checked rather than assumed; a v1
-//     record whose `lsp` key is absent is still refused, because "no LSP rows"
-//     and "LSP section lost" are genuinely indistinguishable there.
-//   - the serena section must be present.
-//   - every referenced backup must exist and be readable RIGHT NOW. v2 gets
-//     this from pinning + checksums; v1 gets it from a direct probe of the
-//     rolling backups it names, immediately before any write. Retention may
-//     have pruned them — if it has, this refuses, which is the honest answer.
-//
-// A v1 record has no pins, so verifyMCPFrontSerenaPins would refuse it on the
-// missing-pin branch; that check is therefore satisfied HERE for v1 by the
-// direct backup probe below, and skipped there (it keys off Version).
-func admitLegacyMCPFrontRecordForRollback(persisted *mcpFrontReconcileReport, reportPath string) error {
-	if persisted.Serena == nil {
-		return fmt.Errorf("%s is a version-%d record with no serena section; a rollback cannot be driven from it (restore those clients by hand or move the file aside)", reportPath, mcpFrontReconcileLegacyReportVersion)
-	}
-	if persisted.LSP == nil {
-		return fmt.Errorf("%s is a version-%d record whose lsp section is ABSENT (not merely empty). Version %d records mark completeness explicitly; a version-%d record cannot, so this one is accepted for rollback only when it carries the section outright — and it does not. Consuming it would restore serena and delete the only evidence the LSP router entries are still on the front port. Restore those entries by hand (each client's `mcp-language-server-<language>` entry), then move %s aside",
-			reportPath, mcpFrontReconcileLegacyReportVersion, mcpFrontReconcileReportVersion, mcpFrontReconcileLegacyReportVersion, reportPath)
-	}
-	var missing []string
-	for _, row := range persisted.Serena.Applied {
-		if row.BackupPath == "" {
-			continue // dry-run row: nothing to restore, nothing to verify
+func validateMCPFrontOperation(surface, operation string) error {
+	switch surface {
+	case mcpFrontSurfaceSerena:
+		if operation != "add" {
+			return fmt.Errorf("serena operation %q is not supported", operation)
 		}
-		if _, err := os.Stat(row.BackupPath); err != nil {
-			missing = append(missing, fmt.Sprintf("%s (%s)", row.Client, row.BackupPath))
+	case mcpFrontSurfaceLSP:
+		if operation != "add" && operation != "remove" {
+			return fmt.Errorf("lsp operation %q is not supported", operation)
 		}
+	default:
+		return fmt.Errorf("unknown surface %q", surface)
 	}
-	if len(missing) > 0 {
-		return fmt.Errorf("%s is a version-%d record whose recorded serena backup(s) are no longer on disk: %s. Version-%d records pin a retention-immune copy; version-%d ones name the rolling `.bak-mcp-local-hub-<ts>` file, which backup retention prunes. Those clients cannot be restored, so no client is touched — restore them by hand and move %s aside",
-			reportPath, mcpFrontReconcileLegacyReportVersion, strings.Join(missing, ", "), mcpFrontReconcileReportVersion, mcpFrontReconcileLegacyReportVersion, reportPath)
+	return nil
+}
+
+func validateMCPFrontEntryState(row mcpFrontReconcileRow, state mcpFrontEntryState) error {
+	switch row.Surface {
+	case mcpFrontSurfaceSerena:
+		if state.LSP != nil {
+			return errors.New("serena state carries an lsp projection")
+		}
+		if state.Present != (state.Fingerprint != "") {
+			return errors.New("serena presence and fingerprint disagree")
+		}
+	case mcpFrontSurfaceLSP:
+		if state.Fingerprint != "" || state.LSP == nil {
+			return errors.New("lsp state lacks its exact projection")
+		}
+		if state.Present != state.LSP.Present {
+			return errors.New("lsp presence and projection disagree")
+		}
+		if state.LSP.Client != row.Client ||
+			state.LSP.Language != row.Language ||
+			snapshotEntryNameCLI(*state.LSP) != row.EntryName {
+			return errors.New("lsp projection identity differs from its recovery row")
+		}
+	default:
+		return fmt.Errorf("unknown surface %q", row.Surface)
 	}
 	return nil
 }
@@ -751,41 +1080,56 @@ func admitLegacyMCPFrontRecordForRollback(persisted *mcpFrontReconcileReport, re
 // mid-rollback error after serena had already been partly restored. Pinning
 // removes the cause; verifying the pin up front removes the class.
 func verifyMCPFrontSerenaPins(persisted *mcpFrontReconcileReport, reportPath string) error {
-	if persisted.Version == mcpFrontReconcileLegacyReportVersion {
-		// A version-1 record predates pinning entirely, so "no pin for this
-		// row" is its normal shape, not evidence of a careless producer. Its
-		// equivalent proof — every named rolling backup still present and
-		// readable — was performed by admitLegacyMCPFrontRecordForRollback
-		// before this ran.
-		return nil
+	pinRoot, rootErr := filepath.Abs(mcpFrontReconcilePinDir(reportPath))
+	if rootErr != nil {
+		return fmt.Errorf("%s: resolve pin root: %w", reportPath, rootErr)
 	}
-	pins := map[string]mcpFrontSerenaPin{}
-	for _, pin := range persisted.Pins {
-		pins[pin.Client] = pin
-	}
-	for _, row := range persisted.Serena.Applied {
-		if row.BackupPath == "" {
-			// No snapshot to restore from (a dry-run row). Nothing to verify;
-			// RestoreSerenaReconcileApplied skips it for the same reason.
+	seenPaths := map[string]string{}
+	for key, row := range persisted.Rows {
+		if row.Surface == mcpFrontSurfaceLSP {
+			if row.Pin != nil {
+				return fmt.Errorf("%s lsp row %q illegally carries a serena pin", reportPath, key)
+			}
 			continue
 		}
-		pin, ok := pins[row.Client]
-		if !ok {
-			return fmt.Errorf("%s records a restorable serena row for %q but no pinned backup for it; this record was written by a producer that did not pin its inputs, so the file it points at is subject to rolling backup retention and may already be gone. Refusing to start a restore that could fail halfway", reportPath, row.Client)
+		if row.Pin == nil {
+			return fmt.Errorf("%s serena row %q has no row-owned pin", reportPath, key)
 		}
-		if pin.Path != row.BackupPath {
-			return fmt.Errorf("%s records serena backup %q for %q but its pin points at %q; the record is inconsistent and must not drive client-config writes", reportPath, row.BackupPath, row.Client, pin.Path)
+		pin := *row.Pin
+		if pin.Client != row.Client || pin.Path == "" || pin.Origin == "" || pin.SHA256 == "" {
+			return fmt.Errorf("%s serena row %q has an incomplete or disagreeing row-owned pin", reportPath, key)
 		}
-		sum, err := fileSHA256(pin.Path)
+		absolutePin, absErr := filepath.Abs(pin.Path)
+		if absErr != nil {
+			return fmt.Errorf("%s serena row %q pin path: %w", reportPath, key, absErr)
+		}
+		rel, relErr := filepath.Rel(pinRoot, absolutePin)
+		if relErr != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." ||
+			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("%s serena row %q pin %q escapes the report pin directory", reportPath, key, pin.Path)
+		}
+		cleanPin := filepath.Clean(absolutePin)
+		if owner, duplicate := seenPaths[cleanPin]; duplicate {
+			return fmt.Errorf("%s serena rows %q and %q share duplicate pin path %q", reportPath, owner, key, pin.Path)
+		}
+		seenPaths[cleanPin] = key
+		sum, err := fileSHA256(cleanPin)
 		if err != nil {
-			return fmt.Errorf("%s: pinned pre-reconcile backup for %q is unreadable at %s: %w; the client cannot be restored from it, so no client is touched", reportPath, row.Client, pin.Path, err)
+			return fmt.Errorf("%s: pinned pre-reconcile backup for %q is unreadable at %s: %w; no client is touched", reportPath, row.Client, pin.Path, err)
 		}
 		if sum != pin.SHA256 {
-			return fmt.Errorf("%s: pinned pre-reconcile backup for %q at %s has changed since it was pinned (sha256 %s, recorded %s); refusing to write a client config from a backup whose contents are no longer the ones this record vouched for", reportPath, row.Client, pin.Path, sum, pin.SHA256)
+			return fmt.Errorf("%s: pinned pre-reconcile backup for %q at %s has changed (sha256 %s, recorded %s)", reportPath, row.Client, pin.Path, sum, pin.SHA256)
 		}
 	}
 	return nil
 }
+
+// mcpFrontReadReportForRetirementFn is the narrow retirement-gate test seam.
+// Production always resolves it to the canonical report reader. Focused tests
+// use it to make the durable re-read remain pending after the rollback's local
+// copy became terminal, proving that the caller gates retirement on durable
+// evidence rather than its stale in-memory copy.
+var mcpFrontReadReportForRetirementFn = readMCPFrontReconcileReport
 
 // mcpFrontRetireReportFn is the retirement test seam (same package-level style
 // as mcpFrontReconcileSerenaReportPathFn).
@@ -843,12 +1187,37 @@ func readMCPFrontReconcileReport(path string) (*mcpFrontReconcileReport, error) 
 		}
 		return nil, err
 	}
-	var out mcpFrontReconcileReport
-	if uerr := json.Unmarshal(raw, &out); uerr != nil {
-		return nil, uerr
+	out, decodeErr := decodeMCPFrontReconcileReport(raw, path)
+	if decodeErr != nil {
+		return nil, decodeErr
 	}
-	if out.Version != mcpFrontReconcileReportVersion {
-		return nil, fmt.Errorf("artifact version %d, this build understands version %d (a version-1 record cannot be upgraded in place: its serena rows point at rolling backups that retention may already have pruned)", out.Version, mcpFrontReconcileReportVersion)
+	if err := validateMCPFrontReconcileReport(out, path); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileReport, error) {
+	var envelope struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.Version != mcpFrontReconcileReportVersion {
+		return nil, fmt.Errorf("legacy-ownership-unproven: artifact version %d cannot be consumed by version %d", envelope.Version, mcpFrontReconcileReportVersion)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var out mcpFrontReconcileReport
+	if err := decoder.Decode(&out); err != nil {
+		return nil, fmt.Errorf("decode strict version-3 row journal %s: %w", path, err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("unexpected trailing JSON value")
+		}
+		return nil, fmt.Errorf("decode strict version-3 row journal %s: %w", path, err)
 	}
 	return &out, nil
 }
@@ -857,72 +1226,241 @@ func readMCPFrontReconcileReport(path string) (*mcpFrontReconcileReport, error) 
 //
 // It exists so the record can be made durable INCREMENTALLY, ahead of each
 // mutation, instead of once at the end. Its state is the accumulating record
-// plus the merge bookkeeping; every mutation of that state goes back through
-// mergeMCPFrontReconcileReport, so the "never overwrite a row an earlier
-// generation captured" invariant has exactly one owner.
+// plus its exact row map. The constructor and prepare methods preserve every
+// earlier immutable baseline and replace only the current attempt/receipt.
 type mcpFrontReconcileJournal struct {
 	reportPath string
 	port       int
 	record     mcpFrontReconcileReport
 }
 
-// newMCPFrontReconcileJournal seeds the record with the prior generation's
-// rows plus THIS run's LSP pre-state. Nothing is written yet — the liveness
-// gate has not run, and a refused run must leave no artifact at all.
-func newMCPFrontReconcileJournal(reportPath string, prior *mcpFrontReconcileReport, port int, lsp []api.LSPRouterEntrySnapshot) *mcpFrontReconcileJournal {
-	return &mcpFrontReconcileJournal{
-		reportPath: reportPath,
-		port:       port,
-		record:     mergeMCPFrontReconcileReport(prior, port, nil, lsp, nil),
+func newMCPFrontV3Journal(
+	reportPath string,
+	prior *mcpFrontReconcileReport,
+	port int,
+	plan *api.LSPRouterClientPlan,
+) (*mcpFrontReconcileJournal, error) {
+	record := mcpFrontReconcileReport{
+		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true,
+		Rows: map[string]mcpFrontReconcileRow{},
 	}
+	if prior != nil {
+		record = *prior
+		if record.Rows == nil {
+			record.Rows = map[string]mcpFrontReconcileRow{}
+		}
+	}
+	record.Generation++
+	active := &mcpFrontReconcilePlan{Generation: record.Generation, Port: port}
+	if plan != nil {
+		if len(plan.CaptureFailures) > 0 {
+			return nil, fmt.Errorf("capture-incomplete: %d lsp plan row(s) failed", len(plan.CaptureFailures))
+		}
+		for _, op := range plan.Operations {
+			key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, op.Client, op.Language, op.EntryName)
+			if existing, ok := record.Rows[key]; ok {
+				if existing.Surface != mcpFrontSurfaceLSP || existing.Baseline.LSP == nil {
+					return nil, fmt.Errorf("row %q has no immutable lsp baseline", key)
+				}
+			} else {
+				baseline := op.PreState
+				record.Rows[key] = mcpFrontReconcileRow{
+					Surface: mcpFrontSurfaceLSP, Client: op.Client, Language: op.Language,
+					EntryName: op.EntryName, Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
+				}
+			}
+			active.Rows = append(active.Rows, key)
+			active.Operations = append(active.Operations, mcpFrontReconcilePlanOp{
+				RowKey: key, Operation: op.Operation,
+				PreState: mcpFrontLSPState(op.PreState), IntendedState: mcpFrontLSPState(op.IntendedState),
+			})
+		}
+	}
+	record.ActivePlan = active
+	return &mcpFrontReconcileJournal{reportPath: reportPath, port: port, record: record}, nil
 }
 
-// recordSerenaBackup is the SerenaReconcileOpts.OnBackupCaptured hook: it runs
-// after this client's pre-rewrite backup exists and before its config is
-// mutated. Returning an error prevents that mutation.
-//
-// A client an earlier generation already recorded is deliberately a no-op: the
-// pinned backup that generation took is the true pre-state, and the backup
-// this run just captured is the ALREADY-REWRITTEN config (or, for a client
-// that generation failed on, an identical copy of a state that was never
-// mutated). Either way the recorded row is the one to keep.
-func (j *mcpFrontReconcileJournal) recordSerenaBackup(client, backupPath string) error {
-	if j.serenaRecorded(client) {
+func (j *mcpFrontReconcileJournal) persist() error {
+	return api.WriteStateFileAtomic(j.reportPath, j.record)
+}
+
+func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconcileAttemptResult) error {
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, result.Client, "", "serena")
+	row, ok := j.record.Rows[key]
+	var createdPin *mcpFrontSerenaPin
+	if ok {
+		if row.Surface != mcpFrontSurfaceSerena || row.Pin == nil {
+			return fmt.Errorf("journal-prepare-failed: serena row %q has no row-owned pinned baseline", key)
+		}
+	} else {
+		pin, pinErr := j.pinBackup(result.Client, result.BackupPath)
+		if pinErr != nil {
+			return fmt.Errorf("journal-prepare-failed: pin serena baseline for %s: %w", result.Client, pinErr)
+		}
+		createdPin = &pin
+		row = mcpFrontReconcileRow{
+			Surface: mcpFrontSurfaceSerena, Client: result.Client, EntryName: "serena",
+			Baseline: mcpFrontSerenaState(result.PreFingerprint), BaselineSet: true, Pin: &pin,
+		}
+	}
+	row.Attempt = &mcpFrontReconcileAttempt{
+		Generation: j.record.Generation, Operation: "add",
+		PreState:      mcpFrontSerenaState(result.PreFingerprint),
+		IntendedState: mcpFrontSerenaState(result.IntendedFingerprint),
+		State:         mcpFrontAttemptPrepared,
+	}
+	row.Disposition = nil
+	j.record.Rows[key] = row
+	found := false
+	for _, planKey := range j.record.ActivePlan.Rows {
+		if planKey == key {
+			found = true
+			break
+		}
+	}
+	if !found {
+		j.record.ActivePlan.Rows = append(j.record.ActivePlan.Rows, key)
+		j.record.ActivePlan.Operations = append(j.record.ActivePlan.Operations, mcpFrontReconcilePlanOp{
+			RowKey: key, Operation: "add",
+			PreState: row.Attempt.PreState, IntendedState: row.Attempt.IntendedState,
+		})
+	}
+	if err := j.persist(); err != nil {
+		if createdPin != nil {
+			delete(j.record.Rows, key)
+			if cleanupErr := reclaimOrphanedPin(*createdPin, j.reportPath); cleanupErr != nil {
+				return fmt.Errorf("journal-prepare-failed: persist row: %w; reclaim unreferenced pin: %v", err, cleanupErr)
+			}
+		}
+		return fmt.Errorf("journal-prepare-failed: persist row: %w", err)
+	}
+	return nil
+}
+
+func (j *mcpFrontReconcileJournal) finishSerenaAttempt(result api.SerenaReconcileAttemptResult) error {
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, result.Client, "", "serena")
+	return j.finishAttempt(
+		key,
+		mcpFrontSerenaState(result.ObservedFingerprint),
+		result.Invoked,
+		result.PreconditionConflict,
+		result.ObservationErr,
+	)
+}
+
+func (j *mcpFrontReconcileJournal) prepareLSPOperation(op api.LSPRouterPlannedOperation) error {
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, op.Client, op.Language, op.EntryName)
+	row, ok := j.record.Rows[key]
+	if !ok || row.Baseline.LSP == nil {
+		return fmt.Errorf("journal-prepare-failed: lsp row %q has no immutable baseline", key)
+	}
+	row.Attempt = &mcpFrontReconcileAttempt{
+		Generation: j.record.Generation, Operation: op.Operation,
+		PreState: mcpFrontLSPState(op.PreState), IntendedState: mcpFrontLSPState(op.IntendedState),
+		State: mcpFrontAttemptPrepared,
+	}
+	row.Disposition = nil
+	j.record.Rows[key] = row
+	return j.persist()
+}
+
+func (j *mcpFrontReconcileJournal) finishLSPOperation(obs api.LSPRouterMutationObservation) error {
+	key := mcpFrontReconcileRowKey(
+		mcpFrontSurfaceLSP, obs.Operation.Client, obs.Operation.Language, obs.Operation.EntryName)
+	return j.finishAttempt(
+		key,
+		mcpFrontLSPState(obs.ObservedState),
+		obs.Invoked,
+		obs.PreconditionConflict,
+		obs.ObservationErr,
+	)
+}
+
+func (j *mcpFrontReconcileJournal) finishAttempt(
+	key string,
+	observed mcpFrontEntryState,
+	invoked bool,
+	preconditionConflict bool,
+	observationErr error,
+) error {
+	row, ok := j.record.Rows[key]
+	if !ok {
+		// A first-generation Serena precondition conflict produced no mutation
+		// and therefore needs no inverse row or pin.
+		if !invoked && preconditionConflict {
+			return nil
+		}
+		return fmt.Errorf("promotion-not-durable: row %q is absent", key)
+	}
+	if !invoked {
+		if !preconditionConflict {
+			return nil
+		}
+		op, found := activeMCPFrontPlanOperation(j.record.ActivePlan, key)
+		if !found {
+			return fmt.Errorf("forward-plan-precondition-conflict-not-durable: row %q is not in the active plan", key)
+		}
+		row.Attempt = &mcpFrontReconcileAttempt{
+			Generation:    j.record.Generation,
+			Operation:     op.Operation,
+			PreState:      op.PreState,
+			IntendedState: op.IntendedState,
+			State:         mcpFrontAttemptPreconditionConflict,
+		}
+		row.Disposition = &mcpFrontRollbackDisposition{
+			State: mcpFrontDispositionConflict, Reason: "forward-plan-precondition-conflict",
+		}
+		j.record.Rows[key] = row
+		if err := j.persist(); err != nil {
+			return fmt.Errorf("forward-plan-precondition-conflict-not-durable: %w", err)
+		}
 		return nil
 	}
-	pin, err := j.pinBackup(client, backupPath)
-	if err != nil {
-		return err
+	if row.Attempt == nil || row.Attempt.State != mcpFrontAttemptPrepared {
+		return fmt.Errorf("promotion-not-durable: row %q has no durable prepared attempt", key)
 	}
-	row := &api.MigrateReport{Applied: []api.AppliedMigration{{
-		Server:     "serena",
-		Client:     client,
-		URL:        fmt.Sprintf("http://127.0.0.1:%d%s", j.port, api.SerenaRouterURLPath),
-		BackupPath: pin.Path,
-	}}}
-	next := mergeMCPFrontReconcileReport(&j.record, j.port, row, nil, []mcpFrontSerenaPin{pin})
-	if werr := api.WriteStateFileAtomic(j.reportPath, next); werr != nil {
-		// The mutation has NOT happened yet, so refusing here costs the
-		// operator one retryable client and costs the record nothing.
-		//
-		// The PIN, however, was already published (write-ahead ordering puts it
-		// on disk before the record that references it). Nothing now references
-		// it and nothing ever will: this generation is refusing, and the pin
-		// directory is only ever cleaned wholesale by a successful rollback. A
-		// pin is a byte copy of a WHOLE client config, so it can carry header
-		// tokens and stdio `env` secrets, and the retry this failure invites
-		// would publish another one each time. Reclaim it here, and report a
-		// reclaim failure rather than swallowing it — an operator told only
-		// about the record write would never learn a secret-bearing file was
-		// left behind (codex bot PR #588).
-		werr = fmt.Errorf("persist to %s: %w", j.reportPath, werr)
-		if cerr := reclaimOrphanedPin(pin, j.reportPath); cerr != nil {
-			return fmt.Errorf("%w; additionally, the now-unreferenced pinned copy of this client's config could NOT be removed: %v. It holds a verbatim copy of %s (which may contain tokens or env secrets) and nothing references it — delete it by hand", werr, cerr, pin.Origin)
+	if observationErr != nil {
+		row.Disposition = &mcpFrontRollbackDisposition{State: mcpFrontDispositionPending, Reason: "forward-ownership-unknown"}
+		j.record.Rows[key] = row
+		if err := j.persist(); err != nil {
+			return err
 		}
-		return werr
+		return fmt.Errorf("forward-ownership-unknown: %s", key)
 	}
-	j.record = next
+	switch {
+	case mcpFrontStateEqual(observed, row.Attempt.IntendedState):
+		row.Attempt.State = mcpFrontAttemptApplied
+		row.Applied = &mcpFrontAppliedReceipt{
+			Generation: row.Attempt.Generation, Port: j.port, PostState: row.Attempt.IntendedState,
+		}
+		row.Disposition = nil
+	case mcpFrontStateEqual(observed, row.Attempt.PreState):
+		row.Attempt.State = mcpFrontAttemptConfirmedNoWrite
+		row.Disposition = nil
+	default:
+		row.Attempt.State = mcpFrontAttemptConflict
+		row.Disposition = &mcpFrontRollbackDisposition{State: mcpFrontDispositionPending, Reason: "forward-ownership-unknown"}
+	}
+	j.record.Rows[key] = row
+	if err := j.persist(); err != nil {
+		return fmt.Errorf("promotion-not-durable: %w", err)
+	}
+	if row.Attempt.State == mcpFrontAttemptConflict {
+		return fmt.Errorf("forward-ownership-unknown: %s", key)
+	}
 	return nil
+}
+
+func activeMCPFrontPlanOperation(plan *mcpFrontReconcilePlan, key string) (mcpFrontReconcilePlanOp, bool) {
+	if plan == nil {
+		return mcpFrontReconcilePlanOp{}, false
+	}
+	for _, op := range plan.Operations {
+		if op.RowKey == key {
+			return op, true
+		}
+	}
+	return mcpFrontReconcilePlanOp{}, false
 }
 
 // reclaimOrphanedPin removes a pin that was published but never referenced by
@@ -956,74 +1494,6 @@ func reclaimOrphanedPin(pin mcpFrontSerenaPin, reportPath string) error {
 	}
 	_ = os.Remove(pinRoot)
 	return nil
-}
-
-// commit re-writes the accumulated record and re-asserts the invariant that
-// every mutated client was journaled ahead of its mutation.
-//
-// The re-write is what puts the LSP pre-state on disk on a host with zero
-// serena clients (where recordSerenaBackup never fires) — the LSP reconcile
-// runs next, and its recovery record must be durable first.
-// It also re-derives the post-write serena fingerprints (Applied) for EVERY
-// recorded client, not just the ones this generation rewrote. A re-run at a
-// changed mcp_front.port rewrites clients an earlier generation had already
-// migrated, so a fingerprint set that only covered this run's new clients
-// would leave the earlier ones baselined against a URL the hub itself has
-// since replaced — and the rollback would then refuse them as
-// operator-modified. Both this and the Port field track the latest generation
-// for the same reason: they describe the live host, not its history.
-func (j *mcpFrontReconcileJournal) commit(serena *api.MigrateReport) error {
-	if serena != nil {
-		for _, row := range serena.Applied {
-			if row.BackupPath == "" {
-				continue // dry-run row: nothing was backed up or written
-			}
-			if !j.serenaRecorded(row.Client) {
-				return fmt.Errorf("internal invariant: client %q was rewritten without a write-ahead recovery row; the OnBackupCaptured journal hook did not run for it", row.Client)
-			}
-		}
-	}
-	j.record.Applied = j.captureAppliedFingerprints()
-	return api.WriteStateFileAtomic(j.reportPath, j.record)
-}
-
-// captureAppliedFingerprints records what this command left in each recorded
-// client's serena entry, so a later rollback can detect operator edits.
-//
-// A client whose fingerprint cannot be computed right now is recorded with
-// Recorded=false rather than omitted: "we have no baseline for this client" is
-// a fact the rollback must be able to state, and an omitted row is
-// indistinguishable from a record written by a producer that had no
-// fingerprints at all.
-func (j *mcpFrontReconcileJournal) captureAppliedFingerprints() []mcpFrontSerenaApplied {
-	if j.record.Serena == nil {
-		return nil
-	}
-	out := make([]mcpFrontSerenaApplied, 0, len(j.record.Serena.Applied))
-	for _, row := range j.record.Serena.Applied {
-		if row.BackupPath == "" {
-			continue // dry-run row: nothing was written, nothing to baseline
-		}
-		sum, err := api.SerenaClientEntryFingerprint(row.Client, nil)
-		if err != nil {
-			out = append(out, mcpFrontSerenaApplied{Client: row.Client})
-			continue
-		}
-		out = append(out, mcpFrontSerenaApplied{Client: row.Client, SHA256: sum, Recorded: true})
-	}
-	return out
-}
-
-func (j *mcpFrontReconcileJournal) serenaRecorded(client string) bool {
-	if j.record.Serena == nil {
-		return false
-	}
-	for _, row := range j.record.Serena.Applied {
-		if row.Client == client {
-			return true
-		}
-	}
-	return false
 }
 
 // pinBackup copies a rolling client-config backup into the record-owned pin
@@ -1076,67 +1546,6 @@ func safeClientPathSegment(client string) (string, error) {
 	return trimmed, nil
 }
 
-// verifyMCPFrontSerenaNotEdited refuses to overwrite a serena entry the
-// OPERATOR has changed since the forward run wrote it.
-//
-// RestoreSerenaReconcileApplied writes the recorded backup over the live entry
-// unconditionally. Forward and rollback are separate operator actions with no
-// bound between them, so "the entry is still what we wrote" is an assumption,
-// not a fact — and when it is wrong, the rollback silently destroys whatever
-// the operator put there (a repointed remote serena, added headers, a
-// deliberate disable). The LSP half of this same rollback already refuses that
-// case; this is the missing serena half (codex bot PR #588).
-//
-// Refusal is whole-run and pre-write, matching verifyMCPFrontSerenaPins: a
-// rollback that restored the untouched clients and then stopped at the edited
-// one would leave the host split across two generations, which is worse than
-// either endpoint and much harder to reason about.
-//
-// A row with no recorded baseline (Recorded=false, or a record written before
-// the field existed) cannot be judged. Those are REPORTED to the operator and
-// allowed through rather than blocking a legitimate rollback on missing
-// evidence — stated plainly, because the operator is the one who knows whether
-// they edited it.
-func verifyMCPFrontSerenaNotEdited(cmd *cobra.Command, persisted *mcpFrontReconcileReport, reportPath string) error {
-	baseline := map[string]mcpFrontSerenaApplied{}
-	for _, row := range persisted.Applied {
-		baseline[row.Client] = row
-	}
-	var diverged []string
-	var unjudgeable []string
-	for _, row := range persisted.Serena.Applied {
-		if row.BackupPath == "" {
-			continue // dry-run row: nothing was written, so nothing was replaced
-		}
-		recorded, ok := baseline[row.Client]
-		if !ok || !recorded.Recorded {
-			unjudgeable = append(unjudgeable, row.Client)
-			continue
-		}
-		live, err := api.SerenaClientEntryFingerprint(row.Client, nil)
-		if err != nil {
-			// Unreadable right now. RestoreSerenaReconcileApplied will surface
-			// its own error for this client; do not convert a transient read
-			// failure into an operator-edit accusation.
-			unjudgeable = append(unjudgeable, row.Client)
-			continue
-		}
-		if live != recorded.SHA256 {
-			diverged = append(diverged, row.Client)
-		}
-	}
-	if len(unjudgeable) > 0 {
-		fmt.Fprintf(cmd.OutOrStdout(),
-			"reconcile-mcp-front --rollback: note: no post-reconcile baseline for %s; cannot tell whether they were edited since the forward run, and they will be restored from the recorded backup\n",
-			strings.Join(unjudgeable, ", "))
-	}
-	if len(diverged) > 0 {
-		return fmt.Errorf("the serena entry for %s no longer matches what the forward reconcile wrote — it has been edited since (by hand, or by another tool). Restoring would overwrite that change with the pre-reconcile backup and discard it. No client was touched. Either put those entries back the way this command left them and re-run `--rollback`, or, if the current content is what you want to keep, move %s aside and restore the other clients by hand",
-			strings.Join(diverged, ", "), reportPath)
-	}
-	return nil
-}
-
 func fileSHA256(path string) (string, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
@@ -1144,109 +1553,6 @@ func fileSHA256(path string) (string, error) {
 	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:]), nil
-}
-
-// mergeMCPFrontReconcileReport folds THIS forward generation into the persisted
-// record WITHOUT ever overwriting a row an earlier generation captured.
-//
-// The invariant: for each key, the record holds the state as it was BEFORE the
-// FIRST generation touched it — because that is the state `--rollback` must
-// restore. A re-run of the forward command (the documented retry for per-client
-// failures) re-derives a "pre-state" that is really the POST-first-run state
-// for every client the first run already migrated; adopting it would overwrite
-// the original with the front-port value and make rollback a no-op.
-//
-// A client the first run FAILED on was never mutated, so the row this run
-// contributes for it genuinely is its original pre-state — which is exactly
-// why "add rows not yet recorded, never replace recorded ones" is the correct
-// merge and not merely the conservative one.
-//
-// Serena rows key on Client; LSP rows key on (Client, Language); pins key on
-// Client alongside the serena row they belong to. Port keeps the first
-// generation's value once recorded. SnapshotComplete is asserted here because
-// this function is the only producer of a record, and it always writes both
-// sections: LSP is materialized to a non-nil slice so the artifact carries an
-// explicit empty section rather than a missing one.
-func mergeMCPFrontReconcileReport(
-	prior *mcpFrontReconcileReport,
-	port int,
-	serena *api.MigrateReport,
-	lsp []api.LSPRouterEntrySnapshot,
-	pins []mcpFrontSerenaPin,
-) mcpFrontReconcileReport {
-	out := mcpFrontReconcileReport{Version: mcpFrontReconcileReportVersion, Port: port, SnapshotComplete: true}
-	mergedSerena := &api.MigrateReport{}
-	mergedLSP := []api.LSPRouterEntrySnapshot{}
-	seenClient := map[string]bool{}
-	seenLSP := map[string]bool{}
-	seenPin := map[string]bool{}
-
-	if prior != nil {
-		// NOTE (codex bot PR #588): out.Port is deliberately NOT inherited from
-		// prior. Port describes what the LATEST forward generation wrote into
-		// the live client configs, and a re-run at a changed mcp_front.port
-		// really did move them — keeping the first generation's value left the
-		// record naming a port the command had stopped writing, so the rollback
-		// judged the live entries against the wrong URL. The pre-state fields
-		// below (rows, pins, LSP snapshot) keep the opposite, first-generation
-		// polarity for the opposite reason. Applied is likewise re-derived per
-		// generation, by the journal's commit, and so is not merged here.
-		//
-		// A prior.Port that is still meaningful is not lost: this function is
-		// only ever called with THIS run's port, and a run that reaches it has
-		// already proven that port live and supervisor-owned.
-		if prior.Serena != nil {
-			for _, row := range prior.Serena.Applied {
-				mergedSerena.Applied = append(mergedSerena.Applied, row)
-				seenClient[row.Client] = true
-			}
-		}
-		if prior.LSP != nil {
-			for _, row := range *prior.LSP {
-				mergedLSP = append(mergedLSP, row)
-				seenLSP[lspSnapshotKey(row)] = true
-			}
-		}
-		for _, pin := range prior.Pins {
-			out.Pins = append(out.Pins, pin)
-			seenPin[pin.Client] = true
-		}
-	}
-
-	if serena != nil {
-		for _, row := range serena.Applied {
-			if seenClient[row.Client] {
-				continue
-			}
-			seenClient[row.Client] = true
-			mergedSerena.Applied = append(mergedSerena.Applied, row)
-		}
-	}
-	for _, row := range lsp {
-		if seenLSP[lspSnapshotKey(row)] {
-			continue
-		}
-		seenLSP[lspSnapshotKey(row)] = true
-		mergedLSP = append(mergedLSP, row)
-	}
-	for _, pin := range pins {
-		if seenPin[pin.Client] {
-			continue
-		}
-		seenPin[pin.Client] = true
-		out.Pins = append(out.Pins, pin)
-	}
-
-	out.Serena = mergedSerena
-	out.LSP = &mergedLSP
-	return out
-}
-
-// lspSnapshotKey is the (client, language) identity of one LSP pre-state row.
-// The NUL separator cannot appear in either component, so distinct pairs can
-// never collide into one key.
-func lspSnapshotKey(row api.LSPRouterEntrySnapshot) string {
-	return row.Client + "\x00" + row.Language
 }
 
 // assertMCPFrontPortNotForeignOwned refuses a mcp_front.port that a DIFFERENT

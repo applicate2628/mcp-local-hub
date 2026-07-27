@@ -91,7 +91,7 @@ func (f *reconcileFakeClient) AddEntry(e clients.MCPEntry) error {
 	if f.addErr != nil {
 		return f.addErr
 	}
-	f.entries[e.Name] = e
+	f.entries[e.Name] = serenaIntendedEntryProjection(f, e)
 	return nil
 }
 func (f *reconcileFakeClient) RemoveEntry(name string) error {
@@ -106,6 +106,42 @@ func (f *reconcileFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 	}
 	cp := e
 	return &cp, nil
+}
+
+func (f *reconcileFakeClient) ConditionalEntryMutation(req clients.ConditionalEntryMutationRequest) (out clients.EntryMutationObserved) {
+	before, err := f.GetEntry(req.EntryName)
+	out.Before = before
+	if err != nil {
+		out.ObservationErr = err
+		return out
+	}
+	if req.ExpectedLive == nil || !req.ExpectedLive(before) {
+		out.PreconditionConflict = true
+		out.PreparationErr = clients.ErrEntryMutationPreconditionConflict
+		return out
+	}
+	if req.BackupKeepN != nil {
+		out.BackupPath, out.PreparationErr = f.BackupKeep(*req.BackupKeepN)
+		if out.PreparationErr != nil {
+			return out
+		}
+	}
+	if req.BeforeMutation != nil {
+		out.PreparationErr = req.BeforeMutation(clients.EntryMutationPreparation{
+			Before: before, BackupPath: out.BackupPath,
+		})
+		if out.PreparationErr != nil {
+			return out
+		}
+	}
+	out.Invoked = true
+	if req.Operation == clients.EntryMutationAdd {
+		out.MutationErr = f.AddEntry(req.Entry)
+	} else {
+		out.MutationErr = f.RemoveEntry(req.EntryName)
+	}
+	out.After, out.ObservationErr = f.GetEntry(req.EntryName)
+	return out
 }
 func (f *reconcileFakeClient) LatestBackupPath() (string, bool, error) { return "", false, nil }
 func (f *reconcileFakeClient) RestoreEntryFromBackup(backupPath, _ string) error {
@@ -783,10 +819,11 @@ func TestSerenaClientReconcile_RecordsManagedEntryMarker(t *testing.T) {
 }
 
 // TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess
-// injects a rewrite failure for ONE client and asserts that client keeps its
-// legacy entry (no removal) and the failure is reported, while the other
-// clients succeed. This is claim #9: legacy removal is ordered AFTER a
-// successful router rewrite for that client.
+// preserves the historical guard name while pinning the corrected class
+// invariant. Every supported adapter owns one same-named "serena" entry, so
+// the successful conditional rewrite replaces the legacy endpoint in place;
+// neither failed nor successful clients may receive a second unjournaled
+// RemoveEntry call.
 func TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess(t *testing.T) {
 	managedEntriesTestHelper(t)
 
@@ -844,6 +881,9 @@ func TestSerenaClientReconcile_LegacyEndpointRemovedOnlyAfterRewriteSuccess(t *t
 	if got := cursor.entries["serena"].URL; got != wantURL {
 		t.Errorf("cursor serena URL = %q, want %q", got, wantURL)
 	}
+	if cursor.removeCalls != 0 {
+		t.Errorf("cursor RemoveEntry called %d times after a successful same-name rewrite; want 0 secondary removals", cursor.removeCalls)
+	}
 }
 
 // TestSerenaClientReconcile_AppliedRowCarriesBackupPath verifies the reconcile
@@ -874,6 +914,62 @@ func TestSerenaClientReconcile_AppliedRowCarriesBackupPath(t *testing.T) {
 		if a.BackupPath != "/fake/bak-"+a.Client {
 			t.Errorf("applied row %s BackupPath = %q, want %q", a.Client, a.BackupPath, "/fake/bak-"+a.Client)
 		}
+	}
+}
+
+func TestSerenaReconcile_PostAttemptHookRunsForSuccessAndFailure(t *testing.T) {
+	managedEntriesTestHelper(t)
+
+	success := newReconcileFakeClient("claude-code")
+	failure := newReconcileFakeClient("cursor")
+	failure.addErr = errors.New("induced add failure")
+	clientMap := map[string]clients.Client{
+		"claude-code": success,
+		"cursor":      failure,
+	}
+	var prepared []SerenaReconcileAttemptResult
+	var finished []SerenaReconcileAttemptResult
+
+	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		Port:           9137,
+		Ping:           okPing,
+		Clients:        clientMap,
+		ClientsInclude: []string{"claude-code", "cursor"},
+		OnAttemptPrepared: func(result SerenaReconcileAttemptResult) error {
+			prepared = append(prepared, result)
+			return nil
+		},
+		OnAttemptFinished: func(result SerenaReconcileAttemptResult) error {
+			finished = append(finished, result)
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("reconcile: %v", err)
+	}
+	if len(prepared) != 2 || len(finished) != 2 {
+		t.Fatalf("prepared=%d finished=%d, want one of each for both adapter attempts", len(prepared), len(finished))
+	}
+	finishedByClient := map[string]SerenaReconcileAttemptResult{}
+	for _, result := range finished {
+		finishedByClient[result.Client] = result
+		if result.IntendedFingerprint == "" {
+			t.Fatalf("%s finished result omitted intended fingerprint: %+v", result.Client, result)
+		}
+	}
+	if got := finishedByClient["claude-code"]; got.AdapterErr != nil || got.ObservationErr != nil ||
+		got.ObservedFingerprint != got.IntendedFingerprint {
+		t.Fatalf("successful attempt result does not prove intended state: %+v", got)
+	}
+	if got := finishedByClient["cursor"]; !errors.Is(got.AdapterErr, failure.addErr) ||
+		got.ObservationErr != nil || got.ObservedFingerprint != got.PreFingerprint {
+		t.Fatalf("failed attempt result does not prove the pre-state/no-write outcome: %+v", got)
+	}
+	if len(report.Applied) != 1 || report.Applied[0].Client != "claude-code" {
+		t.Fatalf("Applied=%+v, want only claude-code", report.Applied)
+	}
+	if len(report.Failed) != 1 || report.Failed[0].Client != "cursor" {
+		t.Fatalf("Failed=%+v, want only cursor", report.Failed)
 	}
 }
 
@@ -1027,6 +1123,109 @@ func TestRestoreSerenaReconcileApplied_BypassesHubEntryGuard_RestoresLegacyHubBa
 	}
 	if strings.Contains(ags, "--url") {
 		t.Errorf("antigravity relay should NOT carry the router --url form after rollback; got:\n%s", ags)
+	}
+}
+
+func TestMCPFrontV3_SerenaCASRestoresLegacyHubBackupAndRefusesConcurrentEdit(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	configPath := filepath.Join(home, ".claude.json")
+	const routerURL = "http://127.0.0.1:9137/serena/mcp"
+	const legacyURL = "http://localhost:9121/mcp"
+	writeConfig := func(url string) {
+		t.Helper()
+		if err := os.WriteFile(configPath,
+			[]byte(`{"mcpServers":{"serena":{"type":"http","url":"`+url+`"}}}`), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+	}
+	writeConfig(routerURL)
+	backupPath := configPath + ".pinned"
+	if err := os.WriteFile(backupPath,
+		[]byte(`{"mcpServers":{"serena":{"type":"http","url":"`+legacyURL+`"}}}`), 0o600); err != nil {
+		t.Fatalf("write pinned backup: %v", err)
+	}
+
+	all := clients.AllClients()
+	expected, err := SerenaClientEntryFingerprint("claude-code", all)
+	if err != nil || expected == "" {
+		t.Fatalf("fingerprint router entry: fingerprint=%q err=%v", expected, err)
+	}
+	request := []SerenaOwnedRestoreRequest{{
+		Client: "claude-code", BackupPath: backupPath,
+		ExpectedAppliedFingerprint: expected, BaselinePresent: true,
+	}}
+	results, restoreErr := RestoreSerenaReconcileAppliedOwned(
+		request, all)
+	if restoreErr != nil {
+		t.Fatalf("owned restore: %v", restoreErr)
+	}
+	if len(results) != 1 || results[0].Status != SerenaOwnedRestoreRestored {
+		t.Fatalf("owned restore results=%+v, want restored", results)
+	}
+	entry, getErr := all["claude-code"].GetEntry("serena")
+	if getErr != nil || entry == nil || entry.URL != legacyURL {
+		t.Fatalf("legacy snapshot not restored: entry=%+v err=%v", entry, getErr)
+	}
+
+	const operatorURL = "https://operator.example/serena/mcp"
+	writeConfig(operatorURL)
+	results, restoreErr = RestoreSerenaReconcileAppliedOwned(
+		request, clients.AllClients())
+	if restoreErr != nil {
+		t.Fatalf("a compare conflict is a classified row, not an infrastructure error: %v", restoreErr)
+	}
+	if len(results) != 1 || results[0].Status != SerenaOwnedRestoreConflict {
+		t.Fatalf("owned restore results=%+v, want skipped-conflict", results)
+	}
+	entry, getErr = clients.AllClients()["claude-code"].GetEntry("serena")
+	if getErr != nil || entry == nil || entry.URL != operatorURL {
+		t.Fatalf("owned restore overwrote the operator edit: entry=%+v err=%v", entry, getErr)
+	}
+}
+
+func TestMCPFrontV3_SerenaAbsentBaselineUsesOwnedRemove(t *testing.T) {
+	t.Cleanup(SetClientWriteFallbackForTest())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	configPath := filepath.Join(home, ".claude.json")
+	const routerURL = "http://127.0.0.1:9137/serena/mcp"
+	writeConfig := func(url string) {
+		t.Helper()
+		if err := os.WriteFile(configPath,
+			[]byte(`{"mcpServers":{"serena":{"type":"http","url":"`+url+`"}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeConfig(routerURL)
+	all := clients.AllClients()
+	expected, err := SerenaClientEntryFingerprint("claude-code", all)
+	if err != nil || expected == "" {
+		t.Fatalf("fingerprint router entry: fingerprint=%q err=%v", expected, err)
+	}
+	request := []SerenaOwnedRestoreRequest{{
+		Client: "claude-code", ExpectedAppliedFingerprint: expected, BaselinePresent: false,
+	}}
+	results, restoreErr := RestoreSerenaReconcileAppliedOwned(request, all)
+	if restoreErr != nil || len(results) != 1 || results[0].Status != SerenaOwnedRestoreRestored {
+		t.Fatalf("absent-baseline remove: results=%+v err=%v", results, restoreErr)
+	}
+	if entry, getErr := all["claude-code"].GetEntry("serena"); getErr != nil || entry != nil {
+		t.Fatalf("owned remove left entry=%+v err=%v", entry, getErr)
+	}
+
+	const operatorURL = "https://operator.example/serena/mcp"
+	writeConfig(operatorURL)
+	results, restoreErr = RestoreSerenaReconcileAppliedOwned(request, clients.AllClients())
+	if restoreErr != nil || len(results) != 1 || results[0].Status != SerenaOwnedRestoreConflict {
+		t.Fatalf("replacement conflict: results=%+v err=%v", results, restoreErr)
+	}
+	if entry, getErr := clients.AllClients()["claude-code"].GetEntry("serena"); getErr != nil || entry == nil || entry.URL != operatorURL {
+		t.Fatalf("owned remove overwrote replacement: entry=%+v err=%v", entry, getErr)
 	}
 }
 

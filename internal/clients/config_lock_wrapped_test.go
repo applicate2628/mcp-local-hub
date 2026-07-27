@@ -1,6 +1,8 @@
 package clients
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -33,5 +35,78 @@ func TestAllClientsAreLockWrapped(t *testing.T) {
 		if _, ok := c.(*lockingClient); !ok {
 			t.Errorf("AllClients()[%q] is %T, not *lockingClient — its mutating methods bypass withConfigLock (torn-write/LWW race)", name, c)
 		}
+		if _, ok := c.(ConditionalEntryMutator); !ok {
+			t.Errorf("AllClients()[%q] is %T and lacks ConditionalEntryMutator", name, c)
+		}
+	}
+}
+
+func TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	concrete := &claudeCode{path: path}
+	wrapped := newLockingClient(concrete)
+	mutator, ok := wrapped.(ConditionalEntryMutator)
+	if !ok {
+		t.Fatalf("wrapped adapter %T lacks ConditionalEntryMutator", wrapped)
+	}
+
+	// The captured pre-state was absence. An operator entry appears after
+	// capture but before the conditional invocation.
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{"serena":{"url":"https://operator.example/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result := mutator.ConditionalEntryMutation(ConditionalEntryMutationRequest{
+		EntryName:    "serena",
+		ExpectedLive: func(live *MCPEntry) bool { return live == nil },
+		Operation:    EntryMutationAdd,
+		Entry:        MCPEntry{Name: "serena", URL: "http://127.0.0.1:9137/serena/mcp"},
+	})
+	if result.Invoked {
+		t.Fatal("intervening operator edit still invoked AddEntry")
+	}
+	if !result.PreconditionConflict || !errors.Is(result.PreparationErr, ErrEntryMutationPreconditionConflict) {
+		t.Fatalf("result=%+v, want exact precondition conflict", result)
+	}
+	live, err := concrete.GetEntry("serena")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live == nil || live.URL != "https://operator.example/mcp" {
+		t.Fatalf("conditional refusal changed operator state: %+v", live)
+	}
+}
+
+func TestMCPFrontV3_ConditionalPrepareFailureNeverInvokesAdapter(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "claude.json")
+	if err := os.WriteFile(path, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	concrete := &claudeCode{path: path}
+	mutator := newLockingClient(concrete).(ConditionalEntryMutator)
+	prepareErr := errors.New("induced durable prepare failure")
+	result := mutator.ConditionalEntryMutation(ConditionalEntryMutationRequest{
+		EntryName:    "serena",
+		ExpectedLive: func(live *MCPEntry) bool { return live == nil },
+		Operation:    EntryMutationAdd,
+		Entry:        MCPEntry{Name: "serena", URL: "http://127.0.0.1:9137/serena/mcp"},
+		BeforeMutation: func(EntryMutationPreparation) error {
+			return prepareErr
+		},
+	})
+	if result.Invoked {
+		t.Fatal("prepare failure still invoked AddEntry")
+	}
+	if !errors.Is(result.PreparationErr, prepareErr) {
+		t.Fatalf("PreparationErr=%v, want %v", result.PreparationErr, prepareErr)
+	}
+	live, err := concrete.GetEntry("serena")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live != nil {
+		t.Fatalf("prepare failure wrote entry: %+v", live)
 	}
 }
