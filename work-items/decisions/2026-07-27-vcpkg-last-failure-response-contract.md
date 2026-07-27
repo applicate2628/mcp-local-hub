@@ -9,6 +9,34 @@ superseded-by: none
 
 # `vcpkg_last_failure` may bound its response and normalizes terminal display bytes
 
+> **CORRECTION (2026-07-27, same day, by the narrow final gate). The bound below does NOT yet
+> bound.** I signed this off after verifying that the budget cannot corrupt a verdict — which is
+> true, and was re-proved rigorously. I did not verify that the budget actually caps the response,
+> and it does not: `Diagnostic.File`, `first_error.file` and `Result.BuildCommand` sit outside every
+> constant here. Three of the five matched diagnostic shapes capture rest-of-line or head-of-line
+> into `File` (`diagnostics.go:94` `ninjaFailedRE`, `:60` `msvcCompileDiagRE`, and
+> `lastfailure.go:668` `findRunBuildCommandLine`), so a single pathological line still returns
+> **6.30 MB / ~1.575M tokens** — the exact magnitude the "before" column below records.
+>
+> Worse than a plain miss: the response carries `diagnostic_text_truncated_to_line_budget` and
+> `diagnostics_dropped: 0`, so it LOOKS bounded.
+>
+> The enforcement test passed because its fixture is the one shape whose payload lives entirely in
+> `Text` (`response_budget_test.go:167-206`). The guard exists; it covers one participant of the
+> class. This is the same "fix landed on one instance of a class" shape the PR exists to close,
+> recurring in the fix itself.
+>
+> **The `one 3 MiB line → 14 KB` row below is therefore true only for the MSVC-text shape.** The
+> row stays as written rather than being quietly edited, so the error is visible; the table is
+> superseded by whatever bound the follow-up lands. Tracked as the blocking finding of the narrow
+> gate on `537ea802`.
+>
+> A second, smaller correction: the claim that *"a single-log phase is never truncated"* is false.
+> The COUNT budget cannot bind on a single log (200 = the per-log ceiling, verified for every phase
+> classification), but the 64 KiB BYTE budget still can and does — measured 83 of 200 dropped on a
+> single-log phase at ~330 bytes mean diagnostic text, which MSVC template-instantiation errors
+> routinely exceed. No operator harm (it is reported), but the justification was wrong.
+
 Two changes to the tool's wire output, signed off together because both were surfaced by the
 same re-gate and both trade a stated contract line for a failure mode that is worse.
 
