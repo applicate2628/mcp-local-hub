@@ -347,7 +347,7 @@ mis-set the OTP as `_authToken` → E401 → clobbered the session token)
 before remembering the canonical tag-push path that `v0.4.6`/`v0.4.7`
 already used. Tag-push first; never local-publish.
 
-### npm install canonicalizes into `~/.local/bin` (copy-only postinstall)
+### npm install canonicalizes into `~/.local/bin` (copy-only postinstall, GLOBAL install only)
 
 `~/.local/bin/mcphub[.exe]` is the CANONICAL binary the whole product
 points at (scheduler tasks, the supervisor's own-child spawn, and
@@ -383,6 +383,26 @@ prints a one-line notice pointing at `mcphub setup` and exits 0, so
 `npm install` NEVER breaks. Under `npm install --ignore-scripts` the
 postinstall does not run at all; the documented manual fallback is
 `mcphub setup` (or the hidden `mcphub canonicalize`).
+
+**GLOBAL install only (bot PR #585).** The bot flagged that the hook as
+originally shipped ran on ANY `npm install` — including a **local** install
+of the package into a project's own `node_modules`, or a **transitive**
+install where `mcp-local-hub` is merely some other package's dependency —
+silently mutating the developer's canonical PATH binary on a host that
+never asked for mcphub at all. Operator decision: keep the auto-update
+(reject the bot's remove-the-hook fix), but gate it. The postinstall now
+checks `process.env.npm_config_global === "true"` before doing anything —
+npm mirrors its own resolved `global` config into every lifecycle script's
+environment
+(https://docs.npmjs.com/cli/v11/using-npm/config#environment-variables);
+empirically verified on npm 11.17.0: `npm install -g` sets it to `"true"`,
+while a bare local install and a transitive install both leave it unset.
+Comparing `npm_config_prefix` to `npm_config_global_prefix` was considered
+and rejected — the same probe showed both hold the identical value during a
+LOCAL install too, so that pair cannot distinguish the two cases. A
+non-global run now prints `mcp-local-hub: skipping ~/.local/bin
+canonicalize (not a global install)` and returns before resolving or
+spawning anything.
 
 ## CLI entry point + console lifetime (2026-07)
 
