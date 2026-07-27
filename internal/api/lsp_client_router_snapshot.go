@@ -102,9 +102,45 @@ type LSPRouterRestoreCallbacks struct {
 	OnDisposition  func(LSPRouterRestoreRowResult) error
 }
 
+// lspSnapshotFromEntry is the SINGLE owner of "what is THIS adapter's own state
+// for this entry" — the projection every plan pre-state, every compare-and-swap
+// precondition, every applied receipt and every rollback compare in this family
+// is built from.
+//
+// MULTI-LAYER ADAPTERS. `entry` comes from Client.GetEntry, which for mimocode
+// returns the MERGED multi-layer view (its own write target, the layers above
+// it, the operator's config.json below it, and the ~/.claude.json MCP import
+// that MiMoCode reads as a compatibility layer). Every mutation in this family
+// — AddEntry / RemoveEntry — touches ONLY the write target. So a merged entry
+// carrying clients.MCPEntry.SourceBelowWriteTarget is projected as ABSENT: it
+// is not in the write target, the hub never wrote it, and the hub cannot
+// clobber it. That is the same contract mimocode's CAS compare object already
+// encodes (clients.casWriteTargetEntry returns nil for a write target with no
+// own value), and the same "remove the hub's key, let the lower/import layer
+// re-emerge" polarity the install/register rollback sites use.
+//
+// WHY IT IS LOAD-BEARING, not cosmetic. Two failures, both reachable by a real
+// operator running `mcphub install --reconcile-mcp-front` on a host with
+// mimocode AND claude-code installed:
+//
+//   - COMPARE-vs-MUTATE. Projecting the merged view made the CAS precondition
+//     compare an object the mutation does not write. Clients are applied in
+//     sorted order, so claude-code's OWN rewrite of ~/.claude.json lands FIRST
+//     and changes mimocode's merged view — the reconcile invalidated its own
+//     plan, and every mimocode operation failed `precondition` (9 of them, one
+//     per manifest language) on every run. Not a race with an outside actor:
+//     deterministic, self-inflicted, and it fails the whole reconcile.
+//   - RECORD CORRECTNESS. The pre-state is what `--rollback` restores. Recording
+//     a claude-code-derived URL as mimocode's pre-state would make rollback
+//     WRITE that URL into mimocode's own config — creating an entry that never
+//     existed there and shadowing the operator's import layer forever. The
+//     honest inverse of "the write target had nothing" is "remove it again".
+//
+// Single-file adapters never set SourceBelowWriteTarget, so their projection is
+// unchanged.
 func lspSnapshotFromEntry(clientName, language, entryName string, entry *clients.MCPEntry) LSPRouterEntrySnapshot {
 	row := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: entryName}
-	if entry == nil {
+	if entry == nil || entry.SourceBelowWriteTarget {
 		return row
 	}
 	row.Present = true
@@ -645,15 +681,11 @@ func (a *API) SnapshotLSPRouterClientEntries(opts LSPClientRouterOpts) ([]LSPRou
 			if readErr != nil {
 				return nil, fmt.Errorf("snapshot lsp router pre-state: read %s entry %s: %w", clientName, entryName, readErr)
 			}
-			row := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: entryName}
-			if live != nil {
-				row.Present = true
-				row.URL = live.URL
-				row.RelayURL = live.RelayURL
-				row.Disabled = live.Disabled
-				row.Raw = live.Raw
-			}
-			out = append(out, row)
+			// Projection goes through the family's one owner: it also decides
+			// what a multi-layer adapter's OWN state is (see
+			// lspSnapshotFromEntry). Re-typing the field copy here would let
+			// this capture drift from the pre-state the plan compares against.
+			out = append(out, lspSnapshotFromEntry(clientName, language, entryName, live))
 
 			// Legacy per-workspace entries the forward pass will DELETE. Only
 			// entries that are present AND legacy-shaped are recorded — the
@@ -670,16 +702,7 @@ func (a *API) SnapshotLSPRouterClientEntries(opts LSPClientRouterOpts) ([]LSPRou
 				return nil, fmt.Errorf("snapshot lsp router pre-state: read %s legacy entry %s: %w", clientName, first.Name, first.Err)
 			}
 			for _, legacy := range legacyEntries {
-				out = append(out, LSPRouterEntrySnapshot{
-					Client:    clientName,
-					Language:  language,
-					EntryName: legacy.Name,
-					Present:   true,
-					URL:       legacy.Entry.URL,
-					RelayURL:  legacy.Entry.RelayURL,
-					Disabled:  legacy.Entry.Disabled,
-					Raw:       legacy.Entry.Raw,
-				})
+				out = append(out, lspSnapshotFromEntry(clientName, language, legacy.Name, legacy.Entry))
 			}
 		}
 	}

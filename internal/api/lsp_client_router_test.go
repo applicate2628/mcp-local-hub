@@ -11,17 +11,25 @@ import (
 )
 
 type lspRouterFakeClient struct {
-	name            string
-	path            string
-	exists          bool
-	entries         map[string]clients.MCPEntry
-	snapshots       map[string]map[string]clients.MCPEntry
-	backupPaths     []string
-	addErr          error
-	addCalls        int
-	removeCalls     int
-	restoreCalls    int
-	latestBackupErr error
+	name        string
+	path        string
+	exists      bool
+	entries     map[string]clients.MCPEntry
+	snapshots   map[string]map[string]clients.MCPEntry
+	backupPaths []string
+	// belowWriteTarget names the entries GetEntry stamps with
+	// clients.MCPEntry.SourceBelowWriteTarget — the multi-layer adapter shape
+	// (mimocode) where an entry is VISIBLE through the merged read but lives in
+	// a layer the hub never writes. It is a field on the base fake rather than
+	// an embedding wrapper on purpose: ConditionalEntryMutation below calls
+	// f.GetEntry, and Go has no virtual dispatch, so an override on an embedder
+	// would be invisible to the very method whose compare object it must shape.
+	belowWriteTarget map[string]bool
+	addErr           error
+	addCalls         int
+	removeCalls      int
+	restoreCalls     int
+	latestBackupErr  error
 }
 
 func newLSPRouterFakeClient(t *testing.T, name string, exists bool) *lspRouterFakeClient {
@@ -85,6 +93,12 @@ func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 		return f.addErr
 	}
 	f.entries[e.Name] = intendedEntryReadbackProjection(f, e)
+	// The write LANDS in the write target, so the entry is no longer sourced
+	// from a layer below it — mimoCodeDefinedAtOrAboveWriteTarget flips to true
+	// after a real AddEntry and GetEntry stops stamping SourceBelowWriteTarget.
+	// A fake that kept stamping it would report a successful write as an absent
+	// readback.
+	delete(f.belowWriteTarget, e.Name)
 	return nil
 }
 func (f *lspRouterFakeClient) RemoveEntry(name string) error {
@@ -98,6 +112,9 @@ func (f *lspRouterFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 		return nil, nil
 	}
 	cp := entry
+	if f.belowWriteTarget[name] {
+		cp.SourceBelowWriteTarget = true
+	}
 	return &cp, nil
 }
 func (f *lspRouterFakeClient) LatestBackupPath() (string, bool, error) {

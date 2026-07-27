@@ -2,7 +2,8 @@
 
 - id: 2026-07-27-lsp-plan-prestate-invalidated-by-sibling-client-write
 - context: adjacent-finding
-- status: open
+- status: fixed (2026-07-27, `internal/api/lsp_client_router_snapshot.go` +
+  `internal/api/lsp_client_router.go`; awaiting archive to `bugs/closed/`)
 - severity: high
 - area: internal/api/lsp_client_router.go:236-256 (plan capture), internal/api/lsp_client_router.go:316-322 (ExpectedLive), internal/clients/mimocode.go:2023-2032 (claude import), internal/clients/mimocode.go:195,201 (claudeHome wiring)
 - found-by: backend-engineer (PR #588 branch repair lane)
@@ -75,36 +76,79 @@ readback, so every successful add compared unequal to its own readback. Fixing
 that (`intendedEntryReadbackProjection`) let the run reach the second client for
 the first time.
 
-## Why it is not fixed in this lane
-
-The fix is a contract decision, not an implementation choice, and each candidate
-lands outside what an implementer may decide:
+## Fix candidates considered when this was filed
 
 1. **Do not plan a client whose only enablement evidence and pre-state come from
-   another client's file.** Needs a way to ask a `clients.Client` whether an
-   entry resolves from its OWN writable layer — a new capability on a shared
-   interface. `internal/api/scan.go:633` already names this presence class
-   (`isPromotableAbsentPresenceState(cur) && clients.MimoCodeHasClaudeImport(path)`),
-   so the concept exists but is not reachable from the plan owner.
+   another client's file.** Recorded as blocked on "a new capability on a shared
+   interface".
 2. **Treat a precondition conflict whose live state already equals the intended
-   state as a satisfied no-write row** (no receipt, so rollback gains no
-   authority and correctly never writes mimocode). Coherent, and narrow enough
-   to live in the plan owner — but it directly contradicts the accepted F2
+   state as a satisfied no-write row.** Rejected: contradicts the accepted F2
    acceptance row in
-   `work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md`
-   ("wrapper rejects precondition; prior receipt absent -> `precondition-conflict`
-   -> settled no-write conflict"), which admits no equality exception.
-3. **Re-read each client's pre-state immediately before mutating it.** Deletes
-   invariant I3 and class C10, both marked protected.
+   `work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md`.
+3. **Re-read each client's pre-state immediately before mutating it.** Rejected:
+   deletes invariant I3 and class C10, both protected.
 
-The general statement the decision does not currently model: **I3 assumes each
-row's pre-state is independent of every other row's mutation.** Two clients
-sharing a read source break that assumption, and mimocode/claude-import is one
-instance of it, not the whole class — two clients whose config paths are
-symlinked to one file behave identically.
+## Resolution (2026-07-27)
 
-## Requested decision
+Fixed along the shape of candidate (1), and **the blocker recorded against it
+did not hold**: the capability already exists and no shared interface changed.
 
-Which of (1) or (2) is the contract, and whether the frozen-population invariant
-should state explicitly that a plan may not contain two clients that resolve one
-entry from a shared source.
+`clients.MCPEntry.SourceBelowWriteTarget` (`internal/clients/clients.go:69-89`)
+is exactly the missing predicate. mimocode's `GetEntry` STAMPS it from
+`mimoCodeDefinedAtOrAboveWriteTarget` (`internal/clients/mimocode.go:3880-3884`),
+which deliberately excludes both the operator's lower `config.json` and the
+`~/.claude.json` import (`internal/clients/mimocode.go:3159-3168`) precisely
+because those are layers "the hub never wrote and never clobbered". The field's
+own doc already enumerated its consumers as the three install/register rollback
+sites and noted that "every OTHER GetEntry caller ignores the field" — the LSP
+router plan/apply family was one of those callers, and it is a family that
+MUTATES under a compare-and-swap, so ignoring it was the defect.
+
+The fix is two edits, both in the api layer:
+
+- `lspSnapshotFromEntry` (`internal/api/lsp_client_router_snapshot.go`) — the
+  single owner of "what is THIS adapter's own state for this entry" — projects a
+  `SourceBelowWriteTarget` entry as ABSENT. Every pre-state capture, CAS
+  precondition, applied receipt and rollback compare in the family funnels
+  through it, so all of them become consistent at once.
+  `SnapshotLSPRouterClientEntries` re-typed the same field copy inline and now
+  routes through the owner too.
+- `collectLegacyLSPEntriesToMigrate` (`internal/api/lsp_client_router.go`) skips
+  a legacy candidate that is below the write target: `RemoveEntry` only deletes
+  the write target's own key, so such an entry is not this reconcile's to
+  migrate away. That keeps the function's stated invariant (captured surface ==
+  mutated surface, by construction) intact.
+
+**Invariant I3 is restored, not deleted.** I3 assumes a row's pre-state is
+independent of every other row's mutation. After the fix a row's pre-state IS
+the write-target object that only that client mutates, so the assumption holds
+by construction rather than by luck. The F2 acceptance row is untouched: there
+is no precondition conflict left to make an equality exception for.
+
+The behavioural outcome is also better than "skip mimocode": mimocode is still
+planned and gets its OWN front-port entry in its OWN config, instead of silently
+depending on another client's file, and its recorded baseline (absent) has the
+honest inverse — remove the hub's key and let the import layer re-emerge, which
+is the same polarity the install/register rollback sites already use.
+
+Mutation-proven both ways:
+
+- dropping the `SourceBelowWriteTarget` clause reproduces
+  `lsp client router plan failed for 9 operation(s)` on both
+  `TestMCPFrontPR588_RollbackRestoresPriorLSPRouterURL` and
+  `TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort`;
+- disabling the legacy-candidate skip fails
+  `TestLSPRouterLegacyCollection_SkipsCandidatesBelowTheWriteTarget`.
+
+Regression coverage: `internal/api/lsp_client_router_multilayer_test.go`.
+
+## Residual — the general class is NOT fully closed
+
+This closes the layered-read instance. The file's own generalization still
+stands for a DIFFERENT shape: two clients whose config paths are **symlinked or
+otherwise aliased to one physical file**. There both entries are genuine write
+targets, `SourceBelowWriteTarget` is false on both, and the earlier client's
+mutation still invalidates the later one's frozen pre-state. No adapter pair in
+this repo resolves to one path today, so it is latent, not live. Closing it
+needs a plan-time identity check (same resolved config path admitted twice) and
+remains a contract decision.

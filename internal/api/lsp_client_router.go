@@ -1092,6 +1092,17 @@ func collectLegacyLSPEntriesToMigrate(
 		if legacy == nil || !entryPointsAtLegacyLSPPort(legacy, legacyPorts) {
 			continue
 		}
+		// A multi-layer adapter's merged read can surface an entry that is NOT
+		// in the write target (mimocode: the operator's config.json below it, or
+		// the ~/.claude.json import). RemoveEntry only ever deletes the write
+		// target's own key, so such an entry is not this reconcile's to migrate
+		// away: planning it would emit an operation that cannot take effect and
+		// record a pre-state whose inverse the rollback cannot honour. Skipping
+		// it here keeps this function's whole reason for existing intact — the
+		// captured surface equals the MUTATED surface by construction.
+		if legacy.SourceBelowWriteTarget {
+			continue
+		}
 		found = append(found, lspLegacyLiveEntry{Name: legacyName, Entry: legacy})
 	}
 	return found, readErrs
