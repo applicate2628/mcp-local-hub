@@ -92,15 +92,48 @@ var (
 	ninjaFailedRE = regexp.MustCompile(`^FAILED:\s*(?:\[code=-?\d+\]\s*)?(?P<target>.+)$`)
 )
 
-// interruptMarkers are exact narrative phrases ninja emits when a build was
-// stopped by an operator/process signal rather than a genuine build defect
-// — verified real sample (scout pass, boost-thread\config-wingpl-out.log):
+// interruptMarkers are the exact WHOLE LINES observed when a build was stopped
+// by an operator/process signal rather than a genuine build defect — verified
+// real sample (scout pass, boost-thread\config-wingpl-out.log, recorded in
+// work-items/decisions/2026-07-25-vcpkg-ground-truth-measured.md §4 trap 2):
 // "FAILED: [code=1]" immediately followed by "User interrupt" and "ninja:
-// build stopped: interrupted by user.". These are deliberately matched as
-// plain substrings rather than an anchored shape: unlike "error" (a common
-// English word that collides with filenames/comments), these are fixed,
-// low-ambiguity ninja-owned narration sentences with negligible risk of
-// appearing as an unrelated false positive.
+// build stopped: interrupted by user.", each on its own line — reproduced in
+// testdata/failing_port/buildtrees/interruptedlib/install-cl-rel-out.log.
+//
+// Producer ground truth, probed in the target environment this session rather
+// than assumed from the shape of the strings:
+//
+//	$ strings <ninja>.exe | grep -i interrupt
+//	interrupted by user           # the %s of the "build stopped: %s." format
+//	$ strings <ninja>.exe | grep "^ninja: "
+//	ninja:                        # the prefix literal
+//	$ strings <ninja>.exe | grep "User interrupt"
+//	(no match)
+//
+// checked against BOTH C:\msys64\ucrt64\bin\ninja.exe and the Visual Studio
+// 18 Community ninja. So ninja OWNS the second line and emits it whole; it
+// does NOT own "User interrupt" at all — that line is the killed SUBPROCESS's
+// captured output, which ninja relays verbatim after its "FAILED:" summary.
+// (cl.exe, link.exe and nmake.exe do not contain the literal either, so the
+// exact producer is whichever tool the step ran; what matters here is that it
+// arrives as a relayed standalone line.)
+//
+// They are matched as COMPLETE LINES, not as substrings of the file. The
+// substring form was wrong in the dangerous direction: DetectInterrupted's
+// verdict is the HIGHEST-precedence branch in LastFailure (lastfailure.go:511,
+// above even an unreadable log), so ONE stray occurrence of the 14 characters
+// "User interrupt" anywhere in ANY scanned phase log converted a genuine build
+// failure into unknown(build_interrupted) and suppressed the real diagnostic.
+// That is not hypothetical: a phase log routinely QUOTES arbitrary text —
+// ninja -v echoes every command line in full (see the fixture's
+// `[1/3] cl.exe /c ... a.cpp`), so any source path or -D value containing the
+// phrase lands in the log; clang and gcc echo the offending SOURCE LINE under
+// each diagnostic, so a comment or string literal mentioning it lands there
+// too; and a project's own CMake message()/check_symbol_exists output is
+// copied straight through.
+//
+// A mid-line occurrence is therefore text the producer QUOTED, never text the
+// producer NARRATED, and only the latter is evidence of an interrupt.
 var interruptMarkers = []string{
 	"User interrupt",
 	"ninja: build stopped: interrupted by user.",
@@ -197,14 +230,35 @@ func driverTier(msg string) DiagnosticTier {
 	return TierSpecific
 }
 
-// DetectInterrupted reports whether content carries a ninja user-interrupt
-// marker. A "FAILED:" line in the same log must NOT be reported as a real
+// DetectInterrupted reports whether content carries a user-interrupt marker as
+// a WHOLE LINE. A "FAILED:" line in the same log must NOT be reported as a real
 // build failure when this is true — the build was stopped, not broken.
+//
+// See interruptMarkers for the producer evidence and for why a whole-file
+// substring scan was the wrong predicate.
+//
+// The walk is deliberately NOT a bufio.Scanner: a scanner stops at the first
+// line over its buffer and reports that only through Err(), so a marker in the
+// tail would be silently missed. Here every byte of the (already size-bounded)
+// content is examined and there is no error channel to drop. Lines are split
+// on '\n' AND '\r' so a CRLF log, and a capture that retained a terminal's
+// carriage-return overwrites, both decompose correctly.
 func DetectInterrupted(content []byte) bool {
-	s := string(content)
-	for _, m := range interruptMarkers {
-		if strings.Contains(s, m) {
-			return true
+	for len(content) > 0 {
+		line := content
+		if i := bytes.IndexAny(content, "\r\n"); i >= 0 {
+			line, content = content[:i], content[i+1:]
+		} else {
+			content = nil
+		}
+		trimmed := string(bytes.TrimSpace(line))
+		if trimmed == "" {
+			continue
+		}
+		for _, m := range interruptMarkers {
+			if trimmed == m {
+				return true
+			}
 		}
 	}
 	return false

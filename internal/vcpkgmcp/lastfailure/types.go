@@ -107,8 +107,13 @@ const (
 	// named MORE than one distinct triplet — never silently picked.
 	ReasonTripletAmbiguous Reason = "triplet_ambiguous"
 	// ReasonBuildInterrupted: a phase log carries an operator/process
-	// interrupt marker ("User interrupt", "ninja: build stopped:
-	// interrupted by user.") rather than a genuine build defect. Verified
+	// interrupt marker as a WHOLE LINE ("User interrupt", "ninja: build
+	// stopped: interrupted by user.") rather than a genuine build defect. The
+	// whole-line requirement is load-bearing, not stylistic: this reason
+	// OUTRANKS every other verdict, so a marker matched mid-line — inside a
+	// path, an echoed `ninja -v` command line, or a source line quoted back by
+	// a compiler diagnostic — would suppress a real failure. See
+	// interruptMarkers in diagnostics.go for the producer evidence. Verified
 	// real case (scout pass, boost-thread\config-wingpl-out.log): a
 	// "FAILED: [code=1]" line immediately followed by "User interrupt" —
 	// reporting this as a build failure would misdirect the operator
