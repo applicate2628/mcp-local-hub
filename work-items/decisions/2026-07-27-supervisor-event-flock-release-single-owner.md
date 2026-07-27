@@ -47,11 +47,18 @@ Concretely:
 
 Two independent inventories on this tree, both non-test files only:
 
-- **Discarded emit verdicts:** `_ = <x>.Emit(` — **132 sites across 23 files**. Top
+- **Discarded emit verdicts:** `_ = <x>.Emit(` — **131 sites across 22 files**. Top
   contributors: `internal/cli/supervise.go` (62), `internal/cli/supervisor_controller.go`
   (21), `internal/cli/supervise_respawn.go` (6), `internal/cli/supervise_realloc.go` (6).
   All of these route through `SupervisorEventLog` and are therefore covered by this
   decision without being edited.
+
+  The raw grep returns **132 across 23** and an earlier revision of this section quoted
+  that number. One of those matches is not code: `internal/api/supervisor_event_lock_health.go:12`
+  is the owner's own doc comment, which quotes the literal string `` `_ = logger.Emit(...)` ``
+  while describing the class. The grep counts the file that describes the grep. The
+  code count is 131 across 22, which is what the Rationale below and the owner's doc
+  comment both state.
 - **Discarded flock releases:** `_ = lock.Unlock()` — **24 sites across 14 files**, NOT
   the 2 the triggering review named. Beyond `gui_event_log.go:164` and
   `intent_audit.go:494` the same shape guards `daemon_intent.go` (5),
