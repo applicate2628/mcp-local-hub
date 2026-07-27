@@ -2,7 +2,7 @@
 
 - id: 2026-07-27-test-fixtures-leak-to-real-client-configs-via-appdata
 - context: adjacent-finding
-- status: open (internal/cli mcp-front fixtures FIXED; internal/api, internal/gui, internal/clients NOT audited)
+- status: open (internal/cli FIXED — mcp-front fixtures AND language_server_test.go's withHermeticHome, which was found still leaking by the PR #588 re-gate; internal/api, internal/gui, internal/clients NOT audited)
 - severity: high
 - area: any test fixture that redirects only HOME / USERPROFILE / LOCALAPPDATA and then drives `clients.AllClients()`
 - found-by: backend-engineer (PR #588 branch repair lane, 2026-07-27)
@@ -39,6 +39,38 @@ Derived from `os.Getenv` over `internal/clients` plus the APPDATA call sites:
 | `$COPILOT_HOME`, `$KIMI_CODE_HOME` | copilot-cli, kimi-code |
 
 ## Fixed so far
+
+**CORRECTION (2026-07-27, PR #588 re-gate).** An earlier revision of this file said
+`internal/cli` was closed. It was not, and the false line was the dangerous part: it
+would have steered the follow-up sweep away from the one package still carrying a
+**write-capable** leak, while the unaudited packages may only have read leaks.
+
+`internal/cli/language_server_test.go`'s `withHermeticHome` redirected only
+`USERPROFILE`/`HOME`, `LOCALAPPDATA` and `XDG_STATE_HOME` — not `%APPDATA%`,
+`$XDG_CONFIG_HOME`, `%ProgramData%`, `$COPILOT_HOME`, `$KIMI_CODE_HOME` or the
+`$MIMOCODE_*` set. `mcphub language-server cleanup` takes an UNFILTERED
+`clients.AllClients()` (`internal/cli/language_server.go:141`) and for each stdio
+`mcp-language-server` entry calls `adapter.BackupKeep` (`:292` — which also PRUNES the
+operator's existing backups) then `adapter.RemoveEntry` (`:302`). Three of the four
+`TestLanguageServerCleanup_*` tests run with no client filter, so a plain
+`go test ./internal/cli/` could delete a real entry and rotate away the backup that
+would have restored it.
+
+It survived the original fix's own verification because that sweep was
+`-run 'Router|Snapshot|Reconcile|Install|Setup|TestMCPFront|TestRouteSession'`, which
+never selects `TestLanguageServerCleanup_*`.
+
+**Measured on the dev host: no damage occurred, and the reason is luck, not isolation.**
+Every real `mcp-language-server` entry there is url/http-shaped — `mcphub` itself had
+already migrated them to hub URLs — and the cleanup predicate matches only stdio
+entries carrying `--lsp`. A host that has not yet migrated holds exactly the shape that
+would have been deleted. Verified with a SHA-256 baseline over the five live client
+configs before and after running the four cleanup tests: four byte-identical, the fifth
+(`~/.claude.json`) accounted for line by line as session telemetry plus one intended
+edit, and the hub-managed backup count unchanged at 4.
+
+Fixed by calling the single owner `neutralizeClientConfigPathEnv` from
+`withHermeticHome`.
 
 `internal/cli` only. `neutralizeClientConfigPathEnv`
 (`internal/cli/client_config_env_isolation_test.go`) is the one owner of the
