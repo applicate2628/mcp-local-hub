@@ -43,6 +43,33 @@ Concretely:
 | `internal/api/gui_event_log.go:164` — `gui-events.log` flock | **No** | Different lock. See below. |
 | `internal/api/intent_audit.go:494` — `intent-audit.log` flock | **No** | Different lock. See below. |
 
+### Measured class size (larger than the review that triggered this decision assumed)
+
+Two independent inventories on this tree, both non-test files only:
+
+- **Discarded emit verdicts:** `_ = <x>.Emit(` — **132 sites across 23 files**. Top
+  contributors: `internal/cli/supervise.go` (62), `internal/cli/supervisor_controller.go`
+  (21), `internal/cli/supervise_respawn.go` (6), `internal/cli/supervise_realloc.go` (6).
+  All of these route through `SupervisorEventLog` and are therefore covered by this
+  decision without being edited.
+- **Discarded flock releases:** `_ = lock.Unlock()` — **24 sites across 14 files**, NOT
+  the 2 the triggering review named. Beyond `gui_event_log.go:164` and
+  `intent_audit.go:494` the same shape guards `daemon_intent.go` (5),
+  `register_supervisor.go` (6), `install_parsed_manifest.go` (3),
+  `lsp_trusted_roots.go` (2), `default_workspace_marker.go`, `intent_collapse.go`,
+  `membership.go`, `stop_intent_subblock.go`, `supervisor_intent_mutate.go`, and
+  `internal/cli/overlay_quarantine.go`.
+
+The second inventory matters and is deliberately NOT resolved here. Those are
+**state-file** locks, not log locks: a stranded `daemon-intent.json` or
+`supervisor-intent.json` lock blocks reconcile and install rather than an audit
+append, so the consequence, the reporting surface, and the correct remedy all differ
+from the log case. Treating them as one undifferentiated sweep would be exactly the
+kind of over-generalization this decision argues against — the owner is per-lock, and
+these are ~20 further locks with their own semantics. Sizing them is a separate
+research task; this note exists so the next reader starts from the measured number
+rather than rediscovering it.
+
 ### Why that split is principled, not arbitrary
 
 **The unit of this invariant is the LOCK, not the file, the caller, or the package.**
