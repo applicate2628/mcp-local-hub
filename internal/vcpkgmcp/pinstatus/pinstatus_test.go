@@ -1390,16 +1390,107 @@ func TestRedactURL_UnparsableURLStillScrubsQueryCredentials(t *testing.T) {
 // credential must come back byte-for-byte, so an operator can still read the
 // malformed value that caused the failure.
 func TestRedactURL_UnparsableURLWithoutCredentialIsUnchanged(t *testing.T) {
+	// Query-FREE fixtures only. The query-BEARING case moved to
+	// TestRedactURL_QueryValueRedactionIsAnAllowlist, where a redacted value
+	// is now the ASSERTED behaviour rather than a regression — see that
+	// test's comment for why the polarity had to flip, and note that the KEY
+	// still round-trips, so the malformed value this test exists to preserve
+	// is still readable.
 	for _, clean := range []string{
 		"https://ho st/repo.git",
 		"https://host/re%zzpo.git",
-		"https://host/repo.git?depth=1&branch=main",
 	} {
 		if got := redactURL(clean); got != clean {
 			t.Fatalf("redactURL(%q) = %q, want it unchanged — over-redaction destroys the diagnostic", clean, got)
 		}
 		if hasEmbeddedCredential(clean) {
 			t.Fatalf("hasEmbeddedCredential(%q) = true, want false — a credential-free remote must not be refused", clean)
+		}
+	}
+}
+
+// The EMISSION rule is an allowlist: a query parameter's value is printed only
+// if its key is on emitSafeQueryKeys (currently empty), so an unrecognized key
+// is redacted rather than forwarded.
+//
+// The previous rule was a denylist of secret-SHAPED key names, which by
+// construction printed every credential spelling nobody had enumerated. Each
+// key below is a real spelling that leaked verbatim into an MCP result — and
+// per the file header an MCP result is copied into a model transcript, a
+// provider's request log, and whatever the caller persists.
+//
+// The three complements are what stop the fix from being a blunt instrument:
+// the KEY must survive (so the operator still sees which parameters existed),
+// a query-free URL must still round-trip byte-for-byte, and the ARGV-refusal
+// verdict must NOT move — hasEmbeddedCredential answers a different question
+// ("does this URL embed a credential") whose answer is a wire enum value, and
+// it must not silently become a shadow of the emission rule.
+func TestRedactURL_QueryValueRedactionIsAnAllowlist(t *testing.T) {
+	leaked := []struct{ key, why string }{
+		{"code", "OAuth 2.0 authorization code"},
+		{"jwt", "a bare JSON Web Token"},
+		{"assertion", "RFC 7523 JWT bearer assertion"},
+		{"pat", "Azure DevOps personal access token"},
+		{"session", "session identifier"},
+		{"sid", "short-form session identifier"},
+		{"ticket", "CAS / Kerberos service ticket"},
+		{"refresh", "OAuth refresh token"},
+	}
+	for _, tc := range leaked {
+		for _, raw := range []string{
+			"https://host/r.git?" + tc.key + "=s3cr3t",      // parsable
+			"https://ho st/r.git?" + tc.key + "=s3cr3t",     // unparsable
+			"https://host/r.git?" + tc.key + "=s3cr3t#frag", // fragment after query
+		} {
+			got := redactURL(raw)
+			if strings.Contains(got, "s3cr3t") {
+				t.Errorf("redactURL(%q) = %q — the value leaked; %q is %s and matches no secret-SHAPED name, which is exactly what a denylist cannot cover", raw, got, tc.key, tc.why)
+			}
+			if !strings.Contains(got, tc.key+"=") {
+				t.Errorf("redactURL(%q) = %q — the KEY must survive so the operator still sees which parameters were present", raw, got)
+			}
+		}
+	}
+
+	// Complement 1: a query-free URL still round-trips byte-for-byte.
+	for _, clean := range []string{
+		"https://github.com/nlohmann/json.git",
+		"git@github.com:owner/repo.git",
+	} {
+		if got := redactURL(clean); got != clean {
+			t.Errorf("redactURL(%q) = %q — a query-free URL must stay copy-pasteable", clean, got)
+		}
+	}
+
+	// Complement 2: a parameter carrying NO value invents no secret.
+	for _, empty := range []string{"https://host/r.git?flag", "https://host/r.git?token="} {
+		if got := redactURL(empty); got != empty {
+			t.Errorf("redactURL(%q) = %q — there is no value to redact, so REDACTED would fabricate one", empty, got)
+		}
+	}
+
+	// Complement 3: the ARGV-refusal verdict is unmoved by the emission
+	// inversion. `?depth=1` is not a credential, and reporting
+	// unknown(remote_url_credential_bearing) for it would be a conclusion the
+	// tool never observed.
+	for _, notACredential := range []string{
+		"https://host/repo.git?depth=1&branch=main",
+		"https://ho st/repo.git?depth=1&branch=main",
+	} {
+		if hasEmbeddedCredential(notACredential) {
+			t.Errorf("hasEmbeddedCredential(%q) = true — the refusal must stay a POSITIVE credential identification, not a shadow of the emission allowlist", notACredential)
+		}
+		if got := redactURL(notACredential); !strings.Contains(got, "depth=REDACTED") {
+			t.Errorf("redactURL(%q) = %q — an unclassifiable value is still redacted on EMISSION even though it is not refused on argv", notACredential, got)
+		}
+	}
+	// ...and a positively-identified one is still refused on both paths.
+	for _, credential := range []string{
+		"https://host/repo.git?access_token=abc123",
+		"https://ho st/repo.git?access_token=abc123",
+	} {
+		if !hasEmbeddedCredential(credential) {
+			t.Errorf("hasEmbeddedCredential(%q) = false — a secret-shaped parameter must still be refused before it reaches git ls-remote's argv", credential)
 		}
 	}
 }
