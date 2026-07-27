@@ -363,25 +363,76 @@ func ContainsFailureDiagnostic(diags []Diagnostic) bool {
 	return false
 }
 
-// maxDiagnosticsPerLog bounds how many matches of EACH severity class
+// maxDiagnosticsPerLog bounds how many matches of EACH RANKING CELL
 // ScanDiagnostics returns from one file, so an adversarial or pathologically
 // noisy log cannot inflate the result unboundedly.
 //
-// The cap is per severity CLASS, not per file, and that distinction is the
-// whole point. A single flat cap applied in file order is spent by whatever
-// comes first — which in a real clang-cl build is a flood of repeated
-// warnings. Verified field failure (2026-07-26): a build log holding 50
-// `clang-cl: warning: unknown argument ignored ... '-fopenmp'` lines followed
-// by `fparser_parse-opt.exe : fatal error LNK1120: 4 unresolved externals`
+// The cap is per cell, not per file, and that distinction is the whole point.
+// A single flat cap applied in file order is spent by whatever comes first —
+// which in a real clang-cl build is a flood of repeated warnings. Verified
+// field failure (2026-07-26): a build log holding 50 `clang-cl: warning:
+// unknown argument ignored ... '-fopenmp'` lines followed by
+// `fparser_parse-opt.exe : fatal error LNK1120: 4 unresolved externals`
 // returned the 50 warnings and DROPPED the error, after which the tool
 // reported unknown(no_failure_diagnostic) — a confident denial of a failure
-// that plainly happened. Reserving a separate error budget makes a trailing
+// that plainly happened. Reserving a separate error budget made a trailing
 // error unloseable to leading noise.
+//
+// A "cell" is (severity class, tier) — the SAME two keys, in the same order,
+// that diagnosticOutranks uses to choose the headline. That correspondence is
+// the rule, not a coincidence: a budget that does not split along a ranking key
+// lets one side of that key starve the other, and the starved side is by
+// definition the one ranking would have preferred.
+//
+// The tier key was the open half. Splitting on severity alone left AGGREGATE
+// and SPECIFIC errors sharing one budget, so the identical failure reappeared
+// one level in: a log whose first 50 error-severity lines are ninja's own
+// `FAILED: [code=N] <target>` summaries (one per failing edge — routine with a
+// wide parallel build, and unavoidable under keep-going) spent the whole error
+// budget on aggregates and DROPPED the trailing `lld-link: error: undefined
+// symbol: X`. headlineErrorDiagnostic then returned an aggregate, so the
+// operator was handed "FAILED: <target>" instead of the cause — precisely the
+// outcome the 2026-07-27 tier work was introduced to prevent, reintroduced
+// through the budget. The operator's own nested clang-cl build has the same
+// shape, each wrapper layer emitting `clang-cl: error: linker command failed
+// with exit code N`.
+//
+// Per-log ceiling consequence: maxDiagnosticsPerLog is now spent per cell, so
+// the worst-case returned count per log is
+// severityBudgetClasses*tierBudgetClasses*maxDiagnosticsPerLog rather than
+// 2*maxDiagnosticsPerLog. ASSUMPTION (UNVERIFIED): holding the per-cell figure
+// at 50 (and accepting the larger ceiling) is preferred over subdividing 50
+// into smaller cells. The code and docs establish the SPLIT (above) but say
+// nothing about the intended total; 50 is kept because subdividing would
+// weaken the guarantee the 2026-07-26 fix deliberately established — a trailing
+// error must survive 50 leading noise lines — which is a regression, whereas a
+// larger bounded ceiling is not. Resolved by the tool owner stating a response
+// size budget, or by measuring a real worst-case result.
 const maxDiagnosticsPerLog = 50
+
+// Budget cell dimensions. They mirror diagnosticOutranks' two keys:
+// severityBudgetClasses is the error/non-error split scanDiagnostics has always
+// used, and tierBudgetClasses is the range of tierRank (specific, aggregate,
+// and the unset fallback tierRank sorts last).
+const (
+	severityBudgetClasses = 2
+	tierBudgetClasses     = 3
+)
+
+// severityBudgetClass maps a diagnostic to its budget row. It is deliberately
+// the SAME error/non-error question ContainsFailureDiagnostic asks, so a
+// diagnostic that can establish a failure is budgeted apart from one that
+// cannot.
+func severityBudgetClass(d Diagnostic) int {
+	if d.Severity == SeverityError {
+		return 0
+	}
+	return 1
+}
 
 // ScanDiagnostics scans content line by line and returns every recognized
 // diagnostic IN FILE ORDER, keeping at most maxDiagnosticsPerLog of each
-// severity class (see the const doc for why the cap is per class).
+// (severity class, tier) cell (see the const doc for why the cap is per cell).
 //
 // File order is deliberately preserved here: this function reports what the
 // log says, in the order the log says it. RANKING for presentation is a
@@ -402,7 +453,15 @@ func ScanDiagnostics(content []byte) []Diagnostic {
 // incomplete evidence.
 func scanDiagnostics(content []byte) ([]Diagnostic, error) {
 	var out []Diagnostic
-	errBudget, otherBudget := maxDiagnosticsPerLog, maxDiagnosticsPerLog
+	// One budget per (severity class, tier) cell — see maxDiagnosticsPerLog.
+	var budget [severityBudgetClasses][tierBudgetClasses]int
+	for s := range budget {
+		for t := range budget[s] {
+			budget[s][t] = maxDiagnosticsPerLog
+		}
+	}
+	remaining := severityBudgetClasses * tierBudgetClasses * maxDiagnosticsPerLog
+
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
@@ -411,19 +470,14 @@ func scanDiagnostics(content []byte) ([]Diagnostic, error) {
 		if !ok {
 			continue
 		}
-		if d.Severity == SeverityError {
-			if errBudget == 0 {
-				continue
-			}
-			errBudget--
-		} else {
-			if otherBudget == 0 {
-				continue
-			}
-			otherBudget--
+		sev, tier := severityBudgetClass(d), tierRank(d.Tier)
+		if budget[sev][tier] == 0 {
+			continue
 		}
+		budget[sev][tier]--
+		remaining--
 		out = append(out, d)
-		if errBudget == 0 && otherBudget == 0 {
+		if remaining == 0 {
 			break
 		}
 	}
