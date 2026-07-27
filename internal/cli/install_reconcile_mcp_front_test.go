@@ -248,8 +248,9 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 	// developer's real vscode config, which is what made it pass — on a host
 	// without VS Code MCP configured (any CI runner) it had nothing to apply and
 	// the rollback failed with "carries no version-3 row map".
-	seedClaudeCodeConfig(t, tmp, map[string]any{
-		"serena": map[string]any{"url": "http://127.0.0.1:9125/serena/mcp"},
+	const preForwardURL = "http://127.0.0.1:9125/serena/mcp"
+	cfgPath := seedClaudeCodeConfig(t, tmp, map[string]any{
+		"serena": map[string]any{"url": preForwardURL},
 	})
 	reportPath := withMCPFrontReportPathSeam(t)
 
@@ -272,12 +273,32 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 	if _, statErr := os.Stat(reportPath); statErr != nil {
 		t.Fatalf("expected the serena report to be persisted at %s after a successful forward reconcile: %v", reportPath, statErr)
 	}
+	// The report-file lifecycle alone does not make this a ROUND TRIP: it proves
+	// the journal was written and later retired, not that the entry moved and came
+	// back. Assert the seeded entry itself — first that the forward run actually
+	// moved it (otherwise the rollback assertion below is vacuous, passing on a
+	// no-op), then that the rollback returned it to its exact pre-forward URL.
+	forwardURL, ok := claudeCodeEntryURL(t, cfgPath, "serena")
+	if !ok {
+		t.Fatalf("serena entry disappeared from %s after the forward reconcile", cfgPath)
+	}
+	if forwardURL == preForwardURL {
+		t.Fatalf("premise broken: the forward reconcile left serena on its pre-forward URL %q, so the rollback assertion would be vacuous", preForwardURL)
+	}
 
 	if err := runReconcileMCPFront(cmd, true); err != nil {
 		t.Fatalf("rollback: %v", err)
 	}
 	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
 		t.Fatalf("expected the persisted report to be removed after a successful rollback; stat err = %v", statErr)
+	}
+	rolledBackURL, ok := claudeCodeEntryURL(t, cfgPath, "serena")
+	if !ok {
+		t.Fatalf("serena entry missing from %s after rollback; the pre-forward state was not restored", cfgPath)
+	}
+	if rolledBackURL != preForwardURL {
+		t.Fatalf("rollback did not complete the round trip: serena url = %q, want the pre-forward %q (forward had moved it to %q)",
+			rolledBackURL, preForwardURL, forwardURL)
 	}
 }
 

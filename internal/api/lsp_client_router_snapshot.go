@@ -138,6 +138,20 @@ type LSPRouterRestoreCallbacks struct {
 //
 // Single-file adapters never set SourceBelowWriteTarget, so their projection is
 // unchanged.
+//
+// DIRECTIONALITY — this projection closes the BELOW direction only. An entry
+// defined only in a layer ABOVE mimocode's write target (mimocode.jsonc,
+// MIMOCODE_CONFIG, the overlay dir, inline content) does NOT set
+// SourceBelowWriteTarget, so it projects as PRESENT with the higher layer's URL
+// while the write target holds nothing — the compare object is again not the
+// mutated object. That is not a live defect and the invariant is not maintained
+// here: no other adapter can move mimocode's higher layers, and the ABOVE
+// direction is owned by mimocode's own shadow guard, which refuses AddEntry for a
+// higher-layer-defined name BEFORE any write — typed
+// ErrMimoCodeOverlayShadowsServer (internal/clients/mimocode.go:885, contract at
+// :105, restated at :3914) — so the case fails loud instead of silently comparing
+// the wrong object. Read "by construction" in ea763851 as scoped to the below
+// direction plus that guard, not as a claim that this function covers both.
 func lspSnapshotFromEntry(clientName, language, entryName string, entry *clients.MCPEntry) LSPRouterEntrySnapshot {
 	row := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: entryName}
 	if entry == nil || entry.SourceBelowWriteTarget {
