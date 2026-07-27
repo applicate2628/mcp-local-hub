@@ -290,6 +290,22 @@ const (
 	// build_failed_count emits a perfectly complete list that this guard
 	// still (correctly) declines to rely on.
 	NoteWrapperFailedPortsCompletenessUnproven Note = "wrapper_failed_ports_list_completeness_unproven"
+
+	// --- Response-budget notes ------------------------------------------
+	// Both name what the TOOL did to its own output, never anything about the
+	// build, per this file's naming rule. They exist so a budget can never
+	// truncate silently.
+
+	// NoteDiagnosticsTruncatedToBudget: the ranked diagnostic list was cut at
+	// the response budget. DiagnosticsDropped carries the count, and the
+	// dropped entries are always the LOWEST-ranked ones (see
+	// applyResponseBudget). Read the primary logs via log_paths for the rest.
+	NoteDiagnosticsTruncatedToBudget Note = "diagnostics_truncated_to_response_budget"
+	// NoteDiagnosticTextTruncated: at least one diagnostic's text exceeded the
+	// per-line budget and was cut. The affected Text also says so in band, with
+	// a marker naming how many bytes were removed — this note only makes the
+	// fact visible without scanning every entry.
+	NoteDiagnosticTextTruncated Note = "diagnostic_text_truncated_to_line_budget"
 )
 
 // ContextSource names one input the answer actually rests on. Closed enum,
@@ -485,12 +501,36 @@ type Result struct {
 	// then by tier within a severity (specific before aggregate), then by
 	// first-occurrence. See rankDiagnostics and DiagnosticTier.
 	//
-	// The ordering is part of the wire contract. Warnings are never dropped —
-	// a -Werror build's warning is genuinely interesting, and filtering is
-	// the caller's choice — they simply sort after the errors. Aggregates are
-	// never dropped either: an aggregate is real information (a count, an exit
-	// code) and is the honest headline when nothing more specific was found.
+	// The ordering is part of the wire contract. No FILTERING policy drops a
+	// class of evidence: a warning is kept (a -Werror build's warning is
+	// genuinely interesting, and filtering is the caller's choice) and so is an
+	// aggregate (a count or an exit code is real information, and the honest
+	// headline when nothing more specific was found) — they simply sort after
+	// what outranks them.
+	//
+	// CONTRACT CHANGE 2026-07-27: this list is now TRUNCATED at a total
+	// response budget (applyResponseBudget). The two sentences above used to
+	// read "Warnings are never dropped ... Aggregates are never dropped
+	// either", which a total cap cannot honour as written — measured, one
+	// rel+dbg install phase could return 800 diagnostics / 204 KB / ~52k
+	// tokens, and a single pathological line could return 6.00 MB.
+	//
+	// What the old wording protected still holds exactly: truncation is
+	// strictly by RANK from the TAIL, so a higher-ranked diagnostic is never
+	// dropped to keep a lower-ranked one, and the headline is never dropped at
+	// all. What is new is a ceiling, and it is REPORTED rather than silent —
+	// see DiagnosticsDropped and NoteDiagnosticsTruncatedToBudget. A caller
+	// needing every line has log_paths.
 	Diagnostics []Diagnostic `json:"diagnostics,omitempty"`
+	// DiagnosticsDropped is how many RANKED diagnostics the response budget
+	// excluded. Omitted (and therefore zero) when the whole set was returned,
+	// which is the case for every real fixture measured.
+	//
+	// It exists so truncation can never be silent: the total this call found is
+	// len(diagnostics) + diagnostics_dropped, and the dropped ones are always
+	// the lowest-ranked. NoteDiagnosticsTruncatedToBudget carries the same fact
+	// into the notes list for a caller that scans notes rather than fields.
+	DiagnosticsDropped int `json:"diagnostics_dropped,omitempty"`
 	// ExitCode is a pointer so "0" and "not known" are distinguishable in
 	// JSON (omitted entirely when unknown).
 	ExitCode *int `json:"exit_code,omitempty"`

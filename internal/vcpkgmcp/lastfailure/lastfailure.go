@@ -493,6 +493,38 @@ func LastFailure(args Args, deps Deps) Result {
 	base.FirstError = headlineErrorDiagnostic(chosenDiags)
 	base.Diagnostics = rankDiagnostics(chosenDiags)
 
+	// The response budget is spent HERE, at the result boundary, and nowhere
+	// else. Two properties depend on that placement and both are load-bearing:
+	//
+	//   - FirstError above and the verdict switch below both read chosenDiags,
+	//     the COMPLETE set, so no cap can turn `failed` into
+	//     unknown(no_failure_diagnostic) by dropping the error that
+	//     established the verdict;
+	//   - the input is already RANKED, so "spend until the budget is gone"
+	//     drops exactly the lowest-ranked tail and needs no second opinion
+	//     about importance.
+	//
+	// See applyResponseBudget for the measured ceilings and the wire-contract
+	// change this makes to Diagnostics.
+	var budgetTruncatedText bool
+	base.Diagnostics, base.DiagnosticsDropped, budgetTruncatedText = applyResponseBudget(base.Diagnostics)
+	if base.FirstError != nil {
+		// The headline is emitted TWICE — here and as Diagnostics[0] — so the
+		// per-line cap has to bind on both, or one 3 MiB line still lands on
+		// the wire through this field.
+		truncated, cut := truncateDiagnosticText(*base.FirstError)
+		base.FirstError = &truncated
+		budgetTruncatedText = budgetTruncatedText || cut
+	}
+	// Appended to base.Notes, not to `notes`: base was already built above, so
+	// a late append to `notes` would never reach the result.
+	if base.DiagnosticsDropped > 0 {
+		base.Notes = append(base.Notes, NoteDiagnosticsTruncatedToBudget)
+	}
+	if budgetTruncatedText {
+		base.Notes = append(base.Notes, NoteDiagnosticTextTruncated)
+	}
+
 	reportedPhase := chosenPhase
 	if reportedPhase == PhaseInstall {
 		// vcpkg's own ninja invocation compiles AND installs in one "install"

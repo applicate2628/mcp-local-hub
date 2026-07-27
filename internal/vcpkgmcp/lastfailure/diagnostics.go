@@ -3,10 +3,12 @@ package lastfailure
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // Diagnostic-shape matching. This is the fix for the two traps named in
@@ -591,17 +593,30 @@ func ContainsFailureDiagnostic(diags []Diagnostic) bool {
 // shape, each wrapper layer emitting `clang-cl: error: linker command failed
 // with exit code N`.
 //
-// Per-log ceiling consequence: maxDiagnosticsPerLog is now spent per cell, so
-// the worst-case returned count per log is
-// severityBudgetClasses*tierBudgetClasses*maxDiagnosticsPerLog rather than
-// 2*maxDiagnosticsPerLog. ASSUMPTION (UNVERIFIED): holding the per-cell figure
-// at 50 (and accepting the larger ceiling) is preferred over subdividing 50
-// into smaller cells. The code and docs establish the SPLIT (above) but say
-// nothing about the intended total; 50 is kept because subdividing would
-// weaken the guarantee the 2026-07-26 fix deliberately established — a trailing
-// error must survive 50 leading noise lines — which is a regression, whereas a
-// larger bounded ceiling is not. Resolved by the tool owner stating a response
-// size budget, or by measuring a real worst-case result.
+// Per-log ceiling consequence: maxDiagnosticsPerLog is spent per cell, so the
+// worst-case returned count per log is cells*maxDiagnosticsPerLog rather than
+// 2*maxDiagnosticsPerLog.
+//
+// RESOLVED 2026-07-27 (this was an ASSUMPTION (UNVERIFIED) naming two resolving
+// steps — "the tool owner stating a response size budget, or measuring a real
+// worst-case result". Both were done):
+//
+//   - MEASURED. The reachable ceiling is 200 per log, not the 300 the constants
+//     imply: tierBudgetClasses is 3, but matchDiagnosticLine assigns a tier on
+//     every branch, so the unset row is dead and only 4 of the 6 cells can fill.
+//     The figure that actually mattered was never the per-log one anyway — a
+//     phase CONCATENATES its logs, so an install phase with N build
+//     configurations returns 200*2N (measured: 800 diagnostics / 204 KB /
+//     ~52k tokens at vcpkg's rel+dbg default; 3200 / 813 KB / ~208k tokens at 8).
+//   - BUDGETED. The response now has a stated total ceiling — see
+//     MaxResponseDiagnostics and its siblings, which bound the RESULT rather
+//     than one log.
+//
+// So 50 per cell stays, and the reason is now positive rather than an
+// assumption: with a total budget in place the per-log figure no longer sets the
+// response size, and subdividing it would weaken the guarantee the 2026-07-26
+// fix deliberately established — a trailing error must survive 50 leading noise
+// lines.
 const maxDiagnosticsPerLog = 50
 
 // Budget cell dimensions. They mirror diagnosticOutranks' two keys:
@@ -681,6 +696,140 @@ func scanDiagnostics(content []byte) ([]Diagnostic, error) {
 		}
 	}
 	return out, scanner.Err()
+}
+
+// --- Total response budget (single owner) --------------------------------
+//
+// # The gap this closes
+//
+// maxDiagnosticsPerLog bounds ONE log's contribution per ranking cell. Nothing
+// bounded the RESULT. Two axes were unbounded, and both were measured this
+// session rather than argued about:
+//
+//	AXIS 1 — count. LastFailure concatenates every log in the chosen PHASE
+//	(lastfailure.go thisPhaseDiags). The install and patch phases carry one
+//	out/err PAIR per build configuration / patch ordinal, so the phase total is
+//	logs x 200 (four reachable cells x 50). Measured, MSVC-shaped lines:
+//	   1 config (2 logs)   400 diagnostics   103 KB JSON   ~26k tokens
+//	   2 configs (4 logs)  800 diagnostics   204 KB JSON   ~52k tokens   <- rel+dbg, the vcpkg default
+//	   8 configs (16 logs) 3200 diagnostics  813 KB JSON  ~208k tokens
+//	Note 200 per log, not the 300 the constants imply: tierBudgetClasses is 3
+//	but matchDiagnosticLine always assigns a tier, so the unset row is dead.
+//
+//	AXIS 2 — one diagnostic's size. scanDiagnostics accepts a 4 MiB line
+//	(its bufio buffer) and Diagnostic.Text was uncapped. Measured: a SINGLE
+//	3 MiB diagnostic line produced a 6.00 MB response, ~1.57M tokens — double
+//	the line, because the headline's text is emitted TWICE (diagnostics[0] and
+//	first_error).
+//
+// For scale, the same measurement over every real fixture in testdata: 0-3
+// diagnostics, longest Text 148 bytes, whole response 0.7-4.8 KB. The budget
+// below is ~13x the largest realistic WHOLE response and ~28x the longest
+// realistic line, so it bounds pathology without touching a real answer.
+//
+// # The three constants, one per distinct failure mode
+//
+// A single cap cannot do this: many lines, one enormous line, and many
+// medium lines fail differently and need different bounds.
+const (
+	// MaxResponseDiagnostics bounds how many diagnostics one result carries.
+	//
+	// 200 is not arbitrary: it is exactly severityBudgetClasses(2) x the two
+	// REACHABLE tiers x maxDiagnosticsPerLog(50), i.e. one log's own ceiling.
+	// So a single-log phase can never be truncated at all, and the budget
+	// binds only on the multi-log concatenation — the axis that was actually
+	// unbounded. It also caps the per-entry JSON structural overhead (~120
+	// bytes of field names), which no byte budget over TEXT can see.
+	MaxResponseDiagnostics = 200
+	// MaxDiagnosticTextBytes bounds ONE diagnostic's Text. Longest real
+	// diagnostic across the fixture corpus: 148 bytes. 4 KiB keeps even a
+	// pathological MSVC template-instantiation error intact while making the
+	// scanner's 4 MiB line ceiling unreachable on the wire.
+	MaxDiagnosticTextBytes = 4 << 10
+	// MaxResponseDiagnosticBytes bounds the SUM of emitted diagnostic text.
+	// Without it the worst case is MaxResponseDiagnostics x
+	// MaxDiagnosticTextBytes = 800 KB. Largest realistic text sum measured:
+	// 295 bytes.
+	MaxResponseDiagnosticBytes = 64 << 10
+)
+
+// truncationMarker is appended to a Text that was cut, so the truncation is
+// visible IN BAND. A caller reading one diagnostic must not have to correlate
+// it with a note elsewhere in the document to learn the line is incomplete.
+const truncationMarker = "… [truncated, %d more bytes]"
+
+// applyResponseBudget spends the budget over an ALREADY-RANKED slice and
+// returns what may be emitted, plus what that cost.
+//
+// # Drop policy, and the wire-contract change it forces
+//
+// The budget is spent in RANK order and the TAIL is dropped. That is the whole
+// policy, and it is deliberately not a second one: rankDiagnostics
+// (severity, then tier, then first occurrence) is already this package's single
+// owner of "what matters most", so a budget that dropped by any other key would
+// be a competing opinion about importance, and the class it dropped would by
+// definition be the class ranking preferred.
+//
+// Diagnostic's wire contract used to read "Warnings are never dropped ...
+// Aggregates are never dropped either". A total cap cannot keep that as
+// written, so it is CHANGED, explicitly: what those sentences protected — no
+// FILTERING policy may hide a class of evidence — still holds exactly, because
+// nothing here drops a higher-ranked diagnostic in order to keep a lower-ranked
+// one. What changes is that the list is TRUNCATED at a stated ceiling, and the
+// truncation is REPORTED (Result.DiagnosticsDropped plus a Note), never silent.
+// Affected surface: vcpkg_last_failure's diagnostics[] and notes[].
+//
+// The headline is never dropped: ranking puts it at index 0, and the first
+// entry is admitted even when its own text alone exceeds the byte budget
+// (truncated to MaxDiagnosticTextBytes first). A result that reported
+// status=failed while omitting the error that established it would be a
+// contradiction, not a budget.
+//
+// This CANNOT change a verdict. LastFailure computes both FirstError and the
+// verdict switch from the complete chosenDiags; this runs only on the slice
+// that is emitted.
+func applyResponseBudget(ranked []Diagnostic) (out []Diagnostic, dropped int, textTruncated bool) {
+	if len(ranked) == 0 {
+		return ranked, 0, false
+	}
+	out = make([]Diagnostic, 0, min(len(ranked), MaxResponseDiagnostics))
+	spent := 0
+	for i, d := range ranked {
+		if len(out) >= MaxResponseDiagnostics {
+			dropped = len(ranked) - i
+			break
+		}
+		d, cut := truncateDiagnosticText(d)
+		textTruncated = textTruncated || cut
+		// i > 0 so the headline is always admitted; every later entry must fit
+		// what is left of the byte budget.
+		if i > 0 && spent+len(d.Text) > MaxResponseDiagnosticBytes {
+			dropped = len(ranked) - i
+			break
+		}
+		spent += len(d.Text)
+		out = append(out, d)
+	}
+	return out, dropped, textTruncated
+}
+
+// truncateDiagnosticText bounds one diagnostic's Text, cutting on a RUNE
+// boundary so a multi-byte character is never split into invalid UTF-8, and
+// appending a marker naming how many bytes were removed.
+//
+// The cap applies to the ORIGINAL text; the emitted string is that prefix plus
+// the short marker, which keeps the rule statable in one sentence.
+func truncateDiagnosticText(d Diagnostic) (Diagnostic, bool) {
+	if len(d.Text) <= MaxDiagnosticTextBytes {
+		return d, false
+	}
+	cut := MaxDiagnosticTextBytes
+	for cut > 0 && !utf8.RuneStart(d.Text[cut]) {
+		cut--
+	}
+	removed := len(d.Text) - cut
+	d.Text = d.Text[:cut] + fmt.Sprintf(truncationMarker, removed)
+	return d, true
 }
 
 // severityRank orders severities for presentation: the actionable line first.
