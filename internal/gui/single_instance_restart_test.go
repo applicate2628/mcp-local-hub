@@ -82,6 +82,199 @@ func phaseEMarkerErrorOnSecondRead(secondErr error) HandoffMarkerReader {
 	})
 }
 
+func TestProbeGUIOwnerLeaseLifecycle_TimeoutBeforeExposurePreventsAcquisition(t *testing.T) {
+	t.Run("timeout closes exposure gate", func(t *testing.T) {
+		now := time.Date(2026, 7, 27, 6, 0, 0, 0, time.UTC)
+		pidportPath := filepath.Join(apitest.HardenedTempDir(t), "gui.pidport")
+		lifecycle := NewGUIOwnerLeaseLifecycle()
+		if !lifecycle.CloseBeforeExposure() {
+			t.Fatal("timeout owner did not close an Open lifecycle")
+		}
+
+		result := ProbeGUIOwnerLease(context.Background(), GUIOwnerLeaseProbeRequest{
+			PidportPath: pidportPath,
+			MarkerStore: phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) { return nil, nil }),
+			Deadlines:   restartTestDeadlines(&now),
+			Lifecycle:   lifecycle,
+		})
+
+		if result.State != GUIOwnerLeaseStateUnknown || result.Lifecycle != lifecycle {
+			t.Fatalf("closed-before-exposure probe = state %v lifecycle %p, want Unknown with lifecycle %p", result.State, result.Lifecycle, lifecycle)
+		}
+		if _, err := os.Stat(pidportPath + ".lock"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("timeout-winning probe touched the flock path: stat error = %v", err)
+		}
+		if got := lifecycle.Disposition(); got != GUIOwnerLeaseNoRetainedLease {
+			t.Fatalf("closed-before-exposure disposition = %v, want NoRetainedLease", got)
+		}
+	})
+
+	t.Run("competing Open transitions have one winner", func(t *testing.T) {
+		const attempts = 100
+		for i := 0; i < attempts; i++ {
+			lifecycle := NewGUIOwnerLeaseLifecycle()
+			start := make(chan struct{})
+			winners := make(chan bool, 2)
+			go func() {
+				<-start
+				winners <- lifecycle.TryExpose()
+			}()
+			go func() {
+				<-start
+				winners <- lifecycle.CloseBeforeExposure()
+			}()
+			close(start)
+			first, second := <-winners, <-winners
+			if first == second {
+				t.Fatalf("attempt %d transition winners = %t/%t, want exactly one", i, first, second)
+			}
+			if lifecycle.Disposition() == GUIOwnerLeaseMayRetainLease {
+				if !lifecycle.PublishNotAcquired() {
+					t.Fatalf("attempt %d exposed winner could not publish NotAcquired", i)
+				}
+			}
+		}
+	})
+}
+
+func TestProbeGUIOwnerLeaseLifecycle_EveryInternalReleasePublishesDisposition(t *testing.T) {
+	now := time.Date(2026, 7, 27, 6, 15, 0, 0, time.UTC)
+	base := phaseEInProgressRecord(now)
+	base.FreshUntil = now.Add(-time.Minute)
+
+	tests := []struct {
+		name      string
+		reader    func(context.CancelFunc) HandoffMarkerReader
+		deadlines func() RestartDeadlines
+	}{
+		{
+			name: "cancellation after acquire",
+			reader: func(cancel context.CancelFunc) HandoffMarkerReader {
+				return phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) {
+					cancel()
+					return nil, nil
+				})
+			},
+			deadlines: func() RestartDeadlines { return restartTestDeadlines(&now) },
+		},
+		{
+			name: "marker reread failure",
+			reader: func(context.CancelFunc) HandoffMarkerReader {
+				return phaseEMarkerErrorOnSecondRead(errors.New("synthetic marker reread failure"))
+			},
+			deadlines: func() RestartDeadlines { return restartTestDeadlines(&now) },
+		},
+		{
+			name: "marker changes after acquire",
+			reader: func(context.CancelFunc) HandoffMarkerReader {
+				reads := 0
+				changed := *base
+				changed.Sequence++
+				return phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) {
+					reads++
+					if reads == 1 {
+						return base, nil
+					}
+					return &changed, nil
+				})
+			},
+			deadlines: func() RestartDeadlines { return restartTestDeadlines(&now) },
+		},
+		{
+			name: "clock failure after acquire",
+			reader: func(context.CancelFunc) HandoffMarkerReader {
+				return phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) { return nil, nil })
+			},
+			deadlines: func() RestartDeadlines {
+				deadlines := restartTestDeadlines(&now)
+				calls := 0
+				deadlines.Now = func() time.Time {
+					calls++
+					if calls == 1 {
+						return now
+					}
+					return time.Time{}
+				}
+				return deadlines
+			},
+		},
+		{
+			name: "reservation found after acquire",
+			reader: func(context.CancelFunc) HandoffMarkerReader {
+				record := phaseEReservedRecord(now, []byte("lifecycle-reservation"))
+				return phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) { return record, nil })
+			},
+			deadlines: func() RestartDeadlines {
+				deadlines := restartTestDeadlines(&now)
+				calls := 0
+				deadlines.Now = func() time.Time {
+					calls++
+					if calls == 1 {
+						return now.Add(2 * time.Minute)
+					}
+					return now
+				}
+				return deadlines
+			},
+		},
+		{
+			name: "final cancellation after marker read",
+			reader: func(cancel context.CancelFunc) HandoffMarkerReader {
+				reads := 0
+				return phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) {
+					reads++
+					if reads == 2 {
+						cancel()
+					}
+					return nil, nil
+				})
+			},
+			deadlines: func() RestartDeadlines { return restartTestDeadlines(&now) },
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			pidportPath := filepath.Join(apitest.HardenedTempDir(t), "gui.pidport")
+			lifecycle := NewGUIOwnerLeaseLifecycle()
+			result := ProbeGUIOwnerLease(ctx, GUIOwnerLeaseProbeRequest{
+				PidportPath: pidportPath,
+				MarkerStore: tc.reader(cancel),
+				Deadlines:   tc.deadlines(),
+				Lifecycle:   lifecycle,
+			})
+			if result.Lifecycle != lifecycle {
+				t.Fatalf("result lifecycle = %p, want %p", result.Lifecycle, lifecycle)
+			}
+			if state := GUIOwnerLeaseLifecycleState(lifecycle.state.Load()); state != GUIOwnerLeaseLifecycleReleased {
+				t.Fatalf("lifecycle state = %v, want Released (result state=%v reason=%v)", state, result.State, result.Reason)
+			}
+			if got := lifecycle.Disposition(); got != GUIOwnerLeaseNoRetainedLease {
+				t.Fatalf("released lifecycle disposition = %v, want NoRetainedLease", got)
+			}
+			assertSingleInstanceFlockAvailable(t, pidportPath)
+		})
+	}
+
+	t.Run("release failure remains fail closed", func(t *testing.T) {
+		lifecycle := NewGUIOwnerLeaseLifecycle()
+		if !lifecycle.TryExpose() {
+			t.Fatal("could not expose lifecycle")
+		}
+		if !lifecycle.PublishRelease(errors.New("synthetic release failure")) {
+			t.Fatal("could not publish release failure")
+		}
+		if got := lifecycle.Disposition(); got != GUIOwnerLeaseMayRetainLease {
+			t.Fatalf("release-unconfirmed disposition = %v, want MayRetainLease", got)
+		}
+		if lifecycle.PublishNotAcquired() || lifecycle.PublishRelease(nil) {
+			t.Fatal("terminal release evidence was overwritten")
+		}
+	})
+}
+
 func phaseEInProgressRecord(now time.Time) *HandoffMarkerRecord {
 	return &HandoffMarkerRecord{
 		Version:    handoffMarkerVersion,
@@ -424,6 +617,7 @@ func TestRestartV3_ReservedDeadlineOutlivesGenerationFreshness(t *testing.T) {
 		Record:      record,
 		MarkerStore: reader,
 		Deadlines:   deadlines,
+		Lifecycle:   NewGUIOwnerLeaseLifecycle(),
 	})
 	if probe.State != GUIOwnerLeaseStateHeld || !errors.Is(probe.Reason, ErrHandoffReserved) || probe.Lease != nil {
 		if probe.Lease != nil {
@@ -486,6 +680,7 @@ func TestRestartV3_RawReservedFreeFlockMapsHeldDuringWindow(t *testing.T) {
 		Record:      record,
 		MarkerStore: store,
 		Deadlines:   deadlines,
+		Lifecycle:   NewGUIOwnerLeaseLifecycle(),
 	})
 	if result.State != GUIOwnerLeaseStateHeld {
 		if result.Lease != nil {
@@ -576,6 +771,7 @@ func TestRestartV3_ProbeUnknownReleasesTentativeLease(t *testing.T) {
 				PidportPath: pidportPath,
 				MarkerStore: tc.markerStore,
 				Deadlines:   deadlines,
+				Lifecycle:   NewGUIOwnerLeaseLifecycle(),
 			})
 			if result.State != GUIOwnerLeaseStateUnknown {
 				if result.Lease != nil {
@@ -671,6 +867,7 @@ func TestRestartV3_ProbeMarkerObservationChangesAreUnknown(t *testing.T) {
 				Record:      tc.requestRecord,
 				MarkerStore: reader,
 				Deadlines:   restartTestDeadlines(&now),
+				Lifecycle:   NewGUIOwnerLeaseLifecycle(),
 			})
 			if result.State != GUIOwnerLeaseStateUnknown {
 				if result.Lease != nil {
@@ -722,6 +919,7 @@ func TestRestartV3_ProbeDACLUncertaintyIsUnknownEvenWhenFlockHeld(t *testing.T) 
 			return nil, os.ErrPermission
 		}),
 		Deadlines: deadlines,
+		Lifecycle: NewGUIOwnerLeaseLifecycle(),
 	})
 	if result.State != GUIOwnerLeaseStateUnknown {
 		t.Fatalf("probe state = %v, want Unknown rather than Held", result.State)
@@ -791,6 +989,7 @@ func TestRestartV3_FreeProbeLeaseReleasedOnEveryConsumerPath(t *testing.T) {
 				PidportPath: pidportPath,
 				MarkerStore: phaseEMarkerReaderFunc(func() (*HandoffMarkerRecord, error) { return nil, nil }),
 				Deadlines:   deadlines,
+				Lifecycle:   NewGUIOwnerLeaseLifecycle(),
 			})
 			if result.State != GUIOwnerLeaseStateFree || result.Lease == nil {
 				t.Fatalf("probe result = state %v lease %T reason %v, want Free owned lease", result.State, result.Lease, result.Reason)

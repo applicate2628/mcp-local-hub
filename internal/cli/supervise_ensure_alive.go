@@ -511,26 +511,32 @@ const (
 	ensureAliveGUIHeldMessage              = "GUI restart interrupted: a GUI process still holds the single-instance lock; run `mcphub gui --force --kill`."
 	ensureAliveGUIUnknownMessage           = "GUI restart owner state is unknown; no action."
 	ensureAliveGUIMarkerWriteFailedMessage = "GUI restart interruption could not be recorded durably; run `mcphub gui`."
+	ensureAliveGUILeaseUnconfirmedDetail   = "the current one-shot process may still own the GUI single-instance flock; will retry next tick"
 )
+
+type ensureAliveGUIRecoveryResult struct {
+	Output           string
+	LeaseDisposition gui.GUIOwnerLeaseDisposition
+}
 
 // runEnsureAliveGUIRecovery is Phase I's degrade-only classifier. It can
 // terminalize one expired nonterminal marker while owning a proved-free GUI
 // flock, or emit an operator diagnostic. It never spawns, kills, binds,
 // retries, reacquires, or transfers a GUI lease.
-func runEnsureAliveGUIRecovery(stateDir string, out io.Writer) {
+func runEnsureAliveGUIRecovery(stateDir string, out io.Writer) gui.GUIOwnerLeaseDisposition {
 	deps := ensureAliveGUIRecoveryDeps
 	if deps.restartV3Enabled == nil || !deps.restartV3Enabled() {
-		return
+		return gui.GUIOwnerLeaseNoRetainedLease
 	}
 
 	if strings.TrimSpace(stateDir) == "" {
 		fmt.Fprintln(out, ensureAliveGUIUnknownMessage)
-		return
+		return gui.GUIOwnerLeaseNoRetainedLease
 	}
 	canonicalStateDir, err := filepath.Abs(filepath.Clean(stateDir))
 	if err != nil {
 		fmt.Fprintln(out, ensureAliveGUIUnknownMessage)
-		return
+		return gui.GUIOwnerLeaseNoRetainedLease
 	}
 	// An absent state directory cannot contain a handoff marker. Return before
 	// HandoffMarkerStore.Read acquires its record lock, because that lock owner
@@ -538,17 +544,17 @@ func runEnsureAliveGUIRecovery(stateDir string, out io.Writer) {
 	// supervisor-liveness probe's fail-closed "unprobeable" input into a false
 	// "not running" result later in this tick.
 	if _, statErr := os.Stat(canonicalStateDir); errors.Is(statErr, os.ErrNotExist) {
-		return
+		return gui.GUIOwnerLeaseNoRetainedLease
 	}
 	if deps.restartDeadlines == nil || deps.markerStore == nil || deps.probeOwnerLease == nil {
 		emitEnsureAliveGUIRecoveryUnknown(canonicalStateDir, out, nil, "phase-i-dependency-missing", errors.New("ensure-alive GUI recovery dependency is nil"))
-		return
+		return gui.GUIOwnerLeaseNoRetainedLease
 	}
 
 	deadlines := deps.restartDeadlines()
 	if deadlines.Now == nil || deadlines.RecordLock <= 0 {
 		emitEnsureAliveGUIRecoveryUnknown(canonicalStateDir, out, nil, "restart-deadline-invalid", errors.New("restart clock or record-lock deadline is invalid"))
-		return
+		return gui.GUIOwnerLeaseNoRetainedLease
 	}
 	// One clock sample drives the entire predicate and the Phase-E revalidation.
 	// This prevents a wall-clock step from changing an expired reservation back
@@ -557,6 +563,7 @@ func runEnsureAliveGUIRecovery(stateDir string, out io.Writer) {
 	deadlines.Now = func() time.Time { return now }
 	classifierCtx, cancelClassifier := context.WithTimeout(context.Background(), deadlines.RecordLock)
 	defer cancelClassifier()
+	lifecycle := gui.NewGUIOwnerLeaseLifecycle()
 
 	// Marker reads and writes are ordinary filesystem calls and therefore have
 	// no cancellable syscall surface. Run the complete classifier behind one
@@ -566,18 +573,26 @@ func runEnsureAliveGUIRecovery(stateDir string, out io.Writer) {
 	// process exit abandons a still-wedged worker and the OS releases any flock
 	// it owns. A buffered result channel lets a worker that unwedges during
 	// shutdown finish without blocking on an abandoned receiver.
-	result := make(chan string, 1)
+	result := make(chan ensureAliveGUIRecoveryResult, 1)
 	go func() {
 		var buffered bytes.Buffer
-		runEnsureAliveGUIRecoveryWithinBudget(classifierCtx, canonicalStateDir, &buffered, deps, deadlines, now)
-		result <- buffered.String()
+		runEnsureAliveGUIRecoveryWithinBudget(classifierCtx, canonicalStateDir, &buffered, deps, deadlines, now, lifecycle)
+		result <- ensureAliveGUIRecoveryResult{
+			Output:           buffered.String(),
+			LeaseDisposition: lifecycle.Disposition(),
+		}
 	}()
 
 	select {
-	case buffered := <-result:
-		_, _ = io.WriteString(out, buffered)
+	case completed := <-result:
+		_, _ = io.WriteString(out, completed.Output)
+		return completed.LeaseDisposition
 	case <-classifierCtx.Done():
-		// Degrade-only timeout: the supervisor-liveness body below must run.
+		// Win the acquisition gate if the probe has not yet exposed the flock.
+		// If exposure already happened, the shared lifecycle stays fail-closed
+		// until the worker publishes a positive terminal outcome.
+		lifecycle.CloseBeforeExposure()
+		return lifecycle.Disposition()
 	}
 }
 
@@ -588,6 +603,7 @@ func runEnsureAliveGUIRecoveryWithinBudget(
 	deps ensureAliveGUIRecoveryDependencies,
 	deadlines gui.RestartDeadlines,
 	now time.Time,
+	lifecycle *gui.GUIOwnerLeaseLifecycle,
 ) {
 	if ctx.Err() != nil {
 		return
@@ -627,20 +643,21 @@ func runEnsureAliveGUIRecoveryWithinBudget(
 		Record:      record,
 		MarkerStore: store,
 		Deadlines:   deadlines,
+		Lifecycle:   lifecycle,
 	})
 	if ctx.Err() != nil {
 		if probe.Lease != nil {
-			probe.Lease.Release()
+			releaseEnsureAliveGUIOwnerLease(lifecycle, probe.Lease)
 		}
 		return
 	}
 
 	switch probe.State {
 	case gui.GUIOwnerLeaseStateFree:
-		runEnsureAliveGUIRecoveryFree(ctx, canonicalStateDir, out, store, record, probe, reasonCode)
+		runEnsureAliveGUIRecoveryFree(ctx, canonicalStateDir, out, store, record, probe, reasonCode, lifecycle)
 	case gui.GUIOwnerLeaseStateHeld:
 		if probe.Lease != nil {
-			probe.Lease.Release()
+			releaseEnsureAliveGUIOwnerLease(lifecycle, probe.Lease)
 			emitEnsureAliveGUIRecoveryUnknown(canonicalStateDir, out, record, "probe-contract-invalid", errors.New("Held owner probe returned an owned lease"))
 			return
 		}
@@ -650,15 +667,21 @@ func runEnsureAliveGUIRecoveryWithinBudget(
 			ensureAliveGUIRecoveryEventFields(record, reasonCode, "mcphub gui --force --kill", probe.Reason))
 	case gui.GUIOwnerLeaseStateUnknown:
 		if probe.Lease != nil {
-			probe.Lease.Release()
+			releaseEnsureAliveGUIOwnerLease(lifecycle, probe.Lease)
 		}
 		emitEnsureAliveGUIRecoveryUnknown(canonicalStateDir, out, record, reasonCode, probe.Reason)
 	default:
 		if probe.Lease != nil {
-			probe.Lease.Release()
+			releaseEnsureAliveGUIOwnerLease(lifecycle, probe.Lease)
 		}
 		emitEnsureAliveGUIRecoveryUnknown(canonicalStateDir, out, record, "probe-state-invalid", fmt.Errorf("unknown GUI owner probe state %d", probe.State))
 	}
+}
+
+func releaseEnsureAliveGUIOwnerLease(lifecycle *gui.GUIOwnerLeaseLifecycle, lease gui.OwnedSingleInstanceLease) error {
+	releaseErr := lease.ReleaseErr()
+	lifecycle.PublishRelease(releaseErr)
+	return releaseErr
 }
 
 func runEnsureAliveGUIRecoveryFree(
@@ -669,6 +692,7 @@ func runEnsureAliveGUIRecoveryFree(
 	observed *gui.HandoffMarkerRecord,
 	probe gui.GUIOwnerLeaseProbeResult,
 	reasonCode string,
+	lifecycle *gui.GUIOwnerLeaseLifecycle,
 ) {
 	if probe.Lease == nil {
 		emitEnsureAliveGUIRecoveryUnknown(stateDir, out, observed, "probe-contract-invalid", errors.New("Free owner probe returned no lease"))
@@ -695,7 +719,9 @@ func runEnsureAliveGUIRecoveryFree(
 	// uphold. An unconfirmed release is bounded: the lock is freed when this
 	// short-lived process exits, so the NEXT tick retries against a genuinely
 	// free flock.
-	release := sync.OnceValue(probe.Lease.ReleaseErr)
+	release := sync.OnceValue(func() error {
+		return releaseEnsureAliveGUIOwnerLease(lifecycle, probe.Lease)
+	})
 	defer func() { _ = release() }()
 
 	current := probe.Record
@@ -909,7 +935,7 @@ const guiOwnerUnknownConfirmationFileLeaf = "gui-owner-unknown-confirmation"
 // This function has no return value: every exit path here is followed by a
 // `return nil` in the caller, matching the best-effort, always-exit-0
 // contract the rest of this file's ensure-alive action upholds.
-func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int) {
+func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool) {
 	now := time.Now().UTC()
 
 	uptimeSeconds, uptimeErr := ensureAliveHeadlessFleetSupervisorUptime(stateDir, now)
@@ -921,9 +947,13 @@ func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, 
 		detectedBody["supervisor_uptime_s"] = uptimeSeconds
 	}
 	fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d) but no live GUI owner holds the single-instance lock (pidport pid=%d); evaluating headless-fleet recovery\n", supervisorPID, guiPID)
-	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "gui-headless-fleet-detected",
-		"supervisor is running but no live GUI owner holds the single-instance lock",
-		detectedBody)
+	defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "gui-headless-fleet-detected",
+		"supervisor is running but no live GUI owner holds the single-instance lock", detectedBody)
+
+	if !allowGUIOwnerRelaunch {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "phase-i-lease-unconfirmed", ensureAliveGUILeaseUnconfirmedDetail)
+		return
+	}
 
 	// (a) Live-handoff suppressor: an unexpired restart-v3 handoff marker
 	// means the GUI is mid-self-restart, not dead.
@@ -972,7 +1002,7 @@ func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, 
 
 // ensureAliveHeadlessFleetSuppress writes the shared suppressed-tick
 // diagnostic + durable event. reason is machine-filterable: exactly
-// "live-handoff" or "boot-grace".
+// "live-handoff", "boot-grace", or "phase-i-lease-unconfirmed".
 func ensureAliveHeadlessFleetSuppress(stateDir string, out io.Writer, reason, detail string) {
 	fmt.Fprintf(out, "ensure-alive: headless-fleet relaunch suppressed (%s): %s\n", reason, detail)
 	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "gui-headless-fleet-relaunch-suppressed",
@@ -1111,7 +1141,7 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 // supervisor happened to be down was invisible to this window) — so this
 // function can keep assuming the window it reads was opened by an
 // UNINTERRUPTED run of Unknown observations.
-func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int) bool {
+func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool) bool {
 	markerPath := guiOwnerUnknownConfirmationMarkerPath(stateDir)
 	now := time.Now().UTC()
 
@@ -1168,7 +1198,7 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 			map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
 		return false
 	}
-	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
+	defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
 		"gui-owner-unknown-escalated-to-recovery",
 		"GUI owner state was ambiguous (pidport malformed/unresolvable) but the single-instance lock was independently confirmed unheld across the bounded confirmation window; treating as confirmed-dead for recovery purposes",
 		map[string]any{
@@ -1176,7 +1206,7 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 			"gui_pidport_pid":       guiPID,
 			"confirmation_window_s": guiOwnerUnknownConfirmationWindow.Seconds(),
 		})
-	runEnsureAliveHeadlessFleet(stateDir, out, supervisorPID, guiPID, guiPort)
+	runEnsureAliveHeadlessFleet(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch)
 	return true
 }
 
@@ -1344,7 +1374,8 @@ func probeGUIServingWithinTimeout(port int) bool {
 // supervisor-events.log (Task Scheduler discards stdout). Returns nil on EVERY
 // branch — this is a best-effort recovery tick (exit 0), not a gate.
 func runEnsureAlive(stateDir string, out io.Writer) error {
-	runEnsureAliveGUIRecovery(stateDir, out)
+	leaseDisposition := runEnsureAliveGUIRecovery(stateDir, out)
+	allowGUIOwnerRelaunch := leaseDisposition != gui.GUIOwnerLeaseMayRetainLease
 
 	running, pid, err := api.SupervisorRunningUnderStateDir(stateDir)
 	if err != nil {
@@ -1379,7 +1410,7 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 			// FIRST Unknown tick's stale timestamp, since this classifier
 			// result never otherwise touches the marker.
 			resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir, pid)
-			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort)
+			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort, allowGUIOwnerRelaunch)
 			return nil
 		case guiOwnerStateUnknown:
 			// Residual 1(b): before printing the standard suppression
@@ -1390,7 +1421,7 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 			// window) it delegates to runEnsureAliveHeadlessFleet and
 			// reports the outcome itself; otherwise fall through to the
 			// unchanged undeterminable/no-action message below.
-			if runEnsureAliveGUIOwnerUnknownEscalation(stateDir, out, pid, guiPID, guiPort) {
+			if runEnsureAliveGUIOwnerUnknownEscalation(stateDir, out, pid, guiPID, guiPort, allowGUIOwnerRelaunch) {
 				return nil
 			}
 			fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); GUI owner state undeterminable (pidport malformed/unresolvable); no action (will retry next tick)\n", pid)
@@ -1476,6 +1507,10 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 	}
 
 	// Confirmed no live GUI owner → genuine OWNER death. Relaunch via the seam.
+	if !allowGUIOwnerRelaunch {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "phase-i-lease-unconfirmed", ensureAliveGUILeaseUnconfirmedDetail)
+		return nil
+	}
 	if relaunchErr := livenessRelaunchFn(); relaunchErr != nil {
 		// Best-effort: record + exit 0. The next ~1-min tick retries. Mirror
 		// to the durable log so a chronically-failing relaunch (e.g. the

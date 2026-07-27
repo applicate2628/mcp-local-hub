@@ -16,6 +16,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/gui"
 )
@@ -555,6 +557,288 @@ func TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses(t *testing.T) {
 	}
 	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-relaunch-suppressed")
 	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"live-handoff"`)
+}
+
+type ensureAliveOrderingWriter struct {
+	mu      sync.Mutex
+	buffer  bytes.Buffer
+	needle  string
+	reached chan struct{}
+	once    sync.Once
+}
+
+func newEnsureAliveOrderingWriter(needle string) *ensureAliveOrderingWriter {
+	return &ensureAliveOrderingWriter{
+		needle:  needle,
+		reached: make(chan struct{}),
+	}
+}
+
+func (w *ensureAliveOrderingWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	n, err := w.buffer.Write(p)
+	if strings.Contains(w.buffer.String(), w.needle) {
+		w.once.Do(func() { close(w.reached) })
+	}
+	return n, err
+}
+
+func (w *ensureAliveOrderingWriter) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buffer.String()
+}
+
+type ensureAliveEventWriteBlock struct {
+	entered chan struct{}
+	release func()
+}
+
+func blockEnsureAliveEventWrite(t *testing.T, event string) ensureAliveEventWriteBlock {
+	t.Helper()
+	entered := make(chan struct{})
+	continueWrite := make(chan struct{})
+	signalEntered := sync.OnceFunc(func() { close(entered) })
+	release := sync.OnceFunc(func() { close(continueWrite) })
+	restore := api.SetSupervisorEventWriteFnForTest(func(_ *api.SupervisorEventLog, raw []byte) error {
+		if bytes.Contains(raw, []byte(`"event":"`+event+`"`)) {
+			signalEntered()
+			<-continueWrite
+		}
+		return nil
+	})
+	t.Cleanup(func() {
+		release()
+		restore()
+	})
+	return ensureAliveEventWriteBlock{entered: entered, release: release}
+}
+
+func holdEnsureAliveEventLogFlock(t *testing.T, stateDir string) (*flock.Flock, func()) {
+	t.Helper()
+	lock := flock.New(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf) + ".lock")
+	locked, err := lock.TryLock()
+	if err != nil || !locked {
+		t.Fatalf("hold supervisor event-log flock: locked=%t err=%v", locked, err)
+	}
+	release := sync.OnceFunc(func() {
+		if err := lock.Unlock(); err != nil {
+			t.Errorf("release supervisor event-log flock: %v", err)
+		}
+	})
+	t.Cleanup(release)
+	return lock, release
+}
+
+func TestEnsureAliveHeadlessFleet_DetectionWriteCannotBlockRelaunch(t *testing.T) {
+	for _, mode := range []string{"stalled-write", "contended-flock"} {
+		t.Run(mode, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+			restoreServing := setGUIServingProbeFnForTest(func(int) bool { return true })
+			t.Cleanup(restoreServing)
+
+			action := make(chan struct{})
+			actionOnce := sync.OnceFunc(func() { close(action) })
+			restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+				actionOnce()
+				return nil
+			})
+			t.Cleanup(restoreRelaunch)
+
+			var diagnosticEntered <-chan struct{}
+			var releaseDiagnostic func()
+			if mode == "stalled-write" {
+				block := blockEnsureAliveEventWrite(t, "gui-headless-fleet-detected")
+				diagnosticEntered = block.entered
+				releaseDiagnostic = block.release
+			} else {
+				_, release := holdEnsureAliveEventLogFlock(t, stateDir)
+				releaseDiagnostic = release
+			}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				runEnsureAliveHeadlessFleet(stateDir, &bytes.Buffer{}, 4242, 5252, 9125, true)
+			}()
+
+			if diagnosticEntered != nil {
+				select {
+				case <-action:
+				case <-diagnosticEntered:
+					releaseDiagnostic()
+					<-done
+					t.Fatal("headless detection write began before the relaunch callback")
+				case <-time.After(2 * time.Second):
+					releaseDiagnostic()
+					<-done
+					t.Fatal("headless relaunch callback was not reached")
+				}
+				select {
+				case <-diagnosticEntered:
+				case <-time.After(2 * time.Second):
+					releaseDiagnostic()
+					<-done
+					t.Fatal("deferred headless detection write was not attempted")
+				}
+			} else {
+				select {
+				case <-action:
+				case <-time.After(2 * time.Second):
+					releaseDiagnostic()
+					<-done
+					t.Fatal("event-log flock contention blocked the relaunch callback")
+				}
+				select {
+				case <-done:
+					t.Fatal("headless recovery returned while the deferred event-log write remained contended")
+				default:
+				}
+			}
+
+			releaseDiagnostic()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("headless recovery did not finish after releasing the diagnostic")
+			}
+			if mode == "contended-flock" {
+				assertSupervisorEvent(t, stateDir, "gui-headless-fleet-detected")
+			}
+		})
+	}
+}
+
+func TestEnsureAliveHeadlessFleet_DetectionWriteCannotBlockSuppressor(t *testing.T) {
+	for _, mode := range []string{"stalled-write", "contended-flock"} {
+		t.Run(mode, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now())
+			out := newEnsureAliveOrderingWriter("boot-grace")
+
+			var diagnosticEntered <-chan struct{}
+			var releaseDiagnostic func()
+			if mode == "stalled-write" {
+				block := blockEnsureAliveEventWrite(t, "gui-headless-fleet-detected")
+				diagnosticEntered = block.entered
+				releaseDiagnostic = block.release
+			} else {
+				_, release := holdEnsureAliveEventLogFlock(t, stateDir)
+				releaseDiagnostic = release
+			}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				runEnsureAliveHeadlessFleet(stateDir, out, 4242, 5252, 9125, true)
+			}()
+
+			select {
+			case <-out.reached:
+			case <-time.After(2 * time.Second):
+				releaseDiagnostic()
+				<-done
+				t.Fatal("headless suppressor decision was not reported")
+			}
+			if diagnosticEntered != nil {
+				select {
+				case <-diagnosticEntered:
+				case <-time.After(2 * time.Second):
+					releaseDiagnostic()
+					<-done
+					t.Fatal("deferred headless detection write was not attempted")
+				}
+			} else {
+				select {
+				case <-done:
+					t.Fatal("headless suppressor returned while the deferred event-log write remained contended")
+				default:
+				}
+			}
+
+			releaseDiagnostic()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("headless suppressor did not finish after releasing the diagnostic")
+			}
+			if !strings.Contains(out.String(), "boot-grace") {
+				t.Fatalf("suppression output = %q, want exact boot-grace reason", out.String())
+			}
+			if mode == "contended-flock" {
+				assertSupervisorEvent(t, stateDir, "gui-headless-fleet-detected")
+			}
+		})
+	}
+}
+
+func TestEnsureAliveUnknownEscalation_DetectionWriteCannotBlockRecovery(t *testing.T) {
+	for _, mode := range []string{"stalled-write", "contended-flock"} {
+		t.Run(mode, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+			t.Cleanup(restoreLockProbe)
+			markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+			if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+				t.Fatalf("seed confirmation marker: %v", err)
+			}
+			out := newEnsureAliveOrderingWriter("phase-i-lease-unconfirmed")
+
+			var diagnosticEntered <-chan struct{}
+			var releaseDiagnostic func()
+			if mode == "stalled-write" {
+				block := blockEnsureAliveEventWrite(t, "gui-owner-unknown-escalated-to-recovery")
+				diagnosticEntered = block.entered
+				releaseDiagnostic = block.release
+			} else {
+				_, release := holdEnsureAliveEventLogFlock(t, stateDir)
+				releaseDiagnostic = release
+			}
+
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				if !runEnsureAliveGUIOwnerUnknownEscalation(stateDir, out, 4242, 0, 0, false) {
+					t.Error("elapsed Unknown confirmation did not delegate to headless recovery")
+				}
+			}()
+
+			select {
+			case <-out.reached:
+			case <-time.After(2 * time.Second):
+				releaseDiagnostic()
+				<-done
+				t.Fatal("delegated headless suppression was not reached")
+			}
+			if diagnosticEntered != nil {
+				select {
+				case <-diagnosticEntered:
+				case <-time.After(2 * time.Second):
+					releaseDiagnostic()
+					<-done
+					t.Fatal("deferred Unknown-escalation detection write was not attempted")
+				}
+			} else {
+				select {
+				case <-done:
+					t.Fatal("Unknown escalation returned while the event-log flock remained contended")
+				default:
+				}
+			}
+
+			releaseDiagnostic()
+			select {
+			case <-done:
+			case <-time.After(2 * time.Second):
+				t.Fatal("Unknown escalation did not finish after releasing the diagnostic")
+			}
+			if mode == "contended-flock" {
+				assertSupervisorEvent(t, stateDir, "gui-owner-unknown-escalated-to-recovery")
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1723,6 +2007,135 @@ func installEnsureAliveGUIRecoveryTestDependencies(
 	t.Cleanup(restore)
 }
 
+func installEnsureAliveRetainedLeasePhaseI(t *testing.T) {
+	t.Helper()
+	now := time.Date(2026, 7, 27, 6, 30, 0, 0, time.UTC)
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+	}
+	lease := &ensureAliveGUIRecoveryLeaseFake{
+		releaseErr: errors.New("synthetic persistent GUI lease release failure"),
+	}
+	installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(_ context.Context, request gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		if request.Lifecycle == nil || !request.Lifecycle.TryExpose() {
+			return gui.GUIOwnerLeaseProbeResult{
+				State:     gui.GUIOwnerLeaseStateUnknown,
+				Reason:    errors.New("test probe was not admitted to the lifecycle"),
+				Lifecycle: request.Lifecycle,
+			}
+		}
+		return gui.GUIOwnerLeaseProbeResult{
+			State:     gui.GUIOwnerLeaseStateFree,
+			Lease:     lease,
+			Record:    cloneEnsureAliveGUIRecoveryRecord(store.record),
+			Lifecycle: request.Lifecycle,
+		}
+	})
+}
+
+func TestEnsureAliveGUIRecovery_RetainedLeaseSuppressesEveryGUIOwnerRelaunch(t *testing.T) {
+	tests := []struct {
+		name     string
+		topology func(*testing.T, string)
+	}{
+		{
+			name: "running-confirmed-dead",
+			topology: func(t *testing.T, stateDir string) {
+				lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+				if err != nil {
+					t.Fatalf("acquire supervisor lock: %v", err)
+				}
+				t.Cleanup(lock.Release)
+				rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+				noLiveGUIOwner(t)
+			},
+		},
+		{
+			name: "down-confirmed-dead",
+			topology: func(t *testing.T, _ string) {
+				noLiveGUIOwner(t)
+			},
+		},
+		{
+			name: "elapsed-unknown",
+			topology: func(t *testing.T, stateDir string) {
+				lock, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+				if err != nil {
+					t.Fatalf("acquire supervisor lock: %v", err)
+				}
+				t.Cleanup(lock.Release)
+				rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+				unknownGUIOwnerState(t, 0, 0)
+				restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+				t.Cleanup(restoreLockProbe)
+				markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+				if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+					t.Fatalf("seed confirmation marker: %v", err)
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			installEnsureAliveRetainedLeasePhaseI(t)
+			tc.topology(t, stateDir)
+
+			var relaunches atomic.Int32
+			restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+				relaunches.Add(1)
+				return nil
+			})
+			t.Cleanup(restoreRelaunch)
+			restoreServing := setGUIServingProbeFnForTest(func(int) bool { return true })
+			t.Cleanup(restoreServing)
+
+			out := &bytes.Buffer{}
+			if err := runEnsureAlive(stateDir, out); err != nil {
+				t.Fatalf("runEnsureAlive: %v", err)
+			}
+			if got := relaunches.Load(); got != 0 {
+				t.Fatalf("GUI-owner relaunch calls with an unconfirmed Phase-I lease = %d, want 0", got)
+			}
+			if !strings.Contains(out.String(), "phase-i-lease-unconfirmed") {
+				t.Fatalf("output = %q, want phase-i-lease-unconfirmed suppression", out.String())
+			}
+			assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"phase-i-lease-unconfirmed"`)
+		})
+	}
+}
+
+func TestEnsureAliveGUIRecovery_PreAcquisitionUnknownDoesNotSuppressRelaunch(t *testing.T) {
+	now := time.Date(2026, 7, 27, 6, 45, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+	}
+	installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(_ context.Context, request gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		return gui.GUIOwnerLeaseProbeResult{
+			State:     gui.GUIOwnerLeaseStateUnknown,
+			Reason:    errors.New("synthetic pre-acquisition marker read failure"),
+			Lifecycle: request.Lifecycle,
+		}
+	})
+
+	var relaunches atomic.Int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		relaunches.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreRelaunch)
+
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if got := relaunches.Load(); got != 1 {
+		t.Fatalf("GUI-owner relaunch calls after pre-acquisition Unknown = %d, want 1", got)
+	}
+}
+
 // holdEnsureAliveSupervisorLock holds the REAL supervisor.lock flock so
 // SupervisorRunningUnderStateDir reports running=true, for tests exercising
 // the Phase-I GUI-restart marker classifier layered on top of a healthy
@@ -2231,11 +2644,15 @@ func TestEnsureAliveGUIRecovery_ClassifierTimeoutRetainsLeaseUntilCASCompletes(t
 			}
 		},
 	}
-	installEnsureAliveGUIRecoveryTestDependencies(t, deadlines, store, func(context.Context, gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+	installEnsureAliveGUIRecoveryTestDependencies(t, deadlines, store, func(_ context.Context, request gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		if request.Lifecycle == nil || !request.Lifecycle.TryExpose() {
+			return gui.GUIOwnerLeaseProbeResult{State: gui.GUIOwnerLeaseStateUnknown, Lifecycle: request.Lifecycle}
+		}
 		return gui.GUIOwnerLeaseProbeResult{
-			State:  gui.GUIOwnerLeaseStateFree,
-			Lease:  lease,
-			Record: cloneEnsureAliveGUIRecoveryRecord(store.record),
+			State:     gui.GUIOwnerLeaseStateFree,
+			Lease:     lease,
+			Record:    cloneEnsureAliveGUIRecoveryRecord(store.record),
+			Lifecycle: request.Lifecycle,
 		}
 	})
 	var relaunches atomic.Int32
@@ -2262,8 +2679,8 @@ func TestEnsureAliveGUIRecovery_ClassifierTimeoutRetainsLeaseUntilCASCompletes(t
 		<-done
 		t.Fatal("blocked marker CAS starved the supervisor-liveness recovery past the total classifier budget")
 	}
-	if got := relaunches.Load(); got != 1 {
-		t.Fatalf("owner relaunch calls after classifier deadline = %d, want 1", got)
+	if got := relaunches.Load(); got != 0 {
+		t.Fatalf("owner relaunch calls after classifier deadline with an exposed lease = %d, want 0", got)
 	}
 	if got := lease.releases.Load(); got != 0 {
 		t.Fatalf("owned probe lease released while CAS was still executing = %d, want 0", got)

@@ -83,6 +83,7 @@ const (
 	FailureRequestCanceled           FailureKind = "request_canceled"
 	FailureBoundaryProbeTimeout      FailureKind = "boundary_probe_timeout"
 	FailureRespawnBudgetInsufficient FailureKind = "respawn_budget_insufficient"
+	FailureAuditDurability           FailureKind = "audit_durability_failed"
 )
 
 // OperationError carries adapter-only diagnostics. HTTP handlers must redact it
@@ -284,6 +285,7 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	terminationCommitted := false
 	var postCommitNotifications []Notification
 	var postCommitAudits []func()
+	var committedAudit *committedAuditFinalizer
 
 	stateDir, err := deps.StateDir()
 	if err != nil {
@@ -489,30 +491,36 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 				return Result{}, &OperationError{Kind: FailureRefusedPortOwner, TaskName: normalized, Cause: terminateErr, Candidate: &candidate}
 			}
 			terminationCommitted = true
-			var committedAudit api.SupervisorEvent
+			var committedEvent api.SupervisorEvent
 			if terminateErr == nil {
 				reaped = true
 				check = PortOwnerReaped
 				postCommitNotifications = append(postCommitNotifications, Notification{Kind: NotificationReaped, TaskName: normalized, Port: port, PID: ownerPID})
-				committedAudit = auditEvent("daemon-port-squatter-reaped", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
+				committedEvent = auditEvent("daemon-port-squatter-reaped", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
 					"note": "operator recover: verified-own port squatter exit confirmed, forcing a respawn",
 				})
 			} else {
 				check = PortOwnerTerminationUnconfirmed
 				postCommitNotifications = append(postCommitNotifications, Notification{Kind: NotificationTerminationUnconfirmed, TaskName: normalized, Port: port, PID: ownerPID, Cause: terminateErr})
-				committedAudit = auditEvent("daemon-port-squatter-termination-unconfirmed", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
+				committedEvent = auditEvent("daemon-port-squatter-termination-unconfirmed", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
 					"err":  BoundEventField(terminateErr.Error()),
 					"note": "operator recover: termination committed but process exit was not confirmed; forcing a respawn",
 				})
+			}
+			committedEvent.TS = postKillStarted.UTC().Format(time.RFC3339Nano)
+			prepared, prepareErr := api.PrepareSupervisorEvent(committedEvent)
+			committedAudit = &committedAuditFinalizer{
+				stateDir:   stateDir,
+				prepared:   prepared,
+				prepareErr: prepareErr,
 			}
 			// Charge the bounded pre-respawn audit only to the non-reserved
 			// post-kill slice. Any time it consumes reduces the subsequent port
 			// wait; the fresh RespawnReserve context below remains untouched.
 			auditBudget := boundedPortWaitBudget(deps.AuditEmitTimeout, deps.PostKillTimeout, deps.RespawnReserve, deps.Now().Sub(postKillStarted))
-			if auditBudget <= 0 {
-				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, nil, nil)
-			} else if pending, emitErr := emitRecoverAuditEventWithTimeoutTracked(stateDir, committedAudit, auditBudget); emitErr != nil {
-				queueIdempotentAuditFallback(&postCommitAudits, stateDir, committedAudit, pending, emitErr)
+			if prepareErr == nil && auditBudget > 0 {
+				committedAudit.attempted = true
+				committedAudit.pending, committedAudit.emitErr = emitRecoverPreparedAuditWithTimeoutTracked(stateDir, prepared, auditBudget)
 			}
 			terminationElapsed := deps.Now().Sub(postKillStarted)
 			waitBudget := boundedPortWaitBudget(deps.PortWaitTimeout, deps.PostKillTimeout, deps.RespawnReserve, terminationElapsed)
@@ -544,8 +552,13 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	}
 	respawn, respawnErr := deps.Respawn(respawnCtx, normalized, true)
 	// A blocking audit flock must never strand recovery before restart delivery.
-	// Only bounded-attempt fallbacks and the no-kill already-exited audit remain
-	// queued here after the injected supervisor-dispatch boundary.
+	// The committed audit establishes its durable handoff after the injected
+	// supervisor-dispatch boundary; the no-kill already-exited audit remains an
+	// independent best-effort closure.
+	var auditDurabilityErr error
+	if committedAudit != nil {
+		auditDurabilityErr = committedAudit.finalize()
+	}
 	for _, emitAudit := range postCommitAudits {
 		emitAudit()
 	}
@@ -553,6 +566,18 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 		notify(options, notification)
 	}
 	result := Result{TaskName: normalized, Reaped: reaped, PortOwnerCheck: check, PortWaitOutcome: portWaitOutcome}
+	if auditDurabilityErr != nil {
+		cause := auditDurabilityErr
+		if respawnErr != nil {
+			cause = errors.Join(auditDurabilityErr, respawnErr)
+		}
+		return result, &OperationError{
+			Kind:     FailureAuditDurability,
+			TaskName: normalized,
+			Cause:    cause,
+			Respawn:  respawn,
+		}
+	}
 	if respawnErr != nil {
 		if !terminationCommitted && (errors.Is(respawnErr, context.Canceled) || errors.Is(respawnErr, context.DeadlineExceeded)) {
 			return result, canceledOperationError(stateDir, *descriptor, 0, "respawn", respawnErr, nil, false)
@@ -731,115 +756,70 @@ func emitRecoverAuditEvent(stateDir string, event api.SupervisorEvent) {
 	_ = logger.Emit(event)
 }
 
-// emitRecoverAuditEventWithTimeoutTracked replaces the prior
-// emitRecoverAuditEventWithTimeout (residual 2 review fix; removed — it had
-// no other callers once this file's one bounded pre-respawn attempt was
-// widened to track its worker). On a timeout it ALSO returns a
-// *api.PendingSupervisorEventEmit exposing the abandoned worker's eventual
-// completion, so queueIdempotentAuditFallback can check the SAME write
-// instead of ever enqueuing an independent duplicate.
-func emitRecoverAuditEventWithTimeoutTracked(stateDir string, event api.SupervisorEvent, timeout time.Duration) (*api.PendingSupervisorEventEmit, error) {
+// emitRecoverPreparedAuditWithTimeoutTracked preserves the exact prepared
+// bytes while exposing a timed-out worker's eventual outcome to the
+// post-respawn durability finalizer.
+func emitRecoverPreparedAuditWithTimeoutTracked(stateDir string, prepared api.PreparedSupervisorEvent, timeout time.Duration) (*api.PendingSupervisorEventEmit, error) {
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = logger.Close() }()
-	return logger.EmitWithTimeoutTracked(event, timeout)
+	return logger.EmitPreparedWithTimeoutTracked(prepared, timeout)
 }
 
-// queueIdempotentAuditFallback appends the ONE closure that decides, at
-// post-respawn execution time, whether a physical write is still needed for
-// committedAudit (round 3 consolidation of the residual-2 review fix). The
-// prior shape (round 2) waited a SECOND, independently-invented grace
-// window (daemonRecoveryLateAuditGrace, 2s) for the abandoned worker before
-// giving up and firing an unconditional duplicate write. That was flagged
-// PILED: two writers were enforcing the same audit outcome with no shared
-// commit protocol — reproduced both ways: releasing the stalled worker
-// after the grace window produced two rows for one event, and holding it
-// forever left the fallback's own unbounded blocking Emit call hung, so
-// recovery itself never returned.
-//
-// The fix folds the fallback into the ALREADY-tracked operation instead of
-// layering a second one. There is exactly one physical writer per event:
-//
-//   - pending == nil: no worker was ever spawned for this event — either
-//     the bounded attempt's own configured budget (the "outer deadline",
-//     deps.AuditEmitTimeout as bounded by boundedPortWaitBudget) was already
-//     exhausted before the call could even try, or the call failed before
-//     acquiring both locks (log-open/marshal failure). This closure is the
-//     ONLY possible writer, so it fires unconditionally — unchanged from
-//     round 2.
-//   - pending != nil: a worker IS already in flight holding both locks.
-//     writeEventLine has no cancellable syscall surface (round 2's own
-//     finding), so that worker is guaranteed to eventually finish this
-//     exact append on its own, independent of anything this closure does.
-//     A single NON-BLOCKING peek (Wait(0)) is enough to catch the case
-//     where it already landed in the sliver of time since the tracked call
-//     gave up. If it is still unsettled, this closure adds NO further wait
-//     of its own — the tracked call already spent the full outer deadline,
-//     so there is nothing left to wait for, and inventing a second wait
-//     here is exactly the piling this consolidation removes. The abandoned
-//     worker keeps running and commits the row whenever the stall clears;
-//     the only accepted residual is that a one-shot CLI process that exits
-//     immediately after recover returns can end this goroutine before that
-//     happens (an existing property of the abandon-and-hope design, not a
-//     new one — see EmitWithTimeoutTracked's own doc). Only a DEFINITE
-//     (non-timeout) failure from the worker — meaning the row is confirmed
-//     absent rather than merely unconfirmed — makes a fresh write from this
-//     closure legitimate rather than a race against an unknown outcome.
-//
-// emitErr is the tracked attempt's OWN returned error (nil when no attempt was
-// made at all — the auditBudget <= 0 call site). Round 4 review fix: the
-// pending != nil switch below already fails closed on a flock-release failure
-// reported by an ABANDONED worker, but that is not the only way one reaches
-// this function. EmitWithTimeoutTracked returns a non-nil handle ONLY when its
-// error is exactly ErrSupervisorEventEmitTimeout (supervisor_events.go's emit:
-// the handle is constructed on the ctx.Done() arm alone). An emit whose write
-// SETTLED before the deadline but whose cross-process flock could not be
-// released therefore returns (nil, err-matching-ErrSupervisorEventReleaseFailed)
-// — pending == nil, so the switch below was skipped entirely and the closure
-// fell through to an unconditional write. That outcome says nothing about the
-// ROW (the append phase completed and very likely committed) and everything
-// about the LOCK, so the unconditional write was both a probable duplicate AND
-// a probable hang: it opens a FRESH flock handle on the same file via the
-// BLOCKING emitRecoverAuditEvent, and the flock the settled emit failed to
-// release is still held by this very process. Fail closed identically to the
-// abandoned-worker case — the two are the same fact reported through two
-// different channels, so they get the same verdict.
-func queueIdempotentAuditFallback(postCommitAudits *[]func(), stateDir string, audit api.SupervisorEvent, pending *api.PendingSupervisorEventEmit, emitErr error) {
-	if errors.Is(emitErr, api.ErrSupervisorEventReleaseFailed) {
-		// Decided at QUEUE time rather than inside the closure: the outcome is
-		// already known here, and not enqueuing at all keeps "was a physical
-		// fallback write still needed?" a single observable decision instead
-		// of a closure that exists only to do nothing.
-		return
+// committedAuditFinalizer owns one normalized committed-recovery record across
+// the bounded pre-respawn attempt and the post-respawn durability boundary.
+// It never remarshals the event, and it never reacquires the event-log flock
+// after a release failure.
+type committedAuditFinalizer struct {
+	stateDir   string
+	prepared   api.PreparedSupervisorEvent
+	prepareErr error
+	attempted  bool
+	pending    *api.PendingSupervisorEventEmit
+	emitErr    error
+}
+
+func (f *committedAuditFinalizer) finalize() error {
+	if f == nil {
+		return nil
 	}
-	*postCommitAudits = append(*postCommitAudits, func() {
-		if pending != nil {
-			switch waitErr := pending.Wait(0); {
-			case waitErr == nil:
-				return // the tracked worker's write already landed -- the one physical row exists.
-			case errors.Is(waitErr, api.ErrSupervisorEventEmitTimeout):
-				// Still unsettled, and by design not waited on further: see
-				// the doc comment above. Do NOT write again here.
-				return
-			case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed):
-				// The worker could not release the cross-process flock. That
-				// says nothing about the ROW — the append phase ran, and may
-				// well have succeeded — so this branch's precondition ("no row
-				// exists and none is coming") is NOT met and a write here would
-				// re-introduce exactly the two-writers-one-outcome duplicate
-				// this function exists to prevent. Fail closed: skip the
-				// fallback. Losing one audit row while the event log's lock is
-				// already stuck is strictly better than a duplicate row, and
-				// the release failure is itself reported to the emit caller.
-				return
-			}
-			// A genuine (non-timeout) write failure: the tracked attempt is
-			// DEFINITELY settled as failed (no row exists and none is
-			// coming from it), so writing once here is a fresh attempt, not
-			// a race against an unknown outcome.
+	if f.prepareErr != nil {
+		return fmt.Errorf("prepare committed recovery audit: %w", f.prepareErr)
+	}
+
+	replay := true
+	switch {
+	case !f.attempted:
+		// No writer exists. Establish the durable carrier below.
+	case f.pending == nil && f.emitErr == nil:
+		return nil
+	case f.pending == nil && errors.Is(f.emitErr, api.ErrSupervisorEventReleaseFailed):
+		replay = false
+	case f.pending != nil:
+		waitErr := f.pending.Wait(0)
+		switch {
+		case waitErr == nil:
+			return nil
+		case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed):
+			replay = false
 		}
-		emitRecoverAuditEvent(stateDir, audit)
-	})
+	}
+
+	logger, err := api.OpenSupervisorEventLog(filepath.Join(f.stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		return fmt.Errorf("open committed recovery audit handoff: %w", err)
+	}
+	defer func() { _ = logger.Close() }()
+	if err := logger.PersistPending(f.prepared); err != nil {
+		return fmt.Errorf("persist committed recovery audit handoff: %w", err)
+	}
+	if replay {
+		// Persistence is the acknowledgement boundary. Replay is deliberately
+		// opportunistic: contention or any replay error leaves the carrier for
+		// a later process and does not undo established durability.
+		_ = logger.TryReplayPending()
+	}
+	return nil
 }

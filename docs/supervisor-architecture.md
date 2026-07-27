@@ -26,6 +26,7 @@ available.
 | `mcphub supervise` | The long-lived supervisor process. Idempotent via `supervisor.lock`. Hosts FIFO event loop, reconcile driver, IPC listener, child-exit reaper. |
 | `mcphub strict-mode enable` / `disable` | Canonical mutation of `supervisor-intent.strict_mode`. Universal lock order: `migration.lock` BEFORE `--once.lock`. Two-resource atomic write (intent file + autostart shim args) with revert-on-failure. |
 | `mcphub strict-mode --recover` | Reconciles after a `STRICT_MODE_REVERT_FAILED` (exit 10) breadcrumb. Prompts operator to drive both intent + shim either to the `intended` value or to `actual_intent_state`. |
+| `mcphub daemon recover <task>` | Identity-gates termination of a verified-own disowned port holder, then requests a forced respawn. Exit 7 means termination committed and respawn was attempted (or accepted, as separately reported), but the recovery audit row or its durable handoff could not be preserved. |
 | `mcphub autostart enable` / `disable` / `status` | Per-OS autostart shim. Windows: Task Scheduler `LogonTrigger`. Linux managed: systemd user service. Linux unmanaged + macOS: per-OS user-space shim. |
 | `mcphub install --upgrade` | Cold-restart upgrade flow. Rename-aside binary replacement (Windows `MoveFileExW`) + atomic rename (POSIX). Issues IPC `quiesce-timers` then `exit{graceful}`; force-kills supervisor with `taskkill /F /T /PID` on timeout; explicitly starts new supervisor. |
 | `mcphub install --rollback-to-legacy` | Reverses migration. Translates supervisor-state quarantined entries to `daemon-intent.json` `chronic-failure`; uninstalls supervisor shim; re-registers every v0.4.x `legacy-tasks/<task>.xml` via `schtasks /Create /XML /F`; runs each task and waits up to 60s for the expected port to bind. Unbound ports captured in `rollback-warnings.json`; rollback exits 0 with warnings. |
@@ -40,12 +41,26 @@ All under `<state-dir>` (per-user `%LOCALAPPDATA%\mcp-local-hub\` on Windows;
   supervisor-intent.json              # NEW: daemon descriptors + maintenance timers + strict_mode (canonical)
   supervisor-state.json               # NEW: per-daemon runtime state, restart_history (30-min sliding window), transient_pids, maintenance_fired_at
   supervisor-events.log               # NEW: JSONL audit trail (envelope: schema_version, ts, severity, source, event, task_name, body); 16 KB per-entry cap; 10 MB rotation → .log.1
+  supervisor-events.log.pending/      # process-exit-safe pending audit rows: <64-lowercase-hex-SHA-256>.jsonl, one normalized record per file, maximum 16 KiB + 1 newline byte
   supervisor.lock                     # NEW: supervisor singleton lock + sidecar with {pid, start_time}
   migration-journal-<UTC-ts>/         # NEW: per-install migration journal (retain 5 newest after `committed`)
   daemon-intent.json                  # preserved exactly (byte-symmetric for rollback)
   managed-entries.json                # preserved exactly
   watchdog-state.json                 # preserved unchanged (v0.4.x watchdog diagnostics)
 ```
+
+Every supervisor-event write checks at most 64 final pending files after it
+acquires the existing in-process event-log mutex and cross-process flock, and
+before rotating or appending the current row. Replay compares the complete
+newline-terminated record against both `supervisor-events.log` and
+`supervisor-events.log.1`. An exact retained match retires the handoff without
+another append; otherwise replay appends and syncs the row before retirement.
+Malformed, oversized, unreadable, mismatched, unappendable, or unremovable
+handoffs remain in the pending directory and fail that replay pass.
+
+This handoff provides a process-exit-safe carrier and exactly one retained row
+within the active-plus-`.1` history. It does not claim power-loss durability or
+exactly-once identity after the row rotates beyond that bounded history.
 
 ## Migration from v0.4.x
 

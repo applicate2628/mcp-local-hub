@@ -169,12 +169,82 @@ func TestDaemonRecoverHermeticExitContract(t *testing.T) {
 		{name: "request canceled", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRequestCanceled, Cause: context.Canceled}, want: daemonRecoverExitUnreachable},
 		{name: "respawn budget insufficient", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnBudgetInsufficient, Cause: daemonrecovery.ErrInsufficientRespawnBudget}, want: daemonRecoverExitBudgetInsufficient},
 		{name: "respawn setup failure", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure}, want: daemonRecoverExitUnreachable},
+		{name: "audit durability", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureAuditDurability, Cause: errors.New("persist handoff")}, want: daemonRecoverExitAuditDurability},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, _, _ := recoverCmd("")
 			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, tc.err)); got != tc.want {
 				t.Fatalf("exit = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverAuditDurabilityFailureExit7PreservesCommittedRespawnWording(t *testing.T) {
+	tests := []struct {
+		name        string
+		respawn     api.RespawnResult
+		want        []string
+		notExpected []string
+	}{
+		{
+			name:    "accepted respawn",
+			respawn: api.RespawnResult{Success: true},
+			want: []string{
+				"process termination was committed",
+				"forced respawn was accepted",
+				"audit record or durable handoff could not be preserved",
+				"details: persist handoff",
+			},
+			notExpected: []string{
+				"forced respawn was attempted but not accepted",
+				"forced respawn accepted by the supervisor",
+			},
+		},
+		{
+			name: "failed respawn",
+			respawn: api.RespawnResult{
+				Code:    "RESPAWN_REJECTED",
+				Message: "restart policy refused the request",
+			},
+			want: []string{
+				"process termination was committed",
+				"forced respawn was attempted but not accepted",
+				"respawn result [RESPAWN_REJECTED]: restart policy refused the request",
+				"audit record or durable handoff could not be preserved",
+				"details: persist handoff",
+			},
+			notExpected: []string{
+				"forced respawn was accepted",
+				"forced respawn accepted by the supervisor",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, out, errOut := recoverCmd("")
+			err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+				Kind:    daemonrecovery.FailureAuditDurability,
+				Cause:   errors.New("persist handoff"),
+				Respawn: tc.respawn,
+			})
+			if got := exitCodeOf(t, err); got != daemonRecoverExitAuditDurability {
+				t.Fatalf("exit=%d want=%d", got, daemonRecoverExitAuditDurability)
+			}
+			message := errOut.String()
+			for _, want := range tc.want {
+				if !strings.Contains(message, want) {
+					t.Fatalf("stderr=%q missing %q", message, want)
+				}
+			}
+			for _, notExpected := range tc.notExpected {
+				if strings.Contains(message, notExpected) {
+					t.Fatalf("stderr=%q unexpectedly contains %q", message, notExpected)
+				}
+			}
+			if strings.Contains(out.String(), "recovered ") {
+				t.Fatalf("stdout reports ordinary success: %q", out.String())
 			}
 		})
 	}

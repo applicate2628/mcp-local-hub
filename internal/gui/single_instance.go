@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -91,6 +92,115 @@ const (
 	GUIOwnerLeaseStateFree
 )
 
+// GUIOwnerLeaseLifecycleState is the monotonic acquisition/release state
+// shared by the GUI-owner probe and its timeout-owning caller.
+type GUIOwnerLeaseLifecycleState uint32
+
+const (
+	// GUIOwnerLeaseLifecycleOpen is the zero value: no flock acquisition has
+	// been admitted.
+	GUIOwnerLeaseLifecycleOpen GUIOwnerLeaseLifecycleState = iota
+	// GUIOwnerLeaseLifecycleClosedBeforeExposure means the timeout owner
+	// closed the gate before the probe could attempt the flock.
+	GUIOwnerLeaseLifecycleClosedBeforeExposure
+	// GUIOwnerLeaseLifecycleExposed means the probe won the gate immediately
+	// before attempting the flock. Until a terminal outcome is published, the
+	// current process may retain the lease.
+	GUIOwnerLeaseLifecycleExposed
+	// GUIOwnerLeaseLifecycleNotAcquired means the admitted flock attempt
+	// returned busy or failed without acquiring a lease.
+	GUIOwnerLeaseLifecycleNotAcquired
+	// GUIOwnerLeaseLifecycleReleased means an acquired lease reported a
+	// successful ReleaseErr.
+	GUIOwnerLeaseLifecycleReleased
+	// GUIOwnerLeaseLifecycleReleaseUnconfirmed means ReleaseErr failed, so
+	// process exit is the remaining release boundary.
+	GUIOwnerLeaseLifecycleReleaseUnconfirmed
+)
+
+// GUIOwnerLeaseDisposition is the tick-local relaunch capability derived from
+// the lifecycle. It deliberately says only whether this process may still own
+// the GUI flock; GUI liveness remains a separate classifier.
+type GUIOwnerLeaseDisposition uint8
+
+const (
+	GUIOwnerLeaseNoRetainedLease GUIOwnerLeaseDisposition = iota
+	GUIOwnerLeaseMayRetainLease
+)
+
+// GUIOwnerLeaseLifecycle atomically arbitrates the outer timeout against the
+// probe's first flock attempt, then publishes exactly one terminal outcome.
+type GUIOwnerLeaseLifecycle struct {
+	state atomic.Uint32
+}
+
+// NewGUIOwnerLeaseLifecycle creates an Open lifecycle.
+func NewGUIOwnerLeaseLifecycle() *GUIOwnerLeaseLifecycle {
+	return &GUIOwnerLeaseLifecycle{}
+}
+
+// TryExpose admits one flock attempt. False means the timeout already closed
+// the gate and the caller must not touch the flock.
+func (l *GUIOwnerLeaseLifecycle) TryExpose() bool {
+	return l != nil && l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleOpen),
+		uint32(GUIOwnerLeaseLifecycleExposed),
+	)
+}
+
+// CloseBeforeExposure prevents a not-yet-admitted probe from touching the
+// flock after the outer deadline.
+func (l *GUIOwnerLeaseLifecycle) CloseBeforeExposure() bool {
+	return l != nil && l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleOpen),
+		uint32(GUIOwnerLeaseLifecycleClosedBeforeExposure),
+	)
+}
+
+// PublishNotAcquired closes an admitted attempt that returned without a lease.
+func (l *GUIOwnerLeaseLifecycle) PublishNotAcquired() bool {
+	return l != nil && l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleExposed),
+		uint32(GUIOwnerLeaseLifecycleNotAcquired),
+	)
+}
+
+// PublishRelease records the observed ReleaseErr outcome without replacing
+// any earlier terminal evidence.
+func (l *GUIOwnerLeaseLifecycle) PublishRelease(err error) bool {
+	if l == nil {
+		return false
+	}
+	next := GUIOwnerLeaseLifecycleReleased
+	if err != nil {
+		next = GUIOwnerLeaseLifecycleReleaseUnconfirmed
+	}
+	return l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleExposed),
+		uint32(next),
+	)
+}
+
+// Disposition fails closed for an exposed, release-unconfirmed, nil, or
+// numerically-invalid lifecycle.
+func (l *GUIOwnerLeaseLifecycle) Disposition() GUIOwnerLeaseDisposition {
+	if l == nil {
+		return GUIOwnerLeaseMayRetainLease
+	}
+	switch GUIOwnerLeaseLifecycleState(l.state.Load()) {
+	case GUIOwnerLeaseLifecycleOpen,
+		GUIOwnerLeaseLifecycleClosedBeforeExposure,
+		GUIOwnerLeaseLifecycleNotAcquired,
+		GUIOwnerLeaseLifecycleReleased:
+		return GUIOwnerLeaseNoRetainedLease
+	case GUIOwnerLeaseLifecycleExposed,
+		GUIOwnerLeaseLifecycleReleaseUnconfirmed:
+		return GUIOwnerLeaseMayRetainLease
+	default:
+		return GUIOwnerLeaseMayRetainLease
+	}
+}
+
 // GUIOwnerLeaseProbeRequest carries the previously-read record plus the
 // read-only store needed to revalidate it after tentatively acquiring a free
 // flock. That re-read closes the marker-change window without introducing a
@@ -100,6 +210,7 @@ type GUIOwnerLeaseProbeRequest struct {
 	Record      *HandoffMarkerRecord
 	MarkerStore HandoffMarkerReader
 	Deadlines   RestartDeadlines
+	Lifecycle   *GUIOwnerLeaseLifecycle
 }
 
 // GUIOwnerLeaseProbeResult represents Held(reason),
@@ -114,6 +225,8 @@ type GUIOwnerLeaseProbeResult struct {
 	Reason error
 	Lease  OwnedSingleInstanceLease
 	Record *HandoffMarkerRecord
+	// Lifecycle is the exact lifecycle supplied by the request.
+	Lifecycle *GUIOwnerLeaseLifecycle
 }
 
 // GUIOwnerLeaseUnknownError preserves the concrete uncertainty while exposing
@@ -450,74 +563,89 @@ func acquireReservationAwareSingleInstanceAt(pidportPath string, port int, optio
 // flock and does not write pidport metadata; the caller must retain that exact
 // lease through its guarded operation and release it on every exit path.
 func ProbeGUIOwnerLease(ctx context.Context, request GUIOwnerLeaseProbeRequest) GUIOwnerLeaseProbeResult {
+	lifecycle := request.Lifecycle
+	withLifecycle := func(result GUIOwnerLeaseProbeResult) GUIOwnerLeaseProbeResult {
+		result.Lifecycle = lifecycle
+		return result
+	}
+	if lifecycle == nil {
+		return withLifecycle(unknownGUIOwnerLease(nil, "probe lifecycle", errors.New("GUI owner lease lifecycle is nil")))
+	}
 	if ctx == nil {
-		return unknownGUIOwnerLease(nil, "probe context", errors.New("context is nil"))
+		return withLifecycle(unknownGUIOwnerLease(nil, "probe context", errors.New("context is nil")))
 	}
 	if err := validateGUIOwnerLeasePath(request.PidportPath); err != nil {
-		return unknownGUIOwnerLease(request.Record, "validate pidport path", err)
+		return withLifecycle(unknownGUIOwnerLease(request.Record, "validate pidport path", err))
 	}
 	if request.Record != nil {
 		if err := validateHandoffMarker(request.Record); err != nil {
-			return unknownGUIOwnerLease(nil, "validate observed handoff marker", err)
+			return withLifecycle(unknownGUIOwnerLease(nil, "validate observed handoff marker", err))
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return unknownGUIOwnerLease(request.Record, "probe cancelled before marker read", err)
+		return withLifecycle(unknownGUIOwnerLease(request.Record, "probe cancelled before marker read", err))
 	}
 	observed, err := readValidatedHandoffMarker(request.MarkerStore)
 	if err != nil {
-		return unknownGUIOwnerLease(request.Record, "read handoff marker", err)
+		return withLifecycle(unknownGUIOwnerLease(request.Record, "read handoff marker", err))
 	}
 	if request.Record != nil && !sameHandoffMarkerObservation(request.Record, observed) {
-		return unknownGUIOwnerLease(observed, "validate observed handoff marker", errors.New("handoff marker changed before owner probe"))
+		return withLifecycle(unknownGUIOwnerLease(observed, "validate observed handoff marker", errors.New("handoff marker changed before owner probe")))
 	}
 	now, err := restartDeadlineNow(request.Deadlines)
 	if err != nil {
-		return unknownGUIOwnerLease(observed, "read restart clock", err)
+		return withLifecycle(unknownGUIOwnerLease(observed, "read restart clock", err))
 	}
 	// A raw reservation is authoritative throughout its protection window.
 	// Returning Held before touching a momentarily-free OS flock prevents a
 	// third entrant or ensure-alive from entering the healthy release gap.
 	if reservationWindowOpen(observed, now) {
-		return heldGUIOwnerLease(observed, ErrHandoffReserved)
+		return withLifecycle(heldGUIOwnerLease(observed, ErrHandoffReserved))
 	}
 
+	if !lifecycle.TryExpose() {
+		return withLifecycle(unknownGUIOwnerLease(observed, "probe flock exposure", errors.New("GUI owner lease probe closed before flock exposure")))
+	}
 	lease, err := tryAcquireSingleInstanceLockAt(request.PidportPath)
 	if err != nil {
+		lifecycle.PublishNotAcquired()
 		if errors.Is(err, ErrSingleInstanceBusy) {
-			return heldGUIOwnerLease(observed, ErrSingleInstanceBusy)
+			return withLifecycle(heldGUIOwnerLease(observed, ErrSingleInstanceBusy))
 		}
-		return unknownGUIOwnerLease(observed, "probe flock", err)
+		return withLifecycle(unknownGUIOwnerLease(observed, "probe flock", err))
 	}
 	if err := ctx.Err(); err != nil {
-		return unknownAfterTentativeLease(lease, observed, "probe cancelled after acquire", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, observed, "probe cancelled after acquire", err))
 	}
 
 	current, err := readValidatedHandoffMarker(request.MarkerStore)
 	if err != nil {
-		return unknownAfterTentativeLease(lease, observed, "revalidate handoff marker", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, observed, "revalidate handoff marker", err))
 	}
 	if !sameHandoffMarkerObservation(observed, current) {
-		return unknownAfterTentativeLease(lease, current, "revalidate handoff marker", errors.New("handoff marker changed during owner probe"))
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, current, "revalidate handoff marker", errors.New("handoff marker changed during owner probe")))
 	}
 	now, err = restartDeadlineNow(request.Deadlines)
 	if err != nil {
-		return unknownAfterTentativeLease(lease, current, "re-read restart clock", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, current, "re-read restart clock", err))
 	}
 	if reservationWindowOpen(current, now) {
-		if releaseErr := lease.release(); releaseErr != nil {
-			return unknownGUIOwnerLease(current, "release tentative lease for reservation", releaseErr)
+		releaseErr := lease.release()
+		lifecycle.PublishRelease(releaseErr)
+		if releaseErr != nil {
+			return withLifecycle(unknownGUIOwnerLease(current, "release tentative lease for reservation", releaseErr))
 		}
-		return heldGUIOwnerLease(current, ErrHandoffReserved)
+		return withLifecycle(heldGUIOwnerLease(current, ErrHandoffReserved))
 	}
 	if err := ctx.Err(); err != nil {
-		return unknownAfterTentativeLease(lease, current, "probe cancelled after marker read", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, current, "probe cancelled after marker read", err))
 	}
 
 	return GUIOwnerLeaseProbeResult{
-		State:  GUIOwnerLeaseStateFree,
-		Lease:  lease,
-		Record: current,
+		State:     GUIOwnerLeaseStateFree,
+		Lease:     lease,
+		Record:    current,
+		Lifecycle: lifecycle,
 	}
 }
 
@@ -541,7 +669,11 @@ func restartDeadlineNow(deadlines RestartDeadlines) (time.Time, error) {
 	if deadlines.Now == nil {
 		return time.Time{}, errors.New("restart clock is nil")
 	}
-	return deadlines.Now().UTC(), nil
+	now := deadlines.Now().UTC()
+	if now.IsZero() {
+		return time.Time{}, errors.New("restart clock returned zero time")
+	}
+	return now, nil
 }
 
 func validateGUIOwnerLeasePath(pidportPath string) error {
@@ -611,8 +743,10 @@ func unknownGUIOwnerLease(record *HandoffMarkerRecord, operation string, cause e
 	}
 }
 
-func unknownAfterTentativeLease(lease *SingleInstanceLock, record *HandoffMarkerRecord, operation string, cause error) GUIOwnerLeaseProbeResult {
-	if releaseErr := lease.release(); releaseErr != nil {
+func unknownAfterTentativeLease(lifecycle *GUIOwnerLeaseLifecycle, lease *SingleInstanceLock, record *HandoffMarkerRecord, operation string, cause error) GUIOwnerLeaseProbeResult {
+	releaseErr := lease.release()
+	lifecycle.PublishRelease(releaseErr)
+	if releaseErr != nil {
 		cause = errors.Join(cause, fmt.Errorf("release tentative lease: %w", releaseErr))
 	}
 	return unknownGUIOwnerLease(record, operation, cause)

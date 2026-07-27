@@ -56,12 +56,15 @@ var (
 //	    or the request was canceled before completion
 //	6 — refused before termination because the configured recovery budget could
 //	    not preserve the mandatory detached respawn reservation
+//	7 — process termination committed and respawn was attempted, but the audit
+//	    record or its durable handoff could not be preserved
 const (
 	daemonRecoverExitUnknownTask        = 2
 	daemonRecoverExitRefused            = 3
 	daemonRecoverExitRespawnError       = 4
 	daemonRecoverExitUnreachable        = 5
 	daemonRecoverExitBudgetInsufficient = 6
+	daemonRecoverExitAuditDurability    = 7
 )
 
 // newDaemonRecoverCmd builds `mcphub daemon recover <task> [--yes]`: reap a
@@ -203,6 +206,19 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 		return forceExit(daemonRecoverExitUnreachable)
 	}
 	switch operationErr.Kind {
+	case daemonrecovery.FailureAuditDurability:
+		if operationErr.Respawn.Success {
+			fmt.Fprintln(errOut, "error: process termination was committed and forced respawn was accepted, but the recovery audit record or durable handoff could not be preserved.")
+		} else {
+			fmt.Fprintln(errOut, "error: process termination was committed; forced respawn was attempted but not accepted, and the recovery audit record or durable handoff could not be preserved.")
+			if operationErr.Respawn.Code != "" || operationErr.Respawn.Message != "" {
+				fmt.Fprintf(errOut, "respawn result [%s]: %s\n", operationErr.Respawn.Code, operationErr.Respawn.Message)
+			}
+		}
+		if operationErr.Cause != nil {
+			fmt.Fprintf(errOut, "details: %v\n", operationErr.Cause)
+		}
+		return forceExit(daemonRecoverExitAuditDurability)
 	case daemonrecovery.FailureInvalidArgs, daemonrecovery.FailureStateRead, daemonrecovery.FailureUnknownTask:
 		if operationErr.Kind == daemonrecovery.FailureUnknownTask {
 			fmt.Fprintf(errOut, "error: task %q not found in supervisor-intent.json\n", taskArg)

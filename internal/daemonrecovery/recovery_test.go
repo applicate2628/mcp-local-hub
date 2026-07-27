@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -143,6 +144,31 @@ func requireFailureKind(t *testing.T, err error, want FailureKind) *OperationErr
 		t.Fatalf("failure kind = %q, want %q", opErr.Kind, want)
 	}
 	return opErr
+}
+
+func recoveryPendingCarrierCount(t *testing.T, stateDir string) int {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(
+		stateDir,
+		api.SupervisorEventLogFileLeaf+".pending",
+		"*.jsonl",
+	))
+	if err != nil {
+		t.Fatalf("glob committed-audit handoffs: %v", err)
+	}
+	return len(matches)
+}
+
+func replayRecoveryPending(t *testing.T, stateDir string) {
+	t.Helper()
+	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("open supervisor event log for replay: %v", err)
+	}
+	defer func() { _ = logger.Close() }()
+	if err := logger.TryReplayPending(); err != nil {
+		t.Fatalf("replay committed-audit handoff: %v", err)
+	}
 }
 
 func TestExecuteUnknownTaskDoesNotProbeTerminateOrRespawn(t *testing.T) {
@@ -1114,20 +1140,22 @@ func TestExecuteBlockingPostCommitAuditCannotPreemptRespawn(t *testing.T) {
 	}
 	select {
 	case executeErr := <-done:
-		t.Fatalf("recovery returned before the held audit flock was released: %v", executeErr)
-	case <-time.After(50 * time.Millisecond):
+		if executeErr != nil {
+			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("recovery waited on replay after the durable handoff was established")
+	}
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 1 {
+		t.Fatalf("pending committed-audit carriers=%d want=1 while the event-log flock is held", got)
 	}
 	if err := auditLock.Unlock(); err != nil {
 		t.Fatalf("release audit flock: %v", err)
 	}
 	locked = false
-	select {
-	case executeErr := <-done:
-		if executeErr != nil {
-			t.Fatalf("ExecuteWithDependencies: %v", executeErr)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("recovery did not finish after the audit flock was released")
+	replayRecoveryPending(t, stateDir)
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 0 {
+		t.Fatalf("pending committed-audit carriers after replay=%d want=0", got)
 	}
 	if len(calls.terminate) != 1 || len(calls.respawn) != 1 {
 		t.Fatalf("post-commit calls: terminate=%d respawn=%d want one each", len(calls.terminate), len(calls.respawn))
@@ -1214,14 +1242,10 @@ func TestExecuteAlreadyExitedBlockingAuditCannotPreemptRespawn(t *testing.T) {
 }
 
 // recoveryStallAuditWrite installs a supervisor-event write function that
-// blocks every append until the returned release func is called, and
-// returns the stateDir-relative helper to read the log afterward. Shared by
-// the two round-3 consolidation tests below: both need a worker that is
-// genuinely spawned (holds both locks) and abandoned when the bounded
-// tracked call gives up — the pending != nil case queueIdempotentAuditFallback
-// exists for. This differs from TestExecuteBlockingPostCommitAuditCannotPreemptRespawn,
-// which holds the REAL flock externally so the flock-ACQUIRE attempt itself
-// times out and no worker is ever spawned (the pending == nil case).
+// blocks every append until the returned release func is called. The worker
+// genuinely owns both locks when the tracked call times out, so the committed
+// audit finalizer must establish a process-exit-safe carrier without waiting
+// for or racing that worker.
 func recoveryStallAuditWrite(t *testing.T, stateDir string) (release func()) {
 	t.Helper()
 	block := make(chan struct{})
@@ -1244,28 +1268,9 @@ func recoveryStallAuditWrite(t *testing.T, stateDir string) (release func()) {
 	return release
 }
 
-// TestExecuteDoesNotHangWhenAuditWorkerNeverSettles reproduces the SECOND
-// half of the round-3 "PILED" finding on residual 2: holding the stalled
-// worker's write open INDEFINITELY (never releasing it) proved recovery
-// itself never returned. The round-2 shape's fallback waited a bounded
-// grace for the tracked worker, but on timeout fell through to an
-// UNBOUNDED blocking Emit call — which then hung forever contending for
-// the same flock the abandoned worker still held, so ExecuteWithDependencies
-// never returned regardless of how long the test was willing to wait.
-//
-// The round-3 fix folds the fallback into the already-tracked operation:
-// once the tracked call's own bounded attempt (the "outer deadline") times
-// out, the post-respawn closure performs a single NON-BLOCKING peek and
-// adds no further wait of its own — so recovery returns promptly even
-// though the write is still stalled and never released within this test.
-//
-// MUTATION: reintroduce any additional blocking wait in
-// queueIdempotentAuditFallback's pending != nil branch (e.g. calling
-// pending.Wait with a nonzero timeout, or falling through to
-// emitRecoverAuditEvent's unconditional blocking Emit on a timeout) — this
-// test's bound on how long ExecuteWithDependencies may take fails because
-// the stalled worker (never released here) makes any such wait or fallback
-// write hang for the lifetime of the test.
+// TestExecuteDoesNotHangWhenAuditWorkerNeverSettles proves the finalizer
+// acknowledges the durable carrier and returns while the original write
+// remains stalled. A blocking wait or a second blocking emit fails the bound.
 func TestExecuteDoesNotHangWhenAuditWorkerNeverSettles(t *testing.T) {
 	d := recoveryDescriptor()
 	const ownerPID = 44000
@@ -1316,25 +1321,14 @@ func TestExecuteDoesNotHangWhenAuditWorkerNeverSettles(t *testing.T) {
 	case <-time.After(4 * time.Second):
 		t.Fatal("recovery did not return even though the stalled audit write was never released -- the fallback is hung")
 	}
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 1 {
+		t.Fatalf("pending committed-audit carriers=%d want=1 before recovery returns", got)
+	}
 }
 
-// TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow
-// reproduces the FIRST half of the round-3 "PILED" finding on residual 2:
-// releasing the stalled worker AFTER the fallback's own grace window had
-// already expired produced TWO audit rows (the delayed original write, plus
-// the fallback's unconditional independent write) — two writers enforcing
-// one outcome with no shared commit protocol.
-//
-// This test releases the stalled write only AFTER ExecuteWithDependencies
-// has ALREADY returned (proving the fold removed the synchronous wait
-// entirely, not just shortened it), then polls the log for the row to land
-// asynchronously and asserts it lands EXACTLY once, never twice.
-//
-// MUTATION: revert queueIdempotentAuditFallback's pending != nil branch to
-// perform an unconditional emitRecoverAuditEvent call after any bounded (or
-// zero) wait — once the stalled write is released post-return, the original
-// worker's write lands in addition to the fallback's write, and the "exactly
-// 1 row" assertion below fails with 2.
+// TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow proves a
+// late original completion and the retained carrier converge through exact-row
+// replay to one active-plus-.1 row.
 func TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow(t *testing.T) {
 	d := recoveryDescriptor()
 	const ownerPID = 44000
@@ -1413,8 +1407,90 @@ func TestExecuteLateAuditWorkerSettlingAfterReturnProducesExactlyOneRow(t *testi
 	if err != nil {
 		t.Fatalf("read event log: %v", err)
 	}
+	replayRecoveryPending(t, stateDir)
+	raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read replayed event log: %v", err)
+	}
 	if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
 		t.Fatalf("committed-kill audit row count=%d, want exactly 1 (duplicate audit row); log=%s", got, raw)
+	}
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 0 {
+		t.Fatalf("pending committed-audit carriers after exact-row replay=%d want=0", got)
+	}
+}
+
+func TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce(t *testing.T) {
+	const helperFlag = "MCPHUB_TEST_PENDING_COMMITTED_AUDIT_HELPER"
+	const helperStateDir = "MCPHUB_TEST_PENDING_COMMITTED_AUDIT_STATE_DIR"
+	if os.Getenv(helperFlag) == "1" {
+		stateDir := os.Getenv(helperStateDir)
+		if stateDir == "" {
+			t.Fatal("helper state directory is empty")
+		}
+		d := recoveryDescriptor()
+		const ownerPID = 44000
+		calls := &recoveryCallLog{}
+		deps := recoveryDependencies(t, calls, d)
+		deps.StateDir = func() (string, error) { return stateDir, nil }
+		deps.AuditEmitTimeout = 40 * time.Millisecond
+		probeCount := 0
+		deps.PortOwner = func(context.Context, int) (int, bool, error) {
+			probeCount++
+			if probeCount <= 2 {
+				return ownerPID, true, nil
+			}
+			return 0, false, nil
+		}
+
+		block := make(chan struct{})
+		restore := api.SetSupervisorEventWriteFnForTest(func(*api.SupervisorEventLog, []byte) error {
+			<-block
+			return nil
+		})
+		defer restore()
+
+		if _, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{Confirmed: true}, deps); err != nil {
+			t.Fatalf("helper ExecuteWithDependencies: %v", err)
+		}
+		if got := recoveryPendingCarrierCount(t, stateDir); got != 1 {
+			t.Fatalf("helper pending committed-audit carriers=%d want=1", got)
+		}
+		return
+	}
+
+	stateDir := t.TempDir()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestExecutePendingCommittedAuditSurvivesProcessExitAndReplaysOnce$")
+	cmd.Env = append(os.Environ(),
+		helperFlag+"=1",
+		helperStateDir+"="+stateDir,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("committed-audit helper failed: %v\n%s", err, output)
+	}
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 1 {
+		t.Fatalf("pending carriers after helper process exit=%d want=1; helper output=%s", got, output)
+	}
+
+	replayRecoveryPending(t, stateDir)
+	raw, err := os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read replayed committed audit: %v", err)
+	}
+	if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
+		t.Fatalf("replayed committed-audit rows=%d want=1; log=%s", got, raw)
+	}
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 0 {
+		t.Fatalf("pending carriers after replay=%d want=0", got)
+	}
+	replayRecoveryPending(t, stateDir)
+	raw, err = os.ReadFile(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read committed audit after idempotent replay: %v", err)
+	}
+	if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
+		t.Fatalf("committed-audit rows after second replay=%d want=1; log=%s", got, raw)
 	}
 }
 
@@ -1458,6 +1534,95 @@ func TestExecuteFastCommittedAuditIsDurableBeforeRespawn(t *testing.T) {
 	}
 	if got := strings.Count(string(raw), `"event":"daemon-port-squatter-reaped"`); got != 1 {
 		t.Fatalf("committed-kill audit count after recovery=%d want=1; audit=%s", got, raw)
+	}
+	if got := recoveryPendingCarrierCount(t, stateDir); got != 0 {
+		t.Fatalf("fast committed audit created %d pending carriers, want 0", got)
+	}
+}
+
+func auditDurabilityFailureDependencies(
+	t *testing.T,
+	respawn api.RespawnResult,
+	respawnErr error,
+) (Dependencies, *recoveryCallLog) {
+	t.Helper()
+	d := recoveryDescriptor()
+	const ownerPID = 44000
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	blockedStateDir := filepath.Join(t.TempDir(), "state-dir-is-a-file")
+	if err := os.WriteFile(blockedStateDir, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("create blocked state path: %v", err)
+	}
+	deps.StateDir = func() (string, error) { return blockedStateDir, nil }
+	probeCount := 0
+	deps.PortOwner = func(context.Context, int) (int, bool, error) {
+		probeCount++
+		if probeCount <= 2 {
+			return ownerPID, true, nil
+		}
+		return 0, false, nil
+	}
+	deps.Respawn = func(_ context.Context, task string, force bool) (api.RespawnResult, error) {
+		calls.order = append(calls.order, "respawn")
+		calls.respawn = append(calls.respawn, respawnCall{task: task, force: force})
+		return respawn, respawnErr
+	}
+	return deps, calls
+}
+
+func TestExecuteAuditHandoffPersistenceFailureReturnsFailureAuditDurabilityAfterRespawn(t *testing.T) {
+	respawn := api.RespawnResult{Success: true}
+	deps, calls := auditDurabilityFailureDependencies(t, respawn, nil)
+
+	result, err := ExecuteWithDependencies(
+		context.Background(),
+		recoveryDescriptor().TaskName,
+		Options{Confirmed: true},
+		deps,
+	)
+	opErr := requireFailureKind(t, err, FailureAuditDurability)
+	if len(calls.terminate) != 1 || len(calls.respawn) != 1 {
+		t.Fatalf("calls: terminate=%d respawn=%d want one each", len(calls.terminate), len(calls.respawn))
+	}
+	if !opErr.Respawn.Success {
+		t.Fatalf("audit durability error lost accepted respawn result: %+v", opErr.Respawn)
+	}
+	if opErr.Cause == nil || !strings.Contains(opErr.Cause.Error(), "persist committed recovery audit handoff") {
+		t.Fatalf("audit durability cause=%v want handoff persistence failure", opErr.Cause)
+	}
+	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped {
+		t.Fatalf("partial result=%+v want committed reap fact", result)
+	}
+}
+
+func TestExecuteAuditDurabilityFailurePreservesRespawnFailureFact(t *testing.T) {
+	respawnCause := errors.New("respawn transport failed")
+	respawn := api.RespawnResult{
+		Success: false,
+		Code:    "RESPAWN_REJECTED",
+		Message: "restart policy refused the request",
+	}
+	deps, calls := auditDurabilityFailureDependencies(t, respawn, respawnCause)
+
+	result, err := ExecuteWithDependencies(
+		context.Background(),
+		recoveryDescriptor().TaskName,
+		Options{Confirmed: true},
+		deps,
+	)
+	opErr := requireFailureKind(t, err, FailureAuditDurability)
+	if len(calls.terminate) != 1 || len(calls.respawn) != 1 {
+		t.Fatalf("calls: terminate=%d respawn=%d want one each", len(calls.terminate), len(calls.respawn))
+	}
+	if !errors.Is(opErr.Cause, respawnCause) {
+		t.Fatalf("audit durability cause=%v want joined respawn cause", opErr.Cause)
+	}
+	if opErr.Respawn != respawn {
+		t.Fatalf("respawn result=%+v want=%+v", opErr.Respawn, respawn)
+	}
+	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped {
+		t.Fatalf("partial result=%+v want committed reap fact", result)
 	}
 }
 
@@ -1920,134 +2085,101 @@ func TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable(t 
 	}
 }
 
-// TestQueueIdempotentAuditFallbackOutcomeMatrix pins the ONE branch point that
-// decides whether a SECOND physical audit row gets written for a single event.
-//
-// The release-failure row is the case review finding 2 introduced: propagating
-// a flock-release failure means a NEW error class can now reach this switch,
-// and it does NOT satisfy the default branch's precondition ("the tracked
-// attempt is DEFINITELY settled as failed — no row exists and none is coming").
-// The append phase already ran and may well have succeeded, so writing here
-// would re-create exactly the two-writers-one-outcome duplicate this function
-// was built to remove.
-//
-// The other three tracked-worker rows are the pre-existing contract, asserted
-// alongside so the new case cannot be added by loosening one of them.
-//
-// The two "Direct*" rows (pending == nil) are the round-4 review fix. A
-// release failure reaches this function through TWO channels, not one:
-// EmitWithTimeoutTracked returns a non-nil handle ONLY when its error is
-// exactly ErrSupervisorEventEmitTimeout (supervisor_events.go's emit builds
-// the handle on the ctx.Done() arm alone), so an emit whose write SETTLED
-// before the deadline but whose flock release failed returns
-// (nil, ErrSupervisorEventReleaseFailed) and used to skip the switch entirely
-// — falling through to an unconditional write that is both a probable
-// duplicate AND a probable hang (emitRecoverAuditEvent opens a fresh flock
-// handle on the same file with a BLOCKING Emit, while the unreleased flock is
-// still held by this very process; gofrs/flock conflicts against a second
-// handle in the SAME process, as verified for
-// TestEnsureAliveGUIRecovery_UnconfirmedLeaseReleaseDegradesToUnknown).
-//
-// MUTATION A: delete the `case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed)`
-// arm from queueIdempotentAuditFallback. The tracked release-failure outcome
-// then falls through to the unconditional fallback write and the
-// "ReleaseFailedRowMayHaveLanded" subtest fails with "audit rows = 1, want 0".
-//
-// MUTATION B: delete the `if errors.Is(emitErr, api.ErrSupervisorEventReleaseFailed)`
-// early return at the top of queueIdempotentAuditFallback. The
-// "DirectReleaseFailureRowMayHaveLanded" subtest fails with
-// "queued fallback closures = 1, want 0".
+// TestQueueIdempotentAuditFallbackOutcomeMatrix pins every tracked-write
+// outcome to one finalizer action. Release failures establish a carrier but do
+// not reacquire the event-log flock; every definitely absent or unsettled row
+// gets a carrier and an opportunistic replay.
 func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 	cases := []struct {
-		name string
-		// tracked reports whether a worker handle exists (the emitTimeout
-		// hand-off). When false the row exercises the direct
-		// (pending == nil) channel and `outcome` is the tracked call's OWN
-		// returned error instead of the abandoned worker's completion.
-		tracked    bool
-		outcome    error
-		wantQueued int
-		wantRows   int
-		why        string
+		name        string
+		attempted   bool
+		pending     bool
+		outcome     error
+		wantRows    int
+		wantPending int
 	}{
 		{
-			name:       "ReleaseFailedRowMayHaveLanded",
-			tracked:    true,
-			outcome:    fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
-			wantQueued: 1,
-			wantRows:   0,
-			why:        "a release failure says nothing about the row; a fallback write would risk a duplicate",
+			name:      "FastSuccess",
+			attempted: true,
 		},
 		{
-			name:       "WorkerWriteSucceeded",
-			tracked:    true,
-			outcome:    nil,
-			wantQueued: 1,
-			wantRows:   0,
-			why:        "the tracked worker's row already landed",
+			name:        "NoAttempt",
+			wantRows:    1,
+			wantPending: 0,
 		},
 		{
-			name:       "WorkerStillUnsettled",
-			tracked:    true,
-			outcome:    api.ErrSupervisorEventEmitTimeout,
-			wantQueued: 1,
-			wantRows:   0,
-			why:        "unsettled by design; racing it with an independent write is the PILED defect",
+			name:        "LockAcquisitionTimeout",
+			attempted:   true,
+			outcome:     api.ErrSupervisorEventEmitTimeout,
+			wantRows:    1,
+			wantPending: 0,
 		},
 		{
-			name:       "GenuineWriteFailure",
-			tracked:    true,
-			outcome:    errors.New("write supervisor event log: simulated disk failure"),
-			wantQueued: 1,
-			wantRows:   1,
-			why:        "definitely settled as failed, so exactly one fresh attempt is legitimate",
+			name:        "DirectDefiniteFailure",
+			attempted:   true,
+			outcome:     errors.New("write supervisor event log: simulated disk failure"),
+			wantRows:    1,
+			wantPending: 0,
 		},
 		{
-			name:       "DirectReleaseFailureRowMayHaveLanded",
-			tracked:    false,
-			outcome:    fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
-			wantQueued: 0,
-			wantRows:   0,
-			why:        "the emit SETTLED before its deadline (so there is no worker handle) but could not release the flock; the append phase ran and may have committed the row",
+			name:        "DirectReleaseFailure",
+			attempted:   true,
+			outcome:     fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
+			wantPending: 1,
 		},
 		{
-			name:       "DirectGenuineWriteFailure",
-			tracked:    false,
-			outcome:    errors.New("write supervisor event log: simulated disk failure"),
-			wantQueued: 1,
-			wantRows:   1,
-			why:        "a settled non-release failure means no row exists and none is coming, so one fresh attempt is legitimate",
+			name:      "PendingSuccess",
+			attempted: true,
+			pending:   true,
 		},
 		{
-			name:       "DirectNoAttemptMade",
-			tracked:    false,
-			outcome:    nil,
-			wantQueued: 1,
-			wantRows:   1,
-			why:        "the auditBudget<=0 call site: nothing was ever attempted, so this closure is the ONLY possible writer",
+			name:        "PendingStillUnsettled",
+			attempted:   true,
+			pending:     true,
+			outcome:     api.ErrSupervisorEventEmitTimeout,
+			wantRows:    1,
+			wantPending: 0,
+		},
+		{
+			name:        "PendingReleaseFailure",
+			attempted:   true,
+			pending:     true,
+			outcome:     fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
+			wantPending: 1,
+		},
+		{
+			name:        "PendingDefiniteFailure",
+			attempted:   true,
+			pending:     true,
+			outcome:     errors.New("write supervisor event log: simulated disk failure"),
+			wantRows:    1,
+			wantPending: 0,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			stateDir := t.TempDir()
-			audit := api.SupervisorEvent{
+			prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
 				Severity: api.SupervisorEventSeverityInfo,
 				Source:   api.SupervisorEventSourceLifecycle,
 				Event:    "daemon-recovery-fallback-outcome-matrix",
+				TS:       time.Unix(1_700_000_000, 0).UTC().Format(time.RFC3339Nano),
+			})
+			if err != nil {
+				t.Fatalf("prepare audit: %v", err)
 			}
-
-			var postCommitAudits []func()
-			if tc.tracked {
-				queueIdempotentAuditFallback(&postCommitAudits, stateDir, audit,
-					api.NewPendingSupervisorEventEmitForTest(tc.outcome), api.ErrSupervisorEventEmitTimeout)
-			} else {
-				queueIdempotentAuditFallback(&postCommitAudits, stateDir, audit, nil, tc.outcome)
+			finalizer := &committedAuditFinalizer{
+				stateDir:  stateDir,
+				prepared:  prepared,
+				attempted: tc.attempted,
+				emitErr:   tc.outcome,
 			}
-			if len(postCommitAudits) != tc.wantQueued {
-				t.Fatalf("queued fallback closures = %d, want %d (%s)", len(postCommitAudits), tc.wantQueued, tc.why)
+			if tc.pending {
+				finalizer.pending = api.NewPendingSupervisorEventEmitForTest(tc.outcome)
+				finalizer.emitErr = api.ErrSupervisorEventEmitTimeout
 			}
-			for _, emitAudit := range postCommitAudits {
-				emitAudit()
+			if err := finalizer.finalize(); err != nil {
+				t.Fatalf("finalize: %v", err)
 			}
 
 			logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
@@ -2055,9 +2187,11 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			if err != nil && !os.IsNotExist(err) {
 				t.Fatalf("read %s: %v", logPath, err)
 			}
-			rows := strings.Count(string(raw), audit.Event)
-			if rows != tc.wantRows {
-				t.Fatalf("audit rows = %d, want %d (%s); log=%q", rows, tc.wantRows, tc.why, string(raw))
+			if rows := strings.Count(string(raw), "daemon-recovery-fallback-outcome-matrix"); rows != tc.wantRows {
+				t.Fatalf("audit rows=%d want=%d; log=%q", rows, tc.wantRows, string(raw))
+			}
+			if got := recoveryPendingCarrierCount(t, stateDir); got != tc.wantPending {
+				t.Fatalf("pending carriers=%d want=%d", got, tc.wantPending)
 			}
 		})
 	}

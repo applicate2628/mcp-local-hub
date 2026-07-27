@@ -5,10 +5,16 @@
 package api
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -878,3 +884,795 @@ func TestSupervisorEventLog_TimeoutWorkerReleasesBeforeSignallingCompletion(t *t
 		t.Fatalf("pending.Wait error = %v, want the underlying release cause preserved", waitErr)
 	}
 }
+
+func TestSupervisorEvent_PrepareOncePreservesTimestampAndBytes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	prepared, err := PrepareSupervisorEvent(SupervisorEvent{
+		Source: "lifecycle",
+		Event:  "prepared-once",
+		Body:   map[string]any{"result": "committed"},
+	})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	var envelope SupervisorEvent
+	if err := json.Unmarshal(prepared.raw[:len(prepared.raw)-1], &envelope); err != nil {
+		t.Fatalf("decode prepared row: %v", err)
+	}
+	if envelope.TS == "" {
+		t.Fatal("prepared timestamp is empty")
+	}
+
+	if pending, err := logger.EmitPreparedWithTimeoutTracked(prepared, time.Second); err != nil || pending != nil {
+		t.Fatalf("emit prepared: pending=%v err=%v", pending, err)
+	}
+	if err := logger.PersistPending(prepared); err != nil {
+		t.Fatalf("persist prepared: %v", err)
+	}
+	active, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read active: %v", err)
+	}
+	carrier, err := os.ReadFile(supervisorEventPendingPath(logger, prepared))
+	if err != nil {
+		t.Fatalf("read carrier: %v", err)
+	}
+	if !bytes.Equal(active, prepared.raw) || !bytes.Equal(carrier, prepared.raw) {
+		t.Fatalf("prepared bytes drifted: active=%q carrier=%q prepared=%q", active, carrier, prepared.raw)
+	}
+}
+
+func TestSupervisorEvent_PreparedBoundaryPreservesMaxUint64AcrossAllModesAndPending(t *testing.T) {
+	evt := SupervisorEvent{
+		TS:     "2026-07-27T00:00:00Z",
+		Source: "lifecycle",
+		Event:  "max-uint64",
+		Body:   map[string]any{"maximum": uint64(math.MaxUint64)},
+	}
+	expected, err := PrepareSupervisorEvent(evt)
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	const numericToken = `"maximum":18446744073709551615`
+	if !bytes.Contains(expected.raw, []byte(numericToken)) {
+		t.Fatalf("prepared row %q does not preserve %s", expected.raw, numericToken)
+	}
+
+	cases := []struct {
+		name string
+		emit func(*SupervisorEventLog) error
+	}{
+		{"blocking", func(l *SupervisorEventLog) error { return l.Emit(evt) }},
+		{"try", func(l *SupervisorEventLog) error { return l.TryEmit(evt) }},
+		{"timeout", func(l *SupervisorEventLog) error { return l.EmitWithTimeout(evt, time.Second) }},
+		{"tracked-timeout", func(l *SupervisorEventLog) error {
+			pending, err := l.EmitWithTimeoutTracked(evt, time.Second)
+			if pending != nil {
+				return errors.New("unexpected pending worker")
+			}
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+			logger, err := OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := tc.emit(logger); err != nil {
+				t.Fatalf("emit: %v", err)
+			}
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(raw, expected.raw) {
+				t.Fatalf("emitted bytes = %q, want exact prepared bytes %q", raw, expected.raw)
+			}
+		})
+	}
+
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.PersistPending(expected); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	carrier, err := os.ReadFile(supervisorEventPendingPath(logger, expected))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(carrier, expected.raw) {
+		t.Fatalf("carrier bytes = %q, want %q", carrier, expected.raw)
+	}
+	if err := logger.TryReplayPending(); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	active, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(active, expected.raw) {
+		t.Fatalf("replayed bytes = %q, want %q", active, expected.raw)
+	}
+}
+
+func TestSupervisorEvent_PreparedBoundaryPreservesNestedCustomMarshalerBytes(t *testing.T) {
+	prepared, err := PrepareSupervisorEvent(SupervisorEvent{
+		TS:     "2026-07-27T00:00:00Z",
+		Source: "lifecycle",
+		Event:  "custom-marshaler",
+		Body:   map[string]any{"nested": exactNestedSupervisorEventJSON{}},
+	})
+	if err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	const nestedToken = `"nested":{"z":18446744073709551615,"a":{"second":2,"first":1}}`
+	if !bytes.Contains(prepared.raw, []byte(nestedToken)) {
+		t.Fatalf("prepared row %q does not preserve custom token %s", prepared.raw, nestedToken)
+	}
+
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending, err := logger.EmitPreparedWithTimeoutTracked(prepared, time.Second); err != nil || pending != nil {
+		t.Fatalf("emit prepared: pending=%v err=%v", pending, err)
+	}
+	active, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(active, prepared.raw) {
+		t.Fatalf("active bytes = %q, want %q", active, prepared.raw)
+	}
+	if err := logger.PersistPending(prepared); err != nil {
+		t.Fatalf("persist: %v", err)
+	}
+	carrier, err := os.ReadFile(supervisorEventPendingPath(logger, prepared))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(carrier, prepared.raw) {
+		t.Fatalf("carrier bytes = %q, want %q", carrier, prepared.raw)
+	}
+	if err := logger.TryReplayPending(); err != nil {
+		t.Fatalf("replay exact custom row: %v", err)
+	}
+	if got := countExactRetainedSupervisorEventRows(t, path, prepared.raw); got != 1 {
+		t.Fatalf("exact retained custom rows = %d, want 1", got)
+	}
+}
+
+func TestSupervisorEventPending_UntrustedCarrierRejectsMalformedAndDigestMismatch(t *testing.T) {
+	t.Run("malformed-json", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+		logger, err := OpenSupervisorEventLog(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := []byte("{not-json}\n")
+		digest := sha256.Sum256(raw)
+		carrierPath := writeRawSupervisorEventCarrier(t, logger, digest, raw)
+		if err := logger.TryReplayPending(); err == nil || !strings.Contains(err.Error(), "invalid JSONL") {
+			t.Fatalf("replay error = %v, want invalid JSONL rejection", err)
+		}
+		if _, err := os.Stat(carrierPath); err != nil {
+			t.Fatalf("malformed carrier not retained: %v", err)
+		}
+	})
+
+	t.Run("digest-mismatch", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+		logger, err := OpenSupervisorEventLog(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared := mustPrepareSupervisorEvent(t, "digest-mismatch")
+		wrongDigest := sha256.Sum256([]byte("different exact bytes\n"))
+		carrierPath := writeRawSupervisorEventCarrier(t, logger, wrongDigest, prepared.raw)
+		if err := logger.TryReplayPending(); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+			t.Fatalf("replay error = %v, want digest mismatch rejection", err)
+		}
+		if _, err := os.Stat(carrierPath); err != nil {
+			t.Fatalf("digest-mismatch carrier not retained: %v", err)
+		}
+	})
+
+	t.Run("invalid-envelope-body", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+		logger, err := OpenSupervisorEventLog(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw := []byte(`{"schema_version":"1","ts":"2026-07-27T00:00:00Z","severity":"info","source":"lifecycle","event":"invalid-body","body":[]}` + "\n")
+		digest := sha256.Sum256(raw)
+		carrierPath := writeRawSupervisorEventCarrier(t, logger, digest, raw)
+		if err := logger.TryReplayPending(); err == nil || !strings.Contains(err.Error(), "body must be a JSON object") {
+			t.Fatalf("replay error = %v, want envelope-body rejection", err)
+		}
+		if _, err := os.Stat(carrierPath); err != nil {
+			t.Fatalf("invalid-envelope carrier not retained: %v", err)
+		}
+	})
+}
+
+func TestSupervisorEvent_PreparedBoundaryRejectsZeroAndCorruptValues(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := logger.EmitPreparedWithTimeoutTracked(PreparedSupervisorEvent{}, time.Second); err == nil {
+		t.Fatal("zero prepared value was accepted by emit")
+	}
+	if err := logger.PersistPending(PreparedSupervisorEvent{}); err == nil {
+		t.Fatal("zero prepared value was accepted by persistence")
+	}
+
+	corrupt := mustPrepareSupervisorEvent(t, "corrupt-prepared")
+	corrupt.digest[0] ^= 0xff
+	if _, err := logger.EmitPreparedWithTimeoutTracked(corrupt, time.Second); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("corrupt prepared emit error = %v, want digest mismatch", err)
+	}
+	if err := logger.PersistPending(corrupt); err == nil || !strings.Contains(err.Error(), "digest mismatch") {
+		t.Fatalf("corrupt prepared persist error = %v, want digest mismatch", err)
+	}
+}
+
+func TestSupervisorEventPending_PersistAtomicCollisionAndBounds(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := prepareSupervisorEventAtLength(t, supervisorEventMaxBytes+1)
+	if err := logger.PersistPending(prepared); err != nil {
+		t.Fatalf("persist maximum-sized row: %v", err)
+	}
+
+	dir := path + supervisorEventPendingDirSuffix
+	finalPath := supervisorEventPendingPath(logger, prepared)
+	if filepath.Base(finalPath) != fmt.Sprintf("%x%s", prepared.digest, supervisorEventPendingFileSuffix) {
+		t.Fatalf("carrier name = %q, want exact lowercase digest", filepath.Base(finalPath))
+	}
+	if stat, err := os.Stat(finalPath); err != nil {
+		t.Fatalf("stat carrier: %v", err)
+	} else {
+		if stat.Size() != int64(supervisorEventMaxBytes+1) {
+			t.Fatalf("carrier size = %d, want %d", stat.Size(), supervisorEventMaxBytes+1)
+		}
+		if runtime.GOOS != "windows" && stat.Mode().Perm() != 0o600 {
+			t.Fatalf("carrier mode = %o, want 0600", stat.Mode().Perm())
+		}
+	}
+	if stat, err := os.Stat(dir); err != nil {
+		t.Fatalf("stat pending dir: %v", err)
+	} else if runtime.GOOS != "windows" && stat.Mode().Perm() != 0o700 {
+		t.Fatalf("pending dir mode = %o, want 0700", stat.Mode().Perm())
+	}
+
+	if err := logger.PersistPending(prepared); err != nil {
+		t.Fatalf("exact-content idempotent persist: %v", err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("idempotent persist created %d entries, want 1", len(entries))
+	}
+
+	oversize := prepared
+	oversize.raw = append(bytes.Clone(prepared.raw), 'x')
+	oversize.digest = sha256.Sum256(oversize.raw)
+	if err := logger.PersistPending(oversize); err == nil || !strings.Contains(err.Error(), "maximum") {
+		t.Fatalf("oversize persist error = %v, want maximum-bound failure", err)
+	}
+
+	if err := os.WriteFile(finalPath, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.PersistPending(prepared); err == nil || !strings.Contains(err.Error(), "collision") {
+		t.Fatalf("collision persist error = %v, want collision refusal", err)
+	}
+
+	cleanupPrepared := mustPrepareSupervisorEvent(t, "temp-cleanup")
+	linkFailure := errors.New("injected hard-link failure")
+	logger.pendingIO.link = func(string, string) error { return linkFailure }
+	if err := logger.PersistPending(cleanupPrepared); !errors.Is(err, linkFailure) {
+		t.Fatalf("link failure = %v, want injected cause", err)
+	}
+	entries, err = os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".tmp-") {
+			t.Fatalf("temporary carrier leaked after link failure: %s", entry.Name())
+		}
+	}
+}
+
+func TestSupervisorEventPending_ReplaysBeforeEveryEmitMode(t *testing.T) {
+	cases := []struct {
+		name string
+		emit func(*SupervisorEventLog, SupervisorEvent) error
+	}{
+		{"blocking", func(l *SupervisorEventLog, evt SupervisorEvent) error { return l.Emit(evt) }},
+		{"try", func(l *SupervisorEventLog, evt SupervisorEvent) error { return l.TryEmit(evt) }},
+		{"timeout", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			return l.EmitWithTimeout(evt, time.Second)
+		}},
+		{"tracked-timeout", func(l *SupervisorEventLog, evt SupervisorEvent) error {
+			pending, err := l.EmitWithTimeoutTracked(evt, time.Second)
+			if pending != nil {
+				return errors.New("unexpected pending worker")
+			}
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+			logger, err := OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			first := mustPrepareSupervisorEvent(t, "pending-before-"+tc.name)
+			if err := logger.PersistPending(first); err != nil {
+				t.Fatalf("persist pending: %v", err)
+			}
+			if err := tc.emit(logger, SupervisorEvent{
+				TS:     "2026-07-27T00:00:01Z",
+				Source: "lifecycle",
+				Event:  "current-after-" + tc.name,
+			}); err != nil {
+				t.Fatalf("emit: %v", err)
+			}
+			rows := readSupervisorEventRows(t, path)
+			if len(rows) != 2 {
+				t.Fatalf("row count = %d, want 2: %q", len(rows), rows)
+			}
+			if !bytes.Equal(rows[0], first.raw) || !bytes.Contains(rows[1], []byte("current-after-"+tc.name)) {
+				t.Fatalf("row order/content = %q, want pending then current", rows)
+			}
+		})
+	}
+}
+
+func TestSupervisorEventPending_ExactActiveAndBackupDedupe(t *testing.T) {
+	cases := []struct {
+		name       string
+		seedActive func(string, []byte) error
+		seedBackup func(string, []byte) error
+		wantRows   int
+	}{
+		{"active", func(path string, raw []byte) error { return os.WriteFile(path, raw, 0o600) }, nil, 1},
+		{"backup", nil, func(path string, raw []byte) error { return os.WriteFile(path+".1", raw, 0o600) }, 1},
+		{"absent", nil, nil, 1},
+		{"partial-tail", func(path string, raw []byte) error {
+			return os.WriteFile(path, raw[:len(raw)-1], 0o600)
+		}, nil, 1},
+		{"content-collision", func(path string, _ []byte) error {
+			other := mustPrepareSupervisorEvent(t, "different-row")
+			return os.WriteFile(path, other.raw, 0o600)
+		}, nil, 1},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+			logger, err := OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared := mustPrepareSupervisorEvent(t, "dedupe-target")
+			if err := logger.PersistPending(prepared); err != nil {
+				t.Fatal(err)
+			}
+			if tc.seedActive != nil {
+				if err := tc.seedActive(path, prepared.raw); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if tc.seedBackup != nil {
+				if err := tc.seedBackup(path, prepared.raw); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := logger.TryReplayPending(); err != nil {
+				t.Fatalf("replay: %v", err)
+			}
+			if _, err := os.Stat(supervisorEventPendingPath(logger, prepared)); !errors.Is(err, os.ErrNotExist) {
+				t.Fatalf("carrier not retired: %v", err)
+			}
+			if got := countExactRetainedSupervisorEventRows(t, path, prepared.raw); got != tc.wantRows {
+				t.Fatalf("exact retained rows = %d, want %d", got, tc.wantRows)
+			}
+		})
+	}
+
+	t.Run("complete-oversize-record-fails-and-retains", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+		logger, err := OpenSupervisorEventLog(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		prepared := mustPrepareSupervisorEvent(t, "oversize-retained-record")
+		if err := logger.PersistPending(prepared); err != nil {
+			t.Fatal(err)
+		}
+		oversizeRecord := append(bytes.Repeat([]byte{'x'}, supervisorEventMaxBytes+1), '\n')
+		if err := os.WriteFile(path, oversizeRecord, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := logger.TryReplayPending(); err == nil || !strings.Contains(err.Error(), "exceeds") {
+			t.Fatalf("replay error = %v, want complete-record cap failure", err)
+		}
+		if _, err := os.Stat(supervisorEventPendingPath(logger, prepared)); err != nil {
+			t.Fatalf("carrier not retained after retained-history error: %v", err)
+		}
+	})
+}
+
+func TestSupervisorEventPending_LateWriterConcurrentReplayAndRotationExactlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	if err := os.WriteFile(path, bytes.Repeat([]byte{'p'}, int(supervisorEventLogRotateSize+1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writer, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayer, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := mustPrepareSupervisorEvent(t, "late-writer")
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	restore := SetSupervisorEventWriteFnForTest(func(l *SupervisorEventLog, raw []byte) error {
+		close(entered)
+		<-release
+		return l.writeEventLine(raw)
+	})
+	defer restore()
+
+	pending, emitErr := writer.EmitPreparedWithTimeoutTracked(prepared, 100*time.Millisecond)
+	if !errors.Is(emitErr, ErrSupervisorEventEmitTimeout) || pending == nil {
+		t.Fatalf("tracked emit = pending %v err %v, want pending timeout", pending, emitErr)
+	}
+	<-entered
+	if err := writer.PersistPending(prepared); err != nil {
+		t.Fatalf("persist while original writer is stalled: %v", err)
+	}
+	if err := replayer.TryReplayPending(); err != nil {
+		t.Fatalf("contended replay: %v", err)
+	}
+	if _, err := os.Stat(supervisorEventPendingPath(writer, prepared)); err != nil {
+		t.Fatalf("contended replay changed carrier: %v", err)
+	}
+	close(release)
+	if err := pending.Wait(5 * time.Second); err != nil {
+		t.Fatalf("wait original writer: %v", err)
+	}
+	if err := replayer.TryReplayPending(); err != nil {
+		t.Fatalf("post-write replay: %v", err)
+	}
+	if got := countExactRetainedSupervisorEventRows(t, path, prepared.raw); got != 1 {
+		t.Fatalf("exact retained rows = %d, want 1", got)
+	}
+}
+
+func TestSupervisorEventPending_ConcurrentReplayExactlyOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	first, _ := OpenSupervisorEventLog(path)
+	second, _ := OpenSupervisorEventLog(path)
+	prepared := mustPrepareSupervisorEvent(t, "concurrent-replay")
+	if err := first.PersistPending(prepared); err != nil {
+		t.Fatal(err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	for _, logger := range []*SupervisorEventLog{first, second} {
+		go func(l *SupervisorEventLog) {
+			<-start
+			errs <- l.TryReplayPending()
+		}(logger)
+	}
+	close(start)
+	for range 2 {
+		if err := <-errs; err != nil {
+			t.Fatalf("concurrent replay: %v", err)
+		}
+	}
+	if got := countExactRetainedSupervisorEventRows(t, path, prepared.raw); got != 1 {
+		t.Fatalf("exact retained rows = %d, want 1", got)
+	}
+	if _, err := os.Stat(supervisorEventPendingPath(first, prepared)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("carrier not retired: %v", err)
+	}
+}
+
+func TestSupervisorEventPending_RetainsOnEveryFailure(t *testing.T) {
+	injected := errors.New("injected pending I/O failure")
+	cases := []struct {
+		name      string
+		seedExact bool
+		mutate    func(*SupervisorEventLog)
+	}{
+		{"scan", false, func(l *SupervisorEventLog) {
+			l.pendingIO.readDirNames = func(string, int) ([]string, error) { return nil, injected }
+		}},
+		{"read", false, func(l *SupervisorEventLog) {
+			l.pendingIO.readBounded = func(string, int64) ([]byte, error) { return nil, injected }
+		}},
+		{"rotate", false, func(l *SupervisorEventLog) {
+			l.pendingIO.rotateIfNeeded = func(string) error { return injected }
+		}},
+		{"open", false, func(l *SupervisorEventLog) {
+			l.pendingIO.openAppend = func(string) (supervisorEventFile, error) { return nil, injected }
+		}},
+		{"append", false, func(l *SupervisorEventLog) {
+			open := l.pendingIO.openAppend
+			l.pendingIO.openAppend = func(path string) (supervisorEventFile, error) {
+				f, err := open(path)
+				return &failingSupervisorEventFile{supervisorEventFile: f, writeErr: injected}, err
+			}
+		}},
+		{"sync", false, func(l *SupervisorEventLog) {
+			open := l.pendingIO.openAppend
+			l.pendingIO.openAppend = func(path string) (supervisorEventFile, error) {
+				f, err := open(path)
+				return &failingSupervisorEventFile{supervisorEventFile: f, syncErr: injected}, err
+			}
+		}},
+		{"close", false, func(l *SupervisorEventLog) {
+			open := l.pendingIO.openAppend
+			l.pendingIO.openAppend = func(path string) (supervisorEventFile, error) {
+				f, err := open(path)
+				return &failingSupervisorEventFile{supervisorEventFile: f, closeErr: injected}, err
+			}
+		}},
+		{"remove", true, func(l *SupervisorEventLog) {
+			l.pendingIO.remove = func(string) error { return injected }
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+			logger, err := OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			prepared := mustPrepareSupervisorEvent(t, "retain-on-"+tc.name)
+			if err := logger.PersistPending(prepared); err != nil {
+				t.Fatal(err)
+			}
+			if tc.seedExact {
+				if err := os.WriteFile(path, prepared.raw, 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			tc.mutate(logger)
+			if err := logger.TryReplayPending(); err == nil {
+				t.Fatal("replay returned nil, want injected failure")
+			}
+			if _, err := os.Stat(supervisorEventPendingPath(logger, prepared)); err != nil {
+				t.Fatalf("carrier not retained: %v", err)
+			}
+		})
+	}
+}
+
+func TestSupervisorEventPending_ReplayBatchIsCappedAt64(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < supervisorEventPendingReplayLimit+1; i++ {
+		prepared, err := PrepareSupervisorEvent(SupervisorEvent{
+			TS:     fmt.Sprintf("2026-07-27T00:00:%02dZ", i%60),
+			Source: "lifecycle",
+			Event:  fmt.Sprintf("batch-%03d", i),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := logger.PersistPending(prepared); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := logger.TryReplayPending(); err != nil {
+		t.Fatalf("replay: %v", err)
+	}
+	entries, err := os.ReadDir(path + supervisorEventPendingDirSuffix)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("pending entries after one pass = %d, want 1", len(entries))
+	}
+	if got := len(readSupervisorEventRows(t, path)); got != supervisorEventPendingReplayLimit {
+		t.Fatalf("replayed rows = %d, want %d", got, supervisorEventPendingReplayLimit)
+	}
+}
+
+func TestSupervisorEventPending_TryReplayReleasesLocksOnPanic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.pendingIO.readDirNames = func(string, int) ([]string, error) {
+		panic("injected replay panic")
+	}
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatal("TryReplayPending did not propagate injected panic")
+			}
+		}()
+		_ = logger.TryReplayPending()
+	}()
+	if !logger.mu.TryLock() {
+		t.Fatal("TryReplayPending retained in-process mutex after panic")
+	}
+	logger.mu.Unlock()
+	other := flock.New(path + supervisorEventLogLockSuffix)
+	locked, err := other.TryLock()
+	if err != nil {
+		t.Fatalf("probe flock after panic: %v", err)
+	}
+	if !locked {
+		t.Fatal("TryReplayPending retained cross-process flock after panic")
+	}
+	if err := other.Unlock(); err != nil {
+		t.Fatalf("release probe flock: %v", err)
+	}
+}
+
+type failingSupervisorEventFile struct {
+	supervisorEventFile
+	writeErr error
+	syncErr  error
+	closeErr error
+}
+
+type exactNestedSupervisorEventJSON struct{}
+
+func (exactNestedSupervisorEventJSON) MarshalJSON() ([]byte, error) {
+	return []byte(`{"z":18446744073709551615,"a":{"second":2,"first":1}}`), nil
+}
+
+func (f *failingSupervisorEventFile) Write(p []byte) (int, error) {
+	if f.writeErr != nil {
+		return 0, f.writeErr
+	}
+	return f.supervisorEventFile.Write(p)
+}
+
+func (f *failingSupervisorEventFile) Sync() error {
+	if f.syncErr != nil {
+		return f.syncErr
+	}
+	return f.supervisorEventFile.Sync()
+}
+
+func (f *failingSupervisorEventFile) Close() error {
+	closeErr := f.supervisorEventFile.Close()
+	return errors.Join(closeErr, f.closeErr)
+}
+
+func mustPrepareSupervisorEvent(t *testing.T, event string) PreparedSupervisorEvent {
+	t.Helper()
+	prepared, err := PrepareSupervisorEvent(SupervisorEvent{
+		TS:     "2026-07-27T00:00:00Z",
+		Source: "lifecycle",
+		Event:  event,
+	})
+	if err != nil {
+		t.Fatalf("prepare %s: %v", event, err)
+	}
+	return prepared
+}
+
+func prepareSupervisorEventAtLength(t *testing.T, totalBytes int) PreparedSupervisorEvent {
+	t.Helper()
+	base, err := PrepareSupervisorEvent(SupervisorEvent{
+		TS:     "2026-07-27T00:00:00Z",
+		Source: "lifecycle",
+		Event:  "maximum-carrier",
+		Body:   map[string]any{"payload": ""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	padding := totalBytes - len(base.raw)
+	if padding < 0 {
+		t.Fatalf("target length %d is below base length %d", totalBytes, len(base.raw))
+	}
+	prepared, err := PrepareSupervisorEvent(SupervisorEvent{
+		TS:     "2026-07-27T00:00:00Z",
+		Source: "lifecycle",
+		Event:  "maximum-carrier",
+		Body:   map[string]any{"payload": strings.Repeat("x", padding)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prepared.raw) != totalBytes {
+		t.Fatalf("prepared length = %d, want %d", len(prepared.raw), totalBytes)
+	}
+	return prepared
+}
+
+func supervisorEventPendingPath(logger *SupervisorEventLog, prepared PreparedSupervisorEvent) string {
+	return filepath.Join(
+		logger.path+supervisorEventPendingDirSuffix,
+		fmt.Sprintf("%x%s", prepared.digest, supervisorEventPendingFileSuffix),
+	)
+}
+
+func writeRawSupervisorEventCarrier(t *testing.T, logger *SupervisorEventLog, digest [sha256.Size]byte, raw []byte) string {
+	t.Helper()
+	dir := logger.path + supervisorEventPendingDirSuffix
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, fmt.Sprintf("%x%s", digest, supervisorEventPendingFileSuffix))
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func readSupervisorEventRows(t *testing.T, path string) [][]byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	parts := bytes.SplitAfter(raw, []byte{'\n'})
+	rows := make([][]byte, 0, len(parts))
+	for _, part := range parts {
+		if len(part) > 0 && part[len(part)-1] == '\n' {
+			rows = append(rows, part)
+		}
+	}
+	return rows
+}
+
+func countExactRetainedSupervisorEventRows(t *testing.T, path string, want []byte) int {
+	t.Helper()
+	count := 0
+	for _, candidate := range []string{path, path + supervisorEventLogRotatedSuffix} {
+		raw, err := os.ReadFile(candidate)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			t.Fatalf("read retained log %s: %v", candidate, err)
+		}
+		for _, row := range bytes.SplitAfter(raw, []byte{'\n'}) {
+			if bytes.Equal(row, want) {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+var _ io.Writer = (*failingSupervisorEventFile)(nil)

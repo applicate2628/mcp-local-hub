@@ -46,11 +46,20 @@
 package api
 
 import (
+	"bufio"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -89,6 +98,13 @@ const supervisorEventLogRotateSize int64 = 10 * 1024 * 1024
 // intent_audit.go:87-91 §35). Marshaled JSON Lines exceeding this
 // ceiling are truncated with identity-field protection.
 const supervisorEventMaxBytes = 16 * 1024
+
+const (
+	supervisorEventPendingDirSuffix   = ".pending"
+	supervisorEventPendingFileSuffix  = ".jsonl"
+	supervisorEventPendingReplayLimit = 64
+	supervisorEventPendingScanLimit   = supervisorEventPendingReplayLimit + 1
+)
 
 // supervisorEventIdentityCap is the per-identity-field byte ceiling
 // per plan §51. Identity fields (Event, Source, TaskName) are NEVER
@@ -149,6 +165,34 @@ type SupervisorEvent struct {
 	TaskName      string         `json:"task_name,omitempty"`
 	Body          map[string]any `json:"body,omitempty"`
 	Truncated     bool           `json:"_truncated,omitempty"`
+}
+
+// PreparedSupervisorEvent is the immutable, normalized byte representation of
+// one supervisor event. Its fields are deliberately unexported: callers can
+// create a value only through PrepareSupervisorEvent, which applies the
+// canonical defaults, truncation, and terminal-newline rules exactly once.
+type PreparedSupervisorEvent struct {
+	raw    []byte
+	digest [sha256.Size]byte
+}
+
+// PrepareSupervisorEvent normalizes one event into its exact JSONL bytes and
+// binds those bytes to their SHA-256 content identity. The returned value can
+// be emitted and persisted without regenerating its timestamp or remarshal.
+func PrepareSupervisorEvent(evt SupervisorEvent) (PreparedSupervisorEvent, error) {
+	raw, err := marshalSupervisorEventLine(evt)
+	if err != nil {
+		return PreparedSupervisorEvent{}, err
+	}
+	return preparedSupervisorEventFromRaw(raw), nil
+}
+
+func preparedSupervisorEventFromRaw(raw []byte) PreparedSupervisorEvent {
+	owned := bytes.Clone(raw)
+	return PreparedSupervisorEvent{
+		raw:    owned,
+		digest: sha256.Sum256(owned),
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -271,9 +315,35 @@ func (p *PendingSupervisorEventEmit) Wait(timeout time.Duration) error {
 // flock can still racily interleave file writes from two goroutines
 // without the mutex.
 type SupervisorEventLog struct {
-	path string
-	lock *flock.Flock
-	mu   sync.Mutex
+	path      string
+	lock      *flock.Flock
+	mu        sync.Mutex
+	pendingIO supervisorEventPendingIO
+}
+
+type supervisorEventFile interface {
+	Name() string
+	Write([]byte) (int, error)
+	ReadAt([]byte, int64) (int, error)
+	Stat() (fs.FileInfo, error)
+	Sync() error
+	Close() error
+}
+
+// supervisorEventPendingIO is installed per log handle so durability failures
+// can be exercised without mutable package-global seams or cross-test races.
+// File method calls remain injectable through the returned supervisorEventFile.
+type supervisorEventPendingIO struct {
+	mkdirAll       func(string, fs.FileMode) error
+	chmod          func(string, fs.FileMode) error
+	createTemp     func(string, string) (supervisorEventFile, error)
+	readBounded    func(string, int64) ([]byte, error)
+	readDirNames   func(string, int) ([]string, error)
+	link           func(string, string) error
+	rotateIfNeeded func(string) error
+	openAppend     func(string) (supervisorEventFile, error)
+	containsRecord func(string, []byte) (bool, error)
+	remove         func(string) error
 }
 
 // OpenSupervisorEventLog constructs a SupervisorEventLog rooted at
@@ -288,8 +358,9 @@ type SupervisorEventLog struct {
 // thin durable-write primitive).
 func OpenSupervisorEventLog(path string) (*SupervisorEventLog, error) {
 	return &SupervisorEventLog{
-		path: path,
-		lock: flock.New(path + supervisorEventLogLockSuffix),
+		path:      path,
+		lock:      flock.New(path + supervisorEventLogLockSuffix),
+		pendingIO: defaultSupervisorEventPendingIO(),
 	}, nil
 }
 
@@ -335,7 +406,11 @@ const (
 const eventLogEmitRetryDelay = 10 * time.Millisecond
 
 func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
-	_, err := l.emit(evt, emitBlocking, 0)
+	prepared, err := PrepareSupervisorEvent(evt)
+	if err != nil {
+		return err
+	}
+	_, err = l.emitPrepared(prepared, emitBlocking, 0)
 	return err
 }
 
@@ -359,7 +434,11 @@ func (l *SupervisorEventLog) Emit(evt SupervisorEvent) error {
 // the error, or has its own independent outer bound) — see
 // EmitWithTimeoutTracked's doc for the one case that needs more.
 func (l *SupervisorEventLog) EmitWithTimeout(evt SupervisorEvent, timeout time.Duration) error {
-	_, err := l.emit(evt, emitTimeout, timeout)
+	prepared, err := PrepareSupervisorEvent(evt)
+	if err != nil {
+		return err
+	}
+	_, err = l.emitPrepared(prepared, emitTimeout, timeout)
 	return err
 }
 
@@ -381,7 +460,17 @@ func (l *SupervisorEventLog) EmitWithTimeout(evt SupervisorEvent, timeout time.D
 // failures and lock-acquisition timeouts never spawn a worker), and nil on
 // emitBlocking/emitTry (which never spawn one either).
 func (l *SupervisorEventLog) EmitWithTimeoutTracked(evt SupervisorEvent, timeout time.Duration) (*PendingSupervisorEventEmit, error) {
-	return l.emit(evt, emitTimeout, timeout)
+	prepared, err := PrepareSupervisorEvent(evt)
+	if err != nil {
+		return nil, err
+	}
+	return l.EmitPreparedWithTimeoutTracked(prepared, timeout)
+}
+
+// EmitPreparedWithTimeoutTracked emits an already-normalized event without
+// regenerating its timestamp or marshaling it again.
+func (l *SupervisorEventLog) EmitPreparedWithTimeoutTracked(prepared PreparedSupervisorEvent, timeout time.Duration) (*PendingSupervisorEventEmit, error) {
+	return l.emitPrepared(prepared, emitTimeout, timeout)
 }
 
 // TryEmit serializes the entry as a JSON Line and appends it only if the
@@ -401,7 +490,11 @@ func (l *SupervisorEventLog) EmitWithTimeoutTracked(evt SupervisorEvent, timeout
 // losing the observability row never loses the repair itself. Do not adopt
 // TryEmit for an event that is the only record of a state mutation.
 func (l *SupervisorEventLog) TryEmit(evt SupervisorEvent) error {
-	_, err := l.emit(evt, emitTry, 0)
+	prepared, err := PrepareSupervisorEvent(evt)
+	if err != nil {
+		return err
+	}
+	_, err = l.emitPrepared(prepared, emitTry, 0)
 	return err
 }
 
@@ -473,11 +566,12 @@ func joinSupervisorEventReleaseErr(writeErr, releaseErr error) error {
 // cross-process-flock RELEASE failure into the error every return path already
 // produces (review finding 2). Every `return` here still states both results
 // explicitly; the releaser only ever ADDS a release failure on top.
-func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, timeout time.Duration) (pending *PendingSupervisorEventEmit, err error) {
-	raw, err := marshalSupervisorEventLine(evt)
-	if err != nil {
+func (l *SupervisorEventLog) emitPrepared(prepared PreparedSupervisorEvent, mode eventLogEmitMode, timeout time.Duration) (pending *PendingSupervisorEventEmit, err error) {
+	if err := validatePreparedSupervisorEvent(prepared); err != nil {
 		return nil, err
 	}
+	raw := bytes.Clone(prepared.raw)
+	writeFn := supervisorEventWriteFn
 
 	// In-process serialization first — guards against two goroutines in the
 	// same supervisor binary racing past the flock acquire.
@@ -608,7 +702,7 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// Both locks stay owned by the deferred releaser above, which frees them
 	// after the write returns — including when the write panics.
 	if mode != emitTimeout {
-		return nil, supervisorEventWriteFn(l, raw)
+		return nil, l.writeEventBatch(raw, writeFn)
 	}
 
 	// Hand off both locks to a worker goroutine so this call can give up
@@ -646,7 +740,6 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 	// under `-race`, and `-race` is exactly what proved the resolver
 	// generation-ordering defect on this branch. Losing that tool is not an
 	// acceptable trade.
-	writeFn := supervisorEventWriteFn
 	// Ownership of both locks transfers to the worker HERE. Setting the flag
 	// before the `go` statement (both are touched only by this goroutine, so
 	// there is no race with the worker) is what keeps the deferred releaser
@@ -671,7 +764,7 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 		func() {
 			defer l.mu.Unlock()
 			defer func() { unlockErr = unlockFn(l) }()
-			writeErr = writeFn(l, raw)
+			writeErr = l.writeEventBatch(raw, writeFn)
 		}()
 		done <- joinSupervisorEventReleaseErr(writeErr, unlockErr)
 	}()
@@ -688,24 +781,258 @@ func (l *SupervisorEventLog) emit(evt SupervisorEvent, mode eventLogEmitMode, ti
 // cross-process flock. Callers MUST hold both locks before calling this and
 // release them only after it returns (directly, or — for the bounded
 // emitTimeout path in emit — via the worker goroutine that calls it).
-func (l *SupervisorEventLog) writeEventLine(raw []byte) error {
-	// Rotation check.
-	if size, ok := supervisorEventLogFileSize(l.path); ok && size >= supervisorEventLogRotateSize {
-		if rotErr := rotateSupervisorEventLogFile(l.path); rotErr != nil {
-			return rotErr
-		}
+// PersistPending atomically establishes a process-exit-safe handoff for the
+// prepared row without acquiring the event-log flock. Publication uses a
+// same-directory hard link so an existing digest carrier is never overwritten.
+func (l *SupervisorEventLog) PersistPending(prepared PreparedSupervisorEvent) error {
+	if err := validatePreparedSupervisorEvent(prepared); err != nil {
+		return err
 	}
 
-	// Append line. O_APPEND + O_CREATE + O_WRONLY 0o600 mirrors
-	// gui_event_log.go's defaultGUIEventLogAppend.
-	f, err := os.OpenFile(l.path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	dir := l.path + supervisorEventPendingDirSuffix
+	if err := l.pendingIO.mkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("create supervisor event pending directory %s: %w", dir, err)
+	}
+	if err := l.pendingIO.chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("secure supervisor event pending directory %s: %w", dir, err)
+	}
+
+	finalPath := filepath.Join(dir, hex.EncodeToString(prepared.digest[:])+supervisorEventPendingFileSuffix)
+	if existing, err := l.pendingIO.readBounded(finalPath, supervisorEventMaxBytes+1); err == nil {
+		if bytes.Equal(existing, prepared.raw) {
+			return nil
+		}
+		return fmt.Errorf("supervisor event pending digest/content collision at %s", finalPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("read existing supervisor event pending carrier %s: %w", finalPath, err)
+	}
+
+	temp, err := l.pendingIO.createTemp(dir, ".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create supervisor event pending temp in %s: %w", dir, err)
+	}
+	tempPath := temp.Name()
+	tempOpen := true
+	defer func() {
+		if tempOpen {
+			_ = temp.Close()
+		}
+		_ = l.pendingIO.remove(tempPath)
+	}()
+
+	n, writeErr := temp.Write(prepared.raw)
+	if writeErr == nil && n != len(prepared.raw) {
+		writeErr = io.ErrShortWrite
+	}
+	if writeErr != nil {
+		return fmt.Errorf("write supervisor event pending temp %s: %w", tempPath, writeErr)
+	}
+	if syncErr := temp.Sync(); syncErr != nil {
+		return fmt.Errorf("sync supervisor event pending temp %s: %w", tempPath, syncErr)
+	}
+	if closeErr := temp.Close(); closeErr != nil {
+		tempOpen = false
+		return fmt.Errorf("close supervisor event pending temp %s: %w", tempPath, closeErr)
+	}
+	tempOpen = false
+
+	if linkErr := l.pendingIO.link(tempPath, finalPath); linkErr != nil {
+		if errors.Is(linkErr, os.ErrExist) {
+			existing, readErr := l.pendingIO.readBounded(finalPath, supervisorEventMaxBytes+1)
+			if readErr != nil {
+				return fmt.Errorf("verify raced supervisor event pending carrier %s: %w", finalPath, readErr)
+			}
+			if !bytes.Equal(existing, prepared.raw) {
+				return fmt.Errorf("supervisor event pending digest/content collision at %s", finalPath)
+			}
+		} else {
+			return fmt.Errorf("publish supervisor event pending carrier %s: %w", finalPath, linkErr)
+		}
+	}
+	if removeErr := l.pendingIO.remove(tempPath); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+		return fmt.Errorf("remove supervisor event pending temp %s: %w", tempPath, removeErr)
+	}
+	return nil
+}
+
+// TryReplayPending opportunistically drains pending carriers. Lock contention
+// is a successful no-op; every acquired resource is released on all exits.
+func (l *SupervisorEventLog) TryReplayPending() (err error) {
+	if !l.mu.TryLock() {
+		return nil
+	}
+	defer l.mu.Unlock()
+
+	locked, lockErr := l.lock.TryLock()
+	if lockErr != nil {
+		return fmt.Errorf("supervisor event log flock: %w", lockErr)
+	}
+	if !locked {
+		return nil
+	}
+	defer func() {
+		if unlockErr := supervisorEventUnlockFn(l); unlockErr != nil {
+			err = joinSupervisorEventReleaseErr(err, unlockErr)
+		}
+	}()
+	return l.replayPendingLocked()
+}
+
+func (l *SupervisorEventLog) writeEventBatch(raw []byte, writeFn func(*SupervisorEventLog, []byte) error) error {
+	if err := l.replayPendingLocked(); err != nil {
+		return err
+	}
+	return writeFn(l, raw)
+}
+
+func (l *SupervisorEventLog) replayPendingLocked() error {
+	dir := l.path + supervisorEventPendingDirSuffix
+	names, err := l.pendingIO.readDirNames(dir, supervisorEventPendingScanLimit)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("scan supervisor event pending directory %s: %w", dir, err)
+	}
+
+	finals := make([]string, 0, len(names))
+	for _, name := range names {
+		if isSupervisorEventPendingFilename(name) {
+			finals = append(finals, name)
+		}
+	}
+	sort.Strings(finals)
+	if len(finals) > supervisorEventPendingReplayLimit {
+		finals = finals[:supervisorEventPendingReplayLimit]
+	}
+
+	for _, name := range finals {
+		pendingPath := filepath.Join(dir, name)
+		raw, readErr := l.pendingIO.readBounded(pendingPath, supervisorEventMaxBytes+1)
+		if readErr != nil {
+			return fmt.Errorf("read supervisor event pending carrier %s: %w", pendingPath, readErr)
+		}
+		digestBytes, decodeErr := hex.DecodeString(strings.TrimSuffix(name, supervisorEventPendingFileSuffix))
+		if decodeErr != nil || len(digestBytes) != sha256.Size {
+			return fmt.Errorf("invalid supervisor event pending carrier name %s", name)
+		}
+		var digest [sha256.Size]byte
+		copy(digest[:], digestBytes)
+		prepared := PreparedSupervisorEvent{raw: raw, digest: digest}
+		if validErr := validatePendingSupervisorEventCarrier(prepared); validErr != nil {
+			return fmt.Errorf("validate supervisor event pending carrier %s: %w", pendingPath, validErr)
+		}
+
+		activeMatch, activeErr := l.pendingIO.containsRecord(l.path, raw)
+		if activeErr != nil {
+			return fmt.Errorf("scan active supervisor event log %s: %w", l.path, activeErr)
+		}
+		backupMatch, backupErr := l.pendingIO.containsRecord(l.path+supervisorEventLogRotatedSuffix, raw)
+		if backupErr != nil {
+			return fmt.Errorf("scan rotated supervisor event log %s: %w", l.path+supervisorEventLogRotatedSuffix, backupErr)
+		}
+		if !activeMatch && !backupMatch {
+			if appendErr := l.appendSupervisorEventLine(raw, true); appendErr != nil {
+				return appendErr
+			}
+		}
+		if removeErr := l.pendingIO.remove(pendingPath); removeErr != nil {
+			return fmt.Errorf("retire supervisor event pending carrier %s: %w", pendingPath, removeErr)
+		}
+	}
+	return nil
+}
+
+// writeEventLine performs the ordinary unsynced current-row append. The caller
+// owns both locks; replay uses appendSupervisorEventLine directly with sync.
+func (l *SupervisorEventLog) writeEventLine(raw []byte) error {
+	return l.appendSupervisorEventLine(raw, false)
+}
+
+func (l *SupervisorEventLog) appendSupervisorEventLine(raw []byte, syncWrite bool) error {
+	if err := l.pendingIO.rotateIfNeeded(l.path); err != nil {
+		return err
+	}
+	f, err := l.pendingIO.openAppend(l.path)
 	if err != nil {
 		return fmt.Errorf("open supervisor event log %s: %w", l.path, err)
 	}
-	defer func() { _ = f.Close() }()
-	if _, err := f.Write(raw); err != nil {
-		return fmt.Errorf("write supervisor event log %s: %w", l.path, err)
+	open := true
+	defer func() {
+		if open {
+			_ = f.Close()
+		}
+	}()
+
+	stat, statErr := f.Stat()
+	if statErr != nil {
+		return fmt.Errorf("stat supervisor event log %s before append: %w", l.path, statErr)
 	}
+	appendCurrent := true
+	if stat.Size() > 0 {
+		var last [1]byte
+		n, readErr := f.ReadAt(last[:], stat.Size()-1)
+		if readErr != nil {
+			return fmt.Errorf("read supervisor event log tail %s: %w", l.path, readErr)
+		}
+		if n != 1 {
+			return fmt.Errorf("read supervisor event log tail %s: %w", l.path, io.ErrUnexpectedEOF)
+		}
+		if last[0] != '\n' {
+			fragmentLen := len(raw) - 1
+			if fragmentLen > 0 && stat.Size() >= int64(fragmentLen) {
+				offset := stat.Size() - int64(fragmentLen)
+				fragment := make([]byte, fragmentLen)
+				n, readErr := f.ReadAt(fragment, offset)
+				if readErr != nil {
+					return fmt.Errorf("read supervisor event log fragment %s: %w", l.path, readErr)
+				}
+				if n != fragmentLen {
+					return fmt.Errorf("read supervisor event log fragment %s: %w", l.path, io.ErrUnexpectedEOF)
+				}
+				atRecordBoundary := offset == 0
+				if !atRecordBoundary {
+					var preceding [1]byte
+					n, readErr := f.ReadAt(preceding[:], offset-1)
+					if readErr != nil {
+						return fmt.Errorf("read supervisor event log fragment boundary %s: %w", l.path, readErr)
+					}
+					if n != 1 {
+						return fmt.Errorf("read supervisor event log fragment boundary %s: %w", l.path, io.ErrUnexpectedEOF)
+					}
+					atRecordBoundary = preceding[0] == '\n'
+				}
+				appendCurrent = !(atRecordBoundary && bytes.Equal(fragment, raw[:fragmentLen]))
+			}
+			n, writeErr := f.Write([]byte{'\n'})
+			if writeErr == nil && n != 1 {
+				writeErr = io.ErrShortWrite
+			}
+			if writeErr != nil {
+				return fmt.Errorf("separate incomplete supervisor event log tail %s: %w", l.path, writeErr)
+			}
+		}
+	}
+
+	if appendCurrent {
+		n, writeErr := f.Write(raw)
+		if writeErr == nil && n != len(raw) {
+			writeErr = io.ErrShortWrite
+		}
+		if writeErr != nil {
+			return fmt.Errorf("write supervisor event log %s: %w", l.path, writeErr)
+		}
+	}
+	if syncWrite {
+		if syncErr := f.Sync(); syncErr != nil {
+			return fmt.Errorf("sync supervisor event log %s: %w", l.path, syncErr)
+		}
+	}
+	if closeErr := f.Close(); closeErr != nil {
+		open = false
+		return fmt.Errorf("close supervisor event log %s: %w", l.path, closeErr)
+	}
+	open = false
 	return nil
 }
 
@@ -774,6 +1101,215 @@ func marshalSupervisorEventLine(evt SupervisorEvent) ([]byte, error) {
 		}
 	}
 	return append(raw, '\n'), nil
+}
+
+func validatePreparedSupervisorEvent(prepared PreparedSupervisorEvent) error {
+	raw := prepared.raw
+	if len(raw) == 0 {
+		return errors.New("supervisor event pending: empty prepared record")
+	}
+	if len(raw) > supervisorEventMaxBytes+1 {
+		return fmt.Errorf("supervisor event pending: prepared record is %d bytes, maximum is %d", len(raw), supervisorEventMaxBytes+1)
+	}
+	if raw[len(raw)-1] != '\n' || bytes.Count(raw, []byte{'\n'}) != 1 {
+		return errors.New("supervisor event pending: prepared record must contain exactly one terminal newline")
+	}
+	if sha256.Sum256(raw) != prepared.digest {
+		return errors.New("supervisor event pending: prepared record digest mismatch")
+	}
+	return nil
+}
+
+// validatePendingSupervisorEventCarrier adds structural envelope validation at
+// the corruptible on-disk boundary. Body stays a RawMessage: decoding and
+// remarshal here would narrow SupervisorEvent.Body's admitted JSON domain
+// through float64 conversion or custom-Marshaler loss.
+func validatePendingSupervisorEventCarrier(prepared PreparedSupervisorEvent) error {
+	if err := validatePreparedSupervisorEvent(prepared); err != nil {
+		return err
+	}
+	var envelope struct {
+		SchemaVersion string          `json:"schema_version"`
+		TS            string          `json:"ts"`
+		Severity      string          `json:"severity"`
+		Source        string          `json:"source"`
+		Event         string          `json:"event"`
+		TaskName      string          `json:"task_name,omitempty"`
+		Body          json.RawMessage `json:"body,omitempty"`
+		Truncated     bool            `json:"_truncated,omitempty"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(prepared.raw[:len(prepared.raw)-1]))
+	decoder.UseNumber()
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&envelope); err != nil {
+		return fmt.Errorf("supervisor event pending: invalid JSONL record: %w", err)
+	}
+	if err := ensureSupervisorEventJSONEOF(decoder); err != nil {
+		return fmt.Errorf("supervisor event pending: invalid JSONL record: %w", err)
+	}
+	if envelope.SchemaVersion == "" || envelope.TS == "" || envelope.Severity == "" {
+		return errors.New("supervisor event pending: missing normalized envelope defaults")
+	}
+	if envelope.Event == "" {
+		return ErrSupervisorEventMissingEvent
+	}
+	if envelope.Source == "" {
+		return ErrSupervisorEventMissingSource
+	}
+	if len(envelope.Event) > supervisorEventIdentityCap ||
+		len(envelope.Source) > supervisorEventIdentityCap ||
+		len(envelope.TaskName) > supervisorEventIdentityCap {
+		return ErrSupervisorEventIdentityOversize
+	}
+	if body := bytes.TrimSpace(envelope.Body); len(body) > 0 && body[0] != '{' {
+		return errors.New("supervisor event pending: body must be a JSON object when present")
+	}
+	return nil
+}
+
+func ensureSupervisorEventJSONEOF(decoder *json.Decoder) error {
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); errors.Is(err, io.EOF) {
+		return nil
+	} else if err != nil {
+		return err
+	}
+	return errors.New("multiple JSON values in one supervisor event record")
+}
+
+func isSupervisorEventPendingFilename(name string) bool {
+	if !strings.HasSuffix(name, supervisorEventPendingFileSuffix) {
+		return false
+	}
+	digest := strings.TrimSuffix(name, supervisorEventPendingFileSuffix)
+	if len(digest) != sha256.Size*2 || digest != strings.ToLower(digest) {
+		return false
+	}
+	decoded, err := hex.DecodeString(digest)
+	return err == nil && len(decoded) == sha256.Size
+}
+
+func defaultSupervisorEventPendingIO() supervisorEventPendingIO {
+	return supervisorEventPendingIO{
+		mkdirAll:     os.MkdirAll,
+		chmod:        os.Chmod,
+		createTemp:   defaultCreateSupervisorEventPendingTemp,
+		readBounded:  readSupervisorEventFileBounded,
+		readDirNames: readSupervisorEventDirNames,
+		link:         os.Link,
+		rotateIfNeeded: func(path string) error {
+			if size, ok := supervisorEventLogFileSize(path); ok && size >= supervisorEventLogRotateSize {
+				return rotateSupervisorEventLogFile(path)
+			}
+			return nil
+		},
+		openAppend: func(path string) (supervisorEventFile, error) {
+			return os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_RDWR, 0o600)
+		},
+		containsRecord: retainedSupervisorEventLogContainsRecord,
+		remove:         os.Remove,
+	}
+}
+
+func defaultCreateSupervisorEventPendingTemp(dir, pattern string) (supervisorEventFile, error) {
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return nil, err
+	}
+	return f, nil
+}
+
+func readSupervisorEventFileBounded(path string, maxBytes int64) (raw []byte, err error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	raw, err = io.ReadAll(io.LimitReader(f, maxBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("file exceeds %d-byte bound", maxBytes)
+	}
+	return raw, nil
+}
+
+func readSupervisorEventDirNames(path string, maxEntries int) (names []string, err error) {
+	dir, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if closeErr := dir.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+	names, err = dir.Readdirnames(maxEntries)
+	if errors.Is(err, io.EOF) {
+		err = nil
+	}
+	return names, err
+}
+
+func retainedSupervisorEventLogContainsRecord(path string, want []byte) (found bool, err error) {
+	f, err := os.Open(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			err = errors.Join(err, closeErr)
+		}
+	}()
+
+	reader := bufio.NewReaderSize(f, supervisorEventMaxBytes+2)
+	for {
+		line, readErr := reader.ReadSlice('\n')
+		if errors.Is(readErr, bufio.ErrBufferFull) {
+			// The cap applies to complete retained records. Drain this
+			// over-cap candidate without retaining it in memory so EOF can
+			// distinguish a harmless incomplete tail from a complete oversize
+			// record.
+			for errors.Is(readErr, bufio.ErrBufferFull) {
+				_, readErr = reader.ReadSlice('\n')
+			}
+			if errors.Is(readErr, io.EOF) {
+				return false, nil
+			}
+			if readErr == nil {
+				return false, fmt.Errorf("retained supervisor event record exceeds %d-byte cap", supervisorEventMaxBytes+1)
+			}
+			return false, readErr
+		}
+		if errors.Is(readErr, io.EOF) {
+			// A final incomplete fragment is intentionally not a retained row,
+			// regardless of its length.
+			return false, nil
+		}
+		if len(line) > supervisorEventMaxBytes+1 {
+			return false, fmt.Errorf("retained supervisor event record exceeds %d-byte cap", supervisorEventMaxBytes+1)
+		}
+		if readErr == nil {
+			if bytes.Equal(line, want) {
+				return true, nil
+			}
+			continue
+		}
+		return false, readErr
+	}
 }
 
 // ---------------------------------------------------------------------------
