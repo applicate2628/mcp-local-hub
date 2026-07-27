@@ -180,13 +180,24 @@ func startTestRouteServer(t *testing.T) (port int, cleanup func()) {
 // supervisor-state.json for the ownership gate, sharing would let one test's
 // seed satisfy (or contradict) another's. Per-test pinning keeps each seed
 // invisible to its neighbours.
-func redirectMCPFrontTestEnv(t *testing.T) {
+// It also neutralizes the client-config path environment beyond
+// HOME/USERPROFILE/LOCALAPPDATA. The header's "zero real client configs are
+// ever touched" claim was NOT true before that: %APPDATA% was left alone, so
+// clients.AllClients() admitted the developer's REAL vscode adapter at
+// %APPDATA%\Code\User\mcp.json and the forward reconcile rewrote their live MCP
+// config to the test's ephemeral port. neutralizeClientConfigPathEnv is the one
+// owner of the full list.
+//
+// Returns the temp home so a caller can seed a SANDBOX client into it.
+func redirectMCPFrontTestEnv(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("LOCALAPPDATA", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	neutralizeClientConfigPathEnv(t, tmp)
 	t.Cleanup(api.SetDaemonStateRootForTest(tmp))
+	return tmp
 }
 
 // withMCPFrontReportPathSeam overrides mcpFrontReconcileSerenaReportPathFn to
@@ -231,7 +242,15 @@ func TestRunReconcileMCPFront_FailsClosedWhenRouteNotLive(t *testing.T) {
 }
 
 func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
-	redirectMCPFrontTestEnv(t)
+	tmp := redirectMCPFrontTestEnv(t)
+	// A round trip needs at least one client to reconcile. Seed a SANDBOX one:
+	// before the env was fully neutralized this test was reconciling the
+	// developer's real vscode config, which is what made it pass — on a host
+	// without VS Code MCP configured (any CI runner) it had nothing to apply and
+	// the rollback failed with "carries no version-3 row map".
+	seedClaudeCodeConfig(t, tmp, map[string]any{
+		"serena": map[string]any{"url": "http://127.0.0.1:9125/serena/mcp"},
+	})
 	reportPath := withMCPFrontReportPathSeam(t)
 
 	port, cleanup := startTestRouteServer(t)
@@ -307,7 +326,12 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 // — confirmed manually during implementation (see this item's final
 // report for the captured failing output), then reverted.
 func TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting(t *testing.T) {
-	redirectMCPFrontTestEnv(t)
+	tmp := redirectMCPFrontTestEnv(t)
+	// Sandbox client to reconcile — see the round-trip test above for why the
+	// seed is load-bearing rather than decorative.
+	seedClaudeCodeConfig(t, tmp, map[string]any{
+		"serena": map[string]any{"url": "http://127.0.0.1:9125/serena/mcp"},
+	})
 	reportPath := withMCPFrontReportPathSeam(t)
 
 	port, cleanup := startTestRouteServer(t)

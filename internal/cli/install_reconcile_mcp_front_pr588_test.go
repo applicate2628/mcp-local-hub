@@ -46,12 +46,23 @@ import (
 
 // mcpFrontPR588Env redirects every path resolution this command family
 // performs to one throwaway directory and returns it.
+//
+// HOME/USERPROFILE/LOCALAPPDATA alone are NOT enough. This command drives a
+// REAL reconcile over clients.AllClients(), and the remaining adapters resolve
+// their config path from %APPDATA%, $XDG_CONFIG_HOME, $MIMOCODE_*,
+// %ProgramData%, $COPILOT_HOME and $KIMI_CODE_HOME. Before
+// neutralizeClientConfigPathEnv was added here, the un-redirected %APPDATA%
+// admitted the developer's REAL vscode adapter
+// (%APPDATA%\Code\User\mcp.json) and the forward pass rewrote their live MCP
+// config to the test's ephemeral port. neutralizeClientConfigPathEnv is the one
+// owner of that list — extend it there, never inline here.
 func mcpFrontPR588Env(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
 	t.Setenv("LOCALAPPDATA", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("HOME", tmp)
+	neutralizeClientConfigPathEnv(t, tmp)
 	t.Cleanup(api.SetDaemonStateRootForTest(tmp))
 	return tmp
 }
