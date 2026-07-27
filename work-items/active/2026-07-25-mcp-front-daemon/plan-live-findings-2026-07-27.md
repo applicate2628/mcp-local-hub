@@ -7,7 +7,451 @@ Decision input: `design.md` — PASS
 Reliability input: `reliability-live-findings-2026-07-27.md` — R2 PASS  
 Execution gate: **PASS — RETURN(lead); planner-eligible**
 
-## R2 correction amendment — active execution contract
+## R3 correction amendment — active execution contract
+
+Accepted inputs:
+
+- R3 architecture decision at SHA-256
+  `6DC6DC4478F05044DBD5E58E08F7DF0E4D4A87AA4161BE20E02B46B93330028F`;
+- R3 design at SHA-256
+  `A42A6CDF0BDEEF1502640269E305D1F6D3F09E05F72789810A125FA6CD6C106B`;
+- repeat reliability PASS at SHA-256
+  `7237D8CFE8CE6A9C535BAC0EAA885E015EAD52F9941207874C8705EA6F890B34`;
+- `architecture-r2-live-findings-2026-07-27.md`.
+
+This amendment supersedes R2 and every earlier plan statement where they
+conflict. The older amendments/phases remain evidence history only.
+
+### R3-0 — foreign-overlap admission gate
+
+Owner: `$lead` with the foreign change owner or user
+
+Source writes: none
+
+Gate: **BLOCKED before implementation while overlap remains**
+
+Current-session evidence shows foreign changes in
+`internal/api/lsp_client_router.go`,
+`internal/api/serena_client_reconcile.go`, and
+`internal/api/serena_client_reconcile_test.go`, including a `TEMPDEBUG` stderr
+write. All three overlap the R3 surface. `.codegraph` and
+`.codegraph-init.log` are also foreign/user-owned and excluded.
+
+Before `$backend-engineer` starts:
+
+1. The Lead records the exact foreign path/hash/diff owner and asks that owner
+   or the user to finish, remove, or explicitly admit those changes.
+2. No R3 actor edits, stages, cleans, deletes, moves, formats, or includes
+   `TEMPDEBUG` or `.codegraph*`.
+3. If any unresolved foreign hunk remains in an allowed R3 path,
+   implementation stays `BLOCKED`; file-level allowlisting does not authorize
+   overwriting an overlapping hunk.
+4. R3 is a new correction atop commit `31b9ca94`. No amend, rebase, reset,
+   squash, checkout, stash, force operation, or history rewrite is authorized.
+
+- **R30-AC1:** Before the first Go/code edit, an owner-approved overlap record
+  names every dirty allowed path and disposition; unresolved overlap count is
+  exactly zero.
+- **R30-AC2:** `git status --short` still lists `.codegraph*` as foreign or the
+  foreign owner has removed it; no R3 diff/stage contains `.codegraph*`.
+- **R30-AC3:** `git rev-parse HEAD` equals `31b9ca94...` at implementation
+  admission or names a newer user-owned descendant explicitly accepted by the
+  user; R3 never rewrites that history.
+
+### Exact R3 change surface
+
+| Kind | Exact path | Sole R3 concern |
+| --- | --- | --- |
+| Production | `internal/clients/config_lock.go` | Wrapper-only one-target, multi-entry dependency authorization |
+|  | `internal/api/lsp_client_router.go` | Frozen forward plan and canonical dependency predicates for each legacy removal |
+|  | `internal/api/lsp_client_router_snapshot.go` | Full rollback groups, legacy dependency predicates, exact inverses |
+|  | `internal/api/serena_client_reconcile.go` | Serena inverse consumes retained `BaselineBytes`, never reopens a pin path |
+|  | `internal/cli/install_reconcile_mcp_front.go` | Strict row schema, classifier, forward/rollback policies, pin orchestration, independent progress, retirement |
+|  | `internal/api/pin_windows.go` | Root-handle-relative Windows no-reparse bounded reader |
+|  | `internal/api/pin_posix.go` | Root-FD-relative POSIX no-follow bounded reader |
+| Test | `internal/clients/config_lock_wrapped_test.go` | Wrapper group-dependency and capability/fail-closed tests |
+|  | `internal/api/lsp_client_router_plan_test.go` | Forward dependency boundary and frozen-plan tests |
+|  | `internal/api/lsp_client_router_snapshot_review_test.go` | Rollback dependency boundary/group retry tests |
+|  | `internal/api/serena_client_reconcile_test.go` | Exact retained-byte inverse and path-not-reopened tests |
+|  | `internal/cli/install_reconcile_mcp_front_v3_test.go` | F2, conflict, pin, policy, independent progress, schema, retirement matrices |
+|  | `internal/cli/install_reconcile_mcp_front_pr588_r2_test.go` | Command-owner v1/v2 forward/rollback byte/no-write refusal and protected CLI guards |
+|  | `internal/api/pin_windows_test.go` | Windows root/intermediate/final reparse, swap, size, cleanup matrix |
+|  | `internal/api/pin_posix_test.go` | POSIX root/intermediate/final symlink, no-follow, swap, size, cleanup matrix |
+
+No other production or test file is admitted.
+`internal/api/state_read_caps.go` remains the unchanged owner of
+`maxStateFileBytes = 1 << 20`; `internal/cli/install.go`,
+`internal/cli/route.go`, state-path resolution, scheduler, GUI, tray,
+supervisor, daemon, and `.codegraph*` remain excluded. Widening is
+`REVISE(architect)`.
+
+All R3 production/tests are atomic revert group `RG-PR588-V3-R3`. Before commit,
+recovery uses only inverse `apply_patch` plus exact SHA-256 equality. A
+commit-level rollback requires user direction because checkout, reset, and
+stash are forbidden.
+
+### Finding and reliability map
+
+| ID | Implementation phase | Mandatory executable falsifier |
+| --- | --- | --- |
+| AR2-01 | R3-A wrapper group authorization | Forward canonical-dependency edit and rollback legacy-dependency edit each invoke zero unsafe target mutations |
+| AR2-02 | R3-B one classifier/two policies | Full F2 table; `prepared` and `post-write-conflict` both block changed-plan forward replacement |
+| AR2-03 | R3-C secure pin readers/orchestration | Windows/POSIX no-follow matrices, pin swap after load, full malformed-pin matrix |
+| AR2-04 | R3-B durable Serena conflict | First-generation pinless conflict persists; prior receipt/pin survives later no-write conflict |
+| AR2-05 | R3-B rollback policy | Mixed uncertain/applied Serena rows and LSP groups complete all independent safe inverses |
+| AR2-06 | R3-D integration | Full F2/conflict/pin/version/dependency/retirement matrices execute through real owners |
+| RR3-01 | R3-C platform readers | Root/intermediate/final/swap/size/cleanup target-platform tests consume one bounded final handle/FD |
+| RR3-02 | R3-B conflict/admission lifecycle | Prior receipt remains sole inverse authority; any disposition blocks same/changed forward replay |
+
+## Phase R3-A — same-lock multi-entry dependency authorization
+
+Owner: `$backend-engineer`
+
+Depends on: R3-0 clear
+
+Revert: `RG-PR588-V3-R3`
+
+1. Replace the target-only conditional capability with wrapper-only
+   `ConditionalEntryGroupMutation`: one target, ordered same-config dependency
+   predicates, optional backup, durable callback, one target add/remove, and
+   complete target/dependency readback inside one `withConfigLock`.
+2. Refuse different-config dependencies or missing group capability before
+   backup/prepare/mutation. Concrete adapters and callers cannot emulate the
+   capability.
+3. Forward canonical add is target-only; every legacy remove requires the exact
+   canonical intended front-route dependency under the same lock.
+4. Rollback canonical add/remove requires every exact routable legacy baseline
+   under the same lock. In-memory readiness may order/report but cannot
+   authorize.
+5. Preserve one adapter invocation maximum per admitted row and lock order:
+   operation → one config lock → short journal lock → target mutation.
+
+Endangered invariants/guards:
+
+| ADR item | Exact guard and expected observation |
+| --- | --- |
+| I3 frozen population | Existing C10 guard; no re-enumeration and zero calls for a newly appearing client |
+| I5 durable prepare | Real group seam prepare failure produces `Invoked=false` and zero target calls |
+| I8 route preservation | `TestMCPFrontR3_GroupMutationRejectsChangedForwardCanonical` and `TestMCPFrontR3_GroupMutationRejectsChangedRollbackLegacy` |
+| R3-1 | Change/remove canonical at the forward dependency boundary; legacy remove count `0`, at least one route remains |
+| R3-2 | Delete/disable/replace legacy at rollback authorization; canonical inverse count `0`, canonical remains |
+
+- **R3A-AC1:** Group observation includes target plus every ordered dependency
+  from the same config owner, and exactly one target operation can be invoked.
+- **R3A-AC2:** Forward dependency edit subcases `changed`, `removed`, and
+  `disabled` each preserve the legacy entry and invoke zero legacy removals.
+- **R3A-AC3:** Rollback dependency edit subcases `deleted`, `disabled`, and
+  `replaced` each preserve canonical and invoke zero canonical inverses.
+- **R3A-AC4:** A different-config dependency and a test adapter without the
+  wrapper group capability both fail closed with zero target mutations.
+
+## Phase R3-B — classifier, conflict lifecycle, and independent rollback
+
+Owner: `$backend-engineer`
+
+Depends on: R3-A observation shape fixed
+
+Revert: `RG-PR588-V3-R3`
+
+1. Implement one pure classifier covering no attempt, `prepared`,
+   `post-write-conflict`, no-invocation `precondition-conflict`,
+   `confirmed-no-write`, valid `applied`, and invalid/unknown.
+2. Forward first refuses any pending or terminal rollback disposition, for
+   byte-identical and changed plans. Otherwise every uncertain/invalid row
+   blocks generation, plan, pin, row, and client changes.
+3. Rollback durably marks uncertainty without early return: one Serena row or
+   one LSP group blocks only itself; process every independent safe row/group in
+   stable order, then aggregate remaining identities.
+4. Persist first-generation Serena precondition conflict as the exact pinless,
+   authority-free terminal row. With prior ownership, retain exact `Applied`
+   receipt and pin, write a pending no-write conflict, and permit inverse only
+   against that prior receipt.
+5. Only explicit rollback advances dispositions. Forward never clears them.
+   Retirement still requires durable all-terminal re-read.
+
+Endangered invariants/guards:
+
+| ADR item | Exact guard and expected observation |
+| --- | --- |
+| I1 immutable baseline | Existing C1/C2 guards compare first baseline bytes after retries |
+| I2 row-only authority | Strict row/projection tests; report port/projection cannot authorize |
+| I4 causation | `TestMCPFrontR3_F2CausationMatrix`, exactly 24 surface/state subcases |
+| I6 exact receipt | Same-call observed intended state creates the only current receipt |
+| I7 CAS inverse | Prior receipt conflict matrix permits inverse only while exact live match remains |
+| I10 monotonic recovery | `TestMCPFrontR3_PriorReceiptConflictAndForwardAdmissionMatrix` |
+| I11 independent progress | `TestMCPFrontR3_RollbackContinuesIndependentSafeWork` |
+| R3-3 | `prepared` and `post-write-conflict` preserve generation/plan/pins and invoke zero adapters on changed-plan retry |
+| R3-4 | One uncertain Serena row/LSP group stays pending while an independent owned row/group restores |
+| R3-7 | First-generation conflict is durable, pinless, no-write, inverse-free |
+| R3-8 | Full F2 table never promotes re-entry equality |
+| R3-10 | Pending/failed/uncertain durable row prevents retirement |
+| R3-11 | No-invocation conflict creates no ownership, retains prior ownership, and cannot be cleared by forward |
+
+- **R3B-AC1:** F2 executes eight durable-state rows for each of Serena add, LSP
+  add, and LSP remove—exactly 24 subcases—with the receipt/inverse counts in the
+  ADR table.
+- **R3B-AC2:** Conflict/policy matrix covers `prepared`,
+  `post-write-conflict`, unknown, applied-without-receipt, pending disposition,
+  terminal disposition, prior-receipt conflict with matching live state, and
+  prior-receipt conflict with diverged live state.
+- **R3B-AC3:** First-generation conflict persists with zero pin/receipt/inverse
+  calls; prior-owned conflict preserves receipt and pin byte-for-byte.
+- **R3B-AC4:** Mixed rollback runs restore and verify the independent Serena row
+  and independent LSP group before returning aggregate pending identities.
+- **R3B-AC5:** Repeated entry contains no retry/backoff loop and invokes each
+  admitted adapter at most once.
+
+## Phase R3-C — one secure Serena pin read and exact-byte inverse
+
+Owner: `$backend-engineer`
+
+Depends on: R3-B exact pin-requiring row classifier
+
+Revert: `RG-PR588-V3-R3`
+
+1. Add `internal/api/pin_windows.go`: open the root with
+   `NtCreateFile`, `FILE_OPEN_REPARSE_POINT`, `OBJ_DONT_REPARSE`, and
+   directory-only options; open every child relative to the validated parent
+   handle; reject every reparse handle; require directory intermediates and a
+   regular final object.
+2. Add `internal/api/pin_posix.go`: open no-follow root directory, walk with
+   parent-relative `openat(..., O_NOFOLLOW|O_CLOEXEC)`, require
+   `O_DIRECTORY` intermediates and regular final `fstat`.
+3. Both readers use unchanged `maxStateFileBytes` through
+   `io.LimitReader(..., cap+1)`, hash/read the final handle exactly once, and
+   close root/intermediate/final resources on success, error, cancellation,
+   oversize, and checksum refusal.
+4. CLI validates row/pin agreement and exact declared set, securely loads all
+   required pins before the first inverse, retains an immutable row-key →
+   verified-bytes map, and passes bytes—not paths—to Serena inverse.
+5. Serena inverse accepts `BaselineBytes`; the v3 rollback path never reopens
+   `BackupPath`. Lexical/final-path checks are diagnostics/defense only, never
+   authorization.
+
+Endangered invariants/guards:
+
+| ADR item | Exact guard and expected observation |
+| --- | --- |
+| I9 exact verified bytes | `TestMCPFrontR3_PinSwapAfterLoadUsesRetainedBytes`; replacement path is never read |
+| R3-5 | Retained bytes passed to inverse equal the bytes hashed from the single secure final read |
+| R3-6 / RR3-01 | Target-platform root/intermediate/final link/reparse, component swap, size, and cleanup matrices |
+
+- **R3C-AC1:** Windows target run executes root, intermediate, final reparse,
+  component-swap, non-regular, >1 MiB, cancellation, and cleanup cases; every
+  refusal occurs before client mutation and handle-leak count is zero.
+- **R3C-AC2:** POSIX target run executes root, intermediate, final symlink,
+  explicit no-follow, component-swap, non-regular, >1 MiB, cancellation, and
+  cleanup cases; every refusal occurs before mutation and FD-leak count is zero.
+- **R3C-AC3:** The complete 17-row Serena pin matrix covers missing, extra,
+  LSP-attached, duplicate, lexical escape, root/intermediate/final link,
+  component swap, unreadable/non-regular, oversize, checksum, metadata, pin-set
+  disagreement, post-load swap, cleanup, and exact pinless conflict.
+- **R3C-AC4:** Post-load path replacement does not affect the inverse:
+  consumed bytes equal the retained verified bytes; replacement read count is
+  zero.
+- **R3C-AC5:** `state_read_caps.go` is diff-free and no duplicate size cap
+  exists in CLI or either platform reader.
+
+Target-platform test execution is mandatory. Windows success does not substitute
+for POSIX execution or vice versa; absence of a target runner is `BLOCKED`, not
+PASS or skip.
+
+## Phase R3-D — command-owner integration and complete acceptance matrices
+
+Owner and integration owner: `$backend-engineer`
+
+Depends on: R3-A through R3-C green on available target; POSIX/Windows target
+matrix may complete at QA but may not be waived
+
+Revert: `RG-PR588-V3-R3`
+
+1. Integrate strict version-3 decode, row validation, classifier, forward
+   admission, pin load, independent rollback, durable dispositions, verification,
+   aggregate return, and retirement in the accepted order.
+2. Command-owner forward and rollback for v1/v2 decode only the version,
+   preserve exact report bytes, perform zero client/state mutations, and return
+   `legacy-ownership-unproven`.
+3. Strict v3 rejects unknown top-level projections, trailing values, incomplete
+   rows, malformed attempt/receipt pairs, illegal pins, and interim R2 shapes.
+4. Preserve C1/C2/C4/C8/C9/C10 and protected C3/C5/C6/C7 without changing their
+   oracles. `install.go`, `route.go`, operation-lock scope, and total preflight
+   remain unchanged.
+5. Remove every R3 actor's temporary diagnostic; foreign `TEMPDEBUG` remains
+   excluded and must have been resolved by R3-0, not silently incorporated.
+
+Invariant/guard completion:
+
+| ADR invariant | Implementation step and mandatory guard |
+| --- | --- |
+| I1 | Row merge; C1/C2 first-baseline guard |
+| I2 | Strict v3 row validator; projection/report-port mutation guard |
+| I3 | Frozen LSP plan; C10 appearing-client guard |
+| I4 | Classifier; 24-case F2 table |
+| I5 | Group/Serena durable callback; real-seam prepare failure guard |
+| I6 | Same-call finish transition; exact receipt tests |
+| I7 | Serena/LSP expected-live inverse; C4 and prior-receipt matrices |
+| I8 | Wrapper dependencies; forward/rollback boundary race tests |
+| I9 | Secure readers plus retained-byte inverse; platform/pin-swap tests |
+| I10 | Forward admission/disposition/retirement; conflict-policy matrix |
+| I11 | Stable independent rollback loops; two mixed-progress tests |
+| I12 | Command owners; v1/v2 × forward/rollback exact-byte/no-write table |
+
+- **R3D-AC1:** `TestMCPFrontR3_CommandOwnersRefuseV1V2ByteIdentical` runs four
+  command cases—v1/v2 × forward/rollback—with exact byte equality and zero
+  adapter/report writes.
+- **R3D-AC2:** Strict-v3 malformed matrix rejects every ADR shape before the
+  first client mutation.
+- **R3D-AC3:** Every R3-1 through R3-11 guard reaches its real owner; helper-only
+  state tests do not count.
+- **R3D-AC4:** Existing original C1-C10 and protected C3/C5/C6/C7 test sets
+  remain green.
+- **R3D-AC5:** `git diff --check` exits 0; exactly seven production and eight
+  test paths are in the R3 diff; excluded/foreign path count is zero.
+
+Exact restored Windows/local commands:
+
+```powershell
+Invoke-PR588Go -GoArgs @(
+    'test', '-v', '-tags=test_state_path_env', '-count=1', '-timeout', '10m',
+    '-run',
+    '^(TestMCPFrontR3_.*|TestMCPFrontV3_.*|TestMCPFrontR2_(CheckWithReconcileMutatesNothing|SecondInvocationRefusesWhileTheTransactionLockIsHeld|ForwardRefusesWhenOnlyTheSerenaRouteIsLive)|TestRouteDaemon_Session(StoresAreReachableForExpiry|ExpiryActuallyReclaimsBoundSessions|ExpiryStopsWithContext))$',
+    './internal/cli/'
+)
+
+Invoke-PR588Go -GoArgs @(
+    'test', '-v', '-tags=test_state_path_env', '-count=1', '-timeout', '10m',
+    '-run',
+    '^(TestMCPFrontR3_.*|TestMCPFrontV3_.*|TestReadSerenaPinBeneathRootNoFollow_.*|TestSnapshotRestore_.*|TestSnapshotLSPRouterClientEntries_CapturesLegacyPerWorkspaceEntries|TestSerena(ClientReconcile_.*|Reconcile_.*))$',
+    './internal/api/'
+)
+
+Invoke-PR588Go -GoArgs @(
+    'test', '-v', '-tags=test_state_path_env', '-count=1', '-timeout', '10m',
+    '-run',
+    '^(Test(AllClientsAreLockWrapped|ConditionalEntryGroupMutation_.*|CAS.*))$',
+    './internal/clients/'
+)
+```
+
+The CLI regex is mandatory; never run the whole CLI package without it.
+
+Exact POSIX target command uses a new temp directory per invocation and the same
+tag:
+
+```sh
+state_dir="$(mktemp -d)"
+MCPHUB_STATE_DIR_OVERRIDE="$state_dir" \
+  go test -v -tags=test_state_path_env -count=1 -timeout 10m \
+  -run '^(TestReadSerenaPinBeneathRootNoFollow_POSIX.*|TestMCPFrontR3_Pin.*)$' \
+  ./internal/api/
+```
+
+The target runner must verify `state_dir` is its created temp child before
+cleanup. No `go test ./...` is allowed.
+
+## Phase R3-E — independent QA and controlled defect mutations
+
+Owner: `$qa-engineer`
+
+Depends on: R3-D handoff hashes and both target-platform reader runs available
+
+Production corrections return to `$backend-engineer`
+
+Revert: immediate inverse `apply_patch` and exact pre-mutation SHA-256
+
+For every row below: hash the production owner, apply only the named defect,
+compile and fail the exact named real-owner assertion, inverse-patch
+immediately, require exact hash equality, and rerun green.
+
+| Claim | Controlled production mutation | Guard |
+| --- | --- | --- |
+| R3-1 | Drop canonical dependency from legacy remove | Forward group-boundary guard |
+| R3-2 | Drop legacy dependencies from canonical inverse | Rollback group-boundary guard |
+| R3-3 | Treat `post-write-conflict` as settled on forward admission | Uncertain-plan replacement matrix |
+| R3-4 | Return globally on first uncertain row/group | Independent-progress matrix |
+| R3-5 | Reopen pin path in Serena inverse | Pin-swap retained-bytes guard |
+| R3-6 | Replace handle/FD-relative component open with pathname check/open | Target-platform root/intermediate/final/swap guard |
+| R3-7 | Ignore missing first-generation Serena conflict row | Pinless durable-conflict guard |
+| R3-8 | Promote prepared state from re-entry equality | 24-case F2 matrix |
+| R3-9 | Permit a v1/v2 command owner to rewrite/retire artifact | Four-case command-owner byte/no-write guard |
+| R3-10 | Retire from in-memory or nonterminal durable state | Durable all-terminal retirement guard |
+| R3-11 | Clear prior receipt/pin or allow forward replay after conflict | Prior-receipt/admission matrix |
+
+QA also preserves the original C1/C2/C4/C8/C9/C10 mutation artifacts, reruns
+their current-source guards green, and reruns C3/C5/C6/C7 protected guards.
+
+- **R3E-AC1:** All 11 mutations fail their named assertion; compile-only,
+  missing-test, no-op, unrelated panic, timeout, or skip does not count.
+- **R3E-AC2:** Every mutated source returns to the exact handoff SHA-256 and its
+  guard reruns green.
+- **R3E-AC3:** All three scoped local sets plus Windows and POSIX platform
+  matrices pass with exact test/subtest counts and zero skips.
+- **R3E-AC4:** With a distinct fresh override directory per command,
+  `go build -tags=test_state_path_env ./...` and
+  `go vet -tags=test_state_path_env ./...` exit 0. Never run
+  `go test ./...`.
+- **R3E-AC5:** QA proves zero unauthorized mutation, zero route-loss race,
+  exact retained pin bytes, 100% independent progress, and durable all-terminal
+  retirement.
+
+Absolute safety: every API/CLI command has
+`-tags=test_state_path_env` and a fresh
+`MCPHUB_STATE_DIR_OVERRIDE`; no whole CLI package test, GUI, tray, supervisor,
+scheduler, daemon, process kill by image name, checkout, reset, stash,
+worktree creation, commit, or push.
+
+## Phase R3-F — completion-verified external review and correction commit
+
+Owner: `$lead`
+
+Depends on: R3-E PASS and publication-ready target-platform evidence
+
+1. Run distinct claim-verification and adversarial architecture lanes with
+   file-based prompts against the R3 ADR/design, exact diff, QA artifact,
+   original classifications, AR2-01..06, RR3-01/02, I1-I12, and R3-1..11.
+2. Windows launcher owner must resolve and execute native `codex.exe` directly
+   from PowerShell, wait for process completion, capture the process object's
+   `ExitCode`, and write stdout/stderr/exit files. A PowerShell owner using
+   `Start-Process -Wait -PassThru` with explicit redirections is acceptable.
+   A `.cmd`/`.bat` parent exit file is forbidden: the two prior `.cmd` parents
+   returned before the Node/Codex child and are not completion oracles.
+3. Each counted lane requires native exit `0`, nonempty output, requested
+   provenance/header, final `PASS`, and no auth/quota/truncation/timeout marker.
+   If native `codex.exe` cannot be actively resolved, the gate is `BLOCKED`;
+   do not substitute the failed `.cmd` oracle.
+4. Any `REVISE` returns to its owner and repeats affected mutations, complete QA,
+   and both external gates.
+5. After two PASS verdicts: promote ADR status to `accepted`; reconcile all 14
+   findings, C1-C10, AR2/RR3, invariants, mutations, target-platform evidence,
+   foreign-overlap disposition, and safety incident; run publication/leak scan;
+   stage only accepted task-owned files; create one new local correction commit
+   atop `31b9ca94` or its explicitly accepted descendant. Do not amend or push.
+
+- **R3F-AC1:** Both external lanes have native exit `0`, valid output, and
+  `PASS`; neither uses `.cmd` as its parent oracle.
+- **R3F-AC2:** Publication scan finds zero secret, token, raw backup, environment
+  value, machine-local path, `TEMPDEBUG`, `.codegraph*`, or unrelated/foreign
+  hunk in staged content.
+- **R3F-AC3:** New local correction commit has parent `31b9ca94...` or an
+  explicitly accepted descendant and names original findings plus AR2-01..06
+  and RR3-01/02. History is not rewritten.
+- **R3F-AC4:** Final report includes classifications, class/invariant maps,
+  11 red/green mutation proofs, exact hashes, target-platform tests, build/vet,
+  both review oracles, safety incident, commit hash, and `not pushed`.
+- **R3F-AC5:** The PR work-item stays active for human review/publication.
+
+### R3 recommended sequence and gate
+
+`$lead` clears R3-0 foreign overlap → `$backend-engineer` implements R3-A
+through R3-D as integration owner → `$qa-engineer` runs R3-E → independent
+claim and adversarial `$architecture-reviewer` lanes → `$lead` publication scan
+and new local correction commit without push.
+
+**Plan gate: PASS; implementation BLOCKED at R3-0 until the current foreign
+overlapping API/debug changes are resolved by their owner or explicitly admitted
+by the user.** After that clearance, the plan is backend-eligible.
+
+## R2 correction amendment — historical execution contract
 
 This amendment is the active plan for the post-QA architecture corrections
 F1-F4 and A-01-A-03. It consumes

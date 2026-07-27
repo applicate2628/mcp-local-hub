@@ -5,21 +5,31 @@ Owner: main conversation holding `$lead`
 Input: `research-live-findings-2026-07-27.md`  
 Input SHA-256: `01B263C82328AA4AB6A6874E6EDE12060F2A862DF5294E1E209B50B08F6A734F`
 
-## R2 superseding contract
+## R3 superseding contract
 
-The accepted-ready R2 architecture contract is
+The accepted-ready R3 architecture contract is
 `work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md`
 (status `proposed`; promotion to `accepted` remains the
-`$architecture-reviewer` gate). It supersedes this package's attempt-settlement,
-Serena pin-authority, point-in-time LSP mutation, dependency-retry, and
-retirement-probe decisions. Downstream planning, implementation, and review
-must consume the decision-registry contract where the two artifacts differ.
+`$architecture-reviewer` gate). It supersedes every R2 or earlier statement in
+this package where the artifacts differ. R3 requires one wrapper-owned
+multi-entry dependency authorization under one config lock; one policy-free
+uncertainty classifier with distinct forward and rollback caller policies;
+securely opened, verified Serena pin bytes passed directly to the inverse; a
+durable pinless no-write Serena precondition-conflict row; and rollback
+continuation across independent safe rows/groups.
 
-Its protected surfaces remain binding: `internal/cli/install.go`,
-`internal/cli/route.go`, the operation-level reconcile lock, total Serena/LSP
-preflight, exact first baseline, per-row receipt port, frozen LSP population,
-canonical-before-legacy forward ordering, and version-1/version-2 no-write
-refusal.
+The RR3 amendment further pins secure pin reads to API-owned root-handle/root-FD
+component walkers using the installed `x/sys/windows v0.46.0` relative-open
+surface and the existing 1 MiB API state-file cap. It also retains any prior
+`Applied` receipt across a no-invocation precondition conflict and refuses every
+new forward generation while any rollback disposition exists, until explicit
+rollback/retirement. Planner admission remains blocked until the repeat
+reliability review returns `PASS`.
+
+Protected C3 `--check`, C5 operation serialization, C6 total route preflight,
+and C7 route cleanup remain binding. The ADR's allowed source/test surfaces,
+lock order, failure discriminators, migration rules, and complete deterministic
+falsifier matrices are the planning and implementation gate.
 
 ## Decision
 

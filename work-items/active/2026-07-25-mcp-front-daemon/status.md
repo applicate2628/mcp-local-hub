@@ -11,11 +11,11 @@ updated: 2026-07-27 08:07
   verified fixes without pushing.
 - **Primary task status**: active
 - **Interruption marker**: none
-- **Stage**: two external R2 architecture gates
+- **Stage**: R3 execution planning after reliability PASS
 - **Main conv role**: orchestrating
-- **Last accepted artifact**: `qa-live-findings-2026-07-27.md`
-  (R2 QA PASS; SHA-256
-  `BD72AD3996DB35FD25044C96AB47EBCB51E97CB6FBFEA12B4E54DEE1AD9A2F64`)
+- **Last accepted artifact**: `reliability-live-findings-2026-07-27.md`
+  (R3 repeat-review PASS; SHA-256
+  `7237D8CFE8CE6A9C535BAC0EAA885E015EAD52F9941207874C8705EA6F890B34`)
 - **Open obligations before closeout**: classification; class sweeps; any needed
   design and implementation; mutation proofs; scoped tagged tests; build; vet;
   independent architecture gate; commit; no push
@@ -27,8 +27,7 @@ updated: 2026-07-27 08:07
 
 | Agent | Role | Model/effort | Status | Launched |
 | --- | --- | --- | --- | --- |
-| architecture-claim-live-findings-r2 | external-reviewer replacing architecture-reviewer | direct Codex CLI, `gpt-5.6-sol`/xhigh | launching | pending |
-| architecture-adversarial-live-findings-r2 | external-reviewer replacing architecture-reviewer | direct Codex CLI, `gpt-5.6-sol`/xhigh | launching | pending |
+| planner-pr588-r3 | planner | native specialist | running, R3 delta only | 11:05 |
 
 ## Completed agents
 
@@ -62,11 +61,17 @@ updated: 2026-07-27 08:07
 | qa-open-recovery-classes-r2 | qa-engineer | REVISE at mutation 1/7; source restored | `qa-live-findings-2026-07-27.md` |
 | backend-open-recovery-classes-r2a | backend-engineer, integration owner | PASS; caller-level oracle now falsifies stale-memory mutation | `implementation-live-findings-2026-07-27.md` |
 | qa-open-recovery-classes-r2-restart | qa-engineer | PASS; 7/7 mutations, 133 restored PASS markers, build/vet exit 0 | `qa-live-findings-2026-07-27.md` |
+| architecture-claim-live-findings-r2 | external-reviewer replacing architecture-reviewer | REVISE evidence; counted gate UNVERIFIED (missing exit record) | `.scratch/external-reviews/r2-claim.out` |
+| architecture-adversarial-live-findings-r2 | external-reviewer replacing architecture-reviewer | REVISE evidence; counted gate UNVERIFIED (missing exit record) | `.scratch/external-reviews/r2-adversarial.out` |
+| architect-pr588-r3-contract | architect | PASS, accepted-ready; reliability returned corrections | `work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md` |
+| reliability-pr588-r3 | reliability-engineer | REVISE, RETURN(architect) | `reliability-live-findings-2026-07-27.md` |
+| architect-pr588-r3-contract-r2 | architect | PASS for repeat reliability | `work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md` |
+| reliability-pr588-r3-r2 | reliability-engineer | PASS, planner-eligible | `reliability-live-findings-2026-07-27.md` |
 
 ## Next action
 
-Obtain two completion-verified external R2 architecture PASS verdicts against
-the same code, ADR, implementation, and QA artifact hashes.
+Finish the exact R3 implementation/verification plan. Before implementation,
+resolve the foreign concurrent `TEMPDEBUG` overlap without overwriting it.
 
 ---
 
