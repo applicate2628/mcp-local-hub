@@ -17,8 +17,13 @@ func TestRealExtractor_OpenCodeConfigPath(t *testing.T) {
 	localAppData := filepath.Join(tmp, "localappdata")
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("XDG_CONFIG_HOME", xdg)
 	t.Setenv("LOCALAPPDATA", localAppData)
+	// guiClientConfigPath resolves EVERY supported client before extracting the
+	// named one, so the non-home roots need neutralizing too. Call it BEFORE the
+	// XDG override below — this test deliberately places opencode's config outside
+	// the home tree, and that override must win.
+	neutralizeClientConfigPathEnv(t, home)
+	t.Setenv("XDG_CONFIG_HOME", xdg)
 
 	opencodeDir := filepath.Join(xdg, "opencode")
 	if err := os.MkdirAll(opencodeDir, 0755); err != nil {

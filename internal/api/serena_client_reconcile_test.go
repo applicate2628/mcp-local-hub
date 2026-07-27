@@ -650,10 +650,7 @@ func TestSerenaClientReconcile_RewritesToRouterURL_PerClient(t *testing.T) {
 
 	home := t.TempDir()
 	// Redirect every adapter's path resolution into the hermetic home.
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming")) // vscode (Windows)
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))    // vscode (Linux)
+	sandboxClientConfigHome(t, home)
 
 	// Seed each URL client's config with a legacy serena entry so the
 	// rewrite has something to overwrite and Exists() is true.
@@ -729,8 +726,7 @@ func TestSerenaClientReconcile_Antigravity_RelayUpstreamIsRouter(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	sandboxClientConfigHome(t, home)
 
 	// Antigravity config: ~/.gemini/antigravity/mcp_config.json. Seed it so
 	// Exists() is true.
@@ -1030,8 +1026,7 @@ func TestRestoreSerenaReconcileApplied_BypassesHubEntryGuard_RestoresLegacyHubBa
 	t.Cleanup(SetClientWriteFallbackForTest()) // %TEMP% HOME fails the prod DACL gate on Windows
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	sandboxClientConfigHome(t, home)
 
 	writeFile := func(rel, body string) string {
 		p := filepath.Join(home, rel)
@@ -1130,8 +1125,7 @@ func TestMCPFrontV3_SerenaCASRestoresLegacyHubBackupAndRefusesConcurrentEdit(t *
 	t.Cleanup(SetClientWriteFallbackForTest())
 
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	sandboxClientConfigHome(t, home)
 	configPath := filepath.Join(home, ".claude.json")
 	const routerURL = "http://127.0.0.1:9137/serena/mcp"
 	const legacyURL = "http://localhost:9121/mcp"
@@ -1190,8 +1184,7 @@ func TestMCPFrontV3_SerenaCASRestoresLegacyHubBackupAndRefusesConcurrentEdit(t *
 func TestMCPFrontV3_SerenaAbsentBaselineUsesOwnedRemove(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	sandboxClientConfigHome(t, home)
 	configPath := filepath.Join(home, ".claude.json")
 	const routerURL = "http://127.0.0.1:9137/serena/mcp"
 	writeConfig := func(url string) {

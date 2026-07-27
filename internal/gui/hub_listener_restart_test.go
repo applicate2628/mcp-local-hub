@@ -23,17 +23,12 @@ func setupInitialHubPortDependencyTest(t *testing.T) string {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	for _, key := range []string{
-		"COPILOT_HOME", "KIMI_CODE_HOME",
-		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
-	} {
-		t.Setenv(key, "")
-	}
+	// This fixture used to re-type the whole non-home env set inline. It is now
+	// the single owner's caller (client_config_env_isolation_test.go) so a new
+	// adapter env var is added in ONE place for the package.
+	neutralizeClientConfigPathEnv(t, home)
 	t.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
-	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(home, "ProgramData", "opencode"))
 	return home
 }
 

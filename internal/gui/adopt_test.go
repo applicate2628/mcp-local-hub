@@ -28,9 +28,16 @@ func setupGUIAdoptTestEnv(t *testing.T, entryName, codexBody string) (codexPath,
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))
-	t.Setenv("APPDATA", filepath.Join(root, "appdata"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+	// These tests drive the REAL /api/adopt and /api/deadopt routes. BuildAdoptPlan
+	// fans out over DefaultScanConfigPaths and BuildDeAdoptPlan calls ProbeHubGate,
+	// which GetEntry's EVERY constructed adapter — so an APPDATA-only widening is
+	// not enough: opencode/crush/goose (XDG_CONFIG_HOME on all OSes), copilot-cli,
+	// kimi-code-cli and mimocode's %ProgramData% managed layer all read real host
+	// files without the full set. neutralizeClientConfigPathEnv
+	// (client_config_env_isolation_test.go) owns it, APPDATA included.
+	neutralizeClientConfigPathEnv(t, home)
 	t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "")
 	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
 	t.Cleanup(api.ResetStrictModeIntentCacheForTest)

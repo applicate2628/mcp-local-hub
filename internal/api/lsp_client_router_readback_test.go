@@ -26,15 +26,23 @@ import (
 // under two mutation paths. It is verified here against the live claude-code
 // adapter — the URL-native family, which is the one the LSP plan drives.
 //
-// SAFETY: HOME / USERPROFILE / LOCALAPPDATA are redirected to a temp dir before
+// SAFETY: every client-config path root is redirected to a temp dir before
 // clients.AllClients() is called, and only the claude-code adapter is ever
 // mutated. It resolves its config to ~/.claude.json, so the write lands in the
-// temp dir. No other adapter in the map is touched.
+// temp dir.
+//
+// "only claude-code is mutated" was the whole safety argument here and it was not
+// sufficient: AllClients() CONSTRUCTS all 47 adapters, so with only HOME /
+// USERPROFILE / LOCALAPPDATA redirected the other 43 still resolved the
+// operator's real config paths. Nothing read them in this test, but the argument
+// was one line of production change away from being wrong. The full non-home set
+// is owned by neutralizeClientConfigPathEnv.
 func TestLSPRouterPlan_IntendedStateMatchesAdapterReadback(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
 	t.Setenv("LOCALAPPDATA", tmp)
+	neutralizeClientConfigPathEnv(t, tmp)
 	t.Cleanup(SetDaemonStateRootForTest(tmp))
 
 	configPath := filepath.Join(tmp, ".claude.json")

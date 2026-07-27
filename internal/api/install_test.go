@@ -224,6 +224,10 @@ func deferredSerenaNoticePlan() (*config.ServerManifest, *Plan) {
 }
 
 func TestInstallPlan_SerenaRealInstallSurfacesDeferredNotice(t *testing.T) {
+	// DryRun:false — this drives the REAL install write loop, whose
+	// executeInstallToWithSymlinkConsents enumerates clients.AllClients()
+	// (install.go:2887) and resolved the operator's real ~/.claude.json.
+	hermeticHome(t)
 	preparePreflightBinaryChecks(t)
 	m, p := deferredSerenaNoticePlan()
 

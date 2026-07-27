@@ -32,16 +32,21 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
-// isolateHome points HOME/USERPROFILE/LOCALAPPDATA at an empty temp dir so any
+// isolateHome points every client-config path root at an empty temp dir so a
 // global config-path resolution (DefaultScanConfigPaths) reads nothing real.
+//
+// The five vars set inline below still left the mimocode managed layer resolving
+// the machine-global %ProgramData%\opencode, plus COPILOT_HOME / KIMI_CODE_HOME /
+// the MIMOCODE_* profile overrides — so the global-scan baselines these tests
+// take were reading real host state. neutralizeClientConfigPathEnv
+// (client_config_env_isolation_test.go) is the single owner of that set.
 func isolateHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	neutralizeClientConfigPathEnv(t, home)
 	return home
 }
 

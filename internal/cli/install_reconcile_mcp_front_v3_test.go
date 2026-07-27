@@ -132,9 +132,28 @@ func v3RecordAsMap(t *testing.T, record mcpFrontReconcileReport) map[string]any 
 	return out
 }
 
+// v3Journal builds a persisted version-3 journal for the tests below.
+//
+// It installs the hermetic client-config env (mcpFrontPR588Env) even though most
+// of these tests read only the journal artifact. Reason: several of them drive
+// runReconcileMCPFront / runRollbackMCPFront, and those reach production code
+// that falls back to the LIVE registry when opts.Clients is nil
+// (api.RestoreLSPRouterRecoveryRows, lsp_client_router_snapshot.go:199). Before
+// this line, TestMCPFrontV3_RollbackCallerRereadsDurableStateBeforeRetirement
+// resolved the operator's REAL C:\Users\<user>\.claude.json — it survived only
+// because its row named a client ("missing-test-client") that no adapter
+// matches. A sibling test naming a real client would have written there. Caught
+// by the client-config sandbox audit
+// (internal/clients/config_path_sandbox_audit.go); isolating the SHARED fixture
+// rather than the one test that tripped is what keeps the next test in this file
+// safe by default.
+//
+// No test in this file calls both mcpFrontPR588Env and v3Journal, so this
+// installs exactly one home redirect per test.
 func v3Journal(t *testing.T, port int, prior *mcpFrontReconcileReport, ops ...api.LSPRouterPlannedOperation) *mcpFrontReconcileJournal {
 	t.Helper()
-	reportPath := filepath.Join(t.TempDir(), "recovery.json")
+	tmp := mcpFrontPR588Env(t)
+	reportPath := filepath.Join(tmp, "recovery.json")
 	journal, err := newMCPFrontV3Journal(reportPath, prior, port, &api.LSPRouterClientPlan{
 		Port: port, Operations: ops,
 	})
