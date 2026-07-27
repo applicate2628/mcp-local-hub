@@ -2052,4 +2052,99 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     expect(alert.textContent).toBe(`${message} A process was already stopped during this recovery attempt.`);
     expect(view.container.textContent).not.toContain(raw);
   });
+  // F2 regression guard. postDaemonRecover's response used to be DISCARDED by
+  // the Dashboard's onRecover handler, so the audit_handoff warning — the ONLY
+  // signal that this long-lived GUI process may still hold the
+  // supervisor-events.log flock — was invisible in the exact surface where the
+  // strand actually hurts. Only the one-shot CLI reported it.
+  //
+  // MUTATION: restore `await postDaemonRecover(d.task_name!);` (drop the
+  // `result.audit_handoff` branch) in DashboardScreen's onRecover. This test
+  // fails with "Unable to find an element by: [data-testid=\"dashboard-audit-lock-stranded\"]".
+  it("surfaces a release_unconfirmed audit handoff as a persistent screen-level warning", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_unconfirmed",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const banner = await view.findByTestId("dashboard-audit-lock-stranded");
+    expect(banner.textContent).toContain("could not confirm it released");
+    expect(banner.textContent).toContain("Do NOT re-run recovery");
+    expect(banner.textContent).toContain("Restart mcphub to release the lock");
+
+    // Screen-level, NOT inside the daemon tile: the condition is process-scoped
+    // and is not attributable to one daemon.
+    expect(view.getByTestId("dashboard-card").contains(banner)).toBe(false);
+
+    // STICKY. A daemon-state delta clears the Card's own transient recovery
+    // feedback; the lock warning must survive it, because the strand outlives
+    // the recovery and its only remedy is restarting this process.
+    await view.findByText("Recovery accepted; waiting for supervisor status");
+    act(() => {
+      dispatchSse("daemon-state", {
+        server: "memory",
+        daemon: "default",
+        port: 9123,
+        pid: 12345,
+        state: "Running",
+      });
+    });
+    await waitFor(() => {
+      expect(view.queryByText("Recovery accepted; waiting for supervisor status")).toBeNull();
+    });
+    expect(view.getByTestId("dashboard-audit-lock-stranded")).toBeTruthy();
+  });
+
+  // F2 negative: a "durable" handoff must not raise the banner, or the warning
+  // becomes noise on every successful recovery.
+  it("shows no lock warning when the audit handoff is durable", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "durable",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    await view.findByText("Recovery accepted; waiting for supervisor status");
+    expect(view.queryByTestId("dashboard-audit-lock-stranded")).toBeNull();
+  });
+
+  // F3 regression guard. RECOVER_AUDIT_DURABILITY_FAILED had no switch arm, so
+  // it fell through to the generic default and told the operator to "try
+  // again" — the one instruction this code exists to prevent, because the
+  // destructive step has already run.
+  //
+  // MUTATION: delete the RECOVER_AUDIT_DURABILITY_FAILED arm from
+  // daemonRecoverCodeMessage. tsc fails the exhaustiveness guard first; forcing
+  // past it, this test fails with the generic "Recovery failed. Check the
+  // supervisor logs and try again." copy.
+  it("never offers a retry for RECOVER_AUDIT_DURABILITY_FAILED", async () => {
+    mockRecoveryFetch(jsonResponse(500, {
+      error: "internal error",
+      code: "RECOVER_AUDIT_DURABILITY_FAILED",
+      termination_committed: true,
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toContain("Do NOT retry");
+    expect(alert.textContent).toContain("already stopped the process and requested a respawn");
+    expect(alert.textContent).toContain("A process was already stopped during this recovery attempt.");
+    // The generic fall-through copy is exactly what the missing arm produced.
+    expect(alert.textContent).not.toContain("Recovery failed. Check the supervisor logs and try again.");
+  });
 });

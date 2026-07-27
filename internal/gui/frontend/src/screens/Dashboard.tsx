@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { cleanupOrphans, fetchOrThrow, getHubHealth, postDaemonRecover, restartSupervisor } from "../api";
-import type { APIError, HubHealth } from "../api";
+import { cleanupOrphans, fetchOrThrow, getHubHealth, isDaemonRecoverErrorCode, postDaemonRecover, restartSupervisor } from "../api";
+import type { APIError, DaemonRecoverErrorCode, HubHealth } from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { unmanagedStdioCount as countUnmanagedStdio } from "../lib/unmanaged-stdio";
 import { daemonStateVisual, isRecoveryEligibleState, stateShape } from "../lib/status";
@@ -154,6 +154,17 @@ export function DashboardScreen() {
   // Phase-0 item 1: honest hub-aggregate health. Fetched on mount, then updated
   // live by the `hub-health` SSE event so a hung/dead/needs-reconcile hub is
   // visible instead of every daemon card silently painting green.
+  // auditLockStranded is STICKY and screen-level on purpose.
+  //
+  // A "release_unconfirmed" audit handoff reports a PROCESS-scoped condition:
+  // this GUI process may still hold the supervisor-events.log cross-process
+  // flock, blocking the supervisor and `mcphub install` for as long as it runs.
+  // That outlives any per-card toast — Card's recoverFeedback is cleared the
+  // moment the daemon's state changes, which a successful recovery causes within
+  // seconds — and it is not attributable to one card, so it belongs beside the
+  // hub-health banner, not inside a daemon tile. It is never auto-cleared,
+  // because the only remedy is restarting this process.
+  const [auditLockStranded, setAuditLockStranded] = useState(false);
   const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
   const hubHealthSseSeqRef = useRef(0);
   const hubHealthFetchSeqRef = useRef(0);
@@ -817,6 +828,18 @@ export function DashboardScreen() {
           ⚠ {hubHealthMessage(hubHealth)}
         </p>
       )}
+      {auditLockStranded && (
+        <p
+          class="dashboard-audit-lock-stranded"
+          data-testid="dashboard-audit-lock-stranded"
+          role="alert"
+        >
+          ⚠ Recovery finished, but this app could not confirm it released the
+          supervisor-events.log lock. While that lock is held, the supervisor and{" "}
+          <code>mcphub install</code> cannot write their event logs. Do NOT re-run
+          recovery — it already completed. Restart mcphub to release the lock.
+        </p>
+      )}
       {unmanagedStdioCount > 0 && (
         <p
           class="dashboard-unmanaged-stdio"
@@ -834,7 +857,14 @@ export function DashboardScreen() {
             daemon={d}
             onRestart={() => restart(d.server, d.daemon)}
             onRecover={async () => {
-              await postDaemonRecover(d.task_name!);
+              const result = await postDaemonRecover(d.task_name!);
+              // The response's warning field is the ONLY signal that this
+              // process may have stranded the event-log flock. Discarding it
+              // (which this handler used to do) made the condition invisible in
+              // the exact surface — a long-lived GUI — where it actually hurts.
+              if (result.audit_handoff === "release_unconfirmed") {
+                setAuditLockStranded(true);
+              }
               setReloadTrigger((n) => n + 1);
             }}
             onStop={() => stop(d.server, d.daemon)}
@@ -1172,42 +1202,63 @@ function daemonRecoveryMessage(error: unknown): string {
     "termination_committed" in body &&
     (body as { termination_committed?: unknown }).termination_committed === true;
 
-  let message: string;
-  switch (apiError?.code) {
-    case "RECOVER_REFUSED_PORT_OWNER":
-      message = "Recovery was refused: the port owner could not be verified as this daemon's child. No process was stopped.";
-      break;
-    case "RECOVER_RESPAWN_FAILED":
-      message = "The supervisor did not accept recovery. View logs and retry after resolving the failure.";
-      break;
-    case "RECOVER_SUPERVISOR_UNAVAILABLE":
-      message = "The supervisor is unavailable. Restart the hub, then retry recovery.";
-      break;
-    case "RECOVER_REQUEST_CANCELED":
-      message = "Recovery was canceled before any process was stopped. Retry if recovery is still needed.";
-      break;
-    case "RECOVER_BOUNDARY_PROBE_TIMEOUT":
-      message = "Recovery verified the process identity but timed out while rechecking the port owner. No process was stopped.";
-      break;
-    case "RECOVER_RESPAWN_BUDGET_INSUFFICIENT":
-      message = "Recovery could not reserve enough time for a safe restart. No process was stopped; retry when the local system is less busy.";
-      break;
-    case "RECOVER_UNKNOWN_TASK":
-      message = "This daemon is no longer known to the supervisor. Refresh status and try again.";
-      break;
-    case "RECOVER_STATE_READ_FAILED":
-      message = "Recovery could not read the current daemon state. Check the supervisor logs and try again.";
-      break;
-    case "RECOVER_UNCLASSIFIED_FAILURE":
-      message = "Recovery failed for an unclassified reason. No specific cause can be asserted; check the supervisor logs before retrying.";
-      break;
-    default:
-      message = "Recovery failed. Check the supervisor logs and try again.";
-  }
+  const code = apiError?.code;
+  const message = isDaemonRecoverErrorCode(code)
+    ? daemonRecoverCodeMessage(code)
+    : // Not a recover-route code at all (transport failure, HTTP_<status>,
+      // a thrown non-APIError). Nothing specific can be asserted.
+      "Recovery failed. Check the supervisor logs and try again.";
 
   return terminationCommitted
     ? `${message} A process was already stopped during this recovery attempt.`
     : message;
+}
+
+// daemonRecoverCodeMessage maps EVERY DaemonRecoverErrorCode to operator copy.
+//
+// The `const unhandled: never = code` in the default arm is the exhaustiveness
+// guard: adding a member to DAEMON_RECOVER_ERROR_CODES (api.ts) without an arm
+// here becomes a COMPILE error, instead of silently inheriting a generic "try
+// again" message. That silent inheritance is exactly how
+// RECOVER_AUDIT_DURABILITY_FAILED — the one code whose entire purpose is to
+// stop a retry — came to render "Recovery failed. Check the supervisor logs and
+// try again."
+function daemonRecoverCodeMessage(code: DaemonRecoverErrorCode): string {
+  switch (code) {
+    case "INVALID_ARGS":
+      return "Recovery was rejected as malformed. No process was stopped. Refresh status and try again.";
+    case "RECOVER_CONFIRMATION_REQUIRED":
+      return "Recovery requires explicit confirmation and did not proceed. No process was stopped.";
+    case "RECOVER_REFUSED_PORT_OWNER":
+      return "Recovery was refused: the port owner could not be verified as this daemon's child. No process was stopped.";
+    case "RECOVER_RESPAWN_FAILED":
+      return "The supervisor did not accept recovery. View logs and retry after resolving the failure.";
+    case "RECOVER_SUPERVISOR_UNAVAILABLE":
+      return "The supervisor is unavailable. Restart the hub, then retry recovery.";
+    case "RECOVER_REQUEST_CANCELED":
+      return "Recovery was canceled before any process was stopped. Retry if recovery is still needed.";
+    case "RECOVER_BOUNDARY_PROBE_TIMEOUT":
+      return "Recovery verified the process identity but timed out while rechecking the port owner. No process was stopped.";
+    case "RECOVER_RESPAWN_BUDGET_INSUFFICIENT":
+      return "Recovery could not reserve enough time for a safe restart. No process was stopped; retry when the local system is less busy.";
+    case "RECOVER_UNKNOWN_TASK":
+      return "This daemon is no longer known to the supervisor. Refresh status and try again.";
+    case "RECOVER_STATE_READ_FAILED":
+      return "Recovery could not read the current daemon state. Check the supervisor logs and try again.";
+    case "RECOVER_AUDIT_DURABILITY_FAILED":
+      // The destructive step ALREADY RAN — the process was stopped and the
+      // respawn was requested. Only the audit record could not be preserved.
+      // Never offer a retry: a re-run would stop a second, freshly respawned
+      // process. This is the entire reason the code is distinct from
+      // RECOVER_UNCLASSIFIED_FAILURE.
+      return "Recovery already stopped the process and requested a respawn, but its audit record could not be preserved. Do NOT retry — the destructive step has already run. Check this daemon's state below and inspect supervisor-events.log.";
+    case "RECOVER_UNCLASSIFIED_FAILURE":
+      return "Recovery failed for an unclassified reason. No specific cause can be asserted; check the supervisor logs before retrying.";
+    default: {
+      const unhandled: never = code;
+      return `Recovery failed (${String(unhandled)}). Check the supervisor logs before retrying.`;
+    }
+  }
 }
 
 // RecoveryActions surfaces the two ops affordances the Dashboard

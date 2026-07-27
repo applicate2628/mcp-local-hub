@@ -750,6 +750,15 @@ export const DAEMON_RECOVER_ERROR_CODES = [
 
 export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number];
 
+// isDaemonRecoverErrorCode narrows an APIError's optional `code` (typed `string
+// | undefined` on the shared APIError) to the recover-route enum, so a consumer
+// can switch over it with a compile-time exhaustiveness guard. It lives here,
+// beside DAEMON_RECOVER_ERROR_CODES, so the list has exactly one owner: a code
+// added to the array is automatically recognized by every consumer.
+export function isDaemonRecoverErrorCode(code: string | undefined): code is DaemonRecoverErrorCode {
+  return code !== undefined && (DAEMON_RECOVER_ERROR_CODES as readonly string[]).includes(code);
+}
+
 export interface DaemonRecoverResponse {
   task_name: string;
   state: "respawn_accepted";
