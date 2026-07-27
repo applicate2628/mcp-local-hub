@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // withTempHome redirects SettingsPath to a tempdir for the test duration.
@@ -418,8 +419,19 @@ func TestMain(m *testing.M) {
 		"MCPHUB_SUPPRESS_BROWSER_LAUNCH": "1",
 	})
 
+	// Client-config sandbox audit. Fails any test in this package whose admitted
+	// adapters resolve to a config path outside the test sandbox — including
+	// adapters constructed by the PRODUCTION CODE under test, which is the shape
+	// that let `withHermeticHome` reach the operator's real configs after
+	// `mcpFrontPR588Env` had supposedly closed the class. Contract, rationale and
+	// the report-mode knob: internal/clients/config_path_sandbox_audit.go.
+	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
+
 	code := m.Run()
 
+	if escapes := auditRestore(); escapes > 0 && code == 0 {
+		code = 1
+	}
 	restoreEnv()
 	restore()
 	_ = os.RemoveAll(tmp)

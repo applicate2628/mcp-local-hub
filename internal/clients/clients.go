@@ -985,6 +985,9 @@ func ConfigPathForName(name string) (string, error) {
 			if err != nil {
 				return "", err
 			}
+			// One of the two construction seams the sandbox audit hooks; no-op
+			// in production. See config_path_sandbox_audit.go.
+			auditConstructedClient(d.name, c)
 			return c.ConfigPath(), nil
 		}
 	}
@@ -1035,6 +1038,12 @@ func AllClientsWithErrors() (constructed map[string]Client, failedNames []string
 			failedNames = append(failedNames, d.name)
 			continue
 		}
+		// One of the two construction seams the sandbox audit hooks; no-op in
+		// production. This is the seam that covers adapters the PRODUCTION CODE
+		// UNDER TEST constructs (e.g. `language-server cleanup`'s unfiltered
+		// AllClients()), not just the ones a fixture built itself. See
+		// config_path_sandbox_audit.go.
+		auditConstructedClient(d.name, c)
 		constructed[c.Name()] = c
 	}
 	return constructed, failedNames

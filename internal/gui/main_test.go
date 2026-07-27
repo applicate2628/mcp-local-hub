@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // TestMain fences the WHOLE internal/gui test binary off the operator's real
@@ -79,8 +80,18 @@ func TestMain(m *testing.M) {
 		SuppressBrowserLaunchEnv: "1",
 	})
 
+	// Client-config sandbox audit. This TestMain fences the STATE dir but installs
+	// no home barrier, and several gui handler tests drive real /api/adopt,
+	// /api/deadopt and global-scan routes that fan out over the whole client
+	// registry. The audit fails any test whose admitted adapters resolve outside
+	// the sandbox. Contract: internal/clients/config_path_sandbox_audit.go.
+	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
+
 	code := m.Run()
 
+	if escapes := auditRestore(); escapes > 0 && code == 0 {
+		code = 1
+	}
 	restoreEnv()
 	restoreState()
 	_ = os.RemoveAll(tmp)

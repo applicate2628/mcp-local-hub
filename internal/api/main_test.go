@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/clients"
 )
 
 // TestMain installs the supervisor IPC test-pipe discriminator for the whole
@@ -207,7 +208,21 @@ func TestMain(m *testing.M) {
 	// snapshot so the default test path scans nothing and kills nothing.
 	snapshotProcessesFn = func() ([]processRow, error) { return nil, nil }
 
+	// ── Client-config sandbox audit ─────────────────────────────────────────
+	// Fails any test whose admitted adapters resolve to a config path outside
+	// the test sandbox — including adapters constructed by the production code
+	// under test (adopt's DefaultScanConfigPaths fan-out, cleanup's unfiltered
+	// AllStdioEntries walk, install's per-binding BackupKeep+AddEntry). The
+	// MIMOCODE_DISABLE_CLAUDE_CODE_MCP default above closes exactly ONE channel
+	// of that class; this closes the class. Contract and the report-mode knob:
+	// internal/clients/config_path_sandbox_audit.go.
+	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
+
 	code := m.Run()
+
+	if escapes := auditRestore(); escapes > 0 && code == 0 {
+		code = 1
+	}
 
 	daemonStateRootOverride = prevOverride
 	lookupProcess = prevLookupProcess
