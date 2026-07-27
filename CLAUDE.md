@@ -1706,7 +1706,23 @@ Exit codes:
     completion (start `mcphub supervise` / enable autostart when unreachable)
 6 — refused before termination because recovery could not preserve the mandatory
     detached respawn reservation; retry when the local system is less busy
+7 — the process WAS terminated and the respawn WAS requested, but the audit
+    record or its durable handoff could not be preserved. Do NOT re-run
+    `recover`: the destructive step already committed, so a re-run would stop a
+    second, freshly respawned process. Check the daemon in the GUI Dashboard or
+    `mcphub status`, and inspect supervisor-events.log.
 ```
+
+A recovery that exits **0** may still print a `warning:` about the
+supervisor-events.log cross-process lock ("releasing … could not be confirmed").
+That is a WARNING, not a failure: the audit row is durable and both the
+termination and the respawn committed. What could not be confirmed is the
+RELEASE of the flock, which this process may hold until it exits — blocking
+event-log writes from the supervisor and `mcphub install` meanwhile. For the
+one-shot CLI that is nearly harmless (the process exits seconds later). The same
+verdict from the long-lived GUI is the one that matters, and the Dashboard shows
+it as a persistent banner; the remedy there is to restart mcphub, never to re-run
+recovery.
 
 `POST /api/daemon/respawn {force:true}` remains the GUI/programmatic
 equivalent of step 2 (without the port-squatter reap).
