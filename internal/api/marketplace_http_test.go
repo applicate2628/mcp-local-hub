@@ -272,8 +272,9 @@ func TestMarketplaceHTTPClient_RejectsCredentialHeaders(t *testing.T) {
 // The old filter enumerated {authorization, cookie, proxy-authorization}
 // and forwarded everything else, so the DEFAULT outcome for an
 // unenumerated name was "send it to whatever URL --registry points at".
-// Every name below is a real credential-bearing or defence-defeating header
-// that the denylist forwarded verbatim; none of them is a hypothetical.
+// Every name below is a real credential-bearing header, or a protocol header
+// this function sets itself so a caller entry is silently wrong; none of them
+// is a hypothetical.
 //
 // The complement case at the end is what stops the fix from buying
 // correctness by refusing everything: the one documented legitimate use
@@ -298,8 +299,17 @@ func TestMarketplaceHTTPClient_HeaderFilterIsAnAllowlist(t *testing.T) {
 		"Authentication-Info":  "RFC 9110 sibling of Authorization",
 		"Proxy-Authenticate":   "RFC 9110 sibling of Proxy-Authorization",
 		"Cookie2":              "sibling of Cookie",
-		"Accept-Encoding":      "overriding it defeats the wire-byte gzip-bomb cap this file installs",
-		"If-None-Match":        "has its own parameter; an extraHeaders entry would silently override it",
+		// CORRECTION (2026-07-27): this string used to read "overriding it
+		// defeats the wire-byte gzip-bomb cap this file installs". False —
+		// MarketplaceFetchWithClient's unconditional
+		// Set("Accept-Encoding","identity") runs AFTER the extraHeaders loop,
+		// so such an entry was always a no-op and the cap was never reachable
+		// through it. Measured: sending "gzip" through extraHeaders (with the
+		// name temporarily allowlisted) still put "identity" on the wire.
+		"Accept-Encoding": "this function sets it unconditionally AFTER the extraHeaders loop, so a caller entry is silently DISCARDED — refuse loudly rather than ignore",
+		// The sibling claim is correct and measured the same way: the loop
+		// runs AFTER the ifNoneMatch parameter's Set, so a caller entry WINS.
+		"If-None-Match": "has its own parameter, and the extraHeaders loop runs AFTER it, so a caller entry silently OVERRIDES the parameter",
 	}
 	for hdr, why := range refused {
 		seen = nil

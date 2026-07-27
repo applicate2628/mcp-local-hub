@@ -259,10 +259,34 @@ func MarketplaceFetch(ctx context.Context, rawURL, ifNoneMatch string, extraHead
 //     X-Access-Token, X-Amz-Security-Token, Circle-Token, X-JFrog-Art-Api;
 //   - the RFC-standard siblings of the three it did list: Authentication-Info,
 //     Proxy-Authenticate, Cookie2;
-//   - protocol headers whose override defeats a defence this file installs:
-//     Accept-Encoding (transport-level DisableCompression + the wire-byte
-//     cap are the gzip-bomb defence) and If-None-Match (which has its own
-//     parameter and would be silently overridden by an extraHeaders entry).
+//   - protocol headers this function already sets ITSELF, where a caller's
+//     value is silently wrong: If-None-Match and Accept-Encoding.
+//
+// Those last two are silently wrong in OPPOSITE directions, and the asymmetry
+// is the whole reason to name them. Measured against a live httptest server
+// with each name temporarily allowlisted (2026-07-27):
+//
+//	If-None-Match     the extraHeaders loop runs AFTER the Set that applies the
+//	                  ifNoneMatch PARAMETER, so a caller entry WINS. Parameter
+//	                  `"param-etag"` + extraHeaders `"caller-etag"` put
+//	                  `"caller-etag"` on the wire: the parameter is overridden.
+//	Accept-Encoding   the unconditional Set("Accept-Encoding","identity") runs
+//	                  AFTER the extraHeaders loop, so a caller entry LOSES.
+//	                  extraHeaders `gzip` still put `identity` on the wire: the
+//	                  caller's intent is discarded.
+//
+// CORRECTION (2026-07-27): an earlier revision of this comment, of aed0d7e9's
+// message, and of the matching test assertion all claimed that overriding
+// Accept-Encoding "defeats the wire-byte gzip-bomb cap this file installs".
+// That was never true — the Set below it made such an entry a no-op, so the cap
+// was never reachable through this path (and that Set already preceded
+// aed0d7e9). The real reason to refuse it is fail-loud over silently-ignored.
+// The If-None-Match half of the claim was, and remains, correct.
+//
+// A per-name reason is not what makes any of these refused, though — that is
+// the point of the polarity. Everything outside the map is refused BY DEFAULT;
+// the list above records which names the predecessor denylist demonstrably let
+// through, not a set of bespoke rules.
 //
 // Inverting the polarity makes the safe outcome the DEFAULT and makes
 // widening the surface a deliberate, reviewable edit to this map, rather
