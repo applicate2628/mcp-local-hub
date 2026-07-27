@@ -230,12 +230,204 @@ func driverTier(msg string) DiagnosticTier {
 	return TierSpecific
 }
 
+// --- Log-line normalization (single owner) ------------------------------
+//
+// # Why this exists, and why it is shared rather than local
+//
+// A buildtrees phase log is a CAPTURED TERMINAL STREAM. Whole-line matching —
+// which both the interrupt markers and every anchored diagnostic shape rely on
+// — is only sound if "the line" means the line's TEXT, not its display bytes.
+// Anchoring on raw bytes made three inputs false-negative that the older
+// substring form had caught, because bytes.TrimSpace strips none of them
+// (measured 2026-07-27):
+//
+//	"\ufeffUser interrupt"                                    BOM prefix
+//	"\x1b[31mninja: build stopped: interrupted by user.\x1b[0m"  ANSI wrap
+//	"User interrupt\x00"                                      NUL suffix
+//
+// BOM and NUL are unrealistic. ANSI is not, and the same measurement showed the
+// damage is NOT confined to the interrupt predicate — it is strictly worse in
+// scanDiagnostics, where a colourized clang diagnostic matched NO shape at all:
+//
+//	ScanDiagnostics("\x1b[1ma.cpp:3:5: \x1b[0m\x1b[0;1;31merror: \x1b[0m...")
+//	  -> 0 diagnostics
+//
+// i.e. a build that plainly failed answers unknown(no_diagnostic_found) — a
+// confident denial, the exact class this package exists to eliminate.
+//
+// Reachability was probed in the target environment this session rather than
+// assumed from the shape of the strings:
+//
+//	$ g++ -fsyntax-only -fdiagnostics-color=always g.cpp 2>&1 | od -c
+//	033 [ 0 1 m 033 [ K g . c p p : 033 [ m 033 [ K ...
+//	$ clang++ -fsyntax-only -fdiagnostics-color=always -fansi-escape-codes ...
+//	033 [ 1 m a n s i . c p p : 1 : 1 3 :  033 [ 0 m 033 [ 0 ; 1 ; 3 1 m ...
+//	$ strings <ninja>.exe | grep CLICOLOR
+//	CLICOLOR_FORCE
+//
+// (msys2 ucrt64 GCC 15 / clang 21 / C:\msys64\ucrt64\bin\ninja.exe.) GCC emits
+// ANSI to a REDIRECTED pipe with nothing but -fdiagnostics-color=always, which
+// an ordinary CXXFLAGS or triplet setting can carry — no exotic configuration
+// and no CLICOLOR_FORCE needed. Note GCC's `\x1b[K` (erase-in-line): the
+// stripper must handle general CSI, not only SGR.
+//
+// Because ANSI reaches every anchored matcher in this package, the fix is ONE
+// normalizer that every phase-log line scanner calls, not a strip inside
+// DetectInterrupted. Two notions of "a line" inside one package is how the two
+// sides drift apart.
+//
+// # Wire consequence (deliberate, stated)
+//
+// Diagnostic.Text and Diagnostic.File are now the NORMALIZED line, not the raw
+// bytes. That is a second fix rather than a cost: an MCP result is rendered in
+// a terminal and copied into transcripts, so relaying a build log's escape
+// sequences verbatim is the same terminal-injection hazard the marketplace
+// catalog path already strips C0/C1/ESC to avoid — and a build log (arbitrary
+// compiler output, source lines echoed back, third-party build scripts) is at
+// least as untrusted as a catalog.
+//
+// # Scope: which scanners, and which not
+//
+// Applied by the three PHASE-LOG scanners — DetectInterrupted, scanDiagnostics,
+// findRunBuildCommandLine — because they read one input class: a captured
+// build-tool stream.
+//
+// NOT applied by ParseWrapperContent (wrapper.go): a build_failed.log is a
+// structured key/value record the operator's OWN wrapper script writes, not a
+// relayed terminal capture, and its `command:` line is emitted as
+// Result.ExactCommand — a string whose entire purpose is verbatim
+// reproducibility, so editing bytes out of it would be a defect, not a fix. If
+// a wrapper is ever observed emitting escapes, this same owner is the fix.
+
+// normalizeLogLine returns line with terminal display bytes removed, leaving
+// the text a whole-line comparison can be made against.
+//
+// The rules, and why each is safe on a byte-oriented walk:
+//
+//   - ANSI/VT escape sequences are dropped: CSI (ESC '[' params intermediates
+//     final), OSC and the other string sequences (ESC ']' / 'P' / 'X' / '^' /
+//     '_' up to BEL or ST), and any other two-byte ESC form. An UNTERMINATED
+//     sequence consumes to end of line — a truncated escape is still not text.
+//   - A UTF-8 BOM (U+FEFF, EF BB BF) is dropped wherever it appears. It is a
+//     zero-width no-break space and is never part of a diagnostic token.
+//   - C0 controls below 0x20 other than TAB, plus DEL (0x7F), are dropped. CR
+//     and LF never reach here: they are the line separators.
+//
+// C1 controls (0x80-0x9F) are deliberately NOT dropped. As raw bytes those are
+// UTF-8 continuation bytes, so removing them would corrupt every multi-byte
+// rune in the line. Every byte value this function does drop is one that cannot
+// occur inside a UTF-8 multi-byte sequence, which is what makes the byte-level
+// walk correct without decoding.
+//
+// Known edge, accepted: a control byte EMBEDDED in text is removed rather than
+// replaced, so "User\x01 interrupt" normalizes to "User interrupt" and would
+// match. That input is display garbage for which no answer is more defensible
+// than another, and the alternative (replacing with a sentinel) would break the
+// diagnostic shapes this same function has to keep matchable.
+//
+// Allocation-free when there is nothing to strip, which is the overwhelmingly
+// common case across a size-bounded log's every line.
+func normalizeLogLine(line string) string {
+	if !needsLogLineNormalization(line) {
+		return line
+	}
+	var b strings.Builder
+	b.Grow(len(line))
+	for i := 0; i < len(line); {
+		c := line[i]
+		switch {
+		case c == 0x1b:
+			i = skipEscapeSequence(line, i)
+		case c == 0xEF && strings.HasPrefix(line[i:], "\ufeff"):
+			i += len("\ufeff")
+		case c < 0x20 && c != '\t':
+			i++
+		case c == 0x7f:
+			i++
+		default:
+			b.WriteByte(c)
+			i++
+		}
+	}
+	return b.String()
+}
+
+// needsLogLineNormalization is the fast path: report whether any byte would be
+// stripped, so an ordinary line is returned as-is with no copy.
+func needsLogLineNormalization(line string) bool {
+	for i := 0; i < len(line); i++ {
+		c := line[i]
+		if c == 0x1b || c == 0x7f || (c < 0x20 && c != '\t') {
+			return true
+		}
+		if c == 0xEF && strings.HasPrefix(line[i:], "\ufeff") {
+			return true
+		}
+	}
+	return false
+}
+
+// skipEscapeSequence returns the index just past the escape sequence starting
+// at line[i] (which the caller has established is ESC). An unterminated
+// sequence consumes the rest of the line.
+func skipEscapeSequence(line string, i int) int {
+	i++ // the ESC itself
+	if i >= len(line) {
+		return i
+	}
+	switch line[i] {
+	case '[': // CSI: params 0x30-0x3F, intermediates 0x20-0x2F, one final 0x40-0x7E
+		i++
+		for i < len(line) && line[i] >= 0x30 && line[i] <= 0x3f {
+			i++
+		}
+		for i < len(line) && line[i] >= 0x20 && line[i] <= 0x2f {
+			i++
+		}
+		if i < len(line) && line[i] >= 0x40 && line[i] <= 0x7e {
+			i++
+		}
+		return i
+	case ']', 'P', 'X', '^', '_': // OSC / DCS / SOS / PM / APC: run to BEL or ST
+		i++
+		for i < len(line) {
+			if line[i] == 0x07 { // BEL
+				return i + 1
+			}
+			if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '\\' { // ST
+				return i + 2
+			}
+			i++
+		}
+		return i
+	default:
+		// The general "nF" escape form: zero or more intermediate bytes
+		// (0x20-0x2F) then one final byte (0x30-0x7E). This covers the
+		// three-byte charset designators a terminal capture really carries —
+		// ESC ( B (select ASCII), ESC ) 0, ESC # 8 — as well as the plain
+		// two-byte forms (ESC 7, ESC =, ESC M), which are just the zero-
+		// intermediate case. Treating every non-CSI escape as two bytes left
+		// the final byte behind as text: this branch was written that way and
+		// TestNormalizeLogLine's "two-byte escape" case caught it, returning
+		// "BUser interrupt" for "\x1b(BUser interrupt".
+		for i < len(line) && line[i] >= 0x20 && line[i] <= 0x2f {
+			i++
+		}
+		if i < len(line) && line[i] >= 0x30 && line[i] <= 0x7e {
+			i++
+		}
+		return i
+	}
+}
+
 // DetectInterrupted reports whether content carries a user-interrupt marker as
 // a WHOLE LINE. A "FAILED:" line in the same log must NOT be reported as a real
 // build failure when this is true — the build was stopped, not broken.
 //
 // See interruptMarkers for the producer evidence and for why a whole-file
-// substring scan was the wrong predicate.
+// substring scan was the wrong predicate, and normalizeLogLine for why the
+// whole-line comparison is made against the line's TEXT rather than its raw
+// display bytes.
 //
 // The walk is deliberately NOT a bufio.Scanner: a scanner stops at the first
 // line over its buffer and reports that only through Err(), so a marker in the
@@ -251,7 +443,9 @@ func DetectInterrupted(content []byte) bool {
 		} else {
 			content = nil
 		}
-		trimmed := string(bytes.TrimSpace(line))
+		// Normalize BEFORE trimming: stripping a trailing reset sequence or a
+		// leading BOM can expose whitespace the trim then has to remove.
+		trimmed := strings.TrimSpace(normalizeLogLine(string(line)))
 		if trimmed == "" {
 			continue
 		}
@@ -465,7 +659,12 @@ func scanDiagnostics(content []byte) ([]Diagnostic, error) {
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
-		line := strings.TrimRight(scanner.Text(), "\r")
+		// normalizeLogLine is the SAME owner DetectInterrupted uses: every
+		// shape below is anchored, so a colourized log would otherwise match
+		// nothing and answer unknown(no_diagnostic_found) for a build that
+		// plainly failed. It also decides what Diagnostic.Text carries on the
+		// wire — see the normalizer's doc for that contract change.
+		line := normalizeLogLine(strings.TrimRight(scanner.Text(), "\r"))
 		d, ok := matchDiagnosticLine(line)
 		if !ok {
 			continue

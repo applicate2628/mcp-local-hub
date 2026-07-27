@@ -658,10 +658,18 @@ func buildCommandForConfig(scans []scannedLog, config string) string {
 	return ""
 }
 
+// findRunBuildCommandLine recovers CMake's "Run Build Command(s): ..." line
+// from a phase log.
+//
+// It normalizes through the SAME owner the two diagnostic scanners use
+// (normalizeLogLine): this is the third reader of one input class — a captured
+// build-tool stream — and a colourized marker would otherwise not be found by
+// the substring search, while a colourized TAIL would put escape bytes straight
+// into Result.BuildCommand on the wire.
 func findRunBuildCommandLine(data []byte) (string, bool) {
 	const marker = "Run Build Command(s): "
 	for _, line := range strings.Split(string(data), "\n") {
-		trimmed := strings.TrimRight(line, "\r")
+		trimmed := normalizeLogLine(strings.TrimRight(line, "\r"))
 		if idx := strings.Index(trimmed, marker); idx >= 0 {
 			return strings.TrimSpace(trimmed[idx+len(marker):]), true
 		}

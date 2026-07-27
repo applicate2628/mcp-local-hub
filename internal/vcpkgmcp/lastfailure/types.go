@@ -112,7 +112,14 @@ const (
 	// whole-line requirement is load-bearing, not stylistic: this reason
 	// OUTRANKS every other verdict, so a marker matched mid-line — inside a
 	// path, an echoed `ninja -v` command line, or a source line quoted back by
-	// a compiler diagnostic — would suppress a real failure. See
+	// a compiler diagnostic — would suppress a real failure.
+	//
+	// "Whole line" means the line's TEXT: the comparison runs after
+	// normalizeLogLine strips terminal display bytes, so a marker wrapped in
+	// ANSI colour by a CLICOLOR_FORCE build still matches while a QUOTED
+	// mid-line occurrence still does not. Anchoring on raw bytes made the
+	// coloured form false-negative, which reported an interrupted build as a
+	// genuine defect. See
 	// interruptMarkers in diagnostics.go for the producer evidence. Verified
 	// real case (scout pass, boost-thread\config-wingpl-out.log): a
 	// "FAILED: [code=1]" line immediately followed by "User interrupt" —
@@ -375,6 +382,23 @@ const (
 )
 
 // Diagnostic is one extracted compiler/linker diagnostic line.
+//
+// # Text and File are NORMALIZED, not raw (wire contract, 2026-07-27)
+//
+// Both carry the log line after normalizeLogLine (diagnostics.go) has removed
+// ANSI/VT escape sequences, a UTF-8 BOM, and C0/DEL control bytes. They are
+// therefore not byte-identical to the log when the build tool colourized its
+// output — measured reachable on an ordinary `-fdiagnostics-color=always`.
+//
+// Two reasons, both deliberate. Matching: every recognized shape is ANCHORED,
+// so without normalization a colourized log matches nothing and the tool answers
+// unknown(no_diagnostic_found) for a build that plainly failed. Emission: an MCP
+// result is rendered in a terminal and copied into transcripts, so relaying a
+// build log's escape sequences verbatim is a terminal-injection channel.
+//
+// A consumer wanting the raw bytes has log_paths and reads the file itself,
+// which the design doc already names as the escape hatch for everything this
+// tool summarises.
 type Diagnostic struct {
 	File     string `json:"file"`
 	Line     int    `json:"line,omitempty"`
