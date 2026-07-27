@@ -1,10 +1,10 @@
 ---
-- id: 2026-07-27-supervisor-event-flock-release-single-owner
-- status: proposed
-- decided-by: $architect (REVISE closure, PR `feat/liveness-headless-gui-recovery`)
-- context: seventh recurrence of "cross-process event-log flock release outcome discarded at the call site", the sixth of which was itself inside the fix for the fifth
-- supersedes: none
-- superseded-by: none
+id: 2026-07-27-supervisor-event-flock-release-single-owner
+status: proposed
+decided-by: $architect (REVISE closure, PR `feat/liveness-headless-gui-recovery`)
+context: seventh recurrence of "cross-process event-log flock release outcome discarded at the call site", the sixth of which was itself inside the fix for the fifth
+supersedes: none
+superseded-by: none
 ---
 
 # The `supervisor-events.log` flock-release verdict gets ONE process-scoped owner, not 131 call-site returns
