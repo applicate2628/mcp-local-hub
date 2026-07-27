@@ -279,11 +279,45 @@ func mcpFrontStateEqual(a, b mcpFrontEntryState) bool {
 		reflect.DeepEqual(a.LSP, b.LSP)
 }
 
+// mcpFrontAttemptUncertain is the SINGLE OWNER of the question "may this
+// durable attempt have written a client entry, with nothing on this host able
+// to prove whether it did?".
+//
+// WHY IT IS A FUNCTION AND NOT THREE `case` LISTS. The two uncertain states
+// arrive by different roads and look unrelated at each individual call site.
+// `prepared` is an attempt whose process never came back to record an outcome;
+// `conflict` is an attempt that DID come back, and whose same-call readback saw
+// a third value that is neither the pre-state nor the intended state. Both mean
+// exactly one thing downstream — no receipt may be synthesised and no later
+// generation may bury the row (I4, I10) — and three separate consumers
+// independently decided which states qualify:
+//
+//   - effectiveMCPFrontAppliedReceipt classified BOTH as uncertain;
+//   - validateMCPFrontReconcileReport refused BOTH from a superseded generation;
+//   - settleMCPFrontReconcileAttempts filtered on `prepared` ALONE.
+//
+// The odd one out was not a style difference. A `conflict` row skipped by
+// settlement was copied into the next generation verbatim while the active plan
+// advanced, which produced an artifact the validator then refused — closing the
+// forward path AND `--rollback` on clients already sitting on the front port.
+// One owner makes the three consumers agree by construction, and makes a sixth
+// attempt state a compile-adjacent decision here rather than three silent ones
+// elsewhere.
+func mcpFrontAttemptUncertain(state string) bool {
+	switch state {
+	case mcpFrontAttemptPrepared, mcpFrontAttemptConflict:
+		return true
+	default:
+		return false
+	}
+}
+
 func effectiveMCPFrontAppliedReceipt(row mcpFrontReconcileRow) (*mcpFrontAppliedReceipt, bool) {
 	if row.Attempt != nil {
-		switch row.Attempt.State {
-		case mcpFrontAttemptPrepared, mcpFrontAttemptConflict:
+		if mcpFrontAttemptUncertain(row.Attempt.State) {
 			return nil, true
+		}
+		switch row.Attempt.State {
 		case mcpFrontAttemptPreconditionConflict:
 			return nil, false
 		case mcpFrontAttemptApplied:
@@ -299,39 +333,78 @@ func effectiveMCPFrontAppliedReceipt(row mcpFrontReconcileRow) (*mcpFrontApplied
 	return row.Applied, false
 }
 
-// settleMCPFrontReconcileAttempts refuses every prepared attempt that survived
-// process re-entry. Current value equality is not mutation causation: only the
-// same-call ConditionalEntryMutator observation may create an applied receipt.
-func settleMCPFrontReconcileAttempts(reportPath string, report *mcpFrontReconcileReport) error {
+// settleMCPFrontReconcileAttempts classifies every attempt that survived
+// process re-entry and durably marks each uncertain row pending. Current value
+// equality is not mutation causation: only the same-call ConditionalEntryMutator
+// observation may create an applied receipt (I4).
+//
+// IT CLASSIFIES; IT DOES NOT DECIDE (invariant I11). It returns the sorted keys
+// of the uncertain rows and lets each caller apply its own policy, because the
+// two callers genuinely want opposite things from the same fact:
+//
+//   - FORWARD refuses. A row that may already have written a client entry
+//     cannot be buried under a new generation, so one uncertain row anywhere
+//     blocks the whole run — nothing has been mutated yet, and refusing costs
+//     the operator a rollback.
+//   - ROLLBACK continues. It is the one operation that can actually settle an
+//     uncertain row, and every OTHER row is owed its inverse regardless. The
+//     per-row machinery for this already exists on both surfaces
+//     (effectiveMCPFrontAppliedReceipt marks a serena row pending and moves on;
+//     LSPRouterRecoveryRow.Uncertain does the same per group).
+//
+// This function used to return a plain error for BOTH callers, which the
+// rollback path could only treat as fatal. One client's transient post-write
+// readback failure — no crash required — therefore aborted before the serena
+// loop and restored NOTHING, leaving every other client stranded on the front
+// port with no `--force` and no per-row escape. That is the whole of B2: not a
+// missing feature, a caller-policy decision taken in the wrong place.
+//
+// The returned error is reserved for a DURABILITY failure. If the pending
+// markers cannot be written, no later per-row disposition can be trusted
+// either, so that one genuinely is global.
+func settleMCPFrontReconcileAttempts(reportPath string, report *mcpFrontReconcileReport) ([]string, error) {
 	if report == nil {
-		return nil
+		return nil, nil
 	}
 	changed := false
 	var uncertain []string
 	for key, row := range report.Rows {
-		if row.Attempt == nil || row.Attempt.State != mcpFrontAttemptPrepared {
+		if row.Attempt == nil || !mcpFrontAttemptUncertain(row.Attempt.State) {
 			continue
 		}
-		if row.Disposition == nil ||
-			row.Disposition.State != mcpFrontDispositionPending ||
-			row.Disposition.Reason != "pending-ownership-unknown" {
-			row.Disposition = &mcpFrontRollbackDisposition{
-				State: mcpFrontDispositionPending, Reason: "pending-ownership-unknown",
-			}
-			report.Rows[key] = row
-			changed = true
-		}
 		uncertain = append(uncertain, key)
+		// A pending disposition written by the run that CAUSED the uncertainty
+		// is strictly more informative than anything this pass can say —
+		// `forward-ownership-unknown` names the failed post-write readback that
+		// produced it, and the failure-mode table keys on that discriminator.
+		// Only a row with no pending marker yet gets the generic reason.
+		if row.Disposition != nil && row.Disposition.State == mcpFrontDispositionPending {
+			continue
+		}
+		row.Disposition = &mcpFrontRollbackDisposition{
+			State: mcpFrontDispositionPending, Reason: "pending-ownership-unknown",
+		}
+		report.Rows[key] = row
+		changed = true
 	}
+	sort.Strings(uncertain)
 	if changed {
 		if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
-			return fmt.Errorf("settle recovery attempts: %w", err)
+			return uncertain, fmt.Errorf("settle recovery attempts: %w", err)
 		}
 	}
-	if len(uncertain) > 0 {
-		return fmt.Errorf("forward-previous-attempt-uncertain: %d prepared row(s) have no same-call mutation receipt", len(uncertain))
+	return uncertain, nil
+}
+
+// describeMCPFrontRowKeys renders raw NUL-separated row keys in the same
+// `surface/client/language/entry` shape every other operator-facing message in
+// this file uses.
+func describeMCPFrontRowKeys(keys []string) string {
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, strings.ReplaceAll(key, "\x00", "/"))
 	}
-	return nil
+	return strings.Join(out, ", ")
 }
 
 // mcpFrontSerenaPin is one client's retention-immune pre-reconcile backup.
@@ -502,8 +575,19 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 		return fmt.Errorf("reconcile-mcp-front: a prior reconcile report exists at %s but could not be read: %w; refusing to run (overwriting it would destroy the pre-reconcile state `--rollback` restores from) — roll back or move that file aside first", reportPath, priorErr)
 	}
 	if prior != nil {
-		if settleErr := settleMCPFrontReconcileAttempts(reportPath, prior); settleErr != nil {
+		uncertain, settleErr := settleMCPFrontReconcileAttempts(reportPath, prior)
+		if settleErr != nil {
 			return fmt.Errorf("reconcile-mcp-front: %w", settleErr)
+		}
+		// FORWARD POLICY. A row that may already have written a client entry
+		// cannot be carried into a new generation: the generation increment
+		// below would stamp it against a plan it does not belong to, and the
+		// validator refuses that artifact from then on — closing both the
+		// forward path and `--rollback`. Refuse here instead, while nothing has
+		// been written and the record is still consumable.
+		if len(uncertain) > 0 {
+			return fmt.Errorf("reconcile-mcp-front: forward-previous-attempt-uncertain: %d row(s) from a previous run may have written a client entry with no same-call receipt to prove it, so a new generation cannot supersede them: %s. Run `mcphub install --reconcile-mcp-front --rollback` first — it settles each of those rows individually and restores every client it still owns — then re-run this command",
+				len(uncertain), describeMCPFrontRowKeys(uncertain))
 		}
 	}
 
@@ -650,21 +734,130 @@ func describePendingMCPFrontRows(report *mcpFrontReconcileReport) string {
 	return strings.Join(labels, ", ")
 }
 
-func conflictMCPFrontRowLabels(report *mcpFrontReconcileReport) []string {
+// mcpFrontConflictFamily names WHY a row reached the terminal `skipped-conflict`
+// disposition. The disposition state alone cannot say, and the difference is
+// the whole content of the message the operator reads.
+//
+// Three unrelated situations land on that one state:
+//
+//   - a ROLLBACK-time compare-and-swap refusal — the live entry no longer
+//     equals what the forward run recorded writing, so somebody edited it and
+//     restoring would discard that edit;
+//   - a FORWARD-time precondition refusal — the forward run's own precondition
+//     check rejected before any write, so the reconcile never touched this
+//     entry at all;
+//   - a route-preservation refusal (I8) — the inverse was skipped because
+//     restoring the pre-reconcile entry would have left that language with no
+//     reachable route.
+//
+// Reporting all three as the first one tells an operator their config "was
+// edited after the reconcile ran … restoring would have discarded that edit"
+// when, for the second family, no reconcile write ever touched the row. That is
+// a false accusation that sends them hunting for an edit they did not make, and
+// it fires on every run for a host carrying such rows.
+type mcpFrontConflictFamily int
+
+const (
+	// mcpFrontConflictDiverged: live state moved away from the recorded write.
+	mcpFrontConflictDiverged mcpFrontConflictFamily = iota
+	// mcpFrontConflictNeverWritten: the forward run wrote nothing to this row.
+	mcpFrontConflictNeverWritten
+	// mcpFrontConflictRouteProtected: the inverse was withheld to keep a route.
+	mcpFrontConflictRouteProtected
+	// mcpFrontConflictUnclassified: a reason this build does not recognise. It
+	// gets its own neutral sentence rather than being folded into a family,
+	// because folding is exactly how the wrong story got told; the reason
+	// string travels with the label so the gap is diagnosable.
+	mcpFrontConflictUnclassified
+)
+
+var mcpFrontConflictFamilyOrder = []mcpFrontConflictFamily{
+	mcpFrontConflictDiverged,
+	mcpFrontConflictNeverWritten,
+	mcpFrontConflictRouteProtected,
+	mcpFrontConflictUnclassified,
+}
+
+// mcpFrontConflictFamilyFor maps a durable disposition reason to its family.
+// The reasons come from exactly two owners: this file's own forward/rollback
+// dispositions, and internal/api/lsp_client_router_snapshot.go's restore
+// results.
+func mcpFrontConflictFamilyFor(reason string) mcpFrontConflictFamily {
+	switch reason {
+	case "rollback-cas-conflict", "rollback-live-diverged":
+		return mcpFrontConflictDiverged
+	case "forward-plan-precondition-conflict":
+		return mcpFrontConflictNeverWritten
+	case "legacy-baseline-not-routable":
+		return mcpFrontConflictRouteProtected
+	default:
+		return mcpFrontConflictUnclassified
+	}
+}
+
+func mcpFrontConflictFamilySentence(family mcpFrontConflictFamily, count int) string {
+	plural := count != 1
+	were := map[bool]string{true: "were", false: "was"}[plural]
+	switch family {
+	case mcpFrontConflictDiverged:
+		return fmt.Sprintf("%d edited after the reconcile ran, so restoring would have discarded that edit and the current value %s kept — if the pre-reconcile value is the one you want, set it by hand:", count, were)
+	case mcpFrontConflictNeverWritten:
+		return fmt.Sprintf("%d never written by the reconcile at all — its own precondition check refused before any write — so there was nothing to restore and the value you see is the one that was already there:", count)
+	case mcpFrontConflictRouteProtected:
+		return fmt.Sprintf("%d kept in place to preserve a live language-server route: restoring the pre-reconcile entry would have left that language with no reachable route:", count)
+	default:
+		return fmt.Sprintf("%d left untouched by the inverse; the current value %s kept:", count, were)
+	}
+}
+
+// conflictMCPFrontRowLabels groups every terminal skipped-conflict row by the
+// family of its reason. An unclassified reason is carried in the label so it
+// reaches the operator instead of being silently absorbed.
+func conflictMCPFrontRowLabels(report *mcpFrontReconcileReport) map[mcpFrontConflictFamily][]string {
 	if report == nil {
 		return nil
 	}
-	var labels []string
+	families := map[mcpFrontConflictFamily][]string{}
 	for _, row := range report.Rows {
 		if row.Disposition == nil || row.Disposition.State != mcpFrontDispositionConflict {
 			continue
 		}
-		labels = append(labels, strings.Join([]string{
+		label := strings.Join([]string{
 			row.Surface, row.Client, row.Language, row.EntryName,
-		}, "/"))
+		}, "/")
+		family := mcpFrontConflictFamilyFor(row.Disposition.Reason)
+		if family == mcpFrontConflictUnclassified && row.Disposition.Reason != "" {
+			label += " (" + row.Disposition.Reason + ")"
+		}
+		families[family] = append(families[family], label)
 	}
-	sort.Strings(labels)
-	return labels
+	for family := range families {
+		sort.Strings(families[family])
+	}
+	return families
+}
+
+func countMCPFrontConflictRows(families map[mcpFrontConflictFamily][]string) int {
+	total := 0
+	for _, labels := range families {
+		total += len(labels)
+	}
+	return total
+}
+
+// describeMCPFrontConflictFamilies renders one clause per family PRESENT, in a
+// stable order, so a report never carries a sentence about a situation that did
+// not occur.
+func describeMCPFrontConflictFamilies(families map[mcpFrontConflictFamily][]string) string {
+	var clauses []string
+	for _, family := range mcpFrontConflictFamilyOrder {
+		labels := families[family]
+		if len(labels) == 0 {
+			continue
+		}
+		clauses = append(clauses, mcpFrontConflictFamilySentence(family, len(labels))+" "+strings.Join(labels, ", ")+".")
+	}
+	return strings.Join(clauses, " ")
 }
 
 func sortedMCPFrontRowKeys(report *mcpFrontReconcileReport, surface string) []string {
@@ -700,7 +893,11 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 	if verr := validateMCPFrontReconcileReport(&persisted, reportPath); verr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
 	}
-	if settleErr := settleMCPFrontReconcileAttempts(reportPath, &persisted); settleErr != nil {
+	// ROLLBACK POLICY (invariant I11). Uncertainty is recorded per row and then
+	// CARRIED INTO the per-row loops below, never used to abort. Only a failure
+	// to make those markers durable stops the rollback here: if the record
+	// cannot be written, no later disposition can be trusted either.
+	if _, settleErr := settleMCPFrontReconcileAttempts(reportPath, &persisted); settleErr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", settleErr)
 	}
 	if verr := verifyMCPFrontSerenaPins(&persisted, reportPath); verr != nil {
@@ -856,18 +1053,15 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 
 	fmt.Fprintf(cmd.OutOrStdout(), "mcp-front rollback: serena(restored=%d) lsp(restored=%d removed=%d failed=%d)\n",
 		serenaRestored, lspRestored, len(lspReport.Removed), len(lspReport.Failed))
-	if len(conflictRows) > 0 {
-		// A skipped-conflict row is the compare-and-swap inverse refusing to
-		// write (I7): the live entry no longer equals what the forward run
-		// recorded writing, so somebody EDITED it after the cutover and
-		// restoring would silently discard that edit. Naming the row key alone
-		// left the operator to infer all of that, so say it.
-		return fmt.Errorf("reconcile-mcp-front --rollback: rollback completed, but %d entr%s left untouched because %s edited after the reconcile ran: %s. "+
-			"Restoring would have discarded that edit, so the current value was kept and the rest of the rollback completed normally. "+
-			"If the pre-reconcile value is the one you want, set it by hand; if the current value is correct, nothing more to do",
-			len(conflictRows), map[bool]string{true: "y was", false: "ies were"}[len(conflictRows) == 1],
-			map[bool]string{true: "it was", false: "they were"}[len(conflictRows) == 1],
-			strings.Join(conflictRows, ", "))
+	if total := countMCPFrontConflictRows(conflictRows); total > 0 {
+		// A skipped-conflict row is an inverse that deliberately did not write,
+		// and the operator's next move depends entirely on WHY. Reporting the
+		// reason family is not a wording preference: the compare-and-swap
+		// refusal (I7) and the forward-time precondition refusal lead to
+		// opposite conclusions about whether anything of theirs was at risk.
+		return fmt.Errorf("reconcile-mcp-front --rollback: rollback completed, but %d entr%s left untouched; the rest of the rollback completed normally. %s",
+			total, map[bool]string{true: "y was", false: "ies were"}[total == 1],
+			describeMCPFrontConflictFamilies(conflictRows))
 	}
 	return nil
 }
@@ -1009,7 +1203,7 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 					return fmt.Errorf("%s current-generation attempt row %q differs from its active-plan operation", reportPath, key)
 				}
 			}
-			if (row.Attempt.State == mcpFrontAttemptPrepared || row.Attempt.State == mcpFrontAttemptConflict) &&
+			if mcpFrontAttemptUncertain(row.Attempt.State) &&
 				row.Attempt.Generation != persisted.ActivePlan.Generation {
 				return fmt.Errorf("%s uncertain row %q belongs to generation %d, not the active generation %d",
 					reportPath, key, row.Attempt.Generation, persisted.ActivePlan.Generation)

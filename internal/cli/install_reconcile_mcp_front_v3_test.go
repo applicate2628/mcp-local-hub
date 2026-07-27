@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -234,8 +235,12 @@ func TestMCPFrontV3_ReentrySettlesWriteReceiptCrashWindows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := settleMCPFrontReconcileAttempts(journal.reportPath, reloaded); err == nil {
-		t.Fatal("re-entry must not equality-promote a prepared attempt")
+	uncertain, err := settleMCPFrontReconcileAttempts(journal.reportPath, reloaded)
+	if err != nil {
+		t.Fatalf("settlement must make the pending marker durable: %v", err)
+	}
+	if len(uncertain) != 1 {
+		t.Fatalf("re-entry must not equality-promote a prepared attempt; uncertain=%v", uncertain)
 	}
 	row := reloaded.Rows[mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", name)]
 	if row.Attempt.State != mcpFrontAttemptPrepared || row.Applied != nil ||
@@ -276,7 +281,11 @@ func TestMCPFrontV3_UncertainAttemptBlocksPlanReplacement(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := settleMCPFrontReconcileAttempts(journal.reportPath, prior); err == nil {
+	uncertain, settleErr := settleMCPFrontReconcileAttempts(journal.reportPath, prior)
+	if settleErr != nil {
+		t.Fatalf("settlement must make the pending marker durable: %v", settleErr)
+	}
+	if len(uncertain) == 0 {
 		t.Fatal("uncertain prepared row must block a replacement generation")
 	}
 }
@@ -619,5 +628,249 @@ func TestMCPFrontV3_RollbackCallerRereadsDurableStateBeforeRetirement(t *testing
 	}
 	if _, statErr := os.Stat(journal.reportPath); statErr != nil {
 		t.Fatalf("active recovery report must be preserved: %v", statErr)
+	}
+}
+
+// --- B1: `conflict` is an uncertain state, and settlement must say so --------
+
+// v3ConflictedLSPJournal drives one LSP row all the way to a durable
+// post-write `conflict`: the mutation WAS invoked, and the same-call readback
+// then observed a value that is neither the pre-state nor the intended state.
+// Nothing on the host can say whether that value is ours, so the row carries no
+// receipt and no terminal disposition — it is uncertain in exactly the sense
+// effectiveMCPFrontAppliedReceipt already means by it.
+func v3ConflictedLSPJournal(t *testing.T) (*mcpFrontReconcileJournal, string) {
+	t.Helper()
+	const client, language = "claude-code", "go"
+	name := api.LSPRouterEntryName(language)
+	pre := v3LSPSnapshot(client, language, name, false, "")
+	intended := v3LSPSnapshot(client, language, name, true, api.LSPRouterURL(9137, language))
+	// A third value: not what we started from, not what we meant to write.
+	surprise := v3LSPSnapshot(client, language, name, true, "http://127.0.0.1:19999/mcp")
+	op := v3LSPAdd(client, language, name, pre, intended)
+
+	journal := v3Journal(t, 9137, nil, op)
+	if err := journal.prepareLSPOperation(op); err != nil {
+		t.Fatalf("prepare: %v", err)
+	}
+	if err := journal.finishLSPOperation(api.LSPRouterMutationObservation{
+		Operation: op, ObservedState: surprise, Invoked: true,
+	}); err == nil {
+		t.Fatal("a post-write conflict must be reported to its caller")
+	}
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, client, language, name)
+	if got := journal.record.Rows[key].Attempt.State; got != mcpFrontAttemptConflict {
+		t.Fatalf("attempt state = %q, want %q — this fixture no longer produces the state it exists to cover", got, mcpFrontAttemptConflict)
+	}
+	return journal, key
+}
+
+// TestMCPFrontV3_PostWriteConflictBlocksTheNextForwardGeneration is the B1
+// guard.
+//
+// `conflict` and `prepared` are the SAME classification —
+// effectiveMCPFrontAppliedReceipt returns uncertain for both, and the validator
+// refuses both when they belong to a superseded generation. Only settlement
+// disagreed: it filtered on `prepared` alone, so a `conflict` row walked
+// straight through the forward gate that exists to stop it.
+func TestMCPFrontV3_PostWriteConflictBlocksTheNextForwardGeneration(t *testing.T) {
+	journal, key := v3ConflictedLSPJournal(t)
+
+	prior, err := readMCPFrontReconcileReport(journal.reportPath)
+	if err != nil {
+		t.Fatalf("a conflicted generation must stay readable by its own reader: %v", err)
+	}
+	if _, uncertain := effectiveMCPFrontAppliedReceipt(prior.Rows[key]); !uncertain {
+		t.Fatal("premise broken: the classifier no longer calls a post-write conflict uncertain")
+	}
+	uncertain, settleErr := settleMCPFrontReconcileAttempts(journal.reportPath, prior)
+	if settleErr != nil {
+		t.Fatalf("settlement must make the pending marker durable: %v", settleErr)
+	}
+	if len(uncertain) != 1 || uncertain[0] != key {
+		t.Fatalf("an uncertain post-write conflict must block the next forward generation, exactly as a prepared attempt does; uncertain=%v", uncertain)
+	}
+}
+
+// TestMCPFrontV3_ForwardNeverPublishesAnArtifactItsOwnReaderRefuses is the B1
+// consequence guard, and the reason the classification mismatch was not merely
+// untidy.
+//
+// It replays the forward pass's exact order — settle, build the next
+// generation, persist — and then asks the one question that decides whether the
+// operator still has a way out: can this binary read what it just wrote? A
+// carried-forward conflict at generation G, stamped against an active plan at
+// G+1, trips the validator's own superseded-uncertainty check, and BOTH exits
+// are then closed: the forward run refuses to merge into an unreadable prior,
+// and `--rollback` refuses to consume it. The documented escape (move the file
+// aside) destroys the only rollback authority for clients already on the front
+// port.
+//
+// The guard is deliberately written against the OUTCOME rather than against one
+// implementation site, so it holds whether the refusal lands in settlement or
+// in the journal constructor.
+func TestMCPFrontV3_ForwardNeverPublishesAnArtifactItsOwnReaderRefuses(t *testing.T) {
+	journal, _ := v3ConflictedLSPJournal(t)
+
+	prior, err := readMCPFrontReconcileReport(journal.reportPath)
+	if err != nil {
+		t.Fatalf("read the conflicted generation: %v", err)
+	}
+	uncertain, settleErr := settleMCPFrontReconcileAttempts(journal.reportPath, prior)
+	if settleErr == nil && len(uncertain) == 0 {
+		next, buildErr := newMCPFrontV3Journal(journal.reportPath, prior, 9138,
+			&api.LSPRouterClientPlan{Port: 9138})
+		if buildErr == nil {
+			// runForwardReconcileMCPFront persists here, BEFORE the first client
+			// mutation, so this byte sequence reaches disk on a run that has
+			// changed nothing yet.
+			if perr := next.persist(); perr != nil {
+				t.Fatalf("persist the replacement generation: %v", perr)
+			}
+		}
+	}
+
+	if _, rerr := readMCPFrontReconcileReport(journal.reportPath); rerr != nil {
+		t.Fatalf("the forward pass published a recovery artifact that its own reader refuses, so `--rollback` and the next forward run are both dead ends and the operator's only way back is to delete the record: %v", rerr)
+	}
+}
+
+// --- B2: rollback uncertainty is row-local, never a global early return ------
+
+// TestMCPFrontV3_UncertainRowDoesNotSuppressAnIndependentRollback is the B2
+// guard for invariant I11.
+//
+// The forward run below genuinely rewrites claude-code's serena entry onto the
+// front port and records an applied receipt for it. A SECOND, unrelated row is
+// then left uncertain — the state a post-write readback failure produces
+// without any crash: finishAttempt records the pending disposition while the
+// attempt is still `prepared`, and that shape is durable.
+//
+// Rollback owed the first row its inverse regardless. The pre-fix code returned
+// on the settlement error before the serena loop ran, so one transient readback
+// failure on any row left EVERY client stranded on the front port with the
+// rollback reporting zero restorations.
+func TestMCPFrontV3_UncertainRowDoesNotSuppressAnIndependentRollback(t *testing.T) {
+	const preReconcileURL = "http://127.0.0.1:9125/serena/mcp"
+
+	tmp := mcpFrontPR588Env(t)
+	assertRedirectedStateDir(t, tmp)
+	reportPath := withMCPFrontReportPathSeam(t)
+
+	port, cleanup := startTestRouteServer(t)
+	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
+
+	a := api.NewAPI()
+	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
+		t.Fatalf("SettingsSet: %v", err)
+	}
+	configPath := seedClaudeCodeConfig(t, tmp, map[string]any{
+		"serena": map[string]any{"url": preReconcileURL},
+	})
+	if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
+		t.Fatalf("forward reconcile: %v", err)
+	}
+	if got, _ := claudeCodeEntryURL(t, configPath, "serena"); got == preReconcileURL {
+		t.Fatalf("premise broken: the forward run did not move serena off %q", preReconcileURL)
+	}
+
+	// Inject one independent uncertain row into the durable record. It belongs
+	// to a client that is not installed here, so it can never be restored and
+	// must stay pending — which is precisely why it must not be allowed to
+	// decide anything about claude-code.
+	record, err := readMCPFrontReconcileReport(reportPath)
+	if err != nil {
+		t.Fatalf("read the forward record: %v", err)
+	}
+	const otherClient, language = "missing-test-client", "go"
+	entryName := api.LSPRouterEntryName(language)
+	baseline := v3LSPSnapshot(otherClient, language, entryName, false, "")
+	intended := v3LSPSnapshot(otherClient, language, entryName, true, api.LSPRouterURL(port, language))
+	uncertainKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, otherClient, language, entryName)
+	record.Rows[uncertainKey] = mcpFrontReconcileRow{
+		Surface: mcpFrontSurfaceLSP, Client: otherClient, Language: language, EntryName: entryName,
+		Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
+		Attempt: &mcpFrontReconcileAttempt{
+			Generation: record.Generation, Operation: "add",
+			PreState: mcpFrontLSPState(baseline), IntendedState: mcpFrontLSPState(intended),
+			State: mcpFrontAttemptPrepared,
+		},
+	}
+	record.ActivePlan.Rows = append(record.ActivePlan.Rows, uncertainKey)
+	record.ActivePlan.Operations = append(record.ActivePlan.Operations, mcpFrontReconcilePlanOp{
+		RowKey: uncertainKey, Operation: "add",
+		PreState: mcpFrontLSPState(baseline), IntendedState: mcpFrontLSPState(intended),
+	})
+	if werr := api.WriteStateFileAtomic(reportPath, record); werr != nil {
+		t.Fatalf("persist the injected uncertain row: %v", werr)
+	}
+	if _, verr := readMCPFrontReconcileReport(reportPath); verr != nil {
+		t.Fatalf("the injected record must be a VALID version-3 artifact, otherwise this test proves nothing about rollback: %v", verr)
+	}
+
+	rollbackErr := runReconcileMCPFront(newMCPFrontTestCmd(), true)
+
+	if got, _ := claudeCodeEntryURL(t, configPath, "serena"); got != preReconcileURL {
+		t.Fatalf("an unrelated uncertain row suppressed a rollback that was owed: serena is %q, want its pre-reconcile %q (rollback err = %v)", got, preReconcileURL, rollbackErr)
+	}
+	if rollbackErr == nil {
+		t.Fatal("an unresolved uncertain row must still produce a non-zero outcome — the operator has to know something was left behind")
+	}
+	if !strings.Contains(rollbackErr.Error(), "recovery remains pending") {
+		t.Fatalf("the outcome must be the aggregate pending report, not a global refusal; got: %v", rollbackErr)
+	}
+	if _, statErr := os.Stat(reportPath); statErr != nil {
+		t.Fatalf("a record with a pending row must be preserved: %v", statErr)
+	}
+}
+
+// --- B3: a forward no-write conflict is not an operator edit -----------------
+
+// TestMCPFrontV3_ForwardNoWriteConflictIsNotReportedAsAnOperatorEdit is the B3
+// guard.
+//
+// Two very different things reach the terminal `skipped-conflict` disposition.
+// A ROLLBACK-time compare-and-swap conflict means the live entry no longer
+// equals what the forward run recorded writing — somebody edited it, and
+// restoring would discard that edit. A FORWARD-time precondition conflict means
+// the opposite: the forward run's own precondition check refused before any
+// write, so the reconcile never touched that entry at all.
+//
+// The closing message keyed on the disposition alone and told both of them the
+// first story. On a host carrying several such rows that is a false accusation
+// on every run, and it points the operator at an edit they never made.
+func TestMCPFrontV3_ForwardNoWriteConflictIsNotReportedAsAnOperatorEdit(t *testing.T) {
+	const client, language = "missing-test-client", "go"
+	entryName := api.LSPRouterEntryName(language)
+	baseline := v3LSPSnapshot(client, language, entryName, false, "")
+	intended := v3LSPSnapshot(client, language, entryName, true, api.LSPRouterURL(9137, language))
+	op := v3LSPAdd(client, language, entryName, baseline, intended)
+
+	journal := v3Journal(t, 9137, nil, op)
+	// Invoked=false plus PreconditionConflict: the wrapper refused before
+	// writing anything, which is the row shape finishAttempt makes terminal.
+	if err := journal.finishLSPOperation(api.LSPRouterMutationObservation{
+		Operation: op, ObservedState: baseline, Invoked: false, PreconditionConflict: true,
+	}); err != nil {
+		t.Fatalf("a forward-plan precondition conflict must persist without failing the run: %v", err)
+	}
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, client, language, entryName)
+	row := journal.record.Rows[key]
+	if row.Disposition == nil ||
+		row.Disposition.State != mcpFrontDispositionConflict ||
+		row.Disposition.Reason != "forward-plan-precondition-conflict" {
+		t.Fatalf("premise broken: the fixture no longer produces a forward no-write conflict: %+v", row.Disposition)
+	}
+
+	err := runRollbackMCPFront(newMCPFrontTestCmd(), api.NewAPI(), journal.reportPath)
+	if err == nil {
+		t.Fatal("a skipped row must still produce a non-zero outcome")
+	}
+	if strings.Contains(err.Error(), "edited after the reconcile ran") {
+		t.Fatalf("the reconcile never wrote this row — its own precondition check refused first — so telling the operator their config was edited after the reconcile ran accuses them of an edit they did not make and sends them looking for it; got:\n%v", err)
+	}
+	if !strings.Contains(err.Error(), strings.ReplaceAll(key, "\x00", "/")) {
+		t.Fatalf("the message must still name the exact row it skipped; got:\n%v", err)
 	}
 }
