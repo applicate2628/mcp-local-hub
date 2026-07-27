@@ -542,6 +542,20 @@ func SetSupervisorEventUnlockFnForTest(fn func(l *SupervisorEventLog) error) fun
 	return func() { supervisorEventUnlockFn = prev }
 }
 
+// ReleaseSupervisorEventFlockForTest performs the REAL cross-process flock
+// release for a log handle.
+//
+// It exists for tests in OTHER packages that install a failing
+// SetSupervisorEventUnlockFnForTest. Such a fake models "the release syscall
+// reported an error", but if it merely returns an error without releasing, the
+// OS handle leaks — and on Windows that blocks the test's own t.TempDir()
+// cleanup with a sharing violation. Calling this first and then returning the
+// error reproduces exactly what a caller observes while keeping the handle
+// reclaimable. Only tests may call it.
+func ReleaseSupervisorEventFlockForTest(l *SupervisorEventLog) error {
+	return l.lock.Unlock()
+}
+
 // joinSupervisorEventReleaseErr folds a cross-process-flock RELEASE failure
 // into the emit result (review finding 2).
 //
@@ -645,6 +659,11 @@ func (l *SupervisorEventLog) emitPrepared(prepared PreparedSupervisorEvent, mode
 		}
 		if flockHeld {
 			if unlockErr := unlockFn(l); unlockErr != nil {
+				// Record with the single process-scoped owner BEFORE folding
+				// into err: every caller of this surface is free to discard
+				// err (131 of them do), so the owner — not the return value —
+				// is what makes a stranded flock observable.
+				noteSupervisorEventLockReleaseFailed(l.path)
 				err = joinSupervisorEventReleaseErr(err, unlockErr)
 			}
 		}
@@ -745,6 +764,10 @@ func (l *SupervisorEventLog) emitPrepared(prepared PreparedSupervisorEvent, mode
 	// there is no race with the worker) is what keeps the deferred releaser
 	// from unlocking out from under a write that is still in flight.
 	handedOff = true
+	// The worker now owns the flock. Until it reports a release, this process
+	// may be holding it, and that fact must be observable to a reader that has
+	// no access to this call's return value.
+	noteSupervisorEventLockHandoff(l.path)
 	go func() {
 		var (
 			writeErr  error
@@ -766,6 +789,10 @@ func (l *SupervisorEventLog) emitPrepared(prepared PreparedSupervisorEvent, mode
 			defer func() { unlockErr = unlockFn(l) }()
 			writeErr = l.writeEventBatch(raw, writeFn)
 		}()
+		// Close out the handoff with the worker's own release outcome. This
+		// runs BEFORE the send on `done`, so a reader that observes the send
+		// can never see a stale "outstanding" for this worker.
+		noteSupervisorEventLockHandoffDone(l.path, unlockErr)
 		done <- joinSupervisorEventReleaseErr(writeErr, unlockErr)
 	}()
 	select {
@@ -872,6 +899,10 @@ func (l *SupervisorEventLog) TryReplayPending() (err error) {
 	}
 	defer func() {
 		if unlockErr := supervisorEventUnlockFn(l); unlockErr != nil {
+			// TryReplayPending's own release can strand the flock too, and its
+			// error is routinely discarded (replay is opportunistic by
+			// contract). Same owner, same reason.
+			noteSupervisorEventLockReleaseFailed(l.path)
 			err = joinSupervisorEventReleaseErr(err, unlockErr)
 		}
 	}()

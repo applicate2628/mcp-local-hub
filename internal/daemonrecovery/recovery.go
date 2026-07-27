@@ -79,10 +79,17 @@ const (
 	// (no termination was committed, so there is no handoff to make).
 	AuditHandoffNotRequired AuditHandoff = "not_required"
 	// AuditHandoffDurable means the audit row is durable and every event-log
-	// flock this recovery took was confirmed released.
+	// flock THIS PROCESS took on that log was confirmed released.
+	//
+	// The scope is deliberately the process, not this one recovery: the
+	// condition being reported is process-scoped (see the type doc above), and
+	// scoping the verdict per-recovery is what let an unenumerated outcome
+	// report "confirmed released" while an abandoned writer still held the lock.
 	AuditHandoffDurable AuditHandoff = "durable"
 	// AuditHandoffReleaseUnconfirmed means the audit row is durable but a
-	// cross-process event-log flock release could not be confirmed.
+	// cross-process event-log flock release could not be confirmed — either a
+	// release failed outright, or a writer that already blew its deadline still
+	// owns the lock.
 	AuditHandoffReleaseUnconfirmed AuditHandoff = "release_unconfirmed"
 )
 
@@ -818,19 +825,53 @@ type committedAuditFinalizer struct {
 	emitErr    error
 }
 
+// logPath is the single place this finalizer names the supervisor event log it
+// writes to and reads lock health for. Both must key off the SAME path or the
+// verdict would be read from a different lock than the one taken.
+func (f *committedAuditFinalizer) logPath() string {
+	return filepath.Join(f.stateDir, api.SupervisorEventLogFileLeaf)
+}
+
+// handoff reads the SINGLE owner of "can this process still be holding the
+// supervisor-events.log flock" and translates it into the wire enum.
+//
+// It is a READ, never a derivation. That is the whole point: the previous shape
+// started from an optimistic `AuditHandoffDurable` and DOWNGRADED it in
+// enumerated release-failure branches, so any outcome nobody had enumerated
+// silently inherited "confirmed released". The abandoned-worker outcome was
+// exactly such an outcome — `Wait(0)` returning ErrSupervisorEventEmitTimeout
+// means the worker still owns BOTH locks — and it reported `durable` while the
+// flock was provably held. Starting from an owner read has no optimistic
+// default to inherit.
+//
+// SCOPE NOTE: this answers a PROCESS-scoped question, not a per-recovery one.
+// A recovery can report release_unconfirmed because an UNRELATED emitter in
+// this process stranded the lock. That is deliberate and fail-closed: the
+// operator remedy ("restart this process") is identical either way, and the
+// per-recovery scoping was the category error that produced this defect class.
+// Decision: work-items/decisions/2026-07-27-supervisor-event-flock-release-single-owner.md
+func (f *committedAuditFinalizer) handoff() AuditHandoff {
+	if api.SupervisorEventLockStateForPath(f.logPath()) == api.SupervisorEventLockReleased {
+		return AuditHandoffDurable
+	}
+	return AuditHandoffReleaseUnconfirmed
+}
+
 // finalize returns the audit handoff verdict alongside the durability error.
 //
 // The two results answer DIFFERENT questions and must not be collapsed. The
 // error answers "is the audit row durable?" — a non-nil error is a genuine
-// FailureAuditDurability. The AuditHandoff answers "was every cross-process
-// event-log flock this recovery took confirmed released?" — an unconfirmed
-// release says nothing about the row (it is durable) and everything about the
-// LOCK, which this process may still hold for its whole lifetime because
-// SupervisorEventLog.Close is a no-op that does not unlock.
+// FailureAuditDurability. The AuditHandoff answers "can this process still be
+// holding the cross-process event-log flock?" — an unconfirmed release says
+// nothing about the row (it is durable) and everything about the LOCK, which
+// this process may hold for its whole lifetime because SupervisorEventLog.Close
+// is a no-op that does not unlock.
 //
-// Every one of the three release-failure branches below reports the same
-// verdict; before this they all returned a bare nil, so a stranded flock left
-// no trace on any channel.
+// The handoff verdict is NOT computed here. It is read from the single
+// process-scoped owner in internal/api (see handoff above). What stays local is
+// the one genuinely per-call decision: whether an opportunistic replay may
+// reacquire the flock. Keeping BOTH a local enumeration and the owner read
+// would be the fix-layering this change exists to remove.
 func (f *committedAuditFinalizer) finalize() (AuditHandoff, error) {
 	if f == nil {
 		return AuditHandoffNotRequired, nil
@@ -839,44 +880,45 @@ func (f *committedAuditFinalizer) finalize() (AuditHandoff, error) {
 		return AuditHandoffNotRequired, fmt.Errorf("prepare committed recovery audit: %w", f.prepareErr)
 	}
 
+	// A release failure (confirmed, or still unresolved in an abandoned worker)
+	// means this process may still hold the flock, so an opportunistic replay
+	// must not try to take it again.
 	replay := true
-	handoff := AuditHandoffDurable
 	switch {
 	case !f.attempted:
 		// No writer exists. Establish the durable carrier below.
 	case f.pending == nil && f.emitErr == nil:
-		return AuditHandoffDurable, nil
+		return f.handoff(), nil
 	case f.pending == nil && errors.Is(f.emitErr, api.ErrSupervisorEventReleaseFailed):
 		replay = false
-		handoff = AuditHandoffReleaseUnconfirmed
 	case f.pending != nil:
-		waitErr := f.pending.Wait(0)
-		switch {
+		switch waitErr := f.pending.Wait(0); {
 		case waitErr == nil:
-			return AuditHandoffDurable, nil
-		case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed):
+			return f.handoff(), nil
+		case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed),
+			errors.Is(waitErr, api.ErrSupervisorEventEmitTimeout):
+			// EmitTimeout here is NOT "nothing happened": Wait's non-blocking
+			// probe returns it precisely while the abandoned worker is still
+			// inside its write holding both locks.
 			replay = false
-			handoff = AuditHandoffReleaseUnconfirmed
 		}
 	}
 
-	logger, err := api.OpenSupervisorEventLog(filepath.Join(f.stateDir, api.SupervisorEventLogFileLeaf))
+	logger, err := api.OpenSupervisorEventLog(f.logPath())
 	if err != nil {
-		return handoff, fmt.Errorf("open committed recovery audit handoff: %w", err)
+		return f.handoff(), fmt.Errorf("open committed recovery audit handoff: %w", err)
 	}
 	defer func() { _ = logger.Close() }()
 	if err := logger.PersistPending(f.prepared); err != nil {
-		return handoff, fmt.Errorf("persist committed recovery audit handoff: %w", err)
+		return f.handoff(), fmt.Errorf("persist committed recovery audit handoff: %w", err)
 	}
 	if replay {
 		// Persistence is the acknowledgement boundary. Replay stays deliberately
 		// opportunistic: contention or a replay I/O error leaves the carrier for
 		// a later process and does not undo established durability, so it is
-		// still discarded. A RELEASE failure is not in that class — it strands
-		// the cross-process flock — so it is reported on the handoff channel.
-		if replayErr := logger.TryReplayPending(); errors.Is(replayErr, api.ErrSupervisorEventReleaseFailed) {
-			handoff = AuditHandoffReleaseUnconfirmed
-		}
+		// still discarded. Its RELEASE outcome is not discarded — TryReplayPending
+		// reports that to the same owner f.handoff() reads below.
+		_ = logger.TryReplayPending()
 	}
-	return handoff, nil
+	return f.handoff(), nil
 }

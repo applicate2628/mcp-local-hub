@@ -2086,9 +2086,22 @@ func TestExecuteMapsRespawnSetupFailureToStateReadAndDialFailureToUnavailable(t 
 }
 
 // TestQueueIdempotentAuditFallbackOutcomeMatrix pins every tracked-write
-// outcome to one finalizer action. Release failures establish a carrier but do
-// not reacquire the event-log flock; every definitely absent or unsettled row
-// gets a carrier and an opportunistic replay.
+// outcome to one finalizer CARRIER/REPLAY action: a release failure (confirmed,
+// or still unresolved in an abandoned worker) establishes a carrier and does NOT
+// reacquire the event-log flock; every other definitely-absent row gets a
+// carrier and an opportunistic replay that drains it.
+//
+// This matrix deliberately no longer varies the expected AuditHandoff. Every row
+// here injects a SYNTHETIC outcome into the finalizer struct, so NO real flock is
+// ever taken — which means "durable" is the truthful verdict for all of them, and
+// asserting it uniformly is itself the regression guard: it proves the verdict is
+// READ from the process-scoped lock owner rather than fabricated from the injected
+// error. The previous version pinned wantHandoff per row from the injected value,
+// which is how the "PendingStillUnsettled" row came to assert
+// AuditHandoffDurable — the right answer for a fake handle, but recorded as
+// though it were the answer for a real in-flight worker holding the lock.
+// Real-lock handoff coverage lives in
+// TestCommittedAuditFinalizerHandoffReadsProcessLockOwner.
 func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 	cases := []struct {
 		name        string
@@ -2097,18 +2110,15 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 		outcome     error
 		wantRows    int
 		wantPending int
-		wantHandoff AuditHandoff
 	}{
 		{
-			name:        "FastSuccess",
-			attempted:   true,
-			wantHandoff: AuditHandoffDurable,
+			name:      "FastSuccess",
+			attempted: true,
 		},
 		{
 			name:        "NoAttempt",
 			wantRows:    1,
 			wantPending: 0,
-			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "LockAcquisitionTimeout",
@@ -2116,7 +2126,6 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     api.ErrSupervisorEventEmitTimeout,
 			wantRows:    1,
 			wantPending: 0,
-			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "DirectDefiniteFailure",
@@ -2124,29 +2133,29 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     errors.New("write supervisor event log: simulated disk failure"),
 			wantRows:    1,
 			wantPending: 0,
-			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "DirectReleaseFailure",
 			attempted:   true,
 			outcome:     fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
 			wantPending: 1,
-			wantHandoff: AuditHandoffReleaseUnconfirmed,
 		},
 		{
-			name:        "PendingSuccess",
-			attempted:   true,
-			pending:     true,
-			wantHandoff: AuditHandoffDurable,
+			name:      "PendingSuccess",
+			attempted: true,
+			pending:   true,
 		},
 		{
+			// The seventh occurrence of the discarded-release class lived here.
+			// Wait(0) reports ErrSupervisorEventEmitTimeout while the abandoned
+			// worker is still inside its write holding BOTH locks, so this row
+			// must take the no-replay path, exactly like a confirmed release
+			// failure — it previously took the replay path and reported durable.
 			name:        "PendingStillUnsettled",
 			attempted:   true,
 			pending:     true,
 			outcome:     api.ErrSupervisorEventEmitTimeout,
-			wantRows:    1,
-			wantPending: 0,
-			wantHandoff: AuditHandoffDurable,
+			wantPending: 1,
 		},
 		{
 			name:        "PendingReleaseFailure",
@@ -2154,7 +2163,6 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			pending:     true,
 			outcome:     fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
 			wantPending: 1,
-			wantHandoff: AuditHandoffReleaseUnconfirmed,
 		},
 		{
 			name:        "PendingDefiniteFailure",
@@ -2163,7 +2171,6 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     errors.New("write supervisor event log: simulated disk failure"),
 			wantRows:    1,
 			wantPending: 0,
-			wantHandoff: AuditHandoffDurable,
 		},
 	}
 	for _, tc := range cases {
@@ -2192,8 +2199,12 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			if err != nil {
 				t.Fatalf("finalize: %v", err)
 			}
-			if handoff != tc.wantHandoff {
-				t.Fatalf("audit handoff=%q want=%q", handoff, tc.wantHandoff)
+			// Uniformly durable BY CONSTRUCTION: an injected outcome takes no
+			// real flock, so the process-scoped owner truthfully reports
+			// "released". A row that reported release_unconfirmed here would
+			// mean the verdict was derived from the injected error again.
+			if handoff != AuditHandoffDurable {
+				t.Fatalf("audit handoff=%q want=%q (no real flock is taken by an injected outcome)", handoff, AuditHandoffDurable)
 			}
 			if !handoff.Valid() {
 				t.Fatalf("audit handoff %q is outside the safe response enum", handoff)
@@ -2212,4 +2223,156 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCommittedAuditFinalizerHandoffReadsProcessLockOwner is the real-lock
+// counterpart to the injected-outcome matrix above, and the regression guard for
+// the seventh occurrence of the discarded-flock-release class.
+//
+// Each subtest strands or occupies the REAL cross-process flock through the
+// production emit path and then asserts finalize() refuses to claim "durable".
+// The matrix above cannot do this: a synthetic error takes no lock.
+//
+// MUTATION (any subtest): restore the pre-fix derivation in finalize by making
+// handoff() return AuditHandoffDurable unconditionally, i.e.
+//
+//	func (f *committedAuditFinalizer) handoff() AuditHandoff { return AuditHandoffDurable }
+//
+// Every subtest then fails with
+// `audit handoff="durable" want="release_unconfirmed" ...`.
+func TestCommittedAuditFinalizerHandoffReadsProcessLockOwner(t *testing.T) {
+	newFinalizer := func(t *testing.T, stateDir string) *committedAuditFinalizer {
+		t.Helper()
+		prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityInfo,
+			Source:   api.SupervisorEventSourceLifecycle,
+			Event:    "daemon-recovery-handoff-owner",
+			TS:       time.Unix(1_700_000_000, 0).UTC().Format(time.RFC3339Nano),
+		})
+		if err != nil {
+			t.Fatalf("prepare audit: %v", err)
+		}
+		return &committedAuditFinalizer{stateDir: stateDir, prepared: prepared}
+	}
+
+	// F6: the 15 daemon-recover audit call sites all funnel through
+	// emitRecoverAuditEvent's `_ = logger.Emit(event)`. The discarded error is
+	// the ONLY thing that used to carry a failed release, so a stranded flock
+	// left no trace anywhere. The owner now carries it instead, and the
+	// finalizer reports it without the call site being touched.
+	t.Run("DiscardedFireAndForgetAuditStrandsTheLock", func(t *testing.T) {
+		stateDir := t.TempDir()
+		logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+		defer api.ResetSupervisorEventLockStateForPathForTest(logPath)
+
+		restoreUnlock := api.SetSupervisorEventUnlockFnForTest(func(l *api.SupervisorEventLog) error {
+			// Free the real handle, then report the failure the caller would see.
+			_ = api.ReleaseSupervisorEventFlockForTest(l)
+			return errors.New("UnlockFileEx: simulated persistent failure")
+		})
+		defer restoreUnlock()
+
+		// Exactly what production does on 15 recover paths — verdict discarded.
+		emitRecoverAuditEvent(stateDir, api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityWarn,
+			Source:   "recover",
+			Event:    "daemon-port-squatter-reaped",
+		})
+
+		handoff, err := newFinalizer(t, stateDir).finalize()
+		if err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		if handoff != AuditHandoffReleaseUnconfirmed {
+			t.Fatalf("audit handoff=%q want=%q after a discarded fire-and-forget audit stranded the flock", handoff, AuditHandoffReleaseUnconfirmed)
+		}
+	})
+
+	// F1: the abandoned bounded-emit worker. finalize()'s own Wait(0) reports
+	// ErrSupervisorEventEmitTimeout while that worker still owns BOTH locks.
+	// The stall window is engineered large so a fast machine cannot flake it.
+	t.Run("AbandonedWorkerStillHoldsTheLock", func(t *testing.T) {
+		stateDir := t.TempDir()
+		logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+		defer api.ResetSupervisorEventLockStateForPathForTest(logPath)
+
+		release := make(chan struct{})
+		var releaseOnce sync.Once
+		safeRelease := func() { releaseOnce.Do(func() { close(release) }) }
+		// The stall is what matters; the row itself is irrelevant to this
+		// assertion, so the seam blocks and then reports a clean write without
+		// touching the temp dir (nothing to race with t.TempDir cleanup).
+		restoreWrite := api.SetSupervisorEventWriteFnForTest(func(*api.SupervisorEventLog, []byte) error {
+			<-release // the filesystem/AV stall the emit timeout exists for
+			return nil
+		})
+		var pending *api.PendingSupervisorEventEmit
+		defer func() {
+			safeRelease()
+			// Join on the abandoned worker before restoring the seam. finalize's
+			// own Wait(0) took the non-blocking default and drained nothing, so
+			// this receive is the first one to consume the worker's result.
+			if pending != nil {
+				_ = pending.Wait(10 * time.Second)
+			}
+			restoreWrite()
+		}()
+
+		prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityInfo,
+			Source:   api.SupervisorEventSourceLifecycle,
+			Event:    "daemon-recovery-committed-stalled",
+		})
+		if err != nil {
+			t.Fatalf("prepare stalled audit: %v", err)
+		}
+		trackedPending, emitErr := emitRecoverPreparedAuditWithTimeoutTracked(stateDir, prepared, 100*time.Millisecond)
+		pending = trackedPending
+		if !errors.Is(emitErr, api.ErrSupervisorEventEmitTimeout) {
+			t.Fatalf("tracked emit with a stalled write = %v, want ErrSupervisorEventEmitTimeout", emitErr)
+		}
+		if pending == nil {
+			t.Fatal("pending handle is nil after a genuine timeout")
+		}
+
+		finalizer := newFinalizer(t, stateDir)
+		finalizer.attempted = true
+		finalizer.pending = pending
+		finalizer.emitErr = emitErr
+
+		handoff, err := finalizer.finalize()
+		if err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		if handoff != AuditHandoffReleaseUnconfirmed {
+			t.Fatalf("audit handoff=%q want=%q while an abandoned worker still holds the flock", handoff, AuditHandoffReleaseUnconfirmed)
+		}
+	})
+
+	// F5's concern, restated: the third release-failure branch used to be a
+	// bespoke `errors.Is(logger.TryReplayPending(), ...)` check that no test
+	// covered. That branch is gone — the replay path reports its own release
+	// outcome to the same owner — so this pins the behaviour, not the branch.
+	t.Run("ReplayPathReleaseFailureStrandsTheLock", func(t *testing.T) {
+		stateDir := t.TempDir()
+		logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+		defer api.ResetSupervisorEventLockStateForPathForTest(logPath)
+
+		restoreUnlock := api.SetSupervisorEventUnlockFnForTest(func(l *api.SupervisorEventLog) error {
+			// Free the real handle, then report the failure the caller would see.
+			_ = api.ReleaseSupervisorEventFlockForTest(l)
+			return errors.New("UnlockFileEx: simulated persistent failure")
+		})
+		defer restoreUnlock()
+
+		// attempted=false reaches PersistPending + the opportunistic replay,
+		// which is the only flock this finalizer takes on this path.
+		handoff, err := newFinalizer(t, stateDir).finalize()
+		if err != nil {
+			t.Fatalf("finalize: %v", err)
+		}
+		if handoff != AuditHandoffReleaseUnconfirmed {
+			t.Fatalf("audit handoff=%q want=%q after the replay path failed to release the flock", handoff, AuditHandoffReleaseUnconfirmed)
+		}
+	})
 }
