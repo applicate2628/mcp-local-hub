@@ -403,6 +403,39 @@ contracts.
 No source, test, commit, checkout, reset, stash, push, GUI, tray, supervisor,
 scheduler, or child application mutation was performed by this QA pass.
 
+## Final committed-code mutation proof
+
+After fix commit `50a0e4b0`, the main session changed only the cleanup
+authorization assignment from `snapshot.liveManaged` to `true`. This mutation
+recreated the original defect class against the final cached-preflight
+implementation.
+
+The exact stopped-router and foreign-listener guards both failed:
+
+```text
+--- FAIL: TestRegister_CleanupKeepsDirectEntryWhenConfiguredRouterIsStopped
+register_test.go:5074: stopped configured router authorized removal of direct entry "legacy-go-stopped-router"
+--- FAIL: TestRegister_CleanupKeepsDirectEntryWhenRouterPortHasForeignListener
+register_test.go:5151: foreign listener authorized removal of cursor direct entry "legacy-go-cursor"
+FAIL mcp-local-hub/internal/api
+```
+
+The mutation run exited 1. Evidence:
+`.scratch/pr583-final-liveness-mutation-20260727-081142642-e06a10721a9843c5a8f238b2c9c867bd/`.
+
+The reverse patch restored `snapshot.liveManaged`. The same two guards then
+passed with exit 0:
+
+```text
+ok mcp-local-hub/internal/api 0.038s
+```
+
+Restored evidence:
+`.scratch/pr583-final-liveness-restored-20260727-081203005-35bb58f2d07143adaba16496f570d9a2/`.
+The restored `internal/api/register.go` SHA-256 is
+`BEC52E1178FB992E1DAB9CF1986B12013E578B33C5080109972069FFC2E23727`,
+exactly matching the committed Revision 2 hash. `git status --short` was empty.
+
 ## Terms and Abbreviations
 
 - **API** — Application Programming Interface.
