@@ -61,19 +61,31 @@ import (
 // # Live bands (anchored to real runtime code, not magic numbers)
 //
 //   - 9121–9138  global daemon ports, incl. the legacy serena 9121/9122 split.
-//     Source: configs/ports.yaml, whose declared globals now span 9121–9138
-//     (…9133 fetch, 9134 oneapi-run, 9135 drmemory, 9136 vtune, 9137 the route
-//     daemon, 9138 vcpkg) + serena_dynamic_pool.go:69 ("clears 9121–9132") +
-//     defaultLegacySerenaPort = 9121 + fetch on 9133 (PR #287 moved it off the
-//     legacy serena port).
+//     Source: configs/ports.yaml, whose declared globals span 9121–9138
+//     (…9133 fetch, 9134 oneapi-run, 9135 drmemory, 9136 vtune, 9138 vcpkg —
+//     note 9137 is NOT in that file, see below) + serena_dynamic_pool.go:69
+//     ("clears 9121–9132") + defaultLegacySerenaPort = 9121 + fetch on 9133
+//     (PR #287 moved it off the legacy serena port).
 //
-//     The upper bound is anchored to configs/ports.yaml's highest declared
-//     global, NOT to a hand-maintained number: every registration in that file
-//     makes a port a LIVE production daemon port, so a band that lags the file
-//     leaves the newest daemons unguarded. It lagged by four (9134/9135/9136
-//     were registered by earlier PRs, 9138 by this one) while the comment below
+//     The upper bound tracks configs/ports.yaml's highest declared global,
+//     NOT a hand-maintained number: every registration in that file makes a
+//     port a LIVE production daemon port, so a band that lags the file leaves
+//     the newest daemons unguarded. It lagged by four (9134/9135/9136 were
+//     registered by earlier PRs, 9138 by this one) while the comment below
 //     still described the whole 9134+ range as an intentional gap.
 //     When a new global is registered above 9138, raise this bound with it.
+//
+//     BUT configs/ports.yaml is NOT a complete ledger, so tracking it is a
+//     floor and not a proof. 9137 is the counter-example: the route daemon
+//     claims it as a bare CONSTANT in code (internal/cli/route.go
+//     DefaultRouteDaemonPort, mirrored by internal/api/mcp_front_port.go
+//     DefaultMCPFrontPort, on the sibling feat/mcp-front-daemon branch) and
+//     never registered it here — which is exactly how the vcpkg daemon was
+//     first assigned 9137 against a port check that was correct about
+//     everything it could observe (see commit ef4f9e13). 9137 is inside this
+//     band only because it happens to fall under the 9138 bound. When raising
+//     the bound, check the band against port constants in code as well as
+//     against this file.
 //
 //   - 9150–9199  serena dynamic pool. Source: serena_dynamic_pool.go:77-78
 //     (serenaDefaultPortPoolStart / serenaDefaultPortPoolEnd).
