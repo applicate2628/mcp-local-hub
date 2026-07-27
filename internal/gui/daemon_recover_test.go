@@ -216,6 +216,7 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 		Reaped:          true,
 		PortOwnerCheck:  daemonrecovery.PortOwnerReaped,
 		PortWaitOutcome: daemonrecovery.PortWaitStillBound,
+		AuditHandoff:    daemonrecovery.AuditHandoffDurable,
 	}}
 	s.daemonRecover = fake
 
@@ -223,18 +224,78 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
+	// audit_handoff joins the pinned set deliberately: it names a lock-release
+	// outcome, never a path, PID, or command line, so it carries nothing this
+	// test exists to keep out of the response.
 	want := map[string]any{
 		"task_name":         `\mcp-local-hub-memory-default`,
 		"state":             "respawn_accepted",
 		"reaped":            true,
 		"port_owner_check":  "reaped",
 		"port_wait_outcome": "still_bound",
+		"audit_handoff":     "durable",
 	}
 	if got := decodeDaemonRecoverBody(t, rec); !mapsEqual(got, want) {
 		t.Fatalf("body=%v want=%v", got, want)
 	}
 	if fake.calls != 1 || !fake.confirmed {
 		t.Fatalf("calls=%d confirmed=%v", fake.calls, fake.confirmed)
+	}
+}
+
+// An unconfirmed lock RELEASE is a warning on a SUCCEEDED recovery, and the
+// distinction is the whole point of the AuditHandoff channel: the termination
+// and the respawn both committed, so telling the operator "failed" would invite
+// a re-run of a destructive operation that already happened.
+//
+// The GUI is also the process where the verdict actually bites — unlike the
+// one-shot CLI, it lives for hours, so a lock it still holds blocks the
+// supervisor and `mcphub install` for that whole time. That makes reporting it
+// on a 200 (rather than swallowing it) load-bearing, not cosmetic.
+func TestDaemonRecoverRouteReleaseUnconfirmedIsAWarningOnSuccessNotAFailure(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
+		TaskName:        `\mcp-local-hub-memory-default`,
+		Reaped:          true,
+		PortOwnerCheck:  daemonrecovery.PortOwnerReaped,
+		PortWaitOutcome: daemonrecovery.PortWaitReleased,
+		AuditHandoff:    daemonrecovery.AuditHandoffReleaseUnconfirmed,
+	}}
+	s.daemonRecover = fake
+
+	rec := performDaemonRecoverRequest(t, s, `{"task_name":"mcp-local-hub-memory-default","confirm":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("an unconfirmed lock release must stay a SUCCESS — the reap and the respawn already "+
+			"committed, so a non-200 invites the operator to retry a destructive op; status=%d body=%s",
+			rec.Code, rec.Body.String())
+	}
+	body := decodeDaemonRecoverBody(t, rec)
+	if body["audit_handoff"] != "release_unconfirmed" {
+		t.Fatalf("the warning must reach the operator, or a lock this long-lived process still holds "+
+			"blocks the supervisor invisibly; body=%v", body)
+	}
+	if body["state"] != "respawn_accepted" {
+		t.Fatalf("state must still report the accepted respawn; body=%v", body)
+	}
+}
+
+// The complement: a clean handoff must NOT raise the warning, or the signal
+// becomes noise the operator learns to ignore.
+func TestDaemonRecoverRouteDurableHandoffRaisesNoWarning(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	s.daemonRecover = &fakeDaemonRecoverer{result: daemonrecovery.Result{
+		TaskName:        `\mcp-local-hub-memory-default`,
+		PortOwnerCheck:  daemonrecovery.PortOwnerUnbound,
+		PortWaitOutcome: daemonrecovery.PortWaitNotRequired,
+		AuditHandoff:    daemonrecovery.AuditHandoffDurable,
+	}}
+
+	rec := performDaemonRecoverRequest(t, s, `{"task_name":"mcp-local-hub-memory-default","confirm":true}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := decodeDaemonRecoverBody(t, rec)["audit_handoff"]; got != "durable" {
+		t.Fatalf("a confirmed release must report durable, not %v", got)
 	}
 }
 

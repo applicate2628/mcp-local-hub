@@ -741,6 +741,10 @@ export const DAEMON_RECOVER_ERROR_CODES = [
   "RECOVER_BOUNDARY_PROBE_TIMEOUT",
   "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
   "RECOVER_STATE_READ_FAILED",
+  // Termination WAS committed and the respawn was attempted; only the audit
+  // record or its durable handoff could not be preserved. Never present it as a
+  // retryable failure — the destructive step already ran.
+  "RECOVER_AUDIT_DURABILITY_FAILED",
   "RECOVER_UNCLASSIFIED_FAILURE",
 ] as const;
 
@@ -763,6 +767,11 @@ export interface DaemonRecoverResponse {
     | "released"
     | "still_bound"
     | "probe_unavailable";
+  // Warning field on a SUCCESS response. "release_unconfirmed" means the audit
+  // row is durable but the GUI process may still hold the supervisor-events.log
+  // cross-process lock, blocking the supervisor and the install CLI until it
+  // exits. The recovery succeeded; surface it as a warning, never as a retry.
+  audit_handoff: "not_required" | "durable" | "release_unconfirmed";
 }
 
 // postDaemonRecover carries the explicit confirmation required by the route.

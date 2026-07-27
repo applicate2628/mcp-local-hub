@@ -250,6 +250,51 @@ func TestDaemonRecoverAuditDurabilityFailureExit7PreservesCommittedRespawnWordin
 	}
 }
 
+// The unconfirmed-release warning must reach stderr WITHOUT turning a succeeded
+// recovery into a failure. The two halves are inseparable: the reap and the
+// respawn already committed, so wording that reads as failure invites a re-run
+// of a destructive operation — which is exactly what the warning tells the
+// operator NOT to do.
+func TestDaemonRecoverReleaseUnconfirmedWarnsWithoutRetryAdvice(t *testing.T) {
+	cmd, out, errOut := recoverCmd("")
+	printRecoverAuditHandoffWarning(cmd, daemonrecovery.Result{
+		TaskName:     `\mcp-local-hub-memory-default`,
+		AuditHandoff: daemonrecovery.AuditHandoffReleaseUnconfirmed,
+	})
+
+	message := errOut.String()
+	for _, want := range []string{
+		"could not be confirmed",
+		"blocking event-log writes",
+		"Do NOT re-run recover",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("stderr=%q missing %q — the operator needs the cause, the blast radius, and the "+
+				"do-not-retry instruction, or the warning is noise", message, want)
+		}
+	}
+	if strings.Contains(out.String(), "warning") {
+		t.Fatalf("the warning belongs on stderr, not stdout: %q", out.String())
+	}
+}
+
+// A confirmed release must stay SILENT. A warning printed on every recovery is
+// one the operator stops reading, which costs exactly the case it exists for.
+func TestDaemonRecoverConfirmedReleaseIsSilent(t *testing.T) {
+	for _, handoff := range []daemonrecovery.AuditHandoff{
+		daemonrecovery.AuditHandoffDurable,
+		daemonrecovery.AuditHandoffNotRequired,
+	} {
+		t.Run(string(handoff), func(t *testing.T) {
+			cmd, _, errOut := recoverCmd("")
+			printRecoverAuditHandoffWarning(cmd, daemonrecovery.Result{AuditHandoff: handoff})
+			if errOut.String() != "" {
+				t.Fatalf("a confirmed handoff (%q) must print nothing; got %q", handoff, errOut.String())
+			}
+		})
+	}
+}
+
 func TestDaemonRecoverBudgetRefusalHasHonestOperatorMessage(t *testing.T) {
 	cmd, _, errOut := recoverCmd("")
 	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{

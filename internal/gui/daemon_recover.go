@@ -86,14 +86,24 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 			http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", "/api/daemon/recover response")
 		return
 	}
+	if !result.AuditHandoff.Valid() {
+		writeAPIErrorRedacted(w, fmt.Errorf("invalid audit handoff %q", result.AuditHandoff),
+			http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", "/api/daemon/recover response")
+		return
+	}
 
 	w.Header().Set("Content-Type", "application/json")
+	// audit_handoff is a WARNING field on a SUCCESS response: "release_unconfirmed"
+	// means this GUI process may still hold the supervisor-events.log flock, which
+	// blocks the supervisor and the install CLI until the GUI exits. The recovery
+	// itself still succeeded, so it must not be retried.
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"task_name":         taskName,
 		"state":             "respawn_accepted",
 		"reaped":            result.Reaped,
 		"port_owner_check":  result.PortOwnerCheck,
 		"port_wait_outcome": result.PortWaitOutcome,
+		"audit_handoff":     result.AuditHandoff,
 	})
 }
 
@@ -123,6 +133,17 @@ func daemonRecoverHTTPFailure(err error) (int, string) {
 		return http.StatusServiceUnavailable, "RECOVER_RESPAWN_BUDGET_INSUFFICIENT"
 	case daemonrecovery.FailureStateRead:
 		return http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED"
+	case daemonrecovery.FailureAuditDurability:
+		// Mirrors the CLI's dedicated exit-7 semantic (internal/cli/daemon_recover.go):
+		// the termination WAS committed and the respawn was attempted; only the audit
+		// record or its durable handoff could not be preserved. It gets its own code
+		// rather than reusing a neighbour because RECOVER_RESPAWN_FAILED would assert
+		// a failed respawn (it may well have been accepted) and RECOVER_STATE_READ_FAILED
+		// would assert a pre-mutation read failure — both would tell an operator that
+		// nothing was destroyed, and invite a retry of a destructive recovery that
+		// already completed. The redacted body's termination_committed field carries
+		// the "do not retry" signal.
+		return http.StatusInternalServerError, "RECOVER_AUDIT_DURABILITY_FAILED"
 	default:
 		return http.StatusInternalServerError, "RECOVER_UNCLASSIFIED_FAILURE"
 	}

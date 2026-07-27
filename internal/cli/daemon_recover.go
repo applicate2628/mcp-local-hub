@@ -134,7 +134,24 @@ func runDaemonRecover(cmd *cobra.Command, taskArg string, yes bool) error {
 		return printRecoverError(cmd, taskArg, err)
 	}
 	fmt.Fprintf(out, "recovered %s: forced respawn accepted by the supervisor.\n", result.TaskName)
+	printRecoverAuditHandoffWarning(cmd, result)
 	return nil
+}
+
+// printRecoverAuditHandoffWarning reports a stranded cross-process event-log
+// flock WITHOUT changing the exit code. The recovery succeeded and the audit row
+// is durable; what could not be confirmed is the RELEASE of the lock, which this
+// process may still hold. For the one-shot CLI that is nearly harmless (the lock
+// dies with the process seconds later), so the remedy is stated as such; the same
+// verdict on the long-lived GUI is the one that actually strands the supervisor.
+func printRecoverAuditHandoffWarning(cmd *cobra.Command, result daemonrecovery.Result) {
+	if result.AuditHandoff != daemonrecovery.AuditHandoffReleaseUnconfirmed {
+		return
+	}
+	errOut := cmd.ErrOrStderr()
+	fmt.Fprintln(errOut, "warning: the recovery audit row is durable, but releasing the supervisor-events.log cross-process lock could not be confirmed.")
+	fmt.Fprintln(errOut, "  This process may still hold it, blocking event-log writes from the supervisor and `mcphub install` until it exits.")
+	fmt.Fprintln(errOut, "  Do NOT re-run recover: the termination and the respawn already committed. The lock is released when this process exits.")
 }
 
 // confirmRecoverReap prompts for an interactive y/N confirmation. A non-tty /

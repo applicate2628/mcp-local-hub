@@ -653,6 +653,7 @@ describe("postDaemonRecover", () => {
         reaped: false,
         port_owner_check: terminationUnconfirmed,
         port_wait_outcome: "still_bound",
+        audit_handoff: "durable",
       }),
     }) as unknown as Response);
 
@@ -660,6 +661,7 @@ describe("postDaemonRecover", () => {
       state: "respawn_accepted",
       reaped: false,
       port_owner_check: "termination_unconfirmed",
+      audit_handoff: "durable",
     });
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/daemon/recover", {
       method: "POST",
@@ -702,7 +704,32 @@ describe("postDaemonRecover", () => {
       "RECOVER_BOUNDARY_PROBE_TIMEOUT",
       "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
       "RECOVER_STATE_READ_FAILED",
+      "RECOVER_AUDIT_DURABILITY_FAILED",
       "RECOVER_UNCLASSIFIED_FAILURE",
     ]);
+  });
+
+  // A stranded event-log flock is reported on the SUCCESS response, so the UI
+  // must be able to read it without treating the recovery as failed.
+  it("carries the audit-handoff warning on a successful recovery", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        task_name: "demo/default",
+        state: "respawn_accepted",
+        reaped: true,
+        port_owner_check: "reaped",
+        port_wait_outcome: "released",
+        audit_handoff: "release_unconfirmed",
+      }),
+    }) as unknown as Response);
+
+    const resolved = await postDaemonRecover("demo/default");
+    const handoff: DaemonRecoverResponse["audit_handoff"] =
+      resolved.audit_handoff;
+    expect(handoff).toBe("release_unconfirmed");
+    expect(resolved.state).toBe("respawn_accepted");
   });
 });

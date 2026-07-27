@@ -59,6 +59,43 @@ func (p PortWaitOutcome) Valid() bool {
 	}
 }
 
+// AuditHandoff reports whether the committed-recovery audit handoff could
+// confirm the RELEASE of the cross-process supervisor-event-log flock it took.
+// It contains no process-controlled detail and is safe for the GUI wire.
+//
+// It is a WARNING channel, deliberately NOT an outcome channel.
+// AuditHandoffReleaseUnconfirmed never downgrades the recovery verdict, because
+// on that path the audit row IS durable (PersistPending established the carrier)
+// and both the termination and the respawn committed. What it reports is a
+// PROCESS-scoped condition: this process may still hold the flock on
+// supervisor-events.log, blocking every other emitter — the supervisor, the
+// install CLI — until it exits. The remediation is "restart this process", never
+// "retry this recovery"; folding it into the error would invite an operator to
+// re-run a destructive recovery that already completed.
+type AuditHandoff string
+
+const (
+	// AuditHandoffNotRequired means no committed-recovery audit was staged
+	// (no termination was committed, so there is no handoff to make).
+	AuditHandoffNotRequired AuditHandoff = "not_required"
+	// AuditHandoffDurable means the audit row is durable and every event-log
+	// flock this recovery took was confirmed released.
+	AuditHandoffDurable AuditHandoff = "durable"
+	// AuditHandoffReleaseUnconfirmed means the audit row is durable but a
+	// cross-process event-log flock release could not be confirmed.
+	AuditHandoffReleaseUnconfirmed AuditHandoff = "release_unconfirmed"
+)
+
+// Valid reports whether the value belongs to the safe response enum.
+func (a AuditHandoff) Valid() bool {
+	switch a {
+	case AuditHandoffNotRequired, AuditHandoffDurable, AuditHandoffReleaseUnconfirmed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Result means the supervisor accepted one force-respawn request. It does not
 // assert that the daemon is Running yet.
 type Result struct {
@@ -66,6 +103,7 @@ type Result struct {
 	Reaped          bool
 	PortOwnerCheck  PortOwnerCheck
 	PortWaitOutcome PortWaitOutcome
+	AuditHandoff    AuditHandoff
 }
 
 // FailureKind is the stable internal outcome the CLI and HTTP adapters map to
@@ -555,17 +593,16 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	// The committed audit establishes its durable handoff after the injected
 	// supervisor-dispatch boundary; the no-kill already-exited audit remains an
 	// independent best-effort closure.
-	var auditDurabilityErr error
-	if committedAudit != nil {
-		auditDurabilityErr = committedAudit.finalize()
-	}
+	// finalize is nil-receiver safe: with no committed audit it reports
+	// AuditHandoffNotRequired and no error.
+	auditHandoff, auditDurabilityErr := committedAudit.finalize()
 	for _, emitAudit := range postCommitAudits {
 		emitAudit()
 	}
 	for _, notification := range postCommitNotifications {
 		notify(options, notification)
 	}
-	result := Result{TaskName: normalized, Reaped: reaped, PortOwnerCheck: check, PortWaitOutcome: portWaitOutcome}
+	result := Result{TaskName: normalized, Reaped: reaped, PortOwnerCheck: check, PortWaitOutcome: portWaitOutcome, AuditHandoff: auditHandoff}
 	if auditDurabilityErr != nil {
 		cause := auditDurabilityErr
 		if respawnErr != nil {
@@ -781,45 +818,65 @@ type committedAuditFinalizer struct {
 	emitErr    error
 }
 
-func (f *committedAuditFinalizer) finalize() error {
+// finalize returns the audit handoff verdict alongside the durability error.
+//
+// The two results answer DIFFERENT questions and must not be collapsed. The
+// error answers "is the audit row durable?" — a non-nil error is a genuine
+// FailureAuditDurability. The AuditHandoff answers "was every cross-process
+// event-log flock this recovery took confirmed released?" — an unconfirmed
+// release says nothing about the row (it is durable) and everything about the
+// LOCK, which this process may still hold for its whole lifetime because
+// SupervisorEventLog.Close is a no-op that does not unlock.
+//
+// Every one of the three release-failure branches below reports the same
+// verdict; before this they all returned a bare nil, so a stranded flock left
+// no trace on any channel.
+func (f *committedAuditFinalizer) finalize() (AuditHandoff, error) {
 	if f == nil {
-		return nil
+		return AuditHandoffNotRequired, nil
 	}
 	if f.prepareErr != nil {
-		return fmt.Errorf("prepare committed recovery audit: %w", f.prepareErr)
+		return AuditHandoffNotRequired, fmt.Errorf("prepare committed recovery audit: %w", f.prepareErr)
 	}
 
 	replay := true
+	handoff := AuditHandoffDurable
 	switch {
 	case !f.attempted:
 		// No writer exists. Establish the durable carrier below.
 	case f.pending == nil && f.emitErr == nil:
-		return nil
+		return AuditHandoffDurable, nil
 	case f.pending == nil && errors.Is(f.emitErr, api.ErrSupervisorEventReleaseFailed):
 		replay = false
+		handoff = AuditHandoffReleaseUnconfirmed
 	case f.pending != nil:
 		waitErr := f.pending.Wait(0)
 		switch {
 		case waitErr == nil:
-			return nil
+			return AuditHandoffDurable, nil
 		case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed):
 			replay = false
+			handoff = AuditHandoffReleaseUnconfirmed
 		}
 	}
 
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(f.stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
-		return fmt.Errorf("open committed recovery audit handoff: %w", err)
+		return handoff, fmt.Errorf("open committed recovery audit handoff: %w", err)
 	}
 	defer func() { _ = logger.Close() }()
 	if err := logger.PersistPending(f.prepared); err != nil {
-		return fmt.Errorf("persist committed recovery audit handoff: %w", err)
+		return handoff, fmt.Errorf("persist committed recovery audit handoff: %w", err)
 	}
 	if replay {
-		// Persistence is the acknowledgement boundary. Replay is deliberately
-		// opportunistic: contention or any replay error leaves the carrier for
-		// a later process and does not undo established durability.
-		_ = logger.TryReplayPending()
+		// Persistence is the acknowledgement boundary. Replay stays deliberately
+		// opportunistic: contention or a replay I/O error leaves the carrier for
+		// a later process and does not undo established durability, so it is
+		// still discarded. A RELEASE failure is not in that class — it strands
+		// the cross-process flock — so it is reported on the handoff channel.
+		if replayErr := logger.TryReplayPending(); errors.Is(replayErr, api.ErrSupervisorEventReleaseFailed) {
+			handoff = AuditHandoffReleaseUnconfirmed
+		}
 	}
-	return nil
+	return handoff, nil
 }

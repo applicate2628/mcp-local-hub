@@ -2097,15 +2097,18 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 		outcome     error
 		wantRows    int
 		wantPending int
+		wantHandoff AuditHandoff
 	}{
 		{
-			name:      "FastSuccess",
-			attempted: true,
+			name:        "FastSuccess",
+			attempted:   true,
+			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "NoAttempt",
 			wantRows:    1,
 			wantPending: 0,
+			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "LockAcquisitionTimeout",
@@ -2113,6 +2116,7 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     api.ErrSupervisorEventEmitTimeout,
 			wantRows:    1,
 			wantPending: 0,
+			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "DirectDefiniteFailure",
@@ -2120,17 +2124,20 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     errors.New("write supervisor event log: simulated disk failure"),
 			wantRows:    1,
 			wantPending: 0,
+			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "DirectReleaseFailure",
 			attempted:   true,
 			outcome:     fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
 			wantPending: 1,
+			wantHandoff: AuditHandoffReleaseUnconfirmed,
 		},
 		{
-			name:      "PendingSuccess",
-			attempted: true,
-			pending:   true,
+			name:        "PendingSuccess",
+			attempted:   true,
+			pending:     true,
+			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "PendingStillUnsettled",
@@ -2139,6 +2146,7 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     api.ErrSupervisorEventEmitTimeout,
 			wantRows:    1,
 			wantPending: 0,
+			wantHandoff: AuditHandoffDurable,
 		},
 		{
 			name:        "PendingReleaseFailure",
@@ -2146,6 +2154,7 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			pending:     true,
 			outcome:     fmt.Errorf("%w: UnlockFileEx: simulated persistent failure", api.ErrSupervisorEventReleaseFailed),
 			wantPending: 1,
+			wantHandoff: AuditHandoffReleaseUnconfirmed,
 		},
 		{
 			name:        "PendingDefiniteFailure",
@@ -2154,6 +2163,7 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 			outcome:     errors.New("write supervisor event log: simulated disk failure"),
 			wantRows:    1,
 			wantPending: 0,
+			wantHandoff: AuditHandoffDurable,
 		},
 	}
 	for _, tc := range cases {
@@ -2178,8 +2188,15 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 				finalizer.pending = api.NewPendingSupervisorEventEmitForTest(tc.outcome)
 				finalizer.emitErr = api.ErrSupervisorEventEmitTimeout
 			}
-			if err := finalizer.finalize(); err != nil {
+			handoff, err := finalizer.finalize()
+			if err != nil {
 				t.Fatalf("finalize: %v", err)
+			}
+			if handoff != tc.wantHandoff {
+				t.Fatalf("audit handoff=%q want=%q", handoff, tc.wantHandoff)
+			}
+			if !handoff.Valid() {
+				t.Fatalf("audit handoff %q is outside the safe response enum", handoff)
 			}
 
 			logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
