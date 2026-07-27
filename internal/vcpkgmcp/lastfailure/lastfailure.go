@@ -104,12 +104,28 @@ func LastFailure(args Args, deps Deps) Result {
 		data, err := deps.FS.ReadFile(wrapperPath)
 		switch {
 		case err == nil:
-			wrapperInfo, wrapperOK, _ = ParseWrapperContent(data)
-			if wrapperOK {
+			var parseErr error
+			wrapperInfo, wrapperOK, parseErr = ParseWrapperContent(data)
+			switch {
+			case wrapperOK:
 				notes = append(notes, NoteWrapperUsedForContext)
 				sources = append(sources, SourceWrapperSummary)
 				ev.AddPath(wrapperPath)
-			} else {
+			case parseErr != nil:
+				// The scan ABORTED — bufio.Scanner gave up (a line beyond the
+				// 4 MiB buffer, or a read error). We did NOT see the file end to
+				// end, so we cannot claim anything about its shape.
+				//
+				// NoteWrapperMalformed's own contract three lines up in types.go
+				// is "the wrapper file WAS read end to end and nothing
+				// recognizable was recovered — a verified fact about content".
+				// Discarding parseErr here asserted exactly that fact about a
+				// file we had abandoned mid-read, which is the same mistake
+				// NoteWrapperUnreadable's doc comment was written to prevent:
+				// it sends the operator to fix a wrapper script when nothing is
+				// wrong with the script.
+				notes = append(notes, NoteWrapperUnreadable)
+			default:
 				notes = append(notes, NoteWrapperMalformed)
 			}
 		case errors.Is(err, fs.ErrNotExist):

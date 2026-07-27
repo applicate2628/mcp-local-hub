@@ -164,8 +164,24 @@ func resolveOperand(tok token, env *varEnv) (*string, []string) {
 // that substituted an uncertain scalar yields NO value: the same rule as
 // lookupCertain, applied to a token that merely EMBEDS such a variable rather
 // than being one.
+// An expansion carrying an UNRESOLVED reference also yields no value, even when
+// its certainty is TriTrue. expandToken leaves the verbatim `${NAME}` in .text
+// and records the name in .unresolved WITHOUT lowering certainty, so gating on
+// certainty alone let a definite operand through whose value was the literal
+// string "${WINSDK_VERSION}". The comparison then produced a DEFINITE verdict —
+// `conditional_not_applied`, whose contract is "definitively FALSE for this
+// triplet" — about a variable this package never had a value for.
+//
+// That reached the operator on the default python3 call: WINSDK_VERSION comes
+// from the MSVC toolchain scripts, not from any triplet file. The mirror case
+// was worse — `if("${SOME_UNKNOWN_FLAG}")` reported `applied` where real CMake
+// evaluates FALSE.
+//
+// triplet.go's header claims this class was closed by removing name-derivation.
+// That closed the UNQUOTED spelling; the quoted spelling above stayed live — an
+// instance fix on an open class. Pinned by TestOperandFromExpansion_*.
 func operandFromExpansion(ex expansion) (*string, []string) {
-	if ex.certainty != TriTrue {
+	if ex.certainty != TriTrue || len(ex.unresolved) > 0 {
 		return nil, dedupStrings(append(append([]string{}, ex.unresolved...), ex.uncertainVars...))
 	}
 	text := ex.text
