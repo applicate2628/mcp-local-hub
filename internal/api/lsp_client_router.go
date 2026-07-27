@@ -236,10 +236,18 @@ func (a *API) PlanLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPRouterCl
 					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "prepare", prepErr))
 					continue
 				}
+				// IntendedState must be the expected READBACK, not a projection
+				// of the write request: PreState and ObservedState are both
+				// readbacks, so projecting the command object here would make
+				// every successful add compare unequal to its own readback and
+				// settle as `forward-ownership-unknown`. The family rule is
+				// owned by intendedEntryReadbackProjection.
+				intendedReadback := intendedEntryReadbackProjection(adapter, entry)
 				plan.Operations = append(plan.Operations, LSPRouterPlannedOperation{
 					Client: clientName, Language: language, EntryName: targetName, Operation: "add",
-					PreState: canonicalPre, IntendedState: lspSnapshotFromEntry(clientName, language, targetName, &entry),
-					entry: entry,
+					PreState:      canonicalPre,
+					IntendedState: lspSnapshotFromEntry(clientName, language, targetName, &intendedReadback),
+					entry:         entry,
 				})
 			}
 			legacyEntries, legacyReadErrs := collectLegacyLSPEntriesToMigrate(

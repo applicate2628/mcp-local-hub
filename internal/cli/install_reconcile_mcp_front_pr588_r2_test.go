@@ -203,6 +203,24 @@ func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 // TestMCPFrontR2_RollbackRefusesAnOperatorEditedSerenaEntry is the P2 guard
 // for the rollback silently overwriting an entry the operator changed between
 // the forward run and the rollback.
+//
+// VERSION-3 CONTRACT (the name predates it and is kept so the guard stays
+// traceable; "refuses" now means "refuses to WRITE this row", not "refuses the
+// whole command"). The version-2 rollback was all-or-nothing: one conflicting
+// entry aborted the run and the record was kept for a retry. Version 3 makes
+// the inverse a per-row compare-and-swap (I7) and lets independent rows finish
+// (Decision E), so the outcome here is:
+//
+//   - the conflicting serena row is NOT written — the operator's edit stands;
+//   - its disposition is `skipped-conflict`, which is TERMINAL: there is
+//     nothing left for a retry to do, because the hub will never overwrite that
+//     edit on its own;
+//   - every other row still restores, and because all rows are then terminal
+//     the record is RETIRED (I10 permits retirement only on an all-terminal
+//     durable re-read — so keeping it here would be the bug, not the safety
+//     net);
+//   - the command still exits non-zero and names the row, so the operator
+//     learns which entry was left alone and why.
 func TestMCPFrontR2_RollbackRefusesAnOperatorEditedSerenaEntry(t *testing.T) {
 	tmp := mcpFrontPR588Env(t)
 	assertRedirectedStateDir(t, tmp)
@@ -232,16 +250,24 @@ func TestMCPFrontR2_RollbackRefusesAnOperatorEditedSerenaEntry(t *testing.T) {
 
 	err := runReconcileMCPFront(newMCPFrontTestCmd(), true)
 	if err == nil {
-		t.Fatalf("rollback must REFUSE when the serena entry no longer matches what the forward run wrote — restoring would discard the operator's edit with no warning")
+		t.Fatalf("rollback must report a non-zero outcome when the serena entry no longer matches what the forward run wrote — restoring would discard the operator's edit, and skipping it silently would leave the operator believing the rollback was complete")
 	}
 	if !strings.Contains(err.Error(), "edited") {
-		t.Fatalf("the refusal must tell the operator their entry was edited since the forward run; got: %v", err)
+		t.Fatalf("the message must tell the operator their entry was edited since the forward run, in those words — a bare row key makes them reverse-engineer the cause; got: %v", err)
+	}
+	serenaRowKey := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")
+	if !strings.Contains(err.Error(), strings.ReplaceAll(serenaRowKey, "\x00", "/")) {
+		t.Fatalf("the message must name the exact row that was left alone; got: %v", err)
 	}
 	if got, _ := claudeCodeEntryURL(t, configPath, "serena"); got != operatorURL {
-		t.Fatalf("a refused rollback must touch NO client: the operator's serena entry is now %q, want %q", got, operatorURL)
+		t.Fatalf("the conflicting row must be left EXACTLY as the operator set it: serena is now %q, want %q", got, operatorURL)
 	}
-	if _, statErr := os.Stat(reportPath); statErr != nil {
-		t.Fatalf("a refused rollback must KEEP the record so the operator can retry after resolving the conflict: %v", statErr)
+	// `skipped-conflict` is terminal, so with no other row outstanding the
+	// record has done its whole job and must NOT stay in the active namespace:
+	// a surviving record is the generation a later forward run would merge into,
+	// and its rollback would then restore a pre-state two cutovers old.
+	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
+		t.Fatalf("every row reached a terminal disposition, so the record must be retired out of the active namespace; stat err = %v", statErr)
 	}
 }
 

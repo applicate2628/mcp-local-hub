@@ -390,6 +390,18 @@ func TestMCPFrontPR588_RollbackRefusesUnknownArtifactVersion(t *testing.T) {
 	if !strings.Contains(err.Error(), "artifact version") {
 		t.Fatalf("refusal must name the version mismatch; got %v", err)
 	}
+	// A NEWER artifact and an OLDER one need OPPOSITE remedies, and the
+	// operator cannot tell which they have from the version number alone. A
+	// higher version means they downgraded (or ran a different install), so the
+	// binary that can read this file is the newer one — sending them to "the
+	// older mcphub that wrote this file" points at the one binary guaranteed
+	// not to understand it.
+	if !strings.Contains(err.Error(), "NEWER mcphub") {
+		t.Fatalf("a higher-than-supported version must send the operator to the NEWER binary; got %v", err)
+	}
+	if strings.Contains(err.Error(), "OLDER mcphub") {
+		t.Fatalf("a higher-than-supported version must NOT offer the legacy downgrade remedy; got %v", err)
+	}
 }
 
 // TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes is the unit-level

@@ -1,404 +1,708 @@
-# Decision: version-3 front-reconcile row journal
+---
+status: proposed
+date: 2026-07-27
+owner: architect
+decision: mcp-front-reconcile-v3-row-journal
+revision: R3
+---
 
-- **status:** proposed
-- **date:** 2026-07-27
-- **owner:** `$architect`
-- **work-item:** `2026-07-25-mcp-front-daemon`
-- **supersedes:** the unsafe attempt-settlement, Serena pin-authority, and
-  point-in-time LSP mutation parts of
-  `work-items/active/2026-07-25-mcp-front-daemon/design.md`
+# MCP-front reconcile version-3 row journal: R3 contract
 
-## Context
+## Verdict
 
-The current version-3 implementation establishes exact row identity, immutable
-baselines, frozen LSP population, per-row ports, and durable dispositions
-(`internal/cli/install_reconcile_mcp_front.go:162-257`). Independent review
-found seven remaining contract gaps:
+**PASS — accepted-ready for repeat reliability review; planner-blocked until
+that review returns `PASS`.**
 
-| Gap | Verified current behavior |
+This R3 decision supersedes the R2 contents previously stored at this path. It
+keeps the accepted row-journal direction and closes the six architecture gaps
+proved by the two R2 reviews. Promotion from `proposed` to `accepted` remains an
+independent architecture-review gate; implementation must not weaken the
+contract merely because the version-3 format is not yet shipped.
+
+The decision is one transaction design, not six local patches:
+
+1. the `clients.lockingClient` wrapper authorizes a target mutation and every
+   same-config dependency under one config-file lock;
+2. one CLI-owned classifier maps durable attempt state to ownership certainty,
+   while forward and rollback callers apply different policies to that result;
+3. one CLI-owned secure pin loader opens, validates, hashes, and reads every
+   Serena pin once, then passes the exact verified bytes to the inverse;
+4. every Serena precondition conflict is a durable no-write row, including the
+   first generation;
+5. rollback skips only an uncertain row or LSP dependency group and continues
+   every independent safe inverse before returning an aggregate pending result.
+
+## Current-source evidence and R2 review disposition
+
+The source below was independently re-read at
+`31b9ca9412ebf42eaa8b141009e94f34bf0acedc`.
+
+| R2 review class | Verified current source | R3 disposition |
+| --- | --- | --- |
+| Cross-entry LSP dependency race | Forward keeps `canonicalReady` in process memory, but the mutation wrapper checks only `op.EntryName` (`internal/api/lsp_client_router.go:277`, `internal/api/lsp_client_router.go:310-327`). Rollback proves legacy readiness before a later canonical-only conditional mutation (`internal/api/lsp_client_router_snapshot.go:314-338`, `internal/api/lsp_client_router_snapshot.go:455-475`). | Add one wrapper-owned multi-entry authorization primitive. |
+| Persisted post-write conflict can be superseded | `effectiveMCPFrontAppliedReceipt` marks both `prepared` and `conflict` uncertain (`internal/cli/install_reconcile_mcp_front.go:282-299`), but settlement handles only `prepared` (`internal/cli/install_reconcile_mcp_front.go:302-334`) and the constructor then increments generation and replaces `ActivePlan` (`internal/cli/install_reconcile_mcp_front.go:1237-1280`). | Centralize classification and block forward admission for both uncertain states. |
+| Pin time-of-check/time-of-use and link escape | Pin verification performs lexical containment and hashes one path read (`internal/cli/install_reconcile_mcp_front.go:1082-1124`), while Serena rollback later reopens `BackupPath` (`internal/api/serena_client_reconcile.go:729-740`). | Open securely once; inverse consumes verified bytes, never a path. |
+| First-generation Serena conflict disappears | `finishAttempt` returns success without persisting when the row is absent and no mutation was invoked (`internal/cli/install_reconcile_mcp_front.go:1386-1393`). | Persist a pinless no-write Serena row with a terminal precondition-conflict attempt. |
+| Rollback loses independent progress | Rollback calls settlement and returns before either surface when a prepared row survives (`internal/cli/install_reconcile_mcp_front.go:700-708`). | Settlement returns classifications; rollback continues independent rows/groups and aggregates pending state. |
+| Missing class falsifiers | The current code has tests for individual conditional mutations, but the cross-entry, conflict-replacement, full pin, legacy command-owner, full equality, and independent-progress matrices are not all executable guards. | The acceptance matrix below is mandatory and exact. |
+
+Review inputs:
+
+- `.scratch/external-reviews/r2-claim.out`, SHA-256
+  `1F7DBAF2CC49F367491814D8ADDC4FB759FDA1676CB2BE7E88C79AF98927EDE0`;
+- `.scratch/external-reviews/r2-adversarial.out`, SHA-256
+  `763FD04D7C3D59C914DB0C8E06B7F4260191C0B6F7A6C8C6CFE155280ABAFA9F`.
+
+## Finding classes and preserved decisions
+
+The ten original classes remain the scope boundary.
+
+| Class | State | R3 contract |
+| --- | --- | --- |
+| C1 legacy LSP rollback identity | REAL | Exact canonical and every removable legacy entry remain separate immutable rows. |
+| C2 latest applied port | REAL | Ownership is per-row `Applied.PostState`; no report-wide port authorizes an inverse. |
+| C3 `--check` dispatch | ALREADY FIXED, protected | Read-only mode remains rejected before reconcile dispatch. |
+| C4 Serena rollback ownership | REAL | Serena inverse remains compare-and-swap against the exact applied fingerprint and exact verified baseline bytes. |
+| C5 operation serialization | ALREADY FIXED, protected | One reconcile operation lock spans report read, all client mutations, dispositions, and retirement. |
+| C6 LSP readiness | ALREADY FIXED, protected | Total Serena and LSP route preflight remains before the first client write. |
+| C7 route-owned cleanup | ALREADY FIXED, protected | Route-process cleanup remains owned by the route daemon. |
+| C8 Serena success promotion | REAL | Only a same-call post-invocation observation may create an applied receipt. |
+| C9 absent/unreachable rollback | REAL | A row requiring an inverse stays pending while its client is unreachable. |
+| C10 snapshot/apply population | REAL | Planning freezes the client population and exact rows; apply never re-enumerates. |
+
+Protected C3/C5/C6/C7 surfaces are not implementation latitude. Any edit to
+`internal/cli/install.go`, `internal/cli/route.go`, reconcile operation-lock
+scope, or total route preflight requires a new admitted finding and re-review.
+
+## Invariants
+
+The R3 implementation preserves these non-negotiable invariants:
+
+- **I1 — immutable first baseline.** A row's first exact baseline never changes
+  across retries or ports.
+- **I2 — row-only authority.** Only the version-3 `Rows` map authorizes
+  mutation or rollback. No top-level compatibility projection, report port, or
+  regenerated plan substitutes for row evidence.
+- **I3 — frozen population.** A forward generation mutates only the exact client
+  and row set captured in its durable plan.
+- **I4 — causation, not equality.** State equality after process re-entry never
+  proves that the interrupted invocation wrote it.
+- **I5 — durable prepare before invocation.** A potentially mutating adapter call
+  starts only after its exact row attempt and required Serena pin are durable.
+- **I6 — exact receipt.** An applied receipt records the exact post-state
+  observed in the same wrapper call and the generation that caused it.
+- **I7 — compare-and-swap inverse.** Rollback mutates only when live state still
+  equals the row's effective applied receipt.
+- **I8 — route preservation.** A legacy LSP entry is removed only while the exact
+  canonical route dependency is live under the same config lock. A canonical
+  rollback inverse runs only while every required legacy route is live under
+  that same lock.
+- **I9 — exact verified Serena bytes.** The bytes hashed during pin validation
+  are the only bytes an inverse may consume.
+- **I10 — monotonic recovery.** A terminal row never becomes non-terminal; only
+  rollback may advance a non-terminal disposition to a terminal one. Once any
+  rollback disposition exists, forward admission refuses both same-plan replay
+  and changed-plan replacement until explicit rollback retires the report. An
+  uncertain row cannot be hidden by a new generation; retirement requires a
+  durable re-read proving all rows terminal.
+- **I11 — independent rollback progress.** Uncertainty in one Serena row or one
+  LSP `(client, language)` group cannot suppress a safe inverse in another
+  independent row/group.
+- **I12 — legacy refusal.** Version-1 and version-2 artifacts are read-only
+  refusals in both forward and rollback modes: exact artifact bytes and client
+  mutation counts remain unchanged.
+
+## Decision A: one multi-entry authorization owner
+
+`internal/clients/config_lock.go` owns a new generic wrapper-only capability,
+provisionally named `ConditionalEntryGroupMutation`. Concrete adapters must not
+implement it and callers must not emulate it with multiple reads.
+
+One request contains:
+
+- one target entry, exact target predicate, add/remove operation, optional
+  backup, and durable `BeforeMutation` callback;
+- an ordered set of dependency entry names with exact predicates;
+- no path supplied by the caller: all target and dependency entries belong to
+  the wrapped client's one `ConfigPath`.
+
+`lockingClient` executes this sequence inside one `withConfigLock` call:
+
+1. read the target and every dependency;
+2. reject a target or dependency mismatch with `Invoked=false`;
+3. capture the optional backup;
+4. durably prepare the target row;
+5. invoke exactly one target mutation through the wrapped concrete adapter;
+6. read back the target and dependencies before releasing the lock;
+7. return the complete observation.
+
+The primitive mutates one target. “Multi-entry” describes its authorization
+set, not a multi-write transaction. This keeps one durable row per write while
+making a dependency a real mutation precondition.
+
+Forward LSP policy:
+
+- canonical add/replace uses target-only authorization;
+- each legacy remove adds a dependency predicate requiring the canonical entry
+  to equal the exact intended front-route state;
+- a failed dependency predicate persists a no-write conflict for the legacy row
+  and performs no legacy removal.
+
+Rollback LSP policy:
+
+- restore legacy rows first within each `(client, language)` group;
+- the canonical inverse adds dependency predicates for every legacy baseline
+  row that must preserve routing;
+- each dependency must equal its exact routable baseline immediately before
+  the canonical inverse;
+- a failed dependency predicate leaves the canonical row pending or
+  `skipped-dependency-conflict` and performs no canonical mutation.
+
+This replaces the in-memory `canonicalReady` authorization role. It may remain
+only as reporting/ordering state; it cannot authorize a write.
+
+## Decision B: one uncertainty classifier, two caller policies
+
+`internal/cli/install_reconcile_mcp_front.go` owns one pure classifier for every
+row attempt. It is the sole definition of ownership certainty.
+
+| Durable attempt state | Classification | Effective receipt |
+| --- | --- | --- |
+| no attempt | settled | existing `Applied`, if any |
+| `prepared` | uncertain-post-invocation | none |
+| `post-write-conflict` (the explicit R3 name for current `conflict`) | uncertain-post-invocation | none |
+| `precondition-conflict` with `Invoked=false` | settled-no-write-conflict | existing prior `Applied`, if any; never a new receipt |
+| `confirmed-no-write` | settled-no-write | previous `Applied`, if any |
+| `applied` with receipt | settled-applied | exact receipt |
+| unknown state or `applied` without receipt | invalid/uncertain | none |
+
+The classifier is policy-free. Two callers consume it:
+
+- **Forward admission policy:** first refuse when any row has any rollback
+  disposition, whether pending or terminal and whether the requested plan is
+  byte-identical or changed. Until explicit rollback/retirement, generation,
+  `ActivePlan`, row bytes, pins, and client configs remain unchanged; the
+  discriminator is `forward-recovery-disposition-active`. Otherwise any
+  uncertain or invalid row blocks generation increment, active-plan
+  replacement, pin replacement, and every client mutation. The prior report may
+  be updated only to make uncertainty explicit; its discriminator is
+  `forward-previous-attempt-uncertain`.
+- **Rollback policy:** uncertain/invalid Serena rows become
+  `pending-ownership-unknown`; an uncertain/invalid LSP row blocks only its
+  `(client, language)` dependency group. Rollback continues all independent
+  groups and returns one aggregate pending error after durable dispositions and
+  verification.
+
+`settleMCPFrontReconcileAttempts` therefore becomes a classification and
+durable-marking pass returning structured row/group results. It must not own the
+forward-versus-rollback decision and must not return early merely because a row
+is uncertain.
+
+The attempt-settled/committed event is the durable row write containing either
+an `Applied` receipt or a same-call no-invocation result. Row terminality is a
+separate disposition lifecycle: a no-invocation conflict with prior ownership
+is attempt-settled but remains rollback-pending. Adapter success, callback
+return, or in-memory state is not a commit event.
+
+There are no automatic adapter retries and no backoff loop. One admitted plan
+operation invokes its adapter at most once. Operator command re-entry is the
+only retry mechanism, and it must pass the durable classifier and forward
+admission policy before any new invocation.
+
+## Decision C: open, validate, and consume Serena pins once
+
+The CLI reconcile owner loads all rollback pins before the first inverse. The
+loader returns an immutable map from row key to `VerifiedSerenaPin{Bytes}`; it
+does not return an authority-bearing path.
+
+For each restorable or ownership-uncertain Serena row, the CLI validates:
+
+1. validate row/client/pin agreement, uniqueness, declared pin-set completeness,
+   and the absence of pins on LSP rows;
+2. enforce lexical containment as an early diagnostic only;
+
+It then passes only `(context, pin root, relative components)` to the API
+state-read owner. The API primitive, provisionally
+`ReadStateFileBeneathRootNoFollow`, must:
+
+3. open and validate the pin root without following a link/reparse point;
+4. open every later component relative to the already-validated parent handle
+   and reject a link/reparse object before using it as the next parent;
+5. require directory objects for intermediates and one regular,
+   non-directory final object;
+6. read the final handle once through
+   `io.LimitReader(handle, maxStateFileBytes+1)`, reject a result above the
+   existing 1 MiB cap, hash those exact bytes, compare the recorded SHA-256, and
+   retain those bytes in memory;
+7. close every root, intermediate, and final handle on success, error,
+   cancellation, and size/hash refusal before any client mutation.
+
+Platform owners:
+
+- **Windows:** `internal/api/state_read_beneath_root_windows.go` is a
+  root-anchored handle-relative component walker. It opens the root with
+  `windows.NtCreateFile`, `FILE_OPEN_REPARSE_POINT`, directory-only options, and
+  `OBJECT_ATTRIBUTES.Attributes` including `OBJ_DONT_REPARSE`; then opens each
+  child with `OBJECT_ATTRIBUTES.RootDirectory` set to the validated parent
+  handle. Every handle is inspected for
+  `FILE_ATTRIBUTE_REPARSE_POINT`; intermediates must be directories and the
+  final object must be regular/non-directory. Final-handle
+  `GetFileInformationByHandle` and `GetFinalPathNameByHandle` volume/root checks
+  are defense-in-depth after handle-relative authorization, not substitutes for
+  it.
+- **POSIX:** `internal/api/state_read_beneath_root_posix.go` opens the root
+  directory with no-follow semantics, walks each component with
+  `openat(parentFD, component, O_NOFOLLOW|O_CLOEXEC)` using `O_DIRECTORY` for
+  intermediates, and opens the final leaf read-only with `O_NOFOLLOW`. `fstat`
+  must prove a regular final file; the root-relative descriptor chain is the
+  containment authority.
+
+Installed-surface evidence pins this implementation choice:
+
+- `go.mod:16` selects `golang.org/x/sys v0.46.0`;
+- `$GOMODCACHE/golang.org/x/sys@v0.46.0/windows/types_windows.go:2942-2963`
+  exposes `OBJECT_ATTRIBUTES.RootDirectory` and `OBJ_DONT_REPARSE`;
+- `$GOMODCACHE/golang.org/x/sys@v0.46.0/windows/types_windows.go:2992-3013`
+  exposes `FILE_OPEN_REPARSE_POINT` and directory/non-directory options;
+- `$GOMODCACHE/golang.org/x/sys@v0.46.0/windows/zsyscall_windows.go:3730`
+  exposes `NtCreateFile`;
+- `$GOMODCACHE/golang.org/x/sys@v0.46.0/windows/syscall_windows_test.go:1127-1164`
+  demonstrates a child `NtCreateFile` with `RootDirectory` bound to an open
+  directory handle.
+
+The size-limit owner is not an assumption: the API state-read package already
+defines `maxStateFileBytes = 1 << 20` for ordinary control files
+(`internal/api/state_read_caps.go:9-11`). The new API primitive resides in that
+package and uses this exact constant; the CLI must not duplicate or override
+it.
+
+`Lstat`, `EvalSymlinks`, lexical/absolute pathname checks, a final-pathname
+containment check, and an absolute final open are forbidden as authorization.
+They may exist only as diagnostics or defense-in-depth after handle-relative
+authorization. In particular, no “check pathname, then open absolute path”
+sequence satisfies this contract.
+
+Serena inverse requests take `BaselineBytes []byte`; the version-3 rollback path
+must not pass or reopen `BackupPath`. Diagnostic `Origin` and `Path` remain in
+the journal but cannot authorize a read. Replacing a pin pathname after loading
+cannot change the bytes consumed by the inverse.
+
+The declared pin set is exact: every row requiring a possible inverse has one
+unique pin; LSP rows and first-generation authority-free Serena
+precondition-conflict rows have none. A precondition-conflict row retaining a
+prior `Applied` receipt also retains its required pin. Undeclared pin objects
+other than the writer's defined lock sidecars are an error before any client
+mutation.
+
+## Decision D: durable first-generation Serena no-write conflict
+
+A first-generation Serena row may be pinless only in this exact shape:
+
+- `Surface=serena`, exact client and entry identity, `BaselineSet=true`;
+- no `Pin` and no `Applied` receipt;
+- `Attempt.State=precondition-conflict`, `Invoked=false` by contract;
+- exact planned pre-state and intended state retained in the attempt;
+- terminal disposition `skipped-conflict` with reason
+  `forward-plan-precondition-conflict`.
+
+`finishAttempt` must create and persist this row even when no prior row exists.
+The validator accepts the pinless shape only when every condition above holds.
+It authorizes no rollback inverse and can never be promoted from later equality.
+
+When a row already has an `Applied` receipt, a same-call no-invocation
+`precondition-conflict` means only “this attempt wrote nothing.” `finishAttempt`
+must retain the prior receipt and its row-owned pin byte-for-byte. It writes the
+new attempt plus non-terminal disposition `pending` with reason
+`forward-precondition-conflict-prior-owned`. Rollback may authorize an inverse
+only from that retained prior receipt: matching live state permits exactly one
+compare-and-swap inverse; diverged live state permits zero inverse writes and
+records conflict. It must never synthesize a receipt from the conflicting
+attempt.
+
+Thus a forward-time no-write conflict always writes a disposition:
+
+- without a prior receipt it writes terminal `skipped-conflict` and carries no
+  inverse authority;
+- with a prior receipt it writes non-terminal `pending`, retains that receipt
+  and pin, and requires explicit rollback to settle the older ownership.
+
+Forward admission cannot clear either shape. Explicit rollback is the only
+transition owner: it retires an all-terminal first-generation conflict report,
+or processes the retained prior receipt and advances the pending row to a
+terminal restored/conflict disposition before retirement.
+
+Any Serena row that might have invoked a mutation (`prepared`,
+`post-write-conflict`, or `applied`) requires its row-owned pin. A missing pin in
+those states is invalid and blocks all writes.
+
+## Decision E: rollback completes independent safe work
+
+Rollback phases are:
+
+1. decode and validate the strict version-3 report;
+2. classify and durably mark uncertain rows without returning early;
+3. securely load all pins required by rows that are eligible for a Serena
+   inverse;
+4. process Serena rows independently in stable key order;
+5. process LSP dependency groups independently in stable group order;
+6. persist every disposition and verify every invoked inverse;
+7. durable re-read; retire only if every row is terminal;
+8. otherwise return one aggregate pending/failed error listing all remaining
+   rows after all independent safe work has run.
+
+A pin error is a global pre-write failure because pin validity is the rollback
+input contract. Runtime uncertainty, client unreachability, compare-and-swap
+conflict, or dependency conflict is row/group-local and must not suppress other
+independent work.
+
+## Locking and state order
+
+The mandatory lock order is:
+
+1. reconcile operation lock;
+2. one client config-file lock;
+3. journal/report state-file lock used by the durable callback;
+4. release journal lock;
+5. perform the target client mutation while the config lock remains held;
+6. release config lock;
+7. eventually retire under the still-held operation lock.
+
+No code may acquire the operation lock or a second config lock while holding a
+config lock. Secure pin loading occurs under the operation lock before any
+config lock and retains bytes, not open handles. Journal callbacks may write the
+report while holding one config lock because no report path calls back into a
+client. These constraints preserve the existing C5 serialization boundary and
+avoid lock inversion.
+
+## Single owners and change-surface contract
+
+| Concern | Single owner |
 | --- | --- |
-| F1 authorization | Serena and LSP compare, back up, prepare, and mutate in separate lock acquisitions; a changed live entry can be overwritten (`.scratch/external-reviews/adversarial.out:57-98`; `internal/api/lsp_client_router.go:292-341`). |
-| F2 causation | Re-entry promotes both durable `prepared` and no-write `conflict` attempts solely because live state equals intended state (`internal/cli/install_reconcile_mcp_front.go:327-359`). |
-| F3 absent Serena inverse | Serena rollback always restores bytes, while the restore core rejects a backup in which the entry was absent (`internal/api/serena_client_reconcile.go:740-768`; `internal/clients/cas_mutator.go:248-266`). |
-| F4 dependency retry | Terminal LSP rows are omitted on retry, so a prior legacy conflict disappears from the canonical-route gate (`internal/cli/install_reconcile_mcp_front.go:818-834`; `internal/api/lsp_client_router_snapshot.go:166-205`). |
-| A-01 pin authority | Rollback consumes `Rows`, but pin verification consumes `Serena.Applied` plus `Pins` (`internal/cli/install_reconcile_mcp_front.go:757-780`; `internal/cli/install_reconcile_mcp_front.go:1128-1162`). |
-| A-02 mutation probe | The prepared-order test does not invoke a production mutation seam, and the retirement test does not drive the caller's durable re-read (`.scratch/external-reviews/claim.out:65-77`). |
-| A-03 decision persistence | No durable decision record owned this cross-package persisted-state contract (`.scratch/external-reviews/claim.out:79-94`). |
+| Config-file critical section and multi-entry authorization | `internal/clients/config_lock.go` |
+| LSP forward dependency predicates and frozen plan | `internal/api/lsp_client_router.go` |
+| LSP rollback groups, dependency predicates, and exact inverses | `internal/api/lsp_client_router_snapshot.go` |
+| Serena exact-byte compare-and-swap inverse | `internal/api/serena_client_reconcile.go` |
+| Version-3 schema, uncertainty classification, forward/rollback policy, secure pin orchestration, retirement | `internal/cli/install_reconcile_mcp_front.go` |
+| Windows root-handle-relative pin read and ordinary-file size cap | `internal/api/state_read_beneath_root_windows.go`, using `internal/api/state_read_caps.go:9-11` without changing that owner |
+| POSIX root-FD-relative pin read and ordinary-file size cap | `internal/api/state_read_beneath_root_posix.go`, using `internal/api/state_read_caps.go:9-11` without changing that owner |
 
-The locking decorator is the existing single owner of client-config critical
-sections, and every production factory returns that wrapper
-(`internal/clients/config_lock.go:160-182`). The existing
-`clients.CASEntryMutator` is deliberately a nine-concrete-adapter allowlist
-(`internal/clients/cas_mutator.go:119-165`); broadening that restore capability
-would incorrectly give unrelated adapters backup-byte semantics they do not
-own.
+Allowed production files are exactly the seven changed/new files in that table;
+`state_read_caps.go` is cited as an unchanged owner, not an allowed edit. New
+production files are limited to the two API platform pin readers. Allowed tests:
 
-## Decision
+- `internal/clients/config_lock_wrapped_test.go`;
+- `internal/api/lsp_client_router_plan_test.go`;
+- `internal/api/lsp_client_router_snapshot_review_test.go`;
+- `internal/api/serena_client_reconcile_test.go`;
+- `internal/cli/install_reconcile_mcp_front_v3_test.go`;
+- `internal/cli/install_reconcile_mcp_front_pr588_r2_test.go`;
+- new narrowly named API platform beneath-root reader tests.
 
-Keep version 3 private and read-only-refuse versions 1 and 2. Replace split
-authorization and compatibility projections with one exact row journal and one
-wrapper-owned conditional mutation primitive.
+No edit is allowed in `internal/cli/install.go`, `internal/cli/route.go`,
+scheduler/GUI/supervisor code, state-path resolution, or `.codegraph*`.
+Widening requires architect re-review before implementation.
 
-### Change-Surface Contract
+## Falsifiable claims
 
-| Field | Contract |
-| --- | --- |
-| Intended change surface | `internal/clients/config_lock.go`, `internal/clients/cas_mutator.go`, `internal/api/serena_client_reconcile.go`, `internal/api/lsp_client_router.go`, `internal/api/lsp_client_router_snapshot.go`, `internal/cli/install_reconcile_mcp_front.go`, and only their focused tests. |
-| Approved extension seams | A new `clients.ConditionalEntryMutator` implemented by `lockingClient`; the existing `clients.CASEntryMutator` for Serena rollback; API callbacks carrying prepared and observed results; version-3 row validation and rollback disposition callbacks. |
-| Writer-owner | `lockingClient.ConditionalEntryMutation` is the only writer-owner for Serena forward and every LSP forward/rollback add or remove. Existing `CASEntryMutator` remains the writer-owner for Serena rollback restore/remove. |
-| Settled/committed event | The conditional primitive returns `EntryMutationObserved{Invoked, Before, After, MutationErr, ObservationErr}` before releasing the config lock; the CLI's single row-transition owner emits the durable `applied`, `confirmed-no-effect`, `rollback-restored`, or pending/conflict disposition. |
-| Protected / must-not-touch | `internal/cli/install.go`, `internal/cli/route.go`, operation-level reconcile lock, total Serena/LSP preflight, exact first baseline, per-row receipt port, frozen LSP population, canonical-before-legacy forward ordering, and version-1/version-2 no-write refusal. |
-| Declared blast radius | One private recovery schema and the client-config mutations initiated by `--reconcile-mcp-front`; no public CLI flag, client-config format, dependency, GUI, tray, supervisor, or route-daemon lifecycle change. |
-
-Updating `config_lock.go` is required because its current canonical comment says
-each lock scope contains only one adapter write (`internal/clients/config_lock.go:32-50`);
-the recovery seam deliberately persists prepared evidence inside that scope.
-
-### 1. Conditional mutation boundary
-
-Add a neutral capability implemented only by `*lockingClient`, not by concrete
-adapters:
-
-`ConditionalEntryMutation(request) -> EntryMutationObserved`
-
-The request contains an entry name, an exact expected-live matcher, optional
-backup retention, one typed operation (`add` or `remove`), and a
-`BeforeMutation` callback. Under one `withConfigLock` call the wrapper:
-
-1. reads the exact live entry through the wrapped concrete adapter;
-2. rejects a mismatch as `precondition-conflict` with `Invoked=false`;
-3. optionally calls the concrete adapter's `BackupKeep`;
-4. calls `BeforeMutation` to persist the exact row, pin, and `prepared` state;
-5. if that callback fails, returns with `Invoked=false`;
-6. calls the concrete adapter's `AddEntry` or `RemoveEntry`;
-7. re-reads the entry and returns the before/after observation before unlock.
-
-The callback may persist recovery state but may not mutate the client or retain
-the unwrapped adapter. Lock order is
-`reconcile operation lock -> one config lock -> recovery state-file lock`; no
-path may acquire these in reverse.
-
-This capability closes F1 for every production adapter because all production
-factories return `lockingClient` (`internal/clients/config_lock.go:178-182`).
-Capability absence is fail-closed: durable pending/no mutation. It does **not**
-add any concrete adapter to `CASEntryMutator`, so the deliberate nine-adapter
-backup-restore allowlist remains unchanged
-(`internal/clients/cas_mutator.go:127-137`).
-
-Serena forward uses this primitive so its live pre-state, backup, row pin,
-durable prepare, adapter invocation, and readback share the same adapter-owned
-critical section. LSP forward canonical adds and legacy removes, and LSP
-rollback restores/removes, use the same primitive. Existing point-in-time
-`GetEntry -> BackupKeep -> AddEntry/RemoveEntry` sequences are removed.
-
-The advisory lock protects concurrent hub participants. A process that ignores
-the advisory lock can still race the underlying file replacement; that is a
-residual platform limit, not authority to restore point-in-time checks
-(`internal/clients/config_lock.go:32-50`).
-
-### 2. Forward attempt state machine
-
-| Durable state | Mutation provenance | Re-entry rule | Automatic inverse authority |
+| Claim | Guarantee | Single owner | Enforcement probe |
 | --- | --- | --- | --- |
-| none/planned | none | May authorize only through the conditional primitive | none |
-| `precondition-conflict` | `Invoked=false` | Never promote from value equality; terminal external conflict for this attempt | none; an older receipt is shadowed while live state conflicts |
-| `prepared` | invocation may or may not have occurred | Always `pending-ownership-unknown` after process re-entry; equality with pre or intended is not causation | none until an atomic write receipt exists |
-| `applied` | same-call `Invoked=true`, observed intended state, and durable receipt | Effective per-row receipt | yes |
-| `confirmed-no-effect` | same-call `Invoked=true`, observed exact pre-state, and durable transition | Preserve an older effective receipt | no new authority |
-| `post-write-unknown` | same-call invocation with unreadable/third state | pending; stop later writes | none |
+| R3-1 | A legacy remove cannot race past a changed canonical route. | `lockingClient` group mutation | Inject a canonical edit at the dependency boundary; legacy mutation count is zero and a route remains. |
+| R3-2 | A canonical rollback inverse cannot race past a changed required legacy route. | `lockingClient` group mutation | Delete/replace legacy at the dependency boundary; canonical mutation count is zero and canonical remains. |
+| R3-3 | Every post-invocation uncertain state blocks forward plan replacement. | CLI uncertainty classifier + forward policy | Persist `prepared` and `post-write-conflict` variants; changed-plan retry preserves generation and active-plan bytes with zero adapter calls. |
+| R3-4 | Rollback uncertainty is local, not a global early return. | CLI rollback policy | One uncertain row/group plus one independent applied row/group leaves the former pending and restores the latter. |
+| R3-5 | A Serena inverse consumes the bounded bytes read and hashed from one final validated handle. | API beneath-root reader + CLI pin loader | Replace the path after load but before inverse; inverse receives original verified bytes and never reopens the path. |
+| R3-6 | Root, intermediate, and final links/reparse points cannot escape pin-root authority. | API platform beneath-root readers | Inject each reparse location and a check/open component swap; refusal precedes every client write and all handles close. |
+| R3-7 | First-generation Serena precondition conflict is durable and non-owning. | CLI journal | With no prior row, inject an intervening edit; row-only conflict is durable, pinless, performs zero writes, and rollback invokes no inverse. |
+| R3-8 | Equality cannot manufacture causation. | CLI same-call finish transition | For each add/remove surface, re-entry equality variants retain uncertainty or prior receipt and cause zero rollback mutation. |
+| R3-9 | Legacy artifacts remain immutable refusals. | CLI decoder/command owner | Forward and rollback command tests for v1/v2 preserve exact bytes and make zero adapter calls. |
+| R3-10 | Retirement cannot erase incomplete recovery. | CLI durable retirement gate | Any pending/failed/uncertain row keeps the active report; all-terminal durable re-read is the sole retirement proof. |
+| R3-11 | A no-invocation conflict creates no new ownership but cannot erase older ownership or be cleared by forward retry. | CLI finish transition + admission policy | Prior receipt survives conflict and is the sole rollback CAS authority; first generation remains authority-free; same/changed forward replay preserves report bytes with zero invocations. |
 
-Only the same-call `EntryMutationObserved` result may promote a prepared row.
-If receipt persistence fails after mutation, durable `prepared` remains and the
-command stops. Re-entry may report current equality for diagnosis but may not
-turn it into `applied` or `confirmed-no-effect`. This deliberately chooses
-manual/fail-closed recovery for the cross-file crash window because no current
-primitive atomically commits both the client config and recovery journal
-(`internal/cli/install_reconcile_mcp_front.go:215-217`).
+## Deterministic acceptance matrix
 
-`precondition-conflict` is not an attempt state consumed by post-write
-settlement. It records `Invoked=false` and can never create an applied receipt.
-The current equality-based settlement owner and the current
-`recordLSPPreconditionConflict -> conflict -> settle as applied` path are
-removed (`internal/cli/install_reconcile_mcp_front.go:327-359`;
-`internal/cli/install_reconcile_mcp_front.go:1374-1394`).
+All tests below are mandatory. Hooks/seams must create race windows
+deterministically; timing-only tests do not satisfy the contract.
 
-### 3. Row-owned Serena pins and inverses
+### F2 causation/equality table
 
-Each authoritative Serena row directly contains:
+For each surface `Serena add`, `LSP add`, and `LSP remove`, test:
 
-- exact immutable baseline presence and fingerprint;
-- pinned backup path, origin, and SHA-256 checksum;
-- latest attempt and applied receipt;
-- rollback disposition.
+| Re-entry state | Durable attempt | Expected effective ownership | Rollback mutation count |
+| --- | --- | --- | --- |
+| live equals intended; prior receipt absent | `prepared` | uncertain, no receipt | 0 |
+| live equals pre-state; prior receipt absent | `prepared` | uncertain, no receipt | 0 |
+| live equals intended; prior receipt exists | `prepared` | uncertain, prior receipt not promoted | 0 |
+| live equals pre-state; prior receipt exists | `confirmed-no-write` produced in same call only | prior receipt retained | inverse authorized only against that prior receipt |
+| same-call post-state equals intended | `applied` plus exact receipt | current receipt | 1 only when CAS still matches |
+| same-call post-state differs from pre and intended | `post-write-conflict` | uncertain, no new receipt | 0 |
+| wrapper rejects precondition; prior receipt absent | `precondition-conflict` | settled no-write conflict, no receipt | 0 |
+| wrapper rejects precondition; prior receipt exists | `precondition-conflict` | prior receipt retained; no new receipt | inverse only against prior receipt |
 
-The top-level persisted `Serena`, `LSP`, `Pins`, `Applied`, and diagnostic
-`Port` projections are removed from the version-3 decision type. Runtime
-`MigrateReport` remains a display/result type only. Read logic first decodes a
-minimal version envelope: versions 1 and 2 are refused byte-identically; only a
-version-3 row type is decoded for mutation.
+### Conflict and caller-policy matrix
 
-Before any rollback write, validation iterates authoritative `Rows` and requires
-each Serena row to resolve to exactly one nonempty, unique pin path and checksum,
-with the path contained under the report's pin directory and its bytes matching
-the recorded checksum. Missing, extra, disagreeing, duplicate, escaped, unreadable,
-or changed pins reject the whole rollback with zero client writes. LSP rows may
-carry no Serena pin.
+- `prepared` blocks changed-plan forward retry: generation, active-plan bytes,
+  pins, and adapter counts unchanged.
+- `post-write-conflict` blocks the same retry with those same assertions.
+- Unknown attempt state and `applied` without receipt fail closed.
+- Any pending or terminal disposition blocks both byte-identical and changed-plan
+  forward re-entry: exact generation, `ActivePlan`, row/pin bytes, and adapter
+  counts remain unchanged.
+- Prior `Applied` plus a later no-invocation `precondition-conflict`, with live
+  state equal to the prior receipt, authorizes exactly one inverse against only
+  that receipt; diverged live state authorizes zero inverse writes.
+- First-generation `precondition-conflict` remains pinless and inverse-free.
+- Repeated command entry has zero hidden retries/backoff, at most one admitted
+  adapter invocation per row, and one durable settled/committed attempt event.
+- One uncertain Serena row plus an independent applied Serena row: uncertain
+  stays pending; independent row restores and verifies.
+- One uncertain LSP group plus an independent applied LSP group: uncertain group
+  stays pending; independent group restores and verifies.
 
-Serena rollback branches on immutable baseline presence:
+### Multi-entry dependency races
 
-| Baseline | Exact inverse | Conflict behavior |
+- Forward: change/remove canonical immediately after target read but before
+  legacy authorization. The wrapper observes the dependency conflict under the
+  one lock, invokes no legacy remove, and at least one route remains.
+- Rollback: delete, disable, or replace a required legacy entry immediately
+  before canonical authorization. The wrapper invokes no canonical inverse and
+  canonical remains.
+- A test adapter that cannot provide the wrapper-owned group capability fails
+  closed with zero target mutations.
+
+### Serena pin matrix
+
+Each case fails before the first client mutation unless the expected outcome
+explicitly says otherwise:
+
+- missing required pin;
+- extra undeclared pin object;
+- pin attached to an LSP row;
+- duplicate path shared by two rows;
+- lexical path escape;
+- pin root itself is a symlink/reparse point;
+- an intermediate component is a symlink/reparse point;
+- the final component is a symlink/reparse point;
+- a component is swapped after a pathname diagnostic but before the child open;
+- unreadable or non-regular final object;
+- final object above `maxStateFileBytes` (1 MiB);
+- checksum mismatch;
+- row/client/path metadata disagreement;
+- pin-set disagreement with the exact restorable Serena row set;
+- path swapped after secure load but before inverse: inverse consumes the
+  retained verified bytes and does not read the replacement;
+- every refusal closes root, intermediate, and final handles and occurs before
+  the first client mutation;
+- pinless first-generation `precondition-conflict`: accepted only in the exact
+  no-write shape and never passed to an inverse.
+
+### Version and schema matrix
+
+- Command-owner forward and rollback tests for version 1 and version 2 assert
+  exact report-byte equality and zero client writes.
+- The same command-owner tests assert the refusal is ACTIONABLE, not merely
+  correct: all six elements listed under "The upgrade-in-place question,
+  answered" must be present in the message, and the artifact must survive
+  byte-identical with no retired sibling. A test asserting only that an error
+  occurred does not satisfy this row.
+- A version-2 body carrying `version: 3` (the interim pre-release build) is
+  refused through the SAME message, not through the raw unknown-field error.
+- Strict version-3 decode rejects unknown top-level compatibility projections,
+  trailing values, incomplete rows, malformed attempt/receipt combinations,
+  and pins outside their permitted row shapes.
+- Rollback-side fixtures are built from the production journal structs, never
+  hand-written literals: a hand-written body silently moves the failure to the
+  decoder and stops exercising the semantic refusal the test names.
+- A completed rollback with any pending durable row cannot retire.
+
+### Preserved class guards
+
+Existing tests for C3, C5, C6, and C7 remain green. C1/C2/C4/C8/C9/C10 tests
+remain class-level: every removable legacy candidate is captured/restored,
+applied ports are row-specific, Serena restore is CAS-owned, receipt promotion
+is post-success, unreachable required rows stay pending, and a newly appearing
+client cannot bypass the frozen plan.
+
+## Failure modes and observable discriminators
+
+| Failure mode | Required discriminator | Effect |
 | --- | --- | --- |
-| present | `CASRestoreEntryFromBytesForRollback`, matching the effective applied fingerprint | preserve changed/absent live entry; terminal `skipped-conflict` |
-| absent | `CASGuardedRemoveEntry`, matching the effective applied fingerprint | preserve changed replacement; terminal `skipped-conflict`; already absent is verified success |
+| Target entry changed | `entry-precondition-conflict` | No mutation; durable no-write conflict. |
+| LSP dependency changed | `dependency-precondition-conflict` | No target mutation; affected group pending/conflict. |
+| Mutation invoked but ownership unresolved | `forward-ownership-unknown` | Durable `post-write-conflict`; blocks forward admission. |
+| Re-entered prepared attempt | `forward-previous-attempt-uncertain` | Blocks forward; rollback localizes pending state. |
+| Any rollback disposition exists on forward entry | `forward-recovery-disposition-active` | Refuse same/changed plan with report bytes and client state unchanged until explicit rollback/retirement. |
+| First-gen Serena conflict could not persist | `serena-precondition-conflict-not-durable` | Fail command; no mutation; no success report. |
+| Pin set malformed or incomplete | `serena-pin-set-invalid` | Global rollback pre-write refusal. |
+| Pin path contains link/reparse escape | `serena-pin-open-unsafe` | Global rollback pre-write refusal. |
+| Pin exceeds ordinary state-file cap | `serena-pin-too-large` | Global rollback pre-write refusal at 1 MiB; all handles closed. |
+| Pin bytes mismatch | `serena-pin-checksum-mismatch` | Global rollback pre-write refusal. |
+| Row/group unavailable or uncertain | `rollback-row-pending` | Continue independent work; retain report. |
+| Durable disposition write fails | `rollback-disposition-not-durable` | Stop before that row's mutation; retain report. |
+| Retirement re-read is not all-terminal | `rollback-recovery-active` | No retirement; aggregate pending result. |
+| Version 1/2 encountered | `legacy-ownership-unproven` | Exact bytes preserved; zero client writes. |
 
-Both methods remain on the existing `CASEntryMutator` allowlist. Successful
-return is followed by exact baseline verification before durable `restored`.
-Thus every legal Serena add has an ownership-checked inverse; the current
-always-restore path (`internal/api/serena_client_reconcile.go:754-768`) is
-removed.
+Errors must retain the row key or `(client, language)` group and causal error.
+No catch-and-swallow or synthesized ownership fallback is allowed.
 
-### 4. Durable LSP dependency groups
+## Compatibility and migration
 
-Every rollback invocation reconstructs each `(client, language)` group from
-**all** authoritative LSP rows, including terminal conflicts, restored rows,
-and baseline-only rows. The CLI never filters terminal rows before calling the
-group owner.
+Version 3 is unshipped on the PR remote head, so R3 revises version 3 in place;
+there is no version-3-to-version-3 migration. Any artifact produced by an
+interim local R2 implementation must pass the R3 strict validator or be refused
+without writes. It must not be silently repaired, projected, or upgraded.
 
-For every legacy row, group readiness is recomputed from the live exact entry:
+Version 1 and version 2 remain inspectable only for the
+`legacy-ownership-unproven` diagnostic. Forward and rollback do not modify,
+replace, retire, or append to them. The user must explicitly move a legacy
+artifact aside or use a separately reviewed migration tool.
 
-| Legacy row state | Group predicate |
-| --- | --- |
-| restored | live must still equal immutable baseline and represent an active route |
-| baseline-only | live must equal immutable baseline and represent an active route |
-| terminal conflict | not ready; preserve canonical |
-| pending/failed/unreachable | not ready; preserve canonical |
-| exact baseline but disabled/non-routable | not ready; preserve canonical |
+### The upgrade-in-place question, answered (added 2026-07-27)
 
-The API owns one `legacyRouteReady` predicate using the same exact snapshot and
-adapter-format semantics as capture. Omission of a row never means ready.
+Earlier revisions stated the refusal without stating what an operator who
+already has a legacy journal on disk is supposed to do about it. That omission
+is what let a strict unknown-field decoder ship whose entire field-facing
+answer to a real upgrade was `json: unknown field "lsp"`. The gap is closed
+here, not left to the implementation.
 
-Only when every legacy row is live-verified ready may the canonical inverse
-run. Otherwise:
+**Decision: version 3 REFUSES a version-1/2 journal. It never upgrades one in
+place, and there is no compatibility shim.** The reason is not schema
+tidiness. A version-1/2 journal records which client entries were *captured*;
+it carries no per-row attempt, no same-call applied receipt, and no generation,
+so it cannot say which client write actually *landed*. Synthesising version-3
+rows from it would manufacture rollback authority that was never proven, and
+the first thing that authority does is overwrite a live client entry. Refusing
+costs the operator one manual step; upgrading can silently destroy an entry
+this hub never wrote. This is the same reason `I4 — causation, not equality`
+forbids promoting live equality to a receipt.
 
-- retryable unreadable/failed legacy rows leave canonical `pending`;
-- a terminal legacy conflict or non-routable baseline gives the canonical row
-  terminal `skipped-dependency-conflict` without mutating it.
+**The refusal is part of the contract, not an implementation detail.** A
+refusal that the operator cannot act on is a field defect of the same class as
+a wrong upgrade, because the practical outcome is identical: their clients stay
+on the front port with no supported way back. Every legacy refusal MUST carry,
+in one message:
 
-Terminal dependency conflicts permit atomic retirement only after every other
-row is terminal, but rollback returns a stable non-success result naming every
-skipped row. Therefore retry cannot erase a legacy barrier, and completion does
-not falsely report a full rollback.
+1. the discriminator `legacy-ownership-unproven`;
+2. the artifact's absolute path;
+3. why the upgrade is refused rather than attempted — that the old format never
+   recorded which write landed;
+4. that nothing was read from the file and no client config was touched;
+5. both concrete remedies: (a) run `--rollback` with the OLDER mcphub binary
+   that wrote the file, which understands the format; or (b) move the file
+   aside and restore the recorded entries by hand, naming where in the file
+   those entries are;
+6. that a fresh forward run then starts a clean version-3 journal.
 
-### 5. Rollback and retirement
+**Four inputs, one owner, two opposite remedies.** A decoder that keys only on
+the `version` field misses the third row below; a refusal that assumes "foreign
+version means older" gets the fourth actively wrong.
 
-Rollback uses these steps:
-
-1. acquire the operation lock;
-2. decode version envelope and validate the complete version-3 row journal;
-3. verify every row-owned Serena pin before the first client mutation;
-4. classify unresolved forward `prepared` rows pending without equality-based
-   promotion;
-5. process Serena rows and full LSP groups through their atomic mutation owners;
-6. persist each observed row/group disposition before a dependent inverse;
-7. re-read the report through `ReadStateFileInodeAnchored`;
-8. recompute retirement eligibility from that durable object only;
-9. atomically rename the active report; return non-success if any terminal
-   conflict was preserved.
-
-An inverse that already equals the immutable baseline is safely satisfied
-without claiming who caused it. A rollback prepared-state crash may therefore
-converge by baseline verification; unlike forward ownership, inverse completion
-does not authorize a later destructive action except through the independently
-reconstructed LSP group predicate.
-
-### 6. Superseded helpers and projections
-
-Remove, rather than layer another check over:
-
-- `newMCPFrontReconcileJournal`;
-- `mcpFrontReconcileJournal.commit` and fingerprint projections;
-- `verifyMCPFrontSerenaNotEdited`;
-- `mergeMCPFrontReconcileReport`;
-- top-level version-3 `Serena`, `LSP`, `Pins`, `Applied`, and `Port` decision
-  fields;
-- tests whose only purpose is those superseded pre-v3 helpers.
-
-Go reference inspection found no production caller for
-`newMCPFrontReconcileJournal`, `commit`, or
-`verifyMCPFrontSerenaNotEdited`; their remaining references are definitions or
-tests. `mergeMCPFrontReconcileReport` is reached only through the stale
-constructor plus one legacy test. This is the required C6 cleanup: provenance
-stays in this decision record and version control, not beside the live row
-owner.
-
-## Failure modes and observability
-
-| Failure ID | Discriminator | Required behavior |
+| Input | How it is recognised | Outcome |
 | --- | --- | --- |
-| `conditional-capability-missing` | adapter is not a locking-wrapper conditional mutator | no config mutation; durable pending/structural failure |
-| `forward-precondition-conflict` | lock-scoped live state differs from exact planned state; `Invoked=false` | durable no-write conflict; never equality-promote |
-| `journal-prepare-failed` | `BeforeMutation` fails | `Invoked=false`; no config mutation |
-| `forward-reentry-causation-unknown` | durable `prepared` survives process boundary | pending/manual; no retry or rollback ownership |
-| `forward-postwrite-unknown` | same-call readback fails or is third state | stop later writes; keep active journal |
-| `serena-pin-invalid` | row pin missing/extra/disagreeing/outside pin root/unreadable/checksum mismatch | reject before first rollback write |
-| `rollback-cas-conflict` | lock-scoped live state differs from effective receipt | no write; terminal skipped conflict |
-| `rollback-route-preservation-blocked` | any legacy row is not live-verified route-ready | keep canonical; pending or skipped-dependency-conflict |
-| `rollback-disposition-not-durable` | disposition publication fails | stop; active journal remains |
-| `rollback-retirement-not-durable` | durable re-read is nonterminal or rename fails | return error; active journal remains |
+| genuine version-1 journal | `version` field | refusal, detail `it declares version 1`, OLDER-binary remedy |
+| genuine version-2 journal | `version` field | refusal, detail `it declares version 2`, OLDER-binary remedy |
+| interim pre-release build: `version: 3` with a version-2 body | strict decode fails AND a version-1/2 top-level body key (`serena`, `lsp`, `pins`, `port`) is present | refusal, detail `carries the pre-version-3 body shape`, OLDER-binary remedy |
+| version ABOVE 3 | `version` field | refusal naming the artifact version, NEWER-binary remedy |
 
-Diagnostics may include failure ID, surface, client, language, entry name,
-generation, and state. They must not include backup contents, headers, tokens,
-environment values, raw entries, or pin bytes.
+The last row is not symmetry for its own sake. A version above 3 means the
+operator downgraded, or is running a different install than the one that wrote
+the file; the binary that can read it is the NEWER one. Sending them to "the
+older mcphub that wrote this file" points at the one binary guaranteed not to
+understand it, so the remedy is selected from the declared version and never
+assumed.
 
-## Deterministic acceptance probes
+Bytes that are none of the four — a corrupt or truncated version-3 journal —
+keep the exact strict-decoder error, which is the honest diagnostic for a file
+that is not a foreign-version journal at all.
 
-Each probe must exercise the real API mutation owner, not a transition helper
-alone. Each defect mutation must make the named test fail, then the exact source
-must be restored and the test rerun green.
+**Single owner.** One function owns this refusal text, and both the decoder's
+version gate and the validator's defence-in-depth version check route through
+it, so the operator never meets two refusals that disagree about what to do
+next.
 
-| Gap | Named regression guard: expected result | Defect mutation that must fail it |
-| --- | --- | --- |
-| F1 | `TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit` tables Serena add, LSP canonical add, LSP legacy remove, LSP rollback add/remove; an edit injected after backup/precondition but before the former write point remains byte-identical and hub mutation count is zero. | Replace conditional mutation with `GetEntry` followed by ordinary `AddEntry`/`RemoveEntry`. |
-| F2 | `TestMCPFrontV3_NoInvocationStateEqualityNeverCreatesReceipt` tables Serena add, LSP add, and LSP remove with mutation count zero and external state equal to intended; re-entry remains pending/unowned and rollback mutation count is zero. | Promote durable `prepared` or `precondition-conflict` when live equals intended. |
-| F3 | `TestMCPFrontV3_SerenaAbsentBaselineUsesOwnedRemove` performs successful absent-to-present forward then rollback; owned entry is removed and verified absent. A changed replacement remains byte-identical and returns conflict. | Send absent baseline through restore-from-bytes or call ordinary remove. |
-| F4 | `TestMCPFrontV3_LSPDependencyBarrierSurvivesRetry` runs two rollback calls: terminal legacy conflict plus canonical pending on call 1; call 2 retains canonical. Table a baseline-only legacy row that is missing, unreachable, disabled, and live-baseline-ready. | Filter terminal rows before rebuilding groups or initialize readiness from omission. |
-| A-01 | `TestMCPFrontV3_RowsExclusivelyOwnSerenaPins` supplies otherwise-valid artifacts with missing, extra, duplicate, escaped, checksum-disagreeing, and projection-only pins; every case performs zero writes and retains the active artifact. | Verify a top-level compatibility projection instead of each authoritative row. |
-| A-02 mutation order | `TestMCPFrontV3_RealMutationSeamsRequireDurablePrepare` forces prepared persistence failure through real Serena and LSP add/remove paths; every adapter mutation counter remains zero. | Move the real adapter call before `BeforeMutation` succeeds. |
-| A-02 retirement | `TestMCPFrontV3_RollbackCallerRereadsDurableStateBeforeRetirement` gives in-memory terminal state while durable publication fails/remains pending; retirement counter remains zero and active path remains. | Retire from the in-memory object or helper result. |
-
-The existing C1, C2, C4, C8, C9, and C10 mutation-failing guards remain required.
-Protected C3, C5, C6, and C7 guards remain green and their production files
-remain diff-free.
-
-## Defect-class completeness audit
-
-| Class / participant | Required disposition |
-| --- | --- |
-| Authorization: Serena forward | Change: conditional wrapper owns read, backup, durable prepare, add, readback. |
-| Authorization: LSP forward canonical add | Change: conditional wrapper; no split check/write. |
-| Authorization: LSP forward legacy remove | Change: conditional wrapper; still downstream of durable canonical receipt. |
-| Authorization: LSP rollback canonical add/remove | Change: conditional wrapper with effective receipt matcher. |
-| Authorization: LSP rollback legacy add | Change: conditional wrapper with effective receipt matcher and exact raw baseline. |
-| Authorization: Serena present rollback | Retain existing nine-adapter rollback-bypass CAS; row-owned pin input replaces `MigrateReport`. |
-| Authorization: Serena absent rollback | Change: existing nine-adapter `CASGuardedRemoveEntry`. |
-| Attempt provenance: precondition conflict | Change: separate `Invoked=false` state; never settlement-promoted. |
-| Attempt provenance: prepared crash | Change: permanently pending/manual after re-entry absent stronger atomic receipt. |
-| Present/absent inverse: Serena | Change: explicit present restore / absent remove polarity. |
-| Present/absent inverse: LSP | Retain polarity, move comparison and mutation into conditional wrapper. |
-| Pin authority | Change: path/checksum live on each Serena row; validate rows only. |
-| Dependency group/retry | Change: reconstruct all rows every call; terminal and baseline-only rows participate. |
-| Retirement | Change tests; retain durable re-read and atomic rename, add durable group/terminal-conflict semantics. |
-| Compatibility projection | Remove from version-3 decision paths and persisted v3 type. |
-| Stale helpers | Remove four superseded helper families and tests that only cover them. |
-| C1 exact identity | Not affected; retain `(surface, client, language, entry_name)`. |
-| C2 per-row port | Not affected; retain per-row applied receipt. |
-| C4 changed Serena entry | Strengthened; present and absent inverse both CAS-owned. |
-| C8 post-success promotion | Strengthened; same-call invoked observation required. |
-| C9 absent/unreachable LSP | Not affected; still pending when ownership may exist. |
-| C10 frozen population | Not affected; plan application never re-enumerates. |
-| C3 `--check` gate | Protected/not affected. |
-| C5 operation lock | Protected/not affected. |
-| C6 LSP readiness | Protected/not affected. |
-| C7 route cleanup | Protected/not affected. |
-
-## Diff-invisible invariants and named guards
-
-| Invariant | Named regression guard | Expected |
-| --- | --- | --- |
-| No external or concurrent hub edit is overwritten unless comparison and mutation share one adapter-owned critical section. | F1 conditional-mutation table | Injected edit preserved; zero hub mutation. |
-| Durable intent or precondition conflict is not mutation causation. | F2 zero-invocation equality table | No receipt and no rollback mutation. |
-| Every legal Serena forward transition has an ownership-checked inverse. | F3 present/absent table | Present restores; absent removes; replacement survives. |
-| Legacy readiness is reconstructed from every row on every retry. | F4 two-call and baseline-only table | Canonical survives any unready legacy row. |
-| Every Serena row resolves to one verified pin before any write. | A-01 valid-v3 malformed-pin table | Zero writes; active artifact retained. |
-| Real mutations require durable prepare and retirement requires durable re-read. | A-02 real-seam tests | Mutation/retirement counters remain zero on injected persistence failure. |
-
-## Architecture claims
-
-1. `{ guarantee: every Serena-forward and LSP mutation is authorized and
-   executed inside one locking-wrapper critical section; single-owner:
-   clients.ConditionalEntryMutator; enforcement-probe:
-   TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit }`
-2. `{ guarantee: the conditional capability covers every production adapter
-   without expanding CASEntryMutator's nine-concrete-adapter allowlist;
-   single-owner: lockingClient method set plus AsCASEntryMutator allowlist;
-   enforcement-probe: production adapter matrix asserts conditional=yes for all
-   and CAS membership remains exactly the current nine }`
-3. `{ guarantee: prepared and no-write conflict states never become applied
-   from re-entry value equality; single-owner: forward row transition owner;
-   enforcement-probe:
-   TestMCPFrontV3_NoInvocationStateEqualityNeverCreatesReceipt }`
-4. `{ guarantee: Serena absence is inverted only by an applied-fingerprint CAS
-   removal; single-owner: Serena row rollback owner;
-   enforcement-probe: TestMCPFrontV3_SerenaAbsentBaselineUsesOwnedRemove }`
-5. `{ guarantee: each version-3 Serena row owns one verified pin path and
-   checksum; single-owner: version-3 row validator;
-   enforcement-probe: TestMCPFrontV3_RowsExclusivelyOwnSerenaPins }`
-6. `{ guarantee: terminal, baseline-only, pending, and restored legacy rows all
-   participate in every reconstructed rollback group; single-owner: LSP
-   dependency-group rollback owner; enforcement-probe:
-   TestMCPFrontV3_LSPDependencyBarrierSurvivesRetry }`
-7. `{ guarantee: no real adapter call occurs before exact prepared persistence;
-   single-owner: ConditionalEntryMutator.BeforeMutation boundary;
-   enforcement-probe:
-   TestMCPFrontV3_RealMutationSeamsRequireDurablePrepare }`
-8. `{ guarantee: active retirement is decided only from a durable report
-   re-read containing terminal row and group outcomes; single-owner: rollback
-   retirement gate; enforcement-probe:
-   TestMCPFrontV3_RollbackCallerRereadsDurableStateBeforeRetirement }`
-9. `{ guarantee: version-1 and version-2 artifacts remain read-only refused and
-   are never rewritten as version 3; single-owner: version envelope gate;
-   enforcement-probe: existing separate v1/v2 byte-identity no-write cases }`
-10. `{ guarantee: C1/C2/C4/C8/C9/C10 remain closed and C3/C5/C6/C7 owners are
-    unchanged; single-owner: Change-Surface Contract; enforcement-probe:
-    existing mutation suite plus protected-file diff check }`
+The external command shape and the already-fixed `--check` contract do not
+change. There is no new dependency, service, schema outside the recovery
+artifact, or cross-platform behavioral fork.
 
 ## Alternatives rejected
 
-| Alternative | Rejection driver |
-| --- | --- |
-| Expand `CASEntryMutator` to every LSP adapter | That interface owns adapter-specific backup-byte restore and its concrete method set is a deliberate allowlist (`internal/clients/cas_mutator.go:54-66`, `:119-165`). F1 needs generic add/remove authorization, not new restore semantics. |
-| Keep point-in-time LSP comparison | It permits the verified split check/write race (`.scratch/external-reviews/adversarial.out:78-96`). |
-| Auto-promote prepared rows from equality | Equality cannot prove whether the adapter was invoked (`.scratch/external-reviews/adversarial.out:100-129`). |
-| Add cross-projection validation while retaining two authorities | It layers another check over the A-01 split owner; removing projections gives one maintained decision source (`.scratch/external-reviews/claim.out:156-168`). |
-| Append-only event log | It adds replay/repair/compaction owners; no admitted requirement needs full history once ambiguous crash windows remain explicitly pending. |
+- **Keep point-in-time dependency checks.** Rejected because the dependency can
+  change before the later target mutation.
+- **Batch all LSP writes into one opaque transaction.** Rejected because the
+  journal needs one durable row/receipt per write and adapters expose one config
+  owner, not a portable multi-file database transaction.
+- **Treat live equality as an interrupted-write receipt.** Rejected because it
+  proves state, not causation.
+- **Block rollback globally on any uncertain row.** Rejected because it destroys
+  independent safe recovery progress.
+- **Reopen a verified pin path in the API.** Rejected because pathname identity
+  is mutable and lexical containment is not object containment.
+- **Give every no-write conflict a dummy pin.** Rejected because it fabricates
+  rollback authority for a mutation that never ran.
+- **Auto-upgrade version 1/2 or interim malformed version 3.** Rejected because
+  missing row ownership cannot be reconstructed safely.
 
-## Migration and compatibility
+## Source-based hypotheses and residuals
 
-Version 3 has not shipped from this branch, so its schema is revised in place.
-The report filename remains unchanged. Versions 1 and 2 are decoded only far
-enough to return `legacy-ownership-unproven`; their bytes and pins are not
-modified. No automatic migration exists. An artifact written by the superseded
-version-3 worktree shape is rejected by strict row validation rather than
-interpreted through compatibility projections.
+No unverified premise authorizes an implementation change in this decision.
+The following source-based hypotheses are explicit and have named falsifiers:
 
-Rollback of this decision is a local code rollback before publication. A
-version-3 artifact created by the accepted implementation remains owned by its
-row schema; older code must not consume it.
+- **H1:** canonical and legacy entries for one LSP `(client, language)` share the
+  same wrapped client's config path. Evidence: the frozen plan binds one
+  `clientMap` adapter per client (`internal/api/lsp_client_router.go:127-137`,
+  `internal/api/lsp_client_router.go:286-310`). Falsifier: a test adapter whose
+  dependency resolves to a different config owner must be refused before write.
+- **H2:** the current per-file wrapper is the only cross-process client-config
+  lock owner. Evidence: `ConditionalEntryMutator` is wrapper-only
+  (`internal/clients/config_lock.go:228-248`). Falsifier: mechanism inventory
+  finds a second production entry-mutation path bypassing `lockingClient`; that
+  finding blocks implementation until routed through the owner.
+- **H3:** version 3 has not shipped on the PR remote. Evidence: the current local
+  R2 commit is `31b9ca94`, while both external reviews are against that local
+  R2 tree and classify R3 as not yet implemented. Release/publication state
+  must be re-probed before any later migration decision.
 
-## Residual risk
+Residual risks after implementation:
 
-- The client-config file lock is advisory. Non-hub writers that ignore it can
-  still race the adapter's final file replacement.
-- No cross-file transaction atomically commits the client config and recovery
-  journal. The design makes that window explicit and manual instead of guessing
-  causation.
-- Terminal conflicts can leave the safe front canonical route in place. The
-  command reports non-success and names the preserved rows; it does not
-  overwrite operator state to force symmetry.
+- an operator can still edit a client config between independent groups; CAS
+  and dependency authorization turn this into visible pending/conflict state;
+- in-memory pin bytes are bounded per row by the API state-read owner's existing
+  `maxStateFileBytes` 1 MiB cap (`internal/api/state_read_caps.go:9-11`);
+- a process crash after a client mutation but before durable receipt remains an
+  uncertain row by design; manual resolution is safer than manufactured
+  ownership;
+- target-platform secure-open behavior remains implementation evidence, not an
+  architecture assumption; Windows and POSIX root/intermediate/final
+  link/reparse, component-swap, size-bound, and handle-leak tests must pass
+  before the implementation architecture gate can close.
+
+## Planner-ready gate
+
+**Planner status: BLOCKED pending repeat reliability review `PASS`.**
+
+After that gate, planning may start only from this R3 file and must preserve the allowed
+production/test surfaces, lock order, state table, and complete acceptance
+matrix. Implementation acceptance requires:
+
+1. reliability review `PASS`;
+2. planner artifact mapping every invariant and falsifier to one implementation
+   step and one executable test;
+3. implementation within the declared change surface;
+4. mutation evidence that each mandatory falsifier fails against the reverted
+   or deliberately mutated implementation and passes after restoration;
+5. scoped tagged tests, build, vet, and independent architecture review;
+6. no push without human publication review.
 
 ## Terms and Abbreviations
 
-- **CAS:** compare-and-set; compare live state and mutate under one config lock.
-- **Conditional mutation:** wrapper-owned live comparison, durable preparation,
-  adapter mutation, and readback under one config lock.
-- **LSP:** Language Server Protocol.
-- **MCP:** Model Context Protocol.
-- **Pin:** retention-immune backup path plus its recorded SHA-256 checksum.
-- **Receipt:** durable proof from the same invocation that a row mutation was
-  invoked and its intended post-state was observed.
-- **Terminal conflict:** deliberate no-write preservation of operator state;
-  rollback completes partially and returns non-success.
-
-Gate: **PASS** — accepted-ready for backend implementation without a new
-architecture choice. The architecture-reviewer owns promotion from `proposed`
-to `accepted`.
+- **ADR** — architecture decision record.
+- **CAS** — compare-and-swap: mutate only if current state equals expected state.
+- **CLI** — command-line interface.
+- **LSP** — Language Server Protocol.
+- **POSIX** — portable operating-system interface used by Unix-like targets.
+- **Receipt** — durable evidence of the exact post-state observed in the same
+  mutation call.
+- **Reparse point** — Windows filesystem object that can redirect path
+  resolution.
+- **Row** — one exact `(surface, client, language, entry)` recovery authority.
+- **Serena** — the Serena Model Context Protocol client entry surface.
+- **TOCTOU** — time-of-check/time-of-use race.

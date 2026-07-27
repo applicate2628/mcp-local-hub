@@ -352,64 +352,63 @@ func TestMCPFrontOwnership_ForwardAcceptsASupervisedRouteDaemon(t *testing.T) {
 // TestMCPFrontReview_RollbackRefusesAnIncompleteRecord is the finding-5 guard.
 //
 // The pre-fix rollback validated only the artifact version and the presence of
-// a serena section. A record with a valid version, real serena data and NO
-// `lsp` key therefore restored serena, performed a zero-row LSP "restore", and
-// then DELETED itself — while every LSP client was still on the front port,
-// with the only record of their pre-state now gone.
+// a serena section. A record with a valid version, real serena data and no
+// second recovery section therefore restored one surface, performed a zero-row
+// "restore" of the other, and then DELETED itself — while every client on that
+// second surface was still on the front port, with the only record of their
+// pre-state now gone.
 //
-// The nil-versus-empty distinction is the crux: Go marshals a nil slice to
-// `null` and an empty one to `[]`, so a value-typed section made "no rows" and
-// "no section" indistinguishable. Each subtest below is a record that the
-// pre-fix validator accepted and this one must refuse, and every subtest also
-// asserts that NO restoration write happened and the record survived.
+// VERSION-3 MIGRATION (this file's fixtures used to be version-2 bodies). The
+// version-2 record had two value-typed sections, `serena` and `lsp`, and the
+// nil-versus-empty distinction was the crux: Go marshals a nil slice to `null`
+// and an empty one to `[]`, so "no rows" and "no section" were
+// indistinguishable. Version 3 replaced both sections with ONE `rows` map plus
+// an `active_plan` that names every row it expects (I2: rows are the only
+// authority), so incompleteness now has exactly two shapes — and the
+// nil-versus-empty crux SURVIVES unchanged in the first two cases, because a
+// missing `rows` key and an explicit `"rows": null` both decode to a nil map:
+//
+//   - the row map is absent or null, so no row can authorise anything;
+//   - the active plan names a row the map does not carry, which is the direct
+//     analogue of "the record says it captured this surface and did not".
+//
+// Every subtest also asserts that NO restoration write happened and the record
+// survived, which is the property the whole test exists for.
 func TestMCPFrontReview_RollbackRefusesAnIncompleteRecord(t *testing.T) {
 	frontSerenaURL := "http://127.0.0.1:9137/serena/mcp"
 
 	cases := []struct {
-		name   string
-		record map[string]any
-		want   string
+		name string
+		// perturb receives the valid version-3 record's own JSON encoding and
+		// breaks exactly one thing.
+		perturb func(map[string]any)
+		want    string
 	}{
 		{
-			name: "no lsp section at all",
-			record: map[string]any{
-				"version":           mcpFrontReconcileReportVersion,
-				"port":              9137,
-				"snapshot_complete": true,
-				"serena":            map[string]any{"applied": []any{}},
-			},
-			want: "carries no lsp section",
+			name:    "no row map at all",
+			perturb: func(m map[string]any) { delete(m, "rows") },
+			want:    "carries no version-3 row map",
 		},
 		{
-			name: "explicitly null lsp section",
-			record: map[string]any{
-				"version":           mcpFrontReconcileReportVersion,
-				"port":              9137,
-				"snapshot_complete": true,
-				"serena":            map[string]any{"applied": []any{}},
-				"lsp":               nil,
-			},
-			want: "carries no lsp section",
+			name:    "explicitly null row map",
+			perturb: func(m map[string]any) { m["rows"] = nil },
+			want:    "carries no version-3 row map",
 		},
 		{
-			name: "not marked snapshot-complete",
-			record: map[string]any{
-				"version": mcpFrontReconcileReportVersion,
-				"port":    9137,
-				"serena":  map[string]any{"applied": []any{}},
-				"lsp":     []any{},
-			},
-			want: "not marked snapshot-complete",
+			name:    "not marked snapshot-complete",
+			perturb: func(m map[string]any) { delete(m, "snapshot_complete") },
+			want:    "not marked snapshot-complete",
 		},
 		{
-			name: "no serena section",
-			record: map[string]any{
-				"version":           mcpFrontReconcileReportVersion,
-				"port":              9137,
-				"snapshot_complete": true,
-				"lsp":               []any{},
+			name: "active plan references a row the map does not carry",
+			perturb: func(m map[string]any) {
+				// The plan still names the serena row; the map no longer has
+				// it. An EMPTY map (not a nil one) is the point: it decodes to
+				// a non-nil map, so it clears the "no row map" gate above and
+				// must be caught by the plan/row agreement check instead.
+				m["rows"] = map[string]any{}
 			},
-			want: "carries no serena section",
+			want: "references missing row",
 		},
 	}
 
@@ -430,7 +429,9 @@ func TestMCPFrontReview_RollbackRefusesAnIncompleteRecord(t *testing.T) {
 				t.Fatalf("read seeded config: %v", rerr)
 			}
 
-			if werr := api.WriteStateFileAtomic(reportPath, tc.record); werr != nil {
+			record := v3RecordAsMap(t, newV3RollbackRecord(t, reportPath, 9137, "claude-code"))
+			tc.perturb(record)
+			if werr := api.WriteStateFileAtomic(reportPath, record); werr != nil {
 				t.Fatalf("seed record: %v", werr)
 			}
 
@@ -459,6 +460,15 @@ func TestMCPFrontReview_RollbackRefusesAnIncompleteRecord(t *testing.T) {
 // other half of "validate everything before writing anything": a record whose
 // pinned backup has been removed or altered must stop the rollback up front,
 // not halfway through the serena leg.
+//
+// VERSION-3 MIGRATION. The pin moved from a top-level `pins` array to the
+// serena ROW that owns it, and verifyMCPFrontSerenaPins now requires the pin to
+// live inside the report's own pin directory. The fixture therefore points at a
+// path INSIDE that directory and simply never creates the file: that is the
+// state a pruned or hand-deleted backup actually leaves behind, and it reaches
+// the digest read — which is the step this test means. A path outside the pin
+// root would be refused one step earlier, for escaping containment, and would
+// no longer exercise the unreadable-input refusal at all.
 func TestMCPFrontReview_RollbackRefusesARecordWhosePinnedInputIsGone(t *testing.T) {
 	tmp := mcpFrontPR588Env(t)
 	assertRedirectedStateDir(t, tmp)
@@ -470,19 +480,11 @@ func TestMCPFrontReview_RollbackRefusesARecordWhosePinnedInputIsGone(t *testing.
 	})
 	before, _ := os.ReadFile(cfgPath)
 
-	missingPin := filepath.Join(t.TempDir(), "pins", "claude-code", "gone.json")
-	if werr := api.WriteStateFileAtomic(reportPath, map[string]any{
-		"version":           mcpFrontReconcileReportVersion,
-		"port":              9137,
-		"snapshot_complete": true,
-		"serena": map[string]any{"applied": []any{
-			map[string]any{"server": "serena", "client": "claude-code", "url": frontSerenaURL, "backup_path": missingPin},
-		}},
-		"lsp": []any{},
-		"pins": []any{
-			map[string]any{"client": "claude-code", "origin": "rolling", "path": missingPin, "sha256": "deadbeef"},
-		},
-	}); werr != nil {
+	missingPin := filepath.Join(mcpFrontReconcilePinDir(reportPath), "claude-code", "gone.json")
+	record := newV3RollbackRecordWithPin(t, 9137, "claude-code", mcpFrontSerenaPin{
+		Client: "claude-code", Origin: "rolling", Path: missingPin, SHA256: "deadbeef",
+	})
+	if werr := api.WriteStateFileAtomic(reportPath, record); werr != nil {
 		t.Fatalf("seed record: %v", werr)
 	}
 

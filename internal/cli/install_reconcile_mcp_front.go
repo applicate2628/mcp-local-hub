@@ -857,8 +857,17 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 	fmt.Fprintf(cmd.OutOrStdout(), "mcp-front rollback: serena(restored=%d) lsp(restored=%d removed=%d failed=%d)\n",
 		serenaRestored, lspRestored, len(lspReport.Removed), len(lspReport.Failed))
 	if len(conflictRows) > 0 {
-		return fmt.Errorf("reconcile-mcp-front --rollback: rollback completed with %d skipped-conflict row(s): %s; operator state was preserved",
-			len(conflictRows), strings.Join(conflictRows, ", "))
+		// A skipped-conflict row is the compare-and-swap inverse refusing to
+		// write (I7): the live entry no longer equals what the forward run
+		// recorded writing, so somebody EDITED it after the cutover and
+		// restoring would silently discard that edit. Naming the row key alone
+		// left the operator to infer all of that, so say it.
+		return fmt.Errorf("reconcile-mcp-front --rollback: rollback completed, but %d entr%s left untouched because %s edited after the reconcile ran: %s. "+
+			"Restoring would have discarded that edit, so the current value was kept and the rest of the rollback completed normally. "+
+			"If the pre-reconcile value is the one you want, set it by hand; if the current value is correct, nothing more to do",
+			len(conflictRows), map[bool]string{true: "y was", false: "ies were"}[len(conflictRows) == 1],
+			map[bool]string{true: "it was", false: "they were"}[len(conflictRows) == 1],
+			strings.Join(conflictRows, ", "))
 	}
 	return nil
 }
@@ -880,8 +889,13 @@ func describeLSPChanges(changes []api.LSPClientRouterChange) string {
 // answers are independent — which is why they are enumerated rather than
 // collapsed into one "looks fine" predicate.
 func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportPath string) error {
+	// Defence in depth: every production caller decodes first, and the decoder
+	// already refuses a foreign version. Routing this through the same owner
+	// keeps ONE refusal wording for the operator instead of two that disagree
+	// about what to do next.
 	if persisted.Version != mcpFrontReconcileReportVersion {
-		return fmt.Errorf("legacy-ownership-unproven: %s carries artifact version %d; version %d row ownership is required and no automatic client write is authorized", reportPath, persisted.Version, mcpFrontReconcileReportVersion)
+		return mcpFrontArtifactRefusal(reportPath, persisted.Version,
+			fmt.Sprintf("it declares version %d", persisted.Version))
 	}
 	if !persisted.SnapshotComplete {
 		return fmt.Errorf("%s is not marked snapshot-complete: the run that wrote it did not finish capturing every recovery section, so consuming it would restore only part of the host and then delete the record of the rest. Re-run `mcphub install --reconcile-mcp-front` (which merges into this record without overwriting it) so the missing section is captured, or move the file aside and restore by hand", reportPath)
@@ -1197,6 +1211,89 @@ func readMCPFrontReconcileReport(path string) (*mcpFrontReconcileReport, error) 
 	return out, nil
 }
 
+// mcpFrontLegacyBodyKeys are the top-level keys of the version-1/version-2
+// journal body. Version 3 persists none of them (I2: the `rows` map is the only
+// authority, and no top-level compatibility projection is written), so seeing
+// any of them proves the bytes on disk are a pre-version-3 body regardless of
+// what the `version` field claims.
+//
+// This exists because the two ways an operator meets a legacy artifact are NOT
+// the same failure: a genuine version-1/2 file declares its own version, while
+// a file written by a pre-release interim build can declare version 3 and still
+// carry the old body. The strict decoder reports the second one as
+// `json: unknown field "lsp"`, which names neither the file's real problem nor
+// anything the operator can do about it.
+var mcpFrontLegacyBodyKeys = []string{"serena", "lsp", "pins", "port"}
+
+// mcpFrontLegacyBodyKeysPresent returns the version-1/2 body keys carried by
+// raw, in mcpFrontLegacyBodyKeys order. An unparseable body returns nothing:
+// the caller then falls back to the exact decoder error, which is the honest
+// diagnostic for bytes that are not a journal at all.
+func mcpFrontLegacyBodyKeysPresent(raw []byte) []string {
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return nil
+	}
+	var found []string
+	for _, key := range mcpFrontLegacyBodyKeys {
+		if _, ok := top[key]; ok {
+			found = append(found, key)
+		}
+	}
+	return found
+}
+
+// mcpFrontArtifactRefusal is the SINGLE OWNER of the operator-facing refusal
+// for an mcp-front reconcile journal this binary cannot consume.
+//
+// THE MIGRATION DECISION IT IMPLEMENTS: version 3 REFUSES a foreign-version
+// artifact; it never upgrades, downgrades, or guesses at one
+// (work-items/decisions/2026-07-27-mcp-front-reconcile-v3-row-journal.md,
+// "Compatibility and migration"). The reason is not schema tidiness. A
+// version-1/2 journal records which entries were CAPTURED, never which client
+// write actually landed — it has no per-row attempt, no same-call applied
+// receipt, and no generation. Synthesising version-3 rows from it would
+// manufacture rollback authority that was never proven, and the first thing
+// that authority does is overwrite a live client entry. Refusing costs the
+// operator one manual step; upgrading can silently destroy an entry this hub
+// never wrote.
+//
+// What the refusal MUST carry, and what a bare `json: unknown field "lsp"` or a
+// bare "artifact version 2 cannot be consumed by version 3" did not: the file's
+// absolute path, why the upgrade is refused rather than attempted, the fact
+// that nothing was read and no client was touched, and the concrete moves that
+// get the operator out of it.
+//
+// TWO ARMS, BECAUSE THE REMEDY IS OPPOSITE. An OLDER artifact means the file
+// was written before this binary and the recovery binary is the older one; a
+// NEWER artifact means the operator downgraded (or ran a different install) and
+// the recovery binary is the newer one. Telling a version-4 holder to "roll
+// back with the older mcphub" sends them to the exact binary that cannot read
+// their file. `declared` therefore selects the arm; it is never assumed.
+func mcpFrontArtifactRefusal(path string, declared int, detail string) error {
+	if declared > mcpFrontReconcileReportVersion {
+		return fmt.Errorf(
+			"legacy-ownership-unproven: %s carries artifact version %d and this mcphub understands version %d — the file was written by a NEWER mcphub than the one you are running. "+
+				"This binary will not guess at a format it does not know: it would be building rollback authority out of fields it cannot interpret, and the first thing that authority does is overwrite a live client entry. "+
+				"Nothing was read from the file and no client config was touched. "+
+				"Run `mcphub install --reconcile-mcp-front --rollback` with the NEWER mcphub that wrote it (upgrade this install, or use the binary you ran before), "+
+				"or move the file aside (rename it to %s.unsupported) and restore the entries by hand before re-running this command",
+			path, declared, mcpFrontReconcileReportVersion, path)
+	}
+	return fmt.Errorf(
+		"legacy-ownership-unproven: %s is a pre-version-%d mcp-front reconcile journal (%s). "+
+			"This binary will NOT upgrade it in place: the older format records which client entries were captured, "+
+			"never which client write actually landed, so building version-%d rollback authority from it would let "+
+			"`--rollback` overwrite an entry this hub never wrote. Nothing was read from the file and no client config was touched. "+
+			"Do ONE of these: (1) run `mcphub install --reconcile-mcp-front --rollback` with the OLDER mcphub binary that wrote "+
+			"this file — it understands the format and will put your clients back; or (2) move the file aside "+
+			"(rename it to %s.legacy) and restore the entries by hand — it is plain JSON, and its `serena` and `lsp` sections "+
+			"name every client together with its pre-reconcile URL. Then re-run `mcphub install --reconcile-mcp-front` to start "+
+			"a fresh version-%d journal",
+		path, mcpFrontReconcileReportVersion, detail,
+		mcpFrontReconcileReportVersion, path, mcpFrontReconcileReportVersion)
+}
+
 func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileReport, error) {
 	var envelope struct {
 		Version int `json:"version"`
@@ -1205,12 +1302,21 @@ func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileR
 		return nil, err
 	}
 	if envelope.Version != mcpFrontReconcileReportVersion {
-		return nil, fmt.Errorf("legacy-ownership-unproven: artifact version %d cannot be consumed by version %d", envelope.Version, mcpFrontReconcileReportVersion)
+		return nil, mcpFrontArtifactRefusal(path, envelope.Version,
+			fmt.Sprintf("it declares version %d", envelope.Version))
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	var out mcpFrontReconcileReport
 	if err := decoder.Decode(&out); err != nil {
+		// A declared version 3 carrying the OLD body is the interim-build case:
+		// same refusal, same remedy, but the version field cannot be trusted to
+		// say so, and the raw decoder error names only the first stray key.
+		if legacy := mcpFrontLegacyBodyKeysPresent(raw); len(legacy) > 0 {
+			return nil, mcpFrontArtifactRefusal(path, envelope.Version, fmt.Sprintf(
+				"it declares version %d but carries the pre-version-%d body shape: top-level %s",
+				envelope.Version, mcpFrontReconcileReportVersion, strings.Join(legacy, ", ")))
+		}
 		return nil, fmt.Errorf("decode strict version-3 row journal %s: %w", path, err)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {

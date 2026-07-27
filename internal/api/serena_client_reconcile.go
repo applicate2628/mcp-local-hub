@@ -498,13 +498,9 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			continue
 		}
 		// Fingerprint the adapter's actual persisted/readback projection, not
-		// the generic write DTO. The generic entry deliberately carries both
-		// URL and relay fields so every adapter can consume its own shape, while
-		// URL adapters discard relay fields and Antigravity discards URL plus
-		// the manifest lookup fields when RelayURL selects the direct form.
-		// Hashing the generic value would therefore make every successful write
-		// look like an unknown third state at readback.
-		intendedEntry := serenaIntendedEntryProjection(adapter, entry)
+		// the generic write DTO — see intendedEntryReadbackProjection, the
+		// shared owner of that rule.
+		intendedEntry := intendedEntryReadbackProjection(adapter, entry)
 		intendedFingerprint, intendedErr := fingerprintSerenaEntry(&intendedEntry)
 		if intendedErr != nil {
 			report.Failed = append(report.Failed, FailedMigration{
@@ -644,7 +640,26 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 	return report, nil
 }
 
-func serenaIntendedEntryProjection(adapter clients.Client, entry clients.MCPEntry) clients.MCPEntry {
+// intendedEntryReadbackProjection reduces a generic WRITE-REQUEST MCPEntry to
+// the subset the given adapter actually persists, i.e. the shape a subsequent
+// GetEntry will return. It is the SINGLE OWNER of that rule for every surface
+// that compares an intended post-state against a readback.
+//
+// A write request is a command object, not a state: it deliberately carries
+// BOTH URL and relay fields so each adapter can pick its own shape. A
+// URL-native adapter stores `url` and reads RelayURL back empty; a relay-stdio
+// adapter stores `relay --url <target>` in args and reads URL back empty.
+// Comparing the raw write request against the readback therefore makes every
+// SUCCESSFUL write look like an unknown third state, which downstream owners
+// report as a conflict (serena: an unknown fingerprint; the mcp-front v3
+// journal: `forward-ownership-unknown`).
+//
+// Both consumers must use this one owner — the serena forward reconcile
+// (fingerprint of the intended entry) and the LSP router plan's IntendedState
+// snapshot. Re-typing the family rule at either call site is the defect this
+// owner exists to prevent; the round-trip shape it predicts is pinned for both
+// families by TestLSPRouterPlan_IntendedStateMatchesAdapterReadback.
+func intendedEntryReadbackProjection(adapter clients.Client, entry clients.MCPEntry) clients.MCPEntry {
 	if adapter.IsRelayStdio() {
 		return clients.MCPEntry{
 			Name:         entry.Name,

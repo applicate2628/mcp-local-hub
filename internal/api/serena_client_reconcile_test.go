@@ -91,7 +91,7 @@ func (f *reconcileFakeClient) AddEntry(e clients.MCPEntry) error {
 	if f.addErr != nil {
 		return f.addErr
 	}
-	f.entries[e.Name] = serenaIntendedEntryProjection(f, e)
+	f.entries[e.Name] = intendedEntryReadbackProjection(f, e)
 	return nil
 }
 func (f *reconcileFakeClient) RemoveEntry(name string) error {

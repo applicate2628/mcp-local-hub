@@ -64,12 +64,27 @@ func (f *lspRouterFakeClient) BackupKeep(int) (string, error) {
 	return backupPath, nil
 }
 func (f *lspRouterFakeClient) Restore(string) error { return nil }
+// AddEntry stores the subset a REAL adapter of this family would persist, not
+// the write request verbatim.
+//
+// The request is a command object: lspRouterMCPEntryForClient fills BOTH `URL`
+// and `RelayURL` so either family can consume it, and each real adapter then
+// keeps only its own shape — a URL-native adapter writes `url` and reads
+// RelayURL back empty. A fake that echoes the whole request back is a client no
+// adapter in this repo behaves like, and it makes every caller that compares an
+// intended post-state against a readback (the LSP plan's IntendedState, the
+// serena forward fingerprint) disagree with production in the fake's favour.
+//
+// It calls intendedEntryReadbackProjection rather than re-stating the rule,
+// because a double that re-types the rule can drift from it silently. The
+// projection itself is pinned against a real adapter by
+// TestLSPRouterPlan_IntendedStateMatchesAdapterReadback.
 func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 	f.addCalls++
 	if f.addErr != nil {
 		return f.addErr
 	}
-	f.entries[e.Name] = e
+	f.entries[e.Name] = intendedEntryReadbackProjection(f, e)
 	return nil
 }
 func (f *lspRouterFakeClient) RemoveEntry(name string) error {

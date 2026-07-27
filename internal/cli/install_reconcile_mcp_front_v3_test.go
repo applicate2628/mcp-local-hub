@@ -32,6 +32,105 @@ func v3LSPRemove(client, language, entryName string, from api.LSPRouterEntrySnap
 	}
 }
 
+// --- version-3 rollback fixtures -------------------------------------------
+//
+// The rollback-side command tests below used to hand-write the version-2 body
+// (`port` / `serena` / `lsp` / `pins` as TOP-LEVEL keys) while stamping the
+// current version number on it. Once the strict version-3 decoder shipped,
+// every one of those fixtures died at the PARSE step with
+// `json: unknown field "lsp"` — so the semantic refusals they were written to
+// pin (a missing recovery section, an unreadable pin) were never reached and
+// the tests were asserting against a code path that no longer runs.
+//
+// These builders are the fix for that class: a fixture is now produced from the
+// SAME structs the production writer persists, so a future schema change breaks
+// them at compile time instead of silently moving the failure to the decoder.
+
+// v3SerenaRowKeyFor is the exact row key of one client's serena recovery row.
+func v3SerenaRowKeyFor(client string) string {
+	return mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, client, "", "serena")
+}
+
+// newV3RollbackRecord builds a MINIMAL but fully VALID version-3 journal for a
+// rollback-side test: generation 1, one serena row that owns its pin and
+// carries a same-generation applied receipt, and an active plan that agrees
+// with it. It passes validateMCPFrontReconcileReport as-is, so a test can
+// invalidate exactly ONE thing and know that is what the refusal is about.
+//
+// It also materialises the pin: the pin file lives inside the report's own pin
+// directory (verifyMCPFrontSerenaPins refuses a path outside it before it ever
+// looks at the bytes) and its recorded SHA-256 is the real digest.
+func newV3RollbackRecord(t *testing.T, reportPath string, port int, client string) mcpFrontReconcileReport {
+	t.Helper()
+	pinDir := filepath.Join(mcpFrontReconcilePinDir(reportPath), client)
+	if err := os.MkdirAll(pinDir, 0o700); err != nil {
+		t.Fatalf("create pin dir: %v", err)
+	}
+	pinPath := filepath.Join(pinDir, "pre-reconcile.json")
+	pinBody := []byte(`{"mcpServers":{"serena":{"url":"http://127.0.0.1:9125/serena/mcp"}}}`)
+	if err := os.WriteFile(pinPath, pinBody, 0o600); err != nil {
+		t.Fatalf("write pin: %v", err)
+	}
+	sum, err := fileSHA256(pinPath)
+	if err != nil {
+		t.Fatalf("hash pin: %v", err)
+	}
+	return newV3RollbackRecordWithPin(t, port, client, mcpFrontSerenaPin{
+		Client: client, Origin: "rolling", Path: pinPath, SHA256: sum,
+	})
+}
+
+// newV3RollbackRecordWithPin is the same shape with a caller-supplied pin, for
+// the tests whose subject IS the pin (missing file, wrong digest, escaping
+// path). It does not touch the filesystem.
+func newV3RollbackRecordWithPin(t *testing.T, port int, client string, pin mcpFrontSerenaPin) mcpFrontReconcileReport {
+	t.Helper()
+	baseline := mcpFrontSerenaState("pre-reconcile-fingerprint")
+	intended := mcpFrontSerenaState("front-port-fingerprint")
+	key := v3SerenaRowKeyFor(client)
+	return mcpFrontReconcileReport{
+		Version:          mcpFrontReconcileReportVersion,
+		SnapshotComplete: true,
+		Generation:       1,
+		Rows: map[string]mcpFrontReconcileRow{
+			key: {
+				Surface: mcpFrontSurfaceSerena, Client: client, EntryName: "serena",
+				Baseline: baseline, BaselineSet: true, Pin: &pin,
+				Attempt: &mcpFrontReconcileAttempt{
+					Generation: 1, Operation: "add",
+					PreState: baseline, IntendedState: intended,
+					State: mcpFrontAttemptApplied,
+				},
+				Applied: &mcpFrontAppliedReceipt{Generation: 1, Port: port, PostState: intended},
+			},
+		},
+		ActivePlan: &mcpFrontReconcilePlan{
+			Generation: 1, Port: port, Rows: []string{key},
+			Operations: []mcpFrontReconcilePlanOp{{
+				RowKey: key, Operation: "add", PreState: baseline, IntendedState: intended,
+			}},
+		},
+	}
+}
+
+// v3RecordAsMap round-trips a record through its own JSON encoding so a test
+// can delete or null ONE key and seed bytes the production reader will actually
+// meet on disk. Building the perturbation from the encoded form (rather than a
+// hand-typed literal) is what keeps these fixtures honest about the real wire
+// shape.
+func v3RecordAsMap(t *testing.T, record mcpFrontReconcileReport) map[string]any {
+	t.Helper()
+	raw, err := json.Marshal(record)
+	if err != nil {
+		t.Fatalf("marshal v3 record: %v", err)
+	}
+	var out map[string]any
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatalf("re-decode v3 record: %v", err)
+	}
+	return out
+}
+
 func v3Journal(t *testing.T, port int, prior *mcpFrontReconcileReport, ops ...api.LSPRouterPlannedOperation) *mcpFrontReconcileJournal {
 	t.Helper()
 	reportPath := filepath.Join(t.TempDir(), "recovery.json")
@@ -260,6 +359,158 @@ func TestMCPFrontV3_V1AndV2ArtifactsRefuseBeforeAnyWrite(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "legacy-ownership-unproven") {
 			t.Fatalf("version %d err=%v", version, err)
 		}
+	}
+}
+
+// legacyMCPFrontJournalBody is the pre-version-3 record shape: two value-typed
+// recovery sections plus (from version 2) a top-level pin array, with no `rows`
+// map, no `active_plan`, and no per-row attempt or applied receipt anywhere.
+// That absence IS the reason version 3 refuses to upgrade one: there is nothing
+// in these bytes that says which client write actually landed.
+func legacyMCPFrontJournalBody(version int, frontSerenaURL, backupPath string) map[string]any {
+	body := map[string]any{
+		"version":           version,
+		"port":              9137,
+		"snapshot_complete": true,
+		"serena": map[string]any{"applied": []any{
+			map[string]any{
+				"server": "serena", "client": "claude-code",
+				"url": frontSerenaURL, "backup_path": backupPath,
+			},
+		}},
+		"lsp": []any{},
+	}
+	if version >= mcpFrontReconcileVersion2 {
+		// Version 1 predates pinning; version 2 added the top-level array.
+		body["pins"] = []any{map[string]any{
+			"client": "claude-code", "origin": "rolling",
+			"path": backupPath, "sha256": "deadbeef",
+		}}
+	}
+	return body
+}
+
+// TestMCPFrontV3_LegacyJournalOnDiskRefusesRollbackWithAnActionableMessage is
+// the FIELD path for the version-3 migration decision, and the reason that
+// decision had to be written down at all.
+//
+// The situation is ordinary: an operator ran `--reconcile-mcp-front` on an
+// older mcphub, upgraded, and now needs `--rollback`. Their journal is on disk
+// in the old shape. Version 3 answers that by REFUSING, never by upgrading in
+// place — a version-1/2 journal records which entries were captured, never
+// which client write landed, so synthesising row authority from it would let
+// the inverse overwrite an entry this hub never wrote.
+//
+// Refusing is only half an answer, though. The refusal the operator actually
+// met was `json: unknown field "lsp"` (or, for a genuine version-2 file,
+// `artifact version 2 cannot be consumed by version 3`) — neither of which
+// names the file, says why it will not be upgraded, or offers a way forward.
+// This test is the guard on the message being usable, not merely correct:
+// the path, the reason, and BOTH concrete remedies must be in it.
+//
+// Three inputs, one contract. The third is the one a strict decoder turns into
+// an unrecognisable error: an interim pre-release build that stamped the
+// current version number onto the old body.
+func TestMCPFrontV3_LegacyJournalOnDiskRefusesRollbackWithAnActionableMessage(t *testing.T) {
+	const frontSerenaURL = "http://127.0.0.1:9137/serena/mcp"
+
+	cases := []struct {
+		name       string
+		version    int
+		wantDetail string
+	}{
+		{
+			name:       "genuine version-1 journal",
+			version:    mcpFrontReconcileLegacyReportVersion,
+			wantDetail: "it declares version 1",
+		},
+		{
+			name:       "genuine version-2 journal",
+			version:    mcpFrontReconcileVersion2,
+			wantDetail: "it declares version 2",
+		},
+		{
+			name:       "interim build stamped version 3 onto a version-2 body",
+			version:    mcpFrontReconcileReportVersion,
+			wantDetail: "carries the pre-version-3 body shape",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := mcpFrontPR588Env(t)
+			assertRedirectedStateDir(t, tmp)
+			reportPath := withMCPFrontReportPathSeam(t)
+
+			// A host mid-cutover: serena IS on the front port, so a journal
+			// consumed on wrong authority is exactly what cannot be undone.
+			cfgPath := seedClaudeCodeConfig(t, tmp, map[string]any{
+				"serena": map[string]any{"url": frontSerenaURL},
+			})
+			configBefore, rerr := os.ReadFile(cfgPath)
+			if rerr != nil {
+				t.Fatalf("read seeded config: %v", rerr)
+			}
+
+			backupPath := filepath.Join(tmp, "legacy-backup.json")
+			if werr := api.WriteStateFileAtomic(reportPath,
+				legacyMCPFrontJournalBody(tc.version, frontSerenaURL, backupPath)); werr != nil {
+				t.Fatalf("seed legacy journal: %v", werr)
+			}
+			journalBefore, rerr := os.ReadFile(reportPath)
+			if rerr != nil {
+				t.Fatalf("read seeded journal: %v", rerr)
+			}
+
+			err := runReconcileMCPFront(newMCPFrontTestCmd(), true)
+			if err == nil {
+				t.Fatalf("rollback must refuse a pre-version-3 journal: consuming it would write client configs on authority the old format never recorded")
+			}
+			for _, want := range []string{
+				// The discriminator the decision's failure-mode table requires.
+				"legacy-ownership-unproven",
+				// WHICH file: an operator with several state files cannot act
+				// on a message that does not name one.
+				reportPath,
+				// WHY it is refused rather than upgraded.
+				"never which client write actually landed",
+				// That nothing has happened yet.
+				"no client config was touched",
+				// Remedy 1: roll back with the binary that wrote it.
+				"OLDER mcphub binary",
+				// Remedy 2: move it aside and restore by hand.
+				".legacy",
+				// Which of the three inputs this is.
+				tc.wantDetail,
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Fatalf("the refusal must carry %q so the operator can act on it; got:\n%v", want, err)
+				}
+			}
+
+			configAfter, rerr := os.ReadFile(cfgPath)
+			if rerr != nil {
+				t.Fatalf("read config after the refusal: %v", rerr)
+			}
+			if string(configAfter) != string(configBefore) {
+				t.Fatalf("a refused legacy journal must leave every client byte-identical.\nbefore: %s\nafter:  %s", configBefore, configAfter)
+			}
+			journalAfter, rerr := os.ReadFile(reportPath)
+			if rerr != nil {
+				t.Fatalf("a refused legacy journal must SURVIVE — it is the operator's only record of the pre-reconcile state: %v", rerr)
+			}
+			if string(journalAfter) != string(journalBefore) {
+				t.Fatalf("the journal must not be repaired, projected or partially upgraded in place.\nbefore: %s\nafter:  %s", journalBefore, journalAfter)
+			}
+			// No retired sibling either: refusing is not consuming.
+			retired, gerr := filepath.Glob(reportPath + ".retired-*")
+			if gerr != nil {
+				t.Fatalf("glob retired reports: %v", gerr)
+			}
+			if len(retired) != 0 {
+				t.Fatalf("a refused legacy journal must not be retired out of the active namespace; found %v", retired)
+			}
+		})
 	}
 }
 
