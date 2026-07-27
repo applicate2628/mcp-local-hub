@@ -353,31 +353,66 @@ func TestTrace_FileNeverInTrace_AbsenceIsNotADeadBranchClaim(t *testing.T) {
 	// executed within it: the file itself IS in FilesInTrace, but the line
 	// is absent from its ExecutedLines entry -- a structurally different
 	// (and weaker) absence claim than the file-never-seen case above.
+	//
+	// VACUOUS-TEST FIX (2026-07-27): the only assertion that distinguished this
+	// subtest from its sibling was `if l == 999`, against a fixture whose lines
+	// are {3,5,8,10}. No code path in parse.go can synthesise a line number
+	// absent from the records, so that check was unfalsifiable, and the
+	// remaining two checks are subsumed by the verbatim DeepEqual on
+	// ExecutedLines/FilesInTrace asserted earlier in this file. The DISTINCTION
+	// the subtest is named for — that the two absence claims are observably
+	// different — was tested by nothing.
+	//
+	// It now asserts that distinction directly, by running both queries and
+	// comparing their shapes. Collapsing the two (e.g. dropping FilesInTrace,
+	// or listing every queried file in it) fails this.
 	t.Run("known file with an unobserved line is a distinct absence claim", func(t *testing.T) {
+		const known, unseen = "/proj/CMakeLists.txt", "/proj/never/Seen.cmake"
+
 		res := Trace(context.Background(), Args{TracePath: path}, defaultDeps())
-		var sawKnownFile bool
-		for _, fl := range res.ExecutedLines {
-			if fl.File != "/proj/CMakeLists.txt" {
-				continue
-			}
-			sawKnownFile = true
-			for _, l := range fl.Lines {
-				if l == 999 {
-					t.Fatalf("line 999 unexpectedly present in a fixture that never recorded it")
+
+		inFiles := func(want string) bool {
+			for _, f := range res.FilesInTrace {
+				if f == want {
+					return true
 				}
 			}
+			return false
 		}
-		if !sawKnownFile {
-			t.Fatalf("/proj/CMakeLists.txt missing from ExecutedLines entirely")
-		}
-		var fileKnown bool
-		for _, f := range res.FilesInTrace {
-			if f == "/proj/CMakeLists.txt" {
-				fileKnown = true
+		linesFor := func(want string) ([]int, bool) {
+			for _, fl := range res.ExecutedLines {
+				if fl.File == want {
+					return fl.Lines, true
+				}
 			}
+			return nil, false
 		}
-		if !fileKnown {
-			t.Fatalf("/proj/CMakeLists.txt missing from FilesInTrace")
+
+		// Claim A (file never processed): absent from FilesInTrace entirely,
+		// so NOTHING about any line inside it is knowable.
+		if inFiles(unseen) {
+			t.Fatalf("a file that never appears in the trace is listed in FilesInTrace %v — the caller can no "+
+				"longer tell \"never processed\" from \"processed, line not observed\"", res.FilesInTrace)
+		}
+		if _, ok := linesFor(unseen); ok {
+			t.Fatalf("a never-seen file has an ExecutedLines entry; positive evidence was invented for it")
+		}
+
+		// Claim B (file processed, line not observed): PRESENT in FilesInTrace,
+		// with an exact observed-line set. Pinning the set verbatim is what
+		// makes "line N was not observed" a checked consequence rather than an
+		// unfalsifiable guess about one arbitrary number.
+		if !inFiles(known) {
+			t.Fatalf("%s is missing from FilesInTrace %v, so its lines cannot be interpreted at all", known, res.FilesInTrace)
+		}
+		lines, ok := linesFor(known)
+		if !ok {
+			t.Fatalf("%s missing from ExecutedLines entirely", known)
+		}
+		wantLines := []int{3, 5, 8, 10}
+		if !reflect.DeepEqual(lines, wantLines) {
+			t.Fatalf("ExecutedLines[%s] = %v, want exactly %v — the absence of any other line is only a real claim "+
+				"if the observed set itself is pinned", known, lines, wantLines)
 		}
 	})
 }
@@ -548,13 +583,23 @@ type singleReaderFS struct{ rc io.ReadCloser }
 func (s *singleReaderFS) Open(string) (io.ReadCloser, error) { return s.rc, nil }
 
 // F26: a request canceled BEFORE the call fails closed without reading at all.
+//
+// VACUOUS-TEST FIX (2026-07-27): the read-volume and reader-closed assertions
+// used to be guarded by `if fs.last != nil && ...`. Trace returns at its
+// ctx.Err() check BEFORE deps.FS.Open is ever called, so fs.last is ALWAYS nil
+// and both bodies were unreachable — the sibling test's own comment above
+// states that fact ("a context already canceled at entry is caught by the cheap
+// guard before the file is even opened"), yet the dead guards remained, along
+// with a 200 000-line fixture built solely to feed them.
+//
+// "StopsReading" is now asserted as the fact it actually is: Open was never
+// called. That is falsifiable — moving the cancellation check below the Open
+// fails it — and it is a STRONGER claim than a read-volume bound.
 func TestF26_CanceledRequestFailsClosedAndStopsReading(t *testing.T) {
-	var big strings.Builder
-	big.WriteString("{\"version\":{\"major\":1,\"minor\":0}}\n")
-	for i := 1; i <= 200000; i++ {
-		fmt.Fprintf(&big, "{\"file\":\"/p/CMakeLists.txt\",\"line\":%d,\"cmd\":\"message\",\"args\":[\"x\"]}\n", i)
-	}
-	fs := &streamFS{content: big.String()}
+	// Small on purpose: the content must never be read, and pinning that is
+	// the point of the test.
+	fs := &streamFS{content: "{\"version\":{\"major\":1,\"minor\":0}}\n" +
+		"{\"file\":\"/p/CMakeLists.txt\",\"line\":1,\"cmd\":\"message\",\"args\":[\"x\"]}\n"}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -568,12 +613,9 @@ func TestF26_CanceledRequestFailsClosedAndStopsReading(t *testing.T) {
 		t.Fatalf("a canceled parse returned partial data (records=%d executed=%d chain=%d); it must fail closed",
 			len(res.Records), len(res.ExecutedLines), len(res.IncludeChain))
 	}
-	if fs.last != nil && fs.last.read > int64(len(big.String()))/2 {
-		t.Fatalf("read %d of %d bytes under an already-canceled context — cancellation is not being observed "+
-			"during the read", fs.last.read, len(big.String()))
-	}
-	if fs.last != nil && !fs.last.closed {
-		t.Fatal("the trace reader was not closed on the cancellation path")
+	if fs.last != nil {
+		t.Fatalf("the trace file was OPENED (%d bytes read) under an already-canceled context — a caller that has "+
+			"gone away must cost no I/O at all, and an opened handle is also one more thing to leak", fs.last.read)
 	}
 }
 

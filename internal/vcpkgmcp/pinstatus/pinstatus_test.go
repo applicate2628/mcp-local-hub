@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -701,26 +702,44 @@ func unresolvedHeadRefVariable(t *testing.T, p PortResult) string {
 
 // TestNoCodePathProducesBehind is a static assertion over the CLOSED enums:
 // since Status and Reason are the only vocabulary any code path in this
-// package can assign (see pinstatus.go), proving none of the declared
-// constants is or contains "behind" proves no code path can ever produce
-// it.
+// package can assign (see pinstatus.go), proving no declared constant is or
+// contains "behind" proves no code path can ever produce it.
+//
+// VACUOUS-TEST FIX (2026-07-27): that argument only holds if the set really is
+// the closed enum, and it was not. The test iterated a HAND-MAINTAINED list of
+// 11 Reason literals while types.go declares 16 — commit_pin_abbreviated,
+// remote_query_timeout, remote_query_canceled, remote_ref_limit and
+// remote_url_credential_bearing were never checked, and a newly added reason
+// would simply be absent from the list too. Comparing literals against a
+// literal is also a tautology: nothing in the package is exercised.
+//
+// The set is now DERIVED from types.go, so the closure claim is one the test
+// actually establishes and a new member is covered the moment it is declared.
+// The count guard is what stops the derivation from silently matching nothing
+// and turning the loop back into a no-op.
 func TestNoCodePathProducesBehind(t *testing.T) {
-	reasons := []Reason{
-		ReasonNotGitComparable,
-		ReasonPinNotAtTip,
-		ReasonRefUnresolvable,
-		ReasonRefNotFoundOnRemote,
-		ReasonNamedRefNotComparable,
-		ReasonHeadRefUnresolvable,
-		ReasonRemoteQueryFailed,
-		ReasonNetworkDisabled,
-		ReasonPortfileUnparsable,
-		ReasonGuardUnresolvable,
-		ReasonMultipleFetchCalls,
+	src, err := os.ReadFile("types.go")
+	if err != nil {
+		t.Fatalf("read the enum declaration: %v", err)
 	}
-	for _, r := range reasons {
-		if strings.Contains(strings.ToLower(string(r)), "behind") {
-			t.Fatalf("reason %q must never be/contain %q", r, "behind")
+	// Matches the `ReasonX Reason = "value"` / `BatchReasonX BatchReason =
+	// "value"` const declarations, capturing the wire value.
+	declRE := regexp.MustCompile(`(?m)^\s*\w+\s+(?:Batch)?Reason\s*=\s*"([a-z0-9_]+)"`)
+	matches := declRE.FindAllStringSubmatch(string(src), -1)
+
+	// Guard the instrument before trusting it: if the regexp ever stops
+	// matching (a rename, a reformat, a move to another file), an empty set
+	// would make every assertion below pass without checking anything.
+	const minKnownReasons = 16
+	if len(matches) < minKnownReasons {
+		t.Fatalf("derived only %d reason constants from types.go, want at least %d — the extraction is broken, so "+
+			"this test would otherwise pass over an empty set", len(matches), minKnownReasons)
+	}
+
+	for _, m := range matches {
+		if strings.Contains(strings.ToLower(m[1]), "behind") {
+			t.Fatalf("reason %q must never be/contain %q — this package cannot prove a differing pin is BEHIND "+
+				"rather than diverged or rebased away", m[1], "behind")
 		}
 	}
 	statuses := []Status{evidence.StatusOK, evidence.StatusFailed, evidence.StatusUnknown}
@@ -1150,39 +1169,92 @@ func TestF24_CompareURLIsBuiltFromTheRedactedRemoteNotTheRawOne(t *testing.T) {
 	}
 }
 
-// F24 (invariant): whatever CompareURL a real call produces is derived from
-// the EMITTED (redacted) remote, never from a separately-held raw spelling.
-func TestF24_CompareURLDerivesFromTheEmittedRemote(t *testing.T) {
-	dir := newPort(t, "gitlab-compare", `vcpkg_from_gitlab(
-    OUT_SOURCE_PATH SOURCE_PATH
-    GITLAB_URL https://gitlab.example
-    REPO group/proj
-    REF `+commitA+`
-    SHA512 0
-)`)
-	remote := "https://gitlab.example/group/proj.git"
-	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
-		FS:         DefaultFS(),
-		RemoteRefs: fakeRemote(map[string]map[string]string{remote: {"HEAD": commitB}}, nil),
-		Now:        fixedNow(),
-	}).Ports[0]
+// VACUOUS-TEST FIX (2026-07-27): TestF24_CompareURLDerivesFromTheEmittedRemote
+// was DELETED here rather than repaired.
+//
+// It claimed to pin that "whatever CompareURL a real call produces is derived
+// from the EMITTED (redacted) remote, never from a separately-held raw
+// spelling", but its fixture remote was credential-free
+// (https://gitlab.example/group/proj.git). redactURL returns the ORIGINAL
+// spelling byte-for-byte when nothing changed, so p.Remote.URL and the raw URL
+// were the SAME STRING and its
+// strings.HasPrefix(p.CompareURL, TrimSuffix(p.Remote.URL, ".git")) assertion
+// held identically whether production fed buildCompareURL the raw remote or the
+// redacted one. It could not distinguish the two, which is the only thing its
+// name promised.
+//
+// No end-to-end fixture can distinguish them either: the only remote for which
+// redaction changes the string is one pinStatusOne refuses before CompareURL is
+// ever built (hasEmbeddedCredential), which the sibling test's own comment
+// records. That sibling —
+// TestF24_CompareURLIsBuiltFromTheRedactedRemoteNotTheRawOne, immediately above
+// — already asserts the wiring DIRECTLY with a credential-bearing remote, and
+// verifies its own fixture still demonstrates the hazard before asserting. It
+// is the binding version of the same claim, so nothing is lost.
 
-	if p.CompareURL == "" {
-		t.Fatalf("no CompareURL produced; fixture does not exercise the path: %+v", p)
+// F25: the whole-output byte ceiling is the backstop for the case the LINE
+// ceiling cannot catch — a remote streaming endlessly in lines that are each
+// individually legal.
+//
+// VACUOUS-TEST FIX (2026-07-27): this test used to feed
+// strings.Repeat("x", MaxRemoteRefLineBytes+1) — 8193 bytes with no newline —
+// and assert only errors.Is(err, ErrRemoteRefLimit). That trips the LINE
+// ceiling in readBoundedLine at 8 KiB; MaxRemoteOutputBytes is 32 MiB and its
+// check was never reached. Both ceilings wrap the same sentinel, so the
+// assertion could not tell them apart: deleting the whole
+// `consumed > MaxRemoteOutputBytes` branch left the test green, and it was a
+// byte-for-byte duplicate of TestF25_OverlongRefLineIsRefusedNotBuffered.
+//
+// The test's old premise was wrong in the same way: an unterminated stream is
+// caught by the line ceiling precisely BECAUSE it has no newline. The output
+// ceiling's real job is the opposite shape, which this now exercises — lines
+// short enough to pass the line ceiling, and (being tab-free) not refs, so the
+// MaxRemoteRefs ceiling is not reached either. The reader generates its bytes
+// rather than materializing 32 MiB.
+func TestF25_TotalOutputCeilingTripsOnManyIndividuallyLegalLines(t *testing.T) {
+	const lineLen = 4096
+	line := strings.Repeat("x", lineLen-1) + "\n" // no tab: not a ref, so refs stays empty
+
+	if lineLen > MaxRemoteRefLineBytes {
+		t.Fatalf("precondition failed: each line must PASS the line ceiling (%d), or this test just repeats the "+
+			"line-ceiling test; lineLen=%d", MaxRemoteRefLineBytes, lineLen)
 	}
-	base := strings.TrimSuffix(p.Remote.URL, ".git")
-	if !strings.HasPrefix(p.CompareURL, base) {
-		t.Fatalf("CompareURL %q is not derived from the emitted remote %q", p.CompareURL, p.Remote.URL)
+	if wouldBeRefs := MaxRemoteOutputBytes/lineLen + 1; wouldBeRefs <= MaxRemoteRefs {
+		// Not fatal — it only matters that these lines are not refs at all —
+		// but state the reasoning so the fixture's shape is not accidental.
+		t.Logf("note: %d lines are needed; they carry no tab so none is counted as a ref", wouldBeRefs)
+	}
+
+	_, err := parseLsRemoteStream(&repeatingReader{chunk: []byte(line)})
+	if !errors.Is(err, ErrRemoteRefLimit) {
+		t.Fatalf("err = %v, want ErrRemoteRefLimit — a remote streaming past the %d-byte whole-output ceiling in "+
+			"individually legal lines must be refused, or it can size our memory without ever tripping the line cap",
+			err, MaxRemoteOutputBytes)
+	}
+	if !strings.Contains(err.Error(), "output exceeded") {
+		t.Fatalf("err = %v, want the OUTPUT ceiling (\"output exceeded\"); a line- or ref-ceiling error here means the "+
+			"fixture is testing a different bound than the one this test is named for", err)
 	}
 }
 
-// F25: the whole-output byte ceiling is a backstop for a remote that streams
-// forever WITHOUT newlines the line ceiling could trip on.
-func TestF25_TotalOutputCeilingTripsWithoutAnyNewline(t *testing.T) {
-	_, err := parseLsRemoteStream(strings.NewReader(strings.Repeat("x", MaxRemoteRefLineBytes+1)))
-	if !errors.Is(err, ErrRemoteRefLimit) {
-		t.Fatalf("err = %v, want ErrRemoteRefLimit for an unterminated oversized stream", err)
+// repeatingReader emits chunk forever, so a multi-megabyte ceiling can be
+// exercised without allocating a multi-megabyte fixture.
+type repeatingReader struct {
+	chunk []byte
+	off   int
+}
+
+func (r *repeatingReader) Read(p []byte) (int, error) {
+	n := 0
+	for n < len(p) {
+		c := copy(p[n:], r.chunk[r.off:])
+		n += c
+		r.off += c
+		if r.off >= len(r.chunk) {
+			r.off = 0
+		}
 	}
+	return n, nil
 }
 
 // =====================================================================
