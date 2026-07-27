@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"os"
 	"sort"
@@ -180,82 +181,83 @@ func boundClientNames(bindings []config.ClientBinding) map[string]bool {
 	return out
 }
 
-// clientHasActiveLSPRouterReplacement reports whether `client` ALREADY routes
-// `language` through the shared hub LSP-router entry — i.e. it holds a live,
-// enabled, hub-owned `mcp-language-server-<lang>` entry pointing at the
-// router's own /lsp/<lang>/mcp path.
-//
-// This is the second way a client can hold a valid managed replacement for a
-// direct stdio LSP entry, and it is INDEPENDENT of the default-install set:
-// ensureLSPRouterClientEntriesWithLoaded deliberately maintains router entries
-// for non-default clients that carry existing mcphub evidence
-// (clientHasLSPRouterEnablementEvidence), so an operator who explicitly
-// enabled cursor for the router has a working replacement even though cursor
-// is absent from effectiveClientBindings. Excluding such a client from cleanup
-// leaves its superseded direct stdio entry live ALONGSIDE the router entry —
-// duplicate servers/tools plus a retained legacy process (bot PR #583, the
-// follow-on finding against the first narrowing fix).
-//
-// The ownership decision itself is NOT re-implemented here: it delegates to
-// entryIsOwnedLSPRouterForLanguage, the single owner shared with the router
-// reconcile and with shouldPreserveSharedLSPRouterEntry. Disabled entries do
-// NOT count: a disabled router entry is not a working replacement, so removing
-// the direct entry would disconnect the client anyway.
-//
-// PORT GATE (routerPort). Ownership alone is NOT sufficient here, because this
-// probe is the gate on a DESTRUCTIVE removal and must prove the replacement
-// actually WORKS, not merely that we own the entry. entryIsOwnedLSPRouterForLanguage
-// answers the ownership question and short-circuits on `reservedName` — which is
-// unconditionally true at this call site, since the entry was fetched BY
-// LSPRouterEntryName(language). Passing a non-zero guiPort into it would NOT
-// help: its `reservedName || (guiPort > 0 && ...)` disjunction still returns
-// owned on the name alone. So the port must be checked HERE.
-//
-// Without it the probe degenerated to "an entry with the reserved name exists,
-// is enabled, and its URL parses as /lsp/<lang>/mcp" — at ANY port. An operator
-// who changed gui_server.port (in Settings, pending-restart) or launched the GUI
-// with an explicit `--port` that beats the persisted value leaves stale-port
-// router entries behind until EnsureLSPRouterClientEntries re-runs; register
-// would read routed=true and delete the client's LIVE direct entry, leaving one
-// dead router entry and no working LSP — exactly the "removed with nothing put
-// in its place" defect this gate exists to prevent.
-//
-// `mcphub gui --reset-port` is NOT one of those scenarios, despite the name: it
-// clears the HUB-AGGREGATE port in hub-mcp.endpoint.json (ResetHubPortContext
-// sets ep.Port = 0) and refuses outright while a GUI holds the single-instance
-// lock, whereas router entries encode the GUI SERVER port via
-// LSPRouterURL(guiPort, language). Two different ports; --reset-port cannot
-// strand a router entry.
-//
-// routerPort is resolved ONCE per cleanup run by the caller (rather than per
-// probe) so every client/language decision in one register is judged against
-// the same port, and a single settings read serves the whole loop. A
-// non-positive routerPort means the caller could not resolve it; we then fail
-// CLOSED (no provable replacement → keep the operator's working direct entry),
-// matching the GetEntry-error posture above.
-//
-// SCOPE OF THE GATE: port EQUALITY against the port this process knows the
-// router is serving — deliberately NOT a liveness probe of that port. See
-// cleanupDirectLanguageServerEntriesAfterRegister's routerPort resolution for
-// why a dial would be the wrong instrument here.
-func clientHasActiveLSPRouterReplacement(client registerClient, language string, routerPort int) (bool, error) {
+type routerReplacementCandidateKind string
+
+const (
+	routerReplacementNotCandidate  routerReplacementCandidateKind = "not-candidate"
+	routerReplacementStructural    routerReplacementCandidateKind = "structural-candidate"
+	routerReplacementIndeterminate routerReplacementCandidateKind = "indeterminate"
+)
+
+type routerReplacementCandidate struct {
+	kind       routerReplacementCandidateKind
+	entryPort  int
+	diagnostic string
+}
+
+// inspectClientLSPRouterReplacement is the single configured-entry inspection
+// owner. It validates entry presence, enablement, route shape, language,
+// ownership, and the positive observed port without comparing that port with
+// the separately resolved GUI port.
+func inspectClientLSPRouterReplacement(client registerClient, clientName, language string) routerReplacementCandidate {
 	entryName := LSPRouterEntryName(language)
 	live, err := client.GetEntry(entryName)
 	if err != nil {
-		return false, err
+		return routerReplacementCandidate{
+			kind: routerReplacementIndeterminate,
+			diagnostic: fmt.Sprintf(
+				"%s LSP router replacement probe for %s failed: %v; keeping any direct %s entry",
+				clientName,
+				language,
+				err,
+				language,
+			),
+		}
 	}
 	if live == nil || live.Disabled {
-		return false, nil
+		return routerReplacementCandidate{kind: routerReplacementNotCandidate}
 	}
-	if routerPort <= 0 {
-		return false, nil
-	}
-	_, entryPort, ok := lspRouterURLLanguagePort(entryLSPRouterURL(live))
-	if !ok || entryPort != routerPort {
-		return false, nil
+	entryLanguage, entryPort, ok := lspRouterURLLanguagePort(entryLSPRouterURL(live))
+	if !ok || entryPort <= 0 || !strings.EqualFold(entryLanguage, language) {
+		return routerReplacementCandidate{kind: routerReplacementNotCandidate}
 	}
 	owned, _ := entryIsOwnedLSPRouterForLanguage(entryName, live, language, 0)
-	return owned, nil
+	if !owned {
+		return routerReplacementCandidate{kind: routerReplacementNotCandidate}
+	}
+	return routerReplacementCandidate{
+		kind:      routerReplacementStructural,
+		entryPort: entryPort,
+	}
+}
+
+func routerReplacementPortMatches(observedPort, resolvedPort int) bool {
+	return observedPort > 0 && resolvedPort > 0 && observedPort == resolvedPort
+}
+
+// ManagedGUIIdentity is caller-owned evidence for the running GUI process whose
+// shared LSP router may replace direct language-server entries.
+type ManagedGUIIdentity struct {
+	Port    int
+	PID     int
+	Version string
+}
+
+const (
+	managedRouterProbeTimeout = 500 * time.Millisecond
+	managedRouterProbeBodyMax = 4 * 1024
+)
+
+type managedRouterSnapshot struct {
+	port         int
+	liveManaged  bool
+	failureClass string
+}
+
+type managedRouterPingResponse struct {
+	OK      bool   `json:"ok"`
+	PID     int    `json:"pid"`
+	Version string `json:"version"`
 }
 
 // RegisterOpts controls a Register invocation.
@@ -298,6 +300,11 @@ type RegisterOpts struct {
 	// seam rather than two. Zero keeps the pre-existing settings-read behavior,
 	// so every existing caller is unchanged.
 	GUIPort int
+
+	// ManagedGUIIdentity is caller-owned evidence for the running GUI process
+	// at GUIPort. The zero value cannot authorize cleanup based only on a
+	// pre-existing shared-router entry.
+	ManagedGUIIdentity ManagedGUIIdentity
 
 	Writer io.Writer // progress output; nil = os.Stderr
 }
@@ -509,7 +516,7 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	// what left a router-routed opt-in client's superseded entry live next to
 	// its router entry. See lspCleanupAliasesForClient.
 	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(
-		bySpec, languages, canonical, allClients, boundClientNames(bindings), opts.GUIPort, w)...)
+		bySpec, languages, canonical, allClients, boundClientNames(bindings), opts.GUIPort, opts.ManagedGUIIdentity, w)...)
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
 	// gate. This is the operator-action seed: after an explicit register
@@ -549,6 +556,290 @@ func preflightSchedulerlessRegisterSupervisor() error {
 	return nil
 }
 
+type lspCleanupAliasPlan struct {
+	boundAliases        map[string]bool
+	routerAliasesByPort map[int]map[string]bool
+	diagnostics         []string
+	complete            bool
+}
+
+type directCleanupMatchResult struct {
+	matches     []clients.LanguageServerStdioEntry
+	diagnostics []string
+	complete    bool
+}
+
+type directCleanupClientPlan struct {
+	clientName          string
+	client              registerClient
+	boundMatches        []clients.LanguageServerStdioEntry
+	routerMatchesByPort map[int][]clients.LanguageServerStdioEntry
+}
+
+func (p directCleanupClientPlan) routerMatchesForPort(resolvedPort int) []clients.LanguageServerStdioEntry {
+	for observedPort, matches := range p.routerMatchesByPort {
+		if routerReplacementPortMatches(observedPort, resolvedPort) {
+			return matches
+		}
+	}
+	return nil
+}
+
+type directCleanupPreflight struct {
+	clients     []directCleanupClientPlan
+	diagnostics []string
+	complete    bool
+}
+
+func (p directCleanupPreflight) hasRouterMatches() bool {
+	for _, clientPlan := range p.clients {
+		for _, matches := range clientPlan.routerMatchesByPort {
+			if len(matches) > 0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (p directCleanupPreflight) hasRouterMatchesForPort(resolvedPort int) bool {
+	for _, clientPlan := range p.clients {
+		if len(clientPlan.routerMatchesForPort(resolvedPort)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+type directCleanupDeps struct {
+	resolveRouterPort func(int) (int, error)
+	probeRouter       func(int, ManagedGUIIdentity) managedRouterSnapshot
+	matchDirect       func(registerClient, string, map[string]bool, string) directCleanupMatchResult
+}
+
+func buildDirectCleanupPreflight(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	boundClients map[string]bool,
+	deps directCleanupDeps,
+) directCleanupPreflight {
+	preflight := directCleanupPreflight{complete: true}
+	clientNames := make([]string, 0, len(allClients))
+	for clientName := range allClients {
+		clientNames = append(clientNames, clientName)
+	}
+	sort.Strings(clientNames)
+
+	for _, clientName := range clientNames {
+		client := allClients[clientName]
+		if client == nil || !client.Exists() {
+			continue
+		}
+		aliases := lspCleanupAliasesForClient(
+			client,
+			clientName,
+			bySpec,
+			languages,
+			boundClients[clientName],
+		)
+		preflight.diagnostics = append(preflight.diagnostics, aliases.diagnostics...)
+		if !aliases.complete {
+			preflight.complete = false
+		}
+
+		clientPlan := directCleanupClientPlan{
+			clientName:          clientName,
+			client:              client,
+			routerMatchesByPort: map[int][]clients.LanguageServerStdioEntry{},
+		}
+		if len(aliases.boundAliases) > 0 {
+			result := deps.matchDirect(client, clientName, aliases.boundAliases, canonicalWorkspace)
+			preflight.diagnostics = append(preflight.diagnostics, result.diagnostics...)
+			if !result.complete {
+				preflight.complete = false
+			} else {
+				clientPlan.boundMatches = result.matches
+			}
+		}
+
+		ports := make([]int, 0, len(aliases.routerAliasesByPort))
+		for port := range aliases.routerAliasesByPort {
+			ports = append(ports, port)
+		}
+		sort.Ints(ports)
+		for _, port := range ports {
+			result := deps.matchDirect(client, clientName, aliases.routerAliasesByPort[port], canonicalWorkspace)
+			preflight.diagnostics = append(preflight.diagnostics, result.diagnostics...)
+			if !result.complete {
+				preflight.complete = false
+				continue
+			}
+			if len(result.matches) > 0 {
+				clientPlan.routerMatchesByPort[port] = result.matches
+			}
+		}
+		preflight.clients = append(preflight.clients, clientPlan)
+	}
+	return preflight
+}
+
+func probeManagedRouter(resolvedPort int, expected ManagedGUIIdentity) managedRouterSnapshot {
+	snapshot := managedRouterSnapshot{port: resolvedPort}
+	switch {
+	case resolvedPort <= 0:
+		snapshot.failureClass = "port-unresolved"
+		return snapshot
+	case expected.Port <= 0 || expected.PID <= 0 || strings.TrimSpace(expected.Version) == "":
+		snapshot.failureClass = "identity-not-supplied"
+		return snapshot
+	case expected.Port != resolvedPort:
+		snapshot.failureClass = "port-mismatch"
+		return snapshot
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), managedRouterProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodGet,
+		fmt.Sprintf("http://127.0.0.1:%d/api/ping", resolvedPort),
+		nil,
+	)
+	if err != nil {
+		snapshot.failureClass = "stopped-or-timeout"
+		return snapshot
+	}
+	client := &http.Client{
+		Timeout: managedRouterProbeTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		snapshot.failureClass = "stopped-or-timeout"
+		return snapshot
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		snapshot.failureClass = "http-status"
+		return snapshot
+	}
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		snapshot.failureClass = "content-type"
+		return snapshot
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, managedRouterProbeBodyMax+1))
+	if err != nil || len(body) > managedRouterProbeBodyMax {
+		snapshot.failureClass = "malformed-response"
+		return snapshot
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	var ping managedRouterPingResponse
+	if err := decoder.Decode(&ping); err != nil {
+		snapshot.failureClass = "malformed-response"
+		return snapshot
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		snapshot.failureClass = "malformed-response"
+		return snapshot
+	}
+	if !ping.OK || ping.PID <= 0 || strings.TrimSpace(ping.Version) == "" ||
+		ping.PID != expected.PID || ping.Version != expected.Version {
+		snapshot.failureClass = "identity-mismatch"
+		return snapshot
+	}
+
+	snapshot.liveManaged = true
+	return snapshot
+}
+
+func managedRouterProofWarning(failureClass string) string {
+	return fmt.Sprintf(
+		"LSP router managed-identity proof unavailable (%s); keeping direct LSP entries whose only replacement is a pre-existing shared-router entry",
+		failureClass,
+	)
+}
+
+func directLanguageServerCleanupMatches(
+	client registerClient,
+	clientName string,
+	aliases map[string]bool,
+	canonicalWorkspace string,
+) directCleanupMatchResult {
+	entries, err := findStdioLanguageServerCandidatesForDirectCleanup(client)
+	if err != nil {
+		return directCleanupMatchResult{
+			diagnostics: []string{fmt.Sprintf("%s direct LSP scan failed: %v", clientName, err)},
+			complete:    false,
+		}
+	}
+	matches, err := matchingDirectLanguageServerEntries(client, entries, aliases, canonicalWorkspace)
+	if err != nil {
+		return directCleanupMatchResult{
+			diagnostics: []string{fmt.Sprintf("%s direct LSP survivor scan failed: %v", clientName, err)},
+			complete:    false,
+		}
+	}
+
+	if aliases["go"] || aliases["gopls"] {
+		stdioEntries, err := removableStdioEntriesForDirectCleanup(client)
+		if err != nil {
+			return directCleanupMatchResult{
+				diagnostics: []string{fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err)},
+				complete:    false,
+			}
+		}
+		goplsMatches, err := matchingDirectGoplsMCPEntries(client, stdioEntries, aliases, canonicalWorkspace)
+		if err != nil {
+			return directCleanupMatchResult{
+				diagnostics: []string{fmt.Sprintf("%s direct gopls survivor scan failed: %v", clientName, err)},
+				complete:    false,
+			}
+		}
+		matches = append(matches, goplsMatches...)
+	}
+	return directCleanupMatchResult{
+		matches:  dedupeDirectLanguageServerEntries(matches),
+		complete: true,
+	}
+}
+
+type directCleanupWarningAccumulator struct {
+	writer   io.Writer
+	seen     map[string]bool
+	warnings []string
+}
+
+func newDirectCleanupWarningAccumulator(writer io.Writer) *directCleanupWarningAccumulator {
+	return &directCleanupWarningAccumulator{
+		writer: writer,
+		seen:   map[string]bool{},
+	}
+}
+
+func (a *directCleanupWarningAccumulator) addDiagnostic(warning string) {
+	if warning == "" || a.seen[warning] {
+		return
+	}
+	a.seen[warning] = true
+	a.warnings = append(a.warnings, warning)
+}
+
+func (a *directCleanupWarningAccumulator) addProofWarning(warning string) {
+	if warning == "" || a.seen[warning] {
+		return
+	}
+	a.seen[warning] = true
+	a.warnings = append(a.warnings, warning)
+	fmt.Fprintf(a.writer, "warning: %s\n", warning)
+}
+
 func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	bySpec map[string]config.LanguageSpec,
 	languages []string,
@@ -556,110 +847,100 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	allClients map[string]registerClient,
 	boundClients map[string]bool,
 	guiPort int,
+	expectedManagedGUI ManagedGUIIdentity,
 	w io.Writer,
 ) []string {
+	return a.cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+		bySpec,
+		languages,
+		canonicalWorkspace,
+		allClients,
+		boundClients,
+		guiPort,
+		expectedManagedGUI,
+		w,
+		directCleanupDeps{
+			resolveRouterPort: a.lspRouterGUIPort,
+			probeRouter:       probeManagedRouter,
+			matchDirect:       directLanguageServerCleanupMatches,
+		},
+	)
+}
+
+func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	boundClients map[string]bool,
+	guiPort int,
+	expectedManagedGUI ManagedGUIIdentity,
+	w io.Writer,
+	deps directCleanupDeps,
+) []string {
 	keepN := a.EffectiveBackupKeepN()
-	var warnings []string
-	// Resolve the live LSP-router port ONCE for the whole cleanup run. It is the
-	// port a router entry must actually name to count as a working replacement
-	// (see clientHasActiveLSPRouterReplacement's PORT GATE). Resolving once keeps
-	// every client/language decision in this register judged against the SAME
-	// port and costs one settings read instead of one per probe. On a resolution
-	// failure we pass 0 (fail closed: no router-based replacement is provable, so
-	// direct entries are kept) and warn once rather than per client/language.
-	//
-	// guiPort is the CALLER's live bound port when it knows one
-	// (RegisterOpts.GUIPort — the GUI project-LSP toggle passes s.Port()); 0
-	// falls back to reading gui_server.port, which is the best a CLI register
-	// with no live server in-process can do.
-	//
-	// WHY PORT EQUALITY AND NOT A LIVENESS DIAL. The gate's question is "would
-	// removing this direct entry disconnect the client", and the honest answer
-	// is decided by CONFIGURATION, not by whether a socket answers right now.
-	// A dial cannot separate the two failure modes that matter: a stale-PORT
-	// entry is permanently wrong (nothing will ever serve 9199) while a
-	// correct-port entry whose GUI is merely not running this second is a fully
-	// working replacement the moment the operator starts the GUI — and the CLI
-	// `mcphub register` case has NO GUI running by construction, so a liveness
-	// probe there would fail CLOSED on every single client and silently disable
-	// the cleanup half of this gate (superseded direct entries would then
-	// accumulate beside router entries forever — the exact over-correction
-	// TestRegister_CleanupCoversOptInClientRoutedThroughSharedLSPRouter pins
-	// against). A dial is also a TOCTOU read: the listener can die one
-	// millisecond after it answers, so a green probe proves nothing durable
-	// while costing a network timeout per (client, language). Port equality
-	// against the port THIS process knows the router serves is the strongest
-	// check that is both decidable offline and stable — and the liveness
-	// concern is already owned elsewhere and end-to-end: the hub listener
-	// health watcher + bounded restart driver (internal/gui/hub_listener.go)
-	// own "is the listener up", and EnsureLSPRouterClientEntries owns
-	// re-stamping entries when the port changes.
-	routerPort, routerPortErr := a.lspRouterGUIPort(guiPort)
-	if routerPortErr != nil {
-		routerPort = 0
-		warnings = append(warnings, fmt.Sprintf(
-			"LSP router port unresolved (%v); keeping every direct LSP entry whose replacement is a shared router entry", routerPortErr))
+	warnings := newDirectCleanupWarningAccumulator(w)
+	preflight := buildDirectCleanupPreflight(
+		bySpec,
+		languages,
+		canonicalWorkspace,
+		allClients,
+		boundClients,
+		deps,
+	)
+	for _, diagnostic := range preflight.diagnostics {
+		warnings.addDiagnostic(diagnostic)
 	}
-	for clientName, client := range allClients {
-		if client == nil || !client.Exists() {
-			continue
-		}
-		// REPLACEMENT GATE (per client, per language — see
-		// lspCleanupAliasesForClient). A direct entry is only ever removed when
-		// THIS client ends up with a working hub-managed replacement for THAT
-		// language. Everything below operates on the narrowed alias set.
-		aliases, aliasWarnings := lspCleanupAliasesForClient(client, clientName, bySpec, languages, boundClients[clientName], routerPort)
-		warnings = append(warnings, aliasWarnings...)
-		if len(aliases) == 0 {
-			continue
-		}
-		// WORKSPACE-AWARE register grain (architect REVISE → Option C): consume the
-		// branch-(a)+managed-only CANDIDATE source, NOT the conservative full-survivor
-		// FindStdioLanguageServerEntries (that one stays for the workspace-FREE
-		// `mcphub language-server cleanup`). The FILE-layer survivor is re-applied
-		// workspace-scoped inside matchingDirectLanguageServerEntries below.
-		entries, err := findStdioLanguageServerCandidatesForDirectCleanup(client)
+	if !preflight.complete {
+		return warnings.warnings
+	}
+
+	resolvedPort := 0
+	routerAuthorized := false
+	if preflight.hasRouterMatches() {
+		var err error
+		resolvedPort, err = deps.resolveRouterPort(guiPort)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s direct LSP scan failed: %v", clientName, err))
-			continue
+			warnings.addProofWarning(managedRouterProofWarning("port-unresolved"))
+			return warnings.warnings
 		}
-		matches, err := matchingDirectLanguageServerEntries(client, entries, aliases, canonicalWorkspace)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s direct LSP survivor scan failed: %v", clientName, err))
-			continue
-		}
-		if aliases["go"] || aliases["gopls"] {
-			stdioEntries, err := removableStdioEntriesForDirectCleanup(client)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err))
-			} else {
-				goplsMatches, err := matchingDirectGoplsMCPEntries(client, stdioEntries, aliases, canonicalWorkspace)
-				if err != nil {
-					warnings = append(warnings, fmt.Sprintf("%s direct gopls survivor scan failed: %v", clientName, err))
-				} else {
-					matches = append(matches, goplsMatches...)
-				}
+		if preflight.hasRouterMatchesForPort(resolvedPort) {
+			snapshot := deps.probeRouter(resolvedPort, expectedManagedGUI)
+			routerAuthorized = snapshot.liveManaged
+			if !snapshot.liveManaged {
+				warnings.addProofWarning(managedRouterProofWarning(snapshot.failureClass))
 			}
 		}
-		matches = dedupeDirectLanguageServerEntries(matches)
+	}
+
+	for _, clientPlan := range preflight.clients {
+		matches := append([]clients.LanguageServerStdioEntry(nil), clientPlan.boundMatches...)
+		if routerAuthorized {
+			matches = append(matches, clientPlan.routerMatchesForPort(resolvedPort)...)
+		}
 		if len(matches) == 0 {
 			continue
 		}
-		backupPath, err := client.BackupKeep(keepN)
+		backupPath, err := clientPlan.client.BackupKeep(keepN)
 		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s direct LSP backup failed: %v", clientName, err))
+			warnings.addDiagnostic(fmt.Sprintf("%s direct LSP backup failed: %v", clientPlan.clientName, err))
 			continue
 		}
-		fmt.Fprintf(w, "✓ %s backup before direct LSP cleanup: %s\n", clientName, backupPath)
+		fmt.Fprintf(w, "✓ %s backup before direct LSP cleanup: %s\n", clientPlan.clientName, backupPath)
 		for _, entry := range matches {
-			if err := client.RemoveEntry(entry.Name); err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s remove direct LSP entry %s failed: %v", clientName, entry.Name, err))
+			if err := clientPlan.client.RemoveEntry(entry.Name); err != nil {
+				warnings.addDiagnostic(fmt.Sprintf(
+					"%s remove direct LSP entry %s failed: %v",
+					clientPlan.clientName,
+					entry.Name,
+					err,
+				))
 				continue
 			}
-			fmt.Fprintf(w, "✓ %s removed direct LSP entry %s (--lsp %s)\n", clientName, entry.Name, entry.Language)
+			fmt.Fprintf(w, "✓ %s removed direct LSP entry %s (--lsp %s)\n", clientPlan.clientName, entry.Name, entry.Language)
 		}
 	}
-	return warnings
+	return warnings.warnings
 }
 
 func addLSPCleanupAlias(aliases map[string]bool, value string) {
@@ -669,62 +950,57 @@ func addLSPCleanupAlias(aliases map[string]bool, value string) {
 	}
 }
 
-// lspCleanupAliasesForClient builds the direct-entry match aliases for ONE
-// client. It is the single owner of the post-register cleanup's safety
-// invariant:
+// lspCleanupAliasesForClient builds the complete, port-independent alias plan
+// for one client. It is the single alias-composition owner for the
+// post-register cleanup's safety invariant:
 //
 //	a direct stdio LSP entry may be removed from a client only when that
 //	client is left with a working hub-managed replacement for THAT language.
 //
-// Two independent sources of a replacement qualify:
-//
-//  1. `bound` — this registration just wrote the client a managed entry for
-//     every registered language (the client is named by
-//     effectiveClientBindings).
-//  2. an already-live shared LSP-router entry for the individual language
-//     (clientHasActiveLSPRouterReplacement), which an opt-in client can hold
-//     without being in the default-install set. routerPort is the live router
-//     port that entry must name to count; see that function's PORT GATE.
-//
-// The grain is per (client, LANGUAGE), not per client, on purpose. A client
-// holding a router entry for `go` but not for `python` must have only its
-// `go` direct entry cleaned; promoting it to a whole-client opt-in would
-// delete its python entry with no replacement — reopening exactly the defect
-// the binding narrowing closed.
-//
-// A GetEntry failure is reported as a warning and treated as "no replacement"
-// (fail-closed): when we cannot confirm a replacement exists we keep the
-// operator's working direct entry rather than deleting it on an unread config.
+// Bound aliases are unchanged and never create router-proof need. Unbound
+// aliases are grouped by the structurally valid router entry's observed port.
+// Exact configured-port selection and managed-listener proof happen later,
+// against the cached groups. Any GetEntry error makes the plan incomplete and
+// carries the existing diagnostic to the cleanup-owned accumulator.
 func lspCleanupAliasesForClient(
 	client registerClient,
 	clientName string,
 	bySpec map[string]config.LanguageSpec,
 	languages []string,
 	bound bool,
-	routerPort int,
-) (map[string]bool, []string) {
-	aliases := map[string]bool{}
-	var warnings []string
+) lspCleanupAliasPlan {
+	plan := lspCleanupAliasPlan{
+		boundAliases:        map[string]bool{},
+		routerAliasesByPort: map[int]map[string]bool{},
+		complete:            true,
+	}
 	for _, lang := range languages {
 		spec, ok := bySpec[lang]
 		if !ok {
 			continue
 		}
-		if !bound {
-			routed, err := clientHasActiveLSPRouterReplacement(client, lang, routerPort)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf(
-					"%s LSP router replacement probe for %s failed: %v; keeping any direct %s entry", clientName, lang, err, lang))
-				continue
-			}
-			if !routed {
-				continue
-			}
+		if bound {
+			addLSPCleanupAlias(plan.boundAliases, lang)
+			addLSPCleanupAlias(plan.boundAliases, spec.LspCommand)
+			continue
 		}
-		addLSPCleanupAlias(aliases, lang)
-		addLSPCleanupAlias(aliases, spec.LspCommand)
+
+		candidate := inspectClientLSPRouterReplacement(client, clientName, lang)
+		switch candidate.kind {
+		case routerReplacementIndeterminate:
+			plan.complete = false
+			plan.diagnostics = append(plan.diagnostics, candidate.diagnostic)
+		case routerReplacementStructural:
+			aliases := plan.routerAliasesByPort[candidate.entryPort]
+			if aliases == nil {
+				aliases = map[string]bool{}
+				plan.routerAliasesByPort[candidate.entryPort] = aliases
+			}
+			addLSPCleanupAlias(aliases, lang)
+			addLSPCleanupAlias(aliases, spec.LspCommand)
+		}
 	}
-	return aliases, warnings
+	return plan
 }
 
 // directLSPSurvivorMatchesWorkspace is the SINGLE-OWNER cross-kind survivor

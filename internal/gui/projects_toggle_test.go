@@ -58,6 +58,54 @@ func decodeToggleResp(t *testing.T, rec *httptest.ResponseRecorder) projectToggl
 	return out
 }
 
+func TestProjectsToggle_RegisterSuppliesManagedGUIIdentity(t *testing.T) {
+	const (
+		expectedPID     = 42424
+		expectedVersion = "project-toggle-identity-test"
+	)
+	root := t.TempDir()
+	s := NewServer(Config{PID: expectedPID, Version: expectedVersion})
+
+	originalRegister := projectsToggleRegister
+	t.Cleanup(func() { projectsToggleRegister = originalRegister })
+	var (
+		gotRoot      string
+		gotLanguages []string
+		gotOpts      api.RegisterOpts
+		calls        int
+	)
+	projectsToggleRegister = func(_ *api.API, root string, languages []string, opts api.RegisterOpts) (*api.RegisterReport, error) {
+		calls++
+		gotRoot = root
+		gotLanguages = append([]string(nil), languages...)
+		gotOpts = opts
+		return &api.RegisterReport{Entries: []api.WorkspaceEntry{{Language: "go"}}}, nil
+	}
+
+	body := `{"root":"` + jsonEscPath(root) +
+		`","scope":"workspace-lsp","server":"mcp-language-server","enable":true,"languages":["go","python"]}`
+	rec := postToggle(t, s, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("register calls = %d, want 1", calls)
+	}
+	if gotRoot != root {
+		t.Fatalf("register root = %q, want %q", gotRoot, root)
+	}
+	if len(gotLanguages) != 2 || gotLanguages[0] != "go" || gotLanguages[1] != "python" {
+		t.Fatalf("register languages = %v, want [go python]", gotLanguages)
+	}
+	if gotOpts.GUIPort != 9081 {
+		t.Fatalf("RegisterOpts.GUIPort = %d, want 9081", gotOpts.GUIPort)
+	}
+	wantIdentity := api.ManagedGUIIdentity{Port: 9081, PID: expectedPID, Version: expectedVersion}
+	if gotOpts.ManagedGUIIdentity != wantIdentity {
+		t.Fatalf("RegisterOpts.ManagedGUIIdentity = %+v, want %+v", gotOpts.ManagedGUIIdentity, wantIdentity)
+	}
+}
+
 // TestProjectsToggle_ObjectMember_Cursor: enable then disable a cursor project
 // server; the .cursor/mcp.json member is added then removed.
 func TestProjectsToggle_ObjectMember_Cursor(t *testing.T) {

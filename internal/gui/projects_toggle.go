@@ -102,6 +102,10 @@ type projectToggleResponse struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
+var projectsToggleRegister = func(a *api.API, root string, languages []string, opts api.RegisterOpts) (*api.RegisterReport, error) {
+	return a.Register(root, languages, opts)
+}
+
 func registerProjectsToggleRoutes(s *Server) {
 	s.mux.HandleFunc("/api/projects/toggle", s.requireSameOrigin(s.projectsToggleHandler))
 }
@@ -166,15 +170,19 @@ func (s *Server) toggleWorkspaceLSP(w http.ResponseWriter, req projectToggleRequ
 	a := api.NewAPI()
 	resp := projectToggleResponse{Scope: req.Scope, Server: req.Server}
 	if req.Enable {
-		// GUIPort: this handler is the ONE Register caller that knows the LIVE
-		// bound GUI-server port, and the post-register cleanup gate needs it to
-		// judge a shared LSP-router entry. Those entries are WRITTEN with
-		// s.Port() (see lsp_router_control.go's LSPClientRouterOpts{GUIPort:
-		// s.Port()}), and an explicit `--port` beats the persisted
-		// gui_server.port, so leaving this 0 would make the gate compare against
-		// a setting the running server may not be using — matching a stale entry
-		// and deleting the client's live direct entry.
-		rep, err := a.Register(req.Root, req.Languages, api.RegisterOpts{GUIPort: s.Port()})
+		// This handler is the ONE Register caller that owns the running GUI
+		// identity. Supply the same Server's bound port, normalized PID, and
+		// version so cleanup can prove a pre-existing shared-router listener
+		// before treating it as a destructive replacement.
+		port := s.Port()
+		rep, err := projectsToggleRegister(a, req.Root, req.Languages, api.RegisterOpts{
+			GUIPort: port,
+			ManagedGUIIdentity: api.ManagedGUIIdentity{
+				Port:    port,
+				PID:     s.cfg.PID,
+				Version: s.cfg.Version,
+			},
+		})
 		if err != nil {
 			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
 			return
