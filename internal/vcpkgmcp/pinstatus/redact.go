@@ -180,6 +180,35 @@ func isEmitSafeQueryKey(key string) bool {
 // this package positively identifies as a credential. See argvSecretQueryKeys
 // for why this is a separate — and knowingly incomplete — predicate rather
 // than the emission rule above.
+//
+// # The empty-value skip is a deliberate wire-verdict change (recorded 2026-07-27)
+//
+// A parameter with an EMPTY value (`?token=`) is skipped, and so is one with no
+// "=" at all (`?token`). The predecessor predicate — `redactQuery(...) changed`
+// — skipped only the second, so it refused the first:
+//
+//	https://host/repo.git?token=   OLD: refused   NEW: queried
+//	https://host/re%zzpo?token=    OLD: refused   NEW: queried
+//
+// (measured this session by running the pre-37320feb predicate verbatim against
+// the current one.) 37320feb's own message asserted "the argv verdict is unmoved
+// in BOTH directions" and named `?access_token=` as a still-refused example; that
+// spelling is empty-valued, so it is one of the cases that moved. The claim was
+// wrong and is corrected here rather than in a commit nobody re-reads.
+//
+// The NEW behaviour is the correct one and is kept. This predicate's answer
+// becomes the closed wire verdict unknown(remote_url_credential_bearing), whose
+// contract in types.go is that the URL "embeds a credential". `?token=` embeds
+// NOTHING — there is no value, so there is nothing to leak through argv, which is
+// the only channel this refusal exists to close (see the file header). Refusing it
+// asserted a credential about an empty string: a conclusion, not an observation,
+// and the same fabricated-verdict class the rest of this file is built to prevent.
+// It also cost the caller a real answer — a live ls-remote that would have
+// succeeded — for no security gain.
+//
+// The skip is therefore the SAME rule redactQuery applies one function up, for
+// the mirrored reason: emission must not invent a secret that was not there, and
+// refusal must not assert one.
 func queryCarriesArgvSecret(rawQuery string) bool {
 	for _, part := range strings.Split(rawQuery, "&") {
 		key, value, hasValue := strings.Cut(part, "=")

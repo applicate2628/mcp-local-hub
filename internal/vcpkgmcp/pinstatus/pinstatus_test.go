@@ -1608,7 +1608,10 @@ func TestRedactURL_QueryValueRedactionIsAnAllowlist(t *testing.T) {
 			t.Errorf("redactURL(%q) = %q — an unclassifiable value is still redacted on EMISSION even though it is not refused on argv", notACredential, got)
 		}
 	}
-	// ...and a positively-identified one is still refused on both paths.
+	// ...and a positively-identified one carrying an ACTUAL VALUE is still
+	// refused on both paths. The value is load-bearing: see
+	// TestArgvRefusal_EmptyValuedSecretParameterIsNotRefused for the
+	// empty-valued spelling, whose verdict this commit's predecessor DID move.
 	for _, credential := range []string{
 		"https://host/repo.git?access_token=abc123",
 		"https://ho st/repo.git?access_token=abc123",
@@ -1616,5 +1619,72 @@ func TestRedactURL_QueryValueRedactionIsAnAllowlist(t *testing.T) {
 		if !hasEmbeddedCredential(credential) {
 			t.Errorf("hasEmbeddedCredential(%q) = false — a secret-shaped parameter must still be refused before it reaches git ls-remote's argv", credential)
 		}
+	}
+}
+
+// An EMPTY-valued secret-shaped parameter (`?token=`) is NOT refused: it embeds
+// no credential, so refusing it would assert one that is not there.
+//
+// This pins a WIRE-VERDICT change that 37320feb made and did not disclose — its
+// message claimed "the argv verdict is unmoved in BOTH directions" and offered
+// `?access_token=` as a still-refused example, which is itself one of the moved
+// cases. Measured by running the pre-37320feb predicate verbatim against the
+// current one (2026-07-27):
+//
+//	https://host/repo.git?token=          OLD refused   NEW queried
+//	https://host/re%zzpo?token=           OLD refused   NEW queried
+//	https://host/repo.git?access_token=   OLD refused   NEW queried
+//
+// The change is kept because the NEW answer is the honest one, and it is pinned
+// here so it is a stated contract rather than an accident of a refactor: nothing
+// else in the suite covered the empty-valued spelling, which is exactly how it
+// moved unnoticed. See queryCarriesArgvSecret's doc for the full rationale.
+//
+// The three complements below are what keep this from becoming a licence to
+// under-refuse: a VALUED secret is still refused, the empty-valued URL is still
+// left alone by EMISSION (REDACTED must not fabricate a value either), and the
+// valueless `?token` form — which the old predicate also skipped — is unchanged.
+func TestArgvRefusal_EmptyValuedSecretParameterIsNotRefused(t *testing.T) {
+	for _, empty := range []string{
+		"https://host/repo.git?token=",           // parsable
+		"https://host/re%zzpo?token=",            // unparsable (bad %-escape in path)
+		"https://host/repo.git?access_token=",    // the spelling 37320feb's message named
+		"https://host/repo.git?depth=1&api_key=", // empty secret alongside a real parameter
+	} {
+		if hasEmbeddedCredential(empty) {
+			t.Errorf("hasEmbeddedCredential(%q) = true — an empty-valued parameter embeds NO credential, so "+
+				"unknown(remote_url_credential_bearing) would assert a fact the tool never observed, and would "+
+				"cost the caller a live answer for no security gain", empty)
+		}
+	}
+
+	// Complement 1: a VALUED secret parameter is still refused. Without this
+	// the test above would pass just as well on a predicate that refused
+	// nothing at all.
+	for _, valued := range []string{
+		"https://host/repo.git?token=s3cr3t",
+		"https://host/re%zzpo?token=s3cr3t",
+		"https://host/repo.git?access_token=s3cr3t",
+	} {
+		if !hasEmbeddedCredential(valued) {
+			t.Errorf("hasEmbeddedCredential(%q) = false — a secret-shaped parameter WITH a value must still be "+
+				"refused before it reaches git ls-remote's argv", valued)
+		}
+	}
+
+	// Complement 2: EMISSION agrees. There is no value to redact, so the URL
+	// round-trips — refusal and redaction must not disagree about whether a
+	// value exists.
+	for _, empty := range []string{"https://host/repo.git?token=", "https://host/repo.git?token"} {
+		if got := redactURL(empty); got != empty {
+			t.Errorf("redactURL(%q) = %q — there is no value to redact, so REDACTED would fabricate one", empty, got)
+		}
+	}
+
+	// Complement 3: the valueless `?token` form (no "=" at all) is unmoved —
+	// the old predicate skipped it too, so it is NOT part of the change above.
+	if hasEmbeddedCredential("https://host/repo.git?token") {
+		t.Errorf("hasEmbeddedCredential(%q) = true — a parameter with no \"=\" carries no value and was not "+
+			"refused before this change either", "https://host/repo.git?token")
 	}
 }
