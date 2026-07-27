@@ -261,13 +261,15 @@ func registerTools(vs *VcpkgServer) {
 			"Parsing STREAMS under hard ceilings (total bytes, per-line bytes, records materialized) rather than reading the file whole; any ceiling " +
 			"that trips, and any malformed line, is reported in input_incomplete_reasons[] (closed enum: input_malformed, byte_limit, line_limit, " +
 			"record_limit) so a bounded read is never mistaken for a complete one. Cancellation is observed and returns unknown(canceled) with no " +
-			"partial result. Note truncated (the returned records cap) is a SEPARATE, narrower signal from input_incomplete.",
+			"partial result. Note truncated (the returned records cap) is a SEPARATE, narrower signal from input_incomplete. " +
+			"An omitted or empty trace_path is unknown(trace_path_not_supplied) — a fact about the CALL, never " +
+			"unknown(trace_not_found), which is reserved for a path that WAS supplied and verified absent.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"trace_path": map[string]any{
 					"type":        "string",
-					"description": "Required absolute path to an existing json-v1 CMake trace.",
+					"description": "Required absolute path to an existing json-v1 CMake trace. Omitting it returns unknown(trace_path_not_supplied), never trace_not_found.",
 				},
 				"file": map[string]any{
 					"type":        "string",

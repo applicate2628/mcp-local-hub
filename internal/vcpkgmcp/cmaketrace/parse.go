@@ -56,6 +56,12 @@ func (p parseResult) incomplete() bool {
 
 // incompleteReasons returns every reason this parse is incomplete, in a
 // fixed (declaration) order so the wire field is deterministic.
+//
+// Consumer-sweep note (ReasonTracePathNotSupplied, 2026-07-27): the not-supplied
+// member is deliberately NOT reachable here. This list qualifies evidence that
+// WAS parsed; a call with no trace_path is refused before deps.FS.Open, so
+// there is no parse and nothing to qualify. Every OTHER member of Reason that
+// can describe a partial read is already listed below.
 func (p parseResult) incompleteReasons() []Reason {
 	var out []Reason
 	if p.malformedCount > 0 {
