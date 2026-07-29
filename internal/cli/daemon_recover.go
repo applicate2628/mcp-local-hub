@@ -138,19 +138,31 @@ func runDaemonRecover(cmd *cobra.Command, taskArg string, yes bool) error {
 	return nil
 }
 
-// printRecoverAuditHandoffWarning reports a stranded cross-process event-log
+// printRecoverAuditHandoffWarning reports an unreleased cross-process event-log
 // flock WITHOUT changing the exit code. The recovery succeeded and the audit row
 // is durable; what could not be confirmed is the RELEASE of the lock, which this
-// process may still hold. For the one-shot CLI that is nearly harmless (the lock
-// dies with the process seconds later), so the remedy is stated as such; the same
-// verdict on the long-lived GUI is the one that actually strands the supervisor.
+// process may still hold.
+//
+// Both non-durable values are reported, because for a ONE-SHOT CLI they have the
+// same remedy: this process is about to exit, and exiting releases the lock
+// either way. The long-lived GUI is where they diverge — there a pending worker
+// clears itself while a stranded flock never does — so the GUI reads the two
+// values separately (internal/gui/frontend/src/screens/Dashboard.tsx). The
+// wording here still distinguishes them so the stderr line is not misleading if
+// an operator pastes it into a bug report.
 func printRecoverAuditHandoffWarning(cmd *cobra.Command, result daemonrecovery.Result) {
-	if result.AuditHandoff != daemonrecovery.AuditHandoffReleaseUnconfirmed {
+	var detail string
+	switch result.AuditHandoff {
+	case daemonrecovery.AuditHandoffReleasePending:
+		detail = "a background writer in this process still holds it"
+	case daemonrecovery.AuditHandoffReleaseUnconfirmed:
+		detail = "releasing it FAILED, so this process holds it until it exits"
+	default:
 		return
 	}
 	errOut := cmd.ErrOrStderr()
-	fmt.Fprintln(errOut, "warning: the recovery audit row is durable, but releasing the supervisor-events.log cross-process lock could not be confirmed.")
-	fmt.Fprintln(errOut, "  This process may still hold it, blocking event-log writes from the supervisor and `mcphub install` until it exits.")
+	fmt.Fprintf(errOut, "warning: the recovery audit row is durable, but the supervisor-events.log cross-process lock was not confirmed released: %s.\n", detail)
+	fmt.Fprintln(errOut, "  While it is held, event-log writes from the supervisor and `mcphub install` are blocked.")
 	fmt.Fprintln(errOut, "  Do NOT re-run recover: the termination and the respawn already committed. The lock is released when this process exits.")
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup, fireEvent, act } from "@testing-library/preact";
-import { DashboardScreen, formatUptime, formatBytes } from "./Dashboard";
+import { DashboardScreen, formatUptime, formatBytes, nextAuditLockView } from "./Dashboard";
+import type { AuditLockSnapshot, DaemonRecoverCorrelation } from "../api";
 import type { DaemonStatus, ScanEntry } from "../types";
 
 // happy-dom does not ship EventSource. Dashboard's bulk-action UI state
@@ -1949,21 +1950,74 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     reaped: false,
     port_owner_check: "unbound",
     port_wait_outcome: "not_required",
+    audit_handoff: "not_required",
   })) {
     let statusCalls = 0;
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: Request | string | URL) => {
+      async (input: Request | string | URL, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input.toString();
         if (url === "/api/status") {
           statusCalls += 1;
-          return Promise.resolve(statusResponse([quarantinedRow]));
+          return statusResponse([quarantinedRow]);
         }
-        if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+        if (url === "/api/scan") return scanResponse([]);
         if (url === "/api/hub/health") {
-          return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+          return jsonResponse(200, { state: "healthy", degraded: false });
         }
-        if (url === "/api/daemon/recover") return Promise.resolve(recoverResponse.clone());
-        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: "33333333-3333-4333-8333-333333333333",
+            revision: 1,
+            state: "released",
+            recovery_receipt: null,
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          const request = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          const responseBody = await recoverResponse.clone().json() as Record<string, unknown>;
+          const receiptFreeCodes = new Set([
+            "AUDIT_LOCK_ADAPTER_INIT_FAILED",
+            "RECOVER_CORRELATION_INVALID",
+            "RECOVER_BASELINE_STALE",
+            "RECOVER_ATTEMPT_CONFLICT",
+            "RECOVER_OCCURRENCE_CONSUMED",
+            "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
+          ]);
+          if (
+            responseBody.audit_lock === undefined &&
+            !receiptFreeCodes.has(String(responseBody.code ?? ""))
+          ) {
+            responseBody.audit_lock = {
+              scope: "supervisor_events_log",
+              server_instance: request.audit_lock_attempt.server_instance,
+              revision: 2,
+              state:
+                responseBody.audit_handoff === "release_unconfirmed"
+                  ? "stranded"
+                  : responseBody.audit_handoff === "release_pending"
+                    ? "outstanding"
+                    : "released",
+              recovery_receipt: {
+                attempt_id: request.audit_lock_attempt.attempt_id,
+                occurrence_id: request.audit_lock_attempt.occurrence_id,
+                status: recoverResponse.ok ? "committed_success" : "not_committed",
+                lock_authorization:
+                  responseBody.audit_handoff === "release_unconfirmed" ||
+                  responseBody.audit_handoff === "release_pending"
+                    ? "current_truth"
+                    : "none",
+              },
+            };
+          }
+          return jsonResponse(recoverResponse.status, responseBody);
+        }
+        throw new Error(`unexpected fetch: ${url}`);
       },
     );
     return { fetchSpy, statusCalls: () => statusCalls };
@@ -2002,14 +2056,145 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(2));
     expect(view.getByTestId("dashboard-card").className).toContain("card warning");
     expect(view.getByTestId("dashboard-card").textContent).toContain("Quarantined");
-    expect(fetchSpy).toHaveBeenCalledWith("/api/daemon/recover", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task_name: "mcp-local-hub-memory-default",
-        confirm: true,
-      }),
+    const recoveryCall = fetchSpy.mock.calls.find(
+      (call) => call[0].toString() === "/api/daemon/recover",
+    );
+    expect(recoveryCall).toBeTruthy();
+    const request = JSON.parse(String(recoveryCall?.[1]?.body)) as {
+      task_name: string;
+      confirm: boolean;
+      audit_lock_attempt: DaemonRecoverCorrelation;
+    };
+    expect(request.task_name).toBe("mcp-local-hub-memory-default");
+    expect(request.confirm).toBe(true);
+    expect(request.audit_lock_attempt.server_instance).toBe(
+      "33333333-3333-4333-8333-333333333333",
+    );
+    const canonicalV4 =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    expect(request.audit_lock_attempt.attempt_id).toMatch(canonicalV4);
+    expect(request.audit_lock_attempt.occurrence_id).toMatch(canonicalV4);
+  });
+
+  it("retains one correlation through response loss and repairs it on EventSource reconnect", async () => {
+    const serverInstance = "33333333-3333-4333-8333-333333333333";
+    let correlation: DaemonRecoverCorrelation | null = null;
+    let postCalls = 0;
+    let exactLookups = 0;
+    let acknowledgeCalls = 0;
+    let acknowledgedBody: Record<string, unknown> | null = null;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: 1,
+            state: "released",
+            recovery_receipt: null,
+          });
+        }
+        if (url.startsWith("/api/daemon/recover/audit-lock-state?")) {
+          exactLookups += 1;
+          if (!correlation) throw new Error("lookup before POST");
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: exactLookups === 1 ? 2 : 3,
+            state: exactLookups === 1 ? "outstanding" : "released",
+            recovery_receipt: {
+              attempt_id: correlation.attempt_id,
+              occurrence_id: correlation.occurrence_id,
+              status:
+                exactLookups === 1 ? "in_flight" : "committed_success",
+              lock_authorization:
+                exactLookups === 1 ? "current_truth" : "none",
+            },
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          acknowledgeCalls += 1;
+          acknowledgedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          postCalls += 1;
+          const body = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          correlation = body.audit_lock_attempt;
+          throw new TypeError("response lost");
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    const unresolved = await view.findByText(/response was lost/);
+    expect(unresolved.textContent).toContain("response was lost");
+    expect(unresolved.textContent).toContain("Do NOT retry");
+    expect(postCalls).toBe(1);
+    expect(exactLookups).toBe(1);
+    expect(acknowledgeCalls).toBe(0);
+
+    act(() => {
+      activeStubEventSource().triggerError();
+      activeStubEventSource().triggerOpen();
     });
+    await view.findByText("Recovery result restored after reconnecting.");
+    await waitFor(() => expect(acknowledgeCalls).toBe(1));
+
+    expect(postCalls).toBe(1);
+    expect(exactLookups).toBeGreaterThanOrEqual(2);
+    expect(correlation).not.toBeNull();
+    const retainedCorrelation =
+      correlation as unknown as DaemonRecoverCorrelation;
+    expect(acknowledgedBody).toEqual({
+      ...retainedCorrelation,
+      acknowledge: true,
+    });
+    const exactURLs = fetchSpy.mock.calls
+      .map((call) => call[0].toString())
+      .filter((url) => url.startsWith("/api/daemon/recover/audit-lock-state?"));
+    for (const url of exactURLs) {
+      expect(url).toContain(`attempt_id=${retainedCorrelation.attempt_id}`);
+      expect(url).toContain(`occurrence_id=${retainedCorrelation.occurrence_id}`);
+      expect(url).toContain(`server_instance=${retainedCorrelation.server_instance}`);
+    }
+  });
+
+  it("surfaces a conflicting binding without relabeling or retrying", async () => {
+    const { fetchSpy } = mockRecoveryFetch(jsonResponse(409, {
+      error: "internal error",
+      code: "RECOVER_ATTEMPT_CONFLICT",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByRole("alert");
+    expect(alert.textContent).toContain("already bound to a different action");
+    expect(alert.textContent).toContain("Nothing was relabeled or retried");
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) => call[0].toString() === "/api/daemon/recover",
+      ),
+    ).toHaveLength(1);
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) =>
+          call[0].toString() ===
+          "/api/daemon/recover/audit-lock-receipt",
+      ),
+    ).toHaveLength(0);
   });
 
   it.each([
@@ -2102,6 +2287,121 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     expect(view.getByTestId("dashboard-audit-lock-stranded")).toBeTruthy();
   });
 
+  // F-1 regression guard, and the one the shipped shape FAILED.
+  //
+  // The banner is a permanent, undismissable "restart the app" alarm. Before the
+  // wire enum was widened, a TRANSIENT condition reached it: a concurrent
+  // healthy bounded emit anywhere in the GUI process made a recovery report
+  // "release_unconfirmed", and nothing ever cleared it. On this product that
+  // advice costs the operator their tray and their whole fleet.
+  //
+  // A later CONFIRMED release is proof the process is clean, so it must clear.
+  //
+  // NOTE ON SCOPE: the clearing pair is release_pending -> durable, NOT
+  // release_unconfirmed -> durable. release_unconfirmed now means a release that
+  // ATTEMPTED AND FAILED, which is permanent for the process's lifetime, so it
+  // deliberately does NOT clear — that latch is pinned by the nextAuditLockWarning
+  // transition table at the bottom of this file.
+  //
+  // MUTATION: replace the reducer call in DashboardScreen's onRecover with the
+  // old assignment, `if (result.audit_handoff === "release_unconfirmed")
+  // setAuditLockWarning("stranded");`. Verified this session: the test fails at
+  // the FIRST await, because that shape drops release_pending on the floor
+  // entirely and no banner is ever rendered:
+  //
+  //	Unable to find an element by: [data-testid="dashboard-audit-lock-pending"]
+  //	  Dashboard.test.tsx:2132  await view.findByTestId("dashboard-audit-lock-pending")
+  it("clears the lock warning when a later recovery confirms the release", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_pending",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await view.findByTestId("dashboard-audit-lock-pending");
+
+    // Second recovery: the lock owner now reads clean.
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "durable",
+    }));
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    await waitFor(() => {
+      expect(view.queryByTestId("dashboard-audit-lock-pending")).toBeNull();
+    });
+    expect(view.queryByTestId("dashboard-audit-lock-stranded")).toBeNull();
+  });
+
+  // The transient variant must NOT wear the permanent remedy. "Restart mcphub"
+  // for an in-flight write that clears in milliseconds is the specific piece of
+  // advice this split exists to stop emitting.
+  it("tells a pending release to wait, never to restart", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_pending",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const banner = await view.findByTestId("dashboard-audit-lock-pending");
+    expect(banner.textContent).toContain("clears on its own");
+    expect(banner.textContent).toContain("no restart needed");
+    expect(banner.textContent).toContain("Do NOT re-run recovery");
+    expect(banner.textContent).not.toContain("Restart mcphub");
+    expect(view.queryByTestId("dashboard-audit-lock-stranded")).toBeNull();
+  });
+
+  it("orders settlement SSE by revision and clears a pending warning without another recovery", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_pending",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await view.findByTestId("dashboard-audit-lock-pending");
+
+    dispatchSse("audit-lock-state", {
+      scope: "supervisor_events_log",
+      server_instance: "33333333-3333-4333-8333-333333333333",
+      revision: 1,
+      state: "released",
+      recovery_receipt: null,
+    });
+    expect(view.getByTestId("dashboard-audit-lock-pending")).toBeTruthy();
+
+    dispatchSse("audit-lock-state", {
+      scope: "supervisor_events_log",
+      server_instance: "33333333-3333-4333-8333-333333333333",
+      revision: 3,
+      state: "released",
+      recovery_receipt: null,
+    });
+    await waitFor(() => {
+      expect(view.queryByTestId("dashboard-audit-lock-pending")).toBeNull();
+    });
+  });
+
   // F2 negative: a "durable" handoff must not raise the banner, or the warning
   // becomes noise on every successful recovery.
   it("shows no lock warning when the audit handoff is durable", async () => {
@@ -2146,5 +2446,57 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     expect(alert.textContent).toContain("A process was already stopped during this recovery attempt.");
     // The generic fall-through copy is exactly what the missing arm produced.
     expect(alert.textContent).not.toContain("Recovery failed. Check the supervisor logs and try again.");
+  });
+});
+
+describe("nextAuditLockView", () => {
+  const serverInstance = "33333333-3333-4333-8333-333333333333";
+  const snapshot = (
+    revision: number,
+    state: AuditLockSnapshot["state"],
+    authorized = false,
+    instance = serverInstance,
+  ): AuditLockSnapshot => ({
+    scope: "supervisor_events_log",
+    server_instance: instance,
+    revision,
+    state,
+    recovery_receipt: authorized
+      ? {
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          status: "committed_success",
+          lock_authorization: "current_truth",
+        }
+      : null,
+  });
+
+  it("ignores older revisions and clears pending on a newer release", () => {
+    const pending = nextAuditLockView(null, snapshot(8, "outstanding", true));
+    expect(pending.warning).toBe("pending");
+    expect(nextAuditLockView(pending, snapshot(7, "released"))).toBe(pending);
+    expect(nextAuditLockView(pending, snapshot(9, "released")).warning).toBeNull();
+  });
+
+  it("does not alarm for an unrelated outstanding baseline", () => {
+    expect(nextAuditLockView(null, snapshot(1, "outstanding")).warning).toBeNull();
+  });
+
+  it("latches stranded only within the same server instance", () => {
+    const stranded = nextAuditLockView(null, snapshot(4, "stranded"));
+    expect(nextAuditLockView(stranded, snapshot(5, "released")).warning).toBe(
+      "stranded",
+    );
+    const restarted = nextAuditLockView(
+      stranded,
+      snapshot(
+        1,
+        "released",
+        false,
+        "44444444-4444-4444-8444-444444444444",
+      ),
+    );
+    expect(restarted.warning).toBeNull();
+    expect(restarted.revision).toBe(1);
   });
 });

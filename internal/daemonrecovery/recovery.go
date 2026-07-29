@@ -86,17 +86,40 @@ const (
 	// scoping the verdict per-recovery is what let an unenumerated outcome
 	// report "confirmed released" while an abandoned writer still held the lock.
 	AuditHandoffDurable AuditHandoff = "durable"
-	// AuditHandoffReleaseUnconfirmed means the audit row is durable but a
-	// cross-process event-log flock release could not be confirmed — either a
-	// release failed outright, or a writer that already blew its deadline still
-	// owns the lock.
+	// AuditHandoffReleasePending means the audit row is durable and a
+	// bounded-emit worker in THIS PROCESS still owns the event-log flock.
+	//
+	// TRANSIENT. It clears by itself when the worker finishes its write, and it
+	// is the normal state of every in-flight bounded emit in the process — the
+	// worker is spawned before the deadline is evaluated, so a healthy
+	// sub-millisecond emit passes through this state too
+	// (api.SupervisorEventLockOutstanding, and its
+	// TestSupervisorEventLockStateOutstandingDuringHealthyBoundedEmit guard).
+	//
+	// The operator remedy is "wait", NEVER "restart this process". It is
+	// reported rather than folded into Durable because a warning channel must
+	// fail closed: a wedged writer sits in this same state indefinitely, and the
+	// reader cannot tell the two apart at the moment it reads.
+	AuditHandoffReleasePending AuditHandoff = "release_pending"
+	// AuditHandoffReleaseUnconfirmed means the audit row is durable and a
+	// cross-process event-log flock release was ATTEMPTED AND FAILED.
+	//
+	// PERMANENT for this process's lifetime (api.SupervisorEventLockStranded is
+	// never cleared). This process holds the flock until it exits, blocking
+	// every other emitter — the supervisor, the install CLI. The only remedy is
+	// restarting this process, and it is never "retry this recovery".
+	//
+	// SCOPE: this value used to also carry the transient AuditHandoffReleasePending
+	// case above. Collapsing the two meant a consumer applying the permanent
+	// remedy ("restart mcphub") to a healthy concurrent emit. They are separate
+	// values precisely so each consumer can state the truthful remedy.
 	AuditHandoffReleaseUnconfirmed AuditHandoff = "release_unconfirmed"
 )
 
 // Valid reports whether the value belongs to the safe response enum.
 func (a AuditHandoff) Valid() bool {
 	switch a {
-	case AuditHandoffNotRequired, AuditHandoffDurable, AuditHandoffReleaseUnconfirmed:
+	case AuditHandoffNotRequired, AuditHandoffDurable, AuditHandoffReleasePending, AuditHandoffReleaseUnconfirmed:
 		return true
 	default:
 		return false
@@ -850,11 +873,29 @@ func (f *committedAuditFinalizer) logPath() string {
 // operator remedy ("restart this process") is identical either way, and the
 // per-recovery scoping was the category error that produced this defect class.
 // Decision: work-items/decisions/2026-07-27-supervisor-event-flock-release-single-owner.md
+// The mapping is 1:1 with the owner's three states and deliberately loses
+// nothing. An earlier shape collapsed Outstanding and Stranded into
+// AuditHandoffReleaseUnconfirmed. That was defensible as fail-closed AT THIS
+// layer, but the only long-lived consumer — the GUI Dashboard — has to pick a
+// remedy from the value alone, and the two states have OPPOSITE remedies
+// ("wait" vs "restart this process"). A consumer given one value for both must
+// either understate a permanent strand or raise a permanent, undismissable
+// alarm for a healthy concurrent emit; it chose the latter. Restoring the
+// distinction here is what lets every consumer state the truthful remedy
+// instead of compensating for a lossy field.
 func (f *committedAuditFinalizer) handoff() AuditHandoff {
-	if api.SupervisorEventLockStateForPath(f.logPath()) == api.SupervisorEventLockReleased {
+	switch api.SupervisorEventLockStateForPath(f.logPath()) {
+	case api.SupervisorEventLockReleased:
 		return AuditHandoffDurable
+	case api.SupervisorEventLockOutstanding:
+		return AuditHandoffReleasePending
+	case api.SupervisorEventLockStranded:
+		return AuditHandoffReleaseUnconfirmed
+	default:
+		// A state this mapping does not know cannot be claimed as released.
+		// Fail closed onto the stronger of the two warnings.
+		return AuditHandoffReleaseUnconfirmed
 	}
-	return AuditHandoffReleaseUnconfirmed
 }
 
 // finalize returns the audit handoff verdict alongside the durability error.

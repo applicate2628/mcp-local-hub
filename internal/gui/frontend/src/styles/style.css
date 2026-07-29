@@ -733,10 +733,16 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
 .dashboard-unmanaged-stdio a {
   font-weight: 700;
 }
-/* Stranded supervisor-events.log flock after a recovery. Amber, and shaped like
-   the hub-health banner rather than a per-card toast, because the condition is
-   PROCESS-scoped: it is not attributable to one daemon, it outlives the recovery
-   that revealed it, and its only remedy is restarting this process. */
+/* Unreleased supervisor-events.log flock after a recovery. Amber, and shaped
+   like the hub-health banner rather than a per-card toast, because the condition
+   is PROCESS-scoped: it is not attributable to one daemon and it outlives the
+   recovery that revealed it.
+
+   Two variants share this shape because they share a severity, NOT a remedy:
+   -stranded is permanent until the process restarts; -pending clears itself when
+   an in-flight write finishes. They are separate elements so neither can inherit
+   the other's copy. */
+.dashboard-audit-lock-pending,
 .dashboard-audit-lock-stranded {
   display: block;
   margin: var(--gap-xs) 0;
@@ -747,6 +753,7 @@ main { padding: var(--screen-padding); overflow: auto; min-width: 0; min-height:
   color: var(--text);
   font-weight: 500;
 }
+.dashboard-audit-lock-pending code,
 .dashboard-audit-lock-stranded code {
   font-family: var(--font-mono, monospace);
   font-size: 0.92em;

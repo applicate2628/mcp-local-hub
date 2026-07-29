@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -178,6 +179,108 @@ func TestSupervisorEventLockStateOutstandingWhileAbandonedWorkerHoldsFlock(t *te
 	}
 	if got := SupervisorEventLockStateForPath(path); got != SupervisorEventLockReleased {
 		t.Fatalf("lock state after the worker released cleanly = %q, want %q", got, SupervisorEventLockReleased)
+	}
+}
+
+// TestSupervisorEventLockStateOutstandingDuringHealthyBoundedEmit is the guard
+// for the claim the Outstanding doc comment used to make and no longer does:
+// that the state only ever describes a worker which already blew its caller's
+// deadline.
+//
+// It does not. emitPrepared spawns the worker and records the handoff at
+// supervisor_events.go:766-770, BEFORE the select at :798 that decides whether
+// the deadline was blown. So a perfectly healthy bounded emit occupies
+// "outstanding" for the whole duration of its write.
+//
+// That is what makes the state unsafe to collapse into a permanent
+// "restart this process" verdict at a consumer: it is the normal state of every
+// in-flight bounded emit in the process, not a rare deadline-blown residue.
+//
+// The window is engineered deterministically large (the write blocks until the
+// observer has sampled) rather than raced against a natural one, so a fast
+// machine cannot flake it. The emit still returns SUCCESS, which is what makes
+// this the HEALTHY path and not a restatement of the abandoned-worker test.
+//
+// MUTATION: move `noteSupervisorEventLockHandoff(l.path)` from before the `go`
+// statement in emitPrepared to inside the `case <-ctx.Done():` arm of the
+// select (i.e. record the handoff only when the deadline actually IS blown).
+// This test then fails with:
+//
+//	owner state sampled from inside a healthy bounded emit = "released", want "outstanding"
+func TestSupervisorEventLockStateOutstandingDuringHealthyBoundedEmit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "supervisor-events.log")
+	defer ResetSupervisorEventLockStateForPathForTest(path)
+
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = logger.Close() }()
+
+	inWrite := make(chan struct{})
+	sampled := make(chan struct{})
+	restoreWrite := SetSupervisorEventWriteFnForTest(func(l *SupervisorEventLog, raw []byte) error {
+		close(inWrite)
+		<-sampled // hold the flock until the observer has read the owner
+		return l.writeEventLine(raw)
+	})
+	defer restoreWrite()
+
+	var observed SupervisorEventLockState
+	go func() {
+		<-inWrite
+		observed = SupervisorEventLockStateForPath(path)
+		close(sampled)
+	}()
+
+	// A 30s budget against a write released the instant the observer samples:
+	// this emit cannot time out, so whatever the observer saw is the state
+	// during a healthy bounded emit.
+	if emitErr := logger.EmitWithTimeout(SupervisorEvent{
+		Severity: "info",
+		Source:   "recover",
+		Event:    "lock-health-healthy-bounded-emit",
+	}, 30*time.Second); emitErr != nil {
+		t.Fatalf("EmitWithTimeout = %v, want nil; the emit must SUCCEED for this to be the healthy path", emitErr)
+	}
+
+	if observed != SupervisorEventLockOutstanding {
+		t.Fatalf("owner state sampled from inside a healthy bounded emit = %q, want %q", observed, SupervisorEventLockOutstanding)
+	}
+	if got := SupervisorEventLockStateForPath(path); got != SupervisorEventLockReleased {
+		t.Fatalf("owner state after the healthy emit returned = %q, want %q", got, SupervisorEventLockReleased)
+	}
+}
+
+func TestSupervisorEventLockStateObserverSequence(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "supervisor-events.log")
+	defer ResetSupervisorEventLockStateForPathForTest(path)
+
+	var observed []SupervisorEventLockSnapshot
+	initial, unsubscribe := SubscribeSupervisorEventLockState(path, func(snapshot SupervisorEventLockSnapshot) {
+		// The callback runs after the owner mutex is released.
+		if reread := SupervisorEventLockSnapshotForPath(path); reread != snapshot {
+			t.Fatalf("callback snapshot=%+v reread=%+v", snapshot, reread)
+		}
+		observed = append(observed, snapshot)
+	})
+	defer unsubscribe()
+	if initial != (SupervisorEventLockSnapshot{State: SupervisorEventLockReleased}) {
+		t.Fatalf("initial=%+v", initial)
+	}
+
+	noteSupervisorEventLockHandoff(path)
+	noteSupervisorEventLockHandoff(path)
+	noteSupervisorEventLockHandoffDone(path, nil)
+	noteSupervisorEventLockHandoffDone(path, nil)
+
+	want := []SupervisorEventLockSnapshot{
+		{State: SupervisorEventLockOutstanding, Revision: 1},
+		{State: SupervisorEventLockReleased, Revision: 2},
+	}
+	if !reflect.DeepEqual(observed, want) {
+		t.Fatalf("observed=%+v want=%+v", observed, want)
 	}
 }
 

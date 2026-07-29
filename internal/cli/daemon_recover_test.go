@@ -264,8 +264,9 @@ func TestDaemonRecoverReleaseUnconfirmedWarnsWithoutRetryAdvice(t *testing.T) {
 
 	message := errOut.String()
 	for _, want := range []string{
-		"could not be confirmed",
-		"blocking event-log writes",
+		"not confirmed released",
+		"releasing it FAILED",
+		"are blocked",
 		"Do NOT re-run recover",
 	} {
 		if !strings.Contains(message, want) {
@@ -275,6 +276,40 @@ func TestDaemonRecoverReleaseUnconfirmedWarnsWithoutRetryAdvice(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "warning") {
 		t.Fatalf("the warning belongs on stderr, not stdout: %q", out.String())
+	}
+}
+
+// A PENDING release must warn too — a one-shot CLI cannot tell an in-flight
+// writer from a wedged one, and both block the supervisor while they last — but
+// it must NOT describe the release as failed. The GUI is where the two values
+// diverge into different remedies; here they share one (this process exits).
+//
+// MUTATION: collapse printRecoverAuditHandoffWarning back to a single
+// `!= AuditHandoffReleaseUnconfirmed` early return. This test then fails with
+// `a pending handoff must warn; stderr was ""`.
+func TestDaemonRecoverReleasePendingWarnsWithoutClaimingAFailedRelease(t *testing.T) {
+	cmd, _, errOut := recoverCmd("")
+	printRecoverAuditHandoffWarning(cmd, daemonrecovery.Result{
+		TaskName:     `\mcp-local-hub-memory-default`,
+		AuditHandoff: daemonrecovery.AuditHandoffReleasePending,
+	})
+
+	message := errOut.String()
+	if message == "" {
+		t.Fatal(`a pending handoff must warn; stderr was ""`)
+	}
+	for _, want := range []string{
+		"a background writer in this process still holds it",
+		"Do NOT re-run recover",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("stderr=%q missing %q", message, want)
+		}
+	}
+	// The distinction is the whole point of the separate value: a transient
+	// in-flight write has not failed to release anything.
+	if strings.Contains(message, "releasing it FAILED") {
+		t.Fatalf("a pending handoff must not claim a FAILED release: %q", message)
 	}
 }
 

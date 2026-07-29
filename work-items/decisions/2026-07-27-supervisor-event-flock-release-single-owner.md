@@ -1,8 +1,8 @@
 ---
 id: 2026-07-27-supervisor-event-flock-release-single-owner
 status: proposed
-decided-by: $architect (REVISE closure, PR `feat/liveness-headless-gui-recovery`)
-context: seventh recurrence of "cross-process event-log flock release outcome discarded at the call site", the sixth of which was itself inside the fix for the fifth
+decided-by: $architect (PR #589 D1/D2 architecture revision; independent gate pending)
+context: one process-scoped release owner plus downstream settlement and authoritative repair for PR `feat/liveness-headless-gui-recovery`
 supersedes: none
 superseded-by: none
 ---
@@ -21,6 +21,10 @@ Concretely:
 1. New owner `internal/api/supervisor_event_lock_health.go`. It answers exactly one
    question, for one lock path: *can this process still be holding the
    `supervisor-events.log` flock?* — `released` / `outstanding` / `stranded`.
+   `outstanding` is a transient physical state while a bounded writer still owns the
+   release attempt and means **wait for settlement**. `stranded` is the permanent
+   same-process state after a confirmed release failure and alone carries the remedy
+   **restart this process, never retry recovery**.
 2. It is fed from the four sites in `internal/api/supervisor_events.go` that already
    compute a release outcome (the synchronous releaser, the bounded-emit worker handoff,
    the worker's own release, and `TryReplayPending`'s releaser). **No call site changes.**
@@ -31,6 +35,31 @@ Concretely:
 4. `AuditHandoff`'s documented meaning widens from "every flock **this recovery** took was
    confirmed released" to "every flock **this process** took on this log was confirmed
    released". The per-recovery scoping was the category error; see Rationale.
+5. The same owner exposes an atomic `{state, revision}` snapshot and transition
+   subscription. The graphical user interface (GUI) adapter coalesces one subscription only
+   while a recovery has observed `release_pending`, publishes its first later
+   `Released|Stranded` settlement over the existing Server-Sent Events (SSE) bus, and
+   unsubscribes. A read-only GET reads the owner directly and repairs event loss. SSE is a
+   hint; the snapshot is authority. No GUI component writes or re-derives physical state.
+6. The Dashboard owns the only observation-order reducer. POST, SSE, and GET observations
+   are linearized by one client authority sequence; an accepted newer EventSource transport
+   generation outranks all revisions from an older generation because backend revisions are
+   process-local. No timer, second EventSource, second state owner, recovery retry, or
+   destructive refresh is introduced.
+7. The graphical user interface (GUI) audit-lock adapter owns a bounded exact-attempt receipt
+   registry beside, but distinct from, the physical owner. The current Dashboard obtains one
+   read-only baseline, sends an opaque attempt id plus the baseline's server-instance token,
+   and the adapter reserves that id before `Recover` may run. Every admitted handler path
+   terminalizes exactly that receipt as committed success, committed error, not committed, or
+   uncertain before response
+   encoding. The Dashboard reducer alone turns an exact committed non-clean receipt into one
+   permission to project independently accepted current physical truth. A different request,
+   process epoch, SSE event, or timing observation can never authorize it.
+8. Receipt memory is bounded without silent eviction. At most 64 unresolved receipts are
+   admitted; a full registry, duplicate id, or stale server instance is rejected before
+   recovery mutation. Terminal receipts remain until an idempotent browser acknowledgement or
+   process teardown. No timer, background cleanup, retrying recovery POST, second EventSource,
+   or second physical-state owner is introduced.
 
 ### Scope this PR converts
 
@@ -127,7 +156,9 @@ Threading it through would mean editing 131 sites and their signatures to carry 
 
 ### Why a latch is the right shape and not a workaround
 
-The remedy for this condition is "restart this process" — a **composition-root** decision.
+The remedy for a confirmed `Stranded` condition is "restart this process" — a
+**composition-root** decision. `Outstanding` is transient; its correct action is to await
+owner settlement.
 Architecture rule D1 (failure is a typed returned value; only the composition root
 terminates) says a leaf must report the condition as a typed value and let the root decide.
 Because the value cannot survive 131 fire-and-forget returns, the typed condition is instead
@@ -161,10 +192,10 @@ per-call is the genuinely per-call decision: whether to attempt an opportunistic
   because an *unrelated* emitter in the same process stranded the lock. This is fail-closed
   and the operator remedy is identical ("restart this process"), but the doc comment must and
   does state it, so the field is not read as per-recovery attribution.
-- **A new fail-closed false-positive window exists:** an abandoned bounded-emit worker that
-  releases cleanly microseconds after `finalize()` reads the owner is reported as
-  `outstanding`. Deliberate: a warning channel must fail closed, and the worker in question
-  has by construction already blown its caller's deadline.
+- **`Outstanding` is a transient wait state.** A bounded writer can occupy it during healthy
+  operation. If a recovery response samples it, the Dashboard may
+  show pending only until the same owner reports `Released` or `Stranded` through settlement
+  SSE or authoritative GET. Only `Stranded` carries restart guidance.
 - **Test-visible behavior change.** `TestQueueIdempotentAuditFallbackOutcomeMatrix` rows that
   injected a synthetic release error and asserted `release_unconfirmed` no longer do so: an
   injected error takes no real flock, so `durable` is the truthful answer. Handoff coverage
@@ -174,6 +205,65 @@ per-call is the genuinely per-call decision: whether to attempt an opportunistic
 - `internal/api` gains process-global mutable state. Bounded (pruned to empty when clean),
   guarded by one mutex, with a test-reset seam — the same posture as the existing
   `supervisorEventWriteFn` / `supervisorEventUnlockFn` seams in the same file.
+
+## Downstream observation and settlement contract
+
+| Boundary | Single owner | Current contract |
+| --- | --- | --- |
+| Physical state and revision | `internal/api/supervisor_event_lock_health.go` under its mutex | Atomic `Released\|Outstanding\|Stranded` snapshot; revision changes only with effective state. |
+| Transition observation | The same API owner | Atomic subscribe plus initial snapshot; callbacks occur after owner mutation and outside the mutex; unsubscribe is idempotent. |
+| Process-to-GUI settlement | One coalesced GUI adapter | Armed only by tracked `release_pending`; publishes first later `Released\|Stranded`, then unsubscribes; ordinary bounded activity is silent. |
+| Exact recovery witness | One bounded registry in the GUI audit-lock adapter | Opaque attempt id is reserved before `Recover`, terminalized before every response encode, never cross-authorizes or silently evicts, and is removed only by idempotent acknowledgement/process teardown. |
+| Loss/reconnect repair | Read-only GET of the physical owner plus optional exact receipt | Authoritative current snapshot/receipt on EventSource open, visibility, and the existing 60-second cadence while a warning or unresolved attempt is active. |
+| Dashboard physical ordering | One audit-lock observation reducer | Every accepted physical POST, SSE, or GET increments one authority sequence. A GET or SSE accepted in a newer transport generation invalidates the physical snapshot of delayed older-generation responses even when its backend revision is lower. |
+|  |  | Backend revisions compare only inside one generation. |
+| Recovery-warning authorization | The same Dashboard reducer | Only a complete matching response or exact same-instance receipt with `lock_authorization=current_truth` grants one permission independently of physical admission. |
+|  |  | Current accepted owner truth consumes it once; `none/not_committed` stays silent and `uncertain` produces only a do-not-rerun ambiguity alert. |
+
+The exact delayed-response falsifier is mandatory: hold generation-1 POST A; accept a
+generation-2 GET returning lower-revision `released`; then resolve A with higher-revision
+`outstanding`. A's physical snapshot must not apply; its authorization is consumed by current
+`released`, the warning must remain clear without flicker, and no recovery retry may occur.
+The inverse arrival order is also required: if A applies while the generation-2 GET is
+in flight, that newer-generation GET must still replace A when it resolves. Same-generation
+higher-revision settlement and ordinary B-before-A response order must continue to apply.
+
+The lost-authorization falsifiers are equally mandatory. First, hold generation-1 A, accept a
+generation-2 GET returning current `outstanding`, then resolve A and transition the owner to
+`Stranded`: A's physical snapshot never applies, but its authorization reconciles cached
+current truth and the later stranded settlement becomes visible. Repeat with generation-2
+`released` and require a continuously clear warning. Second, in one generation apply later
+B=`not_required` with current `outstanding` before held A=`release_pending`; B remains the
+latest applied POST, A grants only authorization, and later `Stranded` becomes visible. A clean
+settlement produces no stale-pending flicker. Completely unarmed healthy
+`Released -> Outstanding -> Released` remains silent: zero banner, zero autonomous GET, and
+zero GUI settlement projection.
+
+The lost-response and exact-attribution falsifiers are mandatory too. Admit A, commit its
+non-clean recovery, drop both its response body and every settlement event, and require exact
+receipt GET to expose current `Outstanding -> Stranded` without applying A's stale snapshot or
+issuing another recovery; repeat with current `Released` and require continuous silence. Then
+preflight A and B from the same physical revision, fail A before commit, commit B, drop A's
+error body, and query A: A must remain `not_committed` and cannot borrow B's commit. Filling the
+64 receipt slots must reject attempt 65 before `Recover`; no receipt may be silently evicted.
+
+## Decision status and co-variation gate
+
+This file is the only decision-registry owner for the process-lock and downstream settlement
+pipeline. The PR #589 settlement design is its bounded realization; the two canonical files
+must be reviewed as one package because changing only one recreates contradictory live truth.
+This decision remains `status: proposed`. A fresh independent architecture `PASS` over both
+exact hashes authorizes `$knowledge-archivist` to perform only the mechanical promotion to
+`accepted` and synchronize the decision index; implementation does not self-promote it.
+
+## Owner claims and falsifying probes
+
+1. `{ guarantee: Outstanding is transient and means wait for owner settlement; single-owner: supervisor-event lock-health state contract; enforcement-probe: healthy bounded-write transition test plus scoped live-tree current-semantics search }`.
+2. `{ guarantee: Stranded is permanent for the process and carries the process-restart remedy; single-owner: supervisor-event lock-health state contract; enforcement-probe: release-failure precedence test plus scoped live-tree current-semantics search }`.
+3. `{ guarantee: physical state has one writer and GUI settlement is an observation rather than a second state owner; single-owner: supervisor-event lock-health owner; enforcement-probe: owner subscription race tests and absence of a GUI setter }`.
+4. `{ guarantee: every armed pending condition settles through SSE or authoritative GET without another recovery; single-owner: coalesced GUI settlement adapter; enforcement-probe: release-without-second-POST and dropped-event GET-repair tests }`.
+5. `{ guarantee: a delayed, lost, or out-of-order recovery response cannot overwrite current physical truth or lose/cross-attribute its exact one-shot permission; single-owner: Dashboard reducer consuming the GUI audit-lock exact-receipt contract; enforcement-probe: deterministic old-generation outcomes, same-generation B-before-A, lost-body released/outstanding/stranded, A-fails-while-B-commits, clean no-flicker, and unarmed healthy silence tests }`.
+6. `{ guarantee: unresolved receipt evidence is bounded and never silently discarded; single-owner: GUI audit-lock receipt registry; enforcement-probe: 64-slot admission, duplicate-id, idempotent-ack, abandoned-client, and process-teardown tests }`.
 
 ## Alternatives rejected
 
@@ -198,3 +288,17 @@ per-call is the genuinely per-call decision: whether to attempt an opportunistic
 5. **Extend the owner to `gui-events.log` and `intent-audit.log` in this PR.** Rejected on
    scope: three locks, three blast radiuses, and this PR's admitted scope is GUI recovery.
    Filed as adjacent findings instead.
+6. **Use one process-global recovery epoch instead of request receipts.** Rejected because two
+   clients may share baseline epoch E: B can commit and advance the scalar while A fails, then
+   A's later GET falsely attributes B's commit to A. Serialization alone does not close the
+   window where B commits after A terminates but before A reads.
+7. **Silently evict old terminal receipts.** Rejected because response loss makes the receipt
+   the only commit witness. Eviction would recreate the hidden-commit defect; fail-closed
+   admission plus explicit idempotent acknowledgement is the bounded alternative.
+
+## Terms and Abbreviations
+
+- **GET/POST** — read-only and mutating Hypertext Transfer Protocol request methods.
+- **GUI** — graphical user interface.
+- **PR** — pull request.
+- **SSE** — Server-Sent Events, the existing browser event stream.

@@ -193,12 +193,8 @@ export async function postDeAdopt(
   };
 }
 
-async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+async function requestJSONObject<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(path, init);
   const data = await resp.json().catch(() => null);
   if (!resp.ok) {
     const envelope = data as { error?: string; code?: string } | null;
@@ -209,6 +205,14 @@ async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
     throw new Error(`${path}: expected object, got ${Array.isArray(data) ? "array" : typeof data}`);
   }
   return data as T;
+}
+
+async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
+  return requestJSONObject<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 function normalizeAdoptPlan(plan: AdoptPlan): AdoptPlan {
@@ -746,6 +750,13 @@ export const DAEMON_RECOVER_ERROR_CODES = [
   // retryable failure — the destructive step already ran.
   "RECOVER_AUDIT_DURABILITY_FAILED",
   "RECOVER_UNCLASSIFIED_FAILURE",
+  "AUDIT_LOCK_ADAPTER_INIT_FAILED",
+  "RECOVER_CORRELATION_INVALID",
+  "RECOVER_BASELINE_STALE",
+  "RECOVER_ATTEMPT_CONFLICT",
+  "RECOVER_OCCURRENCE_CONSUMED",
+  "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
+  "RECOVER_RECEIPT_IN_FLIGHT",
 ] as const;
 
 export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number];
@@ -757,6 +768,35 @@ export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number]
 // added to the array is automatically recognized by every consumer.
 export function isDaemonRecoverErrorCode(code: string | undefined): code is DaemonRecoverErrorCode {
   return code !== undefined && (DAEMON_RECOVER_ERROR_CODES as readonly string[]).includes(code);
+}
+
+export interface DaemonRecoverCorrelation {
+  attempt_id: string;
+  occurrence_id: string;
+  server_instance: string;
+}
+
+export type AuditLockState = "released" | "outstanding" | "stranded";
+export type AuditLockReceiptStatus =
+  | "in_flight"
+  | "committed_success"
+  | "committed_error"
+  | "not_committed"
+  | "consumed";
+
+export interface AuditLockReceipt {
+  attempt_id: string;
+  occurrence_id: string;
+  status: AuditLockReceiptStatus;
+  lock_authorization: "none" | "current_truth" | "uncertain";
+}
+
+export interface AuditLockSnapshot {
+  scope: "supervisor_events_log";
+  server_instance: string;
+  revision: number;
+  state: AuditLockState;
+  recovery_receipt: AuditLockReceipt | null;
 }
 
 export interface DaemonRecoverResponse {
@@ -776,21 +816,108 @@ export interface DaemonRecoverResponse {
     | "released"
     | "still_bound"
     | "probe_unavailable";
-  // Warning field on a SUCCESS response. "release_unconfirmed" means the audit
-  // row is durable but the GUI process may still hold the supervisor-events.log
-  // cross-process lock, blocking the supervisor and the install CLI until it
-  // exits. The recovery succeeded; surface it as a warning, never as a retry.
-  audit_handoff: "not_required" | "durable" | "release_unconfirmed";
+  // Warning field on a SUCCESS response: the audit row is durable, but the GUI
+  // process may still hold the supervisor-events.log cross-process lock, which
+  // blocks the supervisor and the install CLI. The recovery succeeded; surface
+  // it as a warning, never as a retry.
+  //
+  // The two non-durable values have OPPOSITE remedies and must not be treated
+  // alike:
+  //   "release_pending"     — a background writer in the GUI still holds the
+  //                           lock. TRANSIENT: it clears when that write
+  //                           finishes, and it is the normal state of any
+  //                           in-flight bounded emit. Remedy: wait.
+  //   "release_unconfirmed" — releasing the lock FAILED. PERMANENT for this
+  //                           process's lifetime. Remedy: restart mcphub.
+  //   "not_required"        — no audit was staged, so the lock owner was never
+  //                           read. Carries NO information about the lock and
+  //                           must not clear a prior warning.
+  audit_handoff:
+    | "not_required"
+    | "durable"
+    | "release_pending"
+    | "release_unconfirmed";
+  audit_lock: AuditLockSnapshot;
 }
 
-// postDaemonRecover carries the explicit confirmation required by the route.
-// A successful response means the force-respawn was accepted; it does not
-// assert that the daemon has reached Running.
-export async function postDaemonRecover(taskName: string): Promise<DaemonRecoverResponse> {
-  return postJSONObject<DaemonRecoverResponse>("/api/daemon/recover", {
+export interface DaemonRecoverInFlightResponse {
+  state: "recovery_in_flight";
+  audit_lock: AuditLockSnapshot;
+}
+
+export type DaemonRecoverResult =
+  | DaemonRecoverResponse
+  | DaemonRecoverInFlightResponse;
+
+function newCanonicalUUIDv4(): string {
+  const browserCrypto = globalThis.crypto;
+  if (typeof browserCrypto?.randomUUID === "function") {
+    return browserCrypto.randomUUID().toLowerCase();
+  }
+  const bytes = new Uint8Array(16);
+  if (typeof browserCrypto?.getRandomValues === "function") {
+    browserCrypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function newDaemonRecoverCorrelation(serverInstance: string): DaemonRecoverCorrelation {
+  return {
+    attempt_id: newCanonicalUUIDv4(),
+    occurrence_id: newCanonicalUUIDv4(),
+    server_instance: serverInstance,
+  };
+}
+
+// A correlation is created once by the visible Dashboard action and retained by
+// that caller. This helper never retries the destructive POST.
+export async function postDaemonRecover(
+  taskName: string,
+  correlation: DaemonRecoverCorrelation,
+): Promise<DaemonRecoverResult> {
+  return postJSONObject<DaemonRecoverResult>("/api/daemon/recover", {
     task_name: taskName,
     confirm: true,
+    audit_lock_attempt: correlation,
   });
+}
+
+export async function getDaemonRecoverAuditLockState(
+  correlation?: DaemonRecoverCorrelation,
+): Promise<AuditLockSnapshot> {
+  let path = "/api/daemon/recover/audit-lock-state";
+  if (correlation) {
+    const query = new URLSearchParams({
+      attempt_id: correlation.attempt_id,
+      occurrence_id: correlation.occurrence_id,
+      server_instance: correlation.server_instance,
+    });
+    path += `?${query.toString()}`;
+  }
+  return requestJSONObject<AuditLockSnapshot>(path);
+}
+
+export async function acknowledgeDaemonRecoverReceipt(
+  correlation: DaemonRecoverCorrelation,
+): Promise<void> {
+  const path = "/api/daemon/recover/audit-lock-receipt";
+  const resp = await fetch(path, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...correlation, acknowledge: true }),
+  });
+  if (resp.status === 204) return;
+  const data = await resp.json().catch(() => null);
+  const envelope = data as { error?: string; code?: string } | null;
+  const message = envelope?.error ?? resp.statusText ?? "unknown";
+  throw makeAPIError(resp.status, envelope?.code, `${path}: ${message}`, data);
 }
 
 // WorkspacePair mirrors the deduplicated (key, path) entries from the

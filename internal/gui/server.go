@@ -654,6 +654,7 @@ type Server struct {
 	installBulk              installBulkAPI
 	restart                  restarter
 	daemonRecover            daemonRecoverer
+	auditLock                *auditLockAdapter
 	stop                     stopper
 	logs                     logsProvider
 	extractor                extractor
@@ -932,6 +933,7 @@ func NewServer(cfg Config) *Server {
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
+	s.auditLock = newAuditLockAdapter(s.events)
 	s.hubHealth = newHubHealthTracker(func(e Event) {
 		if s.events != nil {
 			s.events.Publish(e)
@@ -1280,6 +1282,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 
 	select {
 	case <-ctx.Done():
+		s.auditLock.beginClose()
 		// Cancel producers and wait only up to the bounded join budget before
 		// taking the current component. Publication admission is already closed,
 		// so a producer that finishes late must shut down its own rejected component.
@@ -1306,6 +1309,7 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 			// deadline exceeded). Force-close active connections so
 			// request goroutines unwind before we return — without
 			// this, hung requests survive Start's return.
+			s.auditLock.close()
 			s.events.Close()
 			return fmt.Errorf("graceful shutdown: %w", err)
 		}
@@ -1314,14 +1318,20 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 		// flushed to gui-events.log before the goroutine exits
 		// (Codex P2 on PR #150 line 101 — without this, every
 		// Start/Stop cycle leaks one drain goroutine).
+		s.auditLock.close()
 		s.events.Close()
 		return nil
 	case err := <-errCh:
+		s.auditLock.beginClose()
 		// A failed GUI listener uses the same cancel/join/take hub boundary as
 		// normal cancellation, so neither producer can republish after return.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		s.closeOwnHubListenerForRestart(drainCtx)
 		drainCancel()
+		guiDrainCtx, guiDrainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = s.guiListener.Shutdown(guiDrainCtx)
+		guiDrainCancel()
+		s.auditLock.close()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {
 			return nil

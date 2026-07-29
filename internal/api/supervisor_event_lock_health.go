@@ -22,16 +22,60 @@ const (
 	// path was observed released. It is the only state that may be reported to
 	// an operator as "confirmed released".
 	SupervisorEventLockReleased SupervisorEventLockState = "released"
-	// SupervisorEventLockOutstanding means an abandoned bounded-emit worker
-	// still owns the flock. That worker has BY CONSTRUCTION already blown its
+	// SupervisorEventLockOutstanding means a bounded-emit worker goroutine
+	// still owns the flock.
+	//
+	// This state is TRANSIENT and it is NOT rare. An earlier revision of this
+	// comment claimed the worker "has BY CONSTRUCTION already blown its
 	// caller's deadline (it only exists on the emitTimeout path), so this is
-	// not transient contention.
+	// not transient contention". The first half is true and the conclusion does
+	// not follow from it: the worker is spawned, and this handoff recorded, at
+	// supervisor_events.go:766-770 — BEFORE the select at :798 that decides
+	// whether the deadline was blown at all. So every bounded emit
+	// (EmitWithTimeout / EmitWithTimeoutTracked / EmitPreparedWithTimeoutTracked)
+	// occupies this state for the whole duration of its write, including the
+	// healthy sub-millisecond case that returns success.
+	//
+	// Falsified by TestSupervisorEventLockStateOutstandingDuringHealthyBoundedEmit,
+	// which samples the state from inside a write that then COMPLETES inside its
+	// deadline and asserts the emit returned nil.
+	//
+	// The consequence for readers: "outstanding" means "wait", never "restart
+	// this process". A reader that cannot distinguish it from Stranded will
+	// eventually raise a permanent alarm for a healthy concurrent emit.
 	SupervisorEventLockOutstanding SupervisorEventLockState = "outstanding"
 	// SupervisorEventLockStranded means a release was attempted and FAILED.
 	// This process may hold the flock for the rest of its lifetime, blocking
 	// every other emitter — the supervisor, the install CLI — until it exits.
+	//
+	// Unlike Outstanding this is PERMANENT for the process: nothing clears a
+	// stranded record (see noteSupervisorEventLockReleaseFailed, which does not
+	// prune, and pruneSupervisorEventLockRecordLocked, which refuses to delete
+	// while stranded is set). Only "restart this process" resolves it.
 	SupervisorEventLockStranded SupervisorEventLockState = "stranded"
 )
+
+// Valid reports whether the state belongs to the public lock-state enum.
+func (s SupervisorEventLockState) Valid() bool {
+	switch s {
+	case SupervisorEventLockReleased, SupervisorEventLockOutstanding, SupervisorEventLockStranded:
+		return true
+	default:
+		return false
+	}
+}
+
+// SupervisorEventLockSnapshot is an atomic observation of one path's
+// process-local lock state. Revision advances only when that path's effective
+// state changes.
+type SupervisorEventLockSnapshot struct {
+	State    SupervisorEventLockState
+	Revision uint64
+}
+
+// SupervisorEventLockObserver receives effective-state transitions after the
+// owner mutex is released.
+type SupervisorEventLockObserver func(SupervisorEventLockSnapshot)
 
 // supervisorEventLockRecord is the per-path tally. A record is DELETED once it
 // returns to clean, so the map is empty in the steady state and a test's
@@ -42,60 +86,116 @@ type supervisorEventLockRecord struct {
 }
 
 var (
-	supervisorEventLockMu     sync.Mutex
-	supervisorEventLockHealth = map[string]*supervisorEventLockRecord{}
+	supervisorEventLockMu        sync.Mutex
+	supervisorEventLockHealth    = map[string]*supervisorEventLockRecord{}
+	supervisorEventLockRevisions = map[string]uint64{}
+	supervisorEventLockObservers = map[string]map[uint64]SupervisorEventLockObserver{}
+	supervisorEventLockNextID    uint64
 )
+
+func supervisorEventLockStateLocked(path string) SupervisorEventLockState {
+	rec := supervisorEventLockHealth[path]
+	switch {
+	case rec == nil:
+		return SupervisorEventLockReleased
+	case rec.stranded:
+		return SupervisorEventLockStranded
+	case rec.outstanding > 0:
+		return SupervisorEventLockOutstanding
+	default:
+		return SupervisorEventLockReleased
+	}
+}
+
+func supervisorEventLockTransitionLocked(path string, before SupervisorEventLockState) (SupervisorEventLockSnapshot, []SupervisorEventLockObserver, bool) {
+	after := supervisorEventLockStateLocked(path)
+	if after == before {
+		return SupervisorEventLockSnapshot{}, nil, false
+	}
+	supervisorEventLockRevisions[path]++
+	snapshot := SupervisorEventLockSnapshot{
+		State:    after,
+		Revision: supervisorEventLockRevisions[path],
+	}
+	observers := make([]SupervisorEventLockObserver, 0, len(supervisorEventLockObservers[path]))
+	for _, observer := range supervisorEventLockObservers[path] {
+		observers = append(observers, observer)
+	}
+	return snapshot, observers, true
+}
+
+func notifySupervisorEventLockObservers(snapshot SupervisorEventLockSnapshot, observers []SupervisorEventLockObserver) {
+	for _, observer := range observers {
+		observer(snapshot)
+	}
+}
 
 // noteSupervisorEventLockHandoff records that ownership of the flock passed to
 // an abandoned bounded-emit worker. Pairs 1:1 with
 // noteSupervisorEventLockHandoffDone.
 func noteSupervisorEventLockHandoff(path string) {
 	supervisorEventLockMu.Lock()
-	defer supervisorEventLockMu.Unlock()
+	before := supervisorEventLockStateLocked(path)
 	rec := supervisorEventLockHealth[path]
 	if rec == nil {
 		rec = &supervisorEventLockRecord{}
 		supervisorEventLockHealth[path] = rec
 	}
 	rec.outstanding++
+	snapshot, observers, changed := supervisorEventLockTransitionLocked(path, before)
+	supervisorEventLockMu.Unlock()
+	if changed {
+		notifySupervisorEventLockObservers(snapshot, observers)
+	}
 }
 
 // noteSupervisorEventLockHandoffDone closes out a handoff with the worker's own
 // release outcome.
 func noteSupervisorEventLockHandoffDone(path string, releaseErr error) {
 	supervisorEventLockMu.Lock()
-	defer supervisorEventLockMu.Unlock()
+	before := supervisorEventLockStateLocked(path)
 	rec := supervisorEventLockHealth[path]
 	if rec == nil {
 		// Defensive: a done without a handoff cannot happen on any current
 		// path, but a failed release must never be dropped on the floor —
 		// dropping it is the exact class this owner exists to end.
 		if releaseErr == nil {
+			supervisorEventLockMu.Unlock()
 			return
 		}
 		supervisorEventLockHealth[path] = &supervisorEventLockRecord{stranded: true}
-		return
+	} else {
+		if rec.outstanding > 0 {
+			rec.outstanding--
+		}
+		if releaseErr != nil {
+			rec.stranded = true
+		}
+		pruneSupervisorEventLockRecordLocked(path, rec)
 	}
-	if rec.outstanding > 0 {
-		rec.outstanding--
+	snapshot, observers, changed := supervisorEventLockTransitionLocked(path, before)
+	supervisorEventLockMu.Unlock()
+	if changed {
+		notifySupervisorEventLockObservers(snapshot, observers)
 	}
-	if releaseErr != nil {
-		rec.stranded = true
-	}
-	pruneSupervisorEventLockRecordLocked(path, rec)
 }
 
 // noteSupervisorEventLockReleaseFailed records a synchronous release failure —
 // the caller still holds the flock and has no worker to account for.
 func noteSupervisorEventLockReleaseFailed(path string) {
 	supervisorEventLockMu.Lock()
-	defer supervisorEventLockMu.Unlock()
+	before := supervisorEventLockStateLocked(path)
 	rec := supervisorEventLockHealth[path]
 	if rec == nil {
 		rec = &supervisorEventLockRecord{}
 		supervisorEventLockHealth[path] = rec
 	}
 	rec.stranded = true
+	snapshot, observers, changed := supervisorEventLockTransitionLocked(path, before)
+	supervisorEventLockMu.Unlock()
+	if changed {
+		notifySupervisorEventLockObservers(snapshot, observers)
+	}
 }
 
 func pruneSupervisorEventLockRecordLocked(path string, rec *supervisorEventLockRecord) {
@@ -115,20 +215,45 @@ func pruneSupervisorEventLockRecordLocked(path string, rec *supervisorEventLockR
 // cannot be made — the remedy is always "restart this process", never "retry
 // the operation".
 func SupervisorEventLockStateForPath(path string) SupervisorEventLockState {
+	return SupervisorEventLockSnapshotForPath(path).State
+}
+
+// SupervisorEventLockSnapshotForPath atomically reads state and revision.
+func SupervisorEventLockSnapshotForPath(path string) SupervisorEventLockSnapshot {
 	supervisorEventLockMu.Lock()
 	defer supervisorEventLockMu.Unlock()
-	rec := supervisorEventLockHealth[path]
-	switch {
-	case rec == nil:
-		return SupervisorEventLockReleased
-	case rec.stranded:
-		// Stranded outranks outstanding: a confirmed failed release is worse
-		// than a worker that has not reported yet.
-		return SupervisorEventLockStranded
-	case rec.outstanding > 0:
-		return SupervisorEventLockOutstanding
-	default:
-		return SupervisorEventLockReleased
+	return SupervisorEventLockSnapshot{
+		State:    supervisorEventLockStateLocked(path),
+		Revision: supervisorEventLockRevisions[path],
+	}
+}
+
+// SubscribeSupervisorEventLockState atomically registers an observer and
+// returns the initial snapshot plus an idempotent unsubscribe handle.
+func SubscribeSupervisorEventLockState(path string, observer SupervisorEventLockObserver) (SupervisorEventLockSnapshot, func()) {
+	supervisorEventLockMu.Lock()
+	supervisorEventLockNextID++
+	id := supervisorEventLockNextID
+	if supervisorEventLockObservers[path] == nil {
+		supervisorEventLockObservers[path] = map[uint64]SupervisorEventLockObserver{}
+	}
+	supervisorEventLockObservers[path][id] = observer
+	initial := SupervisorEventLockSnapshot{
+		State:    supervisorEventLockStateLocked(path),
+		Revision: supervisorEventLockRevisions[path],
+	}
+	supervisorEventLockMu.Unlock()
+
+	var once sync.Once
+	return initial, func() {
+		once.Do(func() {
+			supervisorEventLockMu.Lock()
+			delete(supervisorEventLockObservers[path], id)
+			if len(supervisorEventLockObservers[path]) == 0 {
+				delete(supervisorEventLockObservers, path)
+			}
+			supervisorEventLockMu.Unlock()
+		})
 	}
 }
 
@@ -139,4 +264,6 @@ func ResetSupervisorEventLockStateForPathForTest(path string) {
 	supervisorEventLockMu.Lock()
 	defer supervisorEventLockMu.Unlock()
 	delete(supervisorEventLockHealth, path)
+	delete(supervisorEventLockRevisions, path)
+	delete(supervisorEventLockObservers, path)
 }

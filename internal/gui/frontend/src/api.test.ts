@@ -630,12 +630,35 @@ describe("validatePath", () => {
 });
 
 import {
+  acknowledgeDaemonRecoverReceipt,
   DAEMON_RECOVER_ERROR_CODES,
+  getDaemonRecoverAuditLockState,
+  newDaemonRecoverCorrelation,
   postDaemonRecover,
+  type AuditLockSnapshot,
+  type DaemonRecoverCorrelation,
   type DaemonRecoverResponse,
 } from "./api";
 
 describe("postDaemonRecover", () => {
+  const correlation: DaemonRecoverCorrelation = {
+    attempt_id: "11111111-1111-4111-8111-111111111111",
+    occurrence_id: "22222222-2222-4222-8222-222222222222",
+    server_instance: "33333333-3333-4333-8333-333333333333",
+  };
+  const auditLock: AuditLockSnapshot = {
+    scope: "supervisor_events_log",
+    server_instance: correlation.server_instance,
+    revision: 7,
+    state: "released",
+    recovery_receipt: {
+      attempt_id: correlation.attempt_id,
+      occurrence_id: correlation.occurrence_id,
+      status: "committed_success",
+      lock_authorization: "none",
+    },
+  };
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -654,10 +677,11 @@ describe("postDaemonRecover", () => {
         port_owner_check: terminationUnconfirmed,
         port_wait_outcome: "still_bound",
         audit_handoff: "durable",
+        audit_lock: auditLock,
       }),
     }) as unknown as Response);
 
-    await expect(postDaemonRecover("demo/default")).resolves.toMatchObject({
+    await expect(postDaemonRecover("demo/default", correlation)).resolves.toMatchObject({
       state: "respawn_accepted",
       reaped: false,
       port_owner_check: "termination_unconfirmed",
@@ -666,7 +690,11 @@ describe("postDaemonRecover", () => {
     expect(globalThis.fetch).toHaveBeenCalledWith("/api/daemon/recover", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_name: "demo/default", confirm: true }),
+      body: JSON.stringify({
+        task_name: "demo/default",
+        confirm: true,
+        audit_lock_attempt: correlation,
+      }),
     });
   });
 
@@ -683,7 +711,7 @@ describe("postDaemonRecover", () => {
 
     let err: APIError | undefined;
     try {
-      await postDaemonRecover("demo/default");
+      await postDaemonRecover("demo/default", correlation);
     } catch (cause) {
       err = cause as APIError;
     }
@@ -706,6 +734,13 @@ describe("postDaemonRecover", () => {
       "RECOVER_STATE_READ_FAILED",
       "RECOVER_AUDIT_DURABILITY_FAILED",
       "RECOVER_UNCLASSIFIED_FAILURE",
+      "AUDIT_LOCK_ADAPTER_INIT_FAILED",
+      "RECOVER_CORRELATION_INVALID",
+      "RECOVER_BASELINE_STALE",
+      "RECOVER_ATTEMPT_CONFLICT",
+      "RECOVER_OCCURRENCE_CONSUMED",
+      "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
+      "RECOVER_RECEIPT_IN_FLIGHT",
     ]);
   });
 
@@ -723,13 +758,60 @@ describe("postDaemonRecover", () => {
         port_owner_check: "reaped",
         port_wait_outcome: "released",
         audit_handoff: "release_unconfirmed",
+        audit_lock: { ...auditLock, state: "stranded", revision: 8 },
       }),
     }) as unknown as Response);
 
-    const resolved = await postDaemonRecover("demo/default");
+    const resolved = await postDaemonRecover("demo/default", correlation);
+    if (resolved.state === "recovery_in_flight") {
+      throw new Error("unexpected in-flight replay");
+    }
     const handoff: DaemonRecoverResponse["audit_handoff"] =
       resolved.audit_handoff;
     expect(handoff).toBe("release_unconfirmed");
     expect(resolved.state).toBe("respawn_accepted");
+  });
+
+  it("creates canonical lowercase UUIDv4 identifiers", () => {
+    const created = newDaemonRecoverCorrelation(correlation.server_instance);
+    const canonicalV4 =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    expect(created.server_instance).toBe(correlation.server_instance);
+    expect(created.attempt_id).toMatch(canonicalV4);
+    expect(created.occurrence_id).toMatch(canonicalV4);
+    expect(created.attempt_id).not.toBe(created.occurrence_id);
+  });
+
+  it("looks up and acknowledges the exact full correlation tuple", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        statusText: "OK",
+        json: async () => auditLock,
+      } as unknown as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 204,
+        statusText: "No Content",
+        json: async () => null,
+      } as unknown as Response);
+    globalThis.fetch = fetchMock;
+
+    await expect(getDaemonRecoverAuditLockState(correlation)).resolves.toEqual(auditLock);
+    await expect(acknowledgeDaemonRecoverReceipt(correlation)).resolves.toBeUndefined();
+
+    const lookupURL = fetchMock.mock.calls[0]?.[0]?.toString() ?? "";
+    expect(lookupURL).toContain("attempt_id=11111111-1111-4111-8111-111111111111");
+    expect(lookupURL).toContain("occurrence_id=22222222-2222-4222-8222-222222222222");
+    expect(lookupURL).toContain("server_instance=33333333-3333-4333-8333-333333333333");
+    expect(fetchMock.mock.calls[1]).toEqual([
+      "/api/daemon/recover/audit-lock-receipt",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...correlation, acknowledge: true }),
+      },
+    ]);
   });
 });

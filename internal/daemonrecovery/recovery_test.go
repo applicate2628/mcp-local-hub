@@ -2291,6 +2291,12 @@ func TestCommittedAuditFinalizerHandoffReadsProcessLockOwner(t *testing.T) {
 	// F1: the abandoned bounded-emit worker. finalize()'s own Wait(0) reports
 	// ErrSupervisorEventEmitTimeout while that worker still owns BOTH locks.
 	// The stall window is engineered large so a fast machine cannot flake it.
+	//
+	// The expected value is AuditHandoffReleasePending, NOT ...ReleaseUnconfirmed:
+	// a worker that still holds the lock has not FAILED to release it, and the
+	// two have opposite operator remedies. The assertion below also pins the
+	// class guard (`!= AuditHandoffDurable`) that this subtest has always been
+	// about, so narrowing the value cannot weaken it.
 	t.Run("AbandonedWorkerStillHoldsTheLock", func(t *testing.T) {
 		stateDir := t.TempDir()
 		logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
@@ -2344,8 +2350,11 @@ func TestCommittedAuditFinalizerHandoffReadsProcessLockOwner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("finalize: %v", err)
 		}
-		if handoff != AuditHandoffReleaseUnconfirmed {
-			t.Fatalf("audit handoff=%q want=%q while an abandoned worker still holds the flock", handoff, AuditHandoffReleaseUnconfirmed)
+		if handoff == AuditHandoffDurable {
+			t.Fatalf("audit handoff=%q while an abandoned worker still holds the flock; must never claim a confirmed release", handoff)
+		}
+		if handoff != AuditHandoffReleasePending {
+			t.Fatalf("audit handoff=%q want=%q while an abandoned worker still holds the flock", handoff, AuditHandoffReleasePending)
 		}
 	})
 
@@ -2375,4 +2384,107 @@ func TestCommittedAuditFinalizerHandoffReadsProcessLockOwner(t *testing.T) {
 			t.Fatalf("audit handoff=%q want=%q after the replay path failed to release the flock", handoff, AuditHandoffReleaseUnconfirmed)
 		}
 	})
+}
+
+// TestCommittedAuditFinalizerReportsPendingNotStrandedForAConcurrentHealthyEmit
+// is the guard for the consumer-side defect that made the handoff mapping
+// lossy.
+//
+// SCENARIO (the one that reaches an operator). Two Recover clicks overlap in the
+// GUI. /api/daemon/recover has no mutex or singleflight, and each recovery opens
+// its OWN SupervisorEventLog handle, so the in-process mutex does not serialize
+// them — only the flock does. Recovery B is inside a perfectly healthy bounded
+// emit, holding the flock for the duration of its write. Recovery A's finalize()
+// reads the process-scoped owner during that window.
+//
+// The mapping used to collapse api.SupervisorEventLockOutstanding and
+// api.SupervisorEventLockStranded into AuditHandoffReleaseUnconfirmed. The GUI
+// then applied the STRANDED remedy — a permanent, undismissable "Restart mcphub"
+// banner — to B's healthy write, which released microseconds later. On this
+// product that advice costs the operator the tray and the whole fleet.
+//
+// The false positive is not exotic: the bounded-emit worker is spawned and the
+// handoff recorded BEFORE the deadline is evaluated
+// (internal/api/supervisor_events.go:766-770 vs :798), so EVERY in-flight
+// bounded emit in the process occupies this state — including
+// internal/gui/gui_exit_reason.go's.
+//
+// The write here is unblocked only after the assertion, and the emit is given a
+// budget it cannot exceed, so the window is deterministic rather than raced.
+//
+// MUTATION: collapse the mapping back, i.e. replace the body of handoff() with
+//
+//	if api.SupervisorEventLockStateForPath(f.logPath()) == api.SupervisorEventLockReleased {
+//		return AuditHandoffDurable
+//	}
+//	return AuditHandoffReleaseUnconfirmed
+//
+// This test then fails with:
+//
+//	audit handoff="release_unconfirmed" want="release_pending" while an UNRELATED healthy bounded emit holds the flock
+func TestCommittedAuditFinalizerReportsPendingNotStrandedForAConcurrentHealthyEmit(t *testing.T) {
+	stateDir := t.TempDir()
+	logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	defer api.ResetSupervisorEventLockStateForPathForTest(logPath)
+
+	inWrite := make(chan struct{})
+	sampled := make(chan struct{})
+	restoreWrite := api.SetSupervisorEventWriteFnForTest(func(l *api.SupervisorEventLog, raw []byte) error {
+		close(inWrite)
+		<-sampled // hold the flock across the other recovery's handoff read
+		return nil
+	})
+
+	// Recovery B: an unrelated, HEALTHY bounded emit in the same process.
+	emitDone := make(chan error, 1)
+	go func() {
+		logger, err := api.OpenSupervisorEventLog(logPath)
+		if err != nil {
+			emitDone <- err
+			return
+		}
+		defer func() { _ = logger.Close() }()
+		emitDone <- logger.EmitWithTimeout(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityInfo,
+			Source:   api.SupervisorEventSourceLifecycle,
+			Event:    "concurrent-healthy-bounded-emit",
+		}, 30*time.Second)
+	}()
+	defer restoreWrite()
+
+	<-inWrite
+
+	// Recovery A: its own audit emit already succeeded (pending nil, emitErr
+	// nil), so finalize() reads the process-scoped owner directly.
+	prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityInfo,
+		Source:   api.SupervisorEventSourceLifecycle,
+		Event:    "daemon-recovery-concurrent-handoff",
+		TS:       time.Unix(1_700_000_000, 0).UTC().Format(time.RFC3339Nano),
+	})
+	if err != nil {
+		t.Fatalf("prepare audit: %v", err)
+	}
+	handoff, finalizeErr := (&committedAuditFinalizer{
+		stateDir:  stateDir,
+		prepared:  prepared,
+		attempted: true,
+	}).finalize()
+	close(sampled)
+
+	if finalizeErr != nil {
+		t.Fatalf("finalize: %v", finalizeErr)
+	}
+	if handoff != AuditHandoffReleasePending {
+		t.Fatalf("audit handoff=%q want=%q while an UNRELATED healthy bounded emit holds the flock", handoff, AuditHandoffReleasePending)
+	}
+
+	// The other emit must have SUCCEEDED — otherwise this test would be a
+	// restatement of the abandoned-worker case rather than the healthy one.
+	if emitErr := <-emitDone; emitErr != nil {
+		t.Fatalf("the concurrent bounded emit = %v, want nil (it must be the healthy path)", emitErr)
+	}
+	if got := api.SupervisorEventLockStateForPath(logPath); got != api.SupervisorEventLockReleased {
+		t.Fatalf("owner state after the concurrent emit finished = %q, want %q", got, api.SupervisorEventLockReleased)
+	}
 }

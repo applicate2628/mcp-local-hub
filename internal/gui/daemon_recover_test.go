@@ -227,6 +227,20 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 	// audit_handoff joins the pinned set deliberately: it names a lock-release
 	// outcome, never a path, PID, or command line, so it carries nothing this
 	// test exists to keep out of the response.
+	got := decodeDaemonRecoverBody(t, rec)
+	auditLock, ok := got["audit_lock"].(map[string]any)
+	if !ok {
+		t.Fatalf("body=%v missing typed audit_lock snapshot", got)
+	}
+	if auditLock["scope"] != auditLockScope ||
+		auditLock["state"] != "released" ||
+		auditLock["recovery_receipt"] != nil {
+		t.Fatalf("audit_lock=%v", auditLock)
+	}
+	if instance, ok := auditLock["server_instance"].(string); !ok || validateAuditLockCorrelationValue("server_instance", instance) != nil {
+		t.Fatalf("audit_lock server_instance=%v is not canonical UUIDv4", auditLock["server_instance"])
+	}
+	delete(got, "audit_lock")
 	want := map[string]any{
 		"task_name":         `\mcp-local-hub-memory-default`,
 		"state":             "respawn_accepted",
@@ -235,7 +249,7 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 		"port_wait_outcome": "still_bound",
 		"audit_handoff":     "durable",
 	}
-	if got := decodeDaemonRecoverBody(t, rec); !mapsEqual(got, want) {
+	if !mapsEqual(got, want) {
 		t.Fatalf("body=%v want=%v", got, want)
 	}
 	if fake.calls != 1 || !fake.confirmed {

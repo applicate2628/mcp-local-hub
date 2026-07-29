@@ -1,6 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from "preact/hooks";
-import { cleanupOrphans, fetchOrThrow, getHubHealth, isDaemonRecoverErrorCode, postDaemonRecover, restartSupervisor } from "../api";
-import type { APIError, DaemonRecoverErrorCode, HubHealth } from "../api";
+import {
+  acknowledgeDaemonRecoverReceipt,
+  cleanupOrphans,
+  fetchOrThrow,
+  getDaemonRecoverAuditLockState,
+  getHubHealth,
+  isDaemonRecoverErrorCode,
+  newDaemonRecoverCorrelation,
+  postDaemonRecover,
+  restartSupervisor,
+} from "../api";
+import type {
+  APIError,
+  AuditLockSnapshot,
+  DaemonRecoverCorrelation,
+  DaemonRecoverErrorCode,
+  HubHealth,
+} from "../api";
 import { useEventSource } from "../hooks/useEventSource";
 import { unmanagedStdioCount as countUnmanagedStdio } from "../lib/unmanaged-stdio";
 import { daemonStateVisual, isRecoveryEligibleState, stateShape } from "../lib/status";
@@ -50,6 +66,87 @@ function hubHealthMessage(h: HubHealth): string {
 // state below is a pure projection of those events.
 type BulkAction = "restart" | "stop";
 type BulkOutcome = { action: BulkAction; state: "done" | "error" };
+
+type AuditLockWarning = "pending" | "stranded";
+
+export interface AuditLockView {
+  serverInstance: string;
+  revision: number;
+  state: AuditLockSnapshot["state"];
+  warning: AuditLockWarning | null;
+}
+
+// Every POST, lookup, baseline GET, and settlement SSE enters this one fold.
+// Older revisions cannot overwrite newer truth, and a new server instance
+// starts a new ordering domain instead of relabeling an old recovery receipt.
+export function nextAuditLockView(
+  current: AuditLockView | null,
+  incoming: AuditLockSnapshot,
+): AuditLockView {
+  const sameInstance = current?.serverInstance === incoming.server_instance;
+  if (sameInstance && incoming.revision < current.revision) return current;
+
+  let warning: AuditLockWarning | null = null;
+  if (sameInstance && current?.warning === "stranded") {
+    warning = "stranded";
+  } else if (incoming.state === "stranded") {
+    warning = "stranded";
+  } else if (incoming.state === "outstanding") {
+    const receiptAuthorizesWarning =
+      incoming.recovery_receipt?.lock_authorization === "current_truth";
+    warning =
+      (sameInstance && current?.warning === "pending") ||
+      receiptAuthorizesWarning
+        ? "pending"
+        : null;
+  }
+
+  return {
+    serverInstance: incoming.server_instance,
+    revision: incoming.revision,
+    state: incoming.state,
+    warning,
+  };
+}
+
+type RecoverySettlement =
+  | "missing"
+  | "in_flight"
+  | "committed_success"
+  | "committed_error"
+  | "not_committed"
+  | "consumed"
+  | "conflict";
+
+class RecoveryFlowError extends Error {}
+
+function apiErrorCode(error: unknown): string | undefined {
+  return (error as APIError | undefined)?.code;
+}
+
+function isAuditLockSnapshot(value: unknown): value is AuditLockSnapshot {
+  if (typeof value !== "object" || value === null) return false;
+  const snapshot = value as Partial<AuditLockSnapshot>;
+  return (
+    snapshot.scope === "supervisor_events_log" &&
+    typeof snapshot.server_instance === "string" &&
+    Number.isSafeInteger(snapshot.revision) &&
+    (snapshot.state === "released" ||
+      snapshot.state === "outstanding" ||
+      snapshot.state === "stranded") &&
+    (snapshot.recovery_receipt === null ||
+      typeof snapshot.recovery_receipt === "object")
+  );
+}
+
+function auditLockSnapshotFromError(error: unknown): AuditLockSnapshot | null {
+  const body = (error as APIError | undefined)?.body;
+  if (typeof body !== "object" || body === null || !("audit_lock" in body)) {
+    return null;
+  }
+  const snapshot = (body as { audit_lock?: unknown }).audit_lock;
+  return isAuditLockSnapshot(snapshot) ? snapshot : null;
+}
 
 // RESTART_GRACE_MS bounds the restart/handoff-window debounce for the RED
 // `dashboard-error` banner AFTER the dashboard has already loaded real data.
@@ -154,17 +251,15 @@ export function DashboardScreen() {
   // Phase-0 item 1: honest hub-aggregate health. Fetched on mount, then updated
   // live by the `hub-health` SSE event so a hung/dead/needs-reconcile hub is
   // visible instead of every daemon card silently painting green.
-  // auditLockStranded is STICKY and screen-level on purpose.
-  //
-  // A "release_unconfirmed" audit handoff reports a PROCESS-scoped condition:
-  // this GUI process may still hold the supervisor-events.log cross-process
-  // flock, blocking the supervisor and `mcphub install` for as long as it runs.
-  // That outlives any per-card toast — Card's recoverFeedback is cleared the
-  // moment the daemon's state changes, which a successful recovery causes within
-  // seconds — and it is not attributable to one card, so it belongs beside the
-  // hub-health banner, not inside a daemon tile. It is never auto-cleared,
-  // because the only remedy is restarting this process.
-  const [auditLockStranded, setAuditLockStranded] = useState(false);
+  // The audit-lock projection is screen-level because both warnings report a
+  // PROCESS-scoped supervisor-events.log flock, not a daemon-card condition.
+  const [auditLockView, setAuditLockView] = useState<AuditLockView | null>(null);
+  const auditLockViewRef = useRef<AuditLockView | null>(null);
+  const auditLockBaselineErrorRef = useRef<unknown>(null);
+  const [auditLockNotice, setAuditLockNotice] = useState<string | null>(null);
+  const pendingRecoveriesRef = useRef(new Map<string, DaemonRecoverCorrelation>());
+  const acknowledgedReceiptsRef = useRef(new Set<string>());
+  const acknowledgingReceiptsRef = useRef(new Set<string>());
   const [hubHealth, setHubHealth] = useState<HubHealth | null>(null);
   const hubHealthSseSeqRef = useRef(0);
   const hubHealthFetchSeqRef = useRef(0);
@@ -177,6 +272,123 @@ export function DashboardScreen() {
     },
     [],
   );
+
+  const applyAuditLockSnapshot = useCallback((snapshot: AuditLockSnapshot) => {
+    setAuditLockView((current) => {
+      const next = nextAuditLockView(current, snapshot);
+      auditLockViewRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const acknowledgeTerminalReceipt = useCallback(async (
+    taskName: string,
+    correlation: DaemonRecoverCorrelation,
+    snapshot: AuditLockSnapshot,
+  ): Promise<RecoverySettlement> => {
+    applyAuditLockSnapshot(snapshot);
+    const receipt = snapshot.recovery_receipt;
+    if (receipt === null) return "missing";
+    if (
+      receipt.attempt_id !== correlation.attempt_id ||
+      receipt.occurrence_id !== correlation.occurrence_id
+    ) {
+      setAuditLockNotice(
+        "Recovery receipt did not match the action that created it. It was not acknowledged or relabeled.",
+      );
+      return "conflict";
+    }
+    if (receipt.status === "in_flight") return "in_flight";
+    if (receipt.status === "consumed") {
+      pendingRecoveriesRef.current.delete(taskName);
+      return "consumed";
+    }
+
+    const receiptKey = `${correlation.attempt_id}/${correlation.occurrence_id}`;
+    if (!acknowledgedReceiptsRef.current.has(receiptKey)) {
+      if (!acknowledgingReceiptsRef.current.has(receiptKey)) {
+        acknowledgingReceiptsRef.current.add(receiptKey);
+        try {
+          await acknowledgeDaemonRecoverReceipt(correlation);
+          acknowledgedReceiptsRef.current.add(receiptKey);
+        } catch {
+          setAuditLockNotice(
+            "Recovery finished, but its receipt could not be acknowledged. The dashboard will retry the safe acknowledgement after reconnecting.",
+          );
+          return receipt.status;
+        } finally {
+          acknowledgingReceiptsRef.current.delete(receiptKey);
+        }
+      } else {
+        return receipt.status;
+      }
+    }
+    pendingRecoveriesRef.current.delete(taskName);
+    return receipt.status;
+  }, [applyAuditLockSnapshot]);
+
+  const refreshAuditLockBaseline = useCallback(async (
+    surfaceFailure: boolean,
+  ): Promise<AuditLockView | null> => {
+    try {
+      const snapshot = await getDaemonRecoverAuditLockState();
+      if (!isAuditLockSnapshot(snapshot)) {
+        throw new Error("invalid audit-lock baseline");
+      }
+      auditLockBaselineErrorRef.current = null;
+      const next = nextAuditLockView(auditLockViewRef.current, snapshot);
+      applyAuditLockSnapshot(snapshot);
+      return next;
+    } catch (error) {
+      auditLockBaselineErrorRef.current = error;
+      if (surfaceFailure) {
+        setAuditLockNotice(
+          "Recovery state is unavailable. No recovery request was sent; wait for the dashboard to reconnect.",
+        );
+      }
+      return null;
+    }
+  }, [applyAuditLockSnapshot]);
+
+  const reconcileRecovery = useCallback(async (
+    taskName: string,
+    correlation: DaemonRecoverCorrelation,
+  ): Promise<RecoverySettlement> => {
+    try {
+      const snapshot = await getDaemonRecoverAuditLockState(correlation);
+      if (!isAuditLockSnapshot(snapshot)) {
+        throw new Error("invalid audit-lock receipt");
+      }
+      return await acknowledgeTerminalReceipt(taskName, correlation, snapshot);
+    } catch (error) {
+      if (apiErrorCode(error) === "RECOVER_BASELINE_STALE") {
+        pendingRecoveriesRef.current.delete(taskName);
+        setAuditLockNotice(
+          "The recovery server restarted before this action could be reconciled. Its old identifiers were not relabeled; check daemon status before starting another recovery.",
+        );
+      }
+      return "missing";
+    }
+  }, [acknowledgeTerminalReceipt]);
+
+  const reconcilePendingRecoveries = useCallback(async () => {
+    const pending = [...pendingRecoveriesRef.current.entries()];
+    for (const [taskName, correlation] of pending) {
+      const settlement = await reconcileRecovery(taskName, correlation);
+      if (settlement === "committed_success") {
+        setAuditLockNotice("Recovery result restored after reconnecting.");
+        setReloadTrigger((n) => n + 1);
+      } else if (settlement === "committed_error") {
+        setAuditLockNotice(
+          "Recovery stopped a process but completed with an error. Do NOT repeat it; check daemon status and supervisor logs.",
+        );
+      } else if (settlement === "not_committed") {
+        setAuditLockNotice(
+          "Recovery did not commit. Check current daemon status before deciding whether to start a new action.",
+        );
+      }
+    }
+  }, [reconcileRecovery]);
 
   // mountedRef gates every `loadStatus` state-apply. `loadStatus` is now a
   // hoisted `useCallback` (single fetch+apply owner) that can resolve after the
@@ -495,6 +707,16 @@ export function DashboardScreen() {
     setHubHealth(body);
   }, []);
 
+  const onAuditLockState = useCallback((ev: MessageEvent) => {
+    const body = JSON.parse(ev.data) as unknown;
+    if (!isAuditLockSnapshot(body)) {
+      setAuditLockNotice("The dashboard received an invalid audit-lock update and ignored it.");
+      return;
+    }
+    applyAuditLockSnapshot(body);
+    void reconcilePendingRecoveries();
+  }, [applyAuditLockSnapshot, reconcilePendingRecoveries]);
+
   const resyncHubHealth = useCallback((): (() => void) => {
     let cancelled = false;
     const mySeq = ++hubHealthFetchSeqRef.current;
@@ -529,7 +751,12 @@ export function DashboardScreen() {
     "daemon-failed": onDaemonFailed,
     "daemon-recovered": onDaemonRecovered,
     "hub-health": onHubHealth,
+    "audit-lock-state": onAuditLockState,
   });
+
+  useEffect(() => {
+    void refreshAuditLockBaseline(false);
+  }, [refreshAuditLockBaseline]);
 
   // Initial hub-aggregate health plus connected-stream backstops. SSE only
   // pushes transitions and can drop without reconnecting, so resync on mount,
@@ -562,6 +789,21 @@ export function DashboardScreen() {
     if (connectionState !== "open") return;
     return resyncHubHealth();
   }, [connectionState, resyncHubHealth]);
+
+  // Settlement SSE is transition-only and lossy. Every initial connection and
+  // reconnect repairs both the process-wide state and any retained exact receipt
+  // with GET; the destructive POST itself is never retried.
+  useEffect(() => {
+    if (connectionState !== "open") return;
+    void (async () => {
+      await refreshAuditLockBaseline(false);
+      await reconcilePendingRecoveries();
+    })();
+  }, [
+    connectionState,
+    reconcilePendingRecoveries,
+    refreshAuditLockBaseline,
+  ]);
 
   // Codex bot PR #38 P1 (round 3): safety-net for dropped SSE events.
   // The Broadcaster is lossy (internal/gui/events.go::Publish drops on
@@ -705,6 +947,92 @@ export function DashboardScreen() {
   const runAll = () => fireBulk("restart");
   const stopAll = () => fireBulk("stop");
 
+  async function recoverDaemon(taskName: string): Promise<void> {
+    const retained = pendingRecoveriesRef.current.get(taskName);
+    if (retained) {
+      const settlement = await reconcileRecovery(taskName, retained);
+      if (settlement === "committed_success" || settlement === "consumed") {
+        setReloadTrigger((n) => n + 1);
+        return;
+      }
+      throw new RecoveryFlowError(
+        settlement === "committed_error"
+          ? "Recovery already stopped a process but completed with an error. Do NOT retry; check current daemon status and supervisor logs."
+          : settlement === "not_committed"
+            ? "The prior recovery did not commit. Check current daemon status before starting another recovery."
+            : "The prior recovery action is still unresolved. Do NOT submit it again; the dashboard will reconcile it after reconnecting.",
+      );
+    }
+
+    let baseline = auditLockViewRef.current;
+    if (!baseline) {
+      baseline = await refreshAuditLockBaseline(true);
+    }
+    if (!baseline) {
+      throw new RecoveryFlowError(
+        "Recovery state is unavailable. No recovery request was sent; wait for the dashboard to reconnect.",
+      );
+    }
+
+    const correlation = newDaemonRecoverCorrelation(baseline.serverInstance);
+    pendingRecoveriesRef.current.set(taskName, correlation);
+    setAuditLockNotice(null);
+
+    try {
+      const result = await postDaemonRecover(taskName, correlation);
+      const settlement = await acknowledgeTerminalReceipt(
+        taskName,
+        correlation,
+        result.audit_lock,
+      );
+      if (result.state === "recovery_in_flight" || settlement === "in_flight") {
+        throw new RecoveryFlowError(
+          "Recovery is still running. Do NOT submit it again; the dashboard will reconcile the retained receipt.",
+        );
+      }
+      if (settlement !== "committed_success" && settlement !== "consumed") {
+        throw new RecoveryFlowError(
+          "Recovery returned without a committed success receipt. Do NOT repeat it; check current daemon status.",
+        );
+      }
+      setReloadTrigger((n) => n + 1);
+    } catch (error) {
+      if (error instanceof RecoveryFlowError) throw error;
+
+      const snapshot = auditLockSnapshotFromError(error);
+      if (snapshot) {
+        await acknowledgeTerminalReceipt(taskName, correlation, snapshot);
+        throw error;
+      }
+
+      const code = apiErrorCode(error);
+      if (code) {
+        // Reservation-level failures happen before daemon recovery. They have no
+        // receipt to retain and must never mutate/relabel the correlation.
+        pendingRecoveriesRef.current.delete(taskName);
+        if (code === "RECOVER_BASELINE_STALE") {
+          await refreshAuditLockBaseline(false);
+        }
+        throw error;
+      }
+
+      // The POST response was lost. Repair with the exact retained tuple; never
+      // issue a second destructive POST.
+      const settlement = await reconcileRecovery(taskName, correlation);
+      if (settlement === "committed_success" || settlement === "consumed") {
+        setReloadTrigger((n) => n + 1);
+        return;
+      }
+      throw new RecoveryFlowError(
+        settlement === "committed_error"
+          ? "Recovery already stopped a process but completed with an error. Do NOT retry; check current daemon status and supervisor logs."
+          : settlement === "not_committed"
+            ? "Recovery did not commit. Check current daemon status before starting a new action."
+            : "The recovery response was lost and its exact receipt is not terminal yet. Do NOT retry; the dashboard will reconcile it after reconnecting.",
+      );
+    }
+  }
+
   // Restart-grace debounce, as a PURE render-time comparison of two committed
   // observation timestamps — never elapsed wall-time, never a latched boolean.
   // RED requires a fresh RESOLVED failing observation (`lastFailAt`) that landed
@@ -828,7 +1156,19 @@ export function DashboardScreen() {
           ⚠ {hubHealthMessage(hubHealth)}
         </p>
       )}
-      {auditLockStranded && (
+      {auditLockView?.warning === "pending" && (
+        <p
+          class="dashboard-audit-lock-pending"
+          data-testid="dashboard-audit-lock-pending"
+          role="alert"
+        >
+          ⚠ Recovery finished while a background audit writer still holds the
+          supervisor-events.log lock. This normally clears on its own; no restart needed.
+          While it is pending, the supervisor and <code>mcphub install</code> cannot
+          write their event logs. Do NOT re-run recovery — it already completed.
+        </p>
+      )}
+      {auditLockView?.warning === "stranded" && (
         <p
           class="dashboard-audit-lock-stranded"
           data-testid="dashboard-audit-lock-stranded"
@@ -838,6 +1178,15 @@ export function DashboardScreen() {
           supervisor-events.log lock. While that lock is held, the supervisor and{" "}
           <code>mcphub install</code> cannot write their event logs. Do NOT re-run
           recovery — it already completed. Restart mcphub to release the lock.
+        </p>
+      )}
+      {auditLockNotice && (
+        <p
+          class="dashboard-error"
+          data-testid="dashboard-audit-lock-notice"
+          role="alert"
+        >
+          {auditLockNotice}
         </p>
       )}
       {unmanagedStdioCount > 0 && (
@@ -856,17 +1205,7 @@ export function DashboardScreen() {
             key={keyFor(d)}
             daemon={d}
             onRestart={() => restart(d.server, d.daemon)}
-            onRecover={async () => {
-              const result = await postDaemonRecover(d.task_name!);
-              // The response's warning field is the ONLY signal that this
-              // process may have stranded the event-log flock. Discarding it
-              // (which this handler used to do) made the condition invisible in
-              // the exact surface — a long-lived GUI — where it actually hurts.
-              if (result.audit_handoff === "release_unconfirmed") {
-                setAuditLockStranded(true);
-              }
-              setReloadTrigger((n) => n + 1);
-            }}
+            onRecover={() => recoverDaemon(d.task_name!)}
             onStop={() => stop(d.server, d.daemon)}
             bulkInflight={bulkInflight}
             bulkOutcome={bulkOutcome}
@@ -1194,6 +1533,8 @@ function Card(props: {
 }
 
 function daemonRecoveryMessage(error: unknown): string {
+  if (error instanceof RecoveryFlowError) return error.message;
+
   const apiError = error as APIError | undefined;
   const body = apiError?.body;
   const terminationCommitted =
@@ -1254,6 +1595,20 @@ function daemonRecoverCodeMessage(code: DaemonRecoverErrorCode): string {
       return "Recovery already stopped the process and requested a respawn, but its audit record could not be preserved. Do NOT retry — the destructive step has already run. Check this daemon's state below and inspect supervisor-events.log.";
     case "RECOVER_UNCLASSIFIED_FAILURE":
       return "Recovery failed for an unclassified reason. No specific cause can be asserted; check the supervisor logs before retrying.";
+    case "AUDIT_LOCK_ADAPTER_INIT_FAILED":
+      return "Recovery state is unavailable. No recovery request was sent; wait for the dashboard to reconnect.";
+    case "RECOVER_CORRELATION_INVALID":
+      return "Recovery identifiers were rejected before recovery began. No process was stopped.";
+    case "RECOVER_BASELINE_STALE":
+      return "The recovery server restarted before this action began. No process was stopped; open Recover again after the dashboard reconnects.";
+    case "RECOVER_ATTEMPT_CONFLICT":
+      return "Recovery identifiers are already bound to a different action. Nothing was relabeled or retried.";
+    case "RECOVER_OCCURRENCE_CONSUMED":
+      return "This recovery receipt was already consumed. The action was not repeated; refresh daemon status.";
+    case "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED":
+      return "Recovery cannot start because the receipt registry is full. No process was stopped.";
+    case "RECOVER_RECEIPT_IN_FLIGHT":
+      return "Recovery is still running. Its receipt cannot be acknowledged yet, and the action was not repeated.";
     default: {
       const unhandled: never = code;
       return `Recovery failed (${String(unhandled)}). Check the supervisor logs before retrying.`;
