@@ -55,14 +55,15 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
-// Reason is populated when Status == evidence.StatusUnknown and, for
-// ReasonInputMalformed, when Result.InputIncomplete is true. Closed enum.
+// Reason is populated when Status is not ok and, for ReasonInputMalformed,
+// when Result.InputIncomplete is true. Closed enum.
 type Reason string
 
 const (
@@ -86,6 +87,10 @@ const (
 	// parsed, so there is no partial evidence to qualify. See
 	// parseResult.incompleteReasons.
 	ReasonTracePathNotSupplied Reason = "trace_path_not_supplied"
+	// ReasonRelativeTracePath: trace_path was supplied but is not absolute.
+	// Failed (bad caller input) before the filesystem is touched; resolving it
+	// would bind the call to the hub daemon's private working directory.
+	ReasonRelativeTracePath Reason = "relative_trace_path"
 	// ReasonTraceNotFound: trace_path was supplied and does not exist. A
 	// VERIFIED absence at a path we looked for, which is why the unsupplied
 	// case above must never land here. Never silently offered to generate one
@@ -129,6 +134,10 @@ const (
 	// a truncated index would look exactly like a complete one that happened
 	// to observe fewer lines.
 	ReasonCanceled Reason = "canceled"
+	// ReasonUnsupportedTraceVersion: an explicit trace version header names a
+	// major other than json-v1. The parser stops and returns no partial records
+	// because interpreting a future wire format as v1 would fabricate evidence.
+	ReasonUnsupportedTraceVersion Reason = "unsupported_trace_version"
 )
 
 // Status aliases evidence.Status so callers of this package do not need a
@@ -346,8 +355,6 @@ func DefaultDeps() Deps {
 // parse for a caller that has already gone away.
 func Trace(ctx context.Context, args Args, deps Deps) Result {
 	var ev evidence.Evidence
-	ev.AddPath(args.TracePath)
-
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -364,6 +371,10 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 	if strings.TrimSpace(args.TracePath) == "" {
 		return Result{Status: evidence.StatusUnknown, Reason: ReasonTracePathNotSupplied, Evidence: ev}
 	}
+	if !filepath.IsAbs(args.TracePath) {
+		return Result{Status: evidence.StatusFailed, Reason: ReasonRelativeTracePath, Evidence: ev}
+	}
+	ev.AddPath(args.TracePath)
 
 	f, err := deps.FS.Open(args.TracePath)
 	if err != nil {
@@ -382,6 +393,14 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 			reason = ReasonCanceled
 		}
 		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
+	}
+	if parsed.unsupportedVersion {
+		return Result{
+			Status:               evidence.StatusUnknown,
+			Reason:               ReasonUnsupportedTraceVersion,
+			VersionHeaderPresent: parsed.versionHeaderPresent,
+			Evidence:             ev,
+		}
 	}
 
 	if parsed.sawNoContent() {

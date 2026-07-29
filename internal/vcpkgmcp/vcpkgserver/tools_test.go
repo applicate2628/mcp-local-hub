@@ -3,6 +3,8 @@ package vcpkgserver
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -128,4 +130,66 @@ func TestRegisterTools(t *testing.T) {
 			}
 		})
 	}
+
+	// Receiving-side echo for PR #591: exercise the actual MCP registration,
+	// JSON argument decoder and JSON response encoder, not only package calls.
+	type wirePort struct {
+		PortDir string `json:"port_dir"`
+		Status  string `json:"status"`
+		Reason  string `json:"reason"`
+	}
+	type wireBody struct {
+		Status               string     `json:"status"`
+		Reason               string     `json:"reason"`
+		Ports                []wirePort `json:"ports"`
+		VersionHeaderPresent bool       `json:"version_header_present"`
+		Records              []any      `json:"records"`
+	}
+	callBody := func(t *testing.T, name string, args map[string]any) wireBody {
+		t.Helper()
+		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: args})
+		if err != nil {
+			t.Fatalf("CallTool(%s): %v", name, err)
+		}
+		if result == nil || result.IsError || len(result.Content) != 1 {
+			t.Fatalf("CallTool(%s) returned invalid normal-result envelope: %#v", name, result)
+		}
+		content, ok := result.Content[0].(*mcp.TextContent)
+		if !ok {
+			t.Fatalf("CallTool(%s) content = %T, want *mcp.TextContent", name, result.Content[0])
+		}
+		var body wireBody
+		if err := json.Unmarshal([]byte(content.Text), &body); err != nil {
+			t.Fatalf("CallTool(%s) JSON: %v\nbody=%s", name, err, content.Text)
+		}
+		return body
+	}
+
+	t.Run("pr591_relative_paths_are_wire_visible", func(t *testing.T) {
+		pin := callBody(t, "vcpkg_pin_status", map[string]any{"port_dirs": []string{"relative/port"}})
+		if pin.Status != "ok" || len(pin.Ports) != 1 || pin.Ports[0].Status != "failed" ||
+			pin.Ports[0].Reason != "relative_port_dir" || pin.Ports[0].PortDir != "relative/port" {
+			t.Fatalf("pin-status wire body = %+v, want ok batch with failed(relative_port_dir) entry echoed unchanged", pin)
+		}
+
+		trace := callBody(t, "vcpkg_cmake_trace", map[string]any{"trace_path": "relative/trace.json"})
+		if trace.Status != "failed" || trace.Reason != "relative_trace_path" {
+			t.Fatalf("cmake-trace wire body = %+v, want failed(relative_trace_path)", trace)
+		}
+	})
+
+	t.Run("pr591_unsupported_trace_major_is_wire_visible", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "trace.json")
+		content := []byte("{\"version\":{\"major\":2,\"minor\":0}}\n" +
+			"{\"file\":\"/proj/CMakeLists.txt\",\"line\":1,\"cmd\":\"project\",\"args\":[\"p\"]}\n")
+		if err := os.WriteFile(path, content, 0o644); err != nil {
+			t.Fatalf("write trace fixture: %v", err)
+		}
+
+		trace := callBody(t, "vcpkg_cmake_trace", map[string]any{"trace_path": path})
+		if trace.Status != "unknown" || trace.Reason != "unsupported_trace_version" ||
+			!trace.VersionHeaderPresent || len(trace.Records) != 0 {
+			t.Fatalf("cmake-trace wire body = %+v, want unknown(unsupported_trace_version), header present, no records", trace)
+		}
+	})
 }

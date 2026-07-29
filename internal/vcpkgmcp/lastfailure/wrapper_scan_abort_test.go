@@ -15,8 +15,8 @@ type oneFileFS struct {
 	data []byte
 }
 
-func (f oneFileFS) Stat(string) (os.FileInfo, error)      { return nil, fs.ErrNotExist }
-func (f oneFileFS) ReadDir(string) ([]os.DirEntry, error) { return nil, fs.ErrNotExist }
+func (f oneFileFS) Stat(string) (os.FileInfo, error)  { return nil, fs.ErrNotExist }
+func (f oneFileFS) OpenDir(string) (DirReader, error) { return nil, fs.ErrNotExist }
 
 func (f oneFileFS) ReadFile(p string) ([]byte, error) {
 	if p == f.path {
@@ -60,22 +60,23 @@ func TestWrapperScanAbort_IsNotReportedAsMalformed(t *testing.T) {
 		Deps{FS: oneFileFS{path: wrapperPath, data: oversize}},
 	)
 
-	var sawMalformed, sawUnreadable bool
+	var sawMalformed, sawLimit bool
 	for _, n := range res.Notes {
 		switch n {
 		case NoteWrapperMalformed:
 			sawMalformed = true
-		case NoteWrapperUnreadable:
-			sawUnreadable = true
+		case NoteProducerLimitEngaged:
+			sawLimit = true
 		}
 	}
 	if sawMalformed {
 		t.Fatalf("an ABORTED scan was reported as %q, whose contract is that the file was read END TO END; notes=%v",
 			NoteWrapperMalformed, res.Notes)
 	}
-	if !sawUnreadable {
-		t.Fatalf("an aborted scan must report %q — the tool never saw the whole file, so it can say nothing "+
-			"about its shape; notes=%v", NoteWrapperUnreadable, res.Notes)
+	if res.Reason != ReasonMetadataLimitExceeded || !sawLimit {
+		t.Fatalf("the production path must stop at the metadata sentinel as unknown(%s), before feeding an "+
+			"oversize blob to the parser; status=%s reason=%s notes=%v", ReasonMetadataLimitExceeded,
+			res.Status, res.Reason, res.Notes)
 	}
 }
 

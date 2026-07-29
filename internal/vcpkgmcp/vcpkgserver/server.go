@@ -25,8 +25,11 @@ package vcpkgserver
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/vcpkgmcp/lastfailure"
 )
 
 // VcpkgServer holds the MCP server instance. All three increment-1 tools
@@ -36,7 +39,23 @@ import (
 // struct exists so the registration pattern matches godbolt/perftools and
 // has an obvious place to add shared state (e.g. a cache) later.
 type VcpkgServer struct {
-	server *mcp.Server
+	server           *mcp.Server
+	lastFailureOnce  sync.Once
+	lastFailureSlots chan struct{}
+	lastFailureRun   func(context.Context, lastfailure.Args, lastfailure.Deps) lastfailure.Result
+	lastFailureDeps  func() lastfailure.Deps
+}
+
+func (vs *VcpkgServer) initLastFailure() {
+	vs.lastFailureOnce.Do(func() {
+		vs.lastFailureSlots = make(chan struct{}, 2)
+		if vs.lastFailureRun == nil {
+			vs.lastFailureRun = lastfailure.LastFailureContext
+		}
+		if vs.lastFailureDeps == nil {
+			vs.lastFailureDeps = lastfailure.DefaultDeps
+		}
+	})
 }
 
 // Run wires up a fresh VcpkgServer, registers all tools, and serves the

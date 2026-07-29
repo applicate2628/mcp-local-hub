@@ -3,6 +3,7 @@ package lastfailure
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -335,22 +336,13 @@ func normalizeLogLine(line string) string {
 	}
 	var b strings.Builder
 	b.Grow(len(line))
-	for i := 0; i < len(line); {
-		c := line[i]
-		switch {
-		case c == 0x1b:
-			i = skipEscapeSequence(line, i)
-		case c == 0xEF && strings.HasPrefix(line[i:], "\ufeff"):
-			i += len("\ufeff")
-		case c < 0x20 && c != '\t':
-			i++
-		case c == 0x7f:
-			i++
-		default:
-			b.WriteByte(c)
-			i++
-		}
+	var normalizer logLineNormalizer
+	normalizer.reset()
+	write := func(value byte) { b.WriteByte(value) }
+	for i := 0; i < len(line); i++ {
+		normalizer.feedByte(line[i], write)
 	}
+	normalizer.finish(write)
 	return b.String()
 }
 
@@ -369,57 +361,164 @@ func needsLogLineNormalization(line string) bool {
 	return false
 }
 
-// skipEscapeSequence returns the index just past the escape sequence starting
-// at line[i] (which the caller has established is ESC). An unterminated
-// sequence consumes the rest of the line.
-func skipEscapeSequence(line string, i int) int {
-	i++ // the ESC itself
-	if i >= len(line) {
-		return i
+// logLineNormalizer is the single stateful owner of normalizeLogLine's byte
+// rules. The whole-line compatibility path and the bounded streaming interrupt
+// recognizer feed the same owner, so chunk boundaries cannot create a second
+// ANSI/BOM interpretation.
+type logLineNormalizer struct {
+	escape logLineEscapeState
+	bom    uint8
+}
+
+type logLineEscapeState uint8
+
+const (
+	logLineEscapeNone logLineEscapeState = iota
+	logLineEscapeAfter
+	logLineEscapeCSIParams
+	logLineEscapeCSIIntermediates
+	logLineEscapeString
+	logLineEscapeStringAfterESC
+	logLineEscapeGeneral
+)
+
+func (n *logLineNormalizer) reset() {
+	n.escape = logLineEscapeNone
+	n.bom = 0
+}
+
+func (n *logLineNormalizer) feed(data []byte, emit func(byte)) {
+	for _, value := range data {
+		n.feedByte(value, emit)
 	}
-	switch line[i] {
-	case '[': // CSI: params 0x30-0x3F, intermediates 0x20-0x2F, one final 0x40-0x7E
-		i++
-		for i < len(line) && line[i] >= 0x30 && line[i] <= 0x3f {
-			i++
-		}
-		for i < len(line) && line[i] >= 0x20 && line[i] <= 0x2f {
-			i++
-		}
-		if i < len(line) && line[i] >= 0x40 && line[i] <= 0x7e {
-			i++
-		}
-		return i
-	case ']', 'P', 'X', '^', '_': // OSC / DCS / SOS / PM / APC: run to BEL or ST
-		i++
-		for i < len(line) {
-			if line[i] == 0x07 { // BEL
-				return i + 1
+}
+
+func (n *logLineNormalizer) feedByte(value byte, emit func(byte)) {
+	if n.escape == logLineEscapeNone {
+		switch n.bom {
+		case 1:
+			if value == 0xbb {
+				n.bom = 2
+				return
 			}
-			if line[i] == 0x1b && i+1 < len(line) && line[i+1] == '\\' { // ST
-				return i + 2
+			n.bom = 0
+			n.emitVisible(0xef, emit)
+			n.feedByte(value, emit)
+			return
+		case 2:
+			n.bom = 0
+			if value == 0xbf {
+				return
 			}
-			i++
+			n.emitVisible(0xef, emit)
+			n.emitVisible(0xbb, emit)
+			n.feedByte(value, emit)
+			return
 		}
-		return i
-	default:
-		// The general "nF" escape form: zero or more intermediate bytes
-		// (0x20-0x2F) then one final byte (0x30-0x7E). This covers the
-		// three-byte charset designators a terminal capture really carries —
-		// ESC ( B (select ASCII), ESC ) 0, ESC # 8 — as well as the plain
-		// two-byte forms (ESC 7, ESC =, ESC M), which are just the zero-
-		// intermediate case. Treating every non-CSI escape as two bytes left
-		// the final byte behind as text: this branch was written that way and
-		// TestNormalizeLogLine's "two-byte escape" case caught it, returning
-		// "BUser interrupt" for "\x1b(BUser interrupt".
-		for i < len(line) && line[i] >= 0x20 && line[i] <= 0x2f {
-			i++
+		if value == 0xef {
+			n.bom = 1
+			return
 		}
-		if i < len(line) && line[i] >= 0x30 && line[i] <= 0x7e {
-			i++
-		}
-		return i
 	}
+
+	switch n.escape {
+	case logLineEscapeAfter:
+		switch value {
+		case '[':
+			n.escape = logLineEscapeCSIParams
+		case ']', 'P', 'X', '^', '_':
+			n.escape = logLineEscapeString
+		default:
+			if value >= 0x20 && value <= 0x2f {
+				n.escape = logLineEscapeGeneral
+				return
+			}
+			if value >= 0x30 && value <= 0x7e {
+				n.escape = logLineEscapeNone
+				return
+			}
+			n.escape = logLineEscapeNone
+			n.emitVisible(value, emit)
+		}
+		return
+	case logLineEscapeCSIParams:
+		if value >= 0x30 && value <= 0x3f {
+			return
+		}
+		if value >= 0x20 && value <= 0x2f {
+			n.escape = logLineEscapeCSIIntermediates
+			return
+		}
+		if value >= 0x40 && value <= 0x7e {
+			n.escape = logLineEscapeNone
+			return
+		}
+		n.escape = logLineEscapeNone
+		n.emitVisible(value, emit)
+		return
+	case logLineEscapeCSIIntermediates:
+		if value >= 0x20 && value <= 0x2f {
+			return
+		}
+		if value >= 0x40 && value <= 0x7e {
+			n.escape = logLineEscapeNone
+			return
+		}
+		n.escape = logLineEscapeNone
+		n.emitVisible(value, emit)
+		return
+	case logLineEscapeString:
+		if value == 0x07 {
+			n.escape = logLineEscapeNone
+		} else if value == 0x1b {
+			n.escape = logLineEscapeStringAfterESC
+		}
+		return
+	case logLineEscapeStringAfterESC:
+		if value == '\\' {
+			n.escape = logLineEscapeNone
+		} else {
+			n.escape = logLineEscapeString
+		}
+		return
+	case logLineEscapeGeneral:
+		if value >= 0x20 && value <= 0x2f {
+			return
+		}
+		if value >= 0x30 && value <= 0x7e {
+			n.escape = logLineEscapeNone
+			return
+		}
+		n.escape = logLineEscapeNone
+		n.emitVisible(value, emit)
+		return
+	}
+
+	if value == 0x1b {
+		n.escape = logLineEscapeAfter
+		return
+	}
+	n.emitVisible(value, emit)
+}
+
+func (n *logLineNormalizer) emitVisible(value byte, emit func(byte)) {
+	if (value < 0x20 && value != '\t') || value == 0x7f {
+		return
+	}
+	emit(value)
+}
+
+func (n *logLineNormalizer) finish(emit func(byte)) {
+	// A partial BOM is ordinary UTF-8 data, whereas an unterminated escape
+	// sequence is display control through end of line and remains discarded.
+	switch n.bom {
+	case 1:
+		n.emitVisible(0xef, emit)
+	case 2:
+		n.emitVisible(0xef, emit)
+		n.emitVisible(0xbb, emit)
+	}
+	n.bom = 0
 }
 
 // DetectInterrupted reports whether content carries a user-interrupt marker as
@@ -445,16 +544,23 @@ func DetectInterrupted(content []byte) bool {
 		} else {
 			content = nil
 		}
-		// Normalize BEFORE trimming: stripping a trailing reset sequence or a
-		// leading BOM can expose whitespace the trim then has to remove.
-		trimmed := strings.TrimSpace(normalizeLogLine(string(line)))
-		if trimmed == "" {
-			continue
+		if isInterruptLogLine(line) {
+			return true
 		}
-		for _, m := range interruptMarkers {
-			if trimmed == m {
-				return true
-			}
+	}
+	return false
+}
+
+func isInterruptLogLine(line []byte) bool {
+	// Normalize BEFORE trimming: stripping a trailing reset sequence or a
+	// leading BOM can expose whitespace the trim then has to remove.
+	trimmed := strings.TrimSpace(normalizeLogLine(string(line)))
+	if trimmed == "" {
+		return false
+	}
+	for _, marker := range interruptMarkers {
+		if trimmed == marker {
+			return true
 		}
 	}
 	return false
@@ -648,7 +754,7 @@ func severityBudgetClass(d Diagnostic) int {
 // separate concern owned by rankDiagnostics at the result boundary, so the
 // two never have to be reasoned about together.
 func ScanDiagnostics(content []byte) []Diagnostic {
-	diags, _ := scanDiagnostics(content)
+	diags, _, _ := scanDiagnostics(content, maxDiagnosticsPerLog)
 	return diags
 }
 
@@ -660,42 +766,39 @@ func ScanDiagnostics(content []byte) []Diagnostic {
 // else matched" — the same silent-truncation defect as an unbounded read, one
 // layer down. Callers that issue a verdict must treat a non-nil error as
 // incomplete evidence.
-func scanDiagnostics(content []byte) ([]Diagnostic, error) {
+func scanDiagnostics(content []byte, perCellLimit int) ([]Diagnostic, int, error) {
 	var out []Diagnostic
+	dropped := 0
 	// One budget per (severity class, tier) cell — see maxDiagnosticsPerLog.
 	var budget [severityBudgetClasses][tierBudgetClasses]int
 	for s := range budget {
 		for t := range budget[s] {
-			budget[s][t] = maxDiagnosticsPerLog
+			budget[s][t] = perCellLimit
 		}
 	}
-	remaining := severityBudgetClasses * tierBudgetClasses * maxDiagnosticsPerLog
 
 	scanner := bufio.NewScanner(bytes.NewReader(content))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, phaseLogReadChunkBytes), defaultResponseLimits.logLineBytes)
 	for scanner.Scan() {
 		// normalizeLogLine is the SAME owner DetectInterrupted uses: every
 		// shape below is anchored, so a colourized log would otherwise match
 		// nothing and answer unknown(no_diagnostic_found) for a build that
 		// plainly failed. It also decides what Diagnostic.Text carries on the
 		// wire — see the normalizer's doc for that contract change.
-		line := normalizeLogLine(strings.TrimRight(scanner.Text(), "\r"))
+		line := normalizeLFLogLine(scanner.Text())
 		d, ok := matchDiagnosticLine(line)
 		if !ok {
 			continue
 		}
 		sev, tier := severityBudgetClass(d), tierRank(d.Tier)
 		if budget[sev][tier] == 0 {
+			dropped++
 			continue
 		}
 		budget[sev][tier]--
-		remaining--
 		out = append(out, d)
-		if remaining == 0 {
-			break
-		}
 	}
-	return out, scanner.Err()
+	return out, dropped, scanner.Err()
 }
 
 // --- Total response budget (single owner) --------------------------------
@@ -746,17 +849,390 @@ const (
 	// pathological MSVC template-instantiation error intact while making the
 	// scanner's 4 MiB line ceiling unreachable on the wire.
 	MaxDiagnosticTextBytes = 4 << 10
-	// MaxResponseDiagnosticBytes bounds the SUM of emitted diagnostic text.
-	// Without it the worst case is MaxResponseDiagnostics x
-	// MaxDiagnosticTextBytes = 800 KB. Largest realistic text sum measured:
-	// 295 bytes.
+	// MaxResponseDiagnosticBytes bounds the SUM of emitted diagnostic VARIABLE
+	// cost — Text plus File, the two fields a diagnostic lifts out of the log.
+	//
+	// CORRECTED 2026-07-27: this charged len(Text) alone, which is the defect
+	// that made the whole budget non-binding. Four of the five matched shapes
+	// capture rest-of-line or head-of-line into File (only toolDiagRE's closed
+	// driver allowlist does not), so a 3 MiB File was admitted free of charge
+	// while the response reported itself as bounded. Charging the ENTRY's wire
+	// cost rather than one of its fields is the fix: how the bytes divide
+	// between the two fields is not something a budget should have an opinion
+	// about. Largest realistic sum measured across the fixture corpus:
+	// 203 bytes (148 Text + 55 File).
 	MaxResponseDiagnosticBytes = 64 << 10
+
+	// MaxWirePathBytes bounds ONE locator string: Diagnostic.File,
+	// DiagnosticLog, a LogPaths or OverlayChain entry, FailedTarget, and the
+	// paths inside Evidence.
+	//
+	// Measured across the whole fixture corpus: longest File 55 bytes, longest
+	// path 146, longest overlay entry 40. Windows MAX_PATH is 260. 1 KiB is
+	// ~4x MAX_PATH and ~19x the longest value any real fixture produced, so it
+	// bounds pathology without touching a real locator — and it still leaves
+	// room for the one legitimately multi-valued case, a ninja "FAILED:" line
+	// naming several outputs.
+	MaxWirePathBytes = 1 << 10
+	// MaxWireCommandBytes bounds ONE command string: ExactCommand,
+	// BuildCommand, and the commands inside Evidence.
+	//
+	// Grounded in the producer rather than in taste. These fields exist to be
+	// PASTED INTO A SHELL, and Microsoft documents the command prompt's own
+	// ceiling as 8191 characters (KB 830473, "Command prompt (Cmd. exe)
+	// command-line string limitation"). A longer string could not have been
+	// typed or run, so truncating above this cap can only ever damage a value
+	// that was already not a runnable command — which is why bounding these
+	// fields does not contradict their verbatim-reproducibility contract.
+	// Longest real command measured: 522 bytes (the operator's own wrapper
+	// sample), 134 bytes across the in-tree fixtures.
+	MaxWireCommandBytes = 8 << 10
+	// MaxWireListEntries bounds every repeated output list at its producer and
+	// also bounds the reduced response. Omission is never silent: ResourceReport
+	// carries completeness and dropped counts, while the diagnostic list retains
+	// its dedicated DiagnosticsDropped contract.
+	//
+	// Measured: 11 log paths, 5 notes, 1 context source at the corpus maximum.
+	MaxWireListEntries = 64
+	// MaxResponseBytes is the WHOLE-BODY ceiling, and it is the only bound in
+	// this file that closes the CLASS rather than an enumerated instance.
+	//
+	// Every other constant here caps a field somebody thought to name. That
+	// approach has now failed twice in this package's own history: the first
+	// budget charged Text and missed File, BuildCommand, ExactCommand,
+	// OverlayChain and Evidence.Commands; the correction that found those
+	// missed two of the four unbounded File shapes. A per-field enumeration
+	// cannot converge, because the defect is always the field nobody listed.
+	//
+	// So the per-field caps above are the DEGRADATION POLICY — they decide how
+	// gracefully an oversize value fails — and this is the GUARANTEE: whatever
+	// field is added tomorrow, the marshaled body cannot exceed this size,
+	// because boundResponse measures the real encoding and falls back to a
+	// reduced document that is bounded by construction.
+	//
+	// 256 KiB is ~54x the largest whole response any real fixture produced
+	// (4790 bytes) and still above the producer-shaped result, so the
+	// backstop is unreachable on any answer the per-field caps have already
+	// shaped. It engaging at all is a signal that a new unbounded field exists.
+	MaxResponseBytes = 256 << 10
 )
 
-// truncationMarker is appended to a Text that was cut, so the truncation is
-// visible IN BAND. A caller reading one diagnostic must not have to correlate
-// it with a note elsewhere in the document to learn the line is incomplete.
+// truncationMarker is appended to any wire value that was cut, so the
+// truncation is visible IN BAND. A caller reading one field must not have to
+// correlate it with a note elsewhere in the document to learn the value is
+// incomplete.
+//
+// It carries a second, load-bearing job on LOCATOR fields. A truncated path is
+// not a shortened path, it is a DIFFERENT path — one an operator or an agent
+// could open, or feed to another tool, without ever noticing. The marker makes
+// that impossible to do silently: a value ending in "… [truncated, N more
+// bytes]" contains a space, a non-ASCII ellipsis and a bracket, so it cannot
+// be mistaken for, and cannot resolve as, a real filesystem path.
 const truncationMarker = "… [truncated, %d more bytes]"
+
+// --- The single owner of what may go on this tool's wire ------------------
+//
+// boundResponse is the final, field-agnostic assertion after producer-side
+// limits have already bounded work and retention. LastFailure routes every
+// return through it, including early returns.
+//
+// Placing the bound in a separate function also converts the budget's central
+// safety property from a positional claim into a structural one. The old
+// comment argued "this cannot change a verdict BECAUSE it is applied after the
+// verdict switch" — true, but true only while nobody moved it. boundResponse
+// receives a finished Result. It preserves valid verdicts; validateCausality
+// deliberately downgrades an internally inconsistent failed result to unknown.
+//
+// Three layers, in order:
+//
+//  1. boundWireValues caps each value by KIND (prose / locator / command).
+//     This is an enumeration, and an enumeration is exactly what has failed
+//     twice here — so it is deliberately NOT the guarantee. Its job is the
+//     quality of degradation: a capped field keeps its useful prefix and says
+//     so in band.
+//  2. applyResponseBudget spends the count and aggregate-byte budget over the
+//     already-ranked, already-capped diagnostics.
+//  3. The marshaled-size backstop. Field-agnostic, and therefore the actual
+//     guarantee — see MaxResponseBytes.
+func boundResponse(r Result) Result {
+	r = validateCausality(r)
+	textCut, valueCut := boundWireValues(&r)
+
+	var dropped int
+	r.Diagnostics, dropped = applyResponseBudget(r.Diagnostics)
+	r.DiagnosticsDropped += dropped
+	if dropped > 0 {
+		r.Notes = append(r.Notes, NoteDiagnosticsTruncatedToBudget)
+	}
+	if textCut {
+		r.Notes = append(r.Notes, NoteDiagnosticTextTruncated)
+	}
+	if valueCut {
+		r.Notes = append(r.Notes, NoteResponseValueTruncated)
+	}
+
+	// Measured in the SAME encoding the tool boundary emits
+	// (vcpkgserver/helpers.go jsonResult marshals indented, which is ~30%
+	// larger than the compact form — measuring the compact form would set a
+	// ceiling that does not hold on the wire). The coupling is deliberate and
+	// pinned by a test in vcpkgserver rather than assumed.
+	//
+	// One extra marshal per call, of a document the per-field caps have
+	// already bounded to tens of KB, against a call that has just read up to
+	// maxLogBytes from each of several logs. The cost is not measurable
+	// against the work it guards.
+	if body, err := json.MarshalIndent(r, "", "  "); err == nil && len(body) <= MaxResponseBytes {
+		return r
+	}
+	return reduceOversizeResponse(r)
+}
+
+// reduceOversizeResponse is what a caller gets when the backstop fires: a
+// valid, much smaller document that still answers the question.
+//
+// It keeps the VERDICT and the means to go on — status, reason, phase, the
+// headline error, the log the headline came from, the exit code, the note
+// list, and a bounded prefix of log_paths — and drops the bulk. It never
+// recomputes anything, so it cannot answer differently from the response it
+// replaces; DiagnosticsDropped absorbs the diagnostics it drops, so the total
+// this call found is still recoverable.
+//
+// Every kept field is either a closed enum, an int, or a value the per-field
+// caps have already bounded, and the two growable lists are count-capped here,
+// so the reduction's own size is bounded by construction rather than by
+// argument. The final fallback below makes that unconditional: if even the
+// reduction does not fit, the verdict alone is emitted. The recursion
+// terminates because each stage keeps a strict subset of the last.
+func reduceOversizeResponse(r Result) Result {
+	out := Result{
+		Status:                  r.Status,
+		Reason:                  r.Reason,
+		Phase:                   r.Phase,
+		FailedTarget:            r.FailedTarget,
+		DiagnosticsDropped:      r.DiagnosticsDropped,
+		DiagnosticsDroppedExact: r.DiagnosticsDroppedExact,
+		DiagnosticLog:           r.DiagnosticLog,
+		ExitCode:                r.ExitCode,
+		LogPaths:                capStrings(r.LogPaths, MaxWireListEntries),
+		ContextSource:           r.ContextSource,
+		// First, so it survives the cap that follows it.
+		Notes:     append([]Note{NoteResponseSizeBackstopEngaged}, capNotes(r.Notes, MaxWireListEntries)...),
+		Resources: r.Resources,
+	}
+	if r.FirstError != nil {
+		headline := *r.FirstError
+		out.FirstError = &headline
+		out.Diagnostics = []Diagnostic{headline}
+		if len(r.Diagnostics) > 1 {
+			out.DiagnosticsDropped += len(r.Diagnostics) - 1
+		}
+		out.LogPaths = causalLogPaths(r.DiagnosticLog, out.LogPaths, MaxWireListEntries)
+	} else {
+		out.DiagnosticsDropped += len(r.Diagnostics)
+	}
+	out = validateCausality(out)
+	if body, err := json.MarshalIndent(out, "", "  "); err == nil && len(body) <= MaxResponseBytes {
+		return out
+	}
+	// Nothing above held. Failed results keep their causal tuple or downgrade;
+	// non-failed results retain the closed tri-state fields.
+	minimal := Result{Status: r.Status, Reason: r.Reason, Phase: r.Phase,
+		Notes: []Note{NoteResponseSizeBackstopEngaged}, Resources: r.Resources,
+		DiagnosticsDroppedExact: r.DiagnosticsDroppedExact}
+	if r.Status == Status("failed") && r.FirstError != nil && r.DiagnosticLog != "" {
+		headline := *r.FirstError
+		minimal.FirstError = &headline
+		minimal.Diagnostics = []Diagnostic{headline}
+		minimal.DiagnosticLog = r.DiagnosticLog
+		minimal.LogPaths = []string{r.DiagnosticLog}
+		minimal.ExitCode = r.ExitCode
+	}
+	return validateCausality(minimal)
+}
+
+func causalLogPaths(diagnosticLog string, paths []string, max int) []string {
+	if diagnosticLog == "" {
+		return capStrings(paths, max)
+	}
+	out := make([]string, 0, min(max, len(paths)+1))
+	out = append(out, diagnosticLog)
+	for _, path := range paths {
+		if path == diagnosticLog {
+			continue
+		}
+		if len(out) == max {
+			break
+		}
+		out = append(out, path)
+	}
+	return out
+}
+
+func validateCausality(r Result) Result {
+	if r.Status != Status("failed") {
+		return r
+	}
+	valid := r.FirstError != nil && len(r.Diagnostics) > 0 &&
+		r.Diagnostics[0] == *r.FirstError && r.DiagnosticLog != ""
+	if valid {
+		found := false
+		for _, path := range r.LogPaths {
+			if path == r.DiagnosticLog {
+				found = true
+				break
+			}
+		}
+		valid = found
+		if valid {
+			r.LogPaths = causalLogPaths(r.DiagnosticLog, r.LogPaths, MaxWireListEntries)
+		}
+	}
+	if valid {
+		return r
+	}
+	r.Status = Status("unknown")
+	r.Reason = ReasonCausalityInvariantViolation
+	r.Phase = ""
+	r.Notes = append(r.Notes, NoteCausalityInvariantViolated)
+	return r
+}
+
+func capStrings(in []string, max int) []string {
+	if len(in) <= max {
+		return in
+	}
+	return in[:max]
+}
+
+func capNotes(in []Note, max int) []Note {
+	if len(in) <= max {
+		return in
+	}
+	return in[:max]
+}
+
+// boundWireValues caps every string a Result lifts out of an unbounded log
+// line, wrapper line or directory walk, by the KIND of value it is.
+//
+// The kind distinction is load-bearing and is why this is not one flat cap:
+//
+//   - PROSE (Diagnostic.Text) is useful truncated — the prefix is still the
+//     diagnostic message — and is capped tightly, because two hundred of them
+//     share one aggregate budget.
+//   - a LOCATOR (a file, a target, a path, an overlay entry) is capped at a
+//     path-shaped ceiling, and the in-band marker is what stops the truncated
+//     value from being mistaken for a usable one.
+//   - a COMMAND is capped at the ceiling above which it could not have been
+//     run at all (see MaxWireCommandBytes), so the cap can only ever fire on a
+//     string that was never a reproducible command.
+//
+// This function is the enumeration, and the enumeration is the part that has
+// twice been incomplete. It is written out here, in one place, so that the
+// list is reviewable and so that the reflective enforcement probe in
+// wire_size_test.go has exactly one thing to disagree with. It is NOT the
+// guarantee: MaxResponseBytes is.
+//
+// Returns whether any diagnostic TEXT was cut and whether any other value was
+// cut, kept apart because they are different facts for an operator — an
+// incomplete message versus a locator that must not be used verbatim.
+func boundWireValues(r *Result) (textCut, valueCut bool) {
+	cutPath := func(s *string) {
+		v, cut := truncateWireValue(*s, MaxWirePathBytes)
+		*s, valueCut = v, valueCut || cut
+	}
+	cutCommand := func(s *string) {
+		v, cut := truncateWireValue(*s, MaxWireCommandBytes)
+		*s, valueCut = v, valueCut || cut
+	}
+
+	for i := range r.Diagnostics {
+		d, tc, vc := truncateDiagnostic(r.Diagnostics[i])
+		r.Diagnostics[i], textCut, valueCut = d, textCut || tc, valueCut || vc
+	}
+	if r.FirstError != nil {
+		// The headline is emitted TWICE — here and as Diagnostics[0] — so the
+		// caps have to bind on both, or one pathological line still reaches the
+		// wire through this field.
+		d, tc, vc := truncateDiagnostic(*r.FirstError)
+		r.FirstError, textCut, valueCut = &d, textCut || tc, valueCut || vc
+	}
+
+	cutPath(&r.FailedTarget)
+	cutPath(&r.DiagnosticLog)
+	for i := range r.LogPaths {
+		cutPath(&r.LogPaths[i])
+	}
+	for i := range r.OverlayChain {
+		cutPath(&r.OverlayChain[i])
+	}
+	cutCommand(&r.ExactCommand)
+	cutCommand(&r.BuildCommand)
+
+	// Evidence re-emits the same commands and paths a second time. That second
+	// emission site is precisely the kind of participant a field enumeration
+	// misses: nothing in the Result's own field list names it.
+	for i := range r.Evidence.Paths {
+		cutPath(&r.Evidence.Paths[i])
+	}
+	for i := range r.Evidence.Commands {
+		cutCommand(&r.Evidence.Commands[i])
+	}
+	for i := range r.Evidence.Locations {
+		cutPath(&r.Evidence.Locations[i].File)
+	}
+	return textCut, valueCut
+}
+
+// truncateDiagnostic bounds one diagnostic's two variable-cost fields.
+func truncateDiagnostic(d Diagnostic) (_ Diagnostic, textCut, fileCut bool) {
+	d.Text, textCut = truncateWireValue(d.Text, MaxDiagnosticTextBytes)
+	d.File, fileCut = truncateWireValue(d.File, MaxWirePathBytes)
+	return d, textCut, fileCut
+}
+
+// truncateWireValue bounds one string, cutting on a RUNE boundary so a
+// multi-byte character is never split into invalid UTF-8 (which would make the
+// whole JSON body invalid, not just this field), and appending a marker naming
+// how many bytes were removed.
+//
+// The cap applies to the ORIGINAL string; the emitted value is that prefix plus
+// the short marker, which keeps the rule statable in one sentence.
+func truncateWireValue(s string, max int) (string, bool) {
+	if len(s) <= max {
+		return s, false
+	}
+	if max <= 0 {
+		return "", true
+	}
+	// There is no truthful truncation marker that fits. Returning an empty
+	// value keeps the hard byte cap and, unlike the old decrement loop, always
+	// terminates for tiny residual budgets.
+	if len(fmt.Sprintf(truncationMarker, len(s))) > max {
+		return "", true
+	}
+	cut := max
+	for {
+		marker := fmt.Sprintf(truncationMarker, len(s)-cut)
+		allowed := max - len(marker)
+		if allowed < 0 {
+			allowed = 0
+		}
+		if cut > allowed {
+			cut = allowed
+		}
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		finalMarker := fmt.Sprintf(truncationMarker, len(s)-cut)
+		if cut+len(finalMarker) <= max {
+			return s[:cut] + finalMarker, true
+		}
+		if cut == 0 {
+			return "", true
+		}
+		cut--
+	}
+}
 
 // applyResponseBudget spends the budget over an ALREADY-RANKED slice and
 // returns what may be emitted, plus what that cost.
@@ -785,12 +1261,18 @@ const truncationMarker = "… [truncated, %d more bytes]"
 // status=failed while omitting the error that established it would be a
 // contradiction, not a budget.
 //
-// This CANNOT change a verdict. LastFailure computes both FirstError and the
-// verdict switch from the complete chosenDiags; this runs only on the slice
-// that is emitted.
-func applyResponseBudget(ranked []Diagnostic) (out []Diagnostic, dropped int, textTruncated bool) {
+// This CANNOT change a verdict: it runs inside boundResponse, which receives a
+// finished Result. FirstError and the verdict switch are computed in
+// lastFailure from the complete chosenDiags, in a different function, before
+// this one is ever called.
+//
+// It expects an input boundWireValues has ALREADY capped. That ordering is the
+// invariant that lets the byte budget be spent honestly — a diagnostic is
+// charged the cost it will actually have on the wire, not the cost of the raw
+// log line it came from.
+func applyResponseBudget(ranked []Diagnostic) (out []Diagnostic, dropped int) {
 	if len(ranked) == 0 {
-		return ranked, 0, false
+		return ranked, 0
 	}
 	out = make([]Diagnostic, 0, min(len(ranked), MaxResponseDiagnostics))
 	spent := 0
@@ -799,37 +1281,21 @@ func applyResponseBudget(ranked []Diagnostic) (out []Diagnostic, dropped int, te
 			dropped = len(ranked) - i
 			break
 		}
-		d, cut := truncateDiagnosticText(d)
-		textTruncated = textTruncated || cut
+		// The ENTRY's variable cost, not one of its fields. Charging len(Text)
+		// alone was the defect that made this budget non-binding: File is
+		// rest-of-line or head-of-line in four of the five matched shapes, so
+		// megabytes rode in free while the response reported itself bounded.
+		cost := len(d.Text) + len(d.File)
 		// i > 0 so the headline is always admitted; every later entry must fit
 		// what is left of the byte budget.
-		if i > 0 && spent+len(d.Text) > MaxResponseDiagnosticBytes {
+		if i > 0 && spent+cost > MaxResponseDiagnosticBytes {
 			dropped = len(ranked) - i
 			break
 		}
-		spent += len(d.Text)
+		spent += cost
 		out = append(out, d)
 	}
-	return out, dropped, textTruncated
-}
-
-// truncateDiagnosticText bounds one diagnostic's Text, cutting on a RUNE
-// boundary so a multi-byte character is never split into invalid UTF-8, and
-// appending a marker naming how many bytes were removed.
-//
-// The cap applies to the ORIGINAL text; the emitted string is that prefix plus
-// the short marker, which keeps the rule statable in one sentence.
-func truncateDiagnosticText(d Diagnostic) (Diagnostic, bool) {
-	if len(d.Text) <= MaxDiagnosticTextBytes {
-		return d, false
-	}
-	cut := MaxDiagnosticTextBytes
-	for cut > 0 && !utf8.RuneStart(d.Text[cut]) {
-		cut--
-	}
-	removed := len(d.Text) - cut
-	d.Text = d.Text[:cut] + fmt.Sprintf(truncationMarker, removed)
-	return d, true
+	return out, dropped
 }
 
 // severityRank orders severities for presentation: the actionable line first.

@@ -211,13 +211,23 @@ func TestResponseBudget_TextTruncationIsRuneSafe(t *testing.T) {
 	// A 3-byte rune repeated so the cut lands mid-rune for at least one offset.
 	for _, pad := range []int{0, 1, 2} {
 		text := "a.cpp:1:1: error: " + strings.Repeat("x", pad) + strings.Repeat("\u4e2d", MaxDiagnosticTextBytes)
-		got, cut := truncateDiagnosticText(Diagnostic{Severity: "error", Text: text})
-		if !cut {
-			t.Fatalf("pad=%d: expected truncation of a %d-byte text", pad, len(text))
+		// BOTH variable-cost fields go through the same primitive and both are
+		// exercised here: File is the field the first budget left uncapped.
+		got, textCut, fileCut := truncateDiagnostic(Diagnostic{
+			Severity: "error",
+			Text:     text,
+			File:     text,
+		})
+		if !textCut || !fileCut {
+			t.Fatalf("pad=%d: textCut=%v fileCut=%v, want both true for a %d-byte value",
+				pad, textCut, fileCut, len(text))
 		}
 		if !utf8.ValidString(got.Text) {
 			t.Fatalf("pad=%d: truncated Text is not valid UTF-8 — a byte-boundary cut splits a rune and makes the "+
 				"whole JSON body invalid, not just this field", pad)
+		}
+		if !utf8.ValidString(got.File) {
+			t.Fatalf("pad=%d: truncated File is not valid UTF-8 — the same defect, one field over", pad)
 		}
 	}
 }
@@ -268,34 +278,48 @@ func TestResponseBudget_NeverBindsOnRealFixtures(t *testing.T) {
 
 // applyResponseBudget's own edges, reached directly because a full LastFailure
 // fixture cannot construct them.
+//
+// It no longer truncates: boundWireValues is the single truncator and runs
+// first, so this function only ever spends a budget over values that are
+// already at or under their per-field caps. The tests below therefore feed it
+// pre-capped input, which is exactly the contract boundResponse guarantees.
 func TestApplyResponseBudget_Edges(t *testing.T) {
 	// Empty in, empty out, nothing reported.
-	if out, dropped, cut := applyResponseBudget(nil); len(out) != 0 || dropped != 0 || cut {
-		t.Fatalf("empty input: out=%v dropped=%d cut=%v", out, dropped, cut)
+	if out, dropped := applyResponseBudget(nil); len(out) != 0 || dropped != 0 {
+		t.Fatalf("empty input: out=%v dropped=%d", out, dropped)
 	}
 
 	// The per-line cap is applied BEFORE the byte budget is charged, so no
-	// single entry can consume more than MaxDiagnosticTextBytes of it. That
-	// makes the two constants' ordering an invariant worth stating: while it
-	// holds, an entry can never exhaust the whole budget by itself.
-	if MaxDiagnosticTextBytes > MaxResponseDiagnosticBytes {
-		t.Fatalf("MaxDiagnosticTextBytes (%d) exceeds MaxResponseDiagnosticBytes (%d) — one diagnostic could then "+
-			"consume the entire response budget", MaxDiagnosticTextBytes, MaxResponseDiagnosticBytes)
+	// single entry can consume more than its share of it. That makes the
+	// constants' ordering an invariant worth stating: while it holds, an entry
+	// can never exhaust the whole budget by itself.
+	if MaxDiagnosticTextBytes+MaxWirePathBytes > MaxResponseDiagnosticBytes {
+		t.Fatalf("one entry's per-field ceilings (%d text + %d file) exceed the aggregate budget (%d) — a single "+
+			"diagnostic could then consume the entire response budget",
+			MaxDiagnosticTextBytes, MaxWirePathBytes, MaxResponseDiagnosticBytes)
 	}
+
 	// An oversize headline is admitted and truncated, and does NOT starve the
-	// next entry, precisely because of the ordering above.
+	// next entry, precisely because of the ordering above. Asserted through
+	// boundResponse because that is the composition the ordering lives in.
 	oversize := Diagnostic{Severity: "error", Tier: TierSpecific,
+		File: strings.Repeat("F", MaxWirePathBytes*4),
 		Text: "a.cpp:1:1: error: " + strings.Repeat("y", MaxResponseDiagnosticBytes*2)}
-	out, dropped, cut := applyResponseBudget([]Diagnostic{oversize, {Severity: "error", Tier: TierSpecific, Text: "b"}})
-	if len(out) != 2 || dropped != 0 {
-		t.Fatalf("oversize headline: out=%d dropped=%d, want 2/0 — the per-line cap is charged, not the raw size",
-			len(out), dropped)
+	res := boundResponse(Result{Diagnostics: []Diagnostic{oversize, {Severity: "error", Tier: TierSpecific, Text: "b"}}})
+	if len(res.Diagnostics) != 2 || res.DiagnosticsDropped != 0 {
+		t.Fatalf("oversize headline: out=%d dropped=%d, want 2/0 — the per-field caps are charged, not the raw size",
+			len(res.Diagnostics), res.DiagnosticsDropped)
 	}
-	if !cut {
-		t.Fatal("an oversize headline must be reported as text-truncated")
+	if !hasNote(res.Notes, NoteDiagnosticTextTruncated) || !hasNote(res.Notes, NoteResponseValueTruncated) {
+		t.Fatalf("notes %v: an oversize headline must report BOTH the cut text and the cut file — a truncated "+
+			"locator is a different fact from a truncated message", res.Notes)
 	}
-	if len(out[0].Text) > MaxDiagnosticTextBytes+len(truncationMarker)+32 {
-		t.Fatalf("oversize headline was admitted at %d bytes", len(out[0].Text))
+	if len(res.Diagnostics[0].Text) > MaxDiagnosticTextBytes+len(truncationMarker)+32 {
+		t.Fatalf("oversize headline Text was admitted at %d bytes", len(res.Diagnostics[0].Text))
+	}
+	if len(res.Diagnostics[0].File) > MaxWirePathBytes+len(truncationMarker)+32 {
+		t.Fatalf("oversize headline File was admitted at %d bytes — File is charged and capped like Text, or a "+
+			"3 MiB path rides in free while the response reports itself bounded", len(res.Diagnostics[0].File))
 	}
 
 	// The BYTE budget binds independently of the count budget: enough
@@ -313,7 +337,7 @@ func TestApplyResponseBudget_Edges(t *testing.T) {
 		big[i] = Diagnostic{Severity: "error", Tier: TierSpecific,
 			Text: "a.cpp:1:1: error: " + strings.Repeat("z", perEntry-18)}
 	}
-	out, dropped, _ = applyResponseBudget(big)
+	out, dropped := applyResponseBudget(big)
 	if dropped == 0 {
 		t.Fatalf("%d entries of %d bytes returned whole — the %d-byte aggregate ceiling never bound, so a count "+
 			"cap alone would let count x per-line = %d bytes through",
@@ -324,10 +348,22 @@ func TestApplyResponseBudget_Edges(t *testing.T) {
 	}
 	total := 0
 	for _, d := range out {
-		total += len(d.Text)
+		total += len(d.Text) + len(d.File)
 	}
 	if total > MaxResponseDiagnosticBytes+perEntry {
 		t.Fatalf("emitted text totals %d bytes, ceiling is %d", total, MaxResponseDiagnosticBytes)
+	}
+
+	// The byte budget charges File as well as Text. Entries whose Text is tiny
+	// but whose File fills the per-path cap must still exhaust it, or the
+	// aggregate ceiling is once again a ceiling on one field.
+	fileHeavy := make([]Diagnostic, MaxResponseDiagnosticBytes/MaxWirePathBytes+5)
+	for i := range fileHeavy {
+		fileHeavy[i] = Diagnostic{Severity: "error", Tier: TierSpecific, Text: "e", File: strings.Repeat("p", MaxWirePathBytes)}
+	}
+	if _, dropped := applyResponseBudget(fileHeavy); dropped == 0 {
+		t.Fatalf("%d file-heavy entries returned whole — the aggregate budget charges len(Text) only, which is the "+
+			"defect that made the whole budget non-binding", len(fileHeavy))
 	}
 
 	// A set that fits is returned whole, with nothing reported.
@@ -335,10 +371,9 @@ func TestApplyResponseBudget_Edges(t *testing.T) {
 	for i := range small {
 		small[i] = Diagnostic{Severity: "error", Tier: TierSpecific, Text: "a.cpp:1:1: error: short"}
 	}
-	out, dropped, cut = applyResponseBudget(small)
-	if len(out) != MaxResponseDiagnostics || dropped != 0 || cut {
-		t.Fatalf("exactly-at-ceiling set: out=%d dropped=%d cut=%v, want %d/0/false",
-			len(out), dropped, cut, MaxResponseDiagnostics)
+	out, dropped = applyResponseBudget(small)
+	if len(out) != MaxResponseDiagnostics || dropped != 0 {
+		t.Fatalf("exactly-at-ceiling set: out=%d dropped=%d, want %d/0", len(out), dropped, MaxResponseDiagnostics)
 	}
 }
 

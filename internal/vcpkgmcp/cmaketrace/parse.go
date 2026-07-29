@@ -36,6 +36,9 @@ type parseResult struct {
 	records              []Record
 	malformedCount       int
 	versionHeaderPresent bool
+	// unsupportedVersion stops the parser on an explicit header whose major
+	// is not json-v1. This is a whole-input failure, not partial-v1 evidence.
+	unsupportedVersion bool
 	// sawAnyContent records whether ANY non-blank line was observed at all,
 	// so an empty (or whitespace-only) trace stays distinguishable from one
 	// whose every line was malformed — without buffering the file to run a
@@ -180,6 +183,10 @@ func (p *parseResult) consumeLine(raw string, maxRecords int) (stop bool) {
 
 	if tl.Version != nil && tl.Cmd == "" {
 		p.versionHeaderPresent = true
+		if tl.Version.Major != 1 {
+			p.unsupportedVersion = true
+			return true
+		}
 		return false
 	}
 

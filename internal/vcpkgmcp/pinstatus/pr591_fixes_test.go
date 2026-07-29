@@ -2,11 +2,23 @@ package pinstatus
 
 import (
 	"context"
+	"go/ast"
+	"go/parser"
+	gotoken "go/token"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
+
+type recordingPinFS struct{ reads []string }
+
+func (f *recordingPinFS) ReadFile(path string) ([]byte, error) {
+	f.reads = append(f.reads, path)
+	return []byte(`vcpkg_from_github(REPO acme/widget REF ` + commitA + ` SHA512 0)`), nil
+}
 
 // PR #591 P1 (portfile.go resolveSetVariable): a set() inside an if() branch
 // that did not fire is NOT the variable's value. Resolving the pin from it and
@@ -209,5 +221,205 @@ func TestBoundedWriterReportsFullWritesWhileDiscardingExcess(t *testing.T) {
 	}
 	if sink.String() != "0123" {
 		t.Fatalf("retained %q after the budget was exhausted, want it unchanged", sink.String())
+	}
+}
+
+// PR #591: every port_dirs entry is an absolute-path contract. A relative
+// entry must not inherit the hub daemon's private cwd, even when network is
+// disabled; invalid-input classification owns precedence over runtime policy.
+func TestRelativePortDirIsRefusedBeforeFilesystemOrNetwork(t *testing.T) {
+	for _, disableNetwork := range []bool{false, true} {
+		t.Run(map[bool]string{false: "network enabled", true: "network disabled"}[disableNetwork], func(t *testing.T) {
+			fsys := &recordingPinFS{}
+			var queries int
+			remote := func(context.Context, approvedRemoteURL) (map[string]string, error) {
+				queries++
+				return map[string]string{"HEAD": commitA}, nil
+			}
+
+			res := PinStatus(context.Background(), Args{
+				PortDirs:       []string{"relative/port"},
+				DisableNetwork: disableNetwork,
+			}, Deps{FS: fsys, RemoteRefs: remote, Now: fixedNow()})
+
+			if res.Status != evidence.StatusOK || len(res.Ports) != 1 {
+				t.Fatalf("batch = %v with %d ports, want ok with one explicit per-port verdict", res.Status, len(res.Ports))
+			}
+			port := res.Ports[0]
+			if port.Status != evidence.StatusFailed || port.Reason != ReasonRelativePortDir {
+				t.Fatalf("port status/reason = %v/%v, want failed/%v", port.Status, port.Reason, ReasonRelativePortDir)
+			}
+			if port.PortDir != "relative/port" {
+				t.Fatalf("port_dir = %q, want the caller input echoed unchanged", port.PortDir)
+			}
+			if len(port.Evidence.Paths) != 0 {
+				t.Fatalf("evidence.paths = %v, want empty: relative paths are not filesystem evidence", port.Evidence.Paths)
+			}
+			if len(fsys.reads) != 0 || queries != 0 {
+				t.Fatalf("relative input touched filesystem %v and made %d remote queries; want neither", fsys.reads, queries)
+			}
+		})
+	}
+}
+
+func TestApproveRemoteURLClassification(t *testing.T) {
+	tests := []struct {
+		name       string
+		raw        string
+		wantReason Reason
+	}{
+		{"https", "https://github.com/acme/widget.git", ""},
+		{"scp", "git@github.com:acme/widget.git", ""},
+		{"local path", "../widget.git", ""},
+		{"valueless query", "https://host/widget.git?flag", ""},
+		{"empty query value", "https://host/widget.git?token=", ""},
+		{"userinfo credential", "https://user:secret@host/widget.git", ReasonRemoteURLCredentialBearing},
+		{"credential query", "https://host/widget.git?access_token=secret", ReasonRemoteURLCredentialBearing},
+		{"unknown query value", "https://host/widget.git?depth=1", ReasonRemoteURLQueryUnclassified},
+		{"unknown malformed query", "https://ho st/widget.git?depth=1", ReasonRemoteURLQueryUnclassified},
+		{"malformed shape", "https://ho st/widget.git", ReasonPortfileUnparsable},
+		{"missing host", "https:///widget.git", ReasonPortfileUnparsable},
+		{"fragment", "https://host/widget.git#main", ReasonPortfileUnparsable},
+		{"empty", "", ReasonPortfileUnparsable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			approved, reason := approveRemoteURL(tc.raw)
+			if reason != tc.wantReason {
+				t.Fatalf("reason = %q, want %q", reason, tc.wantReason)
+			}
+			raw, ok := approved.transportArgument()
+			if tc.wantReason != "" {
+				if ok || raw != "" {
+					t.Fatalf("rejected URL gained transport authority: raw=%q ok=%v", raw, ok)
+				}
+				return
+			}
+			if !ok || raw != tc.raw {
+				t.Fatalf("approved transport = %q/%v, want %q/true", raw, ok, tc.raw)
+			}
+		})
+	}
+}
+
+func TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls(t *testing.T) {
+	tests := []struct {
+		name       string
+		remote     string
+		wantReason Reason
+	}{
+		{"credential", "https://host/widget.git?token=secret", ReasonRemoteURLCredentialBearing},
+		{"unclassified query", "https://host/widget.git?depth=1", ReasonRemoteURLQueryUnclassified},
+		{"invalid shape", "https://ho st/widget.git", ReasonPortfileUnparsable},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := newPort(t, "approval-"+strings.ReplaceAll(tc.name, " ", "-"), `vcpkg_from_git(
+    OUT_SOURCE_PATH SOURCE_PATH
+    URL `+tc.remote+`
+    REF `+commitA+`
+    SHA512 0
+)`)
+			var calls int
+			result := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+				FS: DefaultFS(),
+				RemoteRefs: func(context.Context, approvedRemoteURL) (map[string]string, error) {
+					calls++
+					return map[string]string{"HEAD": commitA}, nil
+				},
+				Now: fixedNow(),
+			}).Ports[0]
+			if calls != 0 {
+				t.Fatalf("remote calls = %d, want 0", calls)
+			}
+			if result.Status != evidence.StatusUnknown || result.Reason != tc.wantReason {
+				t.Fatalf("status/reason = %s/%s, want unknown/%s",
+					result.Status, result.Reason, tc.wantReason)
+			}
+			if strings.Contains(result.Remote.URL, "secret") || strings.Contains(result.Remote.URL, "depth=1") {
+				t.Fatalf("rejected value leaked in public remote %q", result.Remote.URL)
+			}
+		})
+	}
+}
+
+func TestApprovedRemoteURLHasOneConstructorAndTypedConsumers(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	files, err := filepath.Glob(filepath.Join(filepath.Dir(thisFile), "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := gotoken.NewFileSet()
+	var declarations, literals, typedCalls int
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		for _, declaration := range file.Decls {
+			switch node := declaration.(type) {
+			case *ast.GenDecl:
+				for _, spec := range node.Specs {
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if ok && typeSpec.Name.Name == "approvedRemoteURL" {
+						declarations++
+					}
+				}
+			case *ast.FuncDecl:
+				functionName := node.Name.Name
+				ast.Inspect(node.Body, func(n ast.Node) bool {
+					switch expression := n.(type) {
+					case *ast.CompositeLit:
+						identifier, ok := expression.Type.(*ast.Ident)
+						if ok && identifier.Name == "approvedRemoteURL" {
+							literals++
+							if functionName != "approveRemoteURL" {
+								t.Errorf("%s constructs approvedRemoteURL outside approveRemoteURL", fset.Position(expression.Pos()))
+							}
+						}
+					case *ast.CallExpr:
+						if identifier, ok := expression.Fun.(*ast.Ident); ok {
+							if identifier.Name == "approvedRemoteURL" {
+								t.Errorf("%s converts directly to approvedRemoteURL", fset.Position(expression.Pos()))
+							}
+							if identifier.Name == "remoteRefs" {
+								typedCalls++
+								if len(expression.Args) != 2 {
+									t.Errorf("%s remoteRefs call has %d arguments", fset.Position(expression.Pos()), len(expression.Args))
+								} else if argument, ok := expression.Args[1].(*ast.Ident); !ok || argument.Name != "approvedRemote" {
+									t.Errorf("%s remoteRefs receives something other than the approved value", fset.Position(expression.Args[1].Pos()))
+								}
+							}
+						}
+					}
+					return true
+				})
+			}
+		}
+	}
+	if declarations != 1 {
+		t.Fatalf("approvedRemoteURL declarations = %d, want 1", declarations)
+	}
+	if literals != 4 {
+		t.Fatalf("approvedRemoteURL literals = %d, want 4 all inside approveRemoteURL", literals)
+	}
+	if typedCalls != 1 {
+		t.Fatalf("remoteRefs production calls = %d, want 1 typed call", typedCalls)
+	}
+	if _, ok := (approvedRemoteURL{}).transportArgument(); ok {
+		t.Fatal("zero approvedRemoteURL gained transport authority")
+	}
+	forged := approvedRemoteURL{
+		raw:   "https://host/widget.git?depth=1",
+		proof: remoteURLApprovalProof,
+	}
+	if _, ok := forged.transportArgument(); ok {
+		t.Fatal("forged approvedRemoteURL bypassed policy revalidation")
 	}
 }

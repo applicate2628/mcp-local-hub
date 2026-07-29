@@ -180,6 +180,55 @@ func TestRelativePortDirIsRefusedNotBoundToTheDaemonWorkingDirectory(t *testing.
 	}
 }
 
+// PR #591: VERSION_* is CMake's integer-component comparison, not semver.
+// The cases here are anchored both in CMake's if() documentation and in a
+// target-machine CMake 4.4.0 smoke probe; huge components also prove the
+// implementation is not bounded by Go's native integer width.
+func TestCompareVersionsMatchesCMakeComponentSemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		lhs, rhs   string
+		comparison int
+	}{
+		{name: "omitted component is zero", lhs: "1.2.0", rhs: "1.2", comparison: 0},
+		{name: "non-integer tail truncates", lhs: "1.0-rc1", rhs: "1.0", comparison: 0},
+		{name: "truncated side has zero later component", lhs: "1.2a.9", rhs: "1.2.1", comparison: -1},
+		{name: "components past tweak follow CMake runtime", lhs: "1.2.3.4.5", rhs: "1.2.3.4", comparison: 1},
+		{name: "huge integer component does not overflow", lhs: "1.999999999999999999999999", rhs: "1.2", comparison: 1},
+		{name: "leading zeros are ignored", lhs: "01.002.0003", rhs: "1.2.3", comparison: 0},
+		{name: "non-integer first component truncates to zero", lhs: "x.9", rhs: "0", comparison: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := compareVersions(tc.lhs, tc.rhs); got != tc.comparison {
+				t.Fatalf("compareVersions(%q, %q) = %d, want %d", tc.lhs, tc.rhs, got, tc.comparison)
+			}
+			if got := compareVersions(tc.rhs, tc.lhs); got != -tc.comparison {
+				t.Fatalf("reverse compareVersions(%q, %q) = %d, want %d", tc.rhs, tc.lhs, got, -tc.comparison)
+			}
+		})
+	}
+}
+
+func TestEveryVersionComparisonOperatorUsesCMakeOrdering(t *testing.T) {
+	lower, higher := "1.2a.9", "1.2.1"
+	for _, tc := range []struct {
+		op   string
+		want Tri
+	}{
+		{op: "VERSION_EQUAL", want: TriFalse},
+		{op: "VERSION_GREATER", want: TriFalse},
+		{op: "VERSION_GREATER_EQUAL", want: TriFalse},
+		{op: "VERSION_LESS", want: TriTrue},
+		{op: "VERSION_LESS_EQUAL", want: TriTrue},
+	} {
+		t.Run(tc.op, func(t *testing.T) {
+			if got := evalComparison(tc.op, &lower, &higher); got != tc.want {
+				t.Fatalf("evalComparison(%s, %q, %q) = %v, want %v", tc.op, lower, higher, got, tc.want)
+			}
+		})
+	}
+}
+
 // unreadableStatDeps makes Stat on one exact path fail with a NON-ENOENT
 // error — the shape a permission denial or sharing violation takes.
 func unreadableStatDeps(lockedPath string) Deps {

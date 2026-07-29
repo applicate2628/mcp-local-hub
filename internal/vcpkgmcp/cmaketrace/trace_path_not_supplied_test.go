@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
@@ -74,7 +75,7 @@ func TestTrace_TracePathNotSupplied_IsNotAVerifiedAbsence(t *testing.T) {
 // every missing trace un-findable.
 func TestTrace_SuppliedButAbsentPath_IsStillAVerifiedAbsence(t *testing.T) {
 	spy := &recordingFS{}
-	const wanted = `C:\does\not\exist\trace.json`
+	wanted := filepath.Join(t.TempDir(), "does-not-exist-trace.json")
 	res := Trace(context.Background(), Args{TracePath: wanted}, Deps{FS: spy})
 
 	if res.Reason != ReasonTraceNotFound {

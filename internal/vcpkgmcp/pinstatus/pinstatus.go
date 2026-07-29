@@ -11,12 +11,13 @@
 // far behind it is. Querying refs/tags/<40-hex-commit> is a tag-NAME lookup
 // whose empty result proves nothing about ancestry either.
 //
-// So the verdict vocabulary this package produces is strictly
-// current | unknown(reason) — there is NO "behind" value anywhere in this
-// package (see TestNoCodePathProducesBehind), and every non-current,
-// non-error commit-shaped result returns BOTH the pinned SHA and the tip
-// SHA (never a direction), plus a browsable compare URL on a known forge so
-// a human can look and decide for themselves.
+// For valid absolute inputs, the verdict vocabulary this package produces is
+// strictly current | unknown(reason) — there is NO "behind" value anywhere in
+// this package (see TestNoCodePathProducesBehind). Invalid relative input is
+// failed(relative_port_dir) before I/O. Every non-current, non-error
+// commit-shaped result returns BOTH the pinned SHA and the tip SHA (never a
+// direction), plus a browsable compare URL on a known forge so a human can
+// look and decide for themselves.
 //
 // # Source-acquisition shapes covered
 //
@@ -133,10 +134,20 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 		return res
 	}
 
-	// DisableNetwork is checked first and unconditionally — per the input
-	// contract, EVERY port returns unknown(network_disabled) when set,
-	// regardless of source-acquisition shape (even a distfile-only port
-	// that would never need the network anyway).
+	// Reject relative caller input before it can bind to the hub daemon's
+	// working directory. Never call filepath.Abs here: that would perform the
+	// ambiguous binding this gate exists to prevent.
+	if !filepath.IsAbs(portDir) {
+		res.Status = evidence.StatusFailed
+		res.Reason = ReasonRelativePortDir
+		return res
+	}
+
+	// DisableNetwork is checked unconditionally for every valid port path —
+	// per the input contract, every such port returns
+	// unknown(network_disabled) when set, regardless of source-acquisition
+	// shape (even a distfile-only port that would never need the network
+	// anyway).
 	if disableNetwork {
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonNetworkDisabled
@@ -210,14 +221,12 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 		return res
 	}
 
-	// Refuse to hand a credential to a child process. Redaction (above)
-	// already guarantees the value never reaches a RESULT field, but argv is
-	// a separate channel: on both Windows and Linux the full command line of
-	// a running process is readable by every local account, so querying at
-	// all would leak the token for the child's lifetime. See redact.go.
-	if hasEmbeddedCredential(queryURL) {
+	// Convert the raw spelling into execution authority exactly once. Public
+	// redaction above remains independent of this admission decision.
+	approvedRemote, approvalReason := approveRemoteURL(queryURL)
+	if approvalReason != "" {
 		res.Status = evidence.StatusUnknown
-		res.Reason = ReasonRemoteURLCredentialBearing
+		res.Reason = approvalReason
 		return res
 	}
 
@@ -257,7 +266,7 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 	// Evidence is an EMITTED field like any other: it takes the redacted
 	// spelling, never queryURL.
 	res.Evidence.AddCommand("git ls-remote " + res.Remote.URL)
-	refs, err := remoteRefs(ctx, queryURL)
+	refs, err := remoteRefs(ctx, approvedRemote)
 	if err != nil {
 		res.Status = evidence.StatusUnknown
 		res.Reason = remoteQueryReason(err)

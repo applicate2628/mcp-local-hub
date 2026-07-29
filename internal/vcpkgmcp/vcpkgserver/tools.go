@@ -72,8 +72,9 @@ func registerTools(vs *VcpkgServer) {
 			"outranks the undefined symbol that caused it. first_error carries that headline error " +
 			"directly and always equals diagnostics[0] when any error exists; diagnostic_log names the " +
 			"log the headline actually came from. When EVERY error is an aggregate the aggregate is " +
-			"still the headline — it is better than nothing. Warnings are never dropped, only sorted " +
-			"after errors. Per-log capping is per SEVERITY CLASS, so an error trailing a flood of " +
+			"still the headline — it is better than nothing. Warnings are never filtered by class; a " +
+			"reported producer/response budget may drop only the lowest-ranked tail and reports the count. " +
+			"Per-log capping is per SEVERITY CLASS, so an error trailing a flood of " +
 			"repeated warnings can never be squeezed out of the answer. " +
 			"COMMANDS: exact_command is the reproducible TOP-LEVEL vcpkg invocation and is recovered " +
 			"ONLY from an authoritative record of it (a build_failed_log's `command:` line); it is " +
@@ -84,6 +85,11 @@ func registerTools(vs *VcpkgServer) {
 			"sub-invocation (CMake's \"Run Build Command(s):\") read from the same (phase, " +
 			"configuration) build step as the reported diagnostic; diagnostic_log names the log the " +
 			"headline diagnostic came from, so both are traceable. " +
+			"RESOURCE BOUNDS: producer work is capped before Result construction (1024 directory entries, " +
+			"64 relevant logs, 32 MiB per log, 256 MiB total metadata/log work, bounded diagnostic cells), " +
+			"the inner JSON is at most 256 KiB, and at most two calls scan concurrently. Any incomplete " +
+			"evidence returns unknown(artifact_limit_exceeded|metadata_limit_exceeded|resource_busy|resource_cancelled); " +
+			"resources.completeness, resources.omitted and resources.high_water report what was bounded. " +
 			"Returns tri-state ok|failed|unknown(reason) plus log_paths[] so an agent can " +
 			"always read further itself, context_source[] naming exactly which sources the answer " +
 			"rests on, and overlay_chain[] echoed back (never resolved to a winner — that is the " +
@@ -117,27 +123,33 @@ func registerTools(vs *VcpkgServer) {
 			"properties": map[string]any{
 				"port": map[string]any{
 					"type":        "string",
+					"maxLength":   lastfailure.MaxPortNameBytes,
 					"description": "Port name. Optional when build_failed_log names exactly one failed port.",
 				},
 				"triplet": map[string]any{
 					"type":        "string",
+					"maxLength":   lastfailure.MaxInputScalarBytes,
 					"description": "Optional. Auto-detected from the port's buildtrees directory (stdout-<triplet>.log / <triplet>.vcpkg_abi_info.txt) when omitted.",
 				},
 				"root": map[string]any{
 					"type":        "string",
+					"maxLength":   lastfailure.MaxInputScalarBytes,
 					"description": "Optional ABSOLUTE vcpkg root override, used to derive <root>/buildtrees when buildtrees_root is not given directly. A relative value returns unknown(relative_root).",
 				},
 				"buildtrees_root": map[string]any{
 					"type":        "string",
+					"maxLength":   lastfailure.MaxInputScalarBytes,
 					"description": "Optional explicit ABSOLUTE buildtrees root override (matches vcpkg's --x-buildtrees-root). Highest precedence for locating logs. A relative value returns unknown(relative_root).",
 				},
 				"build_failed_log": map[string]any{
 					"type":        "string",
+					"maxLength":   lastfailure.MaxInputScalarBytes,
 					"description": "Optional path to a build_failed.log-shaped wrapper file. Never auto-discovered.",
 				},
 				"overlays": map[string]any{
 					"type":        "array",
-					"items":       map[string]any{"type": "string"},
+					"maxItems":    lastfailure.MaxInputOverlayEntries,
+					"items":       map[string]any{"type": "string", "maxLength": lastfailure.MaxInputScalarBytes},
 					"description": "Optional explicit overlay-ports chain, order = precedence. Echoed back only, never resolved.",
 				},
 			},
@@ -173,10 +185,11 @@ func registerTools(vs *VcpkgServer) {
 
 	vs.server.AddTool(&mcp.Tool{
 		Name: "vcpkg_pin_status",
-		Description: "Check whether a port's source pin matches what its remote advertises NOW. Verdicts are current or unknown(reason); " +
+		Description: "Check whether a port's source pin matches what its remote advertises NOW. Valid-input verdicts are current or unknown(reason); " +
 			"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. " +
 			"It is not a staleness checker. The call carries its OWN status/reason separate from each port's: an omitted or empty port_dirs is " +
-			"unknown(no_port_dirs), never an ok result with an empty list. Per-port unknown reasons are a closed enum: not_git_comparable, " +
+			"unknown(no_port_dirs), never an ok result with an empty list. Every port_dirs entry must be absolute; a relative entry is " +
+			"failed(relative_port_dir) before filesystem or network access. Per-port reasons are a closed enum: relative_port_dir, not_git_comparable, " +
 			"pin_not_at_tip, ref_unresolvable, ref_not_found_on_remote, commit_pin_abbreviated, named_ref_not_comparable, head_ref_unresolvable, remote_query_failed, " +
 			"remote_query_timeout, remote_query_canceled, remote_ref_limit, remote_url_credential_bearing, network_disabled, portfile_unparsable, " +
 			"guard_unresolvable, multiple_fetch_calls. An ABBREVIATED commit pin (7..39 hex, pin.shape commit_abbrev) is reported as " +
@@ -191,11 +204,11 @@ func registerTools(vs *VcpkgServer) {
 				"port_dirs": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Absolute port directories, each expected to contain portfile.cmake. Required and non-empty; an empty batch is refused with unknown(no_port_dirs).",
+					"description": "Absolute port directories, each expected to contain portfile.cmake. A relative entry returns failed(relative_port_dir) before filesystem or network access. Required and non-empty; an empty batch is refused with unknown(no_port_dirs).",
 				},
 				"disable_network": map[string]any{
 					"type":        "boolean",
-					"description": "When true, do not query remotes; each requested port reports unknown(network_disabled).",
+					"description": "When true, do not query remotes; each requested valid absolute port reports unknown(network_disabled).",
 				},
 			},
 		},
@@ -263,13 +276,15 @@ func registerTools(vs *VcpkgServer) {
 			"record_limit) so a bounded read is never mistaken for a complete one. Cancellation is observed and returns unknown(canceled) with no " +
 			"partial result. Note truncated (the returned records cap) is a SEPARATE, narrower signal from input_incomplete. " +
 			"An omitted or empty trace_path is unknown(trace_path_not_supplied) — a fact about the CALL, never " +
-			"unknown(trace_not_found), which is reserved for a path that WAS supplied and verified absent.",
+			"unknown(trace_not_found), which is reserved for a path that WAS supplied and verified absent. A relative path is " +
+			"failed(relative_trace_path) before filesystem access. An explicit trace header with a major other than json-v1 is " +
+			"unknown(unsupported_trace_version), with no partial records returned.",
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"trace_path": map[string]any{
 					"type":        "string",
-					"description": "Required absolute path to an existing json-v1 CMake trace. Omitting it returns unknown(trace_path_not_supplied), never trace_not_found.",
+					"description": "Required absolute path to an existing json-v1 CMake trace. A relative value returns failed(relative_trace_path) before filesystem access; omitting it returns unknown(trace_path_not_supplied), never trace_not_found.",
 				},
 				"file": map[string]any{
 					"type":        "string",
@@ -353,7 +368,17 @@ func (vs *VcpkgServer) lastFailureTool(ctx context.Context, req *mcp.CallToolReq
 			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
 		}
 	}
-	res := lastfailure.LastFailure(args, lastfailure.DefaultDeps())
+	vs.initLastFailure()
+	if ctx.Err() != nil {
+		return jsonResult(lastfailure.ResourceResult(lastfailure.ReasonResourceCancelled))
+	}
+	select {
+	case vs.lastFailureSlots <- struct{}{}:
+		defer func() { <-vs.lastFailureSlots }()
+	default:
+		return jsonResult(lastfailure.ResourceResult(lastfailure.ReasonResourceBusy))
+	}
+	res := vs.lastFailureRun(ctx, args, vs.lastFailureDeps())
 	return jsonResult(res)
 }
 

@@ -44,14 +44,18 @@ func writeManifest(t *testing.T, portDir, content string) {
 // error when errsByRemote[remote] is set), and never touches the network —
 // this is the injectable seam every test in this file substitutes.
 func fakeRemote(refsByRemote map[string]map[string]string, errsByRemote map[string]error) remoteRefsFn {
-	return func(ctx context.Context, remote string) (map[string]string, error) {
-		if err, ok := errsByRemote[remote]; ok {
+	return func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
+		raw, ok := remote.transportArgument()
+		if !ok {
+			return nil, errRemoteURLApprovalMissing
+		}
+		if err, ok := errsByRemote[raw]; ok {
 			return nil, err
 		}
-		if refs, ok := refsByRemote[remote]; ok {
+		if refs, ok := refsByRemote[raw]; ok {
 			return refs, nil
 		}
-		return nil, errors.New("fakeRemote: no fixture registered for " + remote)
+		return nil, errors.New("fakeRemote: no fixture registered for " + raw)
 	}
 }
 
@@ -921,8 +925,9 @@ func TestF24_CredentialBearingRemoteIsRefusedNotQueried(t *testing.T) {
 )`)
 
 	var queried []string
-	spy := func(ctx context.Context, remote string) (map[string]string, error) {
-		queried = append(queried, remote)
+	spy := func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
+		raw, _ := remote.transportArgument()
+		queried = append(queried, raw)
 		return map[string]string{"HEAD": commitA}, nil
 	}
 
@@ -1022,7 +1027,7 @@ func TestF8_RequestContextReachesTheRemoteQuery(t *testing.T) {
 	parent := context.WithValue(context.Background(), key, "carried")
 
 	var sawValue any
-	spy := func(ctx context.Context, remote string) (map[string]string, error) {
+	spy := func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
 		sawValue = ctx.Value(key)
 		return map[string]string{"HEAD": commitA}, nil
 	}
@@ -1042,7 +1047,7 @@ func TestF8_CanceledRequestStopsTheBatchAndNeverQueries(t *testing.T) {
 	b := newPort(t, "cancel-b", `vcpkg_from_github(REPO c/d REF `+commitA+` SHA512 0)`)
 
 	var queries int
-	spy := func(ctx context.Context, remote string) (map[string]string, error) {
+	spy := func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
 		queries++
 		return map[string]string{"HEAD": commitA}, nil
 	}
@@ -1069,7 +1074,7 @@ func TestF8_CanceledRequestStopsTheBatchAndNeverQueries(t *testing.T) {
 func TestF8_TimeoutAndCancellationAreDistinctReasons(t *testing.T) {
 	dir := newPort(t, "deadline", `vcpkg_from_github(REPO a/b REF `+commitA+` SHA512 0)`)
 
-	deadlineDeps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote string) (map[string]string, error) {
+	deadlineDeps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
 		return nil, context.DeadlineExceeded
 	}}
 	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deadlineDeps).Ports[0]
@@ -1077,7 +1082,7 @@ func TestF8_TimeoutAndCancellationAreDistinctReasons(t *testing.T) {
 		t.Fatalf("reason = %v, want remote_query_timeout", p.Reason)
 	}
 
-	canceledDeps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote string) (map[string]string, error) {
+	canceledDeps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
 		return nil, context.Canceled
 	}}
 	p2 := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, canceledDeps).Ports[0]
@@ -1100,7 +1105,7 @@ func TestF25_RefCountCeilingTripsAndSurfacesAClosedReason(t *testing.T) {
 	}
 
 	dir := newPort(t, "hostile-remote", `vcpkg_from_github(REPO a/b REF `+commitA+` SHA512 0)`)
-	deps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote string) (map[string]string, error) {
+	deps := Deps{FS: DefaultFS(), Now: fixedNow(), RemoteRefs: func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
 		return nil, err
 	}}
 	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, deps).Ports[0]
@@ -1169,48 +1174,11 @@ func TestF24_CompareURLIsBuiltFromTheRedactedRemoteNotTheRawOne(t *testing.T) {
 	}
 }
 
-// F24 (invariant, end-to-end): whatever CompareURL a REAL PinStatus call
-// produces is derived from the EMITTED (redacted) remote — pinstatus.go:283's
-// `res.Remote`, never `parsed.Remote`. The sibling above pins the same claim by
-// composing buildCompareURL(redactRemote(raw)) itself, which cannot observe
-// WHICH remote production actually passes; only a full call can.
-//
-// RESTORED 2026-07-27 (adversarial-gate finding F1). This test was deleted
-// earlier in this same PR on the stated ground that "no end-to-end fixture can
-// discriminate: the only remote for which redaction changes the string is
-// refused before CompareURL is built". That was true of the code as it stood
-// BEFORE the query-value allowlist landed, and false after it: redaction now
-// rewrites the value of ANY query parameter, while the argv refusal stayed a
-// POSITIVE credential identification that does not fire on `?depth=`. The two
-// predicates were deliberately separated (see redact.go splitURLish), and that
-// separation is exactly what opens the discriminating window the deletion
-// rationale assumed could not exist.
-//
-// The three preconditions below are load-bearing, not ceremony: each is the
-// specific way this test could silently rot back into the unfalsifiable form
-// that got it deleted, and each fails LOUDLY instead.
-func TestF24_CompareURLDerivesFromTheEmittedRemote(t *testing.T) {
-	// GITLAB_URL + REPO compose to "<gitlab-url>/<repo>.git", so a query on
-	// GITLAB_URL lands in the middle of the composed remote.
+// A value-bearing query no longer creates a discriminating raw/redacted
+// CompareURL path: admission rejects it before remote execution. The pure
+// buildCompareURL test above remains the owner of emitted-URL derivation.
+func TestF24_UnclassifiedQueryNeverReachesCompareURL(t *testing.T) {
 	const rawRemote = "https://gitlab.example/grp?depth=1/a/b.git"
-
-	// Precondition 1: the fixture is REACHABLE. `depth` matches none of
-	// argvSecretQueryKeys, so pinStatusOne does not refuse the query and
-	// CompareURL is actually built. If a future change makes the refusal fire
-	// here, this test must say so rather than pass on an empty CompareURL.
-	if hasEmbeddedCredential(rawRemote) {
-		t.Fatalf("fixture is no longer reachable: hasEmbeddedCredential(%q) = true, so pinStatusOne refuses before "+
-			"CompareURL is built and this test cannot observe the wiring", rawRemote)
-	}
-	// Precondition 2: the fixture DISCRIMINATES. The redacted and raw
-	// spellings must differ, or the assertion below holds whichever remote
-	// production feeds buildCompareURL — the exact defect the deleted version
-	// had.
-	redacted := redactURL(rawRemote)
-	if redacted == rawRemote {
-		t.Fatalf("fixture no longer discriminates: redactURL(%q) returned it unchanged, so the emitted and raw "+
-			"remotes are the same string and no assertion can tell which one production used", rawRemote)
-	}
 
 	dir := newPort(t, "gitlab-query-compare", `vcpkg_from_gitlab(
     OUT_SOURCE_PATH SOURCE_PATH
@@ -1219,28 +1187,25 @@ func TestF24_CompareURLDerivesFromTheEmittedRemote(t *testing.T) {
     REF `+commitA+`
     SHA512 0
 )`)
+	var calls int
 	p := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
 		FS: DefaultFS(),
-		// Keyed on the RAW spelling: queryURL, not res.Remote.URL, is what
-		// reaches the network seam.
-		RemoteRefs: fakeRemote(map[string]map[string]string{rawRemote: {"HEAD": commitB}}, nil),
-		Now:        fixedNow(),
+		RemoteRefs: func(context.Context, approvedRemoteURL) (map[string]string, error) {
+			calls++
+			return map[string]string{"HEAD": commitB}, nil
+		},
+		Now: fixedNow(),
 	}).Ports[0]
 
-	// Precondition 3: the path under test actually ran.
-	if p.CompareURL == "" {
-		t.Fatalf("no CompareURL produced; the fixture does not exercise the path: status=%v reason=%v remote=%q",
-			p.Status, p.Reason, p.Remote.URL)
+	if calls != 0 {
+		t.Fatalf("remote query calls = %d, want 0", calls)
 	}
-
-	if !strings.HasPrefix(p.CompareURL, strings.TrimSuffix(p.Remote.URL, ".git")) {
-		t.Fatalf("CompareURL %q is not derived from the EMITTED remote %q — pinstatus.go must pass res.Remote to "+
-			"buildCompareURL, never parsed.Remote", p.CompareURL, p.Remote.URL)
+	if p.Status != evidence.StatusUnknown || p.Reason != ReasonRemoteURLQueryUnclassified {
+		t.Fatalf("status/reason = %s/%s, want unknown/%s",
+			p.Status, p.Reason, ReasonRemoteURLQueryUnclassified)
 	}
-	if strings.Contains(p.CompareURL, "depth=1") {
-		t.Fatalf("CompareURL %q carries the RAW query value; the compare link is built by string-editing the remote "+
-			"URL, so feeding it parsed.Remote reconstructs the unredacted spelling in a THIRD emitted field",
-			p.CompareURL)
+	if p.CompareURL != "" || strings.Contains(p.Remote.URL, "depth=1") {
+		t.Fatalf("rejected query leaked into output: remote=%q compare=%q", p.Remote.URL, p.CompareURL)
 	}
 }
 

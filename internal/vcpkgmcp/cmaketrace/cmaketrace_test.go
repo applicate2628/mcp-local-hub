@@ -45,6 +45,13 @@ func defaultDeps() Deps {
 	return Deps{FS: DefaultFS()}
 }
 
+// unusedTracePath supplies a cross-platform absolute path to tests whose
+// injected FS owns the content. The real filesystem is never consulted.
+func unusedTracePath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "unused-trace.json")
+}
+
 func TestTrace_WellFormed_IncludeChainAndExecutedLines(t *testing.T) {
 	path := writeTrace(t, wellFormedTrace)
 
@@ -204,7 +211,7 @@ func (fakeUnreadableFS) Open(p string) (io.ReadCloser, error) {
 }
 
 func TestTrace_Unreadable(t *testing.T) {
-	res := Trace(context.Background(), Args{TracePath: "irrelevant-fake-path.json"}, Deps{FS: fakeUnreadableFS{}})
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, Deps{FS: fakeUnreadableFS{}})
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceUnreadable {
 		t.Fatalf("Status/Reason = %v/%v, want unknown/trace_unreadable", res.Status, res.Reason)
@@ -555,7 +562,7 @@ func TestF26_CancellationDuringTheParseStopsReadingMidStream(t *testing.T) {
 	reader := &cancelAfterReader{r: strings.NewReader(content), cancel: cancel, after: 4096}
 	deps := Deps{FS: fsReturning(reader)}
 
-	res := Trace(ctx, Args{TracePath: "irrelevant"}, deps)
+	res := Trace(ctx, Args{TracePath: unusedTracePath(t)}, deps)
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonCanceled {
 		t.Fatalf("status=%v reason=%v, want unknown/canceled", res.Status, res.Reason)
@@ -604,7 +611,7 @@ func TestF26_CanceledRequestFailsClosedAndStopsReading(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	res := Trace(ctx, Args{TracePath: "irrelevant"}, Deps{FS: fs})
+	res := Trace(ctx, Args{TracePath: unusedTracePath(t)}, Deps{FS: fs})
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonCanceled {
 		t.Fatalf("status=%v reason=%v, want unknown/canceled", res.Status, res.Reason)
@@ -623,7 +630,7 @@ func TestF26_CanceledRequestFailsClosedAndStopsReading(t *testing.T) {
 func TestF26_TraceReaderIsClosedOnTheSuccessPath(t *testing.T) {
 	fs := &streamFS{content: wellFormedTrace}
 
-	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: fs})
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, Deps{FS: fs})
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("status=%v reason=%v, want ok", res.Status, res.Reason)
@@ -641,7 +648,7 @@ func TestF26_OverlongLineIsRefusedAndReportedAsIncomplete(t *testing.T) {
 		"{\"file\":\"/p/x.cmake\",\"line\":1,\"cmd\":\"message\",\"args\":[\"" + strings.Repeat("z", MaxLineBytes+1) + "\"]}\n"
 	fs := &streamFS{content: content}
 
-	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: fs})
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, Deps{FS: fs})
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("status=%v reason=%v, want ok — the valid records remain positive evidence", res.Status, res.Reason)
@@ -675,7 +682,7 @@ func TestF26_MultipleIncompletenessCausesAreAllReported(t *testing.T) {
 		"{\"file\":\"/p/x.cmake\",\"line\":1,\"cmd\":\"message\",\"args\":[\"" + strings.Repeat("z", MaxLineBytes+1) + "\"]}\n"
 	fs := &streamFS{content: content}
 
-	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: fs})
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, Deps{FS: fs})
 
 	want := map[Reason]bool{ReasonInputMalformed: false, ReasonLineLimit: false}
 	for _, r := range res.InputIncompleteReasons {
@@ -695,7 +702,7 @@ func TestF26_MultipleIncompletenessCausesAreAllReported(t *testing.T) {
 // malformed, without buffering the file to TrimSpace it whole.
 func TestF26_EmptyAndWhitespaceOnlyTracesStillReportTraceEmpty(t *testing.T) {
 	for _, content := range []string{"", "   \n\t\n  \n"} {
-		res := Trace(context.Background(), Args{TracePath: "irrelevant"}, Deps{FS: &streamFS{content: content}})
+		res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, Deps{FS: &streamFS{content: content}})
 		if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceEmpty {
 			t.Fatalf("content %q -> status=%v reason=%v, want unknown/trace_empty", content, res.Status, res.Reason)
 		}
@@ -715,7 +722,7 @@ func TestF26_RecordCeilingBoundsParseIndexAndResponseTogether(t *testing.T) {
 	}
 
 	deps := Deps{FS: &streamFS{content: content.String()}, Limits: Limits{MaxParsedRecords: 5}}
-	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, deps)
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, deps)
 
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("status=%v reason=%v, want ok — records read before the ceiling stay positive evidence", res.Status, res.Reason)
@@ -752,7 +759,7 @@ func TestF26_ByteCeilingStopsTheReadAndIsReported(t *testing.T) {
 
 	fs := &streamFS{content: full}
 	deps := Deps{FS: fs, Limits: Limits{MaxTraceBytes: 1024}}
-	res := Trace(context.Background(), Args{TracePath: "irrelevant"}, deps)
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, deps)
 
 	var sawByteLimit bool
 	for _, r := range res.InputIncompleteReasons {

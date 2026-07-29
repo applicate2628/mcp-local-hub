@@ -72,9 +72,31 @@ There are no hardcoded machine paths. A path that appears in a test fixture is t
   it cannot be compared; it cannot measure distance. So you get `current` or `unknown(<why>)`. Tags and
   branches are `unknown(named_ref_not_comparable)` with the commit they point at — existence proves the
   remote still has that name, not that it is current.
-- **A credential-bearing remote URL is refused, not queried.** Redaction cannot reach a child process's
-  `argv`, which is world-readable for its lifetime, so a URL carrying userinfo is rejected outright.
-  Use a credential helper.
+- **A credential-bearing or unclassified value-bearing remote URL is refused, not queried.** Redaction
+  cannot reach a child process's `argv`, which is world-readable for its lifetime. Positive credential
+  evidence returns `unknown(remote_url_credential_bearing)`; any other non-empty query value returns
+  `unknown(remote_url_query_unclassified)`. Empty or valueless query segments remain admissible. Use a
+  credential helper.
+- **Caller-supplied filesystem targets are absolute-path contracts.** A relative `vcpkg_pin_status.port_dirs`
+  entry returns `failed(relative_port_dir)` before filesystem or network access; a relative
+  `vcpkg_cmake_trace.trace_path` returns `failed(relative_trace_path)` before filesystem access. The hub never
+  binds either value to its own working directory.
+- **CMake trace parsing is json-v1 only.** An explicit header with another major returns
+  `unknown(unsupported_trace_version)` and no partial records.
+- **`vcpkg_last_failure` bounds work before it builds the response.** One call examines at most 1024
+  port-directory entries, admits at most 64 relevant logs, reads at most 32 MiB per log and 256 MiB
+  total, retains bounded diagnostic rank cells, and emits at most 256 KiB of inner result JSON. The
+  shared server admits two such scans at once. A limit, cancellation, or saturation returns the normal
+  tri-state reasons `artifact_limit_exceeded`, `metadata_limit_exceeded`, `resource_cancelled`, or
+  `resource_busy`; it never turns partial evidence into `ok` or `failed`.
+- **Bounded-output metadata is explicit.** `resources.completeness` names every evidence class,
+  `resources.omitted` reports exact drops or lower-bound sentinel counts, and
+  `resources.high_water` records the retained producer maxima. `diagnostics_dropped_exact=false` means
+  the returned diagnostic-drop count is only a lower bound because not every evidence byte reached EOF.
+  `resources.high_water.log_buffer_bytes` is the maximum scanner-owned read-plus-line buffer capacity
+  for the call; it is not Go heap usage or process Working Set.
+  A `failed` result always retains `first_error`, the same entry at `diagnostics[0]`,
+  `diagnostic_log`, that path at `log_paths[0]`, and the exit code when it was known.
 
 ## Reporting a defect
 

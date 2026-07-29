@@ -54,7 +54,7 @@ var ErrRemoteRefLimit = errors.New("pinstatus: remote ref advertisement exceeded
 // ONLY thing a remote can honestly tell us (what a ref points at NOW), which
 // is why the type returns a snapshot map rather than any kind of ordering
 // or ancestry answer.
-type remoteRefsFn func(ctx context.Context, remote string) (map[string]string, error)
+type remoteRefsFn func(ctx context.Context, remote approvedRemoteURL) (map[string]string, error)
 
 // defaultRemoteRefs is the real `git ls-remote` implementation.
 //
@@ -64,11 +64,15 @@ type remoteRefsFn func(ctx context.Context, remote string) (map[string]string, e
 // under hard byte/line/ref ceilings instead of buffering it whole, and calls
 // Wait on EVERY exit path — success, parse limit, error, cancellation — so
 // the child is reaped and our pipes are released rather than leaked.
-func defaultRemoteRefs(ctx context.Context, remote string) (map[string]string, error) {
+func defaultRemoteRefs(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
+	rawRemote, ok := remote.transportArgument()
+	if !ok {
+		return nil, errRemoteURLApprovalMissing
+	}
 	ctx, cancel := context.WithTimeout(ctx, RemoteQueryTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", remote)
+	cmd := exec.CommandContext(ctx, "git", "ls-remote", rawRemote)
 	// A credential prompt is the single most common way `git ls-remote`
 	// stalls: it blocks on a terminal that is not there and burns the whole
 	// deadline. Refuse to prompt so an auth failure is a fast, honest error.
@@ -113,9 +117,9 @@ func defaultRemoteRefs(ctx context.Context, remote string) (map[string]string, e
 			return nil, ctxErr
 		}
 		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("git ls-remote %s: %w: %s", redactURL(remote), waitErr, msg)
+			return nil, fmt.Errorf("git ls-remote %s: %w: %s", redactURL(rawRemote), waitErr, msg)
 		}
-		return nil, fmt.Errorf("git ls-remote %s: %w", redactURL(remote), waitErr)
+		return nil, fmt.Errorf("git ls-remote %s: %w", redactURL(rawRemote), waitErr)
 	}
 	return refs, nil
 }

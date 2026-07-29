@@ -97,6 +97,11 @@ const (
 type Reason string
 
 const (
+	// ReasonRelativePortDir: a PortDirs entry is not absolute. Failed (bad
+	// caller input), and refused before either the filesystem or network is
+	// touched. Resolving it with filepath.Abs would bind the caller's input to
+	// the hub daemon's private working directory.
+	ReasonRelativePortDir Reason = "relative_port_dir"
 	// ReasonNotGitComparable: the port fetches via vcpkg_download_distfile,
 	// or via no recognized fetch call at all (provider/metapackage) — there
 	// is no git remote to compare against, ever.
@@ -182,6 +187,10 @@ const (
 	// regardless (see redact.go); this reason covers the separate argv
 	// channel that redaction cannot reach.
 	ReasonRemoteURLCredentialBearing Reason = "remote_url_credential_bearing"
+	// ReasonRemoteURLQueryUnclassified: the URL carries a non-empty query value
+	// not positively identified as a credential. It is still refused because an
+	// unknown credential spelling must not gain child-process authority.
+	ReasonRemoteURLQueryUnclassified Reason = "remote_url_query_unclassified"
 )
 
 // BatchReason is the CLOSED enum for the WHOLE CALL's outcome — why the tool

@@ -172,9 +172,8 @@ func (e endlessReader) Read(p []byte) (int, error) {
 }
 func (endlessReader) Close() error { return nil }
 
-func (f endlessFS) Stat(p string) (os.FileInfo, error)      { return f.inner.Stat(p) }
-func (f endlessFS) ReadDir(p string) ([]os.DirEntry, error) { return f.inner.ReadDir(p) }
-func (f endlessFS) ReadFile(p string) ([]byte, error)       { return f.inner.ReadFile(p) }
+func (f endlessFS) Stat(p string) (os.FileInfo, error)  { return f.inner.Stat(p) }
+func (f endlessFS) OpenDir(p string) (DirReader, error) { return f.inner.OpenDir(p) }
 func (f endlessFS) Open(p string) (io.ReadCloser, error) {
 	if strings.Contains(filepath.ToSlash(p), f.sub) {
 		return endlessReader{fill: f.fill}, nil
@@ -182,13 +181,14 @@ func (f endlessFS) Open(p string) (io.ReadCloser, error) {
 	return f.inner.Open(p)
 }
 
-// TestReadLogLimited_BoundsBeforeMaterializing pins the bound itself at a
-// test-sized limit against a stream with no end.
-func TestReadLogLimited_BoundsBeforeMaterializing(t *testing.T) {
+// TestReadMetadataLimited_BoundsBeforeMaterializing pins the remaining
+// metadata-materialization bound at a test-sized limit against a stream with
+// no end. Phase logs have their separate streaming guards in logstream_test.go.
+func TestReadMetadataLimited_BoundsBeforeMaterializing(t *testing.T) {
 	fsys := endlessFS{inner: DefaultFS(), sub: "endless.log", fill: 'x'}
-	data, truncated, err := readLogLimited(fsys, "endless.log", 64)
+	data, truncated, err := readMetadataLimited(fsys, "endless.log", 64)
 	if err != nil {
-		t.Fatalf("readLogLimited: %v", err)
+		t.Fatalf("readMetadataLimited: %v", err)
 	}
 	if !truncated {
 		t.Error("truncated = false for a stream longer than the limit")

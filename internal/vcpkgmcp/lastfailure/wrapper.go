@@ -36,7 +36,10 @@ type WrapperInfo struct {
 	ExitCode         *int
 	BuildFailedCount *int
 	// FailedPorts entries are exactly as written, "port:triplet".
-	FailedPorts []string
+	FailedPorts         []string
+	FailedPortsDropped  int
+	OverlayPortsDropped int
+	CommandTruncated    bool
 	// ScanComplete reports whether the whole file was read to EOF without a
 	// scanner error. When false, FailedPorts is a PREFIX of an unknown-length
 	// list, so its ABSENCE of an entry proves nothing — see
@@ -65,6 +68,7 @@ type WrapperInfo struct {
 // returned a confident ok.
 func (w WrapperInfo) FailedPortsListIsComplete() bool {
 	return w.ScanComplete &&
+		w.FailedPortsDropped == 0 &&
 		w.BuildFailedCount != nil &&
 		len(w.FailedPorts) == *w.BuildFailedCount
 }
@@ -215,8 +219,12 @@ func commandFlagValue(argv []string, flag string) string {
 // error are still real. It only disqualifies the one conclusion that depends
 // on having seen the WHOLE file — see FailedPortsListIsComplete.
 func ParseWrapperContent(data []byte) (info WrapperInfo, ok bool, err error) {
+	return parseWrapperContentWithLimits(data, defaultResponseLimits)
+}
+
+func parseWrapperContentWithLimits(data []byte, limits responseLimits) (info WrapperInfo, ok bool, err error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
-	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+	scanner.Buffer(make([]byte, 0, 64*1024), int(limits.metadataBytes))
 
 	inFailedPorts := false
 	for scanner.Scan() {
@@ -229,12 +237,22 @@ func ParseWrapperContent(data []byte) (info WrapperInfo, ok bool, err error) {
 			continue
 		}
 		if m := wrapperCommandRE.FindStringSubmatch(line); m != nil {
-			info.Command = m[1]
+			command := m[1]
+			info.Command, info.CommandTruncated = truncateWireValue(command, limits.commandBytes)
 			ok = true
 			inFailedPorts = false
 
-			argv := SplitWindowsCommandLine(m[1])
-			info.OverlayPorts = append(info.OverlayPorts, commandFlagValues(argv, "--overlay-ports")...)
+			if len(command) > limits.inputScalarBytes {
+				continue
+			}
+			argv := SplitWindowsCommandLine(command)
+			for _, overlay := range commandFlagValues(argv, "--overlay-ports") {
+				if len(info.OverlayPorts) >= limits.overlayEntries || len(overlay) > limits.inputScalarBytes {
+					info.OverlayPortsDropped++
+					continue
+				}
+				info.OverlayPorts = append(info.OverlayPorts, boundedValue(overlay, limits.pathBytes))
+			}
 			if t := commandFlagValue(argv, "--triplet"); t != "" && info.Triplet == "" {
 				info.Triplet = t
 			}
@@ -269,7 +287,11 @@ func ParseWrapperContent(data []byte) (info WrapperInfo, ok bool, err error) {
 		}
 		if inFailedPorts {
 			if m := wrapperFailedEntryRE.FindStringSubmatch(line); m != nil {
-				info.FailedPorts = append(info.FailedPorts, m[1])
+				if len(info.FailedPorts) >= limits.listEntries || len(m[1]) > limits.pathBytes {
+					info.FailedPortsDropped++
+				} else {
+					info.FailedPorts = append(info.FailedPorts, boundedValue(m[1], limits.pathBytes))
+				}
 				continue
 			}
 			// A non-matching line (blank, or next section) ends the list.

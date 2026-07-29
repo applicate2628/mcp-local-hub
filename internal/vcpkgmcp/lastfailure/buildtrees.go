@@ -1,12 +1,14 @@
 package lastfailure
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
@@ -52,28 +54,31 @@ import (
 // FS abstracts the filesystem calls this package needs, so tests exercise
 // fixtures under testdata/ without ever touching the real machine.
 //
-// Open exists alongside ReadFile so LOG reads can be bounded BEFORE the bytes
-// are materialized — see readLogLimited. ReadFile is retained for the small,
-// known-shape files (a wrapper summary, a vcpkg-configuration.json) where the
-// whole content is the unit of work.
+// Open and OpenDir make both byte streams and directory enumeration bounded
+// before materialization.
 type FS interface {
 	Stat(path string) (os.FileInfo, error)
-	ReadDir(path string) ([]os.DirEntry, error)
-	ReadFile(path string) ([]byte, error)
 	Open(path string) (io.ReadCloser, error)
+	OpenDir(path string) (DirReader, error)
+}
+
+// DirReader is the paged directory seam. Its ReadDir contract is os.File's:
+// n>0 returns at most n entries and io.EOF only with the final short page.
+type DirReader interface {
+	ReadDir(n int) ([]os.DirEntry, error)
+	Close() error
 }
 
 type osFS struct{}
 
-func (osFS) Stat(p string) (os.FileInfo, error)      { return os.Stat(p) }
-func (osFS) ReadDir(p string) ([]os.DirEntry, error) { return os.ReadDir(p) }
-func (osFS) ReadFile(p string) ([]byte, error)       { return os.ReadFile(p) }
-func (osFS) Open(p string) (io.ReadCloser, error)    { return os.Open(p) }
+func (osFS) Stat(p string) (os.FileInfo, error)   { return os.Stat(p) }
+func (osFS) Open(p string) (io.ReadCloser, error) { return os.Open(p) }
+func (osFS) OpenDir(p string) (DirReader, error)  { return os.Open(p) }
 
 // DefaultFS wires FS to the real OS.
 func DefaultFS() FS { return osFS{} }
 
-// maxLogBytes bounds how much of ONE log file this package materializes.
+// maxLogBytes bounds how much of ONE phase log this package streams.
 //
 // A buildtrees log is attacker-shaped only in the loosest sense, but it IS
 // unbounded in size: a verbose nested build can emit hundreds of megabytes,
@@ -90,28 +95,77 @@ func DefaultFS() FS { return osFS{} }
 // applied to an unreadable log.
 const maxLogBytes int64 = 32 << 20
 
-// readLogLimited reads at most limit bytes from path, reporting whether the
-// file had more content than that. It reads limit+1 bytes so "exactly at the
-// limit" is distinguishable from "over it" without a second Stat — and so the
-// bound holds even against a stream whose length cannot be known in advance
-// (a Stat-then-read gate would still hand io.ReadAll an unbounded reader).
-//
-// limit is a parameter rather than a direct read of maxLogBytes so the bound
-// is exercisable at test sizes without mutating package state.
-func readLogLimited(fsys FS, path string, limit int64) (data []byte, truncated bool, err error) {
+// readMetadataLimited applies a limit+sentinel bound before materializing the
+// wrapper/configuration documents that require a complete byte slice to parse.
+// Phase logs use phaseLogStreamScanner instead and are never materialized.
+func readMetadataLimited(fsys FS, path string, limit int64) ([]byte, bool, error) {
+	return readMetadataLimitedContext(context.Background(), fsys, path, limit)
+}
+
+func readMetadataLimitedContext(ctx context.Context, fsys FS, path string, limit int64) (data []byte, truncated bool, err error) {
 	rc, err := fsys.Open(path)
 	if err != nil {
 		return nil, false, err
 	}
-	defer rc.Close()
-	data, err = io.ReadAll(io.LimitReader(rc, limit+1))
-	if err != nil {
-		return nil, false, err
+	defer func() {
+		if closeErr := rc.Close(); err == nil && closeErr != nil {
+			err = closeErr
+		}
+	}()
+	data = make([]byte, 0, min(int64(64<<10), limit+1))
+	buffer := make([]byte, 64<<10)
+	for int64(len(data)) < limit+1 {
+		if ctx.Err() != nil {
+			return nil, false, ctx.Err()
+		}
+		remaining := limit + 1 - int64(len(data))
+		chunk := buffer
+		if int64(len(chunk)) > remaining {
+			chunk = chunk[:remaining]
+		}
+		n, readErr := rc.Read(chunk)
+		if n > 0 {
+			data = append(data, chunk[:n]...)
+		}
+		if readErr != nil {
+			if errors.Is(readErr, io.EOF) {
+				break
+			}
+			return nil, false, readErr
+		}
+		if n == 0 {
+			return nil, false, io.ErrNoProgress
+		}
 	}
 	if int64(len(data)) > limit {
 		return data[:limit], true, nil
 	}
 	return data, false, nil
+}
+
+// readDirBounded requests exactly the admitted entries plus one sentinel from
+// the directory stream. It never calls os.ReadDir and never materializes the
+// tail merely to slice it afterward.
+func readDirBounded(fsys FS, path string, limit int) (entries []os.DirEntry, exceeded bool, err error) {
+	dir, err := fsys.OpenDir(path)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() {
+		if closeErr := dir.Close(); err == nil && closeErr != nil {
+			entries, exceeded, err = nil, false, closeErr
+		}
+	}()
+	entries, err = dir.ReadDir(limit + 1)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return nil, false, err
+	}
+	exceeded = len(entries) > limit
+	if exceeded {
+		entries = entries[:limit]
+	}
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
+	return entries, exceeded, nil
 }
 
 // probeDir reports whether path is an existing directory, TRI-STATE.
@@ -180,10 +234,13 @@ type phaseLogFile struct {
 // marker-file shapes in portDir. Returns ok=false (not an error) when
 // nothing matched; returns candidates when MORE THAN ONE distinct triplet
 // value was found (never silently picks one).
-func detectTripletFromPortDir(fsys FS, portDir string) (triplet string, candidates []string, ok bool) {
-	entries, err := fsys.ReadDir(portDir)
+func detectTripletFromPortDir(fsys FS, portDir string, limit int) (triplet string, candidates []string, ok, limitExceeded bool, err error) {
+	entries, limitExceeded, err := readDirBounded(fsys, portDir, limit)
 	if err != nil {
-		return "", nil, false
+		return "", nil, false, false, err
+	}
+	if limitExceeded {
+		return "", nil, false, true, nil
 	}
 	found := map[string]bool{}
 	for _, e := range entries {
@@ -195,27 +252,45 @@ func detectTripletFromPortDir(fsys FS, portDir string) (triplet string, candidat
 		case strings.HasPrefix(name, "stdout-") && strings.HasSuffix(name, ".log"):
 			t := strings.TrimSuffix(strings.TrimPrefix(name, "stdout-"), ".log")
 			if t != "" {
-				found[t] = true
+				if found[t] || len(found) < 2 {
+					found[t] = true
+				}
 			}
 		case strings.HasSuffix(name, ".vcpkg_abi_info.txt"):
 			t := strings.TrimSuffix(name, ".vcpkg_abi_info.txt")
 			if t != "" {
-				found[t] = true
+				if found[t] || len(found) < 2 {
+					found[t] = true
+				}
 			}
 		}
 	}
 	switch len(found) {
 	case 0:
-		return "", nil, false
+		return "", nil, false, false, nil
 	case 1:
 		for t := range found {
-			return t, nil, true
+			return t, nil, true, false, nil
 		}
 	}
 	for t := range found {
 		candidates = append(candidates, t)
 	}
-	return "", candidates, false
+	sort.Strings(candidates)
+	return "", candidates, false, false, nil
+}
+
+type portDirClassification struct {
+	phases                     []phaseLogFile
+	otherLogPaths              []string
+	configureLogYAMLPaths      []string
+	stdoutNarration            string
+	directoryLimitExceeded     bool
+	relevantLogLimitExceeded   bool
+	relevantLogsDroppedAtLeast int
+	otherLogPathsDropped       int
+	entriesExamined            int
+	relevantLogsRetained       int
 }
 
 // classifyPortDir lists portDir and classifies every recognizable log file
@@ -228,10 +303,15 @@ func detectTripletFromPortDir(fsys FS, portDir string) (triplet string, candidat
 // can belong to a try_compile CAPABILITY PROBE rather than the port's real
 // build, so it is kept separate rather than silently folded into the
 // primary phase scan.
-func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, otherLogPaths []string, configureLogYAMLPaths []string, stdoutNarration string, err error) {
-	entries, err := fsys.ReadDir(portDir)
+func classifyPortDir(fsys FS, portDir, triplet string, limits responseLimits) (out portDirClassification, err error) {
+	entries, exceeded, err := readDirBounded(fsys, portDir, limits.directoryEntries)
 	if err != nil {
-		return nil, nil, nil, "", err
+		return out, err
+	}
+	out.directoryLimitExceeded = exceeded
+	out.entriesExamined = len(entries)
+	if exceeded {
+		return out, nil
 	}
 
 	configOutName := "config-" + triplet + "-out.log"
@@ -249,6 +329,14 @@ func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, o
 	// reported as unknown(no_diagnostic_found).
 	buildPrefix := "build-" + triplet + "-"
 	stdoutName := "stdout-" + triplet + ".log"
+	relevantSeen := 0
+	addPhase := func(file phaseLogFile) {
+		relevantSeen++
+		if relevantSeen <= limits.relevantLogs {
+			out.phases = append(out.phases, file)
+		}
+	}
+	otherPaths := newBoundedStringCollector(limits.listEntries, limits.pathBytes)
 
 	for _, e := range entries {
 		if e.IsDir() {
@@ -259,47 +347,82 @@ func classifyPortDir(fsys FS, portDir, triplet string) (phases []phaseLogFile, o
 
 		switch {
 		case name == "extract-out.log":
-			phases = append(phases, phaseLogFile{Phase: PhaseExtract, Stream: "out", Path: full})
+			addPhase(phaseLogFile{Phase: PhaseExtract, Stream: "out", Path: full})
 		case name == "extract-err.log":
-			phases = append(phases, phaseLogFile{Phase: PhaseExtract, Stream: "err", Path: full})
+			addPhase(phaseLogFile{Phase: PhaseExtract, Stream: "err", Path: full})
 		case name == configOutName:
-			phases = append(phases, phaseLogFile{Phase: PhaseConfig, Stream: "out", Path: full})
+			addPhase(phaseLogFile{Phase: PhaseConfig, Stream: "out", Path: full})
 		case name == configErrName:
-			phases = append(phases, phaseLogFile{Phase: PhaseConfig, Stream: "err", Path: full})
+			addPhase(phaseLogFile{Phase: PhaseConfig, Stream: "err", Path: full})
 		case name == stdoutName:
-			stdoutNarration = full
+			relevantSeen++
+			if relevantSeen <= limits.relevantLogs {
+				out.stdoutNarration = full
+			}
 		case strings.HasPrefix(name, installPrefix) && strings.HasSuffix(name, "-out.log"):
 			cfg := strings.TrimSuffix(strings.TrimPrefix(name, installPrefix), "-out.log")
-			phases = append(phases, phaseLogFile{Phase: PhaseInstall, Stream: "out", Config: cfg, Path: full})
+			addPhase(phaseLogFile{Phase: PhaseInstall, Stream: "out", Config: cfg, Path: full})
 		case strings.HasPrefix(name, installPrefix) && strings.HasSuffix(name, "-err.log"):
 			cfg := strings.TrimSuffix(strings.TrimPrefix(name, installPrefix), "-err.log")
-			phases = append(phases, phaseLogFile{Phase: PhaseInstall, Stream: "err", Config: cfg, Path: full})
+			addPhase(phaseLogFile{Phase: PhaseInstall, Stream: "err", Config: cfg, Path: full})
 		case strings.HasPrefix(name, buildPrefix) && strings.HasSuffix(name, "-out.log"):
 			cfg := strings.TrimSuffix(strings.TrimPrefix(name, buildPrefix), "-out.log")
-			phases = append(phases, phaseLogFile{Phase: PhaseBuild, Stream: "out", Config: cfg, Path: full})
+			addPhase(phaseLogFile{Phase: PhaseBuild, Stream: "out", Config: cfg, Path: full})
 		case strings.HasPrefix(name, buildPrefix) && strings.HasSuffix(name, "-err.log"):
 			cfg := strings.TrimSuffix(strings.TrimPrefix(name, buildPrefix), "-err.log")
-			phases = append(phases, phaseLogFile{Phase: PhaseBuild, Stream: "err", Config: cfg, Path: full})
+			addPhase(phaseLogFile{Phase: PhaseBuild, Stream: "err", Config: cfg, Path: full})
 		case strings.HasPrefix(name, patchPrefix) && strings.HasSuffix(name, "-out.log"):
 			// Config field repurposed to hold the 0-based patch ordinal N
 			// (patch-<triplet>-<N>-out.log) — same "extra descriptor" slot
 			// build-config normally occupies, never both at once.
 			ord := strings.TrimSuffix(strings.TrimPrefix(name, patchPrefix), "-out.log")
-			phases = append(phases, phaseLogFile{Phase: PhasePatch, Stream: "out", Config: ord, Path: full})
+			addPhase(phaseLogFile{Phase: PhasePatch, Stream: "out", Config: ord, Path: full})
 		case strings.HasPrefix(name, patchPrefix) && strings.HasSuffix(name, "-err.log"):
 			ord := strings.TrimSuffix(strings.TrimPrefix(name, patchPrefix), "-err.log")
-			phases = append(phases, phaseLogFile{Phase: PhasePatch, Stream: "err", Config: ord, Path: full})
+			addPhase(phaseLogFile{Phase: PhasePatch, Stream: "err", Config: ord, Path: full})
 		case strings.HasSuffix(name, "CMakeConfigureLog.yaml.log"):
-			configureLogYAMLPaths = append(configureLogYAMLPaths, full)
-			otherLogPaths = append(otherLogPaths, full)
+			relevantSeen++
+			if relevantSeen <= limits.relevantLogs {
+				out.configureLogYAMLPaths = append(out.configureLogYAMLPaths, full)
+			}
+			otherPaths.add(full)
 		case strings.HasSuffix(name, ".log") || strings.HasSuffix(name, ".txt"):
 			// Every other artifact (config-<triplet>-<cfg>-ninja.log,
 			// -CMakeCache.txt.log, -CMakeConfigureLog.yaml.log,
 			// <triplet>.vcpkg_abi_info.txt, a different triplet's
 			// leftovers, ...): not diagnostic-scanned, but always
 			// surfaced in log_paths per the design doc invariant.
-			otherLogPaths = append(otherLogPaths, full)
+			otherPaths.add(full)
 		}
 	}
-	return phases, otherLogPaths, configureLogYAMLPaths, stdoutNarration, nil
+	phaseIndex := func(ph Phase) int {
+		switch ph {
+		case PhaseExtract:
+			return 0
+		case PhasePatch:
+			return 1
+		case PhaseConfig:
+			return 2
+		case PhaseBuild:
+			return 3
+		default:
+			return 4
+		}
+	}
+	sort.SliceStable(out.phases, func(i, j int) bool {
+		pi, pj := phaseIndex(out.phases[i].Phase), phaseIndex(out.phases[j].Phase)
+		if pi != pj {
+			return pi < pj
+		}
+		return filepath.Base(out.phases[i].Path) < filepath.Base(out.phases[j].Path)
+	})
+	out.otherLogPaths = otherPaths.values
+	out.otherLogPathsDropped = otherPaths.dropped
+	out.relevantLogsRetained = min(relevantSeen, limits.relevantLogs)
+	if relevantSeen > limits.relevantLogs {
+		out.relevantLogLimitExceeded = true
+		out.relevantLogsDroppedAtLeast = relevantSeen - limits.relevantLogs
+		return out, nil
+	}
+	return out, nil
 }

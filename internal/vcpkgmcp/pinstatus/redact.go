@@ -1,7 +1,9 @@
 package pinstatus
 
 import (
+	"errors"
 	"net/url"
+	"path/filepath"
 	"strings"
 )
 
@@ -110,6 +112,100 @@ var argvSecretQueryKeys = []string{
 	"credential",
 	"sig",
 	"signature",
+}
+
+var errRemoteURLApprovalMissing = errors.New("remote URL approval missing")
+
+// approvedRemoteURL is an execution capability, not a sanitized string. The
+// private proof pointer makes its zero value invalid, and the struct shape
+// prevents string conversion. approveRemoteURL is its sole constructor.
+type approvedRemoteURL struct {
+	raw   string
+	proof *remoteURLApproval
+}
+
+type remoteURLApproval struct{}
+
+var remoteURLApprovalProof = &remoteURLApproval{}
+
+func (remote approvedRemoteURL) transportArgument() (string, bool) {
+	if remote.proof != remoteURLApprovalProof || remote.raw == "" {
+		return "", false
+	}
+	rechecked, reason := approveRemoteURL(remote.raw)
+	if reason != "" || rechecked.proof != remoteURLApprovalProof || rechecked.raw != remote.raw {
+		return "", false
+	}
+	return remote.raw, true
+}
+
+// approveRemoteURL is the single admission owner for raw remote strings.
+// Credential evidence outranks an otherwise unclassified value-bearing query.
+func approveRemoteURL(raw string) (approvedRemoteURL, Reason) {
+	if hasEmbeddedCredential(raw) {
+		return approvedRemoteURL{}, ReasonRemoteURLCredentialBearing
+	}
+
+	parsed, parseErr := url.Parse(raw)
+	_, fallbackQuery, fallbackHasQuery, _ := splitURLish(raw)
+	rawQuery := fallbackQuery
+	hasQuery := fallbackHasQuery
+	if parseErr == nil {
+		rawQuery = parsed.RawQuery
+		hasQuery = parsed.ForceQuery || parsed.RawQuery != ""
+	}
+	if hasQuery && queryCarriesValue(rawQuery) {
+		return approvedRemoteURL{}, ReasonRemoteURLQueryUnclassified
+	}
+	if !validRemoteURLShape(raw, parsed, parseErr) {
+		return approvedRemoteURL{}, ReasonPortfileUnparsable
+	}
+	return approvedRemoteURL{raw: raw, proof: remoteURLApprovalProof}, ""
+}
+
+func queryCarriesValue(rawQuery string) bool {
+	for _, part := range strings.Split(rawQuery, "&") {
+		_, value, hasValue := strings.Cut(part, "=")
+		if hasValue && value != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// validRemoteURLShape checks every structural component before the value gains
+// transport authority. URL, SCP-like, and local-path Git remotes remain valid.
+func validRemoteURLShape(raw string, parsed *url.URL, parseErr error) bool {
+	if raw == "" || strings.TrimSpace(raw) != raw ||
+		strings.IndexFunc(raw, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
+		return false
+	}
+	// SCP-like Git form (git@host:owner/repo.git). Go's URL parser rejects
+	// the colon in this query-free spelling, so validate it before parseErr.
+	if !strings.ContainsAny(raw, "?#") {
+		if filepath.IsAbs(raw) {
+			return true
+		}
+		if at := strings.LastIndexByte(raw, '@'); at > 0 {
+			if colon := strings.IndexByte(raw[at+1:], ':'); colon > 0 {
+				colon += at + 1
+				return colon+1 < len(raw)
+			}
+		}
+	}
+	if parseErr != nil || parsed == nil || parsed.Fragment != "" {
+		return false
+	}
+	if parsed.Scheme != "" && strings.Contains(raw, "://") {
+		if parsed.Path == "" {
+			return false
+		}
+		if !strings.EqualFold(parsed.Scheme, "file") && parsed.Host == "" {
+			return false
+		}
+		return true
+	}
+	return parsed.Scheme == "" && parsed.Path != ""
 }
 
 // redactURL returns raw with any embedded userinfo and any secret-shaped

@@ -1,7 +1,6 @@
 package patchesapply
 
 import (
-	"strconv"
 	"strings"
 )
 
@@ -100,42 +99,62 @@ func truthy(val *string) Tri {
 	return TriTrue
 }
 
-// compareVersions compares two dot-separated version strings component-wise,
-// numerically where possible (falling back to string comparison for a
-// non-numeric component), the same behaviour CMake's VERSION_* if()
-// operators document. Returns -1, 0, or 1.
+// compareVersions mirrors CMake's cmSystemTools::VersionCompare: compare
+// integer components without overflow, ignore leading zeros, treat omitted
+// components as zero, and stop when neither side begins another integer
+// component. Thus a non-integer component or trailing part truncates the
+// version at that point; it is never compared lexically as a prerelease.
+// Returns -1, 0, or 1.
 func compareVersions(a, b string) int {
-	as := strings.Split(a, ".")
-	bs := strings.Split(b, ".")
-	n := len(as)
-	if len(bs) > n {
-		n = len(bs)
-	}
-	for i := 0; i < n; i++ {
-		var av, bv string
-		if i < len(as) {
-			av = as[i]
+	ai, bi := 0, 0
+	for isVersionDigit(a, ai) || isVersionDigit(b, bi) {
+		for byteAt(a, ai) == '0' {
+			ai++
 		}
-		if i < len(bs) {
-			bv = bs[i]
+		for byteAt(b, bi) == '0' {
+			bi++
 		}
-		ai, aerr := strconv.Atoi(av)
-		bi, berr := strconv.Atoi(bv)
-		if aerr == nil && berr == nil {
-			if ai != bi {
-				if ai < bi {
-					return -1
-				}
-				return 1
-			}
-			continue
+
+		ab, bb := ai, bi
+		for isVersionDigit(a, ai) {
+			ai++
 		}
-		if av != bv {
-			if av < bv {
+		for isVersionDigit(b, bi) {
+			bi++
+		}
+
+		ad, bd := a[ab:ai], b[bb:bi]
+		if len(ad) != len(bd) {
+			if len(ad) < len(bd) {
 				return -1
 			}
 			return 1
 		}
+		if ad != bd {
+			if ad < bd {
+				return -1
+			}
+			return 1
+		}
+
+		if byteAt(b, bi) == '.' {
+			bi++
+		}
+		if byteAt(a, ai) == '.' {
+			ai++
+		}
 	}
 	return 0
+}
+
+func byteAt(s string, i int) byte {
+	if i >= len(s) {
+		return 0
+	}
+	return s[i]
+}
+
+func isVersionDigit(s string, i int) bool {
+	b := byteAt(s, i)
+	return b >= '0' && b <= '9'
 }

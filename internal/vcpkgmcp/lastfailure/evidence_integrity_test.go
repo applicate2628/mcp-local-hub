@@ -39,18 +39,9 @@ func (f failingFS) Stat(p string) (os.FileInfo, error) {
 	return f.inner.Stat(p)
 }
 
-func (f failingFS) ReadDir(p string) ([]os.DirEntry, error) { return f.inner.ReadDir(p) }
+func (f failingFS) OpenDir(p string) (DirReader, error) { return f.inner.OpenDir(p) }
 
-func (f failingFS) ReadFile(p string) ([]byte, error) {
-	if f.failRead && f.hit(p) {
-		return nil, errDenied
-	}
-	return f.inner.ReadFile(p)
-}
-
-// Open must honour failRead identically: log reads go through Open (bounded),
-// small known-shape files through ReadFile, and a fixture that denies one but
-// not the other would silently stop exercising the denial it was written for.
+// Open covers logs and metadata; both are bounded streams.
 func (f failingFS) Open(p string) (io.ReadCloser, error) {
 	if f.failRead && f.hit(p) {
 		return nil, errDenied

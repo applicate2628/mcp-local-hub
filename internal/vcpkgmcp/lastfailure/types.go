@@ -186,6 +186,23 @@ const (
 	// probing for pthread.h fails on every MSVC build ever made), so it is
 	// evidence of a capability probe, not of a broken port.
 	ReasonCapabilityProbeOnly Reason = "capability_probe_only"
+	// ReasonArgsInvalid: an argument exceeded the published count/byte budget.
+	ReasonArgsInvalid Reason = "args_invalid"
+	// ReasonMetadataLimitExceeded: wrapper/configuration metadata exceeded the
+	// bounded reader and was not parsed from an incomplete prefix.
+	ReasonMetadataLimitExceeded Reason = "metadata_limit_exceeded"
+	// ReasonArtifactLimitExceeded: directory/log count or total-byte evidence
+	// was incomplete, so no confident build verdict is permitted.
+	ReasonArtifactLimitExceeded Reason = "artifact_limit_exceeded"
+	// ReasonResourceBusy: two last-failure scans already own the tool-local
+	// admission slots; no filesystem work was started for this call.
+	ReasonResourceBusy Reason = "resource_busy"
+	// ReasonResourceCancelled: the caller cancelled before evidence collection
+	// completed. Kept distinct from saturation and filesystem failures.
+	ReasonResourceCancelled Reason = "resource_cancelled"
+	// ReasonCausalityInvariantViolation: internal state requested status=failed
+	// without the evidence tuple required to support it.
+	ReasonCausalityInvariantViolation Reason = "causality_invariant_violation"
 )
 
 // Note is a small closed vocabulary of non-authoritative observations
@@ -292,8 +309,8 @@ const (
 	NoteWrapperFailedPortsCompletenessUnproven Note = "wrapper_failed_ports_list_completeness_unproven"
 
 	// --- Response-budget notes ------------------------------------------
-	// Both name what the TOOL did to its own output, never anything about the
-	// build, per this file's naming rule. They exist so a budget can never
+	// All four name what the TOOL did to its own output, never anything about
+	// the build, per this file's naming rule. They exist so a budget can never
 	// truncate silently.
 
 	// NoteDiagnosticsTruncatedToBudget: the ranked diagnostic list was cut at
@@ -305,7 +322,43 @@ const (
 	// per-line budget and was cut. The affected Text also says so in band, with
 	// a marker naming how many bytes were removed — this note only makes the
 	// fact visible without scanning every entry.
+	//
+	// Its meaning is deliberately UNCHANGED by the 2026-07-27 correction: it
+	// still means a Diagnostic.Text specifically. Every other truncated value
+	// reports through NoteResponseValueTruncated, because the two are different
+	// facts for an operator.
 	NoteDiagnosticTextTruncated Note = "diagnostic_text_truncated_to_line_budget"
+	// NoteResponseValueTruncated: at least one LOCATOR or COMMAND value was cut
+	// — a diagnostic's file, the diagnostic log path, a log_paths or
+	// overlay_chain entry, failed_target, exact_command, build_command, or one
+	// of the paths/commands inside evidence.
+	//
+	// Kept apart from NoteDiagnosticTextTruncated because the operator's
+	// obligation is different. A truncated message is merely incomplete; a
+	// truncated locator or command MUST NOT BE USED VERBATIM — it names
+	// something that does not exist. The affected value also says so in band
+	// (see truncationMarker), so a caller reading one field never has to find
+	// this note to learn the value is unusable.
+	NoteResponseValueTruncated Note = "response_value_truncated_to_wire_budget"
+	// NoteResponseSizeBackstopEngaged: the whole marshaled response exceeded
+	// MaxResponseBytes even after every per-field cap, so the tool returned a
+	// REDUCED document — the verdict, the headline error, the diagnostic log,
+	// the exit code, a bounded prefix of log_paths, and the notes; everything
+	// else was dropped and diagnostics_dropped absorbed the diagnostic count.
+	//
+	// Nothing about the ANSWER changed: the reduction copies fields forward and
+	// recomputes nothing. Read the primary logs via log_paths for what is
+	// missing.
+	//
+	// This note firing is also a defect signal worth reporting upstream. The
+	// per-field caps are sized so the backstop is unreachable on any answer
+	// they have shaped, so it engaging means a Result field exists that nothing
+	// bounds — the exact class the backstop was added to survive.
+	NoteResponseSizeBackstopEngaged Note = "response_reduced_by_size_backstop"
+	NoteProducerLimitEngaged        Note = "producer_limit_engaged"
+	NoteCausalityInvariantViolated  Note = "failed_causality_invariant_violated"
+	NoteOverlayConfigUnreadable     Note = "overlay_chain_vcpkg_configuration_unreadable"
+	NoteOverlayConfigLimitExceeded  Note = "overlay_chain_vcpkg_configuration_limit_exceeded"
 )
 
 // ContextSource names one input the answer actually rests on. Closed enum,
@@ -531,6 +584,9 @@ type Result struct {
 	// the lowest-ranked. NoteDiagnosticsTruncatedToBudget carries the same fact
 	// into the notes list for a caller that scans notes rather than fields.
 	DiagnosticsDropped int `json:"diagnostics_dropped,omitempty"`
+	// DiagnosticsDroppedExact is true when every relevant evidence byte was
+	// scanned to EOF. False means DiagnosticsDropped is only a lower bound.
+	DiagnosticsDroppedExact bool `json:"diagnostics_dropped_exact"`
 	// ExitCode is a pointer so "0" and "not known" are distinguishable in
 	// JSON (omitted entirely when unknown).
 	ExitCode *int `json:"exit_code,omitempty"`
@@ -547,7 +603,8 @@ type Result struct {
 	ContextSource []ContextSource `json:"context_source"`
 	Notes         []Note          `json:"notes,omitempty"`
 
-	Evidence evidence.Evidence `json:"evidence"`
+	Evidence  evidence.Evidence `json:"evidence"`
+	Resources ResourceReport    `json:"resources"`
 }
 
 // Status aliases evidence.Status so callers of this package do not need a
