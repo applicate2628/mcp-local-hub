@@ -1,6 +1,6 @@
 ---
 title: vcpkg MCP — tool contracts, discovery, and the behavioural invariants
-status: proposed
+status: accepted
 date: 2026-07-25
 owner: lead (design) — operator go-ahead given ("б в первую очередь")
 relates-to:
@@ -65,19 +65,6 @@ Returns structured: `{phase: configure|build|install, failed_target, exact_comma
 diagnostics[{file,line,severity,text}], exit_code, log_paths[]}`.
 - Does NOT parse everything: extracts the FIRST real diagnostic + the failing command, and **always
   returns the log paths** so an agent can read further itself.
-
-> **Amended 2026-07-26 after field use.** Two clauses above were under-specified and shipped wrong:
->
-> - *"extracts the FIRST real diagnostic"* was never expressed in the returned document — the array
->   was raw scan order, so a real answer put its one `LNK1120` error at position 51 behind 50
->   repeated clang-cl warnings. `diagnostics[]` is now **ORDERED** (severity, then first occurrence
->   within a severity) and `first_error` carries the headline directly. Warnings are still returned.
-> - *"+ the failing command"* did not say WHICH LAYER's command. The implementation fell back to the
->   first non-empty line of a phase log, which for a make-driven port is make's own trace.
->   `exact_command` is now the **top-level vcpkg invocation only**, recovered solely from an
->   authoritative record of it, omitted (with a note) when none exists; the build-layer
->   sub-invocation moved to its own `build_command`, associated with the `diagnostic_log` it shares
->   a build step with.
 - Handles the two traps the operator hit: libtool erasing the return code (classify by diagnostic,
   never by exit code alone) and `grep error` matching filenames (match on diagnostic POSITION/shape,
   not substring).
@@ -214,3 +201,7 @@ stack 2-3 days, robust across build systems 1-2 weeks.
   an independently-unresolvable `${VCPKG_TARGET_TRIPLET}`, so nothing moved off Resolved). Full
   measured inventory: `work-items/decisions/2026-07-25-vcpkg-ground-truth-measured.md`.
 - Repo location for this MCP (new repo vs a module) — operator's call.
+
+## Acceptance
+
+accepted 2026-07-27 — SHIPPED and field-verified: seven tools registered under `internal/vcpkgmcp/`, serving in-hub on port 9138, and the operator confirmed six of the seven against his real vcpkg tree. Acceptance evidence is the shipped implementation plus that field verification.
