@@ -97,7 +97,7 @@ func TestDaemonRecoverRouteRequiresExplicitConfirmationBeforeInvocation(t *testi
 }
 
 func TestDaemonRecoverRouteMapsStableOutcomesAndRedactsDetails(t *testing.T) {
-	foreignPath := `C:\Users\owner\foreign.exe`
+	foreignPath := `C:\Users\<owner>\foreign.exe`
 	tests := []struct {
 		name       string
 		err        error
@@ -314,7 +314,7 @@ func TestDaemonRecoverRouteDurableHandoffRaisesNoWarning(t *testing.T) {
 }
 
 func TestDaemonRecoverRouteRespawnFailureReportsCommittedTerminationWithoutProcessDetail(t *testing.T) {
-	leakyPath := `C:\Users\owner\mcphub.exe`
+	leakyPath := `C:\Users\<owner>\mcphub.exe`
 	tests := []struct {
 		name       string
 		result     daemonrecovery.Result

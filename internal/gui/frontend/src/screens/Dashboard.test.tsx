@@ -1435,7 +1435,7 @@ describe("DashboardScreen — spawn-hold delivery (banner + card row)", () => {
     cleanup();
   });
 
-  const BIN = "C:\\Users\\dev\\.local\\bin\\mcphub.exe";
+  const BIN = "C:\\Users\\<dev>\\.local\\bin\\mcphub.exe";
   const heldRow = (server: string): DaemonStatus => ({
     server,
     daemon: "default",
