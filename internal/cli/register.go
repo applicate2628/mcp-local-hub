@@ -17,7 +17,9 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
@@ -113,10 +115,11 @@ See also: unregister, workspaces, status.`,
 			explicit := weekly || noWeekly
 			a := api.NewAPI()
 			report, err := a.Register(workspace, languages, api.RegisterOpts{
-				WeeklyRefreshExplicit: explicit,
-				WeeklyRefresh:         weekly,
-				SupervisedProxy:       supervised,
-				Writer:                cmd.OutOrStdout(),
+				WeeklyRefreshExplicit:   explicit,
+				WeeklyRefresh:           weekly,
+				SupervisedProxy:         supervised,
+				ManagedRouterAuthorizer: registerManagedRouterAuthorizer(),
+				Writer:                  cmd.OutOrStdout(),
 			})
 			if err != nil {
 				return err
@@ -132,6 +135,16 @@ See also: unregister, workspaces, status.`,
 	c.Flags().BoolVar(&supervised, "supervised", false,
 		"start LSP proxies through supervisor-intent as Job-protected supervisor children")
 	return c
+}
+
+// registerManagedRouterAuthorizer is the CLI composition boundary. Discovery
+// is read-only: PidportPathNoCreate resolves a candidate path without creating
+// the GUI state directory, while all trust decisions remain in internal/gui.
+func registerManagedRouterAuthorizer() api.ManagedRouterAuthorizer {
+	pidportPath, _ := gui.PidportPathNoCreate()
+	currentExecutable, _ := os.Executable()
+	version, _, _ := buildinfo.Get()
+	return gui.NewManagedRouterAuthorizer(pidportPath, currentExecutable, version)
 }
 
 var registerSchedulerUnavailableForHost = func() (bool, error) {

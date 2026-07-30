@@ -36,6 +36,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"time"
 
@@ -48,7 +49,7 @@ import (
 // WriteDaemonIntent(daemon-intent.json) path for the five production stop
 // writers (recordStopIntentAs, recordInstallIntentPostSuccess,
 // recordRestartIntentForTask, recordUninstallIntentForTasks,
-// recordRegisterIntentForTask).
+// writeRegisterRunningIntentForTask).
 //
 // Behavior mirrors WriteDaemonIntent's contract so the five callers are a
 // drop-in repoint:
@@ -71,6 +72,22 @@ import (
 // the freshly-read struct, so a concurrent Daemons/StrictMode/runtime_spec
 // edit is never clobbered (same lost-update guard the merge owner uses).
 func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) error {
+	return a.writeStopIntentWithCompensation(taskName, intent, who, nil)
+}
+
+type stopIntentCompensationSink func(label string, undo compensation)
+
+type stopIntentTaskSnapshot struct {
+	stop      *DaemonIntent
+	watermark *DaemonIntent
+}
+
+func (a *API) writeStopIntentWithCompensation(
+	taskName string,
+	intent DaemonIntent,
+	who string,
+	enroll stopIntentCompensationSink,
+) error {
 	if len(who) > IdentityFieldByteCap {
 		return ErrEntryOversize
 	}
@@ -84,18 +101,40 @@ func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) 
 		intent.UpdatedAt = time.Now().UTC()
 	}
 
-	before, after, changed, err := mutateStopSubBlock(taskName, func(stops map[string]DaemonIntent) {
-		// SET only when the directive is an ACTIVE stop; otherwise DROP the
-		// entry (re-enable / expired tombstone). time.Now().UTC() is the
-		// evaluation clock — a future-dated stop fail-closes to active via
-		// IsActiveStop, identical to the merge owner.
-		active, _ := intent.IsActiveStop(time.Now().UTC())
-		if active {
-			stops[taskName] = intent
-		} else {
-			delete(stops, taskName)
-		}
-	})
+	before, after, changed, err := mutateStopSubBlockWithPrearm(
+		taskName,
+		func(stops map[string]DaemonIntent) {
+			// SET only when the directive is an ACTIVE stop; otherwise DROP the
+			// entry (re-enable / expired tombstone). time.Now().UTC() is the
+			// evaluation clock — a future-dated stop fail-closes to active via
+			// IsActiveStop, identical to the merge owner.
+			active, _ := intent.IsActiveStop(time.Now().UTC())
+			if active {
+				stops[taskName] = intent
+			} else {
+				delete(stops, taskName)
+			}
+		},
+		func(snapshot stopIntentTaskSnapshot) {
+			if enroll == nil {
+				return
+			}
+			enroll("restore stop intent "+taskName, func() error {
+				restoreBefore, restoreAfter, restoreChanged, restoreErr :=
+					restoreStopIntentTaskSnapshot(taskName, snapshot)
+				if restoreErr == nil && restoreChanged {
+					emitStopIntentAudit(
+						restoreBefore,
+						restoreAfter,
+						taskName,
+						who,
+						intent.Reason,
+					)
+				}
+				return restoreErr
+			})
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -287,6 +326,14 @@ func (a *API) ClearStopIntent(taskName string, who string) error {
 // LockFileEx (the readIntentLocked/writeIntentLocked split daemon_intent.go
 // established).
 func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonIntent)) (before, after *DaemonIntent, changed bool, err error) {
+	return mutateStopSubBlockWithPrearm(taskName, mutate, nil)
+}
+
+func mutateStopSubBlockWithPrearm(
+	taskName string,
+	mutate func(stops map[string]DaemonIntent),
+	prearm func(stopIntentTaskSnapshot),
+) (before, after *DaemonIntent, changed bool, err error) {
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: resolve supervisor-intent path: %w", err)
@@ -296,7 +343,11 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 	if err := lock.Lock(); err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: flock supervisor-intent: %w", err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("stop-intent: release supervisor-intent flock: %w", unlockErr))
+		}
+	}()
 
 	// Read FRESH under the held lock. Missing file → empty intent (a stop
 	// recorded before `mcphub install` ever ran still lands in a freshly
@@ -325,6 +376,11 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 	if prior, ok := stops[taskName]; ok {
 		p := prior
 		before = &p
+	}
+	var priorWatermark *DaemonIntent
+	if prior, ok := watermarks[taskName]; ok {
+		p := prior
+		priorWatermark = &p
 	}
 
 	mutate(stops)
@@ -361,12 +417,103 @@ func mutateStopSubBlock(taskName string, mutate func(stops map[string]DaemonInte
 		return before, after, false, nil
 	}
 
+	if prearm != nil {
+		prearm(stopIntentTaskSnapshot{
+			stop:      cloneDaemonIntentSnapshot(before),
+			watermark: cloneDaemonIntentSnapshot(priorWatermark),
+		})
+	}
+
 	intent.Stops = candidate.Stops
 	intent.LegacyStopWatermarks = candidate.LegacyStopWatermarks
 	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: write supervisor-intent.json: %w", err)
 	}
 	return before, after, entryChanged, nil
+}
+
+func cloneDaemonIntentSnapshot(value *DaemonIntent) *DaemonIntent {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func restoreStopIntentTaskSnapshot(
+	taskName string,
+	snapshot stopIntentTaskSnapshot,
+) (before, after *DaemonIntent, changed bool, err error) {
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return nil, nil, false, fmt.Errorf("stop-intent rollback: resolve supervisor-intent path: %w", err)
+	}
+	lock := flock.New(path + supervisorIntentLockSuffix)
+	if err := lock.Lock(); err != nil {
+		return nil, nil, false, fmt.Errorf("stop-intent rollback: flock supervisor-intent: %w", err)
+	}
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("stop-intent rollback: release supervisor-intent flock: %w", unlockErr))
+		}
+	}()
+
+	intent, _, rawStopMaps, readErr := readSupervisorIntentForMergeWithRawStopMaps(path)
+	if readErr != nil {
+		return nil, nil, false, fmt.Errorf("stop-intent rollback: read supervisor-intent.json: %w", readErr)
+	}
+	if intent == nil {
+		intent = &SupervisorIntentFile{}
+	}
+
+	stops := map[string]DaemonIntent{}
+	for key, value := range intent.Stops {
+		stops[key] = value
+	}
+	watermarks := map[string]DaemonIntent{}
+	for key, value := range intent.LegacyStopWatermarks {
+		watermarks[key] = value
+	}
+	if current, ok := stops[taskName]; ok {
+		value := current
+		before = &value
+	}
+	if snapshot.stop == nil {
+		delete(stops, taskName)
+	} else {
+		stops[taskName] = *snapshot.stop
+	}
+	if snapshot.watermark == nil {
+		delete(watermarks, taskName)
+	} else {
+		watermarks[taskName] = *snapshot.watermark
+	}
+	if current, ok := stops[taskName]; ok {
+		value := current
+		after = &value
+	}
+
+	candidate := cloneSupervisorIntentFile(intent)
+	candidate.Stops = stops
+	if len(candidate.Stops) == 0 {
+		candidate.Stops = nil
+	}
+	candidate.LegacyStopWatermarks = watermarks
+	if len(candidate.LegacyStopWatermarks) == 0 {
+		candidate.LegacyStopWatermarks = nil
+	}
+	normalizeAbsentOnlyStopWatermarks(candidate)
+	persistenceChanged := !stopsMapsEqual(rawStopMaps.Stops, candidate.Stops) ||
+		!stopsMapsEqual(rawStopMaps.LegacyStopWatermarks, candidate.LegacyStopWatermarks)
+	if !persistenceChanged {
+		return before, after, false, nil
+	}
+	intent.Stops = candidate.Stops
+	intent.LegacyStopWatermarks = candidate.LegacyStopWatermarks
+	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
+		return nil, nil, false, fmt.Errorf("stop-intent rollback: write supervisor-intent.json: %w", err)
+	}
+	return before, after, !stopEntriesEqual(before, after), nil
 }
 
 // stopEntriesEqual reports whether two optional DaemonIntent snapshots are

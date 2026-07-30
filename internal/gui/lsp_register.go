@@ -24,9 +24,18 @@ type lspRegisterReport struct {
 	Workspace    string
 	WorkspaceKey string
 	Entries      []api.WorkspaceEntry
-	Warnings     []string
+	Warnings     []lspRegisterWarningCode
 	Results      []lspRegisterLanguageResult
 }
+
+type lspRegisterWarningCode string
+
+const lspRegisterWarningTrustedRootRecordFailed lspRegisterWarningCode = "trusted-root-record-failed"
+
+const (
+	lspRegisterTrustedRootRecordFailedPublic = "trusted-root-record-failed: registration succeeded, but sibling-workspace auto-registration may require an explicit register; verify the mcphub state directory is writable and retry explicit registration"
+	lspRegisterUnknownWarningPublic          = "lsp-register-warning: registration succeeded with a warning; retry explicit registration and verify the mcphub state directory is writable"
+)
 
 type lspRegisterResponse struct {
 	Workspace    string                      `json:"workspace"`
@@ -87,8 +96,7 @@ func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*
 			// failure as a warning so a later sibling-workspace
 			// auto-register failure is diagnosable, but never fail the
 			// register over it.
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("could not record %s as an LSP trusted root (router auto-register of sibling workspaces under this tree may require explicit register): %v", blessedRoot, err))
+			report.Warnings = append(report.Warnings, lspRegisterWarningTrustedRootRecordFailed)
 		}
 	}
 	return report, nil
@@ -164,11 +172,20 @@ func lspRegisterResponseFromReport(report *lspRegisterReport) lspRegisterRespons
 		entries = append(entries, workspaceEntryDTOFromAPI(entry))
 	}
 	results := append([]lspRegisterLanguageResult(nil), report.Results...)
+	warnings := make([]string, 0, len(report.Warnings))
+	for _, warning := range report.Warnings {
+		switch warning {
+		case lspRegisterWarningTrustedRootRecordFailed:
+			warnings = append(warnings, lspRegisterTrustedRootRecordFailedPublic)
+		default:
+			warnings = append(warnings, lspRegisterUnknownWarningPublic)
+		}
+	}
 	return lspRegisterResponse{
 		Workspace:    report.Workspace,
 		WorkspaceKey: report.WorkspaceKey,
 		Entries:      entries,
-		Warnings:     append([]string(nil), report.Warnings...),
+		Warnings:     warnings,
 		Results:      results,
 	}
 }

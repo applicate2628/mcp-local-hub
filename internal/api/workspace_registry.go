@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -194,6 +195,17 @@ func (r *Registry) Save() error {
 // two concurrent `mcphub register` invocations from racing on port allocation
 // or client-config writes.
 func (r *Registry) Lock() (func(), error) {
+	release, err := r.LockWithRelease()
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = release() }, nil
+}
+
+// LockWithRelease acquires the same registry lock as Lock and returns a
+// one-shot, error-reporting release. Registration transactions use this seam
+// so a failed unlock cannot be mistaken for a committed registration.
+func (r *Registry) LockWithRelease() (func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
 	}
@@ -201,7 +213,7 @@ func (r *Registry) Lock() (func(), error) {
 	if err := fl.Lock(); err != nil {
 		return nil, fmt.Errorf("lock %s: %w", r.path+".lock", err)
 	}
-	return func() { _ = fl.Unlock() }, nil
+	return oneShotRegistryRelease(fl, r.path+".lock"), nil
 }
 
 // TryLock is the non-blocking variant of Lock: it attempts to acquire the
@@ -217,6 +229,16 @@ func (r *Registry) Lock() (func(), error) {
 // (that holder self-heals the orphan anyway), so it TryLocks and skips on
 // contention.
 func (r *Registry) TryLock() (func(), bool, error) {
+	release, locked, err := r.TryLockWithRelease()
+	if err != nil || !locked {
+		return nil, locked, err
+	}
+	return func() { _ = release() }, true, nil
+}
+
+// TryLockWithRelease is the bounded/non-blocking rollback counterpart to
+// LockWithRelease. It never waits behind an uncertain retained lock.
+func (r *Registry) TryLockWithRelease() (func() error, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
 	}
@@ -228,7 +250,20 @@ func (r *Registry) TryLock() (func(), bool, error) {
 	if !locked {
 		return nil, false, nil
 	}
-	return func() { _ = fl.Unlock() }, true, nil
+	return oneShotRegistryRelease(fl, r.path+".lock"), true, nil
+}
+
+func oneShotRegistryRelease(fl *flock.Flock, lockPath string) func() error {
+	var once sync.Once
+	var releaseErr error
+	return func() error {
+		once.Do(func() {
+			if err := fl.Unlock(); err != nil {
+				releaseErr = fmt.Errorf("unlock %s: %w", lockPath, err)
+			}
+		})
+		return releaseErr
+	}
 }
 
 // Put upserts an entry (primary key = workspace_key + language).

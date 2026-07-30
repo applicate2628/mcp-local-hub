@@ -47,6 +47,10 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{}, errMacOSProbeUnsupported
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	return ProcessIdentity{}, errMacOSProbeUnsupported
+}
+
 // killProcessImpl is the macOS stub. Never reached in practice
 // because the probe stub above keeps KillRecordedHolder from
 // passing the early-class check, but kept defined so the build

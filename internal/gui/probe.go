@@ -58,6 +58,11 @@ type ProcessIdentity struct {
 	// killProcess uses it via killProcessByIdentity when non-zero,
 	// falls back to PID-based signal otherwise.
 	Handle uintptr
+
+	// closeHandle is populated only by the processIDOverride test seam when a
+	// retained identity is requested. Production identities always use the
+	// platform closeProcessHandle owner.
+	closeHandle func(uintptr)
 }
 
 // Close releases any kernel handle held by Handle. Safe to call
@@ -67,8 +72,13 @@ func (id *ProcessIdentity) Close() {
 	if id == nil || id.Handle == 0 {
 		return
 	}
-	closeProcessHandle(id.Handle)
+	if id.closeHandle != nil {
+		id.closeHandle(id.Handle)
+	} else {
+		closeProcessHandle(id.Handle)
+	}
 	id.Handle = 0
+	id.closeHandle = nil
 }
 
 // pingIncumbent issues GET http://127.0.0.1:<port>/api/ping and
@@ -122,6 +132,29 @@ func processID(pid int) (ProcessIdentity, error) {
 		return processIDOverride(pid)
 	}
 	return processIDImpl(pid)
+}
+
+// retainedProcessID is the destructive-authority variant of processID. Its
+// platform implementation must return a live identity with a non-zero kernel
+// handle or an error; callers retain that handle until the guarded mutation
+// settles. Keeping this separate from processID avoids imposing a new handle
+// lifetime on read-only callers that consume only the snapshot fields.
+func retainedProcessID(pid int) (ProcessIdentity, error) {
+	if pid <= 0 {
+		return ProcessIdentity{Alive: false}, nil
+	}
+	if processIDOverride != nil {
+		identity, err := processIDOverride(pid)
+		if err == nil && identity.Alive && !identity.Denied && identity.Handle == 0 {
+			// The explicit test override proves the snapshot. Supply a logical
+			// retained handle whose close is a no-op so the same established
+			// seam can exercise lease lifetimes without touching an OS handle.
+			identity.Handle = ^uintptr(0)
+			identity.closeHandle = func(uintptr) {}
+		}
+		return identity, err
+	}
+	return retainedProcessIDImpl(pid)
 }
 
 // killProcess sends SIGKILL / TerminateProcess to the given PID.

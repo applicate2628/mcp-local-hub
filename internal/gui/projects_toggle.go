@@ -49,6 +49,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -170,18 +171,10 @@ func (s *Server) toggleWorkspaceLSP(w http.ResponseWriter, req projectToggleRequ
 	a := api.NewAPI()
 	resp := projectToggleResponse{Scope: req.Scope, Server: req.Server}
 	if req.Enable {
-		// This handler is the ONE Register caller that owns the running GUI
-		// identity. Supply the same Server's bound port, normalized PID, and
-		// version so cleanup can prove a pre-existing shared-router listener
-		// before treating it as a destructive replacement.
-		port := s.Port()
+		pidportPath, _ := PidportPathNoCreate()
+		currentExecutable, _ := os.Executable()
 		rep, err := projectsToggleRegister(a, req.Root, req.Languages, api.RegisterOpts{
-			GUIPort: port,
-			ManagedGUIIdentity: api.ManagedGUIIdentity{
-				Port:    port,
-				PID:     s.cfg.PID,
-				Version: s.cfg.Version,
-			},
+			ManagedRouterAuthorizer: NewManagedRouterAuthorizer(pidportPath, currentExecutable, s.cfg.Version),
 		})
 		if err != nil {
 			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")

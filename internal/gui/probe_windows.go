@@ -32,6 +32,14 @@ import (
 // alive=true,denied=true (Claude r2 #2: refuses take-over of a
 // SYSTEM/scheduler-launched lock).
 func processIDImpl(pid int) (ProcessIdentity, error) {
+	return processIDWindows(pid, false)
+}
+
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	return processIDWindows(pid, true)
+}
+
+func processIDWindows(pid int, retainHandle bool) (ProcessIdentity, error) {
 	const (
 		PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 		STILL_ACTIVE                      = 259
@@ -46,7 +54,12 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 		// Other errors (ERROR_INVALID_PARAMETER for dead PID, etc.) → not alive.
 		return ProcessIdentity{Alive: false}, nil
 	}
-	defer windows.CloseHandle(h)
+	handleOwned := true
+	defer func() {
+		if handleOwned {
+			_ = windows.CloseHandle(h)
+		}
+	}()
 
 	// Liveness via GetExitCodeProcess.
 	var exitCode uint32
@@ -70,13 +83,18 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	// Command line via NtQueryInformationProcess + PEB walk.
 	cmdline := queryCmdline(uint32(pid))
 
-	return ProcessIdentity{
+	identity := ProcessIdentity{
 		Alive:     true,
 		Denied:    false,
 		ImagePath: imagePath,
 		Cmdline:   cmdline,
 		StartTime: startTime,
-	}, nil
+	}
+	if retainHandle {
+		identity.Handle = uintptr(h)
+		handleOwned = false
+	}
+	return identity, nil
 }
 
 // killProcessImpl uses PROCESS_TERMINATE + TerminateProcess. Errors
@@ -104,10 +122,9 @@ func killProcessImpl(pid int) error {
 	return nil
 }
 
-// closeProcessHandle is the no-op companion to ProcessIdentity.Handle.
-// Reserved for the future handle-pinning hardening; when Handle is
-// populated it will release the kernel reference.
-func closeProcessHandle(_ uintptr) {}
+func closeProcessHandle(handle uintptr) {
+	_ = windows.CloseHandle(windows.Handle(handle))
+}
 
 // queryImagePath returns the canonical executable path for an open
 // process handle. Returns "" on failure.

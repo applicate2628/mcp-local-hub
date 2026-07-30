@@ -10,7 +10,6 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -27,6 +26,53 @@ func LSPTaskNameForWorkspaceLanguage(wsKey, lang string) string {
 // supervisor-intent task identity for one workspace-scoped LSP proxy.
 func LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang string) string {
 	return canonicalIntentTaskKey(LSPTaskNameForWorkspaceLanguage(wsKey, lang))
+}
+
+// supervisorPostWriteDeps is the transaction-local dependency bundle for the
+// existing post-AddEntry supervised chain. It is deliberately private and
+// concrete: this seam exists only to make every provisional-write failure
+// deterministic without replacing production owners process-wide.
+type supervisorPostWriteDeps struct {
+	upsertIntent       func(WorkspaceEntry, string) (compensation, error)
+	writeRunningIntent func(string, stopIntentCompensationSink) (string, error)
+	reconcile          func(context.Context, bool) (ReconcileResponse, error)
+	readiness          func(int, time.Duration) error
+}
+
+// normalizeSupervisorPostWriteDeps captures production owners at Register call
+// entry and fills any omitted test dependency. The returned value is complete
+// and immutable for that invocation even if an older package test seam changes
+// later in the process.
+func normalizeSupervisorPostWriteDeps(a *API, provided supervisorPostWriteDeps) supervisorPostWriteDeps {
+	resolved := supervisorPostWriteDeps{
+		upsertIntent:       a.upsertLSPSupervisorIntent,
+		writeRunningIntent: a.writeRegisterRunningIntentForTask,
+		reconcile:          registerSupervisorReconcileFn,
+		readiness:          proxyReadinessFn,
+	}
+	if provided.upsertIntent != nil {
+		resolved.upsertIntent = provided.upsertIntent
+	}
+	if provided.writeRunningIntent != nil {
+		resolved.writeRunningIntent = provided.writeRunningIntent
+	}
+	if provided.reconcile != nil {
+		resolved.reconcile = provided.reconcile
+	}
+	if provided.readiness != nil {
+		resolved.readiness = provided.readiness
+	}
+	return resolved
+}
+
+// enrollSupervisorIntentUndo is the single participant-admission boundary for
+// every registration caller that mutates supervisor-intent. A non-nil undo is
+// transaction-owned even when the mutation also returned an error, because the
+// writer may have failed after a partial durable change.
+func enrollSupervisorIntentUndo(transaction *registrationTransaction, label string, undo compensation) {
+	if undo != nil {
+		transaction.AddCompensation(label, undo)
+	}
 }
 
 // BuildSupervisorDaemonForLSP materializes a supervisor-owned descriptor for
@@ -195,21 +241,15 @@ func (a *API) registerOneLanguageSupervised(
 	allClients map[string]registerClient,
 	bindings []config.ClientBinding,
 	w io.Writer,
-	rollback *[]func(),
-) (WorkspaceEntry, error) {
-	unlock, err := reg.Lock()
+	transaction *registrationTransaction,
+) (result registeredLanguageResult, err error) {
+	unlock, err := reg.LockWithRelease()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
+		return registeredLanguageResult{}, fmt.Errorf("acquire registry lock: %w", err)
 	}
-	releaseUnlock := func() {
-		if unlock != nil {
-			unlock()
-			unlock = nil
-		}
-	}
-	defer releaseUnlock()
+	lockToken := transaction.AddFinalizer("release supervised registry lock for "+wsKey+"/"+lang, unlock)
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
+		return registeredLanguageResult{}, fmt.Errorf("load registry: %w", err)
 	}
 
 	prior, had := reg.Get(wsKey, lang)
@@ -219,52 +259,65 @@ func (a *API) registerOneLanguageSupervised(
 	} else {
 		p, err := AllocatePort(reg, *m.PortPool)
 		if err != nil {
-			return WorkspaceEntry{}, err
+			return registeredLanguageResult{}, err
 		}
 		port = p
 	}
 	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, lang)
 	canonicalExe, err := canonicalMcphubPath()
 	if err != nil {
-		return WorkspaceEntry{}, err
+		return registeredLanguageResult{}, err
 	}
 	if _, err := os.Stat(canonicalExe); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		return registeredLanguageResult{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
 	}
 
 	var priorXML []byte
 	if xml, err := sch.ExportXML(taskName); err == nil {
 		priorXML = xml
 	} else if !errors.Is(err, scheduler.ErrTaskNotFound) {
-		return WorkspaceEntry{}, fmt.Errorf("export prior task %s: %w", taskName, err)
+		return registeredLanguageResult{}, fmt.Errorf("export prior task %s: %w", taskName, err)
 	}
 	capturedTaskName := taskName
 	capturedPriorXML := priorXML
 	capturedPort := port
-	legacyTaskDeleted := false
-	*rollback = append(*rollback, func() {
-		if !legacyTaskDeleted {
-			return
+	legacyTaskTouched := false
+	transaction.AddCompensation("restore supervised legacy task "+capturedTaskName, func() error {
+		if !legacyTaskTouched {
+			return nil
 		}
+		var joined error
 		if capturedPort > 0 {
-			_ = killByPortFn(capturedPort, 5*time.Second)
+			if killErr := killByPortFn(capturedPort, 5*time.Second); killErr != nil {
+				joined = errors.Join(joined, fmt.Errorf("kill replacement proxy on port %d: %w", capturedPort, killErr))
+			}
 		}
 		if len(capturedPriorXML) > 0 {
-			_ = sch.ImportXML(capturedTaskName, capturedPriorXML)
-			_ = sch.Run(capturedTaskName)
-			fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
+			if importErr := sch.ImportXML(capturedTaskName, capturedPriorXML); importErr != nil {
+				joined = errors.Join(joined, fmt.Errorf("restore prior task %s: %w", capturedTaskName, importErr))
+			}
+			if runErr := sch.Run(capturedTaskName); runErr != nil {
+				joined = errors.Join(joined, fmt.Errorf("restart prior task %s: %w", capturedTaskName, runErr))
+			}
+			if joined == nil {
+				fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
+			}
 		}
+		return joined
 	})
 	if (had || len(priorXML) > 0) && port > 0 {
+		legacyTaskTouched = true
 		legacyPortReady := proxyReadinessFn(port, lspExistingProxyProbeTimeout) == nil
 		if err := killObservedLiveLSPProxy(port, taskName, legacyPortReady); err != nil {
-			return WorkspaceEntry{}, err
+			return registeredLanguageResult{}, err
 		}
 	}
-	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
-		return WorkspaceEntry{}, fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)
+	if len(priorXML) > 0 {
+		legacyTaskTouched = true
 	}
-	legacyTaskDeleted = len(priorXML) > 0
+	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
+		return registeredLanguageResult{}, fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)
+	}
 
 	entryNameByClient := map[string]string{}
 	if had {
@@ -297,143 +350,90 @@ func (a *API) registerOneLanguageSupervised(
 		WeeklyRefresh: weeklyRefresh,
 		Lifecycle:     LifecycleConfigured,
 	}
-	if err := reg.PutLSP(composedEntry); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
-	}
-	if err := reg.Save(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
-	}
 	capturedRegKey := wsKey
 	capturedRegLang := lang
 	capturedHad := had
 	capturedPrior := prior
-	*rollback = append(*rollback, func() {
-		unlock, err := reg.Lock()
-		if err != nil {
-			fmt.Fprintf(w, "  rollback: could not lock registry for %s/%s: %v\n", capturedRegKey, capturedRegLang, err)
-			return
-		}
-		defer unlock()
-		if err := reg.Load(); err != nil {
-			fmt.Fprintf(w, "  rollback: could not reload registry for %s/%s: %v\n", capturedRegKey, capturedRegLang, err)
-			return
-		}
-		if capturedHad {
-			reg.Put(capturedPrior)
-			_ = reg.Save()
-			fmt.Fprintf(w, "  rollback: restored prior registry entry %s/%s\n", capturedRegKey, capturedRegLang)
-			return
-		}
-		reg.Remove(capturedRegKey, capturedRegLang)
-		_ = reg.Save()
-		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
+	transaction.AddCompensation("restore supervised registry row "+capturedRegKey+"/"+capturedRegLang, func() error {
+		return restoreRegistryRowForRollback(reg.path, capturedRegKey, capturedRegLang, capturedPrior, capturedHad)
 	})
-	releaseUnlock()
-
-	unlock, err = reg.Lock()
-	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("re-acquire registry lock: %w", err)
+	if err := reg.PutLSP(composedEntry); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
 	}
-	defer releaseUnlock()
+	if err := reg.Save(); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("persist registry: %w", err)
+	}
+	if err := transaction.Release(lockToken); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock before client updates: %w", err)
+	}
+
+	unlock, err = reg.LockWithRelease()
+	if err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("re-acquire registry lock: %w", err)
+	}
+	lockToken = transaction.AddFinalizer("release supervised registry lock before client updates for "+wsKey+"/"+lang, unlock)
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("reload registry: %w", err)
+		return registeredLanguageResult{}, fmt.Errorf("reload registry: %w", err)
 	}
 	if _, ok := reg.Get(wsKey, lang); !ok {
-		return WorkspaceEntry{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		return registeredLanguageResult{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
 	}
-	for _, b := range bindings {
-		client, ok := allClients[b.Client]
-		if !ok || !client.Exists() {
-			continue
-		}
-		entryName := entryNameByClient[b.Client]
-		// Snapshot the prior entry; a GetEntry error MUST abort before the
-		// AddEntry below (bot PR #420 finding 1, data-loss). A multi-layer
-		// adapter (mimocode) can confirm a write-target prior yet still fail
-		// reading a malformed lower layer, returning (nil, err); dropping the
-		// error would let AddEntry overwrite and the nil-prior rollback branch
-		// DELETE the operator's entry. The caller runs the accumulated
-		// *rollback on this returned error, so no local runRollback is needed.
-		//
-		// Write-target parent-dir creation for an otherwise-active profile whose
-		// GLOBAL dir is absent (bot PR #420 finding 3, r15) is owned by the config
-		// lock chokepoint (clients.withConfigLock), NOT here — same single owner as
-		// the non-supervised register loop.
-		priorEntry, err := client.GetEntry(entryName)
-		if err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
-		}
-		urlPath := b.URLPath
-		if urlPath == "" {
-			urlPath = "/mcp"
-		}
-		entry := clients.MCPEntry{
-			Name: entryName,
-			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
-		}
-		if err := client.AddEntry(entry); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
-		}
-		clientRef := client
-		savedPrior := priorEntry
-		capturedName := entryName
-		capturedClientName := b.Client
-		*rollback = append(*rollback, func() {
-			// See install.go rollback: a mimo prior sourced BELOW the write target
-			// (config.json) or from the ~/.claude.json import must NOT be copied up
-			// (permanent shadow + import-credential leak — bot PR #420 finding 1).
-			// Take REMOVE for those; the zero value (every other adapter / an
-			// at-or-above mimo prior) copies up.
-			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
-				_ = clientRef.AddEntry(*savedPrior)
-				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
-				return
-			}
-			_ = clientRef.RemoveEntry(capturedName)
-			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", capturedName, capturedClientName)
-		})
-		fmt.Fprintf(w, "✓ %s → %s (entry %s)\n", b.Client, entry.URL, entryName)
-	}
-	releaseUnlock()
-
-	restoreIntent, err := a.upsertLSPSupervisorIntent(composedEntry, canonicalExe)
+	provisionalReceipts, err := writeRegisteredClientEntries(bindings, allClients, entryNameByClient, port, lang, w, transaction)
 	if err != nil {
-		return WorkspaceEntry{}, err
+		return registeredLanguageResult{}, err
 	}
-	// reconcileAttempted gates the rollback kill-by-port. The spawn TRIGGER is
-	// not proxy readiness — it is the
-	// stop being cleared (writeRegisterRunningIntentForTask makes the daemon
-	// spawn-desired) PLUS the reconcile nudge (registerSupervisorReconcileFn).
-	// A reconcile that SPAWNS the daemon and THEN errors returns before any
-	// post-readiness flag is set, so gating the kill on a late flag would skip
-	// the kill and leave restoreIntent()'s descriptor removal to orphan a live
-	// daemon on the port. Flip this true once the stop is cleared and the
-	// reconcile is about to fire; killByPort is a no-op when nothing is bound, so
-	// killing on a reconcile that never actually spawned is harmless.
-	reconcileAttempted := false
-	*rollback = append(*rollback, func() {
-		if reconcileAttempted && port > 0 {
-			_ = killByPortFn(port, 5*time.Second)
+	if err := transaction.Release(lockToken); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock after client updates: %w", err)
+	}
+	postWrite := opts.supervisorPostWriteDeps
+	if postWrite.upsertIntent == nil || postWrite.writeRunningIntent == nil || postWrite.reconcile == nil || postWrite.readiness == nil {
+		return registeredLanguageResult{}, errors.New("supervised register post-write dependencies were not normalized")
+	}
+
+	restoreIntent, err := postWrite.upsertIntent(composedEntry, canonicalExe)
+	enrollSupervisorIntentUndo(
+		transaction,
+		"restore supervised intent "+LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang),
+		restoreIntent,
+	)
+	if err != nil {
+		return registeredLanguageResult{}, err
+	}
+	if canonicalTaskName, err := postWrite.writeRunningIntent(
+		taskName,
+		transaction.AddCompensation,
+	); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
+	}
+	// The reconcile may spawn the replacement and then return an error. Arm the
+	// no-op-safe kill before invoking it, after the running-intent restoration
+	// participant, so rollback first stops the possible replacement and then
+	// restores the exact prior stop state.
+	transaction.AddCompensation("kill possible supervised proxy "+taskName, func() error {
+		if port > 0 {
+			if killErr := killByPortFn(port, 5*time.Second); killErr != nil {
+				return fmt.Errorf("kill possible supervised proxy on port %d: %w", port, killErr)
+			}
 		}
-		restoreIntent()
+		return nil
 	})
-	if canonicalTaskName, err := a.writeRegisterRunningIntentForTask(taskName); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
 	defer cancel()
 	// Stop is cleared (above) — the daemon is now spawn-desired. From here the
 	// reconcile can bind the port, so the rollback must own a port kill.
-	reconcileAttempted = true
-	if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+	if _, err := postWrite.reconcile(ctx, true); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
 	}
-	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+	if err := postWrite.readiness(port, 10*time.Second); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
-	fmt.Fprintf(w, "✓ Supervisor-managed LSP proxy started: %s\n", LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang))
-	a.recordRegisterIntentForTask(taskName, w)
-	return composedEntry, nil
+	transaction.AddSuccessOutput(
+		"supervised proxy started "+LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang),
+		w,
+		"✓ Supervisor-managed LSP proxy started: %s\n",
+		LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang),
+	)
+	return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, nil
 }
 
 func resolveWorkspaceScopedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {
@@ -452,7 +452,7 @@ func resolveWorkspaceScopedLSPEntryName(reg *Registry, serverName, language, wor
 	return candidate
 }
 
-func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath string) (func(), error) {
+func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath string) (undo compensation, err error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve supervisor-intent path: %w", err)
@@ -461,7 +461,11 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	if err := lock.Lock(); err != nil {
 		return nil, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
+		}
+	}()
 
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
@@ -489,17 +493,19 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	// index, so the rollback closure below would restore the descriptor without
 	// the artifact and revive a deliberately-stopped daemon.
 	priorArtifacts := supervisorStopArtifactsForTask(desired, descriptor.TaskName)
-	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
-		return nil, fmt.Errorf("write supervisor-intent LSP row %s: %w", descriptor.TaskName, err)
-	}
-
-	return func() {
-		if replaced {
-			upsertSupervisorIntentDescriptorAndStop(intentPath, priorDescriptor, priorArtifacts)
-			return
+	if replaced {
+		undo = func() error {
+			return upsertSupervisorIntentDescriptorAndStop(intentPath, priorDescriptor, priorArtifacts)
 		}
-		removeSupervisorIntentDescriptorAndStop(intentPath, descriptor.TaskName, !existed, priorArtifacts)
-	}, nil
+	} else {
+		undo = func() error {
+			return removeSupervisorIntentDescriptorAndStop(intentPath, descriptor.TaskName, !existed, priorArtifacts)
+		}
+	}
+	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
+		return undo, fmt.Errorf("write supervisor-intent LSP row %s: %w", descriptor.TaskName, err)
+	}
+	return undo, nil
 }
 
 // lspSupervisorIntentDescriptorExists reports whether supervisor-intent.json
@@ -507,7 +513,7 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 // proxy. Used by the auto-register fast path to distinguish "port responds AND
 // the supervisor owns the proxy" (true fast-return) from "port responds but no
 // supervisor ownership" (legacy/orphan proxy that needs promotion).
-func lspSupervisorIntentDescriptorExists(wsKey, lang string) (bool, error) {
+func lspSupervisorIntentDescriptorExists(wsKey, lang string) (exists bool, err error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return false, fmt.Errorf("resolve supervisor-intent path: %w", err)
@@ -516,7 +522,11 @@ func lspSupervisorIntentDescriptorExists(wsKey, lang string) (bool, error) {
 	if err := lock.Lock(); err != nil {
 		return false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
+		}
+	}()
 	current, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return false, err
@@ -533,7 +543,7 @@ func lspSupervisorIntentDescriptorExists(wsKey, lang string) (bool, error) {
 	return false, nil
 }
 
-func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (func(), bool, error) {
+func (a *API) removeLSPSupervisorIntent(wsKey, lang string) (compensation, bool, error) {
 	return a.removeSupervisorIntentDescriptorForTask(LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang))
 }
 
@@ -569,10 +579,14 @@ func (a *API) RemoveSerenaSupervisorIntentForWorkspace(workspacePath string) (bo
 	cancel()
 	if err != nil {
 		if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+			restoreErr := error(nil)
 			if restoreSupervisorIntent != nil {
-				restoreSupervisorIntent()
+				restoreErr = restoreSupervisorIntent()
 			}
-			return true, fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; restored supervisor intent descriptor; retry unregister: %w", taskName, err)
+			return true, errors.Join(
+				fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; retry unregister: %w", taskName, err),
+				labeledTransactionError("compensation", "restore supervisor intent "+taskName, restoreErr),
+			)
 		}
 		// ErrSupervisorIPCUnavailable does NOT by itself mean the teardown is
 		// durable. The error fires for BOTH "no supervisor at all" (benign — the
@@ -587,16 +601,23 @@ func (a *API) RemoveSerenaSupervisorIntentForWorkspace(workspacePath string) (bo
 		// Unlike the install nudge we do NOT start the autostart owner here: this
 		// is a teardown, not a bring-up, so there is no owner to start.
 		if alive, pid, probeErr := serenaSupervisorOwnerAliveOnIPCUnavailable(); probeErr != nil || alive {
+			restoreErr := error(nil)
 			if restoreSupervisorIntent != nil {
-				restoreSupervisorIntent()
+				restoreErr = restoreSupervisorIntent()
 			}
 			if probeErr != nil {
 				// Cannot resolve / probe the lock owner → unknown liveness. A live
 				// wedged supervisor is the dangerous case, so fail closed: restore
 				// the descriptor and make the caller retry rather than orphan a daemon.
-				return true, fmt.Errorf("supervisor reconcile after removing %s reported IPC unavailable and the lock-owner probe failed (%v); restored supervisor intent descriptor; resolve the supervisor state then retry unregister: %w", taskName, probeErr, err)
+				return true, errors.Join(
+					fmt.Errorf("supervisor reconcile after removing %s reported IPC unavailable and the lock-owner probe failed (%v); resolve the supervisor state then retry unregister: %w", taskName, probeErr, err),
+					labeledTransactionError("compensation", "restore supervisor intent "+taskName, restoreErr),
+				)
 			}
-			return true, fmt.Errorf("supervisor reconcile after removing %s reported IPC unavailable but supervisor lock owner pid=%d is alive (IPC wedged); the live supervisor still tracks the daemon, so restored supervisor intent descriptor; run `mcphub restart` or kill the wedged process, then retry unregister: %w", taskName, pid, err)
+			return true, errors.Join(
+				fmt.Errorf("supervisor reconcile after removing %s reported IPC unavailable but supervisor lock owner pid=%d is alive (IPC wedged); the live supervisor still tracks the daemon; run `mcphub restart` or kill the wedged process, then retry unregister: %w", taskName, pid, err),
+				labeledTransactionError("compensation", "restore supervisor intent "+taskName, restoreErr),
+			)
 		}
 		// No live lock owner: IPC really is unavailable because no supervisor is
 		// running. The on-disk removal is durable and nothing will respawn the
@@ -625,7 +646,7 @@ func serenaSupervisorOwnerAliveOnIPCUnavailable() (alive bool, pid int, probeErr
 	return running, ownerPID, nil
 }
 
-func supervisorIntentDescriptorForTask(taskName string) (SupervisorDaemon, bool, error) {
+func supervisorIntentDescriptorForTask(taskName string) (descriptor SupervisorDaemon, found bool, err error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return SupervisorDaemon{}, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
@@ -634,7 +655,11 @@ func supervisorIntentDescriptorForTask(taskName string) (SupervisorDaemon, bool,
 	if err := lock.Lock(); err != nil {
 		return SupervisorDaemon{}, false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
+		}
+	}()
 	current, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return SupervisorDaemon{}, false, err
@@ -650,7 +675,7 @@ func supervisorIntentDescriptorForTask(taskName string) (SupervisorDaemon, bool,
 	return SupervisorDaemon{}, false, nil
 }
 
-func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), bool, error) {
+func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (undo compensation, removed bool, err error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
@@ -659,7 +684,11 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), 
 	if err := lock.Lock(); err != nil {
 		return nil, false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
+		}
+	}()
 
 	prior, _, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
@@ -667,7 +696,7 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), 
 	}
 	desired := cloneSupervisorIntentFile(prior)
 	kept := desired.Daemons[:0]
-	removed := false
+	removed = false
 	var removedDescriptor SupervisorDaemon
 	for _, daemon := range desired.Daemons {
 		if daemon.TaskName == taskName {
@@ -678,7 +707,7 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), 
 		kept = append(kept, daemon)
 	}
 	if !removed {
-		return func() {}, false, nil
+		return func() error { return nil }, false, nil
 	}
 	priorArtifacts := supervisorStopArtifactsForTask(desired, taskName)
 	desired.Daemons = kept
@@ -686,19 +715,19 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (func(), 
 	// install prune invariant that row removed => its stop entry goes with it.
 	// Keeping both changes in one intent write avoids a re-register window where
 	// reconcile observes the re-added descriptor but an old stop still suppresses
-	// readiness before recordRegisterIntentForTask can clear it.
+	// readiness before the reversible running-intent writer can clear it.
 	removedDescriptors := []SupervisorDaemon{removedDescriptor}
 	desired.Stops = pruneStopsForRemovedSupervisorTargets(desired.Stops, removedDescriptors)
 	desired.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desired.LegacyStopWatermarks, removedDescriptors)
+	undo = func() error {
+		return upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorArtifacts)
+	}
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
-		return nil, false, fmt.Errorf("write supervisor-intent without LSP row %s: %w", taskName, err)
+		return undo, false, fmt.Errorf("write supervisor-intent without LSP row %s: %w", taskName, err)
 	}
-
-	return func() {
-		upsertSupervisorIntentDescriptorAndStop(intentPath, removedDescriptor, priorArtifacts)
-	}, true, nil
+	return undo, true, nil
 }
 
 type supervisorStopArtifacts struct {
@@ -754,15 +783,19 @@ func restoreSupervisorStopArtifacts(desired *SupervisorIntentFile, taskName stri
 	}
 }
 
-func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, artifacts supervisorStopArtifacts) {
+func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, artifacts supervisorStopArtifacts) (err error) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
-		return
+		return fmt.Errorf("supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("release supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, unlockErr))
+		}
+	}()
 	current, _, err := readSupervisorIntentForMerge(path)
 	if err != nil {
-		return
+		return err
 	}
 	desired := cloneSupervisorIntentFile(current)
 	kept := desired.Daemons[:0]
@@ -775,18 +808,22 @@ func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorD
 	restoreSupervisorStopArtifacts(desired, descriptor.TaskName, artifacts)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	_ = writeSupervisorIntentLockHeld(path, desired)
+	return writeSupervisorIntentLockHeld(path, desired)
 }
 
-func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, artifacts supervisorStopArtifacts) {
+func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, artifacts supervisorStopArtifacts) (err error) {
 	lock := flock.New(path + supervisorIntentLockSuffix)
 	if err := lock.Lock(); err != nil {
-		return
+		return fmt.Errorf("supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer func() {
+		if unlockErr := lock.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("release supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, unlockErr))
+		}
+	}()
 	current, existed, err := readSupervisorIntentForMerge(path)
 	if err != nil || !existed {
-		return
+		return err
 	}
 	desired := cloneSupervisorIntentFile(current)
 	kept := desired.Daemons[:0]
@@ -799,19 +836,21 @@ func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIf
 		kept = append(kept, daemon)
 	}
 	if !removed && !artifacts.hasAny() {
-		return
+		return nil
 	}
 	desired.Daemons = kept
 	removedDescriptor := SupervisorDaemon{TaskName: taskName}
 	desired.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(desired.LegacyStopWatermarks, []SupervisorDaemon{removedDescriptor})
 	restoreSupervisorStopArtifacts(desired, taskName, artifacts)
 	if removeFileIfEmpty && len(desired.Daemons) == 0 && len(desired.MaintenanceTimers) == 0 && !desired.StrictMode && len(desired.Stops) == 0 && len(desired.LegacyStopWatermarks) == 0 {
-		_ = os.Remove(path)
-		return
+		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+			return removeErr
+		}
+		return nil
 	}
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	_ = writeSupervisorIntentLockHeld(path, desired)
+	return writeSupervisorIntentLockHeld(path, desired)
 }
 
 func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {

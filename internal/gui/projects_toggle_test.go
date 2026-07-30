@@ -58,7 +58,7 @@ func decodeToggleResp(t *testing.T, rec *httptest.ResponseRecorder) projectToggl
 	return out
 }
 
-func TestProjectsToggle_RegisterSuppliesManagedGUIIdentity(t *testing.T) {
+func TestProjectsToggle_RegisterSuppliesManagedRouterAuthorizer(t *testing.T) {
 	const (
 		expectedPID     = 42424
 		expectedVersion = "project-toggle-identity-test"
@@ -97,12 +97,11 @@ func TestProjectsToggle_RegisterSuppliesManagedGUIIdentity(t *testing.T) {
 	if len(gotLanguages) != 2 || gotLanguages[0] != "go" || gotLanguages[1] != "python" {
 		t.Fatalf("register languages = %v, want [go python]", gotLanguages)
 	}
-	if gotOpts.GUIPort != 9081 {
-		t.Fatalf("RegisterOpts.GUIPort = %d, want 9081", gotOpts.GUIPort)
+	if gotOpts.ManagedRouterAuthorizer == nil {
+		t.Fatal("RegisterOpts.ManagedRouterAuthorizer is nil")
 	}
-	wantIdentity := api.ManagedGUIIdentity{Port: 9081, PID: expectedPID, Version: expectedVersion}
-	if gotOpts.ManagedGUIIdentity != wantIdentity {
-		t.Fatalf("RegisterOpts.ManagedGUIIdentity = %+v, want %+v", gotOpts.ManagedGUIIdentity, wantIdentity)
+	if got := gotOpts.ManagedRouterAuthorizer(context.Background(), 0); got.Lease != nil || got.FailureClass != "port-invalid" {
+		t.Fatalf("authorizer invalid-port verdict = %+v, want fail-closed port-invalid", got)
 	}
 }
 

@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"mcp-local-hub/internal/process"
 )
 
@@ -140,6 +142,20 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	}, nil
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	pidfd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("pidfd_open(%d): %w", pid, err)
+	}
+	identity, err := processIDImpl(pid)
+	if err != nil || !identity.Alive || identity.Denied {
+		_ = unix.Close(pidfd)
+		return identity, err
+	}
+	identity.Handle = uintptr(pidfd)
+	return identity, nil
+}
+
 // killProcessImpl sends SIGKILL by PID. Residual TOCTOU: between
 // gate-pass and Kill the kernel can in theory recycle the PID. A
 // future hardening lane will switch to pidfd_send_signal on Linux
@@ -152,9 +168,9 @@ func killProcessImpl(pid int) error {
 	return nil
 }
 
-// closeProcessHandle no-op companion to ProcessIdentity.Handle.
-// Linux will populate Handle when the pidfd-based hardening lands.
-func closeProcessHandle(_ uintptr) {}
+func closeProcessHandle(handle uintptr) {
+	_ = unix.Close(int(handle))
+}
 
 // readStartTimeLinux returns the process's wall-clock start time by
 // combining /proc/<pid>/stat's starttime field with the system boot

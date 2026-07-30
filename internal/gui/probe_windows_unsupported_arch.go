@@ -26,6 +26,10 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{}, errWindowsArchUnsupported
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	return ProcessIdentity{}, errWindowsArchUnsupported
+}
+
 func killProcessImpl(pid int) error {
 	return errWindowsArchUnsupported
 }

@@ -104,6 +104,36 @@ func TestDefaultClientBindings_DerivedFromDefaultInstallSet(t *testing.T) {
 	}
 }
 
+func TestRegister_NoLegacyManagedRouterPolicyOwners(t *testing.T) {
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve register_test.go path")
+	}
+	files := []string{
+		filepath.Join(filepath.Dir(currentFile), "register.go"),
+		currentFile,
+	}
+	banned := []string{
+		"Managed" + "GUIIdentity",
+		"probeManaged" + "Router",
+		"cleanupDirectLanguageServerEntriesAfterRegister" + "WithDeps",
+		"directCleanup" + "Deps",
+		"RegisterOpts." + "GUIPort",
+		"managedLanguageRoute" + "ProbeFn",
+	}
+	for _, path := range files {
+		content, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for _, symbol := range banned {
+			if bytes.Contains(content, []byte(symbol)) {
+				t.Errorf("legacy managed-router policy owner %q remains in %s", symbol, filepath.Base(path))
+			}
+		}
+	}
+}
+
 // --- Test harness -------------------------------------------------------
 //
 // newRegisterHarness installs fake scheduler + clients + registry path
@@ -218,7 +248,6 @@ func newRegisterHarness(t *testing.T) *registerHarness {
 	// developer fleet on the LSP workspace pool cannot exhaust the test pool.
 	portAvailable = func(int) bool { return true }
 	excludedTCPPortRanges = func() ([]tcpPortRange, error) { return nil, nil }
-
 	fc := &fakeClientsMap{
 		entries:         map[string]map[string]string{},
 		disabledEntries: map[string]map[string]bool{},
@@ -300,6 +329,42 @@ func nineLanguageManifest() *config.ServerManifest {
 func mustNewAPI(t *testing.T) *API {
 	t.Helper()
 	return NewAPI()
+}
+
+type testManagedRouterLease struct {
+	revalidate func(context.Context) string
+	close      func() error
+}
+
+func (l *testManagedRouterLease) Revalidate(ctx context.Context) string {
+	if l == nil || l.revalidate == nil {
+		return ""
+	}
+	return l.revalidate(ctx)
+}
+
+func (l *testManagedRouterLease) Close() error {
+	if l == nil || l.close == nil {
+		return nil
+	}
+	return l.close()
+}
+
+func stableManagedRouterLeaseForTest() ManagedRouterLease {
+	return &testManagedRouterLease{}
+}
+
+func allowManagedRouterAuthorizerForTest(port int) ManagedRouterAuthorizer {
+	return func(_ context.Context, candidatePort int) ManagedRouterAuthorization {
+		if candidatePort != port {
+			return ManagedRouterAuthorization{FailureClass: "test-port-mismatch"}
+		}
+		return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+	}
+}
+
+func allowManagedLanguageRouteForTest(context.Context, int, string, string) managedRouteProof {
+	return managedRouteProof{OK: true}
 }
 
 // --- Register tests -----------------------------------------------------
@@ -1808,7 +1873,7 @@ func TestRegister_SupervisedDeleteLegacyTaskFailureAbortsBeforeIntent(t *testing
 	}
 }
 
-func TestRegister_SupervisedLiveLegacyKillFailureAbortsBeforeDeleteAndIntent(t *testing.T) {
+func TestRegister_SupervisedLiveLegacyKillFailureRunsPrearmedRestore(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -1850,14 +1915,14 @@ func TestRegister_SupervisedLiveLegacyKillFailureAbortsBeforeDeleteAndIntent(t *
 	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
 		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
 	}
-	if killCalls != 1 {
-		t.Fatalf("kill calls = %d, want 1", killCalls)
+	if killCalls != 2 {
+		t.Fatalf("kill calls = %d, want destructive attempt plus prearmed restore cleanup", killCalls)
 	}
 	if len(h.fakeSch.deleteNames) != 0 {
 		t.Fatalf("legacy task was deleted after kill failure: %v", h.fakeSch.deleteNames)
 	}
-	if len(h.fakeSch.importNames) != 0 || len(h.fakeSch.runNames) != 0 {
-		t.Fatalf("legacy task was restored after pre-delete kill failure: import=%v run=%v",
+	if !slices.Contains(h.fakeSch.importNames, taskName) || !slices.Contains(h.fakeSch.runNames, taskName) {
+		t.Fatalf("legacy task prearmed restore did not run after possibly-partial kill failure: import=%v run=%v",
 			h.fakeSch.importNames, h.fakeSch.runNames)
 	}
 	if reconcileCalled {
@@ -1879,7 +1944,7 @@ func TestRegister_SupervisedLiveLegacyKillFailureAbortsBeforeDeleteAndIntent(t *
 	}
 }
 
-func TestRegister_SupervisedLiveNoXMLKillFailureAbortsBeforeMutation(t *testing.T) {
+func TestRegister_SupervisedLiveNoXMLKillFailureRunsPrearmedStateRollback(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -1936,8 +2001,8 @@ func TestRegister_SupervisedLiveNoXMLKillFailureAbortsBeforeMutation(t *testing.
 	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
 		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
 	}
-	if killCalls != 1 {
-		t.Fatalf("kill calls = %d, want 1", killCalls)
+	if killCalls != 2 {
+		t.Fatalf("kill calls = %d, want destructive attempt plus prearmed possible-proxy cleanup", killCalls)
 	}
 	if len(h.fakeSch.deleteNames) != 0 || len(h.fakeSch.importNames) != 0 || len(h.fakeSch.runNames) != 0 {
 		t.Fatalf("scheduler mutated after no-XML kill failure: delete=%v import=%v run=%v",
@@ -3667,6 +3732,7 @@ type fakeClientsMap struct {
 	stdioEntries      map[string]map[string]clients.LanguageServerStdioEntry
 	allStdioEntries   map[string]map[string]clients.StdioEntry
 	backupKeepCalls   map[string]int
+	backupStdio       map[string]map[string]clients.LanguageServerStdioEntry
 	exists            map[string]bool
 	addEntryCount     int
 	failAddEntryCalls int             // the Nth AddEntry (1-based) fails
@@ -3683,7 +3749,16 @@ func (c *fakeClient) Exists() bool {
 }
 func (c *fakeClient) BackupKeep(keepN int) (string, error) {
 	c.parent.backupKeepCalls[c.name]++
-	return fmt.Sprintf("/backup/%s/%d", c.name, keepN), nil
+	backupPath := fmt.Sprintf("/backup/%s/%d", c.name, keepN)
+	if c.parent.backupStdio == nil {
+		c.parent.backupStdio = map[string]map[string]clients.LanguageServerStdioEntry{}
+	}
+	snapshot := make(map[string]clients.LanguageServerStdioEntry, len(c.parent.stdioEntries[c.name]))
+	for name, entry := range c.parent.stdioEntries[c.name] {
+		snapshot[name] = entry
+	}
+	c.parent.backupStdio[backupPath] = snapshot
+	return backupPath, nil
 }
 func (c *fakeClient) AddEntry(e clients.MCPEntry) error {
 	c.parent.addEntryCount++
@@ -3697,6 +3772,15 @@ func (c *fakeClient) RemoveEntry(name string) error {
 	delete(c.parent.entries[c.name], name)
 	delete(c.parent.stdioEntries[c.name], name)
 	delete(c.parent.allStdioEntries[c.name], name)
+	return nil
+}
+func (c *fakeClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	snapshot := c.parent.backupStdio[backupPath]
+	entry, ok := snapshot[name]
+	if !ok {
+		return fmt.Errorf("fake backup %s has no entry %s", backupPath, name)
+	}
+	c.parent.stdioEntries[c.name][name] = entry
 	return nil
 }
 func (c *fakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
@@ -3739,6 +3823,61 @@ type directCleanupInjectedErrorClient struct {
 	findCalls     int
 	failFindAfter int
 	findAfterErr  error
+}
+
+type cleanupMutationInjectedClient struct {
+	registerClient
+	backupErr     error
+	removeErrName string
+	removeErr     error
+}
+
+type cleanupMutationLedgerClient struct {
+	registerClient
+	events *[]string
+}
+
+func (c *cleanupMutationLedgerClient) BackupKeep(keepN int) (string, error) {
+	*c.events = append(*c.events, "backup")
+	return c.registerClient.BackupKeep(keepN)
+}
+
+func (c *cleanupMutationLedgerClient) RemoveEntry(name string) error {
+	*c.events = append(*c.events, "remove:"+name)
+	return c.registerClient.RemoveEntry(name)
+}
+
+func (c *cleanupMutationInjectedClient) BackupKeep(keepN int) (string, error) {
+	if c.backupErr != nil {
+		return "", c.backupErr
+	}
+	return c.registerClient.BackupKeep(keepN)
+}
+
+func (c *cleanupMutationInjectedClient) RemoveEntry(name string) error {
+	if name == c.removeErrName {
+		if c.removeErr != nil {
+			return c.removeErr
+		}
+		return errors.New("injected removal failure")
+	}
+	return c.registerClient.RemoveEntry(name)
+}
+
+func (c *cleanupMutationInjectedClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	restorer, ok := c.registerClient.(registerClientRollbackRestorer)
+	if !ok {
+		return errors.New("wrapped client does not support exact rollback restore")
+	}
+	return restorer.RestoreEntryFromBackupForRollback(backupPath, name)
+}
+
+func (c *cleanupMutationLedgerClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	restorer, ok := c.registerClient.(registerClientRollbackRestorer)
+	if !ok {
+		return errors.New("wrapped client does not support exact rollback restore")
+	}
+	return restorer.RestoreEntryFromBackupForRollback(backupPath, name)
 }
 
 func (c *directCleanupInjectedErrorClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
@@ -3955,191 +4094,18 @@ func verifyReadinessPromptly(t *testing.T, port int, timeout time.Duration, allo
 	}
 }
 
-func TestManagedRouterProbe(t *testing.T) {
-	const (
-		expectedPID     = 24680
-		expectedVersion = "managed-probe-test"
-	)
-
-	t.Run("invalid-inputs-make-no-request", func(t *testing.T) {
-		var requests atomic.Int32
-		_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-			requests.Add(1)
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = fmt.Fprintf(w, `{"ok":true,"pid":%d,"version":%q}`, expectedPID, expectedVersion)
-		})
-		valid := ManagedGUIIdentity{Port: port, PID: expectedPID, Version: expectedVersion}
-		cases := []struct {
-			name     string
-			port     int
-			identity ManagedGUIIdentity
-			want     string
-		}{
-			{name: "unresolved-port", port: 0, identity: valid, want: "port-unresolved"},
-			{name: "missing-identity", port: port, identity: ManagedGUIIdentity{}, want: "identity-not-supplied"},
-			{name: "invalid-pid", port: port, identity: ManagedGUIIdentity{Port: port, Version: expectedVersion}, want: "identity-not-supplied"},
-			{name: "empty-version", port: port, identity: ManagedGUIIdentity{Port: port, PID: expectedPID}, want: "identity-not-supplied"},
-			{name: "port-mismatch", port: port, identity: ManagedGUIIdentity{Port: port + 1, PID: expectedPID, Version: expectedVersion}, want: "port-mismatch"},
-		}
-		for _, tc := range cases {
-			t.Run(tc.name, func(t *testing.T) {
-				got := probeManagedRouter(tc.port, tc.identity)
-				if got.liveManaged {
-					t.Fatalf("invalid input produced live managed verdict: %+v", got)
-				}
-				if got.failureClass != tc.want {
-					t.Fatalf("failure class = %q, want %q", got.failureClass, tc.want)
-				}
-			})
-		}
-		if got := requests.Load(); got != 0 {
-			t.Fatalf("invalid-input probe requests = %d, want 0", got)
-		}
-	})
-
-	responseCases := []struct {
-		name        string
-		status      int
-		contentType string
-		body        string
-		location    string
-		expected    ManagedGUIIdentity
-		wantLive    bool
-		wantClass   string
-	}{
-		{
-			name:        "managed-exact",
-			status:      http.StatusOK,
-			contentType: "application/json; charset=utf-8",
-			body:        fmt.Sprintf(`{"ok":true,"pid":%d,"version":%q}`, expectedPID, expectedVersion),
-			wantLive:    true,
-		},
-		{name: "http-status", status: http.StatusServiceUnavailable, contentType: "application/json", body: `{}`, wantClass: "http-status"},
-		{name: "content-type", status: http.StatusOK, contentType: "text/html", body: `<html></html>`, wantClass: "content-type"},
-		{name: "oversized", status: http.StatusOK, contentType: "application/json", body: strings.Repeat(" ", managedRouterProbeBodyMax+1), wantClass: "malformed-response"},
-		{name: "malformed", status: http.StatusOK, contentType: "application/json", body: `{`, wantClass: "malformed-response"},
-		{
-			name:        "trailing-payload",
-			status:      http.StatusOK,
-			contentType: "application/json",
-			body:        fmt.Sprintf(`{"ok":true,"pid":%d,"version":%q} {}`, expectedPID, expectedVersion),
-			wantClass:   "malformed-response",
-		},
-		{name: "ok-false", status: http.StatusOK, contentType: "application/json", body: fmt.Sprintf(`{"ok":false,"pid":%d,"version":%q}`, expectedPID, expectedVersion), wantClass: "identity-mismatch"},
-		{name: "pid-zero", status: http.StatusOK, contentType: "application/json", body: fmt.Sprintf(`{"ok":true,"pid":0,"version":%q}`, expectedVersion), wantClass: "identity-mismatch"},
-		{name: "version-empty", status: http.StatusOK, contentType: "application/json", body: fmt.Sprintf(`{"ok":true,"pid":%d,"version":""}`, expectedPID), wantClass: "identity-mismatch"},
-		{name: "pid-mismatch", status: http.StatusOK, contentType: "application/json", body: fmt.Sprintf(`{"ok":true,"pid":%d,"version":%q}`, expectedPID+1, expectedVersion), wantClass: "identity-mismatch"},
-		{name: "version-mismatch", status: http.StatusOK, contentType: "application/json", body: fmt.Sprintf(`{"ok":true,"pid":%d,"version":"foreign"}`, expectedPID), wantClass: "identity-mismatch"},
-		{name: "redirect-refused", status: http.StatusTemporaryRedirect, contentType: "application/json", location: "http://example.invalid/api/ping", body: `{}`, wantClass: "http-status"},
-	}
-	for _, tc := range responseCases {
-		t.Run(tc.name, func(t *testing.T) {
-			var requests atomic.Int32
-			_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-				requests.Add(1)
-				if tc.location != "" {
-					w.Header().Set("Location", tc.location)
-				}
-				w.Header().Set("Content-Type", tc.contentType)
-				w.WriteHeader(tc.status)
-				_, _ = io.WriteString(w, tc.body)
-			})
-			expected := tc.expected
-			if expected == (ManagedGUIIdentity{}) {
-				expected = ManagedGUIIdentity{Port: port, PID: expectedPID, Version: expectedVersion}
-			}
-			got := probeManagedRouter(port, expected)
-			if got.liveManaged != tc.wantLive {
-				t.Fatalf("liveManaged = %v, want %v; snapshot=%+v", got.liveManaged, tc.wantLive, got)
-			}
-			if got.failureClass != tc.wantClass {
-				t.Fatalf("failure class = %q, want %q", got.failureClass, tc.wantClass)
-			}
-			if got := requests.Load(); got != 1 {
-				t.Fatalf("probe requests = %d, want 1", got)
-			}
-		})
-	}
-
-	t.Run("timeout-is-bounded-and-cancels-request", func(t *testing.T) {
-		var requests atomic.Int32
-		entered := make(chan struct{})
-		cancelled := make(chan struct{})
-		listener, err := net.Listen("tcp", "127.0.0.1:0")
-		if err != nil {
-			t.Fatalf("listen for blocking probe: %v", err)
-		}
-		port := listener.Addr().(*net.TCPAddr).Port
-		srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			requests.Add(1)
-			close(entered)
-			<-r.Context().Done()
-			close(cancelled)
-		}))
-		srv.Listener = listener
-		srv.Start()
-		t.Cleanup(srv.Close)
-
-		start := time.Now()
-		got := probeManagedRouter(port, ManagedGUIIdentity{Port: port, PID: expectedPID, Version: expectedVersion})
-		elapsed := time.Since(start)
-		if got.liveManaged || got.failureClass != "stopped-or-timeout" {
-			t.Fatalf("timeout snapshot = %+v, want stopped-or-timeout", got)
-		}
-		if elapsed < 400*time.Millisecond || elapsed > 2*time.Second {
-			t.Fatalf("probe elapsed = %s, want 500ms ceiling plus scheduler tolerance", elapsed)
-		}
-		select {
-		case <-entered:
-		default:
-			t.Fatal("blocking handler never received the probe")
-		}
-		select {
-		case <-cancelled:
-		case <-time.After(time.Second):
-			t.Fatal("blocking handler did not observe request cancellation")
-		}
-		if got := requests.Load(); got != 1 {
-			t.Fatalf("timeout probe requests = %d, want 1", got)
-		}
-	})
-
-	t.Run("early-status-return-closes-response-body", func(t *testing.T) {
-		cancelled := make(chan struct{})
-		_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, r *http.Request) {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			if flusher, ok := w.(http.Flusher); ok {
-				flusher.Flush()
-			}
-			<-r.Context().Done()
-			close(cancelled)
-		})
-		got := probeManagedRouter(port, ManagedGUIIdentity{Port: port, PID: expectedPID, Version: expectedVersion})
-		if got.liveManaged || got.failureClass != "http-status" {
-			t.Fatalf("non-200 snapshot = %+v, want http-status", got)
-		}
-		select {
-		case <-cancelled:
-		case <-time.After(time.Second):
-			t.Fatal("response body was not closed on the non-200 return path")
-		}
-	})
-}
-
 func assertSingleRouterProofWarning(t *testing.T, report *RegisterReport, writer string, failureClass string) {
 	t.Helper()
-	want := "LSP router managed-identity proof unavailable (" + failureClass +
-		"); keeping direct LSP entries whose only replacement is a pre-existing shared-router entry"
 	got := 0
 	for _, warning := range report.Warnings {
-		if warning == want {
+		if strings.HasPrefix(warning, failureClass+":") {
 			got++
 		}
 	}
 	if got != 1 {
 		t.Fatalf("router-proof warning count in report = %d, want 1; warnings=%v", got, report.Warnings)
 	}
-	if got := strings.Count(writer, "warning: "+want); got != 1 {
+	if got := strings.Count(writer, "warning: "+failureClass+":"); got != 1 {
 		t.Fatalf("router-proof warning count in progress output = %d, want 1; output=%q", got, writer)
 	}
 }
@@ -4147,11 +4113,11 @@ func assertSingleRouterProofWarning(t *testing.T, report *RegisterReport, writer
 func assertNoRouterProofWarning(t *testing.T, report *RegisterReport, writer string) {
 	t.Helper()
 	for _, warning := range report.Warnings {
-		if strings.Contains(warning, "managed-identity proof unavailable") {
+		if strings.Contains(warning, "keeping matching direct LSP entries") {
 			t.Fatalf("cleanup with no router-origin direct candidate emitted router-proof warning %q", warning)
 		}
 	}
-	if strings.Contains(writer, "managed-identity proof unavailable") {
+	if strings.Contains(writer, "keeping matching direct LSP entries") {
 		t.Fatalf("cleanup with no router-origin direct candidate wrote router-proof warning: %q", writer)
 	}
 }
@@ -4183,7 +4149,7 @@ func assertCleanupWarningCount(t *testing.T, warnings []string, writer, want str
 	}
 }
 
-func TestCleanupDirectLSP_PortResolutionErrorWarnsOnceAndDoesNotMutate(t *testing.T) {
+func TestCleanupDirectLSP_AuthorizerRefusalWarnsOnceAndDoesNotMutate(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
@@ -4207,9 +4173,9 @@ func TestCleanupDirectLSP_PortResolutionErrorWarnsOnceAndDoesNotMutate(t *testin
 		fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", observedPort)
 
 	a := mustNewAPI(t)
-	var resolverCalls, probeCalls int
+	var authorizerCalls, routeCalls int
 	var writer bytes.Buffer
-	warnings := a.cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	warnings := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
@@ -4217,44 +4183,155 @@ func TestCleanupDirectLSP_PortResolutionErrorWarnsOnceAndDoesNotMutate(t *testin
 			"claude-code": &fakeClient{parent: h.fakeClients, name: "claude-code"},
 			"cursor":      &fakeClient{parent: h.fakeClients, name: "cursor"},
 		},
-		map[string]bool{"claude-code": true},
-		0,
-		ManagedGUIIdentity{Port: observedPort, PID: 5150, Version: "must-not-be-read"},
+		map[clientLanguageKey]bool{{Client: "claude-code", Language: "go"}: true},
+		[]clientWriteReceipt{{Key: clientLanguageKey{Client: "claude-code", Language: "go"}, EntryName: boundEntry}},
 		&writer,
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return 0, errors.New("router port resolution sentinel")
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{FailureClass: "pidport-unavailable"}
 			},
-			probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return managedRouterSnapshot{liveManaged: true}
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{OK: true}
 			},
 			matchDirect: directLanguageServerCleanupMatches,
 		},
 	)
 
-	assertCleanupWarningCount(t, warnings, writer.String(), managedRouterProofWarning("port-unresolved"), 1, 1)
-	if resolverCalls != 1 {
-		t.Fatalf("router resolver calls = %d, want 1", resolverCalls)
+	wantWarning := "pidport-unavailable: affected_plans=1 [client=cursor,language=go,port=19125]; keeping matching direct LSP entries"
+	assertCleanupWarningCount(t, warnings, writer.String(), wantWarning, 1, 1)
+	if authorizerCalls != 1 || routeCalls != 0 {
+		t.Fatalf("authorizer refusal calls: authorizer=%d route=%d, want 1/0", authorizerCalls, routeCalls)
 	}
-	if probeCalls != 0 {
-		t.Fatalf("port-resolution failure made %d proof call(s), want 0", probeCalls)
+	if _, stillThere := h.fakeClients.stdioEntries["claude-code"][boundEntry]; stillThere {
+		t.Fatalf("receipt-backed entry %q was suppressed by unrelated router failure", boundEntry)
 	}
-	for clientName, entryName := range map[string]string{
-		"claude-code": boundEntry,
-		"cursor":      unboundEntry,
-	} {
-		if _, stillThere := h.fakeClients.stdioEntries[clientName][entryName]; !stillThere {
-			t.Fatalf("port-resolution failure removed %s entry %q", clientName, entryName)
-		}
-		if got := h.fakeClients.backupKeepCalls[clientName]; got != 0 {
-			t.Fatalf("port-resolution failure made %d %s backup(s), want 0", got, clientName)
-		}
+	if _, stillThere := h.fakeClients.stdioEntries["cursor"][unboundEntry]; !stillThere {
+		t.Fatalf("port-resolution failure removed router-derived entry %q", unboundEntry)
+	}
+	if got := h.fakeClients.backupKeepCalls["claude-code"]; got != 1 {
+		t.Fatalf("receipt-backed client backups = %d, want 1", got)
+	}
+	if got := h.fakeClients.backupKeepCalls["cursor"]; got != 0 {
+		t.Fatalf("port-resolution failure made %d cursor backup(s), want 0", got)
 	}
 }
 
-func TestCleanupDirectLSP_GetEntryErrorIsReturnedOnceBeforeAnySideEffect(t *testing.T) {
+func TestCleanupDirectLSP_ProcessOwnerFailureDoesNotMutate(t *testing.T) {
+	for _, failureClass := range []string{
+		ManagedRouterFailureProcessOwnerMismatch,
+		ManagedRouterFailureProcessOwnerUnavailable,
+	} {
+		t.Run(failureClass, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			canonical := mustCanonical(t, t.TempDir())
+			const (
+				port      = 19133
+				entryName = "legacy-go-owner-refusal"
+			)
+			h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
+				fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+			h.fakeClients.stdioEntries["cursor"][entryName] = clients.LanguageServerStdioEntry{
+				Name: entryName, Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+			routeCalls := 0
+			var mutationEvents []string
+			client := &cleanupMutationLedgerClient{
+				registerClient: testClientFactory()["cursor"],
+				events:         &mutationEvents,
+			}
+			var writer bytes.Buffer
+			warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+				goCleanupSpecForTest(t), []string{"go"}, canonical,
+				map[string]registerClient{"cursor": client},
+				nil, nil, &writer,
+				directCleanupPlanDeps{
+					authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+						return ManagedRouterAuthorization{FailureClass: failureClass}
+					},
+					probeRoute: func(context.Context, int, string, string) managedRouteProof {
+						routeCalls++
+						return managedRouteProof{OK: true}
+					},
+					matchDirect: directLanguageServerCleanupMatches,
+				},
+			)
+			if routeCalls != 0 || len(mutationEvents) != 0 || h.fakeClients.backupKeepCalls["cursor"] != 0 {
+				t.Fatalf("route/mutation/backup = %d/%v/%d, want 0/[]/0", routeCalls, mutationEvents, h.fakeClients.backupKeepCalls["cursor"])
+			}
+			if _, exists := h.fakeClients.stdioEntries["cursor"][entryName]; !exists {
+				t.Fatal("owner refusal removed the direct entry")
+			}
+			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], failureClass+":") {
+				t.Fatalf("warnings=%v, want one %s warning", warnings, failureClass)
+			}
+		})
+	}
+}
+
+func TestCleanupDirectLSP_InvalidReceiptIsWireSafeAndDoesNotMutate(t *testing.T) {
+	const rawReceiptSentinel = `C:\secret\receipt password=hunter2`
+	key := clientLanguageKey{Client: "cursor", Language: "go"}
+	for _, tc := range []struct {
+		name       string
+		receipts   []clientWriteReceipt
+		wantPrefix string
+	}{
+		{
+			name: "empty entry",
+			receipts: []clientWriteReceipt{
+				{Key: key, EntryName: ""},
+			},
+			wantPrefix: "write-entry-name-empty:",
+		},
+		{
+			name: "conflicting entries",
+			receipts: []clientWriteReceipt{
+				{Key: key, EntryName: "router-go"},
+				{Key: key, EntryName: rawReceiptSentinel},
+			},
+			wantPrefix: "write-receipt-conflict:",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			canonical := mustCanonical(t, t.TempDir())
+			const entryName = "legacy-go-invalid-receipt"
+			h.fakeClients.stdioEntries["cursor"][entryName] = clients.LanguageServerStdioEntry{
+				Name: entryName, Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+			var mutationEvents []string
+			client := &cleanupMutationLedgerClient{
+				registerClient: testClientFactory()["cursor"],
+				events:         &mutationEvents,
+			}
+			var writer bytes.Buffer
+			warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+				goCleanupSpecForTest(t), []string{"go"}, canonical,
+				map[string]registerClient{"cursor": client}, map[clientLanguageKey]bool{key: true},
+				tc.receipts, &writer, directCleanupPlanDeps{matchDirect: directLanguageServerCleanupMatches},
+			)
+			if len(mutationEvents) != 0 || h.fakeClients.backupKeepCalls["cursor"] != 0 {
+				t.Fatalf("invalid receipt mutation=%v backup=%d, want none", mutationEvents, h.fakeClients.backupKeepCalls["cursor"])
+			}
+			if _, exists := h.fakeClients.stdioEntries["cursor"][entryName]; !exists {
+				t.Fatal("invalid receipt removed direct entry")
+			}
+			public := strings.Join(warnings, "\n") + "\n" + writer.String()
+			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], tc.wantPrefix) ||
+				strings.Contains(public, rawReceiptSentinel) || strings.Contains(public, "hunter2") {
+				t.Fatalf("unsafe invalid-receipt warning: warnings=%v writer=%q", warnings, writer.String())
+			}
+		})
+	}
+}
+
+func TestCleanupDirectLSP_GetEntryErrorIsReturnedOnceBeforeAnyMutation(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
@@ -4271,27 +4348,26 @@ func TestCleanupDirectLSP_GetEntryErrorIsReturnedOnceBeforeAnySideEffect(t *test
 		fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", routerPort)
 	h.fakeClients.failGetEntry["cursor"] = true
 
-	var resolverCalls, probeCalls, matcherCalls int
+	var authorizerCalls, routeCalls, matcherCalls int
 	var writer bytes.Buffer
-	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
 		map[string]registerClient{
 			"cursor": &fakeClient{parent: h.fakeClients, name: "cursor"},
 		},
-		map[string]bool{},
-		routerPort,
-		ManagedGUIIdentity{Port: routerPort, PID: 6160, Version: "must-not-be-read"},
+		nil,
+		nil,
 		&writer,
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return routerPort, nil
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
 			},
-			probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return managedRouterSnapshot{liveManaged: true, port: routerPort}
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{OK: true}
 			},
 			matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 				matcherCalls++
@@ -4300,11 +4376,11 @@ func TestCleanupDirectLSP_GetEntryErrorIsReturnedOnceBeforeAnySideEffect(t *test
 		},
 	)
 
-	want := "cursor LSP router replacement probe for go failed: fake client cursor: induced GetEntry failure (malformed lower layer); keeping any direct go entry"
+	want := "client-entry-indeterminate: client=cursor,language=go; direct LSP cleanup skipped and matching entries were kept; verify client configuration is readable and retry"
 	assertCleanupWarningCount(t, warnings, writer.String(), want, 1, 0)
-	if resolverCalls != 0 || probeCalls != 0 || matcherCalls != 0 {
-		t.Fatalf("GetEntry failure calls: resolver=%d probe=%d matcher=%d, want all zero",
-			resolverCalls, probeCalls, matcherCalls)
+	if authorizerCalls != 0 || routeCalls != 0 || matcherCalls != 1 {
+		t.Fatalf("GetEntry failure calls: authorizer=%d route=%d matcher=%d, want 0/0/1",
+			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if _, stillThere := h.fakeClients.stdioEntries["cursor"][directEntry]; !stillThere {
 		t.Fatalf("GetEntry failure removed direct entry %q", directEntry)
@@ -4322,14 +4398,14 @@ func TestCleanupDirectLSP_DirectScanErrorIsReturnedOnceBeforeAnySideEffect(t *te
 	}{
 		{
 			name: "candidate-scan",
-			want: "cursor direct LSP scan failed: candidate scan sentinel",
+			want: "direct-scan-failed: client=cursor; direct LSP cleanup skipped and matching entries were kept; verify client configuration is readable and retry",
 			configure: func(client *directCleanupInjectedErrorClient) {
 				client.findErr = errors.New("candidate scan sentinel")
 			},
 		},
 		{
 			name: "survivor-scan",
-			want: "cursor direct LSP survivor scan failed: survivor scan sentinel",
+			want: "survivor-scan-failed: client=cursor; direct LSP cleanup skipped and matching entries were kept; verify client configuration is readable and retry",
 			configure: func(client *directCleanupInjectedErrorClient) {
 				client.survivorErr = errors.New("survivor scan sentinel")
 			},
@@ -4356,25 +4432,24 @@ func TestCleanupDirectLSP_DirectScanErrorIsReturnedOnceBeforeAnySideEffect(t *te
 			}
 			tc.configure(client)
 
-			var resolverCalls, probeCalls, matcherCalls int
+			var authorizerCalls, routeCalls, matcherCalls int
 			var writer bytes.Buffer
-			warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+			warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 				goCleanupSpecForTest(t),
 				[]string{"go"},
 				canonical,
 				map[string]registerClient{"cursor": client},
-				map[string]bool{},
-				routerPort,
-				ManagedGUIIdentity{Port: routerPort, PID: 7170, Version: "must-not-be-read"},
+				nil,
+				nil,
 				&writer,
-				directCleanupDeps{
-					resolveRouterPort: func(int) (int, error) {
-						resolverCalls++
-						return routerPort, nil
+				directCleanupPlanDeps{
+					authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+						authorizerCalls++
+						return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
 					},
-					probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-						probeCalls++
-						return managedRouterSnapshot{liveManaged: true, port: routerPort}
+					probeRoute: func(context.Context, int, string, string) managedRouteProof {
+						routeCalls++
+						return managedRouteProof{OK: true}
 					},
 					matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 						matcherCalls++
@@ -4384,9 +4459,9 @@ func TestCleanupDirectLSP_DirectScanErrorIsReturnedOnceBeforeAnySideEffect(t *te
 			)
 
 			assertCleanupWarningCount(t, warnings, writer.String(), tc.want, 1, 0)
-			if resolverCalls != 0 || probeCalls != 0 || matcherCalls != 1 {
-				t.Fatalf("%s failure calls: resolver=%d probe=%d matcher=%d, want 0/0/1",
-					tc.name, resolverCalls, probeCalls, matcherCalls)
+			if authorizerCalls != 0 || routeCalls != 0 || matcherCalls != 1 {
+				t.Fatalf("%s failure calls: authorizer=%d route=%d matcher=%d, want 0/0/1",
+					tc.name, authorizerCalls, routeCalls, matcherCalls)
 			}
 			if _, stillThere := h.fakeClients.stdioEntries["cursor"][directEntry]; !stillThere {
 				t.Fatalf("%s failure removed direct entry %q", tc.name, directEntry)
@@ -4398,13 +4473,12 @@ func TestCleanupDirectLSP_DirectScanErrorIsReturnedOnceBeforeAnySideEffect(t *te
 	}
 }
 
-func TestCleanupDirectLSP_StaleRouterPortIsNotProbed(t *testing.T) {
+func TestCleanupDirectLSP_StaleRouterPortIsRefusedBeforeRouteProbe(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
 	const (
 		observedPort = 19128
-		resolvedPort = 19129
 	)
 	canonical := mustCanonical(t, t.TempDir())
 	const directEntry = "legacy-go-stale-structural-port"
@@ -4417,27 +4491,26 @@ func TestCleanupDirectLSP_StaleRouterPortIsNotProbed(t *testing.T) {
 	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
 		fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", observedPort)
 
-	var resolverCalls, probeCalls, matcherCalls int
+	var authorizerCalls, routeCalls, matcherCalls int
 	var writer bytes.Buffer
-	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
 		map[string]registerClient{
 			"cursor": &fakeClient{parent: h.fakeClients, name: "cursor"},
 		},
-		map[string]bool{},
-		resolvedPort,
-		ManagedGUIIdentity{Port: resolvedPort, PID: 8180, Version: "must-not-be-read"},
+		nil,
+		nil,
 		&writer,
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return resolvedPort, nil
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{FailureClass: "pidport-port-mismatch"}
 			},
-			probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return managedRouterSnapshot{liveManaged: true, port: resolvedPort}
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{OK: true}
 			},
 			matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 				matcherCalls++
@@ -4446,9 +4519,9 @@ func TestCleanupDirectLSP_StaleRouterPortIsNotProbed(t *testing.T) {
 		},
 	)
 
-	if resolverCalls != 1 || probeCalls != 0 || matcherCalls != 1 {
-		t.Fatalf("stale router calls: resolver=%d probe=%d matcher=%d, want 1/0/1",
-			resolverCalls, probeCalls, matcherCalls)
+	if authorizerCalls != 1 || routeCalls != 0 || matcherCalls != 1 {
+		t.Fatalf("stale router calls: authorizer=%d route=%d matcher=%d, want 1/0/1",
+			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if _, stillThere := h.fakeClients.stdioEntries["cursor"][directEntry]; !stillThere {
 		t.Fatalf("stale structural router port removed direct entry %q", directEntry)
@@ -4456,23 +4529,14 @@ func TestCleanupDirectLSP_StaleRouterPortIsNotProbed(t *testing.T) {
 	if got := h.fakeClients.backupKeepCalls["cursor"]; got != 0 {
 		t.Fatalf("stale structural router port made %d backup(s), want 0", got)
 	}
-	assertNoRouterProofWarning(t, &RegisterReport{Warnings: warnings}, writer.String())
+	assertCleanupWarningCount(t, warnings, writer.String(), "pidport-port-mismatch: affected_plans=1 [client=cursor,language=go,port=19128]; keeping matching direct LSP entries", 1, 1)
 }
 
-func TestCleanupDirectLSP_MatchingOwnedCandidateUsesOneCachedProof(t *testing.T) {
+func TestCleanupDirectLSP_MatchingOwnedCandidateRevalidatesEachClient(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
-	const (
-		expectedPID     = 9190
-		expectedVersion = "cached-proof"
-	)
-	var requests atomic.Int32
-	_, routerPort := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
-		requests.Add(1)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = fmt.Fprintf(w, `{"ok":true,"pid":%d,"version":%q}`, expectedPID, expectedVersion)
-	})
+	const routerPort = 19129
 	canonical := mustCanonical(t, t.TempDir())
 	const directEntry = "legacy-go-cached-proof"
 	h.fakeClients.stdioEntries["cursor"][directEntry] = clients.LanguageServerStdioEntry{
@@ -4503,8 +4567,8 @@ func TestCleanupDirectLSP_MatchingOwnedCandidateUsesOneCachedProof(t *testing.T)
 		findAfterErr:   errors.New("post-proof rescan sentinel"),
 	}
 
-	var resolverCalls, probeCalls, matcherCalls int
-	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	var authorizerCalls, routeCalls, matcherCalls int
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
@@ -4512,18 +4576,17 @@ func TestCleanupDirectLSP_MatchingOwnedCandidateUsesOneCachedProof(t *testing.T)
 			"cursor": client,
 			"vscode": &fakeClient{parent: h.fakeClients, name: "vscode"},
 		},
-		map[string]bool{},
-		routerPort,
-		ManagedGUIIdentity{Port: routerPort, PID: expectedPID, Version: expectedVersion},
+		nil,
+		nil,
 		&bytes.Buffer{},
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return routerPort, nil
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
 			},
-			probeRouter: func(port int, expected ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return probeManagedRouter(port, expected)
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{OK: true}
 			},
 			matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 				matcherCalls++
@@ -4532,15 +4595,12 @@ func TestCleanupDirectLSP_MatchingOwnedCandidateUsesOneCachedProof(t *testing.T)
 		},
 	)
 
-	if resolverCalls != 1 || probeCalls != 1 || matcherCalls != 2 {
-		t.Fatalf("matching owned candidate calls: resolver=%d probe=%d matcher=%d, want 1/1/2",
-			resolverCalls, probeCalls, matcherCalls)
+	if authorizerCalls != 2 || routeCalls != 10 || matcherCalls != 2 {
+		t.Fatalf("matching owned candidate calls: authorizer=%d route=%d matcher=%d, want 2/10/2 (one lease plus five checkpoints per client)",
+			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if client.findCalls != 1 {
 		t.Fatalf("direct candidate scan calls = %d, want 1 cached preflight scan", client.findCalls)
-	}
-	if got := requests.Load(); got != 1 {
-		t.Fatalf("matching owned candidate proof requests = %d, want 1", got)
 	}
 	for clientName, entryName := range map[string]string{
 		"cursor": directEntry,
@@ -4568,27 +4628,26 @@ func TestCleanupDirectLSP_NoRouterEntrySkipsResolverProbeAndWarning(t *testing.T
 		Args:     []string{"--lsp", "gopls", "--workspace", canonical},
 	}
 
-	var resolverCalls, probeCalls, matcherCalls int
+	var authorizerCalls, routeCalls, matcherCalls int
 	var writer bytes.Buffer
-	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
 		map[string]registerClient{
 			"cursor": &fakeClient{parent: h.fakeClients, name: "cursor"},
 		},
-		map[string]bool{},
-		0,
-		ManagedGUIIdentity{},
+		nil,
+		nil,
 		&writer,
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return 0, errors.New("resolver must not run")
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{FailureClass: "must-not-run"}
 			},
-			probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return managedRouterSnapshot{}
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{FailureClass: "must-not-run"}
 			},
 			matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 				matcherCalls++
@@ -4597,9 +4656,9 @@ func TestCleanupDirectLSP_NoRouterEntrySkipsResolverProbeAndWarning(t *testing.T
 		},
 	)
 
-	if resolverCalls != 0 || probeCalls != 0 || matcherCalls != 0 {
-		t.Fatalf("no-router calls: resolver=%d probe=%d matcher=%d, want all zero",
-			resolverCalls, probeCalls, matcherCalls)
+	if authorizerCalls != 0 || routeCalls != 0 || matcherCalls != 0 {
+		t.Fatalf("no-router calls: authorizer=%d route=%d matcher=%d, want all zero",
+			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if _, stillThere := h.fakeClients.stdioEntries["cursor"][directEntry]; !stillThere {
 		t.Fatalf("no-router plan removed direct entry %q", directEntry)
@@ -4619,27 +4678,26 @@ func TestCleanupDirectLSP_NoDirectCandidateSkipsResolverProbeAndWarning(t *testi
 	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
 		fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", routerPort)
 
-	var resolverCalls, probeCalls, matcherCalls int
+	var authorizerCalls, routeCalls, matcherCalls int
 	var writer bytes.Buffer
-	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
 		map[string]registerClient{
 			"cursor": &fakeClient{parent: h.fakeClients, name: "cursor"},
 		},
-		map[string]bool{},
-		routerPort,
-		ManagedGUIIdentity{Port: routerPort, PID: 9290, Version: "must-not-be-read"},
+		nil,
+		nil,
 		&writer,
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return routerPort, nil
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{FailureClass: "must-not-run"}
 			},
-			probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return managedRouterSnapshot{liveManaged: true, port: routerPort}
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{FailureClass: "must-not-run"}
 			},
 			matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 				matcherCalls++
@@ -4648,9 +4706,9 @@ func TestCleanupDirectLSP_NoDirectCandidateSkipsResolverProbeAndWarning(t *testi
 		},
 	)
 
-	if resolverCalls != 0 || probeCalls != 0 || matcherCalls != 1 {
-		t.Fatalf("no-direct-candidate calls: resolver=%d probe=%d matcher=%d, want 0/0/1",
-			resolverCalls, probeCalls, matcherCalls)
+	if authorizerCalls != 0 || routeCalls != 0 || matcherCalls != 1 {
+		t.Fatalf("no-direct-candidate calls: authorizer=%d route=%d matcher=%d, want 0/0/1",
+			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if got := h.fakeClients.backupKeepCalls["cursor"]; got != 0 {
 		t.Fatalf("no-direct-candidate plan made %d backup(s), want 0", got)
@@ -4671,27 +4729,26 @@ func TestCleanupDirectLSP_BoundOnlyPlanNeverResolvesOrProbes(t *testing.T) {
 		Args:     []string{"--lsp", "gopls", "--workspace", canonical},
 	}
 
-	var resolverCalls, probeCalls, matcherCalls int
+	var authorizerCalls, routeCalls, matcherCalls int
 	var writer bytes.Buffer
-	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithDeps(
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		goCleanupSpecForTest(t),
 		[]string{"go"},
 		canonical,
 		map[string]registerClient{
 			"claude-code": &fakeClient{parent: h.fakeClients, name: "claude-code"},
 		},
-		map[string]bool{"claude-code": true},
-		0,
-		ManagedGUIIdentity{},
+		map[clientLanguageKey]bool{{Client: "claude-code", Language: "go"}: true},
+		[]clientWriteReceipt{{Key: clientLanguageKey{Client: "claude-code", Language: "go"}, EntryName: directEntry}},
 		&writer,
-		directCleanupDeps{
-			resolveRouterPort: func(int) (int, error) {
-				resolverCalls++
-				return 0, errors.New("resolver must not run")
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{FailureClass: "must-not-run"}
 			},
-			probeRouter: func(int, ManagedGUIIdentity) managedRouterSnapshot {
-				probeCalls++
-				return managedRouterSnapshot{}
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				return managedRouteProof{FailureClass: "must-not-run"}
 			},
 			matchDirect: func(client registerClient, clientName string, aliases map[string]bool, workspace string) directCleanupMatchResult {
 				matcherCalls++
@@ -4700,9 +4757,9 @@ func TestCleanupDirectLSP_BoundOnlyPlanNeverResolvesOrProbes(t *testing.T) {
 		},
 	)
 
-	if resolverCalls != 0 || probeCalls != 0 || matcherCalls != 1 {
-		t.Fatalf("bound-only calls: resolver=%d probe=%d matcher=%d, want 0/0/1",
-			resolverCalls, probeCalls, matcherCalls)
+	if authorizerCalls != 0 || routeCalls != 0 || matcherCalls != 1 {
+		t.Fatalf("receipt-only calls: authorizer=%d route=%d matcher=%d, want 0/0/1",
+			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if _, stillThere := h.fakeClients.stdioEntries["claude-code"][directEntry]; stillThere {
 		t.Fatalf("bound-only plan did not remove direct entry %q; warnings=%v", directEntry, warnings)
@@ -4718,7 +4775,7 @@ func TestRegister_CleanupSkipsManagedRouterProofWithoutRegisteredLanguageRouterE
 	defer h.restore()
 
 	var requests atomic.Int32
-	_, routerPort := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
+	_, _ = newReadinessHTTPTestServer(t, func(w http.ResponseWriter, _ *http.Request) {
 		requests.Add(1)
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"ok":true,"pid":31337,"version":"must-not-be-read"}`)
@@ -4744,7 +4801,7 @@ func TestRegister_CleanupSkipsManagedRouterProofWithoutRegisteredLanguageRouterE
 		m,
 		ws,
 		[]string{"go"},
-		RegisterOpts{Writer: &writer, GUIPort: routerPort},
+		RegisterOpts{Writer: &writer},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -4799,15 +4856,7 @@ func TestRegister_CleanupSkipsManagedRouterProofWithoutMatchingDirectCandidate(t
 		m,
 		ws,
 		[]string{"go"},
-		RegisterOpts{
-			Writer:  &writer,
-			GUIPort: routerPort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    routerPort,
-				PID:     expectedPID,
-				Version: expectedVersion,
-			},
-		},
+		RegisterOpts{Writer: &writer, ManagedRouterAuthorizer: allowManagedRouterAuthorizerForTest(routerPort)},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -4891,7 +4940,7 @@ func TestRegister_CleanupBoundClientBypassesManagedRouterProof(t *testing.T) {
 
 	var writer bytes.Buffer
 	report, err := mustNewAPI(t).registerWithManifest(
-		m, ws, []string{"go"}, RegisterOpts{Writer: &writer, GUIPort: routerPort},
+		m, ws, []string{"go"}, RegisterOpts{Writer: &writer},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -4992,15 +5041,7 @@ func TestRegister_CleanupRejectsRouterEntryOnStalePort(t *testing.T) {
 		m,
 		ws,
 		[]string{"go", "python"},
-		RegisterOpts{
-			Writer:  &bytes.Buffer{},
-			GUIPort: livePort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    livePort,
-				PID:     expectedPID,
-				Version: expectedVersion,
-			},
-		},
+		RegisterOpts{Writer: &bytes.Buffer{}, ManagedRouterAuthorizer: allowManagedRouterAuthorizerForTest(livePort), probeManagedLanguageRoute: allowManagedLanguageRouteForTest},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -5056,15 +5097,9 @@ func TestRegister_CleanupKeepsDirectEntryWhenConfiguredRouterIsStopped(t *testin
 		m,
 		ws,
 		[]string{"go"},
-		RegisterOpts{
-			Writer:  &writer,
-			GUIPort: routerPort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    routerPort,
-				PID:     123456,
-				Version: "expected-managed-router",
-			},
-		},
+		RegisterOpts{Writer: &writer, ManagedRouterAuthorizer: func(context.Context, int) ManagedRouterAuthorization {
+			return ManagedRouterAuthorization{FailureClass: ManagedRouterFailurePingTransport}
+		}},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -5076,7 +5111,7 @@ func TestRegister_CleanupKeepsDirectEntryWhenConfiguredRouterIsStopped(t *testin
 	if got := h.fakeClients.backupKeepCalls["cursor"]; got != 0 {
 		t.Fatalf("stopped configured router authorized %d backup(s), want 0", got)
 	}
-	assertSingleRouterProofWarning(t, report, writer.String(), "stopped-or-timeout")
+	assertSingleRouterProofWarning(t, report, writer.String(), ManagedRouterFailurePingTransport)
 }
 
 func TestRegister_CleanupKeepsDirectEntryWhenRouterPortHasForeignListener(t *testing.T) {
@@ -5131,15 +5166,9 @@ func TestRegister_CleanupKeepsDirectEntryWhenRouterPortHasForeignListener(t *tes
 		m,
 		ws,
 		[]string{"go", "python"},
-		RegisterOpts{
-			Writer:  &writer,
-			GUIPort: routerPort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    routerPort,
-				PID:     123456,
-				Version: "expected-managed-router",
-			},
-		},
+		RegisterOpts{Writer: &writer, ManagedRouterAuthorizer: func(context.Context, int) ManagedRouterAuthorization {
+			return ManagedRouterAuthorization{FailureClass: ManagedRouterFailurePingIdentityMismatch}
+		}},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -5155,10 +5184,10 @@ func TestRegister_CleanupKeepsDirectEntryWhenRouterPortHasForeignListener(t *tes
 			t.Fatalf("foreign listener authorized %d %s backup(s), want 0", got, clientName)
 		}
 	}
-	if got := requestCount.Load(); got != 1 {
-		t.Fatalf("foreign-listener probe requests = %d, want 1 across clients and languages", got)
+	if got := requestCount.Load(); got != 0 {
+		t.Fatalf("foreign-listener route requests = %d, want 0 after identity refusal", got)
 	}
-	assertSingleRouterProofWarning(t, report, writer.String(), "identity-mismatch")
+	assertSingleRouterProofWarning(t, report, writer.String(), ManagedRouterFailurePingIdentityMismatch)
 }
 
 func TestRegister_CleanupRemovesDirectEntryWithProvenManagedRouter(t *testing.T) {
@@ -5209,15 +5238,7 @@ func TestRegister_CleanupRemovesDirectEntryWithProvenManagedRouter(t *testing.T)
 		m,
 		ws,
 		[]string{"go", "python"},
-		RegisterOpts{
-			Writer:  &bytes.Buffer{},
-			GUIPort: routerPort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    routerPort,
-				PID:     expectedPID,
-				Version: expectedVersion,
-			},
-		},
+		RegisterOpts{Writer: &bytes.Buffer{}, ManagedRouterAuthorizer: allowManagedRouterAuthorizerForTest(routerPort), probeManagedLanguageRoute: allowManagedLanguageRouteForTest},
 	)
 	if err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
@@ -5229,11 +5250,11 @@ func TestRegister_CleanupRemovesDirectEntryWithProvenManagedRouter(t *testing.T)
 	if _, stillThere := h.fakeClients.stdioEntries["cursor"]["legacy-python"]; !stillThere {
 		t.Fatalf("managed go identity authorized removal of sibling python entry without a python router entry")
 	}
-	if got := requestCount.Load(); got != 1 {
-		t.Fatalf("managed-router probe requests = %d, want 1", got)
+	if got := requestCount.Load(); got != 0 {
+		t.Fatalf("harness unexpectedly made %d route request(s)", got)
 	}
 	for _, warning := range report.Warnings {
-		if strings.Contains(warning, "managed-identity proof unavailable") {
+		if strings.Contains(warning, "keeping matching direct LSP entries") {
 			t.Fatalf("successful managed proof emitted failure warning %q", warning)
 		}
 	}
@@ -5270,7 +5291,7 @@ func TestRegister_CleanupRejectsInvalidRouterEntries(t *testing.T) {
 			}
 			return fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", stale)
 		}},
-		{name: "matching-owned", present: true, wantRemoved: true, wantRequests: 1, url: func(port int) string {
+		{name: "matching-owned", present: true, wantRemoved: true, wantRequests: 0, url: func(port int) string {
 			return fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
 		}},
 	}
@@ -5306,15 +5327,7 @@ func TestRegister_CleanupRejectsInvalidRouterEntries(t *testing.T) {
 				m,
 				ws,
 				[]string{"go"},
-				RegisterOpts{
-					Writer:  &bytes.Buffer{},
-					GUIPort: routerPort,
-					ManagedGUIIdentity: ManagedGUIIdentity{
-						Port:    routerPort,
-						PID:     expectedPID,
-						Version: expectedVersion,
-					},
-				},
+				RegisterOpts{Writer: &bytes.Buffer{}, ManagedRouterAuthorizer: allowManagedRouterAuthorizerForTest(routerPort), probeManagedLanguageRoute: allowManagedLanguageRouteForTest},
 			)
 			if err != nil {
 				t.Fatalf("registerWithManifest: %v", err)
@@ -5385,25 +5398,19 @@ func TestRegister_CleanupAliasAuthorizationForDirectEntryKinds(t *testing.T) {
 			h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
 				fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", routerPort)
 
-			expectedPID := actualPID + 1
-			if tc.authorized {
-				expectedPID = actualPID
-			}
 			m := nineLanguageManifest()
 			m.ClientBindings = nil
+			authorizer := allowManagedRouterAuthorizerForTest(routerPort)
+			if !tc.authorized {
+				authorizer = func(context.Context, int) ManagedRouterAuthorization {
+					return ManagedRouterAuthorization{FailureClass: "identity-mismatch"}
+				}
+			}
 			if _, err := mustNewAPI(t).registerWithManifest(
 				m,
 				ws,
 				[]string{"go"},
-				RegisterOpts{
-					Writer:  &bytes.Buffer{},
-					GUIPort: routerPort,
-					ManagedGUIIdentity: ManagedGUIIdentity{
-						Port:    routerPort,
-						PID:     expectedPID,
-						Version: actualVersion,
-					},
-				},
+				RegisterOpts{Writer: &bytes.Buffer{}, ManagedRouterAuthorizer: authorizer, probeManagedLanguageRoute: allowManagedLanguageRouteForTest},
 			); err != nil {
 				t.Fatalf("registerWithManifest: %v", err)
 			}
@@ -5423,8 +5430,8 @@ func TestRegister_CleanupAliasAuthorizationForDirectEntryKinds(t *testing.T) {
 			if got := h.fakeClients.backupKeepCalls["cursor"]; got != wantBackups {
 				t.Fatalf("%s backup count = %d, want %d", tc.kind, got, wantBackups)
 			}
-			if got := requests.Load(); got != 1 {
-				t.Fatalf("%s proof requests = %d, want 1", tc.kind, got)
+			if got := requests.Load(); got != 0 {
+				t.Fatalf("%s harness route requests = %d, want 0", tc.kind, got)
 			}
 		})
 	}
@@ -5499,15 +5506,7 @@ func TestRegister_CleanupCoversOptInClientRoutedThroughSharedLSPRouter(t *testin
 		m,
 		ws,
 		[]string{"go", "python"},
-		RegisterOpts{
-			Writer:  &bytes.Buffer{},
-			GUIPort: routerPort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    routerPort,
-				PID:     expectedPID,
-				Version: expectedVersion,
-			},
-		},
+		RegisterOpts{Writer: &bytes.Buffer{}, ManagedRouterAuthorizer: allowManagedRouterAuthorizerForTest(routerPort), probeManagedLanguageRoute: allowManagedLanguageRouteForTest},
 	); err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
 	}
@@ -5647,7 +5646,7 @@ func TestRegister_RelayStdioOnlyOverrideWarnsInsteadOfSilentZeroWrite(t *testing
 // at the top of Run inside the FIRST language's registerOneLanguage — after that
 // language consumed its bindings and before the second language would resolve
 // its own. Deterministic by construction: no timer, no goroutine, no race.
-func TestRegister_ClientScopeResolvedOnceForTheWholeRegistration(t *testing.T) {
+func TestRegister_EffectiveBindingsResolvedOnceForMultiLanguageCleanup(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 
@@ -5756,9 +5755,9 @@ func TestRegister_ClientScopeResolvedOnceForTheWholeRegistration(t *testing.T) {
 // in favour of a dead replacement — the very deletion the port gate exists to
 // prevent, re-entered through the port's own provenance.
 //
-// RegisterOpts.GUIPort is the seam (mirroring LSPClientRouterOpts.GUIPort), and
-// internal/gui/projects_toggle.go — the one caller that knows the live port —
-// passes s.Port().
+// RegisterOpts.ManagedRouterAuthorizer is the seam: the GUI caller owns its
+// live listener identity and authorizes only the port observed through that
+// server instance.
 //
 // Both directions are asserted; a gate that simply rejected everything would
 // pass the first assertion and fail the second:
@@ -5820,15 +5819,7 @@ func TestRegister_CleanupJudgesRouterEntriesAgainstCallerLiveGUIPort(t *testing.
 		m,
 		ws,
 		[]string{"go", "python"},
-		RegisterOpts{
-			Writer:  &bytes.Buffer{},
-			GUIPort: liveGUIPort,
-			ManagedGUIIdentity: ManagedGUIIdentity{
-				Port:    liveGUIPort,
-				PID:     expectedPID,
-				Version: expectedVersion,
-			},
-		},
+		RegisterOpts{Writer: &bytes.Buffer{}, ManagedRouterAuthorizer: allowManagedRouterAuthorizerForTest(liveGUIPort), probeManagedLanguageRoute: allowManagedLanguageRouteForTest},
 	); err != nil {
 		t.Fatalf("registerWithManifest: %v", err)
 	}
@@ -5837,11 +5828,1186 @@ func TestRegister_CleanupJudgesRouterEntriesAgainstCallerLiveGUIPort(t *testing.
 		t.Errorf("cursor's live direct `go` entry was deleted on the strength of a router entry naming the "+
 			"PERSISTED gui_server.port %d, while the caller told register the GUI is actually serving %d — "+
 			"that router entry is dead, so the client is left with no working Go LSP at all. The gate must "+
-			"resolve its port through RegisterOpts.GUIPort, not from settings alone", persistedPort, liveGUIPort)
+			"authorize the caller-owned live listener identity, not trust settings alone", persistedPort, liveGUIPort)
 	}
 	if _, stillThere := h.fakeClients.stdioEntries["cursor"]["legacy-python"]; stillThere {
 		t.Errorf("cursor's superseded direct `python` entry survived even though its router entry names the "+
 			"caller's LIVE port %d — threading the live port must not degrade into rejecting every router "+
 			"entry, or superseded direct entries duplicate the router's servers/tools forever", liveGUIPort)
+	}
+}
+
+func TestRegister_WriteReceiptsReflectActualSuccessfulAdds(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	h.fakeClients.exists["cursor"] = false
+	entryNames := map[string]string{
+		"claude-code": "mcp-language-server-go",
+		"cursor":      "must-not-be-written",
+	}
+	transaction := newRegistrationTransaction()
+	receipts, err := writeRegisteredClientEntries(
+		[]config.ClientBinding{{Client: "claude-code", URLPath: "/mcp"}, {Client: "cursor", URLPath: "/mcp"}},
+		testClientFactory(), entryNames, 9444, "go", &bytes.Buffer{}, transaction,
+	)
+	if err != nil {
+		t.Fatalf("writeRegisteredClientEntries: %v", err)
+	}
+	if len(receipts) != 1 || receipts[0].Key != (clientLanguageKey{Client: "claude-code", Language: "go"}) || receipts[0].EntryName != entryNames["claude-code"] {
+		t.Fatalf("receipts = %+v, want only the successful claude-code AddEntry", receipts)
+	}
+	if h.fakeClients.addEntryCount != 1 {
+		t.Fatalf("AddEntry calls = %d, want 1", h.fakeClients.addEntryCount)
+	}
+
+	h.fakeClients.failAddEntryCalls = 2
+	_, err = writeRegisteredClientEntries(
+		[]config.ClientBinding{{Client: "codex-cli", URLPath: "/mcp"}},
+		testClientFactory(), map[string]string{"codex-cli": "mcp-language-server-go"}, 9444, "go", &bytes.Buffer{}, transaction,
+	)
+	if err == nil {
+		t.Fatal("induced AddEntry failure returned nil error")
+	}
+	_ = transaction.Fail(err)
+}
+
+func TestRegister_ClientPresenceTransitionNeverWritesEmptyEntryName(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	before := h.fakeClients.addEntryCount
+	transaction := newRegistrationTransaction()
+	receipts, err := writeRegisteredClientEntries(
+		[]config.ClientBinding{{Client: "cursor", URLPath: "/mcp"}},
+		testClientFactory(), map[string]string{}, 9444, "go", &bytes.Buffer{}, transaction,
+	)
+	if err != nil {
+		t.Fatalf("presence-transition write: %v", err)
+	}
+	if len(receipts) != 0 || h.fakeClients.addEntryCount != before {
+		t.Fatalf("empty-name transition wrote client state: receipts=%v addCalls=%d before=%d", receipts, h.fakeClients.addEntryCount, before)
+	}
+	if outcome := transaction.Commit(); !outcome.Committed() {
+		t.Fatalf("empty write transaction commit: %v", outcome.Err)
+	}
+}
+
+func TestRegisterSupervised_EveryPostAddEntryFailureDiscardsReceipts(t *testing.T) {
+	tests := []struct {
+		name         string
+		failureStage string
+		wantErr      string
+		wantCalls    [4]int
+		wantRestores int
+	}{
+		{name: "supervisor-intent-upsert", failureStage: "upsert", wantErr: "supervisor-intent-upsert failure", wantCalls: [4]int{1, 0, 0, 0}},
+		{name: "running-intent-write", failureStage: "write", wantErr: "running-intent-write failure", wantCalls: [4]int{1, 1, 0, 0}, wantRestores: 1},
+		{name: "reconcile", failureStage: "reconcile", wantErr: "reconcile failure", wantCalls: [4]int{1, 1, 1, 0}, wantRestores: 2},
+		{name: "readiness", failureStage: "readiness", wantErr: "readiness failure", wantCalls: [4]int{1, 1, 1, 1}, wantRestores: 2},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			m := nineLanguageManifest()
+			canonical := mustCanonical(t, t.TempDir())
+			h.fakeClients.stdioEntries["claude-code"]["legacy-go"] = clients.LanguageServerStdioEntry{
+				Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+
+			var calls [4]int
+			restores := 0
+			deps := supervisorPostWriteDeps{
+				upsertIntent: func(WorkspaceEntry, string) (compensation, error) {
+					calls[0]++
+					if tt.failureStage == "upsert" {
+						return nil, errors.New("injected supervisor-intent-upsert failure")
+					}
+					return func() error {
+						restores++
+						return nil
+					}, nil
+				},
+				writeRunningIntent: func(_ string, enroll stopIntentCompensationSink) (string, error) {
+					calls[1]++
+					if tt.failureStage == "write" {
+						return "", errors.New("injected running-intent-write failure")
+					}
+					enroll("restore test running intent", func() error {
+						restores++
+						return nil
+					})
+					return "\\test-task", nil
+				},
+				reconcile: func(context.Context, bool) (ReconcileResponse, error) {
+					calls[2]++
+					if tt.failureStage == "reconcile" {
+						return ReconcileResponse{}, errors.New("injected reconcile failure")
+					}
+					return ReconcileResponse{}, nil
+				},
+				readiness: func(int, time.Duration) error {
+					calls[3]++
+					if tt.failureStage == "readiness" {
+						return errors.New("injected readiness failure")
+					}
+					return nil
+				},
+			}
+
+			var output bytes.Buffer
+			transaction := newRegistrationTransaction()
+			result, err := mustNewAPI(t).registerOneLanguageSupervised(
+				m,
+				m.Languages[2],
+				canonical,
+				WorkspaceKey(canonical),
+				"go",
+				RegisterOpts{SupervisedProxy: true, supervisorPostWriteDeps: deps, Writer: &output},
+				NewRegistry(h.regPath),
+				h.fakeSch,
+				testClientFactory(),
+				m.ClientBindings,
+				&output,
+				transaction,
+			)
+			if err != nil {
+				err = transaction.Fail(err).Err
+			}
+
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("registerOneLanguageSupervised error = %v, want %q", err, tt.wantErr)
+			}
+			if h.fakeClients.addEntryCount == 0 {
+				t.Fatal("injected failure occurred before AddEntry; test did not reach the guarded boundary")
+			}
+			if result.Entry.WorkspaceKey != "" || result.Entry.Language != "" || len(result.Receipts) != 0 {
+				t.Fatalf("post-AddEntry failure leaked outward result: %+v", result)
+			}
+			if h.fakeClients.backupKeepCalls["claude-code"] != 0 {
+				t.Fatalf("post-AddEntry failure made %d direct-cleanup backups, want 0", h.fakeClients.backupKeepCalls["claude-code"])
+			}
+			if calls != tt.wantCalls {
+				t.Fatalf("post-write calls = %v, want %v", calls, tt.wantCalls)
+			}
+			if restores != tt.wantRestores {
+				t.Fatalf("intent restore calls = %d, want %d", restores, tt.wantRestores)
+			}
+			if _, exists := h.fakeClients.stdioEntries["claude-code"]["legacy-go"]; !exists {
+				t.Fatal("post-write failure reached cleanup and removed the direct entry")
+			}
+			for clientName, entries := range h.fakeClients.entries {
+				if len(entries) != 0 {
+					t.Fatalf("rollback left provisional entries for %s: %v", clientName, entries)
+				}
+			}
+		})
+	}
+}
+
+func TestSupervisorPostWriteDeps_DefaultsToCanonicalOwners(t *testing.T) {
+	deps := normalizeSupervisorPostWriteDeps(mustNewAPI(t), supervisorPostWriteDeps{})
+	if deps.upsertIntent == nil || deps.writeRunningIntent == nil || deps.reconcile == nil || deps.readiness == nil {
+		t.Fatalf("normalized production dependencies contain a nil owner: %+v", deps)
+	}
+
+	partial := normalizeSupervisorPostWriteDeps(mustNewAPI(t), supervisorPostWriteDeps{
+		readiness: func(int, time.Duration) error { return errors.New("provided-readiness") },
+	})
+	if partial.upsertIntent == nil || partial.writeRunningIntent == nil || partial.reconcile == nil || partial.readiness == nil {
+		t.Fatalf("normalized partial dependencies contain a nil owner: %+v", partial)
+	}
+	if err := partial.readiness(1, time.Second); err == nil || err.Error() != "provided-readiness" {
+		t.Fatalf("partial readiness override = %v, want provided-readiness", err)
+	}
+}
+
+func TestSupervisorPostWriteDeps_PerCallNoCrossTalk(t *testing.T) {
+	for _, label := range []string{"alpha", "beta"} {
+		label := label
+		t.Run(label, func(t *testing.T) {
+			t.Parallel()
+			var calls atomic.Int32
+			deps := normalizeSupervisorPostWriteDeps(mustNewAPI(t), supervisorPostWriteDeps{
+				upsertIntent: func(WorkspaceEntry, string) (compensation, error) {
+					calls.Add(1)
+					return func() error { return nil }, nil
+				},
+				writeRunningIntent: func(string, stopIntentCompensationSink) (string, error) {
+					calls.Add(1)
+					return label, nil
+				},
+				reconcile: func(context.Context, bool) (ReconcileResponse, error) {
+					calls.Add(1)
+					return ReconcileResponse{}, nil
+				},
+				readiness: func(int, time.Duration) error {
+					calls.Add(1)
+					return nil
+				},
+			})
+			if _, err := deps.upsertIntent(WorkspaceEntry{}, ""); err != nil {
+				t.Fatal(err)
+			}
+			if got, err := deps.writeRunningIntent("", func(string, compensation) {}); err != nil || got != label {
+				t.Fatalf("write result = %q, %v; want %q, nil", got, err, label)
+			}
+			if _, err := deps.reconcile(context.Background(), true); err != nil {
+				t.Fatal(err)
+			}
+			if err := deps.readiness(1, time.Second); err != nil {
+				t.Fatal(err)
+			}
+			if got := calls.Load(); got != 4 {
+				t.Fatalf("per-call dependency calls = %d, want 4", got)
+			}
+		})
+	}
+}
+
+func TestCleanupDirectLSP_FailureIsolationMatrix(t *testing.T) {
+	const rawCleanupSentinel = `C:\secret\cleanup-token --password=hunter2 {raw-error}`
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	for _, clientName := range []string{"cursor", "codex-cli"} {
+		h.fakeClients.stdioEntries[clientName]["legacy-go"] = clients.LanguageServerStdioEntry{
+			Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+			Args: []string{"--lsp", "gopls", "--workspace", canonical},
+		}
+	}
+	clientsMap := testClientFactory()
+	clientsMap["cursor"] = &directCleanupInjectedErrorClient{registerClient: clientsMap["cursor"], findErr: errors.New(rawCleanupSentinel)}
+	selected := map[clientLanguageKey]bool{
+		{Client: "cursor", Language: "go"}:    true,
+		{Client: "codex-cli", Language: "go"}: true,
+	}
+	receipts := []clientWriteReceipt{
+		{Key: clientLanguageKey{Client: "cursor", Language: "go"}, EntryName: "router-go"},
+		{Key: clientLanguageKey{Client: "codex-cli", Language: "go"}, EntryName: "router-go"},
+	}
+	var scanWriter bytes.Buffer
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+		[]string{"go"}, canonical, clientsMap, selected, receipts, &scanWriter,
+		directCleanupPlanDeps{matchDirect: directLanguageServerCleanupMatches},
+	)
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
+		t.Fatal("failed cursor plan was mutated")
+	}
+	if _, exists := h.fakeClients.stdioEntries["codex-cli"]["legacy-go"]; exists {
+		t.Fatal("independent codex-cli plan was suppressed by cursor failure")
+	}
+	if h.fakeClients.backupKeepCalls["cursor"] != 0 || h.fakeClients.backupKeepCalls["codex-cli"] != 1 {
+		t.Fatalf("backup calls cursor/codex=%d/%d, want 0/1; warnings=%v", h.fakeClients.backupKeepCalls["cursor"], h.fakeClients.backupKeepCalls["codex-cli"], warnings)
+	}
+	scanPublic := strings.Join(warnings, "\n") + "\n" + scanWriter.String()
+	if strings.Contains(scanPublic, rawCleanupSentinel) || strings.Contains(scanPublic, "hunter2") {
+		t.Fatalf("scan warning leaked raw cause: warnings=%v writer=%q", warnings, scanWriter.String())
+	}
+
+	t.Run("route failure is plan local", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		canonical := mustCanonical(t, t.TempDir())
+		for _, clientName := range []string{"cursor", "codex-cli"} {
+			h.fakeClients.entries[clientName][LSPRouterEntryName("go")] = "http://127.0.0.1:19125/lsp/go/mcp"
+			h.fakeClients.entries[clientName][LSPRouterEntryName("python")] = "http://127.0.0.1:19126/lsp/python/mcp"
+			h.fakeClients.stdioEntries[clientName]["legacy-go"] = clients.LanguageServerStdioEntry{
+				Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+			h.fakeClients.stdioEntries[clientName]["legacy-python"] = clients.LanguageServerStdioEntry{
+				Name: "legacy-python", Command: "mcp-language-server", Language: "pylsp",
+				Args: []string{"--lsp", "pylsp", "--workspace", canonical},
+			}
+		}
+		warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+			map[string]config.LanguageSpec{
+				"go":     {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"},
+				"python": {Name: "python", Backend: "pylsp-mcp", LspCommand: "pylsp"},
+			},
+			[]string{"go", "python"}, canonical, testClientFactory(), nil, nil, &bytes.Buffer{},
+			directCleanupPlanDeps{
+				authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+					return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+				},
+				probeRoute: func(_ context.Context, _ int, language, _ string) managedRouteProof {
+					if language == "go" {
+						return managedRouteProof{FailureClass: "route-jsonrpc-error"}
+					}
+					return managedRouteProof{OK: true}
+				},
+				matchDirect: directLanguageServerCleanupMatches,
+			},
+		)
+		for _, clientName := range []string{"cursor", "codex-cli"} {
+			if _, exists := h.fakeClients.stdioEntries[clientName]["legacy-go"]; !exists {
+				t.Fatalf("%s go plan was removed through failed route proof", clientName)
+			}
+			if _, exists := h.fakeClients.stdioEntries[clientName]["legacy-python"]; exists {
+				t.Fatalf("%s independent python plan was suppressed; warnings=%v", clientName, warnings)
+			}
+		}
+	})
+
+	t.Run("backup failure is client local", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		canonical := mustCanonical(t, t.TempDir())
+		for _, clientName := range []string{"cursor", "codex-cli"} {
+			h.fakeClients.stdioEntries[clientName]["legacy-go"] = clients.LanguageServerStdioEntry{
+				Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+		}
+		clientsMap := testClientFactory()
+		clientsMap["cursor"] = &cleanupMutationInjectedClient{registerClient: clientsMap["cursor"], backupErr: errors.New(rawCleanupSentinel)}
+		keys := map[clientLanguageKey]bool{
+			{Client: "cursor", Language: "go"}: true, {Client: "codex-cli", Language: "go"}: true,
+		}
+		receipts := []clientWriteReceipt{
+			{Key: clientLanguageKey{Client: "cursor", Language: "go"}, EntryName: "router-go"},
+			{Key: clientLanguageKey{Client: "codex-cli", Language: "go"}, EntryName: "router-go"},
+		}
+		var backupWriter bytes.Buffer
+		warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+			map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+			[]string{"go"}, canonical, clientsMap, keys, receipts, &backupWriter,
+			directCleanupPlanDeps{matchDirect: directLanguageServerCleanupMatches},
+		)
+		if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
+			t.Fatal("backup-failed cursor entry was removed")
+		}
+		if _, exists := h.fakeClients.stdioEntries["codex-cli"]["legacy-go"]; exists {
+			t.Fatalf("independent codex client was suppressed; warnings=%v", warnings)
+		}
+		backupPublic := strings.Join(warnings, "\n") + "\n" + backupWriter.String()
+		if strings.Contains(backupPublic, rawCleanupSentinel) || strings.Contains(backupPublic, "hunter2") {
+			t.Fatalf("backup warning leaked raw cause: warnings=%v writer=%q", warnings, backupWriter.String())
+		}
+	})
+
+	t.Run("removal failure is entry local", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		canonical := mustCanonical(t, t.TempDir())
+		for _, name := range []string{"legacy-go", "legacy-go-second"} {
+			h.fakeClients.stdioEntries["cursor"][name] = clients.LanguageServerStdioEntry{
+				Name: name, Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+		}
+		clientsMap := testClientFactory()
+		clientsMap["cursor"] = &cleanupMutationInjectedClient{
+			registerClient: clientsMap["cursor"], removeErrName: "legacy-go", removeErr: errors.New(rawCleanupSentinel),
+		}
+		key := clientLanguageKey{Client: "cursor", Language: "go"}
+		var removeWriter bytes.Buffer
+		transaction := newRegistrationTransaction()
+		warnings, cleanupErr := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransaction(
+			map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+			[]string{"go"}, canonical, clientsMap, map[clientLanguageKey]bool{key: true},
+			[]clientWriteReceipt{{Key: key, EntryName: "router-go"}}, &removeWriter,
+			directCleanupPlanDeps{matchDirect: directLanguageServerCleanupMatches}, transaction,
+		)
+		if cleanupErr == nil {
+			outcome := transaction.Commit()
+			cleanupErr = outcome.Err
+		} else {
+			cleanupErr = transaction.Fail(cleanupErr).Err
+		}
+		if cleanupErr != nil {
+			t.Fatalf("entry-local removal transaction failed: %v", cleanupErr)
+		}
+		if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
+			t.Fatal("failed removal did not preserve its entry")
+		}
+		if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go-second"]; exists {
+			t.Fatalf("independent removal was suppressed; warnings=%v", warnings)
+		}
+		removePublic := strings.Join(warnings, "\n") + "\n" + removeWriter.String()
+		if strings.Contains(removePublic, rawCleanupSentinel) || strings.Contains(removePublic, "hunter2") {
+			t.Fatalf("remove warning leaked raw cause: warnings=%v writer=%q", warnings, removeWriter.String())
+		}
+	})
+}
+
+func TestCleanupDirectLSP_ClientWideIndeterminatePreservesClientAndContinuesOthers(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	for _, clientName := range []string{"cursor", "codex-cli"} {
+		h.fakeClients.stdioEntries[clientName]["legacy-go"] = clients.LanguageServerStdioEntry{
+			Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+			Args: []string{"--lsp", "gopls", "--workspace", canonical},
+		}
+	}
+	clientsMap := testClientFactory()
+	clientsMap["cursor"] = &directCleanupInjectedErrorClient{
+		registerClient: clientsMap["cursor"],
+		survivorErr:    errors.New("injected client-wide survivor scan failure"),
+	}
+	selected := map[clientLanguageKey]bool{
+		{Client: "cursor", Language: "go"}:    true,
+		{Client: "codex-cli", Language: "go"}: true,
+	}
+	receipts := []clientWriteReceipt{
+		{Key: clientLanguageKey{Client: "cursor", Language: "go"}, EntryName: "router-go"},
+		{Key: clientLanguageKey{Client: "codex-cli", Language: "go"}, EntryName: "router-go"},
+	}
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+		[]string{"go"}, canonical, clientsMap, selected, receipts, &bytes.Buffer{},
+		directCleanupPlanDeps{matchDirect: directLanguageServerCleanupMatches},
+	)
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
+		t.Fatal("client-wide-indeterminate cursor plan was mutated")
+	}
+	if _, exists := h.fakeClients.stdioEntries["codex-cli"]["legacy-go"]; exists {
+		t.Fatalf("independent codex-cli plan was suppressed; warnings=%v", warnings)
+	}
+	if !slices.ContainsFunc(warnings, func(v string) bool { return strings.HasPrefix(v, "survivor-scan-failed:") }) {
+		t.Fatalf("warnings=%v, want survivor-scan-failed discriminator", warnings)
+	}
+}
+
+func TestCleanupDirectLSP_PingOnlyServerFailsLanguageRouteOracle(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/ping" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"ok":true,"pid":1,"version":"test"}`)
+			return
+		}
+		http.NotFound(w, r)
+	})
+	canonical := mustCanonical(t, t.TempDir())
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] = fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+	h.fakeClients.stdioEntries["cursor"]["legacy-go"] = clients.LanguageServerStdioEntry{
+		Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls", "--workspace", canonical},
+	}
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+		[]string{"go"}, canonical, testClientFactory(), nil, nil, &bytes.Buffer{},
+		directCleanupPlanDeps{
+			authorizeRouter: allowManagedRouterAuthorizerForTest(port),
+			probeRoute:      probeManagedLanguageRoute,
+			matchDirect:     directLanguageServerCleanupMatches,
+		},
+	)
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
+		t.Fatal("ping-only server authorized direct-entry removal")
+	}
+	if h.fakeClients.backupKeepCalls["cursor"] != 0 || !slices.ContainsFunc(warnings, func(v string) bool { return strings.Contains(v, "route-http-status") }) {
+		t.Fatalf("ping-only result backups=%d warnings=%v", h.fakeClients.backupKeepCalls["cursor"], warnings)
+	}
+}
+
+func TestCleanupDirectLSP_RealGUIRouteToolsListPassesOracle(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	_, port := newReadinessHTTPTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/lsp/go/mcp" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		var request struct {
+			ID json.RawMessage `json:"id"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		response, err := SyntheticToolsListResponse(request.ID, "gopls-mcp")
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(response)
+	})
+	canonical := mustCanonical(t, t.TempDir())
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] = fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+	h.fakeClients.stdioEntries["cursor"]["legacy-go"] = clients.LanguageServerStdioEntry{
+		Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls", "--workspace", canonical},
+	}
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+		[]string{"go"}, canonical, testClientFactory(), nil, nil, &bytes.Buffer{},
+		directCleanupPlanDeps{
+			authorizeRouter: allowManagedRouterAuthorizerForTest(port),
+			probeRoute:      probeManagedLanguageRoute,
+			matchDirect:     directLanguageServerCleanupMatches,
+		},
+	)
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; exists {
+		t.Fatalf("proven real-route-shape cleanup did not remove entry; warnings=%v", warnings)
+	}
+	if h.fakeClients.backupKeepCalls["cursor"] != 1 {
+		t.Fatalf("backup calls=%d, want 1", h.fakeClients.backupKeepCalls["cursor"])
+	}
+}
+
+func TestCleanupDirectLSP_RevalidationFailurePreservesAffectedRouterMatches(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	const port = 9125
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] = fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+	h.fakeClients.stdioEntries["cursor"]["legacy-go"] = clients.LanguageServerStdioEntry{
+		Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls", "--workspace", canonical},
+	}
+	var authorizations, revalidations int
+	authorizer := func(context.Context, int) ManagedRouterAuthorization {
+		authorizations++
+		return ManagedRouterAuthorization{Lease: &testManagedRouterLease{
+			revalidate: func(context.Context) string {
+				revalidations++
+				return ManagedRouterFailureIdentityChanged
+			},
+		}}
+	}
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+		[]string{"go"}, canonical, testClientFactory(), nil, nil, &bytes.Buffer{},
+		directCleanupPlanDeps{
+			authorizeRouter: authorizer,
+			probeRoute:      func(context.Context, int, string, string) managedRouteProof { return managedRouteProof{OK: true} },
+			matchDirect:     directLanguageServerCleanupMatches,
+		},
+	)
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists || h.fakeClients.backupKeepCalls["cursor"] != 0 {
+		t.Fatalf("revalidation failure mutated entry: exists=%v backups=%d warnings=%v", exists, h.fakeClients.backupKeepCalls["cursor"], warnings)
+	}
+	if authorizations != 1 || revalidations != 1 {
+		t.Fatalf("lease acquisition/revalidation = %d/%d, want 1/1", authorizations, revalidations)
+	}
+}
+
+func TestCleanupDirectLSP_RouteRevalidationFailurePreservesAffectedPlanAndContinuesReceiptPlan(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	const port = 19131
+	for _, clientName := range []string{"cursor", "claude-code"} {
+		h.fakeClients.stdioEntries[clientName]["legacy-go"] = clients.LanguageServerStdioEntry{
+			Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+			Args: []string{"--lsp", "gopls", "--workspace", canonical},
+		}
+	}
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] = fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+	authorizerCalls, routeCalls := 0, 0
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		goCleanupSpecForTest(t), []string{"go"}, canonical, testClientFactory(),
+		map[clientLanguageKey]bool{{Client: "claude-code", Language: "go"}: true},
+		[]clientWriteReceipt{{Key: clientLanguageKey{Client: "claude-code", Language: "go"}, EntryName: "legacy-go"}},
+		&bytes.Buffer{}, directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				authorizerCalls++
+				return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+			},
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				routeCalls++
+				if routeCalls == 1 {
+					return managedRouteProof{OK: true}
+				}
+				return managedRouteProof{FailureClass: "route-jsonrpc-error"}
+			},
+			matchDirect: directLanguageServerCleanupMatches,
+		},
+	)
+	if authorizerCalls != 1 || routeCalls != 2 {
+		t.Fatalf("revalidation calls authorizer/route=%d/%d, want 1/2 when post-backup route proof fails", authorizerCalls, routeCalls)
+	}
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists || h.fakeClients.backupKeepCalls["cursor"] != 1 {
+		t.Fatalf("route-revalidation failure mutated router plan: exists=%v backups=%d", exists, h.fakeClients.backupKeepCalls["cursor"])
+	}
+	if _, exists := h.fakeClients.stdioEntries["claude-code"]["legacy-go"]; exists || h.fakeClients.backupKeepCalls["claude-code"] != 1 {
+		t.Fatalf("independent receipt plan did not proceed: exists=%v backups=%d", exists, h.fakeClients.backupKeepCalls["claude-code"])
+	}
+	want := "route-jsonrpc-error: affected_plans=1 [client=cursor,language=go,port=19131]; keeping matching direct LSP entries"
+	if !slices.Contains(warnings, want) {
+		t.Fatalf("warnings=%v, want %q", warnings, want)
+	}
+}
+
+func TestManagedCleanup_TakeoverCheckpointMatrix(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	const (
+		goPort     = 19131
+		pythonPort = 19132
+	)
+	for language, port := range map[string]int{"go": goPort, "python": pythonPort} {
+		h.fakeClients.entries["cursor"][LSPRouterEntryName(language)] = fmt.Sprintf("http://127.0.0.1:%d/lsp/%s/mcp", port, language)
+	}
+	for name, entry := range map[string]clients.LanguageServerStdioEntry{
+		"legacy-go": {
+			Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+			Args: []string{"--lsp", "gopls", "--workspace", canonical},
+		},
+		"legacy-python": {
+			Name: "legacy-python", Command: "mcp-language-server", Language: "pylsp",
+			Args: []string{"--lsp", "pylsp", "--workspace", canonical},
+		},
+		"legacy-rust": {
+			Name: "legacy-rust", Command: "mcp-language-server", Language: "rust-analyzer",
+			Args: []string{"--lsp", "rust-analyzer", "--workspace", canonical},
+		},
+	} {
+		h.fakeClients.stdioEntries["cursor"][name] = entry
+	}
+
+	events := []string{}
+	clientsMap := testClientFactory()
+	clientsMap["cursor"] = &cleanupMutationLedgerClient{registerClient: clientsMap["cursor"], events: &events}
+	authorizerCalls := map[int]int{}
+	revalidationCalls := map[int]int{}
+	routeCalls := 0
+	replacementInjected := false
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		map[string]config.LanguageSpec{
+			"go":     {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"},
+			"python": {Name: "python", Backend: "pylsp-mcp", LspCommand: "pylsp"},
+			"rust":   {Name: "rust", Backend: "rust-mcp", LspCommand: "rust-analyzer"},
+		},
+		[]string{"go", "python", "rust"}, canonical, clientsMap,
+		map[clientLanguageKey]bool{{Client: "cursor", Language: "rust"}: true},
+		[]clientWriteReceipt{{Key: clientLanguageKey{Client: "cursor", Language: "rust"}, EntryName: "router-rust"}},
+		&bytes.Buffer{}, directCleanupPlanDeps{
+			authorizeRouter: func(_ context.Context, port int) ManagedRouterAuthorization {
+				authorizerCalls[port]++
+				events = append(events, fmt.Sprintf("authorize:%d", port))
+				return ManagedRouterAuthorization{Lease: &testManagedRouterLease{
+					revalidate: func(context.Context) string {
+						revalidationCalls[port]++
+						events = append(events, fmt.Sprintf("revalidate:%d:%d", port, revalidationCalls[port]))
+						if port == goPort && replacementInjected {
+							return ManagedRouterFailureIdentityChanged
+						}
+						return ""
+					},
+				}}
+			},
+			probeRoute: func(_ context.Context, port int, language, _ string) managedRouteProof {
+				routeCalls++
+				events = append(events, fmt.Sprintf("route:%s:%d:%d", language, port, routeCalls))
+				if routeCalls == 4 {
+					replacementInjected = true
+					events = append(events, "route:settled")
+				}
+				return managedRouteProof{OK: true}
+			},
+			matchDirect: directLanguageServerCleanupMatches,
+		},
+	)
+
+	if routeCalls != 7 ||
+		authorizerCalls[goPort] != 1 ||
+		authorizerCalls[pythonPort] != 1 ||
+		revalidationCalls[goPort] != 3 ||
+		revalidationCalls[pythonPort] != 5 {
+		t.Fatalf(
+			"proof calls routes=%d authorizer=%v revalidation=%v, want routes=7 authorizer=1/port revalidation=go:3 python:5; events=%v",
+			routeCalls, authorizerCalls, revalidationCalls, events,
+		)
+	}
+	wantTail := []string{
+		"route:settled",
+		fmt.Sprintf("revalidate:%d:3", goPort),
+	}
+	settled := slices.Index(events, "route:settled")
+	if settled < 0 || settled+len(wantTail) > len(events) {
+		t.Fatalf("missing route-settled/takeover boundary; events=%v", events)
+	}
+	if got := events[settled : settled+len(wantTail)]; !slices.Equal(got, wantTail) {
+		t.Fatalf("takeover validation block = %v, want %v; full events=%v", got, wantTail, events)
+	}
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
+		t.Fatal("replacement after route settlement removed the affected go entry")
+	}
+	for _, name := range []string{"legacy-python", "legacy-rust"} {
+		if _, exists := h.fakeClients.stdioEntries["cursor"][name]; exists {
+			t.Fatalf("independent eligible plan %q did not continue; warnings=%v events=%v", name, warnings, events)
+		}
+	}
+	if h.fakeClients.backupKeepCalls["cursor"] != 1 || slices.Contains(events, "remove:legacy-go") {
+		t.Fatalf("mutation batch backup=%d events=%v, want one backup and zero affected-go removals", h.fakeClients.backupKeepCalls["cursor"], events)
+	}
+	wantWarning := "identity-changed: affected_plans=1 [client=cursor,language=go,port=19131]; keeping matching direct LSP entries"
+	if !slices.Contains(warnings, wantWarning) {
+		t.Fatalf("warnings=%v, want %q", warnings, wantWarning)
+	}
+}
+
+func TestManagedCleanup_LeaseFinalizerFailureRollsBack(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	const (
+		port      = 19135
+		entryName = "legacy-go-close-failure"
+	)
+	h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
+		fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+	h.fakeClients.stdioEntries["cursor"][entryName] = clients.LanguageServerStdioEntry{
+		Name: entryName, Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls", "--workspace", canonical},
+	}
+	closeErr := errors.New("injected lease close failure")
+	closeCalls := 0
+	lease := &testManagedRouterLease{
+		close: func() error {
+			closeCalls++
+			return closeErr
+		},
+	}
+	var output bytes.Buffer
+	transaction := newRegistrationTransaction()
+	warnings, err := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransaction(
+		goCleanupSpecForTest(t),
+		[]string{"go"},
+		canonical,
+		testClientFactory(),
+		nil,
+		nil,
+		&output,
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				return ManagedRouterAuthorization{Lease: lease}
+			},
+			probeRoute:  func(context.Context, int, string, string) managedRouteProof { return managedRouteProof{OK: true} },
+			matchDirect: directLanguageServerCleanupMatches,
+		},
+		transaction,
+	)
+	if err != nil {
+		t.Fatalf("cleanup before settlement: %v", err)
+	}
+	if _, exists := h.fakeClients.stdioEntries["cursor"][entryName]; exists {
+		t.Fatal("test did not reach destructive removal before lease settlement")
+	}
+	outcome := transaction.Commit()
+	if outcome.State != registrationTransactionRolledBack || !errors.Is(outcome.Err, closeErr) {
+		t.Fatalf("outcome = %+v, want rolled-back lease close failure", outcome)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("lease close calls = %d, want exactly 1", closeCalls)
+	}
+	if _, exists := h.fakeClients.stdioEntries["cursor"][entryName]; !exists {
+		t.Fatal("lease close failure did not restore the removed direct entry")
+	}
+	if output.Len() != 0 {
+		t.Fatalf("lease close failure exposed success output: %q", output.String())
+	}
+	if len(warnings) != 0 {
+		t.Fatalf("unexpected cleanup warnings before settlement: %v", warnings)
+	}
+}
+
+type managedRouteDoerFunc func(*http.Request) (*http.Response, error)
+
+func (f managedRouteDoerFunc) Do(req *http.Request) (*http.Response, error) { return f(req) }
+
+type managedRouteReadCloser struct {
+	reader io.Reader
+	closed *bool
+}
+
+func (r *managedRouteReadCloser) Read(p []byte) (int, error) { return r.reader.Read(p) }
+func (r *managedRouteReadCloser) Close() error {
+	*r.closed = true
+	return nil
+}
+
+type managedRouteErrorReader struct{}
+
+func (managedRouteErrorReader) Read([]byte) (int, error) { return 0, errors.New("read sentinel") }
+
+func TestProbeManagedLanguageRoute_RefusalMatrix(t *testing.T) {
+	type responseSpec struct {
+		status      int
+		contentType string
+		body        func(string) string
+		readErr     bool
+	}
+	exact := func(id string) string {
+		response, err := SyntheticToolsListResponse(json.RawMessage(strconv.Quote(id)), "gopls-mcp")
+		if err != nil {
+			t.Fatalf("synthetic response: %v", err)
+		}
+		return string(response)
+	}
+	base := responseSpec{status: http.StatusOK, contentType: "application/json", body: exact}
+	tests := []struct {
+		name         string
+		port         int
+		backend      string
+		entropy      io.Reader
+		catalog      func(string) (ToolCatalog, bool)
+		response     responseSpec
+		transportErr error
+		want         string
+		wantOK       bool
+		wantDoCalls  int
+	}{
+		{name: "invalid port", port: 0, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: base, want: "route-transport"},
+		{name: "entropy error", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(nil), response: base, want: "route-transport"},
+		{name: "transport refused", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: base, transportErr: errors.New("refused"), want: "route-transport", wantDoCalls: 1},
+		{name: "response read error", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", readErr: true}, want: "route-transport", wantDoCalls: 1},
+		{name: "unknown catalog", port: 9125, backend: "unknown", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: base, want: "route-catalog-mismatch"},
+		{name: "expected catalog missing", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), catalog: func(string) (ToolCatalog, bool) { return ToolCatalog{}, true }, response: base, want: "route-catalog-mismatch"},
+		{name: "expected catalog duplicate", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), catalog: func(string) (ToolCatalog, bool) {
+			return ToolCatalog{Tools: []ToolSchema{{Name: "dup"}, {Name: "dup"}}}, true
+		}, response: base, want: "route-catalog-mismatch", wantDoCalls: 1},
+		{name: "created with exact body", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: http.StatusCreated, contentType: "application/json", body: exact}, want: "route-http-status", wantDoCalls: 1},
+		{name: "redirect", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 302, contentType: "application/json", body: func(string) string { return `{}` }}, want: "route-http-status", wantDoCalls: 1},
+		{name: "non-2xx", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 503, contentType: "application/json", body: func(string) string { return `{}` }}, want: "route-http-status", wantDoCalls: 1},
+		{name: "missing content type", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, body: exact}, want: "route-content-type", wantDoCalls: 1},
+		{name: "malformed content type", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json; =", body: exact}, want: "route-content-type", wantDoCalls: 1},
+		{name: "non-json content type", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "text/plain", body: exact}, want: "route-content-type", wantDoCalls: 1},
+		{name: "oversized", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(string) string { return strings.Repeat("x", managedRouterRouteBodyMax+1) }}, want: "route-response-too-large", wantDoCalls: 1},
+		{name: "malformed json", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(string) string { return `{` }}, want: "route-malformed", wantDoCalls: 1},
+		{name: "trailing object", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string { return exact(id) + `{}` }}, want: "route-malformed", wantDoCalls: 1},
+		{name: "wrong jsonrpc", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string {
+			return fmt.Sprintf(`{"jsonrpc":"1.0","id":%q,"result":{"tools":[{"name":"go_workspace"}]}}`, id)
+		}}, want: "route-malformed", wantDoCalls: 1},
+		{name: "missing id", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(string) string { return `{"jsonrpc":"2.0","result":{"tools":[{"name":"go_workspace"}]}}` }}, want: "route-id-mismatch", wantDoCalls: 1},
+		{name: "wrong id type", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(string) string { return `{"jsonrpc":"2.0","id":1,"result":{"tools":[{"name":"go_workspace"}]}}` }}, want: "route-id-mismatch", wantDoCalls: 1},
+		{name: "wrong id value", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(string) string {
+			return `{"jsonrpc":"2.0","id":"wrong","result":{"tools":[{"name":"go_workspace"}]}}`
+		}}, want: "route-id-mismatch", wantDoCalls: 1},
+		{name: "jsonrpc error", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string {
+			return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"error":{"code":-1},"result":{"tools":[]}}`, id)
+		}}, want: "route-jsonrpc-error", wantDoCalls: 1},
+		{name: "missing tools", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string { return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{}}`, id) }}, want: "route-tools-invalid", wantDoCalls: 1},
+		{name: "blank tool", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string {
+			return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"tools":[{"name":" "}]}}`, id)
+		}}, want: "route-tools-invalid", wantDoCalls: 1},
+		{name: "duplicate tool", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string {
+			return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"tools":[{"name":"go_workspace"},{"name":"go_workspace"}]}}`, id)
+		}}, want: "route-tools-invalid", wantDoCalls: 1},
+		{name: "unknown tool", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string {
+			return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"tools":[{"name":"unknown"}]}}`, id)
+		}}, want: "route-tools-invalid", wantDoCalls: 1},
+		{name: "incomplete catalog", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: responseSpec{status: 200, contentType: "application/json", body: func(id string) string {
+			return fmt.Sprintf(`{"jsonrpc":"2.0","id":%q,"result":{"tools":[{"name":"go_workspace"}]}}`, id)
+		}}, want: "route-catalog-mismatch", wantDoCalls: 1},
+		{name: "success", port: 9125, backend: "gopls-mcp", entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), response: base, wantOK: true, wantDoCalls: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			doCalls, closed := 0, false
+			doer := managedRouteDoerFunc(func(req *http.Request) (*http.Response, error) {
+				doCalls++
+				if tc.transportErr != nil {
+					return nil, tc.transportErr
+				}
+				var request struct {
+					ID string `json:"id"`
+				}
+				if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
+					t.Fatalf("decode request: %v", err)
+				}
+				var reader io.Reader
+				if tc.response.readErr {
+					reader = managedRouteErrorReader{}
+				} else {
+					reader = strings.NewReader(tc.response.body(request.ID))
+				}
+				return &http.Response{StatusCode: tc.response.status, Header: http.Header{"Content-Type": []string{tc.response.contentType}}, Body: &managedRouteReadCloser{reader: reader, closed: &closed}}, nil
+			})
+			catalog := tc.catalog
+			if catalog == nil {
+				catalog = ToolCatalogForBackend
+			}
+			got := probeManagedLanguageRouteWithDeps(context.Background(), tc.port, "go", tc.backend, managedRouteProbeDeps{do: doer, entropy: tc.entropy, catalog: catalog})
+			if got.OK != tc.wantOK || got.FailureClass != tc.want {
+				t.Fatalf("proof=%+v, want ok=%v class=%q", got, tc.wantOK, tc.want)
+			}
+			if doCalls != tc.wantDoCalls {
+				t.Fatalf("Do calls=%d, want %d", doCalls, tc.wantDoCalls)
+			}
+			if doCalls > 0 && tc.transportErr == nil && !closed {
+				t.Fatal("response body was not closed")
+			}
+		})
+	}
+}
+
+func TestCleanupDirectLSP_Alternate2xxRouteRefusalDoesNotMutate(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     int
+		wantMutate bool
+	}{
+		{name: "201 refuses", status: http.StatusCreated},
+		{name: "200 authorizes", status: http.StatusOK, wantMutate: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			canonical := mustCanonical(t, t.TempDir())
+			const (
+				port      = 19134
+				entryName = "legacy-go-exact-status"
+			)
+			h.fakeClients.entries["cursor"][LSPRouterEntryName("go")] =
+				fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+			h.fakeClients.stdioEntries["cursor"][entryName] = clients.LanguageServerStdioEntry{
+				Name: entryName, Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+			var mutationEvents []string
+			client := &cleanupMutationLedgerClient{
+				registerClient: testClientFactory()["cursor"],
+				events:         &mutationEvents,
+			}
+			probe := func(ctx context.Context, candidatePort int, language, backend string) managedRouteProof {
+				doer := managedRouteDoerFunc(func(req *http.Request) (*http.Response, error) {
+					var request struct {
+						ID string `json:"id"`
+					}
+					if err := json.NewDecoder(req.Body).Decode(&request); err != nil {
+						t.Fatalf("decode route request: %v", err)
+					}
+					body, err := SyntheticToolsListResponse(json.RawMessage(strconv.Quote(request.ID)), backend)
+					if err != nil {
+						t.Fatalf("synthetic tools/list response: %v", err)
+					}
+					return &http.Response{
+						StatusCode: tc.status,
+						Header:     http.Header{"Content-Type": []string{"application/json"}},
+						Body:       io.NopCloser(bytes.NewReader(body)),
+					}, nil
+				})
+				return probeManagedLanguageRouteWithDeps(ctx, candidatePort, language, backend, managedRouteProbeDeps{
+					do: doer, entropy: bytes.NewReader(make([]byte, managedRouterRequestIDBytes)), catalog: ToolCatalogForBackend,
+				})
+			}
+			warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+				goCleanupSpecForTest(t), []string{"go"}, canonical,
+				map[string]registerClient{"cursor": client}, nil, nil, &bytes.Buffer{},
+				directCleanupPlanDeps{
+					authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+						return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+					},
+					probeRoute: probe, matchDirect: directLanguageServerCleanupMatches,
+				},
+			)
+			_, stillThere := h.fakeClients.stdioEntries["cursor"][entryName]
+			if tc.wantMutate {
+				if stillThere || !slices.Equal(mutationEvents, []string{"backup", "remove:" + entryName}) {
+					t.Fatalf("200 mutation state: stillThere=%v events=%v warnings=%v", stillThere, mutationEvents, warnings)
+				}
+				return
+			}
+			if !stillThere || len(mutationEvents) != 0 || len(warnings) != 1 || !strings.HasPrefix(warnings[0], "route-http-status:") {
+				t.Fatalf("201 refusal state: stillThere=%v events=%v warnings=%v", stillThere, mutationEvents, warnings)
+			}
+		})
+	}
+}
+
+func TestCleanupDirectLSP_ProofWarningAggregatesAllPlansByClass(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	canonical := mustCanonical(t, t.TempDir())
+	const port = 19132
+	for _, clientName := range []string{"cursor", "codex-cli"} {
+		h.fakeClients.entries[clientName][LSPRouterEntryName("go")] = fmt.Sprintf("http://127.0.0.1:%d/lsp/go/mcp", port)
+		h.fakeClients.stdioEntries[clientName]["legacy-go"] = clients.LanguageServerStdioEntry{Name: "legacy-go", Command: "mcp-language-server", Language: "gopls", Args: []string{"--lsp", "gopls", "--workspace", canonical}}
+	}
+	var writer bytes.Buffer
+	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		goCleanupSpecForTest(t), []string{"go"}, canonical, testClientFactory(), nil, nil, &writer,
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+			},
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				return managedRouteProof{FailureClass: "route-jsonrpc-error"}
+			},
+			matchDirect: directLanguageServerCleanupMatches,
+		},
+	)
+	want := "route-jsonrpc-error: affected_plans=2 [client=codex-cli,language=go,port=19132; client=cursor,language=go,port=19132]; keeping matching direct LSP entries"
+	assertCleanupWarningCount(t, warnings, writer.String(), want, 1, 1)
+
+	rawSentinel := `C:\\secret\\token --password=hunter2 {raw-body}`
+	warnings = mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		goCleanupSpecForTest(t), []string{"go"}, canonical, map[string]registerClient{"cursor": testClientFactory()["cursor"]}, nil, nil, &bytes.Buffer{},
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				return ManagedRouterAuthorization{FailureClass: rawSentinel}
+			},
+			probeRoute:  func(context.Context, int, string, string) managedRouteProof { return managedRouteProof{OK: true} },
+			matchDirect: directLanguageServerCleanupMatches,
+		},
+	)
+	if len(warnings) != 1 || strings.Contains(warnings[0], rawSentinel) || strings.Contains(warnings[0], "hunter2") || !strings.HasPrefix(warnings[0], "identity-unavailable:") {
+		t.Fatalf("unsanitized or incomplete proof aggregate: %v", warnings)
+	}
+
+	warnings = mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+		goCleanupSpecForTest(t), []string{"go"}, canonical, map[string]registerClient{"cursor": testClientFactory()["cursor"]}, nil, nil, &bytes.Buffer{},
+		directCleanupPlanDeps{
+			authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+				return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+			},
+			probeRoute: func(context.Context, int, string, string) managedRouteProof {
+				return managedRouteProof{FailureClass: rawSentinel}
+			},
+			matchDirect: directLanguageServerCleanupMatches,
+		},
+	)
+	if len(warnings) != 1 || strings.Contains(warnings[0], rawSentinel) || strings.Contains(warnings[0], "hunter2") || !strings.HasPrefix(warnings[0], "route-transport:") {
+		t.Fatalf("unsafe route fallback aggregate: %v", warnings)
+	}
+}
+
+func TestCleanupDirectLSP_RouterReadFailureWithZeroDirectCandidatesIsSilent(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		matches  []clients.LanguageServerStdioEntry
+		wantWarn bool
+	}{
+		{name: "zero candidates"},
+		{name: "one candidate", matches: []clients.LanguageServerStdioEntry{{Name: "legacy-go", Language: "gopls"}}, wantWarn: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			h.fakeClients.failGetEntry["cursor"] = true
+			authorizerCalls, routeCalls, matcherCalls := 0, 0, 0
+			warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+				goCleanupSpecForTest(t), []string{"go"}, mustCanonical(t, t.TempDir()),
+				map[string]registerClient{"cursor": testClientFactory()["cursor"]}, nil, nil, &bytes.Buffer{},
+				directCleanupPlanDeps{
+					authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+						authorizerCalls++
+						return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+					},
+					probeRoute: func(context.Context, int, string, string) managedRouteProof {
+						routeCalls++
+						return managedRouteProof{OK: true}
+					},
+					matchDirect: func(registerClient, string, map[string]bool, string) directCleanupMatchResult {
+						matcherCalls++
+						return directCleanupMatchResult{matches: tc.matches, complete: true}
+					},
+				},
+			)
+			if matcherCalls != 1 || authorizerCalls != 0 || routeCalls != 0 || h.fakeClients.backupKeepCalls["cursor"] != 0 {
+				t.Fatalf("calls matcher/authorizer/route/backup=%d/%d/%d/%d", matcherCalls, authorizerCalls, routeCalls, h.fakeClients.backupKeepCalls["cursor"])
+			}
+			if tc.wantWarn != (len(warnings) == 1) {
+				t.Fatalf("warnings=%v, wantWarn=%v", warnings, tc.wantWarn)
+			}
+			if !tc.wantWarn && len(warnings) != 0 {
+				t.Fatalf("zero-candidate plan emitted warning: %v", warnings)
+			}
+		})
+	}
+}
+
+func TestRegisterReportJSONExactKeys(t *testing.T) {
+	entry := WorkspaceEntry{WorkspaceKey: "key", WorkspacePath: "path", Language: "go", Backend: "gopls-mcp", Port: 9125, TaskName: "task", ClientEntries: map[string]string{"cursor": "entry"}, WeeklyRefresh: true, Lifecycle: "ready", LastMaterializedAt: time.Unix(1, 0).UTC(), LastToolsCallAt: time.Unix(2, 0).UTC(), LastError: "err", RegisteredAt: time.Unix(3, 0).UTC(), RegisteredVia: "manual", Languages: []string{"go"}}
+	for _, tc := range []struct {
+		name    string
+		report  RegisterReport
+		wantTop []string
+	}{
+		{name: "clean", report: RegisterReport{Workspace: "path", WorkspaceKey: "key", Entries: []WorkspaceEntry{entry}}, wantTop: []string{"entries", "workspace", "workspace_key"}},
+		{name: "warning", report: RegisterReport{Workspace: "path", WorkspaceKey: "key", Entries: []WorkspaceEntry{entry}, Warnings: []string{"warning"}}, wantTop: []string{"entries", "warnings", "workspace", "workspace_key"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := json.Marshal(tc.report)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var decoded map[string]any
+			if err := json.Unmarshal(raw, &decoded); err != nil {
+				t.Fatal(err)
+			}
+			if got := sortedAnyMapKeys(decoded); !slices.Equal(got, tc.wantTop) {
+				t.Fatalf("top keys=%v want=%v", got, tc.wantTop)
+			}
+			entries := decoded["entries"].([]any)
+			nested := entries[0].(map[string]any)
+			wantNested := []string{"Backend", "ClientEntries", "Language", "Languages", "LastError", "LastMaterializedAt", "LastToolsCallAt", "Lifecycle", "Port", "RegisteredAt", "RegisteredVia", "TaskName", "WeeklyRefresh", "WorkspaceKey", "WorkspacePath"}
+			if got := sortedAnyMapKeys(nested); !slices.Equal(got, wantNested) {
+				t.Fatalf("entry keys=%v want=%v", got, wantNested)
+			}
+		})
+	}
+}
+
+func sortedAnyMapKeys(values map[string]any) []string {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+type orderedCleanupClient struct {
+	registerClient
+	calls     *[]string
+	backupErr error
+}
+
+func (c *orderedCleanupClient) BackupKeep(int) (string, error) {
+	*c.calls = append(*c.calls, "backup")
+	if c.backupErr != nil {
+		return "", c.backupErr
+	}
+	return "/backup/test", nil
+}
+
+func (c *orderedCleanupClient) RemoveEntry(name string) error {
+	*c.calls = append(*c.calls, "remove:"+name)
+	return c.registerClient.RemoveEntry(name)
+}
+
+func TestCleanupDirectLSP_BackupBeforeRemovePerClient(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		backupErr error
+		wantCalls []string
+	}{
+		{name: "success", wantCalls: []string{"backup", "remove:legacy-go"}},
+		{name: "backup failure", backupErr: errors.New("injected backup failure"), wantCalls: []string{"backup"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			canonical := mustCanonical(t, t.TempDir())
+			h.fakeClients.stdioEntries["cursor"]["legacy-go"] = clients.LanguageServerStdioEntry{
+				Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+				Args: []string{"--lsp", "gopls", "--workspace", canonical},
+			}
+			clientsMap := testClientFactory()
+			var calls []string
+			clientsMap["cursor"] = &orderedCleanupClient{registerClient: clientsMap["cursor"], calls: &calls, backupErr: tc.backupErr}
+			key := clientLanguageKey{Client: "cursor", Language: "go"}
+			mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+				map[string]config.LanguageSpec{"go": {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"}},
+				[]string{"go"}, canonical, clientsMap, map[clientLanguageKey]bool{key: true},
+				[]clientWriteReceipt{{Key: key, EntryName: "router-go"}}, &bytes.Buffer{},
+				directCleanupPlanDeps{matchDirect: directLanguageServerCleanupMatches},
+			)
+			if !slices.Equal(calls, tc.wantCalls) {
+				t.Fatalf("calls=%v, want %v", calls, tc.wantCalls)
+			}
+		})
 	}
 }

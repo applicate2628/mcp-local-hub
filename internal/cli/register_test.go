@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -60,6 +62,26 @@ func TestRegisterCmd_HasSupervisedFlag(t *testing.T) {
 	}
 	if flag.DefValue != "false" {
 		t.Errorf("--supervised default = %q, want false", flag.DefValue)
+	}
+}
+
+func TestRegisterManagedRouterAuthorizerDiscoveryDoesNotCreateState(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("LOCALAPPDATA", base)
+	t.Setenv("XDG_STATE_HOME", base)
+	stateDir := filepath.Join(base, "mcp-local-hub")
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: state dir exists or stat failed unexpectedly: %v", err)
+	}
+	authorizer := registerManagedRouterAuthorizer()
+	if authorizer == nil {
+		t.Fatal("register managed-router authorizer is nil")
+	}
+	if got := authorizer(context.Background(), 0); got.Lease != nil || got.FailureClass != "port-invalid" {
+		t.Fatalf("invalid-port authorization = %+v", got)
+	}
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("read-only authorizer discovery created state dir or stat failed unexpectedly: %v", err)
 	}
 }
 
@@ -147,7 +169,7 @@ func TestRegisterCmd_SchedulerCapableRegisterSkipsSupervisorEnsure(t *testing.T)
 	}
 }
 
-func TestRegisterCmd_PrintsWarningsOnSuccess(t *testing.T) {
+func TestRegisterCLI_RetainsRawOperatorDiagnostic(t *testing.T) {
 	c := newRegisterCmdReal()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
