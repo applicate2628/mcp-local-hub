@@ -1724,6 +1724,45 @@ verdict from the long-lived GUI is the one that matters, and the Dashboard shows
 it as a persistent banner; the remedy there is to restart mcphub, never to re-run
 recovery.
 
+The Dashboard adds a safety envelope around this existing recovery path; it
+does not own or retry daemon recovery. The frontend posts the operator's raw
+task name unchanged, and the GUI route performs the existing one-time
+canonicalization before reserving a correlation and calling the backend. Before
+any destructive action, the route durably reserves a complete version-4
+Universally Unique Identifier (UUID) correlation in
+`daemon-recovery-occurrences.json`. The compact registry retains at most 64
+receipts and stores only the exact canonical task name, correlation, terminal
+status, store generation, and commit-state evidence; it is not an outbox and never
+stores an executable instruction. `termination_committed` is propagated from
+the backend's actual termination boundary. If the terminal receipt cannot be
+made durable, the route returns `409 RECOVER_OUTCOME_UNCERTAIN` and never
+reports fallback success. Before releasing its process-local store mutex, the
+adapter installs a generation-keyed uncertainty overlay. Lookup, exact replay,
+snapshot, and acknowledgement use that one effective resolver, so the same
+process cannot expose the old durable `in_flight` row after reporting
+`uncertain`. A single inode-anchored read may prove an exact terminal record that
+reached disk despite a write-path error; neither the terminal write nor daemon
+recovery is retried. On restart, any remaining durable `in_flight` row becomes
+`uncertain`.
+
+Occurrence schema version 1 accepts only the finite status, authorization,
+backend recovery evidence, and persisted HTTP-error owners. Unknown values fail
+closed during startup decode and before active writes without replacing the
+invalid file. Rollback must not delete this store or reinterpret an unresolved
+receipt as retry permission. See
+[`2026-07-30-daemon-recovery-occurrence-fence`](work-items/decisions/2026-07-30-daemon-recovery-occurrence-fence.md).
+
+Server-Sent Events remain a lossy hint. The Dashboard therefore performs
+bounded `GET /api/daemon/recover/audit-lock-state` reconciliation on mount, stream
+open/reconnect, foreground visibility, and every 60 seconds, with an eight
+second request timeout and monotonic revision checks. A committed success or
+not-committed receipt is acknowledged only after a fresh daemon-status read;
+committed-error and uncertain receipts require an explicit operator
+acknowledgement. Reconciliation never issues a second destructive `POST`. The
+pending map is keyed by canonical task: the same task stays fenced, while a
+different eligible task can proceed through the backend's existing reservation
+and unresolved-task checks. The Dashboard has no process-wide recovery veto.
+
 `POST /api/daemon/respawn {force:true}` remains the GUI/programmatic
 equivalent of step 2 (without the port-squatter reap).
 

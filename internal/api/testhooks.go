@@ -11,9 +11,11 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -112,6 +114,47 @@ func SetTestCanonicalMcphubPath(path string) (restore func()) {
 // canonicalMcphubPath() would return after SetTestCanonicalMcphubPath.
 func MCPHubBinaryName() string {
 	return mcphubShortName
+}
+
+// SetInstallAutostartFixtureForTest replaces the install-time scheduler and
+// autostart seams for a cross-package test. The install owner lives in this
+// package, so callers must use this composite fixture rather than creating a
+// GUI-local scheduler bypass. The returned closure restores all prior bindings
+// exactly once.
+//
+// Production callers never invoke this helper. Nil inputs are test setup errors
+// and panic before any install path can observe a partial fixture.
+func SetInstallAutostartFixtureForTest(
+	schedulerFactory func() (scheduler.Scheduler, error),
+	factory func() (autostart.Backend, error),
+	startOwner func() error,
+) (restore func()) {
+	if !testing.Testing() {
+		panic("api.SetInstallAutostartFixtureForTest called outside a test binary — test-only hook")
+	}
+	if schedulerFactory == nil {
+		panic("api.SetInstallAutostartFixtureForTest called with nil scheduler factory")
+	}
+	if factory == nil {
+		panic("api.SetInstallAutostartFixtureForTest called with nil factory")
+	}
+	if startOwner == nil {
+		panic("api.SetInstallAutostartFixtureForTest called with nil start owner")
+	}
+	origSchedulerFactory := schedulerFactoryFn
+	origFactory := installAutostartBackendFactoryFn
+	origStartOwner := installAutostartOwnerStartFn
+	schedulerFactoryFn = schedulerFactory
+	installAutostartBackendFactoryFn = factory
+	installAutostartOwnerStartFn = startOwner
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			schedulerFactoryFn = origSchedulerFactory
+			installAutostartBackendFactoryFn = origFactory
+			installAutostartOwnerStartFn = origStartOwner
+		})
+	}
 }
 
 // SetDaemonStateRootForTest overrides the per-user state directory

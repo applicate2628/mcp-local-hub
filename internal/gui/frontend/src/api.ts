@@ -757,6 +757,7 @@ export const DAEMON_RECOVER_ERROR_CODES = [
   "RECOVER_OCCURRENCE_CONSUMED",
   "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
   "RECOVER_RECEIPT_IN_FLIGHT",
+  "RECOVER_OUTCOME_UNCERTAIN",
 ] as const;
 
 export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number];
@@ -782,13 +783,17 @@ export type AuditLockReceiptStatus =
   | "committed_success"
   | "committed_error"
   | "not_committed"
+  | "uncertain"
   | "consumed";
 
 export interface AuditLockReceipt {
   attempt_id: string;
   occurrence_id: string;
+  server_instance: string;
+  task_name: string;
   status: AuditLockReceiptStatus;
   lock_authorization: "none" | "current_truth" | "uncertain";
+  termination_commit_state: "committed" | "not_committed" | "unknown";
 }
 
 export interface AuditLockSnapshot {
@@ -797,6 +802,7 @@ export interface AuditLockSnapshot {
   revision: number;
   state: AuditLockState;
   recovery_receipt: AuditLockReceipt | null;
+  recovery_receipts: AuditLockReceipt[];
 }
 
 export interface DaemonRecoverResponse {
@@ -837,6 +843,7 @@ export interface DaemonRecoverResponse {
     | "durable"
     | "release_pending"
     | "release_unconfirmed";
+  termination_committed: boolean;
   audit_lock: AuditLockSnapshot;
 }
 
@@ -854,14 +861,11 @@ function newCanonicalUUIDv4(): string {
   if (typeof browserCrypto?.randomUUID === "function") {
     return browserCrypto.randomUUID().toLowerCase();
   }
-  const bytes = new Uint8Array(16);
-  if (typeof browserCrypto?.getRandomValues === "function") {
-    browserCrypto.getRandomValues(bytes);
-  } else {
-    for (let i = 0; i < bytes.length; i += 1) {
-      bytes[i] = Math.floor(Math.random() * 256);
-    }
+  if (typeof browserCrypto?.getRandomValues !== "function") {
+    throw new Error("Web Crypto is unavailable; recovery was not started.");
   }
+  const bytes = new Uint8Array(16);
+  browserCrypto.getRandomValues(bytes);
   bytes[6] = (bytes[6]! & 0x0f) | 0x40;
   bytes[8] = (bytes[8]! & 0x3f) | 0x80;
   const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
@@ -891,6 +895,7 @@ export async function postDaemonRecover(
 
 export async function getDaemonRecoverAuditLockState(
   correlation?: DaemonRecoverCorrelation,
+  signal?: AbortSignal,
 ): Promise<AuditLockSnapshot> {
   let path = "/api/daemon/recover/audit-lock-state";
   if (correlation) {
@@ -901,7 +906,7 @@ export async function getDaemonRecoverAuditLockState(
     });
     path += `?${query.toString()}`;
   }
-  return requestJSONObject<AuditLockSnapshot>(path);
+  return requestJSONObject<AuditLockSnapshot>(path, { signal });
 }
 
 export async function acknowledgeDaemonRecoverReceipt(

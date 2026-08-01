@@ -1,12 +1,140 @@
 package gui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/scheduler"
 )
+
+type guiTestAutostartFixture struct {
+	mu                     sync.Mutex
+	schedulerFactoryCalls  int
+	schedulerListCalls     int
+	schedulerListPrefix    string
+	schedulerDeleteCalls   int
+	schedulerUnexpectedOps int
+	statusCalls            int
+	enableCalls            int
+	startOwnerCalls        int
+}
+
+type guiTestInstallSideEffectSnapshot struct {
+	schedulerFactoryCalls  int
+	schedulerListCalls     int
+	schedulerListPrefix    string
+	schedulerDeleteCalls   int
+	schedulerUnexpectedOps int
+	statusCalls            int
+	enableCalls            int
+	startOwnerCalls        int
+}
+
+func (f *guiTestAutostartFixture) Enable(autostart.Options) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enableCalls++
+	return nil
+}
+
+func (f *guiTestAutostartFixture) Disable() error { return nil }
+
+func (f *guiTestAutostartFixture) Status(autostart.Options) (autostart.State, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statusCalls++
+	return autostart.StateEnabledStopped, nil
+}
+
+func (f *guiTestAutostartFixture) StatusSnapshot(autostart.Options) (autostart.StatusSnapshot, error) {
+	return autostart.StatusSnapshot{State: autostart.StateEnabledStopped}, nil
+}
+
+func (f *guiTestAutostartFixture) startOwner() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startOwnerCalls++
+	return nil
+}
+
+func (f *guiTestAutostartFixture) schedulerFactory() (scheduler.Scheduler, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.schedulerFactoryCalls++
+	return guiTestScheduler{fixture: f}, nil
+}
+
+func (f *guiTestAutostartFixture) snapshot() guiTestInstallSideEffectSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return guiTestInstallSideEffectSnapshot{
+		schedulerFactoryCalls:  f.schedulerFactoryCalls,
+		schedulerListCalls:     f.schedulerListCalls,
+		schedulerListPrefix:    f.schedulerListPrefix,
+		schedulerDeleteCalls:   f.schedulerDeleteCalls,
+		schedulerUnexpectedOps: f.schedulerUnexpectedOps,
+		statusCalls:            f.statusCalls,
+		enableCalls:            f.enableCalls,
+		startOwnerCalls:        f.startOwnerCalls,
+	}
+}
+
+type guiTestScheduler struct {
+	fixture *guiTestAutostartFixture
+}
+
+func (s guiTestScheduler) Create(scheduler.TaskSpec) error {
+	return s.unexpectedOperation("Create")
+}
+
+func (s guiTestScheduler) Delete(string) error {
+	s.fixture.mu.Lock()
+	defer s.fixture.mu.Unlock()
+	s.fixture.schedulerDeleteCalls++
+	return nil
+}
+
+func (s guiTestScheduler) Run(string) error {
+	return s.unexpectedOperation("Run")
+}
+
+func (s guiTestScheduler) Stop(string) error {
+	return s.unexpectedOperation("Stop")
+}
+
+func (s guiTestScheduler) Status(string) (scheduler.TaskStatus, error) {
+	return scheduler.TaskStatus{}, s.unexpectedOperation("Status")
+}
+
+func (s guiTestScheduler) List(prefix string) ([]scheduler.TaskStatus, error) {
+	s.fixture.mu.Lock()
+	defer s.fixture.mu.Unlock()
+	s.fixture.schedulerListCalls++
+	s.fixture.schedulerListPrefix = prefix
+	return nil, nil
+}
+
+func (s guiTestScheduler) ExportXML(string) ([]byte, error) {
+	return nil, s.unexpectedOperation("ExportXML")
+}
+
+func (s guiTestScheduler) ImportXML(string, []byte) error {
+	return s.unexpectedOperation("ImportXML")
+}
+
+func (s guiTestScheduler) unexpectedOperation(operation string) error {
+	s.fixture.mu.Lock()
+	defer s.fixture.mu.Unlock()
+	s.fixture.schedulerUnexpectedOps++
+	return fmt.Errorf("unexpected GUI test scheduler operation: %s", operation)
+}
+
+var testInstallAutostartFixture = &guiTestAutostartFixture{}
 
 // TestMain fences the WHOLE internal/gui test binary off the operator's real
 // per-user state directory. Without it, any gui test that exercises a handler
@@ -78,9 +206,15 @@ func TestMain(m *testing.M) {
 		// browser window. See browser.go SuppressBrowserLaunchEnv.
 		SuppressBrowserLaunchEnv: "1",
 	})
+	restoreAutostartFixture := api.SetInstallAutostartFixtureForTest(
+		testInstallAutostartFixture.schedulerFactory,
+		func() (autostart.Backend, error) { return testInstallAutostartFixture, nil },
+		testInstallAutostartFixture.startOwner,
+	)
 
 	code := m.Run()
 
+	restoreAutostartFixture()
 	restoreEnv()
 	restoreState()
 	_ = os.RemoveAll(tmp)

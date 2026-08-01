@@ -171,6 +171,111 @@ func replayRecoveryPending(t *testing.T, stateDir string) {
 	}
 }
 
+func TestExecuteTerminationCommittedOutcomeMatrix(t *testing.T) {
+	const ownerPID = 44000
+	tests := []struct {
+		name          string
+		taskName      string
+		edit          func(*Dependencies, *recoveryCallLog)
+		wantCommitted bool
+		wantErr       bool
+	}{
+		{
+			name:          "precommit unknown task",
+			taskName:      `\mcp-local-hub-missing`,
+			wantCommitted: false,
+			wantErr:       true,
+		},
+		{
+			name:          "unbound success",
+			wantCommitted: false,
+		},
+		{
+			name: "committed success",
+			edit: func(deps *Dependencies, calls *recoveryCallLog) {
+				probes := 0
+				deps.PortOwner = func(context.Context, int) (int, bool, error) {
+					calls.probe++
+					probes++
+					if probes <= 2 {
+						return ownerPID, true, nil
+					}
+					return 0, false, nil
+				}
+			},
+			wantCommitted: true,
+		},
+		{
+			name: "committed termination unconfirmed",
+			edit: func(deps *Dependencies, calls *recoveryCallLog) {
+				probes := 0
+				deps.PortOwner = func(context.Context, int) (int, bool, error) {
+					calls.probe++
+					probes++
+					if probes <= 2 {
+						return ownerPID, true, nil
+					}
+					return 0, false, nil
+				}
+				deps.HoldProcess = func(pid int) (process.HeldPIDGeneration, error) {
+					generation := &fakeHeldPIDGeneration{pid: pid}
+					generation.terminate = func() (bool, error) {
+						calls.order = append(calls.order, "terminate")
+						return true, errors.New("wait for process exit timed out")
+					}
+					return generation, nil
+				}
+			},
+			wantCommitted: true,
+		},
+		{
+			name: "postcommit respawn transport error",
+			edit: func(deps *Dependencies, calls *recoveryCallLog) {
+				probes := 0
+				deps.PortOwner = func(context.Context, int) (int, bool, error) {
+					calls.probe++
+					probes++
+					if probes <= 2 {
+						return ownerPID, true, nil
+					}
+					return 0, false, nil
+				}
+				deps.Respawn = func(context.Context, string, bool) (api.RespawnResult, error) {
+					return api.RespawnResult{}, api.ErrSupervisorIPCUnavailable
+				}
+			},
+			wantCommitted: true,
+			wantErr:       true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			d := recoveryDescriptor()
+			calls := &recoveryCallLog{}
+			deps := recoveryDependencies(t, calls, d)
+			if tc.edit != nil {
+				tc.edit(&deps, calls)
+			}
+			taskName := tc.taskName
+			if taskName == "" {
+				taskName = d.TaskName
+			}
+			result, err := ExecuteWithDependencies(
+				context.Background(),
+				taskName,
+				Options{Confirmed: true},
+				deps,
+			)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("error=%v wantErr=%t", err, tc.wantErr)
+			}
+			if result.TerminationCommitted != tc.wantCommitted {
+				t.Fatalf("result=%+v want TerminationCommitted=%t", result, tc.wantCommitted)
+			}
+		})
+	}
+}
+
 func TestExecuteUnknownTaskDoesNotProbeTerminateOrRespawn(t *testing.T) {
 	d := recoveryDescriptor()
 	calls := &recoveryCallLog{}
@@ -262,8 +367,8 @@ func TestExecuteVerifiedOwnerTerminatesWithIdentityBeforeSingleForceRespawn(t *t
 	if err != nil {
 		t.Fatalf("ExecuteWithDependencies: %v", err)
 	}
-	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped {
-		t.Fatalf("result = %+v, want reaped", result)
+	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped || !result.TerminationCommitted {
+		t.Fatalf("result = %+v, want an explicitly committed reap", result)
 	}
 	if len(calls.terminate) != 1 {
 		t.Fatalf("terminate calls = %d, want 1", len(calls.terminate))
@@ -298,8 +403,8 @@ func TestExecuteUnboundPortSkipsTerminateAndForcesRespawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteWithDependencies: %v", err)
 	}
-	if result.Reaped || result.PortOwnerCheck != PortOwnerUnbound {
-		t.Fatalf("result = %+v, want unbound without reap", result)
+	if result.Reaped || result.PortOwnerCheck != PortOwnerUnbound || result.TerminationCommitted {
+		t.Fatalf("result = %+v, want unbound without a committed termination", result)
 	}
 	if len(calls.terminate) != 0 || len(calls.respawn) != 1 || !calls.respawn[0].force {
 		t.Fatalf("side effects: terminate=%d respawn=%+v", len(calls.terminate), calls.respawn)
@@ -1591,8 +1696,8 @@ func TestExecuteAuditHandoffPersistenceFailureReturnsFailureAuditDurabilityAfter
 	if opErr.Cause == nil || !strings.Contains(opErr.Cause.Error(), "persist committed recovery audit handoff") {
 		t.Fatalf("audit durability cause=%v want handoff persistence failure", opErr.Cause)
 	}
-	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped {
-		t.Fatalf("partial result=%+v want committed reap fact", result)
+	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped || !result.TerminationCommitted {
+		t.Fatalf("partial result=%+v want explicit committed reap fact", result)
 	}
 }
 
@@ -1621,8 +1726,8 @@ func TestExecuteAuditDurabilityFailurePreservesRespawnFailureFact(t *testing.T) 
 	if opErr.Respawn != respawn {
 		t.Fatalf("respawn result=%+v want=%+v", opErr.Respawn, respawn)
 	}
-	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped {
-		t.Fatalf("partial result=%+v want committed reap fact", result)
+	if !result.Reaped || result.PortOwnerCheck != PortOwnerReaped || !result.TerminationCommitted {
+		t.Fatalf("partial result=%+v want explicit committed reap fact", result)
 	}
 }
 

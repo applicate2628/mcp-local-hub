@@ -129,11 +129,12 @@ func (a AuditHandoff) Valid() bool {
 // Result means the supervisor accepted one force-respawn request. It does not
 // assert that the daemon is Running yet.
 type Result struct {
-	TaskName        string
-	Reaped          bool
-	PortOwnerCheck  PortOwnerCheck
-	PortWaitOutcome PortWaitOutcome
-	AuditHandoff    AuditHandoff
+	TaskName             string
+	Reaped               bool
+	PortOwnerCheck       PortOwnerCheck
+	PortWaitOutcome      PortWaitOutcome
+	AuditHandoff         AuditHandoff
+	TerminationCommitted bool
 }
 
 // FailureKind is the stable internal outcome the CLI and HTTP adapters map to
@@ -632,7 +633,14 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	for _, notification := range postCommitNotifications {
 		notify(options, notification)
 	}
-	result := Result{TaskName: normalized, Reaped: reaped, PortOwnerCheck: check, PortWaitOutcome: portWaitOutcome, AuditHandoff: auditHandoff}
+	result := Result{
+		TaskName:             normalized,
+		Reaped:               reaped,
+		PortOwnerCheck:       check,
+		PortWaitOutcome:      portWaitOutcome,
+		AuditHandoff:         auditHandoff,
+		TerminationCommitted: terminationCommitted,
+	}
 	if auditDurabilityErr != nil {
 		cause := auditDurabilityErr
 		if respawnErr != nil {

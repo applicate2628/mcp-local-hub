@@ -77,6 +77,16 @@ type SupervisorEventLockSnapshot struct {
 // owner mutex is released.
 type SupervisorEventLockObserver func(SupervisorEventLockSnapshot)
 
+// SupervisorEventLockSubscription is the physical-state owner's narrow
+// subscription handle. Close is idempotent. TryCloseAtTerminal linearizes a
+// terminal claim against the current revision under supervisorEventLockMu, so a
+// delayed callback cannot publish or unsubscribe behind a newer transition.
+type SupervisorEventLockSubscription struct {
+	path   string
+	id     uint64
+	closed bool
+}
+
 // supervisorEventLockRecord is the per-path tally. A record is DELETED once it
 // returns to clean, so the map is empty in the steady state and a test's
 // t.TempDir()-keyed entry does not outlive the test.
@@ -228,9 +238,53 @@ func SupervisorEventLockSnapshotForPath(path string) SupervisorEventLockSnapshot
 	}
 }
 
+func removeSupervisorEventLockObserverLocked(path string, id uint64) {
+	delete(supervisorEventLockObservers[path], id)
+	if len(supervisorEventLockObservers[path]) == 0 {
+		delete(supervisorEventLockObservers, path)
+	}
+}
+
+// Close removes the subscription exactly once.
+func (s *SupervisorEventLockSubscription) Close() {
+	if s == nil {
+		return
+	}
+	supervisorEventLockMu.Lock()
+	defer supervisorEventLockMu.Unlock()
+	if s.closed {
+		return
+	}
+	removeSupervisorEventLockObserverLocked(s.path, s.id)
+	s.closed = true
+}
+
+// TryCloseAtTerminal removes this subscription only when revision is still the
+// current physical revision and that revision is terminal. On failure it
+// returns the newer authoritative snapshot and leaves the subscription active.
+func (s *SupervisorEventLockSubscription) TryCloseAtTerminal(revision uint64) (SupervisorEventLockSnapshot, bool) {
+	if s == nil {
+		return SupervisorEventLockSnapshot{}, false
+	}
+	supervisorEventLockMu.Lock()
+	defer supervisorEventLockMu.Unlock()
+	current := SupervisorEventLockSnapshot{
+		State:    supervisorEventLockStateLocked(s.path),
+		Revision: supervisorEventLockRevisions[s.path],
+	}
+	if s.closed ||
+		current.Revision != revision ||
+		(current.State != SupervisorEventLockReleased && current.State != SupervisorEventLockStranded) {
+		return current, false
+	}
+	removeSupervisorEventLockObserverLocked(s.path, s.id)
+	s.closed = true
+	return current, true
+}
+
 // SubscribeSupervisorEventLockState atomically registers an observer and
-// returns the initial snapshot plus an idempotent unsubscribe handle.
-func SubscribeSupervisorEventLockState(path string, observer SupervisorEventLockObserver) (SupervisorEventLockSnapshot, func()) {
+// returns the initial snapshot plus a revision-aware subscription handle.
+func SubscribeSupervisorEventLockState(path string, observer SupervisorEventLockObserver) (SupervisorEventLockSnapshot, *SupervisorEventLockSubscription) {
 	supervisorEventLockMu.Lock()
 	supervisorEventLockNextID++
 	id := supervisorEventLockNextID
@@ -243,18 +297,7 @@ func SubscribeSupervisorEventLockState(path string, observer SupervisorEventLock
 		Revision: supervisorEventLockRevisions[path],
 	}
 	supervisorEventLockMu.Unlock()
-
-	var once sync.Once
-	return initial, func() {
-		once.Do(func() {
-			supervisorEventLockMu.Lock()
-			delete(supervisorEventLockObservers[path], id)
-			if len(supervisorEventLockObservers[path]) == 0 {
-				delete(supervisorEventLockObservers, path)
-			}
-			supervisorEventLockMu.Unlock()
-		})
-	}
+	return initial, &SupervisorEventLockSubscription{path: path, id: id}
 }
 
 // ResetSupervisorEventLockStateForPathForTest clears one path's tally. Only

@@ -258,14 +258,14 @@ func TestSupervisorEventLockStateObserverSequence(t *testing.T) {
 	defer ResetSupervisorEventLockStateForPathForTest(path)
 
 	var observed []SupervisorEventLockSnapshot
-	initial, unsubscribe := SubscribeSupervisorEventLockState(path, func(snapshot SupervisorEventLockSnapshot) {
+	initial, subscription := SubscribeSupervisorEventLockState(path, func(snapshot SupervisorEventLockSnapshot) {
 		// The callback runs after the owner mutex is released.
 		if reread := SupervisorEventLockSnapshotForPath(path); reread != snapshot {
 			t.Fatalf("callback snapshot=%+v reread=%+v", snapshot, reread)
 		}
 		observed = append(observed, snapshot)
 	})
-	defer unsubscribe()
+	defer subscription.Close()
 	if initial != (SupervisorEventLockSnapshot{State: SupervisorEventLockReleased}) {
 		t.Fatalf("initial=%+v", initial)
 	}
@@ -281,6 +281,46 @@ func TestSupervisorEventLockStateObserverSequence(t *testing.T) {
 	}
 	if !reflect.DeepEqual(observed, want) {
 		t.Fatalf("observed=%+v want=%+v", observed, want)
+	}
+}
+
+func TestSupervisorEventSubscriptionTerminalClaimIsRevisionAtomic(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "supervisor-events.log")
+	defer ResetSupervisorEventLockStateForPathForTest(path)
+
+	var observed []SupervisorEventLockSnapshot
+	_, subscription := SubscribeSupervisorEventLockState(path, func(snapshot SupervisorEventLockSnapshot) {
+		observed = append(observed, snapshot)
+	})
+	defer subscription.Close()
+
+	noteSupervisorEventLockHandoff(path)
+	noteSupervisorEventLockHandoffDone(path, nil)
+	staleTerminal := SupervisorEventLockSnapshotForPath(path)
+	if staleTerminal != (SupervisorEventLockSnapshot{State: SupervisorEventLockReleased, Revision: 2}) {
+		t.Fatalf("stale terminal setup=%+v", staleTerminal)
+	}
+
+	// A newer mutation lands before the delayed terminal callback can claim
+	// ownership of revision 2. The stale claim must retain the subscription.
+	noteSupervisorEventLockHandoff(path)
+	current, closed := subscription.TryCloseAtTerminal(staleTerminal.Revision)
+	if closed ||
+		current != (SupervisorEventLockSnapshot{State: SupervisorEventLockOutstanding, Revision: 3}) {
+		t.Fatalf("stale terminal claim current=%+v closed=%t", current, closed)
+	}
+
+	noteSupervisorEventLockHandoffDone(path, nil)
+	current, closed = subscription.TryCloseAtTerminal(4)
+	if !closed ||
+		current != (SupervisorEventLockSnapshot{State: SupervisorEventLockReleased, Revision: 4}) {
+		t.Fatalf("current terminal claim current=%+v closed=%t", current, closed)
+	}
+
+	before := len(observed)
+	noteSupervisorEventLockHandoff(path)
+	if len(observed) != before {
+		t.Fatalf("closed subscription received a later revision: before=%d after=%d", before, len(observed))
 	}
 }
 

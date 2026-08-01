@@ -2,36 +2,59 @@ package gui
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"os"
 	"path/filepath"
+	"reflect"
+	"strings"
 	"sync"
+	"time"
+	"unicode/utf8"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/daemonrecovery"
 )
 
 const (
-	auditLockScope              = "supervisor_events_log"
-	auditLockOccurrenceCapacity = 64
+	auditLockScope                        = "supervisor_events_log"
+	auditLockOccurrenceCapacity           = 64
+	auditLockOccurrenceStoreVersion       = 1
+	auditLockOccurrenceFileLeaf           = "daemon-recovery-occurrences.json"
+	auditLockOccurrenceStoreMaxBytes      = 1 << 20
+	auditLockStoreLockTimeout             = 2 * time.Second
+	auditLockStoreLockRetry               = 10 * time.Millisecond
+	auditLockTaskNameMaxBytes             = 1024
+	auditLockTerminationStateCommitted    = "committed"
+	auditLockTerminationStateNotCommitted = "not_committed"
+	auditLockTerminationStateUnknown      = "unknown"
 )
 
 type auditLockReceiptDTO struct {
-	AttemptID         string `json:"attempt_id"`
-	OccurrenceID      string `json:"occurrence_id"`
-	Status            string `json:"status"`
-	LockAuthorization string `json:"lock_authorization"`
+	AttemptID              string `json:"attempt_id"`
+	OccurrenceID           string `json:"occurrence_id"`
+	ServerInstance         string `json:"server_instance"`
+	TaskName               string `json:"task_name"`
+	Status                 string `json:"status"`
+	LockAuthorization      string `json:"lock_authorization"`
+	TerminationCommitState string `json:"termination_commit_state"`
 }
 
 type auditLockStateDTO struct {
-	Scope           string                       `json:"scope"`
-	ServerInstance  string                       `json:"server_instance"`
-	Revision        uint64                       `json:"revision"`
-	State           api.SupervisorEventLockState `json:"state"`
-	RecoveryReceipt *auditLockReceiptDTO         `json:"recovery_receipt"`
+	Scope            string                       `json:"scope"`
+	ServerInstance   string                       `json:"server_instance"`
+	Revision         uint64                       `json:"revision"`
+	State            api.SupervisorEventLockState `json:"state"`
+	RecoveryReceipt  *auditLockReceiptDTO         `json:"recovery_receipt"`
+	RecoveryReceipts []auditLockReceiptDTO        `json:"recovery_receipts"`
 }
 
 type auditLockCorrelation struct {
@@ -40,31 +63,28 @@ type auditLockCorrelation struct {
 	ServerInstance string
 }
 
-type auditLockOccurrenceKey struct {
-	attemptID    string
-	occurrenceID string
-}
-
 type auditLockOccurrenceBinding struct {
 	serverInstance string
 	taskName       string
 	confirm        bool
 }
 
-type auditLockOccurrencePhase uint8
-
 const (
-	auditLockOccurrenceInFlight auditLockOccurrencePhase = iota
-	auditLockOccurrenceTerminal
-	auditLockOccurrenceConsumed
+	auditLockOccurrenceInFlight         = "in_flight"
+	auditLockOccurrenceCommittedSuccess = "committed_success"
+	auditLockOccurrenceCommittedError   = "committed_error"
+	auditLockOccurrenceNotCommitted     = "not_committed"
+	auditLockOccurrenceUncertain        = "uncertain"
+	auditLockOccurrenceConsumed         = "consumed"
 )
 
 type daemonRecoverSuccessEvidence struct {
-	TaskName        string
-	Reaped          bool
-	PortOwnerCheck  string
-	PortWaitOutcome string
-	AuditHandoff    string
+	TaskName             string `json:"task_name"`
+	Reaped               bool   `json:"reaped"`
+	PortOwnerCheck       string `json:"port_owner_check"`
+	PortWaitOutcome      string `json:"port_wait_outcome"`
+	AuditHandoff         string `json:"audit_handoff"`
+	TerminationCommitted bool   `json:"termination_committed"`
 }
 
 type auditLockTerminalEvidence struct {
@@ -74,18 +94,51 @@ type auditLockTerminalEvidence struct {
 	Success              *daemonRecoverSuccessEvidence
 }
 
-type auditLockOccurrence struct {
-	binding  auditLockOccurrenceBinding
-	phase    auditLockOccurrencePhase
-	receipt  auditLockReceiptDTO
-	terminal *auditLockTerminalEvidence
+type auditLockOccurrenceRecord struct {
+	OriginServerInstance string                        `json:"origin_server_instance"`
+	AttemptID            string                        `json:"attempt_id"`
+	OccurrenceID         string                        `json:"occurrence_id"`
+	TaskName             string                        `json:"task_name"`
+	Confirm              bool                          `json:"confirm"`
+	Status               string                        `json:"status"`
+	HTTPStatus           int                           `json:"http_status"`
+	ErrorCode            string                        `json:"error_code"`
+	LockAuthorization    string                        `json:"lock_authorization"`
+	Success              *daemonRecoverSuccessEvidence `json:"success"`
+}
+
+type auditLockOccurrenceStore struct {
+	Version              int                         `json:"version"`
+	Generation           uint64                      `json:"generation"`
+	ActiveServerInstance string                      `json:"active_server_instance"`
+	Records              []auditLockOccurrenceRecord `json:"records"`
 }
 
 type auditLockReservation struct {
-	Novel    bool
-	Receipt  auditLockReceiptDTO
-	Terminal *auditLockTerminalEvidence
+	Novel      bool
+	Receipt    auditLockReceiptDTO
+	Terminal   *auditLockTerminalEvidence
+	Binding    auditLockOccurrenceBinding
+	Generation uint64
 }
+
+type auditLockUncertaintyKey struct {
+	Generation     uint64
+	ServerInstance string
+	AttemptID      string
+	OccurrenceID   string
+}
+
+type auditLockStoreLockReleaseError struct {
+	operation string
+	cause     error
+}
+
+func (e *auditLockStoreLockReleaseError) Error() string {
+	return fmt.Sprintf("%s: release occurrence lock: %v", e.operation, e.cause)
+}
+
+func (e *auditLockStoreLockReleaseError) Unwrap() error { return e.cause }
 
 type auditLockRouteError struct {
 	status int
@@ -95,27 +148,42 @@ type auditLockRouteError struct {
 func (e *auditLockRouteError) Error() string { return e.code }
 
 type auditLockAdapter struct {
-	mu             sync.Mutex
-	serverInstance string
-	logPath        string
-	initErr        error
-	closing        bool
-	closed         bool
-	occurrences    map[auditLockOccurrenceKey]*auditLockOccurrence
-	watching       bool
-	unsubscribe    func()
-	events         *Broadcaster
+	mu               sync.Mutex
+	storeMu          sync.Mutex
+	serverInstance   string
+	generation       uint64
+	storePath        string
+	logPath          string
+	initErr          error
+	closing          bool
+	closed           bool
+	watching         bool
+	observedRevision uint64
+	uncertain        map[auditLockUncertaintyKey]auditLockReceiptDTO
+	subscription     *api.SupervisorEventLockSubscription
+	events           *Broadcaster
+	lockTimeout      time.Duration
 }
 
 func newAuditLockAdapter(events *Broadcaster) *auditLockAdapter {
-	a := &auditLockAdapter{
-		occurrences: map[auditLockOccurrenceKey]*auditLockOccurrence{},
-		events:      events,
-	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
-		a.initErr = fmt.Errorf("resolve daemon state dir: %w", err)
-		return a
+		return &auditLockAdapter{
+			events:      events,
+			lockTimeout: auditLockStoreLockTimeout,
+			initErr:     fmt.Errorf("resolve daemon state dir: %w", err),
+		}
+	}
+	return newAuditLockAdapterInStateDir(events, stateDir)
+}
+
+func newAuditLockAdapterInStateDir(events *Broadcaster, stateDir string) *auditLockAdapter {
+	a := &auditLockAdapter{
+		events:      events,
+		storePath:   filepath.Join(stateDir, auditLockOccurrenceFileLeaf),
+		logPath:     filepath.Join(stateDir, api.SupervisorEventLogFileLeaf),
+		lockTimeout: auditLockStoreLockTimeout,
+		uncertain:   make(map[auditLockUncertaintyKey]auditLockReceiptDTO),
 	}
 	instance, err := newAuditLockCorrelationID()
 	if err != nil {
@@ -123,7 +191,11 @@ func newAuditLockAdapter(events *Broadcaster) *auditLockAdapter {
 		return a
 	}
 	a.serverInstance = instance
-	a.logPath = filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	claimCtx, cancel := context.WithTimeout(context.Background(), a.lockTimeout)
+	defer cancel()
+	if err := a.claimStore(claimCtx); err != nil {
+		a.initErr = fmt.Errorf("claim daemon recovery occurrence store: %w", err)
+	}
 	return a
 }
 
@@ -259,6 +331,499 @@ func cloneAuditLockTerminal(in *auditLockTerminalEvidence) *auditLockTerminalEvi
 	return &out
 }
 
+func auditLockRecordBinding(record auditLockOccurrenceRecord) auditLockOccurrenceBinding {
+	return auditLockOccurrenceBinding{
+		serverInstance: record.OriginServerInstance,
+		taskName:       record.TaskName,
+		confirm:        record.Confirm,
+	}
+}
+
+func auditLockTerminationCommitState(record auditLockOccurrenceRecord) string {
+	switch record.Status {
+	case auditLockOccurrenceCommittedError:
+		return auditLockTerminationStateCommitted
+	case auditLockOccurrenceNotCommitted:
+		return auditLockTerminationStateNotCommitted
+	case auditLockOccurrenceCommittedSuccess:
+		if record.Success != nil && record.Success.TerminationCommitted {
+			return auditLockTerminationStateCommitted
+		}
+		return auditLockTerminationStateNotCommitted
+	default:
+		return auditLockTerminationStateUnknown
+	}
+}
+
+func auditLockReceiptFromRecord(record auditLockOccurrenceRecord) auditLockReceiptDTO {
+	return auditLockReceiptDTO{
+		AttemptID:              record.AttemptID,
+		OccurrenceID:           record.OccurrenceID,
+		ServerInstance:         record.OriginServerInstance,
+		TaskName:               record.TaskName,
+		Status:                 record.Status,
+		LockAuthorization:      record.LockAuthorization,
+		TerminationCommitState: auditLockTerminationCommitState(record),
+	}
+}
+
+func auditLockTerminalFromRecord(record auditLockOccurrenceRecord) *auditLockTerminalEvidence {
+	switch record.Status {
+	case auditLockOccurrenceCommittedSuccess:
+		return &auditLockTerminalEvidence{
+			HTTPStatus:           record.HTTPStatus,
+			TerminationCommitted: record.Success != nil && record.Success.TerminationCommitted,
+			Success:              cloneDaemonRecoverSuccess(record.Success),
+		}
+	case auditLockOccurrenceCommittedError:
+		return &auditLockTerminalEvidence{
+			HTTPStatus:           record.HTTPStatus,
+			ErrorCode:            record.ErrorCode,
+			TerminationCommitted: true,
+		}
+	case auditLockOccurrenceNotCommitted:
+		return &auditLockTerminalEvidence{
+			HTTPStatus:           record.HTTPStatus,
+			ErrorCode:            record.ErrorCode,
+			TerminationCommitted: false,
+		}
+	default:
+		return nil
+	}
+}
+
+func auditLockUncertaintyKeyFor(generation uint64, record auditLockOccurrenceRecord) auditLockUncertaintyKey {
+	return auditLockUncertaintyKey{
+		Generation:     generation,
+		ServerInstance: record.OriginServerInstance,
+		AttemptID:      record.AttemptID,
+		OccurrenceID:   record.OccurrenceID,
+	}
+}
+
+// effectiveOccurrence is the single projection owner for durable occurrence
+// state. Callers must hold storeMu: the generation-scoped overlay exists only
+// to keep a terminal result that could not be proven durable from regressing
+// to in_flight inside the same process.
+func (a *auditLockAdapter) effectiveOccurrence(generation uint64, durable auditLockOccurrenceRecord) auditLockOccurrenceRecord {
+	if durable.Status != auditLockOccurrenceInFlight {
+		return durable
+	}
+	if receipt, ok := a.uncertain[auditLockUncertaintyKeyFor(generation, durable)]; ok {
+		durable.Status = receipt.Status
+		durable.HTTPStatus = 0
+		durable.ErrorCode = ""
+		durable.LockAuthorization = receipt.LockAuthorization
+		durable.Success = nil
+	}
+	return durable
+}
+
+func (a *auditLockAdapter) installUncertaintyLockHeld(reservation auditLockReservation) auditLockReceiptDTO {
+	receipt := reservation.Receipt
+	receipt.Status = auditLockOccurrenceUncertain
+	receipt.LockAuthorization = "uncertain"
+	receipt.TerminationCommitState = auditLockTerminationStateUnknown
+	key := auditLockUncertaintyKey{
+		Generation:     reservation.Generation,
+		ServerInstance: receipt.ServerInstance,
+		AttemptID:      receipt.AttemptID,
+		OccurrenceID:   receipt.OccurrenceID,
+	}
+	if a.uncertain == nil {
+		a.uncertain = make(map[auditLockUncertaintyKey]auditLockReceiptDTO)
+	}
+	a.uncertain[key] = receipt
+	return receipt
+}
+
+func (a *auditLockAdapter) clearUncertaintyLockHeld(generation uint64, record auditLockOccurrenceRecord) {
+	delete(a.uncertain, auditLockUncertaintyKeyFor(generation, record))
+}
+
+func cloneDaemonRecoverSuccess(in *daemonRecoverSuccessEvidence) *daemonRecoverSuccessEvidence {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+func decodeRequiredObject(raw []byte, required ...string) (map[string]json.RawMessage, error) {
+	fields, err := decodeUniqueJSONObject(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(fields) != len(required) {
+		return nil, fmt.Errorf("JSON object has %d fields, want %d", len(fields), len(required))
+	}
+	for _, field := range required {
+		if _, ok := fields[field]; !ok {
+			return nil, fmt.Errorf("JSON object missing field %q", field)
+		}
+	}
+	return fields, nil
+}
+
+func decodeAuditLockSuccess(raw json.RawMessage) (*daemonRecoverSuccessEvidence, error) {
+	if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return nil, nil
+	}
+	fields, err := decodeRequiredObject(raw,
+		"task_name",
+		"reaped",
+		"port_owner_check",
+		"port_wait_outcome",
+		"audit_handoff",
+		"termination_committed",
+	)
+	if err != nil {
+		return nil, err
+	}
+	success := &daemonRecoverSuccessEvidence{}
+	targets := map[string]any{
+		"task_name":             &success.TaskName,
+		"reaped":                &success.Reaped,
+		"port_owner_check":      &success.PortOwnerCheck,
+		"port_wait_outcome":     &success.PortWaitOutcome,
+		"audit_handoff":         &success.AuditHandoff,
+		"termination_committed": &success.TerminationCommitted,
+	}
+	for field, target := range targets {
+		if err := json.Unmarshal(fields[field], target); err != nil {
+			return nil, fmt.Errorf("decode success field %s: %w", field, err)
+		}
+	}
+	return success, nil
+}
+
+func decodeAuditLockRecord(raw json.RawMessage) (auditLockOccurrenceRecord, error) {
+	fields, err := decodeRequiredObject(raw,
+		"origin_server_instance",
+		"attempt_id",
+		"occurrence_id",
+		"task_name",
+		"confirm",
+		"status",
+		"http_status",
+		"error_code",
+		"lock_authorization",
+		"success",
+	)
+	if err != nil {
+		return auditLockOccurrenceRecord{}, err
+	}
+	var record auditLockOccurrenceRecord
+	targets := map[string]any{
+		"origin_server_instance": &record.OriginServerInstance,
+		"attempt_id":             &record.AttemptID,
+		"occurrence_id":          &record.OccurrenceID,
+		"task_name":              &record.TaskName,
+		"confirm":                &record.Confirm,
+		"status":                 &record.Status,
+		"http_status":            &record.HTTPStatus,
+		"error_code":             &record.ErrorCode,
+		"lock_authorization":     &record.LockAuthorization,
+	}
+	for field, target := range targets {
+		if err := json.Unmarshal(fields[field], target); err != nil {
+			return auditLockOccurrenceRecord{}, fmt.Errorf("decode occurrence field %s: %w", field, err)
+		}
+	}
+	record.Success, err = decodeAuditLockSuccess(fields["success"])
+	if err != nil {
+		return auditLockOccurrenceRecord{}, fmt.Errorf("decode occurrence success: %w", err)
+	}
+	return record, nil
+}
+
+func decodeAuditLockStore(raw []byte) (auditLockOccurrenceStore, error) {
+	if len(raw) > auditLockOccurrenceStoreMaxBytes {
+		return auditLockOccurrenceStore{}, errors.New("occurrence store exceeds one-mebibyte cap")
+	}
+	fields, err := decodeRequiredObject(raw,
+		"version",
+		"generation",
+		"active_server_instance",
+		"records",
+	)
+	if err != nil {
+		return auditLockOccurrenceStore{}, err
+	}
+	var store auditLockOccurrenceStore
+	if err := json.Unmarshal(fields["version"], &store.Version); err != nil {
+		return auditLockOccurrenceStore{}, fmt.Errorf("decode version: %w", err)
+	}
+	if err := json.Unmarshal(fields["generation"], &store.Generation); err != nil {
+		return auditLockOccurrenceStore{}, fmt.Errorf("decode generation: %w", err)
+	}
+	if err := json.Unmarshal(fields["active_server_instance"], &store.ActiveServerInstance); err != nil {
+		return auditLockOccurrenceStore{}, fmt.Errorf("decode active_server_instance: %w", err)
+	}
+	var records []json.RawMessage
+	if err := json.Unmarshal(fields["records"], &records); err != nil {
+		return auditLockOccurrenceStore{}, fmt.Errorf("decode records: %w", err)
+	}
+	store.Records = make([]auditLockOccurrenceRecord, 0, len(records))
+	for index, recordRaw := range records {
+		record, recordErr := decodeAuditLockRecord(recordRaw)
+		if recordErr != nil {
+			return auditLockOccurrenceStore{}, fmt.Errorf("decode record %d: %w", index, recordErr)
+		}
+		store.Records = append(store.Records, record)
+	}
+	if err := validateAuditLockStore(store); err != nil {
+		return auditLockOccurrenceStore{}, err
+	}
+	return store, nil
+}
+
+func validateOpaqueTaskName(taskName string) error {
+	if taskName == "" || len(taskName) > auditLockTaskNameMaxBytes || !utf8.ValidString(taskName) {
+		return errors.New("task_name is empty, oversized, or invalid UTF-8")
+	}
+	if strings.TrimSpace(taskName) != taskName {
+		return errors.New("task_name contains leading or trailing whitespace")
+	}
+	for _, r := range taskName {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("task_name contains a control character")
+		}
+	}
+	return nil
+}
+
+func validateAuditLockStore(store auditLockOccurrenceStore) error {
+	if store.Version != auditLockOccurrenceStoreVersion {
+		return fmt.Errorf("unsupported daemon recovery occurrence version %d", store.Version)
+	}
+	if store.Generation == 0 {
+		return errors.New("daemon recovery occurrence generation is zero")
+	}
+	if err := validateAuditLockCorrelationValue("active_server_instance", store.ActiveServerInstance); err != nil {
+		return errors.New("active_server_instance is not a canonical UUIDv4")
+	}
+	if len(store.Records) > auditLockOccurrenceCapacity {
+		return fmt.Errorf("daemon recovery occurrence count %d exceeds cap %d", len(store.Records), auditLockOccurrenceCapacity)
+	}
+	attemptIDs := map[string]struct{}{}
+	occurrenceIDs := map[string]struct{}{}
+	unresolvedTasks := map[string]struct{}{}
+	for index, record := range store.Records {
+		if err := validateAuditLockCorrelation(auditLockCorrelation{
+			AttemptID:      record.AttemptID,
+			OccurrenceID:   record.OccurrenceID,
+			ServerInstance: record.OriginServerInstance,
+		}); err != nil {
+			return fmt.Errorf("record %d has invalid correlation", index)
+		}
+		if _, duplicate := attemptIDs[record.AttemptID]; duplicate {
+			return fmt.Errorf("record %d duplicates attempt_id", index)
+		}
+		if _, duplicate := occurrenceIDs[record.OccurrenceID]; duplicate {
+			return fmt.Errorf("record %d duplicates occurrence_id", index)
+		}
+		attemptIDs[record.AttemptID] = struct{}{}
+		occurrenceIDs[record.OccurrenceID] = struct{}{}
+		if err := validateOpaqueTaskName(record.TaskName); err != nil {
+			return fmt.Errorf("record %d: %w", index, err)
+		}
+		if !record.Confirm {
+			return fmt.Errorf("record %d is not explicitly confirmed", index)
+		}
+		switch record.LockAuthorization {
+		case "none", "current_truth", "uncertain":
+		default:
+			return fmt.Errorf("record %d contains invalid lock authorization", index)
+		}
+		if record.Status != auditLockOccurrenceConsumed {
+			if _, duplicate := unresolvedTasks[record.TaskName]; duplicate {
+				return fmt.Errorf("record %d duplicates unresolved task binding", index)
+			}
+			unresolvedTasks[record.TaskName] = struct{}{}
+		}
+		switch record.Status {
+		case auditLockOccurrenceInFlight:
+			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != "none" {
+				return fmt.Errorf("record %d has invalid in-flight evidence", index)
+			}
+		case auditLockOccurrenceCommittedSuccess:
+			if record.HTTPStatus != 200 || record.ErrorCode != "" || record.Success == nil {
+				return fmt.Errorf("record %d has invalid committed-success evidence", index)
+			}
+			if record.Success.TaskName != record.TaskName ||
+				!daemonrecovery.PortOwnerCheck(record.Success.PortOwnerCheck).Valid() ||
+				!daemonrecovery.PortWaitOutcome(record.Success.PortWaitOutcome).Valid() ||
+				!daemonrecovery.AuditHandoff(record.Success.AuditHandoff).Valid() ||
+				auditLockAuthorization(
+					daemonrecovery.AuditHandoff(record.Success.AuditHandoff),
+					record.Success.TerminationCommitted,
+				) != record.LockAuthorization {
+				return fmt.Errorf("record %d has invalid success evidence", index)
+			}
+		case auditLockOccurrenceCommittedError, auditLockOccurrenceNotCommitted:
+			if record.HTTPStatus < 400 || record.HTTPStatus > 599 ||
+				!daemonRecoverErrorCode(record.ErrorCode).Valid() || record.Success != nil {
+				return fmt.Errorf("record %d has invalid error evidence", index)
+			}
+			if record.Status == auditLockOccurrenceNotCommitted && record.LockAuthorization != "none" {
+				return fmt.Errorf("record %d authorizes a noncommitted result", index)
+			}
+		case auditLockOccurrenceUncertain:
+			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != "uncertain" {
+				return fmt.Errorf("record %d has invalid uncertain evidence", index)
+			}
+		case auditLockOccurrenceConsumed:
+			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != "none" {
+				return fmt.Errorf("record %d has invalid consumed tombstone", index)
+			}
+		default:
+			return fmt.Errorf("record %d has invalid status %q", index, record.Status)
+		}
+	}
+	return nil
+}
+
+func (a *auditLockAdapter) withStoreLock(ctx context.Context, operation string, fn func() error) error {
+	return a.withStoreLockFailure(ctx, operation, fn, nil)
+}
+
+// withStoreLockFailure keeps the failure finalizer under storeMu and, when
+// acquired, the file lock. Terminalization uses this seam to publish its
+// generation-scoped uncertainty projection before any same-process reader can
+// observe the old durable in_flight record.
+func (a *auditLockAdapter) withStoreLockFailure(
+	ctx context.Context,
+	operation string,
+	fn func() error,
+	onFailure func(error),
+) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	lockCtx, cancel := context.WithTimeout(ctx, a.lockTimeout)
+	defer cancel()
+	for !a.storeMu.TryLock() {
+		select {
+		case <-lockCtx.Done():
+			return fmt.Errorf("%s: acquire in-process occurrence lock: %w", operation, lockCtx.Err())
+		case <-time.After(auditLockStoreLockRetry):
+		}
+	}
+	defer a.storeMu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(a.storePath), 0o700); err != nil {
+		operationErr := fmt.Errorf("%s: create state directory: %w", operation, err)
+		if onFailure != nil {
+			onFailure(operationErr)
+		}
+		return operationErr
+	}
+	lock := flock.New(a.storePath + ".lock")
+	locked, err := lock.TryLockContext(lockCtx, auditLockStoreLockRetry)
+	if err != nil {
+		_ = lock.Close()
+		operationErr := fmt.Errorf("%s: acquire occurrence lock: %w", operation, err)
+		if onFailure != nil {
+			onFailure(operationErr)
+		}
+		return operationErr
+	}
+	if !locked {
+		_ = lock.Close()
+		operationErr := fmt.Errorf("%s: occurrence lock unavailable", operation)
+		if onFailure != nil {
+			onFailure(operationErr)
+		}
+		return operationErr
+	}
+	opErr := fn()
+	if opErr != nil && onFailure != nil {
+		onFailure(opErr)
+	}
+	closeErr := lock.Close()
+	if opErr != nil {
+		return opErr
+	}
+	if closeErr != nil {
+		return &auditLockStoreLockReleaseError{operation: operation, cause: closeErr}
+	}
+	return nil
+}
+
+func (a *auditLockAdapter) readStoreLockHeld(allowMissing bool) (auditLockOccurrenceStore, error) {
+	raw, err := api.ReadStateFileInodeAnchored(a.storePath)
+	if os.IsNotExist(err) && allowMissing {
+		return auditLockOccurrenceStore{Version: auditLockOccurrenceStoreVersion}, nil
+	}
+	if err != nil {
+		return auditLockOccurrenceStore{}, fmt.Errorf("read occurrence store: %w", err)
+	}
+	store, err := decodeAuditLockStore(raw)
+	if err != nil {
+		return auditLockOccurrenceStore{}, fmt.Errorf("decode occurrence store: %w", err)
+	}
+	return store, nil
+}
+
+func (a *auditLockAdapter) writeStoreLockHeld(store auditLockOccurrenceStore) error {
+	if err := validateAuditLockStore(store); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(store, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal occurrence store: %w", err)
+	}
+	raw = append(raw, '\n')
+	if len(raw) > auditLockOccurrenceStoreMaxBytes {
+		return errors.New("occurrence store exceeds one-mebibyte cap")
+	}
+	if err := api.WriteStateFileBytesLockHeld(a.storePath, raw); err != nil {
+		return fmt.Errorf("write occurrence store: %w", err)
+	}
+	return nil
+}
+
+func (a *auditLockAdapter) claimStore(ctx context.Context) error {
+	var claimed auditLockOccurrenceStore
+	err := a.withStoreLock(ctx, "claim occurrence store", func() error {
+		store, err := a.readStoreLockHeld(true)
+		if err != nil {
+			return err
+		}
+		if store.Generation == math.MaxUint64 {
+			return errors.New("occurrence generation overflow")
+		}
+		records := store.Records[:0]
+		for _, record := range store.Records {
+			if record.Status == auditLockOccurrenceConsumed {
+				continue
+			}
+			if record.Status == auditLockOccurrenceInFlight {
+				record.Status = auditLockOccurrenceUncertain
+				record.LockAuthorization = "uncertain"
+				record.HTTPStatus = 0
+				record.ErrorCode = ""
+				record.Success = nil
+			}
+			records = append(records, record)
+		}
+		store.Records = records
+		store.Version = auditLockOccurrenceStoreVersion
+		store.Generation++
+		store.ActiveServerInstance = a.serverInstance
+		if err := a.writeStoreLockHeld(store); err != nil {
+			return err
+		}
+		claimed = store
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+	a.generation = claimed.Generation
+	return nil
+}
+
 func (a *auditLockAdapter) ensureReady() *auditLockRouteError {
 	if a == nil || a.initErr != nil {
 		return &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
@@ -266,115 +831,381 @@ func (a *auditLockAdapter) ensureReady() *auditLockRouteError {
 	return nil
 }
 
-func (a *auditLockAdapter) validateInstance(serverInstance string) *auditLockRouteError {
+func (a *auditLockAdapter) currentIdentity() (string, uint64) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.serverInstance, a.generation
+}
+
+func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, binding auditLockOccurrenceBinding) (auditLockReservation, *auditLockRouteError) {
+	if err := a.ensureReady(); err != nil {
+		return auditLockReservation{}, err
+	}
+	if err := validateAuditLockCorrelation(c); err != nil || binding.serverInstance != c.ServerInstance ||
+		binding.taskName == "" || !binding.confirm || validateOpaqueTaskName(binding.taskName) != nil {
+		return auditLockReservation{}, &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+	}
+	a.mu.Lock()
+	closing := a.closing
+	a.mu.Unlock()
+	if closing {
+		return auditLockReservation{}, &auditLockRouteError{status: 503, code: "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"}
+	}
+
+	var reservation auditLockReservation
+	err := a.withStoreLock(ctx, "reserve occurrence", func() error {
+		store, err := a.readStoreLockHeld(false)
+		if err != nil {
+			return err
+		}
+		for _, record := range store.Records {
+			if record.AttemptID != c.AttemptID && record.OccurrenceID != c.OccurrenceID {
+				continue
+			}
+			exact := record.AttemptID == c.AttemptID &&
+				record.OccurrenceID == c.OccurrenceID &&
+				record.OriginServerInstance == c.ServerInstance &&
+				auditLockRecordBinding(record) == binding
+			if !exact {
+				return &auditLockRouteError{status: 409, code: "RECOVER_ATTEMPT_CONFLICT"}
+			}
+			effective := a.effectiveOccurrence(store.Generation, record)
+			if effective.Status == auditLockOccurrenceConsumed {
+				return &auditLockRouteError{status: 409, code: "RECOVER_OCCURRENCE_CONSUMED"}
+			}
+			reservation = auditLockReservation{
+				Receipt:    auditLockReceiptFromRecord(effective),
+				Terminal:   auditLockTerminalFromRecord(effective),
+				Binding:    binding,
+				Generation: store.Generation,
+			}
+			return nil
+		}
+		serverInstance, generation := a.currentIdentity()
+		if c.ServerInstance != serverInstance ||
+			store.ActiveServerInstance != serverInstance ||
+			store.Generation != generation {
+			return &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
+		}
+		for _, record := range store.Records {
+			if record.Status != auditLockOccurrenceConsumed && record.TaskName == binding.taskName {
+				return &auditLockRouteError{status: 409, code: "RECOVER_ATTEMPT_CONFLICT"}
+			}
+		}
+		if len(store.Records) >= auditLockOccurrenceCapacity {
+			return &auditLockRouteError{status: 503, code: "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"}
+		}
+		record := auditLockOccurrenceRecord{
+			OriginServerInstance: c.ServerInstance,
+			AttemptID:            c.AttemptID,
+			OccurrenceID:         c.OccurrenceID,
+			TaskName:             binding.taskName,
+			Confirm:              binding.confirm,
+			Status:               auditLockOccurrenceInFlight,
+			LockAuthorization:    "none",
+		}
+		store.Records = append(store.Records, record)
+		if err := a.writeStoreLockHeld(store); err != nil {
+			return err
+		}
+		reservation = auditLockReservation{
+			Novel:      true,
+			Receipt:    auditLockReceiptFromRecord(record),
+			Binding:    binding,
+			Generation: store.Generation,
+		}
+		return nil
+	})
+	if err != nil {
+		var routeErr *auditLockRouteError
+		if errors.As(err, &routeErr) {
+			return auditLockReservation{}, routeErr
+		}
+		return auditLockReservation{}, &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+	}
+	return reservation, nil
+}
+
+func (a *auditLockAdapter) terminalize(reservation auditLockReservation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {
+	ctx, cancel := context.WithTimeout(context.Background(), a.lockTimeout)
+	defer cancel()
+	var receipt auditLockReceiptDTO
+	var requested auditLockOccurrenceRecord
+	var mutationEntered bool
+	var durableProven bool
+	err := a.withStoreLockFailure(ctx, "terminalize occurrence", func() error {
+		store, err := a.readStoreLockHeld(false)
+		if err != nil {
+			return err
+		}
+		serverInstance, generation := a.currentIdentity()
+		if generation != reservation.Generation ||
+			store.Generation != reservation.Generation ||
+			store.ActiveServerInstance != serverInstance ||
+			serverInstance != reservation.Binding.serverInstance {
+			return errors.New("occurrence generation changed before terminalization")
+		}
+		for index := range store.Records {
+			record := &store.Records[index]
+			if record.AttemptID != reservation.Receipt.AttemptID ||
+				record.OccurrenceID != reservation.Receipt.OccurrenceID ||
+				record.OriginServerInstance != reservation.Receipt.ServerInstance ||
+				auditLockRecordBinding(*record) != reservation.Binding ||
+				record.Status != auditLockOccurrenceInFlight {
+				continue
+			}
+			switch receiptStatus {
+			case auditLockOccurrenceCommittedSuccess, auditLockOccurrenceCommittedError, auditLockOccurrenceNotCommitted:
+			default:
+				return fmt.Errorf("invalid terminal receipt status %q", receiptStatus)
+			}
+			mutationEntered = true
+			record.Status = receiptStatus
+			record.HTTPStatus = terminal.HTTPStatus
+			record.ErrorCode = terminal.ErrorCode
+			record.LockAuthorization = authorization
+			record.Success = cloneDaemonRecoverSuccess(terminal.Success)
+			requested = *record
+			if err := a.writeStoreLockHeld(store); err != nil {
+				return err
+			}
+			a.clearUncertaintyLockHeld(store.Generation, *record)
+			receipt = auditLockReceiptFromRecord(*record)
+			durableProven = true
+			return nil
+		}
+		return errors.New("in-flight occurrence changed before terminalization")
+	}, func(_ error) {
+		// If the mutation closure reached the write, perform one inode-anchored
+		// read while both locks are still held. A matching terminal record proves
+		// the write despite its returned error; every other result is uncertain.
+		if mutationEntered {
+			if store, readErr := a.readStoreLockHeld(false); readErr == nil {
+				for _, record := range store.Records {
+					if record.AttemptID == requested.AttemptID &&
+						record.OccurrenceID == requested.OccurrenceID &&
+						record.OriginServerInstance == requested.OriginServerInstance &&
+						auditLockRecordBinding(record) == reservation.Binding &&
+						record.Status == requested.Status &&
+						record.HTTPStatus == requested.HTTPStatus &&
+						record.ErrorCode == requested.ErrorCode &&
+						record.LockAuthorization == requested.LockAuthorization &&
+						reflect.DeepEqual(record.Success, requested.Success) {
+						a.clearUncertaintyLockHeld(store.Generation, record)
+						receipt = auditLockReceiptFromRecord(record)
+						durableProven = true
+						return
+					}
+				}
+			}
+		}
+		receipt = a.installUncertaintyLockHeld(reservation)
+	})
+	if err == nil {
+		return receipt, nil
+	}
+	if durableProven {
+		var releaseErr *auditLockStoreLockReleaseError
+		if errors.As(err, &releaseErr) {
+			_ = api.LogHubMcpEvent("warn", "daemon-recovery-occurrence-store-lock-release-failed", map[string]any{
+				"operation": "terminalize occurrence",
+			})
+		}
+		return receipt, nil
+	}
+	if receipt.Status != auditLockOccurrenceUncertain {
+		// A failure before the finalizer could run is not expected, but remains
+		// fail-closed and never exposes a retryable terminal outcome.
+		receipt = reservation.Receipt
+		receipt.Status = auditLockOccurrenceUncertain
+		receipt.LockAuthorization = "uncertain"
+		receipt.TerminationCommitState = auditLockTerminationStateUnknown
+	}
+	return receipt, &auditLockRouteError{status: 409, code: "RECOVER_OUTCOME_UNCERTAIN"}
+}
+
+func (a *auditLockAdapter) lookup(ctx context.Context, c auditLockCorrelation) (*auditLockReceiptDTO, *auditLockRouteError) {
+	if err := a.ensureReady(); err != nil {
+		return nil, err
+	}
+	var receipt *auditLockReceiptDTO
+	err := a.withStoreLock(ctx, "lookup occurrence", func() error {
+		store, err := a.readStoreLockHeld(false)
+		if err != nil {
+			return err
+		}
+		for _, record := range store.Records {
+			if record.AttemptID == c.AttemptID &&
+				record.OccurrenceID == c.OccurrenceID &&
+				record.OriginServerInstance == c.ServerInstance {
+				value := auditLockReceiptFromRecord(a.effectiveOccurrence(store.Generation, record))
+				receipt = &value
+				return nil
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+	}
+	return receipt, nil
+}
+
+func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelation) *auditLockRouteError {
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
-	if serverInstance != a.serverInstance {
-		return &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
+	rotatedInstance, err := newAuditLockCorrelationID()
+	if err != nil {
+		return &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
 	}
-	return nil
-}
-
-func (a *auditLockAdapter) reserve(c auditLockCorrelation, binding auditLockOccurrenceBinding) (auditLockReservation, *auditLockRouteError) {
-	if err := a.validateInstance(c.ServerInstance); err != nil {
-		return auditLockReservation{}, err
-	}
-	key := auditLockOccurrenceKey{attemptID: c.AttemptID, occurrenceID: c.OccurrenceID}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if existing := a.occurrences[key]; existing != nil {
-		if existing.binding != binding {
-			return auditLockReservation{}, &auditLockRouteError{status: 409, code: "RECOVER_ATTEMPT_CONFLICT"}
+	var rotated bool
+	var nextGeneration uint64
+	var acknowledgedGeneration uint64
+	var acknowledgedRecord auditLockOccurrenceRecord
+	err = a.withStoreLock(ctx, "acknowledge occurrence", func() error {
+		store, err := a.readStoreLockHeld(false)
+		if err != nil {
+			return err
 		}
-		if existing.phase == auditLockOccurrenceConsumed {
-			return auditLockReservation{}, &auditLockRouteError{status: 409, code: "RECOVER_OCCURRENCE_CONSUMED"}
+		serverInstance, generation := a.currentIdentity()
+		if store.Generation != generation || store.ActiveServerInstance != serverInstance {
+			return &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
 		}
-		return auditLockReservation{
-			Receipt:  existing.receipt,
-			Terminal: cloneAuditLockTerminal(existing.terminal),
-		}, nil
-	}
-	if a.closing || len(a.occurrences) >= auditLockOccurrenceCapacity {
-		return auditLockReservation{}, &auditLockRouteError{status: 503, code: "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"}
-	}
-	receipt := auditLockReceiptDTO{
-		AttemptID:         c.AttemptID,
-		OccurrenceID:      c.OccurrenceID,
-		Status:            "in_flight",
-		LockAuthorization: "none",
-	}
-	a.occurrences[key] = &auditLockOccurrence{
-		binding: binding,
-		phase:   auditLockOccurrenceInFlight,
-		receipt: receipt,
-	}
-	return auditLockReservation{Novel: true, Receipt: receipt}, nil
-}
-
-func (a *auditLockAdapter) terminalize(c auditLockCorrelation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) auditLockReceiptDTO {
-	key := auditLockOccurrenceKey{attemptID: c.AttemptID, occurrenceID: c.OccurrenceID}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	entry := a.occurrences[key]
-	if entry == nil || entry.phase != auditLockOccurrenceInFlight {
-		return auditLockReceiptDTO{}
-	}
-	entry.phase = auditLockOccurrenceTerminal
-	entry.receipt.Status = receiptStatus
-	entry.receipt.LockAuthorization = authorization
-	entry.terminal = cloneAuditLockTerminal(&terminal)
-	return entry.receipt
-}
-
-func (a *auditLockAdapter) lookup(c auditLockCorrelation) (*auditLockReceiptDTO, *auditLockRouteError) {
-	if err := a.validateInstance(c.ServerInstance); err != nil {
-		return nil, err
-	}
-	key := auditLockOccurrenceKey{attemptID: c.AttemptID, occurrenceID: c.OccurrenceID}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	entry := a.occurrences[key]
-	if entry == nil {
-		return nil, nil
-	}
-	receipt := entry.receipt
-	return &receipt, nil
-}
-
-func (a *auditLockAdapter) acknowledge(c auditLockCorrelation) *auditLockRouteError {
-	if err := a.validateInstance(c.ServerInstance); err != nil {
-		return err
-	}
-	key := auditLockOccurrenceKey{attemptID: c.AttemptID, occurrenceID: c.OccurrenceID}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	entry := a.occurrences[key]
-	if entry == nil || entry.phase == auditLockOccurrenceConsumed {
+		found := false
+		for index := range store.Records {
+			record := &store.Records[index]
+			if record.AttemptID != c.AttemptID ||
+				record.OccurrenceID != c.OccurrenceID ||
+				record.OriginServerInstance != c.ServerInstance {
+				continue
+			}
+			found = true
+			acknowledgedGeneration = store.Generation
+			acknowledgedRecord = *record
+			effective := a.effectiveOccurrence(store.Generation, *record)
+			if effective.Status == auditLockOccurrenceInFlight {
+				return &auditLockRouteError{status: 409, code: "RECOVER_RECEIPT_IN_FLIGHT"}
+			}
+			if record.Status != auditLockOccurrenceConsumed {
+				record.Status = auditLockOccurrenceConsumed
+				record.HTTPStatus = 0
+				record.ErrorCode = ""
+				record.LockAuthorization = "none"
+				record.Success = nil
+			}
+			break
+		}
+		if !found {
+			return nil
+		}
+		unresolved := false
+		for _, record := range store.Records {
+			if record.Status != auditLockOccurrenceConsumed {
+				unresolved = true
+				break
+			}
+		}
+		if !unresolved {
+			if store.Generation == math.MaxUint64 {
+				return errors.New("occurrence generation overflow")
+			}
+			store.Records = nil
+			store.Generation++
+			store.ActiveServerInstance = rotatedInstance
+			rotated = true
+			nextGeneration = store.Generation
+		}
+		if err := a.writeStoreLockHeld(store); err != nil {
+			return err
+		}
+		if found {
+			a.clearUncertaintyLockHeld(acknowledgedGeneration, acknowledgedRecord)
+		}
 		return nil
+	})
+	if err != nil {
+		var routeErr *auditLockRouteError
+		if errors.As(err, &routeErr) {
+			return routeErr
+		}
+		return &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
 	}
-	if entry.phase == auditLockOccurrenceInFlight {
-		return &auditLockRouteError{status: 409, code: "RECOVER_RECEIPT_IN_FLIGHT"}
+	if rotated {
+		a.mu.Lock()
+		a.serverInstance = rotatedInstance
+		a.generation = nextGeneration
+		a.mu.Unlock()
 	}
-	entry.phase = auditLockOccurrenceConsumed
-	entry.terminal = nil
-	entry.receipt.Status = "consumed"
-	entry.receipt.LockAuthorization = "none"
 	return nil
 }
 
-func (a *auditLockAdapter) snapshot(receipt *auditLockReceiptDTO) (auditLockStateDTO, *auditLockRouteError) {
+func (a *auditLockAdapter) snapshot(ctx context.Context, receipt *auditLockReceiptDTO) (auditLockStateDTO, *auditLockRouteError) {
 	if err := a.ensureReady(); err != nil {
 		return auditLockStateDTO{}, err
 	}
+	var store auditLockOccurrenceStore
+	var receipts []auditLockReceiptDTO
+	err := a.withStoreLock(ctx, "snapshot occurrence store", func() error {
+		var readErr error
+		store, readErr = a.readStoreLockHeld(false)
+		if readErr != nil {
+			return readErr
+		}
+		receipts = make([]auditLockReceiptDTO, 0, len(store.Records))
+		for _, record := range store.Records {
+			effective := a.effectiveOccurrence(store.Generation, record)
+			if effective.Status != auditLockOccurrenceConsumed {
+				receipts = append(receipts, auditLockReceiptFromRecord(effective))
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		return auditLockStateDTO{}, &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+	}
+	serverInstance, generation := a.currentIdentity()
+	if store.Generation != generation || store.ActiveServerInstance != serverInstance {
+		return auditLockStateDTO{}, &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
+	}
 	physical := api.SupervisorEventLockSnapshotForPath(a.logPath)
 	return auditLockStateDTO{
-		Scope:           auditLockScope,
-		ServerInstance:  a.serverInstance,
-		Revision:        physical.Revision,
-		State:           physical.State,
-		RecoveryReceipt: receipt,
+		Scope:            auditLockScope,
+		ServerInstance:   serverInstance,
+		Revision:         physical.Revision,
+		State:            physical.State,
+		RecoveryReceipt:  receipt,
+		RecoveryReceipts: receipts,
 	}, nil
+}
+
+// snapshotAfterTerminal preserves the already-durable receipt when only the
+// follow-up store projection fails. It is intentionally unavailable before
+// reservation/terminalization; pre-mutation store failures still fail loud and
+// prevent recovery.
+func (a *auditLockAdapter) snapshotAfterTerminal(ctx context.Context, receipt *auditLockReceiptDTO) auditLockStateDTO {
+	snapshot, routeErr := a.snapshot(ctx, receipt)
+	if routeErr != nil {
+		return a.snapshotProjection(receipt)
+	}
+	return snapshot
+}
+
+func (a *auditLockAdapter) snapshotProjection(receipt *auditLockReceiptDTO) auditLockStateDTO {
+	serverInstance, _ := a.currentIdentity()
+	physical := api.SupervisorEventLockSnapshotForPath(a.logPath)
+	receipts := []auditLockReceiptDTO{}
+	if receipt != nil {
+		receipts = append(receipts, *receipt)
+	}
+	return auditLockStateDTO{
+		Scope:            auditLockScope,
+		ServerInstance:   serverInstance,
+		Revision:         physical.Revision,
+		State:            physical.State,
+		RecoveryReceipt:  receipt,
+		RecoveryReceipts: receipts,
+	}
 }
 
 func (a *auditLockAdapter) armPendingSettlement() {
@@ -386,52 +1217,78 @@ func (a *auditLockAdapter) armPendingSettlement() {
 		a.mu.Unlock()
 		return
 	}
-	initial, unsubscribe := api.SubscribeSupervisorEventLockState(a.logPath, a.observeSettlement)
+	initial, subscription := api.SubscribeSupervisorEventLockState(a.logPath, a.observeSettlement)
 	if initial.State != api.SupervisorEventLockOutstanding {
 		a.mu.Unlock()
-		unsubscribe()
+		subscription.Close()
 		return
 	}
 	a.watching = true
-	a.unsubscribe = unsubscribe
+	a.observedRevision = initial.Revision
+	a.subscription = subscription
 	a.mu.Unlock()
 }
 
-func (a *auditLockAdapter) observeSettlement(snapshot api.SupervisorEventLockSnapshot) {
-	if snapshot.State != api.SupervisorEventLockReleased && snapshot.State != api.SupervisorEventLockStranded {
+func (a *auditLockAdapter) observeSettlement(hint api.SupervisorEventLockSnapshot) {
+	a.mu.Lock()
+	if a.closing || !a.watching || hint.Revision <= a.observedRevision {
+		a.mu.Unlock()
 		return
 	}
+	a.observedRevision = hint.Revision
+	if hint.State == api.SupervisorEventLockOutstanding {
+		a.mu.Unlock()
+		return
+	}
+	subscription := a.subscription
+	a.mu.Unlock()
+	if subscription == nil {
+		return
+	}
+	authoritative, claimed := subscription.TryCloseAtTerminal(hint.Revision)
+	if !claimed {
+		a.mu.Lock()
+		if authoritative.Revision > a.observedRevision {
+			a.observedRevision = authoritative.Revision
+		}
+		a.mu.Unlock()
+		return
+	}
+
 	a.mu.Lock()
-	if a.closing || !a.watching {
+	if a.subscription != subscription || !a.watching {
 		a.mu.Unlock()
 		return
 	}
 	a.watching = false
-	unsubscribe := a.unsubscribe
-	a.unsubscribe = nil
+	a.subscription = nil
+	a.observedRevision = authoritative.Revision
 	events := a.events
-	dto := auditLockStateDTO{
-		Scope:          auditLockScope,
-		ServerInstance: a.serverInstance,
-		Revision:       snapshot.Revision,
-		State:          snapshot.State,
-	}
+	serverInstance := a.serverInstance
 	a.mu.Unlock()
-	if unsubscribe != nil {
-		unsubscribe()
-	}
 	if events != nil {
+		dto := auditLockStateDTO{
+			Scope:            auditLockScope,
+			ServerInstance:   serverInstance,
+			Revision:         authoritative.Revision,
+			State:            authoritative.State,
+			RecoveryReceipts: []auditLockReceiptDTO{},
+		}
 		events.Publish(Event{Type: "audit-lock-state", Body: dto.eventBody()})
 	}
 }
 
 func (d auditLockStateDTO) eventBody() map[string]any {
 	body := map[string]any{
-		"scope":            d.Scope,
-		"server_instance":  d.ServerInstance,
-		"revision":         d.Revision,
-		"state":            d.State,
-		"recovery_receipt": nil,
+		"scope":             d.Scope,
+		"server_instance":   d.ServerInstance,
+		"revision":          d.Revision,
+		"state":             d.State,
+		"recovery_receipt":  nil,
+		"recovery_receipts": d.RecoveryReceipts,
+	}
+	if body["recovery_receipts"] == nil {
+		body["recovery_receipts"] = []auditLockReceiptDTO{}
 	}
 	if d.RecoveryReceipt != nil {
 		body["recovery_receipt"] = d.RecoveryReceipt
@@ -459,12 +1316,11 @@ func (a *auditLockAdapter) close() {
 	}
 	a.closing = true
 	a.closed = true
-	unsubscribe := a.unsubscribe
-	a.unsubscribe = nil
+	subscription := a.subscription
+	a.subscription = nil
 	a.watching = false
-	clear(a.occurrences)
 	a.mu.Unlock()
-	if unsubscribe != nil {
-		unsubscribe()
+	if subscription != nil {
+		subscription.Close()
 	}
 }

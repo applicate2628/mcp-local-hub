@@ -654,9 +654,13 @@ describe("postDaemonRecover", () => {
     recovery_receipt: {
       attempt_id: correlation.attempt_id,
       occurrence_id: correlation.occurrence_id,
+      server_instance: correlation.server_instance,
+      task_name: "\\demo/default",
       status: "committed_success",
       lock_authorization: "none",
+      termination_commit_state: "not_committed",
     },
+    recovery_receipts: [],
   };
 
   beforeEach(() => {
@@ -677,6 +681,7 @@ describe("postDaemonRecover", () => {
         port_owner_check: terminationUnconfirmed,
         port_wait_outcome: "still_bound",
         audit_handoff: "durable",
+        termination_committed: true,
         audit_lock: auditLock,
       }),
     }) as unknown as Response);
@@ -741,6 +746,7 @@ describe("postDaemonRecover", () => {
       "RECOVER_OCCURRENCE_CONSUMED",
       "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
       "RECOVER_RECEIPT_IN_FLIGHT",
+      "RECOVER_OUTCOME_UNCERTAIN",
     ]);
   });
 
@@ -758,6 +764,7 @@ describe("postDaemonRecover", () => {
         port_owner_check: "reaped",
         port_wait_outcome: "released",
         audit_handoff: "release_unconfirmed",
+        termination_committed: true,
         audit_lock: { ...auditLock, state: "stranded", revision: 8 },
       }),
     }) as unknown as Response);
@@ -782,6 +789,17 @@ describe("postDaemonRecover", () => {
     expect(created.attempt_id).not.toBe(created.occurrence_id);
   });
 
+  it("fails closed when Web Crypto is unavailable", () => {
+    vi.stubGlobal("crypto", undefined);
+    try {
+      expect(() =>
+        newDaemonRecoverCorrelation(correlation.server_instance)
+      ).toThrow("Web Crypto is unavailable; recovery was not started.");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("looks up and acknowledges the exact full correlation tuple", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
@@ -798,13 +816,17 @@ describe("postDaemonRecover", () => {
       } as unknown as Response);
     globalThis.fetch = fetchMock;
 
-    await expect(getDaemonRecoverAuditLockState(correlation)).resolves.toEqual(auditLock);
+    const controller = new AbortController();
+    await expect(
+      getDaemonRecoverAuditLockState(correlation, controller.signal),
+    ).resolves.toEqual(auditLock);
     await expect(acknowledgeDaemonRecoverReceipt(correlation)).resolves.toBeUndefined();
 
     const lookupURL = fetchMock.mock.calls[0]?.[0]?.toString() ?? "";
     expect(lookupURL).toContain("attempt_id=11111111-1111-4111-8111-111111111111");
     expect(lookupURL).toContain("occurrence_id=22222222-2222-4222-8222-222222222222");
     expect(lookupURL).toContain("server_instance=33333333-3333-4333-8333-333333333333");
+    expect(fetchMock.mock.calls[0]?.[1]).toEqual({ signal: controller.signal });
     expect(fetchMock.mock.calls[1]).toEqual([
       "/api/daemon/recover/audit-lock-receipt",
       {

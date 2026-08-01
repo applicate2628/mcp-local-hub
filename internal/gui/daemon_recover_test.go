@@ -32,6 +32,25 @@ func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confir
 
 func performDaemonRecoverRequest(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	installIsolatedAuditLock(t, s)
+	var request map[string]any
+	if err := json.Unmarshal([]byte(body), &request); err == nil {
+		if confirmed, _ := request["confirm"].(bool); confirmed {
+			if _, exists := request["audit_lock_attempt"]; !exists {
+				correlation := validAuditLockCorrelation(s.auditLock.serverInstance, 1)
+				request["audit_lock_attempt"] = map[string]any{
+					"attempt_id":      correlation.AttemptID,
+					"occurrence_id":   correlation.OccurrenceID,
+					"server_instance": correlation.ServerInstance,
+				}
+				encoded, marshalErr := json.Marshal(request)
+				if marshalErr != nil {
+					t.Fatal(marshalErr)
+				}
+				body = string(encoded)
+			}
+		}
+	}
 	req := httptest.NewRequest(http.MethodPost, "/api/daemon/recover", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "http://127.0.0.1:9125")
@@ -48,6 +67,129 @@ func decodeDaemonRecoverBody(t *testing.T, rec *httptest.ResponseRecorder) map[s
 		t.Fatalf("decode body: %v; raw=%s", err, rec.Body.String())
 	}
 	return body
+}
+
+func TestDaemonRecoverPostTerminalSnapshotFailurePreservesCommittedReceipt(t *testing.T) {
+	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	defer adapter.close()
+	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
+	binding := auditLockOccurrenceBinding{
+		serverInstance: correlation.ServerInstance,
+		taskName:       `\demo/default`,
+		confirm:        true,
+	}
+	reservation, reserveErr := adapter.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil {
+		t.Fatalf("reserve: %v", reserveErr)
+	}
+	receipt, terminalErr := adapter.terminalize(
+		reservation,
+		auditLockOccurrenceCommittedError,
+		"none",
+		auditLockTerminalEvidence{
+			HTTPStatus:           http.StatusInternalServerError,
+			ErrorCode:            "RECOVER_RESPAWN_FAILED",
+			TerminationCommitted: true,
+		},
+	)
+	if terminalErr != nil {
+		t.Fatalf("terminalize: %v", terminalErr)
+	}
+
+	// Simulate only the second, post-terminal snapshot read becoming
+	// unavailable. The durable receipt must remain the outward truth instead of
+	// being replaced by a pre-mutation adapter error.
+	adapter.initErr = errors.New("synthetic post-terminal snapshot failure")
+	s := &Server{auditLock: adapter}
+	rec := httptest.NewRecorder()
+	s.writeDaemonRecoverOccurrenceError(
+		context.Background(),
+		rec,
+		http.StatusInternalServerError,
+		"RECOVER_RESPAWN_FAILED",
+		true,
+		receipt,
+	)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response daemonRecoverOccurrenceErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != "RECOVER_RESPAWN_FAILED" ||
+		!response.TerminationCommitted ||
+		response.AuditLock.RecoveryReceipt == nil ||
+		response.AuditLock.RecoveryReceipt.Status != auditLockOccurrenceCommittedError ||
+		response.AuditLock.RecoveryReceipt.TerminationCommitState != auditLockTerminationStateCommitted ||
+		len(response.AuditLock.RecoveryReceipts) != 1 {
+		t.Fatalf("post-terminal fallback response=%+v", response)
+	}
+}
+
+func TestDaemonRecoverRouteCommittedFlagPreservesHTTPMatrix(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "respawn failed",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnFailed},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_RESPAWN_FAILED",
+		},
+		{
+			name:       "supervisor unavailable",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureSupervisorUnavailable},
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   "RECOVER_SUPERVISOR_UNAVAILABLE",
+		},
+		{
+			name:       "respawn setup",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_STATE_READ_FAILED",
+		},
+		{
+			name:       "audit durability",
+			err:        &daemonrecovery.OperationError{Kind: daemonrecovery.FailureAuditDurability},
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_AUDIT_DURABILITY_FAILED",
+		},
+		{
+			name:       "unclassified",
+			err:        errors.New("synthetic backend failure"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   "RECOVER_UNCLASSIFIED_FAILURE",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewServer(Config{Port: 9125})
+			fake := &fakeDaemonRecoverer{
+				result: daemonrecovery.Result{TerminationCommitted: true},
+				err:    tc.err,
+			}
+			s.daemonRecover = fake
+			rec := performDaemonRecoverRequest(t, s, `{"task_name":"demo/default","confirm":true}`)
+			if rec.Code != tc.wantStatus || fake.calls != 1 {
+				t.Fatalf("status=%d calls=%d body=%s", rec.Code, fake.calls, rec.Body.String())
+			}
+			var response daemonRecoverOccurrenceErrorResponse
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Code != tc.wantCode ||
+				!response.TerminationCommitted ||
+				response.AuditLock.RecoveryReceipt == nil ||
+				response.AuditLock.RecoveryReceipt.Status != auditLockOccurrenceCommittedError ||
+				response.AuditLock.RecoveryReceipt.TerminationCommitState != auditLockTerminationStateCommitted {
+				t.Fatalf("committed HTTP response=%+v", response)
+			}
+		})
+	}
 }
 
 func TestDaemonRecoverRouteRequiresSameOriginPOST(t *testing.T) {
@@ -96,7 +238,7 @@ func TestDaemonRecoverRouteRequiresExplicitConfirmationBeforeInvocation(t *testi
 	}
 }
 
-func TestDaemonRecoverRouteMapsStableOutcomesAndRedactsDetails(t *testing.T) {
+func TestKnownRecoveryContractGoldenMatrix(t *testing.T) {
 	foreignPath := `C:\Users\<owner>\foreign.exe`
 	tests := []struct {
 		name       string
@@ -212,11 +354,12 @@ func TestDaemonRecoverRouteMapsStableOutcomesAndRedactsDetails(t *testing.T) {
 func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 	s := NewServer(Config{Port: 9125})
 	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
-		TaskName:        `\mcp-local-hub-memory-default`,
-		Reaped:          true,
-		PortOwnerCheck:  daemonrecovery.PortOwnerReaped,
-		PortWaitOutcome: daemonrecovery.PortWaitStillBound,
-		AuditHandoff:    daemonrecovery.AuditHandoffDurable,
+		TaskName:             `\mcp-local-hub-memory-default`,
+		Reaped:               true,
+		PortOwnerCheck:       daemonrecovery.PortOwnerReaped,
+		PortWaitOutcome:      daemonrecovery.PortWaitStillBound,
+		AuditHandoff:         daemonrecovery.AuditHandoffDurable,
+		TerminationCommitted: true,
 	}}
 	s.daemonRecover = fake
 
@@ -232,9 +375,12 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 	if !ok {
 		t.Fatalf("body=%v missing typed audit_lock snapshot", got)
 	}
+	receipts, receiptsOK := auditLock["recovery_receipts"].([]any)
 	if auditLock["scope"] != auditLockScope ||
 		auditLock["state"] != "released" ||
-		auditLock["recovery_receipt"] != nil {
+		auditLock["recovery_receipt"] == nil ||
+		!receiptsOK ||
+		len(receipts) != 1 {
 		t.Fatalf("audit_lock=%v", auditLock)
 	}
 	if instance, ok := auditLock["server_instance"].(string); !ok || validateAuditLockCorrelationValue("server_instance", instance) != nil {
@@ -242,12 +388,13 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 	}
 	delete(got, "audit_lock")
 	want := map[string]any{
-		"task_name":         `\mcp-local-hub-memory-default`,
-		"state":             "respawn_accepted",
-		"reaped":            true,
-		"port_owner_check":  "reaped",
-		"port_wait_outcome": "still_bound",
-		"audit_handoff":     "durable",
+		"task_name":             `\mcp-local-hub-memory-default`,
+		"state":                 "respawn_accepted",
+		"reaped":                true,
+		"port_owner_check":      "reaped",
+		"port_wait_outcome":     "still_bound",
+		"audit_handoff":         "durable",
+		"termination_committed": true,
 	}
 	if !mapsEqual(got, want) {
 		t.Fatalf("body=%v want=%v", got, want)
@@ -269,11 +416,12 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 func TestDaemonRecoverRouteReleaseUnconfirmedIsAWarningOnSuccessNotAFailure(t *testing.T) {
 	s := NewServer(Config{Port: 9125})
 	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
-		TaskName:        `\mcp-local-hub-memory-default`,
-		Reaped:          true,
-		PortOwnerCheck:  daemonrecovery.PortOwnerReaped,
-		PortWaitOutcome: daemonrecovery.PortWaitReleased,
-		AuditHandoff:    daemonrecovery.AuditHandoffReleaseUnconfirmed,
+		TaskName:             `\mcp-local-hub-memory-default`,
+		Reaped:               true,
+		PortOwnerCheck:       daemonrecovery.PortOwnerReaped,
+		PortWaitOutcome:      daemonrecovery.PortWaitReleased,
+		AuditHandoff:         daemonrecovery.AuditHandoffReleaseUnconfirmed,
+		TerminationCommitted: true,
 	}}
 	s.daemonRecover = fake
 
@@ -325,8 +473,9 @@ func TestDaemonRecoverRouteRespawnFailureReportsCommittedTerminationWithoutProce
 		{
 			name: "confirmed reap then supervisor unavailable",
 			result: daemonrecovery.Result{
-				Reaped:         true,
-				PortOwnerCheck: daemonrecovery.PortOwnerReaped,
+				Reaped:               true,
+				PortOwnerCheck:       daemonrecovery.PortOwnerReaped,
+				TerminationCommitted: true,
 			},
 			err: &daemonrecovery.OperationError{
 				Kind:  daemonrecovery.FailureSupervisorUnavailable,
@@ -338,8 +487,9 @@ func TestDaemonRecoverRouteRespawnFailureReportsCommittedTerminationWithoutProce
 		{
 			name: "termination unconfirmed then respawn rejected",
 			result: daemonrecovery.Result{
-				Reaped:         false,
-				PortOwnerCheck: daemonrecovery.PortOwnerTerminationUnconfirmed,
+				Reaped:               false,
+				PortOwnerCheck:       daemonrecovery.PortOwnerTerminationUnconfirmed,
+				TerminationCommitted: true,
 			},
 			err: &daemonrecovery.OperationError{
 				Kind:    daemonrecovery.FailureRespawnFailed,

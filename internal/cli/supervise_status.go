@@ -325,6 +325,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 				TaskName:                   d.TaskName,
 				Server:                     server,
 				Daemon:                     daemon,
+				Command:                    d.Command,
 				Port:                       port,
 				Args:                       d.Args,
 				StartupBindDeadlineSeconds: deadlineSecs,

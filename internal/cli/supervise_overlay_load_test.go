@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/api/daemon_env_overlay"
 )
 
@@ -15,7 +16,7 @@ import (
 // path returns an empty Overlay + nil error and does NOT emit a
 // fail-LOUD startup-failed event. This is the fresh-install case.
 func TestLoadOverlayAtStartupMissingFileIsBenign(t *testing.T) {
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "state"))
 	events, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, "supervisor-events.log"))
 	if err != nil {
 		t.Fatalf("OpenSupervisorEventLog: %v", err)
@@ -46,7 +47,7 @@ func TestLoadOverlayAtStartupMissingFileIsBenign(t *testing.T) {
 // TestLoadOverlayAtStartupEmitsLoadedEvent verifies the success path
 // emits `daemon-env-overlay-loaded` with the row count.
 func TestLoadOverlayAtStartupEmitsLoadedEvent(t *testing.T) {
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "state"))
 	overlayYAML := `version: 1
 daemons:
   \mcp-local-hub-foo-default:
@@ -92,7 +93,7 @@ daemons:
 // row whose taskName is NOT in the intent triggers the
 // `daemon-env-overlay-orphan-row` event.
 func TestLoadOverlayAtStartupEmitsOrphanForUnknownTask(t *testing.T) {
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "state"))
 	overlayYAML := `version: 1
 daemons:
   \mcp-local-hub-zombie-default:
@@ -139,7 +140,7 @@ daemons:
 // without a leading backslash should still match a canonical-form
 // intent daemon (so the row is NOT classified orphan).
 func TestLoadOverlayAtStartupBareKeyInOverlayMatchesCanonicalIntent(t *testing.T) {
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "state"))
 	// Note: bare key (no leading backslash).
 	overlayYAML := `version: 1
 daemons:
@@ -184,7 +185,7 @@ daemons:
 // both `daemon-env-overlay-load-failed` (warn) and
 // `supervise-startup-failed` (error) audit rows.
 func TestLoadOverlayAtStartupFailLoudOnNonRegularFile(t *testing.T) {
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "state"))
 	// Create a DIRECTORY at the overlay path so Load's IsRegular check
 	// rejects it.
 	if err := os.Mkdir(filepath.Join(stateDir, "daemon-env-overrides.yaml"), 0o700); err != nil {

@@ -154,6 +154,82 @@ func TestSupervisorDaemonEntryLive_GenuineForeignExeStillMismatches(t *testing.T
 	}
 }
 
+// TestSupervisorStatusDaemons_ConfiguredCommandIdentityProjection guards the
+// read-only status reconstruction path. It must retain the configured child
+// command for PID identity while preserving the existing fail-closed
+// projection for a genuine foreign executable.
+func TestSupervisorStatusDaemons_ConfiguredCommandIdentityProjection(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	const taskName = `\mcp-local-hub-memory-default`
+	daemonCmd := testDaemonCommandPath()
+	wantExe := normExeForTest(daemonCmd)
+	if wantExe == canonicalMcphubPath() {
+		t.Skip("test daemon command unexpectedly equals the supervisor path; mismatch is unobservable")
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: taskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Command:  daemonCmd,
+			Port:     0,
+		}},
+	}); err != nil {
+		t.Fatalf("write supervisor intent: %v", err)
+	}
+
+	tests := []struct {
+		name          string
+		identityError error
+		wantState     string
+		wantCurrent   int
+		wantStale     int
+	}{
+		{name: "matching-child", wantState: "Running", wantCurrent: 22036},
+		{name: "genuine-mismatch", identityError: process.ErrProcessIdentityMismatch, wantState: "Restarting", wantStale: 22036},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var sawExe string
+			restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
+				PIDAlive: func(pid int) bool { return pid == 22036 },
+				PIDIdentity: func(proof process.PIDIdentityProof) error {
+					sawExe = proof.ExecutablePath
+					return tt.identityError
+				},
+			})
+			defer restore()
+
+			tracker := NewDaemonRuntimeTracker()
+			tracker.MarkSpawned(taskName, 22036, time.Now().UTC().Add(-time.Minute))
+			rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
+			if err != nil {
+				t.Fatalf("supervisorStatusDaemons: %v", err)
+			}
+			if len(rows) != 1 {
+				t.Fatalf("rows len = %d, want 1: %#v", len(rows), rows)
+			}
+			if sawExe != wantExe {
+				t.Fatalf("PIDIdentity ExecutablePath = %q, want configured child command %q", sawExe, wantExe)
+			}
+			if got := rows[0]["state"]; got != tt.wantState {
+				t.Fatalf("state = %#v, want %q", got, tt.wantState)
+			}
+			if got := rows[0]["current_pid"]; got != tt.wantCurrent {
+				t.Fatalf("current_pid = %#v, want %d", got, tt.wantCurrent)
+			}
+			if tt.wantStale == 0 {
+				if _, ok := rows[0]["stale_pid"]; ok {
+					t.Fatalf("stale_pid present for matching child: %#v", rows[0])
+				}
+			} else if got := rows[0]["stale_pid"]; got != tt.wantStale {
+				t.Fatalf("stale_pid = %#v, want %d", got, tt.wantStale)
+			}
+		})
+	}
+}
+
 // TestProductionTerminateFn_IdentityProofUsesDaemonCommand is the terminate-site
 // guard (supervise.go makeProductionTerminateFnWithStatePath). The terminate
 // path verifies (and then kills) the target PID against an identity proof; that

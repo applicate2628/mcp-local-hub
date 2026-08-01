@@ -131,7 +131,7 @@ func runDaemonRecover(cmd *cobra.Command, taskArg string, yes bool) error {
 		},
 	}, deps)
 	if err != nil {
-		return printRecoverError(cmd, taskArg, err)
+		return printRecoverError(cmd, taskArg, result, err)
 	}
 	fmt.Fprintf(out, "recovered %s: forced respawn accepted by the supervisor.\n", result.TaskName)
 	printRecoverAuditHandoffWarning(cmd, result)
@@ -223,15 +223,25 @@ func printRecoverCandidate(out interface{ Write([]byte) (int, error) }, candidat
 	}
 }
 
-func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
+func printCommittedRecoveryGuard(errOut interface{ Write([]byte) (int, error) }) {
+	fmt.Fprintln(errOut, "Recovery termination was committed; do not run daemon recover again blindly. Check mcp-local-hub status before any further action.")
+}
+
+func printRecoverError(cmd *cobra.Command, taskArg string, result daemonrecovery.Result, err error) error {
 	errOut := cmd.ErrOrStderr()
 	var operationErr *daemonrecovery.OperationError
 	if !errors.As(err, &operationErr) {
 		fmt.Fprintf(errOut, "error: daemon recovery: %v\n", err)
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitRespawnError)
 	}
 	if operationErr.Kind == daemonrecovery.FailureStateRead && errors.Is(operationErr.Cause, api.ErrRespawnSetupFailure) {
 		fmt.Fprintf(errOut, "error: force respawn call could not be prepared: %v\n", operationErr)
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitUnreachable)
 	}
 	switch operationErr.Kind {
@@ -247,6 +257,7 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 		if operationErr.Cause != nil {
 			fmt.Fprintf(errOut, "details: %v\n", operationErr.Cause)
 		}
+		printCommittedRecoveryGuard(errOut)
 		return forceExit(daemonRecoverExitAuditDurability)
 	case daemonrecovery.FailureInvalidArgs, daemonrecovery.FailureStateRead, daemonrecovery.FailureUnknownTask:
 		if operationErr.Kind == daemonrecovery.FailureUnknownTask {
@@ -259,6 +270,9 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 			}
 		} else {
 			fmt.Fprintf(errOut, "error: recover state: %v\n", operationErr)
+		}
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
 		}
 		return forceExit(daemonRecoverExitUnknownTask)
 	case daemonrecovery.FailureConfirmationRequired, daemonrecovery.FailureRefusedPortOwner:
@@ -287,7 +301,11 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 			message = operationErr.Respawn.Message
 		}
 		fmt.Fprintf(errOut, "error: supervisor not reachable: %s\n", message)
-		fmt.Fprintln(errOut, "hint: start it with `mcphub supervise` (or ensure the autostart task is enabled), then retry.")
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		} else {
+			fmt.Fprintln(errOut, "hint: start it with `mcphub supervise` (or ensure the autostart task is enabled), then retry.")
+		}
 		return forceExit(daemonRecoverExitUnreachable)
 	case daemonrecovery.FailureRequestCanceled:
 		fmt.Fprintln(errOut, "error: recovery was canceled before any process termination was committed.")
@@ -301,9 +319,15 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 		return forceExit(daemonRecoverExitBudgetInsufficient)
 	case daemonrecovery.FailureRespawnFailed:
 		fmt.Fprintf(errOut, "error: force respawn refused [%s]: %s\n", operationErr.Respawn.Code, operationErr.Respawn.Message)
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitRespawnError)
 	default:
 		fmt.Fprintln(errOut, "error: daemon recovery failed: unclassified failure.")
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitRespawnError)
 	}
 }

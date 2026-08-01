@@ -59,20 +59,62 @@ func (r *daemonRecoverRequest) UnmarshalJSON(raw []byte) error {
 }
 
 type daemonRecoverResponse struct {
-	TaskName        string            `json:"task_name"`
-	State           string            `json:"state"`
-	Reaped          bool              `json:"reaped"`
-	PortOwnerCheck  string            `json:"port_owner_check"`
-	PortWaitOutcome string            `json:"port_wait_outcome"`
-	AuditHandoff    string            `json:"audit_handoff"`
-	AuditLock       auditLockStateDTO `json:"audit_lock"`
+	TaskName             string            `json:"task_name"`
+	State                string            `json:"state"`
+	Reaped               bool              `json:"reaped"`
+	PortOwnerCheck       string            `json:"port_owner_check"`
+	PortWaitOutcome      string            `json:"port_wait_outcome"`
+	AuditHandoff         string            `json:"audit_handoff"`
+	TerminationCommitted bool              `json:"termination_committed"`
+	AuditLock            auditLockStateDTO `json:"audit_lock"`
 }
 
 type daemonRecoverOccurrenceErrorResponse struct {
-	Error                string            `json:"error"`
-	Code                 string            `json:"code"`
-	TerminationCommitted bool              `json:"termination_committed"`
-	AuditLock            auditLockStateDTO `json:"audit_lock"`
+	Error                  string            `json:"error"`
+	Code                   string            `json:"code"`
+	TerminationCommitted   bool              `json:"termination_committed"`
+	TerminationCommitState string            `json:"termination_commit_state,omitempty"`
+	AuditLock              auditLockStateDTO `json:"audit_lock"`
+}
+
+// daemonRecoverErrorCode owns the finite set that may be persisted in a
+// terminal recovery receipt. Route-only audit-lock errors are deliberately
+// excluded because they never cross the durable terminalization boundary.
+type daemonRecoverErrorCode string
+
+const (
+	daemonRecoverErrorInvalidArgs               daemonRecoverErrorCode = "INVALID_ARGS"
+	daemonRecoverErrorConfirmationRequired      daemonRecoverErrorCode = "RECOVER_CONFIRMATION_REQUIRED"
+	daemonRecoverErrorUnknownTask               daemonRecoverErrorCode = "RECOVER_UNKNOWN_TASK"
+	daemonRecoverErrorRefusedPortOwner          daemonRecoverErrorCode = "RECOVER_REFUSED_PORT_OWNER"
+	daemonRecoverErrorRespawnFailed             daemonRecoverErrorCode = "RECOVER_RESPAWN_FAILED"
+	daemonRecoverErrorSupervisorUnavailable     daemonRecoverErrorCode = "RECOVER_SUPERVISOR_UNAVAILABLE"
+	daemonRecoverErrorRequestCanceled           daemonRecoverErrorCode = "RECOVER_REQUEST_CANCELED"
+	daemonRecoverErrorBoundaryProbeTimeout      daemonRecoverErrorCode = "RECOVER_BOUNDARY_PROBE_TIMEOUT"
+	daemonRecoverErrorRespawnBudgetInsufficient daemonRecoverErrorCode = "RECOVER_RESPAWN_BUDGET_INSUFFICIENT"
+	daemonRecoverErrorStateRead                 daemonRecoverErrorCode = "RECOVER_STATE_READ_FAILED"
+	daemonRecoverErrorAuditDurability           daemonRecoverErrorCode = "RECOVER_AUDIT_DURABILITY_FAILED"
+	daemonRecoverErrorUnclassifiedFailure       daemonRecoverErrorCode = "RECOVER_UNCLASSIFIED_FAILURE"
+)
+
+func (c daemonRecoverErrorCode) Valid() bool {
+	switch c {
+	case daemonRecoverErrorInvalidArgs,
+		daemonRecoverErrorConfirmationRequired,
+		daemonRecoverErrorUnknownTask,
+		daemonRecoverErrorRefusedPortOwner,
+		daemonRecoverErrorRespawnFailed,
+		daemonRecoverErrorSupervisorUnavailable,
+		daemonRecoverErrorRequestCanceled,
+		daemonRecoverErrorBoundaryProbeTimeout,
+		daemonRecoverErrorRespawnBudgetInsufficient,
+		daemonRecoverErrorStateRead,
+		daemonRecoverErrorAuditDurability,
+		daemonRecoverErrorUnclassifiedFailure:
+		return true
+	default:
+		return false
+	}
 }
 
 func registerDaemonRecoverRoutes(s *Server) {
@@ -117,27 +159,27 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var correlation *auditLockCorrelation
-	if req.AuditLockAttempt != nil {
-		parsed, correlationErr := decodeAuditLockCorrelationObject(req.AuditLockAttempt)
-		if correlationErr != nil {
-			writeAuditLockRouteError(w, correlationErr)
-			return
-		}
-		correlation = &parsed
-		reservation, reserveErr := s.auditLock.reserve(parsed, auditLockOccurrenceBinding{
-			serverInstance: parsed.ServerInstance,
-			taskName:       taskName,
-			confirm:        req.Confirm,
-		})
-		if reserveErr != nil {
-			writeAuditLockRouteError(w, reserveErr)
-			return
-		}
-		if !reservation.Novel {
-			s.writeDaemonRecoverReplay(w, reservation)
-			return
-		}
+	if req.AuditLockAttempt == nil {
+		writeAuditLockRouteError(w, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"})
+		return
+	}
+	correlation, correlationErr := decodeAuditLockCorrelationObject(req.AuditLockAttempt)
+	if correlationErr != nil {
+		writeAuditLockRouteError(w, correlationErr)
+		return
+	}
+	reservation, reserveErr := s.auditLock.reserve(r.Context(), correlation, auditLockOccurrenceBinding{
+		serverInstance: correlation.ServerInstance,
+		taskName:       taskName,
+		confirm:        req.Confirm,
+	})
+	if reserveErr != nil {
+		writeAuditLockRouteError(w, reserveErr)
+		return
+	}
+	if !reservation.Novel {
+		s.writeDaemonRecoverReplay(r.Context(), w, reservation)
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -145,105 +187,97 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 	result, err := s.daemonRecover.Recover(ctx, taskName, req.Confirm)
 	if err != nil {
 		status, code := daemonRecoverHTTPFailure(err)
-		terminationCommitted := result.PortOwnerCheck == daemonrecovery.PortOwnerReaped ||
-			result.PortOwnerCheck == daemonrecovery.PortOwnerTerminationUnconfirmed
-		if correlation != nil {
-			authorization := auditLockAuthorization(result.AuditHandoff, terminationCommitted)
-			receipt := s.auditLock.terminalize(*correlation, auditLockReceiptStatus(false, terminationCommitted), authorization, auditLockTerminalEvidence{
-				HTTPStatus:           status,
-				ErrorCode:            code,
-				TerminationCommitted: terminationCommitted,
-			})
-			if authorization == "current_truth" && result.AuditHandoff == daemonrecovery.AuditHandoffReleasePending {
-				s.auditLock.armPendingSettlement()
-			}
-			s.writeDaemonRecoverOccurrenceError(w, status, code, terminationCommitted, receipt)
+		terminationCommitted := result.TerminationCommitted
+		authorization := auditLockAuthorization(result.AuditHandoff, terminationCommitted)
+		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, terminationCommitted), authorization, auditLockTerminalEvidence{
+			HTTPStatus:           status,
+			ErrorCode:            code,
+			TerminationCommitted: terminationCommitted,
+		})
+		if terminalErr != nil {
+			s.writeDaemonRecoverUncertain(w, receipt)
 			return
 		}
-		writeAPIErrorRedactedFields(w, err, status, code, "/api/daemon/recover", map[string]bool{
-			"termination_committed": terminationCommitted,
-		})
+		if authorization == "current_truth" && result.AuditHandoff == daemonrecovery.AuditHandoffReleasePending {
+			s.auditLock.armPendingSettlement()
+		}
+		s.writeDaemonRecoverOccurrenceError(r.Context(), w, status, code, terminationCommitted, receipt)
 		return
 	}
 	if !result.PortOwnerCheck.Valid() {
-		if correlation != nil {
-			receipt := s.auditLock.terminalize(*correlation, "committed_error", "uncertain", auditLockTerminalEvidence{
-				HTTPStatus:           http.StatusInternalServerError,
-				ErrorCode:            "RECOVER_STATE_READ_FAILED",
-				TerminationCommitted: true,
-			})
-			s.writeDaemonRecoverOccurrenceError(w, http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", true, receipt)
+		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
+			HTTPStatus:           http.StatusInternalServerError,
+			ErrorCode:            string(daemonRecoverErrorStateRead),
+			TerminationCommitted: result.TerminationCommitted,
+		})
+		if terminalErr != nil {
+			s.writeDaemonRecoverUncertain(w, receipt)
 			return
 		}
-		writeAPIErrorRedacted(w, fmt.Errorf("invalid port owner check %q", result.PortOwnerCheck),
-			http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", "/api/daemon/recover response")
+		s.writeDaemonRecoverOccurrenceError(r.Context(), w, http.StatusInternalServerError, string(daemonRecoverErrorStateRead), result.TerminationCommitted, receipt)
 		return
 	}
 	if !result.PortWaitOutcome.Valid() {
-		if correlation != nil {
-			receipt := s.auditLock.terminalize(*correlation, "committed_error", "uncertain", auditLockTerminalEvidence{
-				HTTPStatus:           http.StatusInternalServerError,
-				ErrorCode:            "RECOVER_STATE_READ_FAILED",
-				TerminationCommitted: true,
-			})
-			s.writeDaemonRecoverOccurrenceError(w, http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", true, receipt)
+		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
+			HTTPStatus:           http.StatusInternalServerError,
+			ErrorCode:            string(daemonRecoverErrorStateRead),
+			TerminationCommitted: result.TerminationCommitted,
+		})
+		if terminalErr != nil {
+			s.writeDaemonRecoverUncertain(w, receipt)
 			return
 		}
-		writeAPIErrorRedacted(w, fmt.Errorf("invalid port wait outcome %q", result.PortWaitOutcome),
-			http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", "/api/daemon/recover response")
+		s.writeDaemonRecoverOccurrenceError(r.Context(), w, http.StatusInternalServerError, string(daemonRecoverErrorStateRead), result.TerminationCommitted, receipt)
 		return
 	}
 	if !result.AuditHandoff.Valid() {
-		if correlation != nil {
-			receipt := s.auditLock.terminalize(*correlation, "committed_error", "uncertain", auditLockTerminalEvidence{
-				HTTPStatus:           http.StatusInternalServerError,
-				ErrorCode:            "RECOVER_STATE_READ_FAILED",
-				TerminationCommitted: true,
-			})
-			s.writeDaemonRecoverOccurrenceError(w, http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", true, receipt)
+		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
+			HTTPStatus:           http.StatusInternalServerError,
+			ErrorCode:            string(daemonRecoverErrorStateRead),
+			TerminationCommitted: result.TerminationCommitted,
+		})
+		if terminalErr != nil {
+			s.writeDaemonRecoverUncertain(w, receipt)
 			return
 		}
-		writeAPIErrorRedacted(w, fmt.Errorf("invalid audit handoff %q", result.AuditHandoff),
-			http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED", "/api/daemon/recover response")
+		s.writeDaemonRecoverOccurrenceError(r.Context(), w, http.StatusInternalServerError, string(daemonRecoverErrorStateRead), result.TerminationCommitted, receipt)
 		return
 	}
 
-	var receipt *auditLockReceiptDTO
-	if correlation != nil {
-		authorization := auditLockAuthorization(result.AuditHandoff, true)
-		terminalReceipt := s.auditLock.terminalize(*correlation, "committed_success", authorization, auditLockTerminalEvidence{
-			HTTPStatus: http.StatusOK,
-			Success: &daemonRecoverSuccessEvidence{
-				TaskName:        taskName,
-				Reaped:          result.Reaped,
-				PortOwnerCheck:  string(result.PortOwnerCheck),
-				PortWaitOutcome: string(result.PortWaitOutcome),
-				AuditHandoff:    string(result.AuditHandoff),
-			},
-		})
-		receipt = &terminalReceipt
-		if result.AuditHandoff == daemonrecovery.AuditHandoffReleasePending {
-			s.auditLock.armPendingSettlement()
-		}
-	}
-	lockSnapshot, snapshotErr := s.auditLock.snapshot(receipt)
-	if snapshotErr != nil {
-		writeAuditLockRouteError(w, snapshotErr)
+	authorization := auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted)
+	terminalReceipt, terminalErr := s.auditLock.terminalize(reservation, auditLockOccurrenceCommittedSuccess, authorization, auditLockTerminalEvidence{
+		HTTPStatus: http.StatusOK,
+		Success: &daemonRecoverSuccessEvidence{
+			TaskName:             taskName,
+			Reaped:               result.Reaped,
+			PortOwnerCheck:       string(result.PortOwnerCheck),
+			PortWaitOutcome:      string(result.PortWaitOutcome),
+			AuditHandoff:         string(result.AuditHandoff),
+			TerminationCommitted: result.TerminationCommitted,
+		},
+	})
+	if terminalErr != nil {
+		s.writeDaemonRecoverUncertain(w, terminalReceipt)
 		return
 	}
+	if result.AuditHandoff == daemonrecovery.AuditHandoffReleasePending {
+		s.auditLock.armPendingSettlement()
+	}
+	lockSnapshot := s.auditLock.snapshotAfterTerminal(r.Context(), &terminalReceipt)
 	w.Header().Set("Content-Type", "application/json")
 	// audit_handoff is a WARNING field on a SUCCESS response: "release_unconfirmed"
 	// means this GUI process may still hold the supervisor-events.log flock, which
 	// blocks the supervisor and the install CLI until the GUI exits. The recovery
 	// itself still succeeded, so it must not be retried.
 	_ = json.NewEncoder(w).Encode(daemonRecoverResponse{
-		TaskName:        taskName,
-		State:           "respawn_accepted",
-		Reaped:          result.Reaped,
-		PortOwnerCheck:  string(result.PortOwnerCheck),
-		PortWaitOutcome: string(result.PortWaitOutcome),
-		AuditHandoff:    string(result.AuditHandoff),
-		AuditLock:       lockSnapshot,
+		TaskName:             taskName,
+		State:                "respawn_accepted",
+		Reaped:               result.Reaped,
+		PortOwnerCheck:       string(result.PortOwnerCheck),
+		PortWaitOutcome:      string(result.PortWaitOutcome),
+		AuditHandoff:         string(result.AuditHandoff),
+		TerminationCommitted: result.TerminationCommitted,
+		AuditLock:            lockSnapshot,
 	})
 }
 
@@ -280,12 +314,8 @@ func writeAuditLockRouteError(w http.ResponseWriter, routeErr *auditLockRouteErr
 	})
 }
 
-func (s *Server) writeDaemonRecoverOccurrenceError(w http.ResponseWriter, status int, code string, terminationCommitted bool, receipt auditLockReceiptDTO) {
-	snapshot, routeErr := s.auditLock.snapshot(&receipt)
-	if routeErr != nil {
-		writeAuditLockRouteError(w, routeErr)
-		return
-	}
+func (s *Server) writeDaemonRecoverOccurrenceError(ctx context.Context, w http.ResponseWriter, status int, code string, terminationCommitted bool, receipt auditLockReceiptDTO) {
+	snapshot := s.auditLock.snapshotAfterTerminal(ctx, &receipt)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(daemonRecoverOccurrenceErrorResponse{
@@ -296,11 +326,32 @@ func (s *Server) writeDaemonRecoverOccurrenceError(w http.ResponseWriter, status
 	})
 }
 
-func (s *Server) writeDaemonRecoverReplay(w http.ResponseWriter, reservation auditLockReservation) {
+func (s *Server) writeDaemonRecoverUncertain(w http.ResponseWriter, receipt auditLockReceiptDTO) {
+	snapshot := s.auditLock.snapshotProjection(&receipt)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusConflict)
+	_ = json.NewEncoder(w).Encode(daemonRecoverOccurrenceErrorResponse{
+		Error:                  "internal error",
+		Code:                   "RECOVER_OUTCOME_UNCERTAIN",
+		TerminationCommitted:   true,
+		TerminationCommitState: auditLockTerminationStateUnknown,
+		AuditLock:              snapshot,
+	})
+}
+
+func (s *Server) writeDaemonRecoverReplay(ctx context.Context, w http.ResponseWriter, reservation auditLockReservation) {
 	receipt := reservation.Receipt
-	snapshot, routeErr := s.auditLock.snapshot(&receipt)
-	if routeErr != nil {
-		writeAuditLockRouteError(w, routeErr)
+	snapshot := s.auditLock.snapshotAfterTerminal(ctx, &receipt)
+	if receipt.Status == auditLockOccurrenceUncertain {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_ = json.NewEncoder(w).Encode(daemonRecoverOccurrenceErrorResponse{
+			Error:                  "internal error",
+			Code:                   "RECOVER_OUTCOME_UNCERTAIN",
+			TerminationCommitted:   true,
+			TerminationCommitState: auditLockTerminationStateUnknown,
+			AuditLock:              snapshot,
+		})
 		return
 	}
 	if reservation.Terminal == nil {
@@ -325,13 +376,14 @@ func (s *Server) writeDaemonRecoverReplay(w http.ResponseWriter, reservation aud
 	}
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(daemonRecoverResponse{
-		TaskName:        terminal.Success.TaskName,
-		State:           "respawn_accepted",
-		Reaped:          terminal.Success.Reaped,
-		PortOwnerCheck:  terminal.Success.PortOwnerCheck,
-		PortWaitOutcome: terminal.Success.PortWaitOutcome,
-		AuditHandoff:    terminal.Success.AuditHandoff,
-		AuditLock:       snapshot,
+		TaskName:             terminal.Success.TaskName,
+		State:                "respawn_accepted",
+		Reaped:               terminal.Success.Reaped,
+		PortOwnerCheck:       terminal.Success.PortOwnerCheck,
+		PortWaitOutcome:      terminal.Success.PortWaitOutcome,
+		AuditHandoff:         terminal.Success.AuditHandoff,
+		TerminationCommitted: terminal.Success.TerminationCommitted,
+		AuditLock:            snapshot,
 	})
 }
 
@@ -375,13 +427,13 @@ func (s *Server) daemonRecoverAuditLockStateHandler(w http.ResponseWriter, r *ht
 	var receipt *auditLockReceiptDTO
 	if lookup {
 		var lookupErr *auditLockRouteError
-		receipt, lookupErr = s.auditLock.lookup(correlation)
+		receipt, lookupErr = s.auditLock.lookup(r.Context(), correlation)
 		if lookupErr != nil {
 			writeAuditLockRouteError(w, lookupErr)
 			return
 		}
 	}
-	snapshot, snapshotErr := s.auditLock.snapshot(receipt)
+	snapshot, snapshotErr := s.auditLock.snapshot(r.Context(), receipt)
 	if snapshotErr != nil {
 		writeAuditLockRouteError(w, snapshotErr)
 		return
@@ -437,7 +489,7 @@ func (s *Server) daemonRecoverAuditLockReceiptHandler(w http.ResponseWriter, r *
 		writeAuditLockRouteError(w, correlationErr)
 		return
 	}
-	if acknowledgeErr := s.auditLock.acknowledge(correlation); acknowledgeErr != nil {
+	if acknowledgeErr := s.auditLock.acknowledge(r.Context(), correlation); acknowledgeErr != nil {
 		writeAuditLockRouteError(w, acknowledgeErr)
 		return
 	}
@@ -447,29 +499,29 @@ func (s *Server) daemonRecoverAuditLockReceiptHandler(w http.ResponseWriter, r *
 func daemonRecoverHTTPFailure(err error) (int, string) {
 	var operationErr *daemonrecovery.OperationError
 	if !errors.As(err, &operationErr) {
-		return http.StatusInternalServerError, "RECOVER_UNCLASSIFIED_FAILURE"
+		return http.StatusInternalServerError, string(daemonRecoverErrorUnclassifiedFailure)
 	}
 	switch operationErr.Kind {
 	case daemonrecovery.FailureInvalidArgs:
-		return http.StatusBadRequest, "INVALID_ARGS"
+		return http.StatusBadRequest, string(daemonRecoverErrorInvalidArgs)
 	case daemonrecovery.FailureConfirmationRequired:
-		return http.StatusPreconditionFailed, "RECOVER_CONFIRMATION_REQUIRED"
+		return http.StatusPreconditionFailed, string(daemonRecoverErrorConfirmationRequired)
 	case daemonrecovery.FailureUnknownTask:
-		return http.StatusBadRequest, "RECOVER_UNKNOWN_TASK"
+		return http.StatusBadRequest, string(daemonRecoverErrorUnknownTask)
 	case daemonrecovery.FailureRefusedPortOwner:
-		return http.StatusConflict, "RECOVER_REFUSED_PORT_OWNER"
+		return http.StatusConflict, string(daemonRecoverErrorRefusedPortOwner)
 	case daemonrecovery.FailureRespawnFailed:
-		return http.StatusInternalServerError, "RECOVER_RESPAWN_FAILED"
+		return http.StatusInternalServerError, string(daemonRecoverErrorRespawnFailed)
 	case daemonrecovery.FailureSupervisorUnavailable:
-		return http.StatusServiceUnavailable, "RECOVER_SUPERVISOR_UNAVAILABLE"
+		return http.StatusServiceUnavailable, string(daemonRecoverErrorSupervisorUnavailable)
 	case daemonrecovery.FailureRequestCanceled:
-		return http.StatusRequestTimeout, "RECOVER_REQUEST_CANCELED"
+		return http.StatusRequestTimeout, string(daemonRecoverErrorRequestCanceled)
 	case daemonrecovery.FailureBoundaryProbeTimeout:
-		return http.StatusGatewayTimeout, "RECOVER_BOUNDARY_PROBE_TIMEOUT"
+		return http.StatusGatewayTimeout, string(daemonRecoverErrorBoundaryProbeTimeout)
 	case daemonrecovery.FailureRespawnBudgetInsufficient:
-		return http.StatusServiceUnavailable, "RECOVER_RESPAWN_BUDGET_INSUFFICIENT"
+		return http.StatusServiceUnavailable, string(daemonRecoverErrorRespawnBudgetInsufficient)
 	case daemonrecovery.FailureStateRead:
-		return http.StatusInternalServerError, "RECOVER_STATE_READ_FAILED"
+		return http.StatusInternalServerError, string(daemonRecoverErrorStateRead)
 	case daemonrecovery.FailureAuditDurability:
 		// Mirrors the CLI's dedicated exit-7 semantic (internal/cli/daemon_recover.go):
 		// the termination WAS committed and the respawn was attempted; only the audit
@@ -480,8 +532,8 @@ func daemonRecoverHTTPFailure(err error) (int, string) {
 		// nothing was destroyed, and invite a retry of a destructive recovery that
 		// already completed. The redacted body's termination_committed field carries
 		// the "do not retry" signal.
-		return http.StatusInternalServerError, "RECOVER_AUDIT_DURABILITY_FAILED"
+		return http.StatusInternalServerError, string(daemonRecoverErrorAuditDurability)
 	default:
-		return http.StatusInternalServerError, "RECOVER_UNCLASSIFIED_FAILURE"
+		return http.StatusInternalServerError, string(daemonRecoverErrorUnclassifiedFailure)
 	}
 }
