@@ -177,22 +177,24 @@ func (s *Server) toggleWorkspaceLSP(w http.ResponseWriter, req projectToggleRequ
 			ManagedRouterAuthorizer: NewManagedRouterAuthorizer(pidportPath, currentExecutable, s.cfg.Version),
 		})
 		if err != nil {
-			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
+			diagnostic := api.ClassifyRegistrationError(err, "workspace-toggle", "register")
+			writeRegistrationDiagnosticError(w, err, diagnostic, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
 			return
 		}
 		resp.Enabled = rep != nil && len(rep.Entries) > 0
 		if rep != nil {
-			resp.Warnings = rep.Warnings
+			resp.Warnings = projectRegistrationWarnings(rep.Diagnostics())
 		}
 	} else {
 		rep, err := a.Unregister(req.Root, req.Languages)
 		if err != nil {
-			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
+			diagnostic := api.ClassifyRegistrationError(err, "workspace-toggle", "unregister")
+			writeRegistrationDiagnosticError(w, err, diagnostic, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
 			return
 		}
 		resp.Enabled = false // unregistered → not enabled
 		if rep != nil {
-			resp.Warnings = rep.Warnings
+			resp.Warnings = projectRegistrationWarnings(rep.Diagnostics())
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

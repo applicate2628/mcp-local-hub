@@ -83,7 +83,7 @@ func TestLSPRegisterTrustedRootWarningIsWireSafe(t *testing.T) {
 	})
 	ensureLSPRegisteredForGUI = func(context.Context, string, string, string) (api.WorkspaceEntry, error) {
 		return api.WorkspaceEntry{
-			WorkspaceKey: "project", WorkspacePath: "D:/dev/project",
+			WorkspaceKey: "project", WorkspacePath: "project",
 			Language: "go", Backend: "gopls-mcp", Port: 9201, TaskName: "task",
 		}, nil
 	}
@@ -94,7 +94,7 @@ func TestLSPRegisterTrustedRootWarningIsWireSafe(t *testing.T) {
 	server := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	server.lspRegistrar = realLSPRegistrar{}
 	req := httptest.NewRequest(http.MethodPost, "/api/lsp/register",
-		strings.NewReader(`{"workspace_path":"D:/dev/project","language":"go"}`))
+		strings.NewReader(`{"workspace_path":"project","language":"go"}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	recorder := httptest.NewRecorder()
@@ -118,13 +118,104 @@ func TestLSPRegisterTrustedRootWarningIsWireSafe(t *testing.T) {
 }
 
 func TestRegistrationHTTPBodies_NoRawDiagnosticSentinels(t *testing.T) {
-	const rawSentinel lspRegisterWarningCode = `D:\secret\warning password=hunter2`
-	response := lspRegisterResponseFromReport(&lspRegisterReport{Warnings: []lspRegisterWarningCode{rawSentinel}})
-	if len(response.Warnings) != 1 || response.Warnings[0] != lspRegisterUnknownWarningPublic {
-		t.Fatalf("warnings=%v, want fixed fallback", response.Warnings)
+	const rawSentinel = `D:\secret\warning password=hunter2`
+	diagnostic := api.NewRegistrationDiagnostic(api.RegistrationDiagnosticCode(rawSentinel), rawSentinel, rawSentinel, errors.New(rawSentinel))
+	if diagnostic.Code() != api.RegistrationCodeUnknown {
+		t.Fatalf("unknown code normalized to %q, want REG_UNKNOWN", diagnostic.Code())
 	}
-	if strings.Contains(response.Warnings[0], string(rawSentinel)) || strings.Contains(response.Warnings[0], "hunter2") {
-		t.Fatalf("fallback leaked private warning code: %v", response.Warnings)
+	public := registrationDiagnosticPublicText(diagnostic)
+	if public != registrationUnknownErrorPublic {
+		t.Fatalf("unknown public text=%q, want fixed fallback", public)
+	}
+	if strings.Contains(public, rawSentinel) || strings.Contains(public, "hunter2") {
+		t.Fatalf("fallback leaked private diagnostic: %q", public)
+	}
+}
+
+func TestLSPRegisterFailureStatusesProjectFixedDiagnostics(t *testing.T) {
+	const rawSentinel = `D:\secret\lsp --password=hunter2`
+	previousEnsure := ensureLSPRegisteredForGUI
+	previousBless := blessLSPTrustedRootForGUI
+	t.Cleanup(func() {
+		ensureLSPRegisteredForGUI = previousEnsure
+		blessLSPTrustedRootForGUI = previousBless
+	})
+	blessLSPTrustedRootForGUI = func(string) error { return nil }
+	ensureLSPRegisteredForGUI = func(_ context.Context, _, _, language string) (api.WorkspaceEntry, error) {
+		if language == "go" {
+			return api.WorkspaceEntry{WorkspaceKey: "project", WorkspacePath: "project", Language: language}, nil
+		}
+		return api.WorkspaceEntry{}, errors.New(rawSentinel)
+	}
+
+	for _, tc := range []struct {
+		name       string
+		languages  string
+		wantStatus int
+	}{
+		{name: "partial", languages: `["go","python"]`, wantStatus: http.StatusMultiStatus},
+		{name: "all failed", languages: `["python"]`, wantStatus: http.StatusInternalServerError},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+			server.lspRegistrar = realLSPRegistrar{}
+			req := httptest.NewRequest(http.MethodPost, "/api/lsp/register",
+				strings.NewReader(`{"workspace_path":"project","languages":`+tc.languages+`}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			recorder := httptest.NewRecorder()
+			server.mux.ServeHTTP(recorder, req)
+			if recorder.Code != tc.wantStatus {
+				t.Fatalf("status=%d want=%d body=%s", recorder.Code, tc.wantStatus, recorder.Body.String())
+			}
+			body := recorder.Body.String()
+			if strings.Contains(body, rawSentinel) || strings.Contains(body, "hunter2") {
+				t.Fatalf("wire response leaked raw cause: %s", body)
+			}
+			if !strings.Contains(body, "LSP registration failed for the requested language") {
+				t.Fatalf("wire response lacks fixed diagnostic: %s", body)
+			}
+		})
+	}
+}
+
+func TestRegistrationDiagnosticPublicProjectorCoversRegistry(t *testing.T) {
+	const rawCause = `D:\secret\projector password=hunter2`
+	for _, code := range api.RegisteredRegistrationDiagnosticCodes() {
+		diagnostic := api.NewRegistrationDiagnostic(code, rawCause, rawCause, errors.New(rawCause))
+		public := registrationDiagnosticPublicText(diagnostic)
+		if strings.TrimSpace(public) == "" {
+			t.Fatalf("code %s has empty public projection", code)
+		}
+		if strings.Contains(public, rawCause) || strings.Contains(public, "hunter2") {
+			t.Fatalf("code %s leaked private cause: %q", code, public)
+		}
+	}
+}
+
+func TestLSPRegisterTopLevelErrorUsesFixedUnknownProjection(t *testing.T) {
+	const rawSentinel = `D:\secret\handler --password=hunter2`
+	server := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	server.lspRegistrar = fakeLSPRegistrar{
+		RegisterFn: func(string, []string) (*lspRegisterReport, error) {
+			return nil, errors.New(rawSentinel)
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/lsp/register",
+		strings.NewReader(`{"workspace_path":"project","language":"go"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	recorder := httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=500 body=%s", recorder.Code, recorder.Body.String())
+	}
+	body := recorder.Body.String()
+	if strings.Contains(body, rawSentinel) || strings.Contains(body, "hunter2") {
+		t.Fatalf("top-level wire error leaked raw cause: %s", body)
+	}
+	if !strings.Contains(body, registrationUnknownErrorPublic) {
+		t.Fatalf("top-level wire error lacks fixed fallback: %s", body)
 	}
 }
 

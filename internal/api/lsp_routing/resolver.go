@@ -326,7 +326,11 @@ func (r *WorkspaceResolver) refresh() {
 	if err != nil {
 		return
 	}
-	defer unlock()
+	defer func() {
+		if releaseErr := unlock(); releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "lsp_routing: release registry lock %s: %v; the lock stays held until this process exits\n", r.registryPath, releaseErr)
+		}
+	}()
 	if err := r.reg.Load(); err != nil {
 		return
 	}

@@ -1632,7 +1632,7 @@ func (p *LazyProxy) isWarmed() bool {
 // reconcile is the authoritative writer. The alreadyLive snapshot is taken under
 // p.mu strictly BEFORE the flock and p.mu is released before the flock, so the
 // p.mu→flock lock order is preserved (no AB-BA with reconcile).
-func (p *LazyProxy) reserveMaterializedSlot() (bool, error) {
+func (p *LazyProxy) reserveMaterializedSlot() (_ bool, err error) {
 	p.mu.Lock()
 	alreadyLive := p.endpoint != nil
 	p.mu.Unlock()
@@ -1653,7 +1653,7 @@ func (p *LazyProxy) reserveMaterializedSlot() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("reserve materialized LSP backend slot: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "reserve materialized LSP backend slot: reservation stands, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return false, fmt.Errorf("reserve materialized LSP backend slot: %w", err)
 	}

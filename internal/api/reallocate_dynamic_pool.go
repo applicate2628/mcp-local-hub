@@ -52,7 +52,7 @@ func ReallocateDynamicPoolPort(registryPath, intentPath string, d SupervisorDaem
 	if err != nil {
 		return 0, fmt.Errorf("reallocate: lock registry: %w", err)
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "reallocate: release the registry lock")
 	if err := reg.Load(); err != nil {
 		return 0, fmt.Errorf("reallocate: load registry: %w", err)
 	}

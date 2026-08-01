@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
+	"strings"
 )
 
 // ErrCASConflict is the sentinel a CAS entry mutator returns when the live
@@ -107,6 +109,260 @@ type CASEntryMutator interface {
 	// configBytes. It is pure and lock-free and shares the same section extractor
 	// as EntryPresentInBytes.
 	EntryRawSubtree(configBytes []byte, name string) (subtree any, present bool, err error)
+
+	// EntryPhysicalToken delegates to the one syntax-aware lexical extractor.
+	// The opaque token is consumed only by direct cleanup; semantic de-adopt
+	// classification continues to use EntryRawSubtree unchanged.
+	EntryPhysicalToken(configBytes []byte, name string) (token *entryPhysicalToken, present bool, err error)
+}
+
+// ErrCleanupRestoreConflict classifies a cleanup receipt that found the named
+// target present with foreign or unreadable state. Compensation preserves that
+// state rather than overwriting it.
+var ErrCleanupRestoreConflict = errors.New("clients: cleanup restore conflict")
+
+// DirectCleanupCheckpoint identifies the two policy revalidation points inside
+// the client-owned atomic cleanup operation.
+type DirectCleanupCheckpoint int
+
+const (
+	DirectCleanupPostBackupPreRemove DirectCleanupCheckpoint = iota
+	DirectCleanupPostRemove
+)
+
+// DirectCleanupTarget is an opaque snapshot of one physical write-target entry.
+// Only this package creates or interprets its fields; callers retain and return
+// the token to the composite mutator.
+type DirectCleanupTarget struct {
+	identity      DirectCleanupIdentity
+	physicalToken *entryPhysicalToken
+}
+
+// DirectCleanupIdentity is the normalized stdio identity the API observed while
+// planning. The client compares it against its own current AllStdioEntries
+// projection before accepting the opaque physical target.
+type DirectCleanupIdentity struct {
+	Name    string
+	Command string
+	Args    []string
+}
+
+// DirectCleanupReceipt is the compensation capability returned before the first
+// remove attempt. Restore is total over absent, exact-original, and foreign
+// current state and is safe to call repeatedly.
+type DirectCleanupReceipt interface {
+	Restore() error
+}
+
+// DirectCleanupMutator is the client-owned composite cleanup capability. Its
+// resolver reuses CASEntryMutator's concrete method-set allowlist; it does not
+// introduce a second adapter eligibility owner.
+type DirectCleanupMutator interface {
+	CaptureDirectCleanupTarget(identity DirectCleanupIdentity) (*DirectCleanupTarget, error)
+	CleanupDirectEntryAtomically(
+		target *DirectCleanupTarget,
+		keepN int,
+		preArm func(DirectCleanupReceipt) error,
+		revalidate func(DirectCleanupCheckpoint) error,
+	) (backupPath string, err error)
+}
+
+type directCleanupMutator struct {
+	client *lockingClient
+	writer WriteConfigFileFunc
+}
+
+// AsDirectCleanupMutator admits only production locking wrappers whose concrete
+// adapter already satisfies CASEntryMutator. The existing concrete method set
+// remains the single allowlist.
+func AsDirectCleanupMutator(c Client) (DirectCleanupMutator, bool) {
+	lc, ok := c.(*lockingClient)
+	if !ok {
+		return nil, false
+	}
+	if _, ok := lc.Client.(CASEntryMutator); !ok {
+		return nil, false
+	}
+	return &directCleanupMutator{client: lc}, true
+}
+
+func (m *directCleanupMutator) CaptureDirectCleanupTarget(identity DirectCleanupIdentity) (target *DirectCleanupTarget, err error) {
+	if m == nil || m.client == nil || strings.TrimSpace(identity.Name) == "" {
+		return nil, fmt.Errorf("%w: invalid cleanup target", ErrCASConflict)
+	}
+	err = withConfigReadLock(m.client.Client.ConfigPath(), func() error {
+		if _, ok := m.client.Client.(CASEntryMutator); !ok {
+			return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCASConflict, m.client.Client.Name())
+		}
+		if identityErr := verifyDirectCleanupIdentity(m.client.Client, identity); identityErr != nil {
+			return identityErr
+		}
+		configBytes, readErr := readRawConfig(m.client.Client.ConfigPath())
+		if readErr != nil {
+			return fmt.Errorf("capture cleanup target %q: %w", identity.Name, readErr)
+		}
+		physicalToken, present, extractErr := extractEntryPhysicalToken(m.client.Client, configBytes, identity.Name)
+		if extractErr != nil {
+			return fmt.Errorf("%w: capture cleanup target %q: %v", ErrCASConflict, identity.Name, extractErr)
+		}
+		if !present {
+			return fmt.Errorf("%w: physical cleanup target %q is absent", ErrCASConflict, identity.Name)
+		}
+		target = &DirectCleanupTarget{identity: identity, physicalToken: physicalToken}
+		return nil
+	})
+	return target, err
+}
+
+func (m *directCleanupMutator) CleanupDirectEntryAtomically(
+	target *DirectCleanupTarget,
+	keepN int,
+	preArm func(DirectCleanupReceipt) error,
+	revalidate func(DirectCleanupCheckpoint) error,
+) (backupPath string, err error) {
+	if m == nil || m.client == nil || target == nil || target.physicalToken == nil || target.identity.Name == "" {
+		return "", fmt.Errorf("%w: invalid cleanup target", ErrCASConflict)
+	}
+	err = withConfigLock(m.client.Client.ConfigPath(), func() error {
+		if _, ok := m.client.Client.(CASEntryMutator); !ok {
+			return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCASConflict, m.client.Client.Name())
+		}
+		configBytes, readErr := readRawConfig(m.client.Client.ConfigPath())
+		if readErr != nil {
+			return fmt.Errorf("re-read cleanup target %q: %w", target.identity.Name, readErr)
+		}
+		liveToken, present, extractErr := extractEntryPhysicalToken(m.client.Client, configBytes, target.identity.Name)
+		if extractErr != nil {
+			return fmt.Errorf("%w: re-read cleanup target %q: %v", ErrCASConflict, target.identity.Name, extractErr)
+		}
+		if !present || !entryPhysicalTokensEqual(liveToken, target.physicalToken) {
+			return fmt.Errorf("%w: physical cleanup target %q changed after planning", ErrCASConflict, target.identity.Name)
+		}
+		if identityErr := verifyDirectCleanupIdentity(m.client.Client, target.identity); identityErr != nil {
+			return identityErr
+		}
+
+		backupPath, readErr = m.client.Client.BackupKeep(keepN)
+		if readErr != nil {
+			return readErr
+		}
+		receipt := &directCleanupReceipt{mutator: m, target: target}
+		if preArm == nil {
+			return fmt.Errorf("%w: cleanup receipt for %q was not armed", ErrCASConflict, target.identity.Name)
+		}
+		if armErr := invokeDirectCleanupPreArm(preArm, receipt); armErr != nil {
+			return armErr
+		}
+		if revalidate == nil {
+			return fmt.Errorf("%w: nil cleanup revalidator for %q", ErrCASConflict, target.identity.Name)
+		}
+		if validationErr := invokeDirectCleanupRevalidate(revalidate, DirectCleanupPostBackupPreRemove); validationErr != nil {
+			return validationErr
+		}
+		removedBytes, removeErr := removeEntryPhysical(configBytes, liveToken)
+		if removeErr != nil {
+			return fmt.Errorf("%w: remove cleanup target %q: %v", ErrCASConflict, target.identity.Name, removeErr)
+		}
+		if afterToken, stillPresent, verifyErr := extractEntryPhysicalToken(m.client.Client, removedBytes, target.identity.Name); verifyErr != nil {
+			return fmt.Errorf("%w: verify cleanup splice for %q: %v", ErrCASConflict, target.identity.Name, verifyErr)
+		} else if stillPresent || afterToken != nil {
+			return fmt.Errorf("%w: cleanup splice retained target %q", ErrCASConflict, target.identity.Name)
+		}
+		if writeErr := writeConfigFileWith(m.writer, m.client.Client.ConfigPath(), removedBytes); writeErr != nil {
+			return writeErr
+		}
+		if validationErr := invokeDirectCleanupRevalidate(revalidate, DirectCleanupPostRemove); validationErr != nil {
+			return errors.Join(validationErr, receipt.restoreUnderLock())
+		}
+		return nil
+	})
+	return backupPath, err
+}
+
+func verifyDirectCleanupIdentity(client Client, expected DirectCleanupIdentity) error {
+	entries, err := client.AllStdioEntries()
+	if err != nil {
+		return fmt.Errorf("read managed cleanup identity %q: %w", expected.Name, err)
+	}
+	for _, entry := range entries {
+		if entry.Name != expected.Name {
+			continue
+		}
+		if entry.Command == expected.Command && slices.Equal(entry.Args, expected.Args) {
+			return nil
+		}
+		return fmt.Errorf("%w: managed cleanup identity %q changed after planning", ErrCASConflict, expected.Name)
+	}
+	return fmt.Errorf("%w: managed cleanup identity %q is absent", ErrCASConflict, expected.Name)
+}
+
+func invokeDirectCleanupPreArm(preArm func(DirectCleanupReceipt) error, receipt DirectCleanupReceipt) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%w: cleanup receipt pre-arm panicked: %v", ErrCASConflict, recovered)
+		}
+	}()
+	return preArm(receipt)
+}
+
+func invokeDirectCleanupRevalidate(revalidate func(DirectCleanupCheckpoint) error, checkpoint DirectCleanupCheckpoint) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("%w: cleanup revalidation panicked at checkpoint %d: %v", ErrCASConflict, checkpoint, recovered)
+		}
+	}()
+	return revalidate(checkpoint)
+}
+
+type directCleanupReceipt struct {
+	mutator *directCleanupMutator
+	target  *DirectCleanupTarget
+}
+
+func (r *directCleanupReceipt) Restore() error {
+	if r == nil || r.mutator == nil || r.target == nil {
+		return fmt.Errorf("%w: invalid cleanup receipt", ErrCleanupRestoreConflict)
+	}
+	return withConfigLock(r.mutator.client.Client.ConfigPath(), r.restoreUnderLock)
+}
+
+func (r *directCleanupReceipt) restoreUnderLock() error {
+	if _, ok := r.mutator.client.Client.(CASEntryMutator); !ok {
+		return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCleanupRestoreConflict, r.mutator.client.Client.Name())
+	}
+	configBytes, readErr := readRawConfig(r.mutator.client.Client.ConfigPath())
+	if readErr != nil {
+		return fmt.Errorf("%w: read current target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, readErr)
+	}
+	currentToken, present, extractErr := extractEntryPhysicalToken(r.mutator.client.Client, configBytes, r.target.identity.Name)
+	if extractErr != nil {
+		return fmt.Errorf("%w: classify current target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, extractErr)
+	}
+	if present {
+		if entryPhysicalTokensEqual(currentToken, r.target.physicalToken) {
+			return nil
+		}
+		return fmt.Errorf("%w: target %q contains foreign state", ErrCleanupRestoreConflict, r.target.identity.Name)
+	}
+	restoredConfig, restoreErr := restoreEntryPhysical(configBytes, r.target.physicalToken)
+	if restoreErr != nil {
+		return fmt.Errorf("%w: restore cleanup target %q: %v", ErrCleanupRestoreConflict, r.target.identity.Name, restoreErr)
+	}
+	if writeErr := writeConfigFileWith(r.mutator.writer, r.mutator.client.Client.ConfigPath(), restoredConfig); writeErr != nil {
+		return fmt.Errorf("restore cleanup target %q: %w", r.target.identity.Name, writeErr)
+	}
+	restoredBytes, readErr := readRawConfig(r.mutator.client.Client.ConfigPath())
+	if readErr != nil {
+		return fmt.Errorf("%w: verify restored target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, readErr)
+	}
+	restoredToken, restored, extractErr := extractEntryPhysicalToken(r.mutator.client.Client, restoredBytes, r.target.identity.Name)
+	if extractErr != nil {
+		return fmt.Errorf("%w: verify restored target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, extractErr)
+	}
+	if !restored || !entryPhysicalTokensEqual(restoredToken, r.target.physicalToken) {
+		return fmt.Errorf("%w: restored target %q does not match the captured original", ErrCleanupRestoreConflict, r.target.identity.Name)
+	}
+	return nil
 }
 
 // Compile-time proof that every adopt-reachable adapter carries the CAS method
@@ -661,6 +917,14 @@ func (l *lockingClient) EntryRawSubtree(configBytes []byte, name string) (any, b
 		return nil, false, fmt.Errorf("client %s does not support raw entry extraction", l.Client.Name())
 	}
 	return m.EntryRawSubtree(configBytes, name)
+}
+
+func (l *lockingClient) EntryPhysicalToken(configBytes []byte, name string) (*entryPhysicalToken, bool, error) {
+	m, ok := l.Client.(CASEntryMutator)
+	if !ok {
+		return nil, false, fmt.Errorf("client %s does not support physical entry extraction", l.Client.Name())
+	}
+	return m.EntryPhysicalToken(configBytes, name)
 }
 
 func (l *lockingClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (verdict EntryClassification, err error) {

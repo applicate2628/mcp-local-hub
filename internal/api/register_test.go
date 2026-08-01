@@ -18,6 +18,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -630,8 +631,8 @@ func TestRegister_RemovesMatchingDirectLanguageServerEntries(t *testing.T) {
 	if _, ok := h.fakeClients.stdioEntries["codex-cli"]["python-experimental"]; !ok {
 		t.Fatal("same-workspace substring language entry was removed")
 	}
-	if h.fakeClients.backupKeepCalls["codex-cli"] != 1 {
-		t.Errorf("BackupKeep calls for codex-cli = %d, want 1", h.fakeClients.backupKeepCalls["codex-cli"])
+	if h.fakeClients.backupKeepCalls["codex-cli"] != 2 {
+		t.Errorf("BackupKeep calls for codex-cli = %d, want 2 (one receipt-generating backup per physical target)", h.fakeClients.backupKeepCalls["codex-cli"])
 	}
 }
 
@@ -3671,9 +3672,7 @@ func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
 	if f.xml == nil {
 		f.xml = map[string][]byte{}
 	}
-	if _, exists := f.xml[spec.Name]; !exists {
-		f.xml[spec.Name] = []byte("<Task name=\"" + spec.Name + "\"/>")
-	}
+	f.xml[spec.Name] = weeklyTaskXMLForSpec(spec)
 	return nil
 }
 func (f *fakeScheduler) Delete(name string) error {
@@ -3682,6 +3681,7 @@ func (f *fakeScheduler) Delete(name string) error {
 		return f.failDeleteErr
 	}
 	delete(f.tasks, name)
+	delete(f.xml, name)
 	f.deleteNames = append(f.deleteNames, name)
 	// Mirror real Delete on the seeded-List surface so a pruned task no longer
 	// appears in subsequent List calls (and tests can assert deletion via the
@@ -3744,12 +3744,14 @@ type fakeClient struct {
 	name   string
 }
 
+var fakeDirectCleanupTargets sync.Map // map[*clients.DirectCleanupTarget]clients.DirectCleanupIdentity
+
 func (c *fakeClient) Exists() bool {
 	return c.parent.exists[c.name]
 }
 func (c *fakeClient) BackupKeep(keepN int) (string, error) {
 	c.parent.backupKeepCalls[c.name]++
-	backupPath := fmt.Sprintf("/backup/%s/%d", c.name, keepN)
+	backupPath := fmt.Sprintf("/backup/%s/%d/%d", c.name, keepN, c.parent.backupKeepCalls[c.name])
 	if c.parent.backupStdio == nil {
 		c.parent.backupStdio = map[string]map[string]clients.LanguageServerStdioEntry{}
 	}
@@ -3782,6 +3784,65 @@ func (c *fakeClient) RestoreEntryFromBackupForRollback(backupPath, name string) 
 	}
 	c.parent.stdioEntries[c.name][name] = entry
 	return nil
+}
+func (c *fakeClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	target := &clients.DirectCleanupTarget{}
+	fakeDirectCleanupTargets.Store(target, identity)
+	return target, nil
+}
+func (c *fakeClient) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	return fakeCleanupDirectEntryAtomically(c, target, keepN, preArm, revalidate)
+}
+
+type fakeDirectCleanupReceipt struct {
+	client     registerClientRollbackRestorer
+	backupPath string
+	entryName  string
+}
+
+func (r *fakeDirectCleanupReceipt) Restore() error {
+	return r.client.RestoreEntryFromBackupForRollback(r.backupPath, r.entryName)
+}
+
+func fakeCleanupDirectEntryAtomically(
+	client registerClient,
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	rawIdentity, ok := fakeDirectCleanupTargets.Load(target)
+	if !ok {
+		return "", errors.New("fake cleanup target is unknown")
+	}
+	identity := rawIdentity.(clients.DirectCleanupIdentity)
+	backupPath, err := client.BackupKeep(keepN)
+	if err != nil {
+		return "", err
+	}
+	restorer, ok := client.(registerClientRollbackRestorer)
+	if !ok {
+		return backupPath, errors.New("fake cleanup client has no rollback restorer")
+	}
+	receipt := &fakeDirectCleanupReceipt{client: restorer, backupPath: backupPath, entryName: identity.Name}
+	if err := preArm(receipt); err != nil {
+		return backupPath, err
+	}
+	if err := revalidate(clients.DirectCleanupPostBackupPreRemove); err != nil {
+		return backupPath, err
+	}
+	if err := client.RemoveEntry(identity.Name); err != nil {
+		return backupPath, err
+	}
+	if err := revalidate(clients.DirectCleanupPostRemove); err != nil {
+		return backupPath, errors.Join(err, receipt.Restore())
+	}
+	return backupPath, nil
 }
 func (c *fakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 	// Finding 1 regression seam: simulate a multi-layer adapter (mimocode)
@@ -3837,6 +3898,49 @@ type cleanupMutationLedgerClient struct {
 	events *[]string
 }
 
+func captureDirectCleanupTargetThrough(client registerClient, identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	atomicClient, ok := client.(atomicDirectCleanupClient)
+	if !ok {
+		return nil, errors.New("wrapped client does not support atomic direct cleanup")
+	}
+	return atomicClient.CaptureDirectCleanupTarget(identity)
+}
+
+func cleanupDirectEntryAtomicallyThrough(
+	client registerClient,
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	atomicClient, ok := client.(atomicDirectCleanupClient)
+	if !ok {
+		return "", errors.New("wrapped client does not support atomic direct cleanup")
+	}
+	return atomicClient.CleanupDirectEntryAtomically(target, keepN, preArm, revalidate)
+}
+
+func (c *directCleanupInjectedErrorClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	return captureDirectCleanupTargetThrough(c.registerClient, identity)
+}
+
+func (c *directCleanupInjectedErrorClient) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	return cleanupDirectEntryAtomicallyThrough(c.registerClient, target, keepN, preArm, revalidate)
+}
+
+func (c *cleanupMutationInjectedClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	return captureDirectCleanupTargetThrough(c.registerClient, identity)
+}
+
+func (c *cleanupMutationLedgerClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	return captureDirectCleanupTargetThrough(c.registerClient, identity)
+}
+
 func (c *cleanupMutationLedgerClient) BackupKeep(keepN int) (string, error) {
 	*c.events = append(*c.events, "backup")
 	return c.registerClient.BackupKeep(keepN)
@@ -3872,12 +3976,30 @@ func (c *cleanupMutationInjectedClient) RestoreEntryFromBackupForRollback(backup
 	return restorer.RestoreEntryFromBackupForRollback(backupPath, name)
 }
 
+func (c *cleanupMutationInjectedClient) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	return fakeCleanupDirectEntryAtomically(c, target, keepN, preArm, revalidate)
+}
+
 func (c *cleanupMutationLedgerClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	restorer, ok := c.registerClient.(registerClientRollbackRestorer)
 	if !ok {
 		return errors.New("wrapped client does not support exact rollback restore")
 	}
 	return restorer.RestoreEntryFromBackupForRollback(backupPath, name)
+}
+
+func (c *cleanupMutationLedgerClient) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	return fakeCleanupDirectEntryAtomically(c, target, keepN, preArm, revalidate)
 }
 
 func (c *directCleanupInjectedErrorClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
@@ -4595,8 +4717,8 @@ func TestCleanupDirectLSP_MatchingOwnedCandidateRevalidatesEachClient(t *testing
 		},
 	)
 
-	if authorizerCalls != 2 || routeCalls != 10 || matcherCalls != 2 {
-		t.Fatalf("matching owned candidate calls: authorizer=%d route=%d matcher=%d, want 2/10/2 (one lease plus five checkpoints per client)",
+	if authorizerCalls != 2 || routeCalls != 8 || matcherCalls != 2 {
+		t.Fatalf("matching owned candidate calls: authorizer=%d route=%d matcher=%d, want 2/8/2 (one lease plus four accepted-design checkpoints per client)",
 			authorizerCalls, routeCalls, matcherCalls)
 	}
 	if client.findCalls != 1 {
@@ -6512,36 +6634,31 @@ func TestManagedCleanup_TakeoverCheckpointMatrix(t *testing.T) {
 	if routeCalls != 7 ||
 		authorizerCalls[goPort] != 1 ||
 		authorizerCalls[pythonPort] != 1 ||
-		revalidationCalls[goPort] != 3 ||
-		revalidationCalls[pythonPort] != 5 {
+		revalidationCalls[goPort] != 4 ||
+		revalidationCalls[pythonPort] != 4 {
 		t.Fatalf(
-			"proof calls routes=%d authorizer=%v revalidation=%v, want routes=7 authorizer=1/port revalidation=go:3 python:5; events=%v",
+			"proof calls routes=%d authorizer=%v revalidation=%v, want routes=7 authorizer=1/port revalidation=4/port; events=%v",
 			routeCalls, authorizerCalls, revalidationCalls, events,
 		)
 	}
-	wantTail := []string{
-		"route:settled",
-		fmt.Sprintf("revalidate:%d:3", goPort),
+	if settled := slices.Index(events, "route:settled"); settled < 0 {
+		t.Fatalf("missing route-settled takeover boundary; events=%v", events)
 	}
-	settled := slices.Index(events, "route:settled")
-	if settled < 0 || settled+len(wantTail) > len(events) {
-		t.Fatalf("missing route-settled/takeover boundary; events=%v", events)
-	}
-	if got := events[settled : settled+len(wantTail)]; !slices.Equal(got, wantTail) {
-		t.Fatalf("takeover validation block = %v, want %v; full events=%v", got, wantTail, events)
+	if finalGo := slices.Index(events, fmt.Sprintf("revalidate:%d:4", goPort)); finalGo < 0 {
+		t.Fatalf("final settlement validation did not observe the taken-over go lease; events=%v", events)
 	}
 	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
 		t.Fatal("replacement after route settlement removed the affected go entry")
 	}
 	for _, name := range []string{"legacy-python", "legacy-rust"} {
-		if _, exists := h.fakeClients.stdioEntries["cursor"][name]; exists {
-			t.Fatalf("independent eligible plan %q did not continue; warnings=%v events=%v", name, warnings, events)
+		if _, exists := h.fakeClients.stdioEntries["cursor"][name]; !exists {
+			t.Fatalf("outer final-settlement refusal did not restore %q; warnings=%v events=%v", name, warnings, events)
 		}
 	}
-	if h.fakeClients.backupKeepCalls["cursor"] != 1 || slices.Contains(events, "remove:legacy-go") {
-		t.Fatalf("mutation batch backup=%d events=%v, want one backup and zero affected-go removals", h.fakeClients.backupKeepCalls["cursor"], events)
+	if h.fakeClients.backupKeepCalls["cursor"] != 3 || !slices.Contains(events, "remove:legacy-go") {
+		t.Fatalf("mutation batch backup=%d events=%v, want one receipt backup per target and final-settlement rollback of every removed target", h.fakeClients.backupKeepCalls["cursor"], events)
 	}
-	wantWarning := "identity-changed: affected_plans=1 [client=cursor,language=go,port=19131]; keeping matching direct LSP entries"
+	wantWarning := "direct-cleanup-failed: direct entries were preserved because transactional cleanup did not settle"
 	if !slices.Contains(warnings, wantWarning) {
 		t.Fatalf("warnings=%v, want %q", warnings, wantWarning)
 	}
@@ -6965,6 +7082,10 @@ type orderedCleanupClient struct {
 	backupErr error
 }
 
+func (c *orderedCleanupClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	return captureDirectCleanupTargetThrough(c.registerClient, identity)
+}
+
 func (c *orderedCleanupClient) BackupKeep(int) (string, error) {
 	*c.calls = append(*c.calls, "backup")
 	if c.backupErr != nil {
@@ -6976,6 +7097,23 @@ func (c *orderedCleanupClient) BackupKeep(int) (string, error) {
 func (c *orderedCleanupClient) RemoveEntry(name string) error {
 	*c.calls = append(*c.calls, "remove:"+name)
 	return c.registerClient.RemoveEntry(name)
+}
+
+func (c *orderedCleanupClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	restorer, ok := c.registerClient.(registerClientRollbackRestorer)
+	if !ok {
+		return errors.New("wrapped client does not support exact rollback restore")
+	}
+	return restorer.RestoreEntryFromBackupForRollback(backupPath, name)
+}
+
+func (c *orderedCleanupClient) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	return fakeCleanupDirectEntryAtomically(c, target, keepN, preArm, revalidate)
 }
 
 func TestCleanupDirectLSP_BackupBeforeRemovePerClient(t *testing.T) {

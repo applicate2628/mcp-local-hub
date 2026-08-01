@@ -261,7 +261,7 @@ func removeLSPRegistryRow(registryPath, workspaceKey, language string) error {
 }
 
 type registryRollbackStore interface {
-	TryLockWithRelease() (func() error, bool, error)
+	TryLock() (func() error, bool, error)
 	Load() error
 	PutLSP(WorkspaceEntry) error
 	Remove(string, string)
@@ -274,7 +274,7 @@ func restoreRegistryRowWithStore(
 	prior WorkspaceEntry,
 	hadPrior bool,
 ) (err error) {
-	release, locked, lockErr := reg.TryLockWithRelease()
+	release, locked, lockErr := reg.TryLock()
 	if lockErr != nil {
 		return fmt.Errorf("try-lock registry for rollback: %w", lockErr)
 	}

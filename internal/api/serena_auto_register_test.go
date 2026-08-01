@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
 	"mcp-local-hub/internal/config"
 )
 
@@ -560,6 +562,117 @@ func TestAutoRegisterSerena_Idempotent_SecondCallReturnsExisting(t *testing.T) {
 	}
 	if installCalled != 1 {
 		t.Errorf("install seam called %d times across two idempotent calls, want 1 (the second call short-circuits on the existing row)", installCalled)
+	}
+}
+
+func TestAutoRegisterSerena_Idempotent_ExistingRowReleaseFailureReturnsEntryAndError(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	canonicalRoot := mustCanonical(t, root)
+	existing := WorkspaceEntry{
+		WorkspaceKey:  WorkspaceKey(canonicalRoot),
+		WorkspacePath: canonicalRoot,
+		Language:      SerenaLanguageSentinel,
+		Backend:       SerenaServerName,
+		Port:          9150,
+		TaskName:      SerenaTaskNameForWorkspace(canonicalRoot),
+		ClientEntries: map[string]string{"codex": "serena-existing"},
+		RegisteredVia: "auto-detect",
+		Languages:     []string{"go", "python"},
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.PutSerena(existing); err != nil {
+		t.Fatalf("seed serena row: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save seeded registry: %v", err)
+	}
+	before, err := os.ReadFile(regPath)
+	if err != nil {
+		t.Fatalf("read seeded registry: %v", err)
+	}
+
+	var installCalls, reconcileCalls, readinessCalls, reapCalls, startCalls int32
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		atomic.AddInt32(&installCalls, 1)
+		return "", nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		atomic.AddInt32(&reconcileCalls, 1)
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error {
+		atomic.AddInt32(&readinessCalls, 1)
+		return nil
+	})
+	stubAutoRegisterCutover(t,
+		func(context.Context) error {
+			atomic.AddInt32(&reapCalls, 1)
+			return nil
+		},
+		func(context.Context) error {
+			atomic.AddInt32(&startCalls, 1)
+			return nil
+		},
+	)
+
+	lockPath := reg.LockPath()
+	unlockFailure := errors.New("injected existing-row registry unlock failure")
+	previousUnlock := flockUnlockFn
+	var stranded []*flock.Flock
+	var unlockAttempts int32
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			atomic.AddInt32(&unlockAttempts, 1)
+			stranded = append(stranded, fl)
+			return unlockFailure
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		for _, fl := range stranded {
+			_ = fl.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if err == nil {
+		t.Fatal("expected existing-row release failure")
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want the unchanged existing row alongside the release error")
+	}
+	if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, unlockFailure) {
+		t.Fatalf("error = %v, want release class and injected cause", err)
+	}
+	if !reflect.DeepEqual(*entry, existing) {
+		t.Fatalf("entry = %+v, want unchanged existing row %+v", entry, existing)
+	}
+	if attempts := atomic.LoadInt32(&unlockAttempts); attempts != 1 {
+		t.Fatalf("physical unlock attempts = %d, want 1", attempts)
+	}
+	if got := atomic.LoadInt32(&installCalls) + atomic.LoadInt32(&reconcileCalls) + atomic.LoadInt32(&readinessCalls) + atomic.LoadInt32(&reapCalls) + atomic.LoadInt32(&startCalls); got != 0 {
+		t.Fatalf("downstream calls = %d, want 0 (existing-row release failure must stop before install/reconcile/readiness/reap/start)", got)
+	}
+	after, err := os.ReadFile(regPath)
+	if err != nil {
+		t.Fatalf("read registry after existing-row release failure: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("registry bytes changed on existing-row release failure\nbefore=%q\nafter=%q", before, after)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 || rows[0].WorkspaceKey != existing.WorkspaceKey || rows[0].Language != SerenaLanguageSentinel {
+		t.Fatalf("registry rows = %+v, want the one existing serena row", rows)
+	}
+	if _, err := NewRegistry(regPath).Lock(); !errors.Is(err, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("blocking reacquire error = %v, want fail-fast release class", err)
+	}
+	if _, locked, err := NewRegistry(regPath).TryLock(); locked || !errors.Is(err, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("TryLock after failed release = locked=%t err=%v, want fail-fast release class", locked, err)
 	}
 }
 

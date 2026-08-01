@@ -359,6 +359,7 @@ type RegisterReport struct {
 	WorkspaceKey string           `json:"workspace_key"`
 	Entries      []WorkspaceEntry `json:"entries"`
 	Warnings     []string         `json:"warnings,omitempty"`
+	diagnostics  []RegistrationDiagnostic
 }
 
 // UnregisterReport summarizes what Unregister actually removed.
@@ -367,6 +368,7 @@ type UnregisterReport struct {
 	WorkspaceKey string   `json:"workspace_key"`
 	Removed      []string `json:"removed"` // language names
 	Warnings     []string `json:"warnings,omitempty"`
+	diagnostics  []RegistrationDiagnostic
 }
 
 // Register ensures workspace-scoped lazy proxies exist for each requested
@@ -496,17 +498,22 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	// through the supervisor intent file; touching the shared scheduler task
 	// there would mutate durable state before per-language preconditions
 	// such as legacy-port kill/adoption have been proven.
-	if !opts.SupervisedProxy {
-		if err := a.EnsureWeeklyRefreshTask(); err != nil {
-			fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
-		}
-	}
 	allClients := clientsAllForRegister()
 	transaction := newRegistrationTransaction()
 	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
+	defer report.projectCompatibilityWarnings()
+	if !opts.SupervisedProxy {
+		if err := a.EnsureWeeklyRefreshTask(); err != nil {
+			fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeWeeklyRefreshFailed, "weekly-refresh", "scheduler", err,
+			))
+		}
+	}
 	if schedulerUnavailableErr != nil {
-		report.Warnings = append(report.Warnings,
-			fmt.Sprintf("scheduler unavailable (%v); using supervised LSP proxy path and skipping legacy task handling", schedulerUnavailableErr))
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodeSchedulerUnavailable, "workspace-register", "scheduler", schedulerUnavailableErr,
+		))
 		if err := preflightSchedulerlessRegisterSupervisor(); err != nil {
 			return report, err
 		}
@@ -519,7 +526,9 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	bindings, droppedRelayStdio := effectiveClientBindings(m)
 	if warning := relayStdioBindingWarning(bindings, droppedRelayStdio); warning != "" {
 		fmt.Fprintf(w, "warning: %s\n", warning)
-		report.Warnings = append(report.Warnings, warning)
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodeRelayStdioSkipped, strings.Join(droppedRelayStdio, "."), "client-bindings", nil,
+		))
 	}
 	var committedReceipts []clientWriteReceipt
 	for _, lang := range languages {
@@ -534,10 +543,12 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	// Cleanup runs only after every language reached its final success point.
 	// The selected bindings remain intent; committedReceipts are the only proof
 	// of writes performed by this invocation.
-	cleanupWarnings, cleanupErr := a.cleanupDirectLanguageServerEntriesAfterRegister(
+	cleanupDiagnostics, cleanupErr := a.cleanupDirectLanguageServerEntriesAfterRegister(
 		bySpec, languages, canonical, allClients, selectedClientLanguageKeys(bindings, languages), committedReceipts,
 		opts.ManagedRouterAuthorizer, opts.probeManagedLanguageRoute, w, transaction)
-	report.Warnings = append(report.Warnings, cleanupWarnings...)
+	for _, diagnostic := range cleanupDiagnostics {
+		report.addDiagnostic(diagnostic)
+	}
 	if cleanupErr != nil {
 		return report, transaction.Fail(cleanupErr).Err
 	}
@@ -547,10 +558,9 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	}
 	if outcome.ObserverErr != nil {
 		fmt.Fprintf(w, "warning: registration committed but a post-commit observer failed: %v\n", outcome.ObserverErr)
-		report.Warnings = append(
-			report.Warnings,
-			"register-post-commit-observer-failed: registration succeeded, but a completion record could not be written",
-		)
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodePostCommitObserverFailed, "workspace-register", "completion-observer", outcome.ObserverErr,
+		))
 	}
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
@@ -565,8 +575,9 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	if len(report.Entries) > 0 {
 		if err := registerBlessTrustedRootFn(canonical); err != nil {
 			fmt.Fprintf(w, "warning: could not record %s as an LSP trusted root (router auto-register of sibling workspaces under this tree may require explicit register): %v\n", canonical, err)
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("could not record %s as an LSP trusted root: %v", canonical, err))
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeTrustedRootRecordFailed, "trusted-root", "workspace-register", err,
+			))
 		}
 	}
 	return report, nil
@@ -631,6 +642,7 @@ const (
 	cleanupWarningClientEntryIndeterminate directCleanupWarningClass = "client-entry-indeterminate"
 	cleanupWarningDirectScanFailed         directCleanupWarningClass = "direct-scan-failed"
 	cleanupWarningSurvivorScanFailed       directCleanupWarningClass = "survivor-scan-failed"
+	cleanupWarningCASConflict              directCleanupWarningClass = "cas-conflict"
 	cleanupWarningBackupFailed             directCleanupWarningClass = "backup-failed"
 	cleanupWarningRemoveFailed             directCleanupWarningClass = "remove-failed"
 )
@@ -948,10 +960,16 @@ func directLanguageServerCleanupMatches(
 }
 
 type directCleanupWarningAccumulator struct {
-	writer     io.Writer
-	seen       map[string]bool
-	proofPlans map[directCleanupWarningClass]map[directCleanupPlanIdentity]struct{}
-	warnings   []string
+	writer      io.Writer
+	seen        map[string]bool
+	proofPlans  map[directCleanupWarningClass]map[directCleanupPlanIdentity]struct{}
+	warnings    []string
+	diagnostics []RegistrationDiagnostic
+}
+
+type directCleanupOutcome struct {
+	warnings    []string
+	diagnostics []RegistrationDiagnostic
 }
 
 type directCleanupPlanIdentity struct {
@@ -975,6 +993,7 @@ func (a *directCleanupWarningAccumulator) addRecord(record directCleanupWarningR
 	}
 	a.seen[warning] = true
 	a.warnings = append(a.warnings, warning)
+	a.diagnostics = append(a.diagnostics, directCleanupRecordDiagnostic(record))
 }
 
 func (a *directCleanupWarningAccumulator) addProofFailure(failureClass directCleanupWarningClass, plan directCleanupPlan) {
@@ -1024,8 +1043,65 @@ func (a *directCleanupWarningAccumulator) flushProofWarnings() {
 			warning += "; retry after verifying the managed GUI is running as the current user"
 		}
 		a.warnings = append(a.warnings, warning)
+		a.diagnostics = append(a.diagnostics, directCleanupProofDiagnostic(failureClass, plans))
 		fmt.Fprintf(a.writer, "warning: %s\n", warning)
 	}
+}
+
+func (a *directCleanupWarningAccumulator) outcome() directCleanupOutcome {
+	return directCleanupOutcome{
+		warnings:    append([]string(nil), a.warnings...),
+		diagnostics: append([]RegistrationDiagnostic(nil), a.diagnostics...),
+	}
+}
+
+func directCleanupRecordDiagnostic(record directCleanupWarningRecord) RegistrationDiagnostic {
+	code := RegistrationCodeCleanupUnsupported
+	switch record.class {
+	case cleanupWarningDirectScanFailed:
+		code = RegistrationCodeCleanupScanFailed
+	case cleanupWarningSurvivorScanFailed:
+		code = RegistrationCodeCleanupSurvivorScanFailed
+	case cleanupWarningCASConflict:
+		code = RegistrationCodeCleanupCASConflict
+	case cleanupWarningBackupFailed:
+		code = RegistrationCodeCleanupBackupFailed
+	case cleanupWarningRemoveFailed:
+		code = RegistrationCodeCleanupRemoveFailed
+	}
+	plan := record.language
+	if record.entry != "" {
+		plan = record.entry
+	}
+	return NewRegistrationDiagnostic(code, plan, record.client, nil)
+}
+
+func directCleanupProofDiagnostic(failureClass directCleanupWarningClass, plans []directCleanupPlanIdentity) RegistrationDiagnostic {
+	code := RegistrationCodeRouterProofFailed
+	if strings.HasPrefix(string(failureClass), "route-") {
+		code = RegistrationCodeRouteProofFailed
+	} else {
+		switch failureClass {
+		case cleanupWarningDirectScanFailed:
+			code = RegistrationCodeCleanupScanFailed
+		case cleanupWarningSurvivorScanFailed:
+			code = RegistrationCodeCleanupSurvivorScanFailed
+		case cleanupWarningCASConflict:
+			code = RegistrationCodeCleanupCASConflict
+		case cleanupWarningWriteEntryNameEmpty,
+			cleanupWarningWriteReceiptConflict,
+			cleanupWarningWriteReceiptMissing,
+			cleanupWarningClientEntryIndeterminate:
+			code = RegistrationCodeCleanupUnsupported
+		}
+	}
+	planIdentity := ""
+	if len(plans) == 1 {
+		planIdentity = fmt.Sprintf("%s-%s-%d", plans[0].client, plans[0].language, plans[0].port)
+	} else if len(plans) > 1 {
+		planIdentity = fmt.Sprintf("affected-plans-%d", len(plans))
+	}
+	return NewRegistrationDiagnostic(code, planIdentity, string(failureClass), nil)
 }
 
 func renderDirectCleanupWarning(record directCleanupWarningRecord) string {
@@ -1147,11 +1223,11 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	probeRoute func(context.Context, int, string, string) managedRouteProof,
 	w io.Writer,
 	transaction *registrationTransaction,
-) ([]string, error) {
+) ([]RegistrationDiagnostic, error) {
 	if probeRoute == nil {
 		probeRoute = probeManagedLanguageRoute
 	}
-	return a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransaction(
+	outcome, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
 		bySpec,
 		languages,
 		canonicalWorkspace,
@@ -1166,6 +1242,7 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 		},
 		transaction,
 	)
+	return outcome.diagnostics, err
 }
 
 func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
@@ -1179,9 +1256,10 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 	deps directCleanupPlanDeps,
 ) []string {
 	transaction := newRegistrationTransaction()
-	warnings, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransaction(
+	outcome, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
 		bySpec, languages, canonicalWorkspace, allClients, selected, receipts, w, deps, transaction,
 	)
+	warnings := outcome.warnings
 	if err == nil {
 		if outcome := transaction.Commit(); !outcome.Committed() {
 			err = outcome.Err
@@ -1206,15 +1284,32 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransac
 	deps directCleanupPlanDeps,
 	transaction *registrationTransaction,
 ) ([]string, error) {
+	outcome, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+		bySpec, languages, canonicalWorkspace, allClients, selected, receipts, w, deps, transaction,
+	)
+	return outcome.warnings, err
+}
+
+func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	selected map[clientLanguageKey]bool,
+	receipts []clientWriteReceipt,
+	w io.Writer,
+	deps directCleanupPlanDeps,
+	transaction *registrationTransaction,
+) (directCleanupOutcome, error) {
 	if transaction == nil {
-		return nil, errors.New("direct cleanup requires a registration transaction")
+		return directCleanupOutcome{}, errors.New("direct cleanup requires a registration transaction")
 	}
 	keepN := a.EffectiveBackupKeepN()
 	warnings := newDirectCleanupWarningAccumulator(w)
 	receiptNames, receiptWarning := receiptEntryNames(receipts)
 	if receiptWarning != nil {
 		warnings.addRecord(*receiptWarning)
-		return warnings.warnings, nil
+		return warnings.outcome(), nil
 	}
 	plans, warningRecords := buildDirectCleanupPlans(
 		bySpec,
@@ -1309,7 +1404,7 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransac
 		}
 		if len(plansByEntry) == 0 {
 			if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
-				return warnings.warnings, fmt.Errorf("direct cleanup %s proof refusal rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+				return warnings.outcome(), fmt.Errorf("direct cleanup %s proof refusal rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
 			}
 			continue
 		}
@@ -1346,61 +1441,6 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransac
 			}
 			return false
 		}
-		// Exact destructive checkpoint: retained generation first, exact route
-		// second, immediately before the shared client backup.
-		for i := range plans {
-			plan := &plans[i]
-			if plan.key.Client != clientName ||
-				plan.evidence != cleanupEvidenceManagedRouter ||
-				!planHasEntries(plan) {
-				continue
-			}
-			if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
-				invalidatePlan(plan, failure)
-			}
-		}
-		if len(matchesByName) == 0 {
-			if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
-				return warnings.warnings, fmt.Errorf("direct cleanup %s pre-backup proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
-			}
-			continue
-		}
-		backupPath, err := client.BackupKeep(keepN)
-		if err != nil {
-			if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
-				return warnings.warnings, fmt.Errorf("direct cleanup %s backup refusal rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
-			}
-			warnings.addRecord(directCleanupWarningRecord{class: cleanupWarningBackupFailed, client: clientName})
-			continue
-		}
-		transaction.AddSuccessOutput(
-			"cleanup backup "+sanitizeCleanupPlanIdentifier(clientName),
-			w,
-			"✓ %s backup before direct LSP cleanup: %s\n",
-			clientName,
-			backupPath,
-		)
-		// Exact destructive checkpoint immediately after BackupKeep. A refused
-		// plan is removed from this client's batch without suppressing sibling
-		// plans whose own evidence remains valid.
-		for i := range plans {
-			plan := &plans[i]
-			if plan.key.Client != clientName ||
-				plan.evidence != cleanupEvidenceManagedRouter ||
-				!planHasEntries(plan) {
-				continue
-			}
-			if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
-				invalidatePlan(plan, failure)
-			}
-		}
-		if len(matchesByName) == 0 {
-			if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
-				return warnings.warnings, fmt.Errorf("direct cleanup %s post-backup proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
-			}
-			continue
-		}
-
 		completedManagedPlans := map[int][]directCleanupPlan{}
 		for i := range plans {
 			plan := &plans[i]
@@ -1418,46 +1458,95 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransac
 			sort.Strings(entryNames)
 			for _, entryName := range entryNames {
 				entry := matchesByName[entryName]
+				atomicClient, ok := client.(atomicDirectCleanupClient)
+				if !ok {
+					invalidatePlan(plan, string(cleanupWarningClientEntryIndeterminate))
+					if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s capability-refusal rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+					}
+					planFailed = true
+					break
+				}
+				target, captureErr := atomicClient.CaptureDirectCleanupTarget(clients.DirectCleanupIdentity{
+					Name:    entry.Name,
+					Command: entry.Command,
+					Args:    append([]string(nil), entry.Args...),
+				})
+				if captureErr != nil {
+					invalidatePlan(plan, string(cleanupWarningClientEntryIndeterminate))
+					if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s target-capture rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(captureErr, rollbackErr))
+					}
+					planFailed = true
+					break
+				}
 				if plan.evidence == cleanupEvidenceManagedRouter {
 					if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
 						invalidatePlan(plan, failure)
 						if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
-							return warnings.warnings, fmt.Errorf("direct cleanup %s pre-remove proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+							return warnings.outcome(), fmt.Errorf("direct cleanup %s pre-remove proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
 						}
 						planFailed = true
 						break
 					}
 				}
 				entryMark := transaction.Mark()
-				capturedClient := client
-				capturedBackup := backupPath
-				capturedEntry := entry.Name
-				transaction.AddCompensation(
-					fmt.Sprintf("restore %s entry %s from cleanup backup", sanitizeCleanupPlanIdentifier(clientName), sanitizeCleanupPlanIdentifier(entry.Name)),
-					func() error {
-						return restoreRegisterClientEntryFromBackup(capturedClient, capturedBackup, capturedEntry)
+				backupPath, cleanupErr := atomicClient.CleanupDirectEntryAtomically(
+					target,
+					keepN,
+					func(receipt clients.DirectCleanupReceipt) error {
+						transaction.AddCompensation(
+							fmt.Sprintf("restore %s entry %s from cleanup receipt", sanitizeCleanupPlanIdentifier(clientName), sanitizeCleanupPlanIdentifier(entry.Name)),
+							receipt.Restore,
+						)
+						return nil
+					},
+					func(_ clients.DirectCleanupCheckpoint) error {
+						if plan.evidence != cleanupEvidenceManagedRouter {
+							return nil
+						}
+						if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
+							return directCleanupRevalidationError{failure: failure}
+						}
+						return nil
 					},
 				)
-				if err := client.RemoveEntry(entry.Name); err != nil {
-					warnings.addRecord(directCleanupWarningRecord{
-						class: cleanupWarningRemoveFailed, client: clientName,
-						language: languageByName[entry.Name], entry: entry.Name,
-					})
-					if rollbackErr := transaction.RollbackTo(entryMark); rollbackErr != nil {
-						return warnings.warnings, fmt.Errorf("direct cleanup %s remove rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(err, rollbackErr))
-					}
-					continue
-				}
-				if plan.evidence == cleanupEvidenceManagedRouter {
-					if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
-						invalidatePlan(plan, failure)
+				if cleanupErr != nil {
+					var validationErr directCleanupRevalidationError
+					if errors.As(cleanupErr, &validationErr) {
+						invalidatePlan(plan, validationErr.failure)
 						if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
-							return warnings.warnings, fmt.Errorf("direct cleanup %s post-remove proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+							return warnings.outcome(), fmt.Errorf("direct cleanup %s validation rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(cleanupErr, rollbackErr))
 						}
 						planFailed = true
 						break
 					}
+					if errors.Is(cleanupErr, clients.ErrCASConflict) {
+						invalidatePlan(plan, string(cleanupWarningCASConflict))
+					} else if backupPath == "" {
+						warnings.addRecord(directCleanupWarningRecord{class: cleanupWarningBackupFailed, client: clientName})
+					} else {
+						warnings.addRecord(directCleanupWarningRecord{
+							class: cleanupWarningRemoveFailed, client: clientName,
+							language: languageByName[entry.Name], entry: entry.Name,
+						})
+					}
+					if rollbackErr := transaction.RollbackTo(entryMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s remove rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(cleanupErr, rollbackErr))
+					}
+					if errors.Is(cleanupErr, clients.ErrCASConflict) {
+						planFailed = true
+						break
+					}
+					continue
 				}
+				transaction.AddSuccessOutput(
+					"cleanup backup "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+					w,
+					"✓ %s backup before direct LSP cleanup: %s\n",
+					clientName,
+					backupPath,
+				)
 				transaction.AddSuccessOutput(
 					"cleanup removal "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
 					w,
@@ -1497,7 +1586,15 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransac
 		}
 	}
 	warnings.flushProofWarnings()
-	return warnings.warnings, nil
+	return warnings.outcome(), nil
+}
+
+type directCleanupRevalidationError struct {
+	failure string
+}
+
+func (e directCleanupRevalidationError) Error() string {
+	return e.failure
 }
 
 func validateManagedCleanupPlan(
@@ -1519,18 +1616,6 @@ func validateManagedCleanupPlan(
 		return string(normalizeManagedRouteFailureClass(proof.FailureClass))
 	}
 	return ""
-}
-
-type registerClientRollbackRestorer interface {
-	RestoreEntryFromBackupForRollback(backupPath, name string) error
-}
-
-func restoreRegisterClientEntryFromBackup(client registerClient, backupPath, entryName string) error {
-	restorer, ok := client.(registerClientRollbackRestorer)
-	if !ok {
-		return fmt.Errorf("client adapter does not support exact rollback restore")
-	}
-	return restorer.RestoreEntryFromBackupForRollback(backupPath, entryName)
 }
 
 func addLSPCleanupAlias(aliases map[string]bool, value string) {
@@ -1871,7 +1956,7 @@ func (a *API) registerOneLanguage(
 	// touch registry each re-acquire the flock themselves so rollback is
 	// safe whether it runs during Phase 1 (flock still held) or Phase 2/3
 	// (flock released).
-	unlock, err := reg.LockWithRelease()
+	unlock, err := reg.Lock()
 	if err != nil {
 		return registeredLanguageResult{}, fmt.Errorf("acquire registry lock: %w", err)
 	}
@@ -2154,7 +2239,7 @@ func (a *API) registerOneLanguage(
 	// Phase 3: re-acquire flock before client config writes. Client
 	// adapters perform read-modify-write updates, so these writes must be
 	// serialized against concurrent register/unregister operations.
-	unlock, err = reg.LockWithRelease()
+	unlock, err = reg.Lock()
 	if err != nil {
 		return registeredLanguageResult{}, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
@@ -2193,7 +2278,7 @@ func (a *API) Unregister(workspacePath string, languages []string) (*UnregisterR
 	return a.unregisterWithManifest(m, workspacePath, languages, os.Stderr)
 }
 
-func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (*UnregisterReport, error) {
+func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (_ *UnregisterReport, err error) {
 	// Use the existence-tolerant variant: the operator may be cleaning up
 	// a registration whose workspace directory has since been deleted,
 	// moved, or is on an unavailable drive. Without this weakening, an
@@ -2223,7 +2308,7 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	if err != nil {
 		return nil, err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "unregister "+canonical+": removals above stand, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return nil, err
 	}
@@ -2255,6 +2340,7 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	}
 	allClients := clientsAllForRegister()
 	report := &UnregisterReport{Workspace: canonical, WorkspaceKey: activeWSKey}
+	defer report.projectCompatibilityWarnings()
 	sch, schErr := schedulerNewForRegister()
 	// Non-Windows backends return not-implemented; supervised LSP rows have no
 	// scheduled task to delete there, so tolerate absence and skip only the
@@ -2262,8 +2348,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	if schErr != nil {
 		if schedulerUnavailableError(schErr) {
 			sch = nil
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("scheduler unavailable (%v); skipping legacy task deletion (supervised rows have none)", schErr))
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeUnregisterSchedulerUnavailable, "workspace-unregister", "scheduler", schErr,
+			))
 		} else {
 			return nil, schErr
 		}
@@ -2279,16 +2366,18 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 			}
 		}
 		if len(entries) == 0 {
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeUnregisterLanguageMissing, canonical, lang, nil,
+			))
 			continue
 		}
 		for _, entry := range entries {
 			targetWSKey := entry.WorkspaceKey
 			intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(targetWSKey, lang)
 			if restoreSupervisorIntent, supervisorManaged, err := a.removeLSPSupervisorIntent(targetWSKey, lang); err != nil {
-				report.Warnings = append(report.Warnings,
-					fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
+				report.addDiagnostic(NewRegistrationDiagnostic(
+					RegistrationCodeUnregisterIntentRemoveFailed, intentTaskName, lang, err,
+				))
 				continue
 			} else if supervisorManaged {
 				ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
@@ -2305,8 +2394,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 							labeledTransactionError("compensation", "restore supervisor intent "+intentTaskName, restoreErr),
 						)
 					}
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterReconcileFailed, intentTaskName, lang, err,
+					))
 				} else {
 					fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
 				}
@@ -2324,13 +2414,13 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 			if forceKillByPortFn != nil && entry.Port != 0 {
 				outcome, err := forceKillByPortFn(entry.Port, 5*time.Second)
 				if outcome == portKillIdentityMismatch {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("kill proxy on port %d (task %s): port owned by foreign process, not killing: %v",
-							entry.Port, entry.TaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterProxyForeignOwner, entry.TaskName, lang, err,
+					))
 				} else if err != nil {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("kill proxy on port %d (task %s): %v",
-							entry.Port, entry.TaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterProxyKillFailed, entry.TaskName, lang, err,
+					))
 				}
 			}
 			// 2. Remove scheduler task. Task Scheduler's Delete is the
@@ -2339,8 +2429,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 			// Delete prevents it from being re-launched at next logon.
 			if sch != nil {
 				if err := sch.Delete(entry.TaskName); err != nil {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterTaskDeleteFailed, entry.TaskName, lang, err,
+					))
 				} else {
 					fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
 				}
@@ -2356,8 +2447,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 					continue
 				}
 				if err := client.RemoveEntry(entryName); err != nil {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("remove entry %s from %s: %v", entryName, clientName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterClientRemoveFailed, entryName, clientName, err,
+					))
 				} else {
 					fmt.Fprintf(w, "\u2713 removed %s entry from %s\n", entryName, clientName)
 				}
@@ -2661,6 +2753,20 @@ type registerClient interface {
 	FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error)
 }
 
+type atomicDirectCleanupClient interface {
+	CaptureDirectCleanupTarget(clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error)
+	CleanupDirectEntryAtomically(
+		*clients.DirectCleanupTarget,
+		int,
+		func(clients.DirectCleanupReceipt) error,
+		func(clients.DirectCleanupCheckpoint) error,
+	) (string, error)
+}
+
+type registerClientRollbackRestorer interface {
+	RestoreEntryFromBackupForRollback(backupPath, name string) error
+}
+
 // removableStdioCandidatesClient / findStdioLanguageServerCandidatesClient are the
 // OPTIONAL WORKSPACE-AWARE register-grain candidate sources (architect REVISE →
 // Option C, bot PR #425 follow-up GAP 2): the destructive direct-gopls/LSP cleanup
@@ -2838,4 +2944,23 @@ func (a realClientAdapter) FindStdioLanguageServerCandidatesWriteTargetOwned() (
 }
 func (a realClientAdapter) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
 	return a.c.FindStdioLanguageServerEntries()
+}
+func (a realClientAdapter) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	mutator, ok := clients.AsDirectCleanupMutator(a.c)
+	if !ok {
+		return nil, fmt.Errorf("client %s does not support atomic direct cleanup", a.c.Name())
+	}
+	return mutator.CaptureDirectCleanupTarget(identity)
+}
+func (a realClientAdapter) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	mutator, ok := clients.AsDirectCleanupMutator(a.c)
+	if !ok {
+		return "", fmt.Errorf("client %s does not support atomic direct cleanup", a.c.Name())
+	}
+	return mutator.CleanupDirectEntryAtomically(target, keepN, preArm, revalidate)
 }

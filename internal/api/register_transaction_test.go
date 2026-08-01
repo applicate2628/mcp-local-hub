@@ -287,7 +287,7 @@ type fakeRegistryRollbackStore struct {
 	releaseErr error
 }
 
-func (s *fakeRegistryRollbackStore) TryLockWithRelease() (func() error, bool, error) {
+func (s *fakeRegistryRollbackStore) TryLock() (func() error, bool, error) {
 	if s.lockErr != nil {
 		return nil, false, s.lockErr
 	}

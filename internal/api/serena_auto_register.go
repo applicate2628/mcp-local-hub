@@ -201,14 +201,24 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return nil, err
 	}
 	regReleased := false
-	releaseReg := func() {
+	var regReleaseErr error
+	releaseReg := func() error {
 		if regReleased {
-			return
+			return regReleaseErr
 		}
 		regReleased = true
-		regUnlock()
+		if releaseErr := regUnlock(); releaseErr != nil {
+			regReleaseErr = releaseErr
+		}
+		return regReleaseErr
 	}
-	defer releaseReg()
+	defer func() {
+		if !regReleased {
+			if deferredReleaseErr := releaseReg(); deferredReleaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("serena auto-register %s: registration outcome above stands, but could not release the registry lock: %w", key, deferredReleaseErr))
+			}
+		}
+	}()
 	if err = reg.Load(); err != nil {
 		return nil, err
 	}
@@ -216,8 +226,10 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// Idempotency: a concurrent winner (or a prior call) may have already
 	// registered this workspace. Return the existing row unchanged.
 	if existing, ok := reg.GetSerena(key); ok {
-		releaseReg()
 		e := existing
+		if releaseErr := releaseReg(); releaseErr != nil {
+			return &e, fmt.Errorf("serena auto-register: workspace %s is already registered, but could not release the registry lock: %w", root, releaseErr)
+		}
 		return &e, nil
 	}
 
@@ -603,7 +615,9 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//     registry back here would split-state. Releasing the flock publishes the
 	//     committed row to other processes.
 	rowSaved = false
-	releaseReg()
+	if releaseErr := releaseReg(); releaseErr != nil {
+		return nil, fmt.Errorf("serena auto-register: workspace %s and its runtime intent are committed, but could not release the registry lock before reconcile or start: %w", root, releaseErr)
+	}
 
 	// 11. Bring the new daemon live.
 	//   - INTRODUCE or stopped/undetermined pool (needStart) → START the supervisor

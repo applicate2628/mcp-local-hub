@@ -156,8 +156,11 @@ func OpenLSPRegistryForReconcile() (*Registry, bool) {
 		return nil, false
 	}
 	loadErr := reg.Load()
-	unlock()
-	if loadErr != nil {
+	releaseErr := unlock()
+	if releaseErr != nil {
+		fmt.Fprintf(os.Stderr, "open LSP registry for reconcile: release registry lock %s: %v\n", regPath, releaseErr)
+	}
+	if loadErr != nil || releaseErr != nil {
 		return nil, false
 	}
 	return reg, true
@@ -243,7 +246,7 @@ func (a *API) registerOneLanguageSupervised(
 	w io.Writer,
 	transaction *registrationTransaction,
 ) (result registeredLanguageResult, err error) {
-	unlock, err := reg.LockWithRelease()
+	unlock, err := reg.Lock()
 	if err != nil {
 		return registeredLanguageResult{}, fmt.Errorf("acquire registry lock: %w", err)
 	}
@@ -367,7 +370,7 @@ func (a *API) registerOneLanguageSupervised(
 		return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock before client updates: %w", err)
 	}
 
-	unlock, err = reg.LockWithRelease()
+	unlock, err = reg.Lock()
 	if err != nil {
 		return registeredLanguageResult{}, fmt.Errorf("re-acquire registry lock: %w", err)
 	}

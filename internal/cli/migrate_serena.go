@@ -563,14 +563,24 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	// the deferred call is a harmless no-op once the explicit release fired —
 	// no double-unlock.
 	regLockReleased := false
-	releaseRegistryLock := func() {
+	var regReleaseErr error
+	releaseRegistryLock := func() error {
 		if regLockReleased {
-			return
+			return regReleaseErr
 		}
 		regLockReleased = true
-		unlock()
+		if releaseErr := unlock(); releaseErr != nil {
+			regReleaseErr = releaseErr
+		}
+		return regReleaseErr
 	}
-	defer releaseRegistryLock()
+	defer func() {
+		if !regLockReleased {
+			if deferredReleaseErr := releaseRegistryLock(); deferredReleaseErr != nil {
+				err = errors.Join(err, fmt.Errorf("migrate serena: migration outcome above stands, but could not release the registry lock: %w", deferredReleaseErr))
+			}
+		}
+	}()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -645,7 +655,9 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	rollback = append(rollback, func() error {
 		return restoreSerenaRegistryRelocking(regPath, serenaBefore)
 	})
-	releaseRegistryLock()
+	if releaseErr := releaseRegistryLock(); releaseErr != nil {
+		return fmt.Errorf("migrate serena: registry allocations are committed, but could not release the registry lock before re-read, reconcile, reap, install, or start: %w", releaseErr)
+	}
 
 	// Re-read the freshly-allocated serena rows so the PRE-reap predicates see
 	// the assigned ports + task names. This is the count used to decide willReap
@@ -1549,13 +1561,13 @@ func snapshotSerenaRows(reg *api.Registry) []api.WorkspaceEntry {
 // window.
 //
 // The lock is always released before returning (no leaked lock).
-func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) error {
+func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) (err error) {
 	reg := api.NewRegistry(regPath)
 	unlock, err := reg.Lock()
 	if err != nil {
 		return fmt.Errorf("restore registry: re-acquire lock: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "restore registry: restore above stands, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return fmt.Errorf("restore registry: reload: %w", err)
 	}
@@ -1666,7 +1678,7 @@ func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.S
 	if err != nil {
 		return nil, nil, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "re-read serena rows: allocations above stand, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return nil, nil, fmt.Errorf("reload registry: %w", err)
 	}
@@ -1701,7 +1713,7 @@ func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.S
 // (rollback = nil), making this undo a no-op from the commit point on (the
 // committed intent now owns those rows' ports — reverting them would strand the
 // router).
-func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.WorkspaceEntry) error {
+func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.WorkspaceEntry) (err error) {
 	if len(newlyAllocated) == 0 {
 		return nil
 	}
@@ -1710,7 +1722,7 @@ func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.Workspac
 	if err != nil {
 		return fmt.Errorf("revert re-read allocations: re-acquire lock: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "revert re-read allocations: revert above stands, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return fmt.Errorf("revert re-read allocations: reload: %w", err)
 	}

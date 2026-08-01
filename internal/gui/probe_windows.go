@@ -32,14 +32,50 @@ import (
 // alive=true,denied=true (Claude r2 #2: refuses take-over of a
 // SYSTEM/scheduler-launched lock).
 func processIDImpl(pid int) (ProcessIdentity, error) {
-	return processIDWindows(pid, false)
+	return processIDWindows(pid)
 }
 
 func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
-	return processIDWindows(pid, true)
+	const (
+		processQueryLimitedInformation = 0x1000
+		processQueryInformation        = 0x0400
+		processVMRead                  = 0x0010
+	)
+	h, err := windows.OpenProcess(processQueryLimitedInformation|processQueryInformation|processVMRead|windows.SYNCHRONIZE, false, uint32(pid))
+	if err != nil {
+		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return ProcessIdentity{Alive: true, Denied: true}, nil
+		}
+		return ProcessIdentity{Alive: false}, nil
+	}
+	closeFailure := func(cause error) (ProcessIdentity, error) {
+		return ProcessIdentity{}, errors.Join(cause, windows.CloseHandle(h))
+	}
+	wait, err := windows.WaitForSingleObject(h, 0)
+	if err != nil {
+		return closeFailure(fmt.Errorf("wait retained process %d: %w", pid, err))
+	}
+	if wait != uint32(windows.WAIT_TIMEOUT) {
+		if wait == uint32(windows.WAIT_OBJECT_0) {
+			return closeFailure(fmt.Errorf("retained process %d has exited", pid))
+		}
+		return closeFailure(fmt.Errorf("wait retained process %d returned %#x", pid, wait))
+	}
+	imagePath := queryImagePath(h)
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(h, &creation, &exit, &kernel, &user); err != nil {
+		return closeFailure(fmt.Errorf("GetProcessTimes(%d): %w", pid, err))
+	}
+	return ProcessIdentity{
+		Alive:     true,
+		ImagePath: imagePath,
+		Cmdline:   queryCmdlineForHandle(h),
+		StartTime: time.Unix(0, creation.Nanoseconds()),
+		Handle:    uintptr(h),
+	}, nil
 }
 
-func processIDWindows(pid int, retainHandle bool) (ProcessIdentity, error) {
+func processIDWindows(pid int) (ProcessIdentity, error) {
 	const (
 		PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 		STILL_ACTIVE                      = 259
@@ -90,10 +126,6 @@ func processIDWindows(pid int, retainHandle bool) (ProcessIdentity, error) {
 		Cmdline:   cmdline,
 		StartTime: startTime,
 	}
-	if retainHandle {
-		identity.Handle = uintptr(h)
-		handleOwned = false
-	}
 	return identity, nil
 }
 
@@ -122,8 +154,8 @@ func killProcessImpl(pid int) error {
 	return nil
 }
 
-func closeProcessHandle(handle uintptr) {
-	_ = windows.CloseHandle(windows.Handle(handle))
+func closeProcessHandle(handle uintptr) error {
+	return windows.CloseHandle(windows.Handle(handle))
 }
 
 // queryImagePath returns the canonical executable path for an open
@@ -153,6 +185,10 @@ func queryCmdline(pid uint32) []string {
 		return nil
 	}
 	defer windows.CloseHandle(h)
+	return queryCmdlineForHandle(h)
+}
+
+func queryCmdlineForHandle(h windows.Handle) []string {
 
 	type processBasicInformation struct {
 		Reserved1       uintptr

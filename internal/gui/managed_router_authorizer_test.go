@@ -27,6 +27,25 @@ func closeManagedRouterIdentityForTest(identity *ProcessIdentity) error {
 	return nil
 }
 
+func TestManagedRouterLease_CloseCachesFailureOnce(t *testing.T) {
+	closeErr := errors.New("native retained-handle close failed")
+	closeCalls := 0
+	lease := managedRouterLease{closeFn: func() error {
+		closeCalls++
+		return closeErr
+	}}
+
+	if err := lease.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("first Close() error = %v, want native close error", err)
+	}
+	if err := lease.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("second Close() error = %v, want cached native close error", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("native close calls = %d, want 1", closeCalls)
+	}
+}
+
 func TestManagedRouterAuthorizer(t *testing.T) {
 	const (
 		pid     = 4242

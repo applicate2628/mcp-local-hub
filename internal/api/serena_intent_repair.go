@@ -144,7 +144,7 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	if !ok {
 		return 0, nil, nil // long-held mutating lock — that holder self-heals; next startup re-scans
 	}
-	defer regUnlock()
+	defer ReleaseAndJoin(&err, regUnlock, "serena intent repair: release the registry lock")
 
 	if err := reg.Load(); err != nil {
 		return 0, nil, fmt.Errorf("serena intent repair: load registry: %w", err)
@@ -365,7 +365,7 @@ func missingWorkspaceKeys(entries []WorkspaceEntry) []string {
 // (unlock, true, nil) on success, (nil, false, nil) if every attempt found the
 // lock contended, or (nil, false, err) on a real filesystem error. See the
 // registryLockRetry constants for why a single TryLock-then-skip is too eager.
-func tryLockRegistryBrief(reg *Registry) (func(), bool, error) {
+func tryLockRegistryBrief(reg *Registry) (func() error, bool, error) {
 	for attempt := range registryLockRetryAttempts {
 		unlock, ok, err := reg.TryLock()
 		if err != nil {

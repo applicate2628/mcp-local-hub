@@ -93,7 +93,7 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		return entry, nil
 	}
 	reg := NewRegistry(regPath)
-	releaseRegistry, err := reg.LockWithRelease()
+	releaseRegistry, err := reg.Lock()
 	if err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
 	}

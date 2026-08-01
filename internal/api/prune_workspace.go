@@ -142,13 +142,13 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 	td := PruneWorkspaceTeardown{
 		LSPUnregister:      func(p string, langs []string) (*UnregisterReport, error) { return a.Unregister(p, langs) },
 		RemoveSerenaIntent: a.RemoveSerenaSupervisorIntentForWorkspace,
-		DeleteSerenaRow: func() (int, error) {
+		DeleteSerenaRow: func() (_ int, err error) {
 			reg := NewRegistry(regPath)
 			unlock, lerr := reg.Lock()
 			if lerr != nil {
 				return 0, lerr
 			}
-			defer unlock()
+			defer ReleaseAndJoin(&err, unlock, "prune serena row: deletion stands, but could not release the registry lock")
 			if lerr := reg.Load(); lerr != nil {
 				return 0, lerr
 			}
@@ -178,7 +178,7 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 // worktrees growing. Reading the registry directly (SerenaEntries + LSPEntries)
 // covers both. The brief read lock is released before the caller prunes, so it
 // does not nest with PruneWorkspace's own per-workspace locks.
-func (a *API) ListAllWorkspaceRows() ([]*WorkspaceEntry, error) {
+func (a *API) ListAllWorkspaceRows() (_ []*WorkspaceEntry, err error) {
 	regPath, err := registryPathForRegister()
 	if err != nil {
 		return nil, err
@@ -188,7 +188,7 @@ func (a *API) ListAllWorkspaceRows() ([]*WorkspaceEntry, error) {
 	if lerr != nil {
 		return nil, lerr
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "list workspace rows: rows above are valid, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return nil, lerr
 	}
@@ -261,7 +261,7 @@ func workspaceBackendPresence(regPath, wsKey, legacyWSKey string) (hasLSP bool, 
 	if lerr != nil {
 		return false, false, lerr
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "read workspace backend presence: presence bits above are valid, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return false, false, lerr
 	}

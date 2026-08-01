@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -62,23 +63,51 @@ type ProcessIdentity struct {
 	// closeHandle is populated only by the processIDOverride test seam when a
 	// retained identity is requested. Production identities always use the
 	// platform closeProcessHandle owner.
-	closeHandle func(uintptr)
+	closeHandle func(uintptr) error
+	closeState  *processIdentityCloseState
+}
+
+type processIdentityCloseState struct {
+	mu     sync.Mutex
+	closed bool
+	err    error
 }
 
 // Close releases any kernel handle held by Handle. Safe to call
-// multiple times; safe to call on a zero ProcessIdentity (no-op).
+// multiple times; safe to call on a zero ProcessIdentity (no-op). The first
+// native close result is retained so a destructive owner can settle it exactly
+// once instead of silently treating a failed release as success.
 // Callers MUST invoke Close once the handle is no longer needed.
-func (id *ProcessIdentity) Close() {
-	if id == nil || id.Handle == 0 {
-		return
+func (id *ProcessIdentity) Close() error {
+	if id == nil {
+		return nil
 	}
-	if id.closeHandle != nil {
-		id.closeHandle(id.Handle)
-	} else {
-		closeProcessHandle(id.Handle)
+	if id.closeState == nil {
+		if id.Handle == 0 {
+			return nil
+		}
+		id.closeState = &processIdentityCloseState{}
 	}
+	state := id.closeState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed {
+		return state.err
+	}
+	if id.Handle == 0 {
+		state.closed = true
+		return nil
+	}
+	handle := id.Handle
+	closer := id.closeHandle
+	if closer == nil {
+		closer = closeProcessHandle
+	}
+	state.err = closer(handle)
+	state.closed = true
 	id.Handle = 0
 	id.closeHandle = nil
+	return state.err
 }
 
 // pingIncumbent issues GET http://127.0.0.1:<port>/api/ping and
@@ -150,7 +179,7 @@ func retainedProcessID(pid int) (ProcessIdentity, error) {
 			// retained handle whose close is a no-op so the same established
 			// seam can exercise lease lifetimes without touching an OS handle.
 			identity.Handle = ^uintptr(0)
-			identity.closeHandle = func(uintptr) {}
+			identity.closeHandle = func(uintptr) error { return nil }
 		}
 		return identity, err
 	}

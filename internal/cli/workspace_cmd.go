@@ -181,9 +181,9 @@ Behavior:
     ` + "`mcphub workspace unregister`" + ` first if you intend to re-register.
 
 Examples:
-  mcphub workspace register D:\dev\PaperPane
-  mcphub workspace register D:\dev\PaperPane --default
-  mcphub workspace register D:\dev\PaperPane --languages cpp,typescript,markdown
+  mcphub workspace register <workspace>
+  mcphub workspace register <workspace> --default
+  mcphub workspace register <workspace> --languages cpp,typescript,markdown
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -197,7 +197,7 @@ Examples:
 	return c
 }
 
-func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, languagesFlag string) error {
+func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, languagesFlag string) (err error) {
 	canonical, err := api.CanonicalWorkspacePath(rawPath)
 	if err != nil {
 		return err
@@ -249,7 +249,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "workspace register: registration outcome above stands, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -373,9 +373,9 @@ The .serena/ directory on disk is never touched — disk state survives
 unregister so re-registering later replays the same languages snapshot.
 
 Examples:
-  mcphub workspace unregister D:\dev\PaperPane
-  mcphub workspace unregister D:\dev\PaperPane --backend serena
-  mcphub workspace unregister D:\dev\PaperPane --backend all
+  mcphub workspace unregister <workspace>
+  mcphub workspace unregister <workspace> --backend serena
+  mcphub workspace unregister <workspace> --backend all
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -462,13 +462,13 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			return unregisterLSPWorkspaceFn(rawPath, langs)
 		},
 		RemoveSerenaIntent: removeSerenaSupervisorIntentFn,
-		DeleteSerenaRow: func() (int, error) {
+		DeleteSerenaRow: func() (_ int, err error) {
 			reg := api.NewRegistry(regPath)
 			unlock, err := reg.Lock()
 			if err != nil {
 				return 0, err
 			}
-			defer unlock()
+			defer api.ReleaseAndJoin(&err, unlock, "workspace unregister: serena deletion stands, but could not release the registry lock")
 			if err := reg.Load(); err != nil {
 				return 0, err
 			}
@@ -520,7 +520,7 @@ func classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend string) (l
 	if lerr != nil {
 		return nil, false, lerr
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "classify workspace unregister: classification above stands, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return nil, false, lerr
 	}
@@ -598,7 +598,7 @@ type workspaceListJSONRow struct {
 	Default bool `json:"default"`
 }
 
-func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
+func runWorkspaceList(cmd *cobra.Command, jsonOut bool) (err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -608,7 +608,7 @@ func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "workspace list: listing above is valid, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -694,7 +694,7 @@ which clears the marker as a side effect.
 	return c
 }
 
-func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
+func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) (err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -705,7 +705,7 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "workspace set-default: marker write stands, but could not release the registry lock")
 
 	// Empty string clears the marker.
 	if strings.TrimSpace(rawPath) == "" {

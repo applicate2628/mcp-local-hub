@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +36,31 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+func TestProjectsToggleRegistrationErrorUsesFixedProjector(t *testing.T) {
+	const rawSentinel = `D:\secret\toggle --password=hunter2`
+	root := t.TempDir()
+	server := NewServer(Config{})
+	originalRegister := projectsToggleRegister
+	t.Cleanup(func() { projectsToggleRegister = originalRegister })
+	projectsToggleRegister = func(*api.API, string, []string, api.RegisterOpts) (*api.RegisterReport, error) {
+		return &api.RegisterReport{}, errors.New(rawSentinel)
+	}
+
+	body := `{"root":"` + jsonEscPath(root) +
+		`","scope":"workspace-lsp","server":"mcp-language-server","enable":true,"languages":["go"]}`
+	recorder := postToggle(t, server, body)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=500 body=%s", recorder.Code, recorder.Body.String())
+	}
+	wire := recorder.Body.String()
+	if strings.Contains(wire, rawSentinel) || strings.Contains(wire, "hunter2") {
+		t.Fatalf("wire response leaked registration cause: %s", wire)
+	}
+	if !strings.Contains(wire, registrationUnknownErrorPublic) {
+		t.Fatalf("wire response lacks fixed registration fallback: %s", wire)
+	}
+}
 
 // postToggle issues a same-origin POST /api/projects/toggle with the given body.
 func postToggle(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {

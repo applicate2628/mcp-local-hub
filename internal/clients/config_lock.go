@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,7 +49,7 @@ func perPathMutex(configPath string) *sync.Mutex {
 // write paths depend on these critical sections staying tight, so each
 // mutating adapter method does exactly one open → mutate → atomic-write under
 // the lock and nothing slow or interactive.
-func withConfigLock(configPath string, fn func() error) error {
+func withConfigLock(configPath string, fn func() error) (err error) {
 	mu := perPathMutex(configPath)
 	mu.Lock()
 	defer mu.Unlock()
@@ -125,11 +126,19 @@ func withConfigLock(configPath string, fn func() error) error {
 	}
 
 	lockPath := configPath + ".lock"
+	if ghost := unconfirmedConfigLockRelease(lockPath); ghost != nil {
+		return fmt.Errorf("config lock %s: %w", lockPath, ghost)
+	}
 	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {
 		return fmt.Errorf("config lock %s: %w", lockPath, err)
 	}
-	defer func() { _ = fl.Unlock() }()
+	release := newConfigLockRelease(fl, lockPath)
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("release config lock %s: %w", lockPath, releaseErr))
+		}
+	}()
 
 	return fn()
 }
@@ -187,11 +196,7 @@ func (l *lockingClient) InitEmpty() (created bool, err error) {
 		created, err = l.Client.InitEmpty()
 		return err
 	})
-	if werr != nil && err == nil {
-		// A lock-acquire failure (not an InitEmpty failure) — surface it.
-		return false, werr
-	}
-	return created, err
+	return created, werr
 }
 
 func (l *lockingClient) Backup() (string, error) {
@@ -287,10 +292,7 @@ func (l *lockingClient) LatestBackupPath() (path string, ok bool, err error) {
 		path, ok, err = l.Client.LatestBackupPath()
 		return err
 	})
-	if werr != nil && err == nil {
-		return "", false, werr
-	}
-	return path, ok, err
+	return path, ok, werr
 }
 
 func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, err error) {
@@ -298,10 +300,7 @@ func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, 
 		has, err = l.Client.BackupContainsEntry(backupPath, name)
 		return err
 	})
-	if werr != nil && err == nil {
-		return false, werr
-	}
-	return has, err
+	return has, werr
 }
 
 func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (managed bool, err error) {
@@ -309,10 +308,7 @@ func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (manage
 		managed, err = l.Client.BackupEntryIsHubManaged(backupPath, name)
 		return err
 	})
-	if werr != nil && err == nil {
-		return false, werr
-	}
-	return managed, err
+	return managed, werr
 }
 
 // RemovableStdioEntries forwards the OPTIONAL Client method of the same name to

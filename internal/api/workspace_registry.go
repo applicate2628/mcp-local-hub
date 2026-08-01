@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -190,30 +189,24 @@ func (r *Registry) Save() error {
 	return nil
 }
 
-// Lock acquires a cross-process exclusive file lock on <registry>.lock.
-// The returned function releases the lock; callers must defer it. Prevents
-// two concurrent `mcphub register` invocations from racing on port allocation
-// or client-config writes.
-func (r *Registry) Lock() (func(), error) {
-	release, err := r.LockWithRelease()
-	if err != nil {
-		return nil, err
-	}
-	return func() { _ = release() }, nil
-}
+// LockPath returns the registry's single cross-process lock leaf.
+func (r *Registry) LockPath() string { return r.path + ".lock" }
 
-// LockWithRelease acquires the same registry lock as Lock and returns a
-// one-shot, error-reporting release. Registration transactions use this seam
-// so a failed unlock cannot be mistaken for a committed registration.
-func (r *Registry) LockWithRelease() (func() error, error) {
+// Lock acquires a cross-process exclusive file lock on <registry>.lock.
+// The returned one-shot release reports and records failure.
+func (r *Registry) Lock() (func() error, error) {
+	lockPath := r.LockPath()
+	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
+		return nil, fmt.Errorf("lock %s: %w", lockPath, ghost)
+	}
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(r.path + ".lock")
+	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {
-		return nil, fmt.Errorf("lock %s: %w", r.path+".lock", err)
+		return nil, fmt.Errorf("lock %s: %w", lockPath, err)
 	}
-	return oneShotRegistryRelease(fl, r.path+".lock"), nil
+	return newLedgeredFlockRelease(fl, lockPath), nil
 }
 
 // TryLock is the non-blocking variant of Lock: it attempts to acquire the
@@ -228,42 +221,23 @@ func (r *Registry) LockWithRelease() (func() error, error) {
 // never stall on a registry lock held by a concurrent auto-register / migrate
 // (that holder self-heals the orphan anyway), so it TryLocks and skips on
 // contention.
-func (r *Registry) TryLock() (func(), bool, error) {
-	release, locked, err := r.TryLockWithRelease()
-	if err != nil || !locked {
-		return nil, locked, err
+func (r *Registry) TryLock() (func() error, bool, error) {
+	lockPath := r.LockPath()
+	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
+		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, ghost)
 	}
-	return func() { _ = release() }, true, nil
-}
-
-// TryLockWithRelease is the bounded/non-blocking rollback counterpart to
-// LockWithRelease. It never waits behind an uncertain retained lock.
-func (r *Registry) TryLockWithRelease() (func() error, bool, error) {
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(r.path + ".lock")
+	fl := flock.New(lockPath)
 	locked, err := fl.TryLock()
 	if err != nil {
-		return nil, false, fmt.Errorf("try-lock %s: %w", r.path+".lock", err)
+		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, err)
 	}
 	if !locked {
 		return nil, false, nil
 	}
-	return oneShotRegistryRelease(fl, r.path+".lock"), true, nil
-}
-
-func oneShotRegistryRelease(fl *flock.Flock, lockPath string) func() error {
-	var once sync.Once
-	var releaseErr error
-	return func() error {
-		once.Do(func() {
-			if err := fl.Unlock(); err != nil {
-				releaseErr = fmt.Errorf("unlock %s: %w", lockPath, err)
-			}
-		})
-		return releaseErr
-	}
+	return newLedgeredFlockRelease(fl, lockPath), true, nil
 }
 
 // Put upserts an entry (primary key = workspace_key + language).
@@ -473,7 +447,7 @@ func (r *Registry) PutLifecycle(workspaceKey, language, state, lastError string)
 // implying a lifecycle transition or clearing a diagnostic. A zero timestamp is
 // a no-op, and a missing row is silently ignored to match PutLifecycle's
 // unregistered-late-write behavior.
-func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) error {
+func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) (err error) {
 	if toolsCallAt.IsZero() {
 		return nil
 	}
@@ -481,7 +455,7 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "put last tools-call timestamp for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}
@@ -498,12 +472,12 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 // materialization edges: state transition + timestamps in one atomic save.
 // Zero-valued materializedAt / toolsCallAt leave the existing stored values
 // unchanged; non-zero values are coerced to UTC before write.
-func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) error {
+func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) (err error) {
 	unlock, err := r.Lock()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "put lifecycle for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}

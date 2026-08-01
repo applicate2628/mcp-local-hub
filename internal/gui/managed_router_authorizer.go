@@ -64,8 +64,7 @@ func NewManagedRouterAuthorizer(pidportPath, currentExecutable, expectedVersion 
 			portOwner:   api.LoopbackPortOwnerPIDContext,
 			processID:   retainedProcessID,
 			closeID: func(identity *ProcessIdentity) error {
-				identity.Close()
-				return nil
+				return identity.Close()
 			},
 			ownerMatch: processutil.ProcessOwnerMatchesCurrent,
 			ping:       strictManagedRouterPing,
@@ -79,8 +78,7 @@ func newManagedRouterAuthorizerWithDeps(
 ) api.ManagedRouterAuthorizer {
 	if deps.closeID == nil {
 		deps.closeID = func(identity *ProcessIdentity) error {
-			identity.Close()
-			return nil
+			return identity.Close()
 		}
 	}
 	return func(ctx context.Context, candidatePort int) api.ManagedRouterAuthorization {
