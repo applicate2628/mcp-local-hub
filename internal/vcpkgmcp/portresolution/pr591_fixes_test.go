@@ -2,7 +2,6 @@ package portresolution
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
@@ -29,18 +28,15 @@ import (
 // the filesystem must never be consulted at all. That is the property the test
 // is named for, and it is falsifiable.
 //
-// It binds on the PROPERTY, not on one particular gate, and that is deliberate.
-// Two gates enforce it — the pre-join check in ResolvePort and portDirWithin's
-// own name+containment check — so removing either ALONE leaves the test green,
-// which is correct: the invariant still holds. Removing BOTH name gates makes
-// it fail with the laundered path in the message, e.g.
+// It binds on the PROPERTY at the consumer boundary. The shared portname leaf
+// owns grammar and containment; this consumer test proves it invokes that owner
+// before any filesystem access. Removing the consumer call makes it fail with
+// the laundered path in the message, e.g.
 //
 //	port "sub/nested" caused 3 filesystem probe(s) despite being refused:
 //	[stat <overlay> readdir <overlay> stat <overlay>\sub\nested]
 //
-// (the four `..`-shaped names stay refused even then, by the containment check
-// that is the real security boundary — see
-// TestPortDirWithinRejectsAnEscapeIndependentlyOfTheCharsetRule below).
+// (the four `..`-shaped names are also rejected by the leaf containment check.)
 func TestTraversalPortNameIsRefusedBeforeTheJoin(t *testing.T) {
 	overlay := t.TempDir()
 
@@ -114,18 +110,5 @@ func TestLegalPortNamesAreStillAccepted(t *testing.T) {
 				t.Fatalf("port %q was rejected as an invalid name, but it is a legal vcpkg port name", good)
 			}
 		})
-	}
-}
-
-// portDirWithin's containment check is the real boundary, independent of the
-// charset rule: it must reject an escape even for a name the regex allows.
-func TestPortDirWithinRejectsAnEscapeIndependentlyOfTheCharsetRule(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "overlay")
-
-	if _, err := portDirWithin(root, "zlib"); err != nil {
-		t.Fatalf("portDirWithin(root, %q) = %v, want a path beneath the root", "zlib", err)
-	}
-	if _, err := portDirWithin(root, "../escape"); err == nil {
-		t.Fatalf("portDirWithin(root, %q) succeeded, want refusal — containment is the security boundary", "../escape")
 	}
 }

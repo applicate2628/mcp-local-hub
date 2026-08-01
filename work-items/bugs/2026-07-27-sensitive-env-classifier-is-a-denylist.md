@@ -17,7 +17,8 @@
 - **Related, already closed:** `internal/api/marketplace_http.go`
   (`allowedMarketplaceHeaders`, commit "make the marketplace fetch header filter
   an allowlist"), `internal/vcpkgmcp/pinstatus/redact.go` (`emitSafeQueryKeys`)
-- **Related, still open:** `2026-07-27-pinstatus-argv-refusal-is-a-credential-denylist.md`
+- **Related, fixed; terminal record pending lifecycle archive:**
+  `2026-07-27-pinstatus-argv-refusal-is-a-credential-denylist.md`
 
 ## What
 

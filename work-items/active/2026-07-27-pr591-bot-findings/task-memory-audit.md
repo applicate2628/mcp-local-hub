@@ -84,4 +84,3 @@ fix.
 - PASS: the checked requirement is satisfied.
 - REVISE: a bounded correction is required before the next gate.
 - BLOCKED: progress requires an external decision or unavailable dependency.
-

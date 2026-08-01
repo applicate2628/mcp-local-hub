@@ -13,55 +13,13 @@
 package portresolution
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/portname"
 )
-
-// portNameRE is the documented vcpkg port-name rule: "The name must be
-// lowercase ASCII letters, digits, or hyphens (-). It must not start nor end
-// with a hyphen." (Microsoft Learn, vcpkg.json Reference, "name" field:
-// https://learn.microsoft.com/en-us/vcpkg/reference/vcpkg-json).
-//
-// A port name is used as ONE path segment under each root, so it must be
-// validated as one BEFORE being joined: filepath.Join(root, port) happily
-// normalises "../../outside" into a path outside the root, which would make
-// this tool probe and report directories the caller never granted it.
-var portNameRE = regexp.MustCompile(`^[a-z0-9]+(?:-+[a-z0-9]+)*$`)
-
-// errPortEscapesRoot marks a port whose joined path leaves the root.
-var errPortEscapesRoot = errors.New("port path escapes the root")
-
-// portDirWithin validates port as a single legal vcpkg port-name segment and
-// returns its directory under root, guaranteeing the result stays beneath that
-// root.
-//
-// Both checks are kept, deliberately: the name rule rejects the input shape,
-// and the containment check is the actual security boundary — it holds even if
-// the name rule is ever loosened, and it catches platform-specific path
-// normalisation (Windows alternate separators, trailing dots/spaces, 8.3
-// aliases) that a charset regex alone cannot reason about.
-func portDirWithin(root, port string) (string, error) {
-	if !portNameRE.MatchString(port) {
-		return "", fmt.Errorf("%q is not a legal vcpkg port name "+
-			"(lowercase ASCII letters, digits and hyphens; must not start or end with a hyphen)", port)
-	}
-	cleanRoot := filepath.Clean(root)
-	joined := filepath.Clean(filepath.Join(cleanRoot, port))
-	rel, err := filepath.Rel(cleanRoot, joined)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", errPortEscapesRoot, err)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("%w: %q resolves to %q, outside %q", errPortEscapesRoot, port, joined, cleanRoot)
-	}
-	return joined, nil
-}
 
 // Args is the input contract for ResolvePort.
 type Args struct {
@@ -291,13 +249,10 @@ func ResolvePort(args Args, deps Deps) Result {
 
 	port := strings.TrimSpace(args.Port)
 
-	// Gate 1b: the port must be ONE legal path segment. Validated BEFORE any
-	// join, because the join is what launders a traversal name into a
-	// plausible-looking absolute path that later code then probes and reports.
-	// The per-root containment check below is the real boundary; this is the
-	// cheap shape rejection that fails the whole call rather than silently
-	// skipping roots one at a time.
-	if !portNameRE.MatchString(port) {
+	// Gate 1b: parse through the shared leaf BEFORE any filesystem operation.
+	// The leaf owns both the legal-name grammar and per-root containment proof.
+	name, nameErr := portname.Parse(port)
+	if nameErr != nil {
 		res.Status = evidence.StatusFailed
 		res.Reason = ReasonInvalidPortName
 		res.InvalidPort = port
@@ -348,7 +303,7 @@ func ResolvePort(args Args, deps Deps) Result {
 		// Containment is re-verified per root: filepath.Rel is what actually
 		// proves the joined path stays beneath THIS root, and it holds even for
 		// platform-specific normalisation a charset regex cannot reason about.
-		portPath, portErr := portDirWithin(overlayPath, port)
+		portPath, portErr := portname.Join(overlayPath, name)
 		if portErr != nil {
 			res.Status = evidence.StatusFailed
 			res.Reason = ReasonInvalidPortName
@@ -410,7 +365,7 @@ func ResolvePort(args Args, deps Deps) Result {
 	// Check builtin (only if vcpkg_root is supplied).
 	if hasVcpkg {
 		vcpkgRoot := strings.TrimSpace(args.VcpkgRoot)
-		builtinPortPath, portErr := portDirWithin(filepath.Join(vcpkgRoot, "ports"), port)
+		builtinPortPath, portErr := portname.Join(filepath.Join(vcpkgRoot, "ports"), name)
 		if portErr != nil {
 			res.Status = evidence.StatusFailed
 			res.Reason = ReasonInvalidPortName

@@ -123,11 +123,6 @@ for the marketplace catalog (C0/C1/ESC stripped before anything reaches stdout).
 
 ## Residual
 
-The three scanners still disagree on whether CR is a line SEPARATOR — `DetectInterrupted` says yes
-and documents why, the other two say no. Changing that alters line boundaries and needs its own
-measured pass. Filed as `work-items/bugs/2026-07-27-lastfailure-two-notions-of-a-log-line.md`, not
-folded in here.
-
 The frequency of `-fdiagnostics-color=always` in real vcpkg triplets is not measured, and the
 decision does not rest on it: the failure mode is a confident wrong verdict and the mechanism is
 proven reachable, which is sufficient.

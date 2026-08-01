@@ -2,12 +2,9 @@ package lastfailure
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -132,47 +129,6 @@ func readDirBounded(ctx context.Context, fsys FS, path string, limit int) ([]os.
 // evidence.PresenceAbsent, and PresenceUnreadable gets its own reason.
 func probeDir(fsys FS, path string) (evidence.Presence, error) {
 	return evidence.ProbeDir(fsys.Stat, path)
-}
-
-// portNameRE is the documented vcpkg port-name rule: "The name must be
-// lowercase ASCII letters, digits, or hyphens (-). It must not start nor end
-// with a hyphen." (Microsoft Learn, vcpkg.json Reference, "name" field:
-// https://learn.microsoft.com/en-us/vcpkg/reference/vcpkg-json).
-//
-// A port name is used as ONE path segment under the buildtrees root, so it
-// must be validated as one before being joined: `filepath.Join(root, port)`
-// happily normalises `..\outside` into a sibling of the root, which would
-// make this tool scan, read and report logs from OUTSIDE the explicit root
-// the caller granted it.
-var portNameRE = regexp.MustCompile(`^[a-z0-9]+(?:-+[a-z0-9]+)*$`)
-
-// errPortEscapesRoot marks a port whose joined path leaves buildtreesRoot.
-var errPortEscapesRoot = errors.New("port path escapes the buildtrees root")
-
-// portDirWithin validates port as a single legal vcpkg port-name segment and
-// returns its directory under buildtreesRoot, guaranteeing the result stays
-// beneath that root.
-//
-// Both checks are kept, deliberately: the name rule rejects the input shape,
-// and the containment check is the actual security boundary — it holds even
-// if the name rule is ever loosened, and it catches platform-specific path
-// normalisation (Windows alternate separators, trailing dots/spaces, 8.3
-// aliases) that a charset regex alone cannot reason about.
-func portDirWithin(buildtreesRoot, port string) (string, error) {
-	if !portNameRE.MatchString(port) {
-		return "", fmt.Errorf("%q is not a legal vcpkg port name "+
-			"(lowercase ASCII letters, digits and hyphens; must not start or end with a hyphen)", port)
-	}
-	root := filepath.Clean(buildtreesRoot)
-	joined := filepath.Clean(filepath.Join(root, port))
-	rel, err := filepath.Rel(root, joined)
-	if err != nil {
-		return "", fmt.Errorf("%w: %v", errPortEscapesRoot, err)
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-		return "", fmt.Errorf("%w: %q resolves to %q, outside %q", errPortEscapesRoot, port, joined, root)
-	}
-	return joined, nil
 }
 
 // phaseLogFile is one classified phase-log file inside a port directory.

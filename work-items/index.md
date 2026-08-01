@@ -12,7 +12,7 @@
 | Item | Status |
 |---|---|
 | [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B RestartV3 gate ON; PR #563 round-1 three-finding correction QA PASS on `feat/gui-restart-unitb-gated` at `37b39ebc`; changes remain uncommitted and undeployed; next gate is human/PR review |
-| [2026-07-27-pr591-bot-findings](active/2026-07-27-pr591-bot-findings/status.md) | Active — classify all 34 PR #591 Codex-bot findings against four unpushed local commits; fix and verify only genuinely open findings; local commit allowed, push forbidden |
+| [2026-07-27-pr591-bot-findings](active/2026-07-27-pr591-bot-findings/status.md) | Active — 32 satisfied findings preserved; F1 execution-order comments, F2 duplicate port-name ownership, F3 canonical-state drift, and F4 Markdown-byte drift corrected; exact candidate awaits Terra QA and renewed architecture review; push forbidden |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 

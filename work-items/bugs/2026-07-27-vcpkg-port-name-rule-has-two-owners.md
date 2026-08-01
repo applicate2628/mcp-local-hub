@@ -1,6 +1,6 @@
 # vcpkg port-name validation + root-containment rule now has two owners
 
-- **Status:** open
+- **Status:** fixed
 - **Context:** adjacent-finding
 - **Severity:** P3 (maintainability / drift risk; no current defect)
 - **Found:** 2026-07-27, while closing PR #591 bot finding
@@ -70,3 +70,14 @@ normalisation a regex cannot reason about).
   shared owner.
 - A drift guard (one test asserting both packages resolve the same verdict for
   a shared table of names) becomes unnecessary once there is one owner.
+
+## Terminal evidence
+
+Closed: 2026-08-01T17:39:21Z
+
+- **Disposition:** fixed; pending lifecycle-owner archive.
+- **Owner result:** `internal/vcpkgmcp/portname` is the standard-library leaf
+  for legal-name parsing and root containment; both consumers retain only their
+  distinct public-result mappings.
+- **Verification:** leaf parser/containment/owner tests plus the existing
+  port-resolution pre-I/O and last-failure traversal-refusal tests passed.

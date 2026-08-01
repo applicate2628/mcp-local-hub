@@ -1,21 +1,20 @@
 # Vcpkg pin-status remote-query admission
 
-Status: proposed
+Status: accepted
 Date: 2026-07-29
 Owner: Architect
+Accepted: 2026-08-01
 Relates-to: `2026-07-25-vcpkg-mcp-tool-contracts.md`
-Required acceptance: independent architecture gate, then explicit Lead acceptance
+Acceptance: independent architecture gate PASS and explicit Lead acceptance
 
-## Decision requested
+## Scope
 
 Define the single admission boundary for a remote URL before `vcpkg_pin_status`
 passes that URL to the Git child process. This record is deliberately narrow: it
 does not change remote selection, Git invocation, ancestry classification, or
 public redaction.
 
-No implementation is authorized while this record remains `proposed`.
-
-## Proposed decision
+## Decision
 
 The URL classifier owns three mutually exclusive outcomes, in this precedence
 order:
@@ -101,14 +100,13 @@ The decision is falsified if any of these probes fails:
 
 ## Acceptance state
 
-This is a `proposed` decision. It requires an independent architecture `PASS`
-and explicit Lead acceptance before its status may become `accepted` and before
-backend implementation is authorized. Security review remains a later,
-separate required gate.
+This is an `accepted`, current decision. The independent architecture gate
+passed and explicit Lead acceptance was recorded on 2026-08-01. Security review
+remains a later, separate required gate. The admitted URL outcomes, reason
+spellings, and capability boundary above are unchanged.
 
 ## Terms and Abbreviations
 
 - URL: Uniform Resource Locator.
 - argv: operating-system child-process argument vector.
 - Git: the version-control executable used to read remote references.
-

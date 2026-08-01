@@ -1,6 +1,6 @@
 # pinstatus argv-refusal is still a credential DENYLIST, so unenumerated token spellings reach `git ls-remote`'s argv
 
-- **Status:** open
+- **Status:** fixed
 - **Context:** adjacent-finding
 - **Severity:** P2 (real credential-exposure channel; bounded to a portfile that
   embeds a secret in a fetch-URL query, which is 0 of 124 real fetch URLs measured)
@@ -80,3 +80,14 @@ line.
 3. `argvSecretQueryKeys` then only decides WHICH of the two reasons is reported,
    never whether the URL is queried, so its incompleteness stops being a
    security property.
+
+## Terminal evidence
+
+Closed: 2026-08-01T17:39:21Z
+
+- **Disposition:** fixed; pending lifecycle-owner archive.
+- **Owner result:** `approveRemoteURL` now refuses both positive credential
+  evidence and every remaining value-bearing query before a remote query.
+- **Verification:** `TestApproveRemoteURLClassification` and
+  `TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls` passed in
+  `go test -count=1 -run 'TestApproveRemoteURLClassification|TestRemoteURLAdmissionRejectionsMakeZeroRemoteCalls|TestArgvRefusal_EmptyValuedSecretParameterIsNotRefused' ./internal/vcpkgmcp/pinstatus`.

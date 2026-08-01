@@ -8,4 +8,3 @@
 
 - PR: Pull Request.
 - QA: Quality Assurance.
-

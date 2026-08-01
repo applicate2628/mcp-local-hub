@@ -434,68 +434,92 @@ func extractKeyedArgs(tokens []string) map[string]string {
 	return out
 }
 
-// blockOpeners / blockClosers are the CMake commands that open and close a
-// scope whose body may or may not execute (if/elseif/else bodies, loop
-// bodies) or executes only when invoked (function/macro bodies). A set()
-// inside any of them is CONDITIONALLY assigned.
-var (
-	blockOpeners = map[string]bool{"if": true, "foreach": true, "while": true, "function": true, "macro": true}
-	blockClosers = map[string]bool{"endif": true, "endforeach": true, "endwhile": true, "endfunction": true, "endmacro": true}
+// variableEnvironment is the parser's call-site model of local CMake state.
+// A binding is absent, known, or unknown; a dynamic assignment establishes an
+// unknown floor for every older binding until that name is assigned definitely.
+// It never leaves parsePortfileWithManifest or rescans portfile text.
+type variableEnvironment struct {
+	bindings            map[string]variableBinding
+	generation          int
+	dynamicUnknownFloor int
+}
+
+type variableBinding struct {
+	value      string
+	known      bool
+	generation int
+}
+
+type localVariableState uint8
+
+const (
+	localVariableAbsent localVariableState = iota
+	localVariableKnown
+	localVariableUnknown
 )
 
-// resolveSetVariable resolves set(NAME <value>) to a literal, and FAILS CLOSED
-// whenever the portfile does not make that value certain.
-//
-// It used to return the FIRST matching set() found anywhere in the file, with
-// no regard for the conditional context it sat in. A set() inside an if()
-// branch that did not fire is NOT the variable's value — CMake never executed
-// that line — yet the pin resolved from it was then compared against the
-// remote as though it were certain. That is exactly the confident-wrong-answer
-// class this package exists to avoid, and it is worse than the undecidable
-// answer it replaces: a wrong "this ref does not exist upstream" is acted on,
-// an honest "unresolvable" is investigated.
-//
-// The rule is therefore: a value is resolved only when EVERY set() of that
-// name in the file is unconditional AND they all agree. A conditional
-// assignment, or two unconditional assignments that disagree (where the value
-// in effect depends on where the REF is used, which this textual scan does not
-// model), yields ok=false — which surfaces to the caller as
-// ReasonRefUnresolvable naming the variable, so an operator is told which
-// variable to pin down rather than handed a guess.
-func resolveSetVariable(content, varName string) (string, bool) {
-	statements, ok := splitStatementsChecked(content)
-	if !ok {
-		return "", false
+func newVariableEnvironment() variableEnvironment {
+	return variableEnvironment{bindings: make(map[string]variableBinding)}
+}
+
+func (environment *variableEnvironment) nextGeneration() int {
+	environment.generation++
+	return environment.generation
+}
+
+func (environment *variableEnvironment) setKnown(name, value string) {
+	environment.bindings[name] = variableBinding{value: value, known: true, generation: environment.nextGeneration()}
+}
+
+func (environment *variableEnvironment) setUnknown(name string) {
+	environment.bindings[name] = variableBinding{generation: environment.nextGeneration()}
+}
+
+func (environment *variableEnvironment) setAllUnknown() {
+	environment.dynamicUnknownFloor = environment.nextGeneration()
+}
+
+func (environment variableEnvironment) resolve(name string) (string, localVariableState) {
+	binding, found := environment.bindings[name]
+	if found && binding.generation > environment.dynamicUnknownFloor {
+		if binding.known {
+			return binding.value, localVariableKnown
+		}
+		return "", localVariableUnknown
 	}
-	depth := 0
-	value := ""
-	found := false
-	for _, st := range statements {
-		switch {
-		case blockOpeners[st.Name]:
-			depth++
-			continue
-		case blockClosers[st.Name]:
-			if depth > 0 {
-				depth--
-			}
-			continue
-		case st.Name != "set":
-			continue
-		}
-		tokens := tokenize(st.Args)
-		if len(tokens) < 2 || tokens[0].Text != varName || tokens[1].Raw {
-			continue
-		}
-		if depth > 0 {
-			return "", false
-		}
-		if found && value != tokens[1].Text {
-			return "", false
-		}
-		value, found = tokens[1].Text, true
+	if environment.dynamicUnknownFloor != 0 {
+		return "", localVariableUnknown
 	}
-	return value, found
+	return "", localVariableAbsent
+}
+
+// recordSetAssignment updates the call-site environment only for a definite,
+// supported top-level set(NAME value). Unknown guards, unsupported scopes, and
+// unsupported assignment shapes become explicit unknown state instead of a
+// guessed value. A dynamically-computed assignment target taints all older
+// bindings because it may have overwritten any of them.
+func recordSetAssignment(environment *variableEnvironment, state guardState, unsupportedScope bool, args string) {
+	if !state.active {
+		return
+	}
+	tokens := tokenize(args)
+	if len(tokens) == 0 || tokens[0].Raw || tokens[0].Text == "" || strings.Contains(tokens[0].Text, "$") {
+		environment.setAllUnknown()
+		return
+	}
+	name := tokens[0].Text
+	if state.unknown != "" || unsupportedScope || len(tokens) != 2 || tokens[1].Raw {
+		environment.setUnknown(name)
+		return
+	}
+	environment.setKnown(name, tokens[1].Text)
+}
+
+func closeUnsupportedScope(scopes []string, opener string) ([]string, bool) {
+	if len(scopes) == 0 || scopes[len(scopes)-1] != opener {
+		return scopes, false
+	}
+	return scopes[:len(scopes)-1], true
 }
 
 // expandVariables is the SINGLE OWNER of ${NAME} substitution for every
@@ -505,7 +529,7 @@ func resolveSetVariable(content, varName string) (string, bool) {
 // through here is what makes the fix cover the class rather than one field.
 //
 // Resolution order per variable, most specific first:
-//  1. a set(NAME ...) in the SAME portfile,
+//  1. a call-site local binding in the SAME portfile,
 //  2. ${VERSION} from the sibling vcpkg.json,
 //  3. ${PORT} from the port directory's own name.
 //
@@ -513,7 +537,7 @@ func resolveSetVariable(content, varName string) (string, bool) {
 // ok is false and unresolved names it. A partially-expanded string is never
 // returned, because a partially-expanded string compared against a remote is
 // exactly how a wrong negative is manufactured.
-func expandVariables(content string, manifest []byte, portName, text string) (expanded string, source RefValueSource, unresolved string, ok bool) {
+func expandVariables(environment variableEnvironment, manifest []byte, portName, text string) (expanded string, source RefValueSource, unresolved string, ok bool) {
 	if !strings.Contains(text, "${") {
 		return text, "", "", true
 	}
@@ -523,7 +547,7 @@ func expandVariables(content string, manifest []byte, portName, text string) (ex
 			return match
 		}
 		name := embeddedVarRE.FindStringSubmatch(match)[1]
-		value, src, resolved := resolveRefVariable(content, manifest, portName, name)
+		value, src, resolved := resolveRefVariable(environment, manifest, portName, name)
 		if !resolved {
 			unresolved = name
 			return match
@@ -562,9 +586,12 @@ func singleSource(sources map[RefValueSource]bool) RefValueSource {
 	return RefValueSourceMixed
 }
 
-func resolveRefVariable(content string, manifest []byte, portName, name string) (string, RefValueSource, bool) {
-	if value, ok := resolveSetVariable(content, name); ok {
-		return value, RefValueSourceLocalSet, true
+func resolveRefVariable(environment variableEnvironment, manifest []byte, portName, name string) (string, RefValueSource, bool) {
+	if value, state := environment.resolve(name); state != localVariableAbsent {
+		if state == localVariableKnown {
+			return value, RefValueSourceLocalSet, true
+		}
+		return "", "", false
 	}
 	switch name {
 	case "VERSION":
@@ -579,7 +606,7 @@ func resolveRefVariable(content string, manifest []byte, portName, name string) 
 	return "", "", false
 }
 
-func resolveMaybeVariable(content string, manifest []byte, portName string, raw argValue) (value string, wasVar, ok bool) {
+func resolveMaybeVariable(environment variableEnvironment, manifest []byte, portName string, raw argValue) (value string, wasVar, ok bool) {
 	text := strings.TrimSpace(raw.Text)
 	if text == "" {
 		return "", false, false
@@ -587,7 +614,7 @@ func resolveMaybeVariable(content string, manifest []byte, portName string, raw 
 	if raw.Raw || !strings.Contains(text, "${") {
 		return text, false, true
 	}
-	expanded, _, _, expandedOK := expandVariables(content, manifest, portName, text)
+	expanded, _, _, expandedOK := expandVariables(environment, manifest, portName, text)
 	return expanded, true, expandedOK
 }
 
@@ -604,7 +631,7 @@ func manifestVersion(data []byte) string {
 	return ""
 }
 
-func buildPin(content string, manifest []byte, portName string, ref argValue) Pin {
+func buildPin(environment variableEnvironment, manifest []byte, portName string, ref argValue) Pin {
 	refRaw := strings.TrimSpace(ref.Text)
 	if refRaw == "" {
 		return Pin{Shape: RefShapeNone}
@@ -613,7 +640,7 @@ func buildPin(content string, manifest []byte, portName string, ref argValue) Pi
 	// inside it is literal and must NOT be expanded.
 	if !ref.Raw && strings.Contains(refRaw, "${") {
 		pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
-		expanded, source, unresolved, ok := expandVariables(content, manifest, portName, refRaw)
+		expanded, source, unresolved, ok := expandVariables(environment, manifest, portName, refRaw)
 		if !ok {
 			pin.UnresolvedVariable = unresolved
 			return pin
@@ -638,9 +665,9 @@ func buildPin(content string, manifest []byte, portName string, ref argValue) Pi
 	return Pin{Ref: refRaw, Shape: RefShapeBranch, Literal: ref.Raw}
 }
 
-func parseFetchCandidate(name, content string, manifest []byte, portName, args string) FetchCandidate {
+func parseFetchCandidate(name string, environment variableEnvironment, manifest []byte, portName, args string) FetchCandidate {
 	kv := extractKeyedArgValues(tokenize(args))
-	headRef, headRefWasVariable, headRefResolved := resolveMaybeVariable(content, manifest, portName, kv["HEAD_REF"])
+	headRef, headRefWasVariable, headRefResolved := resolveMaybeVariable(environment, manifest, portName, kv["HEAD_REF"])
 	candidate := FetchCandidate{HeadRef: headRef, BindsSourcePath: kv["OUT_SOURCE_PATH"].Text == "SOURCE_PATH"}
 	if headRefWasVariable && !headRefResolved {
 		candidate.UnresolvedHeadRefVariable = unresolvedVariableName(kv["HEAD_REF"])
@@ -649,31 +676,31 @@ func parseFetchCandidate(name, content string, manifest []byte, portName, args s
 	case "vcpkg_download_distfile":
 		candidate.Remote = Remote{Kind: RemoteDistfile}
 	case "vcpkg_from_github":
-		repo, _, _ := resolveMaybeVariable(content, manifest, portName, kv["REPO"])
+		repo, _, _ := resolveMaybeVariable(environment, manifest, portName, kv["REPO"])
 		candidate.Remote = Remote{Kind: RemoteGitHub, Repo: repo}
 		if repo != "" {
 			candidate.Remote.URL = "https://github.com/" + repo + ".git"
 		}
-		candidate.Pin = buildPin(content, manifest, portName, kv["REF"])
+		candidate.Pin = buildPin(environment, manifest, portName, kv["REF"])
 	case "vcpkg_from_git":
-		url, _, _ := resolveMaybeVariable(content, manifest, portName, kv["URL"])
+		url, _, _ := resolveMaybeVariable(environment, manifest, portName, kv["URL"])
 		candidate.Remote = Remote{Kind: RemoteGit, URL: url}
-		candidate.Pin = buildPin(content, manifest, portName, kv["REF"])
+		candidate.Pin = buildPin(environment, manifest, portName, kv["REF"])
 	case "vcpkg_from_gitlab":
 		gitlabURL := "https://gitlab.com"
 		if strings.TrimSpace(kv["GITLAB_URL"].Text) != "" {
-			if value, _, ok := resolveMaybeVariable(content, manifest, portName, kv["GITLAB_URL"]); ok {
+			if value, _, ok := resolveMaybeVariable(environment, manifest, portName, kv["GITLAB_URL"]); ok {
 				gitlabURL = value
 			} else {
 				gitlabURL = ""
 			}
 		}
-		repo, _, _ := resolveMaybeVariable(content, manifest, portName, kv["REPO"])
+		repo, _, _ := resolveMaybeVariable(environment, manifest, portName, kv["REPO"])
 		candidate.Remote = Remote{Kind: RemoteGitLab, Repo: repo}
 		if repo != "" && gitlabURL != "" {
 			candidate.Remote.URL = strings.TrimRight(gitlabURL, "/") + "/" + repo + ".git"
 		}
-		candidate.Pin = buildPin(content, manifest, portName, kv["REF"])
+		candidate.Pin = buildPin(environment, manifest, portName, kv["REF"])
 	}
 	return candidate
 }
@@ -780,7 +807,9 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 		return parsedPortfile{}, false
 	}
 	state := guardState{active: true}
+	variables := newVariableEnvironment()
 	var stack []conditionFrame
+	var unsupportedScopes []string
 	var candidates []FetchCandidate
 	var viableCandidates []FetchCandidate
 	var unresolved string
@@ -828,11 +857,39 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 			}
 			state = stack[len(stack)-1].parent
 			stack = stack[:len(stack)-1]
+		case "foreach", "while", "function", "macro":
+			unsupportedScopes = append(unsupportedScopes, st.Name)
+		case "endforeach":
+			var closed bool
+			unsupportedScopes, closed = closeUnsupportedScope(unsupportedScopes, "foreach")
+			if !closed {
+				return parsedPortfile{}, false
+			}
+		case "endwhile":
+			var closed bool
+			unsupportedScopes, closed = closeUnsupportedScope(unsupportedScopes, "while")
+			if !closed {
+				return parsedPortfile{}, false
+			}
+		case "endfunction":
+			var closed bool
+			unsupportedScopes, closed = closeUnsupportedScope(unsupportedScopes, "function")
+			if !closed {
+				return parsedPortfile{}, false
+			}
+		case "endmacro":
+			var closed bool
+			unsupportedScopes, closed = closeUnsupportedScope(unsupportedScopes, "macro")
+			if !closed {
+				return parsedPortfile{}, false
+			}
+		case "set":
+			recordSetAssignment(&variables, state, len(unsupportedScopes) != 0, st.Args)
 		default:
 			if !fetchFuncNames[st.Name] {
 				continue
 			}
-			candidate := parseFetchCandidate(st.Name, content, manifest, portName, st.Args)
+			candidate := parseFetchCandidate(st.Name, variables, manifest, portName, st.Args)
 			candidate.GuardVariable = state.unknown
 			candidate.Guard = state.text
 			candidate.ActiveForDefault = state.active
@@ -848,7 +905,7 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 			}
 		}
 	}
-	if len(stack) != 0 {
+	if len(stack) != 0 || len(unsupportedScopes) != 0 {
 		return parsedPortfile{}, false
 	}
 	if len(candidates) == 0 {

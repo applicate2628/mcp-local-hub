@@ -10,6 +10,7 @@ import (
 
 	"mcp-local-hub/internal/vcpkgmcp/discovery"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/portname"
 )
 
 // Deps bounds every ambient input LastFailure reads, mirroring the
@@ -211,10 +212,11 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 		triplet = wrapperInfo.Triplet
 	}
 
-	// --- Step 2a: the port name must be ONE legal port-name segment ----------
-	// Validated here, AFTER auto-selection, so a hostile or malformed wrapper
-	// file cannot smuggle a traversal segment in through failed_ports either.
-	if !portNameRE.MatchString(port) {
+	// --- Step 2a: parse the port before any buildtrees access -----------------
+	// This runs after wrapper auto-selection so a malformed wrapper cannot smuggle
+	// a traversal segment through failed_ports.
+	name, nameErr := portname.Parse(port)
+	if nameErr != nil {
 		res := unknownResult(ReasonInvalidPortName, ev, notes, sources)
 		res.FailedTarget = port
 		return res
@@ -307,7 +309,7 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 	}
 
 	// --- Step 5: port directory must exist -----------------------------------
-	portDir, perr := portDirWithin(buildtreesRoot, port)
+	portDir, perr := portname.Join(buildtreesRoot, name)
 	if perr != nil {
 		res := unknownResult(ReasonInvalidPortName, ev, notes, sources)
 		res.FailedTarget = port

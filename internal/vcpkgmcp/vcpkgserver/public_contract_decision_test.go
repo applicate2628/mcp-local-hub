@@ -32,25 +32,25 @@ func TestVcpkgPublicContractDecisionReference(t *testing.T) {
 	records := []publicContractDecisionRecord{
 		{
 			path:       "work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md",
-			sha256:     "3760CA0E9B5F29DC64A0F5D9A99DCC48E006E2D8568A343EFDA83E95E36A514B",
-			blob:       "6eaba08b12fa040ed159a806ded10e54a67d215c",
+			sha256:     "9B68F91B072CBBBF816B84A08B7BEF4709053E086CA239C7ADE9DE7F45C98B06",
+			blob:       "7ac411e3c52c9c292f3c0007d709325db0b7ae72",
 			identity:   "title: vcpkg MCP — tool contracts, discovery, and the behavioural invariants",
 			statusLine: "status: accepted",
 		},
 		{
 			path:       "work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md",
-			sha256:     "9985DDA69F3728BB453A956F82BC282E5DB964B2A16CF33E6F607CAC5EBF5005",
-			blob:       "672f1b37708fc8f29af662b3df90570769a4b0bd",
+			sha256:     "EB3A8C2DD6E07ADD99D81DF324CB6EF552E5FD360D62EFFBBC84F7C50DCC75D6",
+			blob:       "381a3195bbc07a4bc8de8e49270dfb460004b2a4",
 			identity:   "# Vcpkg pin-status remote-query admission",
-			statusLine: "Status: proposed",
+			statusLine: "Status: accepted",
 		},
 		{
 			path:         "work-items/decisions/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md",
-			sha256:       "856E56A33C94233EF44A691AFF15F9C07BE3BA8E13FE445D74FC9C46CD631F94",
-			blob:         "2a07b4535f403e0eab1387723ebb2c28529ab66f",
+			sha256:       "2B8B714B4F86C5C8504ED45454856EC40D7EB8C4AB806C65C9C96CE318277D20",
+			blob:         "b436b8136a6ae455677bcc0f6988a7bbf23abbcf",
 			identity:     "id: 2026-07-30-vcpkg-mcp-bounded-public-result-contract",
 			statusLine:   "status: accepted",
-			semanticBody: "DCA2196E8DD1BC78D5EE11FAFBD8013CD5381998C72AF8F08DFD8AEA86332DCA",
+			semanticBody: "D4510321F00C5F057D5F698E31D46706BF877787C873348460B29B1761BEEC85",
 		},
 	}
 
@@ -146,7 +146,7 @@ func publicContractRequireIndexedBlob(t *testing.T, root, relative, wantBlob str
 func publicContractCheckAcceptedMetadata(t *testing.T, raw []byte, wantSemantic string) {
 	t.Helper()
 	for _, line := range []string{
-		"revision: 4",
+		"revision: 5",
 		"owner: architect",
 		"review-result: PASS",
 		"lead-acceptance: accepted",

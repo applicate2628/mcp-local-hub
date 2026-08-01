@@ -3,15 +3,15 @@ id: 2026-07-30-vcpkg-mcp-bounded-public-result-contract
 title: Bounded public result and filesystem ingress contract for vcpkg MCP
 status: accepted
 date: 2026-07-30
-updated: 2026-07-30
-revision: 4
+updated: 2026-08-01
+revision: 5
 owner: architect
 review-gate: architecture-reviewer
 review-result: PASS
 review-artifact: ".reports/2026-07/report(architecture-reviewer)-2026-07-30_pr591-corrective-implementation-r3-review.md sha256=63F29A1B7E35923E4197AB94B3D317AA490C73E1F17AE130E39CF78376707366"
 lead-acceptance: accepted
 accepted-date: 2026-07-30
-semantic-body-sha256: DCA2196E8DD1BC78D5EE11FAFBD8013CD5381998C72AF8F08DFD8AEA86332DCA
+semantic-body-sha256: D4510321F00C5F057D5F698E31D46706BF877787C873348460B29B1761BEEC85
 supersedes: none
 superseded-by: none
 ---
@@ -49,17 +49,17 @@ state remains `diagnostics=settled_complete`. Terminal reason
 | Decision | State under this revision | Relationship |
 |---|---|---|
 | `work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md` | `accepted`, current | Foundation. Its read-only, evidence, tri-state, closed-reason, and in-hub ownership contracts remain authoritative. This decision extends, and does not supersede, it. |
-| `work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md` | `proposed`, current proposal | Related but separate. It owns value-bearing-query admission and the package-private approved-URL capability. This revision neither accepts nor supersedes it. Any implementation change that depends on that proposal remains separately blocked until its own gate accepts it. |
-| `work-items/decisions/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md` | `proposed`, revision 4 | Sole proposed owner of the universal bounded-result, bounded-ingress, public causal-core, exactness, dependency-direction, and three-record transfer contract defined here. |
+| `work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md` | `accepted`, current, unsuperseded | Related but separate. It owns value-bearing-query admission and the package-private approved-URL capability. This revision neither supersedes it nor redefines its accepted capability. |
+| `work-items/decisions/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md` | `accepted`, current | Sole accepted owner of the universal bounded-result, bounded-ingress, public causal-core, exactness, dependency-direction, and three-record transfer contract defined here. |
 
 The three decision records form one closed transfer manifest. Their exact
 review-source identities are:
 
-| Path | Required relation state | Exact source at revision-4 review |
+| Path | Required relation state | Exact source at revision-5 review |
 |---|---|---|
-| `work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md` | `accepted`, current foundation | SHA-256 `3760CA0E9B5F29DC64A0F5D9A99DCC48E006E2D8568A343EFDA83E95E36A514B`; Git blob `6eaba08b12fa040ed159a806ded10e54a67d215c` |
-| `work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md` | `proposed`, current-related, unsuperseded, separately unadmitted | SHA-256 `9985DDA69F3728BB453A956F82BC282E5DB964B2A16CF33E6F607CAC5EBF5005`; content-derived Git blob `672f1b37708fc8f29af662b3df90570769a4b0bd` |
-| `work-items/decisions/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md` | `proposed` during review; metadata-only `accepted`, current after reviewer PASS and Lead acceptance | The revision-4 design and review gate record the exact proposal file SHA-256, Git blob, and `semantic-body-sha256`; Lead acceptance records the resulting accepted file SHA-256 and Git blob |
+| `work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md` | `accepted`, current foundation | SHA-256 `9B68F91B072CBBBF816B84A08B7BEF4709053E086CA239C7ADE9DE7F45C98B06`; Git blob `7ac411e3c52c9c292f3c0007d709325db0b7ae72` |
+| `work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md` | `accepted`, current, unsuperseded | SHA-256 `EB3A8C2DD6E07ADD99D81DF324CB6EF552E5FD360D62EFFBBC84F7C50DCC75D6`; content-derived Git blob `381a3195bbc07a4bc8de8e49270dfb460004b2a4` |
+| `work-items/decisions/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md` | `accepted`, current; revision 5 was proposed during review | The revision-5 design and review gate record the exact proposal file SHA-256, Git blob, and `semantic-body-sha256`; Lead acceptance records the resulting accepted file SHA-256 and Git blob |
 
 The 2026-07-30 record cannot embed its own full-file digest without creating a
 self-reference. Its immutable `semantic-body-sha256` therefore covers the exact
@@ -166,7 +166,7 @@ not a workstation directory or worktree name.
 |---|---|---|
 | `work-items/decisions/2026-07-30-vcpkg-mcp-bounded-public-result-contract.md` | This long-lived decision, acceptance state, canonical-path registry, exactness algebra, supersession | Always; sole durable authority |
 | `work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md` | Accepted foundational tool behavior and tri-state/evidence contract | Add/reference this accepted extension without duplicating its constants or vocabulary |
-| `work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md` | Separate proposed URL-admission capability | Relationship state only; do not accept, supersede, or copy its semantics into this decision |
+| `work-items/decisions/2026-07-29-vcpkg-pinstatus-remote-query-admission.md` | Separate accepted URL-admission capability | Relationship state only; do not supersede or copy its semantics into this decision |
 | `internal/vcpkgmcp/vcpkgserver/tools.go` | Runtime MCP tool descriptions and input JSON Schema maps for all seven tools | Update descriptions and schema-linked limits/fields for `result_projection`, bounded behavior, and package-owned failure output |
 | `internal/vcpkgmcp/vcpkgserver/helpers.go` | Sole external indented-JSON serialization boundary | Replace unconstrained `any` with the `Projectable` path and exact ceiling enforcement |
 | `internal/vcpkgmcp/publicresult/publicresult.go` | Planned source owner of `MaxEncodedBytes`, `Projectable`, `result_projection`, omission vocabulary, exact marshal measurement | Source of truth for universal output constants and structural schema |
@@ -182,7 +182,7 @@ not a workstation directory or worktree name.
 | `servers/vcpkg/README.md` | Canonical human-facing vcpkg MCP tool/result documentation | Document universal output ceiling, `result_projection`, bounded-ingress behavior, causal failure shape, and four-input exactness meaning |
 | `README.md` | Top-level catalog entry linking to `servers/vcpkg/README.md` | No duplicate schema text; keep the link and read-only/tri-state summary accurate |
 | `internal/vcpkgmcp/vcpkgserver/tools_test.go` | Existing tool-registration/source-shape gate | Enumerate all seven registrations and reject a serializer bypass |
-| `internal/vcpkgmcp/vcpkgserver/public_contract_decision_test.go` | Planned repository-level three-record decision/co-variation guard | Assert all three exact records independently: accepted/current 2026-07-25 foundation, proposed/current-related/unsuperseded 2026-07-29 capability, accepted/current 2026-07-30 contract with reviewed semantic body; validate exact paths/blobs/constants/vocabularies and reject duplicate identities |
+| `internal/vcpkgmcp/vcpkgserver/public_contract_decision_test.go` | Repository-level three-record decision/co-variation guard | Assert all three exact records independently: accepted/current 2026-07-25 foundation, accepted/current/unsuperseded 2026-07-29 capability, accepted/current 2026-07-30 contract with reviewed semantic body; validate exact paths/blobs/constants/vocabularies and reject duplicate identities |
 | `internal/vcpkgmcp/publicresult/publicresult_test.go` | Planned encoded-boundary/schema guard | N-1/N/N+1, normal/minimal, valid JSON, compatibility |
 | `internal/vcpkgmcp/boundedio/boundedio_test.go` | Planned paging/lifetime/determinism guard | Request bounds, limit-plus-one, no tail/reopen, exact close, cancellation |
 | `internal/vcpkgmcp/lastfailure/projection_test.go` | Existing completeness/causality guard | 9×7 matrix plus exhaustive four-axis exactness algebra and reachable producer cross-products |
@@ -201,7 +201,7 @@ relation:
 | Record | Required candidate status | Required candidate bytes |
 |---|---|---|
 | 2026-07-25 tool-contract foundation | `accepted`, current | Exact SHA-256 and Git blob from the review-source table above |
-| 2026-07-29 remote-query admission | `proposed`, current-related, unsuperseded, separately unadmitted | Exact SHA-256 and Git blob from the review-source table above |
+| 2026-07-29 remote-query admission | `accepted`, current, unsuperseded | Exact SHA-256 and Git blob from the review-source table above |
 | 2026-07-30 bounded-result contract | `accepted`, current | Exact accepted SHA-256/Git blob recorded by Lead acceptance; Markdown semantic body byte-identical to the reviewed proposal and matching `semantic-body-sha256` |
 
 The repository-relative paths, full content hashes, Git blob identities, parsed
@@ -210,7 +210,7 @@ manifest. A matching basename, title, or status alone is insufficient.
 
 ### Review and metadata-only promotion
 
-1. Revision 4 is materialized as `proposed` in the main orchestration worktree so
+1. Revision 5 is materialized as `proposed` in the main orchestration worktree so
    the architecture reviewer can review an exact proposal SHA-256, Git blob, and
    semantic-body SHA-256.
 2. The architecture reviewer gates that exact proposed body. A `PASS` does not
@@ -262,8 +262,8 @@ rows. It must reject:
   file claiming the same decision;
 - 2026-07-25 absent, `proposed`, superseded, body-drifted, or not equal to the
   accepted foundation SHA-256/Git blob;
-- 2026-07-29 absent, `accepted`, dropped, superseded, body-drifted, or not equal
-  to the proposed SHA-256/Git blob;
+- 2026-07-29 absent, still `proposed`, dropped, superseded, body-drifted, or not
+  equal to the accepted SHA-256/Git blob;
 - 2026-07-30 absent, still `proposed`, dropped, superseded without an accepted
   replacement, body-drifted, semantic-body-digest mismatch, non-allowlisted
   metadata drift, or accepted SHA-256/Git-blob mismatch;
@@ -295,7 +295,7 @@ and both guards pass.
 - Existing `Reason` values remain the compatibility layer while stable failure
   IDs add causal detail.
 - Decision transfer adds no runtime or wire migration. The accepted candidate
-  ancestry gains the exact accepted foundation, separate proposed remote-query
+  ancestry gains the exact accepted foundation, separate accepted remote-query
   record, and accepted bounded-result record as one coherent manifest.
 - Binary rollback requires no data rollback, but it reopens boundedness,
   redaction, exactness, and causal-collapse defects and is not a safe production
@@ -328,8 +328,8 @@ and both guards pass.
   control in pin status.
 - `TestVcpkgPublicContractDecisionReference` enumerates the exact canonical
   paths above and asserts the three manifest rows independently: accepted/current
-  2026-07-25 foundation, proposed/current-related/unsuperseded 2026-07-29
-  capability, and accepted/current 2026-07-30 contract with reviewed semantic
+  2026-07-25 foundation, accepted/current/unsuperseded 2026-07-29 capability,
+  and accepted/current 2026-07-30 contract with reviewed semantic
   body. It validates exact hashes/blobs, constants, vocabularies, exactness
   algebra, dependency owners, and duplicate absence.
 - `PR591DecisionStagingRetirementProbe` proves candidate/main-staging blob parity,

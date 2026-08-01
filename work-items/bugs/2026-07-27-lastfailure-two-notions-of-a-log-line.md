@@ -1,6 +1,6 @@
 # `lastfailure`'s phase-log scanners disagree about where a LINE ends (CR is a separator for one, not the other)
 
-- **Status:** open
+- **Status:** fixed
 - **Severity:** P3 (an interrupt marker is found on a carriage-return-overwritten
   capture but a diagnostic on the same capture is not; no wrong verdict is
   manufactured, but evidence is silently lost)
@@ -60,3 +60,16 @@ three scanners, in the same way `normalizeLogLine` is now the one owner for
 "clean this line". Decide its `\r` rule ONCE, from a measurement over the scout
 corpus, and state the decision in that owner's doc — rather than leaving two
 different answers in one file with only one of them explained.
+
+## Terminal evidence
+
+Closed: 2026-08-01T17:39:21Z
+
+- **Disposition:** fixed; pending lifecycle-owner archive.
+- **Owner result:** the shared streaming log parser now preserves the three
+  consumers' line semantics at one boundary.
+- **Verification:** `TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics`,
+  `TestDetectInterrupted_RealProducerLinesAreStillDetected`,
+  `TestScanDiagnostics_MatchesColourizedOutput`, and
+  `TestFindRunBuildCommandLine_SurvivesTerminalDisplayBytes` passed in the
+  bounded `internal/vcpkgmcp/lastfailure` test run.

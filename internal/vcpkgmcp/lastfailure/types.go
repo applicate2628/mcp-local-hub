@@ -144,8 +144,8 @@ const (
 	// unrelated tree while the answer still looks confident.
 	ReasonRelativeRoot Reason = "relative_root"
 	// ReasonInvalidPortName: port is not a single legal vcpkg port-name
-	// segment (see portNameRE), or its joined path would escape the
-	// buildtrees root.
+	// segment under the shared portname owner, or its joined path would escape
+	// the buildtrees root.
 	ReasonInvalidPortName Reason = "invalid_port_name"
 	// ReasonBuildtreesRootUnreadable: the buildtrees root could not be
 	// probed at all (permission denied, I/O error). Deliberately NOT

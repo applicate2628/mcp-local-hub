@@ -89,15 +89,12 @@ var emitSafeQueryKeys = map[string]struct{}{}
 //     conclusion, not an observation, and exactly the fabricated-verdict class
 //     this server exists to eliminate.
 //
-// So this side stays a positive identifier and therefore stays INCOMPLETE: the
-// spellings listed in emitSafeQueryKeys' comment above (code, jwt, assertion,
-// pat, session, ticket, refresh) are still handed to `git ls-remote`'s argv,
-// where the child's full command line is readable by every local account for
-// its lifetime. That residual is REAL and is NOT closed here; closing it means
-// refusing every query-bearing remote URL, which needs a reason name that says
-// "unclassifiable query parameter" rather than "credential", i.e. a change to
-// the closed wire enum. Tracked as
-// work-items/bugs/2026-07-27-pinstatus-argv-refusal-is-a-credential-denylist.md.
+// So this side stays a positive identifier: a matching key produces
+// unknown(remote_url_credential_bearing) only when there is credential evidence.
+// Other value-bearing queries are not recategorized as credentials;
+// approveRemoteURL rejects them fail-closed as
+// unknown(remote_url_query_unclassified) before an approved URL capability can
+// reach child-process argv.
 //
 // Matched case-insensitively against the whole key, and as a substring, so
 // "access_token" and "X-Api-Key" are both caught.
