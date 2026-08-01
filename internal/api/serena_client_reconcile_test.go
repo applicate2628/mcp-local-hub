@@ -1148,10 +1148,17 @@ func TestMCPFrontV3_SerenaCASRestoresLegacyHubBackupAndRefusesConcurrentEdit(t *
 	if err != nil || expected == "" {
 		t.Fatalf("fingerprint router entry: fingerprint=%q err=%v", expected, err)
 	}
+	baselineBytes, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("read pinned backup: %v", err)
+	}
 	request := []SerenaOwnedRestoreRequest{{
-		Client: "claude-code", BackupPath: backupPath,
+		Client: "claude-code", BaselineBytes: baselineBytes,
 		ExpectedAppliedFingerprint: expected, BaselinePresent: true,
 	}}
+	if err := os.WriteFile(backupPath, []byte(`{"mcpServers":{"serena":{"url":"https://replaced.example/mcp"}}}`), 0o600); err != nil {
+		t.Fatalf("replace pinned pathname after bytes load: %v", err)
+	}
 	results, restoreErr := RestoreSerenaReconcileAppliedOwned(
 		request, all)
 	if restoreErr != nil {

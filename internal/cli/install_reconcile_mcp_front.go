@@ -205,6 +205,8 @@ type mcpFrontReconcilePlanOp struct {
 	Operation     string             `json:"operation"`
 	PreState      mcpFrontEntryState `json:"pre_state"`
 	IntendedState mcpFrontEntryState `json:"intended_state"`
+	PinBound      bool               `json:"pin_bound"`
+	Pin           *mcpFrontSerenaPin `json:"pin,omitempty"`
 }
 
 type mcpFrontEntryState struct {
@@ -228,8 +230,9 @@ type mcpFrontAppliedReceipt struct {
 }
 
 type mcpFrontRollbackDisposition struct {
-	State  string `json:"state"`
-	Reason string `json:"reason,omitempty"`
+	State               string `json:"state"`
+	Reason              string `json:"reason,omitempty"`
+	DependencyEntryName string `json:"dependency_entry_name,omitempty"`
 }
 
 const (
@@ -279,6 +282,107 @@ func mcpFrontStateEqual(a, b mcpFrontEntryState) bool {
 		reflect.DeepEqual(a.LSP, b.LSP)
 }
 
+// mcpFrontSerenaPinBinding is the single owner of the relationship between a
+// Serena row's retained pin and its current ActivePlan operation. A false
+// PinBound is deliberately distinguishable from a current explicit pinless
+// operation: unshipped v3 artifacts that never captured the binding must be
+// read-only refused rather than upgraded from mutable row metadata.
+type mcpFrontSerenaPinBinding string
+
+const (
+	mcpFrontSerenaPinBoundPinless mcpFrontSerenaPinBinding = "bound-pinless"
+	mcpFrontSerenaPinBoundPresent mcpFrontSerenaPinBinding = "bound-present"
+	mcpFrontSerenaPinUnbound      mcpFrontSerenaPinBinding = "unbound"
+	mcpFrontSerenaPinInvalid      mcpFrontSerenaPinBinding = "invalid"
+)
+
+func cloneMCPFrontSerenaPin(pin *mcpFrontSerenaPin) *mcpFrontSerenaPin {
+	if pin == nil {
+		return nil
+	}
+	copy := *pin
+	return &copy
+}
+
+func mcpFrontSerenaPinEqual(a, b *mcpFrontSerenaPin) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Client == b.Client &&
+		a.Origin == b.Origin &&
+		a.Path == b.Path &&
+		a.SHA256 == b.SHA256
+}
+
+// mcpFrontPlanOperationForRow constructs the only persisted plan operation
+// shape. Serena operations copy the exact first-baseline pin instead of
+// sharing a pointer with the mutable row value; LSP has no Serena authority.
+func mcpFrontPlanOperationForRow(
+	key string,
+	row mcpFrontReconcileRow,
+	operation string,
+	preState, intendedState mcpFrontEntryState,
+) mcpFrontReconcilePlanOp {
+	op := mcpFrontReconcilePlanOp{
+		RowKey: key, Operation: operation, PreState: preState, IntendedState: intendedState,
+	}
+	if row.Surface == mcpFrontSurfaceSerena {
+		op.PinBound = true
+		op.Pin = cloneMCPFrontSerenaPin(row.Pin)
+	}
+	return op
+}
+
+func mcpFrontPlanOperationEqual(a, b mcpFrontReconcilePlanOp) bool {
+	return a.RowKey == b.RowKey &&
+		a.Operation == b.Operation &&
+		mcpFrontStateEqual(a.PreState, b.PreState) &&
+		mcpFrontStateEqual(a.IntendedState, b.IntendedState) &&
+		a.PinBound == b.PinBound &&
+		mcpFrontSerenaPinEqual(a.Pin, b.Pin)
+}
+
+func mcpFrontSerenaPinMetadataValid(row mcpFrontReconcileRow, pin *mcpFrontSerenaPin) bool {
+	if pin == nil || pin.Client == "" || pin.Client != row.Client || pin.Origin == "" || pin.Path == "" {
+		return false
+	}
+	digest, err := hex.DecodeString(pin.SHA256)
+	return err == nil && len(digest) == sha256.Size && hex.EncodeToString(digest) == pin.SHA256
+}
+
+// classifyMCPFrontSerenaPinBinding verifies both exact equality and the Pin's
+// immutable metadata before any classifier, validator, or loader relies on it.
+func classifyMCPFrontSerenaPinBinding(row mcpFrontReconcileRow, op mcpFrontReconcilePlanOp) mcpFrontSerenaPinBinding {
+	if !op.PinBound {
+		return mcpFrontSerenaPinUnbound
+	}
+	if row.Pin == nil && op.Pin == nil {
+		return mcpFrontSerenaPinBoundPinless
+	}
+	if !mcpFrontSerenaPinEqual(row.Pin, op.Pin) {
+		return mcpFrontSerenaPinInvalid
+	}
+	if !mcpFrontSerenaPinMetadataValid(row, row.Pin) {
+		return mcpFrontSerenaPinInvalid
+	}
+	return mcpFrontSerenaPinBoundPresent
+}
+
+func requireMCPFrontSerenaPinBinding(key string, row mcpFrontReconcileRow, op mcpFrontReconcilePlanOp) (mcpFrontSerenaPinBinding, error) {
+	binding := classifyMCPFrontSerenaPinBinding(row, op)
+	switch binding {
+	case mcpFrontSerenaPinBoundPinless, mcpFrontSerenaPinBoundPresent:
+		return binding, nil
+	case mcpFrontSerenaPinUnbound:
+		return binding, fmt.Errorf("serena-pin-set-invalid: row %q has unbound pin binding", key)
+	default:
+		if row.Pin == nil || op.Pin == nil || !mcpFrontSerenaPinEqual(row.Pin, op.Pin) {
+			return binding, fmt.Errorf("serena-pin-set-invalid: row %q has mismatched pin binding", key)
+		}
+		return binding, fmt.Errorf("serena-pin-set-invalid: row %q has malformed pin binding", key)
+	}
+}
+
 // mcpFrontAttemptUncertain is the SINGLE OWNER of the question "may this
 // durable attempt have written a client entry, with nothing on this host able
 // to prove whether it did?".
@@ -319,7 +423,9 @@ func effectiveMCPFrontAppliedReceipt(row mcpFrontReconcileRow) (*mcpFrontApplied
 		}
 		switch row.Attempt.State {
 		case mcpFrontAttemptPreconditionConflict:
-			return nil, false
+			// A no-invocation conflict creates no new authority. If an older applied
+			// receipt exists, it remains the sole rollback authority.
+			return row.Applied, false
 		case mcpFrontAttemptApplied:
 			if row.Applied == nil {
 				return nil, true
@@ -331,6 +437,66 @@ func effectiveMCPFrontAppliedReceipt(row mcpFrontReconcileRow) (*mcpFrontApplied
 		}
 	}
 	return row.Applied, false
+}
+
+// mcpFrontSerenaConflictClass is the sole classifier for the admissible
+// no-invocation Serena conflict shapes. Callers must not reconstruct the
+// authority decision from a complementary boolean: the retained-pin cases
+// carry different rollback obligations from a first-generation conflict.
+type mcpFrontSerenaConflictClass string
+
+const (
+	mcpFrontSerenaConflictNotPreconditionConflict   mcpFrontSerenaConflictClass = "not-precondition-conflict"
+	mcpFrontSerenaConflictFreshAuthorityFreePinless mcpFrontSerenaConflictClass = "fresh-authority-free-pinless"
+	mcpFrontSerenaConflictRetainedPinnedNoReceipt   mcpFrontSerenaConflictClass = "retained-pinned-no-receipt"
+	mcpFrontSerenaConflictRetainedPriorApplied      mcpFrontSerenaConflictClass = "retained-prior-applied"
+	mcpFrontSerenaConflictInvalid                   mcpFrontSerenaConflictClass = "invalid"
+)
+
+func classifyMCPFrontSerenaConflict(report *mcpFrontReconcileReport, key string, row mcpFrontReconcileRow) mcpFrontSerenaConflictClass {
+	if row.Attempt == nil || row.Attempt.State != mcpFrontAttemptPreconditionConflict {
+		return mcpFrontSerenaConflictNotPreconditionConflict
+	}
+	if row.Disposition == nil ||
+		(row.Disposition.State != mcpFrontDispositionConflict && row.Disposition.State != mcpFrontDispositionPending) {
+		return mcpFrontSerenaConflictInvalid
+	}
+	if report == nil || report.ActivePlan == nil || row.Surface != mcpFrontSurfaceSerena ||
+		row.Client == "" || row.Language != "" || row.EntryName != "serena" ||
+		!row.BaselineSet || row.Baseline.LSP != nil ||
+		row.Baseline.Present != (row.Baseline.Fingerprint != "") ||
+		row.Disposition.DependencyEntryName != "" ||
+		row.Attempt.Generation != report.Generation ||
+		report.ActivePlan.Generation != report.Generation ||
+		row.Attempt.Operation != "add" {
+		return mcpFrontSerenaConflictInvalid
+	}
+	op, found := activeMCPFrontPlanOperation(report.ActivePlan, key)
+	if !found || !mcpFrontPlanOperationEqual(op, mcpFrontPlanOperationForRow(
+		key, row, row.Attempt.Operation, row.Attempt.PreState, row.Attempt.IntendedState,
+	)) {
+		return mcpFrontSerenaConflictInvalid
+	}
+	pinBinding := classifyMCPFrontSerenaPinBinding(row, op)
+	switch {
+	case pinBinding == mcpFrontSerenaPinBoundPinless && row.Applied == nil &&
+		mcpFrontStateEqual(row.Baseline, row.Attempt.PreState) &&
+		row.Disposition.State == mcpFrontDispositionConflict &&
+		row.Disposition.Reason == "forward-plan-precondition-conflict":
+		return mcpFrontSerenaConflictFreshAuthorityFreePinless
+	case pinBinding == mcpFrontSerenaPinBoundPresent && row.Applied == nil &&
+		row.Disposition.State == mcpFrontDispositionConflict &&
+		row.Disposition.Reason == "forward-plan-precondition-conflict":
+		return mcpFrontSerenaConflictRetainedPinnedNoReceipt
+	case pinBinding == mcpFrontSerenaPinBoundPresent && row.Applied != nil &&
+		row.Applied.Generation > 0 && row.Applied.Generation < row.Attempt.Generation &&
+		row.Applied.Port > 0 && mcpFrontStateEqual(row.Applied.PostState, row.Attempt.PreState) &&
+		row.Disposition.State == mcpFrontDispositionPending &&
+		row.Disposition.Reason == "forward-precondition-conflict-prior-owned":
+		return mcpFrontSerenaConflictRetainedPriorApplied
+	default:
+		return mcpFrontSerenaConflictInvalid
+	}
 }
 
 // settleMCPFrontReconcileAttempts classifies every attempt that survived
@@ -575,6 +741,9 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 		return fmt.Errorf("reconcile-mcp-front: a prior reconcile report exists at %s but could not be read: %w; refusing to run (overwriting it would destroy the pre-reconcile state `--rollback` restores from) — roll back or move that file aside first", reportPath, priorErr)
 	}
 	if prior != nil {
+		if hasMCPFrontRecoveryDisposition(prior) {
+			return fmt.Errorf("reconcile-mcp-front: forward-recovery-disposition-active: a prior reconcile report has rollback disposition state; refusing before plan capture or generation replacement. Run `mcphub install --reconcile-mcp-front --rollback` first")
+		}
 		uncertain, settleErr := settleMCPFrontReconcileAttempts(reportPath, prior)
 		if settleErr != nil {
 			return fmt.Errorf("reconcile-mcp-front: %w", settleErr)
@@ -672,16 +841,49 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	return nil
 }
 
+func hasMCPFrontRecoveryDisposition(report *mcpFrontReconcileReport) bool {
+	if report == nil {
+		return false
+	}
+	for key, row := range report.Rows {
+		if row.Surface == mcpFrontSurfaceSerena {
+			switch classifyMCPFrontSerenaConflict(report, key, row) {
+			case mcpFrontSerenaConflictFreshAuthorityFreePinless,
+				mcpFrontSerenaConflictRetainedPinnedNoReceipt,
+				mcpFrontSerenaConflictRetainedPriorApplied:
+				return true
+			}
+		}
+		if row.Disposition != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func persistMCPFrontDisposition(
 	reportPath string,
 	report *mcpFrontReconcileReport,
-	key, state, reason string,
+	key, state, reason, dependencyEntryName string,
 ) error {
 	row, ok := report.Rows[key]
 	if !ok {
 		return fmt.Errorf("unknown recovery row %q", key)
 	}
-	row.Disposition = &mcpFrontRollbackDisposition{State: state, Reason: reason}
+	disposition := &mcpFrontRollbackDisposition{
+		State: state, Reason: reason, DependencyEntryName: dependencyEntryName,
+	}
+	// A precondition-conflict attempt is valid only while its exact forward
+	// conflict/pending disposition establishes what authority remains. Once this
+	// rollback records a new terminal result, that forward attempt is consumed.
+	// Clearing it in the same atomic write keeps the fail-closed classifier from
+	// rejecting a terminal artifact this owner just produced.
+	if row.Surface == mcpFrontSurfaceSerena && row.Attempt != nil &&
+		row.Attempt.State == mcpFrontAttemptPreconditionConflict &&
+		terminalMCPFrontDisposition(disposition) {
+		row.Attempt = nil
+	}
+	row.Disposition = disposition
 	report.Rows[key] = row
 	if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
 		return fmt.Errorf("persist rollback disposition for %q: %w", key, err)
@@ -786,7 +988,7 @@ func mcpFrontConflictFamilyFor(reason string) mcpFrontConflictFamily {
 	switch reason {
 	case "rollback-cas-conflict", "rollback-live-diverged":
 		return mcpFrontConflictDiverged
-	case "forward-plan-precondition-conflict":
+	case "forward-plan-precondition-conflict", "dependency-precondition-conflict":
 		return mcpFrontConflictNeverWritten
 	case "legacy-baseline-not-routable":
 		return mcpFrontConflictRouteProtected
@@ -863,7 +1065,7 @@ func describeMCPFrontConflictFamilies(families map[mcpFrontConflictFamily][]stri
 func sortedMCPFrontRowKeys(report *mcpFrontReconcileReport, surface string) []string {
 	var keys []string
 	for key, row := range report.Rows {
-		if row.Surface == surface {
+		if surface == "" || row.Surface == surface {
 			keys = append(keys, key)
 		}
 	}
@@ -871,7 +1073,46 @@ func sortedMCPFrontRowKeys(report *mcpFrontReconcileReport, surface string) []st
 	return keys
 }
 
+// mcpFrontRollbackOps is the immutable per-call rollback dependency set. It
+// gives command-level tests a truthful zero-mutation oracle without adding a
+// package-global hook or changing either API owner.
+type mcpFrontRollbackOps struct {
+	readStateFile func(context.Context, string, []string, string) ([]byte, error)
+	restoreSerena func([]api.SerenaOwnedRestoreRequest) ([]api.SerenaOwnedRestoreResult, error)
+	restoreLSP    func([]api.LSPRouterRecoveryRow, api.LSPClientRouterOpts, api.LSPRouterRestoreCallbacks) (*api.LSPClientRouterReport, []api.LSPRouterRestoreRowResult, error)
+}
+
+func newMCPFrontRollbackOps(a *api.API) mcpFrontRollbackOps {
+	return mcpFrontRollbackOps{
+		readStateFile: api.ReadStateFileBeneathRootNoFollow,
+		restoreSerena: func(requests []api.SerenaOwnedRestoreRequest) ([]api.SerenaOwnedRestoreResult, error) {
+			return api.RestoreSerenaReconcileAppliedOwned(requests, nil)
+		},
+		restoreLSP: func(rows []api.LSPRouterRecoveryRow, opts api.LSPClientRouterOpts, callbacks api.LSPRouterRestoreCallbacks) (*api.LSPClientRouterReport, []api.LSPRouterRestoreRowResult, error) {
+			return a.RestoreLSPRouterRecoveryRows(rows, opts, callbacks)
+		},
+	}
+}
+
 func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) error {
+	return runRollbackMCPFrontWithOps(cmd, reportPath, newMCPFrontRollbackOps(a))
+}
+
+// runRollbackMCPFrontWithReader keeps the verified-pin reader as an immutable
+// per-call dependency so tests can prove that a loaded pin is never reopened
+// by pathname before the owned inverse consumes its verified bytes.
+func runRollbackMCPFrontWithReader(
+	cmd *cobra.Command,
+	a *api.API,
+	reportPath string,
+	readStateFile func(context.Context, string, []string, string) ([]byte, error),
+) error {
+	ops := newMCPFrontRollbackOps(a)
+	ops.readStateFile = readStateFile
+	return runRollbackMCPFrontWithOps(cmd, reportPath, ops)
+}
+
+func runRollbackMCPFrontWithOps(cmd *cobra.Command, reportPath string, ops mcpFrontRollbackOps) error {
 	raw, rerr := api.ReadStateFileInodeAnchored(reportPath)
 	if rerr != nil {
 		if os.IsNotExist(rerr) {
@@ -900,45 +1141,55 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 	if _, settleErr := settleMCPFrontReconcileAttempts(reportPath, &persisted); settleErr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", settleErr)
 	}
-	if verr := verifyMCPFrontSerenaPins(&persisted, reportPath); verr != nil {
+	verifiedPins, verr := loadMCPFrontVerifiedSerenaPinsWithReader(cmd.Context(), &persisted, reportPath, ops.readStateFile)
+	if verr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
 	}
+	defer zeroMCPFrontVerifiedSerenaPins(verifiedPins)
 	serenaRestored := 0
 	for _, key := range sortedMCPFrontRowKeys(&persisted, mcpFrontSurfaceSerena) {
 		row := persisted.Rows[key]
+		switch classifyMCPFrontSerenaConflict(&persisted, key, row) {
+		case mcpFrontSerenaConflictFreshAuthorityFreePinless:
+			continue
+		case mcpFrontSerenaConflictRetainedPinnedNoReceipt:
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, "no-effective-applied-receipt", ""); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+			}
+			continue
+		case mcpFrontSerenaConflictInvalid:
+			return fmt.Errorf("reconcile-mcp-front --rollback: serena conflict row %q has an invalid authority shape", key)
+		}
 		if terminalMCPFrontDisposition(row.Disposition) {
 			continue
 		}
 		receipt, uncertain := effectiveMCPFrontAppliedReceipt(row)
 		if uncertain {
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "pending-ownership-unknown"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "pending-ownership-unknown", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 			continue
 		}
 		if receipt == nil {
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, "no-effective-applied-receipt"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, "no-effective-applied-receipt", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 			continue
 		}
-		results, restoreErr := api.RestoreSerenaReconcileAppliedOwned(
-			[]api.SerenaOwnedRestoreRequest{{
-				Client:                     row.Client,
-				BackupPath:                 row.Pin.Path,
-				ExpectedAppliedFingerprint: receipt.PostState.Fingerprint,
-				BaselinePresent:            row.Baseline.Present,
-			}},
-			nil,
-		)
+		results, restoreErr := ops.restoreSerena([]api.SerenaOwnedRestoreRequest{{
+			Client:                     row.Client,
+			BaselineBytes:              verifiedPins[key],
+			ExpectedAppliedFingerprint: receipt.PostState.Fingerprint,
+			BaselinePresent:            row.Baseline.Present,
+		}})
 		if restoreErr != nil {
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-write-failed"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-write-failed", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 			continue
 		}
 		if len(results) != 1 {
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-result-missing"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-result-missing", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 			continue
@@ -947,21 +1198,21 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 		case api.SerenaOwnedRestoreRestored:
 			live, liveErr := api.SerenaClientEntryFingerprint(row.Client, nil)
 			if liveErr != nil || !mcpFrontStateEqual(mcpFrontSerenaState(live), row.Baseline) {
-				if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-verify-failed"); err != nil {
+				if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-verify-failed", ""); err != nil {
 					return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 				}
 				continue
 			}
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionRestored, "inverse-verified"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionRestored, "inverse-verified", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 			serenaRestored++
 		case api.SerenaOwnedRestoreConflict:
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionConflict, "rollback-cas-conflict"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionConflict, "rollback-cas-conflict", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 		default:
-			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-write-failed"); err != nil {
+			if err := persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, "rollback-write-failed", ""); err != nil {
 				return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
 			}
 		}
@@ -975,6 +1226,7 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 		if row.Disposition != nil {
 			recovery.Disposition = row.Disposition.State
 			recovery.DispositionReason = row.Disposition.Reason
+			recovery.DependencyEntryName = row.Disposition.DependencyEntryName
 		}
 		if receipt != nil && receipt.PostState.LSP != nil {
 			applied := *receipt.PostState.LSP
@@ -982,25 +1234,25 @@ func runRollbackMCPFront(cmd *cobra.Command, a *api.API, reportPath string) erro
 		}
 		recoveryRows = append(recoveryRows, recovery)
 	}
-	lspReport, _, lerr := a.RestoreLSPRouterRecoveryRows(
+	lspReport, _, lerr := ops.restoreLSP(
 		recoveryRows,
 		api.LSPClientRouterOpts{BackupKeepN: effectiveBackupKeepN()},
 		api.LSPRouterRestoreCallbacks{
 			BeforeMutation: func(result api.LSPRouterRestoreRowResult) error {
 				key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, result.Client, result.Language, result.EntryName)
-				return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, result.Reason)
+				return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, result.Reason, result.DependencyEntryName)
 			},
 			OnDisposition: func(result api.LSPRouterRestoreRowResult) error {
 				key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, result.Client, result.Language, result.EntryName)
 				switch result.Status {
 				case api.LSPRouterRestoreBaselineOnly:
-					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, result.Reason)
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionBaselineOnly, result.Reason, result.DependencyEntryName)
 				case api.LSPRouterRestoreRestored:
-					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionRestored, result.Reason)
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionRestored, result.Reason, result.DependencyEntryName)
 				case api.LSPRouterRestoreConflict:
-					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionConflict, result.Reason)
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionConflict, result.Reason, result.DependencyEntryName)
 				default:
-					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, result.Reason)
+					return persistMCPFrontDisposition(reportPath, &persisted, key, mcpFrontDispositionPending, result.Reason, result.DependencyEntryName)
 				}
 			},
 		},
@@ -1136,6 +1388,16 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 		if err := validateMCPFrontOperation(row.Surface, op.Operation); err != nil {
 			return fmt.Errorf("%s active generation row %q: %w", reportPath, op.RowKey, err)
 		}
+		switch row.Surface {
+		case mcpFrontSurfaceSerena:
+			if _, err := requireMCPFrontSerenaPinBinding(op.RowKey, row, op); err != nil {
+				return err
+			}
+		case mcpFrontSurfaceLSP:
+			if op.PinBound || op.Pin != nil {
+				return fmt.Errorf("%s active generation lsp row %q carries a serena pin binding", reportPath, op.RowKey)
+			}
+		}
 		if err := validateMCPFrontEntryState(row, op.PreState); err != nil {
 			return fmt.Errorf("%s active generation row %q has invalid pre-state: %w", reportPath, op.RowKey, err)
 		}
@@ -1156,8 +1418,25 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 		}
 		switch row.Surface {
 		case mcpFrontSurfaceSerena:
-			if row.Client == "" || row.Language != "" || row.EntryName != "serena" || row.Pin == nil {
+			if row.Client == "" || row.Language != "" || row.EntryName != "serena" {
 				return fmt.Errorf("%s row %q has an incomplete serena baseline", reportPath, key)
+			}
+			switch classifyMCPFrontSerenaConflict(persisted, key, row) {
+			case mcpFrontSerenaConflictInvalid:
+				return fmt.Errorf("%s serena conflict row %q has an invalid authority shape", reportPath, key)
+			case mcpFrontSerenaConflictFreshAuthorityFreePinless:
+				if row.Pin != nil {
+					return fmt.Errorf("%s authority-free serena conflict row %q carries a pin", reportPath, key)
+				}
+			case mcpFrontSerenaConflictRetainedPinnedNoReceipt,
+				mcpFrontSerenaConflictRetainedPriorApplied:
+				if row.Pin == nil {
+					return fmt.Errorf("%s retained serena conflict row %q has no row-owned pin", reportPath, key)
+				}
+			case mcpFrontSerenaConflictNotPreconditionConflict:
+				if row.Pin == nil {
+					return fmt.Errorf("%s serena row %q has no row-owned pin", reportPath, key)
+				}
 			}
 		case mcpFrontSurfaceLSP:
 			if row.Client == "" || row.Language == "" || row.EntryName == "" || row.Pin != nil {
@@ -1197,9 +1476,9 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 				if !ok {
 					return fmt.Errorf("%s current-generation attempt row %q is not referenced by the active plan", reportPath, key)
 				}
-				if op.Operation != row.Attempt.Operation ||
-					!mcpFrontStateEqual(op.PreState, row.Attempt.PreState) ||
-					!mcpFrontStateEqual(op.IntendedState, row.Attempt.IntendedState) {
+				if !mcpFrontPlanOperationEqual(op, mcpFrontPlanOperationForRow(
+					key, row, row.Attempt.Operation, row.Attempt.PreState, row.Attempt.IntendedState,
+				)) {
 					return fmt.Errorf("%s current-generation attempt row %q differs from its active-plan operation", reportPath, key)
 				}
 			}
@@ -1229,6 +1508,22 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 			default:
 				return fmt.Errorf("%s row %q has unknown rollback disposition %q",
 					reportPath, key, row.Disposition.State)
+			}
+			dependencyName := row.Disposition.DependencyEntryName
+			switch row.Disposition.Reason {
+			case "dependency-precondition-conflict", "skipped-dependency-conflict", "rollback-ownership-unknown":
+				if dependencyName == "" {
+					return fmt.Errorf("%s row %q has a dependency disposition without the dependency identity", reportPath, key)
+				}
+			}
+			if dependencyName != "" {
+				if row.Surface != mcpFrontSurfaceLSP || dependencyName == row.EntryName {
+					return fmt.Errorf("%s row %q has an invalid dependency identity", reportPath, key)
+				}
+				dependencyKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, row.Client, row.Language, dependencyName)
+				if _, ok := persisted.Rows[dependencyKey]; !ok {
+					return fmt.Errorf("%s row %q references absent dependency row %q", reportPath, key, dependencyName)
+				}
 			}
 		}
 	}
@@ -1278,58 +1573,122 @@ func validateMCPFrontEntryState(row mcpFrontReconcileRow, state mcpFrontEntrySta
 	return nil
 }
 
-// verifyMCPFrontSerenaPins proves every serena row's restore input is present
-// and byte-intact BEFORE the first client write.
-//
-// This is the check that makes finding 1 observable instead of silent. The
-// rolling `.bak-mcp-local-hub-<ts>` backups a forward run takes are pruned to
-// backups.keep_n by the very next runs, so a record that pointed at them was
-// one retry away from naming a deleted file — and the failure surfaced as a
-// mid-rollback error after serena had already been partly restored. Pinning
-// removes the cause; verifying the pin up front removes the class.
-func verifyMCPFrontSerenaPins(persisted *mcpFrontReconcileReport, reportPath string) error {
+// loadMCPFrontVerifiedSerenaPins opens every required Serena pin beneath the
+// report-owned root before any rollback mutation. Each returned slice is the
+// exact checksum-verified content of one retained no-follow final handle.
+func loadMCPFrontVerifiedSerenaPins(ctx context.Context, persisted *mcpFrontReconcileReport, reportPath string) (map[string][]byte, error) {
+	return loadMCPFrontVerifiedSerenaPinsWithReader(ctx, persisted, reportPath, api.ReadStateFileBeneathRootNoFollow)
+}
+
+func loadMCPFrontVerifiedSerenaPinsWithReader(
+	ctx context.Context,
+	persisted *mcpFrontReconcileReport,
+	reportPath string,
+	readStateFile func(context.Context, string, []string, string) ([]byte, error),
+) (map[string][]byte, error) {
 	pinRoot, rootErr := filepath.Abs(mcpFrontReconcilePinDir(reportPath))
 	if rootErr != nil {
-		return fmt.Errorf("%s: resolve pin root: %w", reportPath, rootErr)
+		return nil, fmt.Errorf("serena-pin-set-invalid: resolve pin root: %w", rootErr)
 	}
 	seenPaths := map[string]string{}
-	for key, row := range persisted.Rows {
+	loaded := map[string][]byte{}
+	for _, key := range sortedMCPFrontRowKeys(persisted, "") {
+		row := persisted.Rows[key]
+		op, found := activeMCPFrontPlanOperation(persisted.ActivePlan, key)
+		if !found {
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("serena-pin-set-invalid: row %q has unbound pin binding", key)
+		}
 		if row.Surface == mcpFrontSurfaceLSP {
-			if row.Pin != nil {
-				return fmt.Errorf("%s lsp row %q illegally carries a serena pin", reportPath, key)
+			if row.Pin != nil || op.PinBound || op.Pin != nil {
+				zeroMCPFrontVerifiedSerenaPins(loaded)
+				return nil, fmt.Errorf("serena-pin-set-invalid: lsp row %q carries a serena pin binding", key)
 			}
 			continue
 		}
-		if row.Pin == nil {
-			return fmt.Errorf("%s serena row %q has no row-owned pin", reportPath, key)
+		if row.Surface != mcpFrontSurfaceSerena {
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("serena-pin-set-invalid: row %q has unknown surface %q", key, row.Surface)
+		}
+		if _, err := requireMCPFrontSerenaPinBinding(key, row, op); err != nil {
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, err
+		}
+		conflictClass := classifyMCPFrontSerenaConflict(persisted, key, row)
+		switch conflictClass {
+		case mcpFrontSerenaConflictFreshAuthorityFreePinless:
+			if row.Pin != nil {
+				zeroMCPFrontVerifiedSerenaPins(loaded)
+				return nil, fmt.Errorf("serena-pin-set-invalid: authority-free serena conflict row %q carries a pin", key)
+			}
+			continue
+		case mcpFrontSerenaConflictInvalid:
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("serena-pin-set-invalid: serena conflict row %q has an invalid authority shape", key)
+		case mcpFrontSerenaConflictRetainedPinnedNoReceipt,
+			mcpFrontSerenaConflictRetainedPriorApplied,
+			mcpFrontSerenaConflictNotPreconditionConflict:
+			if row.Pin == nil {
+				zeroMCPFrontVerifiedSerenaPins(loaded)
+				return nil, fmt.Errorf("serena-pin-set-invalid: serena row %q has no row-owned pin", key)
+			}
 		}
 		pin := *row.Pin
-		if pin.Client != row.Client || pin.Path == "" || pin.Origin == "" || pin.SHA256 == "" {
-			return fmt.Errorf("%s serena row %q has an incomplete or disagreeing row-owned pin", reportPath, key)
-		}
 		absolutePin, absErr := filepath.Abs(pin.Path)
 		if absErr != nil {
-			return fmt.Errorf("%s serena row %q pin path: %w", reportPath, key, absErr)
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("serena-pin-set-invalid: serena row %q pin path: %w", key, absErr)
 		}
 		rel, relErr := filepath.Rel(pinRoot, absolutePin)
 		if relErr != nil || rel == "." || filepath.IsAbs(rel) || rel == ".." ||
 			strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-			return fmt.Errorf("%s serena row %q pin %q escapes the report pin directory", reportPath, key, pin.Path)
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("serena-pin-set-invalid: serena row %q pin escapes the report pin directory", key)
 		}
 		cleanPin := filepath.Clean(absolutePin)
 		if owner, duplicate := seenPaths[cleanPin]; duplicate {
-			return fmt.Errorf("%s serena rows %q and %q share duplicate pin path %q", reportPath, owner, key, pin.Path)
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("serena-pin-set-invalid: serena rows %q and %q share a pin path", owner, key)
 		}
 		seenPaths[cleanPin] = key
-		sum, err := fileSHA256(cleanPin)
+		components := strings.Split(rel, string(filepath.Separator))
+		bytes, err := readStateFile(ctx, pinRoot, components, pin.SHA256)
 		if err != nil {
-			return fmt.Errorf("%s: pinned pre-reconcile backup for %q is unreadable at %s: %w; no client is touched", reportPath, row.Client, pin.Path, err)
+			zeroMCPFrontVerifiedSerenaPins(loaded)
+			return nil, fmt.Errorf("%s: row %q: %w", mcpFrontSerenaPinReadDiagnostic(err), key, err)
 		}
-		if sum != pin.SHA256 {
-			return fmt.Errorf("%s: pinned pre-reconcile backup for %q at %s has changed (sha256 %s, recorded %s)", reportPath, row.Client, pin.Path, sum, pin.SHA256)
+		loaded[key] = bytes
+	}
+	return loaded, nil
+}
+
+func mcpFrontSerenaPinReadDiagnostic(err error) string {
+	var readErr *api.StateFileReadError
+	if !errors.As(err, &readErr) {
+		return "serena-pin-open-unsafe"
+	}
+	switch readErr.Category {
+	case api.StateFileReadErrorInvalidInput:
+		return "serena-pin-set-invalid"
+	case api.StateFileReadErrorCanceled:
+		return "serena-pin-read-canceled"
+	case api.StateFileReadErrorTooLarge:
+		return "serena-pin-too-large"
+	case api.StateFileReadErrorChecksumMismatch:
+		return "serena-pin-checksum-mismatch"
+	case api.StateFileReadErrorUnsafeObjectOrIO:
+		return "serena-pin-open-unsafe"
+	default:
+		return "serena-pin-open-unsafe"
+	}
+}
+
+func zeroMCPFrontVerifiedSerenaPins(pins map[string][]byte) {
+	for _, bytes := range pins {
+		for i := range bytes {
+			bytes[i] = 0
 		}
 	}
-	return nil
 }
 
 // mcpFrontReadReportForRetirementFn is the narrow retirement-gate test seam.
@@ -1570,10 +1929,9 @@ func newMCPFrontV3Journal(
 				}
 			}
 			active.Rows = append(active.Rows, key)
-			active.Operations = append(active.Operations, mcpFrontReconcilePlanOp{
-				RowKey: key, Operation: op.Operation,
-				PreState: mcpFrontLSPState(op.PreState), IntendedState: mcpFrontLSPState(op.IntendedState),
-			})
+			active.Operations = append(active.Operations, mcpFrontPlanOperationForRow(
+				key, record.Rows[key], op.Operation, mcpFrontLSPState(op.PreState), mcpFrontLSPState(op.IntendedState),
+			))
 		}
 	}
 	record.ActivePlan = active
@@ -1620,10 +1978,9 @@ func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconci
 	}
 	if !found {
 		j.record.ActivePlan.Rows = append(j.record.ActivePlan.Rows, key)
-		j.record.ActivePlan.Operations = append(j.record.ActivePlan.Operations, mcpFrontReconcilePlanOp{
-			RowKey: key, Operation: "add",
-			PreState: row.Attempt.PreState, IntendedState: row.Attempt.IntendedState,
-		})
+		j.record.ActivePlan.Operations = append(j.record.ActivePlan.Operations, mcpFrontPlanOperationForRow(
+			key, row, "add", row.Attempt.PreState, row.Attempt.IntendedState,
+		))
 	}
 	if err := j.persist(); err != nil {
 		if createdPin != nil {
@@ -1639,12 +1996,27 @@ func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconci
 
 func (j *mcpFrontReconcileJournal) finishSerenaAttempt(result api.SerenaReconcileAttemptResult) error {
 	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, result.Client, "", "serena")
+	preState := mcpFrontSerenaState(result.PreFingerprint)
+	initial := mcpFrontReconcileRow{
+		Surface: mcpFrontSurfaceSerena, Client: result.Client, EntryName: "serena",
+		Baseline: preState, BaselineSet: true,
+	}
+	planRow := initial
+	if existing, found := j.record.Rows[key]; found {
+		planRow = existing
+	}
+	planned := mcpFrontPlanOperationForRow(
+		key, planRow, "add", preState, mcpFrontSerenaState(result.IntendedFingerprint),
+	)
 	return j.finishAttempt(
 		key,
+		planned,
+		&initial,
 		mcpFrontSerenaState(result.ObservedFingerprint),
 		result.Invoked,
 		result.PreconditionConflict,
 		result.ObservationErr,
+		"",
 	)
 }
 
@@ -1667,37 +2039,61 @@ func (j *mcpFrontReconcileJournal) prepareLSPOperation(op api.LSPRouterPlannedOp
 func (j *mcpFrontReconcileJournal) finishLSPOperation(obs api.LSPRouterMutationObservation) error {
 	key := mcpFrontReconcileRowKey(
 		mcpFrontSurfaceLSP, obs.Operation.Client, obs.Operation.Language, obs.Operation.EntryName)
+	planRow := j.record.Rows[key]
+	planned := mcpFrontPlanOperationForRow(
+		key, planRow, obs.Operation.Operation,
+		mcpFrontLSPState(obs.Operation.PreState), mcpFrontLSPState(obs.Operation.IntendedState),
+	)
+	dependencyEntryName := ""
+	if obs.PreconditionConflictScope == "dependency" {
+		dependencyEntryName = obs.PreconditionConflictEntryName
+	}
+	if obs.DependencyFailure != nil {
+		dependencyEntryName = obs.DependencyFailure.EntryName
+	}
 	return j.finishAttempt(
 		key,
+		planned,
+		nil,
 		mcpFrontLSPState(obs.ObservedState),
 		obs.Invoked,
 		obs.PreconditionConflict,
 		obs.ObservationErr,
+		dependencyEntryName,
 	)
 }
 
 func (j *mcpFrontReconcileJournal) finishAttempt(
 	key string,
+	planned mcpFrontReconcilePlanOp,
+	initial *mcpFrontReconcileRow,
 	observed mcpFrontEntryState,
 	invoked bool,
 	preconditionConflict bool,
 	observationErr error,
+	dependencyEntryName string,
 ) error {
 	row, ok := j.record.Rows[key]
 	if !ok {
-		// A first-generation Serena precondition conflict produced no mutation
-		// and therefore needs no inverse row or pin.
-		if !invoked && preconditionConflict {
-			return nil
+		if !invoked && preconditionConflict && initial != nil {
+			if err := j.ensureActivePlanOperation(key, planned); err != nil {
+				return err
+			}
+			row = *initial
+			ok = true
+		} else {
+			return fmt.Errorf("promotion-not-durable: row %q is absent", key)
 		}
-		return fmt.Errorf("promotion-not-durable: row %q is absent", key)
 	}
 	if !invoked {
 		if !preconditionConflict {
 			return nil
 		}
+		if err := j.ensureActivePlanOperation(key, planned); err != nil {
+			return err
+		}
 		op, found := activeMCPFrontPlanOperation(j.record.ActivePlan, key)
-		if !found {
+		if !found || !mcpFrontPlanOperationEqual(op, planned) {
 			return fmt.Errorf("forward-plan-precondition-conflict-not-durable: row %q is not in the active plan", key)
 		}
 		row.Attempt = &mcpFrontReconcileAttempt{
@@ -1707,8 +2103,24 @@ func (j *mcpFrontReconcileJournal) finishAttempt(
 			IntendedState: op.IntendedState,
 			State:         mcpFrontAttemptPreconditionConflict,
 		}
-		row.Disposition = &mcpFrontRollbackDisposition{
-			State: mcpFrontDispositionConflict, Reason: "forward-plan-precondition-conflict",
+		if row.Applied != nil {
+			row.Disposition = &mcpFrontRollbackDisposition{
+				State: mcpFrontDispositionPending, Reason: "forward-precondition-conflict-prior-owned",
+				DependencyEntryName: dependencyEntryName,
+			}
+		} else {
+			reason := "forward-plan-precondition-conflict"
+			if dependencyEntryName != "" {
+				reason = "dependency-precondition-conflict"
+			}
+			row.Disposition = &mcpFrontRollbackDisposition{
+				State: mcpFrontDispositionConflict, Reason: reason,
+				DependencyEntryName: dependencyEntryName,
+			}
+		}
+		if row.Surface == mcpFrontSurfaceSerena &&
+			classifyMCPFrontSerenaConflict(&j.record, key, row) == mcpFrontSerenaConflictInvalid {
+			return fmt.Errorf("forward-plan-precondition-conflict-not-durable: serena row %q has an invalid authority shape", key)
 		}
 		j.record.Rows[key] = row
 		if err := j.persist(); err != nil {
@@ -1719,8 +2131,11 @@ func (j *mcpFrontReconcileJournal) finishAttempt(
 	if row.Attempt == nil || row.Attempt.State != mcpFrontAttemptPrepared {
 		return fmt.Errorf("promotion-not-durable: row %q has no durable prepared attempt", key)
 	}
-	if observationErr != nil {
-		row.Disposition = &mcpFrontRollbackDisposition{State: mcpFrontDispositionPending, Reason: "forward-ownership-unknown"}
+	if observationErr != nil || dependencyEntryName != "" {
+		row.Disposition = &mcpFrontRollbackDisposition{
+			State: mcpFrontDispositionPending, Reason: "forward-ownership-unknown",
+			DependencyEntryName: dependencyEntryName,
+		}
 		j.record.Rows[key] = row
 		if err := j.persist(); err != nil {
 			return err
@@ -1739,7 +2154,10 @@ func (j *mcpFrontReconcileJournal) finishAttempt(
 		row.Disposition = nil
 	default:
 		row.Attempt.State = mcpFrontAttemptConflict
-		row.Disposition = &mcpFrontRollbackDisposition{State: mcpFrontDispositionPending, Reason: "forward-ownership-unknown"}
+		row.Disposition = &mcpFrontRollbackDisposition{
+			State: mcpFrontDispositionPending, Reason: "forward-ownership-unknown",
+			DependencyEntryName: dependencyEntryName,
+		}
 	}
 	j.record.Rows[key] = row
 	if err := j.persist(); err != nil {
@@ -1748,6 +2166,21 @@ func (j *mcpFrontReconcileJournal) finishAttempt(
 	if row.Attempt.State == mcpFrontAttemptConflict {
 		return fmt.Errorf("forward-ownership-unknown: %s", key)
 	}
+	return nil
+}
+
+func (j *mcpFrontReconcileJournal) ensureActivePlanOperation(key string, planned mcpFrontReconcilePlanOp) error {
+	if j.record.ActivePlan == nil || j.record.ActivePlan.Generation != j.record.Generation {
+		return fmt.Errorf("forward-plan-precondition-conflict-not-durable: active plan is missing or not current")
+	}
+	if existing, found := activeMCPFrontPlanOperation(j.record.ActivePlan, key); found {
+		if !mcpFrontPlanOperationEqual(existing, planned) {
+			return fmt.Errorf("forward-plan-precondition-conflict-not-durable: row %q conflicts with the active plan", key)
+		}
+		return nil
+	}
+	j.record.ActivePlan.Rows = append(j.record.ActivePlan.Rows, key)
+	j.record.ActivePlan.Operations = append(j.record.ActivePlan.Operations, planned)
 	return nil
 }
 

@@ -33,13 +33,14 @@ import (
 // faithfully is the difference between a test that proves the disabled bit is
 // restored and one that proves only that the fake remembers what it was told.
 type snapshotFakeClient struct {
-	name        string
-	exists      bool
-	entries     map[string]clients.MCPEntry
-	addCalls    int
-	removeCalls int
-	addErrs     map[string]error
-	removeErrs  map[string]error
+	name              string
+	exists            bool
+	entries           map[string]clients.MCPEntry
+	addCalls          int
+	removeCalls       int
+	addErrs           map[string]error
+	removeErrs        map[string]error
+	postGroupMutation func()
 }
 
 func newSnapshotFakeClient(name string, exists bool) *snapshotFakeClient {
@@ -142,6 +143,86 @@ func (f *snapshotFakeClient) ConditionalEntryMutation(req clients.ConditionalEnt
 		out.MutationErr = f.RemoveEntry(req.EntryName)
 	}
 	out.After, out.ObservationErr = f.GetEntry(req.EntryName)
+	return out
+}
+
+func (f *snapshotFakeClient) ConditionalEntryGroupMutation(req clients.ConditionalEntryGroupMutationRequest) (out clients.ConditionalEntryGroupMutationObserved) {
+	before, err := f.GetEntry(req.EntryName)
+	out.Before = before
+	if err != nil {
+		out.ObservationErr = err
+		return out
+	}
+	if req.ExpectedLive == nil || !req.ExpectedLive(before) {
+		out.PreconditionConflict = true
+		out.PreparationErr = clients.ErrEntryMutationPreconditionConflict
+		out.ConflictScope = "target"
+		out.ConflictEntryName = req.EntryName
+		return out
+	}
+	out.Dependencies = make([]clients.EntryMutationDependencyObserved, len(req.Dependencies))
+	for i, dependency := range req.Dependencies {
+		live, readErr := f.GetEntry(dependency.EntryName)
+		out.Dependencies[i] = clients.EntryMutationDependencyObserved{EntryName: dependency.EntryName, Before: live, ObservationErr: readErr}
+		if readErr != nil {
+			out.ObservationErr = readErr
+			return out
+		}
+		if dependency.ExpectedLive == nil || !dependency.ExpectedLive(live) {
+			out.PreconditionConflict = true
+			out.PreparationErr = clients.ErrEntryMutationPreconditionConflict
+			out.ConflictScope = "dependency"
+			out.ConflictEntryName = dependency.EntryName
+			return out
+		}
+	}
+	if req.BackupKeepN != nil {
+		out.BackupPath, out.PreparationErr = f.BackupKeep(*req.BackupKeepN)
+		if out.PreparationErr != nil {
+			return out
+		}
+	}
+	if req.BeforeMutation != nil {
+		out.PreparationErr = req.BeforeMutation(clients.EntryMutationPreparation{Before: before, BackupPath: out.BackupPath})
+		if out.PreparationErr != nil {
+			return out
+		}
+	}
+	out.Invoked = true
+	if req.Operation == clients.EntryMutationAdd {
+		out.MutationErr = f.AddEntry(req.Entry)
+	} else {
+		out.MutationErr = f.RemoveEntry(req.EntryName)
+	}
+	if out.MutationErr == nil && f.postGroupMutation != nil {
+		f.postGroupMutation()
+	}
+	out.After, out.ObservationErr = f.GetEntry(req.EntryName)
+	for i, dependency := range req.Dependencies {
+		live, readErr := f.GetEntry(dependency.EntryName)
+		out.Dependencies[i].After = live
+		out.Dependencies[i].ObservationErr = readErr
+		if readErr != nil {
+			if out.ObservationErr == nil {
+				out.ObservationErr = readErr
+			}
+			if out.DependencyFailure == nil {
+				out.DependencyFailure = &clients.EntryMutationDependencyFailure{
+					Phase: clients.EntryMutationDependencyFailureAfterRead,
+					Kind:  clients.EntryMutationDependencyFailureObservation, EntryName: dependency.EntryName, Cause: readErr,
+				}
+			}
+			continue
+		}
+		matches := dependency.ExpectedLive(live)
+		out.Dependencies[i].AfterMatchesExpected = &matches
+		if !matches && out.DependencyFailure == nil {
+			out.DependencyFailure = &clients.EntryMutationDependencyFailure{
+				Phase: clients.EntryMutationDependencyFailureAfterPredicateMismatch,
+				Kind:  clients.EntryMutationDependencyFailurePredicateMismatch, EntryName: dependency.EntryName,
+			}
+		}
+	}
 	return out
 }
 
@@ -490,6 +571,236 @@ func TestMCPFrontV3_LSPDependencyBarrierSurvivesRetry(t *testing.T) {
 				t.Fatalf("canonical present=%v, want %v", canonicalPresent, wantPresent)
 			}
 		})
+	}
+}
+
+func TestMCPFrontV3_RollbackCanonicalInverseRejectsInterveningLegacyDependencyEdit(t *testing.T) {
+	const clientName = "codex-cli"
+	const language = "go"
+	const legacyName = "mcp-language-server-go-abcd"
+	const legacyURL = "http://127.0.0.1:9200/mcp"
+	const operatorURL = "https://operator.example/lsp/go"
+	canonicalName := LSPRouterEntryName(language)
+	canonicalApplied := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: canonicalName,
+		Present: true, URL: LSPRouterURL(9137, language),
+	}
+	legacyBaseline := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: legacyName,
+		Present: true, URL: legacyURL,
+	}
+	legacyApplied := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacyName}
+	canonicalBaseline := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: canonicalName}
+
+	base := newSnapshotFakeClient(clientName, true)
+	base.put(clients.MCPEntry{Name: canonicalName, URL: canonicalApplied.URL})
+	client := &raceSnapshotClient{
+		snapshotFakeClient: base,
+		beforeConditional: func(entryName string) {
+			if entryName == canonicalName {
+				base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: operatorURL}
+			}
+		},
+	}
+	_, results, err := NewAPI().RestoreLSPRouterRecoveryRows(
+		[]LSPRouterRecoveryRow{
+			{Baseline: canonicalBaseline, Applied: &canonicalApplied},
+			{Baseline: legacyBaseline, Applied: &legacyApplied},
+		},
+		LSPClientRouterOpts{Clients: map[string]clients.Client{clientName: client}},
+		LSPRouterRestoreCallbacks{},
+	)
+	if err != nil {
+		t.Fatalf("a row-local dependency conflict must remain a rollback result, not abort unrelated rows: %v", err)
+	}
+	if len(results) != 2 || results[0].EntryName != legacyName || results[0].Status != LSPRouterRestoreRestored ||
+		results[1].EntryName != canonicalName || results[1].Status != LSPRouterRestoreConflict ||
+		results[1].Reason != "skipped-dependency-conflict" {
+		t.Fatalf("results=%+v, want restored legacy then canonical dependency conflict", results)
+	}
+	if base.removeCalls != 0 {
+		t.Fatalf("canonical removeCalls=%d, want 0", base.removeCalls)
+	}
+	if canonical := base.entries[canonicalName]; canonical.URL != canonicalApplied.URL {
+		t.Fatalf("dependency refusal removed or changed canonical route: %+v", canonical)
+	}
+	if legacy := base.entries[legacyName]; legacy.URL != operatorURL {
+		t.Fatalf("operator legacy edit was overwritten: %+v", legacy)
+	}
+}
+
+// TestMCPFrontV3_RollbackDependencyAuthorizationMatrix makes both required
+// legacy aliases real rollback dependencies. The injected change occurs only
+// after both legacy inverses, immediately before the canonical group
+// authorization, so a canonical inverse must never erase the last live route.
+func TestMCPFrontV3_RollbackDependencyAuthorizationMatrix(t *testing.T) {
+	const clientName = "codex-cli"
+	const language = "go"
+	const legacyURL = "http://127.0.0.1:9200/mcp"
+	canonicalName := LSPRouterEntryName(language)
+	legacyNames := []string{
+		"mcp-language-server-go-legacy-a",
+		"mcp-language-server-go-legacy-b",
+	}
+	canonicalBaseline := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: canonicalName}
+	canonicalApplied := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: canonicalName,
+		Present: true, URL: LSPRouterURL(9137, language),
+	}
+	rows := func() []LSPRouterRecoveryRow {
+		out := []LSPRouterRecoveryRow{{Baseline: canonicalBaseline, Applied: &canonicalApplied}}
+		for _, name := range legacyNames {
+			baseline := LSPRouterEntrySnapshot{
+				Client: clientName, Language: language, EntryName: name,
+				Present: true, URL: legacyURL,
+			}
+			applied := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: name}
+			out = append(out, LSPRouterRecoveryRow{Baseline: baseline, Applied: &applied})
+		}
+		return out
+	}
+
+	for _, tc := range []struct {
+		name       string
+		aliasIndex int
+		mutate     func(*snapshotFakeClient, string)
+	}{
+		{
+			name:       "delete-first-alias",
+			aliasIndex: 0,
+			mutate: func(base *snapshotFakeClient, name string) {
+				delete(base.entries, name)
+			},
+		},
+		{
+			name:       "replace-first-alias",
+			aliasIndex: 0,
+			mutate: func(base *snapshotFakeClient, name string) {
+				base.entries[name] = clients.MCPEntry{Name: name, URL: "https://operator.example/lsp/go"}
+			},
+		},
+		{
+			name:       "disable-first-alias",
+			aliasIndex: 0,
+			mutate: func(base *snapshotFakeClient, name string) {
+				base.entries[name] = clients.MCPEntry{Name: name, URL: legacyURL, Disabled: true}
+			},
+		},
+		{
+			name:       "delete-non-first-alias",
+			aliasIndex: 1,
+			mutate: func(base *snapshotFakeClient, name string) {
+				delete(base.entries, name)
+			},
+		},
+		{
+			name:       "replace-non-first-alias",
+			aliasIndex: 1,
+			mutate: func(base *snapshotFakeClient, name string) {
+				base.entries[name] = clients.MCPEntry{Name: name, URL: "https://operator.example/lsp/go"}
+			},
+		},
+		{
+			name:       "disable-non-first-alias",
+			aliasIndex: 1,
+			mutate: func(base *snapshotFakeClient, name string) {
+				base.entries[name] = clients.MCPEntry{Name: name, URL: legacyURL, Disabled: true}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			base := newSnapshotFakeClient(clientName, true)
+			base.put(clients.MCPEntry{Name: canonicalName, URL: canonicalApplied.URL})
+			targetAlias := legacyNames[tc.aliasIndex]
+			adapter := &raceSnapshotClient{
+				snapshotFakeClient: base,
+				beforeConditional: func(entryName string) {
+					if entryName == canonicalName {
+						tc.mutate(base, targetAlias)
+					}
+				},
+			}
+
+			report, results, err := NewAPI().RestoreLSPRouterRecoveryRows(
+				rows(),
+				LSPClientRouterOpts{Clients: map[string]clients.Client{clientName: adapter}},
+				LSPRouterRestoreCallbacks{},
+			)
+			if err != nil {
+				t.Fatalf("row-local dependency conflict must not abort rollback: %v", err)
+			}
+			byEntry := map[string]LSPRouterRestoreRowResult{}
+			for _, result := range results {
+				byEntry[result.EntryName] = result
+			}
+			canonical, found := byEntry[canonicalName]
+			if len(results) != 3 || !found || canonical.Status != LSPRouterRestoreConflict ||
+				canonical.Reason != "skipped-dependency-conflict" || canonical.DependencyEntryName != targetAlias {
+				t.Fatalf("results=%+v, want canonical dependency conflict for %q", results, targetAlias)
+			}
+			if len(report.Pending) != 0 || base.removeCalls != 0 {
+				t.Fatalf("report=%+v removeCalls=%d, want no canonical inverse", report, base.removeCalls)
+			}
+			if canonicalLive, exists := base.entries[canonicalName]; !exists || canonicalLive.URL != canonicalApplied.URL {
+				t.Fatalf("canonical inverse changed the protected route: %+v", base.entries)
+			}
+			liveAliases := 0
+			for _, name := range legacyNames {
+				entry, exists := base.entries[name]
+				if exists && activeEntryPointsAtLegacyLSPPort(&entry, map[int]bool{9200: true}) {
+					liveAliases++
+				}
+			}
+			if liveAliases == 0 {
+				t.Fatalf("dependency refusal erased every live legacy route: %+v", base.entries)
+			}
+		})
+	}
+}
+
+func TestMCPFrontV3_RollbackPostInvocationDependencyChangeStaysPending(t *testing.T) {
+	const clientName = "codex-cli"
+	const language = "go"
+	const legacyName = "mcp-language-server-go-abcd"
+	const legacyURL = "http://127.0.0.1:9200/mcp"
+	const operatorURL = "https://operator.example/lsp/go"
+	canonicalName := LSPRouterEntryName(language)
+	canonicalApplied := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: canonicalName,
+		Present: true, URL: LSPRouterURL(9137, language),
+	}
+	canonicalBaseline := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: canonicalName}
+	legacyBaseline := LSPRouterEntrySnapshot{
+		Client: clientName, Language: language, EntryName: legacyName, Present: true, URL: legacyURL,
+	}
+	legacyApplied := LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacyName}
+	client := newSnapshotFakeClient(clientName, true)
+	client.put(clients.MCPEntry{Name: canonicalName, URL: canonicalApplied.URL})
+	client.postGroupMutation = func() {
+		client.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: operatorURL}
+	}
+
+	report, results, err := NewAPI().RestoreLSPRouterRecoveryRows(
+		[]LSPRouterRecoveryRow{
+			{Baseline: canonicalBaseline, Applied: &canonicalApplied},
+			{Baseline: legacyBaseline, Applied: &legacyApplied},
+		},
+		LSPClientRouterOpts{Clients: map[string]clients.Client{clientName: client}},
+		LSPRouterRestoreCallbacks{},
+	)
+	if err != nil {
+		t.Fatalf("a row-local post-invocation dependency change must remain pending without aborting recovery: %v", err)
+	}
+	if len(results) != 2 || results[0].EntryName != legacyName || results[0].Status != LSPRouterRestoreRestored ||
+		results[1].EntryName != canonicalName || results[1].Status != LSPRouterRestorePending ||
+		results[1].Reason != "rollback-ownership-unknown" || results[1].DependencyEntryName != legacyName {
+		t.Fatalf("results=%+v, want restored legacy then dependency-identified canonical pending", results)
+	}
+	if len(report.Pending) != 1 || report.Pending[0].EntryName != canonicalName || client.removeCalls != 1 {
+		t.Fatalf("report=%+v removeCalls=%d, want one invoked-but-pending canonical inverse", report, client.removeCalls)
+	}
+	if legacy := client.entries[legacyName]; legacy.URL != operatorURL {
+		t.Fatalf("post-invocation dependency state was not retained: %+v", legacy)
 	}
 }
 

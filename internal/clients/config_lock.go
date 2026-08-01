@@ -212,6 +212,63 @@ type ConditionalEntryMutationRequest struct {
 	BeforeMutation func(EntryMutationPreparation) error
 }
 
+// EntryMutationDependency is one additional live-entry predicate that must
+// hold under the target mutation's config lock. The wrapper derives the shared
+// ConfigPath; callers cannot supply a second path or a second mutation.
+type EntryMutationDependency struct {
+	EntryName    string
+	ExpectedLive func(*MCPEntry) bool
+}
+
+// EntryMutationDependencyObserved is one dependency observation made while
+// the target mutation's config lock was held. After is populated after an
+// invoked target mutation, even when that mutation returned an error.
+type EntryMutationDependencyObserved struct {
+	EntryName            string
+	Before               *MCPEntry
+	After                *MCPEntry
+	AfterMatchesExpected *bool
+	ObservationErr       error
+}
+
+// EntryMutationDependencyFailurePhase identifies the point in the one-lock
+// transaction where a dependency became unverifiable. The post-mutation cases
+// are deliberately distinct from a precondition conflict: the target may
+// already have been invoked, so callers must treat them as ownership unknown.
+type EntryMutationDependencyFailurePhase string
+
+const (
+	EntryMutationDependencyFailureBeforeRead             EntryMutationDependencyFailurePhase = "before-read"
+	EntryMutationDependencyFailureAfterRead              EntryMutationDependencyFailurePhase = "after-read"
+	EntryMutationDependencyFailureAfterPredicateMismatch EntryMutationDependencyFailurePhase = "after-predicate-mismatch"
+)
+
+// EntryMutationDependencyFailureKind distinguishes an unreadable dependency
+// from a readable dependency whose request-owned predicate no longer holds.
+type EntryMutationDependencyFailureKind string
+
+const (
+	EntryMutationDependencyFailureObservation       EntryMutationDependencyFailureKind = "observation"
+	EntryMutationDependencyFailurePredicateMismatch EntryMutationDependencyFailureKind = "predicate-mismatch"
+)
+
+// EntryMutationDependencyFailure is the typed, first-in-request-order
+// dependency failure. Cause is set only for an observation failure.
+type EntryMutationDependencyFailure struct {
+	Phase     EntryMutationDependencyFailurePhase
+	Kind      EntryMutationDependencyFailureKind
+	EntryName string
+	Cause     error
+}
+
+// ConditionalEntryGroupMutationRequest authorizes one existing target
+// Add/Remove operation against its target predicate and ordered dependency
+// predicates in one config-lock critical section.
+type ConditionalEntryGroupMutationRequest struct {
+	ConditionalEntryMutationRequest
+	Dependencies []EntryMutationDependency
+}
+
 // EntryMutationObserved is the complete same-critical-section observation.
 // Invoked is true only when AddEntry/RemoveEntry was actually called.
 type EntryMutationObserved struct {
@@ -225,6 +282,17 @@ type EntryMutationObserved struct {
 	ObservationErr       error
 }
 
+// ConditionalEntryGroupMutationObserved retains the target observation and
+// adds the ordered dependency observations plus the exact failed predicate.
+// PreconditionConflict remains true for either target or dependency mismatch.
+type ConditionalEntryGroupMutationObserved struct {
+	EntryMutationObserved
+	Dependencies      []EntryMutationDependencyObserved
+	ConflictScope     string // "target" | "dependency"
+	ConflictEntryName string
+	DependencyFailure *EntryMutationDependencyFailure
+}
+
 // ConditionalEntryMutator is implemented only by lockingClient. Concrete
 // adapters intentionally do not carry this method: the wrapper is the owner of
 // the cross-process critical section.
@@ -232,7 +300,14 @@ type ConditionalEntryMutator interface {
 	ConditionalEntryMutation(ConditionalEntryMutationRequest) EntryMutationObserved
 }
 
+// ConditionalEntryGroupMutator is implemented only by lockingClient. Concrete
+// adapters cannot bypass the single config-lock owner for dependency checks.
+type ConditionalEntryGroupMutator interface {
+	ConditionalEntryGroupMutation(ConditionalEntryGroupMutationRequest) ConditionalEntryGroupMutationObserved
+}
+
 var _ ConditionalEntryMutator = (*lockingClient)(nil)
+var _ ConditionalEntryGroupMutator = (*lockingClient)(nil)
 
 // newLockingClient wraps c so its mutating methods are config-file-locked.
 // Every clients factory (NewX / AllClients) returns the wrapped adapter so the
@@ -246,6 +321,19 @@ func newLockingClient(c Client) Client {
 // returns Invoked=false; a post-invocation readback is attempted even when the
 // adapter mutation itself returns an error.
 func (l *lockingClient) ConditionalEntryMutation(req ConditionalEntryMutationRequest) (observed EntryMutationObserved) {
+	return l.conditionalEntryMutationLocked(ConditionalEntryGroupMutationRequest{
+		ConditionalEntryMutationRequest: req,
+	}).EntryMutationObserved
+}
+
+// ConditionalEntryGroupMutation performs one target mutation only after the
+// target and every ordered dependency predicate pass under the same config
+// lock. It never accepts a caller-supplied path or performs a dependency write.
+func (l *lockingClient) ConditionalEntryGroupMutation(req ConditionalEntryGroupMutationRequest) ConditionalEntryGroupMutationObserved {
+	return l.conditionalEntryMutationLocked(req)
+}
+
+func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroupMutationRequest) (observed ConditionalEntryGroupMutationObserved) {
 	if req.EntryName == "" {
 		observed.PreparationErr = errors.New("conditional entry mutation: entry name is empty")
 		return observed
@@ -268,6 +356,24 @@ func (l *lockingClient) ConditionalEntryMutation(req ConditionalEntryMutationReq
 			"conditional entry mutation: unsupported operation %q", req.Operation)
 		return observed
 	}
+	seen := map[string]struct{}{req.EntryName: {}}
+	observed.Dependencies = make([]EntryMutationDependencyObserved, len(req.Dependencies))
+	for i, dependency := range req.Dependencies {
+		if dependency.EntryName == "" {
+			observed.PreparationErr = errors.New("conditional entry mutation: dependency entry name is empty")
+			return observed
+		}
+		if dependency.ExpectedLive == nil {
+			observed.PreparationErr = fmt.Errorf("conditional entry mutation: dependency %q expected-live matcher is nil", dependency.EntryName)
+			return observed
+		}
+		if _, duplicate := seen[dependency.EntryName]; duplicate {
+			observed.PreparationErr = fmt.Errorf("conditional entry mutation: dependency %q is duplicate or equals target", dependency.EntryName)
+			return observed
+		}
+		seen[dependency.EntryName] = struct{}{}
+		observed.Dependencies[i].EntryName = dependency.EntryName
+	}
 
 	lockErr := withConfigLock(l.Client.ConfigPath(), func() error {
 		before, readErr := l.Client.GetEntry(req.EntryName)
@@ -279,7 +385,31 @@ func (l *lockingClient) ConditionalEntryMutation(req ConditionalEntryMutationReq
 		if !req.ExpectedLive(before) {
 			observed.PreconditionConflict = true
 			observed.PreparationErr = ErrEntryMutationPreconditionConflict
+			observed.ConflictScope = "target"
+			observed.ConflictEntryName = req.EntryName
 			return nil
+		}
+		for i, dependency := range req.Dependencies {
+			dependencyBefore, dependencyErr := l.Client.GetEntry(dependency.EntryName)
+			observed.Dependencies[i].Before = dependencyBefore
+			if dependencyErr != nil {
+				observed.Dependencies[i].ObservationErr = dependencyErr
+				observed.ObservationErr = dependencyErr
+				observed.DependencyFailure = &EntryMutationDependencyFailure{
+					Phase:     EntryMutationDependencyFailureBeforeRead,
+					Kind:      EntryMutationDependencyFailureObservation,
+					EntryName: dependency.EntryName,
+					Cause:     dependencyErr,
+				}
+				return nil
+			}
+			if !dependency.ExpectedLive(dependencyBefore) {
+				observed.PreconditionConflict = true
+				observed.PreparationErr = ErrEntryMutationPreconditionConflict
+				observed.ConflictScope = "dependency"
+				observed.ConflictEntryName = dependency.EntryName
+				return nil
+			}
 		}
 		if req.BackupKeepN != nil {
 			backupPath, backupErr := l.Client.BackupKeep(*req.BackupKeepN)
@@ -306,6 +436,32 @@ func (l *lockingClient) ConditionalEntryMutation(req ConditionalEntryMutationReq
 			observed.MutationErr = l.Client.RemoveEntry(req.EntryName)
 		}
 		observed.After, observed.ObservationErr = l.Client.GetEntry(req.EntryName)
+		for i, dependency := range req.Dependencies {
+			dependencyAfter, dependencyErr := l.Client.GetEntry(dependency.EntryName)
+			observed.Dependencies[i].After = dependencyAfter
+			observed.Dependencies[i].ObservationErr = dependencyErr
+			if dependencyErr == nil {
+				matches := dependency.ExpectedLive(dependencyAfter)
+				observed.Dependencies[i].AfterMatchesExpected = &matches
+				if !matches && observed.DependencyFailure == nil {
+					observed.DependencyFailure = &EntryMutationDependencyFailure{
+						Phase:     EntryMutationDependencyFailureAfterPredicateMismatch,
+						Kind:      EntryMutationDependencyFailurePredicateMismatch,
+						EntryName: dependency.EntryName,
+					}
+				}
+			} else if observed.DependencyFailure == nil {
+				observed.DependencyFailure = &EntryMutationDependencyFailure{
+					Phase:     EntryMutationDependencyFailureAfterRead,
+					Kind:      EntryMutationDependencyFailureObservation,
+					EntryName: dependency.EntryName,
+					Cause:     dependencyErr,
+				}
+			}
+			if observed.ObservationErr == nil && dependencyErr != nil {
+				observed.ObservationErr = dependencyErr
+			}
+		}
 		return nil
 	})
 	if lockErr != nil && observed.ObservationErr == nil && observed.PreparationErr == nil {

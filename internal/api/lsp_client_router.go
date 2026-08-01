@@ -137,13 +137,16 @@ type LSPRouterClientPlan struct {
 }
 
 type LSPRouterMutationObservation struct {
-	Operation            LSPRouterPlannedOperation
-	ObservedState        LSPRouterEntrySnapshot
-	Invoked              bool
-	PreconditionConflict bool
-	PreparationErr       error
-	AdapterErr           error
-	ObservationErr       error
+	Operation                     LSPRouterPlannedOperation
+	ObservedState                 LSPRouterEntrySnapshot
+	Invoked                       bool
+	PreconditionConflict          bool
+	PreconditionConflictScope     string
+	PreconditionConflictEntryName string
+	DependencyFailure             *clients.EntryMutationDependencyFailure
+	PreparationErr                error
+	AdapterErr                    error
+	ObservationErr                error
 }
 
 type LSPRouterApplyCallbacks struct {
@@ -283,6 +286,17 @@ func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPR
 	report.Failed = append(report.Failed, plan.CaptureFailures...)
 	backedUp := map[string]bool{}
 	canonicalReady := map[string]bool{}
+	canonicalIntended := map[string]LSPRouterEntrySnapshot{}
+	for _, op := range plan.Operations {
+		if op.EntryName != LSPRouterEntryName(op.Language) {
+			continue
+		}
+		group := op.Client + "\x00" + op.Language
+		if _, exists := canonicalIntended[group]; exists {
+			return report, fmt.Errorf("duplicate canonical lsp router plan operation for %s/%s", op.Client, op.Language)
+		}
+		canonicalIntended[group] = op.IntendedState
+	}
 	for _, op := range plan.Operations {
 		group := op.Client + "\x00" + op.Language
 		if _, ok := canonicalReady[group]; !ok {
@@ -315,7 +329,7 @@ func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPR
 		}
 		var prepareCallbackErr error
 		mutation := clients.EntryMutationOperation(op.Operation)
-		observed := mutator.ConditionalEntryMutation(clients.ConditionalEntryMutationRequest{
+		request := clients.ConditionalEntryMutationRequest{
 			EntryName: op.EntryName,
 			ExpectedLive: func(live *clients.MCPEntry) bool {
 				return lspSnapshotStateEqual(
@@ -332,15 +346,54 @@ func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPR
 				}
 				return prepareCallbackErr
 			},
-		})
+		}
+		var observed clients.EntryMutationObserved
+		conflictScope := ""
+		conflictEntryName := ""
+		var dependencyFailure *clients.EntryMutationDependencyFailure
+		if op.Operation == "remove" && op.EntryName != LSPRouterEntryName(op.Language) {
+			canonical, found := canonicalIntended[group]
+			if !found {
+				capabilityErr := errors.New("planned legacy removal has no frozen canonical dependency")
+				report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "dependency-capability", capabilityErr))
+				continue
+			}
+			groupMutator, groupOK := adapter.(clients.ConditionalEntryGroupMutator)
+			if !groupOK {
+				capabilityErr := errors.New("planned adapter lacks conditional entry group mutation capability")
+				report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "dependency-capability", capabilityErr))
+				continue
+			}
+			groupObserved := groupMutator.ConditionalEntryGroupMutation(clients.ConditionalEntryGroupMutationRequest{
+				ConditionalEntryMutationRequest: request,
+				Dependencies: []clients.EntryMutationDependency{{
+					EntryName: LSPRouterEntryName(op.Language),
+					ExpectedLive: func(live *clients.MCPEntry) bool {
+						return lspSnapshotStateEqual(
+							lspSnapshotFromEntry(op.Client, op.Language, LSPRouterEntryName(op.Language), live),
+							canonical,
+						)
+					},
+				}},
+			})
+			observed = groupObserved.EntryMutationObserved
+			conflictScope = groupObserved.ConflictScope
+			conflictEntryName = groupObserved.ConflictEntryName
+			dependencyFailure = groupObserved.DependencyFailure
+		} else {
+			observed = mutator.ConditionalEntryMutation(request)
+		}
 		observation := LSPRouterMutationObservation{
-			Operation:            op,
-			Invoked:              observed.Invoked,
-			PreconditionConflict: observed.PreconditionConflict,
-			PreparationErr:       observed.PreparationErr,
-			AdapterErr:           observed.MutationErr,
-			ObservationErr:       observed.ObservationErr,
-			ObservedState:        lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.After),
+			Operation:                     op,
+			Invoked:                       observed.Invoked,
+			PreconditionConflict:          observed.PreconditionConflict,
+			PreconditionConflictScope:     conflictScope,
+			PreconditionConflictEntryName: conflictEntryName,
+			DependencyFailure:             dependencyFailure,
+			PreparationErr:                observed.PreparationErr,
+			AdapterErr:                    observed.MutationErr,
+			ObservationErr:                observed.ObservationErr,
+			ObservedState:                 lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.After),
 		}
 		if observed.BackupPath != "" {
 			report.Backups = append(report.Backups, LSPClientRouterBackup{Client: op.Client, Path: observed.BackupPath})
@@ -350,8 +403,10 @@ func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPR
 			observation.AdapterErr = ErrLSPRouterPlanPreconditionConflict
 			observation = LSPRouterMutationObservation{
 				Operation: op, ObservedState: lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.Before),
-				Invoked: false, PreconditionConflict: true, PreparationErr: observed.PreparationErr,
-				AdapterErr: ErrLSPRouterPlanPreconditionConflict,
+				Invoked: false, PreconditionConflict: true,
+				PreconditionConflictScope: conflictScope, PreconditionConflictEntryName: conflictEntryName,
+				DependencyFailure: dependencyFailure,
+				PreparationErr:    observed.PreparationErr, AdapterErr: ErrLSPRouterPlanPreconditionConflict,
 			}
 			if callbacks.OnPreconditionConflict != nil {
 				if callbackErr := callbacks.OnPreconditionConflict(observation); callbackErr != nil {
@@ -387,6 +442,17 @@ func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPR
 			}
 			if callbacks.OnFinished != nil {
 				return report, fmt.Errorf("lsp router plan readback %s/%s/%s: %w", op.Client, op.Language, op.EntryName, observed.ObservationErr)
+			}
+			continue
+		}
+		if observation.DependencyFailure != nil {
+			failureErr := observation.DependencyFailure.Cause
+			if failureErr == nil {
+				failureErr = errors.New("dependency readback no longer matches its requested live state")
+			}
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "dependency-readback", failureErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
 			}
 			continue
 		}

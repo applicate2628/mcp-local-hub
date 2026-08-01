@@ -71,11 +71,12 @@ type LSPRouterEntrySnapshot struct {
 }
 
 type LSPRouterRecoveryRow struct {
-	Baseline          LSPRouterEntrySnapshot  `json:"baseline"`
-	Applied           *LSPRouterEntrySnapshot `json:"applied,omitempty"`
-	Uncertain         bool                    `json:"uncertain,omitempty"`
-	Disposition       string                  `json:"disposition,omitempty"`
-	DispositionReason string                  `json:"disposition_reason,omitempty"`
+	Baseline            LSPRouterEntrySnapshot  `json:"baseline"`
+	Applied             *LSPRouterEntrySnapshot `json:"applied,omitempty"`
+	Uncertain           bool                    `json:"uncertain,omitempty"`
+	Disposition         string                  `json:"disposition,omitempty"`
+	DispositionReason   string                  `json:"disposition_reason,omitempty"`
+	DependencyEntryName string                  `json:"dependency_entry_name,omitempty"`
 }
 
 type LSPRouterRestoreStatus string
@@ -89,12 +90,13 @@ const (
 )
 
 type LSPRouterRestoreRowResult struct {
-	Client    string
-	Language  string
-	EntryName string
-	Status    LSPRouterRestoreStatus
-	Reason    string
-	Err       error
+	Client              string
+	Language            string
+	EntryName           string
+	DependencyEntryName string
+	Status              LSPRouterRestoreStatus
+	Reason              string
+	Err                 error
 }
 
 type LSPRouterRestoreCallbacks struct {
@@ -247,6 +249,13 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 		})
 		legacyRetryableBarrier := false
 		legacyConflictBarrier := false
+		legacyConflictEntryName := ""
+		markLegacyConflict := func(entryName string) {
+			legacyConflictBarrier = true
+			if legacyConflictEntryName == "" {
+				legacyConflictEntryName = entryName
+			}
+		}
 		for _, recovery := range groupRows {
 			row := recovery.Baseline
 			entryName := snapshotEntryName(row)
@@ -255,7 +264,10 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 				(recovery.Disposition == string(LSPRouterRestoreBaselineOnly) ||
 					recovery.Disposition == string(LSPRouterRestoreRestored))
 			if isCanonical && (legacyRetryableBarrier || legacyConflictBarrier) {
-				result := LSPRouterRestoreRowResult{Client: row.Client, Language: row.Language, EntryName: entryName}
+				result := LSPRouterRestoreRowResult{
+					Client: row.Client, Language: row.Language, EntryName: entryName,
+					DependencyEntryName: legacyConflictEntryName,
+				}
 				if legacyConflictBarrier {
 					result.Status = LSPRouterRestoreConflict
 					result.Reason = "skipped-dependency-conflict"
@@ -276,14 +288,15 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 			}
 			if recovery.Disposition == string(LSPRouterRestoreConflict) {
 				if !isCanonical {
-					legacyConflictBarrier = true
+					markLegacyConflict(entryName)
 				}
 				report.Skipped = append(report.Skipped, LSPClientRouterChange{
 					Client: row.Client, Language: row.Language, EntryName: entryName,
 				})
 				if err := emit(LSPRouterRestoreRowResult{
 					Client: row.Client, Language: row.Language, EntryName: entryName,
-					Status: LSPRouterRestoreConflict, Reason: recovery.DispositionReason,
+					DependencyEntryName: recovery.DependencyEntryName,
+					Status:              LSPRouterRestoreConflict, Reason: recovery.DispositionReason,
 				}); err != nil {
 					return report, results, err
 				}
@@ -298,7 +311,8 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 				}
 				if err := emit(LSPRouterRestoreRowResult{
 					Client: row.Client, Language: row.Language, EntryName: entryName,
-					Status: status, Reason: recovery.DispositionReason,
+					DependencyEntryName: recovery.DependencyEntryName,
+					Status:              status, Reason: recovery.DispositionReason,
 				}); err != nil {
 					return report, results, err
 				}
@@ -374,7 +388,7 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 						return report, results, err
 					}
 				} else {
-					legacyConflictBarrier = true
+					markLegacyConflict(entryName)
 					report.Skipped = append(report.Skipped, LSPClientRouterChange{
 						Client: row.Client, Language: row.Language, EntryName: entryName,
 					})
@@ -405,7 +419,7 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 						return report, results, err
 					}
 				} else {
-					legacyConflictBarrier = true
+					markLegacyConflict(entryName)
 					report.Skipped = append(report.Skipped, LSPClientRouterChange{
 						Client: row.Client, Language: row.Language, EntryName: entryName,
 					})
@@ -420,7 +434,7 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 			}
 			if lspSnapshotStateEqual(live, row) {
 				if !isCanonical && !legacyRouteReady(live, row) {
-					legacyConflictBarrier = true
+					markLegacyConflict(entryName)
 					report.Skipped = append(report.Skipped, LSPClientRouterChange{
 						Client: row.Client, Language: row.Language, EntryName: entryName,
 					})
@@ -449,7 +463,7 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 					Client: row.Client, Language: row.Language, EntryName: entryName, URL: snapshotPriorURL(live),
 				})
 				if !isCanonical {
-					legacyConflictBarrier = true
+					markLegacyConflict(entryName)
 				}
 				if err := emit(result); err != nil {
 					return report, results, err
@@ -502,7 +516,7 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 				backupKeepN = &keepN
 			}
 			var durablePrepareErr error
-			observed := mutator.ConditionalEntryMutation(clients.ConditionalEntryMutationRequest{
+			request := clients.ConditionalEntryMutationRequest{
 				EntryName: entryName,
 				ExpectedLive: func(entry *clients.MCPEntry) bool {
 					return lspSnapshotStateEqual(
@@ -522,7 +536,41 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 					}
 					return durablePrepareErr
 				},
-			})
+			}
+			var observed clients.EntryMutationObserved
+			conflictScope := ""
+			conflictEntryName := ""
+			var dependencyFailure *clients.EntryMutationDependencyFailure
+			if isCanonical {
+				dependencies := lspRollbackCanonicalDependencies(groupRows, row.Client, row.Language)
+				if len(dependencies) == 0 {
+					observed = mutator.ConditionalEntryMutation(request)
+				} else {
+					groupMutator, groupOK := adapter.(clients.ConditionalEntryGroupMutator)
+					if !groupOK {
+						capabilityErr := errors.New("adapter lacks conditional entry group mutation capability")
+						result := LSPRouterRestoreRowResult{
+							Client: row.Client, Language: row.Language, EntryName: entryName,
+							Status: LSPRouterRestorePending, Reason: "rollback-route-preservation-blocked", Err: capabilityErr,
+						}
+						report.Pending = append(report.Pending, LSPClientRouterChange{Client: row.Client, Language: row.Language, EntryName: entryName})
+						if err := emit(result); err != nil {
+							return report, results, err
+						}
+						continue
+					}
+					groupObserved := groupMutator.ConditionalEntryGroupMutation(clients.ConditionalEntryGroupMutationRequest{
+						ConditionalEntryMutationRequest: request,
+						Dependencies:                    dependencies,
+					})
+					observed = groupObserved.EntryMutationObserved
+					conflictScope = groupObserved.ConflictScope
+					conflictEntryName = groupObserved.ConflictEntryName
+					dependencyFailure = groupObserved.DependencyFailure
+				}
+			} else {
+				observed = mutator.ConditionalEntryMutation(request)
+			}
 			if observed.BackupPath != "" {
 				report.Backups = append(report.Backups, LSPClientRouterBackup{Client: row.Client, Path: observed.BackupPath})
 				backedUp[row.Client] = true
@@ -531,16 +579,60 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 				return report, results, durablePrepareErr
 			}
 			if observed.PreconditionConflict {
+				reason := "rollback-live-diverged"
+				if isCanonical && conflictScope == "dependency" {
+					reason = "skipped-dependency-conflict"
+				}
+				dependencyEntryName := ""
+				if conflictScope == "dependency" {
+					dependencyEntryName = conflictEntryName
+				}
+				if dependencyFailure != nil {
+					dependencyEntryName = dependencyFailure.EntryName
+				}
 				result := LSPRouterRestoreRowResult{
 					Client: row.Client, Language: row.Language, EntryName: entryName,
-					Status: LSPRouterRestoreConflict, Reason: "rollback-live-diverged",
+					DependencyEntryName: dependencyEntryName,
+					Status:              LSPRouterRestoreConflict, Reason: reason,
 				}
 				report.Skipped = append(report.Skipped, LSPClientRouterChange{
 					Client: row.Client, Language: row.Language, EntryName: entryName,
 				})
 				if !isCanonical {
-					legacyConflictBarrier = true
+					markLegacyConflict(entryName)
 				}
+				if err := emit(result); err != nil {
+					return report, results, err
+				}
+				continue
+			}
+			if isCanonical && !observed.Invoked && observed.ObservationErr != nil {
+				dependencyEntryName := ""
+				if dependencyFailure != nil {
+					dependencyEntryName = dependencyFailure.EntryName
+				}
+				result := LSPRouterRestoreRowResult{
+					Client: row.Client, Language: row.Language, EntryName: entryName,
+					DependencyEntryName: dependencyEntryName,
+					Status:              LSPRouterRestorePending, Reason: "rollback-route-preservation-blocked", Err: observed.ObservationErr,
+				}
+				report.Pending = append(report.Pending, LSPClientRouterChange{Client: row.Client, Language: row.Language, EntryName: entryName})
+				if err := emit(result); err != nil {
+					return report, results, err
+				}
+				continue
+			}
+			if isCanonical && observed.Invoked && dependencyFailure != nil {
+				result := LSPRouterRestoreRowResult{
+					Client:              row.Client,
+					Language:            row.Language,
+					EntryName:           entryName,
+					DependencyEntryName: dependencyFailure.EntryName,
+					Status:              LSPRouterRestorePending,
+					Reason:              "rollback-ownership-unknown",
+					Err:                 dependencyFailure.Cause,
+				}
+				report.Pending = append(report.Pending, LSPClientRouterChange{Client: row.Client, Language: row.Language, EntryName: entryName})
 				if err := emit(result); err != nil {
 					return report, results, err
 				}
@@ -584,7 +676,7 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 				continue
 			}
 			if !isCanonical && !legacyRouteReady(verified, row) {
-				legacyConflictBarrier = true
+				markLegacyConflict(entryName)
 				report.Skipped = append(report.Skipped, LSPClientRouterChange{
 					Client: row.Client, Language: row.Language, EntryName: entryName,
 				})
@@ -612,6 +704,33 @@ func (a *API) RestoreLSPRouterRecoveryRows(
 		}
 	}
 	return report, results, lspRouterReportError(report, "lsp client router recovery restore")
+}
+
+// lspRollbackCanonicalDependencies returns the exact legacy baseline predicates
+// required before a canonical inverse may proceed. The wrapper evaluates these
+// under the canonical target's config lock; prior barrier observations only
+// provide ordering and must never authorize the mutation.
+func lspRollbackCanonicalDependencies(groupRows []LSPRouterRecoveryRow, clientName, language string) []clients.EntryMutationDependency {
+	dependencies := make([]clients.EntryMutationDependency, 0, len(groupRows))
+	canonicalName := LSPRouterEntryName(language)
+	for _, recovery := range groupRows {
+		baseline := recovery.Baseline
+		entryName := snapshotEntryName(baseline)
+		if entryName == canonicalName {
+			continue
+		}
+		baselineCopy := baseline
+		dependencies = append(dependencies, clients.EntryMutationDependency{
+			EntryName: entryName,
+			ExpectedLive: func(entry *clients.MCPEntry) bool {
+				return legacyRouteReady(
+					lspSnapshotFromEntry(clientName, language, entryName, entry),
+					baselineCopy,
+				)
+			},
+		})
+	}
+	return dependencies
 }
 
 // legacyRouteReady is the sole dependency predicate for removing/restoring the

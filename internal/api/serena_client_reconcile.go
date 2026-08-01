@@ -378,7 +378,7 @@ type SerenaOwnedRestoreResult struct {
 // authority, and BaselinePresent selects the exact restore-vs-remove inverse.
 type SerenaOwnedRestoreRequest struct {
 	Client                     string
-	BackupPath                 string
+	BaselineBytes              []byte
 	ExpectedAppliedFingerprint string
 	BaselinePresent            bool
 }
@@ -747,11 +747,10 @@ func RestoreSerenaReconcileAppliedOwned(
 		}
 		var inverseErr error
 		if request.BaselinePresent {
-			snapshotBytes, readErr := os.ReadFile(request.BackupPath)
-			if readErr != nil {
-				inverseErr = fmt.Errorf("read pinned backup: %w", readErr)
+			if request.BaselineBytes == nil {
+				inverseErr = errors.New("missing verified baseline bytes")
 			} else {
-				inverseErr = mutator.CASRestoreEntryFromBytesForRollback(serenaEntryName, match, snapshotBytes)
+				inverseErr = mutator.CASRestoreEntryFromBytesForRollback(serenaEntryName, match, request.BaselineBytes)
 			}
 		} else {
 			inverseErr = mutator.CASGuardedRemoveEntry(serenaEntryName, match)
