@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup } from "@testing-library/preact";
+import { render, fireEvent, waitFor, cleanup, within } from "@testing-library/preact";
 import { SettingsScreen } from "./Settings";
 import * as api from "../lib/settings-api";
 import type { SettingsEnvelope, SettingsSnapshot } from "../lib/settings-types";
@@ -31,6 +31,8 @@ const fakeEnv: SettingsEnvelope = {
     { key: "backups.clean_now", section: "backups", type: "action", deferred: true, help: "" },
     { key: "advanced.open_app_data_folder", section: "advanced", type: "action", deferred: false, help: "" },
     { key: "advanced.export_config_bundle", section: "advanced", type: "action", deferred: true, help: "" },
+    { key: "mcp_front.port", section: "advanced", type: "int",
+      default: "9137", value: "9137", min: 1024, max: 65535, deferred: false, help: "MCP front port help" },
   ],
 };
 
@@ -38,10 +40,25 @@ const fakeEnv: SettingsEnvelope = {
 // (lifted to App level). Tests construct fake SettingsSnapshot objects
 // directly instead of relying on the hook's internal API call.
 function okSnap(data: SettingsEnvelope): SettingsSnapshot {
-  return { status: "ok", data, error: null, refresh: vi.fn(async () => {}) };
+  return {
+    status: "ok",
+    data,
+    error: null,
+    refresh: vi.fn(async () => {}),
+  };
 }
-const loadingSnap: SettingsSnapshot = { status: "loading", data: null, error: null, refresh: vi.fn(async () => {}) };
-const errorSnap: SettingsSnapshot = { status: "error", data: null, error: new Error("boom"), refresh: vi.fn(async () => {}) };
+const loadingSnap: SettingsSnapshot = {
+  status: "loading",
+  data: null,
+  error: null,
+  refresh: vi.fn(async () => {}),
+};
+const errorSnap: SettingsSnapshot = {
+  status: "error",
+  data: null,
+  error: new Error("boom"),
+  refresh: vi.fn(async () => {}),
+};
 
 const stubRoute = (query: string): RouterState => ({ screen: "settings", query });
 
@@ -112,9 +129,26 @@ describe("SettingsScreen", () => {
     expect(onDirty).toHaveBeenLastCalledWith(false);
   });
 
+  it("includes Advanced port edits and Reset in the canonical screen dirty guard", async () => {
+    const onDirty = vi.fn();
+    const { getByRole } = render(
+      <SettingsScreen route={stubRoute("")} onDirtyChange={onDirty} snapshot={okSnap(fakeEnv)} />,
+    );
+    const input = getByRole("spinbutton", { name: /MCP front port/ }) as HTMLInputElement;
+    const advanced = input.closest('section[data-section="advanced"]') as HTMLElement;
+
+    fireEvent.input(input, { target: { value: "9144" } });
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(true));
+
+    fireEvent.click(within(advanced).getByRole("button", { name: "Reset" }));
+    await waitFor(() => expect(onDirty).toHaveBeenLastCalledWith(false));
+    expect(onDirty.mock.calls.map(([dirty]) => dirty)).toEqual([false, true, false]);
+  });
+
   it("error state renders Retry button", async () => {
     const { findByText, findByRole } = render(<SettingsScreen route={stubRoute("")} onDirtyChange={() => {}} snapshot={errorSnap} />);
     expect(await findByText(/Could not load settings/)).toBeTruthy();
-    expect(await findByRole("button", { name: "Retry" })).toBeTruthy();
+    fireEvent.click(await findByRole("button", { name: "Retry" }));
+    expect(errorSnap.refresh).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,20 +1,14 @@
 // internal/api/mcp_front_port_gui_visibility_pr588_test.go
 //
-// codex bot PR #588 P2: the mcp_front.port registry entry claimed the
-// "advanced" section made it visible in the GUI "via the generic
-// FieldRenderer". It did not — SectionAdvanced renders only hard-coded
-// controls, and FieldRenderer is referenced by no section at all.
-//
-// The claim is now retracted in the registry comment. These two tests keep
-// the CORRECTED claim honest from both sides:
+// These two tests keep the mcp_front.port registry comment honest across the
+// Go settings owner and its two management surfaces:
 //
 //   - the surface that DOES work (the settings CLI/registry path) is pinned
 //     positively, so "CLI-managed" is a verified statement rather than
 //     another assertion nobody checked;
-//   - the absent surface is pinned by a cross-language drift gate that FAILS
-//     the moment a generic registry-field rendering path is added to
-//     SectionAdvanced — forcing the comment to be updated in the same change
-//     instead of rotting into a second false claim.
+//   - the explicit Advanced-section frontend binding is pinned by a positive
+//     cross-language drift gate, so removing any link from the literal key to
+//     the typed registry definition, shared save flow, or rendered input fails.
 package api
 
 import (
@@ -79,32 +73,36 @@ func TestMCPFrontPortSetting_IsManageableThroughTheSettingsCLI(t *testing.T) {
 	}
 }
 
-// TestSectionAdvanced_StillHasNoGenericRegistryFieldRendering is the
-// cross-language drift gate for the corrected registry comment.
-//
-// This is a deliberate INVERTED guard: it asserts an ABSENCE that the
-// registry comment currently documents. When someone adds the frontend
-// control or the generic-field rendering path (tracked in
-// work-items/bugs/2026-07-26-mcp-front-port-not-rendered-in-gui-advanced-section.md),
-// this test FAILS — and its message says to delete it and update the
-// mcp_front.port comment in settings_registry.go. That is the intended
-// workflow: a Go comment making a claim about TypeScript cannot be checked by
-// the compiler, so the only thing that stops it from rotting a second time is
-// a gate that trips when the claim stops being true.
-func TestSectionAdvanced_StillHasNoGenericRegistryFieldRendering(t *testing.T) {
+// TestSectionAdvanced_RendersMCPFrontPortThroughExplicitControl is the
+// positive cross-language drift gate for the registry comment. The frontend
+// has no Go import boundary, so this test pins the complete source-level
+// binding instead: literal key, Advanced-section ownership, typed registry
+// lookup, shared save flow, and the rendered input's read/write path.
+func TestSectionAdvanced_RendersMCPFrontPortThroughExplicitControl(t *testing.T) {
 	path := filepath.Join("..", "gui", "frontend", "src", "components", "settings", "SectionAdvanced.tsx")
 	raw, err := os.ReadFile(path)
 	if err != nil {
-		t.Skipf("frontend source not available at %s (%v); the drift gate only runs from a full checkout", path, err)
+		t.Fatalf("read frontend source at %s: %v", path, err)
 	}
-	src := string(raw)
+	src := strings.Join(strings.Fields(string(raw)), " ")
 
-	for _, marker := range []string{"FieldRenderer", "useSectionSaveFlow", MCPFrontPortSettingKey} {
-		if !strings.Contains(src, marker) {
-			continue
+	markers := []struct {
+		name string
+		text string
+	}{
+		{name: "literal registry key", text: `const MCP_FRONT_PORT_KEY = "mcp_front.port";`},
+		{name: "Advanced section ownership", text: `const SECTION_KEYS = [MCP_FRONT_PORT_KEY];`},
+		{name: "shared section save flow", text: `useSectionSaveFlow(snapshot, SECTION_KEYS, onDirtyChange)`},
+		{name: "typed registry definition lookup", text: `setting.key === MCP_FRONT_PORT_KEY && setting.type === "int"`},
+		{name: "rendered control", text: `data-testid="mcp-front-port-input"`},
+		{name: "registry-backed value", text: `value={flow.effective(MCP_FRONT_PORT_KEY)}`},
+		{name: "deferred and busy disablement", text: `disabled={portDef.deferred || flow.busy}`},
+		{name: "local edit path", text: `flow.setLocal( MCP_FRONT_PORT_KEY,`},
+		{name: "shared save footer", text: `<SectionFooter flow={footerFlow} />`},
+	}
+	for _, marker := range markers {
+		if !strings.Contains(src, marker.text) {
+			t.Errorf("SectionAdvanced.tsx lost the explicit mcp_front.port %s binding; missing normalized source marker %q", marker.name, marker.text)
 		}
-		t.Fatalf("SectionAdvanced.tsx now references %q, so it very likely DOES render registry-declared settings — which the mcp_front.port comment in settings_registry.go currently says it does NOT.\n"+
-			"ACTION: if the advanced section now renders %s (or any registry field), delete this test and update that comment to describe the new GUI surface; also close "+
-			"work-items/bugs/2026-07-26-mcp-front-port-not-rendered-in-gui-advanced-section.md.", marker, MCPFrontPortSettingKey)
 	}
 }
