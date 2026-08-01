@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
@@ -62,12 +63,10 @@ type FS interface {
 	OpenDir(path string) (DirReader, error)
 }
 
-// DirReader is the paged directory seam. Its ReadDir contract is os.File's:
-// n>0 returns at most n entries and io.EOF only with the final short page.
-type DirReader interface {
-	ReadDir(n int) ([]os.DirEntry, error)
-	Close() error
-}
+// DirReader remains a package alias for compatibility with the existing
+// deterministic test seams. Generic paging and close ownership live in
+// boundedio.
+type DirReader = boundedio.DirReader
 
 type osFS struct{}
 
@@ -102,70 +101,24 @@ func readMetadataLimited(fsys FS, path string, limit int64) ([]byte, bool, error
 	return readMetadataLimitedContext(context.Background(), fsys, path, limit)
 }
 
-func readMetadataLimitedContext(ctx context.Context, fsys FS, path string, limit int64) (data []byte, truncated bool, err error) {
-	rc, err := fsys.Open(path)
+func readMetadataLimitedContext(ctx context.Context, fsys FS, path string, limit int64) ([]byte, bool, error) {
+	result, err := boundedio.ReadFile(ctx, fsys, path, limit, 64<<10)
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() {
-		if closeErr := rc.Close(); err == nil && closeErr != nil {
-			err = closeErr
-		}
-	}()
-	data = make([]byte, 0, min(int64(64<<10), limit+1))
-	buffer := make([]byte, 64<<10)
-	for int64(len(data)) < limit+1 {
-		if ctx.Err() != nil {
-			return nil, false, ctx.Err()
-		}
-		remaining := limit + 1 - int64(len(data))
-		chunk := buffer
-		if int64(len(chunk)) > remaining {
-			chunk = chunk[:remaining]
-		}
-		n, readErr := rc.Read(chunk)
-		if n > 0 {
-			data = append(data, chunk[:n]...)
-		}
-		if readErr != nil {
-			if errors.Is(readErr, io.EOF) {
-				break
-			}
-			return nil, false, readErr
-		}
-		if n == 0 {
-			return nil, false, io.ErrNoProgress
-		}
-	}
-	if int64(len(data)) > limit {
-		return data[:limit], true, nil
-	}
-	return data, false, nil
+	return result.Data, result.Limited, nil
 }
 
-// readDirBounded requests exactly the admitted entries plus one sentinel from
-// the directory stream. It never calls os.ReadDir and never materializes the
-// tail merely to slice it afterward.
-func readDirBounded(fsys FS, path string, limit int) (entries []os.DirEntry, exceeded bool, err error) {
-	dir, err := fsys.OpenDir(path)
+const directoryReadPageEntries = 128
+
+// readDirBounded delegates generic paging, terminal-request arithmetic, exact
+// close ownership, and whole-directory overflow omission to boundedio.
+func readDirBounded(ctx context.Context, fsys FS, path string, limit int) ([]os.DirEntry, bool, error) {
+	result, err := boundedio.ReadDirComplete(ctx, fsys, path, limit, directoryReadPageEntries)
 	if err != nil {
 		return nil, false, err
 	}
-	defer func() {
-		if closeErr := dir.Close(); err == nil && closeErr != nil {
-			entries, exceeded, err = nil, false, closeErr
-		}
-	}()
-	entries, err = dir.ReadDir(limit + 1)
-	if err != nil && !errors.Is(err, io.EOF) {
-		return nil, false, err
-	}
-	exceeded = len(entries) > limit
-	if exceeded {
-		entries = entries[:limit]
-	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].Name() < entries[j].Name() })
-	return entries, exceeded, nil
+	return result.Entries, result.Limited, nil
 }
 
 // probeDir reports whether path is an existing directory, TRI-STATE.
@@ -234,8 +187,8 @@ type phaseLogFile struct {
 // marker-file shapes in portDir. Returns ok=false (not an error) when
 // nothing matched; returns candidates when MORE THAN ONE distinct triplet
 // value was found (never silently picks one).
-func detectTripletFromPortDir(fsys FS, portDir string, limit int) (triplet string, candidates []string, ok, limitExceeded bool, err error) {
-	entries, limitExceeded, err := readDirBounded(fsys, portDir, limit)
+func detectTripletFromPortDir(ctx context.Context, fsys FS, portDir string, limit int) (triplet string, candidates []string, ok, limitExceeded bool, err error) {
+	entries, limitExceeded, err := readDirBounded(ctx, fsys, portDir, limit)
 	if err != nil {
 		return "", nil, false, false, err
 	}
@@ -303,14 +256,18 @@ type portDirClassification struct {
 // can belong to a try_compile CAPABILITY PROBE rather than the port's real
 // build, so it is kept separate rather than silently folded into the
 // primary phase scan.
-func classifyPortDir(fsys FS, portDir, triplet string, limits responseLimits) (out portDirClassification, err error) {
-	entries, exceeded, err := readDirBounded(fsys, portDir, limits.directoryEntries)
+func classifyPortDir(ctx context.Context, fsys FS, portDir, triplet string, limits responseLimits) (out portDirClassification, err error) {
+	entries, exceeded, err := readDirBounded(ctx, fsys, portDir, limits.directoryEntries)
 	if err != nil {
 		return out, err
 	}
 	out.directoryLimitExceeded = exceeded
 	out.entriesExamined = len(entries)
 	if exceeded {
+		// boundedio intentionally omits the overflowing directory prefix.
+		// High-water reporting still records the admitted semantic ceiling,
+		// not the zero public entries returned after whole-directory omission.
+		out.entriesExamined = limits.directoryEntries
 		return out, nil
 	}
 

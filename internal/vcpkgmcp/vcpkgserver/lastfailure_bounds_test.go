@@ -165,17 +165,14 @@ func TestVcpkgLastFailure_ConcurrentLimitIsContextAware(t *testing.T) {
 	req := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: json.RawMessage(`{}`)}}
 	ctx1, cancel1 := context.WithCancel(t.Context())
 	defer cancel1()
-	resultCh := make(chan *mcp.CallToolResult, 4)
-	call := func(ctx context.Context) { result, _ := vs.lastFailureTool(ctx, req); resultCh <- result }
+	resultCh := make(chan projectableToolOutcome, 4)
+	call := func(ctx context.Context) { resultCh <- vs.lastFailureTool(ctx, req) }
 	go call(ctx1)
 	go call(t.Context())
 	<-started
 	<-started
-	third, err := vs.lastFailureTool(t.Context(), req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if reason := resultReason(t, third); reason != string(lastfailure.ReasonResourceBusy) {
+	third := vs.lastFailureTool(t.Context(), req)
+	if reason := lastFailureOutcomeReason(t, third); reason != lastfailure.ReasonResourceBusy {
 		t.Fatalf("third reason=%q, want resource_busy", reason)
 	}
 	if starts.Load() != 2 {
@@ -194,6 +191,24 @@ func TestVcpkgLastFailure_ConcurrentLimitIsContextAware(t *testing.T) {
 	if active.Load() != 0 {
 		t.Fatalf("active=%d after all return paths", active.Load())
 	}
+}
+
+func lastFailureOutcomeReason(t *testing.T, outcome projectableToolOutcome) lastfailure.Reason {
+	t.Helper()
+	if outcome.invalidArgument != nil {
+		t.Fatalf("last-failure typed outcome has invalid arguments: %v", outcome.invalidArgument)
+	}
+	if outcome.err != nil {
+		t.Fatalf("last-failure typed outcome has internal error: %v", outcome.err)
+	}
+	if outcome.result == nil {
+		t.Fatal("last-failure typed outcome has nil projectable result")
+	}
+	result, ok := outcome.result.(lastfailure.Result)
+	if !ok {
+		t.Fatalf("last-failure typed outcome result=%T, want lastfailure.Result", outcome.result)
+	}
+	return result.Reason
 }
 
 func resultReason(t *testing.T, result *mcp.CallToolResult) string {

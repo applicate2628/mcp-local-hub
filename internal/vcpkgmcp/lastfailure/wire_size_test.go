@@ -1,7 +1,6 @@
 package lastfailure
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,13 +9,6 @@ import (
 	"strings"
 	"testing"
 )
-
-// wireBodyCeiling is the whole-response ceiling this probe asserts, held as a
-// test-local literal so the probe can be run against a tree that does not yet
-// declare the production constant. TestWireSize_CeilingMatchesProduction pins
-// the two together, so the instrument cannot drift away from the bound it
-// claims to be measuring.
-const wireBodyCeiling = 256 << 10
 
 // probeOversize is the pathological payload size every case below plants in a
 // DIFFERENT unbounded position. 3 MiB is chosen to sit under scanDiagnostics'
@@ -107,23 +99,15 @@ func TestWireSize_EveryProducerIsBounded(t *testing.T) {
 			}
 			res := LastFailure(args, Deps{FS: DefaultFS(), Getenv: func(string) string { return "" }})
 
-			body, err := json.MarshalIndent(res, "", "  ")
-			if err != nil {
-				t.Fatal(err)
-			}
 			// Field-agnostic: the walk finds a string this test never named,
 			// which is the whole point — the previous bound was written from an
 			// enumeration of the fields already known to be unsafe.
 			over := oversizeStrings(res, maxWireStringBytes())
-			t.Logf("%-52s body=%8d B  oversize fields: %v", tc.name, len(body), over)
+			t.Logf("%-52s oversize fields: %v", tc.name, over)
 
 			if len(over) > 0 {
 				t.Errorf("Result carries unbounded string(s) %v — every string a Result lifts out of a log or a "+
 					"wrapper line must be bounded by the response budget, not only Diagnostic.Text", over)
-			}
-			if len(body) > wireBodyCeiling {
-				t.Errorf("whole response is %d bytes (~%dk tokens), ceiling is %d — a single pathological line "+
-					"still defeats the response budget", len(body), len(body)/4/1000, wireBodyCeiling)
 			}
 			// The bound must never be able to manufacture a different answer.
 			if res.Status != Status("failed") {

@@ -120,6 +120,60 @@ func TestProjectionRowsThatPreviouslyContradictedTheirDomains(t *testing.T) {
 	}
 }
 
+func TestDiagnosticsDroppedExactnessMatrix(t *testing.T) {
+	states := []evidenceDomainState{
+		domainNotStarted,
+		domainNotApplicable,
+		domainSettledComplete,
+		domainLimited,
+		domainUnreadable,
+		domainCancelled,
+		domainInvalid,
+	}
+
+	for _, directoryEntries := range states {
+		for _, relevantLogs := range states {
+			for _, logBytes := range states {
+				for _, diagnostics := range states {
+					got := projection(
+						domainNotApplicable, domainNotApplicable,
+						directoryEntries, relevantLogs, logBytes, diagnostics,
+						domainNotApplicable, domainNotApplicable, domainNotApplicable,
+						evidence.StatusUnknown, ReasonBuildInterrupted,
+					).diagnosticsDroppedExact()
+					want := (directoryEntries == domainNotApplicable &&
+						relevantLogs == domainNotApplicable &&
+						logBytes == domainNotApplicable &&
+						diagnostics == domainNotApplicable) ||
+						(directoryEntries == domainSettledComplete &&
+							relevantLogs == domainSettledComplete &&
+							(logBytes == domainSettledComplete || logBytes == domainNotApplicable) &&
+							(diagnostics == domainSettledComplete || diagnostics == domainNotApplicable))
+					if got != want {
+						t.Fatalf("directory_entries=%d relevant_logs=%d log_bytes=%d diagnostics=%d: exact=%v, want %v",
+							directoryEntries, relevantLogs, logBytes, diagnostics, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestBuildInterruptedPreservesEarlierProducerIncompleteness(t *testing.T) {
+	state := newCallState(defaultResponseLimits)
+	state.report.Completeness.LogBytes = false
+	projected, ok := projectStopClass(stopScanInterrupted, state, Result{})
+	if !ok {
+		t.Fatal("build-interrupted projection missing")
+	}
+	if projected.logBytes != domainLimited || projected.diagnostics != domainSettledComplete {
+		t.Fatalf("projection=%#v, want limited log bytes and settled diagnostics", projected)
+	}
+	if projected.diagnosticsDroppedExact() {
+		t.Fatal("limited log bytes with settled diagnostics reported an exact dropped count")
+	}
+}
+
 func TestMissingProjectionFailsClosedAndSerializes(t *testing.T) {
 	state := newCallState(defaultResponseLimits)
 	state.report.Omitted.LogPaths = 3

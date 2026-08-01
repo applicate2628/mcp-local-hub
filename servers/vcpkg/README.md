@@ -68,6 +68,13 @@ There are no hardcoded machine paths. A path that appears in a test fixture is t
 
 ## Two limits worth knowing
 
+- **Every successful result has a 256-KiB exact JSON ceiling.** The server
+  measures the indented JSON text it sends, not an estimate. An ordinary result
+  under that ceiling is unchanged. If a complete result exceeds it, the owning
+  tool returns its causal core and an additive `result_projection` object with
+  `complete: false` and closed omission metadata; it never slices JSON or
+  presents a retained prefix as complete.
+
 - **`vcpkg_pin_status` cannot report "behind".** `git ls-remote` can prove a ref is at the tip or that
   it cannot be compared; it cannot measure distance. So you get `current` or `unknown(<why>)`. Tags and
   branches are `unknown(named_ref_not_comparable)` with the commit they point at — existence proves the
@@ -77,6 +84,10 @@ There are no hardcoded machine paths. A path that appears in a test fixture is t
   evidence returns `unknown(remote_url_credential_bearing)`; any other non-empty query value returns
   `unknown(remote_url_query_unclassified)`. Empty or valueless query segments remain admissible. Use a
   credential helper.
+- **A failed remote lifecycle has a typed causal field.** A per-port remote
+  failure retains the established `status` and `reason` and additionally emits
+  `failure.id` with a fixed safe `failure.detail`. It never publishes raw Git
+  stderr, process error text, remote URLs, or credentials in that field.
 - **Caller-supplied filesystem targets are absolute-path contracts.** A relative `vcpkg_pin_status.port_dirs`
   entry returns `failed(relative_port_dir)` before filesystem or network access; a relative
   `vcpkg_cmake_trace.trace_path` returns `failed(relative_trace_path)` before filesystem access. The hub never

@@ -267,6 +267,33 @@ type FetchCandidate struct {
 	BindsSourcePath           bool   `json:"binds_source_path,omitempty"`
 }
 
+// FailureID is the stable public identifier for a remote-query lifecycle
+// failure. It is deliberately independent from Reason: Reason preserves the
+// established tri-state compatibility vocabulary, while this field gives a
+// caller a causal category without exposing raw process output.
+type FailureID string
+
+const (
+	FailureRemoteStartFailed             FailureID = "VCPKG_REMOTE_START_FAILED"
+	FailureProcessContainmentUnavailable FailureID = "VCPKG_PROCESS_CONTAINMENT_UNAVAILABLE"
+	FailureRemoteParseLimit              FailureID = "VCPKG_REMOTE_PARSE_LIMIT"
+	FailureRemoteCanceled                FailureID = "VCPKG_REMOTE_CANCELED"
+	FailureRemoteTimeout                 FailureID = "VCPKG_REMOTE_TIMEOUT"
+	FailureProcessCleanupTimeout         FailureID = "VCPKG_PROCESS_CLEANUP_TIMEOUT"
+	FailureGitExitNonzero                FailureID = "VCPKG_GIT_EXIT_NONZERO"
+	FailureRemoteQueryFailed             FailureID = "VCPKG_REMOTE_QUERY_FAILED"
+)
+
+// PublicFailure is the public causal core for one remote lifecycle failure.
+// Detail is a fixed category owned by this package, never raw stderr, a URL,
+// a path, or a process error string.
+type PublicFailure struct {
+	ID       FailureID   `json:"id"`
+	CauseIDs []FailureID `json:"cause_ids,omitempty"`
+	ExitCode *int        `json:"exit_code,omitempty"`
+	Detail   string      `json:"detail,omitempty"`
+}
+
 // PortResult is the vcpkg_pin_status answer for one port directory.
 type PortResult struct {
 	PortDir string `json:"port_dir"`
@@ -304,6 +331,9 @@ type PortResult struct {
 	// only with ReasonNamedRefNotComparable.
 	NamedRef    string `json:"named_ref,omitempty"`
 	NamedRefSHA string `json:"named_ref_sha,omitempty"`
+	// Failure carries a stable causal category only when the remote query
+	// lifecycle failed. Existing Status/Reason remain the compatibility verdict.
+	Failure *PublicFailure `json:"failure,omitempty"`
 
 	// ObservedAt is when THIS call queried (or, for network-disabled/parse
 	// failures, would have queried) the remote. This package does not
@@ -340,6 +370,10 @@ type Result struct {
 	// ok|failed|unknown(reason) contract this binary is built on.
 	Status Status      `json:"status"`
 	Reason BatchReason `json:"reason,omitempty"`
+	// Failure is reserved for a future call-wide remote lifecycle failure that
+	// no individual PortResult can own. Current batch failures are represented
+	// by their existing batch reason and leave this field absent.
+	Failure *PublicFailure `json:"failure,omitempty"`
 
 	Ports []PortResult `json:"ports"`
 }

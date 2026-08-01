@@ -38,7 +38,6 @@ type responseLimits struct {
 	listEntries             int
 	pathBytes               int
 	commandBytes            int
-	responseBytes           int
 }
 
 func parseConfiguredOverlays(data []byte, limits responseLimits) ([]string, int, error) {
@@ -112,7 +111,6 @@ var defaultResponseLimits = responseLimits{
 	listEntries:             MaxWireListEntries,
 	pathBytes:               MaxWirePathBytes,
 	commandBytes:            MaxWireCommandBytes,
-	responseBytes:           MaxResponseBytes,
 }
 
 // Completeness reports whether each evidence class was examined to its natural
@@ -409,7 +407,15 @@ func projectStopClass(class stopClass, state *callState, result Result) (evidenc
 		return projection(c, m, c, c, na, na, c, na, e,
 			evidence.StatusUnknown, ReasonNoPhaseLogsFound), true
 	case stopScanInterrupted:
-		return projection(c, m, c, c, c, c, p, o, e,
+		// An observed interruption decides the terminal reason, but it cannot
+		// manufacture completeness for a producer domain that had already
+		// exhausted its byte or diagnostic budget. In particular, a retained
+		// prefix can contain the interrupt marker after log_bytes became
+		// limited; diagnostics_dropped_exact must remain false in that case.
+		return projection(c, m, c, c,
+			projectedScanCompleteness(state.report.Completeness.LogBytes),
+			projectedScanCompleteness(state.report.Completeness.Diagnostics),
+			p, o, e,
 			evidence.StatusUnknown, ReasonBuildInterrupted), true
 	case stopScanArtifactLimited:
 		return projection(c, m, c, c, l, l, p, o, e,
@@ -544,6 +550,17 @@ func finalizeProjectedResult(result Result, state *callState) Result {
 	result.Resources.Completeness = projected.completeness()
 	result.DiagnosticsDroppedExact = projected.diagnosticsDroppedExact()
 	return boundResponse(result)
+}
+
+// projectedScanCompleteness preserves the producer-owned completeness fact
+// when a terminal outcome is projected. It deliberately maps every incomplete
+// producer state to limited: ResourceReport exposes an incomplete boolean,
+// while the stop class continues to own the more specific terminal reason.
+func projectedScanCompleteness(complete bool) evidenceDomainState {
+	if complete {
+		return domainSettledComplete
+	}
+	return domainLimited
 }
 
 func (p evidenceProjection) completeness() Completeness {

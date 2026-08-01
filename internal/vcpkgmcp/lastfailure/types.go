@@ -339,26 +339,11 @@ const (
 	// something that does not exist. The affected value also says so in band
 	// (see truncationMarker), so a caller reading one field never has to find
 	// this note to learn the value is unusable.
-	NoteResponseValueTruncated Note = "response_value_truncated_to_wire_budget"
-	// NoteResponseSizeBackstopEngaged: the whole marshaled response exceeded
-	// MaxResponseBytes even after every per-field cap, so the tool returned a
-	// REDUCED document — the verdict, the headline error, the diagnostic log,
-	// the exit code, a bounded prefix of log_paths, and the notes; everything
-	// else was dropped and diagnostics_dropped absorbed the diagnostic count.
-	//
-	// Nothing about the ANSWER changed: the reduction copies fields forward and
-	// recomputes nothing. Read the primary logs via log_paths for what is
-	// missing.
-	//
-	// This note firing is also a defect signal worth reporting upstream. The
-	// per-field caps are sized so the backstop is unreachable on any answer
-	// they have shaped, so it engaging means a Result field exists that nothing
-	// bounds — the exact class the backstop was added to survive.
-	NoteResponseSizeBackstopEngaged Note = "response_reduced_by_size_backstop"
-	NoteProducerLimitEngaged        Note = "producer_limit_engaged"
-	NoteCausalityInvariantViolated  Note = "failed_causality_invariant_violated"
-	NoteOverlayConfigUnreadable     Note = "overlay_chain_vcpkg_configuration_unreadable"
-	NoteOverlayConfigLimitExceeded  Note = "overlay_chain_vcpkg_configuration_limit_exceeded"
+	NoteResponseValueTruncated     Note = "response_value_truncated_to_wire_budget"
+	NoteProducerLimitEngaged       Note = "producer_limit_engaged"
+	NoteCausalityInvariantViolated Note = "failed_causality_invariant_violated"
+	NoteOverlayConfigUnreadable    Note = "overlay_chain_vcpkg_configuration_unreadable"
+	NoteOverlayConfigLimitExceeded Note = "overlay_chain_vcpkg_configuration_limit_exceeded"
 )
 
 // ContextSource names one input the answer actually rests on. Closed enum,

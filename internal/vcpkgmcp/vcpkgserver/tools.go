@@ -14,12 +14,39 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/patchesapply"
 	"mcp-local-hub/internal/vcpkgmcp/pinstatus"
 	"mcp-local-hub/internal/vcpkgmcp/portresolution"
+	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
+
+const resultProjectionDescription = " Every successful result is measured as indented JSON and is bounded to 256 KiB; an oversized complete result retains its package-owned causal core and adds result_projection with explicit omissions."
+
+type projectableToolOutcome struct {
+	invalidArgument error
+	err             error
+	result          publicresult.Projectable
+}
+
+type projectableToolHandler func(context.Context, *mcp.CallToolRequest) projectableToolOutcome
+
+func registerProjectableTool(vs *VcpkgServer, tool *mcp.Tool, handler projectableToolHandler) {
+	vs.server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		outcome := handler(ctx, req)
+		if outcome.invalidArgument != nil {
+			return errResult(fmt.Sprintf("invalid arguments: %v", outcome.invalidArgument)), nil
+		}
+		if outcome.err != nil {
+			return nil, outcome.err
+		}
+		if outcome.result == nil {
+			return errResult("internal invariant: nil projectable result"), nil
+		}
+		return jsonResult(outcome.result)
+	})
+}
 
 // registerTools mounts every increment-1 tool handler. Single registration
 // point, mirroring internal/perftools's registerTools convention.
 func registerTools(vs *VcpkgServer) {
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_discover_root",
 		Description: "Resolve the vcpkg root directory and report WHICH discovery rule fired: " +
 			"explicit root param > VCPKG_ROOT env var > vcpkg resolved on PATH > a nearby " +
@@ -33,7 +60,7 @@ func registerTools(vs *VcpkgServer) {
 			"unknown(multiple_candidates); both list every candidate so the caller can confirm one by " +
 			"passing it as root. Only the env / PATH / manifest rules yield ok with root+rule_fired. " +
 			"None found -> unknown(no_candidates_found) — never reports \"not installed\"; supply " +
-			"root explicitly instead.",
+			"root explicitly instead." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -45,7 +72,7 @@ func registerTools(vs *VcpkgServer) {
 		},
 	}, vs.discoverRootTool)
 
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_last_failure",
 		Description: "Diagnose the last build failure for a vcpkg port. PRIMARY source is the " +
 			"vcpkg-native buildtrees layout (<buildtrees-root>/<port>/<phase>-out/err.log) — always " +
@@ -117,7 +144,7 @@ func registerTools(vs *VcpkgServer) {
 			"supplied or found in any consulted source; it does NOT claim the build used no overlays " +
 			"(buildtrees records no overlay chain, so this tool cannot know that), and " +
 			"buildtrees_root_absent reports a verified absent directory without attributing it to " +
-			"--clean-buildtrees-after-build.",
+			"--clean-buildtrees-after-build." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -156,13 +183,13 @@ func registerTools(vs *VcpkgServer) {
 		},
 	}, vs.lastFailureTool)
 
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_port_resolution",
 		Description: "Determine which port definition wins across overlay ports and builtin ports, and report every location checked. " +
 			"When vcpkg_root is omitted, the builtin fallback is NOT checked; the result states only what the supplied overlays established. " +
 			"port must be ONE legal vcpkg port-name segment (lowercase ASCII letters, digits and hyphens, not leading/trailing) AND its joined path " +
 			"must stay beneath each root -> failed(invalid_port_name), with the rejected value echoed in invalid_port. A traversal name is refused " +
-			"before the join, never normalised into a directory outside the roots the caller granted.",
+			"before the join, never normalised into a directory outside the roots the caller granted." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -183,7 +210,7 @@ func registerTools(vs *VcpkgServer) {
 		},
 	}, vs.portResolutionTool)
 
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_pin_status",
 		Description: "Check whether a port's source pin matches what its remote advertises NOW. Valid-input verdicts are current or unknown(reason); " +
 			"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. " +
@@ -197,7 +224,8 @@ func registerTools(vs *VcpkgServer) {
 			"so an abbreviation has nothing to be matched against. A ${VARIABLE} REF assigned only inside an if()/foreach()/macro() body is " +
 			"unknown(ref_unresolvable), never resolved from a branch that may not have executed. Remote URLs are redacted on every emitted field " +
 			"— including ones url.Parse rejects — and a credential-bearing remote is " +
-			"refused rather than queried (its secret would otherwise appear in the child process's command line).",
+			"refused rather than queried (its secret would otherwise appear in the child process's command line). " +
+			"A remote-query lifecycle failure also includes failure.id and a fixed safe failure.detail; status/reason remain the compatibility verdict." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -214,7 +242,7 @@ func registerTools(vs *VcpkgServer) {
 		},
 	}, vs.pinStatusTool)
 
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_patches_apply",
 		Description: "Statically analyze a portfile to report which patches WOULD apply for a triplet, in order. It applies nothing. " +
 			"Guards that static analysis cannot decide are returned in an undecidable bucket instead of guessed either way. " +
@@ -233,7 +261,7 @@ func registerTools(vs *VcpkgServer) {
 			"answer about a different port) -> failed(relative_port_dir). An unreadable port_dir is " +
 			"unknown(port_dir_unreadable), NEVER the verified-absence reason port_dir_missing. " +
 			"A patch reached through a set() made under an undecided guard lands in undecidable[] exactly like " +
-			"a conditionally appended list item — the scalar and list shapes carry the same tri-state.",
+			"a conditionally appended list item — the scalar and list shapes carry the same tri-state." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -267,7 +295,7 @@ func registerTools(vs *VcpkgServer) {
 		},
 	}, vs.patchesApplyTool)
 
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_cmake_trace",
 		Description: "Read an EXISTING cmake --trace-format=json-v1 trace and report the executed CMake lines, expansions, and include order. " +
 			"Executed lines are positive evidence only: an absent line means \"not observed in this trace\", never \"unreachable\". It never runs cmake. " +
@@ -278,7 +306,7 @@ func registerTools(vs *VcpkgServer) {
 			"An omitted or empty trace_path is unknown(trace_path_not_supplied) — a fact about the CALL, never " +
 			"unknown(trace_not_found), which is reserved for a path that WAS supplied and verified absent. A relative path is " +
 			"failed(relative_trace_path) before filesystem access. An explicit trace header with a major other than json-v1 is " +
-			"unknown(unsupported_trace_version), with no partial records returned.",
+			"unknown(unsupported_trace_version), with no partial records returned." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -302,7 +330,7 @@ func registerTools(vs *VcpkgServer) {
 		},
 	}, vs.cmakeTraceTool)
 
-	vs.server.AddTool(&mcp.Tool{
+	registerProjectableTool(vs, &mcp.Tool{
 		Name: "cmake_include_graph",
 		Description: "Thin wrapper over the hub's internal/cmakegraph static resolver: statically " +
 			"resolves the CMake include()/add_subdirectory() graph WITHOUT ever invoking cmake. " +
@@ -318,7 +346,7 @@ func registerTools(vs *VcpkgServer) {
 			"subtree that could not be listed appears there rather than being silently omitted from an " +
 			"apparently-complete graph. Per-edge, dangling means VERIFIED absence only; a target whose " +
 			"existence could not be determined (access denied, sharing violation) is " +
-			"unresolved(target_unreadable).",
+			"unresolved(target_unreadable)." + resultProjectionDescription,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -348,91 +376,91 @@ func registerTools(vs *VcpkgServer) {
 	}, vs.cmakeIncludeGraphTool)
 }
 
-func (vs *VcpkgServer) discoverRootTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) discoverRootTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args struct {
 		Root string `json:"root"`
 	}
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	res := discovery.DiscoverRoot(args.Root, discovery.DefaultDeps())
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }
 
-func (vs *VcpkgServer) lastFailureTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) lastFailureTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args lastfailure.Args
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	vs.initLastFailure()
 	if ctx.Err() != nil {
-		return jsonResult(lastfailure.ResourceResult(lastfailure.ReasonResourceCancelled))
+		return projectableToolOutcome{result: lastfailure.ResourceResult(lastfailure.ReasonResourceCancelled)}
 	}
 	select {
 	case vs.lastFailureSlots <- struct{}{}:
 		defer func() { <-vs.lastFailureSlots }()
 	default:
-		return jsonResult(lastfailure.ResourceResult(lastfailure.ReasonResourceBusy))
+		return projectableToolOutcome{result: lastfailure.ResourceResult(lastfailure.ReasonResourceBusy)}
 	}
 	res := vs.lastFailureRun(ctx, args, vs.lastFailureDeps())
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }
 
-func (vs *VcpkgServer) portResolutionTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) portResolutionTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args portresolution.Args
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	res := portresolution.ResolvePort(args, portresolution.DefaultDeps())
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }
 
-func (vs *VcpkgServer) pinStatusTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) pinStatusTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args pinstatus.Args
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	res := pinstatus.PinStatus(ctx, args, pinstatus.DefaultDeps())
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }
 
-func (vs *VcpkgServer) patchesApplyTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) patchesApplyTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args patchesapply.Args
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	res := patchesapply.ApplyOrder(args)
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }
 
-func (vs *VcpkgServer) cmakeTraceTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) cmakeTraceTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args cmaketrace.Args
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	res := cmaketrace.Trace(ctx, args, cmaketrace.DefaultDeps())
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }
 
-func (vs *VcpkgServer) cmakeIncludeGraphTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (vs *VcpkgServer) cmakeIncludeGraphTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
 	var args cmakewrap.Args
 	if len(req.Params.Arguments) > 0 {
 		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
-			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
 	res := cmakewrap.RunGraph(ctx, args)
-	return jsonResult(res)
+	return projectableToolOutcome{result: res}
 }

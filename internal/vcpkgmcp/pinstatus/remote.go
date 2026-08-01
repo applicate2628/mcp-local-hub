@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	hubprocess "mcp-local-hub/internal/process"
 )
 
 // Bounds on one `git ls-remote` invocation. Every one of these exists because
@@ -72,7 +74,7 @@ func defaultRemoteRefs(ctx context.Context, remote approvedRemoteURL) (map[strin
 	ctx, cancel := context.WithTimeout(ctx, RemoteQueryTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "git", "ls-remote", rawRemote)
+	cmd := exec.Command("git", "ls-remote", rawRemote)
 	// A credential prompt is the single most common way `git ls-remote`
 	// stalls: it blocks on a terminal that is not there and burns the whole
 	// deadline. Refuse to prompt so an auth failure is a fast, honest error.
@@ -81,45 +83,41 @@ func defaultRemoteRefs(ctx context.Context, remote approvedRemoteURL) (map[strin
 		"GIT_ASKPASS=",
 		"GCM_INTERACTIVE=never",
 	)
-	// WaitDelay is what makes "wait for cleanup" bounded rather than a hope:
-	// after the context ends (or the child exits), Wait force-closes the I/O
-	// pipes if a surviving grandchild still holds them, instead of blocking
-	// on a process we never tracked.
-	cmd.WaitDelay = RemoteWaitDelay
+	return remoteRefsFromCommand(ctx, rawRemote, cmd)
+}
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
+// remoteRefsFromCommand is the package-private deterministic seam for the
+// exact process lifecycle. Production passes only the git command above;
+// tests pass the current test helper executable without changing remoteRefsFn.
+func remoteRefsFromCommand(ctx context.Context, redactedDiagnosticRemote string, cmd *exec.Cmd) (map[string]string, error) {
 	var stderr strings.Builder
-	cmd.Stderr = &boundedWriter{w: &stderr, remaining: maxRemoteStderrBytes}
-
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-
-	refs, parseErr := parseLsRemoteStream(stdout)
-	if parseErr != nil {
-		// We are abandoning the read. Kill the child FIRST: it may still be
-		// writing into a pipe nobody is draining, and Wait would otherwise
-		// block until WaitDelay expired.
-		cancel()
-	}
-	// Unconditional: this is the only place the child is reaped, and it must
-	// run whether the parse succeeded, tripped a limit, or the context died.
-	waitErr := cmd.Wait()
-
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	if waitErr != nil {
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, ctxErr
+	var refs map[string]string
+	runErr := hubprocess.RunContainedStream(
+		ctx,
+		cmd,
+		hubprocess.ContainedStreamOptions{
+			CleanupTimeout: RemoteWaitDelay,
+			Stderr:         &boundedWriter{w: &stderr, remaining: maxRemoteStderrBytes},
+		},
+		func(stdout io.Reader) error {
+			parsed, parseErr := parseLsRemoteStream(stdout)
+			if parseErr == nil {
+				refs = parsed
+			}
+			return parseErr
+		},
+	)
+	if runErr != nil {
+		var lifecycle *hubprocess.ContainedRunError
+		if errors.As(runErr, &lifecycle) && lifecycle.Stage == hubprocess.ContainedStageExit {
+			// Preserve the established internal Git-exit diagnostic while
+			// keeping the public lifecycle projection fixed and sanitized.
+			if msg := strings.TrimSpace(stderr.String()); msg != "" {
+				return nil, fmt.Errorf("git ls-remote %s: %w: %s", redactURL(redactedDiagnosticRemote), runErr, msg)
+			}
+			return nil, fmt.Errorf("git ls-remote %s: %w", redactURL(redactedDiagnosticRemote), runErr)
 		}
-		if msg := strings.TrimSpace(stderr.String()); msg != "" {
-			return nil, fmt.Errorf("git ls-remote %s: %w: %s", redactURL(rawRemote), waitErr, msg)
-		}
-		return nil, fmt.Errorf("git ls-remote %s: %w", redactURL(rawRemote), waitErr)
+		return nil, runErr
 	}
 	return refs, nil
 }

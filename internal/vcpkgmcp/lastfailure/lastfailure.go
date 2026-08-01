@@ -327,7 +327,7 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 
 	// --- Step 6: resolve triplet if still unknown ----------------------------
 	if triplet == "" {
-		t, candidates, ok, limitExceeded, derr := detectTripletFromPortDir(deps.FS, portDir, state.limits.directoryEntries)
+		t, candidates, ok, limitExceeded, derr := detectTripletFromPortDir(ctx, deps.FS, portDir, state.limits.directoryEntries)
 		switch {
 		case derr != nil:
 			res := unknownResult(ReasonPortDirUnreadable, state.ev, notes, sources)
@@ -355,7 +355,7 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 	}
 
 	// --- Step 7: classify phase logs -----------------------------------------
-	classification, err := classifyPortDir(deps.FS, portDir, triplet, state.limits)
+	classification, err := classifyPortDir(ctx, deps.FS, portDir, triplet, state.limits)
 	if err != nil {
 		res := unknownResult(ReasonPortDirUnreadable, ev, notes, sources)
 		res.FailedTarget = port

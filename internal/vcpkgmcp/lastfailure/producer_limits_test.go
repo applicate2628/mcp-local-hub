@@ -72,14 +72,26 @@ func TestLastFailure_PortDirEntryLimitFailsClosed(t *testing.T) {
 	if res.Status != Status("unknown") || res.Reason != ReasonArtifactLimitExceeded {
 		t.Fatalf("status=%s reason=%s, want unknown(%s)", res.Status, res.Reason, ReasonArtifactLimitExceeded)
 	}
-	if len(reader.requests) != 1 || reader.requests[0] != defaultResponseLimits.directoryEntries+1 {
-		t.Fatalf("directory requests=%v, want one page of limit+sentinel=%d", reader.requests, defaultResponseLimits.directoryEntries+1)
+	requested := 0
+	for _, request := range reader.requests {
+		requested += request
+	}
+	if requested != defaultResponseLimits.directoryEntries+1 {
+		t.Fatalf("directory requests=%v total=%d, want cumulative limit+sentinel=%d",
+			reader.requests, requested, defaultResponseLimits.directoryEntries+1)
+	}
+	if reader.requests[len(reader.requests)-1] != 1 {
+		t.Fatalf("terminal directory request=%d, want one remaining sentinel entry", reader.requests[len(reader.requests)-1])
 	}
 	if !reader.closed || fsys.logOpens != 0 {
 		t.Fatalf("closed=%v log opens=%d, want closed/0", reader.closed, fsys.logOpens)
 	}
 	if res.Resources.Completeness.DirectoryEntries || res.Resources.Omitted.DirectoryEntriesAtLeast < 1 {
 		t.Fatalf("resource report=%+v", res.Resources)
+	}
+	if res.Resources.HighWater.DirectoryEntries != defaultResponseLimits.directoryEntries {
+		t.Fatalf("directory high water=%d, want admitted ceiling %d",
+			res.Resources.HighWater.DirectoryEntries, defaultResponseLimits.directoryEntries)
 	}
 }
 
@@ -180,17 +192,16 @@ func TestLastFailure_ProducerAggregationCapsBeforeResultMaterialization(t *testi
 	}
 }
 
-func TestResponseBudget_FailedCausalTupleSurvivesEveryReductionStage(t *testing.T) {
+func TestResponseBudget_FailedCausalTupleSurvivesPackageShaping(t *testing.T) {
 	diagnostic := Diagnostic{File: "a.cpp", Line: 1, Severity: SeverityError, Tier: TierSpecific, Text: "a.cpp:1: error: boom"}
 	input := Result{Status: Status("failed"), Phase: PhaseBuild, FirstError: &diagnostic,
 		Diagnostics: []Diagnostic{diagnostic, diagnostic}, DiagnosticLog: "build.log",
 		LogPaths: []string{"other.log", "build.log"}, ExitCode: intPtr(1),
 		Resources: completeResourceReport(), DiagnosticsDroppedExact: true}
-	for name, result := range map[string]Result{"normal": boundResponse(input), "reduced": reduceOversizeResponse(input)} {
-		if result.Status != Status("failed") || result.FirstError == nil || len(result.Diagnostics) == 0 ||
-			result.Diagnostics[0] != *result.FirstError || result.DiagnosticLog == "" || result.LogPaths[0] != result.DiagnosticLog {
-			t.Fatalf("%s lost causal tuple: %+v", name, result)
-		}
+	result := boundResponse(input)
+	if result.Status != Status("failed") || result.FirstError == nil || len(result.Diagnostics) == 0 ||
+		result.Diagnostics[0] != *result.FirstError || result.DiagnosticLog == "" || result.LogPaths[0] != result.DiagnosticLog {
+		t.Fatalf("package shaping lost causal tuple: %+v", result)
 	}
 }
 

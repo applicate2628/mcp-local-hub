@@ -1,14 +1,268 @@
 package vcpkgserver
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/vcpkgmcp/cmaketrace"
+	"mcp-local-hub/internal/vcpkgmcp/cmakewrap"
+	"mcp-local-hub/internal/vcpkgmcp/discovery"
+	"mcp-local-hub/internal/vcpkgmcp/lastfailure"
+	"mcp-local-hub/internal/vcpkgmcp/patchesapply"
+	"mcp-local-hub/internal/vcpkgmcp/pinstatus"
+	"mcp-local-hub/internal/vcpkgmcp/portresolution"
+	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
+
+type registeredVcpkgToolFixture struct {
+	name       string
+	wantReason string
+	under      func() publicresult.Projectable
+	over       func() publicresult.Projectable
+}
+
+var registeredVcpkgToolFixtures = []registeredVcpkgToolFixture{
+	{
+		name:  "vcpkg_discover_root",
+		under: func() publicresult.Projectable { return discovery.Result{} },
+		over: func() publicresult.Projectable {
+			return discovery.Result{Candidates: oversizedDiscoveryCandidates()}
+		},
+	},
+	{
+		name:       "vcpkg_last_failure",
+		wantReason: "port_not_specified",
+		under:      func() publicresult.Projectable { return lastfailure.Result{} },
+		over: func() publicresult.Projectable {
+			return lastfailure.Result{Diagnostics: oversizedLastFailureDiagnostics()}
+		},
+	},
+	{
+		name:       "vcpkg_port_resolution",
+		wantReason: "empty_port",
+		under:      func() publicresult.Projectable { return portresolution.Result{} },
+		over: func() publicresult.Projectable {
+			return portresolution.Result{AllCandidates: oversizedPortResolutionCandidates()}
+		},
+	},
+	{
+		name:       "vcpkg_pin_status",
+		wantReason: "no_port_dirs",
+		under:      func() publicresult.Projectable { return pinstatus.Result{} },
+		over: func() publicresult.Projectable {
+			return pinstatus.Result{Ports: oversizedPinStatusPorts()}
+		},
+	},
+	{
+		name:       "vcpkg_patches_apply",
+		wantReason: "empty_port_dir",
+		under:      func() publicresult.Projectable { return patchesapply.Result{} },
+		over: func() publicresult.Projectable {
+			return patchesapply.Result{Applied: oversizedAppliedPatches()}
+		},
+	},
+	{
+		name:       "vcpkg_cmake_trace",
+		wantReason: "trace_path_not_supplied",
+		under:      func() publicresult.Projectable { return cmaketrace.Result{} },
+		over: func() publicresult.Projectable {
+			return cmaketrace.Result{Records: oversizedCMakeTraceRecords()}
+		},
+	},
+	{
+		name:       "cmake_include_graph",
+		wantReason: "args_invalid",
+		under:      func() publicresult.Projectable { return cmakewrap.Result{} },
+		over: func() publicresult.Projectable {
+			return cmakewrap.Result{Files: oversizedStrings()}
+		},
+	},
+}
+
+func TestAllRegisteredToolsAreProjectableWithoutChangingCompleteWireShape(t *testing.T) {
+	for _, tc := range registeredVcpkgToolFixtures {
+		t.Run(tc.name, func(t *testing.T) {
+			result := tc.under()
+			want, err := json.MarshalIndent(result, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			wire, err := jsonResult(result)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wire.IsError || len(wire.Content) != 1 {
+				t.Fatalf("normal result envelope=%#v", wire)
+			}
+			content, ok := wire.Content[0].(*mcp.TextContent)
+			if !ok {
+				t.Fatalf("content=%T, want *mcp.TextContent", wire.Content[0])
+			}
+			got := []byte(content.Text)
+			if !bytes.Equal(got, want) {
+				t.Fatalf("under-budget result changed\ngot:  %s\nwant: %s", got, want)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(got, &body); err != nil {
+				t.Fatal(err)
+			}
+			if _, projected := body["result_projection"]; projected {
+				t.Fatal("under-budget result unexpectedly has result_projection")
+			}
+		})
+	}
+}
+
+type contentBoundaryResult struct {
+	Text string `json:"text"`
+}
+
+func (r contentBoundaryResult) PublicResultProjection() any {
+	return struct {
+		ResultProjection publicresult.Projection `json:"result_projection"`
+	}{publicresult.MinimalProjection("text")}
+}
+
+func TestJSONResultExactContentBoundary(t *testing.T) {
+	maxText := largestCompleteContentText(t)
+	for _, tc := range []struct {
+		name       string
+		textLength int
+		projected  bool
+	}{
+		{name: "N-1", textLength: maxText - 1},
+		{name: "N", textLength: maxText},
+		{name: "N+1", textLength: maxText + 1, projected: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			wire, err := jsonResult(contentBoundaryResult{Text: strings.Repeat("x", tc.textLength)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if wire.IsError || len(wire.Content) != 1 {
+				t.Fatalf("result envelope=%#v", wire)
+			}
+			content, ok := wire.Content[0].(*mcp.TextContent)
+			if !ok {
+				t.Fatalf("content=%T, want *mcp.TextContent", wire.Content[0])
+			}
+			if len(content.Text) > publicresult.MaxEncodedBytes {
+				t.Fatalf("content bytes=%d, limit=%d", len(content.Text), publicresult.MaxEncodedBytes)
+			}
+			var body map[string]any
+			if err := json.Unmarshal([]byte(content.Text), &body); err != nil {
+				t.Fatalf("content is not JSON: %v", err)
+			}
+			_, gotProjected := body["result_projection"]
+			if gotProjected != tc.projected {
+				t.Fatalf("projected=%v, want %v", gotProjected, tc.projected)
+			}
+		})
+	}
+}
+
+func TestJSONResultOversizedLastFailureUsesSharedProjection(t *testing.T) {
+	diagnostics := make([]lastfailure.Diagnostic, 128)
+	for i := range diagnostics {
+		diagnostics[i] = lastfailure.Diagnostic{Text: strings.Repeat("x", 4096)}
+	}
+	result := lastfailure.Result{
+		Status:      lastfailure.Status("unknown"),
+		Reason:      lastfailure.ReasonPhaseLogSizeLimitExceeded,
+		Diagnostics: diagnostics,
+	}
+	complete, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(complete) <= publicresult.MaxEncodedBytes {
+		t.Fatalf("test setup encoded %d bytes, want more than %d", len(complete), publicresult.MaxEncodedBytes)
+	}
+
+	wire, err := jsonResult(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wire.IsError || len(wire.Content) != 1 {
+		t.Fatalf("result envelope=%#v", wire)
+	}
+	content, ok := wire.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("content=%T, want *mcp.TextContent", wire.Content[0])
+	}
+	if len(content.Text) > publicresult.MaxEncodedBytes {
+		t.Fatalf("content bytes=%d, limit=%d", len(content.Text), publicresult.MaxEncodedBytes)
+	}
+	var body map[string]any
+	if err := json.Unmarshal([]byte(content.Text), &body); err != nil {
+		t.Fatalf("content is not JSON: %v", err)
+	}
+	if body["status"] != "unknown" || body["reason"] != string(lastfailure.ReasonPhaseLogSizeLimitExceeded) {
+		t.Fatalf("status/reason changed: %#v", body)
+	}
+	if _, ok := body["result_projection"]; !ok {
+		t.Fatalf("shared projection metadata absent: %#v", body)
+	}
+}
+
+func TestLastFailureHasNoPrivateWholeBodyBoundary(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("..", "lastfailure", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	forbidden := []string{
+		"MaxResponseBytes",
+		"responseBytes",
+		"reduceOversizeResponse",
+		"json.MarshalIndent",
+	}
+	for _, path := range paths {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		source, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, token := range forbidden {
+			if bytes.Contains(source, []byte(token)) {
+				t.Errorf("%s contains private whole-body boundary token %q", path, token)
+			}
+		}
+	}
+}
+
+func largestCompleteContentText(t *testing.T) int {
+	t.Helper()
+	low, high := 0, publicresult.MaxEncodedBytes
+	for low < high {
+		middle := low + (high-low+1)/2
+		body, err := json.MarshalIndent(contentBoundaryResult{Text: strings.Repeat("x", middle)}, "", "  ")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(body) <= publicresult.MaxEncodedBytes {
+			low = middle
+		} else {
+			high = middle - 1
+		}
+	}
+	return low
+}
 
 func TestRegisterTools(t *testing.T) {
 	ctx := context.Background()
@@ -54,39 +308,32 @@ func TestRegisterTools(t *testing.T) {
 	// claims. They would have stayed green if a tool answered `ok` for empty
 	// input. The three rows without `invalidInput` were `continue`d past and
 	// got no subtest at all.
-	testCases := []struct {
-		name       string
-		wantReason string
-	}{
-		{name: "vcpkg_discover_root"},
-		{name: "vcpkg_last_failure", wantReason: "port_not_specified"},
-		{name: "cmake_include_graph", wantReason: "args_invalid"},
-		{name: "vcpkg_port_resolution", wantReason: "empty_port"},
-		{name: "vcpkg_pin_status", wantReason: "no_port_dirs"},
-		{name: "vcpkg_patches_apply", wantReason: "empty_port_dir"},
-		{name: "vcpkg_cmake_trace", wantReason: "trace_path_not_supplied"},
-	}
-	expected := make(map[string]bool, len(testCases))
-	for _, tc := range testCases {
+	expected := make(map[string]bool, len(registeredVcpkgToolFixtures))
+	for _, tc := range registeredVcpkgToolFixtures {
 		expected[tc.name] = false
 	}
 	registered := make(map[string]struct{}, len(tools.Tools))
 	for _, tool := range tools.Tools {
 		if _, duplicate := registered[tool.Name]; duplicate {
-			t.Errorf("duplicate tool registration: %q", tool.Name)
+			t.Errorf("registration_live_set: duplicate %q", tool.Name)
 		}
 		registered[tool.Name] = struct{}{}
-		if _, known := expected[tool.Name]; known {
-			expected[tool.Name] = true
+		if _, known := expected[tool.Name]; !known {
+			t.Errorf("registration_live_set: unexpected %q", tool.Name)
+			continue
 		}
+		expected[tool.Name] = true
+	}
+	if len(registered) != len(expected) || len(tools.Tools) != len(expected) {
+		t.Errorf("registration_live_set: count got=%d unique=%d want=%d", len(tools.Tools), len(registered), len(expected))
 	}
 	for name, registered := range expected {
 		if !registered {
-			t.Errorf("tool %q was not registered", name)
+			t.Errorf("registration_live_set: missing %q", name)
 		}
 	}
 
-	for _, tc := range testCases {
+	for _, tc := range registeredVcpkgToolFixtures {
 		if tc.wantReason == "" {
 			continue
 		}
@@ -193,3 +440,715 @@ func TestRegisterTools(t *testing.T) {
 		}
 	})
 }
+
+func TestProjectableAdapterBranches(t *testing.T) {
+	sentinel := errors.New("adapter sentinel")
+	for _, tc := range []struct {
+		name     string
+		handler  projectableToolHandler
+		wantErr  error
+		wantText string
+	}{
+		{
+			name: "invalid_argument",
+			handler: func(context.Context, *mcp.CallToolRequest) projectableToolOutcome {
+				return projectableToolOutcome{invalidArgument: sentinel}
+			},
+			wantText: "invalid arguments: adapter sentinel",
+		},
+		{
+			name: "ordinary_error",
+			handler: func(context.Context, *mcp.CallToolRequest) projectableToolOutcome {
+				return projectableToolOutcome{err: sentinel}
+			},
+			wantErr: sentinel,
+		},
+		{
+			name: "nil_result",
+			handler: func(context.Context, *mcp.CallToolRequest) projectableToolOutcome {
+				return projectableToolOutcome{}
+			},
+			wantText: "internal invariant: nil projectable result",
+		},
+		{
+			name: "success",
+			handler: func(context.Context, *mcp.CallToolRequest) projectableToolOutcome {
+				return projectableToolOutcome{result: discovery.Result{}}
+			},
+			wantText: "{}",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := callProjectableAdapter(t, tc.handler)
+			if tc.wantErr != nil {
+				outcome := tc.handler(context.Background(), &mcp.CallToolRequest{})
+				if !errors.Is(outcome.err, tc.wantErr) {
+					t.Fatalf("typed outcome error=%v, want errors.Is(_, %v)", outcome.err, tc.wantErr)
+				}
+				if err == nil || !strings.Contains(err.Error(), tc.wantErr.Error()) {
+					t.Fatalf("adapter error=%v, want transport error containing %q", err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result == nil || len(result.Content) != 1 {
+				t.Fatalf("adapter result=%#v", result)
+			}
+			content, ok := result.Content[0].(*mcp.TextContent)
+			if !ok {
+				t.Fatalf("adapter content=%T, want *mcp.TextContent", result.Content[0])
+			}
+			if !strings.Contains(content.Text, tc.wantText) {
+				t.Fatalf("adapter body=%q, want text containing %q", content.Text, tc.wantText)
+			}
+		})
+	}
+}
+
+func callProjectableAdapter(t *testing.T, handler projectableToolHandler) (*mcp.CallToolResult, error) {
+	t.Helper()
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "projectable-adapter-test", Version: "test"}, nil)
+	registerProjectableTool(&VcpkgServer{server: server}, &mcp.Tool{
+		Name:        "projectable_adapter_test",
+		InputSchema: map[string]any{"type": "object"},
+	}, handler)
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	defer serverSession.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "projectable-adapter-client", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	defer clientSession.Close()
+	return clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "projectable_adapter_test", Arguments: map[string]any{}})
+}
+
+func TestRegisteredVcpkgToolsUseOnlyProjectableAdapter(t *testing.T) {
+	if err := inspectRegisteredVcpkgTools(readVcpkgProductionSources(t), registeredVcpkgToolFixtures); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRegisteredVcpkgToolsOverBudgetProjectionBijection(t *testing.T) {
+	for _, fixture := range registeredVcpkgToolFixtures {
+		t.Run(fixture.name, func(t *testing.T) {
+			if fixture.under == nil || fixture.over == nil {
+				t.Fatal("registration_nil_fixture")
+			}
+			under := fixture.under()
+			if under == nil {
+				t.Fatal("registration_nil_projectable")
+			}
+			complete, err := json.MarshalIndent(under, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(complete) > publicresult.MaxEncodedBytes {
+				t.Fatalf("under-budget fixture encoded %d bytes", len(complete))
+			}
+			wire, err := publicresult.MarshalIndent(under)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(wire, complete) {
+				t.Fatal("under-budget result changed")
+			}
+
+			over := fixture.over()
+			if over == nil {
+				t.Fatal("registration_nil_projectable")
+			}
+			complete, err = json.MarshalIndent(over, "", "  ")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(complete) <= publicresult.MaxEncodedBytes {
+				t.Fatalf("registration_projector_not_oversized: encoded %d bytes", len(complete))
+			}
+			wire, err = publicresult.MarshalIndent(over)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(wire) > publicresult.MaxEncodedBytes {
+				t.Fatalf("registration_projection_over_budget: bytes=%d limit=%d", len(wire), publicresult.MaxEncodedBytes)
+			}
+			var body map[string]any
+			if err := json.Unmarshal(wire, &body); err != nil {
+				t.Fatal(err)
+			}
+			projection, ok := body["result_projection"].(map[string]any)
+			if !ok || projection["complete"] != false {
+				t.Fatalf("registration_projection_missing: %#v", body["result_projection"])
+			}
+			omissions, ok := projection["omissions"].([]any)
+			if !ok || len(omissions) == 0 {
+				t.Fatalf("registration_projection_missing: omissions=%#v", projection["omissions"])
+			}
+		})
+	}
+}
+
+func TestRegisteredVcpkgToolGuardRejectsDefectClasses(t *testing.T) {
+	sources := readVcpkgProductionSources(t)
+	toolsSource := string(vcpkgProductionSourceByName(t, sources, "tools.go").source)
+	fixtures := append([]registeredVcpkgToolFixture(nil), registeredVcpkgToolFixtures...)
+	for _, tc := range []struct {
+		name      string
+		sources   []vcpkgProductionSource
+		fixtures  []registeredVcpkgToolFixture
+		wantGuard string
+	}{
+		{
+			name: "eighth_registration",
+			sources: replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource,
+				"\n}\n\nfunc (vs *VcpkgServer) discoverRootTool",
+				"\n\tregisterProjectableTool(vs, &mcp.Tool{Name: \"eighth\"}, vs.discoverRootTool)\n}\n\nfunc (vs *VcpkgServer) discoverRootTool", 1)),
+			fixtures: fixtures, wantGuard: "registration_count",
+		},
+		{
+			name:     "duplicate_registration",
+			sources:  replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource, "Name: \"vcpkg_last_failure\"", "Name: \"vcpkg_discover_root\"", 1)),
+			fixtures: fixtures, wantGuard: "registration_duplicate_name",
+		},
+		{
+			name:     "nonliteral_registration",
+			sources:  replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource, "Name: \"vcpkg_discover_root\"", "Name: toolName", 1)),
+			fixtures: fixtures, wantGuard: "registration_nonliteral_name",
+		},
+		{
+			name:     "direct_addtool",
+			sources:  replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource, "registerProjectableTool(vs, &mcp.Tool{", "vs.server.AddTool(&mcp.Tool{", 1)),
+			fixtures: fixtures, wantGuard: "registration_direct_addtool",
+		},
+		{
+			name:     "json_result_bypass",
+			sources:  replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource, "return jsonResult(outcome.result)", "return otherJSONResult(outcome.result)", 1)),
+			fixtures: fixtures, wantGuard: "registration_json_result_bypass",
+		},
+		{
+			name: "handler_wire_escape",
+			sources: replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource,
+				"func (vs *VcpkgServer) discoverRootTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome",
+				"func (vs *VcpkgServer) discoverRootTool(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error)", 1)),
+			fixtures: fixtures, wantGuard: "registration_handler_wire_escape",
+		},
+		{
+			name: "cross_file_helper_addtool",
+			sources: appendVcpkgProductionSource(
+				replaceVcpkgProductionSource(t, sources, "tools.go", strings.Replace(toolsSource,
+					"\n}\n\nfunc (vs *VcpkgServer) discoverRootTool",
+					"\n\tregisterExtraVcpkgTool(vs)\n}\n\nfunc (vs *VcpkgServer) discoverRootTool", 1)),
+				vcpkgProductionSource{name: "zz_cross_file_addtool.go", source: []byte("package vcpkgserver\n\nfunc registerExtraVcpkgTool(vs *VcpkgServer) {\n\tvs.server.AddTool(nil, nil)\n}\n")},
+			),
+			fixtures: fixtures, wantGuard: "registration_direct_addtool",
+		},
+		{
+			name: "cross_file_json_result",
+			sources: appendVcpkgProductionSource(sources,
+				vcpkgProductionSource{name: "zz_cross_file_json.go", source: []byte("package vcpkgserver\n\nfunc alternateSerializationBoundary(v any) {\n\tjsonResult(v)\n}\n")},
+			),
+			fixtures: fixtures, wantGuard: "registration_json_result_bypass",
+		},
+		{
+			name:    "missing_fixture",
+			sources: sources, fixtures: fixtures[:len(fixtures)-1], wantGuard: "registration_fixture_bijection",
+		},
+		{
+			name:    "nil_fixture",
+			sources: sources, fixtures: append(fixtures, registeredVcpkgToolFixture{name: fixtures[0].name}), wantGuard: "registration_nil_fixture",
+		},
+		{
+			name:    "nil_projectable",
+			sources: sources, fixtures: replaceFixture(fixtures, 0, func(f *registeredVcpkgToolFixture) {
+				f.under = func() publicresult.Projectable { return nil }
+			}), wantGuard: "registration_nil_projectable",
+		},
+		{
+			name:    "not_oversized",
+			sources: sources, fixtures: replaceFixture(fixtures, 0, func(f *registeredVcpkgToolFixture) {
+				f.over = f.under
+			}), wantGuard: "registration_projector_not_oversized",
+		},
+		{
+			name:    "missing_projection",
+			sources: sources, fixtures: replaceFixture(fixtures, 0, func(f *registeredVcpkgToolFixture) {
+				f.over = func() publicresult.Projectable { return oversizedMissingProjection{} }
+			}), wantGuard: "registration_projection_missing",
+		},
+		{
+			name:    "projection_over_budget",
+			sources: sources, fixtures: replaceFixture(fixtures, 0, func(f *registeredVcpkgToolFixture) {
+				f.over = func() publicresult.Projectable { return oversizedProjection{} }
+			}), wantGuard: "registration_projection_over_budget",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := inspectRegisteredVcpkgTools(tc.sources, tc.fixtures)
+			if err == nil || !strings.Contains(err.Error(), tc.wantGuard) {
+				t.Fatalf("guard error=%v, want %q", err, tc.wantGuard)
+			}
+		})
+	}
+}
+
+func replaceFixture(fixtures []registeredVcpkgToolFixture, index int, change func(*registeredVcpkgToolFixture)) []registeredVcpkgToolFixture {
+	copy := append([]registeredVcpkgToolFixture(nil), fixtures...)
+	change(&copy[index])
+	return copy
+}
+
+type vcpkgProductionSource struct {
+	name   string
+	source []byte
+}
+
+func readVcpkgProductionSources(t *testing.T) []vcpkgProductionSource {
+	t.Helper()
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatal(err)
+	}
+	filenames := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !entry.IsDir() && strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go") {
+			filenames = append(filenames, name)
+		}
+	}
+	sort.Strings(filenames)
+	sources := make([]vcpkgProductionSource, 0, len(filenames))
+	for _, name := range filenames {
+		source, err := os.ReadFile(name)
+		if err != nil {
+			t.Fatalf("registration_source_read: %s: %v", name, err)
+		}
+		sources = append(sources, vcpkgProductionSource{name: name, source: source})
+	}
+	return sources
+}
+
+func vcpkgProductionSourceByName(t *testing.T, sources []vcpkgProductionSource, name string) vcpkgProductionSource {
+	t.Helper()
+	for _, source := range sources {
+		if source.name == name {
+			return source
+		}
+	}
+	t.Fatalf("registration_source_read: %s missing", name)
+	return vcpkgProductionSource{}
+}
+
+func replaceVcpkgProductionSource(t *testing.T, sources []vcpkgProductionSource, name, replacement string) []vcpkgProductionSource {
+	t.Helper()
+	updated := append([]vcpkgProductionSource(nil), sources...)
+	for index := range updated {
+		if updated[index].name == name {
+			updated[index].source = []byte(replacement)
+			return updated
+		}
+	}
+	t.Fatalf("registration_source_read: %s missing", name)
+	return nil
+}
+
+func appendVcpkgProductionSource(sources []vcpkgProductionSource, source vcpkgProductionSource) []vcpkgProductionSource {
+	updated := append([]vcpkgProductionSource(nil), sources...)
+	updated = append(updated, source)
+	sort.Slice(updated, func(left, right int) bool { return updated[left].name < updated[right].name })
+	return updated
+}
+
+type vcpkgRegistrationInventory struct {
+	functions        []*ast.FuncDecl
+	packageFunctions map[string][]*ast.FuncDecl
+	methods          map[string][]*ast.FuncDecl
+}
+
+func inspectRegisteredVcpkgTools(sources []vcpkgProductionSource, fixtures []registeredVcpkgToolFixture) error {
+	inventory, err := inspectVcpkgProductionSources(sources)
+	if err != nil {
+		return err
+	}
+	registerTools, err := inventory.exactPackageFunction("registerTools")
+	if err != nil {
+		return err
+	}
+	registerProjectableTool, err := inventory.exactPackageFunction("registerProjectableTool")
+	if err != nil {
+		return err
+	}
+	if err := inspectSingleMCPBoundary(inventory.functions, registerProjectableTool); err != nil {
+		return err
+	}
+	registrations, err := registrationsFromRegisterTools(inventory.functions, registerTools)
+	if err != nil {
+		return err
+	}
+	if len(registrations) != 7 {
+		return fmt.Errorf("registration_count: got %d want 7", len(registrations))
+	}
+	registrationNames := map[string]struct{}{}
+	for _, registration := range registrations {
+		if _, duplicate := registrationNames[registration.name]; duplicate {
+			return fmt.Errorf("registration_duplicate_name: %q", registration.name)
+		}
+		registrationNames[registration.name] = struct{}{}
+		handler, err := inventory.exactVcpkgServerMethod(registration.handler)
+		if err != nil || !hasProjectableOutcomeSignature(handler) || handlerContainsWireEscape(handler) {
+			return fmt.Errorf("registration_handler_wire_escape: %s", registration.handler)
+		}
+	}
+	return inspectFixtureBijection(registrationNames, fixtures)
+}
+
+func inspectVcpkgProductionSources(sources []vcpkgProductionSource) (vcpkgRegistrationInventory, error) {
+	inventory := vcpkgRegistrationInventory{
+		packageFunctions: map[string][]*ast.FuncDecl{},
+		methods:          map[string][]*ast.FuncDecl{},
+	}
+	fileSet := token.NewFileSet()
+	for _, source := range sources {
+		parsed, err := parser.ParseFile(fileSet, source.name, source.source, parser.AllErrors)
+		if err != nil {
+			return vcpkgRegistrationInventory{}, fmt.Errorf("registration_parse: %s: %w", source.name, err)
+		}
+		if parsed.Name == nil || parsed.Name.Name != "vcpkgserver" {
+			packageName := ""
+			if parsed.Name != nil {
+				packageName = parsed.Name.Name
+			}
+			return vcpkgRegistrationInventory{}, fmt.Errorf("registration_parse: %s: package %q", source.name, packageName)
+		}
+		for _, declaration := range parsed.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok {
+				continue
+			}
+			inventory.functions = append(inventory.functions, function)
+			if function.Recv == nil {
+				inventory.packageFunctions[function.Name.Name] = append(inventory.packageFunctions[function.Name.Name], function)
+				continue
+			}
+			inventory.methods[methodKey(receiverTypeName(function), function.Name.Name)] = append(inventory.methods[methodKey(receiverTypeName(function), function.Name.Name)], function)
+		}
+	}
+	return inventory, nil
+}
+
+func (inventory vcpkgRegistrationInventory) exactPackageFunction(name string) (*ast.FuncDecl, error) {
+	functions := inventory.packageFunctions[name]
+	if len(functions) != 1 {
+		return nil, fmt.Errorf("registration_count: %s count=%d", name, len(functions))
+	}
+	return functions[0], nil
+}
+
+func (inventory vcpkgRegistrationInventory) exactVcpkgServerMethod(name string) (*ast.FuncDecl, error) {
+	methods := inventory.methods[methodKey("VcpkgServer", name)]
+	if len(methods) != 1 {
+		return nil, fmt.Errorf("registration_handler_wire_escape: %s count=%d", name, len(methods))
+	}
+	return methods[0], nil
+}
+
+func receiverTypeName(function *ast.FuncDecl) string {
+	if function.Recv == nil || len(function.Recv.List) != 1 {
+		return ""
+	}
+	switch receiver := function.Recv.List[0].Type.(type) {
+	case *ast.Ident:
+		return receiver.Name
+	case *ast.StarExpr:
+		return fieldName(receiver.X)
+	}
+	return ""
+}
+
+func methodKey(receiver, name string) string {
+	return receiver + "\x00" + name
+}
+
+type parsedRegistration struct {
+	name    string
+	handler string
+}
+
+func registrationsFromRegisterTools(functions []*ast.FuncDecl, registerTools *ast.FuncDecl) ([]parsedRegistration, error) {
+	registrations := []parsedRegistration{}
+	var guardErr error
+	for _, function := range functions {
+		if function.Body == nil {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			if guardErr != nil || node == nil {
+				return guardErr == nil
+			}
+			call, ok := node.(*ast.CallExpr)
+			if !ok || callName(call) != "registerProjectableTool" {
+				return true
+			}
+			if function != registerTools {
+				guardErr = fmt.Errorf("registration_count: registerProjectableTool owner %s", function.Name.Name)
+				return false
+			}
+			if len(call.Args) != 3 {
+				guardErr = errors.New("registration_count: malformed registration")
+				return false
+			}
+			tool, ok := call.Args[1].(*ast.UnaryExpr)
+			if !ok || tool.Op != token.AND {
+				guardErr = errors.New("registration_nonliteral_name: tool is not an addressable literal")
+				return false
+			}
+			literal, ok := tool.X.(*ast.CompositeLit)
+			if !ok {
+				guardErr = errors.New("registration_nonliteral_name: tool is not a literal")
+				return false
+			}
+			name, ok := literalToolName(literal)
+			if !ok {
+				guardErr = errors.New("registration_nonliteral_name: name is not a string literal")
+				return false
+			}
+			handler, ok := call.Args[2].(*ast.SelectorExpr)
+			if !ok {
+				guardErr = errors.New("registration_handler_wire_escape: handler is not a direct method")
+				return false
+			}
+			handlerReceiver, directVcpkgServerMethod := handler.X.(*ast.Ident)
+			if !directVcpkgServerMethod || handlerReceiver.Name != "vs" {
+				guardErr = errors.New("registration_handler_wire_escape: handler is not a direct method")
+				return false
+			}
+			registrations = append(registrations, parsedRegistration{name: name, handler: handler.Sel.Name})
+			return true
+		})
+	}
+	return registrations, guardErr
+}
+
+func literalToolName(literal *ast.CompositeLit) (string, bool) {
+	for _, element := range literal.Elts {
+		field, ok := element.(*ast.KeyValueExpr)
+		if !ok || fieldName(field.Key) != "Name" {
+			continue
+		}
+		value, ok := field.Value.(*ast.BasicLit)
+		if !ok || value.Kind != token.STRING {
+			return "", false
+		}
+		name, err := strconv.Unquote(value.Value)
+		return name, err == nil && name != ""
+	}
+	return "", false
+}
+
+func inspectSingleMCPBoundary(functions []*ast.FuncDecl, registerProjectableTool *ast.FuncDecl) error {
+	addTools, jsonResults := 0, 0
+	badAddTool, badJSONResult := false, false
+	for _, function := range functions {
+		if function.Body == nil {
+			continue
+		}
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			switch callName(call) {
+			case "AddTool":
+				addTools++
+				badAddTool = badAddTool || function != registerProjectableTool
+			case "jsonResult":
+				jsonResults++
+				badJSONResult = badJSONResult || function != registerProjectableTool
+			}
+			return true
+		})
+	}
+	if addTools != 1 || badAddTool {
+		return fmt.Errorf("registration_direct_addtool: count=%d", addTools)
+	}
+	if jsonResults != 1 || badJSONResult {
+		return fmt.Errorf("registration_json_result_bypass: count=%d", jsonResults)
+	}
+	return nil
+}
+
+func hasProjectableOutcomeSignature(function *ast.FuncDecl) bool {
+	return function.Type.Results != nil && len(function.Type.Results.List) == 1 &&
+		len(function.Type.Results.List[0].Names) == 0 && fieldName(function.Type.Results.List[0].Type) == "projectableToolOutcome"
+}
+
+func handlerContainsWireEscape(function *ast.FuncDecl) bool {
+	escaped := false
+	ast.Inspect(function.Body, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if ok && (callName(call) == "AddTool" || callName(call) == "jsonResult") {
+			escaped = true
+			return false
+		}
+		return true
+	})
+	return escaped
+}
+
+func inspectFixtureBijection(registrationNames map[string]struct{}, fixtures []registeredVcpkgToolFixture) error {
+	fixtureNames := map[string]struct{}{}
+	for _, fixture := range fixtures {
+		if fixture.name == "" || fixture.under == nil || fixture.over == nil {
+			return errors.New("registration_nil_fixture")
+		}
+		if fixture.under() == nil || fixture.over() == nil {
+			return errors.New("registration_nil_projectable")
+		}
+		fixtureNames[fixture.name] = struct{}{}
+	}
+	if len(fixtureNames) != len(fixtures) || len(fixtureNames) != len(registrationNames) {
+		return errors.New("registration_fixture_bijection")
+	}
+	for name := range registrationNames {
+		if _, ok := fixtureNames[name]; !ok {
+			return fmt.Errorf("registration_fixture_bijection: missing %s", name)
+		}
+	}
+	for name := range fixtureNames {
+		if _, ok := registrationNames[name]; !ok {
+			return fmt.Errorf("registration_fixture_bijection: stale %s", name)
+		}
+	}
+	return inspectFixtureProjections(fixtures)
+}
+
+func inspectFixtureProjections(fixtures []registeredVcpkgToolFixture) error {
+	for _, fixture := range fixtures {
+		complete, err := json.MarshalIndent(fixture.over(), "", "  ")
+		if err != nil {
+			return fmt.Errorf("registration_projection_missing: %w", err)
+		}
+		if len(complete) <= publicresult.MaxEncodedBytes {
+			return fmt.Errorf("registration_projector_not_oversized: %s", fixture.name)
+		}
+		projected, err := publicresult.MarshalIndent(fixture.over())
+		if err != nil {
+			if errors.Is(err, publicresult.ErrBudgetInvariant) {
+				return fmt.Errorf("registration_projection_over_budget: %s", fixture.name)
+			}
+			return fmt.Errorf("registration_projection_missing: %w", err)
+		}
+		if len(projected) > publicresult.MaxEncodedBytes {
+			return fmt.Errorf("registration_projection_over_budget: %s", fixture.name)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(projected, &body); err != nil {
+			return fmt.Errorf("registration_projection_missing: %w", err)
+		}
+		projection, ok := body["result_projection"].(map[string]any)
+		if !ok || projection["complete"] != false {
+			return fmt.Errorf("registration_projection_missing: %s", fixture.name)
+		}
+		omissions, ok := projection["omissions"].([]any)
+		if !ok || len(omissions) == 0 {
+			return fmt.Errorf("registration_projection_missing: %s", fixture.name)
+		}
+	}
+	return nil
+}
+
+func callName(call *ast.CallExpr) string {
+	return fieldName(call.Fun)
+}
+
+func fieldName(expression ast.Expr) string {
+	switch expression := expression.(type) {
+	case *ast.Ident:
+		return expression.Name
+	case *ast.SelectorExpr:
+		return expression.Sel.Name
+	}
+	return ""
+}
+
+func oversizedStrings() []string {
+	values := make([]string, 128)
+	for index := range values {
+		values[index] = strings.Repeat("x", 4096)
+	}
+	return values
+}
+
+func oversizedDiscoveryCandidates() []discovery.Candidate {
+	values := make([]discovery.Candidate, 128)
+	for index := range values {
+		values[index].Path = strings.Repeat("x", 4096)
+	}
+	return values
+}
+
+func oversizedLastFailureDiagnostics() []lastfailure.Diagnostic {
+	values := make([]lastfailure.Diagnostic, 128)
+	for index := range values {
+		values[index].Text = strings.Repeat("x", 4096)
+	}
+	return values
+}
+
+func oversizedPortResolutionCandidates() []portresolution.CandidateLocation {
+	values := make([]portresolution.CandidateLocation, 128)
+	for index := range values {
+		values[index].Directory = strings.Repeat("x", 4096)
+	}
+	return values
+}
+
+func oversizedPinStatusPorts() []pinstatus.PortResult {
+	values := make([]pinstatus.PortResult, 128)
+	for index := range values {
+		values[index].PortDir = strings.Repeat("x", 4096)
+	}
+	return values
+}
+
+func oversizedAppliedPatches() []patchesapply.AppliedPatch {
+	values := make([]patchesapply.AppliedPatch, 128)
+	for index := range values {
+		values[index].Filename = strings.Repeat("x", 4096)
+	}
+	return values
+}
+
+func oversizedCMakeTraceRecords() []cmaketrace.Record {
+	values := make([]cmaketrace.Record, 128)
+	for index := range values {
+		values[index].Args = []string{strings.Repeat("x", 4096)}
+	}
+	return values
+}
+
+type oversizedMissingProjection struct{}
+
+func (oversizedMissingProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Text string `json:"text"`
+	}{Text: strings.Repeat("x", publicresult.MaxEncodedBytes)})
+}
+
+func (oversizedMissingProjection) PublicResultProjection() any { return struct{}{} }
+
+type oversizedProjection struct{}
+
+func (oversizedProjection) MarshalJSON() ([]byte, error) {
+	return json.Marshal(struct {
+		Text string `json:"text"`
+	}{Text: strings.Repeat("x", publicresult.MaxEncodedBytes)})
+}
+
+func (oversizedProjection) PublicResultProjection() any { return oversizedProjection{} }

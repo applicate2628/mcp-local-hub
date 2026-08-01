@@ -1,9 +1,9 @@
 package vcpkgserver
 
 import (
-	"encoding/json"
-
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
 
 // errResult is the shared error-return helper used by every tool in this
@@ -21,11 +21,11 @@ func errResult(msg string) *mcp.CallToolResult {
 	}
 }
 
-// jsonResult marshals v (one of the *Result types from discovery/
-// lastfailure/cmakewrap) as indented JSON and wraps it as a successful
-// tool result.
-func jsonResult(v any) (*mcp.CallToolResult, error) {
-	body, err := json.MarshalIndent(v, "", "  ")
+// jsonResult is the only vcpkg MCP success serialization boundary. It accepts
+// only package-owned Projectable results and measures the exact indented JSON
+// text before publishing it.
+func jsonResult(v publicresult.Projectable) (*mcp.CallToolResult, error) {
+	body, err := publicresult.MarshalIndent(v)
 	if err != nil {
 		return errResult("failed to marshal result: " + err.Error()), nil
 	}

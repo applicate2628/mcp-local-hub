@@ -3,7 +3,6 @@ package lastfailure
 import (
 	"bufio"
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"regexp"
 	"sort"
@@ -887,34 +886,13 @@ const (
 	// Longest real command measured: 522 bytes (the operator's own wrapper
 	// sample), 134 bytes across the in-tree fixtures.
 	MaxWireCommandBytes = 8 << 10
-	// MaxWireListEntries bounds every repeated output list at its producer and
-	// also bounds the reduced response. Omission is never silent: ResourceReport
-	// carries completeness and dropped counts, while the diagnostic list retains
-	// its dedicated DiagnosticsDropped contract.
+	// MaxWireListEntries bounds every repeated output list at its producer.
+	// Omission is never silent: ResourceReport carries completeness and dropped
+	// counts, while the diagnostic list retains its dedicated
+	// DiagnosticsDropped contract.
 	//
 	// Measured: 11 log paths, 5 notes, 1 context source at the corpus maximum.
 	MaxWireListEntries = 64
-	// MaxResponseBytes is the WHOLE-BODY ceiling, and it is the only bound in
-	// this file that closes the CLASS rather than an enumerated instance.
-	//
-	// Every other constant here caps a field somebody thought to name. That
-	// approach has now failed twice in this package's own history: the first
-	// budget charged Text and missed File, BuildCommand, ExactCommand,
-	// OverlayChain and Evidence.Commands; the correction that found those
-	// missed two of the four unbounded File shapes. A per-field enumeration
-	// cannot converge, because the defect is always the field nobody listed.
-	//
-	// So the per-field caps above are the DEGRADATION POLICY — they decide how
-	// gracefully an oversize value fails — and this is the GUARANTEE: whatever
-	// field is added tomorrow, the marshaled body cannot exceed this size,
-	// because boundResponse measures the real encoding and falls back to a
-	// reduced document that is bounded by construction.
-	//
-	// 256 KiB is ~54x the largest whole response any real fixture produced
-	// (4790 bytes) and still above the producer-shaped result, so the
-	// backstop is unreachable on any answer the per-field caps have already
-	// shaped. It engaging at all is a signal that a new unbounded field exists.
-	MaxResponseBytes = 256 << 10
 )
 
 // truncationMarker is appended to any wire value that was cut, so the
@@ -930,30 +908,25 @@ const (
 // be mistaken for, and cannot resolve as, a real filesystem path.
 const truncationMarker = "… [truncated, %d more bytes]"
 
-// --- The single owner of what may go on this tool's wire ------------------
+// --- Package-owned evidence shaping ---------------------------------------
 //
-// boundResponse is the final, field-agnostic assertion after producer-side
+// boundResponse is the final package-domain shaping pass after producer-side
 // limits have already bounded work and retention. LastFailure routes every
 // return through it, including early returns.
 //
-// Placing the bound in a separate function also converts the budget's central
-// safety property from a positional claim into a structural one. The old
-// comment argued "this cannot change a verdict BECAUSE it is applied after the
-// verdict switch" — true, but true only while nobody moved it. boundResponse
-// receives a finished Result. It preserves valid verdicts; validateCausality
-// deliberately downgrades an internally inconsistent failed result to unknown.
+// It receives a finished Result and owns only last-failure evidence semantics:
+// valid causal tuples, per-kind value caps, and ranked diagnostic count/byte
+// budgets. It does not marshal or reduce the whole result. The shared
+// publicresult boundary owns the exact encoded-size decision and invokes this
+// package's PublicResultProjection when projection is required.
 //
-// Three layers, in order:
+// Two layers, in order:
 //
 //  1. boundWireValues caps each value by KIND (prose / locator / command).
-//     This is an enumeration, and an enumeration is exactly what has failed
-//     twice here — so it is deliberately NOT the guarantee. Its job is the
-//     quality of degradation: a capped field keeps its useful prefix and says
-//     so in band.
+//     Its job is package-domain degradation quality: a capped field keeps its
+//     useful prefix and says so in band.
 //  2. applyResponseBudget spends the count and aggregate-byte budget over the
 //     already-ranked, already-capped diagnostics.
-//  3. The marshaled-size backstop. Field-agnostic, and therefore the actual
-//     guarantee — see MaxResponseBytes.
 func boundResponse(r Result) Result {
 	r = validateCausality(r)
 	textCut, valueCut := boundWireValues(&r)
@@ -970,84 +943,7 @@ func boundResponse(r Result) Result {
 	if valueCut {
 		r.Notes = append(r.Notes, NoteResponseValueTruncated)
 	}
-
-	// Measured in the SAME encoding the tool boundary emits
-	// (vcpkgserver/helpers.go jsonResult marshals indented, which is ~30%
-	// larger than the compact form — measuring the compact form would set a
-	// ceiling that does not hold on the wire). The coupling is deliberate and
-	// pinned by a test in vcpkgserver rather than assumed.
-	//
-	// One extra marshal per call, of a document the per-field caps have
-	// already bounded to tens of KB, against a call that has just read up to
-	// maxLogBytes from each of several logs. The cost is not measurable
-	// against the work it guards.
-	if body, err := json.MarshalIndent(r, "", "  "); err == nil && len(body) <= MaxResponseBytes {
-		return r
-	}
-	return reduceOversizeResponse(r)
-}
-
-// reduceOversizeResponse is what a caller gets when the backstop fires: a
-// valid, much smaller document that still answers the question.
-//
-// It keeps the VERDICT and the means to go on — status, reason, phase, the
-// headline error, the log the headline came from, the exit code, the note
-// list, and a bounded prefix of log_paths — and drops the bulk. It never
-// recomputes anything, so it cannot answer differently from the response it
-// replaces; DiagnosticsDropped absorbs the diagnostics it drops, so the total
-// this call found is still recoverable.
-//
-// Every kept field is either a closed enum, an int, or a value the per-field
-// caps have already bounded, and the two growable lists are count-capped here,
-// so the reduction's own size is bounded by construction rather than by
-// argument. The final fallback below makes that unconditional: if even the
-// reduction does not fit, the verdict alone is emitted. The recursion
-// terminates because each stage keeps a strict subset of the last.
-func reduceOversizeResponse(r Result) Result {
-	out := Result{
-		Status:                  r.Status,
-		Reason:                  r.Reason,
-		Phase:                   r.Phase,
-		FailedTarget:            r.FailedTarget,
-		DiagnosticsDropped:      r.DiagnosticsDropped,
-		DiagnosticsDroppedExact: r.DiagnosticsDroppedExact,
-		DiagnosticLog:           r.DiagnosticLog,
-		ExitCode:                r.ExitCode,
-		LogPaths:                capStrings(r.LogPaths, MaxWireListEntries),
-		ContextSource:           r.ContextSource,
-		// First, so it survives the cap that follows it.
-		Notes:     append([]Note{NoteResponseSizeBackstopEngaged}, capNotes(r.Notes, MaxWireListEntries)...),
-		Resources: r.Resources,
-	}
-	if r.FirstError != nil {
-		headline := *r.FirstError
-		out.FirstError = &headline
-		out.Diagnostics = []Diagnostic{headline}
-		if len(r.Diagnostics) > 1 {
-			out.DiagnosticsDropped += len(r.Diagnostics) - 1
-		}
-		out.LogPaths = causalLogPaths(r.DiagnosticLog, out.LogPaths, MaxWireListEntries)
-	} else {
-		out.DiagnosticsDropped += len(r.Diagnostics)
-	}
-	out = validateCausality(out)
-	if body, err := json.MarshalIndent(out, "", "  "); err == nil && len(body) <= MaxResponseBytes {
-		return out
-	}
-	// Nothing above held. Failed results keep their causal tuple or downgrade;
-	// non-failed results retain the closed tri-state fields.
-	minimal := Result{Status: r.Status, Reason: r.Reason, Phase: r.Phase,
-		Notes: []Note{NoteResponseSizeBackstopEngaged}, Resources: r.Resources,
-		DiagnosticsDroppedExact: r.DiagnosticsDroppedExact}
-	if r.Status == Status("failed") && r.FirstError != nil && r.DiagnosticLog != "" {
-		headline := *r.FirstError
-		minimal.FirstError = &headline
-		minimal.Diagnostics = []Diagnostic{headline}
-		minimal.DiagnosticLog = r.DiagnosticLog
-		minimal.LogPaths = []string{r.DiagnosticLog}
-		minimal.ExitCode = r.ExitCode
-	}
-	return validateCausality(minimal)
+	return r
 }
 
 func causalLogPaths(diagnosticLog string, paths []string, max int) []string {
@@ -1104,13 +1000,6 @@ func capStrings(in []string, max int) []string {
 	return in[:max]
 }
 
-func capNotes(in []Note, max int) []Note {
-	if len(in) <= max {
-		return in
-	}
-	return in[:max]
-}
-
 // boundWireValues caps every string a Result lifts out of an unbounded log
 // line, wrapper line or directory walk, by the KIND of value it is.
 //
@@ -1129,8 +1018,8 @@ func capNotes(in []Note, max int) []Note {
 // This function is the enumeration, and the enumeration is the part that has
 // twice been incomplete. It is written out here, in one place, so that the
 // list is reviewable and so that the reflective enforcement probe in
-// wire_size_test.go has exactly one thing to disagree with. It is NOT the
-// guarantee: MaxResponseBytes is.
+// wire_size_test.go has exactly one thing to disagree with. The shared
+// publicresult boundary remains the field-agnostic encoded-size guarantee.
 //
 // Returns whether any diagnostic TEXT was cut and whether any other value was
 // cut, kept apart because they are different facts for an operator — an

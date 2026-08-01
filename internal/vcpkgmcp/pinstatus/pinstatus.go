@@ -49,6 +49,7 @@ import (
 	"strings"
 	"time"
 
+	hubprocess "mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
@@ -270,6 +271,7 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 	if err != nil {
 		res.Status = evidence.StatusUnknown
 		res.Reason = remoteQueryReason(err)
+		res.Failure = projectRemoteFailure(res.Reason, err)
 		return res
 	}
 
@@ -281,6 +283,7 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 			// itself did not produce a usable answer, never coerced to ok.
 			res.Status = evidence.StatusUnknown
 			res.Reason = ReasonRemoteQueryFailed
+			res.Failure = projectRemoteFailure(res.Reason, nil)
 			return res
 		}
 		res.PinnedSHA = effectiveRef
@@ -349,6 +352,71 @@ func remoteQueryReason(err error) Reason {
 	default:
 		return ReasonRemoteQueryFailed
 	}
+}
+
+// projectRemoteFailure is total over the stable tri-state reason plus the
+// typed internal process lifecycle. It never projects raw causes.
+func projectRemoteFailure(reason Reason, err error) *PublicFailure {
+	failure := &PublicFailure{}
+	switch reason {
+	case ReasonRemoteRefLimit:
+		failure.ID = FailureRemoteParseLimit
+	case ReasonRemoteQueryCanceled:
+		failure.ID = FailureRemoteCanceled
+	case ReasonRemoteQueryTimeout:
+		failure.ID = FailureRemoteTimeout
+	default:
+		var lifecycle *hubprocess.ContainedRunError
+		if errors.As(err, &lifecycle) {
+			switch lifecycle.Stage {
+			case hubprocess.ContainedStageContainment:
+				failure.ID = FailureProcessContainmentUnavailable
+			case hubprocess.ContainedStageStart:
+				failure.ID = FailureRemoteStartFailed
+			case hubprocess.ContainedStageExit:
+				failure.ID = FailureGitExitNonzero
+				if lifecycle.ExitCode != nil {
+					code := *lifecycle.ExitCode
+					failure.ExitCode = &code
+				}
+			case hubprocess.ContainedStageCleanup:
+				if errors.Is(lifecycle.Cause, hubprocess.ErrCleanupTimeout) {
+					failure.ID = FailureProcessCleanupTimeout
+				}
+			}
+		}
+		if failure.ID == "" {
+			failure.ID = FailureRemoteQueryFailed
+		}
+	}
+
+	var lifecycle *hubprocess.ContainedRunError
+	if errors.As(err, &lifecycle) &&
+		lifecycle.CleanupCause != nil &&
+		errors.Is(lifecycle.CleanupCause, hubprocess.ErrCleanupTimeout) &&
+		failure.ID != FailureProcessCleanupTimeout {
+		failure.CauseIDs = append(failure.CauseIDs, FailureProcessCleanupTimeout)
+	}
+
+	switch failure.ID {
+	case FailureRemoteParseLimit:
+		failure.Detail = "remote reference limit reached"
+	case FailureRemoteCanceled:
+		failure.Detail = "remote query canceled"
+	case FailureRemoteTimeout:
+		failure.Detail = "remote query timed out"
+	case FailureProcessContainmentUnavailable:
+		failure.Detail = "process containment unavailable"
+	case FailureRemoteStartFailed:
+		failure.Detail = "remote query start failed"
+	case FailureProcessCleanupTimeout:
+		failure.Detail = "process cleanup timed out"
+	case FailureGitExitNonzero:
+		failure.Detail = "git exited nonzero"
+	default:
+		failure.Detail = "remote query failed"
+	}
+	return failure
 }
 
 // cancellationReason distinguishes the caller giving up from a deadline

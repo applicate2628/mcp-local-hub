@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
+	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -103,35 +105,9 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		ProcThreadAttributeList: attrList.List(),
 	}
 
-	// Build the command line argv. cmd.Args[0] may differ from
-	// cmd.Path (the LookPath-resolved absolute path) when the caller
-	// invoked exec.Command("name") and let Go resolve from $PATH; we
-	// pass cmd.Path as argv0 so the child has a stable program-name
-	// even when the original argv0 was a bare basename. The trailing
-	// args are cmd.Args[1:] as supplied by the caller.
-	argv := append([]string{cmd.Path}, cmd.Args[1:]...)
-	commandLine, err := windows.UTF16PtrFromString(windows.ComposeCommandLine(argv))
+	commandLine, cwdPtr, envPtr, err := prepareWindowsCommand(cmd)
 	if err != nil {
-		return 0, fmt.Errorf("UTF16PtrFromString(commandLine): %w", err)
-	}
-
-	// Resolve working directory (empty → inherit parent's).
-	var cwdPtr *uint16
-	if cmd.Dir != "" {
-		cwdPtr, err = windows.UTF16PtrFromString(cmd.Dir)
-		if err != nil {
-			return 0, fmt.Errorf("UTF16PtrFromString(cmd.Dir): %w", err)
-		}
-	}
-
-	// Build environment block (NUL-separated KEY=VAL strings followed
-	// by a final NUL). Empty → inherit parent's via NULL.
-	var envPtr *uint16
-	if cmd.Env != nil {
-		envPtr, err = createEnvBlock(cmd.Env)
-		if err != nil {
-			return 0, fmt.Errorf("createEnvBlock: %w", err)
-		}
+		return 0, err
 	}
 
 	// Always-required creation flags:
@@ -203,17 +179,55 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	return int(pi.ProcessId), nil
 }
 
+// prepareWindowsCommand is the single Windows command-line, working-directory,
+// and environment-block owner shared by StartWithJob and RunContainedStream.
+// Callers validate cmd and normalize empty Args before entering this helper.
+func prepareWindowsCommand(cmd *exec.Cmd) (commandLine, cwdPtr, envPtr *uint16, err error) {
+	// Build the command line argv. cmd.Args[0] may differ from cmd.Path (the
+	// LookPath-resolved absolute path), so cmd.Path remains the stable argv0.
+	argv := append([]string{cmd.Path}, cmd.Args[1:]...)
+	commandLine, err = windows.UTF16PtrFromString(windows.ComposeCommandLine(argv))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("UTF16PtrFromString(commandLine): %w", err)
+	}
+
+	if cmd.Dir != "" {
+		cwdPtr, err = windows.UTF16PtrFromString(cmd.Dir)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("UTF16PtrFromString(cmd.Dir): %w", err)
+		}
+	}
+	if cmd.Env != nil {
+		for _, entry := range cmd.Env {
+			if strings.IndexByte(entry, 0) >= 0 {
+				return nil, nil, nil, errors.New("invalid command environment")
+			}
+		}
+	}
+	envPtr, err = createEnvBlock(cmd.Environ())
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("createEnvBlock: %w", err)
+	}
+	return commandLine, cwdPtr, envPtr, nil
+}
+
 // createEnvBlock builds the UTF-16 NUL-separated environment block
 // CreateProcess expects when CREATE_UNICODE_ENVIRONMENT is set.
 // Returns a pointer to the first uint16 of the block; the block is
 // terminated by an additional NUL beyond the last entry.
 func createEnvBlock(env []string) (*uint16, error) {
-	// Empty Env on os/exec.Cmd means "inherit parent's", but callers
-	// passing an explicit empty slice get an explicit empty env. The
-	// minimal valid empty block is two NULs.
+	for _, entry := range env {
+		if strings.IndexByte(entry, 0) >= 0 {
+			return nil, errors.New("invalid command environment")
+		}
+	}
 	if len(env) == 0 {
 		empty := []uint16{0, 0}
 		return &empty[0], nil
+	}
+	if !sort.SliceIsSorted(env, func(i, j int) bool { return windowsEnvironmentLess(env[i], env[j]) }) {
+		env = append([]string(nil), env...)
+		sort.Slice(env, func(i, j int) bool { return windowsEnvironmentLess(env[i], env[j]) })
 	}
 	var size int
 	for _, s := range env {
@@ -232,4 +246,28 @@ func createEnvBlock(env []string) (*uint16, error) {
 	}
 	buf = append(buf, 0) // final NUL
 	return &buf[0], nil
+}
+
+func windowsEnvironmentLess(left, right string) bool {
+	for i := 0; ; i++ {
+		var l, r byte
+		if i < len(left) {
+			l = left[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		if l == '=' || r == '=' || i == len(left) || i == len(right) {
+			return l < r
+		}
+		if l >= 'a' && l <= 'z' {
+			l -= 'a' - 'A'
+		}
+		if r >= 'a' && r <= 'z' {
+			r -= 'a' - 'A'
+		}
+		if l != r {
+			return l < r
+		}
+	}
 }
