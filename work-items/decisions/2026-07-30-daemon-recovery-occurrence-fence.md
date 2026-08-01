@@ -1,7 +1,7 @@
 - id: 2026-07-30-daemon-recovery-occurrence-fence
-- status: proposed
+- status: accepted
 - date: 2026-07-30
-- decided-by: architect through external-worker; architecture-reviewer promotion pending
+- decided-by: architecture-reviewer r13; accepted by lead after final QA r14
 - context: PR589 durable daemon-recovery occurrence fence
 - supersedes: none
 - superseded-by: none
