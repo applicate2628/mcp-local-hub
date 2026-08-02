@@ -354,6 +354,35 @@ command = "operator-tool"
 	}
 }
 
+func TestTOMLFinalTableStandaloneFooterRefusesBeforeMutation(t *testing.T) {
+	identity := DirectCleanupIdentity{Name: "legacy-go", Command: "mcp-language-server", Args: []string{"--lsp", "go"}}
+	original := []byte("[mcp_servers.legacy-go]\ncommand = \"mcp-language-server\"\nargs = [\"--lsp\", \"go\"]\n\n# DO-NOT-REMOVE: operator footer sentinel\n")
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	client := &codexCLI{path: path}
+	capability, ok := AsDirectCleanupMutator(newLockingClient(client))
+	if !ok {
+		t.Fatal("codex TOML client was not admitted to direct cleanup")
+	}
+	target, err := capability.CaptureDirectCleanupTarget(identity)
+	if !errors.Is(err, ErrCASConflict) || target != nil {
+		t.Fatalf("CaptureDirectCleanupTarget = (%v, %v), want nil ErrCASConflict", target, err)
+	}
+	after, readErr := os.ReadFile(path)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(after, original) {
+		t.Fatalf("footer refusal changed TOML bytes:\n%s", after)
+	}
+	backups, globErr := filepath.Glob(path + backupSuffixPrefix + "*")
+	if globErr != nil || len(backups) != 0 {
+		t.Fatalf("footer refusal created backups=%v err=%v", backups, globErr)
+	}
+}
+
 func TestDirectCleanupTOML_SiblingEditSurvivesRemoveAndExactRestore(t *testing.T) {
 	original := []byte(`# file-owned header
 [mcp_servers.legacy-go]

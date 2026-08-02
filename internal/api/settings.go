@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,93 @@ import (
 // each read {x:1, y:2}, modify their own key, and the slower writer
 // silently drops the faster writer's change.
 var settingsMu sync.Mutex
+
+type weeklyScheduleSettingsMode uint8
+
+const (
+	weeklyScheduleSettingsRead weeklyScheduleSettingsMode = iota
+	weeklyScheduleSettingsUpdate
+)
+
+// withWeeklyScheduleSettings owns the narrow settings side of the combined
+// weekly-schedule/task transaction. It keeps the settings mutex and file lock
+// through fn, so callers acquire settings ownership before the weekly-task
+// lock. Update mode supplies an exact-byte rollback for a failed task change;
+// read mode never rewrites the settings file.
+func (a *API) withWeeklyScheduleSettings(mode weeklyScheduleSettingsMode, desired string, fn func(current string, rollback func() error) error) (err error) {
+	if fn == nil {
+		return errors.New("weekly schedule settings callback is required")
+	}
+	def := findDef("daemons.weekly_schedule")
+	if def == nil {
+		return errors.New("weekly schedule setting is not registered")
+	}
+	settingsMu.Lock()
+	defer settingsMu.Unlock()
+
+	path := SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return fmt.Errorf("mkdir settings dir: %w", err)
+	}
+	lockPath := path + ".lock"
+	release, err := lockLeafLedgered(lockPath)
+	if err != nil {
+		return fmt.Errorf("settings flock %s: %w", path, err)
+	}
+	defer ReleaseAndJoin(&err, release, fmt.Sprintf("release settings flock %s", lockPath))
+
+	original, readErr := readStateFileInodeAnchored(path)
+	originalExists := readErr == nil
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return readErr
+	}
+	raw := map[string]string{}
+	if originalExists {
+		if err := yaml.Unmarshal(original, &raw); err != nil {
+			return err
+		}
+		migrateLegacyKeys(raw)
+	}
+	current, exists := raw[def.Key]
+	if !exists {
+		current = def.Default
+	} else if err := validate(def, current); err != nil {
+		return fmt.Errorf("invalid persisted weekly schedule: %w", err)
+	}
+	if _, err := ParseSchedule(current); err != nil {
+		return fmt.Errorf("invalid persisted weekly schedule: %w", err)
+	}
+	if mode == weeklyScheduleSettingsRead {
+		return fn(current, func() error { return nil })
+	}
+	if mode != weeklyScheduleSettingsUpdate {
+		return fmt.Errorf("unknown weekly schedule settings mode %d", mode)
+	}
+	if err := validate(def, desired); err != nil {
+		return fmt.Errorf("invalid weekly schedule update: %w", err)
+	}
+	raw[def.Key] = desired
+	updated, err := yaml.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	if err := WriteStateFileBytesLockHeld(path, updated); err != nil {
+		return fmt.Errorf("write settings file: %w", err)
+	}
+	rollback := func() error {
+		if originalExists {
+			if err := WriteStateFileBytesLockHeld(path, original); err != nil {
+				return fmt.Errorf("restore settings file: %w", err)
+			}
+			return nil
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("remove newly created settings file: %w", err)
+		}
+		return nil
+	}
+	return fn(current, rollback)
+}
 
 // SettingsPath returns the canonical preferences file location (in the
 // per-user data dir — same as secrets).

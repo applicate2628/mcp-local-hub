@@ -346,10 +346,11 @@ func restoreJSONCEntryPhysical(configBytes []byte, token *entryPhysicalToken) ([
 }
 
 type tomlPhysicalHeader struct {
-	kind         unstable.Kind
-	key          string
-	lineStart    int
-	leadingStart int
+	kind          unstable.Kind
+	key           string
+	lineStart     int
+	leadingStart  int
+	expressionEnd int
 }
 
 func parseTOMLPhysicalHeaders(configBytes []byte) ([]tomlPhysicalHeader, error) {
@@ -359,7 +360,11 @@ func parseTOMLPhysicalHeaders(configBytes []byte) ([]tomlPhysicalHeader, error) 
 	var headers []tomlPhysicalHeader
 	for parser.NextExpression() {
 		expression := parser.Expression()
+		expressionEnd := int(expression.Raw.Offset + expression.Raw.Length)
 		if expression.Kind != unstable.Table && expression.Kind != unstable.ArrayTable {
+			if expression.Kind == unstable.KeyValue && len(headers) > 0 {
+				headers[len(headers)-1].expressionEnd = expressionEnd
+			}
 			continue
 		}
 		var parts []string
@@ -378,7 +383,7 @@ func parseTOMLPhysicalHeaders(configBytes []byte) ([]tomlPhysicalHeader, error) 
 		lineStart := bytes.LastIndexByte(configBytes[:firstKeyOffset], '\n') + 1
 		headers = append(headers, tomlPhysicalHeader{
 			kind: expression.Kind, key: strings.Join(parts, "\x00"),
-			lineStart: lineStart, leadingStart: lineStart,
+			lineStart: lineStart, leadingStart: lineStart, expressionEnd: expressionEnd,
 		})
 	}
 	if err := parser.Error(); err != nil {
@@ -402,6 +407,32 @@ func parseTOMLPhysicalHeaders(configBytes []byte) ([]tomlPhysicalHeader, error) 
 		headers[i].leadingStart = start
 	}
 	return headers, nil
+}
+
+func tomlHasStandaloneFooter(configBytes []byte, lastExpressionEnd int) bool {
+	if lastExpressionEnd < 0 || lastExpressionEnd >= len(configBytes) {
+		return false
+	}
+	lineEnd := bytes.IndexByte(configBytes[lastExpressionEnd:], '\n')
+	if lineEnd < 0 {
+		return false
+	}
+	for offset := lastExpressionEnd + lineEnd + 1; offset < len(configBytes); {
+		next := bytes.IndexByte(configBytes[offset:], '\n')
+		end := len(configBytes)
+		if next >= 0 {
+			end = offset + next
+		}
+		line := bytes.TrimLeft(configBytes[offset:end], " \t\r")
+		if len(line) > 0 && line[0] == '#' {
+			return true
+		}
+		if next < 0 {
+			break
+		}
+		offset = end + 1
+	}
+	return false
 }
 
 func extractTOMLEntryPhysicalToken(configBytes []byte, section, name string) (*entryPhysicalToken, bool, error) {
@@ -454,6 +485,17 @@ func extractTOMLEntryPhysicalToken(configBytes []byte, section, name string) (*e
 	for i := boundary + 1; i < len(headers); i++ {
 		if strings.HasPrefix(headers[i].key, targetKey+"\x00") {
 			return nil, false, fmt.Errorf("toml physical entry %q has a non-contiguous table block", name)
+		}
+	}
+	if boundary == len(headers) {
+		lastExpressionEnd := headers[targetIndex].expressionEnd
+		for i := targetIndex + 1; i < boundary; i++ {
+			if headers[i].expressionEnd > lastExpressionEnd {
+				lastExpressionEnd = headers[i].expressionEnd
+			}
+		}
+		if tomlHasStandaloneFooter(configBytes, lastExpressionEnd) {
+			return nil, false, fmt.Errorf("toml physical entry %q has ambiguous trailing footer comments", name)
 		}
 	}
 	token := &entryPhysicalToken{

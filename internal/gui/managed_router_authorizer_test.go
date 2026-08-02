@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"go/ast"
@@ -43,6 +44,635 @@ func TestManagedRouterLease_CloseCachesFailureOnce(t *testing.T) {
 	}
 	if closeCalls != 1 {
 		t.Fatalf("native close calls = %d, want 1", closeCalls)
+	}
+}
+
+type managedRouterReleaseEventForTest struct {
+	class string
+	err   error
+}
+
+type managedRouterProcessObservationForTest struct {
+	identity ProcessIdentity
+	err      error
+}
+
+type managedRouterPingObservationForTest struct {
+	ping    managedRouterPing
+	failure string
+}
+
+type managedRouterAuthorizerPathHarness struct {
+	t           *testing.T
+	pid         int
+	port        int
+	version     string
+	pidportPath string
+	executable  string
+	start       time.Time
+
+	readPID        int
+	readPort       int
+	readErr        error
+	statErr        error
+	portOwnerPID   int
+	portOwnerFound bool
+	portOwnerErr   error
+	ownerMatches   bool
+	ownerMatchErr  error
+	processes      []managedRouterProcessObservationForTest
+	pings          []managedRouterPingObservationForTest
+	processIndex   int
+	pingIndex      int
+
+	closeFailures map[uintptr]error
+	closed        map[uintptr]int
+	events        []managedRouterReleaseEventForTest
+}
+
+func newManagedRouterAuthorizerPathHarness(t *testing.T) *managedRouterAuthorizerPathHarness {
+	t.Helper()
+	const (
+		pid     = 4242
+		port    = 19125
+		version = "1.2.3"
+	)
+	root := t.TempDir()
+	pidportPath := filepath.Join(root, "gui.pidport")
+	if err := os.WriteFile(pidportPath, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	mtime := time.Now().Add(-time.Minute).Round(0)
+	if err := os.Chtimes(pidportPath, mtime, mtime); err != nil {
+		t.Fatal(err)
+	}
+	h := &managedRouterAuthorizerPathHarness{
+		t:              t,
+		pid:            pid,
+		port:           port,
+		version:        version,
+		pidportPath:    pidportPath,
+		executable:     filepath.Join(root, "mcphub.exe"),
+		start:          mtime.Add(-time.Minute),
+		readPID:        pid,
+		readPort:       port,
+		portOwnerPID:   pid,
+		portOwnerFound: true,
+		ownerMatches:   true,
+		closeFailures:  map[uintptr]error{},
+		closed:         map[uintptr]int{},
+	}
+	h.pings = []managedRouterPingObservationForTest{{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}}}
+	return h
+}
+
+func (h *managedRouterAuthorizerPathHarness) identity(handle uintptr) ProcessIdentity {
+	return ProcessIdentity{
+		Alive:     true,
+		ImagePath: h.executable,
+		Cmdline:   []string{h.executable, "gui"},
+		StartTime: h.start,
+		Handle:    handle,
+	}
+}
+
+func (h *managedRouterAuthorizerPathHarness) changedIdentity(handle uintptr) ProcessIdentity {
+	identity := h.identity(handle)
+	identity.StartTime = identity.StartTime.Add(-time.Second)
+	return identity
+}
+
+func (h *managedRouterAuthorizerPathHarness) authorizer() api.ManagedRouterAuthorizer {
+	return newManagedRouterAuthorizerWithDeps(
+		h.pidportPath,
+		h.executable,
+		h.version,
+		managedRouterAuthorizerDeps{
+			readPidport: func(string) (int, int, error) {
+				return h.readPID, h.readPort, h.readErr
+			},
+			statPidport: func(string) (os.FileInfo, error) {
+				if h.statErr != nil {
+					return nil, h.statErr
+				}
+				return os.Stat(h.pidportPath)
+			},
+			portOwner: func(context.Context, int) (int, bool, error) {
+				return h.portOwnerPID, h.portOwnerFound, h.portOwnerErr
+			},
+			processID: func(int) (ProcessIdentity, error) {
+				if h.processIndex >= len(h.processes) {
+					h.t.Fatalf("unexpected process observation %d", h.processIndex+1)
+				}
+				observation := h.processes[h.processIndex]
+				h.processIndex++
+				return observation.identity, observation.err
+			},
+			closeID: func(identity *ProcessIdentity) error {
+				if identity == nil {
+					return nil
+				}
+				handle := identity.Handle
+				h.closed[handle]++
+				identity.Handle = 0
+				return h.closeFailures[handle]
+			},
+			ownerMatch: func(int) (bool, error) {
+				return h.ownerMatches, h.ownerMatchErr
+			},
+			ping: func(context.Context, int) (managedRouterPing, string) {
+				if h.pingIndex >= len(h.pings) {
+					h.t.Fatalf("unexpected ping observation %d", h.pingIndex+1)
+				}
+				observation := h.pings[h.pingIndex]
+				h.pingIndex++
+				return observation.ping, observation.failure
+			},
+			releaseDiagnostic: func(class string, err error) {
+				h.events = append(h.events, managedRouterReleaseEventForTest{class: class, err: err})
+			},
+		},
+	)
+}
+
+func (h *managedRouterAuthorizerPathHarness) requireClosedExactlyOnce(t *testing.T, handles ...uintptr) {
+	t.Helper()
+	for _, handle := range handles {
+		if got := h.closed[handle]; got != 1 {
+			t.Fatalf("identity handle %d close count = %d, want 1", handle, got)
+		}
+	}
+	for handle, calls := range h.closed {
+		if calls != 1 {
+			t.Fatalf("identity handle %d close count = %d, want 1", handle, calls)
+		}
+	}
+}
+
+func TestManagedRouterTemporaryIdentitySettlementMatrix(t *testing.T) {
+	processErr := errors.New("process observation failed")
+	ownerErr := errors.New("owner observation failed")
+	statErr := errors.New("pidport stat failed")
+	t.Run("authorizer preconditions reject before identity acquisition", func(t *testing.T) {
+		cases := []struct {
+			name         string
+			candidate    int
+			hasCandidate bool
+			configure    func(*managedRouterAuthorizerPathHarness)
+			wantClass    string
+		}{
+			{name: "invalid candidate port", candidate: 0, hasCandidate: true, wantClass: api.ManagedRouterFailurePortInvalid},
+			{
+				name: "empty pidport path",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.pidportPath = ""
+				},
+				wantClass: api.ManagedRouterFailurePIDPortUnavailable,
+			},
+			{
+				name: "empty executable path",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.executable = ""
+				},
+				wantClass: api.ManagedRouterFailureExecutableUnavailable,
+			},
+			{
+				name: "uninformative version",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.version = "dev"
+				},
+				wantClass: api.ManagedRouterFailureVersionUninformative,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newManagedRouterAuthorizerPathHarness(t)
+				if tc.configure != nil {
+					tc.configure(h)
+				}
+				candidate := h.port
+				if tc.hasCandidate {
+					candidate = tc.candidate
+				}
+				got := h.authorizer()(context.Background(), candidate)
+				if got.Lease != nil || got.FailureClass != tc.wantClass {
+					t.Fatalf("authorization = %+v, want failure %q", got, tc.wantClass)
+				}
+				if len(h.closed) != 0 || len(h.events) != 0 {
+					t.Fatalf("precondition rejection acquired identity: closed=%v events=%v", h.closed, h.events)
+				}
+			})
+		}
+	})
+	cases := []struct {
+		name      string
+		configure func(*managedRouterAuthorizerPathHarness)
+		wantClass string
+		closed    []uintptr
+	}{
+		{
+			name: "pidport unavailable has no acquired identity",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.readErr = errors.New("pidport unavailable")
+			},
+			wantClass: api.ManagedRouterFailurePIDPortUnavailable,
+		},
+		{
+			name: "pidport port mismatch has no acquired identity",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.readPort++
+			},
+			wantClass: api.ManagedRouterFailurePIDPortPortMismatch,
+		},
+		{
+			name: "pidport stat failure has no acquired identity",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.statErr = statErr
+			},
+			wantClass: api.ManagedRouterFailurePIDPortUnavailable,
+		},
+		{
+			name: "socket owner unavailable has no acquired identity",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.portOwnerFound = false
+			},
+			wantClass: api.ManagedRouterFailureSocketOwnerUnavailable,
+		},
+		{
+			name: "socket owner mismatch has no acquired identity",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.portOwnerPID++
+			},
+			wantClass: api.ManagedRouterFailureSocketOwnerMismatch,
+		},
+		{
+			name: "process error settles acquired identity",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(11), err: processErr}}
+			},
+			wantClass: api.ManagedRouterFailureProcessUnavailable,
+			closed:    []uintptr{11},
+		},
+		{
+			name: "dead identity settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				identity := h.identity(12)
+				identity.Alive = false
+				h.processes = []managedRouterProcessObservationForTest{{identity: identity}}
+			},
+			wantClass: api.ManagedRouterFailureProcessUnavailable,
+			closed:    []uintptr{12},
+		},
+		{
+			name: "denied identity settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				identity := h.identity(13)
+				identity.Denied = true
+				h.processes = []managedRouterProcessObservationForTest{{identity: identity}}
+			},
+			wantClass: api.ManagedRouterFailureProcessUnavailable,
+			closed:    []uintptr{13},
+		},
+		{
+			name: "executable mismatch settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				identity := h.identity(14)
+				identity.ImagePath = filepath.Join(t.TempDir(), "foreign.exe")
+				h.processes = []managedRouterProcessObservationForTest{{identity: identity}}
+			},
+			wantClass: api.ManagedRouterFailureExecutableMismatch,
+			closed:    []uintptr{14},
+		},
+		{
+			name: "argv mismatch settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				identity := h.identity(15)
+				identity.Cmdline = []string{h.executable, "server"}
+				h.processes = []managedRouterProcessObservationForTest{{identity: identity}}
+			},
+			wantClass: api.ManagedRouterFailureArgvRoleMismatch,
+			closed:    []uintptr{15},
+		},
+		{
+			name: "invalid generation settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				identity := h.identity(16)
+				identity.StartTime = time.Time{}
+				h.processes = []managedRouterProcessObservationForTest{{identity: identity}}
+			},
+			wantClass: api.ManagedRouterFailureProcessGenerationInvalid,
+			closed:    []uintptr{16},
+		},
+		{
+			name: "owner unavailable settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.ownerMatchErr = ownerErr
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(17)}}
+			},
+			wantClass: api.ManagedRouterFailureProcessOwnerUnavailable,
+			closed:    []uintptr{17},
+		},
+		{
+			name: "owner mismatch settles once",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.ownerMatches = false
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(18)}}
+			},
+			wantClass: api.ManagedRouterFailureProcessOwnerMismatch,
+			closed:    []uintptr{18},
+		},
+		{
+			name: "ping transport failure settles first observation",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(19)}}
+				h.pings = []managedRouterPingObservationForTest{{failure: api.ManagedRouterFailurePingTransport}}
+			},
+			wantClass: api.ManagedRouterFailurePingTransport,
+			closed:    []uintptr{19},
+		},
+		{
+			name: "ping identity mismatch settles first observation",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(20)}}
+				h.pings = []managedRouterPingObservationForTest{{ping: managedRouterPing{OK: true, PID: h.pid + 1, Version: h.version}}}
+			},
+			wantClass: api.ManagedRouterFailurePingIdentityMismatch,
+			closed:    []uintptr{20},
+		},
+		{
+			name: "second observation failure settles both temporary identities",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				second := h.identity(22)
+				second.Alive = false
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(21)}, {identity: second}}
+			},
+			wantClass: api.ManagedRouterFailureIdentityChanged,
+			closed:    []uintptr{21, 22},
+		},
+		{
+			name: "second generation mismatch settles both temporary identities",
+			configure: func(h *managedRouterAuthorizerPathHarness) {
+				h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(23)}, {identity: h.changedIdentity(24)}}
+			},
+			wantClass: api.ManagedRouterFailureIdentityChanged,
+			closed:    []uintptr{23, 24},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newManagedRouterAuthorizerPathHarness(t)
+			tc.configure(h)
+			got := h.authorizer()(context.Background(), h.port)
+			if got.Lease != nil || got.FailureClass != tc.wantClass {
+				t.Fatalf("authorization = %+v, want failure %q", got, tc.wantClass)
+			}
+			h.requireClosedExactlyOnce(t, tc.closed...)
+			if len(h.events) != 0 {
+				t.Fatalf("unexpected release diagnostics: %+v", h.events)
+			}
+		})
+	}
+
+	t.Run("stable initial acquisition settles the second temporary identity after first close failure", func(t *testing.T) {
+		firstCloseCause := errors.New("first initial temporary close failed")
+		h := newManagedRouterAuthorizerPathHarness(t)
+		h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(25)}, {identity: h.identity(26)}}
+		h.closeFailures[25] = firstCloseCause
+
+		authorization := h.authorizer()(context.Background(), h.port)
+		if authorization.Lease != nil || authorization.FailureClass != api.ManagedRouterFailureIdentityUnavailable {
+			t.Fatalf("authorization = %+v, want identity-unavailable without lease", authorization)
+		}
+		h.requireClosedExactlyOnce(t, 25, 26)
+		if len(h.events) != 1 || h.events[0].class != api.ManagedRouterFailureIdentityUnavailable || !errors.Is(h.events[0].err, firstCloseCause) {
+			t.Fatalf("release diagnostic = %+v, want identity-unavailable with %v", h.events, firstCloseCause)
+		}
+	})
+
+	t.Run("initial generation mismatch settles both temporary identities after independent close failures", func(t *testing.T) {
+		firstCloseCause := errors.New("first initial mismatch close failed")
+		secondCloseCause := errors.New("second initial mismatch close failed")
+		h := newManagedRouterAuthorizerPathHarness(t)
+		h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(27)}, {identity: h.changedIdentity(28)}}
+		h.closeFailures[27] = firstCloseCause
+		h.closeFailures[28] = secondCloseCause
+
+		authorization := h.authorizer()(context.Background(), h.port)
+		if authorization.Lease != nil || authorization.FailureClass != api.ManagedRouterFailureIdentityChanged {
+			t.Fatalf("authorization = %+v, want identity-changed without lease", authorization)
+		}
+		h.requireClosedExactlyOnce(t, 27, 28)
+		if len(h.events) != 1 || h.events[0].class != api.ManagedRouterFailureIdentityChanged || !errors.Is(h.events[0].err, firstCloseCause) || !errors.Is(h.events[0].err, secondCloseCause) {
+			t.Fatalf("release diagnostic = %+v, want identity-changed with both close causes", h.events)
+		}
+	})
+
+	t.Run("revalidation settlement branches", func(t *testing.T) {
+		releaseCause := errors.New("native temporary close failed")
+		firstMismatchCloseCause := errors.New("first revalidation mismatch close failed")
+		secondMismatchCloseCause := errors.New("second revalidation mismatch close failed")
+		cases := []struct {
+			name      string
+			configure func(*managedRouterAuthorizerPathHarness)
+			want      string
+			closed    []uintptr
+			retained  uintptr
+			causes    []error
+		}{
+			{
+				name: "first revalidation observation rejects",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					identity := h.identity(103)
+					identity.Alive = false
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(101)}, {identity: h.identity(102)}, {identity: identity}}
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{101, 103},
+				retained: 102,
+			},
+			{
+				name: "first revalidation generation changes",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(111)}, {identity: h.identity(112)}, {identity: h.changedIdentity(113)}}
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{111, 113},
+				retained: 112,
+			},
+			{
+				name: "revalidation ping rejects",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(121)}, {identity: h.identity(122)}, {identity: h.identity(123)}}
+					h.pings = []managedRouterPingObservationForTest{
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+						{failure: api.ManagedRouterFailurePingTransport},
+					}
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{121, 123},
+				retained: 122,
+			},
+			{
+				name: "second revalidation observation rejects",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					second := h.identity(134)
+					second.Denied = true
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(131)}, {identity: h.identity(132)}, {identity: h.identity(133)}, {identity: second}}
+					h.pings = []managedRouterPingObservationForTest{
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+					}
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{131, 133, 134},
+				retained: 132,
+			},
+			{
+				name: "second revalidation generation changes",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(141)}, {identity: h.identity(142)}, {identity: h.identity(143)}, {identity: h.changedIdentity(144)}}
+					h.pings = []managedRouterPingObservationForTest{
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+					}
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{141, 143, 144},
+				retained: 142,
+			},
+			{
+				name: "temporary close failure remains diagnostic",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(151)}, {identity: h.identity(152)}, {identity: h.identity(153)}, {identity: h.identity(154)}}
+					h.pings = []managedRouterPingObservationForTest{
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+					}
+					h.closeFailures[153] = releaseCause
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{151, 153, 154},
+				retained: 152,
+				causes:   []error{releaseCause},
+			},
+			{
+				name: "revalidation generation mismatch settles both temporary identities after independent close failures",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(171)}, {identity: h.identity(172)}, {identity: h.identity(173)}, {identity: h.changedIdentity(174)}}
+					h.pings = []managedRouterPingObservationForTest{
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+					}
+					h.closeFailures[173] = firstMismatchCloseCause
+					h.closeFailures[174] = secondMismatchCloseCause
+				},
+				want:     api.ManagedRouterFailureIdentityChanged,
+				closed:   []uintptr{171, 173, 174},
+				retained: 172,
+				causes:   []error{firstMismatchCloseCause, secondMismatchCloseCause},
+			},
+			{
+				name: "stable revalidation settles both temporary identities",
+				configure: func(h *managedRouterAuthorizerPathHarness) {
+					h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(161)}, {identity: h.identity(162)}, {identity: h.identity(163)}, {identity: h.identity(164)}}
+					h.pings = []managedRouterPingObservationForTest{
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+						{ping: managedRouterPing{OK: true, PID: h.pid, Version: h.version}},
+					}
+				},
+				closed:   []uintptr{161, 163, 164},
+				retained: 162,
+			},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				h := newManagedRouterAuthorizerPathHarness(t)
+				tc.configure(h)
+				authorization := h.authorizer()(context.Background(), h.port)
+				if authorization.Lease == nil || authorization.FailureClass != "" {
+					t.Fatalf("initial authorization = %+v, want retained lease", authorization)
+				}
+				if got := authorization.Lease.Revalidate(context.Background()); got != tc.want {
+					t.Fatalf("revalidation failure = %q, want %q", got, tc.want)
+				}
+				h.requireClosedExactlyOnce(t, tc.closed...)
+				if len(tc.causes) == 0 {
+					if len(h.events) != 0 {
+						t.Fatalf("unexpected release diagnostics: %+v", h.events)
+					}
+				} else {
+					if len(h.events) != 1 || h.events[0].class != api.ManagedRouterFailureIdentityChanged {
+						t.Fatalf("release diagnostic = %+v, want one identity-changed event", h.events)
+					}
+					for _, cause := range tc.causes {
+						if !errors.Is(h.events[0].err, cause) {
+							t.Fatalf("release diagnostic = %+v, want identity-changed with %v", h.events, cause)
+						}
+					}
+				}
+				if err := authorization.Lease.Close(); err != nil {
+					t.Fatalf("close retained lease: %v", err)
+				}
+				h.requireClosedExactlyOnce(t, append(tc.closed, tc.retained)...)
+			})
+		}
+	})
+}
+
+func TestManagedRouterRetainedIdentityTransfersExactlyOnce(t *testing.T) {
+	h := newManagedRouterAuthorizerPathHarness(t)
+	h.processes = []managedRouterProcessObservationForTest{{identity: h.identity(201)}, {identity: h.identity(202)}}
+	authorization := h.authorizer()(context.Background(), h.port)
+	if authorization.Lease == nil || authorization.FailureClass != "" {
+		t.Fatalf("authorization = %+v, want retained lease", authorization)
+	}
+	h.requireClosedExactlyOnce(t, 201)
+	if got := h.closed[202]; got != 0 {
+		t.Fatalf("retained identity close count before Lease.Close = %d, want 0", got)
+	}
+	if err := authorization.Lease.Close(); err != nil {
+		t.Fatalf("first Lease.Close: %v", err)
+	}
+	if err := authorization.Lease.Close(); err != nil {
+		t.Fatalf("second Lease.Close: %v", err)
+	}
+	h.requireClosedExactlyOnce(t, 201, 202)
+	if len(h.events) != 0 {
+		t.Fatalf("unexpected release diagnostics: %+v", h.events)
+	}
+}
+
+func TestManagedRouterReleaseCauseIsRedacted(t *testing.T) {
+	releaseCause := errors.New("sensitive native close cause")
+	h := newManagedRouterAuthorizerPathHarness(t)
+	identity := h.identity(301)
+	identity.ImagePath = filepath.Join(t.TempDir(), "sensitive-executable-path.exe")
+	identity.Cmdline = []string{identity.ImagePath, "sensitive-argv-marker"}
+	h.processes = []managedRouterProcessObservationForTest{{identity: identity}}
+	h.closeFailures[301] = releaseCause
+
+	got := h.authorizer()(context.Background(), h.port)
+	if got.Lease != nil || got.FailureClass != api.ManagedRouterFailureExecutableMismatch {
+		t.Fatalf("authorization = %+v, want executable mismatch", got)
+	}
+	if len(h.events) != 1 || h.events[0].class != api.ManagedRouterFailureExecutableMismatch || !errors.Is(h.events[0].err, releaseCause) {
+		t.Fatalf("release diagnostic = %+v, want executable mismatch carrying native cause", h.events)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal authorization: %v", err)
+	}
+	serialized := fmt.Sprintf("%+v", got)
+	for _, sensitive := range []string{
+		releaseCause.Error(),
+		h.pidportPath,
+		identity.ImagePath,
+		"sensitive-argv-marker",
+		strconv.Itoa(int(identity.Handle)),
+	} {
+		if strings.Contains(string(encoded), sensitive) || strings.Contains(serialized, sensitive) {
+			t.Fatalf("public authorization leaked %q: json=%s text=%s", sensitive, encoded, serialized)
+		}
 	}
 }
 

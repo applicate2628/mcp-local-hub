@@ -26,6 +26,10 @@ import (
 	"mcp-local-hub/internal/secrets"
 )
 
+// pruneBackupsForBackupPath is the post-commit retention seam. Production uses
+// the clients owner; tests inject only its lock-lifecycle result.
+var pruneBackupsForBackupPath = clients.PruneBackupsForBackupPath
+
 // mcphubShortName is the bare executable name. Used for Antigravity relay
 // entries (subprocess spawners like Node's child_process do honor PATH) and
 // for the install preflight "is mcphub on PATH?" check.
@@ -2946,8 +2950,12 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			rollback = append(rollback, undo)
 		}
 	}
+	postCommitWarnings := false
 	for _, backupPath := range installBackupPaths {
-		clients.PruneBackupsForBackupPath(backupPath, keepN)
+		if err := pruneBackupsForBackupPath(backupPath, keepN); err != nil {
+			postCommitWarnings = true
+			fmt.Fprintf(w, "warning: backup retention lock lifecycle failed; install changes remain committed: %v\n", err)
+		}
 	}
 	// Pass B - start daemons immediately (without waiting for next logon).
 	// Gated by startTasks: the migrate driver passes false to defer daemon
@@ -2967,7 +2975,11 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			}
 		}
 	}
-	fmt.Fprintln(w, "\nInstall complete.")
+	if postCommitWarnings {
+		fmt.Fprintln(w, "\nInstall complete with warnings.")
+	} else {
+		fmt.Fprintln(w, "\nInstall complete.")
+	}
 	return nil
 }
 

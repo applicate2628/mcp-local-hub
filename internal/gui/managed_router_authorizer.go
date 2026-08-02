@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
+	"log"
 	"mime"
 	"net/http"
 	"os"
@@ -34,13 +36,14 @@ type managedRouterProcessGeneration struct {
 }
 
 type managedRouterAuthorizerDeps struct {
-	readPidport func(string) (int, int, error)
-	statPidport func(string) (os.FileInfo, error)
-	portOwner   func(context.Context, int) (int, bool, error)
-	processID   func(int) (ProcessIdentity, error)
-	closeID     func(*ProcessIdentity) error
-	ownerMatch  func(int) (bool, error)
-	ping        func(context.Context, int) (managedRouterPing, string)
+	readPidport       func(string) (int, int, error)
+	statPidport       func(string) (os.FileInfo, error)
+	portOwner         func(context.Context, int) (int, bool, error)
+	processID         func(int) (ProcessIdentity, error)
+	closeID           func(*ProcessIdentity) error
+	releaseDiagnostic func(string, error)
+	ownerMatch        func(int) (bool, error)
+	ping              func(context.Context, int) (managedRouterPing, string)
 }
 
 type managedRouterPing struct {
@@ -66,6 +69,9 @@ func NewManagedRouterAuthorizer(pidportPath, currentExecutable, expectedVersion 
 			closeID: func(identity *ProcessIdentity) error {
 				return identity.Close()
 			},
+			releaseDiagnostic: func(primaryClass string, err error) {
+				log.Printf("managed-router-identity-release-unconfirmed: class=%s: %v", primaryClass, err)
+			},
 			ownerMatch: processutil.ProcessOwnerMatchesCurrent,
 			ping:       strictManagedRouterPing,
 		},
@@ -80,6 +86,9 @@ func newManagedRouterAuthorizerWithDeps(
 		deps.closeID = func(identity *ProcessIdentity) error {
 			return identity.Close()
 		}
+	}
+	if deps.releaseDiagnostic == nil {
+		deps.releaseDiagnostic = func(string, error) {}
 	}
 	return func(ctx context.Context, candidatePort int) api.ManagedRouterAuthorization {
 		if ctx == nil {
@@ -109,28 +118,27 @@ func newManagedRouterAuthorizerWithDeps(
 		}
 		ping, failure := deps.ping(authorizationCtx, candidatePort)
 		if failure != "" {
-			_ = deps.closeID(&firstIdentity)
+			_ = settleTemporaryProcessIdentities(deps, failure, &firstIdentity)
 			return api.ManagedRouterAuthorization{FailureClass: failure}
 		}
 		if !ping.OK || ping.PID != first.pid || strings.TrimSpace(ping.Version) == "" || ping.Version != version {
-			_ = deps.closeID(&firstIdentity)
+			_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailurePingIdentityMismatch, &firstIdentity)
 			return api.ManagedRouterAuthorization{FailureClass: api.ManagedRouterFailurePingIdentityMismatch}
 		}
 		second, secondIdentity, failure := observeManagedRouterGeneration(authorizationCtx, candidatePort, pidportPath, executable, deps)
 		if failure != "" {
-			_ = deps.closeID(&firstIdentity)
+			_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityChanged, &firstIdentity)
 			// The same observation already succeeded before the ping. Any
 			// post-response refusal means the authorized generation is no longer
 			// stable; keep the external taxonomy independent of which signal raced.
 			return api.ManagedRouterAuthorization{FailureClass: api.ManagedRouterFailureIdentityChanged}
 		}
 		if first != second {
-			_ = deps.closeID(&firstIdentity)
-			_ = deps.closeID(&secondIdentity)
+			_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityChanged, &firstIdentity, &secondIdentity)
 			return api.ManagedRouterAuthorization{FailureClass: api.ManagedRouterFailureIdentityChanged}
 		}
-		if err := deps.closeID(&firstIdentity); err != nil {
-			_ = deps.closeID(&secondIdentity)
+		if err := settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityUnavailable, &firstIdentity); err != nil {
+			_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityUnavailable, &secondIdentity)
 			return api.ManagedRouterAuthorization{FailureClass: api.ManagedRouterFailureIdentityUnavailable}
 		}
 		retainedIdentity := secondIdentity
@@ -152,6 +160,23 @@ func newManagedRouterAuthorizerWithDeps(
 			},
 		}
 	}
+}
+
+func settleTemporaryProcessIdentities(deps managedRouterAuthorizerDeps, primaryClass string, identities ...*ProcessIdentity) error {
+	var releaseErrs []error
+	for _, identity := range identities {
+		if identity == nil {
+			continue
+		}
+		if err := deps.closeID(identity); err != nil {
+			releaseErrs = append(releaseErrs, err)
+		}
+	}
+	if err := errors.Join(releaseErrs...); err != nil {
+		deps.releaseDiagnostic(primaryClass, err)
+		return err
+	}
+	return nil
 }
 
 type managedRouterLease struct {
@@ -197,11 +222,8 @@ func revalidateManagedRouterGeneration(
 	if failure != "" {
 		return api.ManagedRouterFailureIdentityChanged
 	}
-	closeFirst := func() bool {
-		return deps.closeID(&firstIdentity) == nil
-	}
 	if first != generation {
-		_ = closeFirst()
+		_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityChanged, &firstIdentity)
 		return api.ManagedRouterFailureIdentityChanged
 	}
 	ping, failure := deps.ping(revalidationCtx, generation.port)
@@ -210,7 +232,7 @@ func revalidateManagedRouterGeneration(
 		ping.PID != generation.pid ||
 		strings.TrimSpace(ping.Version) == "" ||
 		ping.Version != expectedVersion {
-		_ = closeFirst()
+		_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityChanged, &firstIdentity)
 		return api.ManagedRouterFailureIdentityChanged
 	}
 	second, secondIdentity, failure := observeManagedRouterGeneration(
@@ -221,12 +243,10 @@ func revalidateManagedRouterGeneration(
 		deps,
 	)
 	if failure != "" {
-		_ = closeFirst()
+		_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityChanged, &firstIdentity)
 		return api.ManagedRouterFailureIdentityChanged
 	}
-	firstClosed := closeFirst()
-	secondClosed := deps.closeID(&secondIdentity) == nil
-	if !firstClosed || !secondClosed || second != generation {
+	if err := settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureIdentityChanged, &firstIdentity, &secondIdentity); err != nil || second != generation {
 		return api.ManagedRouterFailureIdentityChanged
 	}
 	return ""
@@ -275,11 +295,11 @@ func observeManagedRouterGeneration(
 	}
 	identity, err := deps.processID(pid)
 	if err != nil || !identity.Alive || identity.Denied || identity.Handle == 0 {
-		_ = deps.closeID(&identity)
+		_ = settleTemporaryProcessIdentities(deps, api.ManagedRouterFailureProcessUnavailable, &identity)
 		return managedRouterProcessGeneration{}, ProcessIdentity{}, api.ManagedRouterFailureProcessUnavailable
 	}
 	reject := func(failure string) (managedRouterProcessGeneration, ProcessIdentity, string) {
-		_ = deps.closeID(&identity)
+		_ = settleTemporaryProcessIdentities(deps, failure, &identity)
 		return managedRouterProcessGeneration{}, ProcessIdentity{}, failure
 	}
 	observedExecutable, ok := canonicalManagedRouterExecutable(identity.ImagePath)

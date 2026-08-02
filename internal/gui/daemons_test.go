@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -280,10 +281,9 @@ func TestWeeklyScheduleHandler_ParseError_400_NoUpdatedField(t *testing.T) {
 
 func TestWeeklyScheduleHandler_ValidPayload_Accepted(t *testing.T) {
 	srv := newDaemonsTestServer(t)
-	srv.swapForRoute = func(spec *api.ScheduleSpec, priorXML []byte) (string, error) {
+	setWeeklyScheduleApplyForRoute(t, func(spec *api.ScheduleSpec) (string, error) {
 		return "n/a", nil
-	}
-	srv.exportXMLForRoute = func(name string) ([]byte, error) { return nil, nil }
+	})
 	body := `{"schedule": "weekly Tue 14:30"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
 	req.Header = sameOriginHeaders()
@@ -301,9 +301,9 @@ func TestWeeklyScheduleHandler_ValidPayload_Accepted(t *testing.T) {
 
 func TestWeeklyScheduleHandler_ExportXMLFails_Preflight500(t *testing.T) {
 	srv := newDaemonsTestServer(t)
-	srv.exportXMLForRoute = func(name string) ([]byte, error) {
-		return nil, errors.New("scheduler down")
-	}
+	setWeeklyScheduleApplyForRoute(t, func(spec *api.ScheduleSpec) (string, error) {
+		return "n/a", fmt.Errorf("%w: scheduler down", api.ErrWeeklyRefreshSnapshotUnavailable)
+	})
 	body := `{"schedule": "weekly Sun 03:00"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
 	req.Header = sameOriginHeaders()
@@ -321,10 +321,9 @@ func TestWeeklyScheduleHandler_ExportXMLFails_Preflight500(t *testing.T) {
 
 func TestWeeklyScheduleHandler_SwapFails_RollbackOK(t *testing.T) {
 	srv := newDaemonsTestServer(t)
-	srv.exportXMLForRoute = func(name string) ([]byte, error) { return []byte("<Task/>"), nil }
-	srv.swapForRoute = func(spec *api.ScheduleSpec, priorXML []byte) (string, error) {
+	setWeeklyScheduleApplyForRoute(t, func(spec *api.ScheduleSpec) (string, error) {
 		return "ok", errors.New("create boom")
-	}
+	})
 	body := `{"schedule": "weekly Sun 03:00"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
 	req.Header = sameOriginHeaders()
@@ -345,8 +344,9 @@ func TestWeeklyScheduleHandler_SwapFails_RollbackOK(t *testing.T) {
 
 func TestWeeklyScheduleHandler_NormalizesInput(t *testing.T) {
 	srv := newDaemonsTestServer(t)
-	srv.swapForRoute = func(spec *api.ScheduleSpec, priorXML []byte) (string, error) { return "n/a", nil }
-	srv.exportXMLForRoute = func(name string) ([]byte, error) { return nil, nil }
+	setWeeklyScheduleApplyForRoute(t, func(spec *api.ScheduleSpec) (string, error) {
+		return "n/a", api.NewAPI().SettingsSet("daemons.weekly_schedule", spec.Canonical())
+	})
 	body := `{"schedule": "  weekly mon 14:30  "}`
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
 	req.Header = sameOriginHeaders()
@@ -369,10 +369,9 @@ func TestWeeklyScheduleHandler_NormalizesInput(t *testing.T) {
 
 func TestWeeklyScheduleHandler_SwapFails_DegradedRestore(t *testing.T) {
 	srv := newDaemonsTestServer(t)
-	srv.exportXMLForRoute = func(name string) ([]byte, error) { return []byte("<Task/>"), nil }
-	srv.swapForRoute = func(spec *api.ScheduleSpec, priorXML []byte) (string, error) {
+	setWeeklyScheduleApplyForRoute(t, func(spec *api.ScheduleSpec) (string, error) {
 		return "degraded", errors.New("create + import boom")
-	}
+	})
 	body := `{"schedule": "weekly Sun 03:00"}`
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(body))
 	req.Header = sameOriginHeaders()
@@ -389,4 +388,76 @@ func TestWeeklyScheduleHandler_SwapFails_DegradedRestore(t *testing.T) {
 	if _, has := resp["manual_recovery"]; !has {
 		t.Error("manual_recovery must be present when restore_status==degraded")
 	}
+}
+
+func TestWeeklyScheduleHandler_ReleaseUnconfirmedReportsManualRecovery(t *testing.T) {
+	srv := newDaemonsTestServer(t)
+	setWeeklyScheduleApplyForRoute(t, func(*api.ScheduleSpec) (string, error) {
+		return "n/a", fmt.Errorf("release weekly lock: %w", api.ErrLockReleaseUnconfirmed)
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(`{"schedule":"weekly Tue 14:30"}`))
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["error"] != "scheduler_swap_failed" || resp["updated"] != false || resp["restore_status"] != "n/a" {
+		t.Fatalf("release-unconfirmed response = %#v, want existing failure projection", resp)
+	}
+	const wantManualRecovery = "The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying."
+	if resp["manual_recovery"] != wantManualRecovery {
+		t.Fatalf("manual_recovery = %q, want %q", resp["manual_recovery"], wantManualRecovery)
+	}
+	if len(resp) != 5 {
+		t.Fatalf("release-unconfirmed response fields = %#v, want existing five-field failure schema", resp)
+	}
+}
+
+func TestWeeklyScheduleHandler_ApplyFailureDoesNotDiscloseInternalPath(t *testing.T) {
+	srv := newDaemonsTestServer(t)
+	sensitivePath := filepath.Join(t.TempDir(), "settings.toml")
+	rawCause := fmt.Sprintf("lock %s: synthetic raw cause", sensitivePath)
+	setWeeklyScheduleApplyForRoute(t, func(*api.ScheduleSpec) (string, error) {
+		return "degraded", fmt.Errorf("%w: %s", api.ErrWeeklyScheduleSettingsWrite, rawCause)
+	})
+
+	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(`{"schedule":"weekly Tue 14:30"}`))
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["error"] != "settings_write_failed" || resp["updated"] != false || resp["restore_status"] != "degraded" {
+		t.Fatalf("settings-write response = %#v, want existing failure projection", resp)
+	}
+	if resp["detail"] != "internal error" {
+		t.Fatalf("detail = %q, want opaque internal error", resp["detail"])
+	}
+	if detail := fmt.Sprint(resp["detail"]); strings.Contains(detail, sensitivePath) || strings.Contains(detail, rawCause) {
+		t.Fatalf("detail disclosed internal path or raw cause: %q", detail)
+	}
+	if resp["manual_recovery"] != manualRecoveryHint {
+		t.Fatalf("manual_recovery = %q, want existing degraded-recovery hint", resp["manual_recovery"])
+	}
+	if len(resp) != 5 {
+		t.Fatalf("settings-write response fields = %#v, want existing five-field failure schema", resp)
+	}
+}
+
+func setWeeklyScheduleApplyForRoute(t *testing.T, fn func(*api.ScheduleSpec) (string, error)) {
+	t.Helper()
+	previous := applyWeeklyScheduleForRoute
+	applyWeeklyScheduleForRoute = fn
+	t.Cleanup(func() { applyWeeklyScheduleForRoute = previous })
 }

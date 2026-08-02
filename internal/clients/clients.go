@@ -1220,6 +1220,10 @@ func copyFile(src, dst string, perm os.FileMode) error {
 // Errors during listing or removal are intentionally swallowed — pruning is
 // best-effort; a failed unlink must not break a successful Backup call.
 func pruneOldTimestamped(livePath string, keepN int) {
+	pruneOldTimestampedWithRemove(livePath, keepN, os.Remove)
+}
+
+func pruneOldTimestampedWithRemove(livePath string, keepN int, remove func(string) error) {
 	dir := filepath.Dir(livePath)
 	base := filepath.Base(livePath)
 	entries, err := os.ReadDir(dir)
@@ -1263,7 +1267,7 @@ func pruneOldTimestamped(livePath string, keepN int) {
 		return timestamped[i].modTime.After(timestamped[j].modTime)
 	})
 	for _, b := range timestamped[keepN:] {
-		_ = os.Remove(b.path)
+		_ = remove(b.path)
 	}
 }
 
@@ -1271,15 +1275,15 @@ func pruneOldTimestamped(livePath string, keepN int) {
 // cap for the live config that produced backupPath. It is best-effort like
 // BackupKeep pruning: malformed/non-mcphub paths and remove/list failures do
 // not fail the already-successful caller.
-func PruneBackupsForBackupPath(backupPath string, keepN int) {
+func PruneBackupsForBackupPath(backupPath string, keepN int) error {
 	if keepN <= 0 {
-		return
+		return nil
 	}
 	livePath, ok := livePathFromTimestampedBackupPath(backupPath)
 	if !ok {
-		return
+		return nil
 	}
-	_ = withConfigLock(livePath, func() error {
+	return withConfigLock(livePath, func() error {
 		pruneOldTimestamped(livePath, keepN)
 		return nil
 	})

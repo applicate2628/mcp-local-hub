@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -174,6 +175,53 @@ args = ["orig"]
 	}
 	if strings.Contains(configText, "9310") || strings.Contains(configText, "9311") {
 		t.Fatalf("rollback left installed URL after failure:\n%s\noutput:\n%s", configText, out.String())
+	}
+}
+
+func TestInstallPruneReleaseFailureIsPostCommitWarning(t *testing.T) {
+	entry := "prune-warning"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers.prune-warning]\ncommand = \"go\"\nargs = [\"orig\"]\n")
+	releaseCause := errors.New("injected config lock release failure")
+	fake := newInstallFakeScheduler()
+	var events []string
+	fake.runHook = func(name string) { events = append(events, "run:"+name) }
+	installFakeScheduler(t, fake)
+	previousPrune := pruneBackupsForBackupPath
+	pruneBackupsForBackupPath = func(string, int) error {
+		if len(fake.createdSpecs) != 1 {
+			t.Fatalf("prune warning observed before exactly one planned task was created: %+v", fake.createdSpecs)
+		}
+		events = append(events, "create:"+fake.createdSpecs[0].Name, "prune-warning")
+		return errors.Join(clients.ErrConfigLockReleaseUnconfirmed, releaseCause)
+	}
+	t.Cleanup(func() { pruneBackupsForBackupPath = previousPrune })
+
+	m := &config.ServerManifest{Name: entry}
+	taskName := "mcp-local-hub-prune-warning-default"
+	plan := &Plan{
+		SchedulerTasks: []ScheduledTaskPlan{{Name: taskName, Command: "go", Args: []string{"serve"}, Trigger: "At logon"}},
+		ClientUpdates:  []ClientUpdatePlan{{Client: "codex-cli", URL: "http://127.0.0.1:9310/mcp"}},
+	}
+	var out bytes.Buffer
+	if err := executeInstallTo(&out, m, plan, 1, true, nil, false, false); err != nil {
+		t.Fatalf("executeInstallTo returned post-commit prune failure: %v\noutput:\n%s", err, out.String())
+	}
+	committed, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(committed, []byte("9310")) {
+		t.Fatalf("client bytes were rolled back after retention warning:\n%s", committed)
+	}
+	if got := out.String(); !strings.Contains(got, "warning: backup retention lock lifecycle failed; install changes remain committed:") ||
+		!strings.Contains(got, releaseCause.Error()) ||
+		!strings.Contains(got, "Install complete with warnings.") ||
+		strings.Contains(got, "\nInstall complete.\n") {
+		t.Fatalf("post-commit warning output mismatch:\n%s", got)
+	}
+	wantEvents := []string{"create:" + taskName, "prune-warning", "run:" + taskName}
+	if got := strings.Join(events, "|"); got != strings.Join(wantEvents, "|") {
+		t.Fatalf("post-commit event order = %q, want %q", got, strings.Join(wantEvents, "|"))
 	}
 }
 

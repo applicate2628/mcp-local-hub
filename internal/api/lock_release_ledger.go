@@ -14,8 +14,8 @@ import (
 // benign contention.
 var ErrLockReleaseUnconfirmed = errors.New("lock release could not be confirmed; this process still holds the lock leaf")
 
-// flockUnlockFn is the shared release fault-injection seam for registry and
-// weekly singleton flocks.
+// flockUnlockFn is the shared release fault-injection seam for ledgered API
+// flocks.
 var flockUnlockFn = func(fl *flock.Flock) error { return fl.Unlock() }
 
 var (
