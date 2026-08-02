@@ -22,7 +22,7 @@ ephemeral state at T and acting at T+δ as if the sample still held:
 |---|---|---|---|
 | supervisor liveness probe (`autoRegisterSupervisorRunningFn` / `SupervisorRunningUnderStateDir`) | reap / install / IPC reconcile | supervisor exits between probe and reconcile | **#253 r7:** an UNAVAILABLE reconcile (`ErrSupervisorIPCUnavailable`) is treated as "supervisor gone → START it", not ignored (`serena_auto_register.go`, post-commit block) |
 | router session peek (`peekVersionState`) | forward / detached register | session DELETE/idle-sweep between peek and act | **#253 rounds 2/4/5:** the session watcher cancels the detached register ctx on mid-flight termination; the helper re-checks `ctx.Err()` at its mutation boundaries |
-| registry row Save (a durable claim) | install commit (the convergence the supervisor acts on) | a process crash between Save and commit releases the held flock, leaving a registry row with no intent daemon | **crash-repair (implemented — `RepairSerenaIntentFromRegistry`, PR #256):** a supervisor-side registry→intent self-heal that re-reads registry + intent under locks, APPENDS only the MISSING serena rows, writes via a lock-held helper, then the startup reconcile spawns them — deliberately NOT a full `InstallParsedManifest` re-install (which replaces all rows and would clobber a concurrent auto-register). Runs at supervisor startup only; an orphan created mid-lifetime heals at the next restart or the next new-workspace auto-register. See "Implemented: crash-repair" below |
+| registry row Save (a durable claim) | install commit (the convergence the supervisor acts on) | a process crash between Save and commit releases the held flock, leaving a registry row with no intent daemon | **crash-repair (implemented — `RepairSerenaIntentFromRegistry`, PR #256 / #590):** a supervisor-side registry→intent self-heal that re-reads registry + intent under locks, APPENDS only the MISSING Serena rows, writes via a lock-held helper, then startup or IPC reconcile acts on the completed intent — deliberately NOT a full `InstallParsedManifest` re-install (which replaces all rows and would clobber a concurrent auto-register). IPC dry-run executes the identical classification as a no-write preview. See "Implemented: crash-repair" below |
 
 When adding a new lifecycle step that reads ephemeral state, classify it against this
 table. If you sample-then-act across a window, you owe one of: an immediate re-check,
@@ -72,11 +72,13 @@ both passing.
 
 ## Implemented: crash-repair (registry↔intent self-heal)
 
-The §1 row-3 split (a registry serena row with no matching supervisor-intent daemon,
+The §1 row-3 split (a registry Serena row with no matching supervisor-intent daemon,
 left by a crash between the auto-register registry `Save` and its install commit) is
 healed by `RepairSerenaIntentFromRegistry` (`internal/api/serena_intent_repair.go`,
-PR #256), called by the supervisor at startup BEFORE `loadIntentFiles`
-(`internal/cli/supervise.go`). A first implementation that ran at GUI startup and
+PR #256 / #590). The supervisor calls it at startup BEFORE `loadIntentFiles`
+(`internal/cli/supervise.go`) and before an apply-mode IPC `reconcile` computes drift;
+dry-run `reconcile` calls `PreviewSerenaIntentRepairFromRegistry` for the same
+classification without writing. A first implementation that ran at GUI startup and
 re-used `InstallParsedManifest` was abandoned (PR #254, after a Codex architecture
 review) because that path is the **wrong seam**:
 
@@ -94,12 +96,14 @@ already owns the intent→daemon lifecycle (startup reconcile, IPC `reconcile`, 
 1. Try/acquire the registry flock with a **brief bounded retry** (a non-mutating registry
    reader — the routing cache refresh, `serena_routing/resolver.go` — takes the same
    exclusive flock only momentarily, so a single TryLock-then-skip would forfeit the only
-   startup repair pass); HOLD it across the whole repair. Read the serena rows.
+   repair pass); HOLD it across the whole repair. If its budget is exhausted, return
+   `skipped_registry_lock` without classifying or mutating. Otherwise read the Serena rows.
 2. Acquire the supervisor-intent lock (TryLock, skip-on-contention) while holding the
    registry; re-read the intent under that lock (fresh, not a stale snapshot — the
    clobber-safety point). Deadlock-freedom comes from TryLock on BOTH locks, NOT from
    exclusive ownership (migration / strict-mode / autostart also take the intent lock
-   without the registry lock).
+   without the registry lock). Contention returns `skipped_intent_lock`; it must never
+   become a blocking wait while the registry flock is held.
 3. Classify each serena registry row from the two locked snapshots:
    - **SKIP** a row whose `WorkspaceKey != WorkspaceKey(WorkspacePath)` (hand-edited or
      legacy pre-symlink-resolution row — appending would re-append forever) or whose
@@ -121,17 +125,27 @@ already owns the intent→daemon lifecycle (startup reconcile, IPC `reconcile`, 
    `loadIntentFiles` reads (the registry stays on `DefaultRegistryPath()`, the canonical
    resolver auto-register also uses).
 
-**Scope: startup-only.** The repair runs once at supervisor startup; the first reconcile
-then spawns the recovered daemons. An orphan created WHILE the supervisor is already
-running is NOT healed until the next supervisor restart OR the next new-workspace
-auto-register (whose replace-all install re-materializes every registry row, the orphan
-included). The `IntentWatcher` does NOT close this gap — it refreshes the intent cache
-but only posts delta events for daemon-intent changes, not newly-added supervisor-intent
-rows. Tightening the mid-lifetime window by wiring the repair into
-`AutoRegisterSerenaWorkspace`'s existing-row handling, the IPC `reconcile` apply, or a
-periodic tick is a tracked follow-up (consultant advisory, PR #256). Deferred and
-divergent outcomes are surfaced as warn events to `supervisor-events.log`; GUI/status
-surfacing of those states is a follow-up.
+**Invocation and result contract.** Startup runs the committing repair once; an
+apply-mode IPC `reconcile` runs the same committing repair before reading intent and
+therefore can spawn a newly recovered row in that same round trip. Dry-run executes the
+same locked classification through the preview API, but never writes the registry or
+intent and never emits a repair-mutation audit event. No periodic retry is added.
+
+Every terminal repair or preview result has exactly one outcome:
+
+| Outcome | Meaning | Error and retry behavior |
+|---|---|---|
+| `completed` | The pass reached a verdict, including no work, append, deferral, stale/divergent rows, and pending-removal decisions. | Error empty; no contention retry is required. |
+| `skipped_registry_lock` | The bounded registry-lock retry expired before classification. | Error empty; retry an apply reconcile after the holder finishes. |
+| `skipped_intent_lock` | The non-blocking supervisor-intent lock could not be acquired. | Error empty; retry without adding a blocking wait. |
+| `error` | A real path, lock, load, manifest, materialization, or write failure prevented a verdict. | Non-empty causal error; resolve it, then retry. |
+
+The reconcile IPC response carries the additive `serena_repair_outcome` field alongside
+the existing repair count, deferred keys, and causal error text. Its frame stays `OK`
+for a skip or error because scheduler/intent drift remains valid for stop and restart
+callers. A new CLI treats a missing or unknown outcome as incomplete: `reconcile --apply`
+prints its report then exits 1 without claiming alignment; dry-run prints the same
+incomplete classification and exits 0. Older clients ignore the additive field.
 
 ## Terms and Abbreviations
 
@@ -141,6 +155,8 @@ surfacing of those states is a follow-up.
   must-complete cutover steps; see §2.
 - **orphan row** — a serena registry row with no matching supervisor-intent daemon,
   left by a crash between the registry Save and the install commit; see §1 row 3.
+- **Serena repair outcome** — the typed terminal status of repair or preview:
+  `completed`, `skipped_registry_lock`, `skipped_intent_lock`, or `error`.
 - **introduce-crash** — a crash during the very first serena introduce, before the
   intent gained any `runtime_spec`.
 - **PR #249 / #253 / #254 / #255 / #256** — the serena routing (#249),

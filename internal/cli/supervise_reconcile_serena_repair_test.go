@@ -20,9 +20,14 @@
 package cli
 
 import (
+	"errors"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/scheduler"
@@ -165,6 +170,9 @@ func TestReconcileIPC_ApplyRepairsSerenaIntentFromRegistryBeforeDrift(t *testing
 	if len(body.SerenaOrphansDeferred) != 0 {
 		t.Errorf("SerenaOrphansDeferred = %v, want none", body.SerenaOrphansDeferred)
 	}
+	if body.SerenaRepairOutcome != api.SerenaIntentRepairOutcomeCompleted {
+		t.Errorf("SerenaRepairOutcome = %q, want %q", body.SerenaRepairOutcome, api.SerenaIntentRepairOutcomeCompleted)
+	}
 
 	// An EvIntentUpdate for the orphan's task name must actually be posted —
 	// proving this is a live reconcile effect, not just a durable file write.
@@ -274,6 +282,9 @@ func TestReconcileIPC_DryRunDoesNotRepairSerenaIntentFromRegistry(t *testing.T) 
 	if len(body.SerenaOrphansDeferred) != 0 {
 		t.Errorf("SerenaOrphansDeferred = %v, want none", body.SerenaOrphansDeferred)
 	}
+	if body.SerenaRepairOutcome != api.SerenaIntentRepairOutcomeCompleted {
+		t.Errorf("SerenaRepairOutcome = %q, want %q", body.SerenaRepairOutcome, api.SerenaIntentRepairOutcomeCompleted)
+	}
 
 	intentPath := filepath.Join(fx.deps.stateDir, "supervisor-intent.json")
 	onDisk, rerr := api.ReadSupervisorIntent(intentPath)
@@ -282,5 +293,214 @@ func TestReconcileIPC_DryRunDoesNotRepairSerenaIntentFromRegistry(t *testing.T) 
 	}
 	if onDisk.HasSpecBearingSerenaDaemonForWorkspaceKey(orphanKey) {
 		t.Fatalf("dry-run reconcile must NEVER mutate supervisor-intent.json, but the orphan key %s is now present", orphanKey)
+	}
+}
+
+// TestReconcileIPC_SerenaRepairLockSkipsRemainOK proves the typed repair
+// outcome does not turn a lock-contended Serena pass into an IPC transport
+// failure. Apply continues to dispatch ordinary drift safely; preview remains
+// read-only. Both surfaces report the exact lock that prevented a Serena
+// classification so callers cannot mistake a zero repair count for completion.
+func TestReconcileIPC_SerenaRepairLockSkipsRemainOK(t *testing.T) {
+	type lockKind string
+	const (
+		registryLock lockKind = "registry"
+		intentLock   lockKind = "intent"
+	)
+	tests := []struct {
+		name        string
+		apply       bool
+		wantOutcome api.SerenaIntentRepairOutcome
+		lock        lockKind
+	}{
+		{
+			name:        "apply registry lock",
+			apply:       true,
+			wantOutcome: api.SerenaIntentRepairOutcomeSkippedRegistryLock,
+			lock:        registryLock,
+		},
+		{
+			name:        "preview registry lock",
+			apply:       false,
+			wantOutcome: api.SerenaIntentRepairOutcomeSkippedRegistryLock,
+			lock:        registryLock,
+		},
+		{
+			name:        "apply intent lock",
+			apply:       true,
+			wantOutcome: api.SerenaIntentRepairOutcomeSkippedIntentLock,
+			lock:        intentLock,
+		},
+		{
+			name:        "preview intent lock",
+			apply:       false,
+			wantOutcome: api.SerenaIntentRepairOutcomeSkippedIntentLock,
+			lock:        intentLock,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1})
+			installSchedulerListFake(t, []scheduler.TaskStatus{})
+			registryPath, err := api.DefaultRegistryPath()
+			if err != nil {
+				t.Fatalf("registry path: %v", err)
+			}
+			// A real row forces the repair past the empty-registry early return,
+			// allowing the intent-lock cases to reach their TryLock gate.
+			seedOrphanSerenaRegistryRow(t, registryPath, t.TempDir(), 9151)
+			intentPath := filepath.Join(fx.deps.stateDir, "supervisor-intent.json")
+			intentBefore, err := os.ReadFile(intentPath)
+			if err != nil {
+				t.Fatalf("read intent before: %v", err)
+			}
+			registryBefore, err := os.ReadFile(registryPath)
+			if err != nil {
+				t.Fatalf("read registry before: %v", err)
+			}
+
+			var release func()
+			switch tt.lock {
+			case registryLock:
+				reg := api.NewRegistry(registryPath)
+				unlock, err := reg.Lock()
+				if err != nil {
+					t.Fatalf("hold registry lock: %v", err)
+				}
+				release = unlock
+			case intentLock:
+				lock := flock.New(filepath.Join(fx.deps.stateDir, "supervisor-intent.json.lock"))
+				locked, err := lock.TryLock()
+				if err != nil {
+					t.Fatalf("hold intent lock: %v", err)
+				}
+				if !locked {
+					t.Fatal("could not acquire intent lock to simulate contention")
+				}
+				release = func() { _ = lock.Unlock() }
+			default:
+				t.Fatalf("unknown lock kind %q", tt.lock)
+			}
+			defer release()
+			conn := newFakeIPCConn()
+			req := api.IPCRequest{ID: 1100, Cmd: "reconcile", Args: map[string]any{"apply": tt.apply}}
+			if err := handleReconcile(conn, req, fx.deps); err != nil {
+				t.Fatalf("handleReconcile: %v", err)
+			}
+			frame, body := decodeReconcileResponse(t, conn)
+			if !frame.OK || frame.Error != nil {
+				t.Fatalf("lock skip must keep an OK IPC frame; got OK=%v error=%+v", frame.OK, frame.Error)
+			}
+			if body.SerenaRepairOutcome != tt.wantOutcome {
+				t.Errorf("SerenaRepairOutcome = %q, want %q", body.SerenaRepairOutcome, tt.wantOutcome)
+			}
+			if body.SerenaRepairError != "" {
+				t.Errorf("SerenaRepairError = %q, want empty for a lock skip", body.SerenaRepairError)
+			}
+			if body.SerenaOrphansRepaired != 0 || len(body.SerenaOrphansDeferred) != 0 {
+				t.Errorf("repair result = repaired=%d deferred=%v, want zero result on a lock skip", body.SerenaOrphansRepaired, body.SerenaOrphansDeferred)
+			}
+			intentAfter, err := os.ReadFile(intentPath)
+			if err != nil {
+				t.Fatalf("read intent after: %v", err)
+			}
+			registryAfter, err := os.ReadFile(registryPath)
+			if err != nil {
+				t.Fatalf("read registry after: %v", err)
+			}
+			if string(intentAfter) != string(intentBefore) || string(registryAfter) != string(registryBefore) {
+				t.Fatalf("lock skip mutated repair inputs: intentChanged=%v registryChanged=%v", string(intentAfter) != string(intentBefore), string(registryAfter) != string(registryBefore))
+			}
+			eventRaw, err := os.ReadFile(filepath.Join(fx.deps.stateDir, "supervisor-events.log"))
+			if err != nil {
+				t.Fatalf("read supervisor event log: %v", err)
+			}
+			if tt.apply {
+				if !strings.Contains(string(eventRaw), `"event":"serena-intent-repair-skipped"`) {
+					t.Errorf("apply-mode lock skip did not emit serena-intent-repair-skipped; log=%s", eventRaw)
+				}
+				if !strings.Contains(string(eventRaw), `"outcome":"`+string(tt.wantOutcome)+`"`) || !strings.Contains(string(eventRaw), `"retryable":true`) {
+					t.Errorf("apply-mode skip event did not carry exact outcome/retryable fields; log=%s", eventRaw)
+				}
+			} else if strings.Contains(string(eventRaw), `"event":"serena-intent-repair-skipped"`) {
+				t.Errorf("dry-run preview emitted a repair-mutation skip event; log=%s", eventRaw)
+			}
+		})
+	}
+}
+
+// TestEmitSerenaIntentRepairOutcomePreservesAuditVocabulary pins the one audit
+// owner shared by startup and apply-mode reconcile. Lock skips gain their own
+// retryable event without renaming the established failed/result events.
+func TestEmitSerenaIntentRepairOutcomePreservesAuditVocabulary(t *testing.T) {
+	tests := []struct {
+		name         string
+		result       api.SerenaIntentRepairResult
+		err          error
+		wantEvent    string
+		wantContains []string
+	}{
+		{
+			name:      "registry lock skip",
+			result:    api.SerenaIntentRepairResult{Outcome: api.SerenaIntentRepairOutcomeSkippedRegistryLock},
+			wantEvent: "serena-intent-repair-skipped",
+			wantContains: []string{
+				`"outcome":"skipped_registry_lock"`,
+				`"retryable":true`,
+			},
+		},
+		{
+			name:      "intent lock skip",
+			result:    api.SerenaIntentRepairResult{Outcome: api.SerenaIntentRepairOutcomeSkippedIntentLock},
+			wantEvent: "serena-intent-repair-skipped",
+			wantContains: []string{
+				`"outcome":"skipped_intent_lock"`,
+				`"retryable":true`,
+			},
+		},
+		{
+			name:      "actual failure",
+			result:    api.SerenaIntentRepairResult{Outcome: api.SerenaIntentRepairOutcomeError},
+			err:       errors.New("injected catalog failure"),
+			wantEvent: "serena-intent-repair-failed",
+			wantContains: []string{
+				`"outcome":"error"`,
+				"injected catalog failure",
+			},
+		},
+		{
+			name:      "completed materialization",
+			result:    api.SerenaIntentRepairResult{Outcome: api.SerenaIntentRepairOutcomeCompleted, Repaired: 1},
+			wantEvent: "serena-intent-repair-result",
+			wantContains: []string{
+				`"outcome":"completed"`,
+				`"repaired_count":1`,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "supervisor-events.log")
+			events, err := api.OpenSupervisorEventLog(path)
+			if err != nil {
+				t.Fatalf("open supervisor event log: %v", err)
+			}
+			emitSerenaIntentRepairOutcome(events, tt.result, tt.err)
+			events.Close()
+			raw, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read supervisor event log: %v", err)
+			}
+			if !strings.Contains(string(raw), `"event":"`+tt.wantEvent+`"`) {
+				t.Fatalf("missing event %q; log=%s", tt.wantEvent, raw)
+			}
+			for _, want := range tt.wantContains {
+				if !strings.Contains(string(raw), want) {
+					t.Errorf("event log missing %q; log=%s", want, raw)
+				}
+			}
+		})
 	}
 }

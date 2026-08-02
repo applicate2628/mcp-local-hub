@@ -62,6 +62,13 @@ type ReconcileResponse struct {
 	SerenaOrphansRepaired int      `json:"serena_orphans_repaired"`
 	SerenaOrphansDeferred []string `json:"serena_orphans_deferred,omitempty"`
 
+	// SerenaRepairOutcome is the typed terminal result of the repair/preview
+	// pass. It is additive on the wire: a newer client treats an absent or
+	// unrecognized value from an older supervisor as incomplete rather than as
+	// completed, while an older client ignores this field. See
+	// SerenaIntentRepairOutcome for the stable vocabulary.
+	SerenaRepairOutcome SerenaIntentRepairOutcome `json:"serena_repair_outcome"`
+
 	// SerenaRepairError carries the self-heal's own failure text when the
 	// repair (apply) or preview (dry-run) could not COMPLETE — a malformed
 	// serena catalog, a dynamic-pool fan-out the manifest shape rejected, an

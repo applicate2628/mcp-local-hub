@@ -182,9 +182,9 @@ Behavior:
     ` + "`mcphub workspace unregister`" + ` first if you intend to re-register.
 
 Examples:
-  mcphub workspace register D:\dev\PaperPane
-  mcphub workspace register D:\dev\PaperPane --default
-  mcphub workspace register D:\dev\PaperPane --languages cpp,typescript,markdown
+  mcphub workspace register <workspace-path>
+  mcphub workspace register <workspace-path> --default
+  mcphub workspace register <workspace-path> --languages cpp,typescript,markdown
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -435,18 +435,19 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		// be its own defect. clearDefaultIfMatches is itself a no-op unless the
 		// marker still names THIS canonical path, so a default someone else has
 		// since claimed is never clobbered.
-		markerCleared := false
+		markerCompensation := api.DefaultMarkerCompensationOutcome("")
 		if defaultMarkerWritten && checkErr == nil && !settled.RegistryRowPresent {
-			if clearErr := clearDefaultIfMatches(filepath.Dir(regPath), canonical); clearErr != nil {
+			outcome, clearErr := clearDefaultWorkspaceForAbsentSerenaRegistrationFn(regPath, wsKey, canonical)
+			if clearErr != nil {
 				fmt.Fprintf(cmd.OutOrStderr(),
 					"warning: could not clear the default-workspace marker for the vanished registration %s: %v\n",
 					canonical, clearErr)
 			} else {
-				markerCleared = true
+				markerCompensation = outcome
 			}
 		}
 		return workspaceRegisterPartialStateError(canonical, wsKey, entry, settled,
-			reconcileErr, checkErr, reconcileResp.SerenaRepairError, markerCleared)
+			reconcileErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation)
 	}
 
 	// Print what is ACTUALLY committed (settled.Port, re-read fresh from the
@@ -600,7 +601,7 @@ func realSerenaRegisterSettledCheck(wsKey string) (serenaRegisterSettledResult, 
 // was kept" is only honest when THIS re-read actually confirmed the registry
 // row is still there; a concurrent unregister that deleted it gets a
 // different, accurate statement instead.
-func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, settled serenaRegisterSettledResult, reconcileErr, checkErr error, serenaRepairErr string, defaultMarkerCleared bool) error {
+func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, settled serenaRegisterSettledResult, reconcileErr, checkErr error, serenaRepairOutcome api.SerenaIntentRepairOutcome, serenaRepairErr string, markerCompensation api.DefaultMarkerCompensationOutcome) error {
 	var b strings.Builder
 	if settled.RegistryRowPresent {
 		fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
@@ -611,9 +612,15 @@ func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.Works
 			"re-check — a concurrent `mcphub workspace unregister` (or other process) may have removed "+
 			"it. This process did NOT delete it and did not create a new one.\n", canonical, wsKey)
 	}
-	if defaultMarkerCleared {
+	switch markerCompensation {
+	case api.DefaultMarkerCompensationCleared:
 		b.WriteString("  note: the --default marker this command wrote was cleared again, so the " +
 			"persisted default is not left pointing at an unregistered workspace.\n")
+	case api.DefaultMarkerCompensationPreservedRegistrationPresent:
+		b.WriteString("  note: the --default marker was retained because a current serena registration now owns " +
+			"this canonical workspace path.\n")
+	case api.DefaultMarkerCompensationPreservedMarkerChanged:
+		b.WriteString("  note: the --default marker had already changed, so this process left it untouched.\n")
 	}
 	switch {
 	case reconcileErr != nil && errors.Is(reconcileErr, api.ErrSupervisorIPCUnavailable):
@@ -630,18 +637,32 @@ func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.Works
 	case !settled.RegistryRowPresent:
 		b.WriteString("  next step: if you intended to keep this workspace registered, run `mcphub " +
 			"workspace register` again; if the unregister was intentional, no action is needed.\n")
+	case serenaRepairOutcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock:
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request, but Serena classification was " +
+			"skipped because the registry lock remained contended.\n")
+		b.WriteString("  next step: run `mcphub reconcile --apply` again after the registry writer finishes to retry " +
+			"materializing this workspace.\n")
+	case serenaRepairOutcome == api.SerenaIntentRepairOutcomeSkippedIntentLock:
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request, but Serena classification was " +
+			"skipped because the supervisor-intent lock remained contended.\n")
+		b.WriteString("  next step: run `mcphub reconcile --apply` again after the intent writer finishes to retry " +
+			"materializing this workspace.\n")
 	case serenaRepairErr != "":
 		fmt.Fprintf(&b, "  reason: the supervisor acknowledged the reconcile request, but its serena "+
 			"registry/intent self-heal FAILED: %s\n", serenaRepairErr)
 		b.WriteString("  next step: resolve that cause (supervisor-events.log carries the matching " +
 			"`serena-intent-repair-*` entry), then run `mcphub reconcile --apply` to retry materializing " +
 			"this workspace.\n")
+	case serenaRepairOutcome != api.SerenaIntentRepairOutcomeCompleted:
+		fmt.Fprintf(&b, "  reason: the supervisor acknowledged the reconcile request, but its Serena repair outcome %q "+
+			"is unavailable or unknown, so classification is incomplete.\n", serenaRepairOutcome)
+		b.WriteString("  next step: restart or upgrade the supervisor, then run `mcphub reconcile --apply` to retry " +
+			"materializing this workspace.\n")
 	default:
 		b.WriteString("  reason: the supervisor acknowledged the reconcile request but no settled " +
 			"spec-bearing daemon row is confirmed for this workspace yet — this happens when this is the " +
 			"FIRST serena workspace and the dynamic pool has not been introduced (run `mcphub migrate " +
-			"serena legacy-to-dynamic-pool`), when the self-heal was skipped due to a momentarily " +
-			"contended lock, or when the registry and intent ports disagree (a concurrent port " +
+			"serena legacy-to-dynamic-pool`), or when the registry and intent ports disagree (a concurrent port " +
 			"reallocation). Retry with `mcphub reconcile --apply`; check supervisor-events.log for a " +
 			"`serena-intent-repair-*` entry naming the exact cause.\n")
 	}
@@ -708,6 +729,12 @@ var writeDefaultWorkspaceFn = writeDefaultWorkspace
 // asserted by racing it.
 var clearDefaultWorkspaceIfMatchesFn = clearDefaultIfMatches
 
+// clearDefaultWorkspaceForAbsentSerenaRegistrationFn is the test seam for the
+// registry-ordered stale-register compensation. Production delegates the
+// compare-and-clear ownership to internal/api; tests use the real helper for
+// deterministic interleavings and may replace it only to force an error path.
+var clearDefaultWorkspaceForAbsentSerenaRegistrationFn = api.ClearDefaultWorkspaceForAbsentSerenaRegistration
+
 // serenaRegisterBlessTrustedRootFn is the explicit-serena-register bless seam
 // (area-5 co-design). Production blesses the workspace's canonical root in the
 // shared trusted-roots store via api.BlessDefaultTrustedRoot — the SAME owner
@@ -745,9 +772,9 @@ The .serena/ directory on disk is never touched — disk state survives
 unregister so re-registering later replays the same languages snapshot.
 
 Examples:
-  mcphub workspace unregister D:\dev\PaperPane
-  mcphub workspace unregister D:\dev\PaperPane --backend serena
-  mcphub workspace unregister D:\dev\PaperPane --backend all
+  mcphub workspace unregister <workspace-path>
+  mcphub workspace unregister <workspace-path> --backend serena
+  mcphub workspace unregister <workspace-path> --backend all
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {

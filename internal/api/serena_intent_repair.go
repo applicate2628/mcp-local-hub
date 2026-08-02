@@ -113,6 +113,68 @@ type pendingRemovalFenceSkip struct {
 	probeErr     error
 }
 
+// SerenaIntentRepairOutcome is the terminal classification of one repair or
+// preview pass. A lock skip is deliberately not an error: the caller still has
+// a valid registry/scheduler drift result, but Serena classification is
+// incomplete and must be retried before it can certify fleet alignment.
+type SerenaIntentRepairOutcome string
+
+const (
+	SerenaIntentRepairOutcomeCompleted           SerenaIntentRepairOutcome = "completed"
+	SerenaIntentRepairOutcomeSkippedRegistryLock SerenaIntentRepairOutcome = "skipped_registry_lock"
+	SerenaIntentRepairOutcomeSkippedIntentLock   SerenaIntentRepairOutcome = "skipped_intent_lock"
+	SerenaIntentRepairOutcomeError               SerenaIntentRepairOutcome = "error"
+)
+
+// SerenaIntentRepairResult is the single typed result emitted by the repair
+// owner. Repaired is the count actually appended in apply mode or that would
+// be appended in preview mode; Deferred retains the existing first-introduction
+// and legacy nil-spec deferral semantics.
+type SerenaIntentRepairResult struct {
+	Outcome  SerenaIntentRepairOutcome
+	Repaired int
+	Deferred []string
+}
+
+func completedSerenaIntentRepairResult(repaired int, deferred []string) SerenaIntentRepairResult {
+	return SerenaIntentRepairResult{
+		Outcome:  SerenaIntentRepairOutcomeCompleted,
+		Repaired: repaired,
+		Deferred: deferred,
+	}
+}
+
+func skippedSerenaIntentRepairResult(outcome SerenaIntentRepairOutcome) SerenaIntentRepairResult {
+	return SerenaIntentRepairResult{Outcome: outcome}
+}
+
+func failedSerenaIntentRepairResult(err error) (SerenaIntentRepairResult, error) {
+	if err == nil {
+		err = errors.New("serena intent repair: error outcome requires a cause")
+	}
+	return SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeError}, err
+}
+
+// validateSerenaIntentRepairResult fails closed if a future return path omits
+// an outcome or pairs one with the wrong Go error state. It converts the
+// invalid pair into the only permitted error result rather than allowing a
+// zero-value result to masquerade as a completed no-op.
+func validateSerenaIntentRepairResult(result SerenaIntentRepairResult, err error) (SerenaIntentRepairResult, error) {
+	switch result.Outcome {
+	case SerenaIntentRepairOutcomeCompleted, SerenaIntentRepairOutcomeSkippedRegistryLock, SerenaIntentRepairOutcomeSkippedIntentLock:
+		if err != nil {
+			return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: outcome %q cannot carry an error: %w", result.Outcome, err))
+		}
+	case SerenaIntentRepairOutcomeError:
+		if err == nil {
+			return failedSerenaIntentRepairResult(errors.New("serena intent repair: error outcome returned without an error"))
+		}
+	default:
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: unknown or empty outcome %q", result.Outcome))
+	}
+	return result, err
+}
+
 // RepairSerenaIntentFromRegistry re-reads the workspace registry and the
 // supervisor intent under FRESH locks and APPENDS the daemon rows for any
 // serena registry row whose per-workspace daemon is missing from the intent.
@@ -123,15 +185,11 @@ type pendingRemovalFenceSkip struct {
 // registry flock as the classification, and it only ever drops a mark; it never
 // adds, removes, or otherwise edits a row.
 //
-// Returns:
-//   - repaired:  the number of serena daemon rows appended to the intent.
-//   - deferred:  workspace keys that were orphaned but could NOT be appended
-//     because doing so would introduce the FIRST runtime_spec row while a
-//     supervisor runs (the §7.1 split-brain hazard). The operator must run
-//     `mcphub migrate serena legacy-to-dynamic-pool` to introduce the pool.
-//   - err:       a real I/O / materialization error only. A healthy registry,
-//     a contended lock, an empty registry, or "nothing missing" all return a
-//     zero result with nil error (best-effort, non-fatal at the call site).
+// Returns one typed outcome plus a Go error. Completed includes healthy no-op,
+// first-introduction/legacy deferral, pending-removal, stale, and divergent-row
+// verdicts. A contended registry or intent lock is a distinct retryable skip;
+// only an actual path, lock syscall, load, materialization, or write failure
+// returns outcome error with a non-nil cause.
 //
 // Lock order: registry flock BEFORE intent flock — matching auto-register's own
 // discipline (it holds the registry flock across its install, which acquires the
@@ -153,8 +211,9 @@ type pendingRemovalFenceSkip struct {
 // the read-modify-write. We hold that leaf across the WHOLE repair, so the
 // missing-set computation and the append commit see one consistent, race-free
 // snapshot and no concurrent write can interleave between our read and our write.
-func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, deferred []string, err error) {
-	return repairSerenaIntentFromRegistry(stateDir, true)
+func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (SerenaIntentRepairResult, error) {
+	result, err := repairSerenaIntentFromRegistry(stateDir, true)
+	return validateSerenaIntentRepairResult(result, err)
 }
 
 // PreviewSerenaIntentRepairFromRegistry computes the IDENTICAL classification
@@ -174,15 +233,16 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 // commit=true path) in apply mode, surfacing the SAME count/deferred-keys
 // tuple in ReconcileResponse either way.
 //
-// Returns wouldRepair (the count of daemon rows a real --apply WOULD append —
-// computed via the SAME BuildSupervisorDaemonsForSerena call the commit path
-// uses, so a manifest-shape rejection here is the SAME failure --apply would
-// hit, never a preview that promises a count apply cannot actually deliver),
-// the same deferred-key semantics as the commit variant, and a nil error on
-// every benign outcome (lock contention, empty registry, etc.) exactly like
-// the commit variant.
-func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (wouldRepair int, deferred []string, err error) {
-	return repairSerenaIntentFromRegistry(stateDir, false)
+// Returns the same typed outcome contract as the commit variant. Repaired is
+// the count a real --apply WOULD append — computed through the SAME
+// BuildSupervisorDaemonsForSerena call the commit path uses, so a
+// manifest-shape rejection here is the SAME failure --apply would hit, never a
+// preview that promises a count apply cannot actually deliver. Lock contention
+// remains a distinct skipped outcome with a nil error; a real failure returns
+// outcome error with its causal error.
+func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (SerenaIntentRepairResult, error) {
+	result, err := repairSerenaIntentFromRegistry(stateDir, false)
+	return validateSerenaIntentRepairResult(result, err)
 }
 
 // repairSerenaIntentFromRegistry is the shared implementation behind
@@ -192,7 +252,7 @@ func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (wouldRepai
 // reconcile). commit=false skips ONLY the final write + audit-event steps;
 // every read, lock, and classification decision is identical, so the two
 // modes can never diverge on WHICH rows are orphaned/deferred/skipped.
-func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int, deferred []string, err error) {
+func repairSerenaIntentFromRegistry(stateDir string, commit bool) (SerenaIntentRepairResult, error) {
 	// 1. Resolve the registry + intent paths. stateDir is the SUPERVISOR's already-
 	//    resolved state root, threaded in by the caller — NOT re-resolved via
 	//    DaemonStateDir() here. The cli stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE
@@ -205,7 +265,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	//    The registry stays on DefaultRegistryPath() — the canonical resolver
 	//    auto-register also uses, so repair reads exactly the rows auto-register wrote.
 	if stateDir == "" {
-		return 0, nil, fmt.Errorf("serena intent repair: empty state dir (caller must thread the supervisor's resolved state root)")
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: empty state dir (caller must thread the supervisor's resolved state root)"))
 	}
 
 	// Event emission touches supervisor-events.log. Keep it out of the
@@ -231,7 +291,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: resolve registry path: %w", err)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: resolve registry path: %w", err))
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
 	// The per-workspace unregister fences are co-located with the registry (the
@@ -255,19 +315,19 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	reg := NewRegistry(regPath)
 	regUnlock, ok, err := tryLockRegistryBrief(reg)
 	if err != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: lock registry: %w", err)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: lock registry: %w", err))
 	}
 	if !ok {
-		return 0, nil, nil // long-held mutating lock — that holder self-heals; next startup re-scans
+		return skippedSerenaIntentRepairResult(SerenaIntentRepairOutcomeSkippedRegistryLock), nil
 	}
 	defer regUnlock()
 
 	if err := reg.Load(); err != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: load registry: %w", err)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: load registry: %w", err))
 	}
 	rows := reg.SerenaEntries()
 	if len(rows) == 0 {
-		return 0, nil, nil // no serena workspaces registered — nothing to repair
+		return completedSerenaIntentRepairResult(0, nil), nil
 	}
 
 	// 3. Intent flock (non-blocking), acquired while STILL holding the registry
@@ -279,10 +339,10 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	intentLock := flock.New(intentPath + supervisorIntentLockSuffix)
 	intentLocked, err := intentLock.TryLock()
 	if err != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentPath+supervisorIntentLockSuffix, err)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentPath+supervisorIntentLockSuffix, err))
 	}
 	if !intentLocked {
-		return 0, nil, nil // contended — the holder commits its own intent; next startup re-scans
+		return skippedSerenaIntentRepairResult(SerenaIntentRepairOutcomeSkippedIntentLock), nil
 	}
 	defer func() { _ = intentLock.Unlock() }()
 
@@ -294,7 +354,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 			// guard below handle it.
 			intent = nil
 		} else {
-			return 0, nil, fmt.Errorf("serena intent repair: read supervisor intent %s: %w", intentPath, rerr)
+			return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: read supervisor intent %s: %w", intentPath, rerr))
 		}
 	}
 
@@ -526,7 +586,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	if len(missing) == 0 {
 		// No orphan to append. Still report any legacy nil-spec deferrals so the
 		// caller (and the operator) sees a workspace that needs a migrate.
-		return 0, deferredLegacy, nil
+		return completedSerenaIntentRepairResult(0, deferredLegacy), nil
 	}
 
 	// 5. Introduce-crash guard. A live APPEND cannot safely introduce the FIRST
@@ -551,7 +611,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		// Both the introduce-crash orphans and any legacy nil-spec rows defer to
 		// the same migrate; return their union (deferredLegacy is empty when the
 		// intent is absent — there are no daemons to be nil-spec).
-		return 0, append(introduceKeys, deferredLegacy...), nil
+		return completedSerenaIntentRepairResult(0, append(introduceKeys, deferredLegacy...)), nil
 	}
 
 	// 6. Live-add APPEND. The §7.1 gate is satisfied (the prior intent already
@@ -560,11 +620,11 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	//    APPEND them — never replace the existing rows.
 	catalog, cerr := loadSerenaCatalogManifest()
 	if cerr != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: load serena catalog manifest: %w", cerr)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: load serena catalog manifest: %w", cerr))
 	}
 	dyn, derr := BuildInMemorySerenaDynamicPoolManifest(catalog)
 	if derr != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: build dynamic-pool manifest: %w", derr)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: build dynamic-pool manifest: %w", derr))
 	}
 
 	// Resolve the mcphub binary path by COPYING .Command from an EXISTING serena
@@ -576,7 +636,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		// Defensive: HasRuntimeSpecRow() is true but no row exposed a Command.
 		// A blank Command would yield an unspawnable descriptor; fail loud
 		// rather than commit one.
-		return 0, nil, fmt.Errorf("serena intent repair: intent carries a runtime_spec row but no daemon exposed a command to copy for the appended rows")
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: intent carries a runtime_spec row but no daemon exposed a command to copy for the appended rows"))
 	}
 
 	// Materialize with manifestHash "" — mirrors the install fan-out
@@ -587,7 +647,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		// fan-out must produce a descriptor for each. An empty result means a
 		// manifest-shape gate inside BuildSupervisorDaemonsForSerena refused —
 		// fail loud rather than silently report zero repairs.
-		return 0, nil, fmt.Errorf("serena intent repair: dynamic-pool fan-out produced no daemons for %d missing serena row(s) %v (manifest shape rejected)", len(missing), missingWorkspaceKeys(missing))
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: dynamic-pool fan-out produced no daemons for %d missing serena row(s) %v (manifest shape rejected)", len(missing), missingWorkspaceKeys(missing)))
 	}
 
 	if !commit {
@@ -596,7 +656,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 		// (so a manifest-shape rejection surfaces here as the SAME error --apply
 		// would hit — never a count preview promises that --apply cannot
 		// actually deliver). Never write, never emit an audit event.
-		return len(newDaemons), deferredLegacy, nil
+		return completedSerenaIntentRepairResult(len(newDaemons), deferredLegacy), nil
 	}
 
 	intent.Daemons = append(intent.Daemons, newDaemons...)
@@ -604,7 +664,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	// Write under the held intent flock (writeSupervisorIntentLockHeld assumes
 	// the lock at intentPath+".lock" is held, which it is — see step 3).
 	if werr := writeSupervisorIntentLockHeld(intentPath, intent); werr != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: write supervisor intent %s: %w", intentPath, werr)
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: write supervisor intent %s: %w", intentPath, werr))
 	}
 
 	appliedKeys := missingWorkspaceKeys(missing)
@@ -619,7 +679,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (repaired int,
 	})
 	// deferredLegacy (nil-spec rows that coexisted with the spec-bearing pool) is
 	// returned alongside the append count so the caller still surfaces them.
-	return len(newDaemons), deferredLegacy, nil
+	return completedSerenaIntentRepairResult(len(newDaemons), deferredLegacy), nil
 }
 
 // clearExpiredSerenaRemovalMarks drops the PendingSerenaRemoval flag (and its

@@ -16,7 +16,9 @@
 //	0  — success (drift report printed; in --apply mode, transitions dispatched)
 //	1  — IPC dial / read / decode failure (supervisor unreachable or wire error),
 //	     OR (--apply only) the supervisor's serena registry/intent self-heal
-//	     failed — see errSerenaRepairFailed below
+//	     failed, was skipped for lock contention, or returned an unavailable /
+//	     unknown outcome — see errSerenaRepairFailed and
+//	     errSerenaRepairIncomplete below
 package cli
 
 import (
@@ -43,6 +45,65 @@ import (
 // Dry-run keeps exit 0 (it mutates nothing and a report is all it promised) but
 // still PRINTS the failure.
 var errSerenaRepairFailed = errors.New("serena registry/intent self-heal failed on the supervisor")
+
+// errSerenaRepairIncomplete is the retryable `mcphub reconcile --apply`
+// sentinel for a lock-skipped, absent, or unrecognized repair outcome. The
+// supervisor's IPC frame and ordinary drift result remain valid, but Serena
+// classification did not reach a verdict and cannot certify alignment.
+var errSerenaRepairIncomplete = errors.New("serena registry/intent self-heal classification is incomplete on the supervisor")
+
+type serenaRepairClassification struct {
+	outcome    api.SerenaIntentRepairOutcome
+	incomplete bool
+	detail     string
+}
+
+// classifySerenaRepairOutcome is the sole CLI interpretation of the additive
+// repair outcome wire field. Both human output and apply-mode exit policy use
+// it so an old or future supervisor value cannot be presented as alignment by
+// one surface and failure by another.
+func classifySerenaRepairOutcome(resp api.ReconcileResponse) serenaRepairClassification {
+	if resp.SerenaRepairError != "" {
+		return serenaRepairClassification{
+			outcome:    api.SerenaIntentRepairOutcomeError,
+			incomplete: true,
+			detail:     resp.SerenaRepairError,
+		}
+	}
+	switch resp.SerenaRepairOutcome {
+	case api.SerenaIntentRepairOutcomeCompleted:
+		return serenaRepairClassification{outcome: api.SerenaIntentRepairOutcomeCompleted}
+	case api.SerenaIntentRepairOutcomeSkippedRegistryLock:
+		return serenaRepairClassification{
+			outcome:    resp.SerenaRepairOutcome,
+			incomplete: true,
+			detail:     "the workspace registry lock remained contended",
+		}
+	case api.SerenaIntentRepairOutcomeSkippedIntentLock:
+		return serenaRepairClassification{
+			outcome:    resp.SerenaRepairOutcome,
+			incomplete: true,
+			detail:     "the supervisor-intent lock remained contended",
+		}
+	case api.SerenaIntentRepairOutcomeError:
+		return serenaRepairClassification{
+			outcome:    resp.SerenaRepairOutcome,
+			incomplete: true,
+			detail:     "the supervisor reported a Serena repair error without causal text",
+		}
+	case "":
+		return serenaRepairClassification{
+			incomplete: true,
+			detail:     "the Serena repair outcome is unavailable (restart or upgrade the supervisor)",
+		}
+	default:
+		return serenaRepairClassification{
+			outcome:    resp.SerenaRepairOutcome,
+			incomplete: true,
+			detail:     fmt.Sprintf("the Serena repair outcome %q is unknown (restart or upgrade the supervisor)", resp.SerenaRepairOutcome),
+		}
+	}
+}
 
 // reconcileDialFn is the package-private indirection for
 // api.DialSupervisorIPCReconcile. Tests swap this with a fake that
@@ -112,14 +173,19 @@ See also: status, install --upgrade.`,
 				return printErr
 			}
 			// Report printed either way; now decide the exit. An apply-mode run
-			// whose serena self-heal failed must not exit 0 — the report above
-			// cannot show the orphan (it never reached the intent), so silence
-			// plus exit 0 is the whole defect.
-			if apply && resp.SerenaRepairError != "" {
-				return fmt.Errorf("%w: %s (the drift report above is still valid; "+
-					"re-run `mcphub reconcile --apply` once the cause is resolved, and see "+
-					"supervisor-events.log `serena-intent-repair-*` entries)",
-					errSerenaRepairFailed, resp.SerenaRepairError)
+			// whose Serena classification did not reach a completed verdict must
+			// not exit 0: the ordinary drift report cannot show an orphan that
+			// never reached supervisor-intent.json.
+			classification := classifySerenaRepairOutcome(resp)
+			if apply && classification.incomplete {
+				if classification.outcome == api.SerenaIntentRepairOutcomeError {
+					return fmt.Errorf("%w: %s (the drift report above is still valid; "+
+						"re-run `mcphub reconcile --apply` once the cause is resolved, and see "+
+						"supervisor-events.log `serena-intent-repair-*` entries)",
+						errSerenaRepairFailed, classification.detail)
+				}
+				return fmt.Errorf("%w: %s; re-run `mcphub reconcile --apply` after the contention or version skew is resolved",
+					errSerenaRepairIncomplete, classification.detail)
 			}
 			return nil
 		},
@@ -142,18 +208,27 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 		mode, resp.DriftCount, resp.AppliedCount); err != nil {
 		return err
 	}
+	classification := classifySerenaRepairOutcome(resp)
 	// A self-heal that never reached a verdict is printed FIRST and
 	// unconditionally: the counts below and the drift table underneath are both
 	// blind to the orphan it failed on, so this line is the only place the
 	// operator can learn the report is incomplete.
-	if resp.SerenaRepairError != "" {
+	if classification.incomplete && classification.outcome == api.SerenaIntentRepairOutcomeError {
 		verb := "serena orphan repair FAILED"
 		if resp.DryRun {
 			verb = "serena orphan repair PREVIEW failed"
 		}
 		if _, err := fmt.Fprintf(w, "%s: %s\n  (this pass could not materialize orphaned serena "+
 			"workspaces; they are absent from the drift table below because they never reached "+
-			"supervisor-intent.json)\n", verb, resp.SerenaRepairError); err != nil {
+			"supervisor-intent.json)\n", verb, classification.detail); err != nil {
+			return err
+		}
+	} else if classification.incomplete {
+		verb := "serena orphan repair skipped"
+		if resp.DryRun {
+			verb = "serena orphan repair PREVIEW skipped"
+		}
+		if _, err := fmt.Fprintf(w, "%s: %s\n  (Serena classification is incomplete; re-run `mcphub reconcile --apply` after the lock holder finishes or the supervisor is upgraded)\n", verb, classification.detail); err != nil {
 			return err
 		}
 	}
@@ -178,9 +253,8 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 	if resp.DriftCount == 0 {
 		// Never claim alignment when the self-heal above did not finish: the
 		// orphan it failed on is exactly the drift this line would be denying.
-		if resp.SerenaRepairError != "" {
-			_, err := fmt.Fprintln(w, "no drift against the intent as read — but the serena repair "+
-				"above failed, so alignment is NOT confirmed for orphaned serena workspaces")
+		if classification.incomplete {
+			_, err := fmt.Fprintf(w, "no drift against intent as read; Serena classification incomplete: %s\n", classification.detail)
 			return err
 		}
 		_, err := fmt.Fprintln(w, "no drift — scheduler state and intent are already aligned")

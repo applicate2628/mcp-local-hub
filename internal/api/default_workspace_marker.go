@@ -34,6 +34,24 @@ import (
 // Absent file = no default. Empty file = no default.
 const DefaultWorkspaceFilename = "default-workspace.txt"
 
+// DefaultMarkerCompensationOutcome is the committed result of a stale
+// workspace-register compensation attempt. It is intentionally distinct from
+// the older ClearDefaultWorkspaceIfMatches API, whose established callers only
+// need the error contract.
+type DefaultMarkerCompensationOutcome string
+
+const (
+	// DefaultMarkerCompensationCleared means the expected stale marker was
+	// still present and was cleared while the registry lock was held.
+	DefaultMarkerCompensationCleared DefaultMarkerCompensationOutcome = "cleared"
+	// DefaultMarkerCompensationPreservedRegistrationPresent means a current
+	// Serena registration owns the canonical path, so its marker must survive.
+	DefaultMarkerCompensationPreservedRegistrationPresent DefaultMarkerCompensationOutcome = "preserved_registration_present"
+	// DefaultMarkerCompensationPreservedMarkerChanged means the marker no
+	// longer named the stale registration, so it was left untouched.
+	DefaultMarkerCompensationPreservedMarkerChanged DefaultMarkerCompensationOutcome = "preserved_marker_changed"
+)
+
 // WriteDefaultWorkspace persists the canonical default workspace path under
 // stateDir (or an empty string to clear). Atomic rename so a crash mid-write
 // cannot leave a truncated file.
@@ -65,23 +83,84 @@ func ReadDefaultWorkspace(stateDir string) (string, error) {
 // `workspace unregister --backend serena|all` and the GUI auto-prune sweeper
 // run so a stale default cannot outlive the workspace it pointed at.
 func ClearDefaultWorkspaceIfMatches(stateDir, canonical string) error {
+	_, err := clearDefaultWorkspaceIfMatches(stateDir, canonical)
+	return err
+}
+
+// clearDefaultWorkspaceIfMatches is the marker-only compare-and-clear
+// primitive. Callers that also own a registry decision use its committed
+// outcome to report whether the marker was actually cleared.
+func clearDefaultWorkspaceIfMatches(stateDir, canonical string) (DefaultMarkerCompensationOutcome, error) {
+	return clearDefaultWorkspaceIfMatchesWithMarkerLockHook(stateDir, canonical, nil)
+}
+
+func clearDefaultWorkspaceIfMatchesWithMarkerLockHook(stateDir, canonical string, markerLockHeld func()) (DefaultMarkerCompensationOutcome, error) {
 	if err := os.MkdirAll(stateDir, 0o700); err != nil {
-		return fmt.Errorf("mkdir default workspace state dir: %w", err)
+		return "", fmt.Errorf("mkdir default workspace state dir: %w", err)
 	}
 	path := filepath.Join(stateDir, DefaultWorkspaceFilename)
 	lockPath := path + ".lock"
 	lock := flock.New(lockPath)
 	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("default-workspace flock %s: %w", lockPath, err)
+		return "", fmt.Errorf("default-workspace flock %s: %w", lockPath, err)
 	}
 	defer func() { _ = lock.Unlock() }()
+	if markerLockHeld != nil {
+		markerLockHeld()
+	}
 
 	got, err := ReadDefaultWorkspace(stateDir)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if got != canonical {
-		return nil
+		return DefaultMarkerCompensationPreservedMarkerChanged, nil
 	}
-	return WriteStateFileBytesLockHeld(path, []byte(""))
+	if err := WriteStateFileBytesLockHeld(path, []byte("")); err != nil {
+		return "", err
+	}
+	return DefaultMarkerCompensationCleared, nil
+}
+
+// defaultMarkerCompensationMarkerLockHeldFn is a package-private test seam
+// used only to prove that the registry lock remains held until the marker CAS
+// completes. Production leaves it as a no-op.
+var defaultMarkerCompensationMarkerLockHeldFn = func() {}
+
+// ClearDefaultWorkspaceForAbsentSerenaRegistration compensates a stale
+// --default marker only after a FRESH registry read confirms that the old
+// Serena registration is absent. It locks registry -> marker, the same order
+// used by workspace registration, so a newer same-path registration cannot
+// publish its row and marker between this absence check and the marker clear.
+//
+// workspaceKey and canonical are the old operation's immutable registration
+// identity. A row under workspaceKey with a different canonical path is an
+// integrity contradiction and fails closed. A row under any key with the same
+// canonical path is a current registration and preserves the marker.
+func ClearDefaultWorkspaceForAbsentSerenaRegistration(registryPath, workspaceKey, canonical string) (DefaultMarkerCompensationOutcome, error) {
+	reg := NewRegistry(registryPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return "", fmt.Errorf("lock registry before default marker compensation: %w", err)
+	}
+	defer unlock()
+
+	if err := reg.Load(); err != nil {
+		return "", fmt.Errorf("load registry before default marker compensation: %w", err)
+	}
+	if entry, ok := reg.GetSerena(workspaceKey); ok {
+		if entry.WorkspacePath != canonical {
+			return "", fmt.Errorf("default marker compensation registry identity conflict: workspace key %q maps to %q, not expected canonical path %q", workspaceKey, entry.WorkspacePath, canonical)
+		}
+		return DefaultMarkerCompensationPreservedRegistrationPresent, nil
+	}
+	for _, entry := range reg.SerenaEntries() {
+		if entry.WorkspacePath == canonical {
+			return DefaultMarkerCompensationPreservedRegistrationPresent, nil
+		}
+	}
+
+	// Keep the registry lock through the marker CAS. A concurrent registration
+	// takes this same registry lock before publishing its row and marker.
+	return clearDefaultWorkspaceIfMatchesWithMarkerLockHook(filepath.Dir(registryPath), canonical, defaultMarkerCompensationMarkerLockHeldFn)
 }

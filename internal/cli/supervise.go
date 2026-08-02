@@ -456,12 +456,12 @@ type ipcDispatchDeps struct {
 // (handleReconcile, supervise_reconcile_ipc.go) so both call sites emit the
 // identical audit shape for the same underlying outcome — one owner (C1) of
 // this audit vocabulary ("serena-intent-repair-failed" /
-// "serena-intent-repair-result"), rather than two independently-typed copies
-// drifting apart. events == nil is a no-op (unit tests constructing a bare
+// "serena-intent-repair-skipped" / "serena-intent-repair-result"), rather
+// than two independently-typed copies drifting apart. events == nil is a no-op (unit tests constructing a bare
 // ipcDispatchDeps{} with no event log configured); the repair itself is
 // non-fatal at every call site — a repair error or a deferred
 // introduce-crash never blocks supervisor startup or a reconcile request.
-func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, repaired int, deferredKeys []string, rErr error) {
+func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, result api.SerenaIntentRepairResult, rErr error) {
 	if events == nil {
 		return
 	}
@@ -471,14 +471,27 @@ func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, repaired int,
 			Source:   "reconcile",
 			Event:    "serena-intent-repair-failed",
 			Body: map[string]any{
-				"err": rErr.Error(),
+				"err":     rErr.Error(),
+				"outcome": string(result.Outcome),
 			},
 		})
 		return
 	}
-	if repaired > 0 || len(deferredKeys) > 0 {
+	if result.Outcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedIntentLock {
+		_ = events.TryEmit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "reconcile",
+			Event:    "serena-intent-repair-skipped",
+			Body: map[string]any{
+				"outcome":   string(result.Outcome),
+				"retryable": true,
+			},
+		})
+		return
+	}
+	if result.Repaired > 0 || len(result.Deferred) > 0 {
 		severity := "info"
-		if len(deferredKeys) > 0 {
+		if len(result.Deferred) > 0 {
 			severity = "warn"
 		}
 		_ = events.TryEmit(api.SupervisorEvent{
@@ -486,9 +499,10 @@ func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, repaired int,
 			Source:   "reconcile",
 			Event:    "serena-intent-repair-result",
 			Body: map[string]any{
-				"repaired_count":     repaired,
-				"deferred_count":     len(deferredKeys),
-				"deferred_workspace": deferredKeys,
+				"outcome":            string(result.Outcome),
+				"repaired_count":     result.Repaired,
+				"deferred_count":     len(result.Deferred),
+				"deferred_workspace": result.Deferred,
 			},
 		})
 	}
@@ -838,8 +852,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// up the now-complete intent and the first reconcile spawns the recovered
 	// daemons. NON-FATAL: a repair error (or a deferred introduce-crash) never
 	// blocks supervisor startup — the supervisor must come up regardless.
-	repaired, deferredKeys, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
-	emitSerenaIntentRepairOutcome(events, repaired, deferredKeys, rErr)
+	serenaRepairResult, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	emitSerenaIntentRepairOutcome(events, serenaRepairResult, rErr)
 
 	// Phase 4-E2 one-time dual-intent collapse: merge any active stops from
 	// the legacy daemon-intent.json into the unified supervisor-intent.json

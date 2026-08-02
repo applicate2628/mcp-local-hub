@@ -122,11 +122,19 @@ func stubSerenaRegisterReconcileWithRealRepair(t *testing.T, respErr error) *int
 		if err != nil {
 			t.Fatalf("resolve state dir inside stub: %v", err)
 		}
-		_, _, _ = api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+		repairResult, repairErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
 		if respErr != nil {
 			return api.ReconcileResponse{}, respErr
 		}
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+		resp := api.ReconcileResponse{
+			DriftCount:          1,
+			AppliedCount:        1,
+			SerenaRepairOutcome: repairResult.Outcome,
+		}
+		if repairErr != nil {
+			resp.SerenaRepairError = repairErr.Error()
+		}
+		return resp, nil
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
 	return &calls
@@ -147,7 +155,11 @@ func stubSerenaRegisterReconcileNoRepair(t *testing.T, respErr error) *int {
 		if respErr != nil {
 			return api.ReconcileResponse{}, respErr
 		}
-		return api.ReconcileResponse{DriftCount: 0, AppliedCount: 0}, nil
+		return api.ReconcileResponse{
+			DriftCount:          0,
+			AppliedCount:        0,
+			SerenaRepairOutcome: api.SerenaIntentRepairOutcomeSkippedRegistryLock,
+		}, nil
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
 	return &calls
@@ -310,6 +322,9 @@ func TestWorkspaceRegisterSerena_ReconcileAckedButRepairSkipped_KeepsRegistryRep
 	}
 	if !strings.Contains(err.Error(), "reconcile --apply") {
 		t.Errorf("error should suggest retrying via `mcphub reconcile --apply`; got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "registry lock") {
+		t.Errorf("error should name the registry-lock skip rather than a generic no-op; got %q", err.Error())
 	}
 
 	regPath, _ := api.DefaultRegistryPath()
@@ -530,7 +545,8 @@ func TestWorkspaceRegisterSerena_PortMismatch_NotSettled(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve state dir: %v", err)
 		}
-		if _, _, err := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir); err != nil {
+		repairResult, err := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+		if err != nil {
 			t.Fatalf("real repair inside stub: %v", err)
 		}
 		intentPath, err := api.DefaultSupervisorIntentPath()
@@ -555,7 +571,7 @@ func TestWorkspaceRegisterSerena_PortMismatch_NotSettled(t *testing.T) {
 		if err := api.WriteSupervisorIntent(intentPath, intent); err != nil {
 			t.Fatalf("write mutated intent: %v", err)
 		}
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1, SerenaRepairOutcome: repairResult.Outcome}, nil
 	}
 
 	out, err := runWorkspaceCmd(t, "register", ws)

@@ -135,7 +135,7 @@ func TestWorkspaceUnregisterSerena_DoesNotResurrectIntentDuringTeardown(t *testi
 		if serr != nil {
 			t.Fatalf("resolve state dir inside stub: %v", serr)
 		}
-		if _, _, rerr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir); rerr != nil {
+		if _, rerr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir); rerr != nil {
 			t.Fatalf("simulated concurrent repair inside stub: %v", rerr)
 		}
 

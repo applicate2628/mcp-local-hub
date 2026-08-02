@@ -105,6 +105,9 @@ func TestReconcileIPC_ApplyRepairFailureIsReportedNotSwallowed(t *testing.T) {
 		t.Fatalf("SerenaRepairError is empty: the repair failure was swallowed, so this response is indistinguishable from a healthy pass (drift_count=%d, serena_orphans_repaired=%d)",
 			body.DriftCount, body.SerenaOrphansRepaired)
 	}
+	if body.SerenaRepairOutcome != api.SerenaIntentRepairOutcomeError {
+		t.Errorf("SerenaRepairOutcome = %q, want %q", body.SerenaRepairOutcome, api.SerenaIntentRepairOutcomeError)
+	}
 	if !strings.Contains(body.SerenaRepairError, "serena intent repair") {
 		t.Errorf("SerenaRepairError = %q, want the repair's own error text", body.SerenaRepairError)
 	}
@@ -147,6 +150,9 @@ func TestReconcileIPC_DryRunPreviewFailureIsReported(t *testing.T) {
 	if body.SerenaRepairError == "" {
 		t.Fatal("SerenaRepairError is empty on a failed dry-run preview; `serena orphans would repair: 0` would then be reported for a preview that got no verdict")
 	}
+	if body.SerenaRepairOutcome != api.SerenaIntentRepairOutcomeError {
+		t.Errorf("SerenaRepairOutcome = %q, want %q", body.SerenaRepairOutcome, api.SerenaIntentRepairOutcomeError)
+	}
 	if !body.DryRun {
 		t.Error("DryRun = false on an apply=false request")
 	}
@@ -157,10 +163,11 @@ func TestReconcileIPC_DryRunPreviewFailureIsReported(t *testing.T) {
 func TestReconcileCmd_ApplyExitsNonZeroOnSerenaRepairFailure(t *testing.T) {
 	uninstall := setReconcileDialFnForTest(func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
 		return api.ReconcileResponse{
-			DryRun:            !apply,
-			DriftCount:        0,
-			AppliedCount:      0,
-			SerenaRepairError: "serena intent repair: load serena catalog manifest: parse serena manifest: boom",
+			DryRun:              !apply,
+			DriftCount:          0,
+			AppliedCount:        0,
+			SerenaRepairOutcome: api.SerenaIntentRepairOutcomeError,
+			SerenaRepairError:   "serena intent repair: load serena catalog manifest: parse serena manifest: boom",
 		}, nil
 	})
 	defer uninstall()
@@ -195,9 +202,10 @@ func TestReconcileCmd_ApplyExitsNonZeroOnSerenaRepairFailure(t *testing.T) {
 func TestReconcileCmd_DryRunPrintsRepairFailureWithoutFailing(t *testing.T) {
 	uninstall := setReconcileDialFnForTest(func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
 		return api.ReconcileResponse{
-			DryRun:            true,
-			DriftCount:        0,
-			SerenaRepairError: "serena intent repair: build dynamic-pool manifest: boom",
+			DryRun:              true,
+			DriftCount:          0,
+			SerenaRepairOutcome: api.SerenaIntentRepairOutcomeError,
+			SerenaRepairError:   "serena intent repair: build dynamic-pool manifest: boom",
 		}, nil
 	})
 	defer uninstall()
@@ -223,7 +231,11 @@ func TestReconcileCmd_DryRunPrintsRepairFailureWithoutFailing(t *testing.T) {
 // not colour normal output.
 func TestReconcileCmd_ApplyStaysCleanWhenRepairSucceeded(t *testing.T) {
 	uninstall := setReconcileDialFnForTest(func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
-		return api.ReconcileResponse{DryRun: !apply, DriftCount: 0}, nil
+		return api.ReconcileResponse{
+			DryRun:              !apply,
+			DriftCount:          0,
+			SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted,
+		}, nil
 	})
 	defer uninstall()
 
@@ -241,5 +253,110 @@ func TestReconcileCmd_ApplyStaysCleanWhenRepairSucceeded(t *testing.T) {
 	}
 	if strings.Contains(out, "repair FAILED") {
 		t.Errorf("clean apply printed a repair failure; got:\n%s", out)
+	}
+}
+
+// TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed covers the new
+// additive outcome field separately from actual repair errors above. A lock
+// skip is retryable, but not completed; absent and future values are version
+// skew, and therefore likewise cannot certify fleet alignment. Apply must
+// fail loud after printing the report, while dry-run remains an honest,
+// non-mutating report with exit 0.
+func TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed(t *testing.T) {
+	tests := []struct {
+		name             string
+		apply            bool
+		outcome          api.SerenaIntentRepairOutcome
+		wantApplyFailure bool
+		wantDetail       string
+	}{
+		{
+			name:             "apply registry lock",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeSkippedRegistryLock,
+			wantApplyFailure: true,
+			wantDetail:       "registry lock",
+		},
+		{
+			name:             "apply intent lock",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeSkippedIntentLock,
+			wantApplyFailure: true,
+			wantDetail:       "supervisor-intent lock",
+		},
+		{
+			name:             "apply missing outcome",
+			apply:            true,
+			wantApplyFailure: true,
+			wantDetail:       "unavailable",
+		},
+		{
+			name:             "apply unknown outcome",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcome("future_outcome"),
+			wantApplyFailure: true,
+			wantDetail:       "unknown",
+		},
+		{
+			name:       "preview registry lock",
+			outcome:    api.SerenaIntentRepairOutcomeSkippedRegistryLock,
+			wantDetail: "registry lock",
+		},
+		{
+			name:       "preview intent lock",
+			outcome:    api.SerenaIntentRepairOutcomeSkippedIntentLock,
+			wantDetail: "supervisor-intent lock",
+		},
+		{
+			name:       "preview missing outcome",
+			wantDetail: "unavailable",
+		},
+		{
+			name:       "preview unknown outcome",
+			outcome:    api.SerenaIntentRepairOutcome("future_outcome"),
+			wantDetail: "unknown",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			uninstall := setReconcileDialFnForTest(func(context.Context, bool) (api.ReconcileResponse, error) {
+				return api.ReconcileResponse{
+					DryRun:              !tt.apply,
+					DriftCount:          0,
+					SerenaRepairOutcome: tt.outcome,
+				}, nil
+			})
+			defer uninstall()
+
+			cmd := newReconcileCmdReal()
+			var buf bytes.Buffer
+			cmd.SetOut(&buf)
+			cmd.SetErr(&buf)
+			if tt.apply {
+				cmd.SetArgs([]string{"--apply"})
+			}
+			err := cmd.Execute()
+			out := buf.String()
+			if tt.wantApplyFailure {
+				if !errors.Is(err, errSerenaRepairIncomplete) {
+					t.Fatalf("error = %v, want errSerenaRepairIncomplete", err)
+				}
+			} else if err != nil {
+				t.Fatalf("dry-run must keep exit 0; got %v", err)
+			}
+			if !strings.Contains(out, tt.wantDetail) {
+				t.Errorf("report does not name the incomplete classification detail %q; got:\n%s", tt.wantDetail, out)
+			}
+			if strings.Contains(out, "no drift — scheduler state and intent are already aligned") {
+				t.Errorf("report claimed alignment for an incomplete Serena outcome; got:\n%s", out)
+			}
+			if tt.apply && !strings.Contains(out, "serena orphan repair skipped") {
+				t.Errorf("apply report does not mark a skip; got:\n%s", out)
+			}
+			if !tt.apply && !strings.Contains(out, "serena orphan repair PREVIEW skipped") {
+				t.Errorf("dry-run report does not mark a preview skip; got:\n%s", out)
+			}
+		})
 	}
 }

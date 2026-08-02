@@ -82,7 +82,7 @@ func TestRepairSerenaIntentFromRegistry_InterruptedUnregister_ExpiredLeaseRecove
 		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
 	})
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestRepairSerenaIntentFromRegistry_InterruptedUnregister_ExpiredLeaseRecove
 	}
 
 	// Second pass is a clean no-op — recovery must not re-append on every boot.
-	repaired2, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired2, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("second pass: unexpected error: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestRepairSerenaIntentFromRegistry_PendingRemovalWithoutStamp_Recovered(t *
 		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
 	})
 
-	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -167,7 +167,7 @@ func TestPreviewSerenaIntentRepairFromRegistry_ExpiredLease_PreviewsWithoutClear
 		t.Fatalf("read intent before: %v", err)
 	}
 
-	wouldRepair, _, err := NewAPI().PreviewSerenaIntentRepairFromRegistry(mustStateDir(t))
+	wouldRepair, _, err := previewSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

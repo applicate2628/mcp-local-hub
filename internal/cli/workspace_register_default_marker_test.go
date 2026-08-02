@@ -22,7 +22,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -169,6 +171,166 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterClearsOwnDefaultMarker(t *t
 	}
 	if !strings.Contains(err.Error(), "--default marker") {
 		t.Errorf("the error should tell the operator the marker was taken back; got %q", err.Error())
+	}
+}
+
+// TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault
+// fixes the stale-compensation race specifically: an old register observes its
+// row absent, then a new same-path `register --default` commits a fresh row and
+// marker before the old operation reaches compensation. The old compensation
+// must re-check inside the registry->marker critical section and retain the
+// newer registration's default rather than clearing by path alone.
+func TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+	useRealSerenaRegisterIntentCheck(t)
+
+	healthyWS := t.TempDir()
+	seedHealthySerenaIntentRow(t, healthyWS, 9150)
+	tmp := t.TempDir()
+	ws := makeWorkspaceDir(t, tmp, []string{"python"})
+	wsKey := api.WorkspaceKey(ws)
+
+	firstSettledCheckReached := make(chan struct{})
+	resumeFirstRegister := make(chan struct{})
+	var resumeFirstOnce sync.Once
+	releaseFirstRegister := func() {
+		resumeFirstOnce.Do(func() { close(resumeFirstRegister) })
+	}
+	defer releaseFirstRegister()
+
+	origSettledCheck := serenaRegisterSettledCheckFn
+	var settledChecksMu sync.Mutex
+	settledChecks := 0
+	serenaRegisterSettledCheckFn = func(key string) (serenaRegisterSettledResult, error) {
+		settledChecksMu.Lock()
+		settledChecks++
+		call := settledChecks
+		settledChecksMu.Unlock()
+
+		result, err := realSerenaRegisterSettledCheck(key)
+		if call == 1 {
+			if err != nil {
+				return result, err
+			}
+			if result.RegistryRowPresent {
+				return result, fmt.Errorf("test precondition: first settled check unexpectedly found registry row for %s", key)
+			}
+			close(firstSettledCheckReached)
+			<-resumeFirstRegister
+		}
+		return result, err
+	}
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = origSettledCheck })
+
+	origReconcile := serenaRegisterReconcileFn
+	var reconcileCallsMu sync.Mutex
+	reconcileCalls := 0
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+		if !apply {
+			return api.ReconcileResponse{}, fmt.Errorf("test precondition: register must request apply=true")
+		}
+		reconcileCallsMu.Lock()
+		reconcileCalls++
+		call := reconcileCalls
+		reconcileCallsMu.Unlock()
+
+		if call == 1 {
+			// Model the first register's row disappearing after it writes the
+			// marker, but before it re-checks settlement. Deliberately leave the
+			// marker alone: that old operation is responsible for compensation.
+			regPath, err := api.DefaultRegistryPath()
+			if err != nil {
+				return api.ReconcileResponse{}, fmt.Errorf("resolve registry path: %w", err)
+			}
+			reg := api.NewRegistry(regPath)
+			unlock, err := reg.Lock()
+			if err != nil {
+				return api.ReconcileResponse{}, fmt.Errorf("lock registry: %w", err)
+			}
+			defer unlock()
+			if err := reg.Load(); err != nil {
+				return api.ReconcileResponse{}, fmt.Errorf("load registry: %w", err)
+			}
+			reg.RemoveByBackend(wsKey, api.SerenaServerName)
+			if err := reg.Save(); err != nil {
+				return api.ReconcileResponse{}, fmt.Errorf("save registry: %w", err)
+			}
+			return api.ReconcileResponse{SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted}, nil
+		}
+
+		stateDir, err := api.DaemonStateDir()
+		if err != nil {
+			return api.ReconcileResponse{}, fmt.Errorf("resolve state dir: %w", err)
+		}
+		repairResult, repairErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+		resp := api.ReconcileResponse{SerenaRepairOutcome: repairResult.Outcome}
+		if repairErr != nil {
+			resp.SerenaRepairError = repairErr.Error()
+		}
+		return resp, repairErr
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
+
+	type registerResult struct {
+		out string
+		err error
+	}
+	firstDone := make(chan registerResult, 1)
+	go func() {
+		out, err := runWorkspaceCmd(t, "register", ws, "--default")
+		firstDone <- registerResult{out: out, err: err}
+	}()
+
+	select {
+	case <-firstSettledCheckReached:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first register did not reach the deliberately paused absent settled check")
+	}
+
+	secondOut, secondErr := runWorkspaceCmd(t, "register", ws, "--default")
+	if secondErr != nil {
+		t.Fatalf("new same-path register: %v\noutput: %s", secondErr, secondOut)
+	}
+	releaseFirstRegister()
+
+	var first registerResult
+	select {
+	case first = <-firstDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("old register did not finish after compensation was released")
+	}
+	if first.err == nil {
+		t.Fatalf("old register must retain its original partial-state result; output: %s", first.out)
+	}
+	if !strings.Contains(first.err.Error(), "marker was retained") {
+		t.Errorf("old partial-state result must name the preserved newer marker; got %q", first.err)
+	}
+	if strings.Contains(first.err.Error(), "marker this command wrote was cleared") {
+		t.Errorf("old partial-state result falsely says it cleared the newer marker; got %q", first.err)
+	}
+
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load final registry: %v", err)
+	}
+	entry, ok := reg.GetSerena(wsKey)
+	if !ok || entry.WorkspacePath != ws {
+		t.Fatalf("new same-path registration was not preserved: entry=%+v present=%v", entry, ok)
+	}
+	marker, err := readDefaultWorkspace(filepath.Dir(regPath))
+	if err != nil {
+		t.Fatalf("read final default marker: %v", err)
+	}
+	if marker != ws {
+		t.Errorf("default marker = %q, want newer same-path registration %q", marker, ws)
+	}
+	if settledChecks != 2 || reconcileCalls != 2 {
+		t.Errorf("calls = settled=%d reconcile=%d, want exactly two of each", settledChecks, reconcileCalls)
 	}
 }
 

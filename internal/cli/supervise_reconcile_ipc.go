@@ -165,19 +165,18 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	// The same holds in dry-run, where a swallowed preview error would report
 	// `serena orphans would repair: 0` for a preview that never got a verdict;
 	// surfacing it keeps that number honest without making a dry-run fail.
-	var serenaRepaired int
-	var serenaDeferred []string
+	var serenaRepairResult api.SerenaIntentRepairResult
 	var serenaRepairErr string
 	if args.Apply {
 		var rErr error
-		serenaRepaired, serenaDeferred, rErr = api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
-		emitSerenaIntentRepairOutcome(deps.events, serenaRepaired, serenaDeferred, rErr)
+		serenaRepairResult, rErr = api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
+		emitSerenaIntentRepairOutcome(deps.events, serenaRepairResult, rErr)
 		if rErr != nil {
 			serenaRepairErr = rErr.Error()
 		}
 	} else {
 		var pErr error
-		serenaRepaired, serenaDeferred, pErr = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
+		serenaRepairResult, pErr = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
 		if pErr != nil {
 			serenaRepairErr = pErr.Error()
 		}
@@ -455,9 +454,10 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			Source:   "ipc",
 			Event:    "mcphub-reconcile-invoked",
 			Body: map[string]any{
-				"dry_run":       !args.Apply,
-				"drift_count":   len(drift),
-				"applied_count": appliedCount,
+				"dry_run":               !args.Apply,
+				"drift_count":           len(drift),
+				"applied_count":         appliedCount,
+				"serena_repair_outcome": string(serenaRepairResult.Outcome),
 			},
 		})
 	}
@@ -468,8 +468,9 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		DriftCount:            len(drift),
 		AppliedCount:          appliedCount,
 		Drift:                 drift,
-		SerenaOrphansRepaired: serenaRepaired,
-		SerenaOrphansDeferred: serenaDeferred,
+		SerenaOrphansRepaired: serenaRepairResult.Repaired,
+		SerenaOrphansDeferred: serenaRepairResult.Deferred,
+		SerenaRepairOutcome:   serenaRepairResult.Outcome,
 		SerenaRepairError:     serenaRepairErr,
 	}
 	body, err := json.Marshal(resp)

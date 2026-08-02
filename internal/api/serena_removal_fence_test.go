@@ -204,7 +204,7 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceDecides(t *testing.T) 
 			t.Fatalf("read intent before: %v", err)
 		}
 
-		repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+		repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -248,7 +248,7 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceDecides(t *testing.T) 
 		}
 		release()
 
-		repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+		repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -276,7 +276,7 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceProbeError_FailsClosed
 	serenaRemovalFenceHeldFn = func(string, string) (bool, error) { return false, probeErr }
 	t.Cleanup(func() { serenaRemovalFenceHeldFn = prev })
 
-	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("a fence probe failure must not fail the whole repair: %v", err)
 	}
@@ -317,7 +317,7 @@ func TestRepairSerenaIntentFromRegistry_FreshMark_SkipsWithoutProbingFence(t *te
 	}
 	t.Cleanup(func() { serenaRemovalFenceHeldFn = prev })
 
-	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestPreviewSerenaIntentRepairFromRegistry_LiveFence_MatchesApplyAndWritesNo
 		t.Fatalf("read intent before: %v", err)
 	}
 
-	wouldRepair, deferred, err := NewAPI().PreviewSerenaIntentRepairFromRegistry(mustStateDir(t))
+	wouldRepair, deferred, err := previewSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestRepairSerenaIntentFromRegistry_HeldFenceDoesNotStarveTheRegistryLock(t 
 	// The repair acquires the registry lock, reads BOTH rows, and acts on the
 	// unfenced one — a fence that serialized against the registry lock would
 	// make this a zero-repair no-op instead.
-	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
