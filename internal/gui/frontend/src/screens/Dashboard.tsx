@@ -5,6 +5,9 @@ import {
   fetchOrThrow,
   getDaemonRecoverAuditLockState,
   getHubHealth,
+  isAuditLockAuthorization,
+  isAuditLockReceiptStatus,
+  isAuditLockTerminationState,
   isDaemonRecoverErrorCode,
   newDaemonRecoverCorrelation,
   postDaemonRecover,
@@ -12,6 +15,7 @@ import {
 } from "../api";
 import type {
   APIError,
+  AuditLockAuthorization,
   AuditLockSnapshot,
   DaemonRecoverCorrelation,
   DaemonRecoverErrorCode,
@@ -69,6 +73,12 @@ type BulkOutcome = { action: BulkAction; state: "done" | "error" };
 
 type AuditLockWarning = "pending" | "stranded";
 
+const auditLockAuthorizationCanWarn: Record<AuditLockAuthorization, boolean> = {
+  none: false,
+  current_truth: true,
+  uncertain: false,
+};
+
 export interface AuditLockView {
   serverInstance: string;
   revision: number;
@@ -92,8 +102,9 @@ export function nextAuditLockView(
   } else if (incoming.state === "stranded") {
     warning = "stranded";
   } else if (incoming.state === "outstanding") {
-    const receiptAuthorizesWarning =
-      incoming.recovery_receipt?.lock_authorization === "current_truth";
+    const receiptAuthorizesWarning = incoming.recovery_receipt
+      ? auditLockAuthorizationCanWarn[incoming.recovery_receipt.lock_authorization]
+      : false;
     warning =
       (sameInstance && current?.warning === "pending") ||
       receiptAuthorizesWarning
@@ -139,18 +150,9 @@ function isAuditLockReceipt(value: unknown): value is AuditLockSnapshot["recover
     typeof receipt.occurrence_id === "string" &&
     typeof receipt.server_instance === "string" &&
     typeof receipt.task_name === "string" &&
-    (receipt.status === "in_flight" ||
-      receipt.status === "committed_success" ||
-      receipt.status === "committed_error" ||
-      receipt.status === "not_committed" ||
-      receipt.status === "uncertain" ||
-      receipt.status === "consumed") &&
-    (receipt.lock_authorization === "none" ||
-      receipt.lock_authorization === "current_truth" ||
-      receipt.lock_authorization === "uncertain") &&
-    (receipt.termination_commit_state === "committed" ||
-      receipt.termination_commit_state === "not_committed" ||
-      receipt.termination_commit_state === "unknown")
+    isAuditLockReceiptStatus(receipt.status) &&
+    isAuditLockAuthorization(receipt.lock_authorization) &&
+    isAuditLockTerminationState(receipt.termination_commit_state)
   );
 }
 

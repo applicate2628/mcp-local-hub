@@ -771,6 +771,61 @@ export function isDaemonRecoverErrorCode(code: string | undefined): code is Daem
   return code !== undefined && (DAEMON_RECOVER_ERROR_CODES as readonly string[]).includes(code);
 }
 
+export const AUDIT_LOCK_RECEIPT_STATUSES = [
+  "in_flight",
+  "committed_success",
+  "committed_error",
+  "not_committed",
+  "uncertain",
+  "consumed",
+] as const;
+
+export const AUDIT_LOCK_AUTHORIZATIONS = ["none", "current_truth", "uncertain"] as const;
+
+export const AUDIT_LOCK_TERMINATION_STATES = ["committed", "not_committed", "unknown"] as const;
+
+export const PORT_OWNER_CHECKS = [
+  "reaped",
+  "already_exited",
+  "termination_unconfirmed",
+  "unbound",
+  "tracked_child",
+  "port_unresolvable",
+  "probe_unavailable",
+] as const;
+
+export const PORT_WAIT_OUTCOMES = ["not_required", "released", "still_bound", "probe_unavailable"] as const;
+
+export const AUDIT_HANDOFFS = ["not_required", "durable", "release_pending", "release_unconfirmed"] as const;
+
+function isWireValue<T extends string>(values: readonly T[], value: string | undefined): value is T {
+  return value !== undefined && (values as readonly string[]).includes(value);
+}
+
+export function isAuditLockReceiptStatus(value: string | undefined): value is AuditLockReceiptStatus {
+  return isWireValue(AUDIT_LOCK_RECEIPT_STATUSES, value);
+}
+
+export function isAuditLockAuthorization(value: string | undefined): value is AuditLockAuthorization {
+  return isWireValue(AUDIT_LOCK_AUTHORIZATIONS, value);
+}
+
+export function isAuditLockTerminationState(value: string | undefined): value is AuditLockTerminationState {
+  return isWireValue(AUDIT_LOCK_TERMINATION_STATES, value);
+}
+
+export function isPortOwnerCheck(value: string | undefined): value is PortOwnerCheck {
+  return isWireValue(PORT_OWNER_CHECKS, value);
+}
+
+export function isPortWaitOutcome(value: string | undefined): value is PortWaitOutcome {
+  return isWireValue(PORT_WAIT_OUTCOMES, value);
+}
+
+export function isAuditHandoff(value: string | undefined): value is AuditHandoff {
+  return isWireValue(AUDIT_HANDOFFS, value);
+}
+
 export interface DaemonRecoverCorrelation {
   attempt_id: string;
   occurrence_id: string;
@@ -778,13 +833,12 @@ export interface DaemonRecoverCorrelation {
 }
 
 export type AuditLockState = "released" | "outstanding" | "stranded";
-export type AuditLockReceiptStatus =
-  | "in_flight"
-  | "committed_success"
-  | "committed_error"
-  | "not_committed"
-  | "uncertain"
-  | "consumed";
+export type AuditLockReceiptStatus = (typeof AUDIT_LOCK_RECEIPT_STATUSES)[number];
+export type AuditLockAuthorization = (typeof AUDIT_LOCK_AUTHORIZATIONS)[number];
+export type AuditLockTerminationState = (typeof AUDIT_LOCK_TERMINATION_STATES)[number];
+export type PortOwnerCheck = (typeof PORT_OWNER_CHECKS)[number];
+export type PortWaitOutcome = (typeof PORT_WAIT_OUTCOMES)[number];
+export type AuditHandoff = (typeof AUDIT_HANDOFFS)[number];
 
 export interface AuditLockReceipt {
   attempt_id: string;
@@ -792,8 +846,8 @@ export interface AuditLockReceipt {
   server_instance: string;
   task_name: string;
   status: AuditLockReceiptStatus;
-  lock_authorization: "none" | "current_truth" | "uncertain";
-  termination_commit_state: "committed" | "not_committed" | "unknown";
+  lock_authorization: AuditLockAuthorization;
+  termination_commit_state: AuditLockTerminationState;
 }
 
 export interface AuditLockSnapshot {
@@ -809,19 +863,8 @@ export interface DaemonRecoverResponse {
   task_name: string;
   state: "respawn_accepted";
   reaped: boolean;
-  port_owner_check:
-    | "reaped"
-    | "already_exited"
-    | "termination_unconfirmed"
-    | "unbound"
-    | "tracked_child"
-    | "port_unresolvable"
-    | "probe_unavailable";
-  port_wait_outcome:
-    | "not_required"
-    | "released"
-    | "still_bound"
-    | "probe_unavailable";
+  port_owner_check: PortOwnerCheck;
+  port_wait_outcome: PortWaitOutcome;
   // Warning field on a SUCCESS response: the audit row is durable, but the GUI
   // process may still hold the supervisor-events.log cross-process lock, which
   // blocks the supervisor and the install CLI. The recovery succeeded; surface
@@ -838,11 +881,7 @@ export interface DaemonRecoverResponse {
   //   "not_required"        — no audit was staged, so the lock owner was never
   //                           read. Carries NO information about the lock and
   //                           must not clear a prior warning.
-  audit_handoff:
-    | "not_required"
-    | "durable"
-    | "release_pending"
-    | "release_unconfirmed";
+  audit_handoff: AuditHandoff;
   termination_committed: boolean;
   audit_lock: AuditLockSnapshot;
 }
@@ -886,11 +925,22 @@ export async function postDaemonRecover(
   taskName: string,
   correlation: DaemonRecoverCorrelation,
 ): Promise<DaemonRecoverResult> {
-  return postJSONObject<DaemonRecoverResult>("/api/daemon/recover", {
+  const result = await postJSONObject<DaemonRecoverResult>("/api/daemon/recover", {
     task_name: taskName,
     confirm: true,
     audit_lock_attempt: correlation,
   });
+  if (result.state === "recovery_in_flight") return result;
+  if (!isPortOwnerCheck(result.port_owner_check)) {
+    throw new Error("invalid daemon recovery port_owner_check");
+  }
+  if (!isPortWaitOutcome(result.port_wait_outcome)) {
+    throw new Error("invalid daemon recovery port_wait_outcome");
+  }
+  if (!isAuditHandoff(result.audit_handoff)) {
+    throw new Error("invalid daemon recovery audit_handoff");
+  }
+  return result;
 }
 
 export async function getDaemonRecoverAuditLockState(

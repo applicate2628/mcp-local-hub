@@ -95,26 +95,59 @@ const (
 	daemonRecoverErrorStateRead                 daemonRecoverErrorCode = "RECOVER_STATE_READ_FAILED"
 	daemonRecoverErrorAuditDurability           daemonRecoverErrorCode = "RECOVER_AUDIT_DURABILITY_FAILED"
 	daemonRecoverErrorUnclassifiedFailure       daemonRecoverErrorCode = "RECOVER_UNCLASSIFIED_FAILURE"
+	daemonRecoverErrorAuditLockAdapterInit      daemonRecoverErrorCode = "AUDIT_LOCK_ADAPTER_INIT_FAILED"
+	daemonRecoverErrorCorrelationInvalid        daemonRecoverErrorCode = "RECOVER_CORRELATION_INVALID"
+	daemonRecoverErrorBaselineStale             daemonRecoverErrorCode = "RECOVER_BASELINE_STALE"
+	daemonRecoverErrorAttemptConflict           daemonRecoverErrorCode = "RECOVER_ATTEMPT_CONFLICT"
+	daemonRecoverErrorOccurrenceConsumed        daemonRecoverErrorCode = "RECOVER_OCCURRENCE_CONSUMED"
+	daemonRecoverErrorOccurrenceCapacity        daemonRecoverErrorCode = "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"
+	daemonRecoverErrorReceiptInFlight           daemonRecoverErrorCode = "RECOVER_RECEIPT_IN_FLIGHT"
+	daemonRecoverErrorOutcomeUncertain          daemonRecoverErrorCode = "RECOVER_OUTCOME_UNCERTAIN"
 )
 
+type daemonRecoverErrorCatalogEntry struct {
+	code        daemonRecoverErrorCode
+	persistable bool
+}
+
+var daemonRecoverErrorCatalog = [...]daemonRecoverErrorCatalogEntry{
+	{daemonRecoverErrorInvalidArgs, true},
+	{daemonRecoverErrorConfirmationRequired, true},
+	{daemonRecoverErrorUnknownTask, true},
+	{daemonRecoverErrorRefusedPortOwner, true},
+	{daemonRecoverErrorRespawnFailed, true},
+	{daemonRecoverErrorSupervisorUnavailable, true},
+	{daemonRecoverErrorRequestCanceled, true},
+	{daemonRecoverErrorBoundaryProbeTimeout, true},
+	{daemonRecoverErrorRespawnBudgetInsufficient, true},
+	{daemonRecoverErrorStateRead, true},
+	{daemonRecoverErrorAuditDurability, true},
+	{daemonRecoverErrorUnclassifiedFailure, true},
+	{daemonRecoverErrorAuditLockAdapterInit, false},
+	{daemonRecoverErrorCorrelationInvalid, false},
+	{daemonRecoverErrorBaselineStale, false},
+	{daemonRecoverErrorAttemptConflict, false},
+	{daemonRecoverErrorOccurrenceConsumed, false},
+	{daemonRecoverErrorOccurrenceCapacity, false},
+	{daemonRecoverErrorReceiptInFlight, false},
+	{daemonRecoverErrorOutcomeUncertain, false},
+}
+
 func (c daemonRecoverErrorCode) Valid() bool {
-	switch c {
-	case daemonRecoverErrorInvalidArgs,
-		daemonRecoverErrorConfirmationRequired,
-		daemonRecoverErrorUnknownTask,
-		daemonRecoverErrorRefusedPortOwner,
-		daemonRecoverErrorRespawnFailed,
-		daemonRecoverErrorSupervisorUnavailable,
-		daemonRecoverErrorRequestCanceled,
-		daemonRecoverErrorBoundaryProbeTimeout,
-		daemonRecoverErrorRespawnBudgetInsufficient,
-		daemonRecoverErrorStateRead,
-		daemonRecoverErrorAuditDurability,
-		daemonRecoverErrorUnclassifiedFailure:
-		return true
-	default:
-		return false
+	for _, entry := range daemonRecoverErrorCatalog {
+		if c == entry.code {
+			return entry.persistable
+		}
 	}
+	return false
+}
+
+func daemonRecoverErrorCodes() []string {
+	codes := make([]string, 0, len(daemonRecoverErrorCatalog))
+	for _, entry := range daemonRecoverErrorCatalog {
+		codes = append(codes, string(entry.code))
+	}
+	return codes
 }
 
 func registerDaemonRecoverRoutes(s *Server) {
@@ -140,17 +173,17 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	taskName := daemon_env_overlay.NormalizeOverlayKey(strings.TrimSpace(req.TaskName))
 	if taskName == "" {
-		writeAPIError(w, errors.New("task_name is required"), http.StatusBadRequest, "INVALID_ARGS")
+		writeAPIError(w, errors.New("task_name is required"), http.StatusBadRequest, string(daemonRecoverErrorInvalidArgs))
 		return
 	}
 	if api.IsMaintenanceTaskName(taskName) {
 		writeAPIError(w, fmt.Errorf("task_name %q is a maintenance task, not a daemon", req.TaskName),
-			http.StatusBadRequest, "INVALID_ARGS")
+			http.StatusBadRequest, string(daemonRecoverErrorInvalidArgs))
 		return
 	}
 	if !req.Confirm {
 		writeAPIError(w, errors.New("explicit recovery confirmation is required"),
-			http.StatusPreconditionFailed, "RECOVER_CONFIRMATION_REQUIRED")
+			http.StatusPreconditionFailed, string(daemonRecoverErrorConfirmationRequired))
 		return
 	}
 
@@ -160,7 +193,7 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if req.AuditLockAttempt == nil {
-		writeAuditLockRouteError(w, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"})
+		writeAuditLockRouteError(w, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)})
 		return
 	}
 	correlation, correlationErr := decodeAuditLockCorrelationObject(req.AuditLockAttempt)
@@ -283,25 +316,25 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 
 func auditLockReceiptStatus(success, terminationCommitted bool) string {
 	if success {
-		return "committed_success"
+		return auditLockOccurrenceCommittedSuccess
 	}
 	if terminationCommitted {
-		return "committed_error"
+		return auditLockOccurrenceCommittedError
 	}
-	return "not_committed"
+	return auditLockOccurrenceNotCommitted
 }
 
 func auditLockAuthorization(handoff daemonrecovery.AuditHandoff, committed bool) string {
 	if !committed {
-		return "none"
+		return auditLockAuthorizationNone
 	}
 	switch handoff {
 	case daemonrecovery.AuditHandoffReleasePending, daemonrecovery.AuditHandoffReleaseUnconfirmed:
-		return "current_truth"
+		return auditLockAuthorizationCurrentTruth
 	case daemonrecovery.AuditHandoffNotRequired, daemonrecovery.AuditHandoffDurable:
-		return "none"
+		return auditLockAuthorizationNone
 	default:
-		return "uncertain"
+		return auditLockAuthorizationUncertain
 	}
 }
 
@@ -332,7 +365,7 @@ func (s *Server) writeDaemonRecoverUncertain(w http.ResponseWriter, receipt audi
 	w.WriteHeader(http.StatusConflict)
 	_ = json.NewEncoder(w).Encode(daemonRecoverOccurrenceErrorResponse{
 		Error:                  "internal error",
-		Code:                   "RECOVER_OUTCOME_UNCERTAIN",
+		Code:                   string(daemonRecoverErrorOutcomeUncertain),
 		TerminationCommitted:   true,
 		TerminationCommitState: auditLockTerminationStateUnknown,
 		AuditLock:              snapshot,
@@ -347,7 +380,7 @@ func (s *Server) writeDaemonRecoverReplay(ctx context.Context, w http.ResponseWr
 		w.WriteHeader(http.StatusConflict)
 		_ = json.NewEncoder(w).Encode(daemonRecoverOccurrenceErrorResponse{
 			Error:                  "internal error",
-			Code:                   "RECOVER_OUTCOME_UNCERTAIN",
+			Code:                   string(daemonRecoverErrorOutcomeUncertain),
 			TerminationCommitted:   true,
 			TerminationCommitState: auditLockTerminationStateUnknown,
 			AuditLock:              snapshot,
@@ -393,7 +426,7 @@ func decodeAuditLockCorrelationQuery(r *http.Request) (auditLockCorrelation, boo
 		return auditLockCorrelation{}, false, nil
 	}
 	if len(query) != 3 {
-		return auditLockCorrelation{}, false, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"}
+		return auditLockCorrelation{}, false, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	correlation := auditLockCorrelation{}
 	targets := map[string]*string{
@@ -404,7 +437,7 @@ func decodeAuditLockCorrelationQuery(r *http.Request) (auditLockCorrelation, boo
 	for field, target := range targets {
 		values, ok := query[field]
 		if !ok || len(values) != 1 {
-			return auditLockCorrelation{}, false, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"}
+			return auditLockCorrelation{}, false, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 		}
 		*target = values[0]
 	}
@@ -445,7 +478,7 @@ func (s *Server) daemonRecoverAuditLockStateHandler(w http.ResponseWriter, r *ht
 func decodeAuditLockAcknowledge(raw json.RawMessage) (auditLockCorrelation, *auditLockRouteError) {
 	fields, err := decodeUniqueJSONObject(raw)
 	if err != nil || len(fields) != 4 {
-		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"}
+		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	correlationRaw, err := json.Marshal(map[string]json.RawMessage{
 		"attempt_id":      fields["attempt_id"],
@@ -453,7 +486,7 @@ func decodeAuditLockAcknowledge(raw json.RawMessage) (auditLockCorrelation, *aud
 		"server_instance": fields["server_instance"],
 	})
 	if err != nil {
-		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"}
+		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	correlation, correlationErr := decodeAuditLockCorrelationObject(correlationRaw)
 	if correlationErr != nil {
@@ -461,13 +494,13 @@ func decodeAuditLockAcknowledge(raw json.RawMessage) (auditLockCorrelation, *aud
 	}
 	var acknowledge bool
 	if value, ok := fields["acknowledge"]; !ok || json.Unmarshal(value, &acknowledge) != nil || !acknowledge {
-		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"}
+		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	for field := range fields {
 		switch field {
 		case "attempt_id", "occurrence_id", "server_instance", "acknowledge":
 		default:
-			return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: "RECOVER_CORRELATION_INVALID"}
+			return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 		}
 	}
 	return correlation, nil

@@ -779,6 +779,31 @@ describe("postDaemonRecover", () => {
     expect(resolved.state).toBe("respawn_accepted");
   });
 
+  it.each([
+    ["port_owner_check", "future_owner", "invalid daemon recovery port_owner_check"],
+    ["port_wait_outcome", "future_wait", "invalid daemon recovery port_wait_outcome"],
+    ["audit_handoff", "future_handoff", "invalid daemon recovery audit_handoff"],
+  ])("rejects an unknown success %s enum", async (field, value, message) => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      json: async () => ({
+        task_name: "demo/default",
+        state: "respawn_accepted",
+        reaped: true,
+        port_owner_check: "reaped",
+        port_wait_outcome: "released",
+        audit_handoff: "durable",
+        termination_committed: true,
+        audit_lock: auditLock,
+        [field]: value,
+      }),
+    }) as unknown as Response);
+
+    await expect(postDaemonRecover("demo/default", correlation)).rejects.toThrow(message);
+  });
+
   it("creates canonical lowercase UUIDv4 identifiers", () => {
     const created = newDaemonRecoverCorrelation(correlation.server_instance);
     const canonicalV4 =

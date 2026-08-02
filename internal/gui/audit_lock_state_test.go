@@ -282,14 +282,7 @@ func validAuditLockStoreTestStore(record auditLockOccurrenceRecord) auditLockOcc
 }
 
 func TestAuditLockStoreOwnerEnumsAndStatusesAreExhaustive(t *testing.T) {
-	for _, status := range []string{
-		auditLockOccurrenceInFlight,
-		auditLockOccurrenceCommittedSuccess,
-		auditLockOccurrenceCommittedError,
-		auditLockOccurrenceNotCommitted,
-		auditLockOccurrenceUncertain,
-		auditLockOccurrenceConsumed,
-	} {
+	for _, status := range auditLockOccurrenceStatusValues() {
 		t.Run("status/"+status, func(t *testing.T) {
 			if err := validateAuditLockStore(validAuditLockStoreTestStore(validAuditLockStoreTestRecord(status))); err != nil {
 				t.Fatalf("valid status %q rejected: %v", status, err)
@@ -297,15 +290,7 @@ func TestAuditLockStoreOwnerEnumsAndStatusesAreExhaustive(t *testing.T) {
 		})
 	}
 
-	for _, owner := range []daemonrecovery.PortOwnerCheck{
-		daemonrecovery.PortOwnerReaped,
-		daemonrecovery.PortOwnerAlreadyExited,
-		daemonrecovery.PortOwnerTerminationUnconfirmed,
-		daemonrecovery.PortOwnerUnbound,
-		daemonrecovery.PortOwnerTrackedChild,
-		daemonrecovery.PortOwnerPortUnresolvable,
-		daemonrecovery.PortOwnerProbeUnavailable,
-	} {
+	for _, owner := range daemonrecovery.PortOwnerChecks() {
 		t.Run("port_owner_check/"+string(owner), func(t *testing.T) {
 			record := validAuditLockStoreTestRecord(auditLockOccurrenceCommittedSuccess)
 			record.Success.PortOwnerCheck = string(owner)
@@ -315,12 +300,7 @@ func TestAuditLockStoreOwnerEnumsAndStatusesAreExhaustive(t *testing.T) {
 		})
 	}
 
-	for _, outcome := range []daemonrecovery.PortWaitOutcome{
-		daemonrecovery.PortWaitNotRequired,
-		daemonrecovery.PortWaitReleased,
-		daemonrecovery.PortWaitStillBound,
-		daemonrecovery.PortWaitProbeUnavailable,
-	} {
+	for _, outcome := range daemonrecovery.PortWaitOutcomes() {
 		t.Run("port_wait_outcome/"+string(outcome), func(t *testing.T) {
 			record := validAuditLockStoreTestRecord(auditLockOccurrenceCommittedSuccess)
 			record.Success.PortWaitOutcome = string(outcome)
@@ -330,12 +310,7 @@ func TestAuditLockStoreOwnerEnumsAndStatusesAreExhaustive(t *testing.T) {
 		})
 	}
 
-	for _, handoff := range []daemonrecovery.AuditHandoff{
-		daemonrecovery.AuditHandoffNotRequired,
-		daemonrecovery.AuditHandoffDurable,
-		daemonrecovery.AuditHandoffReleasePending,
-		daemonrecovery.AuditHandoffReleaseUnconfirmed,
-	} {
+	for _, handoff := range daemonrecovery.AuditHandoffs() {
 		t.Run("audit_handoff/"+string(handoff), func(t *testing.T) {
 			record := validAuditLockStoreTestRecord(auditLockOccurrenceCommittedSuccess)
 			record.Success.AuditHandoff = string(handoff)
@@ -347,7 +322,7 @@ func TestAuditLockStoreOwnerEnumsAndStatusesAreExhaustive(t *testing.T) {
 		})
 	}
 
-	for _, authorization := range []string{"none", "current_truth", "uncertain"} {
+	for _, authorization := range auditLockAuthorizationValues() {
 		t.Run("lock_authorization/"+authorization, func(t *testing.T) {
 			record := validAuditLockStoreTestRecord(auditLockOccurrenceInFlight)
 			switch authorization {
@@ -365,20 +340,11 @@ func TestAuditLockStoreOwnerEnumsAndStatusesAreExhaustive(t *testing.T) {
 		})
 	}
 
-	for _, code := range []daemonRecoverErrorCode{
-		daemonRecoverErrorInvalidArgs,
-		daemonRecoverErrorConfirmationRequired,
-		daemonRecoverErrorUnknownTask,
-		daemonRecoverErrorRefusedPortOwner,
-		daemonRecoverErrorRespawnFailed,
-		daemonRecoverErrorSupervisorUnavailable,
-		daemonRecoverErrorRequestCanceled,
-		daemonRecoverErrorBoundaryProbeTimeout,
-		daemonRecoverErrorRespawnBudgetInsufficient,
-		daemonRecoverErrorStateRead,
-		daemonRecoverErrorAuditDurability,
-		daemonRecoverErrorUnclassifiedFailure,
-	} {
+	for _, entry := range daemonRecoverErrorCatalog {
+		if !entry.persistable {
+			continue
+		}
+		code := entry.code
 		t.Run("error_code/"+string(code), func(t *testing.T) {
 			record := validAuditLockStoreTestRecord(auditLockOccurrenceNotCommitted)
 			record.ErrorCode = string(code)

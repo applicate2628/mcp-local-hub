@@ -27,15 +27,29 @@ const (
 	PortOwnerProbeUnavailable       PortOwnerCheck = "probe_unavailable"
 )
 
+var portOwnerChecks = [...]PortOwnerCheck{
+	PortOwnerReaped,
+	PortOwnerAlreadyExited,
+	PortOwnerTerminationUnconfirmed,
+	PortOwnerUnbound,
+	PortOwnerTrackedChild,
+	PortOwnerPortUnresolvable,
+	PortOwnerProbeUnavailable,
+}
+
+// PortOwnerChecks returns the complete safe response enum in wire order.
+func PortOwnerChecks() []PortOwnerCheck {
+	return append([]PortOwnerCheck(nil), portOwnerChecks[:]...)
+}
+
 // Valid reports whether the value belongs to the safe response enum.
 func (p PortOwnerCheck) Valid() bool {
-	switch p {
-	case PortOwnerReaped, PortOwnerAlreadyExited, PortOwnerTerminationUnconfirmed, PortOwnerUnbound, PortOwnerTrackedChild,
-		PortOwnerPortUnresolvable, PortOwnerProbeUnavailable:
-		return true
-	default:
-		return false
+	for _, known := range portOwnerChecks {
+		if p == known {
+			return true
+		}
 	}
+	return false
 }
 
 // PortWaitOutcome reports the best-effort post-termination port-release observation.
@@ -49,14 +63,26 @@ const (
 	PortWaitProbeUnavailable PortWaitOutcome = "probe_unavailable"
 )
 
+var portWaitOutcomes = [...]PortWaitOutcome{
+	PortWaitNotRequired,
+	PortWaitReleased,
+	PortWaitStillBound,
+	PortWaitProbeUnavailable,
+}
+
+// PortWaitOutcomes returns the complete safe response enum in wire order.
+func PortWaitOutcomes() []PortWaitOutcome {
+	return append([]PortWaitOutcome(nil), portWaitOutcomes[:]...)
+}
+
 // Valid reports whether the value belongs to the safe response enum.
 func (p PortWaitOutcome) Valid() bool {
-	switch p {
-	case PortWaitNotRequired, PortWaitReleased, PortWaitStillBound, PortWaitProbeUnavailable:
-		return true
-	default:
-		return false
+	for _, known := range portWaitOutcomes {
+		if p == known {
+			return true
+		}
 	}
+	return false
 }
 
 // AuditHandoff reports whether the committed-recovery audit handoff could
@@ -116,14 +142,26 @@ const (
 	AuditHandoffReleaseUnconfirmed AuditHandoff = "release_unconfirmed"
 )
 
+var auditHandoffs = [...]AuditHandoff{
+	AuditHandoffNotRequired,
+	AuditHandoffDurable,
+	AuditHandoffReleasePending,
+	AuditHandoffReleaseUnconfirmed,
+}
+
+// AuditHandoffs returns the complete safe response enum in wire order.
+func AuditHandoffs() []AuditHandoff {
+	return append([]AuditHandoff(nil), auditHandoffs[:]...)
+}
+
 // Valid reports whether the value belongs to the safe response enum.
 func (a AuditHandoff) Valid() bool {
-	switch a {
-	case AuditHandoffNotRequired, AuditHandoffDurable, AuditHandoffReleasePending, AuditHandoffReleaseUnconfirmed:
-		return true
-	default:
-		return false
+	for _, known := range auditHandoffs {
+		if a == known {
+			return true
+		}
 	}
+	return false
 }
 
 // Result means the supervisor accepted one force-respawn request. It does not

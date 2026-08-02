@@ -36,6 +36,9 @@ const (
 	auditLockTerminationStateCommitted    = "committed"
 	auditLockTerminationStateNotCommitted = "not_committed"
 	auditLockTerminationStateUnknown      = "unknown"
+	auditLockAuthorizationNone            = "none"
+	auditLockAuthorizationCurrentTruth    = "current_truth"
+	auditLockAuthorizationUncertain       = "uncertain"
 )
 
 type auditLockReceiptDTO struct {
@@ -77,6 +80,48 @@ const (
 	auditLockOccurrenceUncertain        = "uncertain"
 	auditLockOccurrenceConsumed         = "consumed"
 )
+
+var auditLockOccurrenceStatuses = [...]string{
+	auditLockOccurrenceInFlight,
+	auditLockOccurrenceCommittedSuccess,
+	auditLockOccurrenceCommittedError,
+	auditLockOccurrenceNotCommitted,
+	auditLockOccurrenceUncertain,
+	auditLockOccurrenceConsumed,
+}
+
+var auditLockAuthorizations = [...]string{
+	auditLockAuthorizationNone,
+	auditLockAuthorizationCurrentTruth,
+	auditLockAuthorizationUncertain,
+}
+
+var auditLockTerminationStates = [...]string{
+	auditLockTerminationStateCommitted,
+	auditLockTerminationStateNotCommitted,
+	auditLockTerminationStateUnknown,
+}
+
+func auditLockOccurrenceStatusValues() []string {
+	return append([]string(nil), auditLockOccurrenceStatuses[:]...)
+}
+
+func auditLockAuthorizationValues() []string {
+	return append([]string(nil), auditLockAuthorizations[:]...)
+}
+
+func auditLockTerminationStateValues() []string {
+	return append([]string(nil), auditLockTerminationStates[:]...)
+}
+
+func auditLockKnownValue(values []string, value string) bool {
+	for _, known := range values {
+		if value == known {
+			return true
+		}
+	}
+	return false
+}
 
 type daemonRecoverSuccessEvidence struct {
 	TaskName             string `json:"task_name"`
@@ -217,22 +262,22 @@ func newAuditLockCorrelationID() (string, error) {
 
 func validateAuditLockCorrelationValue(field, value string) *auditLockRouteError {
 	if len(value) != 36 {
-		return &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+		return &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	for i := 0; i < len(value); i++ {
 		switch i {
 		case 8, 13, 18, 23:
 			if value[i] != '-' {
-				return &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+				return &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 			}
 		default:
 			if !((value[i] >= '0' && value[i] <= '9') || (value[i] >= 'a' && value[i] <= 'f')) {
-				return &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+				return &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 			}
 		}
 	}
 	if value[14] != '4' || (value[19] != '8' && value[19] != '9' && value[19] != 'a' && value[19] != 'b') {
-		return &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+		return &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	_ = field // field is intentionally not echoed to callers or logs.
 	return nil
@@ -294,7 +339,7 @@ func decodeUniqueJSONObject(raw []byte) (map[string]json.RawMessage, error) {
 func decodeAuditLockCorrelationObject(raw json.RawMessage) (auditLockCorrelation, *auditLockRouteError) {
 	fields, err := decodeUniqueJSONObject(raw)
 	if err != nil || len(fields) != 3 {
-		return auditLockCorrelation{}, &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+		return auditLockCorrelation{}, &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	var c auditLockCorrelation
 	targets := map[string]*string{
@@ -305,12 +350,12 @@ func decodeAuditLockCorrelationObject(raw json.RawMessage) (auditLockCorrelation
 	for field, target := range targets {
 		value, ok := fields[field]
 		if !ok || json.Unmarshal(value, target) != nil {
-			return auditLockCorrelation{}, &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+			return auditLockCorrelation{}, &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 		}
 	}
 	for field := range fields {
 		if targets[field] == nil {
-			return auditLockCorrelation{}, &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+			return auditLockCorrelation{}, &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 		}
 	}
 	if validationErr := validateAuditLockCorrelation(c); validationErr != nil {
@@ -422,7 +467,7 @@ func (a *auditLockAdapter) effectiveOccurrence(generation uint64, durable auditL
 func (a *auditLockAdapter) installUncertaintyLockHeld(reservation auditLockReservation) auditLockReceiptDTO {
 	receipt := reservation.Receipt
 	receipt.Status = auditLockOccurrenceUncertain
-	receipt.LockAuthorization = "uncertain"
+	receipt.LockAuthorization = auditLockAuthorizationUncertain
 	receipt.TerminationCommitState = auditLockTerminationStateUnknown
 	key := auditLockUncertaintyKey{
 		Generation:     reservation.Generation,
@@ -631,10 +676,11 @@ func validateAuditLockStore(store auditLockOccurrenceStore) error {
 		if !record.Confirm {
 			return fmt.Errorf("record %d is not explicitly confirmed", index)
 		}
-		switch record.LockAuthorization {
-		case "none", "current_truth", "uncertain":
-		default:
+		if !auditLockKnownValue(auditLockAuthorizations[:], record.LockAuthorization) {
 			return fmt.Errorf("record %d contains invalid lock authorization", index)
+		}
+		if !auditLockKnownValue(auditLockOccurrenceStatuses[:], record.Status) {
+			return fmt.Errorf("record %d has invalid status %q", index, record.Status)
 		}
 		if record.Status != auditLockOccurrenceConsumed {
 			if _, duplicate := unresolvedTasks[record.TaskName]; duplicate {
@@ -644,7 +690,7 @@ func validateAuditLockStore(store auditLockOccurrenceStore) error {
 		}
 		switch record.Status {
 		case auditLockOccurrenceInFlight:
-			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != "none" {
+			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != auditLockAuthorizationNone {
 				return fmt.Errorf("record %d has invalid in-flight evidence", index)
 			}
 		case auditLockOccurrenceCommittedSuccess:
@@ -666,15 +712,15 @@ func validateAuditLockStore(store auditLockOccurrenceStore) error {
 				!daemonRecoverErrorCode(record.ErrorCode).Valid() || record.Success != nil {
 				return fmt.Errorf("record %d has invalid error evidence", index)
 			}
-			if record.Status == auditLockOccurrenceNotCommitted && record.LockAuthorization != "none" {
+			if record.Status == auditLockOccurrenceNotCommitted && record.LockAuthorization != auditLockAuthorizationNone {
 				return fmt.Errorf("record %d authorizes a noncommitted result", index)
 			}
 		case auditLockOccurrenceUncertain:
-			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != "uncertain" {
+			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != auditLockAuthorizationUncertain {
 				return fmt.Errorf("record %d has invalid uncertain evidence", index)
 			}
 		case auditLockOccurrenceConsumed:
-			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != "none" {
+			if record.HTTPStatus != 0 || record.ErrorCode != "" || record.Success != nil || record.LockAuthorization != auditLockAuthorizationNone {
 				return fmt.Errorf("record %d has invalid consumed tombstone", index)
 			}
 		default:
@@ -800,7 +846,7 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 			}
 			if record.Status == auditLockOccurrenceInFlight {
 				record.Status = auditLockOccurrenceUncertain
-				record.LockAuthorization = "uncertain"
+				record.LockAuthorization = auditLockAuthorizationUncertain
 				record.HTTPStatus = 0
 				record.ErrorCode = ""
 				record.Success = nil
@@ -826,7 +872,7 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 
 func (a *auditLockAdapter) ensureReady() *auditLockRouteError {
 	if a == nil || a.initErr != nil {
-		return &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	return nil
 }
@@ -843,13 +889,13 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 	}
 	if err := validateAuditLockCorrelation(c); err != nil || binding.serverInstance != c.ServerInstance ||
 		binding.taskName == "" || !binding.confirm || validateOpaqueTaskName(binding.taskName) != nil {
-		return auditLockReservation{}, &auditLockRouteError{status: 400, code: "RECOVER_CORRELATION_INVALID"}
+		return auditLockReservation{}, &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	a.mu.Lock()
 	closing := a.closing
 	a.mu.Unlock()
 	if closing {
-		return auditLockReservation{}, &auditLockRouteError{status: 503, code: "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"}
+		return auditLockReservation{}, &auditLockRouteError{status: 503, code: string(daemonRecoverErrorOccurrenceCapacity)}
 	}
 
 	var reservation auditLockReservation
@@ -867,11 +913,11 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 				record.OriginServerInstance == c.ServerInstance &&
 				auditLockRecordBinding(record) == binding
 			if !exact {
-				return &auditLockRouteError{status: 409, code: "RECOVER_ATTEMPT_CONFLICT"}
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAttemptConflict)}
 			}
 			effective := a.effectiveOccurrence(store.Generation, record)
 			if effective.Status == auditLockOccurrenceConsumed {
-				return &auditLockRouteError{status: 409, code: "RECOVER_OCCURRENCE_CONSUMED"}
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOccurrenceConsumed)}
 			}
 			reservation = auditLockReservation{
 				Receipt:    auditLockReceiptFromRecord(effective),
@@ -885,15 +931,15 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 		if c.ServerInstance != serverInstance ||
 			store.ActiveServerInstance != serverInstance ||
 			store.Generation != generation {
-			return &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
+			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 		}
 		for _, record := range store.Records {
 			if record.Status != auditLockOccurrenceConsumed && record.TaskName == binding.taskName {
-				return &auditLockRouteError{status: 409, code: "RECOVER_ATTEMPT_CONFLICT"}
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAttemptConflict)}
 			}
 		}
 		if len(store.Records) >= auditLockOccurrenceCapacity {
-			return &auditLockRouteError{status: 503, code: "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"}
+			return &auditLockRouteError{status: 503, code: string(daemonRecoverErrorOccurrenceCapacity)}
 		}
 		record := auditLockOccurrenceRecord{
 			OriginServerInstance: c.ServerInstance,
@@ -902,7 +948,7 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 			TaskName:             binding.taskName,
 			Confirm:              binding.confirm,
 			Status:               auditLockOccurrenceInFlight,
-			LockAuthorization:    "none",
+			LockAuthorization:    auditLockAuthorizationNone,
 		}
 		store.Records = append(store.Records, record)
 		if err := a.writeStoreLockHeld(store); err != nil {
@@ -921,7 +967,7 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 		if errors.As(err, &routeErr) {
 			return auditLockReservation{}, routeErr
 		}
-		return auditLockReservation{}, &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+		return auditLockReservation{}, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	return reservation, nil
 }
@@ -1018,10 +1064,10 @@ func (a *auditLockAdapter) terminalize(reservation auditLockReservation, receipt
 		// fail-closed and never exposes a retryable terminal outcome.
 		receipt = reservation.Receipt
 		receipt.Status = auditLockOccurrenceUncertain
-		receipt.LockAuthorization = "uncertain"
+		receipt.LockAuthorization = auditLockAuthorizationUncertain
 		receipt.TerminationCommitState = auditLockTerminationStateUnknown
 	}
-	return receipt, &auditLockRouteError{status: 409, code: "RECOVER_OUTCOME_UNCERTAIN"}
+	return receipt, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain)}
 }
 
 func (a *auditLockAdapter) lookup(ctx context.Context, c auditLockCorrelation) (*auditLockReceiptDTO, *auditLockRouteError) {
@@ -1046,7 +1092,7 @@ func (a *auditLockAdapter) lookup(ctx context.Context, c auditLockCorrelation) (
 		return nil
 	})
 	if err != nil {
-		return nil, &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+		return nil, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	return receipt, nil
 }
@@ -1057,7 +1103,7 @@ func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelati
 	}
 	rotatedInstance, err := newAuditLockCorrelationID()
 	if err != nil {
-		return &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	var rotated bool
 	var nextGeneration uint64
@@ -1070,7 +1116,7 @@ func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelati
 		}
 		serverInstance, generation := a.currentIdentity()
 		if store.Generation != generation || store.ActiveServerInstance != serverInstance {
-			return &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
+			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 		}
 		found := false
 		for index := range store.Records {
@@ -1085,13 +1131,13 @@ func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelati
 			acknowledgedRecord = *record
 			effective := a.effectiveOccurrence(store.Generation, *record)
 			if effective.Status == auditLockOccurrenceInFlight {
-				return &auditLockRouteError{status: 409, code: "RECOVER_RECEIPT_IN_FLIGHT"}
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorReceiptInFlight)}
 			}
 			if record.Status != auditLockOccurrenceConsumed {
 				record.Status = auditLockOccurrenceConsumed
 				record.HTTPStatus = 0
 				record.ErrorCode = ""
-				record.LockAuthorization = "none"
+				record.LockAuthorization = auditLockAuthorizationNone
 				record.Success = nil
 			}
 			break
@@ -1129,7 +1175,7 @@ func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelati
 		if errors.As(err, &routeErr) {
 			return routeErr
 		}
-		return &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	if rotated {
 		a.mu.Lock()
@@ -1162,11 +1208,11 @@ func (a *auditLockAdapter) snapshot(ctx context.Context, receipt *auditLockRecei
 		return nil
 	})
 	if err != nil {
-		return auditLockStateDTO{}, &auditLockRouteError{status: 500, code: "AUDIT_LOCK_ADAPTER_INIT_FAILED"}
+		return auditLockStateDTO{}, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	serverInstance, generation := a.currentIdentity()
 	if store.Generation != generation || store.ActiveServerInstance != serverInstance {
-		return auditLockStateDTO{}, &auditLockRouteError{status: 409, code: "RECOVER_BASELINE_STALE"}
+		return auditLockStateDTO{}, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 	}
 	physical := api.SupervisorEventLockSnapshotForPath(a.logPath)
 	return auditLockStateDTO{
