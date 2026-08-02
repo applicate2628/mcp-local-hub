@@ -78,9 +78,13 @@ func (a *API) WriteStopIntent(taskName string, intent DaemonIntent, who string) 
 type stopIntentCompensationSink func(label string, undo compensation)
 
 type stopIntentTaskSnapshot struct {
-	stop      *DaemonIntent
-	watermark *DaemonIntent
+	stop             *DaemonIntent
+	watermark        *DaemonIntent
+	appliedStop      *DaemonIntent
+	appliedWatermark *DaemonIntent
 }
+
+var ErrStopIntentRollbackConflict = errors.New("stop-intent rollback compare-and-swap conflict")
 
 func (a *API) writeStopIntentWithCompensation(
 	taskName string,
@@ -418,9 +422,19 @@ func mutateStopSubBlockWithPrearm(
 	}
 
 	if prearm != nil {
+		var appliedStop *DaemonIntent
+		if value, ok := candidate.Stops[taskName]; ok {
+			appliedStop = cloneDaemonIntentSnapshot(&value)
+		}
+		var appliedWatermark *DaemonIntent
+		if value, ok := candidate.LegacyStopWatermarks[taskName]; ok {
+			appliedWatermark = cloneDaemonIntentSnapshot(&value)
+		}
 		prearm(stopIntentTaskSnapshot{
-			stop:      cloneDaemonIntentSnapshot(before),
-			watermark: cloneDaemonIntentSnapshot(priorWatermark),
+			stop:             cloneDaemonIntentSnapshot(before),
+			watermark:        cloneDaemonIntentSnapshot(priorWatermark),
+			appliedStop:      appliedStop,
+			appliedWatermark: appliedWatermark,
 		})
 	}
 
@@ -477,6 +491,14 @@ func restoreStopIntentTaskSnapshot(
 	if current, ok := stops[taskName]; ok {
 		value := current
 		before = &value
+	}
+	var currentWatermark *DaemonIntent
+	if current, ok := watermarks[taskName]; ok {
+		value := current
+		currentWatermark = &value
+	}
+	if !stopEntriesEqual(before, snapshot.appliedStop) || !stopEntriesEqual(currentWatermark, snapshot.appliedWatermark) {
+		return before, before, false, ErrStopIntentRollbackConflict
 	}
 	if snapshot.stop == nil {
 		delete(stops, taskName)

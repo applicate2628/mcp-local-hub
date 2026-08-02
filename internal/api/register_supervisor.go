@@ -358,7 +358,13 @@ func (a *API) registerOneLanguageSupervised(
 	capturedHad := had
 	capturedPrior := prior
 	transaction.AddCompensation("restore supervised registry row "+capturedRegKey+"/"+capturedRegLang, func() error {
-		return restoreRegistryRowForRollback(reg.path, capturedRegKey, capturedRegLang, capturedPrior, capturedHad)
+		// The client-update phase can hold a second registry lock when it fails.
+		// This rollback re-enters the registry through TryLock, so release that
+		// owned lock first while leaving the transaction's unrelated finalizers
+		// and compensations in their existing order.
+		releaseErr := transaction.Release(lockToken)
+		restoreErr := restoreRegistryRowForRollback(reg.path, capturedRegKey, capturedRegLang, capturedPrior, capturedHad)
+		return errors.Join(releaseErr, restoreErr)
 	})
 	if err := reg.PutLSP(composedEntry); err != nil {
 		return registeredLanguageResult{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)

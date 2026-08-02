@@ -854,6 +854,44 @@ func TestRegisterRunningIntentRollbackMatrix(t *testing.T) {
 	}
 }
 
+func TestRegisterRunningIntentRollbackPreservesNewerOperatorStop(t *testing.T) {
+	a := NewAPI()
+	dir := daemonIntentTestHelper(t)
+	target := "\\mcp-local-hub-lsp-deadbeef-python"
+	now := time.Now().UTC().Truncate(time.Second)
+	prior := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonInstall,
+		UpdatedAt: now,
+	}
+	if err := a.WriteStopIntent(target, prior, "tester"); err != nil {
+		t.Fatalf("seed prior stop: %v", err)
+	}
+
+	tx := newRegistrationTransaction()
+	if _, err := a.writeRegisterRunningIntentForTask(target, tx.AddCompensation); err != nil {
+		t.Fatalf("write running intent: %v", err)
+	}
+	newer := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserDisabled,
+		UpdatedAt: prior.UpdatedAt.Add(time.Minute),
+	}
+	if err := a.WriteStopIntent(target, newer, "operator"); err != nil {
+		t.Fatalf("write newer operator stop: %v", err)
+	}
+
+	outcome := tx.Fail(errors.New("injected registration failure"))
+	if !errors.Is(outcome.Err, ErrStopIntentRollbackConflict) {
+		t.Fatalf("rollback error = %v, want compare-and-swap conflict", outcome.Err)
+	}
+	stops := readSubBlockStopForTest(t, dir)
+	got, present := stops[target]
+	if !present || got.Desired != newer.Desired || got.Reason != newer.Reason || !got.UpdatedAt.Equal(newer.UpdatedAt) {
+		t.Fatalf("rollback overwrote newer operator stop: got=%+v present=%t want=%+v", got, present, newer)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // installAuditTaskNames — pure helper.
 // ---------------------------------------------------------------------------

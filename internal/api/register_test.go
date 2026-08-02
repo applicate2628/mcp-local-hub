@@ -6128,6 +6128,44 @@ func TestRegisterSupervised_EveryPostAddEntryFailureDiscardsReceipts(t *testing.
 	}
 }
 
+func TestRegisterSupervised_AddEntryFailureReleasesReacquiredRegistryLockBeforeRollback(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	h.fakeClients.failAddEntryCalls = 1
+	m := nineLanguageManifest()
+	canonical := mustCanonical(t, t.TempDir())
+	transaction := newRegistrationTransaction()
+	var output bytes.Buffer
+	_, err := mustNewAPI(t).registerOneLanguageSupervised(
+		m,
+		m.Languages[2],
+		canonical,
+		WorkspaceKey(canonical),
+		"go",
+		RegisterOpts{SupervisedProxy: true, Writer: &output},
+		NewRegistry(h.regPath),
+		h.fakeSch,
+		testClientFactory(),
+		m.ClientBindings,
+		&output,
+		transaction,
+	)
+	if err == nil {
+		t.Fatal("registerOneLanguageSupervised succeeded despite injected AddEntry failure")
+	}
+	outcome := transaction.Fail(err)
+	if strings.Contains(outcome.Err.Error(), "try-lock registry for rollback: lock is busy") {
+		t.Fatalf("rollback retained its own registry lock: %v", outcome.Err)
+	}
+	registry := NewRegistry(h.regPath)
+	if loadErr := registry.Load(); loadErr != nil {
+		t.Fatalf("load registry after rollback: %v", loadErr)
+	}
+	if _, exists := registry.Get(WorkspaceKey(canonical), "go"); exists {
+		t.Fatal("rollback left the provisional supervised registry row behind")
+	}
+}
+
 func TestSupervisorPostWriteDeps_DefaultsToCanonicalOwners(t *testing.T) {
 	deps := normalizeSupervisorPostWriteDeps(mustNewAPI(t), supervisorPostWriteDeps{})
 	if deps.upsertIntent == nil || deps.writeRunningIntent == nil || deps.reconcile == nil || deps.readiness == nil {

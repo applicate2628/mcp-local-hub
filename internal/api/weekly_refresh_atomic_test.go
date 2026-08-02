@@ -72,6 +72,9 @@ type weeklyAtomicScheduler struct {
 	createErrorAfterWrite bool
 	operationCount        int
 	operationHook         func(string)
+	exportCalls           int
+	failExportOnCall      map[int]error
+	exportOverrideOnCall  map[int][]byte
 }
 
 func (s *weeklyAtomicScheduler) Create(spec scheduler.TaskSpec) error {
@@ -132,6 +135,13 @@ func (s *weeklyAtomicScheduler) ExportXML(name string) ([]byte, error) {
 	s.recordOperation("ExportXML")
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.exportCalls++
+	if err := s.failExportOnCall[s.exportCalls]; err != nil {
+		return nil, err
+	}
+	if raw := s.exportOverrideOnCall[s.exportCalls]; raw != nil {
+		return append([]byte(nil), raw...), nil
+	}
 	raw, ok := s.xml[name]
 	if !ok {
 		return nil, scheduler.ErrTaskNotFound
@@ -3291,6 +3301,58 @@ func TestWeeklyRefreshReleaseSettlementMatrix(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestApplyWeeklyRefreshSchedule_RestoresPriorPairAfterPostCreateVerificationFailure(t *testing.T) {
+	priorSchedule := &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 0, Hour: 3, Minute: 0}
+	desiredSchedule := &ScheduleSpec{Kind: ScheduleWeekly, DayOfWeek: 2, Hour: 14, Minute: 30}
+
+	for _, tt := range []struct {
+		name       string
+		failExport error
+		override   []byte
+	}{
+		{name: "export-error", failExport: errors.New("injected post-create export failure")},
+		{name: "unclassifiable-export", override: []byte("<Task><invalid>")},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sch := &weeklyAtomicScheduler{
+				xml:                  map[string][]byte{},
+				failExportOnCall:     map[int]error{2: tt.failExport},
+				exportOverrideOnCall: map[int][]byte{2: tt.override},
+			}
+			installWeeklyAtomicHarness(t, sch)
+			originalSettings := setWeeklyScheduleForAtomicTest(t, "weekly Sun 03:00")
+			canonical := filepath.Join(t.TempDir(), "mcphub.exe")
+			previousCanonical := testCanonicalMcphubPathOverride
+			testCanonicalMcphubPathOverride = canonical
+			t.Cleanup(func() { testCanonicalMcphubPathOverride = previousCanonical })
+			priorSpec := weeklyRefreshTaskSpec(canonical, priorSchedule)
+			sch.xml[WeeklyRefreshTaskName] = weeklyTaskXMLForSpec(priorSpec)
+
+			restoreStatus, err := NewAPI().ApplyWeeklyRefreshSchedule(desiredSchedule)
+			if err == nil {
+				t.Fatal("ApplyWeeklyRefreshSchedule succeeded after post-create verification failure")
+			}
+			if restoreStatus != "ok" {
+				t.Fatalf("restore status = %q, want ok; err=%v", restoreStatus, err)
+			}
+			settings, readErr := os.ReadFile(SettingsPath())
+			if readErr != nil {
+				t.Fatalf("read restored settings: %v", readErr)
+			}
+			if !bytes.Equal(settings, originalSettings) {
+				t.Fatalf("settings were not restored:\nbefore=%q\nafter=%q", originalSettings, settings)
+			}
+			current, exportErr := sch.ExportXML(WeeklyRefreshTaskName)
+			if exportErr != nil {
+				t.Fatalf("export restored task: %v", exportErr)
+			}
+			if !bytes.Equal(current, sch.xml[WeeklyRefreshTaskName]) || !bytes.Equal(current, weeklyTaskXMLForSpec(priorSpec)) {
+				t.Fatalf("task was not restored to the prior generation: %s", current)
+			}
+		})
+	}
 }
 
 func TestWeeklyScheduleSettingsReleaseSettlementMatrix(t *testing.T) {

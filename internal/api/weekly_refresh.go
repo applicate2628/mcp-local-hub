@@ -179,6 +179,51 @@ func weeklyRefreshTaskSpec(canonicalPath string, schedule *ScheduleSpec) schedul
 	}
 }
 
+// restoreWeeklyRefreshTaskAfterPostCreateFailure returns the scheduler to the
+// exact generation observed before a successful Create could be verified.  A
+// missing prior task is restored by removing the provisional replacement.
+func restoreWeeklyRefreshTaskAfterPostCreateFailure(
+	sch weeklyRefreshTaskScheduler,
+	taskName string,
+	priorXML []byte,
+	exists bool,
+	cause error,
+) (result weeklyRefreshTransactionResult, err error) {
+	result.restoreStatus = "n/a"
+	if exists {
+		if restoreErr := sch.ImportXML(taskName, priorXML); restoreErr != nil {
+			result.restoreStatus = "degraded"
+			return result, errors.Join(cause, fmt.Errorf("restore prior %s: %w", taskName, restoreErr))
+		}
+		restoredXML, verifyErr := sch.ExportXML(taskName)
+		if verifyErr != nil || !bytes.Equal(restoredXML, priorXML) {
+			result.restoreStatus = "degraded"
+			return result, errors.Join(
+				cause,
+				fmt.Errorf("%w: restored prior %s did not verify: %v", ErrWeeklyRefreshConflict, taskName, verifyErr),
+			)
+		}
+		result.state = weeklyRefreshTaskRestored
+		result.restoreStatus = "ok"
+		return result, cause
+	}
+
+	if deleteErr := sch.Delete(taskName); deleteErr != nil {
+		result.restoreStatus = "degraded"
+		return result, errors.Join(cause, fmt.Errorf("remove newly created %s: %w", taskName, deleteErr))
+	}
+	if _, verifyErr := sch.ExportXML(taskName); verifyErr == nil || !errors.Is(verifyErr, scheduler.ErrTaskNotFound) {
+		result.restoreStatus = "degraded"
+		return result, errors.Join(
+			cause,
+			fmt.Errorf("%w: removed newly created %s did not verify: %v", ErrWeeklyRefreshConflict, taskName, verifyErr),
+		)
+	}
+	result.state = weeklyRefreshTaskRestored
+	result.restoreStatus = "ok"
+	return result, cause
+}
+
 // runWeeklyRefreshTaskTransaction is the sole owner of the weekly task's
 // export/delete/create/import lifecycle. Every production writer uses its
 // existing singleton lock and returns only after the final XML is verified.
@@ -273,14 +318,14 @@ func runWeeklyRefreshTaskTransaction(sch weeklyRefreshTaskScheduler, mutation we
 		}
 		settledXML, verifyErr := sch.ExportXML(taskName)
 		if verifyErr != nil {
-			return result, fmt.Errorf("verify created %s: %w", taskName, verifyErr)
+			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("verify created %s: %w", taskName, verifyErr))
 		}
 		matches, classifyErr := weeklyTaskXMLMatchesSpec(settledXML, spec)
 		if classifyErr != nil {
-			return result, fmt.Errorf("%w: verify created %s: %v", ErrWeeklyRefreshConflict, taskName, classifyErr)
+			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("%w: verify created %s: %v", ErrWeeklyRefreshConflict, taskName, classifyErr))
 		}
 		if !matches {
-			return result, fmt.Errorf("%w: created %s does not match the requested generation", ErrWeeklyRefreshConflict, taskName)
+			return restoreWeeklyRefreshTaskAfterPostCreateFailure(sch, taskName, priorXML, exists, fmt.Errorf("%w: created %s does not match the requested generation", ErrWeeklyRefreshConflict, taskName))
 		}
 		result.state = weeklyRefreshTaskCommitted
 		result.finalXML = append([]byte(nil), settledXML...)
