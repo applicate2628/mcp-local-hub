@@ -78,7 +78,7 @@ resolve the foreign concurrent `TEMPDEBUG` overlap without overwriting it.
 # Legacy delivery history — MCP front daemon Increment 1
 
 Template: full-delivery (reliability/architecture-critical). Orchestration weight: requiresLead.
-Branch: feat/mcp-front-daemon (worktree d:/dev/mcphub-front-daemon, off origin/master 1889cff6).
+Branch: feat/mcp-front-daemon (worktree <repo-worktree>, off origin/master 1889cff6).
 Started: 2026-07-25. Operator go-ahead: yes.
 
 ## Goal

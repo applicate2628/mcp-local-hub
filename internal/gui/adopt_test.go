@@ -496,13 +496,13 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 		}
 	}
 	pathBearing := []string{
-		`resolve client config path for "codex-cli": open C:\Users\dima_\AppData\config.toml: denied`,
+		`resolve client config path for "codex-cli": open C:\Users\fixture-user\AppData\config.toml: denied`,
 		`resolve client config path for "codex-cli": open /home/user/.config/x.json: denied`,
 		`check existing disk manifest "x": open \\host\share\manifest.yaml: denied`,
 		// fable PR #516 P3-A evasion shapes: a quoted POSIX path and a rooted
 		// (single-backslash) Windows path the prior regex missed.
 		`entry name "/home/evil/secret.toml" is not a valid manifest name`,
-		`open \Users\dima_\AppData\Local\vault.age: access is denied`,
+		`open \Users\fixture-user\AppData\Local\vault.age: access is denied`,
 		`config=/etc/mcphub/secret.yaml unreadable`,
 	}
 	for _, msg := range pathBearing {
@@ -541,13 +541,13 @@ func TestAdoptPlanErrorIsActionable(t *testing.T) {
 		`some brand new backend error we never enumerated`,
 		// Recognized phrase BUT path-bearing -> redact wins (P3-B: a wrapped OS
 		// "already exists: <path>" must not ride the actionable lane).
-		`Cannot create a file when that file already exists: C:\Users\dima_\x.toml`,
+		`Cannot create a file when that file already exists: C:\Users\fixture-user\x.toml`,
 		// Path-bearing, no recognized phrase.
 		`open /home/user/.config/mcphub/x.json: permission denied`,
 		// Even the Area-3 fail-loud phrase must redact if a path ever appears in the
 		// reason — adoptErrorMessageHasPath is the fail-closed backstop ahead of the
 		// allowlist.
-		`cannot adopt into client "cursor": open C:\Users\dima_\.cursor\mcp.json: denied`,
+		`cannot adopt into client "cursor": open C:\Users\fixture-user\.cursor\mcp.json: denied`,
 	}
 	for _, msg := range redacted {
 		if adoptPlanErrorIsActionable(msg) {
