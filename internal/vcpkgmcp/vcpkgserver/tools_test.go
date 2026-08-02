@@ -174,6 +174,32 @@ func TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer(
 	}
 }
 
+func TestPinStatusJSONResultRedactsSolCredentialCarriersAtActualSerializer(t *testing.T) {
+	tests := []struct {
+		name    string
+		command string
+		secret  string
+	}{
+		{"malformed encoded delimiter", "git ls-remote group/token%3Dactual-malformed-secret%ZZ", "actual-malformed-secret"},
+		{"fused credential key", "git ls-remote group/apikey=actual-fused-secret", "actual-fused-secret"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			result, err := jsonResult(pinstatus.Result{Status: "unknown", Ports: []pinstatus.PortResult{{
+				Remote:   pinstatus.Remote{Kind: pinstatus.RemoteGitHub, URL: "https://host/safe/repo.git"},
+				Evidence: evidence.Evidence{Commands: []string{tc.command}},
+			}}})
+			if err != nil {
+				t.Fatalf("jsonResult: %v", err)
+			}
+			text, ok := result.Content[0].(*mcp.TextContent)
+			if !ok || strings.Contains(text.Text, tc.secret) || !strings.Contains(text.Text, "REDACTED") {
+				t.Fatalf("actual serializer leaked %q: %#v", tc.secret, result)
+			}
+		})
+	}
+}
+
 var registeredVcpkgToolFixtures = []registeredVcpkgToolFixture{
 	{
 		name:  "vcpkg_discover_root",

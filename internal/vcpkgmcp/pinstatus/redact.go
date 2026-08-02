@@ -97,9 +97,10 @@ var emitSafeQueryKeys = map[string]struct{}{}
 // unknown(remote_url_query_unclassified) before an approved URL capability can
 // reach child-process argv.
 //
-// Matched case-insensitively as delimited key words, so "access_token" and
-// "X-Api-Key" are caught without treating a safe word such as "design" as
-// credential evidence merely because it contains the letters "sig".
+// Matched case-insensitively as delimited key words or established identifier
+// compounds, so "access_token", "X-Api-Key", and "apikey" are caught without
+// treating a safe word such as "design" as credential evidence merely because
+// it contains the letters "sig".
 var argvSecretQueryKeys = []string{
 	"token",
 	"secret",
@@ -111,6 +112,22 @@ var argvSecretQueryKeys = []string{
 	"credential",
 	"sig",
 	"signature",
+}
+
+// credentialKeyCompoundPrefixes are the non-secret identifier components used
+// to join a credential word in spellings such as apiKey and apikey. Keeping
+// this vocabulary separate from argvSecretQueryKeys preserves the positive
+// credential-evidence contract: arbitrary substrings such as "monkey" do not
+// become credential evidence merely because they end in "key".
+var credentialKeyCompoundPrefixes = []string{
+	"access",
+	"api",
+	"app",
+	"client",
+	"private",
+	"public",
+	"service",
+	"user",
 }
 
 const redactedRemoteMetadata = "REDACTED"
@@ -332,10 +349,34 @@ func queryCarriesArgvSecret(rawQuery string) bool {
 
 func keyNamesArgvSecret(key string) bool {
 	for _, word := range credentialKeyWords(key) {
-		for _, candidate := range argvSecretQueryKeys {
-			if word == candidate {
-				return true
-			}
+		if isArgvSecretKeyWord(word) {
+			return true
+		}
+	}
+	return false
+}
+
+func isArgvSecretKeyWord(word string) bool {
+	if isArgvSecretKeyPart(word) {
+		return true
+	}
+	for _, prefix := range credentialKeyCompoundPrefixes {
+		if strings.HasPrefix(word, prefix) && isArgvSecretKeyPart(strings.TrimPrefix(word, prefix)) {
+			return true
+		}
+	}
+	for _, prefix := range argvSecretQueryKeys {
+		if strings.HasPrefix(word, prefix) && isArgvSecretKeyPart(strings.TrimPrefix(word, prefix)) {
+			return true
+		}
+	}
+	return false
+}
+
+func isArgvSecretKeyPart(word string) bool {
+	for _, candidate := range argvSecretQueryKeys {
+		if word == candidate {
+			return true
 		}
 	}
 	return false
@@ -520,46 +561,107 @@ func remoteRepoAdmissionReason(raw string) Reason {
 // opaqueRemoteMetadataCarriesCredential recognizes credential-shaped key/value
 // carriers in every non-userinfo remote channel. It is deliberately positive:
 // ordinary owner/path repository names contain no key/value evidence and stay
-// usable. Decoding continues to a stable spelling within a fixed bound; a
-// spelling that exceeds that bound fails closed rather than relying on a
-// particular encoding depth.
+// usable. Decoding continues to a stable spelling within a fixed bound. An
+// incomplete spelling is never accepted as stable: a credential carrier found
+// through its valid escapes fails closed, while malformed input with no such
+// evidence remains distinguishable from a credential-bearing remote.
 func opaqueRemoteMetadataCarriesCredential(raw string) bool {
 	spellings, complete := decodedRemoteMetadataSpellings(raw)
-	if !complete {
-		return true
-	}
 	for _, spelling := range spellings {
-		if opaqueAuthorityCarriesCredential(spelling) {
+		if remoteMetadataSpellingCarriesCredential(spelling) {
 			return true
 		}
-		for _, part := range strings.FieldsFunc(spelling, func(r rune) bool {
-			return r == '&' || r == ';' || r == ',' || r == '/' || r == '?' || r == '#'
-		}) {
-			key, value, hasValue := strings.Cut(part, "=")
-			if !hasValue {
-				key, value, hasValue = strings.Cut(part, ":")
+	}
+	if !complete {
+		spelling := spellings[len(spellings)-1]
+		for range maxRemoteMetadataDecodePasses {
+			decoded, changed := tolerantPathUnescape(spelling)
+			if !changed {
+				break
 			}
-			if hasValue && value != "" && keyNamesArgvSecret(key) {
+			if remoteMetadataSpellingCarriesCredential(decoded) {
 				return true
 			}
+			spelling = decoded
 		}
 	}
 	return false
 }
 
+func remoteMetadataSpellingCarriesCredential(spelling string) bool {
+	if opaqueAuthorityCarriesCredential(spelling) {
+		return true
+	}
+	for _, part := range strings.FieldsFunc(spelling, func(r rune) bool {
+		return r == '&' || r == ';' || r == ',' || r == '/' || r == '?' || r == '#'
+	}) {
+		key, value, hasValue := strings.Cut(part, "=")
+		if !hasValue {
+			key, value, hasValue = strings.Cut(part, ":")
+		}
+		if hasValue && value != "" && keyNamesArgvSecret(key) {
+			return true
+		}
+	}
+	return false
+}
+
+// tolerantPathUnescape decodes every valid percent escape and leaves an invalid
+// one intact. It is used only after PathUnescape reported an incomplete
+// spelling, so valid delimiters before or beside the malformed escape cannot
+// hide positive credential evidence.
+func tolerantPathUnescape(raw string) (string, bool) {
+	var decoded strings.Builder
+	decoded.Grow(len(raw))
+	changed := false
+	for i := 0; i < len(raw); i++ {
+		if raw[i] == '%' && i+2 < len(raw) {
+			hi, hiOK := fromHex(raw[i+1])
+			lo, loOK := fromHex(raw[i+2])
+			if hiOK && loOK {
+				decoded.WriteByte(hi<<4 | lo)
+				i += 2
+				changed = true
+				continue
+			}
+		}
+		decoded.WriteByte(raw[i])
+	}
+	return decoded.String(), changed
+}
+
+func fromHex(value byte) (byte, bool) {
+	switch {
+	case value >= '0' && value <= '9':
+		return value - '0', true
+	case value >= 'a' && value <= 'f':
+		return value - 'a' + 10, true
+	case value >= 'A' && value <= 'F':
+		return value - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
+
 // opaqueAuthorityCarriesCredential catches bare-user and user:password@host
-// spellings that url.Parse treats as non-URL opaque values. A colon after the
-// at sign remains the SCP remote shape (git@host:path), so it stays outside
-// this credential form along with host:port and IPv6.
+// spellings that url.Parse treats as non-URL opaque values. For URL-shaped
+// input it examines only the authority grammar, never a later path segment: an
+// @ in https://host/group/repo@v1.git is part of the path, not userinfo. A
+// colon after the at sign remains the SCP remote shape (git@host:path), so it
+// stays outside this credential form along with host:port and IPv6.
 func opaqueAuthorityCarriesCredential(raw string) bool {
+	body, _, _, _ := splitURLish(raw)
+	if scheme := strings.Index(body, "://"); scheme >= 0 {
+		raw = body[scheme+3:]
+		if authorityEnd := strings.IndexByte(raw, '/'); authorityEnd >= 0 {
+			raw = raw[:authorityEnd]
+		}
+	}
 	at := strings.LastIndexByte(raw, '@')
 	if at <= 0 {
 		return false
 	}
 	prefix := raw[:at]
-	if scheme := strings.LastIndex(prefix, "://"); scheme >= 0 {
-		prefix = prefix[scheme+3:]
-	}
 	colon := strings.LastIndexByte(prefix, ':')
 	if colon > 0 && colon+1 < len(prefix) {
 		return true
@@ -571,13 +673,16 @@ func decodedRemoteMetadataSpellings(raw string) ([]string, bool) {
 	spellings := []string{raw}
 	for range maxRemoteMetadataDecodePasses {
 		decoded, err := url.PathUnescape(spellings[len(spellings)-1])
-		if err != nil || decoded == spellings[len(spellings)-1] {
+		if err != nil {
+			return spellings, false
+		}
+		if decoded == spellings[len(spellings)-1] {
 			return spellings, true
 		}
 		spellings = append(spellings, decoded)
 	}
 	decoded, err := url.PathUnescape(spellings[len(spellings)-1])
-	return spellings, err != nil || decoded == spellings[len(spellings)-1]
+	return spellings, err == nil && decoded == spellings[len(spellings)-1]
 }
 
 func redactResult(r Result) Result {

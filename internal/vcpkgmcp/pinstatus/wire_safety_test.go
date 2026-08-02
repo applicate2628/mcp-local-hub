@@ -13,19 +13,30 @@ import (
 
 func TestS2_PublicWireRedactionCoversEveryRemoteCarrier(t *testing.T) {
 	tests := []struct {
-		name   string
-		repo   string
-		url    string
-		secret string
+		name             string
+		repo             string
+		url              string
+		secret           string
+		decodeIncomplete bool
 	}{
-		{"fragment", "group/project#token=fragment-secret", "https://github.com/group/project.git#token=fragment-secret", "fragment-secret"},
-		{"percent encoded", "group/%74oken%3Dencoded-secret", "https://github.com/group/%74oken%3Dencoded-secret.git", "encoded-secret"},
-		{"triple encoded", "group/%252574oken%25253Dtriple-secret", "https://github.com/group/%252574oken%25253Dtriple-secret.git", "triple-secret"},
-		{"nested URL", "group/project?next=https%3A%2F%2Fgit.example%2Frepo%3Ftoken%3Dnested-secret", "https://github.com/group/project?next=https%3A%2F%2Fgit.example%2Frepo%3Ftoken%3Dnested-secret", "nested-secret"},
-		{"bare opaque", "group/token=bare-secret", "https://github.com/group/token=bare-secret.git", "bare-secret"},
+		{"fragment", "group/project#token=fragment-secret", "https://github.com/group/project.git#token=fragment-secret", "fragment-secret", false},
+		{"percent encoded", "group/%74oken%3Dencoded-secret", "https://github.com/group/%74oken%3Dencoded-secret.git", "encoded-secret", false},
+		{"triple encoded", "group/%252574oken%25253Dtriple-secret", "https://github.com/group/%252574oken%25253Dtriple-secret.git", "triple-secret", false},
+		{"nested URL", "group/project?next=https%3A%2F%2Fgit.example%2Frepo%3Ftoken%3Dnested-secret", "https://github.com/group/project?next=https%3A%2F%2Fgit.example%2Frepo%3Ftoken%3Dnested-secret", "nested-secret", false},
+		{"bare opaque", "group/token=bare-secret", "https://github.com/group/token=bare-secret.git", "bare-secret", false},
+		{"malformed encoded delimiter", "group/token%3Dopaque-secret%ZZ", "https://github.com/group/token%3Dopaque-secret%ZZ.git", "opaque-secret", true},
+		{"fused credential key", "group/apikey=opaque-secret", "https://github.com/group/apikey=opaque-secret.git", "opaque-secret", false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.decodeIncomplete {
+				if _, complete := decodedRemoteMetadataSpellings(tc.repo); complete {
+					t.Fatalf("invalid escape was accepted as complete: %q", tc.repo)
+				}
+			}
+			if !hasEmbeddedCredential(tc.repo) {
+				t.Fatalf("direct classifier did not reject %q", tc.repo)
+			}
 			if redacted := redactURL(tc.url); strings.Contains(redacted, tc.secret) {
 				t.Fatalf("direct redactURL leaked %q: %s", tc.secret, redacted)
 			}
@@ -59,6 +70,19 @@ func TestS2_PublicWireRedactionCoversEveryRemoteCarrier(t *testing.T) {
 	}
 }
 
+func TestS2_CredentialKeyRecognitionCoversDelimitedAndFusedIdentifiers(t *testing.T) {
+	for _, key := range []string{"access_token", "X-Api-Key", "apikey", "clientsecret", "authToken"} {
+		if !keyNamesArgvSecret(key) {
+			t.Fatalf("credential identifier %q was not recognized", key)
+		}
+	}
+	for _, key := range []string{"design", "monkey", "depth"} {
+		if keyNamesArgvSecret(key) {
+			t.Fatalf("safe identifier %q was classified as credential-bearing", key)
+		}
+	}
+}
+
 func TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -70,6 +94,8 @@ func TestS2_ProducerRejectsSecretBearingRepoBeforeRemoteCall(t *testing.T) {
 		{"triple encoded repo", `vcpkg_from_github(REPO group/%252574oken%25253Dtriple-secret REF ` + commitA + ` SHA512 0)`, "triple-secret"},
 		{"nested URL", `vcpkg_from_git(URL "https://host/widget.git?next=https%3A%2F%2Fgit.example%2Frepo%3Ftoken%3Dnested-secret" REF ` + commitA + ` SHA512 0)`, "nested-secret"},
 		{"bare opaque repo", `vcpkg_from_github(REPO group/token=bare-secret REF ` + commitA + ` SHA512 0)`, "bare-secret"},
+		{"malformed encoded delimiter", `vcpkg_from_github(REPO group/token%3Dopaque-secret%ZZ REF ` + commitA + ` SHA512 0)`, "opaque-secret"},
+		{"fused credential key", `vcpkg_from_github(REPO group/apikey=opaque-secret REF ` + commitA + ` SHA512 0)`, "opaque-secret"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,6 +148,7 @@ func TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls(t *testing.
 		"git@host:owner/repo.git",
 		"group/%2Fproject",
 		"group/project#design=dark",
+		"https://host/group/repo@v1.git",
 	} {
 		t.Run("safe "+raw, func(t *testing.T) {
 			if hasEmbeddedCredential(raw) {
@@ -134,6 +161,9 @@ func TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls(t *testing.
 	}
 
 	for _, carrier := range []string{"user@host", "user:password@host"} {
+		if !hasEmbeddedCredential(carrier) {
+			t.Fatalf("authority carrier was not classified as credential-bearing: %q", carrier)
+		}
 		if redacted := redactURL(carrier); strings.Contains(redacted, carrier) {
 			t.Fatalf("direct redaction leaked authority carrier: %q", redacted)
 		}
@@ -165,6 +195,64 @@ func TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls(t *testing.
 	}
 }
 
+func TestS2_SafeRemoteSpellingsRemainAdmissible(t *testing.T) {
+	for _, remote := range []string{
+		"https://host/group/sub/repo.git",
+		"https://host:8443/group/repo.git",
+		"https://[2001:db8::1]:8443/group/repo.git",
+		"git@host:owner/repo.git",
+	} {
+		t.Run(remote, func(t *testing.T) {
+			if hasEmbeddedCredential(remote) {
+				t.Fatalf("safe remote was classified as credential-bearing: %q", remote)
+			}
+			if redacted := redactURL(remote); redacted != remote {
+				t.Fatalf("safe remote redacted to %q, want %q", redacted, remote)
+			}
+			approved, reason := approveRemoteURL(remote)
+			if reason != "" {
+				t.Fatalf("safe remote admission reason = %q", reason)
+			}
+			if argument, ok := approved.transportArgument(); !ok || argument != remote {
+				t.Fatalf("safe remote approval argument = %q/%t, want %q/true", argument, ok, remote)
+			}
+		})
+	}
+	for _, remote := range []string{
+		"https://host/group/repo.git#design=dark",
+	} {
+		t.Run("redaction only "+remote, func(t *testing.T) {
+			if hasEmbeddedCredential(remote) {
+				t.Fatalf("safe remote was classified as credential-bearing: %q", remote)
+			}
+			if redacted := redactURL(remote); redacted != remote {
+				t.Fatalf("safe remote redacted to %q, want %q", redacted, remote)
+			}
+		})
+	}
+}
+
+func TestS2_URLPathAtSignIsNotAuthorityCredential(t *testing.T) {
+	const remote = "https://host/group/repo@v1.git"
+	const command = "git ls-remote " + remote
+	if hasEmbeddedCredential(remote) {
+		t.Fatalf("safe URL path was classified as credential-bearing: %q", remote)
+	}
+	if redacted := redactURL(remote); redacted != remote {
+		t.Fatalf("safe URL path redacted to %q, want %q", redacted, remote)
+	}
+	approved, reason := approveRemoteURL(remote)
+	if reason != "" {
+		t.Fatalf("safe URL path admission reason = %q", reason)
+	}
+	if argument, ok := approved.transportArgument(); !ok || argument != remote {
+		t.Fatalf("safe URL path approval argument = %q/%t, want %q/true", argument, ok, remote)
+	}
+	if redacted := redactEvidenceCommand(command); redacted != command {
+		t.Fatalf("safe command redacted to %q, want %q", redacted, command)
+	}
+}
+
 func TestS2_EvidenceCommandsRedactRepoOnlyCarrierOnEveryPublicBoundary(t *testing.T) {
 	const carrier = "user:password@host"
 	result := Result{Status: evidence.StatusUnknown, Ports: []PortResult{{
@@ -192,7 +280,9 @@ func TestS2_EvidenceCommandsAreSanitizedIndependentlyOfRemote(t *testing.T) {
 	}{
 		{name: "empty remote", command: unsafeCommand, secret: secret},
 		{name: "different remote", remote: "https://host/safe/repo.git", command: unsafeCommand, secret: secret},
-		{name: "safe control", command: "git ls-remote https://host/safe/repo.git"},
+		{name: "malformed encoded delimiter", command: "git ls-remote group/token%3Dmalformed-command-secret%ZZ", secret: "malformed-command-secret"},
+		{name: "fused credential key", command: "git ls-remote group/apikey=fused-command-secret", secret: "fused-command-secret"},
+		{name: "safe control", command: "git ls-remote https://host/group/repo@v1.git"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			result := Result{Status: evidence.StatusUnknown, Ports: []PortResult{{
