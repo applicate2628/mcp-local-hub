@@ -817,6 +817,40 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 	return live, reason
 }
 
+type supervisorLivenessOwnershipProof uint8
+
+const (
+	supervisorLivenessProofNone supervisorLivenessOwnershipProof = iota
+	supervisorLivenessProofPortOwnerPID
+	supervisorLivenessProofPIDIdentityAndTCP
+	supervisorLivenessProofTCPOnly
+)
+
+// supervisorLivenessVerdict preserves ordinary operational liveness while also
+// carrying the provenance of a positive port result. TargetReady is deliberately
+// stricter than Live+PortBound: a TCP-only listener is sufficient for legacy
+// macOS/other-POSIX operational liveness, but never proves that the tracked PID
+// owns the target port.
+type supervisorLivenessVerdict struct {
+	Live           bool
+	Reason         string
+	PortBound      bool
+	IdentityDetail string
+	OwnershipProof supervisorLivenessOwnershipProof
+}
+
+func (v supervisorLivenessVerdict) TargetReady() bool {
+	if !v.Live || !v.PortBound {
+		return false
+	}
+	switch v.OwnershipProof {
+	case supervisorLivenessProofPortOwnerPID, supervisorLivenessProofPIDIdentityAndTCP:
+		return true
+	default:
+		return false
+	}
+}
+
 // supervisorDaemonEntryLiveWithProbe evaluates one daemon's liveness. bindGrace
 // is the tolerance applied to an unbound / owner-unverifiable port before it
 // becomes a not-live reason — the sweep passes the P1b startup deadline before
@@ -833,18 +867,28 @@ func supervisorDaemonEntryLive(d api.SupervisorDaemon, entry DaemonRuntimeEntry,
 // (F6.3 observability). It is populated ONLY for the pid_identity_mismatch
 // reason; every other return leaves it "".
 func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time, probe supervisorLivenessProbe, bindGrace time.Duration) (bool, string, bool, string) {
+	verdict := supervisorDaemonLivenessVerdictWithProbe(d, entry, now, probe, bindGrace)
+	return verdict.Live, verdict.Reason, verdict.PortBound, verdict.IdentityDetail
+}
+
+// supervisorDaemonLivenessVerdictWithProbe is the canonical detailed predicate.
+// It owns both the legacy operational verdict and the stronger proof provenance
+// consumed by target settlement, so the two surfaces cannot drift into duplicate
+// PID/port decision logic.
+func supervisorDaemonLivenessVerdictWithProbe(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time, probe supervisorLivenessProbe, bindGrace time.Duration) supervisorLivenessVerdict {
 	if probe.PIDAlive == nil {
 		probe.PIDAlive = process.IsPidAlive
 	}
 	if entry.CurrentPID <= 0 {
-		return false, supervisorLivenessReasonMissingPID, false, ""
+		return supervisorLivenessVerdict{Reason: supervisorLivenessReasonMissingPID}
 	}
 	if !probe.PIDAlive(entry.CurrentPID) {
-		return false, supervisorLivenessReasonPIDDead, false, ""
+		return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDDead}
 	}
+	pidIdentityVerified := false
 	if probe.PIDIdentity != nil {
 		if entry.StartedAt.IsZero() {
-			return false, supervisorLivenessReasonPIDIdentityMissing, false, ""
+			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDIdentityMissing}
 		}
 		// The daemon runs from its CONFIGURED command (d.Command — the exact
 		// exe the supervisor exec'd), which may differ from the supervisor's
@@ -854,7 +898,7 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 		// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md).
 		expectedExe := daemonExpectedIdentityExe(d.Command)
 		if expectedExe == "" {
-			return false, supervisorLivenessReasonPIDIdentityMissing, false, ""
+			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDIdentityMissing}
 		}
 		err := probe.PIDIdentity(process.PIDIdentityProof{
 			PID:            entry.CurrentPID,
@@ -865,18 +909,20 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 			if errors.Is(err, process.ErrProcessIdentityUnsupported) {
 				// Keep the PIDAlive result on platforms without start-time proof.
 			} else if errors.Is(err, process.ErrProcessAlreadyExited) {
-				return false, supervisorLivenessReasonPIDDead, false, ""
+				return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDDead}
 			} else {
 				// F6.3: surface the exact identity error (recorded=… observed=…)
 				// so the disown/pending event is diagnosable by an operator.
-				return false, supervisorLivenessReasonPIDIdentityMismatch, false, err.Error()
+				return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDIdentityMismatch, IdentityDetail: err.Error()}
 			}
+		} else {
+			pidIdentityVerified = true
 		}
 	}
 	if d.Port <= 0 {
 		// No port to bind — nothing to latch (portBoundByCurrentPID stays false
 		// so the sweep never treats a port-less daemon as "bound").
-		return true, "", false, ""
+		return supervisorLivenessVerdict{Live: true}
 	}
 	if probe.PortOwnerPID != nil {
 		ownerPID, ok, err := probe.PortOwnerPID(d.Port)
@@ -897,7 +943,7 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 			// The owner is unverifiable, so we CANNOT confirm the current PID
 			// bound the port — portBoundByCurrentPID stays false.
 			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < bindGrace {
-				return true, "", false, ""
+				return supervisorLivenessVerdict{Live: true}
 			}
 			// Past grace, port not answering, owner unverifiable. This is
 			// genuinely ambiguous: it is still NOT proof a FOREIGN process owns
@@ -908,39 +954,43 @@ func supervisorDaemonEntryLiveWithProbe(d api.SupervisorDaemon, entry DaemonRunt
 			// supervisorLivenessReasonNeedsRestart). The live PID is retained
 			// for handoff because the reason stays in
 			// supervisorLivenessReasonHasLivePID.
-			return false, supervisorLivenessReasonPortOwnerUnverified, false, ""
+			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortOwnerUnverified}
 		}
 		if !ok {
 			if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < bindGrace {
-				return true, "", false, ""
+				return supervisorLivenessVerdict{Live: true}
 			}
-			return false, supervisorLivenessReasonPortUnbound, false, ""
+			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortUnbound}
 		}
 		if supervisorSelfPIDFn != nil && ownerPID == supervisorSelfPIDFn() {
-			return false, supervisorLivenessReasonPortOwnerSelf, false, ""
+			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortOwnerSelf}
 		}
 		if ownerPID != entry.CurrentPID {
-			return false, supervisorLivenessReasonPortOwnerMismatch, false, ""
+			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortOwnerMismatch}
 		}
 		// Verified: the tracked current PID owns the port. This is the positive
 		// first-bind proof the sweep latches on so subsequent unbound windows
 		// fall under the 5s post-bind grace.
-		return true, "", true, ""
+		return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: supervisorLivenessProofPortOwnerPID}
 	}
 	if probe.PortLive == nil {
 		probe.PortLive = supervisorPortLive
 	}
 	if !probe.PortLive(d.Port) {
 		if !entry.StartedAt.IsZero() && now.Sub(entry.StartedAt) < bindGrace {
-			return true, "", false, ""
+			return supervisorLivenessVerdict{Live: true}
 		}
-		return false, supervisorLivenessReasonPortUnbound, false, ""
+		return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortUnbound}
 	}
 	// PortLive-fallback (macOS / POSIX with no OS owner probe): TCP confirms a
 	// listener answers on the port. We cannot prove WHICH pid owns it, but the
 	// PID-identity gate above already confirmed the tracked PID is our binary,
 	// so treat the answering port as bound-by-current for latch purposes.
-	return true, "", true, ""
+	proof := supervisorLivenessProofTCPOnly
+	if pidIdentityVerified {
+		proof = supervisorLivenessProofPIDIdentityAndTCP
+	}
+	return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: proof}
 }
 
 // supervisorLivenessReasonNeedsRestart reports whether a not-live reason

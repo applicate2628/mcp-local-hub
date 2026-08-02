@@ -20,6 +20,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -106,6 +107,91 @@ func TestSerenaRemovalFence_StaleLeafWithoutHolderIsFree(t *testing.T) {
 	}
 	if held {
 		t.Fatal("a fence leaf with no live holder reported HELD; a killed unregister would strand its row forever")
+	}
+}
+
+func TestSerenaRemovalFence_GenerationDoesNotReplaceLeaf(t *testing.T) {
+	dir := t.TempDir()
+	const key = "beef0001"
+	release, err := AcquireSerenaRemovalFence(dir, key)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence first generation: %v", err)
+	}
+	before, err := os.Stat(serenaRemovalFencePath(dir, key))
+	if err != nil {
+		release()
+		t.Fatalf("stat leaf before publish: %v", err)
+	}
+	first, err := PublishSerenaRemovalFenceGeneration(dir, key)
+	if err != nil {
+		release()
+		t.Fatalf("PublishSerenaRemovalFenceGeneration first: %v", err)
+	}
+	release()
+
+	release, err = AcquireSerenaRemovalFence(dir, key)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence second generation: %v", err)
+	}
+	second, err := PublishSerenaRemovalFenceGeneration(dir, key)
+	if err != nil {
+		release()
+		t.Fatalf("PublishSerenaRemovalFenceGeneration second: %v", err)
+	}
+	after, err := os.Stat(serenaRemovalFencePath(dir, key))
+	release()
+	if err != nil {
+		t.Fatalf("stat leaf after publish: %v", err)
+	}
+	if !os.SameFile(before, after) {
+		t.Fatal("generation publication replaced the stable flock leaf")
+	}
+	if first == second || !validSerenaRemovalFenceGeneration(first) || !validSerenaRemovalFenceGeneration(second) {
+		t.Fatalf("generation tokens = %q, %q; want distinct 128-bit opaque values", first, second)
+	}
+}
+
+func TestSerenaRemovalFence_GenerationPublishFailurePreservesCompleteOldValueAndCleansTemps(t *testing.T) {
+	dir := t.TempDir()
+	const key = "beef0001"
+	release, err := AcquireSerenaRemovalFence(dir, key)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	oldGeneration, err := PublishSerenaRemovalFenceGeneration(dir, key)
+	if err != nil {
+		release()
+		t.Fatalf("initial PublishSerenaRemovalFenceGeneration: %v", err)
+	}
+	publicationErr := errors.New("injected canonical state writer failure")
+	previousWriter := writeSerenaRemovalFenceGenerationFn
+	writeSerenaRemovalFenceGenerationFn = func(string, []byte) error { return publicationErr }
+	t.Cleanup(func() { writeSerenaRemovalFenceGenerationFn = previousWriter })
+	if _, err := PublishSerenaRemovalFenceGeneration(dir, key); !errors.Is(err, publicationErr) {
+		release()
+		t.Fatalf("publish error = %v, want %v", err, publicationErr)
+	}
+	release()
+	got, err := os.ReadFile(serenaRemovalFenceGenerationPath(dir, key))
+	if err != nil {
+		t.Fatalf("read retained generation: %v", err)
+	}
+	if string(got) != oldGeneration+"\n" {
+		t.Fatalf("canonical generation = %q, want complete old value %q", got, oldGeneration+"\n")
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, serenaRemovalFenceDirLeaf))
+	if err != nil {
+		t.Fatalf("ReadDir fence dir: %v", err)
+	}
+	allowed := map[string]bool{
+		key + ".lock":                                      true,
+		key + serenaRemovalFenceGenerationSuffix:           true,
+		key + serenaRemovalFenceGenerationSuffix + ".lock": true,
+	}
+	for _, entry := range entries {
+		if !allowed[entry.Name()] || strings.HasPrefix(entry.Name(), ".") {
+			t.Fatalf("publication failure leaked unexpected/temp artifact %q", entry.Name())
+		}
 	}
 }
 

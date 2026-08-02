@@ -26,7 +26,60 @@ package api
 // post EvIntentUpdate per drift entry whose Action is
 // "post_ev_intent_update"; AppliedCount counts the events posted.
 type ReconcileArgs struct {
-	Apply bool `json:"apply"` // dry-run when false; trigger SM transitions when true
+	Apply        bool             `json:"apply"` // dry-run when false; trigger SM transitions when true
+	SettleTarget *ReconcileTarget `json:"settle_target,omitempty"`
+}
+
+// ReconcileTarget identifies one exact persisted workspace generation whose
+// controller-owned runtime should be observed before the reconcile response is
+// returned. RegisteredAt is the registry row's RFC3339Nano generation stamp;
+// ExpectedPort is the port that exact row and its intent descriptor must name.
+// The optional object is additive: callers that omit it retain the historical
+// enqueue-and-return reconcile behavior.
+type ReconcileTarget struct {
+	WorkspaceKey  string `json:"workspace_key"`
+	WorkspacePath string `json:"workspace_path"`
+	TaskName      string `json:"task_name"`
+	RegisteredAt  string `json:"registered_at"`
+	ExpectedPort  int    `json:"expected_port"`
+}
+
+type ReconcileTargetSettlementState string
+
+const (
+	ReconcileTargetSettlementReady      ReconcileTargetSettlementState = "ready"
+	ReconcileTargetSettlementIncomplete ReconcileTargetSettlementState = "incomplete"
+	ReconcileTargetSettlementFailed     ReconcileTargetSettlementState = "failed"
+)
+
+const (
+	ReconcileTargetReasonReady                    = "ready"
+	ReconcileTargetReasonTargetUnsupported        = "target_unsupported"
+	ReconcileTargetReasonControllerUnavailable    = "controller_unavailable"
+	ReconcileTargetReasonEventLoopUnavailable     = "event_loop_unavailable"
+	ReconcileTargetReasonSettlementTimeout        = "settlement_timeout"
+	ReconcileTargetReasonSettlementCancelled      = "settlement_cancelled"
+	ReconcileTargetReasonLivenessUnverified       = "liveness_unverified"
+	ReconcileTargetReasonPortUnbound              = "port_unbound"
+	ReconcileTargetReasonTargetGenerationReplaced = "target_generation_replaced"
+	ReconcileTargetReasonIntentMissing            = "intent_missing"
+	ReconcileTargetReasonSpawnFailed              = "spawn_failed"
+	ReconcileTargetReasonBackoff                  = "backoff"
+	ReconcileTargetReasonQuarantined              = "quarantined"
+	ReconcileTargetReasonPortOwnerMismatch        = "port_owner_mismatch"
+	ReconcileTargetReasonRegistryUnavailable      = "registry_unavailable"
+)
+
+// ReconcileTargetSettlement is present exactly when ReconcileArgs.SettleTarget
+// was requested. Ready is a positive proof for the echoed generation only; an
+// incomplete or failed state retains a stable reason and any causal detail.
+type ReconcileTargetSettlement struct {
+	State         ReconcileTargetSettlementState `json:"state"`
+	Reason        string                         `json:"reason"`
+	Target        ReconcileTarget                `json:"target"`
+	CurrentPID    int                            `json:"current_pid,omitempty"`
+	PIDGeneration int                            `json:"pid_generation,omitempty"`
+	Error         string                         `json:"error,omitempty"`
 }
 
 // ReconcileResponse is the IPC response body shape returned by the
@@ -67,7 +120,9 @@ type ReconcileResponse struct {
 	// unrecognized value from an older supervisor as incomplete rather than as
 	// completed, while an older client ignores this field. See
 	// SerenaIntentRepairOutcome for the stable vocabulary.
-	SerenaRepairOutcome SerenaIntentRepairOutcome `json:"serena_repair_outcome"`
+	SerenaRepairOutcome    SerenaIntentRepairOutcome      `json:"serena_repair_outcome"`
+	SerenaRepairIncomplete []SerenaIntentRepairIncomplete `json:"serena_repair_incomplete,omitempty"`
+	SerenaRepairRecovered  []SerenaIntentRepairRecovery   `json:"serena_repair_recovered,omitempty"`
 
 	// SerenaRepairError carries the self-heal's own failure text when the
 	// repair (apply) or preview (dry-run) could not COMPLETE — a malformed
@@ -85,6 +140,10 @@ type ReconcileResponse struct {
 	// from reading silence as success. `mcphub reconcile` prints it and, in
 	// --apply mode, exits non-zero on it.
 	SerenaRepairError string `json:"serena_repair_error,omitempty"`
+
+	// TargetSettlement is emitted only for an explicitly requested
+	// SettleTarget. Its absence therefore preserves the old wire shape.
+	TargetSettlement *ReconcileTargetSettlement `json:"target_settlement,omitempty"`
 }
 
 // DriftEntry describes one (task_name, drift_class) pair the reconcile

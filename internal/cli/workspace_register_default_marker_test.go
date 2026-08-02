@@ -130,7 +130,7 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterClearsOwnDefaultMarker(t *t
 
 	orig := serenaRegisterReconcileFn
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		// A row delete that does NOT clear the marker — the residual case.
 		regPath, err := api.DefaultRegistryPath()
 		if err != nil {
@@ -149,7 +149,7 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterClearsOwnDefaultMarker(t *t
 			t.Fatalf("save registry inside stub: %v", err)
 		}
 		unlock()
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 
 	out, err := runWorkspaceCmd(t, "register", ws, "--default")
@@ -226,7 +226,7 @@ func TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault(t 
 	origReconcile := serenaRegisterReconcileFn
 	var reconcileCallsMu sync.Mutex
 	reconcileCalls := 0
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		if !apply {
 			return api.ReconcileResponse{}, fmt.Errorf("test precondition: register must request apply=true")
 		}
@@ -256,7 +256,7 @@ func TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault(t 
 			if err := reg.Save(); err != nil {
 				return api.ReconcileResponse{}, fmt.Errorf("save registry: %w", err)
 			}
-			return api.ReconcileResponse{SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted}, nil
+			return readySerenaRegisterResponse(target, api.ReconcileResponse{SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted}), nil
 		}
 
 		stateDir, err := api.DaemonStateDir()
@@ -268,7 +268,7 @@ func TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault(t 
 		if repairErr != nil {
 			resp.SerenaRepairError = repairErr.Error()
 		}
-		return resp, repairErr
+		return readySerenaRegisterResponse(target, resp), repairErr
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
 
@@ -357,7 +357,7 @@ func TestWorkspaceRegisterSerena_CompensatingClearLeavesForeignDefaultAlone(t *t
 
 	orig := serenaRegisterReconcileFn
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		reg := api.NewRegistry(regPath)
 		unlock, err := reg.Lock()
 		if err != nil {
@@ -371,7 +371,7 @@ func TestWorkspaceRegisterSerena_CompensatingClearLeavesForeignDefaultAlone(t *t
 			t.Fatalf("save registry inside stub: %v", err)
 		}
 		unlock()
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 
 	// No --default: this invocation never wrote a marker, so it must not touch
@@ -386,6 +386,193 @@ func TestWorkspaceRegisterSerena_CompensatingClearLeavesForeignDefaultAlone(t *t
 	}
 	if got != otherDefault {
 		t.Errorf("default marker = %q, want the untouched foreign default %q", got, otherDefault)
+	}
+}
+
+func TestWorkspaceRegister_DefaultChangedDuringReconcileIsNotReportedYes(t *testing.T) {
+	withSerenaManifest(t, 9121, 9124)
+	withStateDir(t)
+
+	root := t.TempDir()
+	newerDefault := makeWorkspaceDir(t, filepath.Join(root, "newer"), []string{"python"})
+	if out, err := runWorkspaceCmd(t, "register", newerDefault); err != nil {
+		t.Fatalf("register newer default candidate: %v\noutput: %s", err, out)
+	}
+
+	reconcileReached := make(chan struct{})
+	resumeReconcile := make(chan struct{})
+	origReconcile := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		close(reconcileReached)
+		select {
+		case <-resumeReconcile:
+			return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
+		case <-ctx.Done():
+			return api.ReconcileResponse{}, ctx.Err()
+		}
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
+
+	registering := makeWorkspaceDir(t, filepath.Join(root, "registering"), []string{"python"})
+	type result struct {
+		out string
+		err error
+	}
+	done := make(chan result, 1)
+	go func() {
+		out, err := runWorkspaceCmd(t, "register", registering, "--default")
+		done <- result{out: out, err: err}
+	}()
+
+	select {
+	case <-reconcileReached:
+	case <-time.After(2 * time.Second):
+		t.Fatal("register did not reach the deterministic reconcile barrier")
+	}
+	if out, err := runWorkspaceCmd(t, "set-default", newerDefault); err != nil {
+		close(resumeReconcile)
+		t.Fatalf("concurrent set-default: %v\noutput: %s", err, out)
+	}
+	close(resumeReconcile)
+
+	var got result
+	select {
+	case got = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("register did not finish after releasing the reconcile barrier")
+	}
+	if got.err != nil {
+		t.Fatalf("register: %v\noutput: %s", got.err, got.out)
+	}
+	if !strings.Contains(got.out, "  default: changed") {
+		t.Errorf("terminal output does not report the newer default decision: %q", got.out)
+	}
+	if strings.Contains(got.out, "  default: yes") {
+		t.Errorf("terminal output falsely confirms the replaced marker: %q", got.out)
+	}
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	marker, err := api.ReadDefaultWorkspace(filepath.Dir(regPath))
+	if err != nil {
+		t.Fatalf("read terminal marker: %v", err)
+	}
+	if marker != newerDefault {
+		t.Errorf("terminal marker = %q, want newer set-default decision %q", marker, newerDefault)
+	}
+}
+
+func TestWorkspaceRegister_DefaultMissingDuringReconcileIsNotReportedYes(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+
+	origReconcile := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(_ context.Context, _ bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		regPath, err := api.DefaultRegistryPath()
+		if err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		if err := api.WriteDefaultWorkspace(filepath.Dir(regPath), ""); err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws, "--default")
+	if err != nil {
+		t.Fatalf("register: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "  default: changed") {
+		t.Errorf("missing terminal marker must be reported changed-away: %q", out)
+	}
+	if strings.Contains(out, "  default: yes") {
+		t.Errorf("missing terminal marker was falsely confirmed: %q", out)
+	}
+}
+
+func TestWorkspaceRegister_DefaultReadErrorIsUnknown(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+
+	readErr := fmt.Errorf("simulated terminal marker read failure")
+	origRead := readDefaultWorkspaceFn
+	readDefaultWorkspaceFn = func(string) (string, error) {
+		return "", readErr
+	}
+	t.Cleanup(func() { readDefaultWorkspaceFn = origRead })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws, "--default")
+	if err != nil {
+		t.Fatalf("registration must remain successful after an indeterminate default read: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("registration success was lost: %q", out)
+	}
+	if !strings.Contains(out, "  default: unknown") {
+		t.Errorf("indeterminate marker was not projected as unknown: %q", out)
+	}
+	if !strings.Contains(out, readErr.Error()) {
+		t.Errorf("specific terminal read error was not preserved: %q", out)
+	}
+	if strings.Contains(out, "  default: yes") {
+		t.Errorf("indeterminate marker was falsely confirmed: %q", out)
+	}
+}
+
+func TestWorkspaceRegister_DefaultConfirmedByTerminalReadIsReportedYes(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+
+	readCalls := 0
+	origRead := readDefaultWorkspaceFn
+	readDefaultWorkspaceFn = func(stateDir string) (string, error) {
+		readCalls++
+		return origRead(stateDir)
+	}
+	t.Cleanup(func() { readDefaultWorkspaceFn = origRead })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws, "--default")
+	if err != nil {
+		t.Fatalf("register: %v\noutput: %s", err, out)
+	}
+	if readCalls != 1 {
+		t.Fatalf("terminal default reads = %d, want exactly one", readCalls)
+	}
+	if !strings.Contains(out, "  default: yes") {
+		t.Errorf("exact terminal marker match was not confirmed: %q", out)
+	}
+	if strings.Contains(out, "  default: changed") || strings.Contains(out, "  default: unknown") {
+		t.Errorf("exact terminal marker match received a contradictory projection: %q", out)
+	}
+}
+
+func TestWorkspaceRegister_WithoutDefaultDoesNotReadOrProjectMarker(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+
+	readCalls := 0
+	origRead := readDefaultWorkspaceFn
+	readDefaultWorkspaceFn = func(string) (string, error) {
+		readCalls++
+		return "", fmt.Errorf("unexpected default-marker read")
+	}
+	t.Cleanup(func() { readDefaultWorkspaceFn = origRead })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err != nil {
+		t.Fatalf("register without --default: %v\noutput: %s", err, out)
+	}
+	if readCalls != 0 {
+		t.Fatalf("terminal default reads = %d, want zero without --default", readCalls)
+	}
+	if strings.Contains(out, "  default:") {
+		t.Errorf("non-default registration gained a default projection: %q", out)
 	}
 }
 

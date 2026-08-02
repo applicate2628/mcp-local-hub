@@ -442,7 +442,24 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		// supervisor-intent.json is physically absent under apply) rather than the
 		// always-non-nil synthetic empty files, so applyReconcileDrift's nil guards
 		// preserve the prior controller caches on a missing sole source.
-		appliedCount = applyReconcileDrift(deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+		if args.SettleTarget == nil {
+			appliedCount = applyReconcileDrift(deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+		} else {
+			// A targeted caller needs the same handler deadline to bound event
+			// enqueue as well as controller processing. The target-less path above
+			// remains byte-for-byte on its historical blocking Post behavior.
+			appliedCount, _ = applyReconcileDriftForTarget(ctx, deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+		}
+	}
+
+	var targetSettlement *api.ReconcileTargetSettlement
+	if args.SettleTarget != nil {
+		var ctrl *supervisorController
+		if deps.controllerProvider != nil {
+			ctrl = deps.controllerProvider()
+		}
+		settled := ctrl.settleReconcileTarget(ctx, *args.SettleTarget)
+		targetSettlement = &settled
 	}
 
 	// (8) Audit emit. Failures are non-fatal (the response is still
@@ -464,14 +481,17 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 
 	// (9) Response.
 	resp := api.ReconcileResponse{
-		DryRun:                !args.Apply,
-		DriftCount:            len(drift),
-		AppliedCount:          appliedCount,
-		Drift:                 drift,
-		SerenaOrphansRepaired: serenaRepairResult.Repaired,
-		SerenaOrphansDeferred: serenaRepairResult.Deferred,
-		SerenaRepairOutcome:   serenaRepairResult.Outcome,
-		SerenaRepairError:     serenaRepairErr,
+		DryRun:                 !args.Apply,
+		DriftCount:             len(drift),
+		AppliedCount:           appliedCount,
+		Drift:                  drift,
+		SerenaOrphansRepaired:  serenaRepairResult.Repaired,
+		SerenaOrphansDeferred:  serenaRepairResult.Deferred,
+		SerenaRepairOutcome:    serenaRepairResult.Outcome,
+		SerenaRepairIncomplete: serenaRepairResult.Incomplete,
+		SerenaRepairRecovered:  serenaRepairResult.Recovered,
+		SerenaRepairError:      serenaRepairErr,
+		TargetSettlement:       targetSettlement,
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -571,6 +591,23 @@ func parseReconcileArgs(raw map[string]any) (api.ReconcileArgs, error) {
 	}
 	if err := json.Unmarshal(b, &args); err != nil {
 		return args, fmt.Errorf("unmarshal args into ReconcileArgs: %w", err)
+	}
+	if target := args.SettleTarget; target != nil {
+		if !args.Apply {
+			return args, fmt.Errorf("settle_target requires apply=true")
+		}
+		if strings.TrimSpace(target.WorkspaceKey) == "" ||
+			strings.TrimSpace(target.WorkspacePath) == "" ||
+			strings.TrimSpace(target.TaskName) == "" {
+			return args, fmt.Errorf("settle_target requires workspace_key, workspace_path, and task_name")
+		}
+		registeredAt, err := time.Parse(time.RFC3339Nano, target.RegisteredAt)
+		if err != nil || registeredAt.IsZero() {
+			return args, fmt.Errorf("settle_target registered_at must be a non-zero RFC3339Nano timestamp")
+		}
+		if target.ExpectedPort <= 0 || target.ExpectedPort > 65535 {
+			return args, fmt.Errorf("settle_target expected_port must be in 1..65535")
+		}
 	}
 	return args, nil
 }
@@ -1061,12 +1098,33 @@ func applyReconcileDrift(
 	updatedIntent *api.SupervisorIntentFile,
 	daemonIntentCacheRefresh *api.DaemonIntentFile,
 ) int {
+	applied, _ := applyReconcileDriftWithContext(nil, deps, drift, updatedIntent, daemonIntentCacheRefresh)
+	return applied
+}
+
+func applyReconcileDriftForTarget(
+	ctx context.Context,
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
+) (int, error) {
+	return applyReconcileDriftWithContext(ctx, deps, drift, updatedIntent, daemonIntentCacheRefresh)
+}
+
+func applyReconcileDriftWithContext(
+	postCtx context.Context,
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
+) (int, error) {
 	if deps.controllerProvider == nil {
-		return 0
+		return 0, nil
 	}
 	ctrl := deps.controllerProvider()
 	if ctrl == nil {
-		return 0
+		return 0, nil
 	}
 	// (#303) Capture the OLD (pre-refresh) descriptor each StRunning command-drift
 	// restart will terminate against, BEFORE the cache refresh below rewrites the
@@ -1115,7 +1173,7 @@ func applyReconcileDrift(
 		ctrl.daemonIntent.Refresh(daemonIntentCacheRefresh)
 	}
 	if ctrl.eventLoop == nil {
-		return 0
+		return 0, nil
 	}
 	applied := 0
 	for _, entry := range drift {
@@ -1135,14 +1193,19 @@ func applyReconcileDrift(
 				body = map[string]any{reconcileManualRestartTerminateDescriptorBodyKey: d}
 			}
 		}
-		ctrl.eventLoop.Post(api.LoopEvent{
+		event := api.LoopEvent{
 			Kind:     kind,
 			TaskName: entry.TaskName,
 			Body:     body,
-		})
+		}
+		if postCtx == nil {
+			ctrl.eventLoop.Post(event)
+		} else if err := ctrl.eventLoop.PostCtx(postCtx, event); err != nil {
+			return applied, err
+		}
 		applied++
 	}
-	return applied
+	return applied, nil
 }
 
 func emitReconcileDaemonIntentReadFailed(events *api.SupervisorEventLog, path string, res api.IntentReadResult) {

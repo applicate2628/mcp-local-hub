@@ -114,7 +114,7 @@ func stubSerenaRegisterReconcileWithRealRepair(t *testing.T, respErr error) *int
 	t.Helper()
 	calls := 0
 	orig := serenaRegisterReconcileFn
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		calls++
 		if !apply {
 			t.Fatal("register must always request apply=true")
@@ -135,7 +135,7 @@ func stubSerenaRegisterReconcileWithRealRepair(t *testing.T, respErr error) *int
 		if repairErr != nil {
 			resp.SerenaRepairError = repairErr.Error()
 		}
-		return resp, nil
+		return readySerenaRegisterResponse(target, resp), nil
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
 	return &calls
@@ -151,16 +151,16 @@ func stubSerenaRegisterReconcileNoRepair(t *testing.T, respErr error) *int {
 	t.Helper()
 	calls := 0
 	orig := serenaRegisterReconcileFn
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		calls++
 		if respErr != nil {
 			return api.ReconcileResponse{}, respErr
 		}
-		return api.ReconcileResponse{
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{
 			DriftCount:          0,
 			AppliedCount:        0,
 			SerenaRepairOutcome: api.SerenaIntentRepairOutcomeSkippedRegistryLock,
-		}, nil
+		}), nil
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
 	return &calls
@@ -227,6 +227,168 @@ func TestWorkspaceRegisterSerena_LiveSupervisorMaterializesBeforeSuccess(t *test
 	}
 	if !intent.HasSpecBearingSerenaDaemonForWorkspaceKey(wsKey) {
 		t.Fatalf("supervisor-intent.json has no spec-bearing serena daemon for %s", wsKey)
+	}
+}
+
+func TestWorkspaceRegisterSerena_TargetSettlementAbsentOldServerCannotSucceed(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+
+	orig := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(_ context.Context, apply bool, _ api.ReconcileTarget) (api.ReconcileResponse, error) {
+		if !apply {
+			t.Fatal("register must request apply=true")
+		}
+		// Models an older server: valid legacy response, additive field absent.
+		return api.ReconcileResponse{SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted}, nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("old-server omission must not succeed; output: %s", out)
+	}
+	if strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("old-server omission printed success: %q", out)
+	}
+	if !strings.Contains(err.Error(), api.ReconcileTargetReasonTargetUnsupported) ||
+		!strings.Contains(err.Error(), "omitted target_settlement") {
+		t.Errorf("old-server omission lost its typed diagnostic: %q", err)
+	}
+}
+
+func TestWorkspaceRegisterSerena_TargetSettlementNotReadyCannotSucceed(t *testing.T) {
+	tests := []struct {
+		name   string
+		state  api.ReconcileTargetSettlementState
+		reason string
+		detail string
+	}{
+		{name: "bind grace", state: api.ReconcileTargetSettlementIncomplete, reason: api.ReconcileTargetReasonPortUnbound, detail: "expected port is not bound yet"},
+		{name: "wrong owner", state: api.ReconcileTargetSettlementFailed, reason: api.ReconcileTargetReasonPortOwnerMismatch, detail: "owner pid 9912"},
+		{name: "timeout", state: api.ReconcileTargetSettlementIncomplete, reason: api.ReconcileTargetReasonSettlementTimeout, detail: context.DeadlineExceeded.Error()},
+		{name: "cancellation", state: api.ReconcileTargetSettlementIncomplete, reason: api.ReconcileTargetReasonSettlementCancelled, detail: context.Canceled.Error()},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withSerenaDynamicPoolCatalog(t)
+			withStateDir(t)
+
+			orig := serenaRegisterReconcileFn
+			serenaRegisterReconcileFn = func(_ context.Context, _ bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+				return api.ReconcileResponse{
+					SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted,
+					TargetSettlement: &api.ReconcileTargetSettlement{
+						State:  tt.state,
+						Reason: tt.reason,
+						Target: target,
+						Error:  tt.detail,
+					},
+				}, nil
+			}
+			t.Cleanup(func() { serenaRegisterReconcileFn = orig })
+
+			ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+			out, err := runWorkspaceCmd(t, "register", ws)
+			if err == nil {
+				t.Fatalf("non-ready settlement must not succeed; output: %s", out)
+			}
+			if strings.Contains(out, "Registered serena workspace") {
+				t.Errorf("non-ready settlement printed success: %q", out)
+			}
+			if !strings.Contains(err.Error(), string(tt.state)) ||
+				!strings.Contains(err.Error(), tt.reason) ||
+				!strings.Contains(err.Error(), tt.detail) {
+				t.Errorf("typed settlement diagnostic was not preserved: %q", err)
+			}
+		})
+	}
+}
+
+func TestWorkspaceRegisterSerena_TargetReadyExactThenFreshGenerationCheck(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+
+	var captured api.ReconcileTarget
+	reconcileReturned := false
+	origReconcile := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(_ context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		if !apply {
+			t.Fatal("register must request apply=true")
+		}
+		captured = target
+		reconcileReturned = true
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted}), nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
+
+	finalChecks := 0
+	origCheck := serenaRegisterSettledCheckFn
+	serenaRegisterSettledCheckFn = func(expected api.WorkspaceEntry) (serenaRegisterSettledResult, error) {
+		if !reconcileReturned {
+			t.Fatal("fresh generation check ran before target-ready response")
+		}
+		finalChecks++
+		return serenaRegisterSettledResult{Settled: true, RegistryRowPresent: true, Port: expected.Port}, nil
+	}
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = origCheck })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err != nil {
+		t.Fatalf("exact ready settlement: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("exact ready settlement did not reach success: %q", out)
+	}
+	if finalChecks != 1 {
+		t.Fatalf("fresh generation checks = %d, want exactly one", finalChecks)
+	}
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatalf("registry path: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	row, ok := reg.GetSerena(api.WorkspaceKey(ws))
+	if !ok {
+		t.Fatal("registered row absent")
+	}
+	want := api.ReconcileTarget{
+		WorkspaceKey:  row.WorkspaceKey,
+		WorkspacePath: row.WorkspacePath,
+		TaskName:      row.TaskName,
+		RegisteredAt:  row.RegisteredAt.UTC().Format(time.RFC3339Nano),
+		ExpectedPort:  row.Port,
+	}
+	if captured != want {
+		t.Fatalf("requested target = %+v, want exact persisted row %+v", captured, want)
+	}
+}
+
+func TestWorkspaceRegisterSerena_TargetReadyWrongEchoCannotSucceed(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+
+	orig := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(_ context.Context, _ bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		wrong := target
+		wrong.ExpectedPort++
+		return readySerenaRegisterResponse(wrong, api.ReconcileResponse{}), nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
+
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("wrong target echo must not succeed; output: %s", out)
+	}
+	if !strings.Contains(err.Error(), api.ReconcileTargetReasonTargetGenerationReplaced) {
+		t.Errorf("wrong target echo lost typed reason: %q", err)
 	}
 }
 
@@ -478,7 +640,7 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterDeletesRow_HonestAbsenceMes
 
 	orig := serenaRegisterReconcileFn
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		if !apply {
 			t.Fatal("register must always request apply=true")
 		}
@@ -502,7 +664,7 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterDeletesRow_HonestAbsenceMes
 			t.Fatalf("save registry inside stub: %v", err)
 		}
 		unlock()
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 
 	out, err := runWorkspaceCmd(t, "register", ws)
@@ -538,7 +700,7 @@ func TestWorkspaceRegisterSerena_PortMismatch_NotSettled(t *testing.T) {
 
 	orig := serenaRegisterReconcileFn
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
-	serenaRegisterReconcileFn = func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(ctx context.Context, apply bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		// Run the REAL repair to materialize the target's intent row, then
 		// rewrite its port so it DISAGREES with the registry's committed
 		// port — modeling a port reallocation racing this register.
@@ -572,7 +734,7 @@ func TestWorkspaceRegisterSerena_PortMismatch_NotSettled(t *testing.T) {
 		if err := api.WriteSupervisorIntent(intentPath, intent); err != nil {
 			t.Fatalf("write mutated intent: %v", err)
 		}
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1, SerenaRepairOutcome: repairResult.Outcome}, nil
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1, SerenaRepairOutcome: repairResult.Outcome}), nil
 	}
 
 	out, err := runWorkspaceCmd(t, "register", ws)
@@ -601,7 +763,7 @@ func TestWorkspaceRegisterSerena_ReplacedGeneration_NotSettled(t *testing.T) {
 
 	orig := serenaRegisterReconcileFn
 	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
-	serenaRegisterReconcileFn = func(context.Context, bool) (api.ReconcileResponse, error) {
+	serenaRegisterReconcileFn = func(_ context.Context, _ bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
 		stateDir, err := api.DaemonStateDir()
 		if err != nil {
 			return api.ReconcileResponse{}, err
@@ -633,7 +795,7 @@ func TestWorkspaceRegisterSerena_ReplacedGeneration_NotSettled(t *testing.T) {
 		if err := reg.Save(); err != nil {
 			return api.ReconcileResponse{}, err
 		}
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1, SerenaRepairOutcome: repairResult.Outcome}, nil
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1, SerenaRepairOutcome: repairResult.Outcome}), nil
 	}
 
 	out, err := runWorkspaceCmd(t, "register", ws)

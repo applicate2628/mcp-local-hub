@@ -267,9 +267,48 @@ func TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed(t *testing.T) {
 		name             string
 		apply            bool
 		outcome          api.SerenaIntentRepairOutcome
+		incomplete       []api.SerenaIntentRepairIncomplete
 		wantApplyFailure bool
 		wantDetail       string
 	}{
+		{
+			name:             "apply held removal generation",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeIncompleteRemovalFence,
+			incomplete:       []api.SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairIncompleteHolderLive}},
+			wantApplyFailure: true,
+			wantDetail:       "holder_live",
+		},
+		{
+			name:             "apply fresh legacy removal generation",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeIncompleteRemovalFence,
+			incomplete:       []api.SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairIncompleteLegacyLeaseFresh}},
+			wantApplyFailure: true,
+			wantDetail:       "legacy_lease_fresh",
+		},
+		{
+			name:             "apply mismatched removal generation",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeIncompleteRemovalFence,
+			incomplete:       []api.SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairIncompleteGenerationMismatch}},
+			wantApplyFailure: true,
+			wantDetail:       "generation_mismatch",
+		},
+		{
+			name:             "apply removal generation probe failure",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeIncompleteRemovalFence,
+			incomplete:       []api.SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairIncompleteGenerationProbeFailed}},
+			wantApplyFailure: true,
+			wantDetail:       "generation_probe_failed",
+		},
+		{
+			name:       "preview fresh legacy removal generation",
+			outcome:    api.SerenaIntentRepairOutcomeIncompleteRemovalFence,
+			incomplete: []api.SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairIncompleteLegacyLeaseFresh}},
+			wantDetail: "legacy_lease_fresh",
+		},
 		{
 			name:             "apply registry lock",
 			apply:            true,
@@ -334,9 +373,10 @@ func TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			uninstall := setReconcileDialFnForTest(func(context.Context, bool) (api.ReconcileResponse, error) {
 				return api.ReconcileResponse{
-					DryRun:              !tt.apply,
-					DriftCount:          0,
-					SerenaRepairOutcome: tt.outcome,
+					DryRun:                 !tt.apply,
+					DriftCount:             0,
+					SerenaRepairOutcome:    tt.outcome,
+					SerenaRepairIncomplete: tt.incomplete,
 				}, nil
 			})
 			defer uninstall()
@@ -368,6 +408,47 @@ func TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed(t *testing.T) {
 			}
 			if !tt.apply && !strings.Contains(out, "serena orphan repair PREVIEW skipped") {
 				t.Errorf("dry-run report does not mark a preview skip; got:\n%s", out)
+			}
+		})
+	}
+}
+
+func TestPrintReconcileTable_ReportsSerenaRecoveryReasons(t *testing.T) {
+	tests := []struct {
+		name     string
+		dryRun   bool
+		recovery api.SerenaIntentRepairRecovery
+		wantVerb string
+	}{
+		{
+			name:     "apply exact generation",
+			recovery: api.SerenaIntentRepairRecovery{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairRecoveryGenerationReclaimed},
+			wantVerb: "serena pending removals recovered",
+		},
+		{
+			name:     "preview expired legacy lease",
+			dryRun:   true,
+			recovery: api.SerenaIntentRepairRecovery{WorkspaceKey: "efgh5678", Reason: api.SerenaIntentRepairRecoveryLegacyLeaseExpired},
+			wantVerb: "serena pending removals would recover",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := printReconcileTable(&buf, api.ReconcileResponse{
+				DryRun:                tt.dryRun,
+				SerenaRepairOutcome:   api.SerenaIntentRepairOutcomeCompleted,
+				SerenaRepairRecovered: []api.SerenaIntentRepairRecovery{tt.recovery},
+			})
+			if err != nil {
+				t.Fatalf("printReconcileTable: %v", err)
+			}
+			out := buf.String()
+			for _, want := range []string{tt.wantVerb, tt.recovery.WorkspaceKey, string(tt.recovery.Reason)} {
+				if !strings.Contains(out, want) {
+					t.Errorf("report missing %q; got:\n%s", want, out)
+				}
 			}
 		})
 	}

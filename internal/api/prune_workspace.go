@@ -39,6 +39,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 )
@@ -92,11 +93,13 @@ type PruneReport struct {
 //     which leaves the pre-fence lease-only behavior — the marked row is still
 //     protected for the lease window, just not beyond it.
 type PruneWorkspaceTeardown struct {
-	LSPUnregister             func(workspacePath string, languages []string) (*UnregisterReport, error)
-	RemoveSerenaIntent        func(canonicalWorkspacePath string) (bool, error)
-	DeleteSerenaRow           func() (int, error)
-	SetSerenaPendingRemoval   func(pending bool) error
-	AcquireSerenaRemovalFence func() (release func(), err error)
+	LSPUnregister                       func(workspacePath string, languages []string) (*UnregisterReport, error)
+	RemoveSerenaIntent                  func(canonicalWorkspacePath string) (bool, error)
+	DeleteSerenaRow                     func() (int, error)
+	SetSerenaPendingRemoval             func(pending bool) error
+	SetSerenaPendingRemovalGeneration   func(pending bool, generation string) error
+	AcquireSerenaRemovalFence           func() (release func(), err error)
+	PublishSerenaRemovalFenceGeneration func() (string, error)
 }
 
 // PruneWorkspace tears down a workspace's daemon rows in the SAME order the CLI
@@ -169,6 +172,10 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 			reg := NewRegistry(regPath)
 			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
 		},
+		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
+			reg := NewRegistry(regPath)
+			return reg.SetSerenaPendingRemovalGeneration(wsKey, legacyWSKey, pending, generation)
+		},
 		// Fence on the CANONICAL key only. The legacy key names the same
 		// workspace, so a second leaf would be a second mutex for one resource,
 		// and the repair probes with the row's own WorkspaceKey — which the
@@ -176,6 +183,9 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 		// the canonical key. One key, one fence.
 		AcquireSerenaRemovalFence: func() (func(), error) {
 			return AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			return PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), wsKey)
 		},
 		DeleteSerenaRow: func() (int, error) {
 			reg := NewRegistry(regPath)
@@ -302,22 +312,39 @@ func PruneWorkspacePhases(workspacePath, canonical string, lspLangs []string, wa
 			}
 		}
 		if td.RemoveSerenaIntent != nil {
-			if td.SetSerenaPendingRemoval != nil {
+			generation := ""
+			if td.PublishSerenaRemovalFenceGeneration != nil {
+				var gerr error
+				generation, gerr = td.PublishSerenaRemovalFenceGeneration()
+				if gerr != nil {
+					return fmt.Errorf("publish serena removal fence generation for workspace %s: %w", canonical, gerr)
+				}
+			}
+			if td.SetSerenaPendingRemovalGeneration != nil {
+				if merr := td.SetSerenaPendingRemovalGeneration(true, generation); merr != nil {
+					return fmt.Errorf("mark workspace %s pending serena removal: %w", canonical, merr)
+				}
+			} else if td.SetSerenaPendingRemoval != nil {
 				if merr := td.SetSerenaPendingRemoval(true); merr != nil {
 					return fmt.Errorf("mark workspace %s pending serena removal: %w", canonical, merr)
 				}
 			}
 			if _, serr := td.RemoveSerenaIntent(canonical); serr != nil {
-				if td.SetSerenaPendingRemoval != nil {
+				var clearErr error
+				if td.SetSerenaPendingRemovalGeneration != nil {
+					clearErr = td.SetSerenaPendingRemovalGeneration(false, "")
+				} else if td.SetSerenaPendingRemoval != nil {
 					// Teardown failed (refused, or a live reconcile could not confirm
 					// the descriptor's removal) — clear the mark so the row is a
 					// normal orphan again for the operator's retry or the
-					// supervisor's own startup self-heal. Best-effort: a clear
-					// failure here is secondary to the ALREADY-FAILED teardown this
-					// function is about to report, and the row simply stays
-					// pending-removal (repair keeps skipping it) until the next
-					// successful unregister attempt clears it.
-					_ = td.SetSerenaPendingRemoval(false)
+					// supervisor's own startup self-heal. A clear failure is joined
+					// to the primary teardown cause below: the row remains pending,
+					// and the caller must see both why teardown failed and why its
+					// compensation did not settle.
+					clearErr = td.SetSerenaPendingRemoval(false)
+				}
+				if clearErr != nil {
+					serr = errors.Join(serr, fmt.Errorf("clear pending Serena-removal tuple after teardown failure: %w", clearErr))
 				}
 				return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, serr)
 			}

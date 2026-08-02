@@ -460,6 +460,21 @@ func TestEmitSerenaIntentRepairOutcomePreservesAuditVocabulary(t *testing.T) {
 			},
 		},
 		{
+			name: "pending removal incomplete",
+			result: api.SerenaIntentRepairResult{
+				Outcome:    api.SerenaIntentRepairOutcomeIncompleteRemovalFence,
+				Incomplete: []api.SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairIncompleteGenerationMismatch}},
+				Recovered:  []api.SerenaIntentRepairRecovery{{WorkspaceKey: "efgh5678", Reason: api.SerenaIntentRepairRecoveryGenerationReclaimed}},
+			},
+			wantEvent: "serena-intent-repair-skipped",
+			wantContains: []string{
+				`"outcome":"incomplete_removal_fence"`,
+				`"reason":"generation_mismatch"`,
+				`"reason":"generation_reclaimed"`,
+				`"retryable":true`,
+			},
+		},
+		{
 			name:      "actual failure",
 			result:    api.SerenaIntentRepairResult{Outcome: api.SerenaIntentRepairOutcomeError},
 			err:       errors.New("injected catalog failure"),
@@ -476,6 +491,21 @@ func TestEmitSerenaIntentRepairOutcomePreservesAuditVocabulary(t *testing.T) {
 			wantContains: []string{
 				`"outcome":"completed"`,
 				`"repaired_count":1`,
+			},
+		},
+		{
+			name: "completed pending-removal recoveries",
+			result: api.SerenaIntentRepairResult{
+				Outcome: api.SerenaIntentRepairOutcomeCompleted,
+				Recovered: []api.SerenaIntentRepairRecovery{
+					{WorkspaceKey: "abcd1234", Reason: api.SerenaIntentRepairRecoveryGenerationReclaimed},
+					{WorkspaceKey: "efgh5678", Reason: api.SerenaIntentRepairRecoveryLegacyLeaseExpired},
+				},
+			},
+			wantEvent: "serena-intent-repair-result",
+			wantContains: []string{
+				`"reason":"generation_reclaimed"`,
+				`"reason":"legacy_lease_expired"`,
 			},
 		},
 	}

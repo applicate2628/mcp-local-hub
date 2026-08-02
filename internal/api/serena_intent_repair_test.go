@@ -159,9 +159,35 @@ func TestSerenaIntentRepairResultOutcomeContractFailsClosed(t *testing.T) {
 			wantOutcome: SerenaIntentRepairOutcomeCompleted,
 		},
 		{
+			name: "completed with typed recovery",
+			result: SerenaIntentRepairResult{
+				Outcome:   SerenaIntentRepairOutcomeCompleted,
+				Recovered: []SerenaIntentRepairRecovery{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairRecoveryLegacyLeaseExpired}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeCompleted,
+		},
+		{
+			name: "completed with invalid recovery",
+			result: SerenaIntentRepairResult{
+				Outcome:   SerenaIntentRepairOutcomeCompleted,
+				Recovered: []SerenaIntentRepairRecovery{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairRecoveryReason("future")}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
 			name:        "skipped registry lock",
 			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeSkippedRegistryLock},
 			wantOutcome: SerenaIntentRepairOutcomeSkippedRegistryLock,
+		},
+		{
+			name: "skipped registry lock with recovery",
+			result: SerenaIntentRepairResult{
+				Outcome:   SerenaIntentRepairOutcomeSkippedRegistryLock,
+				Recovered: []SerenaIntentRepairRecovery{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairRecoveryGenerationReclaimed}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
 		},
 		{
 			name:        "skipped intent lock",
@@ -172,6 +198,21 @@ func TestSerenaIntentRepairResultOutcomeContractFailsClosed(t *testing.T) {
 			name:        "skipped removal fence probe",
 			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeSkippedRemovalFenceProbe},
 			wantOutcome: SerenaIntentRepairOutcomeSkippedRemovalFenceProbe,
+		},
+		{
+			name: "incomplete removal fence with typed reason",
+			result: SerenaIntentRepairResult{
+				Outcome:    SerenaIntentRepairOutcomeIncompleteRemovalFence,
+				Incomplete: []SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairIncompleteHolderLive}},
+				Recovered:  []SerenaIntentRepairRecovery{{WorkspaceKey: "efgh5678", Reason: SerenaIntentRepairRecoveryGenerationReclaimed}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeIncompleteRemovalFence,
+		},
+		{
+			name:        "incomplete removal fence without reason",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeIncompleteRemovalFence},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
 		},
 		{
 			name:        "error with cause",
@@ -908,15 +949,18 @@ func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappende
 		t.Fatalf("read intent before: %v", err)
 	}
 
-	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if repaired != 0 {
-		t.Errorf("repaired = %d, want 0 (pending-removal row must NOT be resurrected)", repaired)
+	if result.Outcome != SerenaIntentRepairOutcomeIncompleteRemovalFence || len(result.Incomplete) != 1 || result.Incomplete[0].Reason != SerenaIntentRepairIncompleteHolderLive {
+		t.Fatalf("result = %+v, want holder-live incomplete", result)
 	}
-	if len(deferred) != 0 {
-		t.Errorf("deferred = %v, want none (pending-removal is a skip, not a defer)", deferred)
+	if result.Repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (pending-removal row must NOT be resurrected)", result.Repaired)
+	}
+	if len(result.Deferred) != 0 {
+		t.Errorf("deferred = %v, want none (pending-removal is a skip, not a defer)", result.Deferred)
 	}
 	after, err := os.ReadFile(intentPath)
 	if err != nil {

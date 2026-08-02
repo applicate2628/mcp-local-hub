@@ -91,6 +91,20 @@ func classifySerenaRepairOutcome(resp api.ReconcileResponse) serenaRepairClassif
 			incomplete: true,
 			detail:     "a pending Serena-removal liveness fence could not be probed",
 		}
+	case api.SerenaIntentRepairOutcomeIncompleteRemovalFence:
+		detail := "one or more pending Serena removals remain unresolved"
+		if len(resp.SerenaRepairIncomplete) > 0 {
+			parts := make([]string, 0, len(resp.SerenaRepairIncomplete))
+			for _, item := range resp.SerenaRepairIncomplete {
+				parts = append(parts, fmt.Sprintf("%s:%s", item.WorkspaceKey, item.Reason))
+			}
+			detail += " (" + strings.Join(parts, ", ") + ")"
+		}
+		return serenaRepairClassification{
+			outcome:    resp.SerenaRepairOutcome,
+			incomplete: true,
+			detail:     detail,
+		}
 	case api.SerenaIntentRepairOutcomeError:
 		return serenaRepairClassification{
 			outcome:    resp.SerenaRepairOutcome,
@@ -235,6 +249,19 @@ func printReconcileTable(w io.Writer, resp api.ReconcileResponse) error {
 			verb = "serena orphan repair PREVIEW skipped"
 		}
 		if _, err := fmt.Fprintf(w, "%s: %s\n  (Serena classification is incomplete; re-run `mcphub reconcile --apply` after the lock holder finishes or the supervisor is upgraded)\n", verb, classification.detail); err != nil {
+			return err
+		}
+	}
+	if len(resp.SerenaRepairRecovered) > 0 {
+		verb := "would recover"
+		if !resp.DryRun {
+			verb = "recovered"
+		}
+		parts := make([]string, 0, len(resp.SerenaRepairRecovered))
+		for _, item := range resp.SerenaRepairRecovered {
+			parts = append(parts, fmt.Sprintf("%s:%s", item.WorkspaceKey, item.Reason))
+		}
+		if _, err := fmt.Fprintf(w, "serena pending removals %s: %s\n", verb, strings.Join(parts, ", ")); err != nil {
 			return err
 		}
 	}

@@ -101,6 +101,11 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 			generation, _ := ev.Body[reapFollowupGenerationBodyKey].(int)
 			ctrl.handleReapFollowup(ev.TaskName, generation)
 			return
+		case evControllerBarrier:
+			if done, ok := ev.Body[controllerBarrierResultBodyKey].(chan struct{}); ok {
+				close(done)
+			}
+			return
 		}
 		postedCount.Add(1)
 		select {

@@ -477,19 +477,21 @@ func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, result api.Se
 		})
 		return
 	}
-	if result.Outcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedIntentLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe {
+	if result.Outcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedIntentLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe || result.Outcome == api.SerenaIntentRepairOutcomeIncompleteRemovalFence {
 		_ = events.TryEmit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "reconcile",
 			Event:    "serena-intent-repair-skipped",
 			Body: map[string]any{
-				"outcome":   string(result.Outcome),
-				"retryable": true,
+				"outcome":    string(result.Outcome),
+				"retryable":  true,
+				"incomplete": result.Incomplete,
+				"recovered":  result.Recovered,
 			},
 		})
 		return
 	}
-	if result.Repaired > 0 || len(result.Deferred) > 0 {
+	if result.Repaired > 0 || len(result.Deferred) > 0 || len(result.Recovered) > 0 {
 		severity := "info"
 		if len(result.Deferred) > 0 {
 			severity = "warn"
@@ -503,6 +505,7 @@ func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, result api.Se
 				"repaired_count":     result.Repaired,
 				"deferred_count":     len(result.Deferred),
 				"deferred_workspace": result.Deferred,
+				"recovered":          result.Recovered,
 			},
 		})
 	}
@@ -1134,6 +1137,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		terminate:           terminateFn,
 		statePath:           statePath,
 		ctx:                 loopCtx,
+		targetRegistryPath:  api.DefaultRegistryPath,
 		failureWindow:       respawnFailureWindow,
 		quarantineThreshold: respawnQuarantineThreshold,
 		// reapFollowupDelay bounds how long an orphaned daemon lingers after its

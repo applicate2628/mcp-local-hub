@@ -68,6 +68,8 @@
 package api
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -81,6 +83,8 @@ import (
 // durable, individually-meaningful state file.
 const serenaRemovalFenceDirLeaf = "serena-removal-fences"
 
+const serenaRemovalFenceGenerationSuffix = ".generation"
+
 // serenaRemovalFencePath is the SINGLE owner of the fence leaf's location. Both
 // sides (the unregister's acquire, the repair's probe) must derive the path from
 // the SAME registryDir — the directory of the registry path each side already
@@ -90,6 +94,13 @@ const serenaRemovalFenceDirLeaf = "serena-removal-fences"
 // path is never re-resolved internally.
 func serenaRemovalFencePath(registryDir, workspaceKey string) string {
 	return filepath.Join(registryDir, serenaRemovalFenceDirLeaf, workspaceKey+".lock")
+}
+
+// serenaRemovalFenceGenerationPath is owned by this API so callers cannot
+// accidentally couple generation metadata to a different state root or the
+// flock inode itself.
+func serenaRemovalFenceGenerationPath(registryDir, workspaceKey string) string {
+	return filepath.Join(registryDir, serenaRemovalFenceDirLeaf, workspaceKey+serenaRemovalFenceGenerationSuffix)
 }
 
 // validSerenaRemovalFenceKey reports whether workspaceKey is the exact shape
@@ -155,13 +166,69 @@ func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func()
 	return func() { _ = fl.Unlock() }, nil
 }
 
+// PublishSerenaRemovalFenceGeneration atomically replaces the sidecar metadata
+// for a fence the caller already holds. It never writes, replaces, or unlinks
+// the flock leaf: its returned opaque value is at least 128 random bits and is
+// safe to persist in the registry as an identity, not as a credential.
+func PublishSerenaRemovalFenceGeneration(registryDir, workspaceKey string) (string, error) {
+	if registryDir == "" {
+		return "", fmt.Errorf("serena removal fence generation: empty registry dir")
+	}
+	if !validSerenaRemovalFenceKey(workspaceKey) {
+		return "", fmt.Errorf("serena removal fence generation: refusing workspace key %q (not the canonical WorkspaceKey hex shape)", workspaceKey)
+	}
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("serena removal fence generation: random token: %w", err)
+	}
+	generation := hex.EncodeToString(raw[:])
+	path := serenaRemovalFenceGenerationPath(registryDir, workspaceKey)
+	if err := writeSerenaRemovalFenceGenerationFn(path, []byte(generation+"\n")); err != nil {
+		return "", fmt.Errorf("serena removal fence generation: publish %s: %w", path, err)
+	}
+	return generation, nil
+}
+
+// writeSerenaRemovalFenceGenerationFn is the narrow test seam over the
+// repository's canonical cross-platform state writer. Production always uses
+// its handle-relative Windows/POSIX publication and cleanup contract.
+var writeSerenaRemovalFenceGenerationFn = WriteStateFileBytesAtomic
+
 // serenaRemovalFenceObservation distinguishes an existing current-generation
 // fence leaf from a missing leaf. Missing is not an error, but its provenance is
 // ambiguous for a fresh pending-removal mark: an older writer may be live while
 // knowing nothing about fences.
 type serenaRemovalFenceObservation struct {
-	exists bool
-	held   bool
+	exists     bool
+	held       bool
+	generation string
+}
+
+func validSerenaRemovalFenceGeneration(generation string) bool {
+	if len(generation) != 32 {
+		return false
+	}
+	_, err := hex.DecodeString(generation)
+	return err == nil
+}
+
+func readSerenaRemovalFenceGeneration(registryDir, workspaceKey string) (string, error) {
+	path := serenaRemovalFenceGenerationPath(registryDir, workspaceKey)
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", fmt.Errorf("serena removal fence generation: read %s: %w", path, err)
+	}
+	generation := string(bytes)
+	if len(generation) == 33 && generation[32] == '\n' {
+		generation = generation[:32]
+	}
+	if !validSerenaRemovalFenceGeneration(generation) {
+		return "", fmt.Errorf("serena removal fence generation: malformed metadata %s", path)
+	}
+	return generation, nil
 }
 
 // observeSerenaRemovalFence reports the current per-workspace fence state. It
@@ -206,8 +273,12 @@ func observeSerenaRemovalFence(registryDir, workspaceKey string) (serenaRemovalF
 		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: try-lock %s: %w", path, lerr)
 	}
 	if locked {
+		generation, generationErr := readSerenaRemovalFenceGeneration(registryDir, workspaceKey)
 		_ = fl.Unlock() // we only asked a question; never keep the fence
-		return serenaRemovalFenceObservation{exists: true}, nil
+		if generationErr != nil {
+			return serenaRemovalFenceObservation{}, generationErr
+		}
+		return serenaRemovalFenceObservation{exists: true, generation: generation}, nil
 	}
 	return serenaRemovalFenceObservation{exists: true, held: true}, nil
 }

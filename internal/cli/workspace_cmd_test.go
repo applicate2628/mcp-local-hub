@@ -141,8 +141,8 @@ func withStateDir(t *testing.T) string {
 	// t.Cleanup — cleanup runs LIFO, so their override is in effect for
 	// their own duration and this default resumes afterward.
 	origReconcile := serenaRegisterReconcileFn
-	serenaRegisterReconcileFn = func(context.Context, bool) (api.ReconcileResponse, error) {
-		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}, nil
+	serenaRegisterReconcileFn = func(_ context.Context, _ bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
 	origIntentCheck := serenaRegisterSettledCheckFn
@@ -164,6 +164,15 @@ func withStateDir(t *testing.T) string {
 	t.Cleanup(func() { serenaRegisterSettledCheckFn = origIntentCheck })
 
 	return dir
+}
+
+func readySerenaRegisterResponse(target api.ReconcileTarget, response api.ReconcileResponse) api.ReconcileResponse {
+	response.TargetSettlement = &api.ReconcileTargetSettlement{
+		State:  api.ReconcileTargetSettlementReady,
+		Reason: api.ReconcileTargetReasonReady,
+		Target: target,
+	}
+	return response
 }
 
 // makeWorkspaceDir creates an existing on-disk workspace directory and

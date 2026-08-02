@@ -418,9 +418,25 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	//    partial-state error instead of rolling back.
 	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultReconcileTimeout)
 	defer cancel()
-	reconcileResp, reconcileErr := serenaRegisterReconcileFn(reconcileCtx, true)
+	reconcileTarget := api.ReconcileTarget{
+		WorkspaceKey:  entry.WorkspaceKey,
+		WorkspacePath: entry.WorkspacePath,
+		TaskName:      entry.TaskName,
+		RegisteredAt:  entry.RegisteredAt.UTC().Format(time.RFC3339Nano),
+		ExpectedPort:  entry.Port,
+	}
+	reconcileResp, reconcileErr := serenaRegisterReconcileFn(reconcileCtx, true, reconcileTarget)
+	var settlementErr error
+	if reconcileErr == nil {
+		settlementErr = validateWorkspaceRegisterTargetSettlement(reconcileTarget, reconcileResp.TargetSettlement)
+	}
+	// Re-read the persisted generation after the server's settlement response.
+	// On ready this closes the replacement window between the controller's
+	// positive runtime proof and terminal output. On a non-ready/transport path
+	// the same read remains diagnostic-only and cannot turn that path into
+	// success.
 	settled, checkErr := serenaRegisterSettledCheckFn(entry)
-	if reconcileErr != nil || checkErr != nil || !settled.Settled {
+	if reconcileErr != nil || settlementErr != nil || checkErr != nil || !settled.Settled {
 		// Compensate our own step-6a marker write when the check CONFIRMS the
 		// row is gone. The step-6a ordering keeps a concurrent `workspace
 		// unregister` from stranding it, but that is not the only way a row can
@@ -447,7 +463,19 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 			}
 		}
 		return workspaceRegisterPartialStateError(canonical, wsKey, entry, settled,
-			reconcileErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation)
+			reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation)
+	}
+
+	// A --default result is a terminal snapshot, not a promise derived from the
+	// successful step-6a write. Another set-default may have won while reconcile
+	// and the persisted-generation check ran. Re-read through the marker owner
+	// immediately before any success output and project that fresh observation;
+	// never compensate or overwrite a newer decision here.
+	defaultProjection := workspaceRegisterDefaultNotRequested
+	var defaultReadErr error
+	if setDefault {
+		defaultProjection, defaultReadErr = observeWorkspaceRegisterDefault(
+			filepath.Dir(regPath), canonical)
 	}
 
 	// Print what is ACTUALLY committed (settled.Port, re-read fresh from the
@@ -458,22 +486,76 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Registered serena workspace %s (key %s)\n  port: %d\n  task: %s\n  languages: %s\n",
 		canonical, wsKey, settled.Port, entry.TaskName, strings.Join(languages, ", "))
-	if setDefault {
+	switch defaultProjection {
+	case workspaceRegisterDefaultConfirmed:
 		fmt.Fprintln(cmd.OutOrStdout(), "  default: yes")
+	case workspaceRegisterDefaultChanged:
+		fmt.Fprintln(cmd.OutOrStdout(), "  default: changed")
+	case workspaceRegisterDefaultUnknown:
+		fmt.Fprintln(cmd.OutOrStdout(), "  default: unknown")
+		fmt.Fprintf(cmd.OutOrStderr(),
+			"warning: workspace registered but the terminal default-workspace marker could not be read: %v\n",
+			defaultReadErr)
 	}
 	return nil
 }
 
-// serenaRegisterReconcileFn is the test-injectable seam over the
-// post-register supervisor materialization nudge (step 8 above). Production:
-// api.DialSupervisorIPCReconcile with apply=true — mirrors the api-package
-// seam shape (registerSupervisorReconcileFn, internal/api/register_supervisor.go:18).
+// serenaRegisterReconcileFn is the test-injectable seam over the targeted
+// post-register supervisor settlement (step 8 above). Production uses the
+// additive target-aware client; the old targetless API remains unchanged for
+// every legacy caller that does not need a readiness proof.
 // Tests stub this to avoid a live supervisor / IPC transport; a stub that
 // wants to faithfully model "the supervisor received the request and
 // self-healed" calls the real api.RepairSerenaIntentFromRegistry itself
 // before returning its canned response — see
 // TestWorkspaceRegisterSerena_LiveSupervisorMaterializesBeforeSuccess.
-var serenaRegisterReconcileFn = api.DialSupervisorIPCReconcile
+var serenaRegisterReconcileFn = api.DialSupervisorIPCReconcileTarget
+
+type workspaceRegisterTargetSettlementError struct {
+	State  api.ReconcileTargetSettlementState
+	Reason string
+	Detail string
+}
+
+func (e *workspaceRegisterTargetSettlementError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("target settlement state=%s reason=%s: %s", e.State, e.Reason, e.Detail)
+	}
+	return fmt.Sprintf("target settlement state=%s reason=%s", e.State, e.Reason)
+}
+
+// validateWorkspaceRegisterTargetSettlement enforces only the additive wire
+// contract. Runtime readiness remains exclusively controller-owned: the CLI
+// accepts the exact echoed target when and only when the controller returns
+// ready/ready, and never attempts its own PID, port, or liveness proof.
+func validateWorkspaceRegisterTargetSettlement(expected api.ReconcileTarget, got *api.ReconcileTargetSettlement) error {
+	if got == nil {
+		return &workspaceRegisterTargetSettlementError{
+			State:  api.ReconcileTargetSettlementIncomplete,
+			Reason: api.ReconcileTargetReasonTargetUnsupported,
+			Detail: "supervisor response omitted target_settlement",
+		}
+	}
+	if got.Target != expected {
+		return &workspaceRegisterTargetSettlementError{
+			State:  api.ReconcileTargetSettlementFailed,
+			Reason: api.ReconcileTargetReasonTargetGenerationReplaced,
+			Detail: fmt.Sprintf("supervisor echoed a different target: got=%+v want=%+v", got.Target, expected),
+		}
+	}
+	if got.State != api.ReconcileTargetSettlementReady || got.Reason != api.ReconcileTargetReasonReady {
+		reason := got.Reason
+		if reason == "" {
+			reason = api.ReconcileTargetReasonTargetUnsupported
+		}
+		return &workspaceRegisterTargetSettlementError{
+			State:  got.State,
+			Reason: reason,
+			Detail: got.Error,
+		}
+	}
+	return nil
+}
 
 // serenaRegisterSettledResult is the outcome of the post-materialize SETTLED
 // check (step 8): the complete tuple workspaceRegisterPartialStateError and
@@ -610,9 +692,13 @@ func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (serenaRegister
 // was kept" is only honest when THIS re-read actually confirmed the registry
 // row is still there; a concurrent unregister that deleted it gets a
 // different, accurate statement instead.
-func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, settled serenaRegisterSettledResult, reconcileErr, checkErr error, serenaRepairOutcome api.SerenaIntentRepairOutcome, serenaRepairErr string, markerCompensation api.DefaultMarkerCompensationOutcome) error {
+func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, settled serenaRegisterSettledResult, reconcileErr, settlementErr, checkErr error, serenaRepairOutcome api.SerenaIntentRepairOutcome, serenaRepairErr string, markerCompensation api.DefaultMarkerCompensationOutcome) error {
 	var b strings.Builder
-	if settled.RegistryRowPresent {
+	if settlementErr != nil && settled.RegistryRowPresent {
+		fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
+			"but the supervisor did not confirm runtime readiness for this exact registration generation — "+
+			"the registration was kept (this process did not roll it back).\n", canonical, wsKey, settled.Port, entry.TaskName)
+	} else if settled.RegistryRowPresent {
 		fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
 			"but no settled spec-bearing supervisor daemon row is confirmed yet — the registration was "+
 			"kept (this process did not roll it back).\n", canonical, wsKey, settled.Port, entry.TaskName)
@@ -638,6 +724,13 @@ func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.Works
 		fmt.Fprintf(&b, "  reason: the supervisor reconcile request failed: %v\n", reconcileErr)
 		b.WriteString("  next step: once the supervisor is healthy, run `mcphub reconcile --apply` " +
 			"to retry materializing this workspace.\n")
+	case settlementErr != nil:
+		fmt.Fprintf(&b, "  reason: the supervisor did not confirm the requested runtime target: %v\n", settlementErr)
+		if checkErr != nil {
+			fmt.Fprintf(&b, "  additional diagnostic: the post-response persisted-generation check also failed: %v\n", checkErr)
+		}
+		b.WriteString("  next step: run `mcphub reconcile --apply`, then retry registration after the " +
+			"reported target-settlement condition is resolved.\n")
 	case checkErr != nil:
 		fmt.Fprintf(&b, "  reason: could not verify the supervisor intent afterward: %v\n", checkErr)
 		b.WriteString("  next step: once the underlying I/O issue is resolved, run `mcphub workspace list` " +
@@ -728,6 +821,35 @@ func workspaceRegisterNoSupervisorAdvice(settled serenaRegisterSettledResult, ch
 // (unregisterLSPWorkspaceFn / removeSerenaSupervisorIntentFn /
 // serenaRegisterBlessTrustedRootFn).
 var writeDefaultWorkspaceFn = writeDefaultWorkspace
+
+// readDefaultWorkspaceFn is the test-injectable seam for the terminal
+// --default snapshot. Production delegates to the same API owner as every
+// other marker read; tests use the seam to deterministically force an
+// indeterminate read without changing process-global filesystem policy.
+var readDefaultWorkspaceFn = readDefaultWorkspace
+
+type workspaceRegisterDefaultProjection uint8
+
+const (
+	workspaceRegisterDefaultNotRequested workspaceRegisterDefaultProjection = iota
+	workspaceRegisterDefaultConfirmed
+	workspaceRegisterDefaultChanged
+	workspaceRegisterDefaultUnknown
+)
+
+// observeWorkspaceRegisterDefault maps the marker owner's fresh read contract
+// to the CLI's terminal tri-state. Empty/missing and a different marker are
+// both known changed-away observations; an actual read failure is unknown.
+func observeWorkspaceRegisterDefault(stateDir, canonical string) (workspaceRegisterDefaultProjection, error) {
+	observed, err := readDefaultWorkspaceFn(stateDir)
+	if err != nil {
+		return workspaceRegisterDefaultUnknown, err
+	}
+	if observed == canonical {
+		return workspaceRegisterDefaultConfirmed, nil
+	}
+	return workspaceRegisterDefaultChanged, nil
+}
 
 // clearDefaultWorkspaceIfMatchesFn is the test-injectable seam over the
 // unregister-side default-marker clear. It mirrors writeDefaultWorkspaceFn and
@@ -874,6 +996,10 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			reg := api.NewRegistry(regPath)
 			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
 		},
+		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
+			reg := api.NewRegistry(regPath)
+			return reg.SetSerenaPendingRemovalGeneration(wsKey, legacyWSKey, pending, generation)
+		},
 		// Per-workspace unregister LIVENESS FENCE, held by the sequencer across
 		// the whole marked window so the supervisor's repair can tell this
 		// teardown apart from a crashed one even when it blocks past the
@@ -881,6 +1007,9 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		// CANONICAL key only — the legacy key names the same workspace.
 		AcquireSerenaRemovalFence: func() (func(), error) {
 			return api.AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			return api.PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), wsKey)
 		},
 		DeleteSerenaRow: func() (int, error) {
 			reg := api.NewRegistry(regPath)

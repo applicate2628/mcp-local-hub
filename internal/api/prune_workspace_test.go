@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"path/filepath"
 	"testing"
 )
 
@@ -195,4 +196,95 @@ func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing
 		}
 		assertOrder(t, calls, []string{"mark(true)", "removeSerenaIntent", "deleteSerenaRow"})
 	})
+}
+
+// TestPruneWorkspacePhases_RemovalGenerationTransaction pins the ownership
+// transaction that prevents an old free fence leaf from being mistaken for the
+// current pending-removal mark: acquire -> publish sidecar -> mark tuple ->
+// intent -> clear tuple/release on failure.
+func TestPruneWorkspacePhases_RemovalGenerationTransaction(t *testing.T) {
+	var calls []string
+	teardownErr := errors.New("simulated intent removal failure")
+	td := PruneWorkspaceTeardown{
+		AcquireSerenaRemovalFence: func() (func(), error) {
+			calls = append(calls, "fence.acquire")
+			return func() { calls = append(calls, "fence.release") }, nil
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			calls = append(calls, "generation.publish")
+			return "0123456789abcdef0123456789abcdef", nil
+		},
+		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
+			calls = append(calls, "mark("+generation+")")
+			if !pending && generation != "" {
+				t.Fatalf("clear carried stale generation %q", generation)
+			}
+			return nil
+		},
+		RemoveSerenaIntent: func(string) (bool, error) {
+			calls = append(calls, "removeSerenaIntent")
+			return false, teardownErr
+		},
+	}
+	err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+	if !errors.Is(err, teardownErr) {
+		t.Fatalf("err = %v, want wrap of %v", err, teardownErr)
+	}
+	assert := []string{
+		"fence.acquire", "generation.publish", "mark(0123456789abcdef0123456789abcdef)",
+		"removeSerenaIntent", "mark()", "fence.release",
+	}
+	if len(calls) != len(assert) {
+		t.Fatalf("calls = %v, want %v", calls, assert)
+	}
+	for i := range assert {
+		if calls[i] != assert[i] {
+			t.Fatalf("calls[%d] = %q, want %q (full: %v)", i, calls[i], assert[i], calls)
+		}
+	}
+}
+
+func TestPruneWorkspacePhases_RemovalGenerationCompensationFailurePreservesBothCauses(t *testing.T) {
+	teardownErr := errors.New("intent removal failed")
+	clearErr := errors.New("registry compensation failed")
+	const workspaceKey = "abcd1234"
+	regPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(regPath)
+	if err := reg.PutSerena(WorkspaceEntry{WorkspaceKey: workspaceKey, WorkspacePath: "c:/ws/test", Language: SerenaLanguageSentinel, Backend: "serena"}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	td := PruneWorkspaceTeardown{
+		AcquireSerenaRemovalFence: func() (func(), error) {
+			return AcquireSerenaRemovalFence(filepath.Dir(regPath), workspaceKey)
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			return PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), workspaceKey)
+		},
+		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
+			if !pending {
+				return clearErr
+			}
+			return NewRegistry(regPath).SetSerenaPendingRemovalGeneration(workspaceKey, "", true, generation)
+		},
+		RemoveSerenaIntent: func(string) (bool, error) { return false, teardownErr },
+	}
+	err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+	if !errors.Is(err, teardownErr) || !errors.Is(err, clearErr) {
+		t.Fatalf("err = %v, want both teardown and compensation causes", err)
+	}
+	observation, observeErr := observeSerenaRemovalFence(filepath.Dir(regPath), workspaceKey)
+	if observeErr != nil || observation.held {
+		t.Fatalf("fence after compensation failure = %+v, err=%v; want released", observation, observeErr)
+	}
+	loaded := NewRegistry(regPath)
+	if err := loaded.Load(); err != nil {
+		t.Fatalf("Load after compensation failure: %v", err)
+	}
+	row, ok := loaded.GetSerena(workspaceKey)
+	if !ok || !row.PendingSerenaRemoval || row.PendingSerenaRemovalAt.IsZero() || !validSerenaRemovalFenceGeneration(row.PendingSerenaRemovalGeneration) {
+		t.Fatalf("failed clear did not leave the complete tuple observable: %+v", row)
+	}
 }

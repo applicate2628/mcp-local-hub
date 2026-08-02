@@ -118,6 +118,12 @@ type WorkspaceEntry struct {
 	// EXPIRED: failing toward recovery is strictly safer than failing toward
 	// the permanent skip this field exists to end.
 	PendingSerenaRemovalAt time.Time `yaml:"pending_serena_removal_at,omitempty"`
+
+	// PendingSerenaRemovalGeneration ties this pending-removal mark to the
+	// exact removal-fence generation that published it. Empty is deliberately
+	// meaningful: rows written by older binaries remain unattributed and repair
+	// applies the legacy lease policy rather than manufacturing provenance.
+	PendingSerenaRemovalGeneration string `yaml:"pending_serena_removal_generation,omitempty"`
 }
 
 // Registry is the on-disk source of truth for workspace-scoped daemons.
@@ -483,9 +489,23 @@ func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) in
 // instant, which is what bounds the mark's lifetime (see the field's doc
 // comment). It is stamped on EVERY pending=true call, including one against an
 // already-marked row: a retried unregister genuinely restarts the teardown, so
-// its lease legitimately restarts with it. pending=false clears BOTH the flag
-// and the stamp so no expired lease outlives the mark it belonged to.
+// its lease legitimately restarts with it. pending=false clears the complete
+// flag/stamp/generation tuple so no old proof outlives the mark it belonged to.
 func (r *Registry) SetSerenaPendingRemoval(wsKey, legacyWSKey string, pending bool) error {
+	return r.SetSerenaPendingRemovalGeneration(wsKey, legacyWSKey, pending, "")
+}
+
+// SetSerenaPendingRemovalGeneration owns the pending-removal tuple. A nonempty
+// generation must have been atomically published by the held removal-fence API
+// immediately before this call. Empty is retained for old callers and records
+// intentionally unattributed legacy state; it is never inferred from a sidecar.
+func (r *Registry) SetSerenaPendingRemovalGeneration(wsKey, legacyWSKey string, pending bool, generation string) error {
+	if generation != "" && !validSerenaRemovalFenceGeneration(generation) {
+		return fmt.Errorf("set pending serena removal generation: malformed generation")
+	}
+	if !pending && generation != "" {
+		return fmt.Errorf("set pending serena removal generation: clear must not carry a generation")
+	}
 	unlock, err := r.Lock()
 	if err != nil {
 		return err
@@ -502,17 +522,19 @@ func (r *Registry) SetSerenaPendingRemoval(wsKey, legacyWSKey string, pending bo
 			continue
 		}
 		if !pending {
-			if !e.PendingSerenaRemoval && e.PendingSerenaRemovalAt.IsZero() {
+			if !e.PendingSerenaRemoval && e.PendingSerenaRemovalAt.IsZero() && e.PendingSerenaRemovalGeneration == "" {
 				continue
 			}
 			e.PendingSerenaRemoval = false
 			e.PendingSerenaRemovalAt = time.Time{}
+			e.PendingSerenaRemovalGeneration = ""
 			r.Put(e)
 			changed = true
 			continue
 		}
 		e.PendingSerenaRemoval = true
 		e.PendingSerenaRemovalAt = now
+		e.PendingSerenaRemovalGeneration = generation
 		r.Put(e)
 		changed = true
 	}
