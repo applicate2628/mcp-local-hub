@@ -419,7 +419,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultReconcileTimeout)
 	defer cancel()
 	reconcileResp, reconcileErr := serenaRegisterReconcileFn(reconcileCtx, true)
-	settled, checkErr := serenaRegisterSettledCheckFn(wsKey)
+	settled, checkErr := serenaRegisterSettledCheckFn(entry)
 	if reconcileErr != nil || checkErr != nil || !settled.Settled {
 		// Compensate our own step-6a marker write when the check CONFIRMS the
 		// row is gone. The step-6a ordering keeps a concurrent `workspace
@@ -524,14 +524,17 @@ var serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
 // supervisor-intent.json fresh (no caller-supplied snapshot) so the verdict
 // reflects what is ACTUALLY committed at the moment of the call:
 //
-//  1. The registry row for wsKey must still exist — a concurrent unregister
+//  1. The registry row for the captured registration must still exist — a concurrent unregister
 //     racing this register would otherwise leave an intent-presence-only
 //     check reporting success for a workspace with NO registry row backing
 //     it (worse than the original bug: an operator-invisible daemon).
 //  2. The intent must carry a spec-bearing daemon row for the SAME key
 //     (api.SupervisorIntentFile.SpecBearingSerenaDaemonForWorkspaceKey — the
 //     single-owner matching loop shared with the bare presence predicate).
-//  3. The registry's Port and the matched daemon's api.EffectiveDaemonPort
+//  3. The registry row must retain the captured registration generation
+//     (RegisteredAt) and workspace path. A same-key unregister/re-register can
+//     otherwise make an older invocation certify the newer row.
+//  4. The registry's Port and the matched daemon's api.EffectiveDaemonPort
 //     must AGREE — catching a port reallocation that raced this register, or
 //     (pre-BLOCKING-1-fix) a resurrected duplicate descriptor converging on
 //     someone else's port.
@@ -541,7 +544,7 @@ var serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
 // reconcileErr to report when the IPC call itself failed; this seam only
 // answers the observable after-the-fact question "is this workspace's
 // registration fully settled right now".
-func realSerenaRegisterSettledCheck(wsKey string) (serenaRegisterSettledResult, error) {
+func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (serenaRegisterSettledResult, error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return serenaRegisterSettledResult{}, err
@@ -555,13 +558,19 @@ func realSerenaRegisterSettledCheck(wsKey string) (serenaRegisterSettledResult, 
 	if err := reg.Load(); err != nil {
 		return serenaRegisterSettledResult{}, err
 	}
-	row, ok := reg.GetSerena(wsKey)
+	row, ok := reg.GetSerena(expected.WorkspaceKey)
 	if !ok {
 		// The registry row is gone — a concurrent unregister beat this
 		// register to it. Never settled regardless of intent state.
 		return serenaRegisterSettledResult{}, nil
 	}
 	result := serenaRegisterSettledResult{RegistryRowPresent: true, Port: row.Port}
+	if row.WorkspacePath != expected.WorkspacePath || !row.RegisteredAt.Equal(expected.RegisteredAt) {
+		// A current row with this deterministic key is not enough: a concurrent
+		// unregister/re-register owns a distinct invocation generation and must
+		// not let this older command print success for it.
+		return result, nil
+	}
 
 	intentPath, err := api.DefaultSupervisorIntentPath()
 	if err != nil {
@@ -578,7 +587,7 @@ func realSerenaRegisterSettledCheck(wsKey string) (serenaRegisterSettledResult, 
 		return result, err
 	}
 	result.PoolIntroduced = intent.HasRuntimeSpecRow()
-	daemon := intent.SpecBearingSerenaDaemonForWorkspaceKey(wsKey)
+	daemon := intent.SpecBearingSerenaDaemonForWorkspaceKey(expected.WorkspaceKey)
 	if daemon == nil {
 		return result, nil
 	}

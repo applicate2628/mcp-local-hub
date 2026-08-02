@@ -169,6 +169,11 @@ func TestSerenaIntentRepairResultOutcomeContractFailsClosed(t *testing.T) {
 			wantOutcome: SerenaIntentRepairOutcomeSkippedIntentLock,
 		},
 		{
+			name:        "skipped removal fence probe",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeSkippedRemovalFenceProbe},
+			wantOutcome: SerenaIntentRepairOutcomeSkippedRemovalFenceProbe,
+		},
+		{
 			name:        "error with cause",
 			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeError},
 			err:         cause,
@@ -882,6 +887,14 @@ func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappende
 	if err := NewRegistry(regPath).SetSerenaPendingRemoval(pendingKey, "", true); err != nil {
 		t.Fatalf("SetSerenaPendingRemoval: %v", err)
 	}
+	// A real in-flight unregister owns the per-workspace fence for the complete
+	// marked window. The repair must observe that owner and leave the descriptor
+	// absent; a fresh timestamp by itself is not an authoritative liveness proof.
+	releaseFence, err := AcquireSerenaRemovalFence(filepath.Dir(regPath), pendingKey)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	defer releaseFence()
 
 	// Intent carries ONLY the healthy daemon — the pending row's descriptor
 	// has already been removed by the (simulated) in-flight unregister, which

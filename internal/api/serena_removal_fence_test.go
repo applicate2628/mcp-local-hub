@@ -34,8 +34,8 @@ func TestSerenaRemovalFence_AcquireMakesHolderObservable(t *testing.T) {
 	dir := t.TempDir()
 	const key = "abcd1234"
 
-	// Never acquired → definitively FREE, and answered without creating
-	// anything (the probe must work on a host where no unregister ever ran).
+	// Never acquired → not held, and answered without creating anything. The
+	// richer observation owner retains missing provenance for repair policy.
 	held, err := serenaRemovalFenceHeld(dir, key)
 	if err != nil {
 		t.Fatalf("probe on a never-acquired fence: unexpected error: %v", err)
@@ -272,9 +272,11 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceProbeError_FailsClosed
 	regPath, intentPath, slowKey := seedSlowUnregisterState(t)
 
 	probeErr := errors.New("simulated LockFileEx failure")
-	prev := serenaRemovalFenceHeldFn
-	serenaRemovalFenceHeldFn = func(string, string) (bool, error) { return false, probeErr }
-	t.Cleanup(func() { serenaRemovalFenceHeldFn = prev })
+	prev := observeSerenaRemovalFenceFn
+	observeSerenaRemovalFenceFn = func(string, string) (serenaRemovalFenceObservation, error) {
+		return serenaRemovalFenceObservation{}, probeErr
+	}
+	t.Cleanup(func() { observeSerenaRemovalFenceFn = prev })
 
 	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
@@ -291,11 +293,11 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceProbeError_FailsClosed
 	}
 }
 
-// A FRESH mark is honored without probing at all — the fence is an ADDITIONAL
-// gate past the lease, never a replacement that could shorten the window a
-// genuinely in-flight teardown depends on. This also pins the behavior for an
-// older binary that sets the mark but takes no fence: it keeps the full lease.
-func TestRepairSerenaIntentFromRegistry_FreshMark_SkipsWithoutProbingFence(t *testing.T) {
+// A FRESH mark with no fence leaf has ambiguous legacy provenance. The repair
+// still probes to distinguish it from an existing free current fence, but must
+// preserve the lease because an older unregister may still be live while
+// knowing nothing about the newer fence mechanism.
+func TestRepairSerenaIntentFromRegistry_FreshLegacyMarkWithoutFence_PreservesLease(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 
 	healthyPath, healthyPort := liveWorkspace(t), 9150
@@ -310,12 +312,12 @@ func TestRepairSerenaIntentFromRegistry_FreshMark_SkipsWithoutProbingFence(t *te
 	})
 
 	probed := 0
-	prev := serenaRemovalFenceHeldFn
-	serenaRemovalFenceHeldFn = func(dir, key string) (bool, error) {
+	prev := observeSerenaRemovalFenceFn
+	observeSerenaRemovalFenceFn = func(dir, key string) (serenaRemovalFenceObservation, error) {
 		probed++
 		return prev(dir, key)
 	}
-	t.Cleanup(func() { serenaRemovalFenceHeldFn = prev })
+	t.Cleanup(func() { observeSerenaRemovalFenceFn = prev })
 
 	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
@@ -324,11 +326,14 @@ func TestRepairSerenaIntentFromRegistry_FreshMark_SkipsWithoutProbingFence(t *te
 	if repaired != 0 {
 		t.Errorf("repaired = %d, want 0 (a fresh mark is still honored)", repaired)
 	}
-	if probed != 0 {
-		t.Errorf("fence probed %d times for a FRESH mark, want 0 — inside the lease the mark is honored outright, with no per-row filesystem probe on the supervisor's startup path", probed)
+	if probed != 1 {
+		t.Errorf("fence probed %d times for a fresh legacy mark, want 1", probed)
 	}
 	if got := readIntent(t, intentPath); got.HasSerenaDaemonForWorkspaceKey(pendingKey) {
 		t.Errorf("fresh pending-removal key %q was appended", pendingKey)
+	}
+	if row := readSerenaRowFresh(t, regPath, pendingKey); !row.PendingSerenaRemoval {
+		t.Error("fresh legacy mark was cleared even though missing fence provenance cannot prove the writer is dead")
 	}
 }
 

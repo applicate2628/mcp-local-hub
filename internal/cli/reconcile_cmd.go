@@ -85,6 +85,12 @@ func classifySerenaRepairOutcome(resp api.ReconcileResponse) serenaRepairClassif
 			incomplete: true,
 			detail:     "the supervisor-intent lock remained contended",
 		}
+	case api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe:
+		return serenaRepairClassification{
+			outcome:    resp.SerenaRepairOutcome,
+			incomplete: true,
+			detail:     "a pending Serena-removal liveness fence could not be probed",
+		}
 	case api.SerenaIntentRepairOutcomeError:
 		return serenaRepairClassification{
 			outcome:    resp.SerenaRepairOutcome,

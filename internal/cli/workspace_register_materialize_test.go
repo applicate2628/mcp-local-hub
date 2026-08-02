@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 )
@@ -583,6 +584,67 @@ func TestWorkspaceRegisterSerena_PortMismatch_NotSettled(t *testing.T) {
 	}
 }
 
+// TestWorkspaceRegisterSerena_ReplacedGeneration_NotSettled proves the settle
+// gate belongs to this invocation, not merely to a deterministic workspace key.
+// A concurrent unregister/re-register can leave an equally valid same-path row
+// and matching daemon behind; its distinct RegisteredAt generation must still
+// prevent the older command from printing success for somebody else's register.
+func TestWorkspaceRegisterSerena_ReplacedGeneration_NotSettled(t *testing.T) {
+	withSerenaDynamicPoolCatalog(t)
+	withStateDir(t)
+	useRealSerenaRegisterIntentCheck(t)
+
+	healthyWS := t.TempDir()
+	seedHealthySerenaIntentRow(t, healthyWS, 9150)
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+	wsKey := api.WorkspaceKey(ws)
+
+	orig := serenaRegisterReconcileFn
+	t.Cleanup(func() { serenaRegisterReconcileFn = orig })
+	serenaRegisterReconcileFn = func(context.Context, bool) (api.ReconcileResponse, error) {
+		stateDir, err := api.DaemonStateDir()
+		if err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		repairResult, err := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+		if err != nil {
+			return api.ReconcileResponse{}, err
+		}
+
+		regPath, err := api.DefaultRegistryPath()
+		if err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		reg := api.NewRegistry(regPath)
+		unlock, err := reg.Lock()
+		if err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		defer unlock()
+		if err := reg.Load(); err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		row, ok := reg.GetSerena(wsKey)
+		if !ok {
+			return api.ReconcileResponse{}, fmt.Errorf("test precondition: target registration %s absent", wsKey)
+		}
+		row.RegisteredAt = row.RegisteredAt.Add(time.Nanosecond)
+		reg.Put(row)
+		if err := reg.Save(); err != nil {
+			return api.ReconcileResponse{}, err
+		}
+		return api.ReconcileResponse{DriftCount: 1, AppliedCount: 1, SerenaRepairOutcome: repairResult.Outcome}, nil
+	}
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("register must not certify a replacement generation; output: %s", out)
+	}
+	if strings.Contains(out, "Registered serena workspace") {
+		t.Errorf("must not print success for another invocation's registration; got %q", out)
+	}
+}
+
 // TestWorkspaceRegisterSerena_SettledCheckError_ReportsActionableText is the
 // medium-item fix test: the checkErr != nil branch of
 // workspaceRegisterPartialStateError previously gave no recovery command.
@@ -593,7 +655,7 @@ func TestWorkspaceRegisterSerena_SettledCheckError_ReportsActionableText(t *test
 	orig := serenaRegisterSettledCheckFn
 	t.Cleanup(func() { serenaRegisterSettledCheckFn = orig })
 	simulatedErr := errors.New("simulated I/O failure reading supervisor-intent.json")
-	serenaRegisterSettledCheckFn = func(string) (serenaRegisterSettledResult, error) {
+	serenaRegisterSettledCheckFn = func(api.WorkspaceEntry) (serenaRegisterSettledResult, error) {
 		return serenaRegisterSettledResult{}, simulatedErr
 	}
 

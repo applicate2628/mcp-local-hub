@@ -17,11 +17,87 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
+
+// TestRepairSerenaIntentFromRegistry_InterruptedUnregister_FreshLeaseRecovered
+// proves the per-workspace fence, not a wall-clock lease, owns liveness. A
+// process that dies just after writing a fresh pending-removal mark releases its
+// fence immediately; a single event-driven repair pass must recover it rather
+// than wait for a pass that may never occur.
+func TestRepairSerenaIntentFromRegistry_InterruptedUnregister_FreshLeaseRecovered(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	strandedPath, strandedPort := liveWorkspace(t), 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	strandedKey := seedSerenaRegistryRow(t, regPath, strandedPath, strandedPort)
+	seedPendingRemovalMark(t, regPath, strandedKey, time.Now().UTC())
+	// Model a CURRENT fence-capable writer that died: acquisition created the
+	// leaf before the mark, and release models the kernel dropping its lock.
+	releaseFence, err := AcquireSerenaRemovalFence(filepath.Dir(regPath), strandedKey)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	releaseFence()
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry: %v", err)
+	}
+	if result.Outcome != SerenaIntentRepairOutcomeCompleted || result.Repaired != 1 {
+		t.Fatalf("result = %+v, want completed repair of the fresh crashed teardown", result)
+	}
+	if got := readIntent(t, intentPath); !got.HasSpecBearingSerenaDaemonForWorkspaceKey(strandedKey) {
+		t.Fatalf("fresh stranded key %q was not materialized", strandedKey)
+	}
+	if row := readSerenaRowFresh(t, regPath, strandedKey); row.PendingSerenaRemoval || !row.PendingSerenaRemovalAt.IsZero() {
+		t.Fatalf("fresh recovered row still carries pending-removal state: %+v", row)
+	}
+}
+
+// TestRepairSerenaIntentFromRegistry_FenceProbeErrorIsIncomplete proves an
+// unobservable fence remains fail-closed and is propagated to callers as a
+// retryable incomplete outcome, never a completed no-drift certificate.
+func TestRepairSerenaIntentFromRegistry_FenceProbeErrorIsIncomplete(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	pendingPath, pendingPort := liveWorkspace(t), 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	pendingKey := seedSerenaRegistryRow(t, regPath, pendingPath, pendingPort)
+	seedPendingRemovalMark(t, regPath, pendingKey, time.Now().UTC())
+	seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+
+	origFenceProbe := observeSerenaRemovalFenceFn
+	observeSerenaRemovalFenceFn = func(string, string) (serenaRemovalFenceObservation, error) {
+		return serenaRemovalFenceObservation{}, errors.New("injected fence probe failure")
+	}
+	t.Cleanup(func() { observeSerenaRemovalFenceFn = origFenceProbe })
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil {
+		t.Fatalf("fence probe failure must remain a typed incomplete result, got error: %v", err)
+	}
+	if result.Outcome != SerenaIntentRepairOutcomeSkippedRemovalFenceProbe {
+		t.Fatalf("outcome = %q, want %q", result.Outcome, SerenaIntentRepairOutcomeSkippedRemovalFenceProbe)
+	}
+	if result.Repaired != 0 {
+		t.Fatalf("repaired = %d, want 0 while liveness is unknown", result.Repaired)
+	}
+	if row := readSerenaRowFresh(t, regPath, pendingKey); !row.PendingSerenaRemoval {
+		t.Fatalf("probe-error row was reclaimed despite unknown liveness: %+v", row)
+	}
+}
 
 // seedPendingRemovalMark stamps the serena row for key with
 // PendingSerenaRemoval=true and PendingSerenaRemovalAt=stampedAt — the exact

@@ -285,6 +285,13 @@ func TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed(t *testing.T) {
 			wantDetail:       "supervisor-intent lock",
 		},
 		{
+			name:             "apply removal fence probe",
+			apply:            true,
+			outcome:          api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe,
+			wantApplyFailure: true,
+			wantDetail:       "liveness fence",
+		},
+		{
 			name:             "apply missing outcome",
 			apply:            true,
 			wantApplyFailure: true,
@@ -306,6 +313,11 @@ func TestReconcileCmd_IncompleteSerenaOutcomesAreFailClosed(t *testing.T) {
 			name:       "preview intent lock",
 			outcome:    api.SerenaIntentRepairOutcomeSkippedIntentLock,
 			wantDetail: "supervisor-intent lock",
+		},
+		{
+			name:       "preview removal fence probe",
+			outcome:    api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe,
+			wantDetail: "liveness fence",
 		},
 		{
 			name:       "preview missing outcome",

@@ -202,19 +202,19 @@ func TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault(t 
 	origSettledCheck := serenaRegisterSettledCheckFn
 	var settledChecksMu sync.Mutex
 	settledChecks := 0
-	serenaRegisterSettledCheckFn = func(key string) (serenaRegisterSettledResult, error) {
+	serenaRegisterSettledCheckFn = func(expected api.WorkspaceEntry) (serenaRegisterSettledResult, error) {
 		settledChecksMu.Lock()
 		settledChecks++
 		call := settledChecks
 		settledChecksMu.Unlock()
 
-		result, err := realSerenaRegisterSettledCheck(key)
+		result, err := realSerenaRegisterSettledCheck(expected)
 		if call == 1 {
 			if err != nil {
 				return result, err
 			}
 			if result.RegistryRowPresent {
-				return result, fmt.Errorf("test precondition: first settled check unexpectedly found registry row for %s", key)
+				return result, fmt.Errorf("test precondition: first settled check unexpectedly found registry row for %s", expected.WorkspaceKey)
 			}
 			close(firstSettledCheckReached)
 			<-resumeFirstRegister

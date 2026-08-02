@@ -477,7 +477,7 @@ func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, result api.Se
 		})
 		return
 	}
-	if result.Outcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedIntentLock {
+	if result.Outcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedIntentLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe {
 		_ = events.TryEmit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "reconcile",

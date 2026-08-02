@@ -155,55 +155,74 @@ func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func()
 	return func() { _ = fl.Unlock() }, nil
 }
 
-// serenaRemovalFenceHeld reports whether a LIVE unregister currently owns the
-// fence for workspaceKey. It is TRI-STATE, deliberately mirroring
-// SupervisorRunningUnderStateDir's contract:
+// serenaRemovalFenceObservation distinguishes an existing current-generation
+// fence leaf from a missing leaf. Missing is not an error, but its provenance is
+// ambiguous for a fresh pending-removal mark: an older writer may be live while
+// knowing nothing about fences.
+type serenaRemovalFenceObservation struct {
+	exists bool
+	held   bool
+}
+
+// observeSerenaRemovalFence reports the current per-workspace fence state. It
+// deliberately preserves both existence and lock state:
 //
-//   - (false, nil) — provably FREE: no live holder (or none ever existed).
-//   - (true,  nil) — provably HELD: a live teardown owns this workspace.
-//   - (false, err) — UNDETERMINABLE: the probe itself failed. Callers gating a
+//   - ({exists:false}, nil) — no current-generation fence leaf exists.
+//   - ({exists:true, held:false}, nil) — an existing fence is provably FREE.
+//   - ({exists:true, held:true}, nil) — a live teardown owns this workspace.
+//   - ({}, err) — UNDETERMINABLE: the probe itself failed. Callers gating a
 //     destructive decision MUST treat this as "assume held" and fail closed;
 //     answering "free" on a probe error would silently disable the fence on
 //     exactly the locked-down / AV-instrumented hosts where a flock syscall can
 //     error instead of cleanly reporting contention.
 //
-// A MISSING leaf is FREE, not an error, and is answered by a stat WITHOUT
+// A MISSING leaf is observed without error and answered by a stat WITHOUT
 // touching the lock: flock.New opens with O_CREATE, so probing a never-used
 // workspace would otherwise create the file (and fail outright when the fence
 // directory does not exist yet — the state of every host where no unregister has
-// ever run). The stat cannot report a false "missing" for a marked row: the
-// acquire happens BEFORE the mark write, and the repair reads the mark under the
-// registry lock, so a mark visible to the repair implies the leaf already exists.
+// ever run). A current writer acquires before marking, so its visible mark
+// implies exists=true. A mixed-version writer may mark without creating a leaf;
+// the repair combines exists=false with its lease instead of treating absence as
+// proof that the writer died.
 //
 // Non-blocking by contract — see the deadlock-freedom note in the file header.
-func serenaRemovalFenceHeld(registryDir, workspaceKey string) (held bool, err error) {
+func observeSerenaRemovalFence(registryDir, workspaceKey string) (serenaRemovalFenceObservation, error) {
 	if registryDir == "" {
-		return false, fmt.Errorf("serena removal fence probe: empty registry dir")
+		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: empty registry dir")
 	}
 	if !validSerenaRemovalFenceKey(workspaceKey) {
-		return false, fmt.Errorf("serena removal fence probe: refusing workspace key %q (not the canonical WorkspaceKey hex shape)", workspaceKey)
+		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: refusing workspace key %q (not the canonical WorkspaceKey hex shape)", workspaceKey)
 	}
 	path := serenaRemovalFencePath(registryDir, workspaceKey)
 	if _, statErr := os.Stat(path); statErr != nil {
 		if os.IsNotExist(statErr) {
-			return false, nil // never acquired → definitively no live holder
+			return serenaRemovalFenceObservation{}, nil
 		}
-		return false, fmt.Errorf("serena removal fence probe: stat %s: %w", path, statErr)
+		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: stat %s: %w", path, statErr)
 	}
 	fl := flock.New(path)
 	locked, lerr := fl.TryLock()
 	if lerr != nil {
-		return false, fmt.Errorf("serena removal fence probe: try-lock %s: %w", path, lerr)
+		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: try-lock %s: %w", path, lerr)
 	}
 	if locked {
 		_ = fl.Unlock() // we only asked a question; never keep the fence
-		return false, nil
+		return serenaRemovalFenceObservation{exists: true}, nil
 	}
-	return true, nil
+	return serenaRemovalFenceObservation{exists: true, held: true}, nil
 }
 
-// serenaRemovalFenceHeldFn is the test seam over the probe, matching the
+// serenaRemovalFenceHeld retains the existing package-local boolean query for
+// callers and primitive tests that only need lock state. Repair uses the richer
+// observation owner below because missing provenance changes fresh-lease policy.
+func serenaRemovalFenceHeld(registryDir, workspaceKey string) (bool, error) {
+	observation, err := observeSerenaRemovalFence(registryDir, workspaceKey)
+	return observation.held, err
+}
+
+// observeSerenaRemovalFenceFn is the test seam over the observation, matching the
 // package's existing seam idiom. Tests override it to drive the UNDETERMINABLE
 // branch, which cannot be produced by a real flock on a healthy filesystem. The
-// HELD and FREE branches are exercised against the real primitive.
-var serenaRemovalFenceHeldFn = serenaRemovalFenceHeld
+// MISSING, HELD, and existing-FREE branches are exercised against the real
+// primitive.
+var observeSerenaRemovalFenceFn = observeSerenaRemovalFence
