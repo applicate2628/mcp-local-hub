@@ -62,6 +62,11 @@ func acknowledgeBody(c auditLockCorrelation) string {
 		c.AttemptID, c.OccurrenceID, c.ServerInstance)
 }
 
+func acknowledgeBodyWithExpectedPhysical(c auditLockCorrelation, snapshot api.SupervisorEventLockSnapshot) string {
+	return fmt.Sprintf(`{"attempt_id":%q,"occurrence_id":%q,"server_instance":%q,"acknowledge":true,"expected_physical":{"server_instance":%q,"revision":%d,"state":%q}}`,
+		c.AttemptID, c.OccurrenceID, c.ServerInstance, c.ServerInstance, snapshot.Revision, snapshot.State)
+}
+
 func successfulTerminalEvidence(taskName string, terminationCommitted bool) auditLockTerminalEvidence {
 	return auditLockTerminalEvidence{
 		HTTPStatus: http.StatusOK,
@@ -806,7 +811,10 @@ func TestAuditLockFinalACKClearsReceiptsAndRotatesBaseline(t *testing.T) {
 	}
 
 	ack := httptest.NewRecorder()
-	s.mux.ServeHTTP(ack, sameOriginRequest(http.MethodDelete, "/api/daemon/recover/audit-lock-receipt", acknowledgeBody(correlation)))
+	s.mux.ServeHTTP(ack, sameOriginRequest(http.MethodDelete, "/api/daemon/recover/audit-lock-receipt", acknowledgeBodyWithExpectedPhysical(
+		correlation,
+		api.SupervisorEventLockSnapshotForPath(s.auditLock.logPath),
+	)))
 	if ack.Code != http.StatusNoContent {
 		t.Fatalf("ACK status=%d body=%s", ack.Code, ack.Body.String())
 	}
@@ -946,6 +954,109 @@ func TestAuditLockACKReplayRaceNeverCreatesANewOccurrence(t *testing.T) {
 		} else if replayErr.code != "RECOVER_BASELINE_STALE" {
 			t.Fatalf("race %d replay err=%v", i, replayErr)
 		}
+	}
+}
+
+func TestAuditLockCommittedSuccessRejectsUnobservedPhysicalRevisionChange(t *testing.T) {
+	a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	defer a.close()
+	correlation := validAuditLockCorrelation(a.serverInstance, 47)
+	binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: `\\mcp-local-hub-stale-ack`, confirm: true}
+	reservation, reserveErr := a.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil || !reservation.Novel {
+		t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+	}
+	if _, terminalErr := a.terminalize(reservation, auditLockOccurrenceCommittedSuccess, auditLockAuthorizationNone, successfulTerminalEvidence(binding.taskName, true)); terminalErr != nil {
+		t.Fatalf("terminalize: %v", terminalErr)
+	}
+	expected := api.SupervisorEventLockSnapshotForPath(a.logPath)
+	logger, err := api.OpenSupervisorEventLog(a.logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := logger.EmitWithTimeout(api.SupervisorEvent{Severity: "info", Source: "test", Event: "advance-physical-revision"}, time.Second); err != nil {
+		_ = logger.Close()
+		t.Fatal(err)
+	}
+	_ = logger.Close()
+	if current := api.SupervisorEventLockSnapshotForPath(a.logPath); current == expected {
+		t.Fatal("physical revision did not advance")
+	}
+	errRoute := a.acknowledgeRequest(context.Background(), auditLockAcknowledgeRequest{
+		Correlation:      correlation,
+		ExpectedPhysical: &auditLockExpectedPhysical{ServerInstance: correlation.ServerInstance, Revision: expected.Revision, State: api.SupervisorEventLockReleased},
+	})
+	if errRoute == nil || errRoute.status != http.StatusConflict || errRoute.code != string(daemonRecoverErrorAckPhysicalStateChanged) {
+		t.Fatalf("stale ACK error=%v", errRoute)
+	}
+	receipt, lookupErr := a.lookup(context.Background(), correlation)
+	if lookupErr != nil || receipt == nil || receipt.Status != auditLockOccurrenceCommittedSuccess {
+		t.Fatalf("stale ACK mutated receipt=%+v err=%v", receipt, lookupErr)
+	}
+}
+
+func TestDecodeAuditLockAcknowledgeExpectedPhysicalIsStrict(t *testing.T) {
+	c := validAuditLockCorrelation("33333333-3333-4333-8333-333333333333", 9)
+	valid := acknowledgeBodyWithExpectedPhysical(c, api.SupervisorEventLockSnapshot{State: api.SupervisorEventLockReleased, Revision: 7})
+	if request, routeErr := decodeAuditLockAcknowledge(json.RawMessage(valid)); routeErr != nil || request.ExpectedPhysical == nil || request.ExpectedPhysical.Revision != 7 {
+		t.Fatalf("valid strict ACK request=%+v err=%v", request, routeErr)
+	}
+	invalid := []string{
+		strings.Replace(valid, `"revision":7`, `"revision":7,"revision":8`, 1),
+		strings.Replace(valid, `"state":"released"`, `"state":"released","extra":true`, 1),
+		strings.Replace(valid, `"revision":7`, `"revision":7.5`, 1),
+		strings.Replace(valid, `"revision":7`, `"revision":18446744073709551616`, 1),
+		strings.Replace(valid, `"state":"released"`, `"state":"outstanding"`, 1),
+	}
+	for _, raw := range invalid {
+		if _, routeErr := decodeAuditLockAcknowledge(json.RawMessage(raw)); routeErr == nil || routeErr.status != http.StatusBadRequest {
+			t.Fatalf("invalid strict ACK body=%s err=%v", raw, routeErr)
+		}
+	}
+}
+
+func TestAuditLockAcknowledgementStatusPolicy(t *testing.T) {
+	terminalCases := []struct {
+		name   string
+		status string
+	}{
+		{name: "committed error", status: auditLockOccurrenceCommittedError},
+		{name: "not committed", status: auditLockOccurrenceNotCommitted},
+	}
+	for index, tc := range terminalCases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+			defer a.close()
+			correlation := validAuditLockCorrelation(a.serverInstance, 80+index)
+			binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: fmt.Sprintf(`\\mcp-local-hub-policy-%d`, index), confirm: true}
+			reservation, reserveErr := a.reserve(context.Background(), correlation, binding)
+			if reserveErr != nil || !reservation.Novel {
+				t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+			}
+			if _, terminalErr := a.terminalize(reservation, tc.status, auditLockAuthorizationNone, auditLockTerminalEvidence{HTTPStatus: http.StatusInternalServerError, ErrorCode: "RECOVER_STATE_READ_FAILED"}); terminalErr != nil {
+				t.Fatalf("terminalize: %v", terminalErr)
+			}
+			if routeErr := a.acknowledge(context.Background(), correlation); routeErr != nil {
+				t.Fatalf("manual terminal acknowledgement: %v", routeErr)
+			}
+		})
+	}
+	a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	defer a.close()
+	correlation := validAuditLockCorrelation(a.serverInstance, 99)
+	binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: `\\mcp-local-hub-policy-success`, confirm: true}
+	reservation, reserveErr := a.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil || !reservation.Novel {
+		t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+	}
+	if _, terminalErr := a.terminalize(reservation, auditLockOccurrenceCommittedSuccess, auditLockAuthorizationNone, successfulTerminalEvidence(binding.taskName, true)); terminalErr != nil {
+		t.Fatalf("terminalize: %v", terminalErr)
+	}
+	if routeErr := a.acknowledge(context.Background(), correlation); routeErr == nil || routeErr.code != string(daemonRecoverErrorAckPreconditionRequired) {
+		t.Fatalf("committed-success without expected physical error=%v", routeErr)
+	}
+	if routeErr := a.acknowledgeRequest(context.Background(), auditLockAcknowledgeRequest{Correlation: correlation, ExpectedPhysical: &auditLockExpectedPhysical{ServerInstance: correlation.ServerInstance, Revision: api.SupervisorEventLockSnapshotForPath(a.logPath).Revision, State: api.SupervisorEventLockReleased}}); routeErr != nil {
+		t.Fatalf("committed-success exact acknowledgement: %v", routeErr)
 	}
 }
 

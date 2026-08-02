@@ -747,6 +747,8 @@ describe("postDaemonRecover", () => {
       "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
       "RECOVER_RECEIPT_IN_FLIGHT",
       "RECOVER_OUTCOME_UNCERTAIN",
+      "RECOVER_ACK_PRECONDITION_REQUIRED",
+      "RECOVER_ACK_PHYSICAL_STATE_CHANGED",
     ]);
   });
 
@@ -825,7 +827,7 @@ describe("postDaemonRecover", () => {
     }
   });
 
-  it("looks up and acknowledges the exact full correlation tuple", async () => {
+  it("looks up and conditionally acknowledges the exact released physical snapshot", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
@@ -845,7 +847,11 @@ describe("postDaemonRecover", () => {
     await expect(
       getDaemonRecoverAuditLockState(correlation, controller.signal),
     ).resolves.toEqual(auditLock);
-    await expect(acknowledgeDaemonRecoverReceipt(correlation)).resolves.toBeUndefined();
+    await expect(acknowledgeDaemonRecoverReceipt(correlation, {
+      server_instance: auditLock.server_instance,
+      revision: auditLock.revision,
+      state: "released",
+    })).resolves.toBeUndefined();
 
     const lookupURL = fetchMock.mock.calls[0]?.[0]?.toString() ?? "";
     expect(lookupURL).toContain("attempt_id=11111111-1111-4111-8111-111111111111");
@@ -857,8 +863,36 @@ describe("postDaemonRecover", () => {
       {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...correlation, acknowledge: true }),
+        body: JSON.stringify({
+          ...correlation,
+          acknowledge: true,
+          expected_physical: {
+            server_instance: auditLock.server_instance,
+            revision: auditLock.revision,
+            state: "released",
+          },
+        }),
       },
     ]);
+  });
+
+  it("omits expected_physical for explicit manual warning acknowledgement", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 204,
+      statusText: "No Content",
+      json: async () => null,
+    } as unknown as Response);
+    globalThis.fetch = fetchMock;
+
+    await expect(acknowledgeDaemonRecoverReceipt(correlation)).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/daemon/recover/audit-lock-receipt",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...correlation, acknowledge: true }),
+      },
+    );
   });
 });

@@ -16,6 +16,7 @@ import {
 import type {
   APIError,
   AuditLockAuthorization,
+  AuditLockExpectedPhysical,
   AuditLockSnapshot,
   DaemonRecoverCorrelation,
   DaemonRecoverErrorCode,
@@ -133,7 +134,7 @@ type RecoverySettlement =
 interface RetainedRecoveryReceipt {
   taskName: string;
   correlation: DaemonRecoverCorrelation;
-  status: "committed_error" | "uncertain";
+  status: "committed_error" | "not_committed" | "uncertain";
 }
 
 class RecoveryFlowError extends Error {}
@@ -347,7 +348,11 @@ export function DashboardScreen() {
         server_instance: receipt.server_instance,
       };
       pending.set(receipt.task_name, correlation);
-      if (receipt.status === "committed_error" || receipt.status === "uncertain") {
+      if (
+        receipt.status === "committed_error" ||
+        receipt.status === "not_committed" ||
+        receipt.status === "uncertain"
+      ) {
         manual.push({
           taskName: receipt.task_name,
           correlation,
@@ -401,8 +406,15 @@ export function DashboardScreen() {
     correlation: DaemonRecoverCorrelation,
     snapshot: AuditLockSnapshot,
   ): Promise<RecoverySettlement> => {
-    applyAuditLockSnapshot(snapshot);
     const receipt = snapshot.recovery_receipt;
+    // A response/lookup is only an acknowledgement authority when it is at
+    // least as new as the projection already observed from SSE.  In
+    // particular, a delayed "released" response must not consume a receipt
+    // after a newer "outstanding" physical-lock update has re-fenced it.
+    if (nextAuditLockView(auditLockViewRef.current, snapshot) === auditLockViewRef.current) {
+      return receipt?.status ?? "missing";
+    }
+    applyAuditLockSnapshot(snapshot);
     if (receipt === null) return "missing";
     if (
       receipt.attempt_id !== correlation.attempt_id ||
@@ -419,7 +431,11 @@ export function DashboardScreen() {
       forgetPendingCorrelation(correlation);
       return "consumed";
     }
-    if (receipt.status === "committed_error" || receipt.status === "uncertain") {
+    if (
+      receipt.status === "committed_error" ||
+      receipt.status === "not_committed" ||
+      receipt.status === "uncertain"
+    ) {
       const manualStatus = receipt.status;
       setRetainedRecoveryReceipts((current) => {
         const retained = current.filter(
@@ -433,10 +449,44 @@ export function DashboardScreen() {
       });
       return receipt.status;
     }
+    // A daemon-status refresh proves only that the supervisor answered.  The
+    // receipt is allowed to be consumed only after the backend's physical-lock
+    // snapshot confirms that the GUI writer released its cross-process fence.
+    // Keep the exact task/correlation in pendingRecoveriesRef while the
+    // transient release_pending state is outstanding; reconnect and SSE
+    // reconciliation re-query this same tuple rather than issuing another POST.
+    if (snapshot.state !== "released") {
+      setAuditLockNotice(
+        "Recovery completed, but the supervisor event-log lock is still settling. Its receipt remains retained; the dashboard will reconcile it after the physical lock releases.",
+      );
+      return receipt.status;
+    }
+    const expectedPhysical: AuditLockExpectedPhysical = {
+      server_instance: snapshot.server_instance,
+      revision: snapshot.revision,
+      state: "released",
+    };
     if (!await loadStatusRef.current()) {
       setAuditLockNotice(
         "Recovery finished, but current daemon status could not be refreshed. Its receipt remains retained and no retry was started.",
       );
+      return receipt.status;
+    }
+
+    // Status refresh is an async gap. SSE may advance the physical owner while
+    // it is pending, so compare the exact projection again immediately before
+    // dispatch. The backend repeats this check atomically at commit time for
+    // transitions the browser has not observed yet.
+    const currentPhysical = auditLockViewRef.current;
+    if (
+      currentPhysical?.serverInstance !== expectedPhysical.server_instance ||
+      currentPhysical.revision !== expectedPhysical.revision ||
+      currentPhysical.state !== expectedPhysical.state
+    ) {
+      setAuditLockNotice(
+        "Recovery finished, but the physical lock state changed before acknowledgement. Its receipt remains retained and is being reconciled.",
+      );
+      await refreshAuditLockBaselineRef.current(false);
       return receipt.status;
     }
 
@@ -445,9 +495,20 @@ export function DashboardScreen() {
       if (!acknowledgingReceiptsRef.current.has(receiptKey)) {
         acknowledgingReceiptsRef.current.add(receiptKey);
         try {
-          await acknowledgeDaemonRecoverReceipt(correlation);
+          await acknowledgeDaemonRecoverReceipt(correlation, expectedPhysical);
           acknowledgedReceiptsRef.current.add(receiptKey);
-        } catch {
+        } catch (error) {
+          const code = apiErrorCode(error);
+          if (
+            code === "RECOVER_ACK_PRECONDITION_REQUIRED" ||
+            code === "RECOVER_ACK_PHYSICAL_STATE_CHANGED"
+          ) {
+            setAuditLockNotice(
+              "Recovery finished, but the backend physical lock state changed before acknowledgement. Its receipt remains retained and is being reconciled.",
+            );
+            await refreshAuditLockBaselineRef.current(false);
+            return receipt.status;
+          }
           setAuditLockNotice(
             "Recovery finished, but its receipt could not be acknowledged. The dashboard will retry the safe acknowledgement after reconnecting.",
           );
@@ -1399,7 +1460,9 @@ export function DashboardScreen() {
           <p>
             {retainedRecoveryReceipts.some((receipt) => receipt.status === "uncertain")
               ? "A recovery outcome is uncertain. Do NOT repeat recovery. Refresh daemon status and inspect logs before acknowledging this warning."
-              : "A committed recovery completed with an error. Do NOT repeat recovery. Refresh daemon status and inspect logs before dismissing this receipt."}
+              : retainedRecoveryReceipts.some((receipt) => receipt.status === "committed_error")
+                ? "A committed recovery completed with an error. Do NOT repeat recovery. Refresh daemon status and inspect logs before dismissing this receipt."
+                : "Recovery did not commit. Check current daemon status before acknowledging this retained receipt or starting another recovery."}
           </p>
           <button
             type="button"
@@ -1831,6 +1894,10 @@ function daemonRecoverCodeMessage(code: DaemonRecoverErrorCode): string {
       return "Recovery is still running. Its receipt cannot be acknowledged yet, and the action was not repeated.";
     case "RECOVER_OUTCOME_UNCERTAIN":
       return "Recovery may already have stopped the process, but its committed outcome could not be persisted. Do NOT retry. Refresh status, inspect logs, then acknowledge the retained warning.";
+    case "RECOVER_ACK_PRECONDITION_REQUIRED":
+      return "The recovery receipt needs a current released-lock snapshot before it can be acknowledged. The receipt remains retained; refresh status instead of repeating recovery.";
+    case "RECOVER_ACK_PHYSICAL_STATE_CHANGED":
+      return "The physical lock state changed before the recovery receipt could be acknowledged. The receipt remains retained; refresh status instead of repeating recovery.";
     default: {
       const unhandled: never = code;
       return `Recovery failed (${String(unhandled)}). Check the supervisor logs before retrying.`;

@@ -238,6 +238,27 @@ func SupervisorEventLockSnapshotForPath(path string) SupervisorEventLockSnapshot
 	}
 }
 
+// CommitIfSupervisorEventLockSnapshot executes commit only while path still has
+// exactly expected physical state. The caller supplies a bounded, non-reentrant
+// commit: callbacks, subscriptions, logging, and further lock-state reads are
+// forbidden while this owner mutex is held. On a mismatch current is the
+// authoritative snapshot and commit is not called.
+func CommitIfSupervisorEventLockSnapshot(path string, expected SupervisorEventLockSnapshot, commit func() error) (current SupervisorEventLockSnapshot, committed bool, err error) {
+	supervisorEventLockMu.Lock()
+	defer supervisorEventLockMu.Unlock()
+	current = SupervisorEventLockSnapshot{
+		State:    supervisorEventLockStateLocked(path),
+		Revision: supervisorEventLockRevisions[path],
+	}
+	if current != expected {
+		return current, false, nil
+	}
+	if err := commit(); err != nil {
+		return current, false, err
+	}
+	return current, true, nil
+}
+
 func removeSupervisorEventLockObserverLocked(path string, id uint64) {
 	delete(supervisorEventLockObservers[path], id)
 	if len(supervisorEventLockObservers[path]) == 0 {

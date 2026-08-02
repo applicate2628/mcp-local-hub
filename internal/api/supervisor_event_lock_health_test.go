@@ -324,6 +324,64 @@ func TestSupervisorEventSubscriptionTerminalClaimIsRevisionAtomic(t *testing.T) 
 	}
 }
 
+func TestCommitIfSupervisorEventLockSnapshotLinearizesStateAndCommit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "supervisor-events.log")
+	defer ResetSupervisorEventLockStateForPathForTest(path)
+	expected := SupervisorEventLockSnapshotForPath(path)
+	entered := make(chan struct{})
+	releaseCommit := make(chan struct{})
+	commitDone := make(chan struct {
+		current   SupervisorEventLockSnapshot
+		committed bool
+		err       error
+	}, 1)
+	go func() {
+		current, committed, err := CommitIfSupervisorEventLockSnapshot(path, expected, func() error {
+			close(entered)
+			<-releaseCommit
+			return nil
+		})
+		commitDone <- struct {
+			current   SupervisorEventLockSnapshot
+			committed bool
+			err       error
+		}{current, committed, err}
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("conditional commit did not enter")
+	}
+	transitionDone := make(chan struct{})
+	go func() {
+		noteSupervisorEventLockHandoff(path)
+		close(transitionDone)
+	}()
+	select {
+	case <-transitionDone:
+		t.Fatal("physical transition crossed conditional commit before its closure returned")
+	case <-time.After(25 * time.Millisecond):
+	}
+	close(releaseCommit)
+	result := <-commitDone
+	if result.err != nil || !result.committed || result.current != expected {
+		t.Fatalf("conditional commit=%+v want exact successful snapshot", result)
+	}
+	select {
+	case <-transitionDone:
+	case <-time.After(time.Second):
+		t.Fatal("physical transition did not complete after conditional commit")
+	}
+	called := false
+	current, committed, err := CommitIfSupervisorEventLockSnapshot(path, expected, func() error {
+		called = true
+		return nil
+	})
+	if err != nil || committed || called || current == expected {
+		t.Fatalf("stale conditional commit current=%+v committed=%t called=%t err=%v", current, committed, called, err)
+	}
+}
+
 // TestSupervisorEventLockStateStrandedOutranksOutstanding pins the precedence:
 // a CONFIRMED failed release is worse news than a worker that has not reported
 // yet, so it must not be masked by a concurrent outstanding handoff.

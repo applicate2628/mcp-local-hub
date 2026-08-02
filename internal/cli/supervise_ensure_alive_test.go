@@ -2136,6 +2136,59 @@ func TestEnsureAliveGUIRecovery_PreAcquisitionUnknownDoesNotSuppressRelaunch(t *
 	}
 }
 
+func TestEnsureAliveGUIRecovery_UnknownAuditCannotBlockSupervisorDecision(t *testing.T) {
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
+	store := &ensureAliveGUIRecoveryMarkerFake{
+		record: expiredEnsureAliveGUIRecoveryRecord(now, gui.HandoffPhaseReserved),
+	}
+	installEnsureAliveGUIRecoveryTestDependencies(t, ensureAliveGUIRecoveryTestDeadlines(now), store, func(_ context.Context, request gui.GUIOwnerLeaseProbeRequest) gui.GUIOwnerLeaseProbeResult {
+		return gui.GUIOwnerLeaseProbeResult{
+			State:     gui.GUIOwnerLeaseStateUnknown,
+			Reason:    errors.New("synthetic owner uncertainty"),
+			Lifecycle: request.Lifecycle,
+		}
+	})
+
+	action := make(chan struct{})
+	var actionOnce sync.Once
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		actionOnce.Do(func() { close(action) })
+		return nil
+	})
+	t.Cleanup(restoreRelaunch)
+
+	_, releaseAuditFlock := holdEnsureAliveEventLogFlock(t, stateDir)
+	done := make(chan error, 1)
+	go func() { done <- runEnsureAlive(stateDir, &bytes.Buffer{}) }()
+
+	select {
+	case <-action:
+	case <-time.After(2 * time.Second):
+		releaseAuditFlock()
+		<-done
+		t.Fatal("supervisor recovery decision did not run while the Phase-I audit flock was wedged")
+	}
+	select {
+	case err := <-done:
+		releaseAuditFlock()
+		t.Fatalf("ensure-alive returned before its deferred audit was released: %v", err)
+	default:
+	}
+
+	releaseAuditFlock()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("runEnsureAlive: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ensure-alive did not finish after the Phase-I audit flock was released")
+	}
+	assertSupervisorEvent(t, stateDir, "gui-restart-owner-unknown")
+}
+
 // holdEnsureAliveSupervisorLock holds the REAL supervisor.lock flock so
 // SupervisorRunningUnderStateDir reports running=true, for tests exercising
 // the Phase-I GUI-restart marker classifier layered on top of a healthy

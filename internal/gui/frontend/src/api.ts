@@ -758,6 +758,8 @@ export const DAEMON_RECOVER_ERROR_CODES = [
   "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
   "RECOVER_RECEIPT_IN_FLIGHT",
   "RECOVER_OUTCOME_UNCERTAIN",
+  "RECOVER_ACK_PRECONDITION_REQUIRED",
+  "RECOVER_ACK_PHYSICAL_STATE_CHANGED",
 ] as const;
 
 export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number];
@@ -857,6 +859,12 @@ export interface AuditLockSnapshot {
   state: AuditLockState;
   recovery_receipt: AuditLockReceipt | null;
   recovery_receipts: AuditLockReceipt[];
+}
+
+export interface AuditLockExpectedPhysical {
+  server_instance: string;
+  revision: number;
+  state: "released";
 }
 
 export interface DaemonRecoverResponse {
@@ -961,12 +969,17 @@ export async function getDaemonRecoverAuditLockState(
 
 export async function acknowledgeDaemonRecoverReceipt(
   correlation: DaemonRecoverCorrelation,
+  expectedPhysical?: AuditLockExpectedPhysical,
 ): Promise<void> {
   const path = "/api/daemon/recover/audit-lock-receipt";
   const resp = await fetch(path, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...correlation, acknowledge: true }),
+    body: JSON.stringify({
+      ...correlation,
+      acknowledge: true,
+      ...(expectedPhysical ? { expected_physical: expectedPhysical } : {}),
+    }),
   });
   if (resp.status === 204) return;
   const data = await resp.json().catch(() => null);

@@ -103,6 +103,8 @@ const (
 	daemonRecoverErrorOccurrenceCapacity        daemonRecoverErrorCode = "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED"
 	daemonRecoverErrorReceiptInFlight           daemonRecoverErrorCode = "RECOVER_RECEIPT_IN_FLIGHT"
 	daemonRecoverErrorOutcomeUncertain          daemonRecoverErrorCode = "RECOVER_OUTCOME_UNCERTAIN"
+	daemonRecoverErrorAckPreconditionRequired   daemonRecoverErrorCode = "RECOVER_ACK_PRECONDITION_REQUIRED"
+	daemonRecoverErrorAckPhysicalStateChanged   daemonRecoverErrorCode = "RECOVER_ACK_PHYSICAL_STATE_CHANGED"
 )
 
 type daemonRecoverErrorCatalogEntry struct {
@@ -131,6 +133,8 @@ var daemonRecoverErrorCatalog = [...]daemonRecoverErrorCatalogEntry{
 	{daemonRecoverErrorOccurrenceCapacity, false},
 	{daemonRecoverErrorReceiptInFlight, false},
 	{daemonRecoverErrorOutcomeUncertain, false},
+	{daemonRecoverErrorAckPreconditionRequired, false},
+	{daemonRecoverErrorAckPhysicalStateChanged, false},
 }
 
 func (c daemonRecoverErrorCode) Valid() bool {
@@ -475,10 +479,38 @@ func (s *Server) daemonRecoverAuditLockStateHandler(w http.ResponseWriter, r *ht
 	_ = json.NewEncoder(w).Encode(snapshot)
 }
 
-func decodeAuditLockAcknowledge(raw json.RawMessage) (auditLockCorrelation, *auditLockRouteError) {
+func decodeAuditLockExpectedPhysical(raw json.RawMessage) (auditLockExpectedPhysical, *auditLockRouteError) {
 	fields, err := decodeUniqueJSONObject(raw)
-	if err != nil || len(fields) != 4 {
-		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+	if err != nil || len(fields) != 3 {
+		return auditLockExpectedPhysical{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+	}
+	var expected auditLockExpectedPhysical
+	if value, ok := fields["server_instance"]; !ok || json.Unmarshal(value, &expected.ServerInstance) != nil ||
+		validateAuditLockCorrelationValue("server_instance", expected.ServerInstance) != nil {
+		return auditLockExpectedPhysical{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+	}
+	if value, ok := fields["revision"]; !ok || json.Unmarshal(value, &expected.Revision) != nil {
+		return auditLockExpectedPhysical{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+	}
+	var state string
+	if value, ok := fields["state"]; !ok || json.Unmarshal(value, &state) != nil || state != string(api.SupervisorEventLockReleased) {
+		return auditLockExpectedPhysical{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+	}
+	expected.State = api.SupervisorEventLockReleased
+	for field := range fields {
+		switch field {
+		case "server_instance", "revision", "state":
+		default:
+			return auditLockExpectedPhysical{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+		}
+	}
+	return expected, nil
+}
+
+func decodeAuditLockAcknowledge(raw json.RawMessage) (auditLockAcknowledgeRequest, *auditLockRouteError) {
+	fields, err := decodeUniqueJSONObject(raw)
+	if err != nil || (len(fields) != 4 && len(fields) != 5) {
+		return auditLockAcknowledgeRequest{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	correlationRaw, err := json.Marshal(map[string]json.RawMessage{
 		"attempt_id":      fields["attempt_id"],
@@ -486,24 +518,32 @@ func decodeAuditLockAcknowledge(raw json.RawMessage) (auditLockCorrelation, *aud
 		"server_instance": fields["server_instance"],
 	})
 	if err != nil {
-		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+		return auditLockAcknowledgeRequest{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 	}
 	correlation, correlationErr := decodeAuditLockCorrelationObject(correlationRaw)
 	if correlationErr != nil {
-		return auditLockCorrelation{}, correlationErr
+		return auditLockAcknowledgeRequest{}, correlationErr
 	}
 	var acknowledge bool
 	if value, ok := fields["acknowledge"]; !ok || json.Unmarshal(value, &acknowledge) != nil || !acknowledge {
-		return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+		return auditLockAcknowledgeRequest{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+	}
+	request := auditLockAcknowledgeRequest{Correlation: correlation}
+	if rawExpected, ok := fields["expected_physical"]; ok {
+		expected, expectedErr := decodeAuditLockExpectedPhysical(rawExpected)
+		if expectedErr != nil {
+			return auditLockAcknowledgeRequest{}, expectedErr
+		}
+		request.ExpectedPhysical = &expected
 	}
 	for field := range fields {
 		switch field {
-		case "attempt_id", "occurrence_id", "server_instance", "acknowledge":
+		case "attempt_id", "occurrence_id", "server_instance", "acknowledge", "expected_physical":
 		default:
-			return auditLockCorrelation{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
+			return auditLockAcknowledgeRequest{}, &auditLockRouteError{status: http.StatusBadRequest, code: string(daemonRecoverErrorCorrelationInvalid)}
 		}
 	}
-	return correlation, nil
+	return request, nil
 }
 
 func (s *Server) daemonRecoverAuditLockReceiptHandler(w http.ResponseWriter, r *http.Request) {
@@ -517,12 +557,12 @@ func (s *Server) daemonRecoverAuditLockReceiptHandler(w http.ResponseWriter, r *
 		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
-	correlation, correlationErr := decodeAuditLockAcknowledge(raw)
+	acknowledgement, correlationErr := decodeAuditLockAcknowledge(raw)
 	if correlationErr != nil {
 		writeAuditLockRouteError(w, correlationErr)
 		return
 	}
-	if acknowledgeErr := s.auditLock.acknowledge(r.Context(), correlation); acknowledgeErr != nil {
+	if acknowledgeErr := s.auditLock.acknowledgeRequest(r.Context(), acknowledgement); acknowledgeErr != nil {
 		writeAuditLockRouteError(w, acknowledgeErr)
 		return
 	}

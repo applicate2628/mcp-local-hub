@@ -66,6 +66,19 @@ type auditLockCorrelation struct {
 	ServerInstance string
 }
 
+// auditLockExpectedPhysical is a compare operand, never a client-selected
+// policy. The physical owner supplies the actual snapshot at commit time.
+type auditLockExpectedPhysical struct {
+	ServerInstance string
+	Revision       uint64
+	State          api.SupervisorEventLockState
+}
+
+type auditLockAcknowledgeRequest struct {
+	Correlation      auditLockCorrelation
+	ExpectedPhysical *auditLockExpectedPhysical
+}
+
 type auditLockOccurrenceBinding struct {
 	serverInstance string
 	taskName       string
@@ -1098,13 +1111,16 @@ func (a *auditLockAdapter) lookup(ctx context.Context, c auditLockCorrelation) (
 }
 
 func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelation) *auditLockRouteError {
+	return a.acknowledgeRequest(ctx, auditLockAcknowledgeRequest{Correlation: c})
+}
+
+func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request auditLockAcknowledgeRequest) *auditLockRouteError {
 	if err := a.ensureReady(); err != nil {
 		return err
 	}
-	rotatedInstance, err := newAuditLockCorrelationID()
-	if err != nil {
-		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
-	}
+	c := request.Correlation
+	var rotatedInstance string
+	var err error
 	var rotated bool
 	var nextGeneration uint64
 	var acknowledgedGeneration uint64
@@ -1114,11 +1130,8 @@ func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelati
 		if err != nil {
 			return err
 		}
-		serverInstance, generation := a.currentIdentity()
-		if store.Generation != generation || store.ActiveServerInstance != serverInstance {
-			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
-		}
 		found := false
+		var recordIndex int
 		for index := range store.Records {
 			record := &store.Records[index]
 			if record.AttemptID != c.AttemptID ||
@@ -1127,46 +1140,92 @@ func (a *auditLockAdapter) acknowledge(ctx context.Context, c auditLockCorrelati
 				continue
 			}
 			found = true
+			recordIndex = index
 			acknowledgedGeneration = store.Generation
 			acknowledgedRecord = *record
 			effective := a.effectiveOccurrence(store.Generation, *record)
+			if effective.Status == auditLockOccurrenceConsumed {
+				return nil
+			}
 			if effective.Status == auditLockOccurrenceInFlight {
 				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorReceiptInFlight)}
-			}
-			if record.Status != auditLockOccurrenceConsumed {
-				record.Status = auditLockOccurrenceConsumed
-				record.HTTPStatus = 0
-				record.ErrorCode = ""
-				record.LockAuthorization = auditLockAuthorizationNone
-				record.Success = nil
 			}
 			break
 		}
 		if !found {
 			return nil
 		}
-		unresolved := false
-		for _, record := range store.Records {
-			if record.Status != auditLockOccurrenceConsumed {
-				unresolved = true
+		serverInstance, generation := a.currentIdentity()
+		if store.Generation != generation || store.ActiveServerInstance != serverInstance || c.ServerInstance != serverInstance {
+			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
+		}
+		willRotate := true
+		for index, candidate := range store.Records {
+			if index != recordIndex && candidate.Status != auditLockOccurrenceConsumed {
+				willRotate = false
 				break
 			}
 		}
-		if !unresolved {
-			if store.Generation == math.MaxUint64 {
-				return errors.New("occurrence generation overflow")
+		if willRotate {
+			rotatedInstance, err = newAuditLockCorrelationID()
+			if err != nil {
+				return err
 			}
-			store.Records = nil
-			store.Generation++
-			store.ActiveServerInstance = rotatedInstance
-			rotated = true
-			nextGeneration = store.Generation
 		}
-		if err := a.writeStoreLockHeld(store); err != nil {
-			return err
-		}
-		if found {
+		consumeAndWrite := func() error {
+			record := &store.Records[recordIndex]
+			record.Status = auditLockOccurrenceConsumed
+			record.HTTPStatus = 0
+			record.ErrorCode = ""
+			record.LockAuthorization = auditLockAuthorizationNone
+			record.Success = nil
+			unresolved := false
+			for _, candidate := range store.Records {
+				if candidate.Status != auditLockOccurrenceConsumed {
+					unresolved = true
+					break
+				}
+			}
+			if !unresolved {
+				if store.Generation == math.MaxUint64 {
+					return errors.New("occurrence generation overflow")
+				}
+				store.Records = nil
+				store.Generation++
+				store.ActiveServerInstance = rotatedInstance
+				rotated = true
+				nextGeneration = store.Generation
+			}
+			if err := a.writeStoreLockHeld(store); err != nil {
+				return err
+			}
 			a.clearUncertaintyLockHeld(acknowledgedGeneration, acknowledgedRecord)
+			return nil
+		}
+		effective := a.effectiveOccurrence(store.Generation, acknowledgedRecord)
+		if effective.Status == auditLockOccurrenceCommittedSuccess {
+			expected := request.ExpectedPhysical
+			if expected == nil || expected.ServerInstance != c.ServerInstance || expected.State != api.SupervisorEventLockReleased {
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAckPreconditionRequired)}
+			}
+			_, committed, commitErr := api.CommitIfSupervisorEventLockSnapshot(a.logPath, api.SupervisorEventLockSnapshot{
+				State: expected.State, Revision: expected.Revision,
+			}, consumeAndWrite)
+			if commitErr != nil {
+				return commitErr
+			}
+			if !committed {
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAckPhysicalStateChanged)}
+			}
+		} else if effective.Status == auditLockOccurrenceCommittedError || effective.Status == auditLockOccurrenceUncertain || effective.Status == auditLockOccurrenceNotCommitted {
+			if request.ExpectedPhysical != nil {
+				return &auditLockRouteError{status: 400, code: string(daemonRecoverErrorCorrelationInvalid)}
+			}
+			if consumeErr := consumeAndWrite(); consumeErr != nil {
+				return consumeErr
+			}
+		} else {
+			return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 		}
 		return nil
 	})
