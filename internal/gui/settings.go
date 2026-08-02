@@ -21,10 +21,10 @@ type settingsAPI interface {
 
 type realSettingsAPI struct{}
 
-func (realSettingsAPI) List() (map[string]string, error)   { return api.NewAPI().SettingsList() }
-func (realSettingsAPI) Set(key, value string) error        { return api.NewAPI().SettingsSet(key, value) }
-func (realSettingsAPI) SettingsPath() string               { return api.SettingsPath() }
-func (realSettingsAPI) OpenPath(path string) error         { return OpenPath(path) }
+func (realSettingsAPI) List() (map[string]string, error) { return api.NewAPI().SettingsList() }
+func (realSettingsAPI) Set(key, value string) error      { return api.NewAPI().SettingsSet(key, value) }
+func (realSettingsAPI) SettingsPath() string             { return api.SettingsPath() }
+func (realSettingsAPI) OpenPath(path string) error       { return OpenPath(path) }
 
 // configSettingDTO is the JSON shape for non-action settings entries.
 // `default` and `value` are ALWAYS emitted (no omitempty) so legitimate
@@ -48,6 +48,7 @@ type configSettingDTO struct {
 	Pattern    string   `json:"pattern,omitempty"`
 	Optional   bool     `json:"optional,omitempty"`
 	Deferred   bool     `json:"deferred"`
+	ReadOnly   bool     `json:"read_only,omitempty"`
 	Help       string   `json:"help"`
 	RenderKind string   `json:"render_kind,omitempty"` // memo D14
 }
@@ -113,14 +114,15 @@ func (s *Server) settingsListHandler(w http.ResponseWriter, r *http.Request) {
 			Pattern:    def.Pattern,
 			Optional:   def.Optional,
 			Deferred:   def.Deferred,
+			ReadOnly:   def.ReadOnly,
 			Help:       def.Help,
 			RenderKind: string(def.RenderKind),
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"settings":                     settings,
-		"actual_port":                  s.Port(),
-		"actual_hub_endpoint_enabled":  s.HubMcpEndpointActive(),
+		"settings":                    settings,
+		"actual_port":                 s.Port(),
+		"actual_hub_endpoint_enabled": s.HubMcpEndpointActive(),
 	})
 }
 
@@ -160,6 +162,14 @@ func (s *Server) settingsPut(w http.ResponseWriter, r *http.Request, def *api.Se
 		w.Header().Set("Allow", "POST")
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
 			"error": "is_action",
+			"key":   def.Key,
+		})
+		return
+	}
+	if def.ReadOnly {
+		w.Header().Set("Allow", "GET")
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]any{
+			"error": "read_only",
 			"key":   def.Key,
 		})
 		return

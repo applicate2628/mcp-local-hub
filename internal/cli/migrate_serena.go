@@ -186,15 +186,20 @@ var installParsedManifestFn = func(ctx context.Context, a *api.API, m *config.Se
 // reconcile discovers the live GUI router port; tests override it to assert
 // ordering (reconcile runs before legacy removal) without a live GUI.
 var reconcileSerenaClientsFn = func(ctx context.Context, w io.Writer) (*api.MigrateReport, error) {
+	target, err := api.NewAPI().ResolveClientRoutingTarget()
+	if err != nil {
+		return nil, fmt.Errorf("resolve client routing target: %w", err)
+	}
 	pidportPath, err := gui.PidportPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve gui pidport path: %w", err)
 	}
 	return api.ReconcileSerenaClientsToRouter(ctx, api.SerenaReconcileOpts{
-		PidportPath:  pidportPath,
-		ReadPidport:  gui.ReadPidport,
-		RemoveLegacy: true,
-		BackupKeepN:  effectiveBackupKeepN(),
+		RoutingTarget: &target,
+		PidportPath:   pidportPath,
+		ReadPidport:   gui.ReadPidport,
+		RemoveLegacy:  true,
+		BackupKeepN:   effectiveBackupKeepN(),
 	})
 }
 

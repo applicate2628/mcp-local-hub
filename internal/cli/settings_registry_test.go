@@ -397,6 +397,9 @@ func TestMain(m *testing.M) {
 		panic("internal/cli TestMain: create global test-state temp dir: " + err.Error())
 	}
 	restore := api.SetDaemonStateRootForTest(tmp)
+	// Redirect every client-adapter path input before installing the audit. The
+	// descriptor is shared with API and GUI package test setup.
+	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
 
 	// Default subprocess state-env safety net (see doc comment above).
 	// MCPHUB_STATE_DIR_OVERRIDE is the authoritative redirect: it routes the
@@ -409,9 +412,6 @@ func TestMain(m *testing.M) {
 	// were redirected. LOCALAPPDATA/XDG redirect the GUI pidport + log base dir.
 	restoreEnv := setEnvWithRestore(map[string]string{
 		"MCPHUB_STATE_DIR_OVERRIDE": tmp,
-		"LOCALAPPDATA":              tmp,
-		"XDG_DATA_HOME":             tmp,
-		"XDG_STATE_HOME":            tmp,
 		// Global browser kill-switch for the whole cli test binary AND any real
 		// `mcphub gui` child a test spawns (inherited env) — no test flashes a
 		// browser window even when it spawns a GUI without an explicit
@@ -433,6 +433,7 @@ func TestMain(m *testing.M) {
 		code = 1
 	}
 	restoreEnv()
+	restoreClientEnv()
 	restore()
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)

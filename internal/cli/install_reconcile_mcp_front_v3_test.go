@@ -158,7 +158,11 @@ func v3Journal(t *testing.T, port int, prior *mcpFrontReconcileReport, ops ...ap
 	t.Helper()
 	tmp := mcpFrontPR588Env(t)
 	reportPath := filepath.Join(tmp, "recovery.json")
-	journal, err := newMCPFrontV3Journal(reportPath, prior, port, &api.LSPRouterClientPlan{
+	version, generation := mcpFrontReconcileReportVersion, 1
+	if prior != nil {
+		version, generation = prior.Version, prior.Generation
+	}
+	journal, err := newMCPFrontV3Journal(reportPath, prior, version, generation, port, &api.LSPRouterClientPlan{
 		Port: port, Operations: ops,
 	})
 	if err != nil {
@@ -175,7 +179,11 @@ func v3Journal(t *testing.T, port int, prior *mcpFrontReconcileReport, ops ...ap
 // boundary instead of reproducing that boundary in a test-local helper.
 func v3JournalAt(t *testing.T, reportPath string, port int, prior *mcpFrontReconcileReport, ops ...api.LSPRouterPlannedOperation) *mcpFrontReconcileJournal {
 	t.Helper()
-	journal, err := newMCPFrontV3Journal(reportPath, prior, port, &api.LSPRouterClientPlan{
+	version, generation := mcpFrontReconcileReportVersion, 1
+	if prior != nil {
+		version, generation = prior.Version, prior.Generation
+	}
+	journal, err := newMCPFrontV3Journal(reportPath, prior, version, generation, port, &api.LSPRouterClientPlan{
 		Port: port, Operations: ops,
 	})
 	if err != nil {
@@ -183,6 +191,40 @@ func v3JournalAt(t *testing.T, reportPath string, port int, prior *mcpFrontRecon
 	}
 	if err := journal.persist(); err != nil {
 		t.Fatal(err)
+	}
+	return journal
+}
+
+func admittedCrossPortJournal(t *testing.T, reportPath string, prior *mcpFrontReconcileReport, port int, ops ...api.LSPRouterPlannedOperation) *mcpFrontReconcileJournal {
+	t.Helper()
+	from := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: prior.Generation, Port: prior.ActivePlan.Port}
+	decision, err := classifyMCPFrontGeneration(prior, from, port)
+	if err != nil || !decision.Admission || decision.Generation != prior.Generation+1 {
+		t.Fatalf("cross-port classification=%+v err=%v", decision, err)
+	}
+	journal, err := newMCPFrontV3Journal(reportPath, prior, mcpFrontReconcileReportVersion, decision.Generation, port, &api.LSPRouterClientPlan{Port: port, Operations: ops})
+	if err != nil {
+		t.Fatal(err)
+	}
+	routing := from
+	admissionOps := mcpFrontGenerationAdmissionOps{
+		routingState: func() (api.MCPFrontRoutingTargetSnapshot, error) { return routing, nil },
+		transition: func(_ context.Context, expected, next api.MCPFrontRoutingTargetSnapshot) error {
+			if !mcpFrontRoutingEpochEqual(routing, expected) {
+				return errors.New("test routing CAS mismatch")
+			}
+			routing = next
+			return nil
+		},
+		persist: func(path string, report *mcpFrontReconcileReport) error {
+			return api.WriteStateFileAtomic(path, report)
+		},
+	}
+	if err := admitMCPFrontGeneration(context.Background(), journal, decision, admissionOps); err != nil {
+		t.Fatal(err)
+	}
+	if journal.record.GenerationAdmission != nil || !mcpFrontRoutingEpochEqual(routing, decision.ToEpoch) {
+		t.Fatalf("admission did not finalize: routing=%+v report=%+v", routing, journal.record.GenerationAdmission)
 	}
 	return journal
 }
@@ -270,7 +312,7 @@ func TestMCPFrontV3_PartialCrossPortRetryKeepsPerRowAppliedPorts(t *testing.T) {
 	}
 	atB := v3LSPSnapshot("claude-code", "go", name, true, api.LSPRouterURL(9138, "go"))
 	retryOp := v3LSPAdd("claude-code", "go", name, atA, atB)
-	retry := v3Journal(t, 9138, prior, retryOp)
+	retry := admittedCrossPortJournal(t, first.reportPath, prior, 9138, retryOp)
 	if err := retry.prepareLSPOperation(retryOp); err != nil {
 		t.Fatal(err)
 	}
@@ -394,6 +436,7 @@ func TestMCPFrontV3_ConflictForwardRetriesAreByteStable(t *testing.T) {
 		name                 string
 		build                func(*testing.T, string, int) *mcpFrontReconcileJournal
 		wantRollbackConflict bool
+		wantRollbackPending  bool
 	}{
 		{
 			name: "first-generation",
@@ -416,24 +459,18 @@ func TestMCPFrontV3_ConflictForwardRetriesAreByteStable(t *testing.T) {
 				if err := os.WriteFile(backupPath, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				first := v3JournalAt(t, reportPath, port, nil)
+				first := v3JournalAt(t, reportPath, port-1, nil)
 				if err := first.prepareSerenaAttempt(api.SerenaReconcileAttemptResult{
 					Client: "claude-code", BackupPath: backupPath, PreFingerprint: "", IntendedFingerprint: "front-a",
 				}); err != nil {
 					t.Fatalf("prepare retained pin: %v", err)
 				}
-				retry, err := newMCPFrontV3Journal(reportPath, &first.record, port+1, &api.LSPRouterClientPlan{Port: port + 1})
-				if err != nil {
-					t.Fatalf("start retained conflict generation: %v", err)
+				if uncertain, err := settleMCPFrontReconcileAttempts(reportPath, &first.record); err != nil || len(uncertain) != 1 {
+					t.Fatalf("settle retained prepared row: uncertain=%v err=%v", uncertain, err)
 				}
-				if err := retry.finishSerenaAttempt(api.SerenaReconcileAttemptResult{
-					Client: "claude-code", PreFingerprint: "front-a", IntendedFingerprint: "front-b", ObservedFingerprint: "operator",
-					PreconditionConflict: true,
-				}); err != nil {
-					t.Fatalf("finish retained conflict: %v", err)
-				}
-				return retry
+				return first
 			},
+			wantRollbackPending: true,
 		},
 	}
 	for _, test := range tests {
@@ -469,6 +506,11 @@ func TestMCPFrontV3_ConflictForwardRetriesAreByteStable(t *testing.T) {
 				if rollbackErr == nil || !strings.Contains(rollbackErr.Error(), "rollback completed") {
 					t.Fatalf("first-generation rollback=%v, want terminal no-write conflict outcome", rollbackErr)
 				}
+			} else if test.wantRollbackPending {
+				if rollbackErr == nil || !strings.Contains(rollbackErr.Error(), "recovery remains pending") {
+					t.Fatalf("retained-pin pending rollback=%v", rollbackErr)
+				}
+				return
 			} else if rollbackErr != nil {
 				t.Fatalf("retained-pin no-receipt rollback: %v", rollbackErr)
 			}
@@ -496,10 +538,7 @@ func TestMCPFrontV3_SerenaPreconditionConflictPreservesEarlierAppliedReceipt(t *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := newMCPFrontV3Journal(first.reportPath, &first.record, 9138, &api.LSPRouterClientPlan{Port: 9138})
-	if err != nil {
-		t.Fatalf("new generation: %v", err)
-	}
+	retry := admittedCrossPortJournal(t, first.reportPath, &first.record, 9138)
 	if err := retry.finishSerenaAttempt(api.SerenaReconcileAttemptResult{
 		Client: "claude-code", PreFingerprint: "front-a", IntendedFingerprint: "front-b", ObservedFingerprint: "operator",
 		PreconditionConflict: true,
@@ -935,7 +974,7 @@ func TestMCPFrontV3_ClassifierRejectsPinMutationAcrossAcceptedShapes(t *testing.
 				if err := os.WriteFile(backupPath, []byte(`{"mcpServers":{}}`), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				first, err := newMCPFrontV3Journal(reportPath, nil, 9137, &api.LSPRouterClientPlan{Port: 9137})
+				first, err := newMCPFrontV3Journal(reportPath, nil, mcpFrontReconcileReportVersion, 1, 9137, &api.LSPRouterClientPlan{Port: 9137})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -947,7 +986,7 @@ func TestMCPFrontV3_ClassifierRejectsPinMutationAcrossAcceptedShapes(t *testing.
 				}); err != nil {
 					t.Fatal(err)
 				}
-				retry, err := newMCPFrontV3Journal(reportPath, &first.record, 9138, &api.LSPRouterClientPlan{Port: 9138})
+				retry, err := newMCPFrontV3Journal(reportPath, &first.record, first.record.Version, first.record.Generation, 9137, &api.LSPRouterClientPlan{Port: 9137})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1227,38 +1266,59 @@ func TestMCPFrontV3_PlanPinBindingRoundTripDeepCopyAndPlanChange(t *testing.T) {
 	if !found || !firstOp.PinBound || firstOp.Pin == nil || firstOp.Pin == firstRow.Pin || !mcpFrontSerenaPinEqual(firstOp.Pin, firstRow.Pin) {
 		t.Fatalf("first plan did not deep-copy its exact pin: row=%+v op=%+v", firstRow, firstOp)
 	}
-	next, err := newMCPFrontV3Journal(reportPath, &first.record, 9138, &api.LSPRouterClientPlan{Port: 9138})
-	if err != nil {
-		t.Fatal(err)
+	routing := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: first.record.Generation, Port: 9137}
+	next, err := classifyMCPFrontGeneration(&first.record, routing, 9138)
+	if err == nil || next.Admission {
+		t.Fatalf("non-terminal matching-generation retry changed its frozen port: next=%+v err=%T %v", next, err, err)
 	}
-	if err := next.finishSerenaAttempt(api.SerenaReconcileAttemptResult{
-		Client: "claude-code", PreFingerprint: "front-a", IntendedFingerprint: "front-b", ObservedFingerprint: "operator",
-		PreconditionConflict: true,
-	}); err != nil {
-		t.Fatal(err)
+}
+
+func TestMCPFrontV3_ValidatedEmptyPlanIsTerminal(t *testing.T) {
+	report := &mcpFrontReconcileReport{
+		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true, Generation: 1,
+		Rows:       map[string]mcpFrontReconcileRow{},
+		ActivePlan: &mcpFrontReconcilePlan{Generation: 1, Port: 9137, Rows: []string{}, Operations: []mcpFrontReconcilePlanOp{}},
 	}
-	row := next.record.Rows[key]
-	op, found := activeMCPFrontPlanOperation(next.record.ActivePlan, key)
-	if !found || next.record.Generation != 2 || next.record.ActivePlan.Generation != 2 || !op.PinBound || op.Pin == nil || op.Pin == row.Pin || !mcpFrontSerenaPinEqual(op.Pin, row.Pin) {
-		t.Fatalf("new generation did not rebind the exact pin: row=%+v op=%+v record=%+v", row, op, next.record)
+	if err := validateMCPFrontReconcileReport(report, filepath.Join(t.TempDir(), "empty.json")); err != nil {
+		t.Fatalf("valid empty generation rejected: %v", err)
 	}
-	durable, err := readMCPFrontReconcileReport(reportPath)
-	if err != nil {
-		t.Fatalf("plan pin round trip: %v", err)
+	if !canRetireMCPFrontReconcileReport(report) {
+		t.Fatal("validated zero-row generation is permanently non-retirable")
 	}
-	durableRow := durable.Rows[key]
-	durableOp, found := activeMCPFrontPlanOperation(durable.ActivePlan, key)
-	if !found || !durableOp.PinBound || durableOp.Pin == nil || durableOp.Pin == durableRow.Pin || !mcpFrontSerenaPinEqual(durableOp.Pin, durableRow.Pin) {
-		t.Fatalf("durable plan pin lost deep-copy identity: row=%+v op=%+v", durableRow, durableOp)
+}
+
+func TestMCPFrontV3_CorruptEmptyPlansFailClosed(t *testing.T) {
+	valid := func() mcpFrontReconcileReport {
+		return mcpFrontReconcileReport{
+			Version: mcpFrontReconcileReportVersion, SnapshotComplete: true, Generation: 1,
+			Rows:       map[string]mcpFrontReconcileRow{},
+			ActivePlan: &mcpFrontReconcilePlan{Generation: 1, Port: 9137, Rows: []string{}, Operations: []mcpFrontReconcilePlanOp{}},
+		}
 	}
-	planOrigin := op.Pin.Origin
-	row.Pin.Origin = "operator-mutated-origin"
-	if op.Pin.Origin != planOrigin {
-		t.Fatal("row pin mutation aliased the active-plan pin")
+	tests := []struct {
+		name   string
+		mutate func(*mcpFrontReconcileReport)
+	}{
+		{name: "nil-row-map", mutate: func(report *mcpFrontReconcileReport) { report.Rows = nil }},
+		{name: "nil-active-plan", mutate: func(report *mcpFrontReconcileReport) { report.ActivePlan = nil }},
+		{name: "generation-mismatch", mutate: func(report *mcpFrontReconcileReport) { report.ActivePlan.Generation = 2 }},
+		{name: "invalid-port", mutate: func(report *mcpFrontReconcileReport) { report.ActivePlan.Port = 0 }},
+		{name: "missing-planned-row", mutate: func(report *mcpFrontReconcileReport) {
+			report.ActivePlan.Rows = []string{"lsp:missing:go:gopls-mcp"}
+			report.ActivePlan.Operations = []mcpFrontReconcilePlanOp{{RowKey: "lsp:missing:go:gopls-mcp"}}
+		}},
+		{name: "asymmetric-operation", mutate: func(report *mcpFrontReconcileReport) {
+			report.ActivePlan.Operations = []mcpFrontReconcilePlanOp{{RowKey: "lsp:missing:go:gopls-mcp"}}
+		}},
 	}
-	next.record.Rows[key] = row
-	if got := classifyMCPFrontSerenaConflict(&next.record, key, row); got != mcpFrontSerenaConflictInvalid {
-		t.Fatalf("one-sided in-memory pin mutation class=%q, want invalid", got)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			report := valid()
+			test.mutate(&report)
+			if err := validateMCPFrontReconcileReport(&report, filepath.Join(t.TempDir(), "empty.json")); err == nil {
+				t.Fatal("corrupt empty generation passed the complete-record gate")
+			}
+		})
 	}
 }
 
@@ -1293,7 +1353,7 @@ func TestMCPFrontV3_RetainedPinnedNoReceiptConflictRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	retry, err := newMCPFrontV3Journal(first.reportPath, &first.record, 9138, &api.LSPRouterClientPlan{Port: 9138})
+	retry, err := newMCPFrontV3Journal(first.reportPath, &first.record, first.record.Version, first.record.Generation, 9137, &api.LSPRouterClientPlan{Port: 9137})
 	if err != nil {
 		t.Fatalf("new generation: %v", err)
 	}
@@ -1897,7 +1957,7 @@ func TestMCPFrontV3_ConfirmedNoWriteKeepsEarlierPortOwnership(t *testing.T) {
 	prior := &first.record
 	atB := v3LSPSnapshot("claude-code", "go", name, true, api.LSPRouterURL(9138, "go"))
 	retryOp := v3LSPAdd("claude-code", "go", name, atA, atB)
-	retry := v3Journal(t, 9138, prior, retryOp)
+	retry := admittedCrossPortJournal(t, first.reportPath, prior, 9138, retryOp)
 	if err := retry.prepareLSPOperation(retryOp); err != nil {
 		t.Fatal(err)
 	}
@@ -2030,7 +2090,7 @@ func TestMCPFrontV3_LegacyJournalOnDiskRefusesRollbackWithAnActionableMessage(t 
 		},
 		{
 			name:       "interim build stamped version 3 onto a version-2 body",
-			version:    mcpFrontReconcileReportVersion,
+			version:    mcpFrontReconcileVersion3,
 			wantDetail: "carries the pre-version-3 body shape",
 		},
 	}
@@ -2308,7 +2368,7 @@ func TestMCPFrontV3_ForwardNeverPublishesAnArtifactItsOwnReaderRefuses(t *testin
 	}
 	uncertain, settleErr := settleMCPFrontReconcileAttempts(journal.reportPath, prior)
 	if settleErr == nil && len(uncertain) == 0 {
-		next, buildErr := newMCPFrontV3Journal(journal.reportPath, prior, 9138,
+		next, buildErr := newMCPFrontV3Journal(journal.reportPath, prior, prior.Version, prior.Generation, prior.ActivePlan.Port,
 			&api.LSPRouterClientPlan{Port: 9138})
 		if buildErr == nil {
 			// runForwardReconcileMCPFront persists here, BEFORE the first client

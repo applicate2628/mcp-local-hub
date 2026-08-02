@@ -27,6 +27,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"reflect"
@@ -872,14 +873,28 @@ func (a *API) SnapshotLSPRouterClientEntries(opts LSPClientRouterOpts) ([]LSPRou
 // before any overwrite/removal. It must be in range: a zero port would make
 // the ownership check weaker than the forward pass's own, so it fails closed.
 func (a *API) RestoreLSPRouterClientEntriesSnapshot(snapshot []LSPRouterEntrySnapshot, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	var report *LSPClientRouterReport
+	err := a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var restoreErr error
+		report, restoreErr = a.restoreLSPRouterClientEntriesSnapshot(snapshot, admitted)
+		return restoreErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+func (a *API) restoreLSPRouterClientEntriesSnapshot(snapshot []LSPRouterEntrySnapshot, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
 	if len(snapshot) == 0 {
 		return report, nil
 	}
-	port, err := resolvedLSPRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return report, err
 	}
+	port := target.Port
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()

@@ -1,7 +1,6 @@
 // internal/cli/client_config_env_isolation_test.go
 //
-// One owner for "neutralize every client-config path environment variable" in
-// package cli tests.
+// Package-local facade for the clients-owned client-config sandbox descriptor.
 //
 // WHY THIS EXISTS. A test that drives a REAL client-config reconcile enumerates
 // clients.AllClients(), and each adapter resolves its config path from the
@@ -27,44 +26,25 @@
 // developer's live VS Code MCP config to point at the test's ephemeral port
 // (plus a .bak-mcp-local-hub-<ts> pair per run).
 //
-// So the rule is: neutralize the whole set in ONE place, and let each fixture
-// pick only its own HOME/USERPROFILE/LOCALAPPDATA policy. Adding a client
-// adapter that reads a new path env var means adding it HERE, once.
+// The descriptor redirects every adapter-path input under the fixture root or
+// unsets its explicit override; adding an adapter input changes that descriptor
+// once for API, CLI, and GUI tests.
 package cli
 
 import (
-	"path/filepath"
 	"testing"
+
+	"mcp-local-hub/internal/clients"
 )
 
 // neutralizeClientConfigPathEnv points every client-config path environment
 // variable this repo's adapters consult at sandboxHome, so a test that
 // enumerates clients.AllClients() can only ever see sandbox configs.
 //
-// It deliberately does NOT set HOME / USERPROFILE / LOCALAPPDATA: those carry
-// per-fixture meaning (state-dir redirect, settings path, seeded client files)
-// and each caller sets them itself. Callers must point them at sandboxHome too.
-//
-// It also deliberately does NOT set MIMOCODE_DISABLE_CLAUDE_CODE_MCP. That gate
-// switches OFF mimocode's ~/.claude.json import layer, and a fixture that
-// silences it stops exercising mimocode's multi-layer read/write split — the
-// exact contract the mcp-front reconcile has to get right. A caller that wants
-// the single-layer shape sets it explicitly after calling this.
+// It does not set MIMOCODE_DISABLE_CLAUDE_CODE_MCP: that gate changes MiMoCode
+// read-layer semantics rather than selecting a path. A fixture that needs the
+// single-layer shape sets it explicitly after calling this helper.
 func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 	t.Helper()
-	// Roaming/XDG roots: redirect (not unset) — an unset APPDATA falls back to
-	// <home>\AppData\Roaming in several adapters, which is only isolated by
-	// accident.
-	t.Setenv("APPDATA", filepath.Join(sandboxHome, "AppData", "Roaming"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(sandboxHome, ".config"))
-	t.Setenv("ProgramData", filepath.Join(sandboxHome, "ProgramData"))
-	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(sandboxHome, "ProgramData", "opencode"))
-	// Explicit-profile overrides: clear them. Any value the developer has
-	// exported points OUTSIDE the sandbox by definition.
-	for _, key := range []string{
-		"COPILOT_HOME", "KIMI_CODE_HOME",
-		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
-	} {
-		t.Setenv(key, "")
-	}
+	t.Cleanup(clients.ApplyClientConfigSandboxEnvironment(sandboxHome))
 }

@@ -32,6 +32,36 @@ The decision is one transaction design, not six local patches:
 5. rollback skips only an uncertain row or LSP dependency group and continues
    every independent safe inverse before returning an aggregate pending result.
 
+## Cycle 3 superseding port and generation admission
+
+This addendum preserves the version-3 row-owned receipt model but advances the
+active recovery artifact to version 4 for prior-port lifecycle authority. The
+public `mcp_front.port` setting is a requested endpoint; the private routing
+epoch `(state, generation, admitted_port)` is the durable endpoint ordinary
+writers use. Only the CLI generation-admission owner may compare the requested
+port, classify the lifecycle, or select a generation. Only the API epoch owner
+may persist the exact old/new routing tuple under the routing lease.
+
+A same-generation retry is frozen to `ActivePlan.Port`. Cross-port admission is
+not a relaxation: it creates exactly generation $N+1$ only after the strict
+validator proves generation $N$ forward-terminal and the routing epoch exactly
+matches its generation and port. Every active row must have a terminal
+`applied` attempt with a valid receipt or `confirmed-no-write`; no disposition,
+prepared/conflict/precondition-conflict, invalid, or unattempted row is allowed.
+The empty plan satisfies this predicate vacuously. Older row receipts and first
+baselines remain exact rollback authority and are not relabelled.
+
+Version 4 adds one optional staged `generation_admission` containing phase
+`prepared` and exact `from_epoch`/`to_epoch`. Admission persists that complete
+plan before one exact epoch compare-and-set, clears staging durably, and permits
+no client prepare or mutation before the clear. Restart or rollback rolls the
+stage forward from `from_epoch`, clears it at `to_epoch`, and fails closed if
+routing matches neither. Strict version-3 read/rollback remains supported;
+version 1/2 refusal is unchanged. Missing private port state is bound only from
+an exact version-3/4 journal proof, never from the requested setting. Version-4
+state is retired through explicit rollback to GUI before a version-3-only
+binary is installed; it is never down-converted.
+
 ## Current-source evidence and R2 review disposition
 
 The source below was independently re-read at

@@ -26,6 +26,37 @@ new forward generation while any rollback disposition exists, until explicit
 rollback/retirement. Planner admission remains blocked until the repeat
 reliability review returns `PASS`.
 
+## Cycle 3 superseding prior-port lifecycle
+
+The Cycle 3 lifecycle addendum supersedes earlier text that treated the public
+`mcp_front.port` value as routing authority or allowed a retry to replace the
+active plan at another port without a generation transition. The public value
+is only the requested next endpoint. The durable private routing epoch is
+`(state, generation, admitted_port)`, and stable-front ordinary writers resolve
+`admitted_port`, never the mutable requested value.
+
+The CLI generation-admission boundary is the sole semantic owner. A retry in
+generation $N$ keeps its frozen active-plan port. A different requested port is
+admissible only as generation $N+1$, after the strict journal validator proves
+the predecessor forward-terminal: exact journal/routing epoch match, no
+rollback disposition, and every non-empty active-plan row either `applied` with
+its exact receipt or `confirmed-no-write`. A validated zero-row plan is
+terminal vacuously. Prepared, conflict, precondition-conflict, unattempted,
+invalid, corrupt, generation-gap, and overflow shapes fail closed.
+
+The recovery wire format is version 4. It retains the version-3 row model and
+adds optional `generation_admission={phase,from_epoch,to_epoch}` for one
+roll-forward-only cross-file handshake: persist the staged report, exact-CAS
+the routing epoch, durably clear staging, and only then permit client prepare
+callbacks or adapter writes. Re-entry rolls forward when routing equals
+`from_epoch`, finalizes when it equals `to_epoch`, and otherwise refuses with
+`MCP_FRONT_GENERATION_ADMISSION_INCOMPLETE`. The new binary strictly reads both
+version 3 and version 4; versions 1/2 remain refused. A version-3 routing state
+without `admitted_port` can be bound only from an exact matching journal, with
+additional intended-state and readiness proof for stable `front`. Downgrade
+requires version-4-capable rollback to GUI and journal retirement; no artifact
+is down-converted.
+
 Protected C3 `--check`, C5 operation serialization, C6 total route preflight,
 and C7 route cleanup remain binding. The ADR's allowed source/test surfaces,
 lock order, failure discriminators, migration rules, and complete deterministic

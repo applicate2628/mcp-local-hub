@@ -13,6 +13,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -121,11 +122,16 @@ func TestProbeDaemonHealth_RouteFrontRowUsesRouteSpecificProbe(t *testing.T) {
 	}
 }
 
-// TestRouteFrontHealthProbe_SucceedsWhereGenericMCPProbeFails is the
-// evidentiary half: against a listener with the route daemon's ACTUAL surface
-// (only /serena/mcp; no /mcp at all) the generic probe fails and the
-// route-specific probe succeeds. That contrast IS the bot's finding.
-func TestRouteFrontHealthProbe_SucceedsWhereGenericMCPProbeFails(t *testing.T) {
+// TestRouteFrontHealthProbe_RejectsBrokenLaterLSPRoute proves health uses the
+// same complete manifest-owned predicate as client cutover. A healthy first
+// LSP route cannot mask a broken later sibling.
+func TestRouteFrontHealthProbe_RejectsBrokenLaterLSPRoute(t *testing.T) {
+	specs, err := loadLSPRouterLanguageSpecs(nil)
+	if err != nil || len(specs) < 2 {
+		t.Fatalf("load at least two canonical LSP route specs: len=%d err=%v", len(specs), err)
+	}
+	firstPath := fmt.Sprintf(lspRouterURLPathTemplate, specs[0].Name)
+	brokenPath := fmt.Sprintf(lspRouterURLPathTemplate, specs[1].Name)
 	mux := http.NewServeMux()
 	mux.HandleFunc(SerenaRouterURLPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -141,6 +147,7 @@ func TestRouteFrontHealthProbe_SucceedsWhereGenericMCPProbeFails(t *testing.T) {
 			"result":  map[string]any{"protocolVersion": "2024-11-05", "capabilities": map[string]any{}},
 		})
 	})
+	mux.HandleFunc(firstPath, serveMCPFrontRoutesReadiness)
 	// Everything else — including /mcp — 404s, exactly as RouteHandler does.
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
@@ -158,13 +165,16 @@ func TestRouteFrontHealthProbe_SucceedsWhereGenericMCPProbeFails(t *testing.T) {
 		t.Fatalf("precondition broken: the generic /mcp probe should NOT succeed against a route-shaped listener; got %+v", generic)
 	}
 	routeProbe := routeFrontHealthProbe(port)
-	if !routeProbe.OK {
-		t.Fatalf("the route-specific probe must report a route-shaped listener as healthy; got err=%q", routeProbe.Err)
+	if routeProbe.OK {
+		t.Fatalf("a front with healthy Serena and first LSP routes must remain unhealthy when later route %s is broken; got %+v", brokenPath, routeProbe)
 	}
 	if routeProbe.Source != RouteFrontHealthSource {
 		t.Fatalf("route probe result must carry Source=%q; got %q", RouteFrontHealthSource, routeProbe.Source)
 	}
-	if routeProbe.ToolCount != 0 {
-		t.Fatalf("the route probe must not claim a tool count it never enumerated; got %d", routeProbe.ToolCount)
+	if !strings.Contains(strings.ToLower(routeProbe.Err), "lsp") {
+		t.Fatalf("the failed health probe must name the LSP stage so operators can diagnose the route gap; got %q", routeProbe.Err)
+	}
+	if !strings.Contains(routeProbe.Err, specs[1].Name) || !strings.Contains(routeProbe.Err, string(MCPFrontProbeStageShapeResponse)) {
+		t.Fatalf("health detail must identify the broken later language and exact probe stage; got %q", routeProbe.Err)
 	}
 }

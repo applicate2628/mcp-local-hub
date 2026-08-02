@@ -14,6 +14,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -21,6 +22,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,14 +32,27 @@ import (
 	"github.com/gofrs/flock"
 )
 
-// startSerenaOnlyRouteServer serves a route daemon that answers /serena/mcp
-// perfectly and has NO /lsp/<language>/mcp mount.
+// startFirstLSPOnlyRouteServer serves a route daemon that answers /serena/mcp
+// and the manifest's first LSP route, but has no later language routes.
 //
 // This is not a contrived shape: internal/cli/route.go's buildRouteServer
 // wires the two routers INDEPENDENTLY, and the LSP one is only wired when the
 // mcp-language-server manifest both loads and parses. Either failure is logged
 // to stderr and the daemon keeps serving — producing exactly this process.
-func startSerenaOnlyRouteServer(t *testing.T) (port int, cleanup func()) {
+func startFirstLSPOnlyRouteServer(t *testing.T) (port int, cleanup func()) {
+	port, _, cleanup = startMCPFrontReadinessServerWithFilter(t, int(^uint(0)>>1), "/lsp/clangd/mcp")
+	return port, cleanup
+}
+
+// startMCPFrontReadinessServer serves a real loopback HTTP listener whose
+// gopls-mcp route has a controllable number of successful requests while every
+// sibling stays live. A finite value models only that backend route dropping
+// between preflight and final verification.
+func startMCPFrontReadinessServer(t *testing.T, lspLiveRequests int) (port int, lspRequests *atomic.Int32, cleanup func()) {
+	return startMCPFrontReadinessServerWithFilter(t, lspLiveRequests, "")
+}
+
+func startMCPFrontReadinessServerWithFilter(t *testing.T, lspLiveRequests int, onlyLSPPath string) (port int, lspRequests *atomic.Int32, cleanup func()) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -44,19 +60,95 @@ func startSerenaOnlyRouteServer(t *testing.T) (port int, cleanup func()) {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc(api.SerenaRouterURLPath, func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			w.Header().Set("Allow", "POST")
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		serveMCPFrontReadinessResponse(w, r)
+	})
+	lspRequests = new(atomic.Int32)
+	var perPath sync.Map
+	mux.HandleFunc("/lsp/", func(w http.ResponseWriter, r *http.Request) {
+		lspRequests.Add(1)
+		counterAny, _ := perPath.LoadOrStore(r.URL.Path, new(atomic.Int32))
+		pathRequests := counterAny.(*atomic.Int32).Add(1)
+		limitedPath := onlyLSPPath
+		if limitedPath == "" {
+			limitedPath = "/lsp/go/mcp"
+		}
+		if (onlyLSPPath != "" && r.URL.Path != onlyLSPPath) || (r.URL.Path == limitedPath && int(pathRequests) > lspLiveRequests) {
+			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"serena-router","version":"0"}}}`)
+		serveMCPFrontReadinessResponse(w, r)
 	})
-	// Everything else — crucially every /lsp/<language>/mcp path — 404s, the
-	// way an unmounted route does.
 	srv := &http.Server{Handler: mux}
 	go func() { _ = srv.Serve(ln) }()
-	return ln.Addr().(*net.TCPAddr).Port, func() { _ = srv.Close() }
+	return ln.Addr().(*net.TCPAddr).Port, lspRequests, func() { _ = srv.Close() }
+}
+
+func serveMCPFrontReadinessResponse(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.Header().Set("Allow", "POST")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"mcp-front-readiness","version":"test"}}}`)
+}
+
+func TestMCPFrontR2_ZeroRowGenerationRoundTripsAndRetriesCleanly(t *testing.T) {
+	tmp := mcpFrontPR588Env(t)
+	assertRedirectedStateDir(t, tmp)
+	reportPath := withMCPFrontReportPathSeam(t)
+
+	port, cleanup := startTestRouteServer(t)
+	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
+
+	a := api.NewAPI()
+	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
+		t.Fatalf("SettingsSet: %v", err)
+	}
+
+	for cycle := 1; cycle <= 2; cycle++ {
+		if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
+			t.Fatalf("cycle %d empty forward: %v", cycle, err)
+		}
+		durable, err := readMCPFrontReconcileReport(reportPath)
+		if err != nil {
+			t.Fatalf("cycle %d read empty journal: %v", cycle, err)
+		}
+		if durable == nil || len(durable.Rows) != 0 || durable.ActivePlan == nil || len(durable.ActivePlan.Rows) != 0 || len(durable.ActivePlan.Operations) != 0 {
+			t.Fatalf("cycle %d journal is not an explicit zero-row generation: %+v", cycle, durable)
+		}
+		state, err := a.MCPFrontRoutingTargetSnapshot()
+		if err != nil || state.State != api.MCPFrontRoutingTargetFront || state.Generation != 1 {
+			t.Fatalf("cycle %d forward routing state=%+v err=%v, want stable front generation 1", cycle, state, err)
+		}
+
+		clientRows := 0
+		ops := newMCPFrontRollbackOps(a)
+		restoreSerena := ops.restoreSerena
+		restoreLSP := ops.restoreLSP
+		ops.restoreSerena = func(requests []api.SerenaOwnedRestoreRequest) ([]api.SerenaOwnedRestoreResult, error) {
+			clientRows += len(requests)
+			return restoreSerena(requests)
+		}
+		ops.restoreLSP = func(rows []api.LSPRouterRecoveryRow, opts api.LSPClientRouterOpts, callbacks api.LSPRouterRestoreCallbacks) (*api.LSPClientRouterReport, []api.LSPRouterRestoreRowResult, error) {
+			clientRows += len(rows)
+			return restoreLSP(rows, opts, callbacks)
+		}
+		if err := runRollbackMCPFrontWithOps(newMCPFrontTestCmd(), reportPath, ops); err != nil {
+			t.Fatalf("cycle %d empty rollback: %v", cycle, err)
+		}
+		if clientRows != 0 {
+			t.Fatalf("cycle %d empty rollback admitted %d client mutation rows", cycle, clientRows)
+		}
+		state, err = a.MCPFrontRoutingTargetSnapshot()
+		if err != nil || state.State != api.MCPFrontRoutingTargetGUI || state.Generation != 0 {
+			t.Fatalf("cycle %d rollback routing state=%+v err=%v, want stable gui", cycle, state, err)
+		}
+		if _, err := os.Stat(reportPath); !os.IsNotExist(err) {
+			t.Fatalf("cycle %d active empty journal was not retired: %v", cycle, err)
+		}
+	}
 }
 
 // TestMCPFrontR2_ForwardRefusesWhenOnlyTheSerenaRouteIsLive is the P1 guard
@@ -67,11 +159,11 @@ func startSerenaOnlyRouteServer(t *testing.T) (port int, cleanup func()) {
 // treated as the whole command's gate, so a route daemon serving only
 // /serena/mcp satisfied it and the LSP leg then rewrote every LSP client onto
 // a route that answers nothing.
-func TestMCPFrontR2_ForwardRefusesWhenOnlyTheSerenaRouteIsLive(t *testing.T) {
+func TestMCPFrontR2_ForwardRefusesWhenALaterLSPRouteIsBroken(t *testing.T) {
 	redirectMCPFrontTestEnv(t)
 	reportPath := withMCPFrontReportPathSeam(t)
 
-	port, cleanup := startSerenaOnlyRouteServer(t)
+	port, cleanup := startFirstLSPOnlyRouteServer(t)
 	defer cleanup()
 	seedSupervisorOwnedRoutePort(t, port)
 
@@ -88,13 +180,68 @@ func TestMCPFrontR2_ForwardRefusesWhenOnlyTheSerenaRouteIsLive(t *testing.T) {
 
 	err := runReconcileMCPFront(newMCPFrontTestCmd(), false)
 	if err == nil {
-		t.Fatalf("forward reconcile must REFUSE when the LSP route is not live: it is about to point every LSP client at /lsp/<language>/mcp on this port, and nothing answers there")
+		t.Fatalf("forward reconcile must REFUSE when only the first LSP route is live: it is about to point later clients at broken /lsp/<language>/mcp routes")
 	}
 	if !strings.Contains(err.Error(), "lsp") && !strings.Contains(err.Error(), "LSP") {
 		t.Fatalf("the refusal must name the LSP route as the cause, so the operator knows what to fix; got: %v", err)
 	}
+	var readinessErr *api.MCPFrontRoutesLiveError
+	if !errors.As(err, &readinessErr) || readinessErr.Stage != api.MCPFrontRouteStageLSP {
+		t.Fatalf("the preflight refusal must preserve a typed LSP readiness stage; err=%T %v", err, err)
+	}
+	if readinessErr.Code != api.MCPFrontRouteNotReadyCode || readinessErr.Language != "fortran" || readinessErr.Backend != "mcp-language-server" || readinessErr.ProbeStage != api.MCPFrontProbeStageShapeResponse {
+		t.Fatalf("preflight must identify the first broken later manifest route and exact substage; got %+v", readinessErr)
+	}
 	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
 		t.Fatalf("a refused pre-flight must leave ZERO side effects, including no recovery record; stat err = %v", statErr)
+	}
+}
+
+// TestMCPFrontR2_ForwardFinalVerificationRefusesLostLSPRoute proves readiness
+// is re-established after client writes, not only before the recovery journal
+// is created. The server permits exactly preflight's HEAD+initialize LSP pair,
+// then drops the LSP route; no timing or host scheduling is involved.
+func TestMCPFrontR2_ForwardFinalVerificationRefusesLostLSPRoute(t *testing.T) {
+	tmp := redirectMCPFrontTestEnv(t)
+	reportPath := withMCPFrontReportPathSeam(t)
+
+	// Two complete pre-write route probes are mandatory now: the admission
+	// preflight and the post-front-preparing re-probe. Drop the route only for
+	// the final post-write verification.
+	port, lspRequests, cleanup := startMCPFrontReadinessServer(t, 4)
+	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
+
+	a := api.NewAPI()
+	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
+		t.Fatalf("SettingsSet: %v", err)
+	}
+	configPath := seedClaudeCodeConfig(t, tmp, map[string]any{
+		"serena": map[string]any{"url": "http://127.0.0.1:9125/serena/mcp"},
+	})
+
+	err := runReconcileMCPFront(newMCPFrontTestCmd(), false)
+	if err == nil {
+		t.Fatal("forward reconcile reported success after the LSP route dropped during its client writes")
+	}
+	var readinessErr *api.MCPFrontRoutesLiveError
+	if !errors.As(err, &readinessErr) || readinessErr.Stage != api.MCPFrontRouteStageLSP {
+		t.Fatalf("final verification must return the typed LSP readiness failure; err=%T %v", err, err)
+	}
+	if readinessErr.Code != api.MCPFrontRouteNotReadyCode || readinessErr.Language != "go" || readinessErr.Backend != "gopls-mcp" || readinessErr.ProbeStage != api.MCPFrontProbeStageShapeResponse {
+		t.Fatalf("final verification must identify the dropped gopls backend route and exact substage; got %+v", readinessErr)
+	}
+	if got := lspRequests.Load(); got <= 4 {
+		t.Fatalf("LSP requests=%d, want more than one route's preflight pair so final all-route verification is proven to have run", got)
+	}
+	if got, ok := claudeCodeEntryURL(t, configPath, "serena"); !ok || got != api.SerenaRouterClientURL(port) {
+		t.Fatalf("the final verification test must reach the post-write stage; serena URL=%q present=%v, want %q", got, ok, api.SerenaRouterClientURL(port))
+	}
+	if _, statErr := os.Stat(reportPath); statErr != nil {
+		t.Fatalf("post-write readiness refusal must retain the durable recovery journal for retry or rollback: %v", statErr)
+	}
+	if state, stateErr := api.NewAPI().MCPFrontRoutingTargetSnapshot(); stateErr != nil || state.State != api.MCPFrontRoutingTargetFrontPreparing || state.Generation != 1 {
+		t.Fatalf("post-write failure routing state=%+v err=%v, want front-preparing generation 1", state, stateErr)
 	}
 }
 
@@ -147,10 +294,9 @@ func TestMCPFrontR2_CheckWithReconcileMutatesNothing(t *testing.T) {
 	}
 }
 
-// TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort is the P2 guard for the
-// record naming the FIRST generation's port after a re-run moved the clients
-// to a different one. The rollback judges live entries against this value, so
-// a stale one makes it skip the very entries the cutover created.
+// TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort guards the explicit N+1
+// admission path after a terminal predecessor. The rollback judges each row
+// against its exact receipt, while the active plan names the newly admitted port.
 func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 	tmp := mcpFrontPR588Env(t)
 	assertRedirectedStateDir(t, tmp)
@@ -167,6 +313,9 @@ func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 	}
 	if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
 		t.Fatalf("forward reconcile at port A: %v", err)
+	}
+	if state, stateErr := a.MCPFrontRoutingTargetSnapshot(); stateErr != nil || state.State != api.MCPFrontRoutingTargetFront || state.Generation != 1 {
+		t.Fatalf("successful forward routing state=%+v err=%v, want front generation 1", state, stateErr)
 	}
 	if got := readPersistedMCPFrontReport(t, reportPath).ActivePlan.Port; got != portA {
 		t.Fatalf("generation 1 recorded port %d, want %d", got, portA)
@@ -186,17 +335,49 @@ func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 		t.Fatalf("SettingsSet B: %v", err)
 	}
 	if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
-		t.Fatalf("forward reconcile at port B: %v", err)
+		t.Fatalf("terminal generation must admit an exact N+1 port move: %v", err)
 	}
 
 	rec := readPersistedMCPFrontReport(t, reportPath)
-	if rec.ActivePlan.Port != portB {
-		t.Fatalf("active plan port=%d, want latest %d (first %d)", rec.ActivePlan.Port, portB, portA)
+	if rec.Version != mcpFrontReconcileReportVersion || rec.Generation != 2 || rec.ActivePlan.Generation != 2 || rec.ActivePlan.Port != portB || !rec.Settled || rec.GenerationAdmission != nil {
+		t.Fatalf("admitted generation is incomplete: %+v", rec)
 	}
 	// The pre-state must NOT have moved with it: opposite polarity, same record.
 	serenaKey := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")
 	if rec.Rows[serenaKey].Pin == nil {
 		t.Fatalf("expected the first generation's row-owned pin to survive the re-run; row=%+v", rec.Rows[serenaKey])
+	}
+}
+
+func TestMCPFrontRollbackPartialLeavesGUIRestoring(t *testing.T) {
+	tmp := mcpFrontPR588Env(t)
+	assertRedirectedStateDir(t, tmp)
+	reportPath := withMCPFrontReportPathSeam(t)
+	configPath := seedClaudeCodeConfig(t, tmp, map[string]any{
+		"serena": map[string]any{"url": "http://127.0.0.1:9125/serena/mcp"},
+	})
+	port, cleanup := startTestRouteServer(t)
+	defer cleanup()
+	seedSupervisorOwnedRoutePort(t, port)
+	a := api.NewAPI()
+	if err := a.SettingsSet(api.MCPFrontPortSettingKey, strconv.Itoa(port)); err != nil {
+		t.Fatal(err)
+	}
+	if err := runReconcileMCPFront(newMCPFrontTestCmd(), false); err != nil {
+		t.Fatalf("forward reconcile: %v", err)
+	}
+	if err := os.Remove(configPath); err != nil {
+		t.Fatalf("make recorded client unavailable: %v", err)
+	}
+	err := runReconcileMCPFront(newMCPFrontTestCmd(), true)
+	if err == nil || !strings.Contains(err.Error(), "recovery remains pending") {
+		t.Fatalf("partial rollback err=%v, want durable pending recovery", err)
+	}
+	if state, stateErr := a.MCPFrontRoutingTargetSnapshot(); stateErr != nil || state.State != api.MCPFrontRoutingTargetGUIRestoring || state.Generation != 1 {
+		t.Fatalf("partial rollback routing state=%+v err=%v, want gui-restoring generation 1", state, stateErr)
+	}
+	if _, statErr := os.Stat(reportPath); statErr != nil {
+		t.Fatalf("partial rollback retired its recovery journal: %v", statErr)
 	}
 }
 
@@ -396,7 +577,7 @@ func TestMCPFrontR2_PinIsReclaimedWhenItsRecordCannotBePublished(t *testing.T) {
 		t.Fatalf("seed backup: %v", err)
 	}
 
-	journal, journalErr := newMCPFrontV3Journal(reportPath, nil, 9137, &api.LSPRouterClientPlan{Port: 9137})
+	journal, journalErr := newMCPFrontV3Journal(reportPath, nil, mcpFrontReconcileReportVersion, 1, 9137, &api.LSPRouterClientPlan{Port: 9137})
 	if journalErr != nil {
 		t.Fatal(journalErr)
 	}

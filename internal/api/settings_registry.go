@@ -48,6 +48,7 @@ type SettingDef struct {
 	Pattern    string
 	Optional   bool // for TypeString/TypePath: empty value allowed (memo §4.1, Codex r1 P1.3)
 	Deferred   bool
+	ReadOnly   bool // visible through list/get, mutable only through its owning typed API
 	Help       string
 	RenderKind RenderKind // memo D14: "" = default, "custom" = section owns rendering
 }
@@ -221,6 +222,16 @@ var SettingsRegistry = []SettingDef{
 	{Key: MCPFrontPortSettingKey, Section: "advanced", Type: TypeInt,
 		Default: strconv.Itoa(DefaultMCPFrontPort), Min: intPtr(1024), Max: intPtr(65535),
 		Help: "Port for the supervisor-managed MCP front daemon (`mcphub route`) that serves /serena/mcp + /lsp/<language>/mcp independently of the GUI process, so serena+LSP MCP survive GUI restarts/exits. Restart of `mcphub route` (or the supervisor) is required to take effect. This setting alone does not rewrite any client config — run `mcphub install --reconcile-mcp-front` to repoint installed clients at the new port."},
+	{Key: MCPFrontRoutingTargetSettingKey, Section: "advanced", Type: TypeEnum,
+		Default: string(MCPFrontRoutingTargetGUI),
+		Enum: []string{
+			string(MCPFrontRoutingTargetGUI),
+			string(MCPFrontRoutingTargetFrontPreparing),
+			string(MCPFrontRoutingTargetFront),
+			string(MCPFrontRoutingTargetGUIRestoring),
+		},
+		ReadOnly: true,
+		Help:     "Current client-routing target. Read-only: only the journaled `mcphub install --reconcile-mcp-front` transaction may transition it."},
 }
 
 // findDef returns the SettingDef for the given key, or nil if unknown.

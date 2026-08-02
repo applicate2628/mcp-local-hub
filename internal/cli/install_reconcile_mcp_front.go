@@ -149,12 +149,15 @@ const mcpFrontReconcilePinDirLeaf = "mcp-front-reconcile-pins"
 // interpret must never be used to drive writes into client configs. Bump on
 // any change to what the fields mean.
 //
-// Version 3 makes recovery authority per exact row. Versions 1 and 2 lack the
+// Version 3 makes recovery authority per exact row. Version 4 adds the
+// recoverable cross-file generation-admission handshake. Versions 1 and 2 lack the
 // immutable `(surface, client, language, entry_name)` row, active plan,
 // pre/intended attempt, and effective applied receipt needed to distinguish a
 // successful write from a retry that did not write. They are read-only refused
 // with `legacy-ownership-unproven`; neither is upgraded in place.
-const mcpFrontReconcileReportVersion = 3
+const mcpFrontReconcileReportVersion = 4
+
+const mcpFrontReconcileVersion3 = 3
 
 const mcpFrontReconcileVersion2 = 2
 
@@ -173,12 +176,22 @@ const mcpFrontReconcileLegacyReportVersion = 1
 // mutation and rollback authority. A rollback retires the artifact only after
 // a durable re-read shows every row in a terminal disposition.
 type mcpFrontReconcileReport struct {
-	Version          int                             `json:"version"`
-	SnapshotComplete bool                            `json:"snapshot_complete"`
-	Generation       int                             `json:"generation,omitempty"`
-	Rows             map[string]mcpFrontReconcileRow `json:"rows,omitempty"`
-	ActivePlan       *mcpFrontReconcilePlan          `json:"active_plan,omitempty"`
+	Version             int                             `json:"version"`
+	SnapshotComplete    bool                            `json:"snapshot_complete"`
+	Generation          int                             `json:"generation,omitempty"`
+	Rows                map[string]mcpFrontReconcileRow `json:"rows"`
+	ActivePlan          *mcpFrontReconcilePlan          `json:"active_plan,omitempty"`
+	Settled             bool                            `json:"settled,omitempty"`
+	GenerationAdmission *mcpFrontGenerationAdmission    `json:"generation_admission,omitempty"`
 }
+
+type mcpFrontGenerationAdmission struct {
+	Phase     string                            `json:"phase"`
+	FromEpoch api.MCPFrontRoutingTargetSnapshot `json:"from_epoch"`
+	ToEpoch   api.MCPFrontRoutingTargetSnapshot `json:"to_epoch"`
+}
+
+const mcpFrontGenerationAdmissionPrepared = "prepared"
 
 type mcpFrontReconcileRow struct {
 	Surface     string                       `json:"surface"`
@@ -704,17 +717,237 @@ func preflightMCPFrontReconcile(ctx context.Context, a *api.API, port int) error
 	if serr := api.AssertMCPFrontPortSupervisorOwned(port); serr != nil {
 		return serr
 	}
-	// Serena route. ReconcileSerenaClientsToRouter re-proves this internally
-	// before its own writes; that inner proof is deliberately left in place as
-	// defense-in-depth, but it is no longer this command's gate.
-	if perr := api.AssertSerenaRouterRouteLive(ctx, port); perr != nil {
-		return perr
-	}
-	// LSP route. Never probed before this round — see AssertLSPRouterRouteLive.
-	if perr := api.AssertLSPRouterRouteLive(ctx, port); perr != nil {
+	// ReconcileSerenaClientsToRouter re-proves Serena internally before its own
+	// writes, but this command owns both Serena and LSP client surfaces. Its
+	// gate must therefore establish their shared front-readiness invariant once.
+	if perr := api.AssertMCPFrontRoutesLive(ctx, port); perr != nil {
 		return perr
 	}
 	return nil
+}
+
+func verifyMCPFrontIntendedStates(report *mcpFrontReconcileReport) error {
+	if report == nil || report.ActivePlan == nil {
+		return errors.New("active recovery plan is missing")
+	}
+	for _, op := range report.ActivePlan.Operations {
+		row, ok := report.Rows[op.RowKey]
+		if !ok {
+			return fmt.Errorf("active plan references missing row %q", op.RowKey)
+		}
+		var live mcpFrontEntryState
+		switch row.Surface {
+		case mcpFrontSurfaceSerena:
+			fingerprint, err := api.SerenaClientEntryFingerprint(row.Client, nil)
+			if err != nil {
+				return fmt.Errorf("read intended serena row %q: %w", op.RowKey, err)
+			}
+			live = mcpFrontSerenaState(fingerprint)
+		case mcpFrontSurfaceLSP:
+			snapshot, err := api.ReadLSPRouterEntrySnapshot(row.Client, row.Language, row.EntryName, nil)
+			if err != nil {
+				return fmt.Errorf("read intended lsp row %q: %w", op.RowKey, err)
+			}
+			live = mcpFrontLSPState(snapshot)
+		default:
+			return fmt.Errorf("row %q has unknown surface %q", op.RowKey, row.Surface)
+		}
+		if !mcpFrontStateEqual(live, op.IntendedState) {
+			return fmt.Errorf("row %q does not match its journaled intended state", op.RowKey)
+		}
+	}
+	return nil
+}
+
+func mcpFrontRoutingEpochEqual(a, b api.MCPFrontRoutingTargetSnapshot) bool {
+	return a.State == b.State && a.Generation == b.Generation && a.Port == b.Port
+}
+
+type mcpFrontGenerationDecision struct {
+	Generation int
+	Port       int
+	FromEpoch  api.MCPFrontRoutingTargetSnapshot
+	ToEpoch    api.MCPFrontRoutingTargetSnapshot
+	Admission  bool
+	Settled    bool
+}
+
+type mcpFrontGenerationAdmissionOps struct {
+	routingState func() (api.MCPFrontRoutingTargetSnapshot, error)
+	transition   func(context.Context, api.MCPFrontRoutingTargetSnapshot, api.MCPFrontRoutingTargetSnapshot) error
+	persist      func(string, *mcpFrontReconcileReport) error
+}
+
+func newMCPFrontGenerationAdmissionOps(a *api.API) mcpFrontGenerationAdmissionOps {
+	return mcpFrontGenerationAdmissionOps{
+		routingState: a.MCPFrontRoutingTargetSnapshot,
+		transition:   a.TransitionMCPFrontRoutingEpochContext,
+		persist: func(path string, report *mcpFrontReconcileReport) error {
+			return api.WriteStateFileAtomic(path, report)
+		},
+	}
+}
+
+func mcpFrontPriorForwardTerminal(prior *mcpFrontReconcileReport, routing api.MCPFrontRoutingTargetSnapshot) error {
+	if prior == nil || prior.ActivePlan == nil {
+		return errors.New("forward-generation-not-terminal: prior generation has no active plan")
+	}
+	if prior.Generation != prior.ActivePlan.Generation || routing.Generation != prior.Generation || routing.Port != prior.ActivePlan.Port {
+		return fmt.Errorf("%w: routing-epoch-mismatch journal=%d/%d routing=%s/%d/%d",
+			api.ErrMCPFrontTargetConflict, prior.Generation, prior.ActivePlan.Port, routing.State, routing.Generation, routing.Port)
+	}
+	if prior.Settled {
+		if routing.State != api.MCPFrontRoutingTargetFront {
+			return fmt.Errorf("%w: routing-epoch-mismatch settled journal requires front", api.ErrMCPFrontTargetConflict)
+		}
+	} else if routing.State != api.MCPFrontRoutingTargetFrontPreparing {
+		return fmt.Errorf("%w: routing-epoch-mismatch unsettled journal requires front-preparing", api.ErrMCPFrontTargetConflict)
+	}
+	for _, key := range prior.ActivePlan.Rows {
+		row := prior.Rows[key]
+		if row.Disposition != nil {
+			return fmt.Errorf("forward-recovery-disposition-active: row %q carries rollback disposition", key)
+		}
+		if row.Attempt == nil || row.Attempt.Generation != prior.Generation {
+			return fmt.Errorf("forward-generation-not-terminal: row %q is unattempted in generation %d", key, prior.Generation)
+		}
+		switch row.Attempt.State {
+		case mcpFrontAttemptApplied:
+			if row.Applied == nil || row.Applied.Generation != prior.Generation || row.Applied.Port != prior.ActivePlan.Port {
+				return fmt.Errorf("forward-generation-not-terminal: row %q has no exact applied receipt", key)
+			}
+		case mcpFrontAttemptConfirmedNoWrite:
+		default:
+			return fmt.Errorf("forward-generation-not-terminal: row %q attempt is %q", key, row.Attempt.State)
+		}
+	}
+	return nil
+}
+
+func classifyMCPFrontGeneration(prior *mcpFrontReconcileReport, routing api.MCPFrontRoutingTargetSnapshot, requestedPort int) (mcpFrontGenerationDecision, error) {
+	if requestedPort <= 0 {
+		return mcpFrontGenerationDecision{}, fmt.Errorf("requested mcp-front port %d is invalid", requestedPort)
+	}
+	if prior == nil {
+		gui := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetGUI}
+		if !mcpFrontRoutingEpochEqual(routing, gui) {
+			return mcpFrontGenerationDecision{}, fmt.Errorf("%w: routing-epoch-mismatch without journal: %s/%d/%d", api.ErrMCPFrontTargetConflict, routing.State, routing.Generation, routing.Port)
+		}
+		to := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: 1, Port: requestedPort}
+		return mcpFrontGenerationDecision{Generation: 1, Port: requestedPort, FromEpoch: gui, ToEpoch: to, Admission: true}, nil
+	}
+	if prior.ActivePlan == nil || prior.Generation != prior.ActivePlan.Generation || routing.Generation != prior.Generation || routing.Port != prior.ActivePlan.Port {
+		return mcpFrontGenerationDecision{}, fmt.Errorf("%w: routing-epoch-mismatch journal=%d/%d routing=%s/%d/%d", api.ErrMCPFrontTargetConflict, prior.Generation, func() int {
+			if prior.ActivePlan == nil {
+				return 0
+			}
+			return prior.ActivePlan.Port
+		}(), routing.State, routing.Generation, routing.Port)
+	}
+	if requestedPort == prior.ActivePlan.Port {
+		switch routing.State {
+		case api.MCPFrontRoutingTargetFrontPreparing:
+			return mcpFrontGenerationDecision{Generation: prior.Generation, Port: requestedPort, FromEpoch: routing, ToEpoch: routing}, nil
+		case api.MCPFrontRoutingTargetFront:
+			return mcpFrontGenerationDecision{Generation: prior.Generation, Port: requestedPort, FromEpoch: routing, ToEpoch: routing, Settled: true}, nil
+		default:
+			return mcpFrontGenerationDecision{}, fmt.Errorf("%w: routing-epoch-mismatch for retry: %s", api.ErrMCPFrontTargetConflict, routing.State)
+		}
+	}
+	if err := mcpFrontPriorForwardTerminal(prior, routing); err != nil {
+		return mcpFrontGenerationDecision{}, err
+	}
+	maxInt := int(^uint(0) >> 1)
+	if prior.Generation == maxInt {
+		return mcpFrontGenerationDecision{}, errors.New("journal-generation-overflow")
+	}
+	to := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: prior.Generation + 1, Port: requestedPort}
+	return mcpFrontGenerationDecision{Generation: to.Generation, Port: requestedPort, FromEpoch: routing, ToEpoch: to, Admission: true}, nil
+}
+
+func reconcileMCPFrontGenerationAdmission(ctx context.Context, reportPath string, report *mcpFrontReconcileReport, ops mcpFrontGenerationAdmissionOps) error {
+	admission := report.GenerationAdmission
+	if admission == nil {
+		return nil
+	}
+	routing, err := ops.routingState()
+	if err != nil {
+		return fmt.Errorf("MCP_FRONT_GENERATION_ADMISSION_INCOMPLETE: read routing epoch: %w", err)
+	}
+	if mcpFrontRoutingEpochEqual(routing, admission.FromEpoch) {
+		if err := ops.transition(ctx, admission.FromEpoch, admission.ToEpoch); err != nil {
+			return fmt.Errorf("generation-admission-transition-failed: %w", err)
+		}
+	} else if !mcpFrontRoutingEpochEqual(routing, admission.ToEpoch) {
+		return fmt.Errorf("MCP_FRONT_GENERATION_ADMISSION_INCOMPLETE: routing %s/%d/%d matches neither from %s/%d/%d nor to %s/%d/%d",
+			routing.State, routing.Generation, routing.Port,
+			admission.FromEpoch.State, admission.FromEpoch.Generation, admission.FromEpoch.Port,
+			admission.ToEpoch.State, admission.ToEpoch.Generation, admission.ToEpoch.Port)
+	}
+	report.GenerationAdmission = nil
+	if err := ops.persist(reportPath, report); err != nil {
+		report.GenerationAdmission = admission
+		return fmt.Errorf("generation-admission-finalize-failed: %w", err)
+	}
+	return nil
+}
+
+func admitMCPFrontGeneration(ctx context.Context, journal *mcpFrontReconcileJournal, decision mcpFrontGenerationDecision, ops mcpFrontGenerationAdmissionOps) error {
+	if !decision.Admission {
+		return nil
+	}
+	journal.record.GenerationAdmission = &mcpFrontGenerationAdmission{
+		Phase: mcpFrontGenerationAdmissionPrepared, FromEpoch: decision.FromEpoch, ToEpoch: decision.ToEpoch,
+	}
+	if err := ops.persist(journal.reportPath, &journal.record); err != nil {
+		return fmt.Errorf("generation-admission-not-durable: %w", err)
+	}
+	return reconcileMCPFrontGenerationAdmission(ctx, journal.reportPath, &journal.record, ops)
+}
+
+type mcpFrontRoutingMigrationOps struct {
+	verify     func(*mcpFrontReconcileReport) error
+	preflight  func(context.Context, int) error
+	transition func(context.Context, api.MCPFrontRoutingTargetSnapshot, api.MCPFrontRoutingTargetSnapshot) error
+}
+
+func bindMCPFrontRoutingPortForMigration(ctx context.Context, a *api.API, prior *mcpFrontReconcileReport, routing api.MCPFrontRoutingTargetSnapshot) (api.MCPFrontRoutingTargetSnapshot, error) {
+	return bindMCPFrontRoutingPortForMigrationWithOps(ctx, prior, routing, mcpFrontRoutingMigrationOps{
+		verify:     verifyMCPFrontIntendedStates,
+		preflight:  func(ctx context.Context, port int) error { return preflightMCPFrontReconcile(ctx, a, port) },
+		transition: a.TransitionMCPFrontRoutingEpochContext,
+	})
+}
+
+func bindMCPFrontRoutingPortForMigrationWithOps(ctx context.Context, prior *mcpFrontReconcileReport, routing api.MCPFrontRoutingTargetSnapshot, ops mcpFrontRoutingMigrationOps) (api.MCPFrontRoutingTargetSnapshot, error) {
+	if routing.State == api.MCPFrontRoutingTargetGUI || routing.Port > 0 {
+		return routing, nil
+	}
+	if prior == nil || prior.ActivePlan == nil || prior.Generation != routing.Generation || prior.ActivePlan.Generation != prior.Generation || prior.ActivePlan.Port <= 0 {
+		return routing, errors.New("generation-migration-unproven: journal cannot bind the missing admitted port")
+	}
+	if routing.State == api.MCPFrontRoutingTargetFront {
+		if ops.verify == nil || ops.preflight == nil {
+			return routing, errors.New("generation-migration-unproven: stable front proof dependencies are unavailable")
+		}
+		if err := ops.verify(prior); err != nil {
+			return routing, fmt.Errorf("generation-migration-unproven: intended state: %w", err)
+		}
+		if err := ops.preflight(ctx, prior.ActivePlan.Port); err != nil {
+			return routing, fmt.Errorf("generation-migration-unproven: stable front readiness: %w", err)
+		}
+	} else if routing.State != api.MCPFrontRoutingTargetFrontPreparing && routing.State != api.MCPFrontRoutingTargetGUIRestoring {
+		return routing, fmt.Errorf("generation-migration-unproven: unsupported state %q", routing.State)
+	}
+	bound := routing
+	bound.Port = prior.ActivePlan.Port
+	if ops.transition == nil {
+		return routing, errors.New("generation-migration-unproven: routing transition dependency is unavailable")
+	}
+	if err := ops.transition(ctx, routing, bound); err != nil {
+		return routing, fmt.Errorf("generation-migration-unproven: bind admitted port: %w", err)
+	}
+	return bound, nil
 }
 
 func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath string) error {
@@ -725,11 +958,6 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), mcpFrontReconcileTimeout)
 	defer cancel()
-
-	if gerr := preflightMCPFrontReconcile(ctx, a, port); gerr != nil {
-		return fmt.Errorf("reconcile-mcp-front: refusing to write any client config: %w", gerr)
-	}
-
 	keepN := effectiveBackupKeepN()
 	// Read any prior, not-yet-rolled-back generation BEFORE anything is
 	// written. A prior artifact that exists but cannot be read/parsed is a
@@ -759,12 +987,65 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 				len(uncertain), describeMCPFrontRowKeys(uncertain))
 		}
 	}
+	targetState, stateErr := a.MCPFrontRoutingTargetSnapshotForMigration()
+	if stateErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: read routing target: %w", stateErr)
+	}
+	admissionOps := newMCPFrontGenerationAdmissionOps(a)
+	if prior != nil && prior.GenerationAdmission != nil {
+		if err := reconcileMCPFrontGenerationAdmission(ctx, reportPath, prior, admissionOps); err != nil {
+			return fmt.Errorf("reconcile-mcp-front: %w", err)
+		}
+		targetState, stateErr = a.MCPFrontRoutingTargetSnapshot()
+		if stateErr != nil {
+			return fmt.Errorf("reconcile-mcp-front: re-read routing target after admission recovery: %w", stateErr)
+		}
+	}
+	targetState, stateErr = bindMCPFrontRoutingPortForMigration(ctx, a, prior, targetState)
+	if stateErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: %w", stateErr)
+	}
+	// Recover any already-durable admission before consulting the mutable
+	// requested endpoint's readiness. This probe is still before plan capture,
+	// new admission persistence, or client mutation.
+	if gerr := preflightMCPFrontReconcile(ctx, a, port); gerr != nil {
+		return fmt.Errorf("reconcile-mcp-front: refusing to write any client config: %w", gerr)
+	}
+	if targetState.State == api.MCPFrontRoutingTargetGUIRestoring {
+		return fmt.Errorf("reconcile-mcp-front: %w", &api.MCPFrontTransitionActiveError{State: targetState.State, Generation: targetState.Generation})
+	}
+	if prior != nil && prior.ActivePlan != nil && prior.Settled && port != prior.ActivePlan.Port {
+		if err := verifyMCPFrontIntendedStates(prior); err != nil {
+			return fmt.Errorf("reconcile-mcp-front: forward-generation-not-terminal: settled predecessor intended-state verification failed: %w", err)
+		}
+	}
+	decision, decisionErr := classifyMCPFrontGeneration(prior, targetState, port)
+	if decisionErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: %w", decisionErr)
+	}
+	if decision.Settled {
+		if verr := verifyMCPFrontIntendedStates(prior); verr != nil {
+			return fmt.Errorf("reconcile-mcp-front: settled target does not match durable intended state: %w", verr)
+		}
+		if gerr := preflightMCPFrontReconcile(ctx, a, decision.Port); gerr != nil {
+			return fmt.Errorf("reconcile-mcp-front: settled target readiness failed: %w", gerr)
+		}
+		if !prior.Settled {
+			prior.Settled = true
+			if err := api.WriteStateFileAtomic(reportPath, prior); err != nil {
+				return fmt.Errorf("reconcile-mcp-front: repair settled journal marker: %w", err)
+			}
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "mcp-front reconcile: generation=%d already settled on port=%d; rollback remains required before downgrade\n", prior.Generation, decision.Port)
+		return nil
+	}
+	frontTarget := api.ClientRoutingTarget{Mode: api.MCPFrontRoutingTargetFront, Port: decision.Port, Generation: decision.Generation}
 
 	// Freeze the complete eligible LSP population and every exact pre-state
 	// once. Apply uses only this plan and never re-enumerates clients.
-	lspPlan, planErr := a.PlanLSPRouterClientEntries(api.LSPClientRouterOpts{
-		GUIPort:     port,
-		BackupKeepN: keepN,
+	lspPlan, planErr := a.PlanLSPRouterClientEntriesForMCPFrontTransaction(api.LSPClientRouterOpts{
+		RoutingTarget: &frontTarget,
+		BackupKeepN:   keepN,
 	})
 	if planErr != nil {
 		return fmt.Errorf("reconcile-mcp-front: capture-incomplete: %w (nothing was written)", planErr)
@@ -772,13 +1053,25 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	if len(lspPlan.CaptureFailures) > 0 {
 		return fmt.Errorf("reconcile-mcp-front: capture-incomplete: %d lsp row(s) could not be captured (nothing was written)", len(lspPlan.CaptureFailures))
 	}
-	journal, journalErr := newMCPFrontV3Journal(reportPath, prior, port, lspPlan)
+	recordVersion := mcpFrontReconcileReportVersion
+	if prior != nil && !decision.Admission {
+		recordVersion = prior.Version
+	}
+	journal, journalErr := newMCPFrontV3Journal(reportPath, prior, recordVersion, decision.Generation, decision.Port, lspPlan)
 	if journalErr != nil {
 		return fmt.Errorf("reconcile-mcp-front: build recovery plan: %w", journalErr)
 	}
-	// The complete LSP plan is durable before the first Serena or LSP mutation.
-	if persistErr := journal.persist(); persistErr != nil {
+	// The complete plan and, for a new generation, the recoverable handoff are
+	// durable and finalized before the first prepare callback can run.
+	if decision.Admission {
+		if err := admitMCPFrontGeneration(ctx, journal, decision, admissionOps); err != nil {
+			return fmt.Errorf("reconcile-mcp-front: %w", err)
+		}
+	} else if persistErr := journal.persist(); persistErr != nil {
 		return fmt.Errorf("reconcile-mcp-front: persist active recovery plan: %w (nothing was written)", persistErr)
+	}
+	if gerr := preflightMCPFrontReconcile(ctx, a, decision.Port); gerr != nil {
+		return fmt.Errorf("reconcile-mcp-front: post-transition readiness failed; routing remains front-preparing: %w", gerr)
 	}
 
 	// Serena first. Its own port-liveness proof (Port>0 path,
@@ -794,8 +1087,8 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	// after that client's backup exists and before its config is mutated, and
 	// a failure there aborts THAT CLIENT'S rewrite rather than leaving it
 	// mutated with no durable way back.
-	serenaReport, serr := api.ReconcileSerenaClientsToRouter(ctx, api.SerenaReconcileOpts{
-		Port:              port,
+	serenaReport, serr := api.ReconcileSerenaClientsToRouterForMCPFrontTransaction(ctx, api.SerenaReconcileOpts{
+		RoutingTarget:     &frontTarget,
 		BackupKeepN:       keepN,
 		OnAttemptPrepared: journal.prepareSerenaAttempt,
 		OnAttemptFinished: journal.finishSerenaAttempt,
@@ -820,6 +1113,29 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 		fmt.Fprintf(cmd.OutOrStdout(), "serena: %d applied, %d failed (port %d)\n", len(serenaReport.Applied), len(serenaReport.Failed), port)
 		return fmt.Errorf("reconcile-mcp-front: lsp client router reconcile: %w", lerr)
 	}
+	// The routes are checked again after every client write and its own readback.
+	// A front that disappeared or lost its LSP mount during the transaction must
+	// not be reported as a successful cutover; the durable journal remains for
+	// explicit retry or rollback.
+	if len(serenaReport.Failed) > 0 || len(lspReport.Failed) > 0 {
+		return fmt.Errorf("reconcile-mcp-front: %d serena + %d lsp per-client failure(s); routing remains front-preparing and this generation will resume on retry",
+			len(serenaReport.Failed), len(lspReport.Failed))
+	}
+	if verr := verifyMCPFrontIntendedStates(&journal.record); verr != nil {
+		return fmt.Errorf("reconcile-mcp-front: final intended-state verification failed; routing remains front-preparing: %w", verr)
+	}
+	if verr := preflightMCPFrontReconcile(ctx, a, decision.Port); verr != nil {
+		return fmt.Errorf("reconcile-mcp-front: final mcp-front route readiness verification failed after client writes: %w", verr)
+	}
+	preparingEpoch := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: journal.record.Generation, Port: journal.record.ActivePlan.Port}
+	frontEpoch := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFront, Generation: journal.record.Generation, Port: journal.record.ActivePlan.Port}
+	if transitionErr := a.TransitionMCPFrontRoutingEpochContext(ctx, preparingEpoch, frontEpoch); transitionErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: settle front routing target: %w", transitionErr)
+	}
+	journal.record.Settled = true
+	if persistErr := journal.persist(); persistErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: routing target settled, but durable journal marker could not be updated: %w; re-run repairs the marker", persistErr)
+	}
 
 	_ = api.LogHubMcpEvent("info", "mcp-front-reconciled", map[string]any{
 		"action":         "reconcile",
@@ -834,10 +1150,7 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"mcp-front reconcile: port=%d serena(applied=%d failed=%d) lsp(applied=%d removed=%d failed=%d)\n",
 		port, len(serenaReport.Applied), len(serenaReport.Failed), len(lspReport.Applied), len(lspReport.Removed), len(lspReport.Failed))
-	if len(serenaReport.Failed) > 0 || len(lspReport.Failed) > 0 {
-		return fmt.Errorf("reconcile-mcp-front: %d serena + %d lsp per-client failure(s); re-run to retry the failed clients (successful ones are unaffected, and the pre-reconcile record `--rollback` restores from is preserved across re-runs)",
-			len(serenaReport.Failed), len(lspReport.Failed))
-	}
+	fmt.Fprintln(cmd.OutOrStdout(), "downgrade safety: run `mcphub install --reconcile-mcp-front --rollback` and verify it completes before installing a version that does not understand the front routing target")
 	return nil
 }
 
@@ -904,7 +1217,11 @@ func terminalMCPFrontDisposition(disposition *mcpFrontRollbackDisposition) bool 
 }
 
 func canRetireMCPFrontReconcileReport(report *mcpFrontReconcileReport) bool {
-	if report == nil || len(report.Rows) == 0 {
+	// Production callers pass only records accepted by
+	// validateMCPFrontReconcileReport. An accepted generation with no planned
+	// client rows is complete by construction; malformed empty records are
+	// rejected by that complete-record gate before this terminal-state check.
+	if report == nil {
 		return false
 	}
 	for _, row := range report.Rows {
@@ -1080,6 +1397,10 @@ type mcpFrontRollbackOps struct {
 	readStateFile func(context.Context, string, []string, string) ([]byte, error)
 	restoreSerena func([]api.SerenaOwnedRestoreRequest) ([]api.SerenaOwnedRestoreResult, error)
 	restoreLSP    func([]api.LSPRouterRecoveryRow, api.LSPClientRouterOpts, api.LSPRouterRestoreCallbacks) (*api.LSPClientRouterReport, []api.LSPRouterRestoreRowResult, error)
+	routingState  func() (api.MCPFrontRoutingTargetSnapshot, error)
+	transition    func(context.Context, api.MCPFrontRoutingTargetSnapshot, api.MCPFrontRoutingTargetSnapshot) error
+	persist       func(string, *mcpFrontReconcileReport) error
+	bindMigration func(context.Context, *mcpFrontReconcileReport, api.MCPFrontRoutingTargetSnapshot) (api.MCPFrontRoutingTargetSnapshot, error)
 }
 
 func newMCPFrontRollbackOps(a *api.API) mcpFrontRollbackOps {
@@ -1090,6 +1411,14 @@ func newMCPFrontRollbackOps(a *api.API) mcpFrontRollbackOps {
 		},
 		restoreLSP: func(rows []api.LSPRouterRecoveryRow, opts api.LSPClientRouterOpts, callbacks api.LSPRouterRestoreCallbacks) (*api.LSPClientRouterReport, []api.LSPRouterRestoreRowResult, error) {
 			return a.RestoreLSPRouterRecoveryRows(rows, opts, callbacks)
+		},
+		routingState: a.MCPFrontRoutingTargetSnapshotForMigration,
+		transition:   a.TransitionMCPFrontRoutingEpochContext,
+		persist: func(path string, report *mcpFrontReconcileReport) error {
+			return api.WriteStateFileAtomic(path, report)
+		},
+		bindMigration: func(ctx context.Context, report *mcpFrontReconcileReport, routing api.MCPFrontRoutingTargetSnapshot) (api.MCPFrontRoutingTargetSnapshot, error) {
+			return bindMCPFrontRoutingPortForMigration(ctx, a, report, routing)
 		},
 	}
 }
@@ -1134,6 +1463,16 @@ func runRollbackMCPFrontWithOps(cmd *cobra.Command, reportPath string, ops mcpFr
 	if verr := validateMCPFrontReconcileReport(&persisted, reportPath); verr != nil {
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
 	}
+	if persisted.GenerationAdmission != nil {
+		if ops.routingState == nil || ops.transition == nil || ops.persist == nil {
+			return errors.New("reconcile-mcp-front --rollback: MCP_FRONT_GENERATION_ADMISSION_INCOMPLETE: admission recovery dependencies are unavailable")
+		}
+		if err := reconcileMCPFrontGenerationAdmission(cmd.Context(), reportPath, &persisted, mcpFrontGenerationAdmissionOps{
+			routingState: ops.routingState, transition: ops.transition, persist: ops.persist,
+		}); err != nil {
+			return fmt.Errorf("reconcile-mcp-front --rollback: %w", err)
+		}
+	}
 	// ROLLBACK POLICY (invariant I11). Uncertainty is recorded per row and then
 	// CARRIED INTO the per-row loops below, never used to abort. Only a failure
 	// to make those markers durable stops the rollback here: if the record
@@ -1146,6 +1485,44 @@ func runRollbackMCPFrontWithOps(cmd *cobra.Command, reportPath string, ops mcpFr
 		return fmt.Errorf("reconcile-mcp-front --rollback: %w", verr)
 	}
 	defer zeroMCPFrontVerifiedSerenaPins(verifiedPins)
+	if ops.routingState != nil && ops.transition != nil {
+		state, stateErr := ops.routingState()
+		if stateErr != nil {
+			return fmt.Errorf("reconcile-mcp-front --rollback: read routing target: %w", stateErr)
+		}
+		if state.Port == 0 && state.State != api.MCPFrontRoutingTargetGUI {
+			if ops.bindMigration == nil {
+				return errors.New("reconcile-mcp-front --rollback: generation-migration-unproven: admitted-port binding dependency is unavailable")
+			}
+			state, stateErr = ops.bindMigration(cmd.Context(), &persisted, state)
+			if stateErr != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", stateErr)
+			}
+		}
+		switch state.State {
+		case api.MCPFrontRoutingTargetGUI:
+			if !canRetireMCPFrontReconcileReport(&persisted) {
+				next := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetGUIRestoring, Generation: persisted.Generation, Port: persisted.ActivePlan.Port}
+				if err := ops.transition(cmd.Context(), state, next); err != nil {
+					return fmt.Errorf("reconcile-mcp-front --rollback: enter gui-restoring: %w", err)
+				}
+			}
+		case api.MCPFrontRoutingTargetFront, api.MCPFrontRoutingTargetFrontPreparing:
+			if state.Generation != persisted.Generation || state.Port != persisted.ActivePlan.Port {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", &api.MCPFrontTargetConflictError{Expected: state.State, Actual: state.State, Generation: persisted.Generation, ActualGeneration: state.Generation})
+			}
+			next := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetGUIRestoring, Generation: persisted.Generation, Port: persisted.ActivePlan.Port}
+			if err := ops.transition(cmd.Context(), state, next); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: enter gui-restoring: %w", err)
+			}
+		case api.MCPFrontRoutingTargetGUIRestoring:
+			if state.Generation != persisted.Generation {
+				return fmt.Errorf("reconcile-mcp-front --rollback: %w", &api.MCPFrontTargetConflictError{Expected: api.MCPFrontRoutingTargetGUIRestoring, Actual: state.State, Generation: persisted.Generation, ActualGeneration: state.Generation})
+			}
+		default:
+			return fmt.Errorf("reconcile-mcp-front --rollback: unsupported routing state %q", state.State)
+		}
+	}
 	serenaRestored := 0
 	for _, key := range sortedMCPFrontRowKeys(&persisted, mcpFrontSurfaceSerena) {
 		row := persisted.Rows[key]
@@ -1273,6 +1650,19 @@ func runRollbackMCPFrontWithOps(cmd *cobra.Command, reportPath string, ops mcpFr
 			describePendingMCPFrontRows(durable), reportPath)
 	}
 	conflictRows := conflictMCPFrontRowLabels(durable)
+	if ops.routingState != nil && ops.transition != nil {
+		state, stateErr := ops.routingState()
+		if stateErr != nil {
+			return fmt.Errorf("reconcile-mcp-front --rollback: re-read routing target before settle: %w", stateErr)
+		}
+		if state.State == api.MCPFrontRoutingTargetGUIRestoring {
+			if err := ops.transition(cmd.Context(), state, api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetGUI}); err != nil {
+				return fmt.Errorf("reconcile-mcp-front --rollback: settle gui routing target: %w", err)
+			}
+		} else if state.State != api.MCPFrontRoutingTargetGUI {
+			return fmt.Errorf("reconcile-mcp-front --rollback: routing target changed before settle: %w", &api.MCPFrontTargetConflictError{Expected: api.MCPFrontRoutingTargetGUIRestoring, Actual: state.State, Generation: persisted.Generation, ActualGeneration: state.Generation})
+		}
+	}
 
 	// ATOMIC RETIREMENT. Move the record out of the active namespace before
 	// reporting success, and FAIL if that transition cannot complete. The
@@ -1339,9 +1729,12 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 	// already refuses a foreign version. Routing this through the same owner
 	// keeps ONE refusal wording for the operator instead of two that disagree
 	// about what to do next.
-	if persisted.Version != mcpFrontReconcileReportVersion {
+	if persisted.Version != mcpFrontReconcileVersion3 && persisted.Version != mcpFrontReconcileReportVersion {
 		return mcpFrontArtifactRefusal(reportPath, persisted.Version,
 			fmt.Sprintf("it declares version %d", persisted.Version))
+	}
+	if persisted.Version == mcpFrontReconcileVersion3 && persisted.GenerationAdmission != nil {
+		return fmt.Errorf("%s version-3 journal carries version-4 generation admission", reportPath)
 	}
 	if !persisted.SnapshotComplete {
 		return fmt.Errorf("%s is not marked snapshot-complete: the run that wrote it did not finish capturing every recovery section, so consuming it would restore only part of the host and then delete the record of the rest. Re-run `mcphub install --reconcile-mcp-front` (which merges into this record without overwriting it) so the missing section is captured, or move the file aside and restore by hand", reportPath)
@@ -1365,6 +1758,61 @@ func validateMCPFrontReconcileReport(persisted *mcpFrontReconcileReport, reportP
 	if len(persisted.ActivePlan.Rows) != len(persisted.ActivePlan.Operations) {
 		return fmt.Errorf("%s active generation plan has %d row references but %d operations",
 			reportPath, len(persisted.ActivePlan.Rows), len(persisted.ActivePlan.Operations))
+	}
+	if admission := persisted.GenerationAdmission; admission != nil {
+		if persisted.Version != mcpFrontReconcileReportVersion {
+			return fmt.Errorf("%s generation admission requires version %d", reportPath, mcpFrontReconcileReportVersion)
+		}
+		if admission.Phase != mcpFrontGenerationAdmissionPrepared {
+			return fmt.Errorf("%s generation admission has unknown phase %q", reportPath, admission.Phase)
+		}
+		if admission.FromEpoch.State != api.MCPFrontRoutingTargetFront && admission.FromEpoch.State != api.MCPFrontRoutingTargetFrontPreparing && admission.FromEpoch.State != api.MCPFrontRoutingTargetGUI {
+			return fmt.Errorf("%s generation admission has invalid from state %q", reportPath, admission.FromEpoch.State)
+		}
+		if admission.ToEpoch.State != api.MCPFrontRoutingTargetFrontPreparing || admission.ToEpoch.Generation <= 0 || admission.ToEpoch.Port <= 0 {
+			return fmt.Errorf("%s generation admission has invalid to epoch", reportPath)
+		}
+		if admission.FromEpoch.State == api.MCPFrontRoutingTargetGUI {
+			if admission.FromEpoch.Generation != 0 || admission.FromEpoch.Port != 0 || admission.ToEpoch.Generation != 1 {
+				return fmt.Errorf("%s initial generation admission has an invalid epoch step", reportPath)
+			}
+		} else {
+			if admission.FromEpoch.Generation <= 0 || admission.FromEpoch.Port <= 0 || admission.FromEpoch.Generation == int(^uint(0)>>1) || admission.ToEpoch.Generation != admission.FromEpoch.Generation+1 {
+				return fmt.Errorf("%s generation admission is not an exact generation increment", reportPath)
+			}
+			if admission.ToEpoch.Port == admission.FromEpoch.Port {
+				return fmt.Errorf("%w: %s generation admission must change admitted port for an N+1 transition", api.ErrMCPFrontTargetInvalid, reportPath)
+			}
+		}
+		if persisted.Generation != admission.ToEpoch.Generation || persisted.ActivePlan.Generation != admission.ToEpoch.Generation || persisted.ActivePlan.Port != admission.ToEpoch.Port || persisted.Settled {
+			return fmt.Errorf("%s staged generation admission does not match its active plan", reportPath)
+		}
+		for key, row := range persisted.Rows {
+			if row.Disposition != nil {
+				return fmt.Errorf("%s staged generation admission row %q carries rollback disposition", reportPath, key)
+			}
+			if row.Attempt == nil {
+				if row.Applied != nil {
+					return fmt.Errorf("%s staged generation admission row %q has receipt without retained attempt", reportPath, key)
+				}
+				continue
+			}
+			if row.Attempt.Generation == admission.ToEpoch.Generation {
+				return fmt.Errorf("%s staged generation admission row %q already carries a new-generation attempt", reportPath, key)
+			}
+			if admission.FromEpoch.State == api.MCPFrontRoutingTargetGUI || row.Attempt.Generation != admission.FromEpoch.Generation {
+				return fmt.Errorf("%s staged generation admission row %q does not belong to the retained generation", reportPath, key)
+			}
+			switch row.Attempt.State {
+			case mcpFrontAttemptApplied:
+				if row.Applied == nil || row.Applied.Generation != admission.FromEpoch.Generation || row.Applied.Port != admission.FromEpoch.Port {
+					return fmt.Errorf("%s staged generation admission row %q lacks its exact retained receipt", reportPath, key)
+				}
+			case mcpFrontAttemptConfirmedNoWrite:
+			default:
+				return fmt.Errorf("%s staged generation admission row %q is not forward-terminal", reportPath, key)
+			}
+		}
 	}
 	planRows := make(map[string]bool, len(persisted.ActivePlan.Rows))
 	for _, key := range persisted.ActivePlan.Rows {
@@ -1824,14 +2272,18 @@ func mcpFrontLegacyBodyKeysPresent(raw []byte) []string {
 // back with the older mcphub" sends them to the exact binary that cannot read
 // their file. `declared` therefore selects the arm; it is never assumed.
 func mcpFrontArtifactRefusal(path string, declared int, detail string) error {
-	if declared > mcpFrontReconcileReportVersion {
+	return mcpFrontArtifactRefusalForVersion(path, declared, mcpFrontReconcileReportVersion, detail)
+}
+
+func mcpFrontArtifactRefusalForVersion(path string, declared, understood int, detail string) error {
+	if declared > understood {
 		return fmt.Errorf(
 			"legacy-ownership-unproven: %s carries artifact version %d and this mcphub understands version %d — the file was written by a NEWER mcphub than the one you are running. "+
 				"This binary will not guess at a format it does not know: it would be building rollback authority out of fields it cannot interpret, and the first thing that authority does is overwrite a live client entry. "+
 				"Nothing was read from the file and no client config was touched. "+
 				"Run `mcphub install --reconcile-mcp-front --rollback` with the NEWER mcphub that wrote it (upgrade this install, or use the binary you ran before), "+
 				"or move the file aside (rename it to %s.unsupported) and restore the entries by hand before re-running this command",
-			path, declared, mcpFrontReconcileReportVersion, path)
+			path, declared, understood, path)
 	}
 	return fmt.Errorf(
 		"legacy-ownership-unproven: %s is a pre-version-%d mcp-front reconcile journal (%s). "+
@@ -1843,8 +2295,8 @@ func mcpFrontArtifactRefusal(path string, declared int, detail string) error {
 			"(rename it to %s.legacy) and restore the entries by hand — it is plain JSON, and its `serena` and `lsp` sections "+
 			"name every client together with its pre-reconcile URL. Then re-run `mcphub install --reconcile-mcp-front` to start "+
 			"a fresh version-%d journal",
-		path, mcpFrontReconcileReportVersion, detail,
-		mcpFrontReconcileReportVersion, path, mcpFrontReconcileReportVersion)
+		path, mcpFrontReconcileVersion3, detail,
+		mcpFrontReconcileVersion3, path, mcpFrontReconcileVersion3)
 }
 
 func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileReport, error) {
@@ -1854,7 +2306,7 @@ func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileR
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		return nil, err
 	}
-	if envelope.Version != mcpFrontReconcileReportVersion {
+	if envelope.Version != mcpFrontReconcileVersion3 && envelope.Version != mcpFrontReconcileReportVersion {
 		return nil, mcpFrontArtifactRefusal(path, envelope.Version,
 			fmt.Sprintf("it declares version %d", envelope.Version))
 	}
@@ -1868,15 +2320,15 @@ func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileR
 		if legacy := mcpFrontLegacyBodyKeysPresent(raw); len(legacy) > 0 {
 			return nil, mcpFrontArtifactRefusal(path, envelope.Version, fmt.Sprintf(
 				"it declares version %d but carries the pre-version-%d body shape: top-level %s",
-				envelope.Version, mcpFrontReconcileReportVersion, strings.Join(legacy, ", ")))
+				envelope.Version, mcpFrontReconcileVersion3, strings.Join(legacy, ", ")))
 		}
-		return nil, fmt.Errorf("decode strict version-3 row journal %s: %w", path, err)
+		return nil, fmt.Errorf("decode strict version-%d row journal %s: %w", envelope.Version, path, err)
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		if err == nil {
 			err = errors.New("unexpected trailing JSON value")
 		}
-		return nil, fmt.Errorf("decode strict version-3 row journal %s: %w", path, err)
+		return nil, fmt.Errorf("decode strict version-%d row journal %s: %w", envelope.Version, path, err)
 	}
 	return &out, nil
 }
@@ -1888,54 +2340,128 @@ func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileR
 // plus its exact row map. The constructor and prepare methods preserve every
 // earlier immutable baseline and replace only the current attempt/receipt.
 type mcpFrontReconcileJournal struct {
-	reportPath string
-	port       int
-	record     mcpFrontReconcileReport
+	reportPath      string
+	port            int
+	record          mcpFrontReconcileReport
+	currentPlanRows map[string]bool
+}
+
+// carryForwardMCPFrontActivePlan builds the next generation's complete row
+// binding from the prior generation's persisted authority. Every retained row
+// must keep its exact operation (including a deep-copied Serena pin binding)
+// until a current-generation operation for that row replaces it. Missing or
+// asymmetric bindings are refused; reconstructing one from mutable row fields
+// would manufacture rollback authority the persisted plan never proved.
+func carryForwardMCPFrontActivePlan(
+	prior *mcpFrontReconcileReport,
+	generation, port int,
+) (*mcpFrontReconcilePlan, error) {
+	active := &mcpFrontReconcilePlan{Generation: generation, Port: port}
+	if prior == nil {
+		return active, nil
+	}
+	if prior.ActivePlan == nil {
+		return nil, errors.New("prior journal has no active plan")
+	}
+	if len(prior.ActivePlan.Rows) != len(prior.ActivePlan.Operations) {
+		return nil, fmt.Errorf("prior active plan has %d row references but %d operations",
+			len(prior.ActivePlan.Rows), len(prior.ActivePlan.Operations))
+	}
+
+	rowRefs := make(map[string]bool, len(prior.ActivePlan.Rows))
+	for _, key := range prior.ActivePlan.Rows {
+		if key == "" || rowRefs[key] {
+			return nil, fmt.Errorf("prior active plan has an empty or duplicate row reference %q", key)
+		}
+		if _, ok := prior.Rows[key]; !ok {
+			return nil, fmt.Errorf("prior active plan references missing row %q", key)
+		}
+		rowRefs[key] = true
+		active.Rows = append(active.Rows, key)
+	}
+
+	opRefs := make(map[string]bool, len(prior.ActivePlan.Operations))
+	for _, op := range prior.ActivePlan.Operations {
+		if op.RowKey == "" || opRefs[op.RowKey] || !rowRefs[op.RowKey] {
+			return nil, fmt.Errorf("prior active plan has an empty, duplicate, or unbound operation for row %q", op.RowKey)
+		}
+		op.Pin = cloneMCPFrontSerenaPin(op.Pin)
+		opRefs[op.RowKey] = true
+		active.Operations = append(active.Operations, op)
+	}
+	for key := range prior.Rows {
+		if !rowRefs[key] || !opRefs[key] {
+			return nil, fmt.Errorf("prior row %q has no inherited active-plan operation", key)
+		}
+	}
+	return active, nil
 }
 
 func newMCPFrontV3Journal(
 	reportPath string,
 	prior *mcpFrontReconcileReport,
+	version, generation int,
 	port int,
 	plan *api.LSPRouterClientPlan,
 ) (*mcpFrontReconcileJournal, error) {
 	record := mcpFrontReconcileReport{
-		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true,
+		Version: version, SnapshotComplete: true, Generation: generation,
 		Rows: map[string]mcpFrontReconcileRow{},
 	}
 	if prior != nil {
-		record = *prior
+		raw, cloneErr := json.Marshal(prior)
+		if cloneErr != nil {
+			return nil, fmt.Errorf("clone prior journal: %w", cloneErr)
+		}
+		if cloneErr := json.Unmarshal(raw, &record); cloneErr != nil {
+			return nil, fmt.Errorf("clone prior journal: %w", cloneErr)
+		}
+		record.Version = version
+		record.Generation = generation
+		record.Settled = false
+		record.GenerationAdmission = nil
 		if record.Rows == nil {
 			record.Rows = map[string]mcpFrontReconcileRow{}
 		}
 	}
-	record.Generation++
-	active := &mcpFrontReconcilePlan{Generation: record.Generation, Port: port}
+	active, activeErr := carryForwardMCPFrontActivePlan(prior, record.Generation, port)
+	if activeErr != nil {
+		return nil, activeErr
+	}
+	record.ActivePlan = active
+	journal := &mcpFrontReconcileJournal{
+		reportPath: reportPath, port: port, record: record,
+		currentPlanRows: map[string]bool{},
+	}
 	if plan != nil {
 		if len(plan.CaptureFailures) > 0 {
 			return nil, fmt.Errorf("capture-incomplete: %d lsp plan row(s) failed", len(plan.CaptureFailures))
 		}
 		for _, op := range plan.Operations {
 			key := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, op.Client, op.Language, op.EntryName)
-			if existing, ok := record.Rows[key]; ok {
+			if journal.currentPlanRows[key] {
+				return nil, fmt.Errorf("current lsp plan has duplicate row %q", key)
+			}
+			if existing, ok := journal.record.Rows[key]; ok {
 				if existing.Surface != mcpFrontSurfaceLSP || existing.Baseline.LSP == nil {
 					return nil, fmt.Errorf("row %q has no immutable lsp baseline", key)
 				}
 			} else {
 				baseline := op.PreState
-				record.Rows[key] = mcpFrontReconcileRow{
+				journal.record.Rows[key] = mcpFrontReconcileRow{
 					Surface: mcpFrontSurfaceLSP, Client: op.Client, Language: op.Language,
 					EntryName: op.EntryName, Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
 				}
 			}
-			active.Rows = append(active.Rows, key)
-			active.Operations = append(active.Operations, mcpFrontPlanOperationForRow(
-				key, record.Rows[key], op.Operation, mcpFrontLSPState(op.PreState), mcpFrontLSPState(op.IntendedState),
-			))
+			if err := journal.bindCurrentPlanOperation(key, mcpFrontPlanOperationForRow(
+				key, journal.record.Rows[key], op.Operation,
+				mcpFrontLSPState(op.PreState), mcpFrontLSPState(op.IntendedState),
+			)); err != nil {
+				return nil, err
+			}
 		}
 	}
-	record.ActivePlan = active
-	return &mcpFrontReconcileJournal{reportPath: reportPath, port: port, record: record}, nil
+	return journal, nil
 }
 
 func (j *mcpFrontReconcileJournal) persist() error {
@@ -1968,20 +2494,15 @@ func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconci
 		State:         mcpFrontAttemptPrepared,
 	}
 	row.Disposition = nil
-	j.record.Rows[key] = row
-	found := false
-	for _, planKey := range j.record.ActivePlan.Rows {
-		if planKey == key {
-			found = true
-			break
+	if err := j.bindCurrentPlanOperation(key, mcpFrontPlanOperationForRow(
+		key, row, "add", row.Attempt.PreState, row.Attempt.IntendedState,
+	)); err != nil {
+		if createdPin != nil {
+			_ = reclaimOrphanedPin(*createdPin, j.reportPath)
 		}
+		return fmt.Errorf("journal-prepare-failed: bind serena row %q: %w", key, err)
 	}
-	if !found {
-		j.record.ActivePlan.Rows = append(j.record.ActivePlan.Rows, key)
-		j.record.ActivePlan.Operations = append(j.record.ActivePlan.Operations, mcpFrontPlanOperationForRow(
-			key, row, "add", row.Attempt.PreState, row.Attempt.IntendedState,
-		))
-	}
+	j.record.Rows[key] = row
 	if err := j.persist(); err != nil {
 		if createdPin != nil {
 			delete(j.record.Rows, key)
@@ -2030,6 +2551,11 @@ func (j *mcpFrontReconcileJournal) prepareLSPOperation(op api.LSPRouterPlannedOp
 		Generation: j.record.Generation, Operation: op.Operation,
 		PreState: mcpFrontLSPState(op.PreState), IntendedState: mcpFrontLSPState(op.IntendedState),
 		State: mcpFrontAttemptPrepared,
+	}
+	if err := j.bindCurrentPlanOperation(key, mcpFrontPlanOperationForRow(
+		key, row, op.Operation, row.Attempt.PreState, row.Attempt.IntendedState,
+	)); err != nil {
+		return fmt.Errorf("journal-prepare-failed: bind lsp row %q: %w", key, err)
 	}
 	row.Disposition = nil
 	j.record.Rows[key] = row
@@ -2170,17 +2696,61 @@ func (j *mcpFrontReconcileJournal) finishAttempt(
 }
 
 func (j *mcpFrontReconcileJournal) ensureActivePlanOperation(key string, planned mcpFrontReconcilePlanOp) error {
+	return j.bindCurrentPlanOperation(key, planned)
+}
+
+// bindCurrentPlanOperation replaces a carried-forward operation exactly once
+// when this generation actually plans the same row. Later binds in the same
+// generation must be byte-for-byte equivalent; a disagreement is a plan
+// integrity failure, not permission to overwrite the durable precondition.
+func (j *mcpFrontReconcileJournal) bindCurrentPlanOperation(key string, planned mcpFrontReconcilePlanOp) error {
 	if j.record.ActivePlan == nil || j.record.ActivePlan.Generation != j.record.Generation {
 		return fmt.Errorf("forward-plan-precondition-conflict-not-durable: active plan is missing or not current")
 	}
-	if existing, found := activeMCPFrontPlanOperation(j.record.ActivePlan, key); found {
+	if planned.RowKey != key {
+		return fmt.Errorf("forward-plan-precondition-conflict-not-durable: operation row %q does not match binding key %q", planned.RowKey, key)
+	}
+	if len(j.record.ActivePlan.Rows) != len(j.record.ActivePlan.Operations) {
+		return fmt.Errorf("forward-plan-precondition-conflict-not-durable: active plan row/operation counts differ")
+	}
+	rowFound := false
+	for _, planKey := range j.record.ActivePlan.Rows {
+		if planKey == key {
+			if rowFound {
+				return fmt.Errorf("forward-plan-precondition-conflict-not-durable: duplicate row %q", key)
+			}
+			rowFound = true
+		}
+	}
+	opIndex := -1
+	for i, op := range j.record.ActivePlan.Operations {
+		if op.RowKey == key {
+			if opIndex >= 0 {
+				return fmt.Errorf("forward-plan-precondition-conflict-not-durable: duplicate operation for row %q", key)
+			}
+			opIndex = i
+		}
+	}
+	if rowFound != (opIndex >= 0) {
+		return fmt.Errorf("forward-plan-precondition-conflict-not-durable: row %q has an asymmetric plan binding", key)
+	}
+	if opIndex >= 0 {
+		existing := j.record.ActivePlan.Operations[opIndex]
+		if !j.currentPlanRows[key] {
+			planned.Pin = cloneMCPFrontSerenaPin(planned.Pin)
+			j.record.ActivePlan.Operations[opIndex] = planned
+			j.currentPlanRows[key] = true
+			return nil
+		}
 		if !mcpFrontPlanOperationEqual(existing, planned) {
 			return fmt.Errorf("forward-plan-precondition-conflict-not-durable: row %q conflicts with the active plan", key)
 		}
 		return nil
 	}
 	j.record.ActivePlan.Rows = append(j.record.ActivePlan.Rows, key)
+	planned.Pin = cloneMCPFrontSerenaPin(planned.Pin)
 	j.record.ActivePlan.Operations = append(j.record.ActivePlan.Operations, planned)
+	j.currentPlanRows[key] = true
 	return nil
 }
 

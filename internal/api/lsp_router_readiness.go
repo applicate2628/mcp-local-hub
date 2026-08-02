@@ -35,6 +35,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -54,12 +55,11 @@ const routerProbeBudget = 2 * time.Second
 // a HEAD that must produce the router's 405 + `Allow: POST` signature, then a
 // real `initialize` round-trip that must return a JSON-RPC result.
 //
-// The probe targets ONE language, and that is sufficient by construction: the
-// route daemon wires the LSP router for the whole manifest language set in a
-// single call (SetLSPRouterReadOnly(resolver, sessions, m.Languages)), so the
-// mount is all-or-nothing. The language is drawn from loadLSPRouterLanguages —
-// the same resolver the forward pass uses to decide which entries to write —
-// so the probe can never test a language set the writer does not share.
+// Every language/backend route declared by the accepted embedded manifest is
+// probed. The router dispatches by language and backend, so one healthy sibling
+// cannot establish readiness for another. Probes run concurrently and their
+// results are merged in canonical manifest order, keeping both the budget and
+// the selected error deterministic.
 //
 // `initialize` is answered SYNTHETICALLY by the router (internal/gui/
 // lsp_router.go handleLSPInitialize) with no backend touch, so this proves the
@@ -70,24 +70,88 @@ const routerProbeBudget = 2 * time.Second
 // Pure read: nothing is mutated on any path.
 func AssertLSPRouterRouteLive(ctx context.Context, port int) error {
 	if port <= 0 {
-		return fmt.Errorf("%w: refusing to probe non-positive port %d", ErrLSPRouterRouteNotLive, port)
+		return newLSPRouterRouteLiveError("", "", MCPFrontProbeStageInput,
+			fmt.Errorf("%w: refusing to probe non-positive port %d", ErrLSPRouterRouteNotLive, port))
 	}
-	languages, err := loadLSPRouterLanguages(nil)
+	specs, err := loadLSPRouterLanguageSpecs(nil)
 	if err != nil {
-		return fmt.Errorf("%w: cannot resolve the LSP language set to probe: %v", ErrLSPRouterRouteNotLive, err)
+		return newLSPRouterRouteLiveError("", "", MCPFrontProbeStageRouteSetLoad,
+			fmt.Errorf("%w: cannot resolve the LSP language set to probe: %w", ErrLSPRouterRouteNotLive, err))
 	}
-	if len(languages) == 0 {
-		return fmt.Errorf("%w: the %s manifest declares no languages, so no LSP route exists to prove", ErrLSPRouterRouteNotLive, lspManifestServerName)
+	if len(specs) == 0 {
+		return newLSPRouterRouteLiveError("", "", MCPFrontProbeStageRouteSetEmpty,
+			fmt.Errorf("%w: the %s manifest declares no languages, so no LSP route exists to prove", ErrLSPRouterRouteNotLive, lspManifestServerName))
 	}
-	language := languages[0]
-	path := fmt.Sprintf(lspRouterURLPathTemplate, language)
-	if perr := routerRouteShapeProbe(ctx, port, path); perr != nil {
-		return fmt.Errorf("%w: %v — the supervisor-managed `mcphub route` daemon wires /serena/mcp and /lsp/<language>/mcp independently, so a live serena route does not imply a live LSP route (a route daemon whose mcp-language-server manifest failed to load keeps serving serena and never mounts this one). Check the route daemon's stderr, then re-run", ErrLSPRouterRouteNotLive, perr)
+
+	results := make([]error, len(specs))
+	var probes sync.WaitGroup
+	probes.Add(len(specs))
+	for i, spec := range specs {
+		i, spec := i, spec
+		go func() {
+			defer probes.Done()
+			results[i] = assertLSPRouterLanguageRouteLive(ctx, port, spec.Name, spec.Backend)
+		}()
 	}
-	if perr := routerInitializeLifecycleProbe(ctx, port, path); perr != nil {
-		return fmt.Errorf("%w: %v — no LSP client config was written", ErrLSPRouterRouteNotLive, perr)
+	probes.Wait()
+	for _, err := range results {
+		if err != nil {
+			return err
+		}
 	}
 	return nil
+}
+
+type lspRouterRouteLiveError struct {
+	Language   string
+	Backend    string
+	ProbeStage MCPFrontProbeStage
+	Cause      error
+}
+
+func (e *lspRouterRouteLiveError) Error() string { return e.Cause.Error() }
+func (e *lspRouterRouteLiveError) Unwrap() error { return e.Cause }
+
+func newLSPRouterRouteLiveError(language, backend string, stage MCPFrontProbeStage, cause error) *lspRouterRouteLiveError {
+	return &lspRouterRouteLiveError{Language: language, Backend: backend, ProbeStage: stage, Cause: cause}
+}
+
+func assertLSPRouterLanguageRouteLive(ctx context.Context, port int, language, backend string) error {
+	path := fmt.Sprintf(lspRouterURLPathTemplate, language)
+	if perr := routerRouteShapeProbe(ctx, port, path); perr != nil {
+		return newLSPRouterRouteLiveError(language, backend, probeStageFromError(perr),
+			fmt.Errorf("%w: language %q backend %q: %w — the supervisor-managed `mcphub route` daemon wires and dispatches LSP routes independently; check the route daemon's stderr, then re-run", ErrLSPRouterRouteNotLive, language, backend, perr))
+	}
+	if perr := routerInitializeLifecycleProbe(ctx, port, path); perr != nil {
+		return newLSPRouterRouteLiveError(language, backend, probeStageFromError(perr),
+			fmt.Errorf("%w: language %q backend %q: %w — no LSP client config was written", ErrLSPRouterRouteNotLive, language, backend, perr))
+	}
+	return nil
+}
+
+type routerProbeError struct {
+	Stage MCPFrontProbeStage
+	Cause error
+}
+
+func (e *routerProbeError) Error() string { return e.Cause.Error() }
+func (e *routerProbeError) Unwrap() error { return e.Cause }
+
+func probeStageFromError(err error) MCPFrontProbeStage {
+	var probeErr *routerProbeError
+	if errors.As(err, &probeErr) {
+		return probeErr.Stage
+	}
+	return MCPFrontProbeStageInput
+}
+
+func newRouterProbeError(ctx context.Context, stage MCPFrontProbeStage, cause error) *routerProbeError {
+	if ctxErr := ctx.Err(); errors.Is(ctxErr, context.DeadlineExceeded) {
+		stage = MCPFrontProbeStageParentDeadline
+	} else if errors.Is(ctxErr, context.Canceled) {
+		stage = MCPFrontProbeStageParentCanceled
+	}
+	return &routerProbeError{Stage: stage, Cause: cause}
 }
 
 // routerRouteShapeProbe issues a loopback HEAD to path and returns nil only
@@ -108,16 +172,17 @@ func routerRouteShapeProbe(ctx context.Context, port int, path string) error {
 	defer cancel()
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodHead, url, nil)
 	if err != nil {
-		return err
+		return newRouterProbeError(ctx, MCPFrontProbeStageShapeTransport, err)
 	}
 	client := &http.Client{Timeout: routerProbeBudget}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return newRouterProbeError(ctx, MCPFrontProbeStageShapeTransport, err)
 	}
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusMethodNotAllowed || !strings.Contains(strings.ToUpper(resp.Header.Get("Allow")), "POST") {
-		return fmt.Errorf("port %d responded but is not an mcphub MCP router at %s (HEAD -> status %d, Allow=%q; expected 405 with Allow: POST)", port, path, resp.StatusCode, resp.Header.Get("Allow"))
+		return newRouterProbeError(ctx, MCPFrontProbeStageShapeResponse,
+			fmt.Errorf("port %d responded but is not an mcphub MCP router at %s (HEAD -> status %d, Allow=%q; expected 405 with Allow: POST)", port, path, resp.StatusCode, resp.Header.Get("Allow")))
 	}
 	return nil
 }
@@ -137,28 +202,35 @@ func routerInitializeLifecycleProbe(ctx context.Context, port int, path string) 
 	const initBody = `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"mcphub-reconcile-probe","version":"0"}}}`
 	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, url, strings.NewReader(initBody))
 	if err != nil {
-		return err
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeTransport, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := &http.Client{Timeout: routerProbeBudget}
 	resp, err := client.Do(req)
 	if err != nil {
-		return err
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeTransport, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("router at port %d does not serve the MCP lifecycle at %s: initialize -> status %d (body=%.200s)", port, path, resp.StatusCode, string(raw))
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeHTTPStatus,
+			fmt.Errorf("router at port %d does not serve the MCP lifecycle at %s: initialize -> status %d (body=%.200s)", port, path, resp.StatusCode, string(raw)))
 	}
 	var rpc struct {
 		Result json.RawMessage `json:"result"`
 		Error  json.RawMessage `json:"error"`
 	}
 	if jerr := json.Unmarshal(raw, &rpc); jerr != nil {
-		return fmt.Errorf("router at port %d returned a non-JSON-RPC initialize response at %s: %w", port, path, jerr)
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeJSONDecode,
+			fmt.Errorf("router at port %d returned a non-JSON-RPC initialize response at %s: %w", port, path, jerr))
 	}
-	if len(rpc.Error) > 0 || len(rpc.Result) == 0 {
-		return fmt.Errorf("router at port %d rejected MCP initialize at %s (no result; error=%s)", port, path, string(rpc.Error))
+	if len(rpc.Error) > 0 {
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeJSONRPCError,
+			fmt.Errorf("router at port %d rejected MCP initialize at %s (error=%s)", port, path, string(rpc.Error)))
+	}
+	if len(rpc.Result) == 0 {
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeResultMissing,
+			fmt.Errorf("router at port %d returned MCP initialize without a result at %s", port, path))
 	}
 	return nil
 }

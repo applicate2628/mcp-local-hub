@@ -172,6 +172,7 @@ type InstallOpts struct {
 	DryRun            bool
 	Writer            io.Writer // progress output destination; nil = os.Stderr
 	GUIPort           int       // live GUI/router port injected by CLI/GUI; zero means unknown
+	RoutingTarget     *ClientRoutingTarget
 	SymlinkConsents   []ResolvedSymlinkConsent
 }
 
@@ -183,12 +184,44 @@ type InstallAllOpts struct {
 	DryRun            bool
 	Writer            io.Writer
 	GUIPort           int
+	RoutingTarget     *ClientRoutingTarget
 }
 
 // InstallResult is one row in an InstallAll report.
 type InstallResult struct {
 	Server string
 	Err    error
+}
+
+func installOptsMayWriteClients(opts InstallOpts) bool {
+	return !(len(opts.ClientsInclude) == 1 && strings.TrimSpace(opts.ClientsInclude[0]) == "")
+}
+
+func (a *API) prepareInstallClientRoutingDecision(opts *InstallOpts) (ClientRoutingAuthorityRequest, error) {
+	if opts == nil {
+		return ClientRoutingAuthorityRequest{}, &MCPFrontTargetInvalidError{Detail: "install routing options are nil"}
+	}
+	if opts.RoutingTarget != nil {
+		if err := ValidateClientRoutingTarget(*opts.RoutingTarget); err != nil {
+			return ClientRoutingAuthorityRequest{}, err
+		}
+		opts.GUIPort = opts.RoutingTarget.Port
+		return ExactTarget(*opts.RoutingTarget), nil
+	}
+	if opts.GUIPort != 0 {
+		legacy := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: opts.GUIPort}
+		if err := ValidateClientRoutingTarget(legacy); err != nil {
+			return ClientRoutingAuthorityRequest{}, err
+		}
+		return StableGUICompatibility(), nil
+	}
+	target, err := a.ResolveClientRoutingTarget()
+	if err != nil {
+		return ClientRoutingAuthorityRequest{}, err
+	}
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
+	return ExactTarget(target), nil
 }
 
 // UninstallReport summarizes what Uninstall actually did. Callers (CLI/GUI)
@@ -261,6 +294,14 @@ func (a *API) Install(opts InstallOpts) error {
 	if err := refuseWorkspaceScopedInstall(m, w); err != nil {
 		return err
 	}
+	authorityRequest := CanonicalAtAdmission()
+	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+		var targetErr error
+		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
+		if targetErr != nil {
+			return fmt.Errorf("resolve client routing target: %w", targetErr)
+		}
+	}
 	// 2. Preflight.
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
@@ -280,7 +321,7 @@ func (a *API) Install(opts InstallOpts) error {
 	// global daemons spawn from supervisor-intent.json (installPlanCore writes
 	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
 	// rather than from per-daemon scheduler tasks.
-	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -320,6 +361,7 @@ func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 			DryRun:            opts.DryRun,
 			Writer:            opts.Writer,
 			GUIPort:           opts.GUIPort,
+			RoutingTarget:     opts.RoutingTarget,
 		})
 		results = append(results, InstallResult{Server: name, Err: err})
 	}
@@ -365,6 +407,7 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			DryRun:            opts.DryRun,
 			Writer:            opts.Writer,
 			GUIPort:           opts.GUIPort,
+			RoutingTarget:     opts.RoutingTarget,
 		}, opts.ManifestDir)
 		results = append(results, InstallResult{Server: e.Name(), Err: err})
 	}
@@ -417,6 +460,14 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
+	authorityRequest := CanonicalAtAdmission()
+	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+		var targetErr error
+		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
+		if targetErr != nil {
+			return fmt.Errorf("resolve client routing target: %w", targetErr)
+		}
+	}
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
@@ -429,7 +480,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
@@ -450,6 +501,14 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
+	authorityRequest := CanonicalAtAdmission()
+	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+		var targetErr error
+		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
+		if targetErr != nil {
+			return fmt.Errorf("resolve client routing target: %w", targetErr)
+		}
+	}
 	if err := Preflight(m, opts.DaemonFilter); err != nil {
 		return err
 	}
@@ -463,7 +522,26 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
+}
+
+func (a *API) installPlanCoreWithRoutingTargetLease(
+	ctx context.Context,
+	m *config.ServerManifest,
+	plan *Plan,
+	opts InstallOpts,
+	authorityRequest ClientRoutingAuthorityRequest,
+	w io.Writer,
+) error {
+	run := func() error {
+		return a.installPlanCoreWithSymlinkConsents(ctx, m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	}
+	if opts.DryRun || !IsSerenaServer(m.Name) || !installOptsMayWriteClients(opts) {
+		return run()
+	}
+	return a.WithClientRoutingAuthorityLease(ctx, authorityRequest, func(ClientRoutingTarget) error {
+		return run()
+	})
 }
 
 // resolveDefaultClientsOverride returns the operator's persisted
@@ -1139,25 +1217,16 @@ var singleHealthProbeFn = singleHealthProbe
 // with this Source set so no renderer prints a phantom "OK (0)".
 const RouteFrontHealthSource = "route-front"
 
-// routeFrontHealthProbeTimeout bounds routeFrontHealthProbe. It is larger than
-// singleHealthProbe's 3s because defaultRouterReadinessPing performs TWO
-// sequential round-trips, each with its own 2s budget derived from the context
-// passed in; a 3s parent would sever the second one on a slow host and report
-// a false failure.
-const routeFrontHealthProbeTimeout = 6 * time.Second
-
 // routeFrontHealthProbeFn is the test seam for routeFrontHealthProbe, mirroring
 // singleHealthProbeFn.
 var routeFrontHealthProbeFn = routeFrontHealthProbe
 
 // routeFrontHealthProbe health-probes the built-in `mcphub route` front daemon
-// on the ONE endpoint it actually serves. It reuses defaultRouterReadinessPing
-// — the SAME predicate `mcphub install --reconcile-mcp-front` requires before
-// it will point any client config at this port (HEAD -> 405 + `Allow: POST` on
-// /serena/mcp, then a real MCP `initialize` round-trip that must return a
-// JSON-RPC result). Single owner: "the front daemon is healthy" and "the front
-// daemon is safe to reconcile clients onto" are the same claim, so they must
-// not drift into two predicates.
+// on both endpoints it writes into client configuration. It reuses
+// AssertMCPFrontRoutesLive — the SAME predicate `mcphub install
+// --reconcile-mcp-front` requires before and after client writes. Single owner:
+// "the front daemon is healthy" and "the front daemon is safe to reconcile
+// clients onto" are the same claim, so they must not drift into two predicates.
 //
 // tools/list is deliberately NOT part of the probe: /serena/mcp's tools/list
 // requires a minted session AND at least one registered serena workspace
@@ -1165,10 +1234,8 @@ var routeFrontHealthProbeFn = routeFrontHealthProbe
 // no-workspace error otherwise), so including it would report a healthy front
 // daemon as failed on every host that has not registered a workspace yet.
 func routeFrontHealthProbe(port int) *HealthProbe {
-	ctx, cancel := context.WithTimeout(context.Background(), routeFrontHealthProbeTimeout)
-	defer cancel()
-	if err := defaultRouterReadinessPing(ctx, port); err != nil {
-		return &HealthProbe{Source: RouteFrontHealthSource, Err: "route front " + SerenaRouterURLPath + ": " + err.Error()}
+	if err := AssertMCPFrontRoutesLive(context.Background(), port); err != nil {
+		return &HealthProbe{Source: RouteFrontHealthSource, Err: "route front: " + err.Error()}
 	}
 	return &HealthProbe{OK: true, Source: RouteFrontHealthSource}
 }

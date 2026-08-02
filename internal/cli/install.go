@@ -251,7 +251,6 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
 					Writer:            cmd.OutOrStdout(),
-					GUIPort:           resolveInstallGUIPort(),
 				})
 				failed := 0
 				for _, r := range results {
@@ -295,7 +294,6 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				IncludeAllClients: allClients,
 				DryRun:            dryRun,
 				Writer:            cmd.OutOrStdout(),
-				GUIPort:           resolveInstallGUIPort(),
 			})
 		},
 	}
@@ -1409,7 +1407,6 @@ func upgradeInstallServer(server string, w io.Writer) error {
 		Server:         server,
 		ClientsInclude: upgradeNoClientWriteSentinel,
 		Writer:         w,
-		GUIPort:        resolveInstallGUIPort(),
 	}
 	if upgradeServerInstallFn != nil {
 		return upgradeServerInstallFn(opts)

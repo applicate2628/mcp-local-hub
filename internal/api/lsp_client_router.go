@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 const (
@@ -21,8 +23,14 @@ const (
 // LSPClientRouterOpts controls the client-config reconcile that points
 // eligible present MCP clients at the workspace-agnostic LSP router.
 type LSPClientRouterOpts struct {
+	// RoutingTarget is the frozen, typed client-routing decision supplied by a
+	// composition root. Production callers should use this field (or leave it
+	// nil so the API resolves the canonical durable state exactly once).
+	RoutingTarget *ClientRoutingTarget
 	// GUIPort is the port written into LSP router client URLs. Zero means
-	// read the validated gui_server.port setting through SettingsGet.
+	// resolve the canonical routing target. A non-zero value is retained only
+	// as a source-compatible adapter for older callers and tests; it is treated
+	// as a stable GUI target and never consulted alongside RoutingTarget.
 	// Despite the field name it is a plain port value, not GUI-specific:
 	// sub-increment 2a's `mcphub install --reconcile-mcp-front` command
 	// passes the settings-owned mcp_front.port here explicitly (a non-zero
@@ -128,12 +136,26 @@ type LSPRouterPlannedOperation struct {
 // one operation. The adapter map is deliberately private and never persisted;
 // applying a plan can only use the same concrete population captured here.
 type LSPRouterClientPlan struct {
-	Port            int                         `json:"port"`
-	Operations      []LSPRouterPlannedOperation `json:"operations"`
-	CaptureFailures []LSPClientRouterFailure    `json:"capture_failures,omitempty"`
-	clientMap       map[string]clients.Client
-	keepN           int
-	opts            LSPClientRouterOpts
+	Port             int                         `json:"port"`
+	Operations       []LSPRouterPlannedOperation `json:"operations"`
+	CaptureFailures  []LSPClientRouterFailure    `json:"capture_failures,omitempty"`
+	clientMap        map[string]clients.Client
+	keepN            int
+	opts             LSPClientRouterOpts
+	transactionOwned bool
+	authorityRequest ClientRoutingAuthorityRequest
+}
+
+// PlanLSPRouterClientEntriesForMCPFrontTransaction is the explicit front
+// transaction lane. Its caller already owns the durable transitional state;
+// ordinary callers must use PlanLSPRouterClientEntries and are fenced again
+// at Apply time by the routing-target lease.
+func (a *API) PlanLSPRouterClientEntriesForMCPFrontTransaction(opts LSPClientRouterOpts) (*LSPRouterClientPlan, error) {
+	plan, err := a.PlanLSPRouterClientEntries(opts)
+	if plan != nil {
+		plan.transactionOwned = true
+	}
+	return plan, err
 }
 
 type LSPRouterMutationObservation struct {
@@ -162,15 +184,24 @@ var ErrLSPRouterPlanPreconditionConflict = errors.New("lsp router plan precondit
 // may perform. It calls clients.AllClients at most once; application never
 // enumerates or re-admits clients.
 func (a *API) PlanLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPRouterClientPlan, error) {
+	authorityRequest := lspClientRoutingAuthorityRequest(opts)
+	resolveCanonical := opts.RoutingTarget == nil && opts.GUIPort == 0
 	languages, err := loadLSPRouterLanguages(opts.Languages)
 	if err != nil {
 		return nil, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return nil, err
 	}
-	opts.GUIPort = port
+	if resolveCanonical {
+		// Planning freezes client URLs before Apply acquires the operation lease,
+		// so the frozen target must still be exact at admission time.
+		authorityRequest = ExactTarget(target)
+	}
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
+	port := target.Port
 	regEntries, err := loadLSPRouterRegistryEntries()
 	if err != nil {
 		return nil, err
@@ -197,10 +228,11 @@ func (a *API) PlanLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPRouterCl
 		capturedClients[clientName] = adapter
 	}
 	plan := &LSPRouterClientPlan{
-		Port:      port,
-		clientMap: capturedClients,
-		keepN:     keepN,
-		opts:      opts,
+		Port:             port,
+		clientMap:        capturedClients,
+		keepN:            keepN,
+		opts:             opts,
+		authorityRequest: authorityRequest,
 	}
 	forceClientName := strings.TrimSpace(opts.ForceClientName)
 	for _, clientName := range sortedLSPClientNames(capturedClients) {
@@ -279,10 +311,26 @@ func (a *API) PlanLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPRouterCl
 // A pre-state mismatch invokes the separate OnPreconditionConflict callback
 // because no mutation attempt was prepared or made.
 func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPRouterApplyCallbacks) (*LSPClientRouterReport, error) {
-	report := &LSPClientRouterReport{}
 	if plan == nil {
-		return report, errors.New("nil lsp router client plan")
+		return &LSPClientRouterReport{}, errors.New("nil lsp router client plan")
 	}
+	if plan.transactionOwned {
+		return a.applyLSPRouterClientPlan(plan, callbacks)
+	}
+	var report *LSPClientRouterReport
+	err := a.WithClientRoutingAuthorityLease(context.Background(), plan.authorityRequest, func(ClientRoutingTarget) error {
+		var applyErr error
+		report, applyErr = a.applyLSPRouterClientPlan(plan, callbacks)
+		return applyErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+func (a *API) applyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPRouterApplyCallbacks) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
 	report.Failed = append(report.Failed, plan.CaptureFailures...)
 	backedUp := map[string]bool{}
 	canonicalReady := map[string]bool{}
@@ -691,16 +739,31 @@ func clientHasLSPRouterEnablementEvidence(
 // The current router state is still backed up before any mutation so rollback
 // itself remains reversible through the normal backup files.
 func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	var report *LSPClientRouterReport
+	err := a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var rollbackErr error
+		report, rollbackErr = a.rollbackLSPRouterClientEntries(admitted)
+		return rollbackErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+func (a *API) rollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
 	languages, err := loadLSPRouterLanguages(opts.Languages)
 	if err != nil {
 		return report, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return report, err
 	}
-	opts.GUIPort = port
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
+	port := target.Port
 	regEntries, err := loadLSPRouterRegistryEntries()
 	if err != nil {
 		return report, err
@@ -794,16 +857,30 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 // mcp-language-server-<language> router entries without restoring legacy
 // per-workspace entries and without touching sibling clients.
 func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	var report *LSPClientRouterReport
+	err := a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var rollbackErr error
+		report, rollbackErr = a.rollbackLSPRouterClientEntriesForClient(clientName, admitted)
+		return rollbackErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+func (a *API) rollbackLSPRouterClientEntriesForClient(clientName string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
 	keepN := opts.BackupKeepN
 	if keepN == 0 {
 		keepN = a.EffectiveBackupKeepN()
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return report, err
 	}
-	opts.GUIPort = port
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
 	return a.rollbackLSPRouterClientEntriesForClientWithKeepN(clientName, opts, keepN)
 }
 
@@ -877,10 +954,11 @@ func (a *API) LSPRouterClientStatuses(opts LSPClientRouterOpts) ([]LSPRouterClie
 	if err != nil {
 		return nil, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return nil, err
 	}
+	port := target.Port
 	disabledClients, err := a.LSPRouterDisabledClientSet()
 	if err != nil {
 		return nil, err
@@ -929,19 +1007,69 @@ func LSPRouterURL(guiPort int, language string) string {
 	return fmt.Sprintf(lspRouterURLTemplate, guiPort, language)
 }
 
-func (a *API) lspRouterGUIPort(port int) (int, error) {
-	if port == 0 {
-		setting, err := a.SettingsGet("gui_server.port")
-		if err != nil {
-			return 0, fmt.Errorf("read gui_server.port: %w", err)
+func (a *API) resolveLSPClientRoutingTarget(opts LSPClientRouterOpts) (ClientRoutingTarget, error) {
+	if opts.RoutingTarget != nil {
+		if err := ValidateClientRoutingTarget(*opts.RoutingTarget); err != nil {
+			return ClientRoutingTarget{}, err
 		}
-		n, err := strconv.Atoi(strings.TrimSpace(setting))
-		if err != nil || n < 1024 || n > 65535 {
-			return 0, fmt.Errorf("gui_server.port resolved to invalid value %q", setting)
-		}
-		port = n
+		return *opts.RoutingTarget, nil
 	}
-	return resolvedLSPRouterGUIPort(port)
+	if opts.GUIPort != 0 {
+		target := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: opts.GUIPort}
+		if err := ValidateClientRoutingTarget(target); err != nil {
+			return ClientRoutingTarget{}, err
+		}
+		return target, nil
+	}
+	return a.ResolveClientRoutingTarget()
+}
+
+func lspClientRoutingAuthorityRequest(opts LSPClientRouterOpts) ClientRoutingAuthorityRequest {
+	if opts.RoutingTarget != nil {
+		return ExactTarget(*opts.RoutingTarget)
+	}
+	if opts.GUIPort != 0 {
+		return StableGUICompatibility()
+	}
+	return CanonicalAtAdmission()
+}
+
+// withLSPClientRoutingAuthority keeps routing authority separate from endpoint
+// provenance. Typed and default callers use the admitted canonical target;
+// source-compatible GUIPort callers keep their explicit endpoint while the
+// owner only proves that durable routing remains stable GUI for the operation.
+func (a *API) withLSPClientRoutingAuthority(
+	ctx context.Context,
+	opts LSPClientRouterOpts,
+	work func(LSPClientRouterOpts) error,
+) error {
+	legacyPort := opts.GUIPort
+	if opts.RoutingTarget == nil && legacyPort != 0 {
+		legacy := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: legacyPort}
+		if err := ValidateClientRoutingTarget(legacy); err != nil {
+			return err
+		}
+	}
+	request := lspClientRoutingAuthorityRequest(opts)
+	return a.WithClientRoutingAuthorityLease(ctx, request, func(canonical ClientRoutingTarget) error {
+		target := canonical
+		if opts.RoutingTarget == nil && legacyPort != 0 {
+			target = ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: legacyPort}
+		}
+		opts.RoutingTarget = &target
+		opts.GUIPort = target.Port
+		return work(opts)
+	})
+}
+
+// lspRouterGUIPort is the legacy single-port adapter kept for source
+// compatibility. New production paths resolve a ClientRoutingTarget instead.
+func (a *API) lspRouterGUIPort(port int) (int, error) {
+	target, err := a.resolveLSPClientRoutingTarget(LSPClientRouterOpts{GUIPort: port})
+	if err != nil {
+		return 0, err
+	}
+	return target.Port, nil
 }
 
 func resolvedLSPRouterGUIPort(port int) (int, error) {
@@ -951,7 +1079,7 @@ func resolvedLSPRouterGUIPort(port int) (int, error) {
 	return port, nil
 }
 
-func loadLSPRouterLanguages(requested []string) ([]string, error) {
+func loadLSPRouterLanguageSpecs(requested []string) ([]config.LanguageSpec, error) {
 	data, err := loadManifestYAMLEmbedFirst(lspManifestServerName)
 	if err != nil {
 		return nil, fmt.Errorf("load manifest %s: %w", lspManifestServerName, err)
@@ -960,32 +1088,47 @@ func loadLSPRouterLanguages(requested []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	known := map[string]bool{}
-	all := make([]string, 0, len(m.Languages))
+	known := map[string]config.LanguageSpec{}
+	all := make([]config.LanguageSpec, 0, len(m.Languages))
+	allNames := make([]string, 0, len(m.Languages))
 	for _, spec := range m.Languages {
 		if spec.Name == "" {
 			continue
 		}
-		known[spec.Name] = true
-		all = append(all, spec.Name)
+		known[spec.Name] = spec
+		all = append(all, spec)
+		allNames = append(allNames, spec.Name)
 	}
 	if len(requested) == 0 {
 		return all, nil
 	}
-	out := make([]string, 0, len(requested))
+	out := make([]config.LanguageSpec, 0, len(requested))
 	seen := map[string]bool{}
 	for _, language := range requested {
 		language = strings.TrimSpace(language)
 		if language == "" || seen[language] {
 			continue
 		}
-		if !known[language] {
-			return nil, fmt.Errorf("unknown LSP language %q (manifest %s supports: %v)", language, lspManifestServerName, all)
+		spec, ok := known[language]
+		if !ok {
+			return nil, fmt.Errorf("unknown LSP language %q (manifest %s supports: %v)", language, lspManifestServerName, allNames)
 		}
 		seen[language] = true
-		out = append(out, language)
+		out = append(out, spec)
 	}
 	return out, nil
+}
+
+func loadLSPRouterLanguages(requested []string) ([]string, error) {
+	specs, err := loadLSPRouterLanguageSpecs(requested)
+	if err != nil {
+		return nil, err
+	}
+	languages := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		languages = append(languages, spec.Name)
+	}
+	return languages, nil
 }
 
 func loadLSPRouterRegistryEntries() ([]WorkspaceEntry, error) {

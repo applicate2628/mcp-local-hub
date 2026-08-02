@@ -13,7 +13,9 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -325,32 +327,21 @@ func TestRunReconcileMCPFront_ForwardThenRollback_RoundTrip(t *testing.T) {
 // a.SettingsSet validates against the registry's [1024,65535] range on
 // every write, so an actually out-of-range value can never reach the
 // settings file through the normal write path; and a corrupted-but-in-range
-// persisted value is silently resolved to the schema default by
-// SettingsListIn's own graceful-degrade behavior (never an error) — so
-// there is no way to make a.ResolveMCPFrontPort() itself fail via the
-// normal settings surface either.
+// persisted ordinary value may still use SettingsListIn's schema fallback;
+// transaction-owned routing state is the exception and fails closed.
 //
-// What this hardening DOES fix, and what this test proves: before it,
-// runRollbackMCPFront called a.ResolveMCPFrontPort() unconditionally, which
-// reads and fully re-parses gui-preferences.yaml. If that file becomes
-// unreadable/unparseable for any reason between the forward run and the
-// rollback (this test simulates that by writing malformed YAML directly to
-// the settings file, bypassing SettingsSet), the OLD rollback would abort
-// with an error even though the forward run's report already recorded a
-// perfectly good, usable port. The hardened rollback reads the port back
-// from that persisted report instead and never needs to touch the live
-// settings file at all in the common case.
-//
-// Mutation-proven: reverting runRollbackMCPFront to always call
-// a.ResolveMCPFrontPort() (ignoring persisted.Port) makes this test fail
-// with the settings-file parse error surfacing as the rollback's own error
-// — confirmed manually during implementation (see this item's final
-// report for the captured failing output), then reverted.
-func TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting(t *testing.T) {
+// D2 adds a stricter prerequisite: rollback still takes the forward port and
+// baselines from the journal, but its durable routing state lives in the same
+// settings record. If that record cannot be parsed, the transaction cannot
+// prove or CAS front/gui-restoring safely. The only valid response is to fail
+// before the first inverse, retain both journal and client bytes, and surface
+// MCP_FRONT_TARGET_INVALID. Repairing the settings syntax permits the same
+// generation to resume with its frozen journal port.
+func TestRunReconcileMCPFront_Rollback_InvalidDurableTargetFailsClosed(t *testing.T) {
 	tmp := redirectMCPFrontTestEnv(t)
 	// Sandbox client to reconcile — see the round-trip test above for why the
 	// seed is load-bearing rather than decorative.
-	seedClaudeCodeConfig(t, tmp, map[string]any{
+	configPath := seedClaudeCodeConfig(t, tmp, map[string]any{
 		"serena": map[string]any{"url": "http://127.0.0.1:9125/serena/mcp"},
 	})
 	reportPath := withMCPFrontReportPathSeam(t)
@@ -374,6 +365,10 @@ func TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting(t *testin
 	if _, statErr := os.Stat(reportPath); statErr != nil {
 		t.Fatalf("expected the serena report to be persisted at %s after a successful forward reconcile: %v", reportPath, statErr)
 	}
+	configBefore, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Simulate the live settings file becoming unreadable between the
 	// forward run and the rollback (malformed YAML, bypassing SettingsSet's
@@ -389,11 +384,18 @@ func TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting(t *testin
 		t.Fatalf("test precondition broken: ResolveMCPFrontPort should fail against the corrupted settings file, but it did not")
 	}
 
-	if err := runReconcileMCPFront(cmd, true); err != nil {
-		t.Fatalf("rollback must succeed using the persisted forward-run port, independent of the (now-unreadable) live mcp_front.port setting: %v", err)
+	if err := runReconcileMCPFront(cmd, true); !errors.Is(err, api.ErrMCPFrontTargetInvalid) {
+		t.Fatalf("rollback with unreadable durable target error=%T %v, want fail-closed target-invalid", err, err)
 	}
-	if _, statErr := os.Stat(reportPath); !os.IsNotExist(statErr) {
-		t.Fatalf("expected the persisted report to be removed after a successful rollback; stat err = %v", statErr)
+	if _, statErr := os.Stat(reportPath); statErr != nil {
+		t.Fatalf("fail-closed rollback retired its recovery report: %v", statErr)
+	}
+	configAfter, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(configBefore, configAfter) {
+		t.Fatal("fail-closed rollback mutated the client config before rejecting invalid routing state")
 	}
 }
 

@@ -28,7 +28,8 @@ type installer interface {
 type realInstaller struct{}
 
 func (realInstaller) Install(name string, guiPort int) error {
-	return api.NewAPI().Install(api.InstallOpts{Server: name, GUIPort: guiPort})
+	_ = guiPort // retained in the handler interface for wire/source compatibility
+	return api.NewAPI().Install(api.InstallOpts{Server: name})
 }
 
 // uninstaller is the narrow interface the DELETE /api/install/:server
@@ -69,13 +70,14 @@ type installBulkAPI interface {
 type realInstallBulkAPI struct{}
 
 func (realInstallBulkAPI) InstallAll(servers []string, guiPort int) []api.InstallResult {
+	_ = guiPort // the durable routing target, not listener-local state, owns writes
 	a := api.NewAPI()
 	if len(servers) == 0 {
-		return a.InstallAllWithOpts(api.InstallAllOpts{GUIPort: guiPort})
+		return a.InstallAllWithOpts(api.InstallAllOpts{})
 	}
 	results := make([]api.InstallResult, 0, len(servers))
 	for _, name := range servers {
-		err := a.Install(api.InstallOpts{Server: name, GUIPort: guiPort})
+		err := a.Install(api.InstallOpts{Server: name})
 		results = append(results, api.InstallResult{Server: name, Err: err})
 	}
 	return results

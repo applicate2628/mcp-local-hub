@@ -52,7 +52,7 @@ func (s *Server) lspRouterStatusHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	a := lspRouterControlAPIFactory()
-	statuses, err := a.LSPRouterClientStatuses(api.LSPClientRouterOpts{GUIPort: s.Port()})
+	statuses, err := a.LSPRouterClientStatuses(api.LSPClientRouterOpts{})
 	if err != nil {
 		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "LSP_ROUTER_STATUS_FAILED", "/api/lsp-router/status")
 		return
@@ -85,7 +85,7 @@ func (s *Server) lspRouterDisableHandler(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	a := lspRouterControlAPIFactory()
-	report, err := a.DisableLSPRouterClient(clientName, api.LSPClientRouterOpts{GUIPort: s.Port()})
+	report, err := a.DisableLSPRouterClient(clientName, api.LSPClientRouterOpts{})
 	writeLSPRouterControlResponse(w, s, "lsp-router-disable", clientName, false, report, err)
 }
 
@@ -104,7 +104,7 @@ func (s *Server) lspRouterEnableHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	a := lspRouterControlAPIFactory()
-	report, err := a.EnableLSPRouterClient(clientName, api.LSPClientRouterOpts{GUIPort: s.Port()})
+	report, err := a.EnableLSPRouterClient(clientName, api.LSPClientRouterOpts{})
 	writeLSPRouterControlResponse(w, s, "lsp-router-enable", clientName, true, report, err)
 }
 

@@ -1,10 +1,6 @@
 // internal/gui/client_config_env_isolation_test.go
 //
-// One owner for "neutralize every client-config path environment variable" in
-// package gui tests. Counterparts:
-// internal/cli/client_config_env_isolation_test.go and
-// internal/api/client_config_env_isolation_test.go — three copies only because a
-// _test.go file cannot be shared across packages.
+// Package-local facade for the clients-owned client-config sandbox descriptor.
 //
 // WHY THIS EXISTS. HOME / USERPROFILE / LOCALAPPDATA cover 4 of the 47 adapters
 // in clients.AllClients(). Three gui-reachable production surfaces fan out over
@@ -29,37 +25,19 @@
 package gui
 
 import (
-	"path/filepath"
 	"testing"
+
+	"mcp-local-hub/internal/clients"
 )
 
 // neutralizeClientConfigPathEnv points every client-config path environment
 // variable this repo's adapters consult at sandboxHome.
 //
-// It deliberately does NOT set HOME / USERPROFILE / LOCALAPPDATA: those carry
-// per-fixture meaning and each caller sets them itself. Callers MUST point them
-// at sandboxHome too.
+// It redirects every adapter path input, including HOME, USERPROFILE, and
+// LOCALAPPDATA, below sandboxHome.
 func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 	t.Helper()
-	// Roaming/XDG roots: redirect (not unset) — an unset APPDATA falls back to
-	// <home>\AppData\Roaming in several adapters, which is only isolated by
-	// accident. XDG_CONFIG_HOME is NOT Linux-only here: crush, goose and opencode
-	// consult it on every OS.
-	t.Setenv("APPDATA", filepath.Join(sandboxHome, "AppData", "Roaming"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(sandboxHome, ".config"))
-	t.Setenv("ProgramData", filepath.Join(sandboxHome, "ProgramData"))
-	// mimocode's machine-wide managed layer reads %ProgramData%\opencode unless
-	// this override points elsewhere. ProgramData is ALWAYS set on Windows, so
-	// this read is unconditional without the redirect.
-	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(sandboxHome, "ProgramData", "opencode"))
-	// Explicit-profile overrides resolve with ABSOLUTE precedence and no home
-	// fallback. Any exported value points OUTSIDE the sandbox by definition.
-	for _, key := range []string{
-		"COPILOT_HOME", "KIMI_CODE_HOME",
-		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
-	} {
-		t.Setenv(key, "")
-	}
+	t.Cleanup(clients.ApplyClientConfigSandboxEnvironment(sandboxHome))
 }
 
 // sandboxClientConfigHome is the whole-sandbox form for a test that owns its own
@@ -69,8 +47,6 @@ func neutralizeClientConfigPathEnv(t *testing.T, sandboxHome string) {
 func sandboxClientConfigHome(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
 	neutralizeClientConfigPathEnv(t, home)
 	return home
 }

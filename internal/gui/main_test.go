@@ -69,11 +69,11 @@ func TestMain(m *testing.M) {
 	}
 
 	restoreState := api.SetDaemonStateRootForTest(stateRoot)
+	// Redirect every client-adapter path input before installing the audit. The
+	// descriptor is shared with API and CLI package test setup.
+	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
 	restoreEnv := setEnvWithRestore(map[string]string{
 		"MCPHUB_STATE_DIR_OVERRIDE": stateRoot,
-		"LOCALAPPDATA":              localAppData,
-		"XDG_STATE_HOME":            localAppData,
-		"XDG_DATA_HOME":             localAppData,
 		// Global browser kill-switch for the whole gui test binary AND any
 		// `mcphub gui` child a test spawns (inherited env) — no test flashes a
 		// browser window. See browser.go SuppressBrowserLaunchEnv.
@@ -93,6 +93,7 @@ func TestMain(m *testing.M) {
 		code = 1
 	}
 	restoreEnv()
+	restoreClientEnv()
 	restoreState()
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)

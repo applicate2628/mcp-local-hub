@@ -422,20 +422,25 @@ func TestMCPFrontPR588_RollbackRefusesUnknownArtifactVersion(t *testing.T) {
 // captured state genuinely is its original pre-state).
 func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
 	name := api.LSPRouterEntryName("go")
+	inheritedName := api.LSPRouterEntryName("rust")
 	gen1 := v3LSPSnapshot("claude-code", "go", name, true, "GEN1-URL")
+	inherited := v3LSPSnapshot("claude-code", "rust", inheritedName, true, "RUST-GEN1-URL")
 	first := v3Journal(t, 9137, nil,
 		v3LSPAdd("claude-code", "go", name, gen1,
 			v3LSPSnapshot("claude-code", "go", name, true, "FRONT-A")),
+		v3LSPAdd("claude-code", "rust", inheritedName, inherited,
+			v3LSPSnapshot("claude-code", "rust", inheritedName, true, "RUST-FRONT-A")),
 	)
 	gen2 := v3LSPSnapshot("claude-code", "go", name, true, "FRONT-A")
 	cursor := v3LSPSnapshot("cursor", "go", name, true, "CURSOR-URL")
-	retry := v3Journal(t, 9200, &first.record,
+	retry := v3Journal(t, 9137, &first.record,
 		v3LSPAdd("claude-code", "go", name, gen2,
 			v3LSPSnapshot("claude-code", "go", name, true, "FRONT-B")),
 		v3LSPAdd("cursor", "go", name, cursor,
 			v3LSPSnapshot("cursor", "go", name, true, "FRONT-B")),
 	)
 	claudeKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", name)
+	inheritedKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "rust", inheritedName)
 	cursorKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "cursor", "go", name)
 	if got := retry.record.Rows[claudeKey].Baseline.LSP.URL; got != "GEN1-URL" {
 		t.Fatalf("retry overwrote first immutable baseline: %q", got)
@@ -443,8 +448,41 @@ func TestMCPFrontPR588_MergePreservesRecordedRowsAndAddsNewOnes(t *testing.T) {
 	if got := retry.record.Rows[cursorKey].Baseline.LSP.URL; got != "CURSOR-URL" {
 		t.Fatalf("retry omitted new row baseline: %q", got)
 	}
-	if retry.record.ActivePlan.Port != 9200 {
-		t.Fatalf("active generation port=%d, want 9200", retry.record.ActivePlan.Port)
+	if retry.record.ActivePlan.Port != 9137 {
+		t.Fatalf("active generation port=%d, want 9137", retry.record.ActivePlan.Port)
+	}
+	if len(retry.record.ActivePlan.Rows) != 3 || len(retry.record.ActivePlan.Operations) != 3 {
+		t.Fatalf("merged active plan rows=%d operations=%d, want one retained, one replaced, and one new",
+			len(retry.record.ActivePlan.Rows), len(retry.record.ActivePlan.Operations))
+	}
+	current, ok := activeMCPFrontPlanOperation(retry.record.ActivePlan, claudeKey)
+	if !ok || current.PreState.LSP == nil || current.IntendedState.LSP == nil ||
+		current.PreState.LSP.URL != "FRONT-A" || current.IntendedState.LSP.URL != "FRONT-B" {
+		t.Fatalf("current-generation operation did not replace inherited state: %+v", current)
+	}
+	retained, ok := activeMCPFrontPlanOperation(retry.record.ActivePlan, inheritedKey)
+	if !ok || retained.PreState.LSP == nil || retained.IntendedState.LSP == nil ||
+		retained.PreState.LSP.URL != "RUST-GEN1-URL" || retained.IntendedState.LSP.URL != "RUST-FRONT-A" {
+		t.Fatalf("settled inherited operation was not preserved: %+v", retained)
+	}
+	if _, ok := activeMCPFrontPlanOperation(retry.record.ActivePlan, cursorKey); !ok {
+		t.Fatalf("new row %q has no active-plan operation", cursorKey)
+	}
+}
+
+func TestMCPFrontPR588_MergeRefusesAnInheritedRowWithoutPlanAuthority(t *testing.T) {
+	name := api.LSPRouterEntryName("go")
+	first := v3Journal(t, 9137, nil, v3LSPAdd(
+		"claude-code", "go", name,
+		v3LSPSnapshot("claude-code", "go", name, true, "GEN1-URL"),
+		v3LSPSnapshot("claude-code", "go", name, true, "FRONT-A"),
+	))
+	first.record.ActivePlan.Rows = nil
+	first.record.ActivePlan.Operations = nil
+
+	_, err := newMCPFrontV3Journal(first.reportPath, &first.record, first.record.Version, first.record.Generation, 9137, &api.LSPRouterClientPlan{Port: 9137})
+	if err == nil || !strings.Contains(err.Error(), "has no inherited active-plan operation") {
+		t.Fatalf("merge accepted an inherited row whose persisted plan carried no authority: %v", err)
 	}
 }
 

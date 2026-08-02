@@ -222,6 +222,10 @@ func parseGUIPidportFile(path string) (pid, port int, err error) {
 // so Phase 4 can wire the gui-package primitives across the
 // api->gui-can't-import-api boundary.
 type SerenaReconcileOpts struct {
+	// RoutingTarget is the frozen, typed decision used by production writers.
+	// When nil, Port/PidportPath retain their legacy source-compatible behavior.
+	RoutingTarget *ClientRoutingTarget
+
 	// Port, when non-zero, is used DIRECTLY as the client-URL port instead
 	// of discovering it via the GUI pidport file — still liveness-probed
 	// via Ping before any client write (fail-closed), just against a
@@ -426,6 +430,34 @@ var ErrSerenaReconcileRouteNotLive = errors.New("serena client-reconcile: mcp fr
 // manifest, and does NOT flow through the G4 hub resolver (claim #8). It is
 // inert until Phase 4 wires it into the migrate command.
 func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpts) (*MigrateReport, error) {
+	request := StableGUICompatibility()
+	if opts.RoutingTarget != nil {
+		request = ExactTarget(*opts.RoutingTarget)
+	}
+	var report *MigrateReport
+	err := NewAPI().WithClientRoutingAuthorityLease(ctx, request, func(canonical ClientRoutingTarget) error {
+		if opts.RoutingTarget != nil {
+			opts.RoutingTarget = &canonical
+		}
+		var reconcileErr error
+		report, reconcileErr = reconcileSerenaClientsToRouter(ctx, opts)
+		return reconcileErr
+	})
+	return report, err
+}
+
+// ReconcileSerenaClientsToRouterForMCPFrontTransaction is the explicit
+// transaction lane used only after durable state has entered front-preparing.
+// Ordinary callers use ReconcileSerenaClientsToRouter and cannot bypass the
+// routing lease with a pre-frozen target.
+func ReconcileSerenaClientsToRouterForMCPFrontTransaction(ctx context.Context, opts SerenaReconcileOpts) (*MigrateReport, error) {
+	if opts.RoutingTarget == nil {
+		return nil, &MCPFrontTargetInvalidError{Detail: "front transaction Serena reconcile requires a frozen routing target"}
+	}
+	return reconcileSerenaClientsToRouter(ctx, opts)
+}
+
+func reconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpts) (*MigrateReport, error) {
 	report := &MigrateReport{}
 
 	// 1. Resolve + prove the client-URL port live (fail-closed). This MUST
@@ -933,17 +965,39 @@ func inScopeReconcileClients(include []string) []string {
 // like the real router" is. opts.Port==0 (every existing caller) is
 // unchanged: pidport-based GUI discovery.
 func resolveSerenaReconcilePort(ctx context.Context, opts SerenaReconcileOpts) (int, error) {
+	if opts.RoutingTarget != nil {
+		if err := ValidateClientRoutingTarget(*opts.RoutingTarget); err != nil {
+			return 0, err
+		}
+		switch opts.RoutingTarget.Mode {
+		case MCPFrontRoutingTargetFront:
+			return proveSerenaDirectPortLive(ctx, opts, opts.RoutingTarget.Port)
+		case MCPFrontRoutingTargetGUI:
+			port, err := discoverLiveGUIPort(ctx, opts)
+			if err != nil {
+				return 0, err
+			}
+			if port != opts.RoutingTarget.Port {
+				return 0, fmt.Errorf("%w: pidport resolved port %d but durable GUI target is %d", ErrSerenaReconcileGUINotLive, port, opts.RoutingTarget.Port)
+			}
+			return port, nil
+		}
+	}
 	if opts.Port > 0 {
-		ping := opts.Ping
-		if ping == nil {
-			ping = defaultRouterReadinessPing
-		}
-		if perr := ping(ctx, opts.Port); perr != nil {
-			return 0, fmt.Errorf("%w: port %d did not answer the readiness ping: %v", ErrSerenaReconcileRouteNotLive, opts.Port, perr)
-		}
-		return opts.Port, nil
+		return proveSerenaDirectPortLive(ctx, opts, opts.Port)
 	}
 	return discoverLiveGUIPort(ctx, opts)
+}
+
+func proveSerenaDirectPortLive(ctx context.Context, opts SerenaReconcileOpts, port int) (int, error) {
+	ping := opts.Ping
+	if ping == nil {
+		ping = defaultRouterReadinessPing
+	}
+	if perr := ping(ctx, port); perr != nil {
+		return 0, fmt.Errorf("%w: port %d did not answer the readiness ping: %v", ErrSerenaReconcileRouteNotLive, port, perr)
+	}
+	return port, nil
 }
 
 // discoverLiveGUIPort reads the GUI pidport, confirms the GUI is live via a
@@ -1095,7 +1149,7 @@ func AssertSerenaRouterRouteLive(ctx context.Context, port int) error {
 		return fmt.Errorf("%w: refusing to probe non-positive port %d", ErrSerenaRouterRouteNotLive, port)
 	}
 	if err := defaultRouterReadinessPing(ctx, port); err != nil {
-		return fmt.Errorf("%w: %v", ErrSerenaRouterRouteNotLive, err)
+		return fmt.Errorf("%w: %w", ErrSerenaRouterRouteNotLive, err)
 	}
 	return nil
 }

@@ -72,6 +72,9 @@ func (a *API) SettingsListIn(path string) (map[string]string, error) {
 				out[def.Key] = v
 				continue
 			}
+			if def.ReadOnly {
+				return nil, fmt.Errorf("invalid persisted read-only setting %s=%q", def.Key, v)
+			}
 			// Invalid persisted value — fall through to default below.
 		}
 		out[def.Key] = def.Default
@@ -114,6 +117,9 @@ func (a *API) SettingsSetIn(path, key, value string) error {
 	def := findDef(key)
 	if def == nil {
 		return fmt.Errorf("unknown setting %q", key)
+	}
+	if def.ReadOnly {
+		return fmt.Errorf("setting %q is read-only; use its owning operation", key)
 	}
 	if err := validate(def, value); err != nil {
 		return fmt.Errorf("invalid value for %s: %v", key, err)
@@ -181,7 +187,11 @@ func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) 
 		return fmt.Errorf("write settings file: %w", err)
 	}
 	if after != nil {
-		if err := after(raw); err != nil {
+		persisted, readErr := readRawSettingsMap(path)
+		if readErr != nil {
+			return fmt.Errorf("re-read persisted settings file: %w", readErr)
+		}
+		if err := after(persisted); err != nil {
 			return err
 		}
 	}
