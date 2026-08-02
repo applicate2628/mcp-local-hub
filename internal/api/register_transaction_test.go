@@ -71,6 +71,36 @@ func TestRegistrationTransaction_CommitFinalizerFailureRollsBack(t *testing.T) {
 	}
 }
 
+func TestRegistrationTransaction_CommitForwardRetainsFinalizerErrorWithoutCompensation(t *testing.T) {
+	tx := newRegistrationTransaction()
+	compensated := false
+	observed := false
+	closeErr := errors.New("forward finalizer release failed")
+	token := tx.AddTrackedCompensation("must stay disarmed", func() error {
+		compensated = true
+		return nil
+	})
+	if err := tx.DisarmCompensation(token); err != nil {
+		t.Fatalf("DisarmCompensation: %v", err)
+	}
+	tx.AddFinalizer("forward resource", func() error { return closeErr })
+	tx.AddAfterCommit("forward observer", func() error {
+		observed = true
+		return nil
+	})
+
+	outcome := tx.CommitForward()
+	if outcome.State != registrationTransactionCommitted || !errors.Is(outcome.Err, closeErr) {
+		t.Fatalf("CommitForward outcome = %+v, want committed with finalizer error", outcome)
+	}
+	if compensated {
+		t.Fatal("CommitForward ran a disarmed compensation")
+	}
+	if !observed {
+		t.Fatal("CommitForward skipped the committed observer")
+	}
+}
+
 func TestRegistrationTransaction_PostCommitObserversRunAllAndJoinErrors(t *testing.T) {
 	observerAErr := errors.New("observer-a")
 	observerCErr := errors.New("observer-c")

@@ -321,6 +321,21 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 		Writer:          w,
 		SymlinkConsents: opts.SymlinkConsents,
 	}); err != nil {
+		// FORWARD-COMMITTED branch: install proved that one client mutation is
+		// applied, deliberately retained earlier independent work, and skipped
+		// later optional clients after config-lock release became unconfirmed.
+		// The full plan is therefore incomplete, so preserve the recoverable
+		// `adopting` state without promoting it; generic abort would delete the
+		// snapshots, manifest, and routed keys needed to reconcile the committed
+		// subset. A process restart is required before same-leaf recovery.
+		var forwardErr *InstallForwardCommittedError
+		if errors.As(err, &forwardErr) {
+			return fmt.Errorf(
+				"adopt install committed a forward subset through client %q; later requested clients may have been skipped; "+
+					"the pre-adopt provenance snapshots, manifest %q, and routed vault keys were PRESERVED for recovery, "+
+					"without promoting the partial plan to adopted; restart the process before same-client recovery, then use de-adopt or explicit reconciliation: %w",
+				forwardErr.Client, plan.ManifestName, err)
+		}
 		// PRESERVE branch (bug 2026-07-12): Install's own client-config rollback could
 		// not CONFIRM the pre-adopt state of ≥1 client (it may have been rewritten to
 		// the hub relay and not reversed, OR a restore write failed on an

@@ -266,6 +266,10 @@ type SerenaReconcileOpts struct {
 	// file. Discovery (pidport + ping) still runs so a dry-run surfaces the
 	// "start the GUI first" failure too.
 	DryRun bool
+
+	// classifyClientMutation is the per-run settlement seam. Production leaves
+	// it nil and uses clients.ClassifyClientMutation.
+	classifyClientMutation func(error) clients.ClientMutationSettlement
 }
 
 // ErrSerenaReconcileGUINotLive is the fail-closed sentinel returned when the
@@ -286,11 +290,12 @@ var ErrSerenaReconcileGUINotLive = errors.New("serena client-reconcile: GUI not 
 // flag launches), pings it, and on absent/stale pidport OR ping failure
 // returns ErrSerenaReconcileGUINotLive with NO client writes.
 //
-// The result is a MigrateReport: Applied rows are successful (or dry-run
-// intended) router rewrites; Failed rows carry the per-client error so a
-// partial failure leaves that client on its still-functional legacy
-// endpoint and is retryable. The returned error is non-nil only for a
-// whole-run blocker (GUI not live).
+// The result is a MigrateReport: Applied rows are actual (or dry-run intended)
+// router rewrites; Failed rows carry per-client lifecycle errors. Ordinary add
+// failures leave that client on its still-functional legacy endpoint. When an
+// add/remove applied but lock release was unconfirmed, both rows are present
+// and the in-process rollback owner skips only that unsafe client leaf. The
+// returned error is non-nil only for a whole-run blocker (GUI not live).
 //
 // This function does NOT restart the supervisor, does NOT touch the disk
 // manifest, and does NOT flow through the G4 hub resolver (claim #8). It is
@@ -316,6 +321,10 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 	allClients := opts.Clients
 	if allClients == nil {
 		allClients = clients.AllClients()
+	}
+	classify := opts.classifyClientMutation
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
 	}
 
 	// 2. Antigravity's relay `command` field needs the canonical installed
@@ -376,14 +385,19 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			continue
 		}
 
-		// 3. Router rewrite. On failure, DO NOT remove the legacy entry —
-		//    the client stays on its still-functional legacy endpoint
-		//    (claim #9) and the failure is reported for retry.
+		// 3. Router rewrite. On an ordinary failure, DO NOT remove the legacy
+		//    entry — the client stays on its still-functional legacy endpoint
+		//    (claim #9). An applied-release outcome records the actual rewrite
+		//    plus lifecycle failure and stops later work on this client leaf.
+		var addReleaseErr error
 		if aerr := adapter.AddEntry(entry); aerr != nil {
-			report.Failed = append(report.Failed, FailedMigration{
-				Server: serenaEntryName, Client: clientName, Err: aerr.Error(),
-			})
-			continue
+			if classify(aerr) != clients.ClientMutationAppliedReleaseUnconfirmed {
+				report.Failed = append(report.Failed, FailedMigration{
+					Server: serenaEntryName, Client: clientName, Err: aerr.Error(),
+				})
+				continue
+			}
+			addReleaseErr = aerr
 		}
 
 		// 4. Record the managed-entries marker so a later demigrate can tell
@@ -407,11 +421,32 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 		//    already overwrote the same-named "serena" entry in place, so
 		//    there is nothing distinct to remove; RemoveLegacy is honored
 		//    for callers whose legacy entry lives under a different name or
-		//    who want the ordering invariant exercised explicitly. A removal
-		//    failure does NOT undo the successful rewrite — it is a soft
-		//    warning, since the client is already on the router URL.
+		//    who want the ordering invariant exercised explicitly. An ordinary
+		//    removal failure does NOT undo the successful rewrite and remains a
+		//    soft warning. An applied-release removal also records a lifecycle
+		//    failure and makes this leaf unsafe for the outer restore.
+		applied := AppliedMigration{
+			Server: serenaEntryName, Client: clientName, URL: routerURL, BackupPath: backupPath,
+		}
+		if addReleaseErr != nil {
+			applied.restoreUnsafe = true
+			report.Applied = append(report.Applied, applied)
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName,
+				Err: fmt.Sprintf("router rewrite applied; lock release unconfirmed: %v", addReleaseErr),
+			})
+			continue
+		}
+
 		if opts.RemoveLegacy {
 			if rerr := removeLegacySerenaEntry(adapter, routerURL, legacyPort); rerr != nil {
+				if classify(rerr) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					applied.restoreUnsafe = true
+					report.Failed = append(report.Failed, FailedMigration{
+						Server: serenaEntryName, Client: clientName,
+						Err: fmt.Sprintf("legacy endpoint removal applied; lock release unconfirmed: %v", rerr),
+					})
+				}
 				_ = LogHubMcpEvent("warn", "serena-legacy-endpoint-removal-failed", map[string]any{
 					"server":      serenaEntryName,
 					"client":      clientName,
@@ -422,18 +457,18 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			}
 		}
 
-		report.Applied = append(report.Applied, AppliedMigration{
-			Server: serenaEntryName, Client: clientName, URL: routerURL, BackupPath: backupPath,
-		})
+		report.Applied = append(report.Applied, applied)
 	}
 
 	return report, nil
 }
 
 // RestoreSerenaReconcileApplied undoes a partially-successful
-// ReconcileSerenaClientsToRouter run by restoring every Applied client's
-// serena entry from the per-client backup the reconcile captured immediately
-// before its rewrite. It is the outer-rollback compensator the serena migrate
+// ReconcileSerenaClientsToRouter run by restoring each safely-reacquirable
+// Applied client's serena entry from the per-client backup captured immediately
+// before its rewrite. An Applied row marked with unconfirmed lock release is
+// reported and skipped so rollback never reacquires that poisoned leaf. It is
+// the outer-rollback compensator the serena migrate
 // driver runs when the reconcile reports per-client failures (report.Failed
 // non-empty): the migrate must NOT proceed to the irreversible supervisor reap
 // while only SOME clients point at the router, so the ones that succeeded are
@@ -459,11 +494,22 @@ func ReconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 // variant bypasses that guard to put the exact pre-reconcile bytes back; the
 // demigrate guard stays in force for the normal demigrate flow.
 func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]clients.Client) error {
+	return restoreSerenaReconcileAppliedWithClassifier(report, allClients, clients.ClassifyClientMutation)
+}
+
+func restoreSerenaReconcileAppliedWithClassifier(
+	report *MigrateReport,
+	allClients map[string]clients.Client,
+	classify func(error) clients.ClientMutationSettlement,
+) error {
 	if report == nil {
 		return nil
 	}
 	if allClients == nil {
 		allClients = clients.AllClients()
+	}
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
 	}
 	var errs []error
 	for _, app := range report.Applied {
@@ -472,12 +518,20 @@ func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]
 			// does not capture a backup). Nothing to undo for this client.
 			continue
 		}
+		if app.restoreUnsafe {
+			errs = append(errs, fmt.Errorf("restore %s/%s skipped: prior mutation was applied but config-lock release was unconfirmed", app.Server, app.Client))
+			continue
+		}
 		adapter := allClients[app.Client]
 		if adapter == nil {
 			errs = append(errs, fmt.Errorf("restore %s/%s: no adapter on this host", app.Server, app.Client))
 			continue
 		}
 		if rerr := adapter.RestoreEntryFromBackupForRollback(app.BackupPath, serenaEntryName); rerr != nil {
+			if classify(rerr) == clients.ClientMutationAppliedReleaseUnconfirmed {
+				errs = append(errs, fmt.Errorf("restore %s/%s from %s applied; lock release unconfirmed: %w", app.Server, app.Client, app.BackupPath, rerr))
+				continue
+			}
 			errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
 		}
 	}

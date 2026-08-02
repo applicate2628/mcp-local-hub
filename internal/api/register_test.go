@@ -23,6 +23,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -5993,6 +5995,251 @@ func TestRegister_WriteReceiptsReflectActualSuccessfulAdds(t *testing.T) {
 	_ = transaction.Fail(err)
 }
 
+func classifyRegisterReleaseForTest(t *testing.T, releaseCause error) {
+	t.Helper()
+	previous := classifyRegisterClientMutation
+	classifyRegisterClientMutation = func(err error) clients.ClientMutationSettlement {
+		if errors.Is(err, releaseCause) {
+			return clients.ClientMutationAppliedReleaseUnconfirmed
+		}
+		return clients.ClassifyClientMutation(err)
+	}
+	t.Cleanup(func() { classifyRegisterClientMutation = previous })
+}
+
+func realRegisterClientsForTest(t *testing.T, names ...string) map[string]registerClient {
+	t.Helper()
+	all := clients.AllClients()
+	out := make(map[string]registerClient, len(names))
+	for _, name := range names {
+		client := all[name]
+		if client == nil {
+			t.Fatalf("real client adapter %q is unavailable", name)
+		}
+		out[name] = realClientAdapter{c: client}
+	}
+	return out
+}
+
+func TestRegisterAppliedReleaseUnconfirmedForwardCommitsReceipt(t *testing.T) {
+	const seedEntry = "register-forward-receipt-seed"
+	codexPath, cursorPath, _, _ := seedTwoPresentClients(t, seedEntry)
+	h := newRegisterHarness(t)
+	defer h.restore()
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryAppliedReleaseUnconfirmed},
+	})
+	classifyRegisterReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+	realClients := realRegisterClientsForTest(t, "codex-cli", "cursor")
+	testClientFactory = func() map[string]registerClient { return realClients }
+
+	m := nineLanguageManifest()
+	m.ClientBindings = []config.ClientBinding{
+		{Client: "codex-cli", URLPath: "/mcp"},
+		{Client: "cursor", URLPath: "/mcp"},
+	}
+	report, err := mustNewAPI(t).registerWithManifest(m, t.TempDir(), []string{"go"}, RegisterOpts{Writer: io.Discard})
+	if !errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) || !errors.Is(err, inducedAddEntryReleaseUnconfirmed) {
+		t.Fatalf("register error = %v, want applied release lifecycle error", err)
+	}
+	var forwardErr *RegisterForwardCommittedError
+	if !errors.As(err, &forwardErr) || forwardErr.Client != "codex-cli" || forwardErr.Operation != "add-entry" {
+		t.Fatalf("forward outcome = %#v err=%v, want codex-cli add-entry", forwardErr, err)
+	}
+	if got := seam.writeCount(codexPath); got != 1 {
+		t.Fatalf("codex writes = %d, want one applied write and no same-leaf compensation", got)
+	}
+	if got := seam.writeCount(cursorPath); got != 0 {
+		t.Fatalf("later optional cursor write ran after poisoned codex leaf: %d", got)
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("report entries = %+v, want one committed language", report.Entries)
+	}
+	entry := report.Entries[0]
+	if len(entry.ClientEntries) != 1 || entry.ClientEntries["codex-cli"] == "" {
+		t.Fatalf("committed receipt map = %+v, want only codex-cli", entry.ClientEntries)
+	}
+	reg := NewRegistry(h.regPath)
+	if loadErr := reg.Load(); loadErr != nil {
+		t.Fatalf("load committed registry: %v", loadErr)
+	}
+	stored, ok := reg.Get(entry.WorkspaceKey, entry.Language)
+	if !ok || len(stored.ClientEntries) != 1 || stored.ClientEntries["codex-cli"] != entry.ClientEntries["codex-cli"] {
+		t.Fatalf("stored committed receipt = %+v ok=%v, want report receipt %+v", stored.ClientEntries, ok, entry.ClientEntries)
+	}
+	if !h.fakeSch.tasks[entry.TaskName] {
+		t.Fatalf("scheduler task was rolled back after applied client write: %+v", h.fakeSch.tasks)
+	}
+	if raw, readErr := os.ReadFile(codexPath); readErr != nil || !bytes.Contains(raw, []byte("http://127.0.0.1:")) {
+		t.Fatalf("committed codex target = %q err=%v", raw, readErr)
+	}
+}
+
+type countingRegisterClient struct {
+	registerClient
+	findCalls *int
+}
+
+func (c *countingRegisterClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
+	*c.findCalls++
+	return c.registerClient.FindStdioLanguageServerEntries()
+}
+
+func TestRegisterAppliedReleaseUnconfirmedSkipsSameLeafDirectCleanup(t *testing.T) {
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+	const legacyEntry = "legacy-go-must-survive"
+	body := fmt.Sprintf("[mcp_servers.%s]\ncommand = \"mcp-language-server\"\nargs = [\"--lsp\", \"gopls\", \"--workspace\", %q]\n", legacyEntry, canonical)
+	codexPath, _, _ := setupAdoptTestEnv(t, "register-forward-cleanup-seed", body)
+	h := newRegisterHarness(t)
+	defer h.restore()
+	seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryAppliedReleaseUnconfirmed},
+	})
+	classifyRegisterReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+	realClients := realRegisterClientsForTest(t, "codex-cli")
+	findCalls := 0
+	realClients["codex-cli"] = &countingRegisterClient{registerClient: realClients["codex-cli"], findCalls: &findCalls}
+	testClientFactory = func() map[string]registerClient { return realClients }
+
+	m := nineLanguageManifest()
+	m.ClientBindings = []config.ClientBinding{{Client: "codex-cli", URLPath: "/mcp"}}
+	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"go"}, RegisterOpts{Writer: io.Discard})
+	var forwardErr *RegisterForwardCommittedError
+	if !errors.As(err, &forwardErr) {
+		t.Fatalf("register error = %v, want RegisterForwardCommittedError", err)
+	}
+	if findCalls != 0 {
+		t.Fatalf("direct-cleanup discovery ran %d time(s) after poisoned add leaf, want 0", findCalls)
+	}
+	raw, readErr := os.ReadFile(codexPath)
+	if readErr != nil || !bytes.Contains(raw, []byte(legacyEntry)) {
+		t.Fatalf("legacy direct entry was not preserved: bytes=%q err=%v", raw, readErr)
+	}
+}
+
+func TestRegisterRollbackCompensationsAppliedReleaseUnconfirmedAreReconciled(t *testing.T) {
+	tests := []struct {
+		name       string
+		seed       string
+		wantMarker string
+	}{
+		{
+			name:       "restore-prior-entry",
+			seed:       "[mcp_servers.rollback-target]\nurl = \"http://127.0.0.1:8111/prior\"\n",
+			wantMarker: "http://127.0.0.1:8111/prior",
+		},
+		{
+			name: "remove-new-entry",
+			seed: "[mcp_servers]\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			codexPath, _, _ := setupAdoptTestEnv(t, "register-rollback-settlement", tt.seed)
+			seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+				codexPath: {addEntry: addEntrySucceed, restore: restoreAppliedReleaseUnconfirmed},
+			})
+			classifyRegisterReleaseForTest(t, inducedRestoreReleaseUnconfirmed)
+			clientMap := realRegisterClientsForTest(t, "codex-cli")
+			tx := newRegistrationTransaction()
+			receipts, err := writeRegisteredClientEntries(
+				[]config.ClientBinding{{Client: "codex-cli", URLPath: "/mcp"}},
+				clientMap,
+				map[string]string{"codex-cli": "rollback-target"},
+				9444,
+				"go",
+				io.Discard,
+				tx,
+			)
+			if err != nil || len(receipts) != 1 {
+				t.Fatalf("writeRegisteredClientEntries receipts=%+v err=%v", receipts, err)
+			}
+			primaryCause := errors.New("induced registration failure after client write")
+			outcome := tx.Fail(primaryCause)
+			if !errors.Is(outcome.Err, primaryCause) || !errors.Is(outcome.Err, inducedRestoreReleaseUnconfirmed) {
+				t.Fatalf("rollback outcome = %v, want primary and applied-release causes", outcome.Err)
+			}
+			if got := seam.writeCount(codexPath); got != 2 {
+				t.Fatalf("config writes = %d, want add plus one reconciled compensation", got)
+			}
+			raw, readErr := os.ReadFile(codexPath)
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			if tt.wantMarker == "" {
+				if bytes.Contains(raw, []byte("rollback-target")) {
+					t.Fatalf("new entry survived applied remove compensation: %q", raw)
+				}
+			} else if !bytes.Contains(raw, []byte(tt.wantMarker)) || bytes.Contains(raw, []byte("http://127.0.0.1:9444")) {
+				t.Fatalf("prior entry was not reconciled by applied restore: %q", raw)
+			}
+		})
+	}
+}
+
+type cleanupAppliedReleaseClient struct {
+	registerClient
+	releaseCause error
+	cleanupCalls int
+}
+
+func (c *cleanupAppliedReleaseClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	return captureDirectCleanupTargetThrough(c.registerClient, identity)
+}
+
+func (c *cleanupAppliedReleaseClient) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	c.cleanupCalls++
+	backupPath, err := cleanupDirectEntryAtomicallyThrough(c.registerClient, target, keepN, preArm, revalidate)
+	if err != nil {
+		return backupPath, err
+	}
+	return backupPath, errors.Join(clients.ErrConfigLockReleaseUnconfirmed, c.releaseCause)
+}
+
+func TestRegisterDirectCleanupAppliedReleaseUnconfirmedForwardCommitsRemoval(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	ws := t.TempDir()
+	canonical := mustCanonical(t, ws)
+	const directEntry = "legacy-go-forward-removed"
+	h.fakeClients.stdioEntries["codex-cli"][directEntry] = clients.LanguageServerStdioEntry{
+		Name: directEntry, Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls", "--workspace", canonical},
+	}
+	releaseCause := errors.New("injected direct-cleanup release failure")
+	baseFactory := testClientFactory
+	var wrapped *cleanupAppliedReleaseClient
+	testClientFactory = func() map[string]registerClient {
+		all := baseFactory()
+		wrapped = &cleanupAppliedReleaseClient{registerClient: all["codex-cli"], releaseCause: releaseCause}
+		all["codex-cli"] = wrapped
+		return all
+	}
+	classifyRegisterReleaseForTest(t, releaseCause)
+	m := nineLanguageManifest()
+	m.ClientBindings = []config.ClientBinding{{Client: "codex-cli", URLPath: "/mcp"}}
+	report, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"go"}, RegisterOpts{Writer: io.Discard})
+	var forwardErr *RegisterForwardCommittedError
+	if !errors.As(err, &forwardErr) || forwardErr.Operation != "remove-direct-entry" || !errors.Is(err, releaseCause) {
+		t.Fatalf("register cleanup error = %v forward=%#v, want applied remove outcome", err, forwardErr)
+	}
+	if wrapped == nil || wrapped.cleanupCalls != 1 {
+		t.Fatalf("cleanup calls = %#v, want exactly one", wrapped)
+	}
+	if _, restored := h.fakeClients.stdioEntries["codex-cli"][directEntry]; restored {
+		t.Fatalf("applied direct removal was compensated after release became unconfirmed")
+	}
+	if len(report.Entries) != 1 || !h.fakeSch.tasks[report.Entries[0].TaskName] {
+		t.Fatalf("independent registration owners rolled back: report=%+v tasks=%+v", report.Entries, h.fakeSch.tasks)
+	}
+}
+
 func TestRegister_ClientPresenceTransitionNeverWritesEmptyEntryName(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
@@ -6125,6 +6372,87 @@ func TestRegisterSupervised_EveryPostAddEntryFailureDiscardsReceipts(t *testing.
 				}
 			}
 		})
+	}
+}
+
+func TestRegisterSupervisedAppliedReleaseUnconfirmedCompletesMandatoryContinuations(t *testing.T) {
+	const seedEntry = "register-supervised-forward-seed"
+	codexPath, _, _ := setupAdoptTestEnv(t, seedEntry, "[mcp_servers]\n")
+	h := newRegisterHarness(t)
+	defer h.restore()
+	registryReleaseCause := errors.New("injected supervised registry release failure")
+	previousUnlock := flockUnlockFn
+	unlockAttempts := 0
+	var heldRegistryLock *flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		unlockAttempts++
+		if unlockAttempts == 2 {
+			heldRegistryLock = fl
+			return registryReleaseCause
+		}
+		return previousUnlock(fl)
+	}
+	lockPath := h.regPath + ".lock"
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if heldRegistryLock != nil {
+			_ = heldRegistryLock.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryAppliedReleaseUnconfirmed},
+	})
+	classifyRegisterReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+	realClients := realRegisterClientsForTest(t, "codex-cli")
+	testClientFactory = func() map[string]registerClient { return realClients }
+
+	var events []string
+	undoCalls := 0
+	deps := supervisorPostWriteDeps{
+		upsertIntent: func(WorkspaceEntry, string) (compensation, error) {
+			events = append(events, "upsert-intent")
+			return func() error { undoCalls++; return nil }, nil
+		},
+		writeRunningIntent: func(_ string, enroll stopIntentCompensationSink) (string, error) {
+			events = append(events, "write-running-intent")
+			enroll("restore supervised forward running intent", func() error { undoCalls++; return nil })
+			return "supervised-forward-task", nil
+		},
+		reconcile: func(context.Context, bool) (ReconcileResponse, error) {
+			events = append(events, "reconcile")
+			return ReconcileResponse{}, nil
+		},
+		readiness: func(int, time.Duration) error {
+			events = append(events, "readiness")
+			return nil
+		},
+	}
+	m := nineLanguageManifest()
+	m.ClientBindings = []config.ClientBinding{{Client: "codex-cli", URLPath: "/mcp"}}
+	report, err := mustNewAPI(t).registerWithManifest(m, t.TempDir(), []string{"go"}, RegisterOpts{
+		SupervisedProxy:         true,
+		supervisorPostWriteDeps: deps,
+		Writer:                  io.Discard,
+	})
+	var forwardErr *RegisterForwardCommittedError
+	if !errors.As(err, &forwardErr) || !errors.Is(err, inducedAddEntryReleaseUnconfirmed) || !errors.Is(err, registryReleaseCause) {
+		t.Fatalf("supervised register error = %v forward=%#v", err, forwardErr)
+	}
+	wantEvents := []string{"upsert-intent", "write-running-intent", "reconcile", "readiness"}
+	if !slices.Equal(events, wantEvents) {
+		t.Fatalf("mandatory continuation order = %v, want %v", events, wantEvents)
+	}
+	if undoCalls != 0 {
+		t.Fatalf("forward commit ran %d stale intent compensation(s), want 0", undoCalls)
+	}
+	if got := seam.writeCount(codexPath); got != 1 {
+		t.Fatalf("codex writes = %d, want one applied write", got)
+	}
+	if len(report.Entries) != 1 || report.Entries[0].ClientEntries["codex-cli"] == "" {
+		t.Fatalf("supervised committed receipt missing: %+v", report.Entries)
 	}
 }
 

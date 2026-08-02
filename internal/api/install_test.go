@@ -225,6 +225,196 @@ func TestInstallPruneReleaseFailureIsPostCommitWarning(t *testing.T) {
 	}
 }
 
+func classifyInstallReleaseForTest(t *testing.T, releaseCause error) {
+	t.Helper()
+	previous := classifyInstallClientMutation
+	classifyInstallClientMutation = func(err error) clients.ClientMutationSettlement {
+		if errors.Is(err, releaseCause) {
+			return clients.ClientMutationAppliedReleaseUnconfirmed
+		}
+		return clients.ClassifyClientMutation(err)
+	}
+	t.Cleanup(func() { classifyInstallClientMutation = previous })
+}
+
+func TestInstallAppliedReleaseUnconfirmedForwardCommitsIntent(t *testing.T) {
+	entry := "install-forward-release"
+	codexPath, cursorPath, _, _ := seedTwoPresentClients(t, entry)
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryAppliedReleaseUnconfirmed},
+	})
+	classifyInstallReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+
+	fake := newInstallFakeScheduler()
+	installFakeScheduler(t, fake)
+	previousPrune := pruneBackupsForBackupPath
+	pruneCalls := 0
+	pruneBackupsForBackupPath = func(string, int) error {
+		pruneCalls++
+		return nil
+	}
+	t.Cleanup(func() { pruneBackupsForBackupPath = previousPrune })
+	taskName := "mcp-local-hub-install-forward-release-default"
+	plan := &Plan{
+		SchedulerTasks: []ScheduledTaskPlan{{Name: taskName, Command: "go", Args: []string{"serve"}, Trigger: "At logon"}},
+		ClientUpdates: []ClientUpdatePlan{
+			{Client: "codex-cli", URL: "http://127.0.0.1:9312/mcp"},
+			{Client: "cursor", URL: "http://127.0.0.1:9312/mcp"},
+		},
+	}
+	intentPath := filepath.Join(t.TempDir(), "supervisor-intent.json")
+	intentCalls := 0
+	undoCalled := false
+	intermediate := func() (func(), error) {
+		intentCalls++
+		if err := os.WriteFile(intentPath, []byte("committed"), 0o600); err != nil {
+			return nil, err
+		}
+		return func() {
+			undoCalled = true
+			_ = os.Remove(intentPath)
+		}, nil
+	}
+
+	var out bytes.Buffer
+	err := executeInstallTo(&out, &config.ServerManifest{Name: entry}, plan, 1, false, intermediate, true, false)
+	if !errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) || !errors.Is(err, inducedAddEntryReleaseUnconfirmed) {
+		t.Fatalf("executeInstallTo error = %v, want applied release lifecycle error", err)
+	}
+	if !strings.Contains(err.Error(), "configuration applied; lock release unconfirmed") {
+		t.Fatalf("executeInstallTo error lacks forward-only context: %v", err)
+	}
+	var forwardCommitted *InstallForwardCommittedError
+	if !errors.As(err, &forwardCommitted) || forwardCommitted.Client != "codex-cli" {
+		t.Fatalf("forward outcome = %#v err=%v, want codex-cli InstallForwardCommittedError", forwardCommitted, err)
+	}
+	var rollbackIncomplete *InstallClientRollbackIncompleteError
+	if errors.As(err, &rollbackIncomplete) {
+		t.Fatalf("forward-only applied mutation was reported rollback-incomplete: %v", err)
+	}
+	if got := seam.writeCount(codexPath); got != 1 {
+		t.Fatalf("codex write count = %d, want one applied AddEntry and no same-leaf restore", got)
+	}
+	if got := seam.writeCount(cursorPath); got != 0 {
+		t.Fatalf("later optional cursor mutation ran after poisoned codex leaf: writes=%d", got)
+	}
+	if raw, readErr := os.ReadFile(codexPath); readErr != nil || !bytes.Contains(raw, []byte("9312")) {
+		t.Fatalf("applied codex target = %q err=%v, want committed URL", raw, readErr)
+	}
+	if intentCalls != 1 || undoCalled {
+		t.Fatalf("mandatory intent settlement calls=%d undoCalled=%v, want one committed write and no compensation", intentCalls, undoCalled)
+	}
+	if raw, readErr := os.ReadFile(intentPath); readErr != nil || string(raw) != "committed" {
+		t.Fatalf("committed intent = %q err=%v", raw, readErr)
+	}
+	if !fake.tasks[taskName] {
+		t.Fatalf("scheduler task was rolled back after applied client target: tasks=%v", fake.tasks)
+	}
+	if pruneCalls != 0 || fake.runCount != 0 {
+		t.Fatalf("optional post-commit work ran after poisoned leaf: prune=%d run=%d", pruneCalls, fake.runCount)
+	}
+}
+
+func TestInstallAppliedReleaseUnconfirmedIntentFailureReturnsBothWithoutRollback(t *testing.T) {
+	entry := "install-forward-intent-failure"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers."+entry+"]\ncommand = \"go\"\nargs = [\"orig\"]\n")
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryAppliedReleaseUnconfirmed},
+	})
+	classifyInstallReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+	fake := newInstallFakeScheduler()
+	installFakeScheduler(t, fake)
+	taskName := "mcp-local-hub-install-forward-intent-failure-default"
+	plan := &Plan{
+		SchedulerTasks: []ScheduledTaskPlan{{Name: taskName, Command: "go", Args: []string{"serve"}, Trigger: "At logon"}},
+		ClientUpdates:  []ClientUpdatePlan{{Client: "codex-cli", URL: "http://127.0.0.1:9315/mcp"}},
+	}
+	intentCause := errors.New("induced mandatory intent failure")
+
+	var out bytes.Buffer
+	err := executeInstallTo(&out, &config.ServerManifest{Name: entry}, plan, 1, false, func() (func(), error) {
+		return nil, intentCause
+	}, true, false)
+	if !errors.Is(err, inducedAddEntryReleaseUnconfirmed) || !errors.Is(err, intentCause) {
+		t.Fatalf("executeInstallTo error = %v, want client release and intent causes", err)
+	}
+	var forwardCommitted *InstallForwardCommittedError
+	if !errors.As(err, &forwardCommitted) || forwardCommitted.Client != "codex-cli" {
+		t.Fatalf("forward outcome = %#v err=%v, want codex-cli InstallForwardCommittedError", forwardCommitted, err)
+	}
+	if got := seam.writeCount(codexPath); got != 1 {
+		t.Fatalf("codex write count = %d, want no rollback after intent failure", got)
+	}
+	if raw, readErr := os.ReadFile(codexPath); readErr != nil || !bytes.Contains(raw, []byte("9315")) {
+		t.Fatalf("applied codex target = %q err=%v, want committed URL", raw, readErr)
+	}
+	if !fake.tasks[taskName] {
+		t.Fatalf("scheduler task was rolled back after mandatory intent failure: tasks=%v", fake.tasks)
+	}
+}
+
+func TestInstallRollbackRestoreAppliedReleaseUnconfirmedIsReconciled(t *testing.T) {
+	entry := "install-restore-release"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers."+entry+"]\ncommand = \"go\"\nargs = [\"orig\"]\n")
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntrySucceed, restore: restoreAppliedReleaseUnconfirmed},
+	})
+	classifyInstallReleaseForTest(t, inducedRestoreReleaseUnconfirmed)
+	intermediateCause := errors.New("induced post-client intent failure")
+	plan := &Plan{ClientUpdates: []ClientUpdatePlan{{Client: "codex-cli", URL: "http://127.0.0.1:9313/mcp"}}}
+
+	var out bytes.Buffer
+	err := executeInstallTo(&out, &config.ServerManifest{Name: entry}, plan, 1, false, func() (func(), error) {
+		return nil, intermediateCause
+	}, true, true)
+	if !errors.Is(err, intermediateCause) || !errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) || !errors.Is(err, inducedRestoreReleaseUnconfirmed) {
+		t.Fatalf("executeInstallTo error = %v, want intent and restore lifecycle causes", err)
+	}
+	var rollbackIncomplete *InstallClientRollbackIncompleteError
+	if errors.As(err, &rollbackIncomplete) {
+		t.Fatalf("applied restore was falsely reported rollback-incomplete: %v", err)
+	}
+	var forwardCommitted *InstallForwardCommittedError
+	if errors.As(err, &forwardCommitted) {
+		t.Fatalf("reconciled rollback restore was falsely reported forward-committed: %v", err)
+	}
+	if got := seam.writeCount(codexPath); got != 2 {
+		t.Fatalf("codex write count = %d, want AddEntry plus exactly one restore", got)
+	}
+	if raw, readErr := os.ReadFile(codexPath); readErr != nil || !bytes.Contains(raw, []byte("orig")) || bytes.Contains(raw, []byte("9313")) {
+		t.Fatalf("rollback restore bytes = %q err=%v, want original entry", raw, readErr)
+	}
+}
+
+func TestInstallAddEntryBodyErrorStillRunsPrearmedRestore(t *testing.T) {
+	entry := "install-body-error-restore"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, "[mcp_servers."+entry+"]\ncommand = \"go\"\nargs = [\"orig\"]\n")
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryFailMutated, restore: restoreSucceed},
+	})
+	plan := &Plan{ClientUpdates: []ClientUpdatePlan{{Client: "codex-cli", URL: "http://127.0.0.1:9314/mcp"}}}
+
+	var out bytes.Buffer
+	err := executeInstallTo(&out, &config.ServerManifest{Name: entry}, plan, 1, false, nil, true, true)
+	if err == nil || !strings.Contains(err.Error(), "induced mutated add-entry failure") {
+		t.Fatalf("executeInstallTo error = %v, want ordinary mutated body failure", err)
+	}
+	var rollbackIncomplete *InstallClientRollbackIncompleteError
+	if errors.As(err, &rollbackIncomplete) {
+		t.Fatalf("ordinary body error restored cleanly but reported rollback-incomplete: %v", err)
+	}
+	var forwardCommitted *InstallForwardCommittedError
+	if errors.As(err, &forwardCommitted) {
+		t.Fatalf("ordinary body error was falsely reported forward-committed: %v", err)
+	}
+	if got := seam.writeCount(codexPath); got != 2 {
+		t.Fatalf("codex write count = %d, want failed AddEntry plus pre-armed restore", got)
+	}
+	if raw, readErr := os.ReadFile(codexPath); readErr != nil || !bytes.Contains(raw, []byte("orig")) || bytes.Contains(raw, []byte("9314")) {
+		t.Fatalf("ordinary body-error rollback bytes = %q err=%v, want original entry", raw, readErr)
+	}
+}
+
 func TestPrintPlanTo_SerenaDryRunShowsRouterURLAndDeferredNotice(t *testing.T) {
 	m := serenaManifest()
 	wantURL := SerenaRouterClientURL(9125)

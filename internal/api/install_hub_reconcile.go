@@ -45,7 +45,9 @@ type HubReconcileOpts struct {
 // Succeeded lists the client ids whose entire batch (adds + removes)
 // applied without error. Failed records per-client failures, scoped to
 // the phase that errored ("add/replace" or "remove") and the wrapped
-// error message. The reconcile continues with the next client when a
+// error message. An applied mutation with unconfirmed lock release is recorded
+// as a failure whose message explicitly says the operation applied; later ops
+// for that client stop. The reconcile continues with the next client when a
 // per-client phase fails — operators rerun to converge.
 type HubReconcileReport struct {
 	Succeeded []string
@@ -463,13 +465,24 @@ func callApplyOpsForClient(client string, ops []ClientUpdatePlan) error {
 // this file consults that predicate so a future relay adapter is excluded
 // automatically without editing each site.
 func applyOpsForClient(client string, ops []ClientUpdatePlan) error {
+	return applyOpsForClientWithDeps(client, ops, clients.AllClients(), clients.ClassifyClientMutation)
+}
+
+func applyOpsForClientWithDeps(
+	client string,
+	ops []ClientUpdatePlan,
+	allClients map[string]clients.Client,
+	classify func(error) clients.ClientMutationSettlement,
+) error {
 	if clients.IsRelayStdio(client) {
 		return nil // surfaced as a "skipped" success in the report layer
 	}
 	if len(ops) == 0 {
 		return nil
 	}
-	allClients := clients.AllClients()
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
+	}
 	c, ok := allClients[client]
 	if !ok {
 		return fmt.Errorf("unknown client %q", client)
@@ -490,10 +503,16 @@ func applyOpsForClient(client string, ops []ClientUpdatePlan) error {
 				Headers: op.Headers,
 			}
 			if err := c.AddEntry(entry); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					return fmt.Errorf("add %s in %s applied; lock release unconfirmed: %w", op.EntryName, client, err)
+				}
 				return fmt.Errorf("add %s in %s: %w", op.EntryName, client, err)
 			}
 		case ClientUpdateRemove:
 			if err := c.RemoveEntry(op.EntryName); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					return fmt.Errorf("remove %s in %s applied; lock release unconfirmed: %w", op.EntryName, client, err)
+				}
 				return fmt.Errorf("remove %s in %s: %w", op.EntryName, client, err)
 			}
 		}

@@ -388,15 +388,43 @@ func (a *API) registerOneLanguageSupervised(
 		return registeredLanguageResult{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
 	}
 	provisionalReceipts, err := writeRegisteredClientEntries(bindings, allClients, entryNameByClient, port, lang, w, transaction)
+	var forwardErr *RegisterForwardCommittedError
 	if err != nil {
-		return registeredLanguageResult{}, err
+		if !errors.As(err, &forwardErr) {
+			return registeredLanguageResult{}, err
+		}
+		var persistErr error
+		composedEntry, persistErr = persistRegistrationForwardReceipts(reg, composedEntry, prior, had, provisionalReceipts)
+		forwardErr.cause = errors.Join(
+			forwardErr.cause,
+			labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr),
+		)
+	}
+	forwardResult := func(label string, continuationErr error) (registeredLanguageResult, error) {
+		if forwardErr == nil {
+			return registeredLanguageResult{}, continuationErr
+		}
+		forwardErr.cause = errors.Join(
+			forwardErr.cause,
+			labeledRegistrationForwardContinuationError(label, continuationErr),
+		)
+		return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, forwardErr
 	}
 	if err := transaction.Release(lockToken); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock after client updates: %w", err)
+		if forwardErr == nil {
+			return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock after client updates: %w", err)
+		}
+		forwardErr.cause = errors.Join(
+			forwardErr.cause,
+			labeledRegistrationForwardContinuationError(
+				"release supervised registry lock after client updates",
+				fmt.Errorf("release supervised registry lock after client updates: %w", err),
+			),
+		)
 	}
 	postWrite := opts.supervisorPostWriteDeps
 	if postWrite.upsertIntent == nil || postWrite.writeRunningIntent == nil || postWrite.reconcile == nil || postWrite.readiness == nil {
-		return registeredLanguageResult{}, errors.New("supervised register post-write dependencies were not normalized")
+		return forwardResult("normalize supervised post-write dependencies", errors.New("supervised register post-write dependencies were not normalized"))
 	}
 
 	restoreIntent, err := postWrite.upsertIntent(composedEntry, canonicalExe)
@@ -406,13 +434,13 @@ func (a *API) registerOneLanguageSupervised(
 		restoreIntent,
 	)
 	if err != nil {
-		return registeredLanguageResult{}, err
+		return forwardResult("upsert supervisor intent", err)
 	}
 	if canonicalTaskName, err := postWrite.writeRunningIntent(
 		taskName,
 		transaction.AddCompensation,
 	); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
+		return forwardResult("write running intent", fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err))
 	}
 	// The reconcile may spawn the replacement and then return an error. Arm the
 	// no-op-safe kill before invoking it, after the running-intent restoration
@@ -431,10 +459,10 @@ func (a *API) registerOneLanguageSupervised(
 	// Stop is cleared (above) — the daemon is now spawn-desired. From here the
 	// reconcile can bind the port, so the rollback must own a port kill.
 	if _, err := postWrite.reconcile(ctx, true); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+		return forwardResult("reconcile supervisor", fmt.Errorf("supervisor reconcile after LSP intent write: %w", err))
 	}
 	if err := postWrite.readiness(port, 10*time.Second); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		return forwardResult("verify proxy readiness", fmt.Errorf("proxy readiness on port %d: %w", port, err))
 	}
 	transaction.AddSuccessOutput(
 		"supervised proxy started "+LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang),
@@ -442,7 +470,7 @@ func (a *API) registerOneLanguageSupervised(
 		"✓ Supervisor-managed LSP proxy started: %s\n",
 		LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang),
 	)
-	return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, nil
+	return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, forwardErr
 }
 
 func resolveWorkspaceScopedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {

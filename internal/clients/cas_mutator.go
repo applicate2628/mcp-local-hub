@@ -38,20 +38,20 @@ type ClassifyVerdict = EntryClassification
 // never-adoptable adapters must not be compile-forced to implement a restore they
 // can never run.
 //
-// The whole point is atomicity. withConfigLock wraps each adapter method
-// individually, so a plan-time recognizer check followed by a later
+// The whole point is atomicity. withConfigMutationLock wraps each config-entry
+// mutation individually, so a plan-time recognizer check followed by a later
 // AddEntry/RemoveEntry is NOT one critical section — an operator hand-edit (or a
 // demigrate) landing between plan and execute would let de-adopt restore a stale
 // snapshot OVER the operator's fresh edit (silent data loss). Each CAS method
 // instead does the whole re-read -> check -> mutate under ONE held lock.
 //
 // LOCK OWNERSHIP (design P3). The lockingClient FORWARDER holds
-// withConfigLock(ConfigPath) across the whole call (type-assert-inside-lock,
-// mirroring AddEntryWithConfigWriter, config_lock.go:229-239). The concrete
-// method bodies below run UNDER that held lock and are themselves LOCK-FREE: the
-// per-path mutex is non-reentrant (config_lock.go:24-30), so a concrete body
-// calling withConfigLock would self-deadlock. They call only the LOCK-FREE
-// concrete reads/writes (GetEntry, restoreEntryFromBytes, RemoveEntry).
+// withConfigMutationLock(ConfigPath) across the whole call (type-assert-inside-
+// lock, mirroring lockingClient.AddEntryWithConfigWriter). The concrete
+// method bodies below run UNDER that held lock and are themselves LOCK-FREE:
+// perPathMutex is non-reentrant, so a concrete body calling either config-lock
+// wrapper would self-deadlock. They call only the LOCK-FREE concrete reads/writes
+// (GetEntry, restoreEntryFromBytes, RemoveEntry).
 //
 // ADOPT-REACHABILITY ENFORCEMENT (Phase-3 constraint, fable-5 Phase-2 audit).
 // These methods are defined on EACH adopt-reachable CONCRETE adapter, NEVER on
@@ -223,7 +223,7 @@ func (m *directCleanupMutator) CleanupDirectEntryAtomically(
 	if m == nil || m.client == nil || target == nil || target.physicalToken == nil || target.identity.Name == "" {
 		return "", fmt.Errorf("%w: invalid cleanup target", ErrCASConflict)
 	}
-	err = withConfigLock(m.client.Client.ConfigPath(), func() error {
+	err = withConfigMutationLock(m.client.Client.ConfigPath(), func() error {
 		if _, ok := m.client.Client.(CASEntryMutator); !ok {
 			return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCASConflict, m.client.Client.Name())
 		}
@@ -323,7 +323,7 @@ func (r *directCleanupReceipt) Restore() error {
 	if r == nil || r.mutator == nil || r.target == nil {
 		return fmt.Errorf("%w: invalid cleanup receipt", ErrCleanupRestoreConflict)
 	}
-	return withConfigLock(r.mutator.client.Client.ConfigPath(), r.restoreUnderLock)
+	return withConfigMutationLock(r.mutator.client.Client.ConfigPath(), r.restoreUnderLock)
 }
 
 func (r *directCleanupReceipt) restoreUnderLock() error {
@@ -400,7 +400,7 @@ var (
 // it cannot drift out of sync with a rename.
 //
 // On success it returns the ORIGINAL c (the lockingClient wrapper in production),
-// so the returned mutator's forwarder still HOLDS withConfigLock. A bare concrete
+// so the returned mutator's forwarder still HOLDS withConfigMutationLock. A bare concrete
 // (test-only, never lockingClient-wrapped) is returned as-is and runs LOCK-FREE —
 // correct only for a single-threaded unit test.
 func AsCASEntryMutator(c Client) (CASEntryMutator, bool) {
@@ -907,9 +907,9 @@ func (a *antigravityClient) CASGuardedRemoveEntry(name string, match func(*MCPEn
 
 // ---- lockingClient forwarders ----
 //
-// CAS forwarders hold withConfigLock. ClassifyEntryUnderLock holds the
-// read-selection withConfigReadLock. EntryRawSubtree is a pure lock-free bytes
-// forward, matching EntryPresentInBytes.
+// CAS mutation forwarders hold withConfigMutationLock. ClassifyEntryUnderLock
+// holds the read-selection withConfigReadLock. EntryRawSubtree is a pure
+// lock-free bytes forward, matching EntryPresentInBytes.
 
 func (l *lockingClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
 	m, ok := l.Client.(CASEntryMutator)
@@ -947,7 +947,7 @@ func (l *lockingClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry
 }
 
 func (l *lockingClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {
 			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())
@@ -957,7 +957,7 @@ func (l *lockingClient) CASRestoreEntryFromBytes(name string, match func(*MCPEnt
 }
 
 func (l *lockingClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {
 			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())

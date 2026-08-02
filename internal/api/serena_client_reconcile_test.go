@@ -45,18 +45,22 @@ func seedPidport(t *testing.T, pid, port int) string {
 // invariant. Named distinctly from register_test.go's fakeClient (which
 // implements only a subset of the interface).
 type reconcileFakeClient struct {
-	name          string
-	exists        bool
-	entries       map[string]clients.MCPEntry
-	addErr        error  // when non-nil, AddEntry returns it
-	backupPath    string // path BackupKeep returns (default "/fake/bak")
-	backupCount   int
-	addCalls      int
-	removeCalls   int
-	restoreCalls  int    // RestoreEntryFromBackup + ...ForRollback invocation count
-	rollbackCalls int    // RestoreEntryFromBackupForRollback invocation count only
-	restoreFrom   string // last backupPath passed to a restore call
-	restoreErr    error  // when non-nil, the restore call returns it
+	name               string
+	exists             bool
+	entries            map[string]clients.MCPEntry
+	addErr             error // when non-nil, AddEntry returns it
+	addAppliesOnErr    bool
+	removeErr          error
+	removeAppliesOnErr bool
+	getEntryOverride   *clients.MCPEntry
+	backupPath         string // path BackupKeep returns (default "/fake/bak")
+	backupCount        int
+	addCalls           int
+	removeCalls        int
+	restoreCalls       int    // RestoreEntryFromBackup + ...ForRollback invocation count
+	rollbackCalls      int    // RestoreEntryFromBackupForRollback invocation count only
+	restoreFrom        string // last backupPath passed to a restore call
+	restoreErr         error  // when non-nil, the restore call returns it
 }
 
 func newReconcileFakeClient(name string) *reconcileFakeClient {
@@ -89,6 +93,9 @@ func (f *reconcileFakeClient) Restore(string) error { return nil }
 func (f *reconcileFakeClient) AddEntry(e clients.MCPEntry) error {
 	f.addCalls++
 	if f.addErr != nil {
+		if f.addAppliesOnErr {
+			f.entries[e.Name] = e
+		}
 		return f.addErr
 	}
 	f.entries[e.Name] = e
@@ -96,10 +103,20 @@ func (f *reconcileFakeClient) AddEntry(e clients.MCPEntry) error {
 }
 func (f *reconcileFakeClient) RemoveEntry(name string) error {
 	f.removeCalls++
+	if f.removeErr != nil {
+		if f.removeAppliesOnErr {
+			delete(f.entries, name)
+		}
+		return f.removeErr
+	}
 	delete(f.entries, name)
 	return nil
 }
 func (f *reconcileFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
+	if f.getEntryOverride != nil {
+		cp := *f.getEntryOverride
+		return &cp, nil
+	}
 	e, ok := f.entries[name]
 	if !ok {
 		return nil, nil
@@ -988,5 +1005,87 @@ func TestSerenaClientReconcile_DoesNotTouchG4Resolver(t *testing.T) {
 		if strings.Contains(imp.Path.Value, "hub_mcp_resolver") || strings.Contains(imp.Path.Value, "resolver") {
 			t.Errorf("serena_client_reconcile.go imports a resolver path %s; serena routing must flow only through the /serena/mcp router", imp.Path.Value)
 		}
+	}
+}
+
+func TestSerenaReconcileAppliedReleaseUnconfirmedRecordsActualChangeAndSkipsUnsafeRestore(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	induced := errors.New("induced serena add release failure")
+	client := newReconcileFakeClient("codex-cli")
+	client.addErr = induced
+	client.addAppliesOnErr = true
+
+	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		PidportPath:            seedPidport(t, 100, 9125),
+		VerifyIdentity:         okGUIIdentity,
+		Ping:                   okPing,
+		Clients:                map[string]clients.Client{"codex-cli": client},
+		ClientsInclude:         []string{"codex-cli"},
+		RemoveLegacy:           true,
+		classifyClientMutation: classifyAPITestAppliedRelease(induced),
+	})
+	if err != nil {
+		t.Fatalf("ReconcileSerenaClientsToRouter: %v", err)
+	}
+	if len(report.Applied) != 1 || len(report.Failed) != 1 || !report.Applied[0].restoreUnsafe {
+		t.Fatalf("report = %+v, want actual applied row marked unsafe-to-restore plus lifecycle failure", report)
+	}
+	if client.removeCalls != 0 {
+		t.Fatalf("RemoveEntry calls = %d, want 0 after applied-release add", client.removeCalls)
+	}
+	restoreErr := restoreSerenaReconcileAppliedWithClassifier(report, map[string]clients.Client{"codex-cli": client}, classifyAPITestAppliedRelease(induced))
+	if restoreErr == nil || !strings.Contains(restoreErr.Error(), "prior mutation was applied") {
+		t.Fatalf("restore error = %v, want explicit unsafe-leaf skip", restoreErr)
+	}
+	if client.restoreCalls != 0 {
+		t.Fatalf("restore calls = %d, want 0 for poisoned leaf", client.restoreCalls)
+	}
+}
+
+func TestSerenaLegacyRemoveAppliedReleaseUnconfirmedMarksRewriteUnsafeToRestore(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	induced := errors.New("induced serena remove release failure")
+	client := newReconcileFakeClient("codex-cli")
+	client.getEntryOverride = &clients.MCPEntry{Name: serenaEntryName, URL: "http://localhost:9121/mcp"}
+	client.removeErr = induced
+	client.removeAppliesOnErr = true
+
+	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
+		PidportPath:            seedPidport(t, 100, 9125),
+		VerifyIdentity:         okGUIIdentity,
+		Ping:                   okPing,
+		Clients:                map[string]clients.Client{"codex-cli": client},
+		ClientsInclude:         []string{"codex-cli"},
+		RemoveLegacy:           true,
+		classifyClientMutation: classifyAPITestAppliedRelease(induced),
+	})
+	if err != nil {
+		t.Fatalf("ReconcileSerenaClientsToRouter: %v", err)
+	}
+	if client.removeCalls != 1 || len(report.Applied) != 1 || len(report.Failed) != 1 || !report.Applied[0].restoreUnsafe {
+		t.Fatalf("calls=%d report=%+v, want applied removal lifecycle failure and unsafe restore marker", client.removeCalls, report)
+	}
+}
+
+func TestRestoreSerenaReconcileAppliedConsumesAppliedReleaseAndContinuesIndependentClient(t *testing.T) {
+	induced := errors.New("induced restore release failure")
+	first := newReconcileFakeClient("codex-cli")
+	first.restoreErr = induced
+	second := newReconcileFakeClient("claude-code")
+	report := &MigrateReport{Applied: []AppliedMigration{
+		{Server: serenaEntryName, Client: "codex-cli", BackupPath: "/fake/codex.bak"},
+		{Server: serenaEntryName, Client: "claude-code", BackupPath: "/fake/claude.bak"},
+	}}
+
+	err := restoreSerenaReconcileAppliedWithClassifier(
+		report,
+		map[string]clients.Client{"codex-cli": first, "claude-code": second},
+		classifyAPITestAppliedRelease(induced),
+	)
+	if err == nil || !strings.Contains(err.Error(), "applied; lock release unconfirmed") {
+		t.Fatalf("restore error = %v", err)
+	}
+	if first.restoreCalls != 1 || second.restoreCalls != 1 {
+		t.Fatalf("restore calls first=%d second=%d, want 1/1 across independent leaves", first.restoreCalls, second.restoreCalls)
 	}
 }

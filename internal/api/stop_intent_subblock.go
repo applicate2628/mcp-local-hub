@@ -132,7 +132,6 @@ func (a *API) writeStopIntentWithCompensation(
 						restoreAfter,
 						taskName,
 						who,
-						intent.Reason,
 					)
 				}
 				return restoreErr
@@ -147,7 +146,7 @@ func (a *API) writeStopIntentWithCompensation(
 	// the After snapshot; a DROP (entry removed) emits clear-intent with the
 	// Before snapshot. A no-op write (drop of an absent entry) emits nothing.
 	if changed {
-		emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+		emitStopIntentAudit(before, after, taskName, who)
 	}
 	return nil
 }
@@ -222,7 +221,7 @@ func (a *API) WriteStopIntentIdleGuardedResult(taskName string, intent DaemonInt
 		return false, err
 	}
 	if changed {
-		emitStopIntentAudit(before, after, taskName, who, intent.Reason)
+		emitStopIntentAudit(before, after, taskName, who)
 	} else if refused != nil {
 		emitIdleStopRefusedAudit(refused, taskName, who)
 	}
@@ -555,7 +554,7 @@ func stopEntriesEqual(a, b *DaemonIntent) bool {
 // emits clear-intent with the Before snapshot. A no-op (both nil) emits
 // nothing. Routed through the appendIntentAuditFn seam so tests intercept it
 // exactly as they do for WriteDaemonIntent.
-func emitStopIntentAudit(before, after *DaemonIntent, taskName, who, reason string) {
+func emitStopIntentAudit(before, after *DaemonIntent, taskName, who string) {
 	if appendIntentAuditFn == nil {
 		return
 	}
@@ -565,7 +564,7 @@ func emitStopIntentAudit(before, after *DaemonIntent, taskName, who, reason stri
 			WithAction("set-intent"),
 			WithTask(taskName),
 			WithWho(who),
-			WithReason(reason),
+			WithReason(after.Reason),
 			WithBefore(before),
 			WithAfter(after),
 		))
@@ -577,7 +576,7 @@ func emitStopIntentAudit(before, after *DaemonIntent, taskName, who, reason stri
 			WithAction("clear-intent"),
 			WithTask(taskName),
 			WithWho(who),
-			WithReason(reason),
+			WithReason(before.Reason),
 			WithBefore(before),
 		))
 	}

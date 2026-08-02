@@ -11,9 +11,11 @@
 //     The proxy itself may re-stamp this on startup, but Register
 //     pre-seeds it so `mcphub workspaces` shows a sensible state
 //     immediately.
-//   - Rollback: if any per-language step fails, every side effect applied
-//     so far is reversed in LIFO order (client entries, scheduler tasks,
-//     port allocations, registry entries).
+//   - Settlement: ordinary per-language failures reverse every side effect
+//     applied so far in LIFO order (client entries, scheduler tasks, port
+//     allocations, registry entries). A *RegisterForwardCommittedError is the
+//     typed exception: the coherent applied prefix is retained and later
+//     optional mutations stop.
 //   - Default-all when caller passes an empty languages slice.
 package api
 
@@ -39,6 +41,11 @@ import (
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
+
+// classifyRegisterClientMutation is the registration composition seam for the
+// clients-owned settlement contract. Production always uses the shared owner;
+// focused tests may inject only a deterministic lifecycle outcome.
+var classifyRegisterClientMutation = clients.ClassifyClientMutation
 
 // defaultClientBindingsNow resolves the implicit client binding set used when a
 // workspace-scoped manifest does not declare client_bindings.
@@ -362,6 +369,23 @@ type RegisterReport struct {
 	diagnostics  []RegistrationDiagnostic
 }
 
+// RegisterForwardCommittedError reports that registration committed the
+// coherent subset required by an applied client mutation whose config-lock
+// release could not be confirmed. Later optional client/cleanup mutations are
+// skipped; Client and Operation identify the settlement point without exposing
+// config contents or machine-local paths.
+type RegisterForwardCommittedError struct {
+	Client    string
+	Operation string
+	cause     error
+}
+
+func (e *RegisterForwardCommittedError) Error() string {
+	return fmt.Sprintf("registration forward subset committed at client %s during %s: %v", e.Client, e.Operation, e.cause)
+}
+
+func (e *RegisterForwardCommittedError) Unwrap() error { return e.cause }
+
 // UnregisterReport summarizes what Unregister actually removed.
 type UnregisterReport struct {
 	Workspace    string   `json:"workspace"`
@@ -378,13 +402,18 @@ type UnregisterReport struct {
 // Lazy mode: this function DOES NOT preflight LSP binaries. Missing LSP
 // binaries are surfaced later at first tools/call via LifecycleMissing.
 //
-// Side effects per language (rolled back on later failure):
+// Side effects per language:
 //  1. Allocate port from registry (first-free in the manifest's pool).
 //  2. Create scheduler task whose command is
 //     `mcphub daemon workspace-proxy --port <p> --workspace <ws> --language <lang>`.
 //  3. Write managed entries into each client config (the registry-derived
 //     defaults claude-code and codex-cli, or whatever the manifest declares in
 //     client_bindings). Cursor requires an explicit binding.
+//
+// Ordinary later failures roll these effects back in LIFO order. If an applied
+// client mutation cannot confirm config-lock release, Register instead returns
+// *RegisterForwardCommittedError after retaining the coherent applied prefix;
+// later optional client and cleanup mutations are not attempted.
 //
 // Registry is saved once at the end; a mid-loop failure leaves the registry
 // untouched on disk.
@@ -534,6 +563,12 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	for _, lang := range languages {
 		result, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, bindings, w, transaction)
 		if err != nil {
+			var forwardErr *RegisterForwardCommittedError
+			if errors.As(err, &forwardErr) {
+				report.Entries = append(report.Entries, result.Entry)
+				committedReceipts = append(committedReceipts, result.Receipts...)
+				return report, settleRegistrationCommit(report, w, transaction, forwardErr)
+			}
 			outcome := transaction.Fail(fmt.Errorf("register language %s: %w", lang, err))
 			return report, outcome.Err
 		}
@@ -550,17 +585,14 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		report.addDiagnostic(diagnostic)
 	}
 	if cleanupErr != nil {
+		var forwardErr *RegisterForwardCommittedError
+		if errors.As(cleanupErr, &forwardErr) {
+			return report, settleRegistrationCommit(report, w, transaction, forwardErr)
+		}
 		return report, transaction.Fail(cleanupErr).Err
 	}
-	outcome := transaction.Commit()
-	if !outcome.Committed() {
-		return report, outcome.Err
-	}
-	if outcome.ObserverErr != nil {
-		fmt.Fprintf(w, "warning: registration committed but a post-commit observer failed: %v\n", outcome.ObserverErr)
-		report.addDiagnostic(NewRegistrationDiagnostic(
-			RegistrationCodePostCommitObserverFailed, "workspace-register", "completion-observer", outcome.ObserverErr,
-		))
+	if err := settleRegistrationCommit(report, w, transaction, nil); err != nil {
+		return report, err
 	}
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
@@ -581,6 +613,38 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 	}
 	return report, nil
+}
+
+func settleRegistrationCommit(
+	report *RegisterReport,
+	w io.Writer,
+	transaction *registrationTransaction,
+	forwardErr *RegisterForwardCommittedError,
+) error {
+	var outcome registrationTransactionOutcome
+	if forwardErr == nil {
+		outcome = transaction.Commit()
+		if !outcome.Committed() {
+			return outcome.Err
+		}
+	} else {
+		outcome = transaction.CommitForward()
+		if outcome.State != registrationTransactionCommitted {
+			forwardErr.cause = errors.Join(forwardErr.cause, outcome.Err)
+			return forwardErr
+		}
+		forwardErr.cause = errors.Join(forwardErr.cause, outcome.Err)
+	}
+	if outcome.ObserverErr != nil {
+		fmt.Fprintf(w, "warning: registration committed but a post-commit observer failed: %v\n", outcome.ObserverErr)
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodePostCommitObserverFailed, "workspace-register", "completion-observer", outcome.ObserverErr,
+		))
+	}
+	if forwardErr != nil {
+		return forwardErr
+	}
+	return nil
 }
 
 // registerBlessTrustedRootFn is the explicit-register bless seam. In
@@ -1491,13 +1555,20 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 					}
 				}
 				entryMark := transaction.Mark()
+				cleanupCompensationToken := compensationToken(-1)
 				backupPath, cleanupErr := atomicClient.CleanupDirectEntryAtomically(
 					target,
 					keepN,
 					func(receipt clients.DirectCleanupReceipt) error {
-						transaction.AddCompensation(
+						cleanupCompensationToken = transaction.AddTrackedCompensation(
 							fmt.Sprintf("restore %s entry %s from cleanup receipt", sanitizeCleanupPlanIdentifier(clientName), sanitizeCleanupPlanIdentifier(entry.Name)),
-							receipt.Restore,
+							func() error {
+								return settleRegistrationCompensationMutation(
+									"restore direct-cleanup receipt for "+sanitizeCleanupPlanIdentifier(entry.Name),
+									clientName,
+									receipt.Restore(),
+								)
+							},
 						)
 						return nil
 					},
@@ -1511,6 +1582,32 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 						return nil
 					},
 				)
+				if classifyRegisterClientMutation(cleanupErr) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					disarmErr := transaction.DisarmCompensation(cleanupCompensationToken)
+					transaction.AddSuccessOutput(
+						"cleanup backup "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+						w,
+						"✓ %s backup before direct LSP cleanup: %s\n",
+						clientName,
+						backupPath,
+					)
+					transaction.AddSuccessOutput(
+						"cleanup removal "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+						w,
+						"✓ %s removed direct LSP entry %s (--lsp %s; configuration applied; lock release unconfirmed)\n",
+						clientName,
+						entry.Name,
+						entry.Language,
+					)
+					return warnings.outcome(), &RegisterForwardCommittedError{
+						Client:    clientName,
+						Operation: "remove-direct-entry",
+						cause: errors.Join(
+							fmt.Errorf("configuration applied; lock release unconfirmed: %w", cleanupErr),
+							disarmErr,
+						),
+					}
+				}
 				if cleanupErr != nil {
 					var validationErr directCleanupRevalidationError
 					if errors.As(cleanupErr, &validationErr) {
@@ -1885,22 +1982,46 @@ func writeRegisteredClientEntries(
 		savedPrior := priorEntry
 		capturedName := entryName
 		capturedClientName := binding.Client
-		transaction.AddCompensation("restore client entry "+capturedClientName+"/"+capturedName, func() error {
+		compensationToken := transaction.AddTrackedCompensation("restore client entry "+capturedClientName+"/"+capturedName, func() error {
 			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
-				if err := clientRef.AddEntry(*savedPrior); err != nil {
-					return fmt.Errorf("restore prior %s entry in %s: %w", capturedName, capturedClientName, err)
+				restoreErr := clientRef.AddEntry(*savedPrior)
+				if err := settleRegistrationCompensationMutation("restore prior "+capturedName+" entry", capturedClientName, restoreErr); err != nil {
+					return err
 				}
 				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
 				return nil
 			}
-			if err := clientRef.RemoveEntry(capturedName); err != nil {
-				return fmt.Errorf("remove %s entry from %s: %w", capturedName, capturedClientName, err)
+			removeErr := clientRef.RemoveEntry(capturedName)
+			if err := settleRegistrationCompensationMutation("remove "+capturedName+" entry", capturedClientName, removeErr); err != nil {
+				return err
 			}
 			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", capturedName, capturedClientName)
 			return nil
 		})
-		if err := client.AddEntry(entry); err != nil {
-			return nil, fmt.Errorf("write %s entry: %w", binding.Client, err)
+		addErr := client.AddEntry(entry)
+		switch classifyRegisterClientMutation(addErr) {
+		case clients.ClientMutationNeedsCompensation:
+			return nil, fmt.Errorf("write %s entry: %w", binding.Client, addErr)
+		case clients.ClientMutationAppliedReleaseUnconfirmed:
+			disarmErr := transaction.DisarmCompensation(compensationToken)
+			seen[key] = entryName
+			receipts = append(receipts, clientWriteReceipt{Key: key, EntryName: entryName})
+			transaction.AddSuccessOutput(
+				"client entry written "+capturedClientName+"/"+capturedName,
+				w,
+				"\u2713 %s \u2192 %s (entry %s; configuration applied; lock release unconfirmed)\n",
+				binding.Client,
+				entry.URL,
+				entryName,
+			)
+			return receipts, &RegisterForwardCommittedError{
+				Client:    binding.Client,
+				Operation: "add-entry",
+				cause: errors.Join(
+					fmt.Errorf("configuration applied; lock release unconfirmed: %w", addErr),
+					disarmErr,
+				),
+			}
 		}
 
 		seen[key] = entryName
@@ -1915,6 +2036,17 @@ func writeRegisteredClientEntries(
 		)
 	}
 	return receipts, nil
+}
+
+func settleRegistrationCompensationMutation(operation, clientName string, err error) error {
+	switch classifyRegisterClientMutation(err) {
+	case clients.ClientMutationApplied:
+		return nil
+	case clients.ClientMutationAppliedReleaseUnconfirmed:
+		return fmt.Errorf("%s in %s: configuration applied; lock release unconfirmed: %w", operation, clientName, err)
+	default:
+		return fmt.Errorf("%s in %s: %w", operation, clientName, err)
+	}
 }
 
 // registerOneLanguage is the per-language unit of work. It (a) allocates a
@@ -2252,9 +2384,53 @@ func (a *API) registerOneLanguage(
 	}
 	receipts, err := writeRegisteredClientEntries(bindings, allClients, entryNameByClient, port, lang, w, transaction)
 	if err != nil {
-		return registeredLanguageResult{}, err
+		var forwardErr *RegisterForwardCommittedError
+		if !errors.As(err, &forwardErr) {
+			return registeredLanguageResult{}, err
+		}
+		committedEntry, persistErr := persistRegistrationForwardReceipts(reg, composedEntry, prior, had, receipts)
+		forwardErr.cause = errors.Join(
+			forwardErr.cause,
+			labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr),
+		)
+		return registeredLanguageResult{Entry: committedEntry, Receipts: receipts}, forwardErr
 	}
 	return registeredLanguageResult{Entry: composedEntry, Receipts: receipts}, nil
+}
+
+func persistRegistrationForwardReceipts(
+	reg *Registry,
+	entry WorkspaceEntry,
+	prior WorkspaceEntry,
+	hadPrior bool,
+	receipts []clientWriteReceipt,
+) (WorkspaceEntry, error) {
+	actual := map[string]string{}
+	if hadPrior {
+		for clientName, entryName := range prior.ClientEntries {
+			actual[clientName] = entryName
+		}
+	}
+	for _, receipt := range receipts {
+		if receipt.Key.Language == entry.Language {
+			actual[receipt.Key.Client] = receipt.EntryName
+		}
+	}
+	entry.ClientEntries = actual
+	if err := reg.PutLSP(entry); err != nil {
+		return entry, fmt.Errorf("registration: committed receipt row rejected: %w", err)
+	}
+	if err := reg.Save(); err != nil {
+		return entry, fmt.Errorf("registration: persist committed receipt row: %w", err)
+	}
+	return entry, nil
+}
+
+func labeledRegistrationForwardContinuationError(label string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("complete mandatory registration continuation %s: %w", label, err)
 }
 
 // Unregister removes scheduler tasks, client-config entries, and registry

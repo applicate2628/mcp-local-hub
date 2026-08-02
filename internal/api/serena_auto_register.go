@@ -432,7 +432,15 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 			return acqErr
 		}
 		interlockHeld = true
-		releaseInterlock = release
+		releaseInterlock = func() {
+			if !interlockHeld {
+				return
+			}
+			interlockHeld = false
+			if release != nil {
+				release()
+			}
+		}
 		interlockBypass = lock.AllowSpecBearingWriteBypass()
 		return nil
 	}
@@ -610,13 +618,17 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return failPreCommit(fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr))
 	}
 
-	// 10. COMMIT POINT (mirror migrate step 9). Disarm the rollback + release the
-	//     flock — the intent now owns the row AND our daemon is in it; rolling the
-	//     registry back here would split-state. Releasing the flock publishes the
-	//     committed row to other processes.
+	// 10. COMMIT POINT (mirror migrate step 9). Disarm the rollback, then attempt
+	//     the registry-flock release exactly once. The intent now owns the row AND
+	//     our daemon is in it; rolling the registry back here would split-state.
+	//     A release failure is accumulated instead of returned immediately because
+	//     it must not skip the owed reconcile/start continuation below.
 	rowSaved = false
+	var postCommitErr error
+	registryReleaseFailed := false
 	if releaseErr := releaseReg(); releaseErr != nil {
-		return nil, fmt.Errorf("serena auto-register: workspace %s and its runtime intent are committed, but could not release the registry lock before reconcile or start: %w", root, releaseErr)
+		registryReleaseFailed = true
+		postCommitErr = errors.Join(postCommitErr, fmt.Errorf("serena auto-register: workspace %s and its runtime intent are committed, but the registry lock release could not be confirmed (no rollback occurred): %w", root, releaseErr))
 	}
 
 	// 11. Bring the new daemon live.
@@ -631,6 +643,8 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//     the needStart outcome. (A reconcile error while the supervisor is still UP
 	//     is a transient nudge failure; keep it non-fatal — the 60s poll backstops.)
 	needPostCommitStart := needStart
+	continuationOutcome := "the running supervisor reconcile completed"
+	continuationFailed := false
 	if !needStart {
 		if _, recErr := autoRegisterReconcileFn(commitCtx, true); recErr != nil {
 			if errors.Is(recErr, ErrSupervisorIPCUnavailable) {
@@ -639,10 +653,13 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 				// needReap||needStart), so verify the start primitive HERE; an
 				// unwired/unsupported platform cannot self-heal → fail loud.
 				if autoRegisterStartFn == nil || autoRegisterStartSupportedFn == nil || !autoRegisterStartSupportedFn() {
-					emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
-					return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the supervisor exited after the liveness probe and the start primitive is unavailable on this build/platform — run `mcphub supervise` so the current binary reconciles the committed intent", root)
+					continuationFailed = true
+					postCommitErr = errors.Join(postCommitErr, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the supervisor exited after the liveness probe and the start primitive is unavailable on this build/platform — NO supervisor is running; run `mcphub supervise` so the current binary reconciles the committed intent (no rollback occurred)", root))
+				} else {
+					needPostCommitStart = true
 				}
-				needPostCommitStart = true
+			} else {
+				continuationOutcome = "the running supervisor reconcile was attempted; its IntentWatcher poll remains the backstop"
 			}
 			// else: the supervisor is up; the reconcile nudge failed transiently; the
 			// 60s IntentWatcher reconcile is the backstop (non-fatal).
@@ -658,16 +675,32 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		releaseInterlock()
 		if startErr := autoRegisterStartFn(commitCtx); startErr != nil {
 			// POST-COMMIT start failure: fail loud, NO registry rollback (the intent
-			// is the commit point). Audit, then return; the operator restarts the
-			// supervisor and the committed intent is reconciled.
-			emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
-			return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — run `mcphub supervise` so the current binary reconciles the committed intent (the registry is intentionally NOT rolled back: the intent is the commit point)", root, startErr)
+			// is the commit point). Accumulate it with any registry-release failure;
+			// the operator restarts the supervisor and reconciles the committed intent.
+			continuationFailed = true
+			postCommitErr = errors.Join(postCommitErr, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — NO supervisor is running; run `mcphub supervise` so the current binary reconciles the committed intent (no rollback occurred: the intent is the commit point)", root, startErr))
+		} else if needStart {
+			continuationOutcome = "the supervisor start completed"
+		} else {
+			continuationOutcome = "the fallback supervisor start completed"
 		}
 	}
 
-	// Release the install mutex before the readiness probe — readiness touches
-	// neither the registry nor the intent, so other roots may proceed.
+	// Release the install mutex before either returning a known finalization error
+	// or entering readiness — neither path touches registry/intent mutation state.
 	releaseInstallMu()
+
+	if postCommitErr != nil {
+		// The row + runtime intent are already committed. Emit the existing event
+		// exactly once and return the committed entry; readiness cannot turn a known
+		// release/start lifecycle failure into success.
+		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+		if registryReleaseFailed && !continuationFailed {
+			postCommitErr = fmt.Errorf("%w; %s; the registration and runtime intent remain committed and no rollback occurred", postCommitErr, continuationOutcome)
+		}
+		e := newEntry
+		return &e, postCommitErr
+	}
 
 	// 12. Readiness: poll the allocated port's /mcp with a synthetic initialize,
 	//     bounded by BOTH the fixed cold-start budget AND the router's REMAINING

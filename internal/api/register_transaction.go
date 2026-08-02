@@ -41,6 +41,7 @@ type transactionMark struct {
 	observers int
 }
 
+type compensationToken int
 type finalizerToken int
 
 type registrationTransactionOutcome struct {
@@ -76,10 +77,27 @@ func (t *registrationTransaction) Mark() transactionMark {
 }
 
 func (t *registrationTransaction) AddCompensation(label string, undo compensation) {
+	t.AddTrackedCompensation(label, undo)
+}
+
+func (t *registrationTransaction) AddTrackedCompensation(label string, undo compensation) compensationToken {
 	if t == nil || t.state != registrationTransactionOpen || undo == nil {
-		return
+		return compensationToken(-1)
 	}
 	t.steps = append(t.steps, namedCompensation{label: label, undo: undo, active: true})
+	return compensationToken(len(t.steps) - 1)
+}
+
+func (t *registrationTransaction) DisarmCompensation(token compensationToken) error {
+	if t == nil {
+		return errors.New("registration transaction is nil")
+	}
+	index := int(token)
+	if index < 0 || index >= len(t.steps) {
+		return fmt.Errorf("registration transaction: invalid compensation token %d", index)
+	}
+	t.steps[index].active = false
+	return nil
 }
 
 func (t *registrationTransaction) AddFinalizer(label string, close finalizer) finalizerToken {
@@ -208,6 +226,30 @@ func (t *registrationTransaction) Commit() registrationTransactionOutcome {
 		t.state = registrationTransactionRolledBack
 		return registrationTransactionOutcome{State: t.state, Err: errors.Join(finalizerErr, rollbackErr)}
 	}
+	return t.finishCommit(nil)
+}
+
+// CommitForward settles a transaction whose externally-owned target already
+// applied and therefore cannot be rolled back safely. Finalizers and observers
+// still run, but a finalizer failure is retained instead of activating stale
+// compensations for independent owners.
+func (t *registrationTransaction) CommitForward() registrationTransactionOutcome {
+	if t == nil {
+		return registrationTransactionOutcome{
+			State: registrationTransactionRolledBack,
+			Err:   errors.New("registration transaction is nil"),
+		}
+	}
+	if t.state != registrationTransactionOpen {
+		return registrationTransactionOutcome{
+			State: t.state,
+			Err:   fmt.Errorf("registration transaction already settled as %s", t.state),
+		}
+	}
+	return t.finishCommit(t.ReleaseSince(transactionMark{}))
+}
+
+func (t *registrationTransaction) finishCommit(finalizerErr error) registrationTransactionOutcome {
 	observers := append([]namedAfterCommitObserver(nil), t.observers...)
 	for i := range t.steps {
 		t.steps[i].active = false
@@ -223,7 +265,7 @@ func (t *registrationTransaction) Commit() registrationTransactionOutcome {
 			labeledTransactionError("after-commit observer", observer.label, observer.observe()),
 		)
 	}
-	return registrationTransactionOutcome{State: t.state, ObserverErr: observerErr}
+	return registrationTransactionOutcome{State: t.state, Err: finalizerErr, ObserverErr: observerErr}
 }
 
 func labeledTransactionError(kind, label string, err error) error {
