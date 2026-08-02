@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"unicode"
 )
 
 // This file is the SINGLE OWNER of credential handling for remote URLs.
@@ -96,8 +97,9 @@ var emitSafeQueryKeys = map[string]struct{}{}
 // unknown(remote_url_query_unclassified) before an approved URL capability can
 // reach child-process argv.
 //
-// Matched case-insensitively against the whole key, and as a substring, so
-// "access_token" and "X-Api-Key" are both caught.
+// Matched case-insensitively as delimited key words, so "access_token" and
+// "X-Api-Key" are caught without treating a safe word such as "design" as
+// credential evidence merely because it contains the letters "sig".
 var argvSecretQueryKeys = []string{
 	"token",
 	"secret",
@@ -110,6 +112,14 @@ var argvSecretQueryKeys = []string{
 	"sig",
 	"signature",
 }
+
+const redactedRemoteMetadata = "REDACTED"
+
+// maxRemoteMetadataDecodePasses bounds opaque metadata decoding. A spelling
+// that still changes after this many passes is refused: its eventual form is
+// not established within the resource budget, so it cannot gain execution or
+// emission authority.
+const maxRemoteMetadataDecodePasses = 8
 
 var errRemoteURLApprovalMissing = errors.New("remote URL approval missing")
 
@@ -215,7 +225,11 @@ func redactURL(raw string) string {
 	}
 	parsed, err := url.Parse(raw)
 	if err != nil {
-		return redactUnparsable(raw)
+		redacted := redactUnparsable(raw)
+		if redacted != raw || !hasEmbeddedCredential(raw) {
+			return redacted
+		}
+		return redactedRemoteMetadata
 	}
 	changed := false
 	if parsed.User != nil {
@@ -229,6 +243,9 @@ func redactURL(raw string) string {
 		}
 	}
 	if !changed {
+		if hasEmbeddedCredential(raw) {
+			return redactedRemoteMetadata
+		}
 		// Return the ORIGINAL spelling rather than url.String()'s
 		// re-encoding: an unchanged URL must round-trip byte-for-byte so a
 		// caller can paste it, and so tests compare against what the
@@ -305,17 +322,49 @@ func isEmitSafeQueryKey(key string) bool {
 func queryCarriesArgvSecret(rawQuery string) bool {
 	for _, part := range strings.Split(rawQuery, "&") {
 		key, value, hasValue := strings.Cut(part, "=")
-		if !hasValue || value == "" {
+		if !hasValue || value == "" || !keyNamesArgvSecret(key) {
 			continue
 		}
-		lower := strings.ToLower(key)
+		return true
+	}
+	return false
+}
+
+func keyNamesArgvSecret(key string) bool {
+	for _, word := range credentialKeyWords(key) {
 		for _, candidate := range argvSecretQueryKeys {
-			if strings.Contains(lower, candidate) {
+			if word == candidate {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func credentialKeyWords(key string) []string {
+	var words []string
+	var word []rune
+	flush := func() {
+		if len(word) != 0 {
+			words = append(words, strings.ToLower(string(word)))
+			word = nil
+		}
+	}
+	var previous rune
+	for _, r := range key {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			flush()
+			previous = 0
+			continue
+		}
+		if len(word) != 0 && unicode.IsUpper(r) && (unicode.IsLower(previous) || unicode.IsDigit(previous)) {
+			flush()
+		}
+		word = append(word, r)
+		previous = r
+	}
+	flush()
+	return words
 }
 
 // redactUnparsable is the fail-closed path for a string url.Parse rejected.
@@ -414,7 +463,7 @@ func hasEmbeddedCredential(raw string) bool {
 		if parsed.User != nil {
 			return true
 		}
-		return queryCarriesArgvSecret(parsed.RawQuery)
+		return opaqueRemoteMetadataCarriesCredential(raw)
 	}
 	// Unparsable: fall back to the same crude authority+query decomposition
 	// redaction uses (splitURLish), so a URL we cannot model is still examined
@@ -422,17 +471,160 @@ func hasEmbeddedCredential(raw string) bool {
 	// positive credential predicate — deliberately not "did redaction change
 	// anything", which would make this wire verdict a shadow of the emission
 	// rule (see splitURLish).
-	body, query, _, _ := splitURLish(raw)
+	body, _, _, _ := splitURLish(raw)
 	if redactUnparsableUserinfo(body) != body {
 		return true
 	}
-	return queryCarriesArgvSecret(query)
+	return opaqueRemoteMetadataCarriesCredential(raw)
 }
 
-// redactRemote returns a copy of r whose URL is safe to emit.
+// redactRemote returns a copy of r whose URL and source metadata are safe to
+// emit. Repo normally remains its copy-pasteable owner/path spelling, but a
+// malformed value is still a secret carrier and must never bypass this owner.
 func redactRemote(r Remote) Remote {
+	rawRepo := r.Repo
+	r.Repo = redactRemoteRepo(rawRepo)
+	if rawRepo != "" && r.Repo != rawRepo {
+		r.URL = strings.ReplaceAll(r.URL, rawRepo, r.Repo)
+	}
 	r.URL = redactURL(r.URL)
 	return r
+}
+
+func redactRemoteRepo(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	if redacted := redactURL(raw); redacted != raw {
+		return redacted
+	}
+	if hasEmbeddedCredential(raw) {
+		return redactedRemoteMetadata
+	}
+	return raw
+}
+
+// remoteRepoAdmissionReason closes the execution channel for malformed source
+// metadata that is not expressible as URL userinfo/query. GitHub and GitLab
+// build their remote URL around REPO, so a value such as user:password@host
+// would otherwise be visible in the child argv even though URL parsing sees it
+// only as a path. This is positive credential evidence, not a general
+// validation rule; ordinary project paths keep their established behavior.
+func remoteRepoAdmissionReason(raw string) Reason {
+	if hasEmbeddedCredential(raw) {
+		return ReasonRemoteURLCredentialBearing
+	}
+	return ""
+}
+
+// opaqueRemoteMetadataCarriesCredential recognizes credential-shaped key/value
+// carriers in every non-userinfo remote channel. It is deliberately positive:
+// ordinary owner/path repository names contain no key/value evidence and stay
+// usable. Decoding continues to a stable spelling within a fixed bound; a
+// spelling that exceeds that bound fails closed rather than relying on a
+// particular encoding depth.
+func opaqueRemoteMetadataCarriesCredential(raw string) bool {
+	spellings, complete := decodedRemoteMetadataSpellings(raw)
+	if !complete {
+		return true
+	}
+	for _, spelling := range spellings {
+		if opaqueAuthorityCarriesCredential(spelling) {
+			return true
+		}
+		for _, part := range strings.FieldsFunc(spelling, func(r rune) bool {
+			return r == '&' || r == ';' || r == ',' || r == '/' || r == '?' || r == '#'
+		}) {
+			key, value, hasValue := strings.Cut(part, "=")
+			if !hasValue {
+				key, value, hasValue = strings.Cut(part, ":")
+			}
+			if hasValue && value != "" && keyNamesArgvSecret(key) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// opaqueAuthorityCarriesCredential catches bare-user and user:password@host
+// spellings that url.Parse treats as non-URL opaque values. A colon after the
+// at sign remains the SCP remote shape (git@host:path), so it stays outside
+// this credential form along with host:port and IPv6.
+func opaqueAuthorityCarriesCredential(raw string) bool {
+	at := strings.LastIndexByte(raw, '@')
+	if at <= 0 {
+		return false
+	}
+	prefix := raw[:at]
+	if scheme := strings.LastIndex(prefix, "://"); scheme >= 0 {
+		prefix = prefix[scheme+3:]
+	}
+	colon := strings.LastIndexByte(prefix, ':')
+	if colon > 0 && colon+1 < len(prefix) {
+		return true
+	}
+	return !strings.Contains(raw[at+1:], ":")
+}
+
+func decodedRemoteMetadataSpellings(raw string) ([]string, bool) {
+	spellings := []string{raw}
+	for range maxRemoteMetadataDecodePasses {
+		decoded, err := url.PathUnescape(spellings[len(spellings)-1])
+		if err != nil || decoded == spellings[len(spellings)-1] {
+			return spellings, true
+		}
+		spellings = append(spellings, decoded)
+	}
+	decoded, err := url.PathUnescape(spellings[len(spellings)-1])
+	return spellings, err != nil || decoded == spellings[len(spellings)-1]
+}
+
+func redactResult(r Result) Result {
+	if len(r.Ports) == 0 {
+		return r
+	}
+	r.Ports = append([]PortResult(nil), r.Ports...)
+	for i := range r.Ports {
+		r.Ports[i] = redactPortResult(r.Ports[i])
+	}
+	return r
+}
+
+func redactPortResult(port PortResult) PortResult {
+	rawRemoteURL := port.Remote.URL
+	rawRepo := port.Remote.Repo
+	port.Remote = redactRemote(port.Remote)
+	port.Candidates = redactCandidates(port.Candidates)
+	port.CompareURL = redactURL(port.CompareURL)
+	if rawRepo != "" && rawRepo != port.Remote.Repo {
+		port.CompareURL = strings.ReplaceAll(port.CompareURL, rawRepo, port.Remote.Repo)
+	}
+	if len(port.Evidence.Commands) != 0 {
+		port.Evidence.Commands = append([]string(nil), port.Evidence.Commands...)
+		for i, command := range port.Evidence.Commands {
+			if rawRemoteURL != "" && rawRemoteURL != port.Remote.URL {
+				command = strings.ReplaceAll(command, rawRemoteURL, port.Remote.URL)
+			}
+			if rawRepo != "" && rawRepo != port.Remote.Repo {
+				command = strings.ReplaceAll(command, rawRepo, port.Remote.Repo)
+			}
+			port.Evidence.Commands[i] = redactEvidenceCommand(command)
+		}
+	}
+	return port
+}
+
+// redactEvidenceCommand is the final-wire owner for each evidence command.
+// Commands are independent public strings: they may come from a cache-like
+// result and need not repeat Remote.URL or Remote.Repo. Credential evidence
+// therefore redacts the complete command before ordinary URL redaction handles
+// value-bearing query text.
+func redactEvidenceCommand(command string) string {
+	if hasEmbeddedCredential(command) {
+		return redactedRemoteMetadata
+	}
+	return redactURL(command)
 }
 
 // redactCandidates returns a copy of candidates whose every Remote.URL is

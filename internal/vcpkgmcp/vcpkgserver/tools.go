@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -18,6 +19,62 @@ import (
 )
 
 const resultProjectionDescription = " Every successful result is measured as indented JSON and is bounded to 256 KiB; an oversized complete result retains its package-owned causal core and adds result_projection with explicit omissions."
+
+func pinStatusReasonVocabularies() (perPort, batch, noPortDirs, tooManyPortDirs, relativePortDir, commitPinAbbreviated, refUnresolvable, networkDisabled string) {
+	registry := pinstatus.PublicReasonRegistry()
+	perPortReasons := registry.PerPort()
+	perPortValues := make([]string, len(perPortReasons))
+	for i, reason := range perPortReasons {
+		perPortValues[i] = string(reason)
+	}
+	batchReasons := registry.Batch()
+	batchValues := make([]string, len(batchReasons))
+	for i, reason := range batchReasons {
+		batchValues[i] = string(reason)
+	}
+	findPerPort := func(want pinstatus.Reason) string {
+		if reason, ok := registry.LookupPerPort(want); ok {
+			return string(reason)
+		}
+		return ""
+	}
+	findBatch := func(want pinstatus.BatchReason) string {
+		if reason, ok := registry.LookupBatch(want); ok {
+			return string(reason)
+		}
+		return ""
+	}
+	return strings.Join(perPortValues, ", "), strings.Join(batchValues, ", "),
+		findBatch(pinstatus.BatchReasonNoPortDirs), findBatch(pinstatus.BatchReasonTooManyPortDirs),
+		findPerPort(pinstatus.ReasonRelativePortDir), findPerPort(pinstatus.ReasonCommitPinAbbreviated),
+		findPerPort(pinstatus.ReasonRefUnresolvable), findPerPort(pinstatus.ReasonNetworkDisabled)
+}
+
+func pinStatusToolDescription() string {
+	perPortReasons, batchReasons, noPortDirs, tooManyPortDirs, relativePortDir, commitPinAbbreviated, refUnresolvable, _ := pinStatusReasonVocabularies()
+	return fmt.Sprintf("Check whether a port's source pin matches what its remote advertises NOW. Valid-input verdicts are current or unknown(reason); "+
+		"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. "+
+		"It is not a staleness checker. The call carries its OWN status/reason separate from each port's: an omitted or empty port_dirs is "+
+		"unknown(%s), never an ok result with an empty list. A batch over the package limit is unknown(%s) before filesystem, clock, allocation, or remote work. Batch reasons are a closed enum: %s. Every port_dirs entry must be absolute; a relative entry is "+
+		"failed(%s) before filesystem or network access. Per-port reasons are a closed enum: %s. "+
+		"An ABBREVIATED commit pin (7..39 hex, pin.shape commit_abbrev) is reported as "+
+		"unknown(%s) — an unresolvable COMMIT, never as a missing tag/branch: ls-remote advertises only full 40-hex SHAs, "+
+		"so an abbreviation has nothing to be matched against. A ${VARIABLE} REF assigned only inside an if()/foreach()/macro() body is "+
+		"unknown(%s), never resolved from a branch that may not have executed. Remote URLs are redacted on every emitted field "+
+		"— including ones url.Parse rejects — and a credential-bearing remote is "+
+		"refused rather than queried (its secret would otherwise appear in the child process's command line). "+
+		"A remote-query lifecycle failure also includes failure.id and a fixed safe failure.detail; status/reason remain the compatibility verdict.", noPortDirs, tooManyPortDirs, batchReasons, relativePortDir, perPortReasons, commitPinAbbreviated, refUnresolvable) + resultProjectionDescription
+}
+
+func pinStatusPortDirsDescription() string {
+	_, _, noPortDirs, tooManyPortDirs, relativePortDir, _, _, _ := pinStatusReasonVocabularies()
+	return fmt.Sprintf("Absolute port directories, each expected to contain portfile.cmake. At most %d entries are admitted; an oversize batch returns unknown(%s) before filesystem, clock, allocation, or remote work. A relative entry returns failed(%s) before filesystem or network access. Required and non-empty; an empty batch is refused with unknown(%s).", pinstatus.MaxPortDirs, tooManyPortDirs, relativePortDir, noPortDirs)
+}
+
+func pinStatusDisableNetworkDescription() string {
+	_, _, _, _, _, _, _, networkDisabled := pinStatusReasonVocabularies()
+	return fmt.Sprintf("When true, do not query remotes; each requested valid absolute port reports unknown(%s).", networkDisabled)
+}
 
 type projectableToolOutcome struct {
 	invalidArgument error
@@ -211,32 +268,20 @@ func registerTools(vs *VcpkgServer) {
 	}, vs.portResolutionTool)
 
 	registerProjectableTool(vs, &mcp.Tool{
-		Name: "vcpkg_pin_status",
-		Description: "Check whether a port's source pin matches what its remote advertises NOW. Valid-input verdicts are current or unknown(reason); " +
-			"this tool cannot say \"behind\" because git ls-remote cannot prove a differing pin is an ancestor rather than diverged or rebased away. " +
-			"It is not a staleness checker. The call carries its OWN status/reason separate from each port's: an omitted or empty port_dirs is " +
-			"unknown(no_port_dirs), never an ok result with an empty list. Every port_dirs entry must be absolute; a relative entry is " +
-			"failed(relative_port_dir) before filesystem or network access. Per-port reasons are a closed enum: relative_port_dir, not_git_comparable, " +
-			"pin_not_at_tip, ref_unresolvable, ref_not_found_on_remote, commit_pin_abbreviated, named_ref_not_comparable, head_ref_unresolvable, remote_query_failed, " +
-			"remote_query_timeout, remote_query_canceled, remote_ref_limit, remote_url_credential_bearing, network_disabled, portfile_unparsable, " +
-			"guard_unresolvable, multiple_fetch_calls. An ABBREVIATED commit pin (7..39 hex, pin.shape commit_abbrev) is reported as " +
-			"unknown(commit_pin_abbreviated) — an unresolvable COMMIT, never as a missing tag/branch: ls-remote advertises only full 40-hex SHAs, " +
-			"so an abbreviation has nothing to be matched against. A ${VARIABLE} REF assigned only inside an if()/foreach()/macro() body is " +
-			"unknown(ref_unresolvable), never resolved from a branch that may not have executed. Remote URLs are redacted on every emitted field " +
-			"— including ones url.Parse rejects — and a credential-bearing remote is " +
-			"refused rather than queried (its secret would otherwise appear in the child process's command line). " +
-			"A remote-query lifecycle failure also includes failure.id and a fixed safe failure.detail; status/reason remain the compatibility verdict." + resultProjectionDescription,
+		Name:        "vcpkg_pin_status",
+		Description: pinStatusToolDescription(),
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
 				"port_dirs": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Absolute port directories, each expected to contain portfile.cmake. A relative entry returns failed(relative_port_dir) before filesystem or network access. Required and non-empty; an empty batch is refused with unknown(no_port_dirs).",
+					"maxItems":    pinstatus.MaxPortDirs,
+					"description": pinStatusPortDirsDescription(),
 				},
 				"disable_network": map[string]any{
 					"type":        "boolean",
-					"description": "When true, do not query remotes; each requested valid absolute port reports unknown(network_disabled).",
+					"description": pinStatusDisableNetworkDescription(),
 				},
 			},
 		},

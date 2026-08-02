@@ -191,6 +191,10 @@ const (
 	// not positively identified as a credential. It is still refused because an
 	// unknown credential spelling must not gain child-process authority.
 	ReasonRemoteURLQueryUnclassified Reason = "remote_url_query_unclassified"
+	// ReasonSemanticFileIncomplete: portfile.cmake or vcpkg.json exceeded the
+	// package-owned semantic-file budget. Truncated text is not parsed because
+	// it cannot justify an ok pin-status verdict.
+	ReasonSemanticFileIncomplete Reason = "semantic_file_incomplete"
 )
 
 // BatchReason is the CLOSED enum for the WHOLE CALL's outcome — why the tool
@@ -202,11 +206,95 @@ const (
 type BatchReason string
 
 const (
+	// MaxPortDirs is the package-owned admission limit for one pin-status call.
+	// The MCP schema imports this value directly, so advertised and enforced
+	// batch capacity cannot drift.
+	MaxPortDirs = 64
+
+	// MaxSemanticFileBytes bounds each portfile.cmake and vcpkg.json read. A
+	// cap-truncated semantic input is incomplete evidence, never parseable
+	// content. This value is intentionally independent of result projection.
+	MaxSemanticFileBytes = 1 << 20
+
 	// BatchReasonNoPortDirs: port_dirs was omitted or empty. An empty batch
 	// is rejected rather than answered with an empty list, which would be
 	// indistinguishable from "checked everything, all fine".
 	BatchReasonNoPortDirs BatchReason = "no_port_dirs"
+	// BatchReasonTooManyPortDirs: port_dirs exceeds MaxPortDirs. Rejection is
+	// before filesystem reads, clock samples, result preallocation, or remote
+	// work, so one daemon request cannot claim unbounded sequential work.
+	BatchReasonTooManyPortDirs BatchReason = "too_many_port_dirs"
 )
+
+// ReasonRegistry is the single typed inventory of reason values this package
+// may publish. It keeps the MCP tool description tied to the closed enums
+// rather than a hand-maintained string that can silently omit a new path.
+type ReasonRegistry struct {
+	perPort []Reason
+	batch   []BatchReason
+}
+
+var pinStatusReasonRegistry = ReasonRegistry{
+	perPort: []Reason{
+		ReasonRelativePortDir,
+		ReasonNotGitComparable,
+		ReasonPinNotAtTip,
+		ReasonRefUnresolvable,
+		ReasonRefNotFoundOnRemote,
+		ReasonCommitPinAbbreviated,
+		ReasonNamedRefNotComparable,
+		ReasonHeadRefUnresolvable,
+		ReasonRemoteQueryFailed,
+		ReasonNetworkDisabled,
+		ReasonPortfileUnparsable,
+		ReasonGuardUnresolvable,
+		ReasonMultipleFetchCalls,
+		ReasonRemoteQueryTimeout,
+		ReasonRemoteQueryCanceled,
+		ReasonRemoteRefLimit,
+		ReasonRemoteURLCredentialBearing,
+		ReasonRemoteURLQueryUnclassified,
+		ReasonSemanticFileIncomplete,
+	},
+	batch: []BatchReason{
+		BatchReasonNoPortDirs,
+		BatchReasonTooManyPortDirs,
+	},
+}
+
+// PublicReasonRegistry returns copies so callers can enumerate the closed wire
+// vocabulary without mutating its package-owned registry.
+func PublicReasonRegistry() ReasonRegistry { return pinStatusReasonRegistry }
+
+// PerPort returns all per-port wire reasons in stable description order.
+func (r ReasonRegistry) PerPort() []Reason { return append([]Reason(nil), r.perPort...) }
+
+// Batch returns all call-wide wire reasons in stable description order.
+func (r ReasonRegistry) Batch() []BatchReason { return append([]BatchReason(nil), r.batch...) }
+
+// LookupPerPort returns a registered per-port reason by its typed identity.
+// Description consumers use this rather than assigning semantic meaning to
+// registry slice position.
+func (r ReasonRegistry) LookupPerPort(want Reason) (Reason, bool) {
+	for _, reason := range r.perPort {
+		if reason == want {
+			return reason, true
+		}
+	}
+	return "", false
+}
+
+// LookupBatch returns a registered batch reason by its typed identity.
+// Description consumers use this rather than assigning semantic meaning to
+// registry slice position.
+func (r ReasonRegistry) LookupBatch(want BatchReason) (BatchReason, bool) {
+	for _, reason := range r.batch {
+		if reason == want {
+			return reason, true
+		}
+	}
+	return "", false
+}
 
 // Remote is the parsed remote source this port fetches from.
 type Remote struct {

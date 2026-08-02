@@ -115,6 +115,13 @@ func PinStatus(ctx context.Context, args Args, deps Deps) Result {
 			Ports:  []PortResult{},
 		}
 	}
+	if len(args.PortDirs) > MaxPortDirs {
+		return Result{
+			Status: evidence.StatusUnknown,
+			Reason: BatchReasonTooManyPortDirs,
+			Ports:  []PortResult{},
+		}
+	}
 
 	out := Result{Status: evidence.StatusOK, Ports: make([]PortResult, 0, len(args.PortDirs))}
 	for _, dir := range args.PortDirs {
@@ -156,11 +163,16 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 	}
 
 	portfilePath := filepath.Join(portDir, "portfile.cmake")
-	data, err := fsys.ReadFile(portfilePath)
+	data, complete, err := fsys.ReadFile(portfilePath)
 	res.Evidence.AddPath(portfilePath)
 	if err != nil {
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPortfileUnparsable
+		return res
+	}
+	if !complete {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonSemanticFileIncomplete
 		return res
 	}
 
@@ -168,9 +180,14 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 	// set() in the portfile. A missing or malformed manifest is not itself a
 	// parse failure: it only leaves ${VERSION} unresolved.
 	manifestPath := filepath.Join(portDir, "vcpkg.json")
-	manifest, manifestErr := fsys.ReadFile(manifestPath)
+	manifest, manifestComplete, manifestErr := fsys.ReadFile(manifestPath)
 	if manifestErr == nil {
 		res.Evidence.AddPath(manifestPath)
+	}
+	if manifestErr == nil && !manifestComplete {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonSemanticFileIncomplete
+		return res
 	}
 	parsed, ok := parsePortfileWithManifest(string(data), manifest, filepath.Base(portDir))
 	if !ok {
@@ -219,6 +236,11 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 		// parse-completeness problem, not a live-remote problem.
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPortfileUnparsable
+		return res
+	}
+	if reason := remoteRepoAdmissionReason(parsed.Remote.Repo); reason != "" {
+		res.Status = evidence.StatusUnknown
+		res.Reason = reason
 		return res
 	}
 

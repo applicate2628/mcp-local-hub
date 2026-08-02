@@ -9,6 +9,7 @@ import (
 // PublicResultProjection preserves the batch verdict while omitting port rows
 // only after the complete package-owned result exceeds the shared ceiling.
 func (r Result) PublicResultProjection() any {
+	r = redactResult(r)
 	failures := make([]projectedFailurePort, 0)
 	for index, port := range r.Ports {
 		if port.Failure == nil {

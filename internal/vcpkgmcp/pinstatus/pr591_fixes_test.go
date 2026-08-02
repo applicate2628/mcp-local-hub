@@ -15,9 +15,11 @@ import (
 
 type recordingPinFS struct{ reads []string }
 
-func (f *recordingPinFS) ReadFile(path string) ([]byte, error) {
+var _ FS = (*recordingPinFS)(nil)
+
+func (f *recordingPinFS) ReadFile(path string) ([]byte, bool, error) {
 	f.reads = append(f.reads, path)
-	return []byte(`vcpkg_from_github(REPO acme/widget REF ` + commitA + ` SHA512 0)`), nil
+	return []byte(`vcpkg_from_github(REPO acme/widget REF ` + commitA + ` SHA512 0)`), true, nil
 }
 
 // PR #591 P1 (portfile.go resolveSetVariable): a set() inside an if() branch

@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/cmaketrace"
 	"mcp-local-hub/internal/vcpkgmcp/cmakewrap"
 	"mcp-local-hub/internal/vcpkgmcp/discovery"
+	"mcp-local-hub/internal/vcpkgmcp/evidence"
 	"mcp-local-hub/internal/vcpkgmcp/lastfailure"
 	"mcp-local-hub/internal/vcpkgmcp/patchesapply"
 	"mcp-local-hub/internal/vcpkgmcp/pinstatus"
@@ -33,6 +35,143 @@ type registeredVcpkgToolFixture struct {
 	wantReason string
 	under      func() publicresult.Projectable
 	over       func() publicresult.Projectable
+}
+
+func TestPinStatusLiveDescriptionUsesExactTypedReasonVocabularies(t *testing.T) {
+	perPortVocabulary, batchVocabulary, noPortDirs, tooManyPortDirs, relativePortDir, commitPinAbbreviated, refUnresolvable, networkDisabled := pinStatusReasonVocabularies()
+	registry := pinstatus.PublicReasonRegistry()
+	description := pinStatusToolDescription()
+	if strings.Count(description, "Batch reasons are a closed enum: "+batchVocabulary+".") != 1 {
+		t.Fatalf("live description does not render exactly the batch registry vocabulary: %q", description)
+	}
+	if strings.Count(description, "Per-port reasons are a closed enum: "+perPortVocabulary+".") != 1 {
+		t.Fatalf("live description does not render exactly the per-port registry vocabulary: %q", description)
+	}
+	if !strings.Contains(description, "unknown("+noPortDirs+")") || !strings.Contains(description, "unknown("+tooManyPortDirs+")") {
+		t.Fatalf("live description does not render both registry-derived batch reasons: %q", description)
+	}
+	if !strings.Contains(description, "omitted or empty port_dirs is unknown("+string(pinstatus.BatchReasonNoPortDirs)+")") {
+		t.Fatalf("live description does not bind empty input to its typed batch reason: %q", description)
+	}
+	if !strings.Contains(description, "A batch over the package limit is unknown("+string(pinstatus.BatchReasonTooManyPortDirs)+")") {
+		t.Fatalf("live description does not bind the over-limit batch to its typed reason: %q", description)
+	}
+	for _, reason := range []string{relativePortDir, commitPinAbbreviated, refUnresolvable} {
+		if !strings.Contains(description, reason) {
+			t.Fatalf("live description omits registry-derived named per-port reason %q: %q", reason, description)
+		}
+	}
+	if schema := pinStatusPortDirsDescription(); !strings.Contains(schema, relativePortDir) || !strings.Contains(schema, noPortDirs) || !strings.Contains(schema, tooManyPortDirs) {
+		t.Fatalf("port_dirs schema is not registry-derived: %q", schema)
+	}
+	if schema := pinStatusDisableNetworkDescription(); !strings.Contains(schema, networkDisabled) {
+		t.Fatalf("disable_network schema is not registry-derived: %q", schema)
+	}
+	for _, reason := range registry.PerPort() {
+		if !strings.Contains(perPortVocabulary, string(reason)) {
+			t.Fatalf("typed per-port reason %q is absent from %q", reason, perPortVocabulary)
+		}
+		if strings.Contains(batchVocabulary, string(reason)) {
+			t.Fatalf("per-port reason %q leaked into batch vocabulary %q", reason, batchVocabulary)
+		}
+	}
+	for _, batch := range registry.Batch() {
+		if !strings.Contains(batchVocabulary, string(batch)) {
+			t.Fatalf("typed batch reason %q is absent from %q", batch, batchVocabulary)
+		}
+		if strings.Contains(perPortVocabulary, string(batch)) {
+			t.Fatalf("batch reason %q leaked into per-port vocabulary %q", batch, perPortVocabulary)
+		}
+	}
+}
+
+func TestPinStatusLiveDescriptionsHaveNoReasonLiteralShadowOwner(t *testing.T) {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	source, err := os.ReadFile(filepath.Join(filepath.Dir(thisFile), "tools.go"))
+	if err != nil {
+		t.Fatalf("read tools.go: %v", err)
+	}
+	text := string(source)
+	start := strings.Index(text, "func pinStatusToolDescription")
+	end := strings.Index(text, "type projectableToolOutcome")
+	if start < 0 || end <= start {
+		t.Fatal("could not isolate pin-status description helpers")
+	}
+	section := text[start:end]
+	for _, reason := range pinstatus.PublicReasonRegistry().PerPort() {
+		if strings.Contains(section, strconv.Quote(string(reason))) {
+			t.Fatalf("per-port reason %q survives as a description literal", reason)
+		}
+	}
+	for _, reason := range pinstatus.PublicReasonRegistry().Batch() {
+		if strings.Contains(section, strconv.Quote(string(reason))) {
+			t.Fatalf("batch reason %q survives as a description literal", reason)
+		}
+	}
+}
+
+func TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer(t *testing.T) {
+	const secret = "serializer-repo-secret"
+	result, err := jsonResult(pinstatus.Result{
+		Status: "ok",
+		Ports: []pinstatus.PortResult{{
+			Remote: pinstatus.Remote{
+				Kind: pinstatus.RemoteGitHub,
+				Repo: "group/token=" + secret,
+				URL:  "https://github.com/group/token=" + secret + ".git",
+			},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("jsonResult: %v", err)
+	}
+	if result == nil || len(result.Content) != 1 {
+		t.Fatalf("jsonResult envelope = %#v", result)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("jsonResult content = %T, want *mcp.TextContent", result.Content[0])
+	}
+	if strings.Contains(text.Text, secret) {
+		t.Fatalf("actual vcpkg serializer leaked remote metadata secret: %s", text.Text)
+	}
+	if !strings.Contains(text.Text, "REDACTED") {
+		t.Fatalf("actual vcpkg serializer did not visibly redact metadata: %s", text.Text)
+	}
+}
+
+func TestPinStatusJSONResultRedactsRepoOnlyEvidenceAtActualSerializer(t *testing.T) {
+	const carrier = "user:password@host"
+	result, err := jsonResult(pinstatus.Result{Status: "unknown", Ports: []pinstatus.PortResult{{
+		Remote:   pinstatus.Remote{Kind: pinstatus.RemoteGitHub, Repo: carrier, URL: "https://github.com/safe/repo.git"},
+		Evidence: evidence.Evidence{Commands: []string{"git ls-remote " + carrier}},
+		Failure:  &pinstatus.PublicFailure{ID: pinstatus.FailureRemoteQueryFailed, Detail: "remote query failed"},
+	}}})
+	if err != nil {
+		t.Fatalf("jsonResult: %v", err)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || strings.Contains(text.Text, carrier) {
+		t.Fatalf("actual serializer leaked repo-only evidence carrier: %#v", result)
+	}
+}
+
+func TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer(t *testing.T) {
+	const secret = "actual-serializer-command-secret"
+	result, err := jsonResult(pinstatus.Result{Status: "unknown", Ports: []pinstatus.PortResult{{
+		Remote:   pinstatus.Remote{Kind: pinstatus.RemoteGitHub, URL: "https://host/safe/repo.git"},
+		Evidence: evidence.Evidence{Commands: []string{"git ls-remote https://user:" + secret + "@host/repo.git"}},
+	}}})
+	if err != nil {
+		t.Fatalf("jsonResult: %v", err)
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok || strings.Contains(text.Text, secret) || !strings.Contains(text.Text, "REDACTED") {
+		t.Fatalf("actual serializer leaked independent evidence command: %#v", result)
+	}
 }
 
 var registeredVcpkgToolFixtures = []registeredVcpkgToolFixture{
@@ -411,6 +550,17 @@ func TestRegisterTools(t *testing.T) {
 		}
 		return body
 	}
+
+	t.Run("pr591_pin_status_batch_admission_is_wire_visible", func(t *testing.T) {
+		portDirs := make([]string, pinstatus.MaxPortDirs+1)
+		for i := range portDirs {
+			portDirs[i] = "relative/port"
+		}
+		pin := callBody(t, "vcpkg_pin_status", map[string]any{"port_dirs": portDirs})
+		if pin.Status != "unknown" || pin.Reason != string(pinstatus.BatchReasonTooManyPortDirs) || len(pin.Ports) != 0 {
+			t.Fatalf("pin-status wire body = %+v, want unknown(%s) with no port rows", pin, pinstatus.BatchReasonTooManyPortDirs)
+		}
+	})
 
 	t.Run("pr591_relative_paths_are_wire_visible", func(t *testing.T) {
 		pin := callBody(t, "vcpkg_pin_status", map[string]any{"port_dirs": []string{"relative/port"}})
