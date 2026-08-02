@@ -951,10 +951,84 @@ func TestExecuteCanceledBeforeKillDoesNotTerminate(t *testing.T) {
 		return generation, nil
 	}
 
-	_, err := ExecuteWithDependencies(ctx, d.TaskName, Options{Confirmed: true}, deps)
+	terminationObserverCalls := 0
+	_, err := ExecuteWithDependencies(ctx, d.TaskName, Options{
+		Confirmed: true,
+		OnTerminationCommitted: func() {
+			terminationObserverCalls++
+		},
+	}, deps)
 	requireFailureKind(t, err, FailureRequestCanceled)
 	if len(calls.terminate) != 0 || len(calls.respawn) != 0 {
 		t.Fatalf("pre-kill cancellation side effects: terminate=%d respawn=%d", len(calls.terminate), len(calls.respawn))
+	}
+	if terminationObserverCalls != 0 {
+		t.Fatalf("termination observer calls=%d after pre-kill cancellation", terminationObserverCalls)
+	}
+}
+
+func TestExecuteTerminationObserverRunsBeforePostCommitRecovery(t *testing.T) {
+	d := recoveryDescriptor()
+	const ownerPID = 44000
+	calls := &recoveryCallLog{}
+	deps := recoveryDependencies(t, calls, d)
+	probeCount := 0
+	deps.PortOwner = func(context.Context, int) (int, bool, error) {
+		calls.probe++
+		probeCount++
+		if probeCount <= 2 {
+			return ownerPID, true, nil
+		}
+		return 0, false, nil
+	}
+	terminateReturned := false
+	deps.HoldProcess = func(pid int) (process.HeldPIDGeneration, error) {
+		generation := &fakeHeldPIDGeneration{pid: pid}
+		generation.terminate = func() (bool, error) {
+			calls.order = append(calls.order, "terminate")
+			calls.terminate = append(calls.terminate, generation.lastProof)
+			terminateReturned = true
+			return true, nil
+		}
+		return generation, nil
+	}
+	observerCalls := 0
+	deps.Respawn = func(_ context.Context, task string, force bool) (api.RespawnResult, error) {
+		if !terminateReturned {
+			t.Fatal("respawn started before Terminate returned")
+		}
+		if observerCalls != 1 {
+			t.Fatalf("termination observer calls=%d before respawn, want 1", observerCalls)
+		}
+		calls.order = append(calls.order, "respawn")
+		calls.respawn = append(calls.respawn, respawnCall{task: task, force: force})
+		return api.RespawnResult{Success: true}, nil
+	}
+
+	result, err := ExecuteWithDependencies(context.Background(), d.TaskName, Options{
+		Confirmed: true,
+		OnTerminationCommitted: func() {
+			if !terminateReturned {
+				t.Fatal("termination observer ran before Terminate returned")
+			}
+			observerCalls++
+			calls.order = append(calls.order, "observer")
+		},
+	}, deps)
+	if err != nil {
+		t.Fatalf("ExecuteWithDependencies: %v", err)
+	}
+	if !result.TerminationCommitted {
+		t.Fatalf("result=%+v, want committed termination", result)
+	}
+	if observerCalls != 1 {
+		t.Fatalf("termination observer calls=%d, want 1", observerCalls)
+	}
+	if !reflect.DeepEqual(calls.order, []string{"terminate", "observer", "respawn"}) {
+		t.Fatalf("call order=%v, want terminate -> observer -> respawn", calls.order)
+	}
+	if len(calls.respawn) != 1 {
+		t.Fatalf("respawn calls=%+v, want exactly one", calls.respawn)
 	}
 }
 

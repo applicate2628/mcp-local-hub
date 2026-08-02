@@ -135,6 +135,12 @@ import (
 // re-establish the GUI owner the autostart task is responsible for).
 var livenessRelaunchFn = relaunchSupervisorOwner
 
+// ensureAliveHeadlessFleetNowFn supplies the wall-clock observation paired
+// with the persisted supervisor StartedAt. Production reads it once per
+// decision; tests replace it to exercise rollback/forward anomalies without
+// depending on machine time.
+var ensureAliveHeadlessFleetNowFn = func() time.Time { return time.Now().UTC() }
+
 // standaloneRelaunchFn is the GUI-INDEPENDENT relaunch SEAM (§5 permanent
 // fix PART 2). It is used when the supervisor is down BUT a live GUI owner
 // is present: instead of re-firing the autostart GUI task (a no-op
@@ -294,6 +300,12 @@ func setLivenessRelaunchFnForTest(fn func() error) func() {
 	prev := livenessRelaunchFn
 	livenessRelaunchFn = fn
 	return func() { livenessRelaunchFn = prev }
+}
+
+func setEnsureAliveHeadlessFleetNowForTest(fn func() time.Time) func() {
+	prev := ensureAliveHeadlessFleetNowFn
+	ensureAliveHeadlessFleetNowFn = fn
+	return func() { ensureAliveHeadlessFleetNowFn = prev }
 }
 
 // setStandaloneRelaunchFnForTest installs a test standalone-relaunch function
@@ -959,6 +971,27 @@ const (
 	guiOwnerUnknownConfirmationWindow = 90 * time.Second
 )
 
+type ensureAliveHeadlessFleetAgeClassification string
+
+const (
+	ensureAliveHeadlessFleetAgeTrusted     ensureAliveHeadlessFleetAgeClassification = "trusted_age"
+	ensureAliveHeadlessFleetAgeFutureStart ensureAliveHeadlessFleetAgeClassification = "clock_anomaly_future_start"
+)
+
+type ensureAliveHeadlessFleetSupervisorAge struct {
+	classification ensureAliveHeadlessFleetAgeClassification
+	age            time.Duration
+	startedAt      time.Time
+	observedAt     time.Time
+}
+
+func (a ensureAliveHeadlessFleetSupervisorAge) withinBootGrace(grace time.Duration) bool {
+	return grace > 0 &&
+		a.classification == ensureAliveHeadlessFleetAgeTrusted &&
+		a.age >= 0 &&
+		a.age < grace
+}
+
 // guiOwnerUnknownConfirmationFileLeaf names the durable marker residual 1(b)
 // uses to persist "since when has the GUI owner state been Unknown AND the
 // flock independently confirmed unheld" ACROSS ticks — each `--ensure-alive`
@@ -980,15 +1013,17 @@ const guiOwnerUnknownConfirmationFileLeaf = "gui-owner-unknown-confirmation"
 // `return nil` in the caller, matching the best-effort, always-exit-0
 // contract the rest of this file's ensure-alive action upholds.
 func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool) {
-	now := time.Now().UTC()
+	runEnsureAliveHeadlessFleetAt(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch, ensureAliveHeadlessFleetNowFn())
+}
 
-	uptimeSeconds, uptimeErr := ensureAliveHeadlessFleetSupervisorUptime(stateDir, now)
+func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) {
+	supervisorAge, ageErr := ensureAliveHeadlessFleetSupervisorUptime(stateDir, observedAt)
 	detectedBody := map[string]any{
 		"supervisor_pid":  supervisorPID,
 		"gui_pidport_pid": guiPID,
 	}
-	if uptimeErr == nil {
-		detectedBody["supervisor_uptime_s"] = uptimeSeconds
+	if ageErr == nil {
+		detectedBody["supervisor_uptime_s"] = supervisorAge.age.Seconds()
 	}
 	fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d) but no live GUI owner holds the single-instance lock (pidport pid=%d); evaluating headless-fleet recovery\n", supervisorPID, guiPID)
 	defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "gui-headless-fleet-detected",
@@ -1001,7 +1036,7 @@ func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, 
 
 	// (a) Live-handoff suppressor: an unexpired restart-v3 handoff marker
 	// means the GUI is mid-self-restart, not dead.
-	if handoffSuppressed, handoffErr := ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir, now); handoffErr != nil {
+	if handoffSuppressed, handoffErr := ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir, observedAt); handoffErr != nil {
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "live-handoff", fmt.Sprintf("restart-v3 handoff marker unreadable (will retry next tick): %v", handoffErr))
 		return
 	} else if handoffSuppressed {
@@ -1010,12 +1045,30 @@ func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, 
 	}
 
 	// (b) Boot-grace suppressor: the supervisor itself may have just started.
-	if uptimeErr != nil {
-		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor start time undeterminable (will retry next tick): %v", uptimeErr))
+	if ageErr != nil {
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor start time undeterminable (will retry next tick): %v", ageErr))
 		return
 	}
-	if uptimeSeconds < ensureAliveHeadlessFleetBootGrace.Seconds() {
-		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor uptime %.0fs is within the %s boot-grace window", uptimeSeconds, ensureAliveHeadlessFleetBootGrace))
+	switch supervisorAge.classification {
+	case ensureAliveHeadlessFleetAgeFutureStart:
+		fmt.Fprintf(out, "ensure-alive: supervisor start time is %.0fs in the future; treating as a clock anomaly, not boot grace\n", -supervisorAge.age.Seconds())
+		defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"gui-headless-fleet-supervisor-clock-anomaly",
+			"supervisor start time is in the future; boot grace does not apply after confirmed GUI-owner death",
+			map[string]any{
+				"classification":   string(supervisorAge.classification),
+				"supervisor_pid":   supervisorPID,
+				"started_at":       supervisorAge.startedAt.Format(time.RFC3339Nano),
+				"observed_at":      supervisorAge.observedAt.Format(time.RFC3339Nano),
+				"supervisor_age_s": supervisorAge.age.Seconds(),
+			})
+	case ensureAliveHeadlessFleetAgeTrusted:
+		if supervisorAge.withinBootGrace(ensureAliveHeadlessFleetBootGrace) {
+			ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor uptime %.0fs is within the %s boot-grace window", supervisorAge.age.Seconds(), ensureAliveHeadlessFleetBootGrace))
+			return
+		}
+	default:
+		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor age classification %q is undeterminable (will retry next tick)", supervisorAge.classification))
 		return
 	}
 
@@ -1060,16 +1113,30 @@ func ensureAliveHeadlessFleetSuppress(stateDir string, out io.Writer, reason, de
 // flock itself), so this is an independent read of the same sidecar
 // AcquireSupervisorLock writes. Fail-closed: any read or parse error is
 // returned to the caller, which suppresses this tick rather than guessing.
-func ensureAliveHeadlessFleetSupervisorUptime(stateDir string, now time.Time) (seconds float64, err error) {
+func ensureAliveHeadlessFleetSupervisorUptime(stateDir string, observedAt time.Time) (ensureAliveHeadlessFleetSupervisorAge, error) {
+	var result ensureAliveHeadlessFleetSupervisorAge
+	if observedAt.IsZero() {
+		return result, errors.New("supervisor observation time is zero")
+	}
 	owner, err := api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
 	if err != nil {
-		return 0, err
+		return result, err
 	}
 	startedAt, err := time.Parse(time.RFC3339Nano, owner.StartedAt)
 	if err != nil {
-		return 0, err
+		return result, err
 	}
-	return now.Sub(startedAt).Seconds(), nil
+	if startedAt.IsZero() {
+		return result, errors.New("supervisor start time is zero")
+	}
+	result.startedAt = startedAt.UTC()
+	result.observedAt = observedAt.UTC()
+	result.age = result.observedAt.Sub(result.startedAt)
+	result.classification = ensureAliveHeadlessFleetAgeTrusted
+	if result.startedAt.After(result.observedAt) {
+		result.classification = ensureAliveHeadlessFleetAgeFutureStart
+	}
+	return result, nil
 }
 
 // ensureAliveHeadlessFleetLiveHandoffSuppressed reports whether an unexpired

@@ -23,10 +23,13 @@ type fakeDaemonRecoverer struct {
 	confirmed bool
 }
 
-func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confirmed bool) (daemonrecovery.Result, error) {
+func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confirmed bool, onTerminationCommitted func()) (daemonrecovery.Result, error) {
 	f.calls++
 	f.taskName = taskName
 	f.confirmed = confirmed
+	if f.result.TerminationCommitted && onTerminationCommitted != nil {
+		onTerminationCommitted()
+	}
 	return f.result, f.err
 }
 

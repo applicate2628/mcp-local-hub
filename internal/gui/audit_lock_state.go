@@ -15,10 +15,9 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
-
-	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/daemonrecovery"
@@ -52,12 +51,15 @@ type auditLockReceiptDTO struct {
 }
 
 type auditLockStateDTO struct {
-	Scope            string                       `json:"scope"`
-	ServerInstance   string                       `json:"server_instance"`
-	Revision         uint64                       `json:"revision"`
-	State            api.SupervisorEventLockState `json:"state"`
-	RecoveryReceipt  *auditLockReceiptDTO         `json:"recovery_receipt"`
-	RecoveryReceipts []auditLockReceiptDTO        `json:"recovery_receipts"`
+	Scope                         string                       `json:"scope"`
+	ServerInstance                string                       `json:"server_instance"`
+	Revision                      uint64                       `json:"revision"`
+	State                         api.SupervisorEventLockState `json:"state"`
+	OccurrenceStoreHealth         occurrenceStoreLockState     `json:"occurrence_store_health"`
+	OccurrenceStoreHealthRevision uint64                       `json:"occurrence_store_health_revision"`
+	RestartRequired               bool                         `json:"restart_required"`
+	RecoveryReceipt               *auditLockReceiptDTO         `json:"recovery_receipt"`
+	RecoveryReceipts              []auditLockReceiptDTO        `json:"recovery_receipts"`
 }
 
 type auditLockCorrelation struct {
@@ -172,38 +174,94 @@ type auditLockOccurrenceStore struct {
 	Records              []auditLockOccurrenceRecord `json:"records"`
 }
 
-type auditLockReservation struct {
-	Novel      bool
-	Receipt    auditLockReceiptDTO
-	Terminal   *auditLockTerminalEvidence
-	Binding    auditLockOccurrenceBinding
-	Generation uint64
+type auditLockMutationEpoch struct {
+	ServerInstance string
+	Generation     uint64
 }
 
-type auditLockUncertaintyKey struct {
+func (e auditLockMutationEpoch) matchesStore(store auditLockOccurrenceStore) bool {
+	return store.Generation == e.Generation && store.ActiveServerInstance == e.ServerInstance
+}
+
+type auditLockReservation struct {
+	Novel         bool
+	Receipt       auditLockReceiptDTO
+	Terminal      *auditLockTerminalEvidence
+	Binding       auditLockOccurrenceBinding
+	MutationEpoch auditLockMutationEpoch
+	Settlement    *auditLockSettlementCell
+}
+
+type auditLockSettlementKey struct {
 	Generation     uint64
 	ServerInstance string
 	AttemptID      string
 	OccurrenceID   string
 }
 
-type auditLockStoreLockReleaseError struct {
-	operation string
-	cause     error
+type auditLockSettlementPhase string
+
+const (
+	auditLockSettlementInFlight        auditLockSettlementPhase = "in_flight"
+	auditLockSettlementDurableTerminal auditLockSettlementPhase = "durable_terminal"
+	auditLockSettlementUncertain       auditLockSettlementPhase = "uncertain"
+)
+
+type auditLockSettlementSnapshot struct {
+	phase   auditLockSettlementPhase
+	receipt auditLockReceiptDTO
 }
 
-func (e *auditLockStoreLockReleaseError) Error() string {
-	return fmt.Sprintf("%s: release occurrence lock: %v", e.operation, e.cause)
+type auditLockSettlementCell struct {
+	snapshot atomic.Pointer[auditLockSettlementSnapshot]
 }
 
-func (e *auditLockStoreLockReleaseError) Unwrap() error { return e.cause }
+func newAuditLockSettlementCell(receipt auditLockReceiptDTO) *auditLockSettlementCell {
+	cell := &auditLockSettlementCell{}
+	cell.snapshot.Store(&auditLockSettlementSnapshot{
+		phase:   auditLockSettlementInFlight,
+		receipt: receipt,
+	})
+	return cell
+}
+
+func (c *auditLockSettlementCell) load() *auditLockSettlementSnapshot {
+	if c == nil {
+		return nil
+	}
+	return c.snapshot.Load()
+}
+
+func (c *auditLockSettlementCell) publish(phase auditLockSettlementPhase, receipt auditLockReceiptDTO) *auditLockSettlementSnapshot {
+	if c == nil {
+		return nil
+	}
+	next := &auditLockSettlementSnapshot{phase: phase, receipt: receipt}
+	for {
+		current := c.snapshot.Load()
+		if current == nil {
+			return nil
+		}
+		if current.phase != auditLockSettlementInFlight {
+			return current
+		}
+		if c.snapshot.CompareAndSwap(current, next) {
+			return next
+		}
+	}
+}
 
 type auditLockRouteError struct {
-	status int
-	code   string
+	status                   int
+	code                     string
+	cause                    error
+	occurrenceStoreHealth    *occurrenceStoreLockHealthSnapshot
+	auditLockStateProjection *auditLockStateDTO
 }
 
 func (e *auditLockRouteError) Error() string { return e.code }
+
+func (e *auditLockRouteError) Unwrap() error { return e.cause }
 
 type auditLockAdapter struct {
 	mu               sync.Mutex
@@ -217,7 +275,8 @@ type auditLockAdapter struct {
 	closed           bool
 	watching         bool
 	observedRevision uint64
-	uncertain        map[auditLockUncertaintyKey]auditLockReceiptDTO
+	settlements      sync.Map
+	storeLockHealth  *occurrenceStoreLockHealth
 	subscription     *api.SupervisorEventLockSubscription
 	events           *Broadcaster
 	lockTimeout      time.Duration
@@ -227,21 +286,31 @@ func newAuditLockAdapter(events *Broadcaster) *auditLockAdapter {
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return &auditLockAdapter{
-			events:      events,
-			lockTimeout: auditLockStoreLockTimeout,
-			initErr:     fmt.Errorf("resolve daemon state dir: %w", err),
+			events:          events,
+			storeLockHealth: newOccurrenceStoreLockHealth(nil, emitOccurrenceStoreLockHealthEvent),
+			lockTimeout:     auditLockStoreLockTimeout,
+			initErr:         fmt.Errorf("resolve daemon state dir: %w", err),
 		}
 	}
 	return newAuditLockAdapterInStateDir(events, stateDir)
 }
 
 func newAuditLockAdapterInStateDir(events *Broadcaster, stateDir string) *auditLockAdapter {
+	return newAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, nil, emitOccurrenceStoreLockHealthEvent)
+}
+
+func newAuditLockAdapterInStateDirWithStoreLockDeps(
+	events *Broadcaster,
+	stateDir string,
+	factory occurrenceStoreLockFactory,
+	emit occurrenceStoreLockHealthEmitter,
+) *auditLockAdapter {
 	a := &auditLockAdapter{
-		events:      events,
-		storePath:   filepath.Join(stateDir, auditLockOccurrenceFileLeaf),
-		logPath:     filepath.Join(stateDir, api.SupervisorEventLogFileLeaf),
-		lockTimeout: auditLockStoreLockTimeout,
-		uncertain:   make(map[auditLockUncertaintyKey]auditLockReceiptDTO),
+		events:          events,
+		storePath:       filepath.Join(stateDir, auditLockOccurrenceFileLeaf),
+		logPath:         filepath.Join(stateDir, api.SupervisorEventLogFileLeaf),
+		storeLockHealth: newOccurrenceStoreLockHealth(factory, emit),
+		lockTimeout:     auditLockStoreLockTimeout,
 	}
 	instance, err := newAuditLockCorrelationID()
 	if err != nil {
@@ -255,6 +324,17 @@ func newAuditLockAdapterInStateDir(events *Broadcaster, stateDir string) *auditL
 		a.initErr = fmt.Errorf("claim daemon recovery occurrence store: %w", err)
 	}
 	return a
+}
+
+func emitOccurrenceStoreLockHealthEvent(event occurrenceStoreLockHealthEvent) {
+	_ = api.LogHubMcpEvent("warn", occurrenceStoreLockStrandedEvent, map[string]any{
+		"code":                    string(daemonRecoverErrorOccurrenceStoreLockStranded),
+		"operation":               event.Operation,
+		"data_outcome":            event.DataOutcome,
+		"occurrence_store_health": event.Snapshot.State,
+		"revision":                event.Snapshot.Revision,
+		"restart_required":        event.Snapshot.RestartRequired,
+	})
 }
 
 func newAuditLockCorrelationID() (string, error) {
@@ -450,8 +530,8 @@ func auditLockTerminalFromRecord(record auditLockOccurrenceRecord) *auditLockTer
 	}
 }
 
-func auditLockUncertaintyKeyFor(generation uint64, record auditLockOccurrenceRecord) auditLockUncertaintyKey {
-	return auditLockUncertaintyKey{
+func auditLockSettlementKeyFor(generation uint64, record auditLockOccurrenceRecord) auditLockSettlementKey {
+	return auditLockSettlementKey{
 		Generation:     generation,
 		ServerInstance: record.OriginServerInstance,
 		AttemptID:      record.AttemptID,
@@ -459,44 +539,62 @@ func auditLockUncertaintyKeyFor(generation uint64, record auditLockOccurrenceRec
 	}
 }
 
+func auditLockSettlementKeyForReservation(reservation auditLockReservation) auditLockSettlementKey {
+	return auditLockSettlementKey{
+		Generation:     reservation.MutationEpoch.Generation,
+		ServerInstance: reservation.Receipt.ServerInstance,
+		AttemptID:      reservation.Receipt.AttemptID,
+		OccurrenceID:   reservation.Receipt.OccurrenceID,
+	}
+}
+
+func (a *auditLockAdapter) settlementCell(generation uint64, record auditLockOccurrenceRecord) *auditLockSettlementCell {
+	value, ok := a.settlements.Load(auditLockSettlementKeyFor(generation, record))
+	if !ok {
+		return nil
+	}
+	cell, _ := value.(*auditLockSettlementCell)
+	return cell
+}
+
 // effectiveOccurrence is the single projection owner for durable occurrence
-// state. Callers must hold storeMu: the generation-scoped overlay exists only
-// to keep a terminal result that could not be proven durable from regressing
-// to in_flight inside the same process.
+// state. Durable terminal, uncertain, and consumed records are authoritative;
+// only an indexed uncertain cell may project durable in_flight as uncertain.
 func (a *auditLockAdapter) effectiveOccurrence(generation uint64, durable auditLockOccurrenceRecord) auditLockOccurrenceRecord {
 	if durable.Status != auditLockOccurrenceInFlight {
 		return durable
 	}
-	if receipt, ok := a.uncertain[auditLockUncertaintyKeyFor(generation, durable)]; ok {
-		durable.Status = receipt.Status
+	cell := a.settlementCell(generation, durable)
+	settlement := cell.load()
+	if settlement != nil && settlement.phase == auditLockSettlementUncertain {
+		durable.Status = settlement.receipt.Status
 		durable.HTTPStatus = 0
 		durable.ErrorCode = ""
-		durable.LockAuthorization = receipt.LockAuthorization
+		durable.LockAuthorization = settlement.receipt.LockAuthorization
 		durable.Success = nil
 	}
 	return durable
 }
 
-func (a *auditLockAdapter) installUncertaintyLockHeld(reservation auditLockReservation) auditLockReceiptDTO {
+func auditLockUncertainReceipt(reservation auditLockReservation) auditLockReceiptDTO {
 	receipt := reservation.Receipt
 	receipt.Status = auditLockOccurrenceUncertain
 	receipt.LockAuthorization = auditLockAuthorizationUncertain
 	receipt.TerminationCommitState = auditLockTerminationStateUnknown
-	key := auditLockUncertaintyKey{
-		Generation:     reservation.Generation,
-		ServerInstance: receipt.ServerInstance,
-		AttemptID:      receipt.AttemptID,
-		OccurrenceID:   receipt.OccurrenceID,
-	}
-	if a.uncertain == nil {
-		a.uncertain = make(map[auditLockUncertaintyKey]auditLockReceiptDTO)
-	}
-	a.uncertain[key] = receipt
 	return receipt
 }
 
-func (a *auditLockAdapter) clearUncertaintyLockHeld(generation uint64, record auditLockOccurrenceRecord) {
-	delete(a.uncertain, auditLockUncertaintyKeyFor(generation, record))
+func (a *auditLockAdapter) publishUncertainSettlement(reservation auditLockReservation) *auditLockSettlementSnapshot {
+	return reservation.Settlement.publish(auditLockSettlementUncertain, auditLockUncertainReceipt(reservation))
+}
+
+func (a *auditLockAdapter) publishDurableSettlement(reservation auditLockReservation, receipt auditLockReceiptDTO) {
+	reservation.Settlement.publish(auditLockSettlementDurableTerminal, receipt)
+	a.settlements.CompareAndDelete(auditLockSettlementKeyForReservation(reservation), reservation.Settlement)
+}
+
+func (a *auditLockAdapter) clearSettlement(generation uint64, record auditLockOccurrenceRecord) {
+	a.settlements.Delete(auditLockSettlementKeyFor(generation, record))
 }
 
 func cloneDaemonRecoverSuccess(in *daemonRecoverSuccessEvidence) *daemonRecoverSuccessEvidence {
@@ -743,68 +841,110 @@ func validateAuditLockStore(store auditLockOccurrenceStore) error {
 	return nil
 }
 
-func (a *auditLockAdapter) withStoreLock(ctx context.Context, operation string, fn func() error) error {
+func (a *auditLockAdapter) withStoreLock(ctx context.Context, operation string, fn func(*auditLockStoreOperation) error) error {
 	return a.withStoreLockFailure(ctx, operation, fn, nil)
 }
 
-// withStoreLockFailure keeps the failure finalizer under storeMu and, when
-// acquired, the file lock. Terminalization uses this seam to publish its
-// generation-scoped uncertainty projection before any same-process reader can
-// observe the old durable in_flight record.
+// withStoreLockFailure runs the failure finalizer on every failure path. Before
+// storeMu acquisition the finalizer must be lock-free; after acquisition it may
+// additionally use the inode-anchored proof available under the physical lock.
 func (a *auditLockAdapter) withStoreLockFailure(
 	ctx context.Context,
 	operation string,
-	fn func() error,
+	fn func(*auditLockStoreOperation) error,
 	onFailure func(error),
 ) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	healthLease, healthErr := a.storeLockHealth.begin(operation)
+	if healthErr != nil {
+		if onFailure != nil {
+			onFailure(healthErr)
+		}
+		return healthErr
+	}
+	finishWithoutPhysicalLock := func(operationErr error, outcome occurrenceStoreDataOutcome) error {
+		strandedErr := healthLease.finish(nil, outcome)
+		var existingStranded *occurrenceStoreLockStrandedError
+		if strandedErr != nil && !errors.As(operationErr, &existingStranded) {
+			operationErr = errors.Join(operationErr, strandedErr)
+		}
+		if onFailure != nil {
+			onFailure(operationErr)
+		}
+		return operationErr
+	}
 	lockCtx, cancel := context.WithTimeout(ctx, a.lockTimeout)
 	defer cancel()
-	for !a.storeMu.TryLock() {
+	for {
+		if strandedErr := healthLease.stranded(occurrenceStoreDataNotEntered); strandedErr != nil {
+			return finishWithoutPhysicalLock(strandedErr, occurrenceStoreDataNotEntered)
+		}
+		if a.storeMu.TryLock() {
+			// Close failure is published before the releasing operation unlocks
+			// storeMu. Re-check after acquisition so a waiter that was descheduled
+			// between the pre-check and TryLock cannot enter the physical store.
+			if strandedErr := healthLease.stranded(occurrenceStoreDataNotEntered); strandedErr != nil {
+				a.storeMu.Unlock()
+				return finishWithoutPhysicalLock(strandedErr, occurrenceStoreDataNotEntered)
+			}
+			break
+		}
 		select {
 		case <-lockCtx.Done():
-			return fmt.Errorf("%s: acquire in-process occurrence lock: %w", operation, lockCtx.Err())
+			operationErr := fmt.Errorf("%s: acquire in-process occurrence lock: %w", operation, lockCtx.Err())
+			return finishWithoutPhysicalLock(operationErr, occurrenceStoreDataNotEntered)
 		case <-time.After(auditLockStoreLockRetry):
 		}
 	}
-	defer a.storeMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(a.storePath), 0o700); err != nil {
 		operationErr := fmt.Errorf("%s: create state directory: %w", operation, err)
-		if onFailure != nil {
-			onFailure(operationErr)
-		}
-		return operationErr
+		a.storeMu.Unlock()
+		return finishWithoutPhysicalLock(operationErr, occurrenceStoreDataNotEntered)
 	}
-	lock := flock.New(a.storePath + ".lock")
+	lock := a.storeLockHealth.newLock(a.storePath + ".lock")
 	locked, err := lock.TryLockContext(lockCtx, auditLockStoreLockRetry)
 	if err != nil {
-		_ = lock.Close()
 		operationErr := fmt.Errorf("%s: acquire occurrence lock: %w", operation, err)
-		if onFailure != nil {
-			onFailure(operationErr)
+		if closeErr := lock.Close(); closeErr != nil {
+			operationErr = errors.Join(operationErr, fmt.Errorf("%s: close unacquired occurrence lock: %w", operation, closeErr))
 		}
-		return operationErr
+		a.storeMu.Unlock()
+		return finishWithoutPhysicalLock(operationErr, occurrenceStoreDataNotEntered)
 	}
 	if !locked {
-		_ = lock.Close()
 		operationErr := fmt.Errorf("%s: occurrence lock unavailable", operation)
-		if onFailure != nil {
-			onFailure(operationErr)
+		if closeErr := lock.Close(); closeErr != nil {
+			operationErr = errors.Join(operationErr, fmt.Errorf("%s: close unacquired occurrence lock: %w", operation, closeErr))
 		}
-		return operationErr
+		a.storeMu.Unlock()
+		return finishWithoutPhysicalLock(operationErr, occurrenceStoreDataNotEntered)
 	}
-	opErr := fn()
+	storeOperation := &auditLockStoreOperation{dataOutcome: occurrenceStoreDataUnproven}
+	opErr := fn(storeOperation)
 	if opErr != nil && onFailure != nil {
 		onFailure(opErr)
 	}
 	closeErr := lock.Close()
+	var strandedEvent *occurrenceStoreLockHealthEvent
+	if closeErr != nil {
+		healthErr, strandedEvent = healthLease.poison(closeErr, storeOperation.dataOutcome)
+	}
+	a.storeMu.Unlock()
+	finishedHealthErr := healthLease.finish(lock, storeOperation.dataOutcome)
+	if healthErr == nil {
+		healthErr = finishedHealthErr
+	}
+	a.storeLockHealth.emitEvent(strandedEvent)
 	if opErr != nil {
+		if healthErr != nil {
+			return errors.Join(opErr, healthErr)
+		}
 		return opErr
 	}
-	if closeErr != nil {
-		return &auditLockStoreLockReleaseError{operation: operation, cause: closeErr}
+	if healthErr != nil {
+		return healthErr
 	}
 	return nil
 }
@@ -844,7 +984,7 @@ func (a *auditLockAdapter) writeStoreLockHeld(store auditLockOccurrenceStore) er
 
 func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 	var claimed auditLockOccurrenceStore
-	err := a.withStoreLock(ctx, "claim occurrence store", func() error {
+	err := a.withStoreLock(ctx, "claim occurrence store", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(true)
 		if err != nil {
 			return err
@@ -873,6 +1013,7 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 		if err := a.writeStoreLockHeld(store); err != nil {
 			return err
 		}
+		operation.proveDurable()
 		claimed = store
 		return nil
 	})
@@ -885,15 +1026,62 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 
 func (a *auditLockAdapter) ensureReady() *auditLockRouteError {
 	if a == nil || a.initErr != nil {
+		if a != nil {
+			if healthErr := a.storeLockHealth.strandedError("claim occurrence store", occurrenceStoreDataDurableProven); healthErr != nil {
+				return auditLockRouteErrorFromStoreError(healthErr, 500, daemonRecoverErrorAuditLockAdapterInit)
+			}
+			return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit), cause: a.initErr}
+		}
 		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	return nil
 }
 
-func (a *auditLockAdapter) currentIdentity() (string, uint64) {
+func auditLockRouteErrorFromStoreError(err error, fallbackStatus int, fallbackCode daemonRecoverErrorCode) *auditLockRouteError {
+	var routeErr *auditLockRouteError
+	errors.As(err, &routeErr)
+	var healthErr *occurrenceStoreLockStrandedError
+	if errors.As(err, &healthErr) {
+		health := healthErr.Health
+		promoted := &auditLockRouteError{
+			status:                503,
+			code:                  string(daemonRecoverErrorOccurrenceStoreLockStranded),
+			cause:                 err,
+			occurrenceStoreHealth: &health,
+		}
+		if routeErr != nil {
+			promoted.auditLockStateProjection = routeErr.auditLockStateProjection
+		}
+		return promoted
+	}
+	if routeErr != nil {
+		copy := *routeErr
+		copy.cause = err
+		return &copy
+	}
+	return &auditLockRouteError{status: fallbackStatus, code: string(fallbackCode), cause: err}
+}
+
+func (a *auditLockAdapter) currentMutationEpoch() auditLockMutationEpoch {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	return a.serverInstance, a.generation
+	return auditLockMutationEpoch{
+		ServerInstance: a.serverInstance,
+		Generation:     a.generation,
+	}
+}
+
+func (a *auditLockAdapter) currentIdentity() (string, uint64) {
+	epoch := a.currentMutationEpoch()
+	return epoch.ServerInstance, epoch.Generation
+}
+
+func (a *auditLockAdapter) withOccurrenceStoreHealth(dto auditLockStateDTO) auditLockStateDTO {
+	health := a.storeLockHealth.snapshot()
+	dto.OccurrenceStoreHealth = health.State
+	dto.OccurrenceStoreHealthRevision = health.Revision
+	dto.RestartRequired = health.RestartRequired
+	return dto
 }
 
 func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, binding auditLockOccurrenceBinding) (auditLockReservation, *auditLockRouteError) {
@@ -906,13 +1094,17 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 	}
 	a.mu.Lock()
 	closing := a.closing
+	mutationEpoch := auditLockMutationEpoch{
+		ServerInstance: a.serverInstance,
+		Generation:     a.generation,
+	}
 	a.mu.Unlock()
 	if closing {
 		return auditLockReservation{}, &auditLockRouteError{status: 503, code: string(daemonRecoverErrorOccurrenceCapacity)}
 	}
 
 	var reservation auditLockReservation
-	err := a.withStoreLock(ctx, "reserve occurrence", func() error {
+	err := a.withStoreLock(ctx, "reserve occurrence", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(false)
 		if err != nil {
 			return err
@@ -933,17 +1125,15 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOccurrenceConsumed)}
 			}
 			reservation = auditLockReservation{
-				Receipt:    auditLockReceiptFromRecord(effective),
-				Terminal:   auditLockTerminalFromRecord(effective),
-				Binding:    binding,
-				Generation: store.Generation,
+				Receipt:       auditLockReceiptFromRecord(effective),
+				Terminal:      auditLockTerminalFromRecord(effective),
+				Binding:       binding,
+				MutationEpoch: mutationEpoch,
+				Settlement:    a.settlementCell(store.Generation, record),
 			}
 			return nil
 		}
-		serverInstance, generation := a.currentIdentity()
-		if c.ServerInstance != serverInstance ||
-			store.ActiveServerInstance != serverInstance ||
-			store.Generation != generation {
+		if c.ServerInstance != mutationEpoch.ServerInstance || !mutationEpoch.matchesStore(store) {
 			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 		}
 		for _, record := range store.Records {
@@ -967,42 +1157,50 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 		if err := a.writeStoreLockHeld(store); err != nil {
 			return err
 		}
+		operation.proveDurable()
+		receipt := auditLockReceiptFromRecord(record)
+		settlement := newAuditLockSettlementCell(receipt)
+		a.settlements.Store(auditLockSettlementKeyFor(store.Generation, record), settlement)
 		reservation = auditLockReservation{
-			Novel:      true,
-			Receipt:    auditLockReceiptFromRecord(record),
-			Binding:    binding,
-			Generation: store.Generation,
+			Novel:         true,
+			Receipt:       receipt,
+			Binding:       binding,
+			MutationEpoch: mutationEpoch,
+			Settlement:    settlement,
 		}
 		return nil
 	})
 	if err != nil {
-		var routeErr *auditLockRouteError
-		if errors.As(err, &routeErr) {
-			return auditLockReservation{}, routeErr
+		routeErr := auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)
+		var healthErr *occurrenceStoreLockStrandedError
+		if errors.As(err, &healthErr) && healthErr.DataOutcome == occurrenceStoreDataDurableProven && reservation.Novel {
+			projection := a.snapshotProjection(&reservation.Receipt)
+			routeErr.auditLockStateProjection = &projection
 		}
-		return auditLockReservation{}, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
+		return reservation, routeErr
 	}
 	return reservation, nil
 }
 
 func (a *auditLockAdapter) terminalize(reservation auditLockReservation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {
-	ctx, cancel := context.WithTimeout(context.Background(), a.lockTimeout)
-	defer cancel()
+	return a.terminalizeContext(context.Background(), reservation, receiptStatus, authorization, terminal)
+}
+
+func (a *auditLockAdapter) terminalizeContext(ctx context.Context, reservation auditLockReservation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {
+	if a.currentMutationEpoch() != reservation.MutationEpoch {
+		return reservation.Receipt, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
+	}
 	var receipt auditLockReceiptDTO
 	var requested auditLockOccurrenceRecord
 	var mutationEntered bool
 	var durableProven bool
-	err := a.withStoreLockFailure(ctx, "terminalize occurrence", func() error {
+	err := a.withStoreLockFailure(ctx, "terminalize occurrence", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(false)
 		if err != nil {
 			return err
 		}
-		serverInstance, generation := a.currentIdentity()
-		if generation != reservation.Generation ||
-			store.Generation != reservation.Generation ||
-			store.ActiveServerInstance != serverInstance ||
-			serverInstance != reservation.Binding.serverInstance {
-			return errors.New("occurrence generation changed before terminalization")
+		if !reservation.MutationEpoch.matchesStore(store) {
+			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 		}
 		for index := range store.Records {
 			record := &store.Records[index]
@@ -1028,13 +1226,18 @@ func (a *auditLockAdapter) terminalize(reservation auditLockReservation, receipt
 			if err := a.writeStoreLockHeld(store); err != nil {
 				return err
 			}
-			a.clearUncertaintyLockHeld(store.Generation, *record)
+			operation.proveDurable()
 			receipt = auditLockReceiptFromRecord(*record)
+			a.publishDurableSettlement(reservation, receipt)
 			durableProven = true
 			return nil
 		}
 		return errors.New("in-flight occurrence changed before terminalization")
-	}, func(_ error) {
+	}, func(failure error) {
+		var routeErr *auditLockRouteError
+		if errors.As(failure, &routeErr) && routeErr.code == string(daemonRecoverErrorBaselineStale) {
+			return
+		}
 		// If the mutation closure reached the write, perform one inode-anchored
 		// read while both locks are still held. A matching terminal record proves
 		// the write despite its returned error; every other result is uncertain.
@@ -1050,35 +1253,61 @@ func (a *auditLockAdapter) terminalize(reservation auditLockReservation, receipt
 						record.ErrorCode == requested.ErrorCode &&
 						record.LockAuthorization == requested.LockAuthorization &&
 						reflect.DeepEqual(record.Success, requested.Success) {
-						a.clearUncertaintyLockHeld(store.Generation, record)
 						receipt = auditLockReceiptFromRecord(record)
+						a.publishDurableSettlement(reservation, receipt)
 						durableProven = true
 						return
 					}
 				}
 			}
 		}
-		receipt = a.installUncertaintyLockHeld(reservation)
+		settlement := a.publishUncertainSettlement(reservation)
+		if settlement != nil {
+			receipt = settlement.receipt
+			if settlement.phase == auditLockSettlementDurableTerminal {
+				durableProven = true
+			}
+		}
 	})
 	if err == nil {
 		return receipt, nil
 	}
-	if durableProven {
-		var releaseErr *auditLockStoreLockReleaseError
-		if errors.As(err, &releaseErr) {
-			_ = api.LogHubMcpEvent("warn", "daemon-recovery-occurrence-store-lock-release-failed", map[string]any{
-				"operation": "terminalize occurrence",
-			})
+	var healthErr *occurrenceStoreLockStrandedError
+	if errors.As(err, &healthErr) && !durableProven {
+		if receipt.Status == "" {
+			// A route error such as a stale baseline can fail before the
+			// destructive mutation is entered. Preserve that in-flight data
+			// outcome; only the failure callback may publish uncertainty when
+			// the operation genuinely lacks a stronger route classification.
+			receipt = reservation.Receipt
 		}
+		mapped := auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)
+		projection := a.snapshotProjection(&receipt)
+		mapped.auditLockStateProjection = &projection
+		return receipt, mapped
+	}
+	var routeErr *auditLockRouteError
+	if errors.As(err, &routeErr) {
+		mapped := auditLockRouteErrorFromStoreError(err, routeErr.status, daemonRecoverErrorAuditLockAdapterInit)
+		if mapped.occurrenceStoreHealth != nil {
+			projection := a.snapshotProjection(&reservation.Receipt)
+			mapped.auditLockStateProjection = &projection
+		}
+		return reservation.Receipt, mapped
+	}
+	if durableProven {
 		return receipt, nil
 	}
 	if receipt.Status != auditLockOccurrenceUncertain {
-		// A failure before the finalizer could run is not expected, but remains
-		// fail-closed and never exposes a retryable terminal outcome.
-		receipt = reservation.Receipt
-		receipt.Status = auditLockOccurrenceUncertain
-		receipt.LockAuthorization = auditLockAuthorizationUncertain
-		receipt.TerminationCommitState = auditLockTerminationStateUnknown
+		settlement := a.publishUncertainSettlement(reservation)
+		if settlement != nil && settlement.phase == auditLockSettlementDurableTerminal {
+			return settlement.receipt, nil
+		}
+		if settlement != nil {
+			receipt = settlement.receipt
+		} else {
+			receipt = auditLockUncertainReceipt(reservation)
+		}
 	}
 	return receipt, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain)}
 }
@@ -1088,7 +1317,7 @@ func (a *auditLockAdapter) lookup(ctx context.Context, c auditLockCorrelation) (
 		return nil, err
 	}
 	var receipt *auditLockReceiptDTO
-	err := a.withStoreLock(ctx, "lookup occurrence", func() error {
+	err := a.withStoreLock(ctx, "lookup occurrence", func(_ *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(false)
 		if err != nil {
 			return err
@@ -1105,7 +1334,7 @@ func (a *auditLockAdapter) lookup(ctx context.Context, c auditLockCorrelation) (
 		return nil
 	})
 	if err != nil {
-		return nil, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
+		return nil, auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)
 	}
 	return receipt, nil
 }
@@ -1125,7 +1354,9 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 	var nextGeneration uint64
 	var acknowledgedGeneration uint64
 	var acknowledgedRecord auditLockOccurrenceRecord
-	err = a.withStoreLock(ctx, "acknowledge occurrence", func() error {
+	mutationEpoch := a.currentMutationEpoch()
+	rotationDurable := false
+	err = a.withStoreLock(ctx, "acknowledge occurrence", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(false)
 		if err != nil {
 			return err
@@ -1155,8 +1386,7 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 		if !found {
 			return nil
 		}
-		serverInstance, generation := a.currentIdentity()
-		if store.Generation != generation || store.ActiveServerInstance != serverInstance || c.ServerInstance != serverInstance {
+		if !mutationEpoch.matchesStore(store) {
 			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 		}
 		willRotate := true
@@ -1199,13 +1429,15 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 			if err := a.writeStoreLockHeld(store); err != nil {
 				return err
 			}
-			a.clearUncertaintyLockHeld(acknowledgedGeneration, acknowledgedRecord)
+			operation.proveDurable()
+			rotationDurable = rotated
+			a.clearSettlement(acknowledgedGeneration, acknowledgedRecord)
 			return nil
 		}
 		effective := a.effectiveOccurrence(store.Generation, acknowledgedRecord)
 		if effective.Status == auditLockOccurrenceCommittedSuccess {
 			expected := request.ExpectedPhysical
-			if expected == nil || expected.ServerInstance != c.ServerInstance || expected.State != api.SupervisorEventLockReleased {
+			if expected == nil || expected.ServerInstance != mutationEpoch.ServerInstance || expected.State != api.SupervisorEventLockReleased {
 				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAckPreconditionRequired)}
 			}
 			_, committed, commitErr := api.CommitIfSupervisorEventLockSnapshot(a.logPath, api.SupervisorEventLockSnapshot{
@@ -1229,18 +1461,14 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 		}
 		return nil
 	})
-	if err != nil {
-		var routeErr *auditLockRouteError
-		if errors.As(err, &routeErr) {
-			return routeErr
-		}
-		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
-	}
-	if rotated {
+	if rotationDurable {
 		a.mu.Lock()
 		a.serverInstance = rotatedInstance
 		a.generation = nextGeneration
 		a.mu.Unlock()
+	}
+	if err != nil {
+		return auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)
 	}
 	return nil
 }
@@ -1251,7 +1479,7 @@ func (a *auditLockAdapter) snapshot(ctx context.Context, receipt *auditLockRecei
 	}
 	var store auditLockOccurrenceStore
 	var receipts []auditLockReceiptDTO
-	err := a.withStoreLock(ctx, "snapshot occurrence store", func() error {
+	err := a.withStoreLock(ctx, "snapshot occurrence store", func(_ *auditLockStoreOperation) error {
 		var readErr error
 		store, readErr = a.readStoreLockHeld(false)
 		if readErr != nil {
@@ -1267,21 +1495,21 @@ func (a *auditLockAdapter) snapshot(ctx context.Context, receipt *auditLockRecei
 		return nil
 	})
 	if err != nil {
-		return auditLockStateDTO{}, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
+		return auditLockStateDTO{}, auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)
 	}
 	serverInstance, generation := a.currentIdentity()
 	if store.Generation != generation || store.ActiveServerInstance != serverInstance {
 		return auditLockStateDTO{}, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
 	}
 	physical := api.SupervisorEventLockSnapshotForPath(a.logPath)
-	return auditLockStateDTO{
+	return a.withOccurrenceStoreHealth(auditLockStateDTO{
 		Scope:            auditLockScope,
 		ServerInstance:   serverInstance,
 		Revision:         physical.Revision,
 		State:            physical.State,
 		RecoveryReceipt:  receipt,
 		RecoveryReceipts: receipts,
-	}, nil
+	}), nil
 }
 
 // snapshotAfterTerminal preserves the already-durable receipt when only the
@@ -1303,14 +1531,14 @@ func (a *auditLockAdapter) snapshotProjection(receipt *auditLockReceiptDTO) audi
 	if receipt != nil {
 		receipts = append(receipts, *receipt)
 	}
-	return auditLockStateDTO{
+	return a.withOccurrenceStoreHealth(auditLockStateDTO{
 		Scope:            auditLockScope,
 		ServerInstance:   serverInstance,
 		Revision:         physical.Revision,
 		State:            physical.State,
 		RecoveryReceipt:  receipt,
 		RecoveryReceipts: receipts,
-	}
+	})
 }
 
 func (a *auditLockAdapter) armPendingSettlement() {
@@ -1372,25 +1600,28 @@ func (a *auditLockAdapter) observeSettlement(hint api.SupervisorEventLockSnapsho
 	serverInstance := a.serverInstance
 	a.mu.Unlock()
 	if events != nil {
-		dto := auditLockStateDTO{
+		dto := a.withOccurrenceStoreHealth(auditLockStateDTO{
 			Scope:            auditLockScope,
 			ServerInstance:   serverInstance,
 			Revision:         authoritative.Revision,
 			State:            authoritative.State,
 			RecoveryReceipts: []auditLockReceiptDTO{},
-		}
+		})
 		events.Publish(Event{Type: "audit-lock-state", Body: dto.eventBody()})
 	}
 }
 
 func (d auditLockStateDTO) eventBody() map[string]any {
 	body := map[string]any{
-		"scope":             d.Scope,
-		"server_instance":   d.ServerInstance,
-		"revision":          d.Revision,
-		"state":             d.State,
-		"recovery_receipt":  nil,
-		"recovery_receipts": d.RecoveryReceipts,
+		"scope":                            d.Scope,
+		"server_instance":                  d.ServerInstance,
+		"revision":                         d.Revision,
+		"state":                            d.State,
+		"occurrence_store_health":          d.OccurrenceStoreHealth,
+		"occurrence_store_health_revision": d.OccurrenceStoreHealthRevision,
+		"restart_required":                 d.RestartRequired,
+		"recovery_receipt":                 nil,
+		"recovery_receipts":                d.RecoveryReceipts,
 	}
 	if body["recovery_receipts"] == nil {
 		body["recovery_receipts"] = []auditLockReceiptDTO{}
@@ -1425,6 +1656,7 @@ func (a *auditLockAdapter) close() {
 	a.subscription = nil
 	a.watching = false
 	a.mu.Unlock()
+	a.settlements.Clear()
 	if subscription != nil {
 		subscription.Close()
 	}

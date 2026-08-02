@@ -269,9 +269,10 @@ type Notification struct {
 
 // Options contains caller-owned confirmation and local progress hooks.
 type Options struct {
-	Confirmed   bool
-	ConfirmReap func(ReapCandidate) bool
-	Notify      func(Notification)
+	Confirmed              bool
+	ConfirmReap            func(ReapCandidate) bool
+	Notify                 func(Notification)
+	OnTerminationCommitted func()
 }
 
 // Dependencies are the operation's injected system boundaries. There is no
@@ -307,6 +308,13 @@ const (
 	defaultRespawnReserve         = 20 * time.Second
 	defaultSupervisorProbeTimeout = 5 * time.Second
 )
+
+// MaximumPostCommitDuration is the production upper bound for recovery work
+// after termination has committed. It includes the bounded pre-respawn work
+// and preserves the mandatory 20-second respawn reservation.
+func MaximumPostCommitDuration() time.Duration {
+	return defaultPostKillFinishTimeout
+}
 
 // ProductionDependencies wires the shared operation to its owning API/process
 // surfaces. The status probe is a single no-retry call bounded to five seconds;
@@ -598,6 +606,9 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 				return Result{}, &OperationError{Kind: FailureRefusedPortOwner, TaskName: normalized, Cause: terminateErr, Candidate: &candidate}
 			}
 			terminationCommitted = true
+			if options.OnTerminationCommitted != nil {
+				options.OnTerminationCommitted()
+			}
 			var committedEvent api.SupervisorEvent
 			if terminateErr == nil {
 				reaped = true

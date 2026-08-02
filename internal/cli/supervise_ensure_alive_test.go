@@ -376,8 +376,13 @@ func TestEnsureAlive_RelaunchFailure_StillExitsZero(t *testing.T) {
 // supervisor.lock.lock, so it does not contend with the caller's held lock.
 func rewriteEnsureAliveSupervisorLockOwnerStartedAt(t *testing.T, stateDir string, startedAt time.Time) {
 	t.Helper()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAtRaw(t, stateDir, startedAt.UTC().Format(time.RFC3339Nano))
+}
+
+func rewriteEnsureAliveSupervisorLockOwnerStartedAtRaw(t *testing.T, stateDir, startedAt string) {
+	t.Helper()
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
-	owner := api.SupervisorLockOwner{PID: os.Getpid(), StartedAt: startedAt.UTC().Format(time.RFC3339Nano)}
+	owner := api.SupervisorLockOwner{PID: os.Getpid(), StartedAt: startedAt}
 	if err := api.WriteStateFileAtomic(lockPath+".owner.json", owner); err != nil {
 		t.Fatalf("rewrite supervisor.lock owner sidecar: %v", err)
 	}
@@ -495,6 +500,210 @@ func TestEnsureAlive_HeadlessFleet_BootGraceSuppresses(t *testing.T) {
 	}
 	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-relaunch-suppressed")
 	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"boot-grace"`)
+}
+
+func TestEnsureAliveHeadlessFleetSupervisorAge_DomainMatrix(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	startedAt := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, startedAt)
+
+	tests := []struct {
+		name           string
+		observedAt     time.Time
+		classification ensureAliveHeadlessFleetAgeClassification
+		age            time.Duration
+		withinGrace    bool
+	}{
+		{name: "startup", observedAt: startedAt, classification: ensureAliveHeadlessFleetAgeTrusted, age: 0, withinGrace: true},
+		{name: "just inside boundary", observedAt: startedAt.Add(ensureAliveHeadlessFleetBootGrace - time.Nanosecond), classification: ensureAliveHeadlessFleetAgeTrusted, age: ensureAliveHeadlessFleetBootGrace - time.Nanosecond, withinGrace: true},
+		{name: "exact boundary", observedAt: startedAt.Add(ensureAliveHeadlessFleetBootGrace), classification: ensureAliveHeadlessFleetAgeTrusted, age: ensureAliveHeadlessFleetBootGrace, withinGrace: false},
+		{name: "wall clock forward", observedAt: startedAt.Add(2 * time.Hour), classification: ensureAliveHeadlessFleetAgeTrusted, age: 2 * time.Hour, withinGrace: false},
+		{name: "wall clock rollback", observedAt: startedAt.Add(-2 * time.Hour), classification: ensureAliveHeadlessFleetAgeFutureStart, age: -2 * time.Hour, withinGrace: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := ensureAliveHeadlessFleetSupervisorUptime(stateDir, tt.observedAt)
+			if err != nil {
+				t.Fatalf("supervisor age: %v", err)
+			}
+			if got.classification != tt.classification || got.age != tt.age {
+				t.Fatalf("supervisor age = {classification:%q age:%s}, want {%q %s}", got.classification, got.age, tt.classification, tt.age)
+			}
+			if got.withinBootGrace(ensureAliveHeadlessFleetBootGrace) != tt.withinGrace {
+				t.Fatalf("within boot grace = %v, want %v", got.withinBootGrace(ensureAliveHeadlessFleetBootGrace), tt.withinGrace)
+			}
+		})
+	}
+}
+
+func TestEnsureAliveHeadlessFleetSupervisorAge_DegenerateInputsFailClosed(t *testing.T) {
+	validNow := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name       string
+		startedAt  *string
+		observedAt time.Time
+	}{
+		{name: "missing sidecar", observedAt: validNow},
+		{name: "missing timestamp", startedAt: stringPointer(""), observedAt: validNow},
+		{name: "parse failure", startedAt: stringPointer("not-a-time"), observedAt: validNow},
+		{name: "zero timestamp", startedAt: stringPointer(time.Time{}.UTC().Format(time.RFC3339Nano)), observedAt: validNow},
+		{name: "zero observation", startedAt: stringPointer(validNow.Format(time.RFC3339Nano)), observedAt: time.Time{}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			if tt.startedAt != nil {
+				rewriteEnsureAliveSupervisorLockOwnerStartedAtRaw(t, stateDir, *tt.startedAt)
+			}
+			if got, err := ensureAliveHeadlessFleetSupervisorUptime(stateDir, tt.observedAt); err == nil {
+				t.Fatalf("supervisor age = %+v, want fail-closed error", got)
+			}
+		})
+	}
+}
+
+func TestEnsureAliveHeadlessFleetSupervisorAge_RestartResetsGrace(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	firstStart := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, firstStart)
+	old, err := ensureAliveHeadlessFleetSupervisorUptime(stateDir, firstStart.Add(2*time.Minute))
+	if err != nil || old.withinBootGrace(ensureAliveHeadlessFleetBootGrace) {
+		t.Fatalf("old process age = %+v, err=%v; want outside grace", old, err)
+	}
+
+	restartedAt := firstStart.Add(10 * time.Minute)
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, restartedAt)
+	restarted, err := ensureAliveHeadlessFleetSupervisorUptime(stateDir, restartedAt.Add(time.Second))
+	if err != nil {
+		t.Fatalf("restarted process age: %v", err)
+	}
+	if restarted.classification != ensureAliveHeadlessFleetAgeTrusted || restarted.age != time.Second || !restarted.withinBootGrace(ensureAliveHeadlessFleetBootGrace) {
+		t.Fatalf("restarted process age = %+v, want trusted one-second grace", restarted)
+	}
+}
+
+func TestEnsureAliveHeadlessFleet_FutureStartedAtRecoversConfirmedDeadGUI(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+
+	observedAt := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	startedAt := observedAt.Add(2 * time.Hour)
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, startedAt)
+	restoreNow := setEnsureAliveHeadlessFleetNowForTest(func() time.Time { return observedAt })
+	defer restoreNow()
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
+	defer restoreGUI()
+
+	var relaunches int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreRelaunch()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Fatalf("relaunch calls = %d, want exactly 1", got)
+	}
+	if strings.Contains(out.String(), "boot-grace") {
+		t.Fatalf("output = %q, future timestamp must not qualify for boot grace", out.String())
+	}
+	if got := countSupervisorEventBody(t, stateDir, "gui-headless-fleet-supervisor-clock-anomaly", `"supervisor_age_s":-7200`); got != 1 {
+		t.Fatalf("clock-anomaly event count = %d, want 1", got)
+	}
+	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-supervisor-clock-anomaly", `"started_at":"2026-08-02T12:00:00Z"`)
+	assertSupervisorEventBody(t, stateDir, "gui-headless-fleet-supervisor-clock-anomaly", `"observed_at":"2026-08-02T10:00:00Z"`)
+	if got := countSupervisorEventBody(t, stateDir, "gui-headless-fleet-relaunch-suppressed", `"reason":"boot-grace"`); got != 0 {
+		t.Fatalf("boot-grace suppression count = %d, want 0", got)
+	}
+}
+
+func TestEnsureAliveHeadlessFleet_FutureStartedAtPreservesSafetySuppressors(t *testing.T) {
+	tests := []struct {
+		name       string
+		allow      bool
+		addHandoff bool
+		wantReason string
+	}{
+		{name: "lease unconfirmed", allow: false, wantReason: "phase-i-lease-unconfirmed"},
+		{name: "live handoff", allow: true, addHandoff: true, wantReason: "live-handoff"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			observedAt := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+			rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, observedAt.Add(2*time.Hour))
+			if tt.addHandoff {
+				deadlines := gui.DefaultRestartDeadlines()
+				deadlines.Now = func() time.Time { return observedAt }
+				store := gui.NewHandoffMarkerStore(stateDir, deadlines)
+				if _, err := store.Begin(gui.HandoffBegin{Generation: "d5-future-start", Route: gui.HandoffRouteSamePort, OldPort: 9125, NewPort: 9125, OldPID: 5555}); err != nil {
+					t.Fatalf("begin handoff: %v", err)
+				}
+			}
+			var relaunches int32
+			restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+				atomic.AddInt32(&relaunches, 1)
+				return nil
+			})
+			defer restoreRelaunch()
+
+			out := &bytes.Buffer{}
+			runEnsureAliveHeadlessFleetAt(stateDir, out, 4242, 5555, 9125, tt.allow, observedAt)
+			if got := atomic.LoadInt32(&relaunches); got != 0 {
+				t.Fatalf("relaunch calls = %d, want 0", got)
+			}
+			if !strings.Contains(out.String(), tt.wantReason) {
+				t.Fatalf("output = %q, want suppression %q", out.String(), tt.wantReason)
+			}
+			if got := countSupervisorEventBody(t, stateDir, "gui-headless-fleet-supervisor-clock-anomaly", ""); got != 0 {
+				t.Fatalf("clock-anomaly event count before prerequisite gates = %d, want 0", got)
+			}
+		})
+	}
+}
+
+func TestEnsureAliveHeadlessFleet_InvalidStartedAtSuppresses(t *testing.T) {
+	tests := []struct {
+		name      string
+		startedAt *string
+	}{
+		{name: "missing sidecar"},
+		{name: "missing timestamp", startedAt: stringPointer("")},
+		{name: "parse failure", startedAt: stringPointer("not-a-time")},
+		{name: "zero timestamp", startedAt: stringPointer(time.Time{}.UTC().Format(time.RFC3339Nano))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stateDir := ensureAliveTestStateDir(t)
+			if tt.startedAt != nil {
+				rewriteEnsureAliveSupervisorLockOwnerStartedAtRaw(t, stateDir, *tt.startedAt)
+			}
+			var relaunches int32
+			restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+				atomic.AddInt32(&relaunches, 1)
+				return nil
+			})
+			defer restoreRelaunch()
+			out := &bytes.Buffer{}
+			runEnsureAliveHeadlessFleetAt(stateDir, out, 4242, 5555, 9125, true, time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC))
+			if got := atomic.LoadInt32(&relaunches); got != 0 {
+				t.Fatalf("relaunch calls = %d, want 0", got)
+			}
+			if !strings.Contains(out.String(), "boot-grace") || !strings.Contains(out.String(), "undeterminable") {
+				t.Fatalf("output = %q, want fail-closed boot-grace suppression", out.String())
+			}
+		})
+	}
 }
 
 // TestEnsureAlive_HeadlessFleet_LiveHandoffSuppresses covers the live-handoff
@@ -2849,6 +3058,30 @@ func assertSupervisorEventBody(t *testing.T, stateDir, wantEvent, wantBodySubstr
 		}
 	}
 	t.Fatalf("supervisor-events.log has no %q row carrying %q; log body=%q", wantEvent, wantBodySubstring, string(raw))
+}
+
+func countSupervisorEventBody(t *testing.T, stateDir, wantEvent, wantBodySubstring string) int {
+	t.Helper()
+	logPath := filepath.Join(stateDir, api.SupervisorEventLogFileLeaf)
+	raw, err := os.ReadFile(logPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0
+	}
+	if err != nil {
+		t.Fatalf("read supervisor-events.log %q: %v", logPath, err)
+	}
+	eventNeedle := `"event":"` + wantEvent + `"`
+	count := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, eventNeedle) && strings.Contains(line, wantBodySubstring) {
+			count++
+		}
+	}
+	return count
+}
+
+func stringPointer(value string) *string {
+	return &value
 }
 
 // TestEnsureAliveGUIRecovery_UnconfirmedLeaseReleaseDegradesToUnknown pins

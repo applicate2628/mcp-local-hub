@@ -27,13 +27,17 @@ type blockingDaemonRecoverer struct {
 	release chan struct{}
 	once    sync.Once
 	result  daemonrecovery.Result
+	err     error
 }
 
-func (f *blockingDaemonRecoverer) Recover(context.Context, string, bool) (daemonrecovery.Result, error) {
+func (f *blockingDaemonRecoverer) Recover(_ context.Context, _ string, _ bool, onTerminationCommitted func()) (daemonrecovery.Result, error) {
 	f.calls.Add(1)
+	if f.result.TerminationCommitted && onTerminationCommitted != nil {
+		onTerminationCommitted()
+	}
 	f.once.Do(func() { close(f.started) })
 	<-f.release
-	return f.result, nil
+	return f.result, f.err
 }
 
 func sameOriginRequest(method, target, body string) *http.Request {
@@ -63,8 +67,12 @@ func acknowledgeBody(c auditLockCorrelation) string {
 }
 
 func acknowledgeBodyWithExpectedPhysical(c auditLockCorrelation, snapshot api.SupervisorEventLockSnapshot) string {
+	return acknowledgeBodyWithExpectedPhysicalForServer(c, c.ServerInstance, snapshot)
+}
+
+func acknowledgeBodyWithExpectedPhysicalForServer(c auditLockCorrelation, expectedServerInstance string, snapshot api.SupervisorEventLockSnapshot) string {
 	return fmt.Sprintf(`{"attempt_id":%q,"occurrence_id":%q,"server_instance":%q,"acknowledge":true,"expected_physical":{"server_instance":%q,"revision":%d,"state":%q}}`,
-		c.AttemptID, c.OccurrenceID, c.ServerInstance, c.ServerInstance, snapshot.Revision, snapshot.State)
+		c.AttemptID, c.OccurrenceID, c.ServerInstance, expectedServerInstance, snapshot.Revision, snapshot.State)
 }
 
 func successfulTerminalEvidence(taskName string, terminationCommitted bool) auditLockTerminalEvidence {
@@ -197,13 +205,250 @@ func TestAuditLockGenerationRejectsLateOldServerTerminalization(t *testing.T) {
 		successfulTerminalEvidence(binding.taskName, false),
 	)
 	if terminalErr == nil ||
-		terminalErr.code != "RECOVER_OUTCOME_UNCERTAIN" ||
-		receipt.Status != auditLockOccurrenceUncertain {
+		terminalErr.code != string(daemonRecoverErrorBaselineStale) ||
+		receipt.Status != auditLockOccurrenceInFlight {
 		t.Fatalf("late terminalization receipt=%+v err=%v", receipt, terminalErr)
 	}
 	persisted, lookupErr := second.lookup(context.Background(), correlation)
 	if lookupErr != nil || persisted == nil || persisted.Status != auditLockOccurrenceUncertain {
 		t.Fatalf("persisted restart outcome=%+v err=%v", persisted, lookupErr)
+	}
+}
+
+func TestAuditLockACK_PriorGenerationTerminal_AllStatuses(t *testing.T) {
+	tests := []struct {
+		name   string
+		status string
+	}{
+		{name: "committed success", status: auditLockOccurrenceCommittedSuccess},
+		{name: "committed error", status: auditLockOccurrenceCommittedError},
+		{name: "not committed", status: auditLockOccurrenceNotCommitted},
+		{name: "uncertain", status: auditLockOccurrenceUncertain},
+	}
+
+	for index, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			first := newAuditLockAdapterInStateDir(nil, stateDir)
+			if err := first.ensureReady(); err != nil {
+				t.Fatal(err)
+			}
+			originEpoch := first.currentMutationEpoch()
+			correlation := validAuditLockCorrelation(originEpoch.ServerInstance, 200+index)
+			correlation.AttemptID = fmt.Sprintf("20000000-0000-4000-8000-%012x", index)
+			binding := auditLockOccurrenceBinding{
+				serverInstance: originEpoch.ServerInstance,
+				taskName:       fmt.Sprintf(`\demo/prior-generation-%d`, index),
+				confirm:        true,
+			}
+			reservation, reserveErr := first.reserve(context.Background(), correlation, binding)
+			if reserveErr != nil || !reservation.Novel || reservation.MutationEpoch != originEpoch {
+				t.Fatalf("origin reserve=%+v err=%v epoch=%+v", reservation, reserveErr, originEpoch)
+			}
+			if tc.status != auditLockOccurrenceUncertain {
+				terminal := auditLockTerminalEvidence{
+					HTTPStatus: http.StatusInternalServerError,
+					ErrorCode:  string(daemonRecoverErrorStateRead),
+				}
+				if tc.status == auditLockOccurrenceCommittedSuccess {
+					terminal = successfulTerminalEvidence(binding.taskName, true)
+				} else if tc.status == auditLockOccurrenceCommittedError {
+					terminal.TerminationCommitted = true
+				}
+				if _, terminalErr := first.terminalize(reservation, tc.status, auditLockAuthorizationNone, terminal); terminalErr != nil {
+					t.Fatalf("origin terminalization: %v", terminalErr)
+				}
+			}
+			first.close()
+
+			second := newAuditLockAdapterInStateDir(nil, stateDir)
+			defer second.close()
+			if err := second.ensureReady(); err != nil {
+				t.Fatal(err)
+			}
+			claimedEpoch := second.currentMutationEpoch()
+			if claimedEpoch.ServerInstance == originEpoch.ServerInstance || claimedEpoch.Generation != originEpoch.Generation+1 {
+				t.Fatalf("claimed epoch=%+v, origin=%+v", claimedEpoch, originEpoch)
+			}
+			retained, lookupErr := second.lookup(context.Background(), correlation)
+			if lookupErr != nil || retained == nil || retained.Status != tc.status || retained.ServerInstance != originEpoch.ServerInstance {
+				t.Fatalf("retained receipt=%+v err=%v, want status=%q origin=%q", retained, lookupErr, tc.status, originEpoch.ServerInstance)
+			}
+
+			blockedCorrelation := validAuditLockCorrelation(claimedEpoch.ServerInstance, 300+index)
+			blockedCorrelation.AttemptID = fmt.Sprintf("30000000-0000-4000-8000-%012x", index)
+			if _, blockedErr := second.reserve(context.Background(), blockedCorrelation, auditLockOccurrenceBinding{
+				serverInstance: claimedEpoch.ServerInstance,
+				taskName:       binding.taskName,
+				confirm:        true,
+			}); blockedErr == nil || blockedErr.code != string(daemonRecoverErrorAttemptConflict) {
+				t.Fatalf("same-task fence before ACK err=%v", blockedErr)
+			}
+
+			if tc.status == auditLockOccurrenceCommittedSuccess {
+				physical := api.SupervisorEventLockSnapshotForPath(second.logPath)
+				wrongOriginRequest := auditLockAcknowledgeRequest{
+					Correlation: correlation,
+					ExpectedPhysical: &auditLockExpectedPhysical{
+						ServerInstance: originEpoch.ServerInstance,
+						Revision:       physical.Revision,
+						State:          physical.State,
+					},
+				}
+				if routeErr := second.acknowledgeRequest(context.Background(), wrongOriginRequest); routeErr == nil || routeErr.code != string(daemonRecoverErrorAckPreconditionRequired) {
+					t.Fatalf("origin-bound physical proof err=%v, want current-epoch precondition", routeErr)
+				}
+
+				logger, err := api.OpenSupervisorEventLog(second.logPath)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := logger.EmitWithTimeout(api.SupervisorEvent{Severity: "info", Source: "test", Event: "advance-prior-generation-ack-revision"}, time.Second); err != nil {
+					_ = logger.Close()
+					t.Fatal(err)
+				}
+				if err := logger.Close(); err != nil {
+					t.Fatal(err)
+				}
+				staleRequest, decodeErr := decodeAuditLockAcknowledge(json.RawMessage(
+					acknowledgeBodyWithExpectedPhysicalForServer(correlation, claimedEpoch.ServerInstance, physical),
+				))
+				if decodeErr != nil {
+					t.Fatalf("decode prior-generation ACK wire body: %v", decodeErr)
+				}
+				if routeErr := second.acknowledgeRequest(context.Background(), staleRequest); routeErr == nil || routeErr.code != string(daemonRecoverErrorAckPhysicalStateChanged) {
+					t.Fatalf("stale current-epoch physical proof err=%v", routeErr)
+				}
+				stillRetained, staleLookupErr := second.lookup(context.Background(), correlation)
+				if staleLookupErr != nil || stillRetained == nil || stillRetained.Status != tc.status {
+					t.Fatalf("stale physical ACK consumed receipt=%+v err=%v", stillRetained, staleLookupErr)
+				}
+				physical = api.SupervisorEventLockSnapshotForPath(second.logPath)
+				request, decodeErr := decodeAuditLockAcknowledge(json.RawMessage(
+					acknowledgeBodyWithExpectedPhysicalForServer(correlation, claimedEpoch.ServerInstance, physical),
+				))
+				if decodeErr != nil {
+					t.Fatalf("decode current-epoch ACK wire body: %v", decodeErr)
+				}
+				if routeErr := second.acknowledgeRequest(context.Background(), request); routeErr != nil {
+					t.Fatalf("prior-generation committed-success ACK: %v", routeErr)
+				}
+			} else if routeErr := second.acknowledge(context.Background(), correlation); routeErr != nil {
+				t.Fatalf("prior-generation ACK: %v", routeErr)
+			}
+
+			rotatedEpoch := second.currentMutationEpoch()
+			if rotatedEpoch.Generation != claimedEpoch.Generation+1 || rotatedEpoch.ServerInstance == claimedEpoch.ServerInstance {
+				t.Fatalf("rotated epoch=%+v, claimed=%+v", rotatedEpoch, claimedEpoch)
+			}
+			if consumed, consumedErr := second.lookup(context.Background(), correlation); consumedErr != nil || consumed != nil {
+				t.Fatalf("consumed lookup=%+v err=%v", consumed, consumedErr)
+			}
+			if routeErr := second.acknowledge(context.Background(), correlation); routeErr != nil {
+				t.Fatalf("idempotent repeated ACK: %v", routeErr)
+			}
+			if afterRepeated := second.currentMutationEpoch(); afterRepeated != rotatedEpoch {
+				t.Fatalf("repeated ACK rotated epoch: before=%+v after=%+v", rotatedEpoch, afterRepeated)
+			}
+
+			admittedCorrelation := validAuditLockCorrelation(rotatedEpoch.ServerInstance, 400+index)
+			admittedCorrelation.AttemptID = fmt.Sprintf("40000000-0000-4000-8000-%012x", index)
+			admitted, admittedErr := second.reserve(context.Background(), admittedCorrelation, auditLockOccurrenceBinding{
+				serverInstance: rotatedEpoch.ServerInstance,
+				taskName:       binding.taskName,
+				confirm:        true,
+			})
+			if admittedErr != nil || !admitted.Novel || admitted.MutationEpoch != rotatedEpoch {
+				t.Fatalf("same-task admission after ACK=%+v err=%v epoch=%+v", admitted, admittedErr, rotatedEpoch)
+			}
+		})
+	}
+}
+
+func TestAuditLockACK_PriorGenerationRejectsLateTerminalizer(t *testing.T) {
+	stateDir := t.TempDir()
+	first := newAuditLockAdapterInStateDir(nil, stateDir)
+	defer first.close()
+	originEpoch := first.currentMutationEpoch()
+	correlation := validAuditLockCorrelation(originEpoch.ServerInstance, 500)
+	correlation.AttemptID = "50000000-0000-4000-8000-000000000500"
+	binding := auditLockOccurrenceBinding{
+		serverInstance: originEpoch.ServerInstance,
+		taskName:       `\demo/late-prior-generation`,
+		confirm:        true,
+	}
+	reservation, reserveErr := first.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil || !reservation.Novel {
+		t.Fatalf("origin reserve=%+v err=%v", reservation, reserveErr)
+	}
+	terminal := auditLockTerminalEvidence{
+		HTTPStatus: http.StatusInternalServerError,
+		ErrorCode:  string(daemonRecoverErrorStateRead),
+	}
+	if _, terminalErr := first.terminalize(reservation, auditLockOccurrenceNotCommitted, auditLockAuthorizationNone, terminal); terminalErr != nil {
+		t.Fatalf("origin terminalization: %v", terminalErr)
+	}
+
+	first.storeMu.Lock()
+	var releaseOnce sync.Once
+	releaseLateTerminalizer := func() { releaseOnce.Do(first.storeMu.Unlock) }
+	defer releaseLateTerminalizer()
+	type terminalizeResult struct {
+		receipt auditLockReceiptDTO
+		err     *auditLockRouteError
+	}
+	lateStarted := make(chan struct{})
+	lateResult := make(chan terminalizeResult, 1)
+	go func() {
+		close(lateStarted)
+		receipt, routeErr := first.terminalize(reservation, auditLockOccurrenceNotCommitted, auditLockAuthorizationNone, terminal)
+		lateResult <- terminalizeResult{receipt: receipt, err: routeErr}
+	}()
+	<-lateStarted
+
+	second := newAuditLockAdapterInStateDir(nil, stateDir)
+	defer second.close()
+	if err := second.ensureReady(); err != nil {
+		t.Fatal(err)
+	}
+	claimedEpoch := second.currentMutationEpoch()
+	if routeErr := second.acknowledge(context.Background(), correlation); routeErr != nil {
+		t.Fatalf("prior-generation ACK: %v", routeErr)
+	}
+	rotatedEpoch := second.currentMutationEpoch()
+	if rotatedEpoch.Generation != claimedEpoch.Generation+1 {
+		t.Fatalf("ACK rotation=%+v, claimed=%+v", rotatedEpoch, claimedEpoch)
+	}
+
+	newCorrelation := validAuditLockCorrelation(rotatedEpoch.ServerInstance, 501)
+	newCorrelation.AttemptID = "50000000-0000-4000-8000-000000000501"
+	newReservation, newReserveErr := second.reserve(context.Background(), newCorrelation, auditLockOccurrenceBinding{
+		serverInstance: rotatedEpoch.ServerInstance,
+		taskName:       binding.taskName,
+		confirm:        true,
+	})
+	if newReserveErr != nil || !newReservation.Novel {
+		t.Fatalf("post-ACK reserve=%+v err=%v", newReservation, newReserveErr)
+	}
+
+	releaseLateTerminalizer()
+	select {
+	case result := <-lateResult:
+		if result.err == nil || result.err.code != string(daemonRecoverErrorBaselineStale) {
+			t.Fatalf("late terminalization receipt=%+v err=%v, want baseline stale", result.receipt, result.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("late terminalizer did not return")
+	}
+	if afterLate := second.currentMutationEpoch(); afterLate != rotatedEpoch {
+		t.Fatalf("late terminalizer changed epoch: before=%+v after=%+v", rotatedEpoch, afterLate)
+	}
+	if oldReceipt, oldLookupErr := second.lookup(context.Background(), correlation); oldLookupErr != nil || oldReceipt != nil {
+		t.Fatalf("late terminalizer recreated old receipt=%+v err=%v", oldReceipt, oldLookupErr)
+	}
+	currentReceipt, currentLookupErr := second.lookup(context.Background(), newCorrelation)
+	if currentLookupErr != nil || currentReceipt == nil || currentReceipt.Status != auditLockOccurrenceInFlight {
+		t.Fatalf("late terminalizer changed current receipt=%+v err=%v", currentReceipt, currentLookupErr)
 	}
 }
 
@@ -283,6 +528,55 @@ func validAuditLockStoreTestStore(record auditLockOccurrenceRecord) auditLockOcc
 		Generation:           1,
 		ActiveServerInstance: "44444444-4444-4444-8444-444444444444",
 		Records:              []auditLockOccurrenceRecord{record},
+	}
+}
+
+func TestAuditLockMutationEpochPreservesVersionOneSchema(t *testing.T) {
+	raw, err := json.Marshal(validAuditLockStoreTestStore(validAuditLockStoreTestRecord(auditLockOccurrenceUncertain)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var store map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &store); err != nil {
+		t.Fatal(err)
+	}
+	wantStoreFields := map[string]struct{}{
+		"version":                {},
+		"generation":             {},
+		"active_server_instance": {},
+		"records":                {},
+	}
+	if len(store) != len(wantStoreFields) {
+		t.Fatalf("version-1 store fields=%v", store)
+	}
+	for field := range store {
+		if _, ok := wantStoreFields[field]; !ok {
+			t.Fatalf("unexpected version-1 store field %q", field)
+		}
+	}
+	var records []map[string]json.RawMessage
+	if err := json.Unmarshal(store["records"], &records); err != nil || len(records) != 1 {
+		t.Fatalf("version-1 records=%v err=%v", records, err)
+	}
+	wantRecordFields := map[string]struct{}{
+		"origin_server_instance": {},
+		"attempt_id":             {},
+		"occurrence_id":          {},
+		"task_name":              {},
+		"confirm":                {},
+		"status":                 {},
+		"http_status":            {},
+		"error_code":             {},
+		"lock_authorization":     {},
+		"success":                {},
+	}
+	if len(records[0]) != len(wantRecordFields) {
+		t.Fatalf("version-1 record fields=%v", records[0])
+	}
+	for field := range records[0] {
+		if _, ok := wantRecordFields[field]; !ok {
+			t.Fatalf("unexpected version-1 record field %q", field)
+		}
 	}
 }
 
@@ -429,7 +723,7 @@ func TestAuditLockStoreUnknownOwnerValuesFailClosedOnDecodeAndWrite(t *testing.T
 			store.Generation = adapter.generation
 			store.ActiveServerInstance = adapter.serverInstance
 			tc.mutate(&store)
-			err = adapter.withStoreLock(context.Background(), "reject invalid owner value", func() error {
+			err = adapter.withStoreLock(context.Background(), "reject invalid owner value", func(_ *auditLockStoreOperation) error {
 				return adapter.writeStoreLockHeld(store)
 			})
 			if err == nil {
@@ -611,6 +905,301 @@ func TestAuditLockTerminalWriteFailureRetainsUncertainFence(t *testing.T) {
 	snapshot, snapshotErr := adapter.snapshot(context.Background(), nil)
 	if snapshotErr != nil || len(snapshot.RecoveryReceipts) != 0 {
 		t.Fatalf("post-ack snapshot=%+v err=%v", snapshot, snapshotErr)
+	}
+}
+
+func auditLockSettlementCount(adapter *auditLockAdapter) int {
+	count := 0
+	adapter.settlements.Range(func(_, _ any) bool {
+		count++
+		return true
+	})
+	return count
+}
+
+func TestAuditLockTerminalize_StoreMuTimeoutPublishesCell(t *testing.T) {
+	tests := []struct {
+		name string
+		ctx  func() context.Context
+	}{
+		{
+			name: "deadline",
+			ctx:  context.Background,
+		},
+		{
+			name: "canceled context",
+			ctx: func() context.Context {
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				return ctx
+			},
+		},
+	}
+	for testIndex, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+			adapter.lockTimeout = 25 * time.Millisecond
+			correlation := validAuditLockCorrelation(adapter.serverInstance, 200+testIndex)
+			binding := auditLockOccurrenceBinding{
+				serverInstance: adapter.serverInstance,
+				taskName:       fmt.Sprintf(`\\mcp-local-hub-settlement-timeout-%d`, testIndex),
+				confirm:        true,
+			}
+			reservation, reserveErr := adapter.reserve(context.Background(), correlation, binding)
+			if reserveErr != nil || !reservation.Novel || reservation.Settlement == nil {
+				adapter.close()
+				t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+			}
+			initial := reservation.Settlement.load()
+			if initial == nil || initial.phase != auditLockSettlementInFlight {
+				adapter.close()
+				t.Fatalf("initial settlement=%+v", initial)
+			}
+
+			adapter.storeMu.Lock()
+			receipt, terminalErr := adapter.terminalizeContext(
+				tc.ctx(),
+				reservation,
+				auditLockOccurrenceNotCommitted,
+				auditLockAuthorizationNone,
+				auditLockTerminalEvidence{
+					HTTPStatus: http.StatusInternalServerError,
+					ErrorCode:  "RECOVER_STATE_READ_FAILED",
+				},
+			)
+			adapter.storeMu.Unlock()
+			if terminalErr == nil ||
+				terminalErr.code != string(daemonRecoverErrorOutcomeUncertain) ||
+				receipt.Status != auditLockOccurrenceUncertain ||
+				receipt.TerminationCommitState != auditLockTerminationStateUnknown {
+				adapter.close()
+				t.Fatalf("terminalize receipt=%+v err=%v", receipt, terminalErr)
+			}
+			settlement := reservation.Settlement.load()
+			if settlement == nil || settlement.phase != auditLockSettlementUncertain ||
+				settlement.receipt.Status != auditLockOccurrenceUncertain {
+				adapter.close()
+				t.Fatalf("settlement=%+v", settlement)
+			}
+
+			raw, err := os.ReadFile(adapter.storePath)
+			if err != nil {
+				adapter.close()
+				t.Fatal(err)
+			}
+			var durable auditLockOccurrenceStore
+			if err := json.Unmarshal(raw, &durable); err != nil {
+				adapter.close()
+				t.Fatal(err)
+			}
+			if len(durable.Records) != 1 || durable.Records[0].Status != auditLockOccurrenceInFlight {
+				adapter.close()
+				t.Fatalf("durable store=%+v", durable)
+			}
+
+			lookup, lookupErr := adapter.lookup(context.Background(), correlation)
+			if lookupErr != nil || lookup == nil || lookup.Status != auditLockOccurrenceUncertain {
+				adapter.close()
+				t.Fatalf("lookup=%+v err=%v", lookup, lookupErr)
+			}
+			replay, replayErr := adapter.reserve(context.Background(), correlation, binding)
+			if replayErr != nil || replay.Novel || replay.Receipt.Status != auditLockOccurrenceUncertain ||
+				replay.Settlement != reservation.Settlement {
+				adapter.close()
+				t.Fatalf("replay=%+v err=%v", replay, replayErr)
+			}
+			snapshot, snapshotErr := adapter.snapshot(context.Background(), nil)
+			if snapshotErr != nil || len(snapshot.RecoveryReceipts) != 1 ||
+				snapshot.RecoveryReceipts[0].Status != auditLockOccurrenceUncertain {
+				adapter.close()
+				t.Fatalf("snapshot=%+v err=%v", snapshot, snapshotErr)
+			}
+
+			blocked := validAuditLockCorrelation(adapter.serverInstance, 210+testIndex)
+			blocked.AttemptID = fmt.Sprintf("20000000-0000-4000-8000-%012x", testIndex)
+			if _, blockedErr := adapter.reserve(context.Background(), blocked, binding); blockedErr == nil ||
+				blockedErr.code != string(daemonRecoverErrorAttemptConflict) {
+				adapter.close()
+				t.Fatalf("same-task reserve err=%v", blockedErr)
+			}
+
+			oldEpoch := adapter.currentMutationEpoch()
+			if acknowledgeErr := adapter.acknowledge(context.Background(), correlation); acknowledgeErr != nil {
+				adapter.close()
+				t.Fatalf("uncertain acknowledgement: %v", acknowledgeErr)
+			}
+			if adapter.currentMutationEpoch() == oldEpoch {
+				adapter.close()
+				t.Fatal("final acknowledgement did not rotate the mutation epoch")
+			}
+			if auditLockSettlementCount(adapter) != 0 {
+				adapter.close()
+				t.Fatalf("settlement cells after acknowledgement=%d", auditLockSettlementCount(adapter))
+			}
+			if acknowledgeErr := adapter.acknowledge(context.Background(), correlation); acknowledgeErr != nil {
+				adapter.close()
+				t.Fatalf("repeated acknowledgement: %v", acknowledgeErr)
+			}
+
+			current := adapter.currentMutationEpoch()
+			newCorrelation := validAuditLockCorrelation(current.ServerInstance, 220+testIndex)
+			newCorrelation.AttemptID = fmt.Sprintf("22000000-0000-4000-8000-%012x", testIndex)
+			newBinding := binding
+			newBinding.serverInstance = current.ServerInstance
+			newReservation, newReserveErr := adapter.reserve(context.Background(), newCorrelation, newBinding)
+			if newReserveErr != nil || !newReservation.Novel {
+				adapter.close()
+				t.Fatalf("post-ACK reserve=%+v err=%v", newReservation, newReserveErr)
+			}
+			adapter.close()
+			if auditLockSettlementCount(adapter) != 0 {
+				t.Fatalf("settlement cells after close=%d", auditLockSettlementCount(adapter))
+			}
+		})
+	}
+}
+
+func TestAuditLockSettlementCell_ACKWinsLatePublication(t *testing.T) {
+	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	correlation := validAuditLockCorrelation(adapter.serverInstance, 230)
+	binding := auditLockOccurrenceBinding{
+		serverInstance: adapter.serverInstance,
+		taskName:       `\\mcp-local-hub-settlement-late-publication`,
+		confirm:        true,
+	}
+	reservation, reserveErr := adapter.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil || !reservation.Novel || reservation.Settlement == nil {
+		adapter.close()
+		t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+	}
+	oldCell := reservation.Settlement
+	uncertain := oldCell.publish(auditLockSettlementUncertain, auditLockUncertainReceipt(reservation))
+	if uncertain == nil || uncertain.phase != auditLockSettlementUncertain {
+		adapter.close()
+		t.Fatalf("uncertain settlement=%+v", uncertain)
+	}
+	oldEpoch := adapter.currentMutationEpoch()
+	if acknowledgeErr := adapter.acknowledge(context.Background(), correlation); acknowledgeErr != nil {
+		adapter.close()
+		t.Fatalf("acknowledge: %v", acknowledgeErr)
+	}
+	if adapter.currentMutationEpoch() == oldEpoch {
+		adapter.close()
+		t.Fatal("acknowledgement did not rotate the mutation epoch")
+	}
+	if auditLockSettlementCount(adapter) != 0 {
+		adapter.close()
+		t.Fatalf("settlement cells after acknowledgement=%d", auditLockSettlementCount(adapter))
+	}
+
+	current := adapter.currentMutationEpoch()
+	newCorrelation := validAuditLockCorrelation(current.ServerInstance, 231)
+	newCorrelation.AttemptID = "23100000-0000-4000-8000-000000000231"
+	newBinding := binding
+	newBinding.serverInstance = current.ServerInstance
+	newReservation, newReserveErr := adapter.reserve(context.Background(), newCorrelation, newBinding)
+	if newReserveErr != nil || !newReservation.Novel || newReservation.Settlement == nil {
+		adapter.close()
+		t.Fatalf("new reserve=%+v err=%v", newReservation, newReserveErr)
+	}
+
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			phase := auditLockSettlementUncertain
+			lateReceipt := auditLockUncertainReceipt(reservation)
+			if index%2 == 0 {
+				phase = auditLockSettlementDurableTerminal
+				lateReceipt.Status = auditLockOccurrenceNotCommitted
+			}
+			oldCell.publish(phase, lateReceipt)
+		}(i)
+	}
+	close(start)
+	wait.Wait()
+
+	settlement := oldCell.load()
+	if settlement == nil || settlement.phase != auditLockSettlementUncertain ||
+		settlement.receipt.Status != auditLockOccurrenceUncertain {
+		adapter.close()
+		t.Fatalf("old settlement changed after ACK=%+v", settlement)
+	}
+	if adapter.currentMutationEpoch() != current {
+		adapter.close()
+		t.Fatalf("late publication changed epoch from %+v to %+v", current, adapter.currentMutationEpoch())
+	}
+	oldLookup, oldLookupErr := adapter.lookup(context.Background(), correlation)
+	if oldLookupErr != nil || oldLookup != nil {
+		adapter.close()
+		t.Fatalf("late publication resurrected old receipt=%+v err=%v", oldLookup, oldLookupErr)
+	}
+	newLookup, newLookupErr := adapter.lookup(context.Background(), newCorrelation)
+	if newLookupErr != nil || newLookup == nil || newLookup.Status != auditLockOccurrenceInFlight {
+		adapter.close()
+		t.Fatalf("new receipt=%+v err=%v", newLookup, newLookupErr)
+	}
+	if cell := adapter.settlementCell(current.Generation, auditLockOccurrenceRecord{
+		OriginServerInstance: newCorrelation.ServerInstance,
+		AttemptID:            newCorrelation.AttemptID,
+		OccurrenceID:         newCorrelation.OccurrenceID,
+	}); cell != newReservation.Settlement {
+		adapter.close()
+		t.Fatalf("current settlement cell=%p want=%p", cell, newReservation.Settlement)
+	}
+	adapter.close()
+	if auditLockSettlementCount(adapter) != 0 {
+		t.Fatalf("settlement cells after close=%d", auditLockSettlementCount(adapter))
+	}
+}
+
+func TestAuditLockSettlementCell_DurableTerminalDoesNotDowngrade(t *testing.T) {
+	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	defer adapter.close()
+	correlation := validAuditLockCorrelation(adapter.serverInstance, 240)
+	binding := auditLockOccurrenceBinding{
+		serverInstance: adapter.serverInstance,
+		taskName:       `\\mcp-local-hub-settlement-durable`,
+		confirm:        true,
+	}
+	reservation, reserveErr := adapter.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil || !reservation.Novel || reservation.Settlement == nil {
+		t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+	}
+	receipt, terminalErr := adapter.terminalize(
+		reservation,
+		auditLockOccurrenceNotCommitted,
+		auditLockAuthorizationNone,
+		auditLockTerminalEvidence{
+			HTTPStatus: http.StatusInternalServerError,
+			ErrorCode:  "RECOVER_STATE_READ_FAILED",
+		},
+	)
+	if terminalErr != nil || receipt.Status != auditLockOccurrenceNotCommitted {
+		t.Fatalf("terminal receipt=%+v err=%v", receipt, terminalErr)
+	}
+	settlement := reservation.Settlement.load()
+	if settlement == nil || settlement.phase != auditLockSettlementDurableTerminal ||
+		settlement.receipt.Status != auditLockOccurrenceNotCommitted {
+		t.Fatalf("durable settlement=%+v", settlement)
+	}
+	if auditLockSettlementCount(adapter) != 0 {
+		t.Fatalf("indexed cells after durable terminal=%d", auditLockSettlementCount(adapter))
+	}
+	late := reservation.Settlement.publish(auditLockSettlementUncertain, auditLockUncertainReceipt(reservation))
+	if late == nil || late.phase != auditLockSettlementDurableTerminal ||
+		late.receipt.Status != auditLockOccurrenceNotCommitted {
+		t.Fatalf("late downgrade result=%+v", late)
+	}
+	lookup, lookupErr := adapter.lookup(context.Background(), correlation)
+	if lookupErr != nil || lookup == nil || lookup.Status != auditLockOccurrenceNotCommitted {
+		t.Fatalf("lookup=%+v err=%v", lookup, lookupErr)
+	}
+	if acknowledgeErr := adapter.acknowledge(context.Background(), correlation); acknowledgeErr != nil {
+		t.Fatalf("acknowledge: %v", acknowledgeErr)
 	}
 }
 
@@ -1000,6 +1589,17 @@ func TestDecodeAuditLockAcknowledgeExpectedPhysicalIsStrict(t *testing.T) {
 	valid := acknowledgeBodyWithExpectedPhysical(c, api.SupervisorEventLockSnapshot{State: api.SupervisorEventLockReleased, Revision: 7})
 	if request, routeErr := decodeAuditLockAcknowledge(json.RawMessage(valid)); routeErr != nil || request.ExpectedPhysical == nil || request.ExpectedPhysical.Revision != 7 {
 		t.Fatalf("valid strict ACK request=%+v err=%v", request, routeErr)
+	}
+	currentServerInstance := "44444444-4444-4444-8444-444444444444"
+	splitIdentity := acknowledgeBodyWithExpectedPhysicalForServer(
+		c,
+		currentServerInstance,
+		api.SupervisorEventLockSnapshot{State: api.SupervisorEventLockReleased, Revision: 8},
+	)
+	request, routeErr := decodeAuditLockAcknowledge(json.RawMessage(splitIdentity))
+	if routeErr != nil || request.Correlation.ServerInstance != c.ServerInstance ||
+		request.ExpectedPhysical == nil || request.ExpectedPhysical.ServerInstance != currentServerInstance {
+		t.Fatalf("origin/current ACK wire split request=%+v err=%v", request, routeErr)
 	}
 	invalid := []string{
 		strings.Replace(valid, `"revision":7`, `"revision":7,"revision":8`, 1),
