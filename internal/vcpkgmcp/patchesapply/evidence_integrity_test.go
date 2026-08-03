@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
@@ -24,18 +25,18 @@ func failingDeps(failSub string, failStat, failReadDir bool) Deps {
 	hit := func(p string) bool {
 		return failSub != "" && strings.Contains(filepath.ToSlash(p), failSub)
 	}
-	d := Deps{ReadFile: base.ReadFile}
+	d := base
 	d.Stat = func(p string) (os.FileInfo, error) {
 		if failStat && hit(p) {
 			return nil, errDenied
 		}
 		return base.Stat(p)
 	}
-	d.ReadDir = func(p string) ([]os.DirEntry, error) {
+	d.OpenDir = func(p string) (boundedio.DirReader, error) {
 		if failReadDir && hit(p) {
 			return nil, errDenied
 		}
-		return base.ReadDir(p)
+		return base.OpenDir(p)
 	}
 	return d
 }
@@ -185,16 +186,14 @@ func TestApplyOrder_UnreadableTripletFile_ReportsUnknown(t *testing.T) {
 	// Stat succeeds (the file IS found on the lookup path) but ReadFile is
 	// denied — the case where the tool knows exactly which file governs and
 	// still cannot read it.
-	res := applyOrder(args, Deps{
-		Stat:    DefaultDeps().Stat,
-		ReadDir: DefaultDeps().ReadDir,
-		ReadFile: func(p string) ([]byte, error) {
-			if strings.Contains(filepath.ToSlash(p), "corp-windows.cmake") {
-				return nil, errDenied
-			}
-			return DefaultDeps().ReadFile(p)
-		},
-	})
+	deps := DefaultDeps()
+	deps.ReadFile = func(p string) ([]byte, error) {
+		if strings.Contains(filepath.ToSlash(p), "corp-windows.cmake") {
+			return nil, errDenied
+		}
+		return DefaultDeps().ReadFile(p)
+	}
+	res := applyOrder(args, deps)
 
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonTripletFileUnreadable {
 		t.Fatalf("got status=%v reason=%v, want unknown/triplet_file_unreadable; result=%+v",
@@ -210,4 +209,21 @@ func TestApplyOrder_UnreadableTripletFile_ReportsUnknown(t *testing.T) {
 	if findUndecidable(res, "static-only.patch") == nil {
 		t.Errorf("static-only.patch must be undecidable; result=%+v", res)
 	}
+
+	t.Run("parser stop retains triplet evidence and precedence", func(t *testing.T) {
+		malformedPortDir := writeFixture(t, "vcpkg_from_github(PATCHES static-only.patch\n")
+		parserStop := applyOrder(Args{PortDir: malformedPortDir, Triplet: "corp-windows", OverlayTriplets: []string{tripletDir}}, deps)
+		if parserStop.Status != evidence.StatusUnknown || parserStop.Reason != ReasonTripletFileUnreadable {
+			t.Fatalf("parser-stop status/reason = %v/%v, want unknown/%v", parserStop.Status, parserStop.Reason, ReasonTripletFileUnreadable)
+		}
+		if parserStop.TripletFile == "" || findUnreadable(parserStop, UnreadableTripletFile) == nil {
+			t.Fatalf("parser-stop triplet metadata was lost: triplet_file=%q unreadable=%+v", parserStop.TripletFile, parserStop.Unreadable)
+		}
+		if !containsStr(parserStop.Evidence.Paths, parserStop.TripletFile) {
+			t.Fatalf("parser-stop evidence paths = %v, want located triplet file %q", parserStop.Evidence.Paths, parserStop.TripletFile)
+		}
+		if len(parserStop.Applied) != 0 || len(parserStop.Orphaned) != 0 {
+			t.Fatalf("parser stop probed patch or orphan buckets: %+v", parserStop)
+		}
+	})
 }

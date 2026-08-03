@@ -6,7 +6,8 @@ import "strings"
 // parser and does not execute anything. It recognizes just enough shape —
 // statements, quoted/bare/bracket tokens, comments, parenthesis nesting — to
 // locate set()/get_filename_component()/if()/elseif()/else()/endif()/
-// list()/and any other call's argument list, and to hand the argument text
+// foreach()/endforeach()/while()/endwhile()/list()/and any other call's
+// argument list, and to hand the argument text
 // to the higher-level walk in walk.go. Anything outside this shape is left
 // as an opaque call the walk simply does not special-case.
 //
@@ -179,6 +180,10 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 							k = afterClose
 							continue
 						}
+						// An unclosed bracket argument invalidates every later
+						// statement boundary; do not reinterpret it as a bareword.
+						countLines(i, n)
+						return out, false
 					}
 					k++
 				case src[k] == '(':
@@ -303,9 +308,14 @@ func isSpaceOrNL(c byte) bool {
 // Sequences or Variable References, is performed" — a Raw token's Text must
 // never be run through env.expand (see varEnv.expandToken).
 type token struct {
-	Text   string
-	Quoted bool
-	Raw    bool
+	// Text is the literal argument text after lexical escapes such as \; have
+	// been materialized. listText retains the list serialization marker so the
+	// one list splitter below can distinguish an escaped literal semicolon from
+	// a separator after variable substitution.
+	Text     string
+	listText string
+	Quoted   bool
+	Raw      bool
 }
 
 // tokenize splits a raw argument or condition text into CMake-ish tokens:
@@ -341,7 +351,8 @@ func tokenize(s string) []token {
 		case c == '"':
 			end := skipQuoted(s, i)
 			raw := s[i+1 : end-1]
-			tokens = append(tokens, token{Text: unescapeQuoted(raw), Quoted: true})
+			text := unescapeQuoted(raw)
+			tokens = append(tokens, token{Text: text, listText: text, Quoted: true})
 			i = end
 		case c == '[':
 			if eq, contentStart, isBracket := matchBracketOpen(s, i); isBracket {
@@ -355,7 +366,7 @@ func tokenize(s string) []token {
 					} else if strings.HasPrefix(content, "\n") {
 						content = content[1:]
 					}
-					tokens = append(tokens, token{Text: content, Quoted: true, Raw: true})
+					tokens = append(tokens, token{Text: content, listText: content, Quoted: true, Raw: true})
 					i = afterClose
 					continue
 				}
@@ -366,19 +377,101 @@ func tokenize(s string) []token {
 			for i < n && !isSpaceOrNL(s[i]) && s[i] != '"' && s[i] != '(' && s[i] != ')' && s[i] != '#' {
 				i++
 			}
-			tokens = append(tokens, token{Text: s[start:i]})
+			raw := s[start:i]
+			tokens = append(tokens, token{Text: unescapeBare(raw), listText: raw})
 		case c == '(' || c == ')':
-			tokens = append(tokens, token{Text: string(c)})
+			tokens = append(tokens, token{Text: string(c), listText: string(c)})
 			i++
 		default:
 			start := i
 			for i < n && !isSpaceOrNL(s[i]) && s[i] != '"' && s[i] != '(' && s[i] != ')' && s[i] != '#' {
 				i++
 			}
-			tokens = append(tokens, token{Text: s[start:i]})
+			raw := s[start:i]
+			tokens = append(tokens, token{Text: unescapeBare(raw), listText: raw})
 		}
 	}
 	return tokens
+}
+
+// splitCMakeList is the sole CMake argument-boundary owner. Source-escaped
+// semicolons arrive marked by evaluateValue; serialized bytes inserted from a
+// variable are governed by CMake's serialized list rules instead.
+func splitCMakeList(t token, value evaluatedValue) []semanticItem {
+	if t.Quoted || t.Raw {
+		return []semanticItem{semanticItem{
+			text:    string(value.text),
+			display: string(value.text),
+			meta:    combineItemProvenance(value.metas),
+			spans:   spansFromMetas(value.metas),
+		}}
+	}
+
+	items := make([]semanticItem, 0, 1)
+	current := make([]byte, 0, len(value.text))
+	metas := make([]provenanceMeta, 0, len(value.text))
+	flush := func() {
+		if len(current) == 0 {
+			return // empty unquoted list elements are not command arguments.
+		}
+		items = append(items, semanticItem{
+			text:    string(current),
+			display: string(current),
+			meta:    combineItemProvenance(metas),
+			spans:   spansFromMetas(metas),
+		})
+		current = current[:0]
+		metas = metas[:0]
+	}
+	openBrackets, closeBrackets := 0, 0
+	for i, b := range value.text {
+		switch b {
+		case '[':
+			openBrackets++
+		case ']':
+			closeBrackets++
+		case ';':
+			if value.protectedSemicolon[i] || openBrackets != closeBrackets {
+				current = append(current, b)
+				metas = append(metas, value.metas[i])
+				continue
+			}
+			backslashes := 0
+			for j := len(current) - 1; j >= 0 && current[j] == '\\'; j-- {
+				backslashes++
+			}
+			if backslashes != 0 {
+				// CMake 4.4 treats every non-empty immediately preceding
+				// serialized run as protective and consumes exactly one slash.
+				current = current[:len(current)-1]
+				metas = metas[:len(metas)-1]
+				current = append(current, b)
+				metas = append(metas, value.metas[i])
+				continue
+			}
+			flush()
+			openBrackets, closeBrackets = 0, 0
+			continue
+		}
+		current = append(current, b)
+		metas = append(metas, value.metas[i])
+	}
+	flush()
+	return items
+}
+
+func combineItemProvenance(metas []provenanceMeta) provenanceMeta {
+	combined := certainProvenance()
+	for _, meta := range metas {
+		combined = combineProvenance(combined, meta)
+	}
+	return combined
+}
+
+// unescapeBare materializes the bare-argument escape that matters to CMake
+// list semantics while listText retains the source marker for splitCMakeList.
+func unescapeBare(s string) string {
+	return strings.ReplaceAll(s, `\;`, `;`)
 }
 
 // unescapeQuoted resolves quoted_argument escape productions per

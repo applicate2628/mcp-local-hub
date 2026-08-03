@@ -69,8 +69,8 @@
 //
 // # Conditional calls: the path is resolved anyway
 //
-// A call textually nested inside an if()/elseif()/else() block answers two
-// INDEPENDENT questions: "where does this point?" (fully statically
+// A call textually nested inside an if()/elseif()/else(), foreach(), or
+// while() block answers two INDEPENDENT questions: "where does this point?" (fully statically
 // computable from the text, same as an unconditional call) and "will it
 // execute?" (genuinely unknown without evaluating CMake). This package only
 // answers the first question, via Status — Edge.Conditional records the
@@ -240,14 +240,14 @@
 //     EXCLUDE_FROM_ALL, add_subdirectory's optional binary-dir argument).
 //     This matches the dominant real-world call shape.
 //   - Conditional and deferred-macro-context detection are simple per-file
-//     nesting counters; they do not model elseif()/else() branch selection
-//     (any call nested inside ANY if()...endif() block is flagged
-//     conditional, regardless of which branch it is textually in), are NOT
-//     transitive across file boundaries (a call is flagged only by an
-//     if()/macro()/function() in ITS OWN file — if that file was itself
-//     reached via a conditional or deferred-macro edge, this package does
-//     not propagate that fact onto the file's own calls), and do not model
-//     macro/function INVOCATION (only lexical DEFINITION-site nesting).
+//     lexical frame stacks; they do not model if()/elseif()/else() branch
+//     selection or loop execution (any call nested inside an open
+//     if()/foreach()/while() frame is flagged conditional), are NOT transitive
+//     across file boundaries (a call is flagged only by a control frame or
+//     macro()/function() in ITS OWN file — if that file was itself reached via
+//     a conditional or deferred-macro edge, this package does not propagate
+//     that fact onto the file's own calls), and do not model macro/function
+//     INVOCATION (only lexical DEFINITION-site nesting).
 //   - CMAKE_MODULE_PATH is never consulted: a bare include() argument with no
 //     path separator and no .cmake suffix is refused (ReasonModuleNameNotPath)
 //     rather than guessed, regardless of what CMAKE_MODULE_PATH might
@@ -265,6 +265,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -377,6 +378,10 @@ const (
 	// enumerating candidate roots, so enumeration stopped early. Path names
 	// the directory the walk was in when the cap tripped.
 	CoverageRootEnumerationCapped CoverageReason = "root_enumeration_capped"
+	// CoverageSymlinkDirectorySkipped: a directory symlink was encountered
+	// while enumerating WalkTree. Its subtree was deliberately not traversed,
+	// so any matching CMake files behind it are absent from the result.
+	CoverageSymlinkDirectorySkipped CoverageReason = "symlink_directory_skipped"
 )
 
 // EdgeKind distinguishes the two directives this package tracks.
@@ -409,11 +414,12 @@ type Edge struct {
 	// other unresolved reason, since no path was ever computed.
 	ResolvedPath string
 	// Conditional is true when this call is textually nested inside an
-	// if()/elseif()/else() block in ITS OWN file (see the package doc's
-	// "Conditional calls" section). It is independent of Status: a
-	// conditional edge is Resolved/Dangling by the exact same os.Stat rule as
-	// an unconditional one. Conditional == true means only "whether this
-	// executes at configure time is unknown", never "the path is unknown".
+	// if()/elseif()/else(), foreach()/endforeach(), or while()/endwhile()
+	// control frame in ITS OWN file (see the package doc's "Conditional
+	// calls" section). It is independent of Status: a conditional edge is
+	// Resolved/Dangling by the exact same os.Stat rule as an unconditional one.
+	// Conditional == true means only "whether this executes at configure time
+	// is unknown", never "the path is unknown".
 	Conditional bool
 }
 
@@ -467,8 +473,9 @@ type Result struct {
 	// construction. Either way the graph is incomplete.
 	RootEnumerationCapped bool
 	// UnscannedFiles lists every COVERAGE HOLE — a file whose content could
-	// not be read, a subtree that could not be enumerated, a root refused for
-	// escaping the workspace, and the point enumeration was capped at. See
+	// not be read, a subtree that could not be enumerated or was skipped for a
+	// directory symlink, a root refused for escaping the workspace, and the
+	// point enumeration was capped at. See
 	// UnscannedFile's doc.
 	UnscannedFiles []UnscannedFile
 }
@@ -587,6 +594,28 @@ func Walk(ctx context.Context, startFile, workspaceRoot string, opts Options) (*
 // ADMISSION too (see Result.NodeCapTruncated) — not only when following an
 // edge within an already-admitted root.
 func WalkTree(ctx context.Context, root, workspaceRoot string, entryNames []string, opts Options) (*Result, error) {
+	return walkTreeWithOperations(ctx, root, workspaceRoot, entryNames, opts, treeOperations{
+		walkDir:            filepath.WalkDir,
+		isDirectorySymlink: isDirectorySymlink,
+		walkRoot:           (*walker).walkRoot,
+	})
+}
+
+// treeOperations keeps WalkTree's filesystem and root-processing operations
+// local to one invocation. Production passes the ordinary filepath/os-backed
+// operations; tests can supply deterministic operations without process-global
+// hooks or filesystem privilege requirements.
+type treeOperations struct {
+	walkDir            func(root string, fn fs.WalkDirFunc) error
+	isDirectorySymlink func(path string) bool
+	walkRoot           func(*walker, string) (string, error)
+}
+
+// walkTreeWithOperations is the package-local WalkTree implementation seam.
+// It preserves WalkTree's public contract while allowing tests to control the
+// operations whose platform behavior would otherwise make a race-window
+// regression nondeterministic.
+func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, entryNames []string, opts Options, operations treeOperations) (*Result, error) {
 	if len(entryNames) == 0 {
 		return nil, errors.New("cmakegraph: entryNames must be non-empty")
 	}
@@ -610,7 +639,7 @@ func WalkTree(ctx context.Context, root, workspaceRoot string, entryNames []stri
 
 	var starts []string
 	rootEnumerationFailed := error(nil)
-	walkErr := filepath.WalkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
+	walkErr := operations.walkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
 		if ctxErr := w.ctx.Err(); ctxErr != nil {
 			return ctxErr
 		}
@@ -625,6 +654,17 @@ func WalkTree(ctx context.Context, root, workspaceRoot string, entryNames []stri
 			// A subtree we could not look inside. Skipped, but RECORDED —
 			// whatever matching files it held are missing from the graph.
 			w.recordCoverage(path, CoverageEnumerateFailed, err.Error())
+			return nil
+		}
+		if operations.isDirectorySymlink(path) {
+			// A directory symlink is a coverage hole, not a path into another
+			// subtree. Lstat identifies the entry itself; os.Stat only classifies
+			// its target. On platforms that expose it as a directory, SkipDir is
+			// required to prevent descent; elsewhere WalkDir already skips it.
+			w.recordCoverage(path, CoverageSymlinkDirectorySkipped, "directory symlink was not traversed")
+			if d.IsDir() {
+				return fs.SkipDir
+			}
 			return nil
 		}
 		if d.IsDir() || !matchesEntry(d.Name(), entryNames) {
@@ -651,11 +691,26 @@ func WalkTree(ctx context.Context, root, workspaceRoot string, entryNames []stri
 		if err := w.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("cmakegraph: walk %s: %w", absRoot, err)
 		}
-		if _, err := w.walkRoot(s); err != nil {
+		if _, err := operations.walkRoot(w, s); err != nil {
 			return nil, fmt.Errorf("cmakegraph: walk %s: %w", s, err)
 		}
 	}
+	if err := w.ctx.Err(); err != nil {
+		return nil, fmt.Errorf("cmakegraph: walk %s: %w", absRoot, err)
+	}
 	return w.result(absRoot), nil
+}
+
+// isDirectorySymlink identifies a symlink entry whose target is a directory.
+// Lstat keeps the directory-link policy anchored to the entry being walked;
+// Stat is used only to classify the target and never to traverse its contents.
+func isDirectorySymlink(path string) bool {
+	entry, err := os.Lstat(path)
+	if err != nil || entry.Mode()&fs.ModeSymlink == 0 {
+		return false
+	}
+	target, err := os.Stat(path)
+	return err == nil && target.IsDir()
 }
 
 // matchesEntry reports whether name (a bare file basename) matches one of
@@ -687,6 +742,24 @@ func matchesEntry(name string, patterns []string) bool {
 type sourceContext struct {
 	dir      string
 	verified bool
+}
+
+// controlFrame is one lexically-open CMake control construct. It records
+// static uncertainty only: scanning never attempts to execute any branch or
+// loop. An edge is Conditional while any control frame remains open.
+type controlFrame uint8
+
+const (
+	controlFrameIf controlFrame = iota
+	controlFrameForeach
+	controlFrameWhile
+)
+
+func closeControlFrame(frames []controlFrame, expected controlFrame) []controlFrame {
+	if n := len(frames); n > 0 && frames[n-1] == expected {
+		return frames[:n-1]
+	}
+	return frames
 }
 
 // visitKey identifies one (file, source-context) traversal node. Keying by
@@ -737,6 +810,10 @@ func newWalker(ctx context.Context, workspaceRoot string, opts Options) (*walker
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return nil, errors.New("cmakegraph: workspaceRoot is required (it is the hard outside_workspace boundary and the ${CMAKE_SOURCE_DIR} value)")
 	}
+	normalizedOpts := opts.normalized()
+	if err := validateSentinelLimit(normalizedOpts.MaxFileBytes); err != nil {
+		return nil, err
+	}
 	absRoot, err := filepath.Abs(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("cmakegraph: resolve workspace root: %w", err)
@@ -747,7 +824,7 @@ func newWalker(ctx context.Context, workspaceRoot string, opts Options) (*walker
 	}
 	return &walker{
 		ctx:               ctx,
-		opts:              opts.normalized(),
+		opts:              normalizedOpts,
 		workspaceRoot:     absRoot,
 		realWorkspaceRoot: realRoot,
 		visited:           map[visitKey]bool{},
@@ -873,7 +950,7 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 	w.files[canonSelf] = true
 	listDir := filepath.Dir(canonSelf)
 
-	condDepth := 0
+	var controlFrames []controlFrame
 	macroDepth := 0
 	for _, c := range scanTopLevelCommands(data) {
 		if w.ctx.Err() != nil {
@@ -881,12 +958,22 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 		}
 		switch c.Name {
 		case "if":
-			condDepth++
+			controlFrames = append(controlFrames, controlFrameIf)
 			continue
 		case "endif":
-			if condDepth > 0 {
-				condDepth--
-			}
+			controlFrames = closeControlFrame(controlFrames, controlFrameIf)
+			continue
+		case "foreach":
+			controlFrames = append(controlFrames, controlFrameForeach)
+			continue
+		case "endforeach":
+			controlFrames = closeControlFrame(controlFrames, controlFrameForeach)
+			continue
+		case "while":
+			controlFrames = append(controlFrames, controlFrameWhile)
+			continue
+		case "endwhile":
+			controlFrames = closeControlFrame(controlFrames, controlFrameWhile)
 			continue
 		case "macro", "function":
 			macroDepth++
@@ -921,7 +1008,7 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 			FromFile:    canonSelf,
 			Line:        lineOf(data, c.NameOffset),
 			RawArg:      rawArg,
-			Conditional: condDepth > 0,
+			Conditional: len(controlFrames) > 0,
 		}
 
 		candidate, reason, ok := classifyArg(kind, rawArg, malformed, macroDepth > 0, listDir, ctx, w.workspaceRoot)
@@ -1091,7 +1178,21 @@ func realOrNearestAncestor(p string) string {
 // case by identity (errors.Is) rather than by matching an error STRING.
 var errByteCapExceeded = errors.New("cmakegraph: file exceeds byte cap")
 
+// validateSentinelLimit rejects a cap that cannot safely reserve one extra
+// byte for the bounded-read sentinel. It is shared by option admission and
+// readBoundedFrom so an unrepresentable cap fails before opening or reading a
+// file, regardless of which path reaches the reader.
+func validateSentinelLimit(maxBytes int64) error {
+	if maxBytes == math.MaxInt64 {
+		return fmt.Errorf("cmakegraph: max file bytes %d cannot reserve the maxBytes+1 sentinel", maxBytes)
+	}
+	return nil
+}
+
 func readBounded(path string, maxBytes int64) ([]byte, error) {
+	if err := validateSentinelLimit(maxBytes); err != nil {
+		return nil, err
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -1128,6 +1229,9 @@ func readBounded(path string, maxBytes int64) ([]byte, error) {
 // grown file looks like from here, and is the only honest way to prove the
 // bound rather than merely asserting the Stat gate that precedes it.
 func readBoundedFrom(r io.Reader, path string, maxBytes int64) ([]byte, error) {
+	if err := validateSentinelLimit(maxBytes); err != nil {
+		return nil, err
+	}
 	data, err := io.ReadAll(io.LimitReader(r, maxBytes+1))
 	if err != nil {
 		return nil, err

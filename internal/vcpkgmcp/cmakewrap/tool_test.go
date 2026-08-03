@@ -3,9 +3,13 @@ package cmakewrap
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/cmakegraph"
@@ -16,7 +20,12 @@ import (
 // tiny real fixture tree — proving this is a thin wrapper (no re-implemented
 // resolution), not a second parallel implementation.
 func TestRunGraph_RealWalkTree(t *testing.T) {
-	res := RunGraph(context.Background(), Args{Root: "testdata/cmake_fixture"})
+	workdir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(workdir, "testdata", "cmake_fixture")
+	res := RunGraph(context.Background(), Args{Root: fixture})
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 	}
@@ -53,7 +62,12 @@ func TestRunGraph_RealWalkTree(t *testing.T) {
 
 // TestRunGraph_RealWalk_SingleFile exercises the Walk (single-file) mode.
 func TestRunGraph_RealWalk_SingleFile(t *testing.T) {
-	res := RunGraph(context.Background(), Args{File: "testdata/cmake_fixture/CMakeLists.txt"})
+	workdir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := filepath.Join(workdir, "testdata", "cmake_fixture", "CMakeLists.txt")
+	res := RunGraph(context.Background(), Args{File: fixture})
 	if res.Status != evidence.StatusOK {
 		t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
 	}
@@ -76,12 +90,12 @@ func TestRun_WalkFailed_PropagatesAsUnknown(t *testing.T) {
 	fakeWalkTree := func(ctx context.Context, root, workspaceRoot string, entryNames []string, opts cmakegraph.Options) (*cmakegraph.Result, error) {
 		return nil, errors.New("simulated walktree failure")
 	}
-	res := run(context.Background(), Args{File: "does-not-matter.cmake"}, fakeWalk, fakeWalkTree)
+	res := run(context.Background(), Args{File: filepath.Join(t.TempDir(), "does-not-matter.cmake")}, fakeWalk, fakeWalkTree)
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonWalkFailed {
 		t.Fatalf("got status=%v reason=%v, want unknown/walk_failed", res.Status, res.Reason)
 	}
 
-	res2 := run(context.Background(), Args{Root: "does-not-matter"}, fakeWalk, fakeWalkTree)
+	res2 := run(context.Background(), Args{Root: t.TempDir()}, fakeWalk, fakeWalkTree)
 	if res2.Status != evidence.StatusUnknown || res2.Reason != ReasonWalkFailed {
 		t.Fatalf("got status=%v reason=%v, want unknown/walk_failed (root mode)", res2.Status, res2.Reason)
 	}
@@ -99,7 +113,7 @@ func TestRun_HistogramIsVerbatimNotRederived(t *testing.T) {
 			Histogram:     wantHist,
 		}, nil
 	}
-	res := run(context.Background(), Args{Root: "irrelevant"}, cmakegraph.Walk, fakeWalkTree)
+	res := run(context.Background(), Args{Root: t.TempDir()}, cmakegraph.Walk, fakeWalkTree)
 	if res.Histogram.Resolved != 7 || res.Histogram.Dangling != 2 || res.Histogram.Unresolved != 1 {
 		t.Fatalf("histogram = %+v, want verbatim %+v", res.Histogram, wantHist)
 	}
@@ -149,12 +163,14 @@ func TestF20_WorkspaceRootIsForwardedInRootMode(t *testing.T) {
 		return &cmakegraph.Result{Root: root, WorkspaceRoot: workspaceRoot}, nil
 	}
 
-	run(context.Background(), Args{Root: "C:/tree", WorkspaceRoot: "C:/workspace"}, cmakegraph.Walk, fakeWalkTree)
+	root := filepath.Join(t.TempDir(), "tree")
+	workspace := t.TempDir()
+	run(context.Background(), Args{Root: root, WorkspaceRoot: workspace}, cmakegraph.Walk, fakeWalkTree)
 
-	if gotRoot != "C:/tree" {
-		t.Errorf("root forwarded as %q, want %q", gotRoot, "C:/tree")
+	if gotRoot != root {
+		t.Errorf("root forwarded as %q, want %q", gotRoot, root)
 	}
-	if gotWorkspace != "C:/workspace" {
+	if gotWorkspace != workspace {
 		t.Fatalf("workspace_root forwarded as %q, want %q — supplying it must not be silently ignored "+
 			"in root mode", gotWorkspace, "C:/workspace")
 	}
@@ -169,10 +185,11 @@ func TestF20_OmittedWorkspaceRootStillDefaultsToRoot(t *testing.T) {
 		return &cmakegraph.Result{}, nil
 	}
 
-	run(context.Background(), Args{Root: "C:/tree"}, cmakegraph.Walk, fakeWalkTree)
+	root := t.TempDir()
+	run(context.Background(), Args{Root: root}, cmakegraph.Walk, fakeWalkTree)
 
-	if gotWorkspace != "C:/tree" {
-		t.Fatalf("default workspace_root = %q, want the root %q", gotWorkspace, "C:/tree")
+	if gotWorkspace != root {
+		t.Fatalf("default workspace_root = %q, want the root %q", gotWorkspace, root)
 	}
 }
 
@@ -195,6 +212,9 @@ func TestF21_RootLevelFileYieldsAValidDefaultWorkspace(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if !filepath.IsAbs(tc.file) {
+				t.Skipf("%q is not absolute under this host's filepath semantics", tc.file)
+			}
 			var gotWorkspace string
 			fakeWalk := func(ctx context.Context, startFile, workspaceRoot string, opts cmakegraph.Options) (*cmakegraph.Result, error) {
 				gotWorkspace = workspaceRoot
@@ -226,10 +246,114 @@ func TestRun_CanceledContextIsItsOwnReason(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	res := run(ctx, Args{Root: "irrelevant"}, cmakegraph.Walk, cmakegraph.WalkTree)
+	res := run(ctx, Args{Root: t.TempDir()}, cmakegraph.Walk, cmakegraph.WalkTree)
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonCanceled {
 		t.Fatalf("status=%v reason=%v, want unknown/canceled", res.Status, res.Reason)
 	}
+}
+
+// TestPR591_RelativeGraphPathsRejectedBeforeTraversal proves the wrapper
+// refuses any non-empty relative graph path before it can bind to the hub
+// daemon working directory or invoke a traversal callback.
+func TestPR591_RelativeGraphPathsRejectedBeforeTraversal(t *testing.T) {
+	absoluteRoot := t.TempDir()
+	absoluteWorkspace := t.TempDir()
+	absoluteFile := filepath.Join(t.TempDir(), "CMakeLists.txt")
+
+	cases := []struct {
+		name          string
+		args          Args
+		wantWalk      int
+		wantWalkTree  int
+		wantArgsError bool
+		relativePath  string
+	}{
+		{name: "relative root", args: Args{Root: "relative-root"}, wantArgsError: true, relativePath: "relative-root"},
+		{name: "drive-relative root", args: Args{Root: `C:relative-root`}, wantArgsError: true, relativePath: `C:relative-root`},
+		{name: "relative file", args: Args{File: "relative-file.cmake"}, wantArgsError: true, relativePath: "relative-file.cmake"},
+		{name: "explicit relative workspace root", args: Args{Root: absoluteRoot, WorkspaceRoot: "relative-workspace"}, wantArgsError: true, relativePath: "relative-workspace"},
+		{name: "absolute root control", args: Args{Root: absoluteRoot, WorkspaceRoot: absoluteWorkspace}, wantWalkTree: 1},
+		{name: "absolute file control", args: Args{File: absoluteFile, WorkspaceRoot: absoluteWorkspace}, wantWalk: 1},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.wantArgsError {
+				if filepath.IsAbs(tc.relativePath) {
+					t.Fatalf("rejection input %q is absolute under filepath semantics", tc.relativePath)
+				}
+			}
+
+			var walkCalls, walkTreeCalls int
+			fakeWalk := func(ctx context.Context, startFile, workspaceRoot string, opts cmakegraph.Options) (*cmakegraph.Result, error) {
+				walkCalls++
+				return &cmakegraph.Result{Root: startFile, WorkspaceRoot: workspaceRoot}, nil
+			}
+			fakeWalkTree := func(ctx context.Context, root, workspaceRoot string, entryNames []string, opts cmakegraph.Options) (*cmakegraph.Result, error) {
+				walkTreeCalls++
+				return &cmakegraph.Result{Root: root, WorkspaceRoot: workspaceRoot}, nil
+			}
+
+			res := run(context.Background(), tc.args, fakeWalk, fakeWalkTree)
+			if tc.wantArgsError {
+				if res.Status != evidence.StatusUnknown || res.Reason != ReasonArgsInvalid {
+					t.Fatalf("status=%v reason=%v, want unknown/args_invalid", res.Status, res.Reason)
+				}
+			} else if res.Status != evidence.StatusOK {
+				t.Fatalf("status=%v reason=%v, want ok", res.Status, res.Reason)
+			}
+			if walkCalls != tc.wantWalk || walkTreeCalls != tc.wantWalkTree {
+				t.Fatalf("walk calls=%d walkTree calls=%d, want %d and %d", walkCalls, walkTreeCalls, tc.wantWalk, tc.wantWalkTree)
+			}
+		})
+	}
+}
+
+func TestPR591_CMakeWrapPublicDocsMatchAbsolutePathContract(t *testing.T) {
+	for _, field := range []string{"Root", "File", "WorkspaceRoot"} {
+		doc := argsFieldDoc(t, field)
+		if !strings.Contains(strings.ToLower(doc), "absolute") || !strings.Contains(doc, "unknown(args_invalid)") {
+			t.Fatalf("Args.%s doc = %q, want absolute-path and unknown(args_invalid) contract", field, doc)
+		}
+	}
+}
+
+func argsFieldDoc(t *testing.T, fieldName string) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), thisFile[:len(thisFile)-len("_test.go")]+".go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse tool.go: %v", err)
+	}
+	for _, decl := range parsed.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != "Args" {
+				continue
+			}
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatal("Args is not a struct")
+			}
+			for _, field := range structType.Fields.List {
+				if len(field.Names) == 1 && field.Names[0].Name == fieldName {
+					if field.Doc == nil {
+						return ""
+					}
+					return field.Doc.Text()
+				}
+			}
+		}
+	}
+	t.Fatalf("Args.%s not found", fieldName)
+	return ""
 }
 
 // End-to-end over the REAL cmakegraph: the wrapper forwards the coverage

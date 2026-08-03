@@ -19,6 +19,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcp-local-hub/internal/cmakegraph"
 	"mcp-local-hub/internal/vcpkgmcp/cmaketrace"
 	"mcp-local-hub/internal/vcpkgmcp/cmakewrap"
 	"mcp-local-hub/internal/vcpkgmcp/discovery"
@@ -615,6 +616,82 @@ func TestRegisterTools(t *testing.T) {
 			t.Fatalf("cmake-trace wire body = %+v, want unknown(unsupported_trace_version), header present, no records", trace)
 		}
 	})
+}
+
+func TestPR591_CMakeIncludeGraphDescriptorMatchesContracts(t *testing.T) {
+	tool := registeredToolByName(t, liveRegisteredTools(t), "cmake_include_graph")
+	if !strings.Contains(tool.Description, string(cmakegraph.CoverageSymlinkDirectorySkipped)) {
+		t.Fatalf("cmake_include_graph descriptor omits typed coverage reason %q: %q", cmakegraph.CoverageSymlinkDirectorySkipped, tool.Description)
+	}
+	for _, property := range []string{"root", "file", "workspace_root"} {
+		description := toolInputDescription(t, tool, property)
+		if !strings.Contains(strings.ToLower(description), "absolute") || !strings.Contains(description, string(cmakewrap.ReasonArgsInvalid)) {
+			t.Fatalf("cmake_include_graph %s descriptor = %q, want absolute and unknown(%s)", property, description, cmakewrap.ReasonArgsInvalid)
+		}
+	}
+}
+
+func TestPR591_PatchesApplyDescriptorNamesDeferredInvocation(t *testing.T) {
+	tool := registeredToolByName(t, liveRegisteredTools(t), "vcpkg_patches_apply")
+	if !strings.Contains(tool.Description, "invocation") || !strings.Contains(tool.Description, "${ARGN}") || !strings.Contains(tool.Description, string(patchesapply.ReasonPatchesDeferredCommandBody)) {
+		t.Fatalf("patches descriptor does not name deferred invocation forwarding contract: %q", tool.Description)
+	}
+}
+
+func liveRegisteredTools(t *testing.T) []*mcp.Tool {
+	t.Helper()
+	ctx := context.Background()
+	server := mcp.NewServer(&mcp.Implementation{Name: "vcpkg-mcp-descriptor-test", Version: "test"}, nil)
+	registerTools(&VcpkgServer{server: server})
+	serverTransport, clientTransport := mcp.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	defer serverSession.Close()
+	client := mcp.NewClient(&mcp.Implementation{Name: "vcpkg-mcp-descriptor-client", Version: "test"}, nil)
+	clientSession, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	defer clientSession.Close()
+	listed, err := clientSession.ListTools(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	return listed.Tools
+}
+
+func registeredToolByName(t *testing.T, tools []*mcp.Tool, name string) *mcp.Tool {
+	t.Helper()
+	for _, tool := range tools {
+		if tool.Name == name {
+			return tool
+		}
+	}
+	t.Fatalf("tool %q not registered", name)
+	return nil
+}
+
+func toolInputDescription(t *testing.T, tool *mcp.Tool, property string) string {
+	t.Helper()
+	schema, ok := tool.InputSchema.(map[string]any)
+	if !ok {
+		t.Fatalf("%s InputSchema type = %T, want map[string]any", tool.Name, tool.InputSchema)
+	}
+	properties, ok := schema["properties"].(map[string]any)
+	if !ok {
+		t.Fatalf("%s properties = %#v", tool.Name, schema["properties"])
+	}
+	field, ok := properties[property].(map[string]any)
+	if !ok {
+		t.Fatalf("%s.%s schema = %#v", tool.Name, property, properties[property])
+	}
+	description, ok := field["description"].(string)
+	if !ok {
+		t.Fatalf("%s.%s description = %#v", tool.Name, property, field["description"])
+	}
+	return description
 }
 
 func TestProjectableAdapterBranches(t *testing.T) {

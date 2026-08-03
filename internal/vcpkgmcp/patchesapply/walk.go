@@ -31,6 +31,56 @@ type declaredPatch struct {
 	pathUnresolved []string
 }
 
+// parserStructuralSignal reports a whole-portfile structural condition that
+// prevents patch probing while still allowing the caller to retain evidence
+// observed before parsing.
+type parserStructuralSignal uint8
+
+const (
+	parserStructuralNone parserStructuralSignal = iota
+	parserStructuralExpressionUnparsable
+	parserStructuralDeferredBody
+)
+
+func declaredPatchFromSemanticItem(item semanticItem) declaredPatch {
+	display := item.display
+	if display == "" {
+		display = item.text
+	}
+	return declaredPatch{
+		raw:            display,
+		expanded:       item.text,
+		guard:          item.meta.guard,
+		guardText:      item.meta.guardText,
+		unresolvedVars: item.meta.unresolvedVars,
+		pathUnresolved: item.meta.pathUnresolved,
+	}
+}
+
+func semanticItemsFromToken(t token, env *varEnv, active Tri, guardText string, unresolvedVars []string) ([]semanticItem, valueResolution) {
+	callMeta := provenanceMeta{
+		guard:          active,
+		guardText:      guardText,
+		unresolvedVars: dedupStrings(unresolvedVars),
+	}
+	evaluated := env.evaluateValue(t, callMeta)
+	if evaluated.resolution.failed() {
+		return nil, evaluated.resolution
+	}
+	items := splitCMakeList(t, evaluated)
+	if len(items) == 1 && items[0].text != "" {
+		if evaluated.exactReference && items[0].meta.source != "" {
+			items[0].display = items[0].meta.source
+		} else {
+			// Public result filenames retain the r2 source-display contract when a
+			// scalar/generated value remains one command argument. Split serialized
+			// values use their resulting semantic item text instead.
+			items[0].display = t.Text
+		}
+	}
+	return items, valueResolution{}
+}
+
 // ifFrame tracks one open if()/elseif()/else() block while walking.
 type ifFrame struct {
 	// parentActive is the cumulative active Tri of the ENCLOSING scope (the
@@ -56,10 +106,10 @@ type ifFrame struct {
 // from "declared PATCHES but every branch happened to be guard-false", and
 // truncated flags a whole-file structural break (unbalanced parens at EOF)
 // that makes every extracted entry untrustworthy.
-func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesKeyword bool, truncated bool) {
+func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesKeyword bool, structural parserStructuralSignal) {
 	stmts, ok := splitStatementsChecked(src)
 	if !ok {
-		return nil, false, true
+		return nil, false, parserStructuralExpressionUnparsable
 	}
 
 	var frames []ifFrame
@@ -86,8 +136,28 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		return dedupStrings(all)
 	}
 
+	declarationDepth := 0
+	declaredCommands := map[string]struct{}{}
+	deferredCommandBody := false
 	for _, st := range stmts {
+		if declarationDepth > 0 {
+			if containsPatchesKeyword(st.Args) {
+				deferredCommandBody = true
+			}
+			switch st.Name {
+			case "function", "macro":
+				declarationDepth++
+			case "endfunction", "endmacro":
+				declarationDepth--
+			}
+			continue
+		}
 		switch st.Name {
+		case "function", "macro":
+			if toks := tokenize(st.Args); len(toks) > 0 && !toks[0].Quoted {
+				declaredCommands[strings.ToLower(toks[0].Text)] = struct{}{}
+			}
+			declarationDepth = 1
 		case "if":
 			cond, unresolved := evalCondition(st.Args, env)
 			parent := active()
@@ -131,18 +201,111 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		case "set":
 			handleSet(st.Args, env, active(), guardText(), activeUnresolved())
 		case "get_filename_component":
-			handleGetFilenameComponent(st.Args, env, active())
+			handleGetFilenameComponent(st.Args, env, active(), guardText(), activeUnresolved())
 		case "list":
 			handleListAppend(st.Args, env, active(), guardText(), activeUnresolved())
+		case "cmake_language":
+			if classifyCMakeLanguage(st.Args, env, active(), guardText(), activeUnresolved()) == cmakeLanguageCallDeferred {
+				deferredCommandBody = true
+			}
+			continue
 		default:
-			found, items := extractPatchesArg(st.Args, env, active(), guardText(), activeUnresolved())
+			if _, declared := declaredCommands[st.Name]; declared {
+				if declaredInvocationPatches(st.Args, env, active(), guardText(), activeUnresolved()) != patchesAbsent {
+					deferredCommandBody = true
+				}
+				continue
+			}
+			found, items, resolution := extractPatchesArg(st.Args, env, active(), guardText(), activeUnresolved())
+			if resolution.failed() {
+				return nil, false, parserStructuralExpressionUnparsable
+			}
 			if found {
 				sawPatchesKeyword = true
 				entries = append(entries, items...)
 			}
 		}
 	}
-	return entries, sawPatchesKeyword, false
+	if deferredCommandBody {
+		return entries, sawPatchesKeyword, parserStructuralDeferredBody
+	}
+	return entries, sawPatchesKeyword, parserStructuralNone
+}
+
+type patchesPresence uint8
+
+const (
+	patchesAbsent patchesPresence = iota
+	patchesPresent
+	patchesUnprovable
+)
+
+func declaredInvocationPatches(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) patchesPresence {
+	for _, t := range tokenize(argsRaw) {
+		items, resolution := semanticItemsFromToken(t, env, active, guardText, unresolvedVars)
+		if resolution.failed() {
+			return patchesUnprovable
+		}
+		for _, item := range items {
+			if item.text == "PATCHES" {
+				return patchesPresent
+			}
+			if len(item.meta.pathUnresolved) != 0 {
+				return patchesUnprovable
+			}
+		}
+	}
+	return patchesAbsent
+}
+
+type cmakeLanguageClass uint8
+
+const (
+	cmakeLanguageNotLiteralCall cmakeLanguageClass = iota
+	cmakeLanguageCallConsumed
+	cmakeLanguageCallDeferred
+)
+
+// classifyCMakeLanguage consumes cmake_language before generic PATCHES
+// extraction can inspect its forwarded arguments. Only the lexical literal
+// CALL form evaluates its target and operands.
+func classifyCMakeLanguage(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) cmakeLanguageClass {
+	tokens := tokenize(argsRaw)
+	if len(tokens) == 0 || tokens[0].Text != "CALL" {
+		return cmakeLanguageNotLiteralCall
+	}
+	if len(tokens) < 2 {
+		return cmakeLanguageCallDeferred
+	}
+	target, resolution := semanticItemsFromToken(tokens[1], env, active, guardText, unresolvedVars)
+	if resolution.failed() || len(target) != 1 || target[0].text == "" || len(target[0].meta.pathUnresolved) != 0 {
+		return cmakeLanguageCallDeferred
+	}
+	for _, forwardedToken := range tokens[2:] {
+		items, resolution := semanticItemsFromToken(forwardedToken, env, active, guardText, unresolvedVars)
+		if resolution.failed() {
+			return cmakeLanguageCallDeferred
+		}
+		for _, item := range items {
+			if item.text == "PATCHES" || len(item.meta.pathUnresolved) != 0 {
+				return cmakeLanguageCallDeferred
+			}
+		}
+	}
+	return cmakeLanguageCallConsumed
+}
+
+// containsPatchesKeyword detects a bare PATCHES token in a deferred command
+// body. Function and macro declarations are intentionally never modeled as
+// calls, so this is evidence of an unsupported declaration-body dependency,
+// not an extraction request.
+func containsPatchesKeyword(argsRaw string) bool {
+	for _, t := range tokenize(argsRaw) {
+		if !t.Quoted && t.Text == "PATCHES" {
+			return true
+		}
+	}
+	return false
 }
 
 // notAllPrior computes NOT(cond1) AND NOT(cond2) AND ... for every branch
@@ -175,44 +338,24 @@ func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unreso
 		return
 	}
 	name := toks[0].Text
-	var parts []string
-	var items []listItem
-	// The assignment is only as applicable as the branch it sits in, AND as
-	// the values it reads: a set() under an undecided if() is uncertain, and so
-	// is one whose value splices a variable that was itself assigned under one.
-	valueCertainty := TriTrue
-	valueUncertainVars := append([]string{}, unresolvedVars...)
+	var items []semanticItem
+	resolution := valueResolution{}
 	for _, t := range toks[1:] {
 		if !t.Quoted && (t.Text == "CACHE" || t.Text == "PARENT_SCOPE" || t.Text == "FORCE") {
 			break
 		}
-		ex := env.expandToken(t)
-		valueCertainty = kleeneAnd(valueCertainty, ex.certainty)
-		valueUncertainVars = append(valueUncertainVars, ex.uncertainVars...)
-		parts = append(parts, ex.text)
-		if ex.text != "" {
-			items = append(items, listItem{
-				text:           ex.text,
-				guard:          kleeneAnd(active, ex.certainty),
-				guardText:      guardText,
-				unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
-				pathUnresolved: ex.unresolved,
-			})
+		var evaluated []semanticItem
+		evaluated, resolution = semanticItemsFromToken(t, env, active, guardText, unresolvedVars)
+		items = append(items, evaluated...)
+		if resolution.failed() {
+			break
 		}
 	}
-	assignedGuard := kleeneAnd(active, valueCertainty)
-	// setScalar carries the value AND its guard together. Writing env.scalars
-	// directly here is what used to lose the tri-state on the scalar shape
-	// while the list items beside it kept theirs.
-	env.setScalar(name, strings.Join(parts, ";"), scalarTaint{
-		guard:          assignedGuard,
-		guardText:      guardText,
-		unresolvedVars: dedupStrings(valueUncertainVars),
-	})
-	// CMake set(VAR value...) establishes a list value, replacing any prior
-	// value; later list(APPEND VAR ...) extends this declaration in source
-	// order. Keeping the declaration here lets PATCHES ${VAR} expand both.
-	env.lists[name] = items
+	// set(VAR value...) evaluates command arguments first, then stores their
+	// semicolon serialization with metadata-only provenance spans.
+	value := serializeItems(items)
+	value.resolution = resolution
+	env.setValue(name, value)
 }
 
 // handleGetFilenameComponent implements get_filename_component(<var>
@@ -221,7 +364,7 @@ func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unreso
 // shape). Any other mode (DIRECTORY, NAME, EXT, ...) is deliberately left
 // unhandled: the variable stays unresolved rather than this package
 // guessing an unsupported transform.
-func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri) {
+func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) {
 	if active == TriFalse {
 		return
 	}
@@ -235,12 +378,13 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri) {
 	if mode != "ABSOLUTE" {
 		return
 	}
-	// Same tri-state rule as handleSet: the derived path is only as applicable
-	// as the branch this call sits in and the variables it read.
-	env.setScalar(name, env.getFilenameComponentAbsolute(ex.text), scalarTaint{
+	meta := provenanceMeta{
 		guard:          kleeneAnd(active, ex.certainty),
-		unresolvedVars: ex.uncertainVars,
-	})
+		guardText:      guardText,
+		unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
+		pathUnresolved: ex.unresolved,
+	}
+	env.setValue(name, serializeItems([]semanticItem{{text: env.getFilenameComponentAbsolute(ex.text), meta: meta}}))
 }
 
 // handleListAppend implements list(APPEND <listvar> item...). Only the
@@ -261,28 +405,27 @@ func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string,
 		return
 	}
 	listName := toks[1].Text
+	var appended []semanticItem
+	resolution := valueResolution{}
 	for _, t := range toks[2:] {
-		ex := env.expandToken(t)
-		env.lists[listName] = append(env.lists[listName], listItem{
-			text:           ex.text,
-			guard:          kleeneAnd(active, ex.certainty),
-			guardText:      guardText,
-			unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
-			pathUnresolved: ex.unresolved,
-		})
+		var items []semanticItem
+		items, resolution = semanticItemsFromToken(t, env, active, guardText, unresolvedVars)
+		appended = append(appended, items...)
+		if resolution.failed() {
+			break
+		}
 	}
+	value := serializeItems(appended)
+	value.resolution = resolution
+	env.setValue(listName, appendSerializedValue(env.values[listName], value))
 }
 
 // extractPatchesArg scans one call statement's raw argument text for a bare
 // PATCHES keyword token. Everything after it, up to the next token that
 // looks like a different ALL-CAPS keyword-arg (or end of the call), is
-// collected as a declared patch entry — except a token that is EXACTLY
-// "${PATCHES}" (a bare list-variable splice), which instead expands to the
-// full accumulated list(APPEND PATCHES ...) history (each item keeping ITS
-// OWN guard from when it was appended, per handleListAppend above). This is
-// what lets the python3-style conditional-accumulation shape and the flat
-// literal-list shape share one code path.
-func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) (found bool, items []declaredPatch) {
+// collected as declared patch entries. Every token, including an exact
+// unquoted ${VAR}, follows the same serialized-value evaluation path.
+func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) (found bool, items []declaredPatch, resolution valueResolution) {
 	toks := tokenize(argsRaw)
 	for i := 0; i < len(toks); i++ {
 		if toks[i].Quoted || toks[i].Text != "PATCHES" {
@@ -295,38 +438,18 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 			if !t.Quoted && looksLikeKeywordArg(t.Text) {
 				break
 			}
-			if !t.Quoted {
-				if m := reVarRefFull.FindStringSubmatch(t.Text); m != nil {
-					if lst, ok := env.lists[m[1]]; ok {
-						for _, li := range lst {
-							items = append(items, declaredPatch{
-								raw:            li.text,
-								expanded:       li.text,
-								guard:          li.guard,
-								guardText:      li.guardText,
-								unresolvedVars: li.unresolvedVars,
-								pathUnresolved: li.pathUnresolved,
-							})
-						}
-						j++
-						continue
-					}
-				}
+			semanticItems, itemResolution := semanticItemsFromToken(t, env, active, guardText, unresolvedVars)
+			if itemResolution.failed() {
+				return found, nil, itemResolution
 			}
-			ex := env.expandToken(t)
-			items = append(items, declaredPatch{
-				raw:            t.Text,
-				expanded:       ex.text,
-				guard:          kleeneAnd(active, ex.certainty),
-				guardText:      guardText,
-				unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
-				pathUnresolved: ex.unresolved,
-			})
+			for _, item := range semanticItems {
+				items = append(items, declaredPatchFromSemanticItem(item))
+			}
 			j++
 		}
 		i = j - 1
 	}
-	return found, items
+	return found, items, valueResolution{}
 }
 
 // looksLikeKeywordArg identifies the vcpkg helper keyword names that end a

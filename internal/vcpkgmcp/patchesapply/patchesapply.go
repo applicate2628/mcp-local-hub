@@ -36,12 +36,15 @@
 package patchesapply
 
 import (
+	"context"
+	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
+	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
 
 // Args is the input contract for ApplyOrder.
@@ -118,12 +121,21 @@ const (
 	// keyword-arg at all (the netgen shape) — every physical .patch/.diff
 	// file in the port directory is therefore orphaned by construction.
 	ReasonNoPatchesDeclared Reason = "no_patches_declared"
-	// ReasonPatchesExprUnparsable: the portfile's statement structure itself
-	// is broken (unbalanced parentheses before EOF), so no extracted entry
-	// can be trusted. A single unparsable if()-condition INSIDE an otherwise
-	// well-formed file does NOT produce this — that guard degrades to the
-	// per-entry Undecidable bucket instead (see condition.go).
+	// ReasonPatchesExprUnparsable: the portfile's statement structure is broken
+	// (unbalanced parentheses before EOF), or a PATCHES value expression
+	// (including a malformed supported variable reference) cannot be resolved
+	// safely, so no extracted entry can be trusted. A single
+	// unparsable if()-condition INSIDE an otherwise well-formed file does NOT
+	// produce this — that guard degrades to the per-entry Undecidable bucket
+	// instead (see condition.go).
 	ReasonPatchesExprUnparsable Reason = "patches_expression_unparsable"
+	// ReasonPortfileSizeLimitExceeded: portfile.cmake exceeded the bounded
+	// streaming read limit, so no prefix is parsed as a complete portfile.
+	ReasonPortfileSizeLimitExceeded Reason = "portfile_size_limit_exceeded"
+	// ReasonPatchesDeferredCommandBody: a PATCHES flow crosses a deferred
+	// function or macro declaration or invocation boundary. Static analysis
+	// never executes declaration bodies for their side effects.
+	ReasonPatchesDeferredCommandBody Reason = "patches_deferred_command_body"
 
 	// --- Evidence-integrity reasons -------------------------------------
 	// Each of the three below reports "the filesystem declined to answer a
@@ -141,10 +153,10 @@ const (
 	// be probed. Such a path is NOT in Missing — "missing" is a real defect
 	// report, and a permission error is not evidence that a file is absent.
 	ReasonPatchPathUnreadable Reason = "patch_path_unreadable"
-	// ReasonOrphanScanIncomplete: at least one directory under the port dir
-	// could not be listed, so the orphan inventory is a PREFIX of the truth.
-	// Without this, an unreadable subdirectory full of unreferenced patches
-	// was indistinguishable from "no orphans", under an overall ok.
+	// ReasonOrphanScanIncomplete: a directory under the port dir could not be
+	// completely scanned because it was unreadable, a traversal budget was
+	// reached, or the request was cancelled. The orphan inventory is therefore
+	// a PREFIX of the truth and must not report an overall ok verdict.
 	ReasonOrphanScanIncomplete Reason = "orphan_scan_incomplete"
 )
 
@@ -171,6 +183,19 @@ type UnreadablePath struct {
 	// never a verdict (verdicts stay in the closed Reason/Kind enums).
 	Error string `json:"error,omitempty"`
 }
+
+// OrphanScanStopCause is the typed resource boundary that stopped orphan
+// traversal. It remains populated when another evidence-integrity reason has
+// higher verdict precedence, so the incomplete traversal is never hidden.
+type OrphanScanStopCause string
+
+const (
+	OrphanScanStopDirectoryUnreadable OrphanScanStopCause = "directory_unreadable"
+	OrphanScanStopEntryLimit          OrphanScanStopCause = "entry_limit_exceeded"
+	OrphanScanStopDirectoryLimit      OrphanScanStopCause = "directory_limit_exceeded"
+	OrphanScanStopDepthLimit          OrphanScanStopCause = "depth_limit_exceeded"
+	OrphanScanStopCancelled           OrphanScanStopCause = "cancelled"
+)
 
 // AppliedPatch is one patch that WOULD be applied for this triplet, in the
 // exact order vcpkg would apply it (0-based Ordinal, matching the observed
@@ -242,6 +267,11 @@ type Result struct {
 	// Unreadable lists every path the filesystem refused to answer for. Any
 	// entry here forces Status=unknown with the matching Reason.
 	Unreadable []UnreadablePath `json:"unreadable,omitempty"`
+	// OrphanScanStopCause explains why an orphan inventory is incomplete. It
+	// is separate from unreadable paths: resource limits and cancellation are
+	// not filesystem unreadability. It stays visible if an earlier reason wins
+	// the established verdict precedence.
+	OrphanScanStopCause OrphanScanStopCause `json:"orphan_scan_stop_cause,omitempty"`
 
 	Evidence evidence.Evidence `json:"evidence"`
 }
@@ -256,8 +286,9 @@ type Status = evidence.Status
 // a real vcpkg checkout.
 type Deps struct {
 	Stat     func(path string) (os.FileInfo, error)
-	ReadDir  func(path string) ([]os.DirEntry, error)
 	ReadFile func(path string) ([]byte, error)
+	Open     func(path string) (io.ReadCloser, error)
+	OpenDir  func(path string) (boundedio.DirReader, error)
 }
 
 // DefaultDeps wires Deps to the real OS. Production callers use this; tests
@@ -267,17 +298,52 @@ type Deps struct {
 func DefaultDeps() Deps {
 	return Deps{
 		Stat:     os.Stat,
-		ReadDir:  os.ReadDir,
 		ReadFile: os.ReadFile,
+		Open: func(path string) (io.ReadCloser, error) {
+			return os.Open(path)
+		},
+		OpenDir: func(path string) (boundedio.DirReader, error) {
+			return os.Open(path)
+		},
 	}
 }
 
 // ApplyOrder executes vcpkg_patches_apply against the real filesystem.
 func ApplyOrder(args Args) Result {
-	return applyOrder(args, DefaultDeps())
+	return ApplyOrderContext(context.Background(), args)
+}
+
+// ApplyOrderContext executes vcpkg_patches_apply against the real filesystem
+// and observes cancellation while streaming the portfile and walking orphans.
+func ApplyOrderContext(ctx context.Context, args Args) Result {
+	return applyOrderContext(ctx, args, DefaultDeps())
 }
 
 func applyOrder(args Args, deps Deps) Result {
+	return applyOrderContext(context.Background(), args, deps)
+}
+
+const (
+	// MaxPortfileBytes is the package's complete-portfile admission limit. The
+	// next byte is read only as an overflow sentinel and is never parsed.
+	MaxPortfileBytes       int64 = publicresult.MaxEncodedBytes
+	portfileReadBatchBytes int64 = 32 << 10
+)
+
+type boundedDeps struct{ deps Deps }
+
+func (d boundedDeps) Open(path string) (io.ReadCloser, error) {
+	return d.deps.Open(path)
+}
+
+func (d boundedDeps) OpenDir(path string) (boundedio.DirReader, error) {
+	return d.deps.OpenDir(path)
+}
+
+func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var ev evidence.Evidence
 	// Declared up front because the port-dir probe below can already produce
 	// an entry: an unreadable port dir is the FIRST question the filesystem
@@ -329,7 +395,7 @@ func applyOrder(args Args, deps Deps) Result {
 
 	portfilePath := filepath.Join(portDir, "portfile.cmake")
 	ev.AddPath(portfilePath)
-	raw, err := deps.ReadFile(portfilePath)
+	portfile, err := boundedio.ReadFile(ctx, boundedDeps{deps: deps}, portfilePath, MaxPortfileBytes, portfileReadBatchBytes)
 	if err != nil {
 		return Result{
 			Status: evidence.StatusUnknown, Reason: ReasonPortfileUnreadable,
@@ -337,6 +403,12 @@ func applyOrder(args Args, deps Deps) Result {
 		}
 	}
 	ev.AddCommand("read " + portfilePath)
+	if portfile.Limited {
+		return Result{
+			Status: evidence.StatusUnknown, Reason: ReasonPortfileSizeLimitExceeded,
+			Triplet: triplet, PortDir: portDir, Evidence: ev,
+		}
+	}
 
 	portName := strings.TrimSpace(args.PortName)
 	if portName == "" {
@@ -363,6 +435,7 @@ func applyOrder(args Args, deps Deps) Result {
 			tripletFacts = parseTripletFacts(string(tripletRaw), portDir, portName, vcpkgRoot)
 		}
 	case evidence.PresenceUnreadable:
+		ev.AddPath(tripletFile)
 		errText := ""
 		if tripletErr != nil {
 			errText = tripletErr.Error()
@@ -372,19 +445,24 @@ func applyOrder(args Args, deps Deps) Result {
 		})
 	}
 
-	env := newVarEnv(portDir, portName, vcpkgRoot, args.VarOverrides, tripletFacts)
-
-	entries, sawPatches, truncated := walkPortfile(string(raw), env)
-	if truncated {
-		return Result{
-			Status: evidence.StatusUnknown, Reason: ReasonPatchesExprUnparsable,
-			Triplet: triplet, PortDir: portDir, Evidence: ev,
-		}
+	// Every post-triplet path starts from this one base result. In particular,
+	// structural parser stops retain the located triplet identity, preobserved
+	// triplet evidence, and a higher-priority unreadable-triplet reason.
+	res := Result{
+		Triplet:     triplet,
+		PortDir:     portDir,
+		TripletFile: tripletFile,
+		Evidence:    ev,
+		Unreadable:  unreadable,
+	}
+	if tripletPresence == evidence.PresenceAbsent {
+		res.TripletFile = ""
 	}
 
-	res := Result{Triplet: triplet, PortDir: portDir, TripletFile: tripletFile}
-	if tripletPresence != evidence.PresenceExists {
-		res.TripletFile = ""
+	env := newVarEnv(portDir, portName, vcpkgRoot, args.VarOverrides, tripletFacts)
+	entries, sawPatches, structural := walkPortfile(string(portfile.Data), env)
+	if structural != parserStructuralNone {
+		return finalizePostTripletResult(res, ev, unreadable, sawPatches, structural)
 	}
 	referenced := map[string]bool{}
 	ordinal := 0
@@ -457,15 +535,19 @@ func applyOrder(args Args, deps Deps) Result {
 		}
 	}
 
-	orphans, orphanFailures := findOrphans(deps, portDir, referenced)
+	orphans, orphanFailures, orphanStop := findOrphans(ctx, deps, portDir, referenced)
 	res.Orphaned = orphans
 	unreadable = append(unreadable, orphanFailures...)
-	res.Unreadable = unreadable
-	res.Evidence = ev
+	res.OrphanScanStopCause = orphanStop
+	return finalizePostTripletResult(res, ev, unreadable, sawPatches, parserStructuralNone)
+}
 
-	// Verdict precedence: evidence-integrity problems first (each names a
-	// different remedy), then the structural "nothing declared" case. Every
-	// branch keeps the buckets already computed.
+// finalizePostTripletResult is the sole post-triplet result finalizer. It
+// completes evidence fields and owns verdict precedence for normal and
+// parser-stop paths alike.
+func finalizePostTripletResult(res Result, ev evidence.Evidence, unreadable []UnreadablePath, sawPatches bool, structural parserStructuralSignal) Result {
+	res.Evidence = ev
+	res.Unreadable = unreadable
 	switch {
 	case hasUnreadableKind(unreadable, UnreadableTripletFile):
 		res.Status = evidence.StatusUnknown
@@ -473,14 +555,21 @@ func applyOrder(args Args, deps Deps) Result {
 	case hasUnreadableKind(unreadable, UnreadablePatchPath):
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPatchPathUnreadable
-	case hasUnreadableKind(unreadable, UnreadableOrphanDir):
+	case res.OrphanScanStopCause != "":
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonOrphanScanIncomplete
+	case structural == parserStructuralExpressionUnparsable:
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonPatchesExprUnparsable
+	case structural == parserStructuralDeferredBody:
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonPatchesDeferredCommandBody
 	case !sawPatches:
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonNoPatchesDeclared
 	default:
 		res.Status = evidence.StatusOK
+		res.Reason = ""
 	}
 	return res
 }
@@ -519,33 +608,61 @@ func probePatchFile(deps Deps, path string) (evidence.Presence, error) {
 	return evidence.ProbeFile(evidence.StatFunc(deps.Stat), path)
 }
 
+const (
+	// MaxOrphanScanEntries bounds all directory entries admitted by a call.
+	// A per-directory plus-one sentinel proves an overflowing directory without
+	// returning an operating-system-order prefix as evidence.
+	MaxOrphanScanEntries = 4096
+	// MaxOrphanScanDirectories includes the port directory itself.
+	MaxOrphanScanDirectories = 512
+	// MaxOrphanScanDepth counts edges below the port directory.
+	MaxOrphanScanDepth = 32
+	// OrphanScanReadBatchEntries bounds one filesystem ReadDir request.
+	OrphanScanReadBatchEntries = 128
+)
+
 // findOrphans recursively scans portDir for .patch/.diff files whose cleaned
-// absolute path never appeared in referenced (any declared entry, regardless
-// of guard truth — an orphan is orphaned for every triplet, not just this
-// one).
-//
-// A ReadDir failure is now ACCUMULATED and returned rather than silently
-// ending that branch of the walk. Swallowing it produced an empty (or
-// truncated) orphan list that was indistinguishable from a verified "no
-// orphans", under an overall ok — the caller had no way to tell that a
-// subdirectory full of unreferenced patches simply could not be listed.
-func findOrphans(deps Deps, portDir string, referenced map[string]bool) ([]OrphanedPatch, []UnreadablePath) {
+// absolute path never appeared in referenced. Every incomplete traversal
+// returns one typed stop cause, so no prefix can retain an ok verdict.
+func findOrphans(ctx context.Context, deps Deps, portDir string, referenced map[string]bool) ([]OrphanedPatch, []UnreadablePath, OrphanScanStopCause) {
 	var out []OrphanedPatch
 	var failures []UnreadablePath
-	var walk func(string)
-	walk = func(dir string) {
-		dirEntries, err := deps.ReadDir(dir)
+	entriesRemaining := MaxOrphanScanEntries
+	directoriesSeen := 0
+
+	var walk func(dir string, depth int) OrphanScanStopCause
+	walk = func(dir string, depth int) OrphanScanStopCause {
+		if err := ctx.Err(); err != nil {
+			return OrphanScanStopCancelled
+		}
+		if directoriesSeen == MaxOrphanScanDirectories {
+			return OrphanScanStopDirectoryLimit
+		}
+		directoriesSeen++
+
+		admitted, err := boundedio.ReadDirComplete(ctx, boundedDeps{deps: deps}, dir, entriesRemaining, OrphanScanReadBatchEntries)
 		if err != nil {
+			if ctx.Err() != nil {
+				return OrphanScanStopCancelled
+			}
 			failures = append(failures, UnreadablePath{
 				Path: dir, Kind: UnreadableOrphanDir, Error: err.Error(),
 			})
-			return
+			return OrphanScanStopDirectoryUnreadable
 		}
-		sort.Slice(dirEntries, func(i, j int) bool { return dirEntries[i].Name() < dirEntries[j].Name() })
-		for _, de := range dirEntries {
+		if admitted.Limited {
+			return OrphanScanStopEntryLimit
+		}
+		entriesRemaining -= len(admitted.Entries)
+		for _, de := range admitted.Entries {
 			full := filepath.Clean(filepath.Join(dir, de.Name()))
 			if de.IsDir() {
-				walk(full)
+				if depth == MaxOrphanScanDepth {
+					return OrphanScanStopDepthLimit
+				}
+				if stop := walk(full, depth+1); stop != "" {
+					return stop
+				}
 				continue
 			}
 			name := de.Name()
@@ -556,7 +673,9 @@ func findOrphans(deps Deps, portDir string, referenced map[string]bool) ([]Orpha
 				out = append(out, OrphanedPatch{Filename: name, Path: full})
 			}
 		}
+		return ""
 	}
-	walk(portDir)
-	return out, failures
+
+	stop := walk(portDir, 0)
+	return out, failures, stop
 }

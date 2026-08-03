@@ -13,6 +13,7 @@
 package portresolution
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -105,8 +106,9 @@ type Winner struct {
 	// Directory is the absolute path to the winning port directory.
 	Directory string `json:"directory"`
 	// Source is a label describing which overlay or "builtin" this came from.
-	// For overlays: "<overlay-path>" or "overlay-<index>" (overlay index in
-	// the precedence list). For builtin: "builtin <vcpkg-root>/ports".
+	// For overlays it is "overlay-%02d: <path>", where %02d is the original
+	// supplied overlay index (minimum width two) and <path> is trimmed. For
+	// builtin it is "builtin <vcpkg-root>/ports".
 	Source string `json:"source"`
 }
 
@@ -232,6 +234,28 @@ func inspectPortCandidate(deps Deps, dir string) (CandidateState, string) {
 	return CandidateStateAbsent, "no portfile.cmake or vcpkg.json found"
 }
 
+// overlayRoot is one non-blank overlay together with its position in the
+// caller-supplied precedence list. Source labels use the original position;
+// resolution uses the filtered slice order.
+type overlayRoot struct {
+	path        string
+	sourceIndex int
+}
+
+// normalizedOverlayRoots is the sole owner of overlay blank filtering and
+// whitespace normalization for ResolvePort.
+func normalizedOverlayRoots(paths []string) []overlayRoot {
+	var roots []overlayRoot
+	for sourceIndex, path := range paths {
+		path = strings.TrimSpace(path)
+		if path == "" {
+			continue
+		}
+		roots = append(roots, overlayRoot{path: path, sourceIndex: sourceIndex})
+	}
+	return roots
+}
+
 // ResolvePort resolves a port name against overlay directories and the
 // builtin ports directory. Returns a tri-state result (ok/failed/unknown)
 // with detailed evidence.
@@ -259,14 +283,15 @@ func ResolvePort(args Args, deps Deps) Result {
 		return res
 	}
 
+	overlayRoots := normalizedOverlayRoots(args.OverlayPorts)
+
 	// Roots are an explicit absolute-path contract. Never call Abs here: doing
 	// so would silently bind relative inputs to the process working directory.
-	for _, overlayPath := range args.OverlayPorts {
-		overlayPath = strings.TrimSpace(overlayPath)
-		if overlayPath != "" && !filepath.IsAbs(overlayPath) {
+	for _, overlay := range overlayRoots {
+		if !filepath.IsAbs(overlay.path) {
 			res.Status = evidence.StatusFailed
 			res.Reason = ReasonRelativeRoot
-			res.InvalidRoot = overlayPath
+			res.InvalidRoot = overlay.path
 			return res
 		}
 	}
@@ -278,7 +303,7 @@ func ResolvePort(args Args, deps Deps) Result {
 	}
 
 	// Gate 2: At least one root must be supplied (overlay or vcpkg).
-	hasOverlays := len(args.OverlayPorts) > 0
+	hasOverlays := len(overlayRoots) > 0
 	hasVcpkg := strings.TrimSpace(args.VcpkgRoot) != ""
 	if !hasOverlays && !hasVcpkg {
 		res.Status = evidence.StatusUnknown
@@ -294,11 +319,9 @@ func ResolvePort(args Args, deps Deps) Result {
 	builtinUnreadable := false
 
 	// Check overlays in precedence order (first match wins).
-	for overlayIdx, overlayPath := range args.OverlayPorts {
-		overlayPath = strings.TrimSpace(overlayPath)
-		if overlayPath == "" {
-			continue
-		}
+	for overlayPrecedence, overlay := range overlayRoots {
+		overlayPath := overlay.path
+		sourceIndex := overlay.sourceIndex
 
 		// Containment is re-verified per root: filepath.Rel is what actually
 		// proves the joined path stays beneath THIS root, and it holds even for
@@ -315,7 +338,7 @@ func ResolvePort(args Args, deps Deps) Result {
 		if state, reason := inspectRoot(deps, overlayPath); state == CandidateStateUnreadable {
 			candidate := CandidateLocation{
 				Directory: portPath,
-				Source:    formatOverlaySource(overlayPath, overlayIdx),
+				Source:    formatOverlaySource(overlayPath, sourceIndex),
 				State:     CandidateStateUnreadable,
 				Reason:    "overlay root unreadable: " + reason,
 			}
@@ -323,7 +346,7 @@ func ResolvePort(args Args, deps Deps) Result {
 			if blockingOverlay == nil {
 				blocking := candidate
 				blockingOverlay = &blocking
-				blockingOverlayPrecedence = overlayIdx
+				blockingOverlayPrecedence = overlayPrecedence
 			}
 			continue
 		}
@@ -332,7 +355,7 @@ func ResolvePort(args Args, deps Deps) Result {
 		found := state == CandidateStateFound
 		res.AllCandidates = append(res.AllCandidates, CandidateLocation{
 			Directory:    portPath,
-			Source:       formatOverlaySource(overlayPath, overlayIdx),
+			Source:       formatOverlaySource(overlayPath, sourceIndex),
 			PortDirFound: found,
 			State:        state,
 			Reason:       reason,
@@ -340,7 +363,7 @@ func ResolvePort(args Args, deps Deps) Result {
 		if state == CandidateStateUnreadable && blockingOverlay == nil {
 			blocking := res.AllCandidates[len(res.AllCandidates)-1]
 			blockingOverlay = &blocking
-			blockingOverlayPrecedence = overlayIdx
+			blockingOverlayPrecedence = overlayPrecedence
 		}
 
 		if found {
@@ -348,15 +371,15 @@ func ResolvePort(args Args, deps Deps) Result {
 				// First match wins.
 				winner = &Winner{
 					Directory: portPath,
-					Source:    formatOverlaySource(overlayPath, overlayIdx),
+					Source:    formatOverlaySource(overlayPath, sourceIndex),
 				}
-				winnerPrecedence = overlayIdx
+				winnerPrecedence = overlayPrecedence
 			} else {
 				// Overlay-to-overlay shadowing detected.
 				overlayToOverlayHit = true
 				res.Shadows = append(res.Shadows, Shadow{
 					Directory: portPath,
-					Source:    formatOverlaySource(overlayPath, overlayIdx),
+					Source:    formatOverlaySource(overlayPath, sourceIndex),
 				})
 			}
 		}
@@ -403,7 +426,7 @@ func ResolvePort(args Args, deps Deps) Result {
 						Directory: builtinPortPath,
 						Source:    builtinSource,
 					}
-					winnerPrecedence = len(args.OverlayPorts)
+					winnerPrecedence = len(overlayRoots)
 				} else {
 					// Overlay already won, builtin is shadowed.
 					res.Shadows = append(res.Shadows, Shadow{
@@ -446,16 +469,8 @@ func ResolvePort(args Args, deps Deps) Result {
 	return res
 }
 
-// formatOverlayIndex returns a zero-padded index for display in source labels.
-func formatOverlayIndex(idx int) string {
-	if idx < 10 {
-		return "0" + string(rune('0'+idx))
-	}
-	return string(rune('0'+(idx/10))) + string(rune('0'+(idx%10)))
-}
-
-// formatOverlaySource returns a human-readable source label for an overlay.
+// formatOverlaySource is the sole formatter for overlay source identity.
+// Width two is a minimum, so supplied index 103 remains "103".
 func formatOverlaySource(overlayPath string, idx int) string {
-	// Return the overlay path itself as the source label for clarity.
-	return overlayPath
+	return fmt.Sprintf("overlay-%02d: %s", idx, strings.TrimSpace(overlayPath))
 }

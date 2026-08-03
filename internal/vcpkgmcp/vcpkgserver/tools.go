@@ -302,6 +302,12 @@ func registerTools(vs *VcpkgServer) {
 			"in unreadable[] and force unknown(triplet_file_unreadable|patch_path_unreadable|" +
 			"orphan_scan_incomplete) — every bucket is still returned, so a partial inventory is never " +
 			"silently presented as a complete one. " +
+			"portfile.cmake is read through a bounded stream: a too-large file returns " +
+			"unknown(portfile_size_limit_exceeded), never a parsed prefix. Orphan scan limits, " +
+			"directory unreadability, and cancellation return unknown(orphan_scan_incomplete) with " +
+			"orphan_scan_stop_cause. PATCHES inside a function() or macro() body, or carried through a declared " +
+			"function/macro invocation such as ${ARGN}, returns unknown(patches_deferred_command_body); declaration " +
+			"bodies and calls are not modeled. " +
 			"port_dir MUST be absolute (a relative one would bind to the hub daemon's working directory and " +
 			"answer about a different port) -> failed(relative_port_dir). An unreadable port_dir is " +
 			"unknown(port_dir_unreadable), NEVER the verified-absence reason port_dir_missing. " +
@@ -387,7 +393,7 @@ func registerTools(vs *VcpkgServer) {
 			"independent roots (the right mode for an overlay-ports tree with no single top-level " +
 			"CMakeLists.txt); use file to walk a single starting file. Coverage is always reported, " +
 			"never assumed: unscanned_files[] carries every hole with a CLOSED reason (byte_cap_exceeded, " +
-			"file_unreadable, enumerate_failed, root_outside_workspace, root_enumeration_capped), so a " +
+			"file_unreadable, enumerate_failed, root_outside_workspace, root_enumeration_capped, symlink_directory_skipped), so a " +
 			"subtree that could not be listed appears there rather than being silently omitted from an " +
 			"apparently-complete graph. Per-edge, dangling means VERIFIED absence only; a target whose " +
 			"existence could not be determined (access denied, sharing violation) is " +
@@ -397,15 +403,15 @@ func registerTools(vs *VcpkgServer) {
 			"properties": map[string]any{
 				"root": map[string]any{
 					"type":        "string",
-					"description": "Directory to walk every entry_names match under as an independent root (cmakegraph.WalkTree). Mutually exclusive with file — supplying BOTH is refused with unknown(args_invalid), never silently resolved in root's favour.",
+					"description": "Absolute directory to walk every entry_names match under as an independent root (cmakegraph.WalkTree). A relative root returns unknown(args_invalid) before traversal. Mutually exclusive with file — supplying BOTH is refused with unknown(args_invalid), never silently resolved in root's favour.",
 				},
 				"file": map[string]any{
 					"type":        "string",
-					"description": "Single file to start the walk from (cmakegraph.Walk). Mutually exclusive with root — supplying BOTH is refused with unknown(args_invalid).",
+					"description": "Absolute single file to start the walk from (cmakegraph.Walk). A relative file returns unknown(args_invalid) before traversal. Mutually exclusive with root — supplying BOTH is refused with unknown(args_invalid).",
 				},
 				"workspace_root": map[string]any{
 					"type":        "string",
-					"description": "Boundary no resolved path may escape, and the value substituted for ${CMAKE_SOURCE_DIR}. Honoured in BOTH modes; it may be a parent of root. Defaults to root, or file's containing directory.",
+					"description": "When explicitly supplied, an absolute boundary no resolved path may escape; a relative workspace_root returns unknown(args_invalid) before traversal. It is the value substituted for ${CMAKE_SOURCE_DIR}, honoured in BOTH modes; it may be a parent of root. Defaults to root, or file's containing directory.",
 				},
 				"entry_names": map[string]any{
 					"type":        "array",
@@ -484,7 +490,7 @@ func (vs *VcpkgServer) patchesApplyTool(ctx context.Context, req *mcp.CallToolRe
 			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
-	res := patchesapply.ApplyOrder(args)
+	res := patchesapply.ApplyOrderContext(ctx, args)
 	return projectableToolOutcome{result: res}
 }
 

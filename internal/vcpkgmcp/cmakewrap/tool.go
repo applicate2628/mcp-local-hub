@@ -30,10 +30,11 @@ import (
 type Reason string
 
 const (
-	// ReasonArgsInvalid: neither root nor file was supplied, or BOTH were.
-	// The two are declared mutually exclusive by the tool schema and they
-	// select different traversal modes, so honouring one and discarding the
-	// other would silently answer a question the caller did not ask.
+	// ReasonArgsInvalid: root and file were both supplied or both omitted, or
+	// a non-empty root, file, or explicitly supplied workspace_root is not
+	// absolute. The two paths are mutually exclusive and select different
+	// traversal modes; relative caller paths must never be resolved against
+	// the hub daemon working directory.
 	ReasonArgsInvalid Reason = "args_invalid"
 	// ReasonWalkFailed: cmakegraph.Walk/WalkTree returned a Go error
 	// (e.g. the workspace root does not exist, startFile is empty, the tree
@@ -48,17 +49,20 @@ const (
 
 // Args is the cmake_include_graph tool's input contract.
 type Args struct {
-	// Root, when set, walks EVERY file under Root matching EntryNames as an
+	// Root, when set, must be absolute or the tool returns unknown(args_invalid)
+	// before traversal. It walks EVERY file under Root matching EntryNames as an
 	// independent root (cmakegraph.WalkTree) — the right mode for a tree
 	// with no single top-level CMakeLists.txt (e.g. a vcpkg-style
 	// overlay-ports tree).
 	Root string `json:"root,omitempty"`
-	// File, when set (and Root is not), walks starting at this one file
+	// File, when set, must be absolute or the tool returns unknown(args_invalid)
+	// before traversal. When Root is not set, it walks starting at this one file
 	// (cmakegraph.Walk) — reproduces the narrower "one root per port" mode.
 	File string `json:"file,omitempty"`
-	// WorkspaceRoot is the boundary no resolved path may escape, and the
-	// value substituted for ${CMAKE_SOURCE_DIR}. Defaults to Root when set,
-	// else to File's containing directory.
+	// WorkspaceRoot, when explicitly supplied, must be absolute or the tool
+	// returns unknown(args_invalid) before traversal. It is the boundary no
+	// resolved path may escape and the value substituted for ${CMAKE_SOURCE_DIR}.
+	// It defaults to Root when set, else to File's containing directory.
 	WorkspaceRoot string `json:"workspace_root,omitempty"`
 	// EntryNames is used only in Root mode. Defaults to
 	// []string{"CMakeLists.txt", "*.cmake"} — the whole tree's
@@ -162,6 +166,7 @@ func RunGraph(ctx context.Context, args Args) Result {
 func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Result {
 	root := strings.TrimSpace(args.Root)
 	file := strings.TrimSpace(args.File)
+	workspaceRoot := strings.TrimSpace(args.WorkspaceRoot)
 
 	// root and file are declared MUTUALLY EXCLUSIVE by the tool schema and
 	// select different traversal modes. Supplying both is not a caller
@@ -178,7 +183,21 @@ func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Resul
 		return Result{Status: evidence.StatusUnknown, Reason: ReasonArgsInvalid}
 	}
 
-	workspaceRoot := strings.TrimSpace(args.WorkspaceRoot)
+	// All caller-supplied paths must already be absolute. In particular, do
+	// not use filepath.Abs here: resolving a relative input would bind it to
+	// the hub daemon's working directory rather than to a caller-controlled
+	// workspace. Validate before deriving a blank workspace_root and before
+	// either traversal callback can run.
+	if (root != "" && !filepath.IsAbs(root)) ||
+		(file != "" && !filepath.IsAbs(file)) ||
+		(workspaceRoot != "" && !filepath.IsAbs(workspaceRoot)) {
+		var ev evidence.Evidence
+		ev.AddPath(root)
+		ev.AddPath(file)
+		ev.AddPath(workspaceRoot)
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonArgsInvalid, Evidence: ev}
+	}
+
 	if workspaceRoot == "" {
 		if root != "" {
 			workspaceRoot = root

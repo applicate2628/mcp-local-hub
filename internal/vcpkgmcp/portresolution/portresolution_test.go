@@ -3,8 +3,12 @@ package portresolution
 import (
 	"encoding/json"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +313,126 @@ func TestNoRootsSupplied(t *testing.T) {
 	if res.Reason != ReasonNoRootsSupplied {
 		t.Errorf("expected ReasonNoRootsSupplied, got %q", res.Reason)
 	}
+}
+
+func TestPR591_BlankOnlyOverlaysAreNoRootsWithZeroIO(t *testing.T) {
+	dependencyCalls := 0
+	deps := Deps{
+		Stat: func(string) (os.FileInfo, error) {
+			dependencyCalls++
+			return nil, errors.New("unexpected Stat call")
+		},
+		ReadDir: func(string) ([]os.DirEntry, error) {
+			dependencyCalls++
+			return nil, errors.New("unexpected ReadDir call")
+		},
+		Abs: func(string) (string, error) {
+			dependencyCalls++
+			return "", errors.New("unexpected Abs call")
+		},
+	}
+
+	res := ResolvePort(Args{
+		Port:         "myport",
+		VcpkgRoot:    " \t ",
+		OverlayPorts: []string{"", " \n\t "},
+	}, deps)
+
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonNoRootsSupplied {
+		t.Fatalf("expected unknown no_roots_supplied, got status=%v reason=%q", res.Status, res.Reason)
+	}
+	if dependencyCalls != 0 {
+		t.Fatalf("expected no dependency calls, got %d", dependencyCalls)
+	}
+}
+
+func TestPR591_MixedBlankOverlaysPreserveSourceIndices(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlay := filepath.Join(tmpDir, "overlay")
+	portDir := filepath.Join(overlay, "myport")
+	deps := &fakeDeps{
+		files: map[string]os.FileInfo{
+			tmpDir:  newFakeStat("tmpdir", true),
+			overlay: newFakeStat("overlay", true),
+			portDir: newFakeStat("myport", true),
+		},
+		portManifests: map[string]bool{
+			portDir: true,
+		},
+	}
+
+	roots := normalizedOverlayRoots([]string{"", overlay, " \t ", overlay})
+	if len(roots) != 2 || roots[0].sourceIndex != 1 || roots[1].sourceIndex != 3 {
+		t.Fatalf("expected retained source indices [1 3], got %+v", roots)
+	}
+
+	res := ResolvePort(Args{
+		Port:         "myport",
+		OverlayPorts: []string{"", overlay, " \t ", overlay},
+	}, deps.toDeps())
+
+	if res.Status != evidence.StatusOK || res.Winner == nil || res.Winner.Directory != portDir {
+		t.Fatalf("expected first non-blank overlay to win, got status=%v winner=%+v", res.Status, res.Winner)
+	}
+	if res.Winner.Source != "overlay-01: "+overlay {
+		t.Fatalf("expected literal winner source from supplied index 1, got %q", res.Winner.Source)
+	}
+	if len(res.Shadows) != 1 || res.Shadows[0].Directory != portDir || res.Shadows[0].Source != "overlay-03: "+overlay {
+		t.Fatalf("expected same supplied overlay at index 3 as the only shadow, got %+v", res.Shadows)
+	}
+}
+
+func TestPR591_WinnerSourceDocsMatchFormatter(t *testing.T) {
+	tmpDir := t.TempDir()
+	overlay := filepath.Join(tmpDir, "overlay")
+	portDir := filepath.Join(overlay, "myport")
+	deps := &fakeDeps{
+		files:         map[string]os.FileInfo{tmpDir: newFakeStat("tmpdir", true), overlay: newFakeStat("overlay", true), portDir: newFakeStat("myport", true)},
+		portManifests: map[string]bool{portDir: true},
+	}
+	res := ResolvePort(Args{Port: "myport", OverlayPorts: []string{"", overlay, "", overlay}}, deps.toDeps())
+	if res.Winner == nil || res.Winner.Source != "overlay-01: "+overlay || len(res.Shadows) != 1 || res.Shadows[0].Source != "overlay-03: "+overlay {
+		t.Fatalf("live overlay source formatting = winner:%+v shadows:%+v, want original indices 01 and 03", res.Winner, res.Shadows)
+	}
+	doc := winnerSourceDoc(t)
+	if !strings.Contains(doc, "overlay-%02d: <path>") || !strings.Contains(doc, "original") || !strings.Contains(doc, "index") {
+		t.Fatalf("Winner.Source doc = %q, want exact formatter form and original-index meaning", doc)
+	}
+}
+
+func winnerSourceDoc(t *testing.T) string {
+	t.Helper()
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), thisFile[:len(thisFile)-len("_test.go")]+".go", nil, parser.ParseComments)
+	if err != nil {
+		t.Fatalf("parse portresolution.go: %v", err)
+	}
+	for _, decl := range parsed.Decls {
+		gen, ok := decl.(*ast.GenDecl)
+		if !ok {
+			continue
+		}
+		for _, spec := range gen.Specs {
+			typeSpec, ok := spec.(*ast.TypeSpec)
+			if !ok || typeSpec.Name.Name != "Winner" {
+				continue
+			}
+			structType, ok := typeSpec.Type.(*ast.StructType)
+			if !ok {
+				t.Fatal("Winner is not a struct")
+			}
+			for _, field := range structType.Fields.List {
+				if len(field.Names) == 1 && field.Names[0].Name == "Source" && field.Doc != nil {
+					return field.Doc.Text()
+				}
+			}
+		}
+	}
+	t.Fatal("Winner.Source doc not found")
+	return ""
 }
 
 // Test: candidate dir exists but holds neither manifest file.
@@ -689,7 +813,7 @@ func TestHigherPrecedenceUnreadableOverlayFailsClosed(t *testing.T) {
 	if res.Reason != ReasonHigherPrecedenceOverlayUnreadable {
 		t.Fatalf("expected higher_precedence_overlay_unreadable, got %q", res.Reason)
 	}
-	if res.BlockingCandidate == nil || res.BlockingCandidate.Source != missingOverlay {
+	if res.BlockingCandidate == nil || res.BlockingCandidate.Source != "overlay-00: "+missingOverlay {
 		t.Fatalf("expected blocking candidate for %q, got %+v", missingOverlay, res.BlockingCandidate)
 	}
 	if res.BlockingCandidate.State != CandidateStateUnreadable {

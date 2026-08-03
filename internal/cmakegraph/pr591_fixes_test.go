@@ -2,6 +2,10 @@ package cmakegraph
 
 import (
 	"context"
+	"errors"
+	"io"
+	"io/fs"
+	"math"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -194,5 +198,136 @@ func TestIncludeWithALeadingCommentResolves(t *testing.T) {
 	}
 	if res.Edges[0].RawArg != "Foo.cmake" {
 		t.Fatalf("raw_arg = %q, want Foo.cmake", res.Edges[0].RawArg)
+	}
+}
+
+func TestPR591_LoopNestedEdgesAreConditional(t *testing.T) {
+	dir := t.TempDir()
+	root := writeFile(t, dir, "CMakeLists.txt", "foreach(item IN ITEMS one)\n"+
+		"  include(loop.cmake)\n"+
+		"  while(LOOP_AGAIN)\n"+
+		"    add_subdirectory(child)\n"+
+		"  endwhile()\n"+
+		"endforeach()\n"+
+		"include(outside.cmake)\n")
+	writeFile(t, dir, "loop.cmake", "# leaf\n")
+	writeFile(t, dir, "child/CMakeLists.txt", "# leaf\n")
+	writeFile(t, dir, "outside.cmake", "# leaf\n")
+
+	res, err := Walk(context.Background(), root, dir, DefaultOptions())
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	for _, line := range []int{2, 4} {
+		e := edgeByLine(t, res, line)
+		if !e.Conditional || e.Status != StatusResolved {
+			t.Fatalf("edge on line %d = {%v, Conditional:%v}, want {Resolved, Conditional:true}; loop frames are lexical uncertainty, not executed", line, e.Status, e.Conditional)
+		}
+	}
+	if e := edgeByLine(t, res, 7); e.Conditional || e.Status != StatusResolved {
+		t.Fatalf("edge after endforeach on line 7 = {%v, Conditional:%v}, want {Resolved, Conditional:false}", e.Status, e.Conditional)
+	}
+}
+
+type fakeWalkDirEntry struct {
+	name string
+	mode fs.FileMode
+	dir  bool
+}
+
+func (e fakeWalkDirEntry) Name() string      { return e.name }
+func (e fakeWalkDirEntry) IsDir() bool       { return e.dir }
+func (e fakeWalkDirEntry) Type() fs.FileMode { return e.mode }
+func (e fakeWalkDirEntry) Info() (fs.FileInfo, error) {
+	return nil, errors.New("fake walk entry has no file info")
+}
+
+func TestPR591_DirectorySymlinkIsNotDescended(t *testing.T) {
+	root := t.TempDir()
+	link := filepath.Join(root, "linked")
+	var skipDirReturned bool
+
+	res, err := walkTreeWithOperations(context.Background(), root, root, []string{"*.cmake"}, DefaultOptions(), treeOperations{
+		walkDir: func(_ string, visit fs.WalkDirFunc) error {
+			if err := visit(root, fakeWalkDirEntry{name: filepath.Base(root), dir: true}, nil); err != nil {
+				return err
+			}
+			if err := visit(link, fakeWalkDirEntry{name: "linked", mode: fs.ModeSymlink, dir: true}, nil); err != nil {
+				skipDirReturned = errors.Is(err, fs.SkipDir)
+				return nil
+			}
+			return nil
+		},
+		isDirectorySymlink: func(path string) bool { return path == link },
+		walkRoot:           (*walker).walkRoot,
+	})
+	if err != nil {
+		t.Fatalf("walkTreeWithOperations: %v", err)
+	}
+	if !skipDirReturned {
+		t.Fatal("directory symlink callback did not return fs.SkipDir; its subtree could be descended")
+	}
+	if reason, ok := coverageReasonFor(res, link); !ok || reason != CoverageSymlinkDirectorySkipped {
+		t.Fatalf("coverage for %q = (%q, %t), want (%q, true)", link, reason, ok, CoverageSymlinkDirectorySkipped)
+	}
+}
+
+func TestPR591_CancellationAfterFinalRootReturnsError(t *testing.T) {
+	root := t.TempDir()
+	entry := filepath.Join(root, "only.cmake")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	processed := false
+
+	res, err := walkTreeWithOperations(ctx, root, root, []string{"*.cmake"}, DefaultOptions(), treeOperations{
+		walkDir: func(_ string, visit fs.WalkDirFunc) error {
+			if err := visit(root, fakeWalkDirEntry{name: filepath.Base(root), dir: true}, nil); err != nil {
+				return err
+			}
+			return visit(entry, fakeWalkDirEntry{name: "only.cmake"}, nil)
+		},
+		isDirectorySymlink: func(string) bool { return false },
+		walkRoot: func(_ *walker, start string) (string, error) {
+			if start != entry {
+				t.Fatalf("root operation received %q, want %q", start, entry)
+			}
+			processed = true
+			defer cancel() // The only selected root succeeds, then the final boundary observes cancellation.
+			return start, nil
+		},
+	})
+	if !processed {
+		t.Fatal("the injected final root operation was not called")
+	}
+	if res != nil {
+		t.Fatalf("result = %+v, want nil after cancellation", res)
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v, want wrapping context.Canceled after the final root", err)
+	}
+}
+
+type readCountingReader struct{ reads int }
+
+func (r *readCountingReader) Read([]byte) (int, error) {
+	r.reads++
+	return 0, io.EOF
+}
+
+func TestPR591_MaxInt64FileCapFailsBeforeIO(t *testing.T) {
+	reader := &readCountingReader{}
+	if _, err := readBoundedFrom(reader, "never-read.cmake", math.MaxInt64); err == nil {
+		t.Fatal("readBoundedFrom accepted MaxInt64 even though maxBytes+1 is unrepresentable")
+	}
+	if reader.reads != 0 {
+		t.Fatalf("reader calls = %d, want 0: an unrepresentable sentinel cap must fail before I/O", reader.reads)
+	}
+
+	root := t.TempDir()
+	writeFile(t, root, "CMakeLists.txt", "# leaf\n")
+	opts := DefaultOptions()
+	opts.MaxFileBytes = math.MaxInt64
+	if _, err := Walk(context.Background(), filepath.Join(root, "CMakeLists.txt"), root, opts); err == nil {
+		t.Fatal("Walk admitted MaxInt64 MaxFileBytes even though its sentinel cannot be represented")
 	}
 }

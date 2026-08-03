@@ -116,10 +116,8 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 		return nil
 	}
 
-	facts := map[string]string{}
 	env := &varEnv{
-		scalars:   facts,
-		lists:     map[string][]listItem{},
+		values:    map[string]serializedValue{},
 		vcpkgRoot: vcpkgRoot,
 		portName:  portName,
 		portDir:   portDir,
@@ -169,10 +167,14 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 		}
 		if unresolvedSeen {
 			// Do not let a partially-expanded value masquerade as a fact.
-			delete(facts, name)
+			delete(env.values, name)
 			continue
 		}
-		facts[name] = strings.Join(parts, ";")
+		env.setValue(name, serializedValue{text: strings.Join(parts, ";")})
+	}
+	facts := make(map[string]string, len(env.values))
+	for name, value := range env.values {
+		facts[name] = value.text
 	}
 	return facts
 }

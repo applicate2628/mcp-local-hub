@@ -262,6 +262,42 @@ func TestMatchDiagnosticLine_TierSweep(t *testing.T) {
 	}
 }
 
+// TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific guards the MSVC
+// linker's drive-qualified origin while retaining the closed diagnostic suffix
+// and the earlier wrapper-noise rejection.
+func TestPR591_DriveQualifiedMSVCLinkerDiagnosticIsSpecific(t *testing.T) {
+	const driveQualified = `C:\vcpkg\buildtrees\fparser\x64-windows-rel\fparser_parse-opt.exe : error LNK2019: unresolved external symbol "gzopen_w"`
+
+	d, ok := matchDiagnosticLine(driveQualified)
+	if !ok {
+		t.Fatalf("drive-qualified linker line was not recognized: %q", driveQualified)
+	}
+	if d.File != `C:\vcpkg\buildtrees\fparser\x64-windows-rel\fparser_parse-opt.exe` {
+		t.Errorf("file = %q, want the complete drive-qualified origin", d.File)
+	}
+	if d.Severity != SeverityError {
+		t.Errorf("severity = %q, want %q", d.Severity, SeverityError)
+	}
+	if d.Tier != TierSpecific {
+		t.Errorf("tier = %q, want %q", d.Tier, TierSpecific)
+	}
+	if d.Text != driveQualified {
+		t.Errorf("text = %q, want original line %q", d.Text, driveQualified)
+	}
+
+	for _, line := range []string{
+		`-- Installing: C:\vcpkg\installed\x64-windows\include\error_category.hpp`,
+		`NMAKE : fatal error U1077: 'cd' : return code '0x2'`,
+		`C:\vcpkg\buildtrees\fparser\(unexpected)\fparser_parse-opt.exe : error LNK2019: unresolved external symbol "gzopen_w"`,
+		"C:\\vcpkg\\buildtrees\\fparser\\fparser_parse-opt.exe\r : error LNK2019: unresolved external symbol \"gzopen_w\"",
+		"C:\\vcpkg\\buildtrees\\fparser\\fparser_parse-opt.exe\n : error LNK2019: unresolved external symbol \"gzopen_w\"",
+	} {
+		if _, ok := matchDiagnosticLine(line); ok {
+			t.Errorf("non-diagnostic line matched: %q", line)
+		}
+	}
+}
+
 // TestMatchDiagnosticLine_EveryRecognizedLineIsTiered guards the enum's
 // closedness at the only place tiers are assigned: no recognized shape may
 // return a Diagnostic with an unset or unknown tier.

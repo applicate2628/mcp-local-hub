@@ -61,7 +61,7 @@ var (
 		`^(?P<file>[^()\r\n]+)\((?P<line>\d+)(?:,\d+)?\):\s+(?P<sev>fatal error|error|warning)(?:\s+(?P<code>[A-Za-z]+\d+))?\s*:\s*(?P<msg>.+)$`)
 
 	msvcLinkDiagRE = regexp.MustCompile(
-		`^(?P<file>[^:()\r\n]+?)\s*:\s+(?P<sev>fatal error|error|warning)\s+(?P<code>LNK\d+)\s*:\s*(?P<msg>.+)$`)
+		`^(?P<file>[^()\r\n]+?)[ \t]*:[ \t]+(?P<sev>fatal error|error|warning)[ \t]+(?P<code>LNK[0-9]+)[ \t]*:[ \t]*(?P<msg>[^\r\n]+)$`)
 
 	// toolDiagRE matches a diagnostic emitted by a compiler/linker DRIVER,
 	// which names itself instead of a source position — verified real sample
