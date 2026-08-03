@@ -2004,6 +2004,7 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
             "RECOVER_ATTEMPT_CONFLICT",
             "RECOVER_OCCURRENCE_CONSUMED",
             "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
+            "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
           ]);
           if (
             responseBody.audit_lock === undefined &&
@@ -3054,6 +3055,65 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     expect(alert.textContent).toContain("already stopped the process and requested a respawn");
     expect(alert.textContent).toContain("A process was already stopped during this recovery attempt.");
     // The generic fall-through copy is exactly what the missing arm produced.
+    expect(alert.textContent).not.toContain("Recovery failed. Check the supervisor logs and try again.");
+  });
+
+  it.each([
+    ["pre-action", {
+      error: "internal error",
+      code: "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
+      occurrence_store_health: "stranded",
+      occurrence_store_health_revision: 1,
+      restart_required: true,
+    }],
+    ["terminal", {
+      error: "internal error",
+      code: "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
+      occurrence_store_health: "stranded",
+      occurrence_store_health_revision: 2,
+      restart_required: true,
+      audit_lock: {
+        scope: "supervisor_events_log",
+        server_instance: "33333333-3333-4333-8333-333333333333",
+        revision: 2,
+        state: "stranded",
+        occurrence_store_health: "stranded",
+        occurrence_store_health_revision: 2,
+        restart_required: true,
+        recovery_receipt: {
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          server_instance: "33333333-3333-4333-8333-333333333333",
+          task_name: "\\mcp-local-hub-memory-default",
+          status: "uncertain",
+          lock_authorization: "uncertain",
+          termination_commit_state: "unknown",
+        },
+        recovery_receipts: [{
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          server_instance: "33333333-3333-4333-8333-333333333333",
+          task_name: "\\mcp-local-hub-memory-default",
+          status: "uncertain",
+          lock_authorization: "uncertain",
+          termination_commit_state: "unknown",
+        }],
+      },
+    }],
+  ])("requires conservative guidance for a %s stranded recovery occurrence-store lock", async (_shape, response) => {
+    mockRecoveryFetch(jsonResponse(503, response));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByText(/occurrence store lock is stranded/);
+    expect(alert.textContent).toContain("Restart mcphub");
+    expect(alert.textContent).toContain("reconcile the retained recovery outcome");
+    expect(alert.textContent).toContain("inspect the daemon and supervisor state");
+    expect(alert.textContent).toContain("Do NOT retry");
+    expect(alert.textContent).not.toContain("try recovery again");
+    expect(alert.textContent).not.toContain("try again");
+    expect(alert.textContent).not.toContain("before retrying");
     expect(alert.textContent).not.toContain("Recovery failed. Check the supervisor logs and try again.");
   });
 

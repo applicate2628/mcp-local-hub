@@ -1898,6 +1898,8 @@ function daemonRecoverCodeMessage(code: DaemonRecoverErrorCode): string {
       return "The recovery receipt needs a current released-lock snapshot before it can be acknowledged. The receipt remains retained; refresh status instead of repeating recovery.";
     case "RECOVER_ACK_PHYSICAL_STATE_CHANGED":
       return "The physical lock state changed before the recovery receipt could be acknowledged. The receipt remains retained; refresh status instead of repeating recovery.";
+    case "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED":
+      return "Recovery cannot proceed because its occurrence store lock is stranded. Restart mcphub, then reconcile the retained recovery outcome and inspect the daemon and supervisor state. Do NOT retry.";
     default: {
       const unhandled: never = code;
       return `Recovery failed (${String(unhandled)}). Check the supervisor logs before retrying.`;
