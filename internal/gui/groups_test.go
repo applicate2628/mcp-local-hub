@@ -140,7 +140,7 @@ func (f *fakeGroupsAPI) GroupToken(group string) (string, bool) {
 // s.groupsRepublishFn as needed.
 func groupsTestServer(t *testing.T, g groupsAPI) *Server {
 	t.Helper()
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.groups = g
 	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
 	return s

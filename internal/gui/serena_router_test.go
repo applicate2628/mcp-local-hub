@@ -322,7 +322,7 @@ func newSerenaTestServer(t *testing.T, deps *serenaRouterDeps) *Server {
 	t.Helper()
 	resetSerenaRouterTestSeam(t)
 	serenaRouterTestSeam = func() *serenaRouterDeps { return deps }
-	return NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	return newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
 }
 
 // buildToolCallBody marshals a JSON-RPC tools/call envelope around the
@@ -2130,11 +2130,11 @@ func TestSanitizeRefusalPath_StripsControlBytes(t *testing.T) {
 	}{
 		{"", ""},
 		{"/normal/path", "/normal/path"},
-		{"a\x1bb", "a b"},            // ESC → space
-		{"a\tb", "a b"},             // C0 (TAB) → space
-		{"a\x7fb", "a?b"},           // DEL → ?
-		{"a‮b", "a?b"},         // RLO bidi → ?
-		{"a\x9bb", "a?b"},           // raw C1 byte (invalid UTF-8) → ?
+		{"a\x1bb", "a b"}, // ESC → space
+		{"a\tb", "a b"},   // C0 (TAB) → space
+		{"a\x7fb", "a?b"}, // DEL → ?
+		{"a‮b", "a?b"},    // RLO bidi → ?
+		{"a\x9bb", "a?b"}, // raw C1 byte (invalid UTF-8) → ?
 		{"D:\\dev\\Proj", "D:\\dev\\Proj"},
 	}
 	for _, c := range cases {

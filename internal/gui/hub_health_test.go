@@ -140,7 +140,7 @@ func recvHubHealth(t *testing.T, ch <-chan Event) Event {
 // The tracker publishes a hub-health SSE event on every state CHANGE and dedups a
 // repeat of the same state (so a steady state never spams the bus).
 func TestHubHealthTrackerPublishesOnChangeAndDedups(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := s.Broadcaster().Subscribe(ctx)
@@ -228,7 +228,7 @@ func TestHubHealthTrackerClearReconcilePendingIfResolved(t *testing.T) {
 
 func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {
 	t.Run("pending reconcile survives an outage", func(t *testing.T) {
-		s := NewServer(Config{})
+		s := newEphemeralServer(t, Config{})
 		wrap := s.hubHealthEmitWrapper(nil)
 		s.hubHealth.markReconcilePending()
 		_ = wrap("error", "hub-listener-restart-failed", nil)
@@ -242,7 +242,7 @@ func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {
 	})
 
 	t.Run("plain recovering without pending reconcile becomes healthy", func(t *testing.T) {
-		s := NewServer(Config{})
+		s := newEphemeralServer(t, Config{})
 		s.hubHealth.set(HubHealthRecovering, "")
 		_ = s.hubHealthEmitWrapper(nil)("info", "hub-listener-restarted", nil)
 		if got, action := s.hubHealth.snapshot(); got != HubHealthHealthy || action != "" {
@@ -252,7 +252,7 @@ func TestHubHealthRestartedEventPreservesNeedsReconcile(t *testing.T) {
 }
 
 func TestHubHealthInstanceIDChangeFromRecoveringPublishesNeedsReconcile(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.hubHealth.set(HubHealthRecovering, "")
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -270,7 +270,7 @@ func TestHubHealthInstanceIDChangeFromRecoveringPublishesNeedsReconcile(t *testi
 }
 
 func TestHubHealthInstanceIDChangeWhileDownDefersReconcileUntilRecovery(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	wrap := s.hubHealthEmitWrapper(nil)
 	s.hubHealth.set(HubHealthDown, "")
 
@@ -320,7 +320,7 @@ func TestHubHealthEmitWrapperMapsRestartEvents(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{})
+			s := newEphemeralServer(t, Config{})
 			if tc.event == "hub-listener-restart-instance-id-changed" {
 				s.hubHealth.set(HubHealthRecovering, "")
 			} else {
@@ -361,7 +361,7 @@ func TestHubHealthServing(t *testing.T) {
 
 // GET /api/hub/health returns the current state + degraded flag for initial load.
 func TestHubHealthGetReturnsCurrentState(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.hubHealth.markReconcilePending()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/hub/health", nil)

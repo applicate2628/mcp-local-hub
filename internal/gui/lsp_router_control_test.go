@@ -83,7 +83,7 @@ func withFakeLSPRouterControlAPI(t *testing.T, fake *fakeLSPRouterControlAPI) *S
 	orig := lspRouterControlAPIFactory
 	lspRouterControlAPIFactory = func() lspRouterControlAPI { return fake }
 	t.Cleanup(func() { lspRouterControlAPIFactory = orig })
-	return NewServer(Config{Port: 7777})
+	return newEphemeralServer(t, Config{Port: 7777})
 }
 
 func postLSPRouterControl(t *testing.T, s *Server, path, client string) *httptest.ResponseRecorder {

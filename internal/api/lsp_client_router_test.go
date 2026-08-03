@@ -72,6 +72,7 @@ func (f *lspRouterFakeClient) BackupKeep(int) (string, error) {
 	return backupPath, nil
 }
 func (f *lspRouterFakeClient) Restore(string) error { return nil }
+
 // AddEntry stores the subset a REAL adapter of this family would persist, not
 // the write request verbatim.
 //
@@ -1085,6 +1086,158 @@ func TestEnsureLSPRouterClientEntries_AddFailureSkipsLegacyRemove(t *testing.T) 
 	}
 	if got := codex.removeCalls; got != 0 {
 		t.Fatalf("RemoveEntry calls = %d, want 0 after add failure", got)
+	}
+}
+
+type observedLSPRouterClient struct {
+	*lspRouterFakeClient
+	conditionalCalls int
+}
+
+func (f *observedLSPRouterClient) ConditionalEntryMutation(req clients.ConditionalEntryMutationRequest) clients.EntryMutationObserved {
+	f.conditionalCalls++
+	return f.lspRouterFakeClient.ConditionalEntryMutation(req)
+}
+
+func (f *observedLSPRouterClient) ConditionalEntryGroupMutation(req clients.ConditionalEntryGroupMutationRequest) clients.ConditionalEntryGroupMutationObserved {
+	f.conditionalCalls++
+	return f.lspRouterFakeClient.ConditionalEntryGroupMutation(req)
+}
+
+func planLSPRouterLegacyGroup(t *testing.T, canonicalCorrect bool) (*LSPRouterClientPlan, *observedLSPRouterClient, string, string) {
+	t.Helper()
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	t.Cleanup(restoreRegistry)
+	const clientName = "codex-cli"
+	const legacyName = "mcp-language-server-go-legacy"
+	seedLegacyLSPWorkspace(t, clientName, legacyName)
+	base := newLSPRouterFakeClient(t, clientName, true)
+	base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: "http://127.0.0.1:9200/mcp"}
+	canonicalName := LSPRouterEntryName("go")
+	if canonicalCorrect {
+		base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, "go")}
+	}
+	adapter := &observedLSPRouterClient{lspRouterFakeClient: base}
+	plan, err := NewAPI().PlanLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9137,
+		Clients: map[string]clients.Client{clientName: adapter},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	return plan, adapter, legacyName, canonicalName
+}
+
+func TestLSPRouterPlan_GuardLegacyOnlyPlanHasNoCanonicalOperation(t *testing.T) {
+	plan, adapter, legacyName, canonicalName := planLSPRouterLegacyGroup(t, true)
+	if len(plan.Operations) != 1 || plan.Operations[0].Operation != "remove" || plan.Operations[0].EntryName != legacyName {
+		t.Fatalf("operations=%+v, want only legacy removal", plan.Operations)
+	}
+	if len(plan.canonicalDependencies) != 1 ||
+		!lspRouterSnapshotHasIdentity(plan.canonicalDependencies[0].IntendedState, "codex-cli", "go", canonicalName) ||
+		!plan.canonicalDependencies[0].IntendedState.Present {
+		t.Fatalf("canonical dependencies=%+v, want one present canonical snapshot", plan.canonicalDependencies)
+	}
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
+	if err != nil {
+		t.Fatalf("apply legacy-only plan: %v", err)
+	}
+	if len(report.Removed) != 1 || report.Removed[0].EntryName != legacyName || adapter.addCalls != 0 || adapter.removeCalls != 1 {
+		t.Fatalf("report=%+v add=%d remove=%d, want one legacy removal without canonical add", report, adapter.addCalls, adapter.removeCalls)
+	}
+}
+
+func TestLSPRouterPlan_AddThenRemoveUsesFrozenCanonicalDependency(t *testing.T) {
+	plan, adapter, legacyName, canonicalName := planLSPRouterLegacyGroup(t, false)
+	if len(plan.Operations) != 2 || plan.Operations[0].Operation != "add" || plan.Operations[0].EntryName != canonicalName ||
+		plan.Operations[1].Operation != "remove" || plan.Operations[1].EntryName != legacyName || len(plan.canonicalDependencies) != 1 {
+		t.Fatalf("plan=%+v dependencies=%+v, want canonical add then legacy removal with one dependency", plan.Operations, plan.canonicalDependencies)
+	}
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
+	if err != nil {
+		t.Fatalf("apply add/remove plan: %v", err)
+	}
+	if len(report.Applied) != 1 || len(report.Removed) != 1 || adapter.addCalls != 1 || adapter.removeCalls != 1 {
+		t.Fatalf("report=%+v add=%d remove=%d, want one add and one removal", report, adapter.addCalls, adapter.removeCalls)
+	}
+}
+
+func TestLSPRouterPlan_CanonicalDeletionAfterPlanConflictsBeforeLegacyRemoval(t *testing.T) {
+	plan, adapter, legacyName, canonicalName := planLSPRouterLegacyGroup(t, true)
+	delete(adapter.entries, canonicalName)
+	prepared, finished, conflicts := 0, 0, 0
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{
+		OnPrepared:             func(LSPRouterPlannedOperation) error { prepared++; return nil },
+		OnFinished:             func(LSPRouterMutationObservation) error { finished++; return nil },
+		OnPreconditionConflict: func(LSPRouterMutationObservation) error { conflicts++; return nil },
+	})
+	if err == nil || len(report.Failed) != 1 || report.Failed[0].EntryName != legacyName || report.Failed[0].Op != "precondition" {
+		t.Fatalf("report=%+v err=%v, want one dependency precondition conflict", report, err)
+	}
+	if adapter.removeCalls != 0 || len(adapter.backupPaths) != 0 || prepared != 0 || finished != 0 || conflicts != 1 {
+		t.Fatalf("remove=%d backups=%v prepared=%d finished=%d conflicts=%d, want atomic refusal before legacy mutation",
+			adapter.removeCalls, adapter.backupPaths, prepared, finished, conflicts)
+	}
+}
+
+func TestLSPRouterPlan_CanonicalAddFailureKeepsLegacyNotReady(t *testing.T) {
+	plan, adapter, legacyName, _ := planLSPRouterLegacyGroup(t, false)
+	adapter.addErr = errors.New("induced canonical add failure")
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
+	if err == nil || len(report.Failed) != 1 || report.Failed[0].Op != "add" {
+		t.Fatalf("report=%+v err=%v, want canonical add failure", report, err)
+	}
+	if adapter.addCalls != 1 || adapter.removeCalls != 0 || len(adapter.backupPaths) != 1 {
+		t.Fatalf("add=%d remove=%d backups=%v, want failed canonical add and no legacy removal", adapter.addCalls, adapter.removeCalls, adapter.backupPaths)
+	}
+	if _, exists := adapter.entries[legacyName]; !exists {
+		t.Fatalf("legacy entry %q was removed after canonical add failure", legacyName)
+	}
+}
+
+func TestLSPRouterPlan_GuardMalformedLSPPlanRejectedBeforeCallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(*LSPRouterClientPlan)
+	}{
+		{name: "missing-evidence", build: func(plan *LSPRouterClientPlan) { plan.canonicalDependencies = nil }},
+		{name: "extra-evidence", build: func(plan *LSPRouterClientPlan) {
+			plan.canonicalDependencies = append(plan.canonicalDependencies, lspRouterCanonicalDependency{
+				Client: "other", Language: "go", IntendedState: LSPRouterEntrySnapshot{Client: "other", Language: "go", EntryName: LSPRouterEntryName("go"), Present: true, URL: LSPRouterURL(9137, "go")},
+			})
+		}},
+		{name: "mismatched-evidence", build: func(plan *LSPRouterClientPlan) { plan.canonicalDependencies[0].IntendedState.Present = false }},
+		{name: "duplicate-evidence", build: func(plan *LSPRouterClientPlan) {
+			plan.canonicalDependencies = append(plan.canonicalDependencies, plan.canonicalDependencies[0])
+		}},
+		{name: "duplicate-canonical-operation", build: func(plan *LSPRouterClientPlan) { plan.Operations = append(plan.Operations, plan.Operations[0]) }},
+		{name: "non-add-canonical-operation", build: func(plan *LSPRouterClientPlan) { plan.Operations[0].Operation = "remove" }},
+		{name: "invalid-canonical-order", build: func(plan *LSPRouterClientPlan) {
+			plan.Operations[0], plan.Operations[1] = plan.Operations[1], plan.Operations[0]
+		}},
+		{name: "dependency-identity-disagreement", build: func(plan *LSPRouterClientPlan) {
+			plan.canonicalDependencies[0].IntendedState.EntryName = "mcp-language-server-go-legacy"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, adapter, _, _ := planLSPRouterLegacyGroup(t, false)
+			tc.build(plan)
+			prepared, finished, conflicts := 0, 0, 0
+			report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{
+				OnPrepared:             func(LSPRouterPlannedOperation) error { prepared++; return nil },
+				OnFinished:             func(LSPRouterMutationObservation) error { finished++; return nil },
+				OnPreconditionConflict: func(LSPRouterMutationObservation) error { conflicts++; return nil },
+			})
+			if err == nil || len(report.Applied) != 0 || len(report.Removed) != 0 || len(report.Failed) != 0 {
+				t.Fatalf("report=%+v err=%v, want side-effect-free validation rejection", report, err)
+			}
+			if adapter.conditionalCalls != 0 || adapter.addCalls != 0 || adapter.removeCalls != 0 || len(adapter.backupPaths) != 0 ||
+				prepared != 0 || finished != 0 || conflicts != 0 {
+				t.Fatalf("conditional=%d add=%d remove=%d backups=%v prepared=%d finished=%d conflicts=%d, want all zero",
+					adapter.conditionalCalls, adapter.addCalls, adapter.removeCalls, adapter.backupPaths, prepared, finished, conflicts)
+			}
+		})
 	}
 }
 

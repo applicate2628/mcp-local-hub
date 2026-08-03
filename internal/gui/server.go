@@ -746,6 +746,9 @@ type Server struct {
 	// registry plus startHubMcpListenerWithOptions directly.
 	hubEndpointGateFn     func(*api.API) bool
 	startHubMcpListenerFn func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error)
+	// serveFullFn is a test-only failure seam for the post-readiness ServeFull
+	// return path. Production leaves it nil and always calls owner.ServeFull.
+	serveFullFn func(net.Listener, http.Handler) error
 
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
@@ -1176,8 +1179,13 @@ func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struc
 	// + start srv.Serve FIRST; run hub startup AFTER. Shutdown still
 	// handles a nil s.hubMcpComp cleanly.
 	close(ready)
-	if err := owner.ServeFull(ln, s.httpHandler()); err != nil {
+	serveFull := owner.ServeFull
+	if s.serveFullFn != nil {
+		serveFull = s.serveFullFn
+	}
+	if err := serveFull(ln, s.httpHandler()); err != nil {
 		_ = ln.Close()
+		s.events.Close()
 		return err
 	}
 	return s.runActivatedGUIListener(ctx, owner.Errors())

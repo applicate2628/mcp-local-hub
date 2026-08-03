@@ -1066,7 +1066,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				sid := sessionID
 				sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
 			}
-			daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
+			daemonSessionID, daemonProtocolVersion, daemonSessionCached, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
 			if hsErr != nil {
 				// Finding 4: the router session was DELETEd/swept during the handshake.
 				// resolveDaemonSession already best-effort-released the just-minted daemon
@@ -1334,6 +1334,22 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			_, _ = io.Copy(w, upstreamResp.Body)
+			// A non-SSE 404 from a request that USED a cached daemon session is the
+			// daemon's protocol-level "unknown session" signal. The upstream response
+			// is already copied exactly once; do not replay a potentially
+			// non-idempotent tools/call. Instead, let the next client request perform
+			// the ordinary handshake after removing only the precise stale cache entry.
+			//
+			// The match prevents an old response from deleting a concurrent newer
+			// handshake, workspace switch, or reservation. Other 4xx/5xx responses,
+			// successful responses, and SSE stay untouched.
+			if upstreamResp.StatusCode == http.StatusNotFound && daemonSessionCached &&
+				s.serenaDaemonSessions.unbindIfMatch(sessionID, ws.WorkspaceKey, daemonSessionID, daemonProtocolVersion) {
+				_ = auditFn("warn", "serena-daemon-session-invalidated-unknown-session", map[string]any{
+					"status":  upstreamResp.StatusCode,
+					"trigger": "cached-daemon-session-404",
+				})
+			}
 			return
 		},
 	)

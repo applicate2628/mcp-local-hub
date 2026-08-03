@@ -30,8 +30,10 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +45,49 @@ import (
 
 	"github.com/spf13/cobra"
 )
+
+func TestMCPFrontGuardPinnedBackupCapSymmetry(t *testing.T) {
+	backupPath := filepath.Join(t.TempDir(), "claude-code.backup")
+	before := bytes.Repeat([]byte("x"), api.MaxClientConfigBackupBytes+1)
+	if err := os.WriteFile(backupPath, before, 0o600); err != nil {
+		t.Fatalf("seed oversized client-config backup: %v", err)
+	}
+	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")
+	pinWriteCalled := false
+	journal := &mcpFrontReconcileJournal{
+		reportPath: filepath.Join(t.TempDir(), "mcp-front-reconcile.json"),
+		record:     mcpFrontReconcileReport{Rows: map[string]mcpFrontReconcileRow{}},
+		writeClientConfigPin: func(string, []byte) error {
+			pinWriteCalled = true
+			return errors.New("unexpected pin write")
+		},
+	}
+
+	pin, err := journal.pinBackup(context.Background(), "claude-code", backupPath)
+	var readErr *api.StateFileReadError
+	if !errors.As(err, &readErr) {
+		t.Fatalf("oversized pin preparation err=%v, want *api.StateFileReadError", err)
+	}
+	if readErr.Category != api.StateFileReadErrorTooLarge {
+		t.Fatalf("oversized pin preparation category=%q, want %q", readErr.Category, api.StateFileReadErrorTooLarge)
+	}
+	if pinWriteCalled {
+		t.Fatal("oversized pin preparation invoked writeClientConfigPin")
+	}
+	if pin != (mcpFrontSerenaPin{}) {
+		t.Fatalf("oversized pin preparation returned a durable pin: %+v", pin)
+	}
+	after, err := os.ReadFile(backupPath)
+	if err != nil {
+		t.Fatalf("read client-config backup after failed preparation: %v", err)
+	}
+	if !bytes.Equal(after, before) {
+		t.Fatal("oversized pin preparation mutated the client-config backup")
+	}
+	if row, found := journal.record.Rows[key]; found {
+		t.Fatalf("oversized pin preparation created a Serena journal row: %+v", row)
+	}
+}
 
 // mcpFrontPR588Env redirects every path resolution this command family
 // performs to one throwaway directory and returns it.

@@ -368,8 +368,7 @@ func TestInstallAllHandler_EmptyResults_200EmptyArray(t *testing.T) {
 
 func newAuditingInstallRoutesServer(t *testing.T, u *fakeUninstaller, b *fakeInstallBulk) *Server {
 	t.Helper()
-	s := &Server{mux: http.NewServeMux(), uninstaller: u, installBulk: b, events: NewBroadcaster()}
-	t.Cleanup(func() { s.events.Close() })
+	s := &Server{mux: http.NewServeMux(), uninstaller: u, installBulk: b, events: newEphemeralBroadcaster(t)}
 	registerInstallRoutes(s)
 	return s
 }

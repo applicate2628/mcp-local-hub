@@ -1088,9 +1088,11 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	// a failure there aborts THAT CLIENT'S rewrite rather than leaving it
 	// mutated with no durable way back.
 	serenaReport, serr := api.ReconcileSerenaClientsToRouterForMCPFrontTransaction(ctx, api.SerenaReconcileOpts{
-		RoutingTarget:     &frontTarget,
-		BackupKeepN:       keepN,
-		OnAttemptPrepared: journal.prepareSerenaAttempt,
+		RoutingTarget: &frontTarget,
+		BackupKeepN:   keepN,
+		OnAttemptPrepared: func(result api.SerenaReconcileAttemptResult) error {
+			return journal.prepareSerenaAttemptWithContext(ctx, result)
+		},
 		OnAttemptFinished: journal.finishSerenaAttempt,
 	})
 	if serr != nil {
@@ -1405,7 +1407,7 @@ type mcpFrontRollbackOps struct {
 
 func newMCPFrontRollbackOps(a *api.API) mcpFrontRollbackOps {
 	return mcpFrontRollbackOps{
-		readStateFile: api.ReadStateFileBeneathRootNoFollow,
+		readStateFile: api.ReadClientConfigBackupBeneathRootNoFollow,
 		restoreSerena: func(requests []api.SerenaOwnedRestoreRequest) ([]api.SerenaOwnedRestoreResult, error) {
 			return api.RestoreSerenaReconcileAppliedOwned(requests, nil)
 		},
@@ -2025,7 +2027,7 @@ func validateMCPFrontEntryState(row mcpFrontReconcileRow, state mcpFrontEntrySta
 // report-owned root before any rollback mutation. Each returned slice is the
 // exact checksum-verified content of one retained no-follow final handle.
 func loadMCPFrontVerifiedSerenaPins(ctx context.Context, persisted *mcpFrontReconcileReport, reportPath string) (map[string][]byte, error) {
-	return loadMCPFrontVerifiedSerenaPinsWithReader(ctx, persisted, reportPath, api.ReadStateFileBeneathRootNoFollow)
+	return loadMCPFrontVerifiedSerenaPinsWithReader(ctx, persisted, reportPath, api.ReadClientConfigBackupBeneathRootNoFollow)
 }
 
 func loadMCPFrontVerifiedSerenaPinsWithReader(
@@ -2340,10 +2342,12 @@ func decodeMCPFrontReconcileReport(raw []byte, path string) (*mcpFrontReconcileR
 // plus its exact row map. The constructor and prepare methods preserve every
 // earlier immutable baseline and replace only the current attempt/receipt.
 type mcpFrontReconcileJournal struct {
-	reportPath      string
-	port            int
-	record          mcpFrontReconcileReport
-	currentPlanRows map[string]bool
+	reportPath             string
+	port                   int
+	record                 mcpFrontReconcileReport
+	currentPlanRows        map[string]bool
+	readClientConfigBackup func(context.Context, string, []string, string) ([]byte, error)
+	writeClientConfigPin   func(string, []byte) error
 }
 
 // carryForwardMCPFrontActivePlan builds the next generation's complete row
@@ -2431,7 +2435,9 @@ func newMCPFrontV3Journal(
 	record.ActivePlan = active
 	journal := &mcpFrontReconcileJournal{
 		reportPath: reportPath, port: port, record: record,
-		currentPlanRows: map[string]bool{},
+		currentPlanRows:        map[string]bool{},
+		readClientConfigBackup: api.ReadClientConfigBackupBeneathRootNoFollow,
+		writeClientConfigPin:   api.WriteStateFileBytesAtomic,
 	}
 	if plan != nil {
 		if len(plan.CaptureFailures) > 0 {
@@ -2469,6 +2475,10 @@ func (j *mcpFrontReconcileJournal) persist() error {
 }
 
 func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconcileAttemptResult) error {
+	return j.prepareSerenaAttemptWithContext(context.Background(), result)
+}
+
+func (j *mcpFrontReconcileJournal) prepareSerenaAttemptWithContext(ctx context.Context, result api.SerenaReconcileAttemptResult) error {
 	key := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, result.Client, "", "serena")
 	row, ok := j.record.Rows[key]
 	var createdPin *mcpFrontSerenaPin
@@ -2477,7 +2487,7 @@ func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconci
 			return fmt.Errorf("journal-prepare-failed: serena row %q has no row-owned pinned baseline", key)
 		}
 	} else {
-		pin, pinErr := j.pinBackup(result.Client, result.BackupPath)
+		pin, pinErr := j.pinBackup(ctx, result.Client, result.BackupPath)
 		if pinErr != nil {
 			return fmt.Errorf("journal-prepare-failed: pin serena baseline for %s: %w", result.Client, pinErr)
 		}
@@ -2807,7 +2817,7 @@ func reclaimOrphanedPin(pin mcpFrontSerenaPin, reportPath string) error {
 // client config can carry header tokens and stdio `env` secrets — the same
 // reason the adopt-provenance snapshots use it (CLAUDE.md, "Adopt
 // provenance").
-func (j *mcpFrontReconcileJournal) pinBackup(client, backupPath string) (mcpFrontSerenaPin, error) {
+func (j *mcpFrontReconcileJournal) pinBackup(ctx context.Context, client, backupPath string) (mcpFrontSerenaPin, error) {
 	if backupPath == "" {
 		return mcpFrontSerenaPin{}, errors.New("no backup path was captured for this client")
 	}
@@ -2815,21 +2825,40 @@ func (j *mcpFrontReconcileJournal) pinBackup(client, backupPath string) (mcpFron
 	if err != nil {
 		return mcpFrontSerenaPin{}, err
 	}
-	raw, rerr := os.ReadFile(backupPath)
+	absoluteBackup, absErr := filepath.Abs(backupPath)
+	if absErr != nil {
+		return mcpFrontSerenaPin{}, fmt.Errorf("resolve pre-reconcile backup %s: %w", backupPath, absErr)
+	}
+	readBackup := j.readClientConfigBackup
+	if readBackup == nil {
+		readBackup = api.ReadClientConfigBackupBeneathRootNoFollow
+	}
+	raw, rerr := readBackup(ctx, filepath.Dir(absoluteBackup), []string{filepath.Base(absoluteBackup)}, "")
 	if rerr != nil {
 		return mcpFrontSerenaPin{}, fmt.Errorf("read pre-reconcile backup %s: %w", backupPath, rerr)
 	}
+	defer zeroMCPFrontPinBytes(raw)
 	pinPath := filepath.Join(mcpFrontReconcilePinDir(j.reportPath), segment, filepath.Base(backupPath))
-	if werr := api.WriteStateFileBytesAtomic(pinPath, raw); werr != nil {
+	sum := sha256.Sum256(raw)
+	writePin := j.writeClientConfigPin
+	if writePin == nil {
+		writePin = api.WriteStateFileBytesAtomic
+	}
+	if werr := writePin(pinPath, raw); werr != nil {
 		return mcpFrontSerenaPin{}, fmt.Errorf("pin pre-reconcile backup to %s: %w", pinPath, werr)
 	}
-	sum := sha256.Sum256(raw)
 	return mcpFrontSerenaPin{
 		Client: client,
 		Origin: backupPath,
 		Path:   pinPath,
 		SHA256: hex.EncodeToString(sum[:]),
 	}, nil
+}
+
+func zeroMCPFrontPinBytes(bytes []byte) {
+	for i := range bytes {
+		bytes[i] = 0
+	}
 }
 
 // safeClientPathSegment refuses a client name that could escape or collide

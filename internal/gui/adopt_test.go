@@ -91,7 +91,7 @@ func guiAdoptDefaultManifestDir(t *testing.T) string {
 
 func postAdoptTest(t *testing.T, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -566,7 +566,7 @@ func TestAdoptRoutePublishesOperatorActionEvent(t *testing.T) {
 command = "go"
 args = ["version"]
 `)
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := s.Broadcaster().Subscribe(ctx)

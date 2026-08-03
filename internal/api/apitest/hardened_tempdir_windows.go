@@ -14,6 +14,7 @@
 package apitest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,20 +36,29 @@ func HardenedTempDir(t *testing.T) string {
 // checked by the hardened state reader is a child of the temp root.
 func HardenedDir(t *testing.T, dir string) string {
 	t.Helper()
+	if err := HardenedDirForTestMain(dir); err != nil {
+		t.Fatalf("apitest.HardenedDir %s: %v", dir, err)
+	}
+	return dir
+}
+
+// HardenedDirForTestMain creates dir if needed and applies the protected
+// owner-only DACL. It is the error-returning form for package TestMain setup.
+func HardenedDirForTestMain(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("apitest.HardenedDir mkdir %s: %v", dir, err)
+		return fmt.Errorf("mkdir: %w", err)
 	}
 	currentSID, err := currentUserSID()
 	if err != nil {
-		t.Fatalf("apitest.HardenedDir currentUserSID: %v", err)
+		return fmt.Errorf("current user SID: %w", err)
 	}
 	systemSID, err := windows.StringToSid("S-1-5-18")
 	if err != nil {
-		t.Fatalf("apitest.HardenedDir system sid: %v", err)
+		return fmt.Errorf("system SID: %w", err)
 	}
 	adminSID, err := windows.StringToSid("S-1-5-32-544")
 	if err != nil {
-		t.Fatalf("apitest.HardenedDir admin sid: %v", err)
+		return fmt.Errorf("administrators SID: %w", err)
 	}
 	entries := []windows.EXPLICIT_ACCESS{
 		{
@@ -84,7 +94,7 @@ func HardenedDir(t *testing.T, dir string) string {
 	}
 	dacl, err := windows.ACLFromEntries(entries, nil)
 	if err != nil {
-		t.Fatalf("apitest.HardenedDir ACLFromEntries: %v", err)
+		return fmt.Errorf("ACLFromEntries: %w", err)
 	}
 	if err := windows.SetNamedSecurityInfo(
 		dir,
@@ -95,9 +105,9 @@ func HardenedDir(t *testing.T, dir string) string {
 		dacl,
 		nil,
 	); err != nil {
-		t.Fatalf("apitest.HardenedDir SetNamedSecurityInfo %s: %v", dir, err)
+		return fmt.Errorf("SetNamedSecurityInfo: %w", err)
 	}
-	return dir
+	return nil
 }
 
 // currentUserSID returns the SID of the process token's user. The

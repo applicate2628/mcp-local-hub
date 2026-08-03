@@ -53,7 +53,7 @@ func newMembershipTestServer(t *testing.T) (*Server, string) {
 		t.Fatalf("DefaultRegistryPath: %v", err)
 	}
 	apitest.HardenedDir(t, filepath.Dir(regPath))
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
 	s.port.Store(9125)
 	return s, tmp
 }

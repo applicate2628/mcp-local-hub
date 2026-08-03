@@ -53,7 +53,7 @@ func seedHomeWithClaudeBackup(t *testing.T) (home, backupPath string) {
 
 func newBackupActionsTestServer(t *testing.T) (*Server, *fakeBackupActions) {
 	t.Helper()
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
 	fa := &fakeBackupActions{}
 	s.backupActions = fa
 	return s, fa

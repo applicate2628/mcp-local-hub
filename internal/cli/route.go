@@ -15,9 +15,10 @@
 //     omission-based — bot/architect review finding F1, 2026-07-25): this
 //     command never wires api.SetSerenaAutoRegisterCutoverPrimitives (the
 //     supervisor reap+install+start cutover stays exclusively GUI-owned —
-//     see internal/cli/gui.go's runGUI) and starts no idle/prune/reconcile
-//     ticker (session cleanup, backend-loss reconcile, idle-shutdown,
-//     workspace-prune all stay GUI-owned background loops). Omitting the
+//     see internal/cli/gui.go's runGUI) and starts no GUI-owned
+//     idle/prune/event-subscriber loop. Its own in-memory session cleanup and
+//     backend-loss reconcile tickers are process-local and do not touch
+//     registry or intent. Omitting the
 //     cutover primitives is NOT sufficient on its own: the router deps'
 //     AutoRegisterFn (new-workspace registration) and WakeIdleFn (which can
 //     clear an idle-stop on supervisor-intent) are both real registry/intent
@@ -104,6 +105,44 @@ const DefaultRouteDaemonPort = 9137
 // process exits. Mirrors the GUI's own shutdown posture.
 const routeShutdownGrace = 5 * time.Second
 
+// routeBackendLossReconcileInterval is the route daemon's fallback cadence for
+// observing a supervisor-reported Serena process restart or absence. The
+// reconciler owns only this process's in-memory router, daemon-session, and
+// sticky stores; it never writes registry or supervisor intent.
+const routeBackendLossReconcileInterval = 30 * time.Second
+
+var (
+	routeDialSupervisorIPCStatus = api.DialSupervisorIPCStatus
+	routeLifecycleAuditFn        = api.RouteReadOnlyStderrSink
+)
+
+// routeSerenaBackendStatus reads the supervisor's durable status for the
+// route-owned backend-loss reconciler. A read failure is transient rather than
+// a backend-loss proof, so the reconciler retains its stores; this wrapper only
+// emits the route daemon's existing redacted structured diagnostic envelope.
+func routeSerenaBackendStatus(ctx context.Context) ([]api.DaemonStatus, error) {
+	rows, err := routeDialSupervisorIPCStatus(ctx)
+	if err != nil {
+		_ = routeLifecycleAuditFn("warn", "serena-supervisor-status-read-failed", map[string]any{
+			"trigger": "route-backend-loss-reconcile",
+		})
+	}
+	return rows, err
+}
+
+// startRouteSerenaBackendLossReconcile wires and starts the existing
+// cancellable reconciler for the stores owned by this route Server. It does not
+// add a second reconciliation engine or a detached poll: cancellation is the
+// route daemon context, and ReconcileSerenaBackendLossViaIPC remains the sole
+// owner of first-observation, idle-grace, PID-change, and absence semantics.
+func startRouteSerenaBackendLossReconcile(ctx context.Context, s *gui.Server, interval time.Duration) {
+	if s == nil {
+		return
+	}
+	gui.SetSerenaBackendStatusFn(routeSerenaBackendStatus)
+	go runSerenaBackendLossReconcileTicker(ctx, s, interval)
+}
+
 func newRouteCmd() *cobra.Command {
 	var port int
 	cmd := &cobra.Command{
@@ -121,8 +160,9 @@ It is Increment 1 of the MCP-front-daemon decision record
 front-daemon.md): a supervisor-managed, always-on process so serena+LSP MCP
 keep answering when the GUI dies. It is READ-ONLY on the registry and
 supervisor-intent — it never reaps, installs, or starts the supervisor, and
-runs no idle/prune/reconcile ticker. Client configs and the GUI's own port
-are completely untouched.`,
+runs no GUI-owned idle/prune/event-subscriber loop. Its process-local session
+expiry and backend-loss reconcile ticks do not write shared state. Client
+configs and the GUI's own port are completely untouched.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Sub-increment 2a: an explicit --port flag always wins (this is
 			// what the supervisor descriptor passes — ensureBuiltinRouteDaemonAtStartup
@@ -156,7 +196,7 @@ are completely untouched.`,
 // already-resolved port at construction time.
 // buildRouteServer constructs the gui.Server the route daemon serves,
 // wired EXACTLY the way runRoute wires it (read-only serena+LSP routers, no
-// cutover primitives, no background tickers). Extracted (sub-increment 2a)
+// cutover primitives, no GUI-owned background tickers). Extracted (sub-increment 2a)
 // so a test can exercise the real, shipped construction path via
 // s.RouteHandler() without needing a real TCP listener/goroutine — see
 // route_i6_readonly_test.go's mutation-proven regression guard for the F1
@@ -174,9 +214,9 @@ are completely untouched.`,
 // OWN routers. Nothing expired these, so a long-lived route daemon — which is
 // exactly what this process is designed to be, supervisor-managed and always
 // on — accumulated one binding per MCP session for its entire uptime and never
-// released any. The file header's "starts no idle/prune/reconcile ticker" rule
-// is about not performing GUI-owned WORK on shared state; expiring this
-// process's own in-memory maps is neither.
+// released any. The file header's GUI-owned-loop restriction is about not
+// performing shared-state work; expiring and reconciling this process's own
+// in-memory maps are neither.
 //
 // lsp may be nil: the LSP router is only wired when the mcp-language-server
 // manifest loads and parses.
@@ -299,6 +339,10 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	// always-on route daemon grows one binding per MCP session forever — the
 	// GUI-owned sweeps drive the GUI's routers, not these (codex bot PR #588).
 	runRouteSessionExpiry(ctx, s, sessionStores, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
+	// Reconcile only this route server's in-memory session stores against the
+	// supervisor's durable daemon generation. The reconciler is the existing GUI
+	// lifecycle owner; it has no registry/intent writes and exits with ctx.
+	startRouteSerenaBackendLossReconcile(ctx, s, routeBackendLossReconcileInterval)
 
 	// Deliberately absent (Increment 1 constraint — see file header):
 	//   - api.SetSerenaAutoRegisterCutoverPrimitives: the supervisor
@@ -306,9 +350,11 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	//     workspace that needs first-time auto-register while no supervisor
 	//     is running fails loud (503) from THIS process instead of silently
 	//     reaping/installing/starting the supervisor from a second daemon.
-	//   - every GUI background ticker (session cleanup, backend-loss IPC
-	//     reconcile, backend-loss event subscriber, idle-shutdown sweep,
-	//     workspace auto-prune sweep): none are started here.
+	//   - GUI-owned background work (backend-loss event subscriber,
+	//     idle-shutdown sweep, workspace auto-prune sweep): none is started here.
+	//     The two route-owned in-memory maintenance tickers above are deliberately
+	//     separate: session expiry and the existing IPC reconciler for this
+	//     server's own stores.
 	//   - gui.Server.Start / ContinueWithGUIListener / composeGuiServerRestartV3:
 	//     this process serves RouteHandler() on its own bare listener instead.
 	//   - a NON-nil AutoRegisterFn / WakeIdleFn on either router's deps, and

@@ -7,7 +7,7 @@
 // The forward pass rewrites the canonical `mcp-language-server-<language>`
 // entry AND DELETES every legacy registry-backed per-workspace entry that
 // still points at a registry-owned proxy port
-// (ensureLSPRouterClientEntriesWithLoaded). The snapshot captured only the
+// (the forward Plan/Apply pipeline). The snapshot captured only the
 // canonical name, so those deletions had no recovery row and the rollback
 // could not put them back.
 package api

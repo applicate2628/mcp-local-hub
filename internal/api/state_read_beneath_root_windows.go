@@ -18,6 +18,16 @@ func ReadStateFileBeneathRootNoFollow(ctx context.Context, root string, relative
 	return readStateFileBeneathRootNoFollow(ctx, root, relativeComponents, expectedSHA256, nil)
 }
 
+// ReadClientConfigBackupBeneathRootNoFollow reads one bounded client-config
+// backup through the same retained no-follow handle chain as state files.
+// expectedSHA256 is empty only while capturing a fresh forward backup; callers
+// restoring a persisted pin must pass its persisted SHA-256.
+func ReadClientConfigBackupBeneathRootNoFollow(ctx context.Context, root string, relativeComponents []string, expectedSHA256 string) ([]byte, error) {
+	return readStateFileBeneathRootNoFollowWithPolicy(ctx, root, relativeComponents, stateReadBeneathRootPolicy{
+		maxBytes: MaxClientConfigBackupBytes, expectedSHA256: expectedSHA256, allowEmptyExpectedSHA256: true,
+	}, nil)
+}
+
 func readStateFileBeneathRootNoFollow(
 	ctx context.Context,
 	root string,
@@ -25,7 +35,19 @@ func readStateFileBeneathRootNoFollow(
 	expectedSHA256 string,
 	step stateReadBeneathRootStepFunc,
 ) (result []byte, retErr error) {
-	if err := validateStateReadBeneathRootInput(root, relativeComponents, expectedSHA256); err != nil {
+	return readStateFileBeneathRootNoFollowWithPolicy(ctx, root, relativeComponents, stateReadBeneathRootPolicy{
+		maxBytes: maxStateFileBytes, expectedSHA256: expectedSHA256,
+	}, step)
+}
+
+func readStateFileBeneathRootNoFollowWithPolicy(
+	ctx context.Context,
+	root string,
+	relativeComponents []string,
+	policy stateReadBeneathRootPolicy,
+	step stateReadBeneathRootStepFunc,
+) (result []byte, retErr error) {
+	if err := validateStateReadBeneathRootInputWithPolicy(root, relativeComponents, policy); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
@@ -99,10 +121,10 @@ func readStateFileBeneathRootNoFollow(
 		return nil, newStateFileReadError(StateFileReadErrorUnsafeObjectOrIO, "stat-final", finalComponent, nil)
 	}
 	size := int64(info.FileSizeHigh)<<32 | int64(info.FileSizeLow)
-	if size > maxStateFileBytes {
+	if size > int64(policy.maxBytes) {
 		return nil, newStateFileReadError(StateFileReadErrorTooLarge, "stat-final", finalComponent, nil)
 	}
-	buf := make([]byte, 0, minStateReadCapacity(size))
+	buf := make([]byte, 0, minStateReadCapacity(size, policy.maxBytes))
 	chunk := make([]byte, stateReadChunkSize)
 	defer zeroStateSecretBytes(chunk)
 	for {
@@ -110,7 +132,7 @@ func readStateFileBeneathRootNoFollow(
 			zeroStateSecretBytes(buf)
 			return nil, newStateFileReadError(StateFileReadErrorCanceled, "before-read", finalComponent, err)
 		}
-		requested := stateReadRequestLimit(len(buf), len(chunk))
+		requested := stateReadRequestLimitWithCap(len(buf), len(chunk), policy.maxBytes)
 		if requested == 0 {
 			zeroStateSecretBytes(buf)
 			return nil, newStateFileReadError(StateFileReadErrorTooLarge, "before-read", finalComponent, nil)
@@ -124,7 +146,7 @@ func readStateFileBeneathRootNoFollow(
 		}
 		var n uint32
 		readErr := windows.ReadFile(finalHandle, chunk[:requested], &n, nil)
-		remaining := maxStateFileBytes - len(buf)
+		remaining := policy.maxBytes - len(buf)
 		if int(n) > remaining {
 			zeroStateSecretBytes(buf)
 			return nil, newStateFileReadError(StateFileReadErrorTooLarge, "read-final", finalComponent, nil)
@@ -146,7 +168,7 @@ func readStateFileBeneathRootNoFollow(
 	if buf == nil {
 		buf = []byte{}
 	}
-	if !stateReadChecksumMatches(buf, expectedSHA256) {
+	if policy.expectedSHA256 != "" && !stateReadChecksumMatches(buf, policy.expectedSHA256) {
 		zeroStateSecretBytes(buf)
 		return nil, newStateFileReadError(StateFileReadErrorChecksumMismatch, "verify-checksum", finalComponent, nil)
 	}

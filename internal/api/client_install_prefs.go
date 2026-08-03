@@ -304,14 +304,23 @@ func (a *API) enableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSP
 	opts.GUIPort = target.Port
 	var report *LSPClientRouterReport
 	err = a.setLSPRouterClientDisabledInThen(SettingsPath(), name, false, func(raw map[string]string) error {
-		var runErr error
-		report, runErr = a.ensureLSPRouterClientEntriesWithState(
-			opts,
-			lspRouterDisabledClientSetFromRaw(raw),
-			clientInstallEnabledSetFromRaw(raw),
-			keepN,
-		)
-		return runErr
+		plan, planErr := a.planLSPRouterClientEntries(opts, &lspRouterPlanningState{
+			disabledClients: lspRouterDisabledClientSetFromRaw(raw),
+			enabledClients:  clientInstallEnabledSetFromRaw(raw),
+			keepN:           keepN,
+		})
+		if planErr != nil {
+			report = &LSPClientRouterReport{}
+			return planErr
+		}
+		canonicalDependencies, validationErr := validateLSPRouterClientPlan(plan)
+		if validationErr != nil {
+			report = &LSPClientRouterReport{}
+			return validationErr
+		}
+		var applyErr error
+		report, applyErr = a.applyValidatedLSPRouterClientPlanUnderAuthority(plan, canonicalDependencies, LSPRouterApplyCallbacks{})
+		return applyErr
 	})
 	return report, err
 }

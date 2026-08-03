@@ -235,3 +235,33 @@ func TestReadStateFileBeneathRootNoFollowPOSIXClosesDescriptorsOnEveryReturn(t *
 		})
 	}
 }
+
+func TestReadClientConfigBackupBeneathRootNoFollowPOSIXRejectsGrowthAfterStat(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "backup.json")
+	payload := bytes.Repeat([]byte("x"), MaxClientConfigBackupBytes)
+	if err := os.WriteFile(path, payload, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	grew := false
+	sawSentinel := false
+	_, err := readStateFileBeneathRootNoFollowWithPolicy(context.Background(), root, []string{"backup.json"}, stateReadBeneathRootPolicy{
+		maxBytes: MaxClientConfigBackupBytes, allowEmptyExpectedSHA256: true,
+	}, func(event stateReadBeneathRootStep) error {
+		if event.Event != stateReadBeneathRootBeforeRead {
+			return nil
+		}
+		if event.Requested == 1 {
+			sawSentinel = true
+		}
+		if grew {
+			return nil
+		}
+		grew = true
+		return os.WriteFile(path, append(payload, 'y'), 0o600)
+	})
+	requireStateReadCategory(t, err, StateFileReadErrorTooLarge)
+	if !grew || !sawSentinel {
+		t.Fatalf("growth=%v sentinel=%v, want a bounded one-byte over-cap read", grew, sawSentinel)
+	}
+}

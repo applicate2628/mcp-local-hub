@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 )
 
@@ -67,6 +68,10 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(tmp)
 		panic("internal/gui TestMain: create state root: " + mkErr.Error())
 	}
+	if hardenErr := apitest.HardenedDirForTestMain(stateRoot); hardenErr != nil {
+		_ = os.RemoveAll(tmp)
+		panic("internal/gui TestMain: harden state root: " + hardenErr.Error())
+	}
 
 	restoreState := api.SetDaemonStateRootForTest(stateRoot)
 	// Redirect every client-adapter path input before installing the audit. The
@@ -88,6 +93,12 @@ func TestMain(m *testing.M) {
 	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
 
 	code := m.Run()
+	if leakErr := assertNoBroadcasterWorkers(); leakErr != nil {
+		if code == 0 {
+			code = 1
+		}
+		_, _ = os.Stderr.WriteString(leakErr.Error() + "\n")
+	}
 
 	if escapes := auditRestore(); escapes > 0 && code == 0 {
 		code = 1

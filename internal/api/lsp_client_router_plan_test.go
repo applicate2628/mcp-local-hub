@@ -187,37 +187,36 @@ func (f *postInvocationLSPRouterClient) ConditionalEntryGroupMutation(req client
 }
 
 func TestMCPFrontV3_ForwardPostInvocationDependencyChangeIsReported(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
 	const clientName = "codex-cli"
 	const language = "go"
 	const legacyName = "mcp-language-server-go-legacy"
 	const legacyURL = "http://127.0.0.1:9200/mcp"
 	const operatorURL = "https://operator.example/mcp"
 	canonicalName := LSPRouterEntryName(language)
-	canonical := LSPRouterEntrySnapshot{
-		Client: clientName, Language: language, EntryName: canonicalName,
-		Present: true, URL: LSPRouterURL(9137, language),
-	}
+	seedLegacyLSPWorkspace(t, clientName, legacyName)
 	base := newLSPRouterFakeClient(t, clientName, true)
 	base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: legacyURL}
-	base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: canonical.URL}
+	base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, language)}
 	client := &postInvocationLSPRouterClient{
 		lspRouterFakeClient: base,
 		afterGroupMutation: func(clients.ConditionalEntryGroupMutationRequest) {
 			base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: operatorURL}
 		},
 	}
-	legacy := LSPRouterEntrySnapshot{
-		Client: clientName, Language: language, EntryName: legacyName, Present: true, URL: legacyURL,
+	plan, err := NewAPI().PlanLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9137,
+		Clients: map[string]clients.Client{clientName: client},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
 	}
-	plan := &LSPRouterClientPlan{
-		Operations: []LSPRouterPlannedOperation{
-			{Client: clientName, Language: language, EntryName: canonicalName, Operation: "add", PreState: canonical, IntendedState: canonical,
-				entry: clients.MCPEntry{Name: canonicalName, URL: canonical.URL}},
-			{Client: clientName, Language: language, EntryName: legacyName, Operation: "remove", PreState: legacy,
-				IntendedState: LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacyName}},
-		},
-		clientMap: map[string]clients.Client{clientName: client},
-		keepN:     3,
+	if len(plan.Operations) != 1 || plan.Operations[0].EntryName != legacyName || plan.Operations[0].Operation != "remove" ||
+		len(plan.canonicalDependencies) != 1 {
+		t.Fatalf("producer plan=%+v dependencies=%+v, want one legacy removal and one canonical dependency", plan.Operations, plan.canonicalDependencies)
 	}
 	var finished *LSPRouterMutationObservation
 	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{
@@ -247,6 +246,10 @@ func TestMCPFrontV3_ForwardPostInvocationDependencyChangeIsReported(t *testing.T
 // deliberately the failing dependency so the first alias demonstrates normal
 // progress while a remaining live legacy route survives every refusal.
 func TestMCPFrontV3_ForwardLegacyDependencyMatrix(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
 	const clientName = "codex-cli"
 	const language = "go"
 	const legacyPort = 9200
@@ -255,9 +258,22 @@ func TestMCPFrontV3_ForwardLegacyDependencyMatrix(t *testing.T) {
 		"mcp-language-server-go-legacy-a",
 		"mcp-language-server-go-legacy-b",
 	}
-	canonicalIntended := LSPRouterEntrySnapshot{
-		Client: clientName, Language: language, EntryName: canonicalName,
-		Present: true, URL: LSPRouterURL(9137, language),
+	reg := NewRegistry(testRegistryPathOverride)
+	for i, legacyName := range legacyNames {
+		if err := reg.PutLSP(WorkspaceEntry{
+			WorkspaceKey:  []string{"abcd1234", "defa5678"}[i],
+			WorkspacePath: []string{"D:/dev/project-a", "D:/dev/project-b"}[i],
+			Language:      language,
+			Backend:       "gopls-mcp",
+			Port:          legacyPort,
+			TaskName:      []string{"mcp-local-hub-lsp-abcd1234-go", "mcp-local-hub-lsp-defa5678-go"}[i],
+			ClientEntries: map[string]string{clientName: legacyName},
+		}); err != nil {
+			t.Fatalf("PutLSP %q: %v", legacyName, err)
+		}
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save registry: %v", err)
 	}
 	legacyState := func(name string) LSPRouterEntrySnapshot {
 		return LSPRouterEntrySnapshot{
@@ -266,28 +282,22 @@ func TestMCPFrontV3_ForwardLegacyDependencyMatrix(t *testing.T) {
 		}
 	}
 	planFor := func(adapter clients.Client) *LSPRouterClientPlan {
-		return &LSPRouterClientPlan{
-			Operations: []LSPRouterPlannedOperation{
-				{
-					Client: clientName, Language: language, EntryName: canonicalName, Operation: "add",
-					PreState:      LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: canonicalName},
-					IntendedState: canonicalIntended,
-					entry:         clients.MCPEntry{Name: canonicalName, URL: canonicalIntended.URL},
-				},
-				{
-					Client: clientName, Language: language, EntryName: legacyNames[0], Operation: "remove",
-					PreState:      legacyState(legacyNames[0]),
-					IntendedState: LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacyNames[0]},
-				},
-				{
-					Client: clientName, Language: language, EntryName: legacyNames[1], Operation: "remove",
-					PreState:      legacyState(legacyNames[1]),
-					IntendedState: LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacyNames[1]},
-				},
-			},
-			clientMap: map[string]clients.Client{clientName: adapter},
-			keepN:     3,
+		t.Helper()
+		plan, err := NewAPI().PlanLSPRouterClientEntries(LSPClientRouterOpts{
+			GUIPort: 9137,
+			Clients: map[string]clients.Client{clientName: adapter},
+		})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
 		}
+		if len(plan.Operations) != 3 ||
+			plan.Operations[0].Operation != "add" || plan.Operations[0].EntryName != canonicalName ||
+			plan.Operations[1].Operation != "remove" || plan.Operations[1].EntryName != legacyNames[0] ||
+			plan.Operations[2].Operation != "remove" || plan.Operations[2].EntryName != legacyNames[1] ||
+			len(plan.canonicalDependencies) != 1 {
+			t.Fatalf("producer plan=%+v dependencies=%+v, want canonical add followed by sorted legacy removals", plan.Operations, plan.canonicalDependencies)
+		}
+		return plan
 	}
 
 	for _, tc := range []struct {
@@ -324,7 +334,7 @@ func TestMCPFrontV3_ForwardLegacyDependencyMatrix(t *testing.T) {
 		{
 			name: "disable-canonical",
 			mutate: func(base *lspRouterFakeClient) {
-				base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: canonicalIntended.URL, Disabled: true}
+				base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, language), Disabled: true}
 			},
 		},
 	} {
@@ -393,6 +403,11 @@ func TestMCPFrontV3_ForwardLegacyDependencyMatrix(t *testing.T) {
 }
 
 func TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+	seedLegacyLSPWorkspace(t, "codex-cli", "mcp-language-server-go-abcd")
+
 	const operatorURL = "https://operator.example/mcp"
 	const legacyName = "mcp-language-server-go-abcd"
 	canonicalName := LSPRouterEntryName("go")
@@ -488,11 +503,7 @@ func TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit(t *testing.T) {
 		base := newLSPRouterFakeClient(t, "codex-cli", true)
 		baselineURL := "http://127.0.0.1:9200/mcp"
 		base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: baselineURL}
-		canonicalIntended := LSPRouterEntrySnapshot{
-			Client: "codex-cli", Language: "go", EntryName: canonicalName,
-			Present: true, URL: LSPRouterURL(9137, "go"),
-		}
-		base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: canonicalIntended.URL}
+		base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, "go")}
 		client := &raceLSPRouterClient{
 			lspRouterFakeClient: base,
 			beforeConditional: func(entryName string) {
@@ -502,21 +513,16 @@ func TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit(t *testing.T) {
 				base.entries[entryName] = clients.MCPEntry{Name: entryName, URL: operatorURL}
 			},
 		}
-		pre := LSPRouterEntrySnapshot{
-			Client: "codex-cli", Language: "go", EntryName: legacyName,
-			Present: true, URL: baselineURL,
+		plan, err := NewAPI().PlanLSPRouterClientEntries(LSPClientRouterOpts{
+			GUIPort: 9137,
+			Clients: map[string]clients.Client{"codex-cli": client},
+		})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
 		}
-		plan := &LSPRouterClientPlan{
-			Operations: []LSPRouterPlannedOperation{
-				{Client: "codex-cli", Language: "go", EntryName: canonicalName, Operation: "add",
-					PreState: canonicalIntended, IntendedState: canonicalIntended,
-					entry: clients.MCPEntry{Name: canonicalName, URL: canonicalIntended.URL}},
-				{Client: "codex-cli", Language: "go", EntryName: legacyName,
-					Operation: "remove", PreState: pre,
-					IntendedState: LSPRouterEntrySnapshot{Client: "codex-cli", Language: "go", EntryName: legacyName}},
-			},
-			clientMap: map[string]clients.Client{"codex-cli": client},
-			keepN:     3,
+		if len(plan.Operations) != 1 || plan.Operations[0].Operation != "remove" || plan.Operations[0].EntryName != legacyName ||
+			len(plan.canonicalDependencies) != 1 {
+			t.Fatalf("producer plan=%+v dependencies=%+v, want one legacy removal and one canonical dependency", plan.Operations, plan.canonicalDependencies)
 		}
 		if _, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{}); err == nil {
 			t.Fatal("intervening legacy edit must fail the conditional precondition")
@@ -533,11 +539,7 @@ func TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit(t *testing.T) {
 		base := newLSPRouterFakeClient(t, "codex-cli", true)
 		baselineURL := "http://127.0.0.1:9200/mcp"
 		base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: baselineURL}
-		canonicalIntended := LSPRouterEntrySnapshot{
-			Client: "codex-cli", Language: "go", EntryName: canonicalName,
-			Present: true, URL: LSPRouterURL(9137, "go"),
-		}
-		base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: canonicalIntended.URL}
+		base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, "go")}
 		client := &raceLSPRouterClient{
 			lspRouterFakeClient: base,
 			beforeConditional: func(entryName string) {
@@ -546,21 +548,16 @@ func TestMCPFrontV3_ConditionalMutationRejectsInterveningEdit(t *testing.T) {
 				}
 			},
 		}
-		legacyPre := LSPRouterEntrySnapshot{
-			Client: "codex-cli", Language: "go", EntryName: legacyName,
-			Present: true, URL: baselineURL,
+		plan, err := NewAPI().PlanLSPRouterClientEntries(LSPClientRouterOpts{
+			GUIPort: 9137,
+			Clients: map[string]clients.Client{"codex-cli": client},
+		})
+		if err != nil {
+			t.Fatalf("plan: %v", err)
 		}
-		plan := &LSPRouterClientPlan{
-			Operations: []LSPRouterPlannedOperation{
-				{Client: "codex-cli", Language: "go", EntryName: canonicalName, Operation: "add",
-					PreState: canonicalIntended, IntendedState: canonicalIntended,
-					entry: clients.MCPEntry{Name: canonicalName, URL: canonicalIntended.URL}},
-				{Client: "codex-cli", Language: "go", EntryName: legacyName, Operation: "remove",
-					PreState:      legacyPre,
-					IntendedState: LSPRouterEntrySnapshot{Client: "codex-cli", Language: "go", EntryName: legacyName}},
-			},
-			clientMap: map[string]clients.Client{"codex-cli": client},
-			keepN:     3,
+		if len(plan.Operations) != 1 || plan.Operations[0].Operation != "remove" || plan.Operations[0].EntryName != legacyName ||
+			len(plan.canonicalDependencies) != 1 {
+			t.Fatalf("producer plan=%+v dependencies=%+v, want one legacy removal and one canonical dependency", plan.Operations, plan.canonicalDependencies)
 		}
 		if _, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{}); err == nil {
 			t.Fatal("intervening canonical dependency edit must fail legacy conditional group")

@@ -44,6 +44,27 @@ func startFirstLSPOnlyRouteServer(t *testing.T) (port int, cleanup func()) {
 	return port, cleanup
 }
 
+func TestMCPFrontGuardPinPreparationZeroesBuffer(t *testing.T) {
+	raw := []byte("token-bearing backup bytes")
+	writeErr := errors.New("injected pin write failure")
+	journal := &mcpFrontReconcileJournal{
+		reportPath: t.TempDir(),
+		readClientConfigBackup: func(context.Context, string, []string, string) ([]byte, error) {
+			return raw, nil
+		},
+		writeClientConfigPin: func(string, []byte) error { return writeErr },
+	}
+	_, err := journal.pinBackup(context.Background(), "claude-code", filepath.Join(t.TempDir(), "claude-code.backup"))
+	if !errors.Is(err, writeErr) {
+		t.Fatalf("pin write failure lost its cause: %v", err)
+	}
+	for i, got := range raw {
+		if got != 0 {
+			t.Fatalf("backup byte %d=%d after failed pin write, want zero", i, got)
+		}
+	}
+}
+
 // startMCPFrontReadinessServer serves a real loopback HTTP listener whose
 // gopls-mcp route has a controllable number of successful requests while every
 // sibling stays live. A finite value models only that backend route dropping

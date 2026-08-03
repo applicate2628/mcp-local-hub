@@ -989,14 +989,17 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	// flight to surface the dead forward. The always-on forward-failure floor
 	// is the primary signal; this is the safety net behind it.
 	gui.SetSerenaBackendStatusFn(api.DialSupervisorIPCStatus)
-	// v0.6 idle-shutdown (#6, spec §6): wire the idle sweeper's two seams.
+	// v0.6 idle-shutdown (#6, spec §6): wire the idle sweeper's seams.
 	// The threshold reader resolves the GUI-settable daemons.serena_idle_shutdown
 	// each tick (so an operator change takes effect within ~60s, no restart); the
 	// stop writer records Desired=stopped+IntentReasonIdle on the unified
 	// supervisor-intent stops sub-block via the §4/Phase-E corrected stop path.
+	// The canonical routing authority shares this API instance and limits idle
+	// shutdown authority to a stably GUI-routed MCP front for the whole tick.
+	guiAPI := api.NewAPI()
 	gui.SetSerenaIdleShutdownFns(
 		func() (time.Duration, bool) {
-			v, err := api.NewAPI().SettingsGet(api.SerenaIdleShutdownSettingKey)
+			v, err := guiAPI.SettingsGet(api.SerenaIdleShutdownSettingKey)
 			if err != nil {
 				// Read failure → disable idle-shutdown for this tick (fail-safe:
 				// never idle a daemon on a settings read error).
@@ -1005,7 +1008,15 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			return api.SerenaIdleShutdownThreshold(v)
 		},
 		func(taskName string, now time.Time) (bool, error) {
-			return api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
+			return guiAPI.WriteSerenaIdleStopResult(taskName, now)
+		},
+		func(ctx context.Context, admittedTick func() int) (int, error) {
+			stopped := 0
+			err := guiAPI.WithClientRoutingAuthorityLease(ctx, api.StableGUICompatibility(), func(api.ClientRoutingTarget) error {
+				stopped = admittedTick()
+				return nil
+			})
+			return stopped, err
 		},
 	)
 	var selfRestartExitRequested atomic.Bool

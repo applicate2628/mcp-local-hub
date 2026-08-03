@@ -1,14 +1,76 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestReadClientConfigBackupBeneathRootNoFollowPolicy(t *testing.T) {
+	t.Run("exact-cap-capture-and-verified-rollback", func(t *testing.T) {
+		root := t.TempDir()
+		payload := bytes.Repeat([]byte("x"), MaxClientConfigBackupBytes)
+		if err := os.WriteFile(filepath.Join(root, "backup.json"), payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		captured, err := ReadClientConfigBackupBeneathRootNoFollow(context.Background(), root, []string{"backup.json"}, "")
+		if err != nil {
+			t.Fatalf("capture at exact cap: %v", err)
+		}
+		if !bytes.Equal(captured, payload) {
+			t.Fatal("capture returned bytes different from the retained final handle")
+		}
+		verified, err := ReadClientConfigBackupBeneathRootNoFollow(context.Background(), root, []string{"backup.json"}, stateReadDigest(payload))
+		if err != nil {
+			t.Fatalf("rollback verification at exact cap: %v", err)
+		}
+		if !bytes.Equal(verified, payload) {
+			t.Fatal("verified rollback returned bytes different from the retained final handle")
+		}
+	})
+
+	t.Run("cap-plus-one", func(t *testing.T) {
+		root := t.TempDir()
+		payload := bytes.Repeat([]byte("x"), MaxClientConfigBackupBytes+1)
+		if err := os.WriteFile(filepath.Join(root, "backup.json"), payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadClientConfigBackupBeneathRootNoFollow(context.Background(), root, []string{"backup.json"}, "")
+		requireStateReadCategory(t, err, StateFileReadErrorTooLarge)
+	})
+
+	t.Run("cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_, err := ReadClientConfigBackupBeneathRootNoFollow(ctx, t.TempDir(), []string{"backup.json"}, "")
+		requireStateReadCategory(t, err, StateFileReadErrorCanceled)
+	})
+
+	t.Run("checksum-mismatch", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, "backup.json"), []byte("actual"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadClientConfigBackupBeneathRootNoFollow(context.Background(), root, []string{"backup.json"}, stateReadDigest([]byte("expected")))
+		requireStateReadCategory(t, err, StateFileReadErrorChecksumMismatch)
+	})
+
+	t.Run("non-regular-final-object", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.Mkdir(filepath.Join(root, "backup.json"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ReadClientConfigBackupBeneathRootNoFollow(context.Background(), root, []string{"backup.json"}, "")
+		requireStateReadCategory(t, err, StateFileReadErrorUnsafeObjectOrIO)
+	})
+}
 
 func stateReadDigest(bytes []byte) string {
 	sum := sha256.Sum256(bytes)

@@ -94,7 +94,7 @@ func TestHubListenerRestartDriverRestartsAndPublishesNewBundle(t *testing.T) {
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
@@ -179,7 +179,7 @@ func TestHubListenerRestartDriverHydratesReconcilePendingFromAcceptedComponent(t
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
 	newComp.reconcilePending = true // bind loaded a set durable marker under hub-mcp.lock
@@ -218,7 +218,7 @@ func TestHubListenerRestartDriverHydratesReconcilePendingFromAcceptedComponent(t
 
 func TestHubListenerRestartDriverRejectsDeadOnArrivalComponent(t *testing.T) {
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	deadComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
@@ -265,7 +265,7 @@ func TestHubListenerRestartDriverRejectsDeadOnArrivalComponent(t *testing.T) {
 }
 
 func TestHubListenerRestartDriverBackoffAndExhaustion(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
 
 	var starts int
@@ -348,7 +348,7 @@ func TestHubListenerRestartDriverRetriesStartFailureExhaustionWithoutSignal(t *t
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
@@ -411,7 +411,7 @@ func TestHubListenerRestartDriverRetriesStartFailureExhaustionWithoutSignal(t *t
 }
 
 func TestHubListenerRestartDriverStartFailureRetryEventuallyAbandons(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
 
 	var starts int
@@ -463,7 +463,7 @@ func TestHubListenerRestartDriverStartFailureRetryEventuallyAbandons(t *testing.
 }
 
 func TestHubListenerRestartDriverStableHealthyWindowResetsCounter(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	firstComp := liveRestartTestComp(3439)
 	secondComp := liveRestartTestComp(3439)
@@ -535,7 +535,7 @@ func TestHubListenerRestartStableWindowExceedsWatcherDetectionLatency(t *testing
 }
 
 func TestHubListenerRestartDriverImmediateRefailAfterWatcherLatencyExhausts(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
 
 	var nowMu sync.Mutex
@@ -598,7 +598,7 @@ func TestHubListenerRestartDriverImmediateRefailAfterWatcherLatencyExhausts(t *t
 }
 
 func TestHubListenerRestartDriverContinuesAfterExhaustionForFreshOutage(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
 
 	var nowMu sync.Mutex
@@ -673,7 +673,7 @@ func TestHubListenerRestartDriverContinuesAfterExhaustionForFreshOutage(t *testi
 }
 
 func TestHubListenerRestartDriverRollingCapAbandonsRepeatedStableWindowFlaps(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
 
 	var nowMu sync.Mutex
@@ -741,7 +741,7 @@ func TestHubListenerRestartDriverRollingCapAbandonsRepeatedStableWindowFlaps(t *
 }
 
 func TestHubListenerRestartDriverRollingCapResetsAfterWindow(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
@@ -782,7 +782,7 @@ func TestHubListenerRestartDriverRollingCapResetsAfterWindow(t *testing.T) {
 }
 
 func TestHubListenerRestartDriverStableResetDoesNotDisableFailureExhaustion(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(liveRestartTestComp(3439))
 	now := time.Unix(1000, 0)
 	s.hubRestartConsecutive = 3
@@ -822,7 +822,7 @@ func TestHubListenerRestartDriverStableResetDoesNotDisableFailureExhaustion(t *t
 }
 
 func TestHubListenerRestartDriverCancelDuringBackoffDoesNotRestart(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
 
@@ -873,7 +873,7 @@ func TestHubListenerRestartDriverCancelDuringBackoffDoesNotRestart(t *testing.T)
 }
 
 func TestHubListenerRestartDriverCanceledBeforeSignalDoesNotRestart(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
 
@@ -908,7 +908,7 @@ func TestHubListenerRestartDriverCanceledBeforeSignalDoesNotRestart(t *testing.T
 }
 
 func TestHubListenerRestartDriverCancelAfterStartBeforePublishTearsDownNewBundle(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
@@ -942,7 +942,7 @@ func TestHubListenerRestartDriverCancelAfterStartBeforePublishTearsDownNewBundle
 }
 
 func TestHubListenerRestartDriverShutdownCancelsOldListenerWatchers(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	oldCtx, oldCancel := context.WithCancel(context.Background())
 	oldComp.listenerCancel = oldCancel
@@ -987,7 +987,7 @@ func TestHubListenerRestartDriverShutdownCancelsOldListenerWatchers(t *testing.T
 }
 
 func TestHubListenerRestartDriverConcurrentCancelAndSignalTearsDownOnceNoOrphan(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(3439)
 	newComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(oldComp)
@@ -1054,7 +1054,7 @@ func TestHubListenerRestartDriverConcurrentCancelAndSignalTearsDownOnceNoOrphan(
 }
 
 func TestHubListenerRestartDriverNilBatonStopsWithoutDoubleShutdown(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 
 	var starts int
 	var shutdowns int
@@ -1254,7 +1254,7 @@ func TestHubListenerRestartDriverPreservesEndpointInstanceIDAcrossRealRestart(t 
 		t.Fatalf("LoadHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubMcpComp.Store(firstComp)
 	events := make(chan hubRestartTestEvent, 4)
 	restartCtx, restartCancel := context.WithCancel(context.Background())
@@ -1310,7 +1310,7 @@ func TestHubListenerRestartEventReportsInstanceIDMismatchAsDegraded(t *testing.T
 	if err != nil {
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	oldComp := liveRestartTestComp(before.Port)
 	newComp := liveRestartTestComp(before.Port)
 	s.hubMcpComp.Store(oldComp)
@@ -1394,7 +1394,7 @@ func TestHubListenerStartOptionsInstallWatcherCallback(t *testing.T) {
 }
 
 func TestHubListenerRestartSignalIsNonBlockingAndCoalesced(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.signalHubListenerRestart()
 	s.signalHubListenerRestart()
 
@@ -1420,7 +1420,7 @@ func TestHubListenerRestartSignalPublishesHealthByDriverLiveness(t *testing.T) {
 		{name: "driver stopped", alive: false, want: HubHealthDown},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{Port: 0})
+			s := newEphemeralServer(t, Config{Port: 0})
 			s.hubRestartDriverAlive.Store(tc.alive)
 
 			s.signalHubListenerRestart()
@@ -1433,7 +1433,7 @@ func TestHubListenerRestartSignalPublishesHealthByDriverLiveness(t *testing.T) {
 }
 
 func TestHubListenerRestartDriverCleanCancellationPreservesShutdownHealthSemantics(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.hubRestartDriverAlive.Store(true)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

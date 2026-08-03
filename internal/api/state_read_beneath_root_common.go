@@ -45,18 +45,35 @@ func newStateFileReadError(category StateFileReadErrorCategory, operation, compo
 	return &StateFileReadError{Category: category, Operation: operation, Component: component, Cause: cause}
 }
 
+type stateReadBeneathRootPolicy struct {
+	maxBytes                 int
+	expectedSHA256           string
+	allowEmptyExpectedSHA256 bool
+}
+
 func validateStateReadBeneathRootInput(root string, relativeComponents []string, expectedSHA256 string) *StateFileReadError {
+	return validateStateReadBeneathRootInputWithPolicy(root, relativeComponents, stateReadBeneathRootPolicy{
+		maxBytes: maxStateFileBytes, expectedSHA256: expectedSHA256,
+	})
+}
+
+func validateStateReadBeneathRootInputWithPolicy(root string, relativeComponents []string, policy stateReadBeneathRootPolicy) *StateFileReadError {
 	if !filepath.IsAbs(root) {
 		return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", fmt.Errorf("state root must be absolute"))
 	}
 	if len(relativeComponents) == 0 {
 		return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", fmt.Errorf("state path has no relative components"))
 	}
-	if len(expectedSHA256) != sha256.Size*2 {
-		return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", fmt.Errorf("state file checksum is not a SHA-256 digest"))
+	if policy.maxBytes <= 0 {
+		return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", fmt.Errorf("state file byte cap must be positive"))
 	}
-	if _, err := hex.DecodeString(expectedSHA256); err != nil {
-		return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", err)
+	if policy.expectedSHA256 != "" || !policy.allowEmptyExpectedSHA256 {
+		if len(policy.expectedSHA256) != sha256.Size*2 {
+			return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", fmt.Errorf("state file checksum is not a SHA-256 digest"))
+		}
+		if _, err := hex.DecodeString(policy.expectedSHA256); err != nil {
+			return newStateFileReadError(StateFileReadErrorInvalidInput, "validate", "", err)
+		}
 	}
 	for _, component := range relativeComponents {
 		if component == "" || component == "." || component == ".." || filepath.IsAbs(component) ||
@@ -67,12 +84,12 @@ func validateStateReadBeneathRootInput(root string, relativeComponents []string,
 	return nil
 }
 
-func minStateReadCapacity(size int64) int {
+func minStateReadCapacity(size int64, maxBytes int) int {
 	if size <= 0 {
 		return 0
 	}
-	if size > maxStateFileBytes {
-		return maxStateFileBytes
+	if size > int64(maxBytes) {
+		return maxBytes
 	}
 	return int(size)
 }
@@ -88,7 +105,11 @@ const stateReadChunkSize = 4096
 // That sentinel byte proves a file that grows after the initial stat exceeds
 // the cap before append can allocate beyond the bounded buffer.
 func stateReadRequestLimit(bufferLength, chunkLength int) int {
-	remaining := maxStateFileBytes - bufferLength
+	return stateReadRequestLimitWithCap(bufferLength, chunkLength, maxStateFileBytes)
+}
+
+func stateReadRequestLimitWithCap(bufferLength, chunkLength, maxBytes int) int {
+	remaining := maxBytes - bufferLength
 	if remaining < 0 || chunkLength <= 0 {
 		return 0
 	}

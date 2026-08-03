@@ -49,6 +49,7 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +64,22 @@ import (
 // stop-write half of the sweep (the GUI is unwired).
 var serenaIdleStopFn func(taskName string, now time.Time) (bool, error)
 
+// serenaIdleRoutingAuthorityFunc admits one complete enabled idle-sweep tick
+// while canonical MCP front routing remains stably GUI. The callback owns no
+// routing state; production delegates admission and the shared routing lease to
+// api.(*API).WithClientRoutingAuthorityLease.
+type serenaIdleRoutingAuthorityFunc func(ctx context.Context, admittedTick func() int) (int, error)
+
+// serenaIdleRoutingAuthorityFn is the seam over the API's operation-lifetime
+// routing authority lease. A nil seam is fail-safe: the GUI retains resources
+// rather than making an idle-stop decision without canonical authority.
+var serenaIdleRoutingAuthorityFn serenaIdleRoutingAuthorityFunc
+
+// serenaIdleAuditFn writes the sweeper's best-effort structured audit events.
+// Tests replace it to assert that routing-target failures are visible without
+// touching the process-local hub log.
+var serenaIdleAuditFn = api.LogHubMcpEvent
+
 // serenaIdleThresholdFn is the seam over the GUI-settable threshold read.
 // Production reads daemons.serena_idle_shutdown via api.(*API).SettingsGet and
 // parses it with api.SerenaIdleShutdownThreshold; tests inject a fixed
@@ -70,12 +87,17 @@ var serenaIdleStopFn func(taskName string, now time.Time) (bool, error)
 var serenaIdleThresholdFn func() (time.Duration, bool)
 
 // SetSerenaIdleShutdownFns wires the production idle-shutdown seams the GUI
-// idle sweeper uses. CLI boot (internal/cli/gui.go) calls it with a live
-// api.API-backed threshold reader + stop writer. Passing nil for either
-// disables that half (the sweep is then a no-op for the missing half).
-func SetSerenaIdleShutdownFns(threshold func() (time.Duration, bool), stop func(taskName string, now time.Time) (bool, error)) {
+// idle sweeper uses. CLI boot (internal/cli/gui.go) calls it with one live
+// api.API-backed threshold reader, stop writer, and canonical routing-authority
+// capability. Passing nil for any dependency disables the sweep.
+func SetSerenaIdleShutdownFns(
+	threshold func() (time.Duration, bool),
+	stop func(taskName string, now time.Time) (bool, error),
+	routingAuthority serenaIdleRoutingAuthorityFunc,
+) {
 	serenaIdleThresholdFn = threshold
 	serenaIdleStopFn = stop
+	serenaIdleRoutingAuthorityFn = routingAuthority
 }
 
 // recordSerenaActivity stamps wsKey's in-memory last-activity to now. Called
@@ -551,7 +573,8 @@ func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int 
 	}
 	thresholdFn := serenaIdleThresholdFn
 	stopFn := serenaIdleStopFn
-	if thresholdFn == nil || stopFn == nil {
+	routingAuthorityFn := serenaIdleRoutingAuthorityFn
+	if thresholdFn == nil || stopFn == nil || routingAuthorityFn == nil {
 		return 0
 	}
 	threshold, enabled := thresholdFn()
@@ -559,136 +582,149 @@ func (s *Server) SweepIdleSerenaDaemons(ctx context.Context, now time.Time) int 
 		return 0 // "off" — idle-shutdown disabled.
 	}
 
-	deps := s.serenaRouterDepsProd()
-	if deps == nil || deps.Resolver == nil {
-		return 0
-	}
-	lister, ok := deps.Resolver.(workspaceLister)
-	if !ok {
-		return 0
-	}
-
-	// Collect the serena pool daemons: WorkspacePath -> (WorkspaceKey, TaskName).
-	// The supervisor IPC status keys workspace by PATH (Workspace = WorkspacePath).
-	type serenaRow struct {
-		key      string
-		taskName string
-	}
-	byPath := map[string]serenaRow{}
-	for _, ws := range lister.ListWorkspaces() {
-		if ws == nil || ws.TaskName == "" {
-			continue
+	stopped, err := routingAuthorityFn(ctx, func() int {
+		deps := s.serenaRouterDepsProd()
+		if deps == nil || deps.Resolver == nil {
+			return 0
 		}
-		if !isSerenaWorkspaceEntry(ws) {
-			continue
-		}
-		byPath[ws.WorkspacePath] = serenaRow{key: ws.WorkspaceKey, taskName: ws.TaskName}
-	}
-	if len(byPath) == 0 {
-		return 0
-	}
-
-	statusFn := serenaBackendStatusFn
-	if statusFn == nil {
-		return 0
-	}
-	rows, err := statusFn(ctx)
-	if err != nil {
-		// IPC unavailable / transient: do NOT idle-stop on a status-read
-		// failure (false-positive risk — the daemons may be fine and only the
-		// supervisor momentarily unreachable). Skip this tick.
-		return 0
-	}
-
-	stopped := 0
-	for _, row := range rows {
-		sr, want := byPath[row.Workspace]
-		if !want {
-			continue // not a serena pool daemon the router knows.
-		}
-		if !isRunningDaemonState(row.State) {
-			continue // already stopped / failed / restarting — nothing to idle.
+		lister, ok := deps.Resolver.(workspaceLister)
+		if !ok {
+			return 0
 		}
 
-		// The per-workspace stop/forward gate makes the "no started request"
-		// observation atomic with beginning an idle-stop phase. A request that
-		// already resolved this workspace increments the counter before
-		// wake/handshake, so the sweep skips it; a request that arrives after this
-		// point waits until the stop write and stale-session invalidation finish,
-		// then observes/wakes the just-stopped daemon. The gate mutex is held only
-		// for that small state transition, never across the stop writer or other
-		// lock-taking cleanup calls.
-		type idleStopResult struct {
-			gated   bool
-			idleFor time.Duration
-			wrote   bool
-			err     error
+		// Collect the serena pool daemons: WorkspacePath -> (WorkspaceKey, TaskName).
+		// The supervisor IPC status keys workspace by PATH (Workspace = WorkspacePath).
+		type serenaRow struct {
+			key      string
+			taskName string
 		}
-		result := func() idleStopResult {
-			if !s.beginSerenaIdleStop(sr.key) {
-				return idleStopResult{}
+		byPath := map[string]serenaRow{}
+		for _, ws := range lister.ListWorkspaces() {
+			if ws == nil || ws.TaskName == "" {
+				continue
 			}
-			defer s.endSerenaIdleStop(sr.key)
-
-			// Compute idle duration from LAST-ACTIVITY, not wall-clock since spawn.
-			// If activity was recorded, that is the baseline; otherwise fall back to
-			// the daemon's supervisor uptime so a freshly-spawned-but-never-called
-			// daemon is not idled until it has been up at least `threshold`.
-			result := idleStopResult{
-				gated:   true,
-				idleFor: serenaIdleDuration(s, sr.key, row.UptimeSec, now),
+			if !isSerenaWorkspaceEntry(ws) {
+				continue
 			}
-			if result.idleFor < threshold {
+			byPath[ws.WorkspacePath] = serenaRow{key: ws.WorkspaceKey, taskName: ws.TaskName}
+		}
+		if len(byPath) == 0 {
+			return 0
+		}
+
+		statusFn := serenaBackendStatusFn
+		if statusFn == nil {
+			return 0
+		}
+		rows, err := statusFn(ctx)
+		if err != nil {
+			// IPC unavailable / transient: do NOT idle-stop on a status-read
+			// failure (false-positive risk — the daemons may be fine and only the
+			// supervisor momentarily unreachable). Skip this tick.
+			return 0
+		}
+
+		stopped := 0
+		for _, row := range rows {
+			sr, want := byPath[row.Workspace]
+			if !want {
+				continue // not a serena pool daemon the router knows.
+			}
+			if !isRunningDaemonState(row.State) {
+				continue // already stopped / failed / restarting — nothing to idle.
+			}
+
+			// The per-workspace stop/forward gate makes the "no started request"
+			// observation atomic with beginning an idle-stop phase. A request that
+			// already resolved this workspace increments the counter before
+			// wake/handshake, so the sweep skips it; a request that arrives after this
+			// point waits until the stop write and stale-session invalidation finish,
+			// then observes/wakes the just-stopped daemon. The gate mutex is held only
+			// for that small state transition, never across the stop writer or other
+			// lock-taking cleanup calls.
+			type idleStopResult struct {
+				gated   bool
+				idleFor time.Duration
+				wrote   bool
+				err     error
+			}
+			result := func() idleStopResult {
+				if !s.beginSerenaIdleStop(sr.key) {
+					return idleStopResult{}
+				}
+				defer s.endSerenaIdleStop(sr.key)
+
+				// Compute idle duration from LAST-ACTIVITY, not wall-clock since spawn.
+				// If activity was recorded, that is the baseline; otherwise fall back to
+				// the daemon's supervisor uptime so a freshly-spawned-but-never-called
+				// daemon is not idled until it has been up at least `threshold`.
+				result := idleStopResult{
+					gated:   true,
+					idleFor: serenaIdleDuration(s, sr.key, row.UptimeSec, now),
+				}
+				if result.idleFor < threshold {
+					return result
+				}
+				result.wrote, result.err = stopFn(sr.taskName, now)
+				if result.err != nil || !result.wrote {
+					return result
+				}
+				// Drop the activity baseline so a stale timestamp does not linger for a
+				// now-stopped daemon. The wake re-establishes it on the next call.
+				s.dropSerenaActivity(sr.key)
+				// The successful stop write is the durable fact: invalidate the local
+				// daemon-session binding unconditionally while later requests are still
+				// held at the workspace gate. Re-reading the idle marker here races a
+				// concurrent wake clearing that marker.
+				s.serenaDaemonSessions.unbindWorkspace(sr.key)
 				return result
+			}()
+			if !result.gated {
+				continue
 			}
-			result.wrote, result.err = stopFn(sr.taskName, now)
-			if result.err != nil || !result.wrote {
-				return result
+			idleFor := result.idleFor
+			if idleFor < threshold {
+				continue
 			}
-			// Drop the activity baseline so a stale timestamp does not linger for a
-			// now-stopped daemon. The wake re-establishes it on the next call.
-			s.dropSerenaActivity(sr.key)
-			// The successful stop write is the durable fact: invalidate the local
-			// daemon-session binding unconditionally while later requests are still
-			// held at the workspace gate. Re-reading the idle marker here races a
-			// concurrent wake clearing that marker.
-			s.serenaDaemonSessions.unbindWorkspace(sr.key)
-			return result
-		}()
-		if !result.gated {
-			continue
-		}
-		idleFor := result.idleFor
-		if idleFor < threshold {
-			continue
-		}
-		if result.err != nil {
-			// Non-fatal: a transient stop-write failure is retried next tick.
-			// Emit a best-effort audit so the failure is diagnosable.
-			_ = api.LogHubMcpEvent("warn", "serena-idle-stop-failed", map[string]any{
-				"task_name":     sr.taskName,
-				"workspace_key": sr.key,
-				"idle_secs":     int(idleFor / time.Second),
-				"err":           result.err.Error(),
-			})
-			continue
-		}
-		if !result.wrote {
-			_ = api.LogHubMcpEvent("info", "serena-idle-skipped-operator-stop-active", map[string]any{
+			if result.err != nil {
+				// Non-fatal: a transient stop-write failure is retried next tick.
+				// Emit a best-effort audit so the failure is diagnosable.
+				_ = serenaIdleAuditFn("warn", "serena-idle-stop-failed", map[string]any{
+					"task_name":     sr.taskName,
+					"workspace_key": sr.key,
+					"idle_secs":     int(idleFor / time.Second),
+					"err":           result.err.Error(),
+				})
+				continue
+			}
+			if !result.wrote {
+				_ = serenaIdleAuditFn("info", "serena-idle-skipped-operator-stop-active", map[string]any{
+					"task_name":      sr.taskName,
+					"workspace_key":  sr.key,
+					"idle_secs":      int(idleFor / time.Second),
+					"threshold_secs": int(threshold / time.Second),
+				})
+				continue
+			}
+			stopped++
+			_ = serenaIdleAuditFn("info", "serena-idle-stopped", map[string]any{
 				"task_name":      sr.taskName,
 				"workspace_key":  sr.key,
 				"idle_secs":      int(idleFor / time.Second),
 				"threshold_secs": int(threshold / time.Second),
 			})
-			continue
 		}
-		stopped++
-		_ = api.LogHubMcpEvent("info", "serena-idle-stopped", map[string]any{
-			"task_name":      sr.taskName,
-			"workspace_key":  sr.key,
-			"idle_secs":      int(idleFor / time.Second),
-			"threshold_secs": int(threshold / time.Second),
+		return stopped
+	})
+	if err != nil {
+		var conflict *api.MCPFrontTargetConflictError
+		if errors.As(err, &conflict) && conflict.Expected == api.MCPFrontRoutingTargetGUI && conflict.Actual == api.MCPFrontRoutingTargetFront {
+			return 0 // Stable front retains resources silently.
+		}
+		_ = serenaIdleAuditFn("warn", "serena-idle-skipped-routing-target-unavailable", map[string]any{
+			"reason": "canonical-routing-target-unavailable",
 		})
+		return 0
 	}
 	return stopped
 }
