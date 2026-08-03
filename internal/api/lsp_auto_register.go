@@ -29,7 +29,7 @@ const lspExistingProxyProbeTimeout = 500 * time.Millisecond
 // The per-tuple lock spans registry write, supervisor intent write, reconcile,
 // and proxy readiness so concurrent first-touch calls cannot route to an
 // unready port or allocate two ports for the same language.
-func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePath, language string) (WorkspaceEntry, error) {
+func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePath, language string) (entry WorkspaceEntry, err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -85,12 +85,16 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	if err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
 	}
+	defer func() { ReleaseAndJoin(&err, unlock) }()
 	if err := reg.Load(); err != nil {
-		unlock()
 		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
 	}
 	if prior, ok := reg.Get(workspaceKey, language); ok {
-		unlock()
+		releaseErr := unlock()
+		unlock = nil
+		if releaseErr != nil {
+			return prior, releaseErr
+		}
 		portReady := proxyReadinessFn(prior.Port, lspExistingProxyProbeTimeout) == nil
 		owned, err := lspSupervisorIntentDescriptorExists(prior.WorkspaceKey, prior.Language)
 		if err != nil {
@@ -182,26 +186,22 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		return prior, nil
 	}
 	if keyMismatchErr != nil {
-		unlock()
 		return WorkspaceEntry{}, keyMismatchErr
 	}
 
 	port, err := AllocatePort(reg, *m.PortPool)
 	if err != nil {
-		unlock()
 		return WorkspaceEntry{}, err
 	}
 	canonicalExe, err := canonicalMcphubPath()
 	if err != nil {
-		unlock()
 		return WorkspaceEntry{}, err
 	}
 	if _, err := os.Stat(canonicalExe); err != nil {
-		unlock()
 		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
 	}
 
-	entry := WorkspaceEntry{
+	entry = WorkspaceEntry{
 		WorkspaceKey:  workspaceKey,
 		WorkspacePath: canonical,
 		Language:      language,
@@ -213,31 +213,30 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		Lifecycle:     LifecycleConfigured,
 	}
 	if err := reg.PutLSP(entry); err != nil {
-		unlock()
 		return WorkspaceEntry{}, fmt.Errorf("ensure LSP register: row write rejected: %w", err)
 	}
 	if err := reg.Save(); err != nil {
-		unlock()
 		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
 	}
-	unlock()
+	releaseErr := unlock()
+	unlock = nil
+	if releaseErr != nil {
+		return entry, releaseErr
+	}
 
 	supervisorSpawnRequested := false
-	rollback := func() {
-		if supervisorSpawnRequested && entry.Port > 0 {
-			_ = killByPortFn(entry.Port, 5*time.Second)
-		}
-		removeLSPRegistryRow(regPath, workspaceKey, language)
+	rollback := func() error {
+		return rollbackLSPRegistration(entry, supervisorSpawnRequested, func() error {
+			return removeLSPRegistryRow(regPath, workspaceKey, language)
+		})
 	}
 
 	if err := ctx.Err(); err != nil {
-		rollback()
-		return WorkspaceEntry{}, err
+		return WorkspaceEntry{}, errors.Join(err, rollback())
 	}
 	restoreIntent, err := a.upsertLSPSupervisorIntent(entry, canonicalExe)
 	if err != nil {
-		rollback()
-		return WorkspaceEntry{}, err
+		return WorkspaceEntry{}, errors.Join(err, rollback())
 	}
 	intentWritten := true
 	rollbackIntent := func() {
@@ -251,19 +250,28 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	if _, err := registerSupervisorReconcileFn(reconcileCtx, true); err != nil {
 		cancel()
 		rollbackIntent()
-		rollback()
-		return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+		return WorkspaceEntry{}, errors.Join(fmt.Errorf("supervisor reconcile after LSP intent write: %w", err), rollback())
 	}
 	cancel()
 	supervisorSpawnRequested = true
 
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
 		rollbackIntent()
-		rollback()
-		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		return WorkspaceEntry{}, errors.Join(fmt.Errorf("proxy readiness on port %d: %w", port, err), rollback())
 	}
 
 	return entry, nil
+}
+
+func rollbackLSPRegistration(entry WorkspaceEntry, supervisorSpawnRequested bool, removeRow func() error) error {
+	var rollbackErrs []error
+	if supervisorSpawnRequested && entry.Port > 0 {
+		rollbackErrs = append(rollbackErrs, killByPortFn(entry.Port, 5*time.Second))
+	}
+	if removeRow != nil {
+		rollbackErrs = append(rollbackErrs, removeRow())
+	}
+	return errors.Join(rollbackErrs...)
 }
 
 func lspEnsureMutex(workspaceKey, language string) *sync.Mutex {
@@ -292,16 +300,16 @@ func loadLSPRegisterManifest(language string) (*config.ServerManifest, config.La
 	return nil, config.LanguageSpec{}, fmt.Errorf("unknown language %q (manifest %s supports: %v)", language, m.Name, sortedLanguageNames(m))
 }
 
-func removeLSPRegistryRow(regPath, workspaceKey, language string) {
+func removeLSPRegistryRow(regPath, workspaceKey, language string) (err error) {
 	reg := NewRegistry(regPath)
 	unlock, err := reg.Lock()
 	if err != nil {
-		return
+		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
-		return
+		return err
 	}
 	reg.Remove(workspaceKey, language)
-	_ = reg.Save()
+	return reg.Save()
 }

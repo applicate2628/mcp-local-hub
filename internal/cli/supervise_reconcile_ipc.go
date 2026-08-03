@@ -386,7 +386,11 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		isOrphanedLSP := false
 		if intentDesired == api.ReconcileIntentDesiredRunning && isLSPWorkspaceProxyDescriptor(d) {
 			if !lspRegistryLoaded {
-				lspRegistry, _ = api.OpenLSPRegistryForReconcile()
+				var snapshotErr error
+				lspRegistry, _, snapshotErr = api.OpenLSPRegistryForReconcile()
+				if snapshotErr != nil {
+					emitLSPRegistryReconcileSnapshotUnavailable(deps.events, "inter-process", lspRegistry != nil, snapshotErr)
+				}
 				lspRegistryLoaded = true
 			}
 			isOrphanedLSP = !api.LSPRegistryRowBacksDescriptorIn(d, lspRegistry)

@@ -2,53 +2,113 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"path/filepath"
 	"testing"
 )
 
-// TestPruneWorkspacePhases_SetSerenaPendingRemoval_OrderingAndFailureClear
-// pins the exact call ordering PruneWorkspacePhases must follow for the
-// unregister-resurrects-serena-intent fix (mcphub-register-intent REVISE
-// round 2, BLOCKING 1):
-//
-//  1. SetSerenaPendingRemoval(true) BEFORE RemoveSerenaIntent — so a
-//     reconcile a live supervisor's RemoveSerenaIntent nudges INSIDE this
-//     same call cannot observe the registry row without the mark set.
-//  2. On a RemoveSerenaIntent failure, SetSerenaPendingRemoval(false) runs
-//     to clear the mark — so a retry (or the supervisor's own startup
-//     self-heal) sees a normal orphan row again, not one permanently
-//     skipped.
-//  3. DeleteSerenaRow runs ONLY after a successful RemoveSerenaIntent, and
-//     SetSerenaPendingRemoval is NOT called again on the success path (the
-//     row is about to be deleted entirely; a redundant clear would be a
-//     wasted registry write, not a correctness bug, but this test also
-//     documents that steady-state contract).
-func TestPruneWorkspacePhases_SetSerenaPendingRemoval_OrderingAndFailureClear(t *testing.T) {
-	t.Run("success path: mark(true) then RemoveSerenaIntent then DeleteSerenaRow, no clear", func(t *testing.T) {
+func TestPruneWorkspace_ReleaseOnlyDisarmsZeroRowRollbackAndPreservesResults(t *testing.T) {
+	releaseErr := errors.New("registry release unconfirmed")
+	rollbackCalls := 0
+	report := &PruneReport{}
+	td := PruneWorkspaceTeardown{
+		LSPUnregister: func(string, []string) (*UnregisterReport, error) {
+			return &UnregisterReport{Removed: []string{"lsp"}}, nil
+		},
+		AcquireSerenaRemovalFence: func() (func() error, error) {
+			return func() error { return nil }, nil
+		},
+		BeginSerenaPendingRemoval: func(string) (func() error, error) {
+			return func() error { rollbackCalls++; return nil }, nil
+		},
+		RemoveSerenaIntent: func(string) (bool, error) { return true, nil },
+		DeleteSerenaRow: func() PruneSerenaDeleteResult {
+			return PruneSerenaDeleteResult{Removed: 0, ReleaseErr: releaseErr}
+		},
+	}
+
+	err := PruneWorkspacePhases("/ws", "/ws", nil, true, true, td, report)
+	if !errors.Is(err, releaseErr) {
+		t.Fatalf("error = %v, want release failure", err)
+	}
+	if rollbackCalls != 0 {
+		t.Fatalf("rollback calls = %d, want 0 after committed zero-row delete", rollbackCalls)
+	}
+	if len(report.LSPRemoved) != 1 || report.SerenaRemoved != 0 {
+		t.Fatalf("committed report = %+v, want retained LSP result and zero Serena removals", report)
+	}
+}
+
+func TestPruneWorkspace_MutationReleaseAndRollbackFailuresAllJoin(t *testing.T) {
+	mutationErr := errors.New("row mutation")
+	releaseErr := errors.New("registry release")
+	rollbackErr := errors.New("tuple rollback")
+	report := &PruneReport{}
+	td := PruneWorkspaceTeardown{
+		AcquireSerenaRemovalFence: func() (func() error, error) {
+			return func() error { return nil }, nil
+		},
+		BeginSerenaPendingRemoval: func(string) (func() error, error) {
+			return func() error { return rollbackErr }, nil
+		},
+		RemoveSerenaIntent: func(string) (bool, error) { return true, nil },
+		DeleteSerenaRow: func() PruneSerenaDeleteResult {
+			return PruneSerenaDeleteResult{Removed: 1, MutationErr: mutationErr, ReleaseErr: releaseErr}
+		},
+	}
+
+	err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, report)
+	for _, want := range []error{mutationErr, releaseErr, rollbackErr} {
+		if !errors.Is(err, want) {
+			t.Fatalf("error = %v, want cause %v", err, want)
+		}
+	}
+	if report.SerenaRemoved != 1 {
+		t.Fatalf("SerenaRemoved = %d, want committed result 1", report.SerenaRemoved)
+	}
+}
+
+func TestPruneWorkspacePhases_PendingRemovalTransactionOrdering(t *testing.T) {
+	t.Run("commit-unknown mark error invokes returned rollback", func(t *testing.T) {
+		markErr := errors.New("registry writer failed reopening after rename")
+		rolledBack := false
+		removed := false
+		td := PruneWorkspaceTeardown{
+			BeginSerenaPendingRemoval: func(string) (func() error, error) {
+				return func() error { rolledBack = true; return nil }, markErr
+			},
+			RemoveSerenaIntent: func(string) (bool, error) {
+				removed = true
+				return true, nil
+			},
+		}
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+		if !errors.Is(err, markErr) || !rolledBack || removed {
+			t.Fatalf("err=%v rolledBack=%t removed=%t; want commit-unknown rollback before intent removal", err, rolledBack, removed)
+		}
+	})
+
+	t.Run("success path discards rollback after row delete", func(t *testing.T) {
 		var calls []string
 		td := PruneWorkspaceTeardown{
-			SetSerenaPendingRemoval: func(pending bool) error {
-				if pending {
-					calls = append(calls, "mark(true)")
-				} else {
-					calls = append(calls, "mark(false)")
-				}
-				return nil
+			BeginSerenaPendingRemoval: func(string) (func() error, error) {
+				calls = append(calls, "begin")
+				return func() error { calls = append(calls, "rollback"); return nil }, nil
 			},
 			RemoveSerenaIntent: func(string) (bool, error) {
 				calls = append(calls, "removeSerenaIntent")
 				return true, nil
 			},
-			DeleteSerenaRow: func() (int, error) {
+			DeleteSerenaRow: func() PruneSerenaDeleteResult {
 				calls = append(calls, "deleteSerenaRow")
-				return 1, nil
+				return PruneSerenaDeleteResult{Removed: 1}
 			},
 		}
 		report := &PruneReport{}
 		if err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, report); err != nil {
 			t.Fatalf("PruneWorkspacePhases: %v", err)
 		}
-		want := []string{"mark(true)", "removeSerenaIntent", "deleteSerenaRow"}
+		want := []string{"begin", "removeSerenaIntent", "deleteSerenaRow"}
 		if len(calls) != len(want) {
 			t.Fatalf("calls = %v, want %v", calls, want)
 		}
@@ -62,25 +122,21 @@ func TestPruneWorkspacePhases_SetSerenaPendingRemoval_OrderingAndFailureClear(t 
 		}
 	})
 
-	t.Run("failure path: mark(true) then RemoveSerenaIntent fails then mark(false), DeleteSerenaRow never called", func(t *testing.T) {
+	t.Run("intent failure rolls the exact attempt back before fence release", func(t *testing.T) {
 		var calls []string
 		teardownErr := errors.New("simulated live-supervisor reconcile failure")
 		td := PruneWorkspaceTeardown{
-			SetSerenaPendingRemoval: func(pending bool) error {
-				if pending {
-					calls = append(calls, "mark(true)")
-				} else {
-					calls = append(calls, "mark(false)")
-				}
-				return nil
+			BeginSerenaPendingRemoval: func(string) (func() error, error) {
+				calls = append(calls, "begin")
+				return func() error { calls = append(calls, "rollback"); return nil }, nil
 			},
 			RemoveSerenaIntent: func(string) (bool, error) {
 				calls = append(calls, "removeSerenaIntent")
 				return false, teardownErr
 			},
-			DeleteSerenaRow: func() (int, error) {
+			DeleteSerenaRow: func() PruneSerenaDeleteResult {
 				calls = append(calls, "deleteSerenaRow")
-				return 0, nil
+				return PruneSerenaDeleteResult{}
 			},
 		}
 		report := &PruneReport{}
@@ -91,7 +147,7 @@ func TestPruneWorkspacePhases_SetSerenaPendingRemoval_OrderingAndFailureClear(t 
 		if !errors.Is(err, teardownErr) {
 			t.Errorf("error does not wrap the underlying teardown error: %v", err)
 		}
-		want := []string{"mark(true)", "removeSerenaIntent", "mark(false)"}
+		want := []string{"begin", "removeSerenaIntent", "rollback"}
 		if len(calls) != len(want) {
 			t.Fatalf("calls = %v, want %v (DeleteSerenaRow must NEVER run after a teardown failure)", calls, want)
 		}
@@ -103,38 +159,82 @@ func TestPruneWorkspacePhases_SetSerenaPendingRemoval_OrderingAndFailureClear(t 
 	})
 }
 
+func TestPruneWorkspacePhases_DeleteSerenaRowFailureRollsBackPendingRemovalTuple(t *testing.T) {
+	const generation = "0123456789abcdef0123456789abcdef"
+	deleteErr := errors.New("registry row-delete failure")
+
+	t.Run("successful rollback preserves row-delete error", func(t *testing.T) {
+		rollbackCalls := 0
+		td := PruneWorkspaceTeardown{
+			PublishSerenaRemovalFenceGeneration: func() (string, error) { return generation, nil },
+			BeginSerenaPendingRemoval: func(gotGeneration string) (func() error, error) {
+				if gotGeneration != generation {
+					t.Fatalf("generation = %q, want %q", gotGeneration, generation)
+				}
+				return func() error { rollbackCalls++; return nil }, nil
+			},
+			RemoveSerenaIntent: func(string) (bool, error) { return true, nil },
+			DeleteSerenaRow:    func() PruneSerenaDeleteResult { return PruneSerenaDeleteResult{MutationErr: deleteErr} },
+		}
+
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+		if !errors.Is(err, deleteErr) {
+			t.Fatalf("err = %v, want row-delete cause", err)
+		}
+		if rollbackCalls != 1 {
+			t.Fatalf("rollback calls = %d, want 1", rollbackCalls)
+		}
+	})
+
+	t.Run("rollback failure joins both causes", func(t *testing.T) {
+		rollbackErr := errors.New("pending tuple rollback failure")
+		rollbackCalls := 0
+		td := PruneWorkspaceTeardown{
+			PublishSerenaRemovalFenceGeneration: func() (string, error) { return generation, nil },
+			BeginSerenaPendingRemoval: func(string) (func() error, error) {
+				return func() error { rollbackCalls++; return rollbackErr }, nil
+			},
+			RemoveSerenaIntent: func(string) (bool, error) { return true, nil },
+			DeleteSerenaRow:    func() PruneSerenaDeleteResult { return PruneSerenaDeleteResult{MutationErr: deleteErr} },
+		}
+
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+		if !errors.Is(err, deleteErr) || !errors.Is(err, rollbackErr) {
+			t.Fatalf("err = %v, want both row-delete and rollback causes", err)
+		}
+		if rollbackCalls != 1 {
+			t.Fatalf("rollback calls = %d, want 1", rollbackCalls)
+		}
+	})
+}
+
 // TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow pins the
 // placement of the liveness fence, which is the whole basis of the repair's
 // "is this teardown alive?" answer (serena_removal_fence.go):
 //
-//   - ACQUIRED BEFORE SetSerenaPendingRemoval(true). Acquiring it after would
+//   - ACQUIRED BEFORE BeginSerenaPendingRemoval. Acquiring it after would
 //     leave an instant where the mark is set and the fence is free — the exact
 //     shape the repair reads as reclaimable crash debris.
-//   - RELEASED AFTER the row delete (and, on the failure path, after the mark is
-//     cleared back to false). Releasing earlier would expose the same window
-//     from the other end.
+//   - RELEASED AFTER the row delete or returned exact rollback reaches its
+//     verdict. Releasing earlier would expose the same window from the other end.
 func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing.T) {
 	newTD := func(calls *[]string, removeErr error) PruneWorkspaceTeardown {
 		return PruneWorkspaceTeardown{
-			AcquireSerenaRemovalFence: func() (func(), error) {
+			AcquireSerenaRemovalFence: func() (func() error, error) {
 				*calls = append(*calls, "fence.acquire")
-				return func() { *calls = append(*calls, "fence.release") }, nil
+				return func() error { *calls = append(*calls, "fence.release"); return nil }, nil
 			},
-			SetSerenaPendingRemoval: func(pending bool) error {
-				if pending {
-					*calls = append(*calls, "mark(true)")
-				} else {
-					*calls = append(*calls, "mark(false)")
-				}
-				return nil
+			BeginSerenaPendingRemoval: func(string) (func() error, error) {
+				*calls = append(*calls, "begin")
+				return func() error { *calls = append(*calls, "rollback"); return nil }, nil
 			},
 			RemoveSerenaIntent: func(string) (bool, error) {
 				*calls = append(*calls, "removeSerenaIntent")
 				return removeErr == nil, removeErr
 			},
-			DeleteSerenaRow: func() (int, error) {
+			DeleteSerenaRow: func() PruneSerenaDeleteResult {
 				*calls = append(*calls, "deleteSerenaRow")
-				return 1, nil
+				return PruneSerenaDeleteResult{Removed: 1}
 			},
 		}
 	}
@@ -156,7 +256,7 @@ func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing
 			t.Fatalf("PruneWorkspacePhases: %v", err)
 		}
 		assertOrder(t, calls, []string{
-			"fence.acquire", "mark(true)", "removeSerenaIntent", "deleteSerenaRow", "fence.release",
+			"fence.acquire", "begin", "removeSerenaIntent", "deleteSerenaRow", "fence.release",
 		})
 	})
 
@@ -168,7 +268,7 @@ func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing
 			t.Fatal("PruneWorkspacePhases must surface the RemoveSerenaIntent failure")
 		}
 		assertOrder(t, calls, []string{
-			"fence.acquire", "mark(true)", "removeSerenaIntent", "mark(false)", "fence.release",
+			"fence.acquire", "begin", "removeSerenaIntent", "rollback", "fence.release",
 		})
 	})
 
@@ -176,7 +276,7 @@ func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing
 		fenceErr := errors.New("simulated fence acquire failure")
 		var calls []string
 		td := newTD(&calls, nil)
-		td.AcquireSerenaRemovalFence = func() (func(), error) {
+		td.AcquireSerenaRemovalFence = func() (func() error, error) {
 			calls = append(calls, "fence.acquire")
 			return nil, fenceErr
 		}
@@ -194,7 +294,64 @@ func TestPruneWorkspacePhases_SerenaRemovalFence_WrapsTheMarkedWindow(t *testing
 		if err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{}); err != nil {
 			t.Fatalf("PruneWorkspacePhases with a nil fence seam: %v", err)
 		}
-		assertOrder(t, calls, []string{"mark(true)", "removeSerenaIntent", "deleteSerenaRow"})
+		assertOrder(t, calls, []string{"begin", "removeSerenaIntent", "deleteSerenaRow"})
+	})
+}
+
+func TestPruneWorkspacePhases_UnconfirmedFenceReleaseDowngradesTheTeardown(t *testing.T) {
+	t.Run("committed mutation remains reported", func(t *testing.T) {
+		dir := t.TempDir()
+		const key = "abcd1234"
+		unlockErr := errors.New("simulated UnlockFileEx failure")
+		failingFenceUnlock(t, unlockErr)
+		calls := []string{}
+		report := &PruneReport{}
+		td := PruneWorkspaceTeardown{
+			AcquireSerenaRemovalFence: func() (func() error, error) {
+				calls = append(calls, "fence.acquire")
+				return AcquireSerenaRemovalFence(dir, key)
+			},
+			BeginSerenaPendingRemoval: func(string) (func() error, error) { return func() error { return nil }, nil },
+			RemoveSerenaIntent: func(string) (bool, error) {
+				calls = append(calls, "remove")
+				return true, nil
+			},
+			DeleteSerenaRow: func() PruneSerenaDeleteResult {
+				calls = append(calls, "delete")
+				return PruneSerenaDeleteResult{Removed: 1}
+			},
+		}
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, report)
+		if !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) || !errors.Is(err, unlockErr) {
+			t.Fatalf("err = %v, want release sentinel and unlock cause", err)
+		}
+		if report.SerenaRemoved != 1 {
+			t.Fatalf("report.SerenaRemoved = %d, want committed row deletion retained", report.SerenaRemoved)
+		}
+		if fmt.Sprint(calls) != "[fence.acquire remove delete]" {
+			t.Fatalf("calls = %v, want acquire then mutations", calls)
+		}
+	})
+
+	t.Run("release failure joins rather than replaces mutation failure", func(t *testing.T) {
+		dir := t.TempDir()
+		const key = "beefcafe"
+		unlockErr := errors.New("simulated UnlockFileEx failure")
+		teardownErr := errors.New("simulated supervisor teardown refusal")
+		failingFenceUnlock(t, unlockErr)
+		td := PruneWorkspaceTeardown{
+			AcquireSerenaRemovalFence: func() (func() error, error) { return AcquireSerenaRemovalFence(dir, key) },
+			BeginSerenaPendingRemoval: func(string) (func() error, error) { return func() error { return nil }, nil },
+			RemoveSerenaIntent:        func(string) (bool, error) { return false, teardownErr },
+			DeleteSerenaRow: func() PruneSerenaDeleteResult {
+				t.Fatal("DeleteSerenaRow called after teardown failure")
+				return PruneSerenaDeleteResult{}
+			},
+		}
+		err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+		if !errors.Is(err, teardownErr) || !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) || !errors.Is(err, unlockErr) {
+			t.Fatalf("err = %v, want teardown and release causes", err)
+		}
 	})
 }
 
@@ -206,20 +363,17 @@ func TestPruneWorkspacePhases_RemovalGenerationTransaction(t *testing.T) {
 	var calls []string
 	teardownErr := errors.New("simulated intent removal failure")
 	td := PruneWorkspaceTeardown{
-		AcquireSerenaRemovalFence: func() (func(), error) {
+		AcquireSerenaRemovalFence: func() (func() error, error) {
 			calls = append(calls, "fence.acquire")
-			return func() { calls = append(calls, "fence.release") }, nil
+			return func() error { calls = append(calls, "fence.release"); return nil }, nil
 		},
 		PublishSerenaRemovalFenceGeneration: func() (string, error) {
 			calls = append(calls, "generation.publish")
 			return "0123456789abcdef0123456789abcdef", nil
 		},
-		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
-			calls = append(calls, "mark("+generation+")")
-			if !pending && generation != "" {
-				t.Fatalf("clear carried stale generation %q", generation)
-			}
-			return nil
+		BeginSerenaPendingRemoval: func(generation string) (func() error, error) {
+			calls = append(calls, "begin("+generation+")")
+			return func() error { calls = append(calls, "rollback"); return nil }, nil
 		},
 		RemoveSerenaIntent: func(string) (bool, error) {
 			calls = append(calls, "removeSerenaIntent")
@@ -231,8 +385,8 @@ func TestPruneWorkspacePhases_RemovalGenerationTransaction(t *testing.T) {
 		t.Fatalf("err = %v, want wrap of %v", err, teardownErr)
 	}
 	assert := []string{
-		"fence.acquire", "generation.publish", "mark(0123456789abcdef0123456789abcdef)",
-		"removeSerenaIntent", "mark()", "fence.release",
+		"fence.acquire", "generation.publish", "begin(0123456789abcdef0123456789abcdef)",
+		"removeSerenaIntent", "rollback", "fence.release",
 	}
 	if len(calls) != len(assert) {
 		t.Fatalf("calls = %v, want %v", calls, assert)
@@ -257,17 +411,18 @@ func TestPruneWorkspacePhases_RemovalGenerationCompensationFailurePreservesBothC
 		t.Fatalf("Save: %v", err)
 	}
 	td := PruneWorkspaceTeardown{
-		AcquireSerenaRemovalFence: func() (func(), error) {
+		AcquireSerenaRemovalFence: func() (func() error, error) {
 			return AcquireSerenaRemovalFence(filepath.Dir(regPath), workspaceKey)
 		},
 		PublishSerenaRemovalFenceGeneration: func() (string, error) {
 			return PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), workspaceKey)
 		},
-		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
-			if !pending {
-				return clearErr
+		BeginSerenaPendingRemoval: func(generation string) (func() error, error) {
+			rollback, err := NewRegistry(regPath).BeginSerenaPendingRemoval(workspaceKey, "", generation)
+			if rollback == nil || err != nil {
+				return rollback, err
 			}
-			return NewRegistry(regPath).SetSerenaPendingRemovalGeneration(workspaceKey, "", true, generation)
+			return func() error { return clearErr }, nil
 		},
 		RemoveSerenaIntent: func(string) (bool, error) { return false, teardownErr },
 	}

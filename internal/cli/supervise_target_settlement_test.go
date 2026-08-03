@@ -92,7 +92,7 @@ func writeTargetSettlementRegistryRow(t *testing.T, path string, row api.Workspa
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := registry.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}

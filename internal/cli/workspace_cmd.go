@@ -198,7 +198,7 @@ Examples:
 	return c
 }
 
-func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, languagesFlag string) error {
+func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, languagesFlag string) (err error) {
 	canonical, err := api.CanonicalWorkspacePath(rawPath)
 	if err != nil {
 		return err
@@ -250,7 +250,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	if err != nil {
 		return err
 	}
-	// releaseRegLock is called explicitly after reg.Save() and the --default
+	// The release callback is called explicitly after reg.Save() and the --default
 	// marker write below (steps 6 + 6a), BEFORE the supervisor-materialization
 	// step (8) — never held across it. The marker write is deliberately INSIDE
 	// the hold so it is ordered against a concurrent unregister's row delete
@@ -261,18 +261,9 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	// (~250ms total, tryLockRegistryBrief); holding THIS command's lock
 	// across that call would starve it into a silent no-op on every single
 	// register — which was the concrete mechanism behind the P1 this fixes
-	// (see the commit message). The idempotent nil-guard makes the deferred
-	// call below a harmless no-op once the explicit release has run, and
-	// still unlocks on every early-return path before that point (mirrors
-	// the releaseUnlock idiom in registerOneLanguageSupervised,
-	// register_supervisor.go).
-	releaseRegLock := func() {
-		if unlock != nil {
-			unlock()
-			unlock = nil
-		}
-	}
-	defer releaseRegLock()
+	// (see the commit message). Clearing unlock after the explicit one-shot
+	// release disarms the deferred early-return guard.
+	defer func() { api.ReleaseAndJoin(&err, unlock) }()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -354,9 +345,13 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		}
 	}
 
-	// Release the registry lock NOW — see the releaseRegLock doc comment at
+	// Release the registry lock NOW — see the acquisition comment at
 	// acquisition time (step 3) for why this must happen before step 8 below.
-	releaseRegLock()
+	releaseErr := unlock()
+	unlock = nil
+	if releaseErr != nil {
+		return fmt.Errorf("release registry after workspace registration: %w", releaseErr)
+	}
 
 	// 6b. EXPLICIT serena register → bless this workspace's canonical root as a
 	//     trusted root (area-5 co-design — REGRESSION-SAFETY). This is the serena
@@ -626,7 +621,7 @@ var serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
 // reconcileErr to report when the IPC call itself failed; this seam only
 // answers the observable after-the-fact question "is this workspace's
 // registration fully settled right now".
-func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (serenaRegisterSettledResult, error) {
+func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (result serenaRegisterSettledResult, err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return serenaRegisterSettledResult{}, err
@@ -636,7 +631,7 @@ func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (serenaRegister
 	if err != nil {
 		return serenaRegisterSettledResult{}, err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
 		return serenaRegisterSettledResult{}, err
 	}
@@ -646,7 +641,7 @@ func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (serenaRegister
 		// register to it. Never settled regardless of intent state.
 		return serenaRegisterSettledResult{}, nil
 	}
-	result := serenaRegisterSettledResult{RegistryRowPresent: true, Port: row.Port}
+	result = serenaRegisterSettledResult{RegistryRowPresent: true, Port: row.Port}
 	if row.WorkspacePath != expected.WorkspacePath || !row.RegisteredAt.Equal(expected.RegisteredAt) {
 		// A current row with this deterministic key is not enough: a concurrent
 		// unregister/re-register owns a distinct invocation generation and must
@@ -949,10 +944,11 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	//     later spawn the now-unbacked proxy → "not registered" exit 1 →
 	//     restart-backoff → quarantine. (*api.API).Unregister acquires its OWN
 	//     registry lock, so we must NOT hold the lock across that call.
-	//   - The serena (sentinel) row owns a per-workspace supervisor-intent
-	//     descriptor keyed by api.SerenaTaskNameForWorkspace(canonical). The
-	//     registry row is removed directly via RemoveByBackend("serena"), then
-	//     the descriptor teardown nudges a running supervisor to reconcile.
+	//   - The Serena descriptor is torn down through the shared sequencer while
+	//     the removal fence is held and the exact pending tuple is staged. Only
+	//     successful descriptor teardown proceeds to RemoveByBackend("serena").
+	//     Any staging, teardown, or row-delete error invokes the exact rollback;
+	//     fence release is the final action.
 	lspLangs, removeSerena, err := classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend)
 	if err != nil {
 		return err
@@ -992,41 +988,40 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			return unregisterLSPWorkspaceFn(rawPath, langs)
 		},
 		RemoveSerenaIntent: removeSerenaSupervisorIntentFn,
-		SetSerenaPendingRemoval: func(pending bool) error {
+		BeginSerenaPendingRemoval: func(generation string) (func() error, error) {
 			reg := api.NewRegistry(regPath)
-			return reg.SetSerenaPendingRemoval(wsKey, legacyWSKey, pending)
-		},
-		SetSerenaPendingRemovalGeneration: func(pending bool, generation string) error {
-			reg := api.NewRegistry(regPath)
-			return reg.SetSerenaPendingRemovalGeneration(wsKey, legacyWSKey, pending, generation)
+			return reg.BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation)
 		},
 		// Per-workspace unregister LIVENESS FENCE, held by the sequencer across
 		// the whole marked window so the supervisor's repair can tell this
 		// teardown apart from a crashed one even when it blocks past the
 		// pending-removal lease (api/serena_removal_fence.go). Fenced on the
 		// CANONICAL key only — the legacy key names the same workspace.
-		AcquireSerenaRemovalFence: func() (func(), error) {
+		AcquireSerenaRemovalFence: func() (func() error, error) {
 			return api.AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
 		},
 		PublishSerenaRemovalFenceGeneration: func() (string, error) {
 			return api.PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), wsKey)
 		},
-		DeleteSerenaRow: func() (int, error) {
+		DeleteSerenaRow: func() (result api.PruneSerenaDeleteResult) {
 			reg := api.NewRegistry(regPath)
 			unlock, err := reg.Lock()
 			if err != nil {
-				return 0, err
+				result.MutationErr = err
+				return result
 			}
-			defer unlock()
+			defer func() { result.ReleaseErr = unlock() }()
 			if err := reg.Load(); err != nil {
-				return 0, err
+				result.MutationErr = err
+				return result
 			}
 			n := reg.RemoveByBackend(wsKey, "serena")
 			if legacyWSKey != wsKey {
 				n += reg.RemoveByBackend(legacyWSKey, "serena")
 			}
 			if err := reg.Save(); err != nil {
-				return 0, err
+				result.MutationErr = err
+				return result
 			}
 			// Clear the default marker HERE — inside this delete's registry-lock
 			// hold, and only for a delete that actually removed a row. This is
@@ -1065,7 +1060,8 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 						canonical, cerr)
 				}
 			}
-			return n, nil
+			result.Removed = n
+			return result
 		},
 	}
 	if err := api.PruneWorkspacePhases(rawPath, canonical, lspLangs, len(lspLangs) > 0, removeSerena, td, report); err != nil {
@@ -1102,7 +1098,7 @@ func classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend string) (l
 	if lerr != nil {
 		return nil, false, lerr
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 	if lerr := reg.Load(); lerr != nil {
 		return nil, false, lerr
 	}
@@ -1180,7 +1176,7 @@ type workspaceListJSONRow struct {
 	Default bool `json:"default"`
 }
 
-func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
+func runWorkspaceList(cmd *cobra.Command, jsonOut bool) (err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -1190,7 +1186,7 @@ func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -1276,7 +1272,7 @@ which clears the marker as a side effect.
 	return c
 }
 
-func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
+func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) (err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -1287,7 +1283,7 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 
 	// Empty string clears the marker.
 	if strings.TrimSpace(rawPath) == "" {

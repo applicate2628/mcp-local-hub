@@ -17,6 +17,10 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
+func TestLSPRegistryInterProcessReconcileSnapshotUnavailableReportsFailOpenState(t *testing.T) {
+	assertLSPRegistrySnapshotUnavailableEvent(t, "inter-process", false)
+}
+
 // newReconcileTestDeps constructs an ipcDispatchDeps suitable for
 // unit-testing handleReconcile. The controller carries a real
 // supervisorController + EventLoop so we can observe EvIntentUpdate

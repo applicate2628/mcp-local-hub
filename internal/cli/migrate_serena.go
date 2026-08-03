@@ -556,21 +556,10 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if err != nil {
 		return err
 	}
-	// releaseRegistryLock is the single idempotent unlock path. It is called
-	// explicitly right after the registry Save (the only registry mutation)
-	// and is also deferred as a belt-and-suspenders guard for the error paths
-	// BEFORE that explicit release. Idempotency (regLockReleased guard) means
-	// the deferred call is a harmless no-op once the explicit release fired —
-	// no double-unlock.
-	regLockReleased := false
-	releaseRegistryLock := func() {
-		if regLockReleased {
-			return
-		}
-		regLockReleased = true
-		unlock()
-	}
-	defer releaseRegistryLock()
+	// The one-shot release callback is called explicitly right after the registry
+	// Save (the only registry mutation). A deferred guard owns earlier returns;
+	// clearing unlock after the explicit call disarms that guard.
+	defer func() { api.ReleaseAndJoin(&err, unlock) }()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -629,7 +618,7 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	if err := reg.Save(); err != nil {
 		// Save is atomic (tempfile + rename): a failure leaves the prior
 		// on-disk registry intact, so there is nothing to roll back. The
-		// deferred releaseRegistryLock frees the still-held lock. Crucially we
+		// deferred release guard frees the still-held lock. Crucially we
 		// do NOT push the relocking undo here — it would deadlock trying to
 		// re-acquire the lock this same goroutine still holds.
 		return err
@@ -639,13 +628,17 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	// and release the lock (Fix 3). Nothing after this point (reconcile, reap,
 	// intent write, start) touches the registry, so holding the lock across the
 	// multi-second reap would only block concurrent registry ops. Ordering is
-	// load-bearing: releaseRegistryLock MUST run before any deferred rollback
+	// load-bearing: the explicit release MUST run before any deferred rollback
 	// fires (it does — the explicit call below executes during the function
 	// body, the deferred rollback runs after the body returns).
 	rollback = append(rollback, func() error {
 		return restoreSerenaRegistryRelocking(regPath, serenaBefore)
 	})
-	releaseRegistryLock()
+	releaseErr := unlock()
+	unlock = nil
+	if releaseErr != nil {
+		return fmt.Errorf("release registry after migration allocation: %w", releaseErr)
+	}
 
 	// Re-read the freshly-allocated serena rows so the PRE-reap predicates see
 	// the assigned ports + task names. This is the count used to decide willReap
@@ -765,7 +758,7 @@ func runMigrateSerenaDynamicPool(ctx context.Context, w io.Writer) (err error) {
 	// start site calls it (the pre-acquire ones are harmless no-ops), keeping one
 	// release discipline. The acquire swaps in the real idempotent release (the
 	// underlying (*SupervisorLock).Release nils its flock, so a second call is a
-	// no-op too). Mirrors releaseRegistryLock's idempotent-closure shape.
+	// no-op too).
 	//
 	// finding 2 (bot PR #276): the acquire was historically deferred to step 7e —
 	// AFTER the step-7 reap, the registry re-read, the start-supported re-check, and
@@ -1549,13 +1542,13 @@ func snapshotSerenaRows(reg *api.Registry) []api.WorkspaceEntry {
 // window.
 //
 // The lock is always released before returning (no leaked lock).
-func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) error {
+func restoreSerenaRegistryRelocking(regPath string, serenaSnapshot []api.WorkspaceEntry) (err error) {
 	reg := api.NewRegistry(regPath)
 	unlock, err := reg.Lock()
 	if err != nil {
 		return fmt.Errorf("restore registry: re-acquire lock: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
 		return fmt.Errorf("restore registry: reload: %w", err)
 	}
@@ -1666,7 +1659,7 @@ func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.S
 	if err != nil {
 		return nil, nil, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
 		return nil, nil, fmt.Errorf("reload registry: %w", err)
 	}
@@ -1701,7 +1694,7 @@ func reReadAndAllocateSerenaForInstall(regPath string, dynamicManifest *config.S
 // (rollback = nil), making this undo a no-op from the commit point on (the
 // committed intent now owns those rows' ports — reverting them would strand the
 // router).
-func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.WorkspaceEntry) error {
+func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.WorkspaceEntry) (err error) {
 	if len(newlyAllocated) == 0 {
 		return nil
 	}
@@ -1710,7 +1703,7 @@ func revertSerenaReReadAllocations(regPath string, newlyAllocated []api.Workspac
 	if err != nil {
 		return fmt.Errorf("revert re-read allocations: re-acquire lock: %w", err)
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
 		return fmt.Errorf("revert re-read allocations: reload: %w", err)
 	}

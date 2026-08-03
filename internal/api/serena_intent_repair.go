@@ -33,8 +33,6 @@ import (
 	"os"
 	"path/filepath"
 	"time"
-
-	"github.com/gofrs/flock"
 )
 
 // registryLockRetry bounds the brief retry on the registry flock. A non-mutating
@@ -53,11 +51,10 @@ const (
 // PendingSerenaRemoval mark is reported as fresh for diagnostics while the
 // repair asks the liveness fence whether the teardown is actually still alive.
 //
-// Sizing: the marked window is [SetSerenaPendingRemoval(true) ->
-// RemoveSerenaIntent -> DeleteSerenaRow] in PruneWorkspacePhases. Its slow leg
-// is RemoveSerenaIntent's live-supervisor reconcile nudge, bounded by
-// DefaultReconcileTimeout (30s); the two registry writes around it are
-// sub-second. 10 minutes is ~20x that worst case.
+// The teardown sequence is BeginSerenaPendingRemoval → RemoveSerenaIntent →
+// registry-row delete or exact rollback → final fence release. The timestamp
+// describes expected duration for diagnostics and legacy attribution; the fence
+// and generation decide current-owner liveness.
 //
 // The TTL is not the reclaim decision — the fence is (see
 // serena_removal_fence.go). Elapsed time cannot separate a teardown that
@@ -377,7 +374,7 @@ func (a *API) PreviewSerenaIntentRepairFromRegistry(stateDir string) (SerenaInte
 // reconcile). commit=false skips ONLY the final write + audit-event steps;
 // every read, lock, and classification decision is identical, so the two
 // modes can never diverge on WHICH rows are orphaned/deferred/skipped.
-func repairSerenaIntentFromRegistry(stateDir string, commit bool) (SerenaIntentRepairResult, error) {
+func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result SerenaIntentRepairResult, err error) {
 	// 1. Resolve the registry + intent paths. stateDir is the SUPERVISOR's already-
 	//    resolved state root, threaded in by the caller — NOT re-resolved via
 	//    DaemonStateDir() here. The cli stateDirFunc honors MCPHUB_STATE_DIR_OVERRIDE
@@ -445,7 +442,23 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (SerenaIntentR
 	if !ok {
 		return skippedSerenaIntentRepairResult(SerenaIntentRepairOutcomeSkippedRegistryLock), nil
 	}
-	defer regUnlock()
+	defer func() {
+		if releaseErr := regUnlock(); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("serena intent repair: release registry lock: %w", releaseErr))
+			if commit {
+				repairEvents = append(repairEvents, serenaIntentRepairEvent{
+					severity: SupervisorEventSeverityError,
+					event:    "serena-intent-repair-lock-release-unconfirmed",
+					body: map[string]any{
+						"lock":                "registry",
+						"error":               releaseErr.Error(),
+						"release_unconfirmed": errors.Is(releaseErr, ErrLockReleaseUnconfirmed),
+						"restart_recovers":    true,
+					},
+				})
+			}
+		}
+	}()
 
 	if err := reg.Load(); err != nil {
 		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: load registry: %w", err))
@@ -461,15 +474,31 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (SerenaIntentR
 	//    registry via the earlier defer). The fresh locked read below is the
 	//    clobber-safety point: `missing` is computed from THIS read, never a
 	//    stale snapshot.
-	intentLock := flock.New(intentPath + supervisorIntentLockSuffix)
-	intentLocked, err := intentLock.TryLock()
+	intentLockPath := intentPath + supervisorIntentLockSuffix
+	intentRelease, intentLocked, err := tryLockLeafLedgered(intentLockPath)
 	if err != nil {
-		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentPath+supervisorIntentLockSuffix, err))
+		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentLockPath, err))
 	}
 	if !intentLocked {
 		return skippedSerenaIntentRepairResult(SerenaIntentRepairOutcomeSkippedIntentLock), nil
 	}
-	defer func() { _ = intentLock.Unlock() }()
+	defer func() {
+		if releaseErr := intentRelease(); releaseErr != nil {
+			err = errors.Join(err, fmt.Errorf("serena intent repair: release supervisor-intent lock: %w", releaseErr))
+			if commit {
+				repairEvents = append(repairEvents, serenaIntentRepairEvent{
+					severity: SupervisorEventSeverityError,
+					event:    "serena-intent-repair-lock-release-unconfirmed",
+					body: map[string]any{
+						"lock":                "supervisor-intent",
+						"error":               releaseErr.Error(),
+						"release_unconfirmed": errors.Is(releaseErr, ErrLockReleaseUnconfirmed),
+						"restart_recovers":    true,
+					},
+				})
+			}
+		}
+	}()
 
 	intent, rerr := ReadSupervisorIntent(intentPath)
 	if rerr != nil {
@@ -498,36 +527,11 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (SerenaIntentR
 		if ws.Language != SerenaLanguageSentinel || ws.WorkspacePath == "" {
 			continue
 		}
-		// Mid-unregister guard (unregister-resurrects-serena-intent fix). A row
-		// PruneWorkspacePhases has flagged PendingSerenaRemoval is DELIBERATELY
-		// being torn down: its matching intent descriptor was just removed (or is
-		// about to be) and a reconcile was nudged in the SAME window this repair
-		// can run in. Without this check, that transient
-		// registry-row-present/intent-row-absent state is indistinguishable from
-		// a genuine crash-orphan, and repair would re-append the very row the
-		// operator just unregistered. Skip silently — not a defer, not a warning:
-		// this is expected, self-resolving state (the row disappears for good once
-		// DeleteSerenaRow commits, or the flag clears if the teardown fails and a
-		// normal orphan classification applies on the next pass).
-		//
-		// "Self-resolving" holds for a teardown that RUNS to a verdict; it does
-		// NOT hold for one that is INTERRUPTED after the mark and the descriptor
-		// removal but before DeleteSerenaRow (the process is killed, or that
-		// delete's registry write fails) — nothing then ever clears the flag, and
-		// an unconditional skip here would strand the row forever: no daemon in
-		// the intent, the resolver still routing to it, and `mcphub workspace
-		// register` still rejecting it as already registered. So the mark must be
-		// reclaimable — but ONLY once its owner is provably gone.
-		//
-		// The FENCE is the load-bearing reclaim gate. A wall-clock lease measures
-		// elapsed time, not liveness, and this repair is event-driven: honoring a
-		// fresh mark without probing can strand a row forever after the single pass
-		// observes a crashed unregister. The kernel releases the fence when its
-		// holder dies, so a live-but-slow teardown keeps its row while a killed one
-		// is recovered immediately only when the free fence generation exactly
-		// matches the generation persisted in this mark. Missing or mismatched
-		// metadata is unattributed legacy state: preserve a fresh lease, then
-		// recover after expiry. Never retrofit a token to an old mark.
+		// Pending-removal classification is fence-owned: a held/live owner is
+		// preserved and reported incomplete; a free exact generation is reclaimed
+		// immediately; missing generation uses the legacy lease fallback; and a
+		// mismatched generation or probe failure is preserved fail-closed. Clearing
+		// a reclaimed tuple is recovery behavior, not failed-teardown rollback.
 		if ws.PendingSerenaRemoval {
 			leaseFresh := pendingSerenaRemovalLeaseFresh(ws.PendingSerenaRemovalAt, now)
 			fence, ferr := observeSerenaRemovalFenceFn(registryDir, ws.WorkspaceKey)
@@ -802,8 +806,9 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (SerenaIntentR
 	return finalizedSerenaIntentRepairResult(len(newDaemons), deferredLegacy, repairIncomplete, recoveredRemovalMarks), nil
 }
 
-// clearReclaimedSerenaRemovalMarks drops the PendingSerenaRemoval flag (and its
-// stamp) from each given row and commits the registry.
+// clearReclaimedSerenaRemovalMarks clears the complete flag/timestamp/generation
+// tuple after successful reclamation classification. It is the recovery-only
+// owner for that clear.
 //
 // Callers MUST already hold the registry flock: reg is the SAME already-loaded
 // *Registry the repair classified from, and (*Registry).Save takes no internal
@@ -846,7 +851,7 @@ func missingWorkspaceKeys(entries []WorkspaceEntry) []string {
 // (unlock, true, nil) on success, (nil, false, nil) if every attempt found the
 // lock contended, or (nil, false, err) on a real filesystem error. See the
 // registryLockRetry constants for why a single TryLock-then-skip is too eager.
-func tryLockRegistryBrief(reg *Registry) (func(), bool, error) {
+func tryLockRegistryBrief(reg *Registry) (func() error, bool, error) {
 	for attempt := range registryLockRetryAttempts {
 		unlock, ok, err := reg.TryLock()
 		if err != nil {

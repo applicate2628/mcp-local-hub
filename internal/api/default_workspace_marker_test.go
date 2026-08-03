@@ -126,15 +126,15 @@ func TestClearDefaultWorkspaceForAbsentSerenaRegistration(t *testing.T) {
 					t.Fatalf("lock registry: %v", err)
 				}
 				if err := reg.Load(); err != nil {
-					unlock()
+					assertRegistryReleased(t, unlock)
 					t.Fatalf("load registry: %v", err)
 				}
 				tt.seed(reg, workspaceKey, canonical)
 				if err := reg.Save(); err != nil {
-					unlock()
+					assertRegistryReleased(t, unlock)
 					t.Fatalf("save registry: %v", err)
 				}
-				unlock()
+				assertRegistryReleased(t, unlock)
 			}
 
 			gotOutcome, err := ClearDefaultWorkspaceForAbsentSerenaRegistration(regPath, workspaceKey, canonical)
@@ -219,7 +219,7 @@ func TestDefaultMarkerCompensation_HoldsRegistryThroughMarkerCAS(t *testing.T) {
 		t.Fatalf("probe registry lock: %v", err)
 	}
 	if registryLocked {
-		registryUnlock()
+		assertRegistryReleased(t, registryUnlock)
 		t.Fatal("registry lock was released before the marker CAS completed")
 	}
 

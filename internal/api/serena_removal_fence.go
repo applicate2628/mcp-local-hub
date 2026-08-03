@@ -6,8 +6,9 @@
 // PendingSerenaRemoval so RepairSerenaIntentFromRegistry can tell "deliberately
 // being torn down" apart from "orphaned by a crash" and skip it instead of
 // re-appending the descriptor the teardown just removed. That mark alone is not
-// enough: an unregister that is KILLED between the mark and its DeleteSerenaRow
-// leaves the mark set with nobody left to clear it, so the repair also needs a
+// enough: an unregister interrupted after BeginSerenaPendingRemoval but before
+// row deletion or rollback completes leaves the mark set with nobody left to
+// clear it, so the repair also needs a
 // way to reclaim the row. The first answer to that was a wall-clock lease
 // (serenaPendingRemovalLeaseTTL) — but elapsed time is not liveness. A teardown
 // that is merely SLOW (its RemoveSerenaIntent blocks on supervisor-intent.json's
@@ -70,12 +71,23 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/gofrs/flock"
 )
+
+// ErrSerenaRemovalFenceReleaseFailed classifies a fence release that could not
+// be confirmed. The caller may still hold the fence, even if its teardown
+// mutations committed.
+var ErrSerenaRemovalFenceReleaseFailed = errors.New("serena removal fence: release could not be confirmed; this process may still hold the fence")
+
+// serenaRemovalFenceUnlockFn is the injectable release seam. Production uses
+// (*flock.Flock).Unlock; tests use it to exercise an unlock failure that a
+// healthy filesystem cannot deterministically produce.
+var serenaRemovalFenceUnlockFn = func(fl *flock.Flock) error { return fl.Unlock() }
 
 // serenaRemovalFenceDirLeaf is the subdirectory (alongside workspaces.yaml)
 // holding one fence leaf per workspace. A dedicated directory keeps these
@@ -129,12 +141,11 @@ func validSerenaRemovalFenceKey(workspaceKey string) bool {
 }
 
 // AcquireSerenaRemovalFence takes the per-workspace unregister fence and returns
-// its release closure. The caller MUST hold it across the ENTIRE marked window
-// — from before SetSerenaPendingRemoval(true) until after the registry-row
-// delete (or after the failure path has cleared the mark again) — so a repair
-// running at any instant inside that window observes a live owner. Acquiring it
-// after the mark write would leave a gap in which the mark is set and the fence
-// is free, i.e. exactly the state the repair reads as reclaimable debris.
+// its release closure. The fence is acquired before generation publication and
+// BeginSerenaPendingRemoval, remains held across intent teardown, and is
+// released only after row deletion or the returned exact rollback. Acquiring it
+// after Begin or releasing it before the delete/rollback verdict exposes a false
+// reclaimable window.
 //
 // The acquire is BLOCKING, which makes the fence a per-workspace mutex between
 // concurrent teardowns as well (a second `mcphub workspace unregister` / GUI
@@ -147,8 +158,12 @@ func validSerenaRemovalFenceKey(workspaceKey string) bool {
 // lock, a blocking wait here can only ever wait on another teardown of the SAME
 // workspace.
 //
+// The returned release reports whether the lock was actually dropped. A failed
+// release leaves this process appearing live to repair and blocks a later
+// teardown for this workspace, so callers must not report a clean teardown.
+//
 // registryDir is filepath.Dir of the caller's already-resolved registry path.
-func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func(), err error) {
+func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func() error, err error) {
 	if registryDir == "" {
 		return nil, fmt.Errorf("serena removal fence: empty registry dir (caller must thread the resolved registry directory)")
 	}
@@ -163,7 +178,15 @@ func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func()
 	if err := fl.Lock(); err != nil {
 		return nil, fmt.Errorf("serena removal fence: lock %s: %w", path, err)
 	}
-	return func() { _ = fl.Unlock() }, nil
+	// Capture the seam once so a held release closure cannot observe a test
+	// cleanup restoring the package variable while it is in flight.
+	unlockFn := serenaRemovalFenceUnlockFn
+	return func() error {
+		if unlockErr := unlockFn(fl); unlockErr != nil {
+			return fmt.Errorf("%w: %s: %w", ErrSerenaRemovalFenceReleaseFailed, path, unlockErr)
+		}
+		return nil
+	}, nil
 }
 
 // PublishSerenaRemovalFenceGeneration atomically replaces the sidecar metadata
@@ -231,6 +254,11 @@ func readSerenaRemovalFenceGeneration(registryDir, workspaceKey string) (string,
 	return generation, nil
 }
 
+// readSerenaRemovalFenceGenerationFn is the observation seam for the rare case
+// where generation read and self-release both fail. Production always uses the
+// canonical sidecar reader.
+var readSerenaRemovalFenceGenerationFn = readSerenaRemovalFenceGeneration
+
 // observeSerenaRemovalFence reports the current per-workspace fence state. It
 // deliberately preserves both existence and lock state:
 //
@@ -241,7 +269,8 @@ func readSerenaRemovalFenceGeneration(registryDir, workspaceKey string) (string,
 //     destructive decision MUST treat this as "assume held" and fail closed;
 //     answering "free" on a probe error would silently disable the fence on
 //     exactly the locked-down / AV-instrumented hosts where a flock syscall can
-//     error instead of cleanly reporting contention.
+//     error instead of cleanly reporting contention. A failed self-release is
+//     also undeterminable: the probe now holds the fence it was measuring.
 //
 // A MISSING leaf is observed without error and answered by a stat WITHOUT
 // touching the lock: flock.New opens with O_CREATE, so probing a never-used
@@ -268,15 +297,25 @@ func observeSerenaRemovalFence(registryDir, workspaceKey string) (serenaRemovalF
 		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: stat %s: %w", path, statErr)
 	}
 	fl := flock.New(path)
+	// Bind the probe's release behavior to this observation. If it fails, the
+	// acquired handle remains held and the result must be undeterminable.
+	unlockFn := serenaRemovalFenceUnlockFn
 	locked, lerr := fl.TryLock()
 	if lerr != nil {
 		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: try-lock %s: %w", path, lerr)
 	}
 	if locked {
-		generation, generationErr := readSerenaRemovalFenceGeneration(registryDir, workspaceKey)
-		_ = fl.Unlock() // we only asked a question; never keep the fence
-		if generationErr != nil {
-			return serenaRemovalFenceObservation{}, generationErr
+		generation, generationErr := readSerenaRemovalFenceGenerationFn(registryDir, workspaceKey)
+		unlockErr := unlockFn(fl)
+		if generationErr != nil || unlockErr != nil {
+			var causes []error
+			if generationErr != nil {
+				causes = append(causes, generationErr)
+			}
+			if unlockErr != nil {
+				causes = append(causes, fmt.Errorf("%w: %s: %w", ErrSerenaRemovalFenceReleaseFailed, path, unlockErr))
+			}
+			return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: %w", errors.Join(causes...))
 		}
 		return serenaRemovalFenceObservation{exists: true, generation: generation}, nil
 	}

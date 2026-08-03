@@ -324,13 +324,22 @@ func (r *WorkspaceResolver) refresh() {
 
 	unlock, err := r.reg.Lock()
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "lsp_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
 		return
 	}
-	defer unlock()
-	if err := r.reg.Load(); err != nil {
+	loadErr := r.reg.Load()
+	releaseErr := unlock()
+	if loadErr != nil {
+		fmt.Fprintf(os.Stderr, "lsp_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, loadErr)
+		if releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "lsp_routing: release registry %s: %v; preserving cached snapshot\n", r.registryPath, releaseErr)
+		}
 		return
 	}
 	entries := r.reg.LSPEntries()
+	if releaseErr != nil {
+		fmt.Fprintf(os.Stderr, "lsp_routing: release registry %s: %v; retaining loaded snapshot\n", r.registryPath, releaseErr)
+	}
 
 	r.mu.Lock()
 	r.cached = entries

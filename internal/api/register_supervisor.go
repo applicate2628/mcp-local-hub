@@ -76,14 +76,14 @@ func BuildSupervisorDaemonForLSP(entry WorkspaceEntry, mcphubBinaryPath string) 
 // loaded registry. See LSPRegistryRowBacksDescriptorIn for the shared
 // predicate and fail-open contract; this wrapper just adds the per-call
 // load around it.
-func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
-	reg, ok := OpenLSPRegistryForReconcile()
+func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) (bool, error) {
+	reg, ok, err := OpenLSPRegistryForReconcile()
 	if !ok {
 		// Load/lock failure — fail OPEN (never suppress a legitimate spawn
 		// on a transient registry hiccup).
-		return true
+		return true, err
 	}
-	return LSPRegistryRowBacksDescriptorIn(d, reg)
+	return LSPRegistryRowBacksDescriptorIn(d, reg), err
 }
 
 // OpenLSPRegistryForReconcile loads workspaces.yaml ONCE (brief-retry lock,
@@ -99,22 +99,29 @@ func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
 // releases the flock immediately after Load succeeds — a long-held lock
 // across an entire reconcile pass would otherwise contend with concurrent
 // registry writers (workspace register/unregister) for no benefit.
-func OpenLSPRegistryForReconcile() (*Registry, bool) {
+func OpenLSPRegistryForReconcile() (*Registry, bool, error) {
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	reg := NewRegistry(regPath)
 	unlock, ok, err := tryLockRegistryBrief(reg)
-	if err != nil || !ok {
-		return nil, false
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
 	}
 	loadErr := reg.Load()
-	unlock()
+	releaseErr := unlock()
+	return finishOpenLSPRegistryForReconcile(reg, loadErr, releaseErr)
+}
+
+func finishOpenLSPRegistryForReconcile(reg *Registry, loadErr, releaseErr error) (*Registry, bool, error) {
 	if loadErr != nil {
-		return nil, false
+		return nil, false, errors.Join(loadErr, releaseErr)
 	}
-	return reg, true
+	return reg, true, releaseErr
 }
 
 // LSPRegistryRowBacksDescriptorIn is the registry-injected form of
@@ -194,21 +201,17 @@ func (a *API) registerOneLanguageSupervised(
 	sch testScheduler,
 	allClients map[string]registerClient,
 	w io.Writer,
-	rollback *[]func(),
-) (WorkspaceEntry, error) {
+	rollback *[]func() error,
+) (result registerLanguageResult) {
 	unlock, err := reg.Lock()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
+		result.PrimaryErr = fmt.Errorf("acquire registry lock: %w", err)
+		return result
 	}
-	releaseUnlock := func() {
-		if unlock != nil {
-			unlock()
-			unlock = nil
-		}
-	}
-	defer releaseUnlock()
+	defer func() { ReleaseAndJoin(&result.ReleaseErr, unlock) }()
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
+		result.PrimaryErr = fmt.Errorf("load registry: %w", err)
+		return result
 	}
 
 	prior, had := reg.Get(wsKey, lang)
@@ -218,32 +221,36 @@ func (a *API) registerOneLanguageSupervised(
 	} else {
 		p, err := AllocatePort(reg, *m.PortPool)
 		if err != nil {
-			return WorkspaceEntry{}, err
+			result.PrimaryErr = err
+			return result
 		}
 		port = p
 	}
 	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, lang)
 	canonicalExe, err := canonicalMcphubPath()
 	if err != nil {
-		return WorkspaceEntry{}, err
+		result.PrimaryErr = err
+		return result
 	}
 	if _, err := os.Stat(canonicalExe); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		result.PrimaryErr = fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		return result
 	}
 
 	var priorXML []byte
 	if xml, err := sch.ExportXML(taskName); err == nil {
 		priorXML = xml
 	} else if !errors.Is(err, scheduler.ErrTaskNotFound) {
-		return WorkspaceEntry{}, fmt.Errorf("export prior task %s: %w", taskName, err)
+		result.PrimaryErr = fmt.Errorf("export prior task %s: %w", taskName, err)
+		return result
 	}
 	capturedTaskName := taskName
 	capturedPriorXML := priorXML
 	capturedPort := port
 	legacyTaskDeleted := false
-	*rollback = append(*rollback, func() {
+	*rollback = append(*rollback, func() error {
 		if !legacyTaskDeleted {
-			return
+			return nil
 		}
 		if capturedPort > 0 {
 			_ = killByPortFn(capturedPort, 5*time.Second)
@@ -253,15 +260,18 @@ func (a *API) registerOneLanguageSupervised(
 			_ = sch.Run(capturedTaskName)
 			fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
 		}
+		return nil
 	})
 	if (had || len(priorXML) > 0) && port > 0 {
 		legacyPortReady := proxyReadinessFn(port, lspExistingProxyProbeTimeout) == nil
 		if err := killObservedLiveLSPProxy(port, taskName, legacyPortReady); err != nil {
-			return WorkspaceEntry{}, err
+			result.PrimaryErr = err
+			return result
 		}
 	}
 	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
-		return WorkspaceEntry{}, fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)
+		result.PrimaryErr = fmt.Errorf("delete legacy task %s before supervised promote: %w", taskName, err)
+		return result
 	}
 	legacyTaskDeleted = len(priorXML) > 0
 
@@ -301,48 +311,63 @@ func (a *API) registerOneLanguageSupervised(
 		Lifecycle:     LifecycleConfigured,
 	}
 	if err := reg.PutLSP(composedEntry); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
+		result.PrimaryErr = fmt.Errorf("register: composed LSP-row write rejected: %w", err)
+		return result
 	}
 	if err := reg.Save(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
+		result.PrimaryErr = fmt.Errorf("persist registry: %w", err)
+		return result
 	}
 	capturedRegKey := wsKey
 	capturedRegLang := lang
 	capturedHad := had
 	capturedPrior := prior
-	*rollback = append(*rollback, func() {
+	*rollback = append(*rollback, func() (err error) {
 		unlock, err := reg.Lock()
 		if err != nil {
 			fmt.Fprintf(w, "  rollback: could not lock registry for %s/%s: %v\n", capturedRegKey, capturedRegLang, err)
-			return
+			return err
 		}
-		defer unlock()
+		defer ReleaseAndJoin(&err, unlock)
 		if err := reg.Load(); err != nil {
 			fmt.Fprintf(w, "  rollback: could not reload registry for %s/%s: %v\n", capturedRegKey, capturedRegLang, err)
-			return
+			return err
 		}
 		if capturedHad {
 			reg.Put(capturedPrior)
-			_ = reg.Save()
+			if err := reg.Save(); err != nil {
+				return err
+			}
 			fmt.Fprintf(w, "  rollback: restored prior registry entry %s/%s\n", capturedRegKey, capturedRegLang)
-			return
+			return nil
 		}
 		reg.Remove(capturedRegKey, capturedRegLang)
-		_ = reg.Save()
+		if err := reg.Save(); err != nil {
+			return err
+		}
 		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
+		return nil
 	})
-	releaseUnlock()
+	releaseErr := unlock()
+	unlock = nil
+	if releaseErr != nil {
+		result.Entry = composedEntry
+		result.ReleaseErr = releaseErr
+		return result
+	}
 
 	unlock, err = reg.Lock()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("re-acquire registry lock: %w", err)
+		result.PrimaryErr = fmt.Errorf("re-acquire registry lock: %w", err)
+		return result
 	}
-	defer releaseUnlock()
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("reload registry: %w", err)
+		result.PrimaryErr = fmt.Errorf("reload registry: %w", err)
+		return result
 	}
 	if _, ok := reg.Get(wsKey, lang); !ok {
-		return WorkspaceEntry{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		result.PrimaryErr = fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		return result
 	}
 	for _, b := range bindingsPre {
 		client, ok := allClients[b.Client]
@@ -364,7 +389,8 @@ func (a *API) registerOneLanguageSupervised(
 		// the non-supervised register loop.
 		priorEntry, err := client.GetEntry(entryName)
 		if err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
+			result.PrimaryErr = fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
+			return result
 		}
 		urlPath := b.URLPath
 		if urlPath == "" {
@@ -375,13 +401,14 @@ func (a *API) registerOneLanguageSupervised(
 			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
 		}
 		if err := client.AddEntry(entry); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
+			result.PrimaryErr = fmt.Errorf("write %s entry: %w", b.Client, err)
+			return result
 		}
 		clientRef := client
 		savedPrior := priorEntry
 		capturedName := entryName
 		capturedClientName := b.Client
-		*rollback = append(*rollback, func() {
+		*rollback = append(*rollback, func() error {
 			// See install.go rollback: a mimo prior sourced BELOW the write target
 			// (config.json) or from the ~/.claude.json import must NOT be copied up
 			// (permanent shadow + import-credential leak — bot PR #420 finding 1).
@@ -390,18 +417,26 @@ func (a *API) registerOneLanguageSupervised(
 			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
 				_ = clientRef.AddEntry(*savedPrior)
 				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
-				return
+				return nil
 			}
 			_ = clientRef.RemoveEntry(capturedName)
 			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", capturedName, capturedClientName)
+			return nil
 		})
 		fmt.Fprintf(w, "✓ %s → %s (entry %s)\n", b.Client, entry.URL, entryName)
 	}
-	releaseUnlock()
+	releaseErr = unlock()
+	unlock = nil
+	if releaseErr != nil {
+		result.Entry = composedEntry
+		result.ReleaseErr = releaseErr
+		return result
+	}
 
 	restoreIntent, err := a.upsertLSPSupervisorIntent(composedEntry, canonicalExe)
 	if err != nil {
-		return WorkspaceEntry{}, err
+		result.PrimaryErr = err
+		return result
 	}
 	// reconcileAttempted gates the rollback kill-by-port. The spawn TRIGGER is
 	// not proxy readiness — it is the
@@ -414,14 +449,16 @@ func (a *API) registerOneLanguageSupervised(
 	// reconcile is about to fire; killByPort is a no-op when nothing is bound, so
 	// killing on a reconcile that never actually spawned is harmless.
 	reconcileAttempted := false
-	*rollback = append(*rollback, func() {
+	*rollback = append(*rollback, func() error {
 		if reconcileAttempted && port > 0 {
 			_ = killByPortFn(port, 5*time.Second)
 		}
 		restoreIntent()
+		return nil
 	})
 	if canonicalTaskName, err := a.writeRegisterRunningIntentForTask(taskName); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
+		result.PrimaryErr = fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
+		return result
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
 	defer cancel()
@@ -429,14 +466,17 @@ func (a *API) registerOneLanguageSupervised(
 	// reconcile can bind the port, so the rollback must own a port kill.
 	reconcileAttempted = true
 	if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+		result.PrimaryErr = fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+		return result
 	}
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		result.PrimaryErr = fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		return result
 	}
 	fmt.Fprintf(w, "✓ Supervisor-managed LSP proxy started: %s\n", LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang))
 	a.recordRegisterIntentForTask(taskName, w)
-	return composedEntry, nil
+	result.Entry = composedEntry
+	return result
 }
 
 func resolveWorkspaceScopedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {

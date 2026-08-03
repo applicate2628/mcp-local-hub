@@ -45,7 +45,7 @@ func seedOrphanSerenaRegistryRow(t *testing.T, regPath, workspacePath string, po
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestReconcileIPC_SerenaRepairLockSkipsRemainOK(t *testing.T) {
 				t.Fatalf("read registry before: %v", err)
 			}
 
-			var release func()
+			var release func() error
 			switch tt.lock {
 			case registryLock:
 				reg := api.NewRegistry(registryPath)
@@ -378,11 +378,11 @@ func TestReconcileIPC_SerenaRepairLockSkipsRemainOK(t *testing.T) {
 				if !locked {
 					t.Fatal("could not acquire intent lock to simulate contention")
 				}
-				release = func() { _ = lock.Unlock() }
+				release = lock.Unlock
 			default:
 				t.Fatalf("unknown lock kind %q", tt.lock)
 			}
-			defer release()
+			defer assertRegistryReleased(t, release)
 			conn := newFakeIPCConn()
 			req := api.IPCRequest{ID: 1100, Cmd: "reconcile", Args: map[string]any{"apply": tt.apply}}
 			if err := handleReconcile(conn, req, fx.deps); err != nil {

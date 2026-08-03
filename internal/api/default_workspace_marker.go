@@ -137,13 +137,13 @@ var defaultMarkerCompensationMarkerLockHeldFn = func() {}
 // identity. A row under workspaceKey with a different canonical path is an
 // integrity contradiction and fails closed. A row under any key with the same
 // canonical path is a current registration and preserves the marker.
-func ClearDefaultWorkspaceForAbsentSerenaRegistration(registryPath, workspaceKey, canonical string) (DefaultMarkerCompensationOutcome, error) {
+func ClearDefaultWorkspaceForAbsentSerenaRegistration(registryPath, workspaceKey, canonical string) (outcome DefaultMarkerCompensationOutcome, err error) {
 	reg := NewRegistry(registryPath)
 	unlock, err := reg.Lock()
 	if err != nil {
 		return "", fmt.Errorf("lock registry before default marker compensation: %w", err)
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock)
 
 	if err := reg.Load(); err != nil {
 		return "", fmt.Errorf("load registry before default marker compensation: %w", err)

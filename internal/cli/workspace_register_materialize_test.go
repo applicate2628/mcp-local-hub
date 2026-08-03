@@ -663,7 +663,7 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterDeletesRow_HonestAbsenceMes
 		if err := reg.Save(); err != nil {
 			t.Fatalf("save registry inside stub: %v", err)
 		}
-		unlock()
+		assertRegistryReleased(t, unlock)
 		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 
@@ -782,7 +782,7 @@ func TestWorkspaceRegisterSerena_ReplacedGeneration_NotSettled(t *testing.T) {
 		if err != nil {
 			return api.ReconcileResponse{}, err
 		}
-		defer unlock()
+		defer assertRegistryReleased(t, unlock)
 		if err := reg.Load(); err != nil {
 			return api.ReconcileResponse{}, err
 		}

@@ -37,7 +37,7 @@ func stubClearDefaultMarker(t *testing.T, regPath string) *[]clearMarkerCall {
 			t.Errorf("probe registry lock during the marker clear: %v", err)
 		}
 		if ok {
-			unlock()
+			assertRegistryReleased(t, unlock)
 		}
 		calls = append(calls, clearMarkerCall{
 			stateDir:       stateDir,
@@ -151,7 +151,7 @@ func TestWorkspaceUnregister_ZeroRowDeleteLeavesTheDefaultMarkerAlone(t *testing
 		if err != nil {
 			t.Fatalf("lock registry inside the teardown seam: %v", err)
 		}
-		defer unlock()
+		defer assertRegistryReleased(t, unlock)
 		if err := reg.Load(); err != nil {
 			t.Fatalf("load registry inside the teardown seam: %v", err)
 		}

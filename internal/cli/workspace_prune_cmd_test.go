@@ -28,7 +28,7 @@ func seedSerenaRow(t *testing.T, canonical string) {
 	if err != nil {
 		t.Fatalf("lock: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load: %v", err)
 	}
@@ -245,7 +245,7 @@ func TestWorkspacePrune_IdleAddsCandidates(t *testing.T) {
 	}
 	key := api.WorkspaceKey(idleCanon)
 	if err := reg.Load(); err != nil {
-		unlock()
+		assertRegistryReleased(t, unlock)
 		t.Fatalf("load: %v", err)
 	}
 	e := api.WorkspaceEntry{
@@ -258,14 +258,14 @@ func TestWorkspacePrune_IdleAddsCandidates(t *testing.T) {
 	}
 	e.LastToolsCallAt = time.Now().Add(-72 * time.Hour)
 	if err := reg.PutSerena(e); err != nil {
-		unlock()
+		assertRegistryReleased(t, unlock)
 		t.Fatalf("PutSerena: %v", err)
 	}
 	if err := reg.Save(); err != nil {
-		unlock()
+		assertRegistryReleased(t, unlock)
 		t.Fatalf("save: %v", err)
 	}
-	unlock()
+	assertRegistryReleased(t, unlock)
 
 	// Without --idle, the structural-only run finds no orphan.
 	out, err := runWorkspacePruneCmd(t, "", "--dry-run")

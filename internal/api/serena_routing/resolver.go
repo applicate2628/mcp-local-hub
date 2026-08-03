@@ -134,17 +134,24 @@ func (r *WorkspaceResolver) refresh() {
 		fmt.Fprintf(os.Stderr, "serena_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
 		return
 	}
-	defer unlock()
-	if err := r.reg.Load(); err != nil {
+	loadErr := r.reg.Load()
+	releaseErr := unlock()
+	if loadErr != nil {
 		// The registry file exists and was locked, but parsing/loading it failed
 		// (e.g. a malformed YAML after an operator hand-edit). Same fail-loud
 		// diagnostic as the lock-error and stat-error paths: surface the load
 		// failure so a stale cached view being served is operator-visible,
 		// while still preserving the prior snapshot for routing availability.
-		fmt.Fprintf(os.Stderr, "serena_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
+		fmt.Fprintf(os.Stderr, "serena_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, loadErr)
+		if releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "serena_routing: release registry %s: %v; preserving cached snapshot\n", r.registryPath, releaseErr)
+		}
 		return
 	}
 	entries := r.reg.SerenaEntries()
+	if releaseErr != nil {
+		fmt.Fprintf(os.Stderr, "serena_routing: release registry %s: %v; retaining loaded snapshot\n", r.registryPath, releaseErr)
+	}
 
 	r.mu.Lock()
 	r.cached = entries

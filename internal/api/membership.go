@@ -7,11 +7,7 @@
 // acquire; one Registry.Save call.
 package api
 
-import (
-	"fmt"
-
-	"github.com/gofrs/flock"
-)
+import "fmt"
 
 // MembershipDelta is one (workspace_key, language) toggle. Memo D5.
 type MembershipDelta struct {
@@ -31,18 +27,18 @@ type MembershipDelta struct {
 //   - Atomic: one Registry.Save; either all named deltas persist or none.
 //   - Validation: every (workspace_key, language) MUST exist in the
 //     registry; otherwise return an error and skip the save.
-func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (int, error) {
+func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (updated int, err error) {
 	if len(deltas) == 0 {
 		return 0, nil
 	}
 
-	lock := flock.New(path + ".lock")
-	if err := lock.Lock(); err != nil {
+	reg := NewRegistry(path)
+	release, err := reg.Lock()
+	if err != nil {
 		return 0, fmt.Errorf("acquire lock: %w", err)
 	}
-	defer func() { _ = lock.Unlock() }()
+	defer ReleaseAndJoin(&err, release)
 
-	reg := NewRegistry(path)
 	if err := reg.Load(); err != nil {
 		return 0, fmt.Errorf("load registry: %w", err)
 	}
@@ -65,7 +61,7 @@ func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (int, 
 		}
 	}
 
-	updated := 0
+	updated = 0
 	for _, d := range deltas {
 		i := idx[[2]string{d.WorkspaceKey, d.Language}]
 		if reg.Workspaces[i].WeeklyRefresh != d.Enabled {

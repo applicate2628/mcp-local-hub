@@ -21,11 +21,45 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/gofrs/flock"
 )
+
+// failingFenceUnlock retains every handle whose release it rejects so cleanup
+// can explicitly release it after restoring the production seam.
+func failingFenceUnlock(t *testing.T, cause error) {
+	t.Helper()
+	previous := serenaRemovalFenceUnlockFn
+	var mu sync.Mutex
+	var retained []*flock.Flock
+	serenaRemovalFenceUnlockFn = func(fl *flock.Flock) error {
+		mu.Lock()
+		retained = append(retained, fl)
+		mu.Unlock()
+		return cause
+	}
+	t.Cleanup(func() {
+		serenaRemovalFenceUnlockFn = previous
+		mu.Lock()
+		handles := append([]*flock.Flock(nil), retained...)
+		mu.Unlock()
+		for _, fl := range handles {
+			if err := fl.Unlock(); err != nil {
+				t.Errorf("cleanup retained Serena removal fence: %v", err)
+			}
+		}
+	})
+}
+
+func releaseFenceOrFail(t *testing.T, release func() error) {
+	t.Helper()
+	if err := release(); err != nil {
+		t.Fatalf("release Serena removal fence: %v", err)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // The fence primitive itself.
@@ -72,7 +106,7 @@ func TestSerenaRemovalFence_AcquireMakesHolderObservable(t *testing.T) {
 		t.Error("probe reported HELD for an unrelated workspace key; the fence must be per-workspace")
 	}
 
-	release()
+	releaseFenceOrFail(t, release)
 
 	// Released → free again. (A killed holder reaches this same state via the
 	// kernel dropping its flock, which is why the fence answers liveness.)
@@ -119,15 +153,15 @@ func TestSerenaRemovalFence_GenerationDoesNotReplaceLeaf(t *testing.T) {
 	}
 	before, err := os.Stat(serenaRemovalFencePath(dir, key))
 	if err != nil {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("stat leaf before publish: %v", err)
 	}
 	first, err := PublishSerenaRemovalFenceGeneration(dir, key)
 	if err != nil {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("PublishSerenaRemovalFenceGeneration first: %v", err)
 	}
-	release()
+	releaseFenceOrFail(t, release)
 
 	release, err = AcquireSerenaRemovalFence(dir, key)
 	if err != nil {
@@ -135,11 +169,11 @@ func TestSerenaRemovalFence_GenerationDoesNotReplaceLeaf(t *testing.T) {
 	}
 	second, err := PublishSerenaRemovalFenceGeneration(dir, key)
 	if err != nil {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("PublishSerenaRemovalFenceGeneration second: %v", err)
 	}
 	after, err := os.Stat(serenaRemovalFencePath(dir, key))
-	release()
+	releaseFenceOrFail(t, release)
 	if err != nil {
 		t.Fatalf("stat leaf after publish: %v", err)
 	}
@@ -160,7 +194,7 @@ func TestSerenaRemovalFence_GenerationPublishFailurePreservesCompleteOldValueAnd
 	}
 	oldGeneration, err := PublishSerenaRemovalFenceGeneration(dir, key)
 	if err != nil {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("initial PublishSerenaRemovalFenceGeneration: %v", err)
 	}
 	publicationErr := errors.New("injected canonical state writer failure")
@@ -168,10 +202,10 @@ func TestSerenaRemovalFence_GenerationPublishFailurePreservesCompleteOldValueAnd
 	writeSerenaRemovalFenceGenerationFn = func(string, []byte) error { return publicationErr }
 	t.Cleanup(func() { writeSerenaRemovalFenceGenerationFn = previousWriter })
 	if _, err := PublishSerenaRemovalFenceGeneration(dir, key); !errors.Is(err, publicationErr) {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("publish error = %v, want %v", err, publicationErr)
 	}
-	release()
+	releaseFenceOrFail(t, release)
 	got, err := os.ReadFile(serenaRemovalFenceGenerationPath(dir, key))
 	if err != nil {
 		t.Fatalf("read retained generation: %v", err)
@@ -226,7 +260,7 @@ func TestSerenaRemovalFence_ExcludesASecondHolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
 	}
-	defer release()
+	defer func() { releaseFenceOrFail(t, release) }()
 
 	second := flock.New(serenaRemovalFencePath(dir, key))
 	locked, err := second.TryLock()
@@ -236,6 +270,54 @@ func TestSerenaRemovalFence_ExcludesASecondHolder(t *testing.T) {
 	if locked {
 		_ = second.Unlock()
 		t.Fatal("a second holder acquired the fence while the first held it; concurrent teardowns could interleave their mark/clear")
+	}
+}
+
+func TestSerenaRemovalFenceHeld_UnconfirmedProbeReleaseIsUndeterminable(t *testing.T) {
+	dir := t.TempDir()
+	const key = "c0ffee00"
+
+	// Create a stale leaf first, while normal unlock behavior is installed, so
+	// the probe takes the free-lock branch rather than the missing-leaf branch.
+	release, err := AcquireSerenaRemovalFence(dir, key)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	releaseFenceOrFail(t, release)
+
+	unlockErr := errors.New("simulated UnlockFileEx failure")
+	failingFenceUnlock(t, unlockErr)
+	held, err := serenaRemovalFenceHeld(dir, key)
+	if err == nil {
+		t.Fatal("probe reported a clean free verdict after it could not release the lock it acquired")
+	}
+	if held {
+		t.Fatalf("held = true with an unconfirmed probe release; want undeterminable false/error")
+	}
+	if !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) || !errors.Is(err, unlockErr) {
+		t.Fatalf("err = %v, want release sentinel and unlock cause", err)
+	}
+}
+
+func TestObserveSerenaRemovalFence_JoinsGenerationReadAndReleaseErrors(t *testing.T) {
+	dir := t.TempDir()
+	const key = "c0ffee01"
+	release, err := AcquireSerenaRemovalFence(dir, key)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	releaseFenceOrFail(t, release) // retain a leaf so observe takes the lock path.
+
+	readErr := errors.New("simulated generation read failure")
+	previousRead := readSerenaRemovalFenceGenerationFn
+	readSerenaRemovalFenceGenerationFn = func(string, string) (string, error) { return "", readErr }
+	t.Cleanup(func() { readSerenaRemovalFenceGenerationFn = previousRead })
+	unlockErr := errors.New("simulated UnlockFileEx failure")
+	failingFenceUnlock(t, unlockErr)
+
+	_, err = observeSerenaRemovalFence(dir, key)
+	if !errors.Is(err, readErr) || !errors.Is(err, unlockErr) || !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) {
+		t.Fatalf("err = %v, want generation-read, unlock, and release-sentinel causes", err)
 	}
 }
 
@@ -283,7 +365,7 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceDecides(t *testing.T) 
 		if err != nil {
 			t.Fatalf("acquire fence for the slow teardown: %v", err)
 		}
-		defer release()
+		defer func() { releaseFenceOrFail(t, release) }()
 
 		before, err := os.ReadFile(intentPath)
 		if err != nil {
@@ -332,7 +414,7 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceDecides(t *testing.T) 
 		if err != nil {
 			t.Fatalf("acquire fence: %v", err)
 		}
-		release()
+		releaseFenceOrFail(t, release)
 
 		repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 		if err != nil {
@@ -376,6 +458,38 @@ func TestRepairSerenaIntentFromRegistry_ExpiredLease_FenceProbeError_FailsClosed
 	}
 	if row := readSerenaRowFresh(t, regPath, slowKey); !row.PendingSerenaRemoval {
 		t.Error("the mark was cleared on an unobservable fence; fail-closed means leaving it for a pass that can actually observe liveness")
+	}
+}
+
+func TestRepairSerenaIntentFromRegistry_ExpiredLease_ProbeReleaseFailure_FailsClosed(t *testing.T) {
+	regPath, intentPath, slowKey := seedSlowUnregisterState(t)
+	release, err := AcquireSerenaRemovalFence(filepath.Dir(regPath), slowKey)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	releaseFenceOrFail(t, release)
+
+	failingFenceUnlock(t, errors.New("simulated UnlockFileEx failure"))
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before repair: %v", err)
+	}
+	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
+	if err != nil {
+		t.Fatalf("repair after unconfirmed probe release: %v", err)
+	}
+	if repaired != 0 {
+		t.Fatalf("repaired = %d, want 0 after an unconfirmed probe release", repaired)
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after repair: %v", err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("repair rewrote supervisor intent after an unconfirmed probe release")
+	}
+	if row := readSerenaRowFresh(t, regPath, slowKey); !row.PendingSerenaRemoval {
+		t.Fatal("repair cleared a pending-removal mark after an unconfirmed probe release")
 	}
 }
 
@@ -433,7 +547,7 @@ func TestPreviewSerenaIntentRepairFromRegistry_LiveFence_MatchesApplyAndWritesNo
 	if err != nil {
 		t.Fatalf("acquire fence: %v", err)
 	}
-	defer release()
+	defer func() { releaseFenceOrFail(t, release) }()
 
 	before, err := os.ReadFile(intentPath)
 	if err != nil {
@@ -489,7 +603,7 @@ func TestRepairSerenaIntentFromRegistry_HeldFenceDoesNotStarveTheRegistryLock(t 
 	if err != nil {
 		t.Fatalf("acquire fence: %v", err)
 	}
-	defer release()
+	defer func() { releaseFenceOrFail(t, release) }()
 
 	// The repair acquires the registry lock, reads BOTH rows, and acts on the
 	// unfenced one — a fence that serialized against the registry lock would

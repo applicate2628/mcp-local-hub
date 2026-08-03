@@ -92,14 +92,16 @@ func TestRepairSerenaIntentFromRegistry_InterruptedUnregister_FreshLeaseRecovere
 	}
 	generation, err := PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), strandedKey)
 	if err != nil {
-		releaseFence()
+		releaseFenceOrFail(t, releaseFence)
 		t.Fatalf("PublishSerenaRemovalFenceGeneration: %v", err)
 	}
-	if err := NewRegistry(regPath).SetSerenaPendingRemovalGeneration(strandedKey, "", true, generation); err != nil {
-		releaseFence()
-		t.Fatalf("SetSerenaPendingRemovalGeneration: %v", err)
+	rollback, err := NewRegistry(regPath).BeginSerenaPendingRemoval(strandedKey, "", generation)
+	if err != nil || rollback == nil {
+		releaseFenceOrFail(t, releaseFence)
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
-	releaseFence()
+	_ = rollback // Model the crashed writer by deliberately retaining its tuple.
+	releaseFenceOrFail(t, releaseFence)
 	intentPath := seedIntent(t, &SupervisorIntentFile{
 		Version: 1,
 		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
@@ -133,15 +135,17 @@ func TestRepairSerenaIntentFromRegistry_FreshMismatchedGenerationPreservesLease(
 	}
 	currentGeneration, err := PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), pendingKey)
 	if err != nil {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("PublishSerenaRemovalFenceGeneration: %v", err)
 	}
-	release()
+	releaseFenceOrFail(t, release)
 	// A distinct valid identity models an older mark beside a newer retained
 	// sidecar. Repair must not treat the free inode as proof for that old mark.
-	if err := NewRegistry(regPath).SetSerenaPendingRemovalGeneration(pendingKey, "", true, "0123456789abcdef0123456789abcdef"); err != nil {
-		t.Fatalf("SetSerenaPendingRemovalGeneration: %v", err)
+	rollback, err := NewRegistry(regPath).BeginSerenaPendingRemoval(pendingKey, "", "0123456789abcdef0123456789abcdef")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
+	_ = rollback // Retain the simulated older tuple for repair classification.
 	if currentGeneration == "0123456789abcdef0123456789abcdef" {
 		t.Fatal("test precondition: independently generated token collided")
 	}
@@ -173,7 +177,7 @@ func TestRepairSerenaIntentFromRegistry_MalformedGenerationIsTypedIncomplete(t *
 	if err != nil {
 		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
 	}
-	release()
+	releaseFenceOrFail(t, release)
 	if err := os.WriteFile(serenaRemovalFenceGenerationPath(filepath.Dir(regPath), pendingKey), []byte("not-a-generation\n"), 0o600); err != nil {
 		t.Fatalf("write malformed generation: %v", err)
 	}
@@ -203,14 +207,16 @@ func TestRepairSerenaIntentFromRegistry_OldWriterRoundTripWithRetainedSidecarUse
 	}
 	generation, err := PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), pendingKey)
 	if err != nil {
-		release()
+		releaseFenceOrFail(t, release)
 		t.Fatalf("PublishSerenaRemovalFenceGeneration: %v", err)
 	}
-	if err := NewRegistry(regPath).SetSerenaPendingRemovalGeneration(pendingKey, "", true, generation); err != nil {
-		release()
-		t.Fatalf("SetSerenaPendingRemovalGeneration: %v", err)
+	rollback, err := NewRegistry(regPath).BeginSerenaPendingRemoval(pendingKey, "", generation)
+	if err != nil || rollback == nil {
+		releaseFenceOrFail(t, release)
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
-	release()
+	_ = rollback // Preserve the staged tuple for the old-writer round trip.
+	releaseFenceOrFail(t, release)
 
 	newBytes, err := os.ReadFile(regPath)
 	if err != nil {
@@ -241,27 +247,7 @@ func TestRepairSerenaIntentFromRegistry_OldWriterRoundTripWithRetainedSidecarUse
 		t.Fatalf("fresh old-writer row was reclaimed or retrofitted: %+v", freshRow)
 	}
 
-	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
-	if err != nil {
-		t.Fatalf("lock registry to expire legacy mark: %v", err)
-	}
-	if err := reg.Load(); err != nil {
-		unlock()
-		t.Fatalf("load registry to expire legacy mark: %v", err)
-	}
-	row, ok := reg.GetSerena(pendingKey)
-	if !ok {
-		unlock()
-		t.Fatalf("pending row %q missing before expiry", pendingKey)
-	}
-	row.PendingSerenaRemovalAt = time.Now().UTC().Add(-serenaPendingRemovalLeaseTTL - time.Minute)
-	reg.Put(row)
-	if err := reg.Save(); err != nil {
-		unlock()
-		t.Fatalf("save expired legacy mark: %v", err)
-	}
-	unlock()
+	seedPendingRemovalMark(t, regPath, pendingKey, time.Now().UTC().Add(-serenaPendingRemovalLeaseTTL-time.Minute))
 
 	expired, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
@@ -312,10 +298,9 @@ func TestRepairSerenaIntentFromRegistry_FenceProbeErrorIsIncomplete(t *testing.T
 	}
 }
 
-// seedPendingRemovalMark stamps the serena row for key with
-// PendingSerenaRemoval=true and PendingSerenaRemovalAt=stampedAt — the exact
-// on-disk shape SetSerenaPendingRemoval(true) leaves behind, with the lease age
-// under the test's control.
+// seedPendingRemovalMark is the test-only owner for historical pending tuples
+// that BeginSerenaPendingRemoval intentionally cannot create, including zero or
+// expired timestamps. Valid current teardown states use Begin directly.
 func seedPendingRemovalMark(t *testing.T, regPath, key string, stampedAt time.Time) {
 	t.Helper()
 	reg := NewRegistry(regPath)
@@ -323,7 +308,7 @@ func seedPendingRemovalMark(t *testing.T, regPath, key string, stampedAt time.Ti
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
@@ -502,10 +487,8 @@ func TestPendingSerenaRemovalLeaseFresh_Boundaries(t *testing.T) {
 	}
 }
 
-// SetSerenaPendingRemoval owns the stamp: pending=true records the lease start,
-// pending=false clears BOTH the flag and the stamp so no expired lease outlives
-// the mark it belonged to.
-func TestRegistry_SetSerenaPendingRemoval_StampsAndClearsLease(t *testing.T) {
+// Begin stages; its returned rollback restores the exact prior tuple.
+func TestRegistry_BeginSerenaPendingRemoval_StampsAndRollbackRestoresLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspaces.yaml")
 	reg := NewRegistry(path)
 	if err := reg.PutSerena(WorkspaceEntry{
@@ -523,8 +506,9 @@ func TestRegistry_SetSerenaPendingRemoval_StampsAndClearsLease(t *testing.T) {
 	}
 
 	before := time.Now().UTC().Add(-time.Second)
-	if err := reg.SetSerenaPendingRemoval("abcd1234", "", true); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval(true): %v", err)
+	rollback, err := reg.BeginSerenaPendingRemoval("abcd1234", "", "")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
 	got := readSerenaRowFresh(t, path, "abcd1234")
 	if !got.PendingSerenaRemoval {
@@ -534,8 +518,8 @@ func TestRegistry_SetSerenaPendingRemoval_StampsAndClearsLease(t *testing.T) {
 		t.Errorf("PendingSerenaRemovalAt = %v, want a stamp at or after %v", got.PendingSerenaRemovalAt, before)
 	}
 
-	if err := reg.SetSerenaPendingRemoval("abcd1234", "", false); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval(false): %v", err)
+	if err := rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
 	}
 	cleared := readSerenaRowFresh(t, path, "abcd1234")
 	if cleared.PendingSerenaRemoval {
@@ -546,7 +530,7 @@ func TestRegistry_SetSerenaPendingRemoval_StampsAndClearsLease(t *testing.T) {
 	}
 }
 
-func TestRegistry_SetSerenaPendingRemovalGeneration_RejectsMalformedToken(t *testing.T) {
+func TestRegistry_BeginSerenaPendingRemoval_RejectsMalformedGeneration(t *testing.T) {
 	reg := NewRegistry(filepath.Join(t.TempDir(), "workspaces.yaml"))
 	if err := reg.PutSerena(WorkspaceEntry{WorkspaceKey: "abcd1234", WorkspacePath: "c:/ws/foo", Language: SerenaLanguageSentinel, Backend: "serena"}); err != nil {
 		t.Fatalf("PutSerena: %v", err)
@@ -554,7 +538,8 @@ func TestRegistry_SetSerenaPendingRemovalGeneration_RejectsMalformedToken(t *tes
 	if err := reg.Save(); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	if err := reg.SetSerenaPendingRemovalGeneration("abcd1234", "", true, "malformed"); err == nil {
-		t.Fatal("SetSerenaPendingRemovalGeneration accepted malformed nonempty token")
+	rollback, err := reg.BeginSerenaPendingRemoval("abcd1234", "", "malformed")
+	if err == nil || rollback != nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v; want nil rollback and malformed-generation error", rollback != nil, err)
 	}
 }

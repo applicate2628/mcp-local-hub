@@ -1414,7 +1414,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		)
 		reconciler.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool {
 			if !lspRegistryForReconcilePassLoaded {
-				lspRegistryForReconcilePass, _ = api.OpenLSPRegistryForReconcile()
+				var snapshotErr error
+				lspRegistryForReconcilePass, _, snapshotErr = api.OpenLSPRegistryForReconcile()
+				if snapshotErr != nil {
+					emitLSPRegistryReconcileSnapshotUnavailable(events, "startup", lspRegistryForReconcilePass != nil, snapshotErr)
+				}
 				lspRegistryForReconcilePassLoaded = true
 			}
 			return api.LSPRegistryRowBacksDescriptorIn(d, lspRegistryForReconcilePass)
@@ -1654,6 +1658,24 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		stderrSink.noteGracefulExit("context-cancel")
 		return ctx.Err()
 	}
+}
+
+func emitLSPRegistryReconcileSnapshotUnavailable(events *api.SupervisorEventLog, phase string, snapshotUsable bool, err error) {
+	if events == nil || err == nil {
+		return
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityWarn,
+		Source:   api.SupervisorEventSourceReconcile,
+		Event:    "lsp-registry-reconcile-snapshot-unavailable",
+		Body: map[string]any{
+			"phase":               phase,
+			"error":               err.Error(),
+			"snapshot_usable":     snapshotUsable,
+			"release_unconfirmed": errors.Is(err, api.ErrLockReleaseUnconfirmed),
+			"restart_recovers":    errors.Is(err, api.ErrLockReleaseUnconfirmed),
+		},
+	})
 }
 
 // resolveWatcherDaemonIntent resolves the unified stops source for one

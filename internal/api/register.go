@@ -236,11 +236,13 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 	}
 	allClients := clientsAllForRegister()
-	var rollback []func()
-	runRollback := func() {
+	var rollback []func() error
+	runRollback := func() error {
+		var rollbackErrs []error
 		for i := len(rollback) - 1; i >= 0; i-- {
-			rollback[i]()
+			rollbackErrs = append(rollbackErrs, rollback[i]())
 		}
+		return errors.Join(rollbackErrs...)
 	}
 	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
 	if schedulerUnavailableErr != nil {
@@ -251,12 +253,10 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 		}
 	}
 	for _, lang := range languages {
-		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
-		if err != nil {
-			runRollback()
+		result := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
+		if err := consumeRegisterLanguageResult(report, result, runRollback); err != nil {
 			return report, fmt.Errorf("register language %s: %w", lang, err)
 		}
-		report.Entries = append(report.Entries, entry)
 	}
 	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
 	// EXPLICIT register → bless this workspace's canonical root as a
@@ -581,6 +581,26 @@ func stringSliceContainsFold(values []string, want string) bool {
 	return false
 }
 
+type registerLanguageResult struct {
+	Entry      WorkspaceEntry
+	PrimaryErr error
+	ReleaseErr error
+}
+
+func consumeRegisterLanguageResult(report *RegisterReport, result registerLanguageResult, runRollback func() error) error {
+	if result.Entry.WorkspaceKey != "" {
+		report.Entries = append(report.Entries, result.Entry)
+	}
+	if result.PrimaryErr != nil {
+		var rollbackErr error
+		if runRollback != nil {
+			rollbackErr = runRollback()
+		}
+		return errors.Join(result.PrimaryErr, rollbackErr, result.ReleaseErr)
+	}
+	return result.ReleaseErr
+}
+
 // registerOneLanguage is the per-language unit of work. It (a) allocates a
 // free port (or reuses the existing one for idempotent re-register),
 // (b) creates the scheduler task, (c) writes each client entry, and
@@ -594,8 +614,8 @@ func (a *API) registerOneLanguage(
 	sch testScheduler,
 	allClients map[string]registerClient,
 	w io.Writer,
-	rollback *[]func(),
-) (WorkspaceEntry, error) {
+	rollback *[]func() error,
+) (result registerLanguageResult) {
 	var spec config.LanguageSpec
 	for _, l := range m.Languages {
 		if l.Name == lang {
@@ -614,17 +634,13 @@ func (a *API) registerOneLanguage(
 	// (flock released).
 	unlock, err := reg.Lock()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
+		result.PrimaryErr = fmt.Errorf("acquire registry lock: %w", err)
+		return result
 	}
-	releaseUnlock := func() {
-		if unlock != nil {
-			unlock()
-			unlock = nil
-		}
-	}
-	defer releaseUnlock()
+	defer func() { ReleaseAndJoin(&result.ReleaseErr, unlock) }()
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
+		result.PrimaryErr = fmt.Errorf("load registry: %w", err)
+		return result
 	}
 	// Reuse existing entry port (idempotent re-register) or allocate new.
 	prior, had := reg.Get(wsKey, lang)
@@ -634,7 +650,8 @@ func (a *API) registerOneLanguage(
 	} else {
 		p, err := AllocatePort(reg, *m.PortPool)
 		if err != nil {
-			return WorkspaceEntry{}, err
+			result.PrimaryErr = err
+			return result
 		}
 		port = p
 		// Tentatively pin the port into the registry's in-memory set so
@@ -643,12 +660,14 @@ func (a *API) registerOneLanguage(
 		//
 		// B.1: this is an LSP-row write; PutLSP enforces the @-prefix gate.
 		if err := reg.PutLSP(WorkspaceEntry{WorkspaceKey: wsKey, WorkspacePath: canonical, Language: lang, Port: port}); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("register: tentative LSP-row write rejected: %w", err)
+			result.PrimaryErr = fmt.Errorf("register: tentative LSP-row write rejected: %w", err)
+			return result
 		}
 		capturedKey := wsKey
 		capturedLang := lang
-		*rollback = append(*rollback, func() {
+		*rollback = append(*rollback, func() error {
 			reg.Remove(capturedKey, capturedLang)
+			return nil
 		})
 	}
 	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, lang)
@@ -656,7 +675,8 @@ func (a *API) registerOneLanguage(
 	// rollback can restore it).
 	canonicalExe, err := canonicalMcphubPath()
 	if err != nil {
-		return WorkspaceEntry{}, err
+		result.PrimaryErr = err
+		return result
 	}
 	// Verify the canonical mcphub binary actually exists before creating a
 	// scheduler task pointing at it. Without this preflight, a fresh user
@@ -667,7 +687,8 @@ func (a *API) registerOneLanguage(
 	// while no proxy ever comes up. Install does the same preflight in
 	// installUsingEmbedFirst (see install.go:298-300).
 	if _, err := os.Stat(canonicalExe); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		result.PrimaryErr = fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		return result
 	}
 	args := []string{
 		"daemon", "workspace-proxy",
@@ -685,7 +706,8 @@ func (a *API) registerOneLanguage(
 		// the existing task and leave rollback unable to restore it on a
 		// later failure, turning a recoverable re-register error into a
 		// persistent outage.
-		return WorkspaceEntry{}, fmt.Errorf("export prior task %s: %w", taskName, err)
+		result.PrimaryErr = fmt.Errorf("export prior task %s: %w", taskName, err)
+		return result
 	}
 	// Register the scheduler rollback BEFORE the destructive Delete+Create
 	// so a Create failure on a re-register path does not orphan the old
@@ -696,7 +718,7 @@ func (a *API) registerOneLanguage(
 	capturedPriorXML := priorXML
 	capturedPort := port
 	startedNewTask := false
-	*rollback = append(*rollback, func() {
+	*rollback = append(*rollback, func() error {
 		// Kill the running proxy BEFORE deleting the task. On Windows,
 		// sch.Delete removes the task definition but does NOT terminate
 		// the already-started process. If sch.Run above succeeded and
@@ -720,6 +742,7 @@ func (a *API) registerOneLanguage(
 		} else {
 			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", capturedTaskName)
 		}
+		return nil
 	})
 	// Destructive replace: prior task (if any) is Deleted and the new task
 	// Created. A Create failure triggers runRollback which fires the
@@ -761,7 +784,8 @@ func (a *API) registerOneLanguage(
 		LogonTrigger:     true,
 	}
 	if err := sch.Create(taskSpec); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("create task %s: %w", taskName, err)
+		result.PrimaryErr = fmt.Errorf("create task %s: %w", taskName, err)
+		return result
 	}
 	fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", taskName)
 	// Pre-compute client entry names so the registry entry can be fully
@@ -812,16 +836,18 @@ func (a *API) registerOneLanguage(
 	// B.1: composedEntry is an LSP-row write; PutLSP enforces the @-prefix
 	// gate (Language is the per-LSP language string, never the sentinel).
 	if err := reg.PutLSP(composedEntry); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
+		result.PrimaryErr = fmt.Errorf("register: composed LSP-row write rejected: %w", err)
+		return result
 	}
 	if err := reg.Save(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
+		result.PrimaryErr = fmt.Errorf("persist registry: %w", err)
+		return result
 	}
 	capturedRegKey := wsKey
 	capturedRegLang := lang
 	capturedHad := had
 	capturedPrior := prior
-	*rollback = append(*rollback, func() {
+	*rollback = append(*rollback, func() (err error) {
 		// Rollback may fire at any phase — before or after Phase 1 releases
 		// the flock — so re-acquire it here. If acquisition fails (extreme
 		// cases: registry path unreachable, concurrent holder deadlocked),
@@ -830,13 +856,13 @@ func (a *API) registerOneLanguage(
 		if err != nil {
 			fmt.Fprintf(w, "  rollback: could not lock registry for %s/%s: %v\n",
 				capturedRegKey, capturedRegLang, err)
-			return
+			return err
 		}
-		defer unlock()
+		defer ReleaseAndJoin(&err, unlock)
 		if err := reg.Load(); err != nil {
 			fmt.Fprintf(w, "  rollback: could not reload registry for %s/%s: %v\n",
 				capturedRegKey, capturedRegLang, err)
-			return
+			return err
 		}
 		if capturedHad {
 			// Re-register rollback: restore the prior (workspace, language)
@@ -846,13 +872,18 @@ func (a *API) registerOneLanguage(
 			// "not registered" and exits — turning a recoverable
 			// re-register failure into a persistent outage.
 			reg.Put(capturedPrior)
-			_ = reg.Save()
+			if err := reg.Save(); err != nil {
+				return err
+			}
 			fmt.Fprintf(w, "  rollback: restored prior registry entry %s/%s\n", capturedRegKey, capturedRegLang)
-			return
+			return nil
 		}
 		reg.Remove(capturedRegKey, capturedRegLang)
-		_ = reg.Save()
+		if err := reg.Save(); err != nil {
+			return err
+		}
 		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
+		return nil
 	})
 
 	// Phase 1 complete: the registry row is persisted to disk. Release the
@@ -864,13 +895,20 @@ func (a *API) registerOneLanguage(
 	// read. Net result: "error: not registered" from the proxy and a
 	// consistent 10s register failure. Regression-guarded by
 	// TestRegisterOneLanguage_ReleasesFlockBeforeSchRun.
-	releaseUnlock()
+	releaseErr := unlock()
+	unlock = nil
+	if releaseErr != nil {
+		result.Entry = composedEntry
+		result.ReleaseErr = releaseErr
+		return result
+	}
 
 	// Start the proxy. Registry is already persisted, so daemon startup
 	// finds the entry. Logon-triggered tasks only fire at the next logon,
 	// so this sch.Run prevents the port from advertising dead until reboot.
 	if err := sch.Run(taskName); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
+		result.PrimaryErr = fmt.Errorf("run task %s: %w", taskName, err)
+		return result
 	}
 	startedNewTask = true
 	// Verify readiness. Windows schtasks /Run only triggers the task
@@ -883,7 +921,8 @@ func (a *API) registerOneLanguage(
 	// on timeout so registry / scheduler / client entries do not leak
 	// for a proxy that never came up.
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		result.PrimaryErr = fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		return result
 	}
 	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
 	// Task 10 plan \u00a765: AFTER scheduler create + sch.Run + readiness
@@ -897,14 +936,16 @@ func (a *API) registerOneLanguage(
 	// serialized against concurrent register/unregister operations.
 	unlock, err = reg.Lock()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("re-acquire registry lock: %w", err)
+		result.PrimaryErr = fmt.Errorf("re-acquire registry lock: %w", err)
+		return result
 	}
-	defer releaseUnlock()
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("reload registry: %w", err)
+		result.PrimaryErr = fmt.Errorf("reload registry: %w", err)
+		return result
 	}
 	if _, ok := reg.Get(wsKey, lang); !ok {
-		return WorkspaceEntry{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		result.PrimaryErr = fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		return result
 	}
 	// 2. Write client entries. Names + entry were pre-composed above;
 	// this loop just pushes entries into each client's config and
@@ -931,7 +972,8 @@ func (a *API) registerOneLanguage(
 		// register, and GUI Apply at once.
 		priorEntry, err := client.GetEntry(entryName)
 		if err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
+			result.PrimaryErr = fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
+			return result
 		}
 		urlPath := b.URLPath
 		if urlPath == "" {
@@ -942,13 +984,14 @@ func (a *API) registerOneLanguage(
 			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
 		}
 		if err := client.AddEntry(entry); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
+			result.PrimaryErr = fmt.Errorf("write %s entry: %w", b.Client, err)
+			return result
 		}
 		clientRef := client
 		savedPrior := priorEntry
 		capturedName := entryName
 		capturedClientName := b.Client
-		*rollback = append(*rollback, func() {
+		*rollback = append(*rollback, func() error {
 			// See install.go rollback: a mimo prior sourced BELOW the write target
 			// (config.json) or from the ~/.claude.json import must NOT be copied up
 			// (permanent shadow + import-credential leak — bot PR #420 finding 1).
@@ -957,14 +1000,16 @@ func (a *API) registerOneLanguage(
 			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
 				_ = clientRef.AddEntry(*savedPrior)
 				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
-				return
+				return nil
 			}
 			_ = clientRef.RemoveEntry(capturedName)
 			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", capturedName, capturedClientName)
+			return nil
 		})
 		fmt.Fprintf(w, "\u2713 %s \u2192 %s (entry %s)\n", b.Client, entry.URL, entryName)
 	}
-	return composedEntry, nil
+	result.Entry = composedEntry
+	return result
 }
 
 // Unregister removes scheduler tasks, client-config entries, and registry
@@ -988,7 +1033,7 @@ func (a *API) Unregister(workspacePath string, languages []string) (*UnregisterR
 	return a.unregisterWithManifest(m, workspacePath, languages, os.Stderr)
 }
 
-func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (*UnregisterReport, error) {
+func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (result *UnregisterReport, err error) {
 	// Use the existence-tolerant variant: the operator may be cleaning up
 	// a registration whose workspace directory has since been deleted,
 	// moved, or is on an unavailable drive. Without this weakening, an
@@ -1018,7 +1063,7 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	if err != nil {
 		return nil, err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock)
 	if err := reg.Load(); err != nil {
 		return nil, err
 	}

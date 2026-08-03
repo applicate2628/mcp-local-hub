@@ -523,7 +523,7 @@ func withStubbedLSPUnregister(t *testing.T) *[]string {
 		if err != nil {
 			return nil, err
 		}
-		defer unlock()
+		defer assertRegistryReleased(t, unlock)
 		if err := reg.Load(); err != nil {
 			return nil, err
 		}
@@ -1410,12 +1410,12 @@ func TestWorkspaceList_LockedDuringRead(t *testing.T) {
 
 	select {
 	case result := <-done:
-		unlock()
+		assertRegistryReleased(t, unlock)
 		t.Fatalf("workspace list returned while registry lock was held: err=%v output=%s", result.err, result.out)
 	case <-time.After(150 * time.Millisecond):
 	}
 
-	unlock()
+	assertRegistryReleased(t, unlock)
 	select {
 	case result := <-done:
 		if result.err != nil {

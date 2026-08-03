@@ -151,13 +151,7 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			if err != nil {
 				return fmt.Errorf("registry lock: %w", err)
 			}
-			releaseUnlock := func() {
-				if unlock != nil {
-					unlock()
-					unlock = nil
-				}
-			}
-			defer releaseUnlock()
+			defer func() { api.ReleaseAndJoin(&err, unlock) }()
 			if err := reg.Load(); err != nil {
 				return fmt.Errorf("load registry: %w", err)
 			}
@@ -288,7 +282,11 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				// bind failure keeps the existing cobra exit-1 (genuine crash).
 				return bindRefusedExit(fmt.Errorf("bind proxy: %w", err))
 			}
-			releaseUnlock()
+			releaseErr := unlock()
+			unlock = nil
+			if releaseErr != nil {
+				return fmt.Errorf("release registry lock after proxy bind: %w", releaseErr)
+			}
 
 			errCh := make(chan error, 1)
 			go func() { errCh <- proxy.Serve() }()

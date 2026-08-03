@@ -66,7 +66,7 @@ func TestWorkspaceRegisterSerena_DefaultMarkerWrittenUnderRegistryLock(t *testin
 			t.Fatalf("probe TryLock: %v", terr)
 		}
 		if acquired {
-			unlock()
+			assertRegistryReleased(t, unlock)
 		} else {
 			lockHeldAtWrite = true
 		}
@@ -148,7 +148,7 @@ func TestWorkspaceRegisterSerena_ConcurrentUnregisterClearsOwnDefaultMarker(t *t
 		if err := reg.Save(); err != nil {
 			t.Fatalf("save registry inside stub: %v", err)
 		}
-		unlock()
+		assertRegistryReleased(t, unlock)
 		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 
@@ -248,7 +248,7 @@ func TestWorkspaceRegisterSerena_StaleCompensationPreservesNewSamePathDefault(t 
 			if err != nil {
 				return api.ReconcileResponse{}, fmt.Errorf("lock registry: %w", err)
 			}
-			defer unlock()
+			defer assertRegistryReleased(t, unlock)
 			if err := reg.Load(); err != nil {
 				return api.ReconcileResponse{}, fmt.Errorf("load registry: %w", err)
 			}
@@ -370,7 +370,7 @@ func TestWorkspaceRegisterSerena_CompensatingClearLeavesForeignDefaultAlone(t *t
 		if err := reg.Save(); err != nil {
 			t.Fatalf("save registry inside stub: %v", err)
 		}
-		unlock()
+		assertRegistryReleased(t, unlock)
 		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
 	}
 

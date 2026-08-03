@@ -163,7 +163,7 @@ func TestRegistry_LockPreventsSimultaneousWriters(t *testing.T) {
 			t.Errorf("Lock: %v", err)
 			return
 		}
-		defer unlock()
+		defer assertRegistryReleased(t, unlock)
 		if err := r.Load(); err != nil {
 			t.Errorf("Load: %v", err)
 			return
@@ -424,11 +424,7 @@ func TestRegistry_SerenaSentinel_RoundTripsNewFields(t *testing.T) {
 	}
 }
 
-// TestRegistry_SetSerenaPendingRemoval_SetsAndClears is the round-trip test
-// for the unregister-resurrects-serena-intent fix (mcphub-register-intent
-// REVISE round 2, BLOCKING 1): PruneWorkspacePhases flips this flag true
-// BEFORE the paired intent teardown and false again if that teardown fails.
-func TestRegistry_SetSerenaPendingRemoval_SetsAndClears(t *testing.T) {
+func TestRegistry_BeginSerenaPendingRemoval_StagesAndRollbackRestores(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspaces.yaml")
 	reg := NewRegistry(path)
 	if err := reg.PutSerena(WorkspaceEntry{
@@ -445,8 +441,9 @@ func TestRegistry_SetSerenaPendingRemoval_SetsAndClears(t *testing.T) {
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := reg.SetSerenaPendingRemoval("abcd1234", "", true); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval(true): %v", err)
+	rollback, err := reg.BeginSerenaPendingRemoval("abcd1234", "", "")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
 	reg2 := NewRegistry(path)
 	if err := reg2.Load(); err != nil {
@@ -454,37 +451,37 @@ func TestRegistry_SetSerenaPendingRemoval_SetsAndClears(t *testing.T) {
 	}
 	got, ok := reg2.GetSerena("abcd1234")
 	if !ok {
-		t.Fatal("row missing after SetSerenaPendingRemoval(true)")
+		t.Fatal("row missing after BeginSerenaPendingRemoval")
 	}
 	if !got.PendingSerenaRemoval {
-		t.Error("PendingSerenaRemoval = false after SetSerenaPendingRemoval(true)")
+		t.Error("PendingSerenaRemoval = false after BeginSerenaPendingRemoval")
 	}
 
-	// Clear (mirrors the failed-teardown recovery path).
-	if err := reg2.SetSerenaPendingRemoval("abcd1234", "", false); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval(false): %v", err)
+	if err := rollback(); err != nil {
+		t.Fatalf("rollback: %v", err)
 	}
 	reg3 := NewRegistry(path)
 	if err := reg3.Load(); err != nil {
-		t.Fatalf("reload after clear: %v", err)
+		t.Fatalf("reload after rollback: %v", err)
 	}
 	got3, ok := reg3.GetSerena("abcd1234")
 	if !ok {
-		t.Fatal("row missing after SetSerenaPendingRemoval(false)")
+		t.Fatal("row missing after rollback")
 	}
 	if got3.PendingSerenaRemoval {
-		t.Error("PendingSerenaRemoval = true after SetSerenaPendingRemoval(false)")
+		t.Error("PendingSerenaRemoval = true after rollback")
 	}
 }
 
-// TestRegistry_SetSerenaPendingRemoval_NoOpOnMissingRow mirrors
+// TestRegistry_BeginSerenaPendingRemoval_NoOpOnMissingRow mirrors
 // TestRegistry_PutLifecycleNoOpOnMissingEntry's ghost-resurrection guard: a
 // workspace key with no serena row is a silent no-op, never a ghost row.
-func TestRegistry_SetSerenaPendingRemoval_NoOpOnMissingRow(t *testing.T) {
+func TestRegistry_BeginSerenaPendingRemoval_NoOpOnMissingRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspaces.yaml")
 	reg := NewRegistry(path)
-	if err := reg.SetSerenaPendingRemoval("deadbeef", "", true); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval: %v", err)
+	rollback, err := reg.BeginSerenaPendingRemoval("deadbeef", "", "")
+	if err != nil || rollback != nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v; want nil, nil", rollback != nil, err)
 	}
 	reg2 := NewRegistry(path)
 	if err := reg2.Load(); err != nil {
@@ -495,11 +492,11 @@ func TestRegistry_SetSerenaPendingRemoval_NoOpOnMissingRow(t *testing.T) {
 	}
 }
 
-// TestRegistry_SetSerenaPendingRemoval_BothCanonicalAndLegacyKeys flags BOTH
+// TestRegistry_BeginSerenaPendingRemoval_BothCanonicalAndLegacyKeys stages BOTH
 // rows when the canonical and legacy keys diverge and both have a serena row
 // — mirrors how unregister's own DeleteSerenaRow handles the same
 // canonical/legacy pair (workspace_cmd.go, prune_workspace.go).
-func TestRegistry_SetSerenaPendingRemoval_BothCanonicalAndLegacyKeys(t *testing.T) {
+func TestRegistry_BeginSerenaPendingRemoval_BothCanonicalAndLegacyKeys(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspaces.yaml")
 	reg := NewRegistry(path)
 	if err := reg.PutSerena(WorkspaceEntry{
@@ -520,8 +517,9 @@ func TestRegistry_SetSerenaPendingRemoval_BothCanonicalAndLegacyKeys(t *testing.
 		t.Fatalf("Save: %v", err)
 	}
 
-	if err := reg.SetSerenaPendingRemoval("canonical1", "legacy999", true); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval: %v", err)
+	rollback, err := reg.BeginSerenaPendingRemoval("canonical1", "legacy999", "")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
 	reg2 := NewRegistry(path)
 	if err := reg2.Load(); err != nil {
@@ -534,6 +532,152 @@ func TestRegistry_SetSerenaPendingRemoval_BothCanonicalAndLegacyKeys(t *testing.
 	legacy, ok := reg2.GetSerena("legacy999")
 	if !ok || !legacy.PendingSerenaRemoval {
 		t.Errorf("legacy row PendingSerenaRemoval = %v (ok=%v), want true", legacy.PendingSerenaRemoval, ok)
+	}
+}
+
+func TestRegistry_BeginSerenaPendingRemoval_RollbackOwnership(t *testing.T) {
+	const (
+		canonical  = "abcd1234"
+		legacy     = "beefcafe"
+		oldGen     = "0123456789abcdef0123456789abcdef"
+		attemptGen = "fedcba9876543210fedcba9876543210"
+		thirdGen   = "11111111111111111111111111111111"
+	)
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	priorAt := time.Date(2026, time.August, 3, 12, 0, 0, 123456789, time.UTC)
+	reg := NewRegistry(path)
+	for _, row := range []WorkspaceEntry{
+		{WorkspaceKey: canonical, WorkspacePath: "c:/ws/canonical", Language: SerenaLanguageSentinel, Backend: "serena", Port: 9500, PendingSerenaRemoval: true, PendingSerenaRemovalAt: priorAt, PendingSerenaRemovalGeneration: oldGen},
+		{WorkspaceKey: legacy, WorkspacePath: "c:/ws/legacy", Language: SerenaLanguageSentinel, Backend: "serena", Port: 9501},
+	} {
+		if err := reg.PutSerena(row); err != nil {
+			t.Fatalf("PutSerena: %v", err)
+		}
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	rollback, err := NewRegistry(path).BeginSerenaPendingRemoval(canonical, legacy, attemptGen)
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
+	}
+	staged := NewRegistry(path)
+	if err := staged.Load(); err != nil {
+		t.Fatalf("load staged registry: %v", err)
+	}
+	candidate, ok := staged.GetSerena(canonical)
+	if !ok || !candidate.PendingSerenaRemoval || candidate.PendingSerenaRemovalGeneration != attemptGen {
+		t.Fatalf("canonical staged tuple = %+v, want attempt generation", candidate)
+	}
+	legacyCandidate, ok := staged.GetSerena(legacy)
+	if !ok || !legacyCandidate.PendingSerenaRemoval || !legacyCandidate.PendingSerenaRemovalAt.Equal(candidate.PendingSerenaRemovalAt) || legacyCandidate.PendingSerenaRemovalGeneration != attemptGen {
+		t.Fatalf("legacy staged tuple = %+v, want same exact attempt as canonical %+v", legacyCandidate, candidate)
+	}
+
+	// A later Begin owns the legacy tuple. The first rollback restores only the
+	// canonical pre-state and exposes the conflict without clobbering it.
+	laterRollback, err := NewRegistry(path).BeginSerenaPendingRemoval(legacy, "", thirdGen)
+	if err != nil || laterRollback == nil {
+		t.Fatalf("later BeginSerenaPendingRemoval = rollback %v, err %v", laterRollback != nil, err)
+	}
+	_ = laterRollback // Deliberately retain the later writer's staged tuple.
+	if err := rollback(); !errors.Is(err, ErrSerenaPendingRemovalRollbackConflict) {
+		t.Fatalf("rollback error = %v, want typed ownership conflict", err)
+	}
+	after := NewRegistry(path)
+	if err := after.Load(); err != nil {
+		t.Fatalf("load after rollback: %v", err)
+	}
+	gotCanonical, _ := after.GetSerena(canonical)
+	if !gotCanonical.PendingSerenaRemoval || !gotCanonical.PendingSerenaRemovalAt.Equal(priorAt) || gotCanonical.PendingSerenaRemovalGeneration != oldGen {
+		t.Fatalf("canonical pre-state was not restored exactly: %+v", gotCanonical)
+	}
+	gotLegacy, _ := after.GetSerena(legacy)
+	if gotLegacy.PendingSerenaRemovalGeneration != thirdGen {
+		t.Fatalf("third-party tuple was clobbered: %+v", gotLegacy)
+	}
+	if err := rollback(); !errors.Is(err, ErrSerenaPendingRemovalRollbackConflict) {
+		t.Fatalf("idempotent rollback error = %v, want retained typed conflict only", err)
+	}
+}
+
+func TestRegistry_BeginSerenaPendingRemoval_RollbackDoesNotRecreateDeletedRows(t *testing.T) {
+	const key = "abcd1234"
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	reg := NewRegistry(path)
+	if err := reg.PutSerena(WorkspaceEntry{WorkspaceKey: key, WorkspacePath: "c:/ws", Language: SerenaLanguageSentinel, Backend: "serena"}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	rollback, err := NewRegistry(path).BeginSerenaPendingRemoval(key, key, "0123456789abcdef0123456789abcdef")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
+	}
+	deleted := NewRegistry(path)
+	if err := deleted.Load(); err != nil {
+		t.Fatalf("load staged registry: %v", err)
+	}
+	deleted.RemoveSerena(key)
+	if err := deleted.Save(); err != nil {
+		t.Fatalf("save deleted registry: %v", err)
+	}
+	if err := rollback(); err != nil {
+		t.Fatalf("rollback after row deletion: %v", err)
+	}
+	final := NewRegistry(path)
+	if err := final.Load(); err != nil {
+		t.Fatalf("load final registry: %v", err)
+	}
+	if _, ok := final.GetSerena(key); ok {
+		t.Fatal("rollback recreated a successfully deleted Serena row")
+	}
+}
+
+func TestRegistry_BeginSerenaPendingRemoval_CommitUnknownRestoresPreState(t *testing.T) {
+	const (
+		key        = "abcd1234"
+		generation = "0123456789abcdef0123456789abcdef"
+	)
+	path := filepath.Join(t.TempDir(), "workspaces.yaml")
+	seed := NewRegistry(path)
+	if err := seed.PutSerena(WorkspaceEntry{WorkspaceKey: key, WorkspacePath: "c:/ws", Language: SerenaLanguageSentinel, Backend: "serena"}); err != nil {
+		t.Fatalf("PutSerena: %v", err)
+	}
+	if err := seed.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	commitUnknown := errors.New("registry writer could not reopen after rename")
+	staging := NewRegistry(path)
+	staging.savePendingRemovalFn = func(r *Registry) error {
+		if err := r.Save(); err != nil {
+			return err
+		}
+		return commitUnknown
+	}
+	rollback, err := staging.BeginSerenaPendingRemoval(key, "", generation)
+	if !errors.Is(err, commitUnknown) || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v; want commit-unknown rollback", rollback != nil, err)
+	}
+	staged := NewRegistry(path)
+	if err := staged.Load(); err != nil {
+		t.Fatalf("load published staged tuple: %v", err)
+	}
+	if row, _ := staged.GetSerena(key); !row.PendingSerenaRemoval || row.PendingSerenaRemovalGeneration != generation {
+		t.Fatalf("commit-unknown stage was not published: %+v", row)
+	}
+	if err := rollback(); err != nil {
+		t.Fatalf("rollback commit-unknown tuple: %v", err)
+	}
+	restored := NewRegistry(path)
+	if err := restored.Load(); err != nil {
+		t.Fatalf("load restored registry: %v", err)
+	}
+	if row, _ := restored.GetSerena(key); row.PendingSerenaRemoval || !row.PendingSerenaRemovalAt.IsZero() || row.PendingSerenaRemovalGeneration != "" {
+		t.Fatalf("commit-unknown rollback did not restore exact pre-state: %+v", row)
 	}
 }
 

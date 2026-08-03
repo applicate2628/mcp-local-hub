@@ -704,8 +704,7 @@ func TestRegister_ReleasesFlockBeforeSchRun(t *testing.T) {
 				done <- err
 				return
 			}
-			unlock()
-			done <- nil
+			done <- unlock()
 		}()
 		select {
 		case err := <-done:
@@ -722,6 +721,46 @@ func TestRegister_ReleasesFlockBeforeSchRun(t *testing.T) {
 	_, err := mustNewAPI(t).registerWithManifest(m, ws, []string{"python"}, RegisterOpts{Writer: &bytes.Buffer{}})
 	if err != nil {
 		t.Fatalf("register: %v", err)
+	}
+}
+
+func TestRegisterLanguageResult_ReleaseOnlyPreservesCommittedEntryWithoutRollback(t *testing.T) {
+	releaseErr := errors.New("release unconfirmed")
+	report := &RegisterReport{}
+	rollbackCalls := 0
+	entry := WorkspaceEntry{WorkspaceKey: "committed", Language: "go"}
+	err := consumeRegisterLanguageResult(report, registerLanguageResult{Entry: entry, ReleaseErr: releaseErr}, func() error {
+		rollbackCalls++
+		return nil
+	})
+	if !errors.Is(err, releaseErr) {
+		t.Fatalf("error = %v, want release failure", err)
+	}
+	if rollbackCalls != 0 {
+		t.Fatalf("rollback calls = %d, want 0", rollbackCalls)
+	}
+	if len(report.Entries) != 1 || report.Entries[0].WorkspaceKey != entry.WorkspaceKey {
+		t.Fatalf("entries = %+v, want committed entry", report.Entries)
+	}
+}
+
+func TestRegisterLanguageResult_PrimaryReleaseAndRollbackFailuresJoin(t *testing.T) {
+	primaryErr := errors.New("primary")
+	releaseErr := errors.New("release")
+	rollbackErr := errors.New("rollback")
+	report := &RegisterReport{}
+	err := consumeRegisterLanguageResult(report, registerLanguageResult{
+		Entry:      WorkspaceEntry{WorkspaceKey: "committed"},
+		PrimaryErr: primaryErr,
+		ReleaseErr: releaseErr,
+	}, func() error { return rollbackErr })
+	for _, want := range []error{primaryErr, releaseErr, rollbackErr} {
+		if !errors.Is(err, want) {
+			t.Fatalf("error = %v, want cause %v", err, want)
+		}
+	}
+	if len(report.Entries) != 1 {
+		t.Fatalf("entries = %+v, want committed entry preserved", report.Entries)
 	}
 }
 

@@ -200,15 +200,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	if err != nil {
 		return nil, err
 	}
-	regReleased := false
-	releaseReg := func() {
-		if regReleased {
-			return
-		}
-		regReleased = true
-		regUnlock()
-	}
-	defer releaseReg()
+	defer func() { ReleaseAndJoin(&err, regUnlock) }()
 	if err = reg.Load(); err != nil {
 		return nil, err
 	}
@@ -216,8 +208,12 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// Idempotency: a concurrent winner (or a prior call) may have already
 	// registered this workspace. Return the existing row unchanged.
 	if existing, ok := reg.GetSerena(key); ok {
-		releaseReg()
 		e := existing
+		releaseErr := regUnlock()
+		regUnlock = nil
+		if releaseErr != nil {
+			return &e, releaseErr
+		}
 		return &e, nil
 	}
 
@@ -273,7 +269,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// not-yet-committed registry row is invisible to OTHER mcphub processes — a
 	// concurrent migrate/install must not read this uncommitted row, commit a
 	// supervisor intent for it, and then be left with a daemon whose registry row
-	// our pre-commit rollback removed (split-state). The deferred releaseReg frees
+	// our pre-commit rollback removed (split-state). The deferred release guard frees
 	// the flock on any error path; the commit path frees it explicitly below.
 
 	// The row is on disk under our held flock. Every PRE-COMMIT error path must
@@ -603,7 +599,11 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//     registry back here would split-state. Releasing the flock publishes the
 	//     committed row to other processes.
 	rowSaved = false
-	releaseReg()
+	releaseErr := regUnlock()
+	regUnlock = nil
+	if releaseErr != nil {
+		return &newEntry, releaseErr
+	}
 
 	// 11. Bring the new daemon live.
 	//   - INTRODUCE or stopped/undetermined pool (needStart) → START the supervisor

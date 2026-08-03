@@ -58,7 +58,7 @@ func seedSerenaRegistryRow(t *testing.T, regPath, path string, port int) string 
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
@@ -265,6 +265,32 @@ func TestSerenaIntentRepairResultOutcomeContractFailsClosed(t *testing.T) {
 	}
 	if result.Outcome != SerenaIntentRepairOutcomeError {
 		t.Fatalf("empty state dir outcome = %q, want %q", result.Outcome, SerenaIntentRepairOutcomeError)
+	}
+}
+
+func TestGhostRegistryLock_SerenaIntentRepairFailsLoud(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stateDir := mustStateDir(t)
+	cause := errors.New("registry ghost")
+	recordUnconfirmedLockRelease(NewRegistry(regPath).LockPath(), cause)
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	if result.Outcome != SerenaIntentRepairOutcomeError || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+		t.Fatalf("repair = (%+v, %v), want typed error outcome with ghost causes", result, err)
+	}
+}
+
+func TestGhostSupervisorIntentLock_SerenaIntentRepairFailsLoud(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stateDir := mustStateDir(t)
+	seedSerenaRegistryRow(t, regPath, liveWorkspace(t), 43111)
+	cause := errors.New("intent ghost")
+	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+	recordUnconfirmedLockRelease(intentPath+supervisorIntentLockSuffix, cause)
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	if result.Outcome != SerenaIntentRepairOutcomeError || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+		t.Fatalf("repair = (%+v, %v), want typed error outcome with ghost causes", result, err)
 	}
 }
 
@@ -529,7 +555,7 @@ func seedSerenaRegistryRowWithKey(t *testing.T, regPath, key, path string, port 
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
@@ -635,7 +661,7 @@ func TestRepairSerenaIntentFromRegistry_RegistryLockContended_Skips(t *testing.T
 	if err != nil {
 		t.Fatalf("test acquire registry lock: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 
 	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
@@ -887,7 +913,7 @@ func TestRepairSerenaIntentFromRegistry_EventLogLockContentionDoesNotBlockOrHold
 	if !ok {
 		t.Fatal("registry lock remained held after repair returned")
 	}
-	regUnlock()
+	assertRegistryReleased(t, regUnlock)
 
 	intentLock := flock.New(intentPath + supervisorIntentLockSuffix)
 	intentLocked, err := intentLock.TryLock()
@@ -925,9 +951,11 @@ func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappende
 	// the interrupted-unregister case covered in
 	// serena_pending_removal_lease_test.go, not the in-flight one asserted
 	// here.)
-	if err := NewRegistry(regPath).SetSerenaPendingRemoval(pendingKey, "", true); err != nil {
-		t.Fatalf("SetSerenaPendingRemoval: %v", err)
+	rollback, err := NewRegistry(regPath).BeginSerenaPendingRemoval(pendingKey, "", "")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
 	}
+	_ = rollback // Retain the staged tuple during the simulated in-flight teardown.
 	// A real in-flight unregister owns the per-workspace fence for the complete
 	// marked window. The repair must observe that owner and leave the descriptor
 	// absent; a fresh timestamp by itself is not an authoritative liveness proof.
@@ -935,7 +963,7 @@ func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappende
 	if err != nil {
 		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
 	}
-	defer releaseFence()
+	defer func() { releaseFenceOrFail(t, releaseFence) }()
 
 	// Intent carries ONLY the healthy daemon — the pending row's descriptor
 	// has already been removed by the (simulated) in-flight unregister, which
