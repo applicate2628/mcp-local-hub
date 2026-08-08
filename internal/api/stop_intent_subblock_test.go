@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api/apitest"
 )
 
@@ -25,6 +27,100 @@ func readSupervisorIntentFromDisk(t *testing.T, stateDir string) *SupervisorInte
 		t.Fatalf("read supervisor-intent.json: %v", err)
 	}
 	return got
+}
+
+func TestMutateStopSubBlock_ReleaseSettlementMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		seed        bool
+		change      bool
+		unconfirmed bool
+		wantApplied bool
+	}{
+		{name: "changed-persisted-release-unconfirmed", change: true, unconfirmed: true, wantApplied: true},
+		{name: "no-persistence-change-release-unconfirmed", seed: true, unconfirmed: true},
+		{name: "changed-confirmed-release", change: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			defer SetDaemonStateRootForTest(stateDir)()
+			task := `\mcp-local-hub-stop-release-settlement`
+			value := DaemonIntent{
+				Desired: IntentDesiredStopped, Reason: IntentReasonUserStop,
+				UpdatedAt: time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC),
+			}
+			if tc.seed {
+				if err := NewAPI().WriteStopIntent(task, value, "seed"); err != nil {
+					t.Fatalf("seed stop: %v", err)
+				}
+			}
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatalf("intent path: %v", err)
+			}
+			beforeBytes, readErr := os.ReadFile(intentPath)
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatalf("read before bytes: %v", readErr)
+			}
+
+			lockPath := supervisorIntentLockPath(intentPath)
+			originalUnlock := flockUnlockFn
+			var releaseCalls int
+			releaseCause := errors.New("injected stop release failure")
+			flockUnlockFn = func(fl *flock.Flock) error {
+				releaseCalls++
+				physicalErr := fl.Unlock()
+				if tc.unconfirmed {
+					return errors.Join(physicalErr, releaseCause)
+				}
+				return physicalErr
+			}
+			defer func() {
+				flockUnlockFn = originalUnlock
+				unconfirmedLockReleasesMu.Lock()
+				delete(unconfirmedLockReleases, lockPath)
+				unconfirmedLockReleasesMu.Unlock()
+			}()
+
+			_, _, _, err = mutateStopSubBlock(task, func(stops map[string]DaemonIntent) {
+				if tc.change {
+					stops[task] = value
+				}
+			})
+			if releaseCalls != 1 {
+				t.Fatalf("release calls = %d, want 1", releaseCalls)
+			}
+			if tc.unconfirmed {
+				if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+					t.Fatalf("error = %v, want release sentinel and injected cause", err)
+				}
+			} else if err != nil {
+				t.Fatalf("confirmed release returned error: %v", err)
+			}
+			if IsAppliedLockReleaseUnconfirmed(err) != tc.wantApplied {
+				t.Fatalf("applied classifier = %t, want %t; err=%v", IsAppliedLockReleaseUnconfirmed(err), tc.wantApplied, err)
+			}
+
+			afterBytes, readErr := os.ReadFile(intentPath)
+			if readErr != nil {
+				t.Fatalf("read after bytes: %v", readErr)
+			}
+			if !tc.change {
+				if string(afterBytes) != string(beforeBytes) {
+					t.Fatalf("no-op mutation changed persisted bytes\nbefore=%s\nafter=%s", beforeBytes, afterBytes)
+				}
+				return
+			}
+			var persisted SupervisorIntentFile
+			if err := json.Unmarshal(afterBytes, &persisted); err != nil {
+				t.Fatalf("decode persisted intent: %v", err)
+			}
+			if got, ok := persisted.Stops[task]; !ok || !stopEntriesEqual(&got, &value) {
+				t.Fatalf("persisted stop = %+v ok=%t, want %+v", got, ok, value)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -132,6 +132,12 @@ func ReallocateDynamicPoolPort(registryPath, intentPath string, d SupervisorDaem
 		}
 		return true, nil
 	}); err != nil {
+		// The descriptor write reached durable storage, but its leaf release is
+		// unconfirmed.  Keep the registry at newPort: compensating it would make
+		// the two stores diverge and would not be safe to retry in this process.
+		if IsAppliedLockReleaseUnconfirmed(err) {
+			return newPort, err
+		}
 		// P1-2 compensation: step 4 (intent) failed AFTER step 3 committed the
 		// registry row to newPort. Left uncompensated, registry=newPort while the
 		// descriptor argv/Port still name oldPort. SERENA survives this divergence (it

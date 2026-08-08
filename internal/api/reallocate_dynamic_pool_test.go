@@ -201,6 +201,54 @@ func TestReallocateDynamicPoolPort_Serena_MovesRegistryAndDescriptorTogether(t *
 	assertNoClientConfigFiles(t, dir)
 }
 
+func TestReallocateDynamicPoolPort_AppliedIntentReleaseKeepsNewPort(t *testing.T) {
+	setPortAvailableForTest(t, map[int]bool{9151: false}, true)
+	dir := hardenedTempDir(t)
+	regPath := filepath.Join(dir, "workspaces.yaml")
+	intentPath := filepath.Join(dir, "supervisor-intent.json")
+	task := `\mcp-local-hub-serena-b133f336`
+	const oldPort = 9151
+	seedRegistrySerenaRow(t, regPath, task, oldPort)
+	seedReallocIntent(t, intentPath, serenaDaemonWithRuntimeSpec(task, oldPort))
+
+	releaseCause := errors.New("injected supervisor-intent release failure")
+	previous := reallocMutateIntentFn
+	reallocMutateIntentFn = func(path string, mutate func(*SupervisorIntentFile) (bool, error)) error {
+		if err := MutateSupervisorIntentIfChanged(path, mutate); err != nil {
+			return err
+		}
+		return markAppliedLockReleaseUnconfirmed(errors.Join(ErrLockReleaseUnconfirmed, releaseCause))
+	}
+	t.Cleanup(func() { reallocMutateIntentFn = previous })
+
+	newPort, err := ReallocateDynamicPoolPort(regPath, intentPath, serenaDaemonWithRuntimeSpec(task, oldPort))
+	if !IsAppliedLockReleaseUnconfirmed(err) || !errors.Is(err, releaseCause) {
+		t.Fatalf("error=%v, want applied release cause", err)
+	}
+	if newPort == oldPort || newPort < 9150 || newPort > 9199 {
+		t.Fatalf("newPort=%d, want committed fresh Serena port", newPort)
+	}
+	reg := NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatal(err)
+	}
+	row, ok := reg.GetSerena("wskey")
+	if !ok || row.Port != newPort {
+		t.Fatalf("registry row=%+v found=%t, want committed port %d", row, ok, newPort)
+	}
+	intent, readErr := ReadSupervisorIntent(intentPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	descriptor := intent.FindSupervisorDaemonByTaskName(task)
+	if descriptor == nil || descriptor.Port != newPort || descriptorArgPortForTest(*descriptor) != newPort {
+		t.Fatalf("descriptor=%+v, want Port and --port %d", descriptor, newPort)
+	}
+	if descriptor.RuntimeSpec == nil || descriptor.RuntimeSpec.ExternalPort != newPort || descriptor.RuntimeSpec.UpstreamPort != newPort+10000 {
+		t.Fatalf("runtime spec=%+v, want external=%d upstream=%d", descriptor.RuntimeSpec, newPort, newPort+10000)
+	}
+}
+
 func TestReallocateDynamicPoolPort_LSP_UsesManifestPool(t *testing.T) {
 	setPortAvailableForTest(t, map[int]bool{9401: false}, true)
 

@@ -610,12 +610,21 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		// carries runtime_spec (HasRuntimeSpecRow ⟹ the §7.1 introduce gate never fires).
 		SupervisorLockBypass: interlockBypass,
 	})
+	var postCommitErr error
 	if iErr != nil {
-		// Covers BOTH a genuine install failure AND the RequireWorkspaceKey
-		// stale-drop (the install errored BEFORE the write, so the prior intent is
-		// intact on disk): failPreCommit rolls our row back and — if we reaped —
-		// recovery-restarts on that still-intact prior intent.
-		return failPreCommit(fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr))
+		if IsAppliedLockReleaseUnconfirmed(iErr) {
+			// The intent is durable. Retain the release cause and enter the same
+			// post-commit continuation as a clean install so commitCtx, reconcile
+			// fallback, interlock release, event emission, and committed-entry
+			// settlement remain single-owned below.
+			postCommitErr = iErr
+		} else {
+			// Covers BOTH a genuine install failure AND the RequireWorkspaceKey
+			// stale-drop (the install errored BEFORE the write, so the prior intent is
+			// intact on disk): failPreCommit rolls our row back and — if we reaped —
+			// recovery-restarts on that still-intact prior intent.
+			return failPreCommit(fmt.Errorf("serena auto-register: install dynamic-pool descriptor for %s: %w", root, iErr))
+		}
 	}
 
 	// 10. COMMIT POINT (mirror migrate step 9). Disarm the rollback, then attempt
@@ -624,7 +633,6 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//     A release failure is accumulated instead of returned immediately because
 	//     it must not skip the owed reconcile/start continuation below.
 	rowSaved = false
-	var postCommitErr error
 	registryReleaseFailed := false
 	if releaseErr := releaseReg(); releaseErr != nil {
 		registryReleaseFailed = true

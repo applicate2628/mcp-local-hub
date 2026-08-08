@@ -131,6 +131,33 @@ func TestMembershipHandler_UnknownPair_400(t *testing.T) {
 	}
 }
 
+func TestMembershipHandler_JoinedReleaseFailureIsOpaque500(t *testing.T) {
+	_, _ = newMembershipTestServer(t)
+	pathLeak := filepath.Join(t.TempDir(), "private", "workspaces.yaml.lock")
+	body := bytes.NewBufferString(`[{"workspace_key":"k1","language":"python","enabled":true}]`)
+	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-refresh-membership", body)
+	rec := httptest.NewRecorder()
+	weeklyRefreshMembershipPutWithUpdate(rec, req, func(string, []api.MembershipDelta) (int, error) {
+		return 0, errors.Join(
+			errors.New("validation-shaped text"),
+			fmt.Errorf("path=%s: %w", pathLeak, api.ErrLockReleaseUnconfirmed),
+		)
+	})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), pathLeak) || strings.Contains(rec.Body.String(), "validation-shaped") {
+		t.Fatalf("opaque response leaked cause: %s", rec.Body.String())
+	}
+	var got map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got["error"] != "membership_failed" || got["detail"] != "internal error" {
+		t.Fatalf("opaque envelope=%v", got)
+	}
+}
+
 func TestMembershipHandler_BadMethod(t *testing.T) {
 	// Task 11: GET is now a supported method (snapshot endpoint), so the
 	// bad-method test must use a method that ISN'T in the allow list.

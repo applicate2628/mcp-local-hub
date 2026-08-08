@@ -92,6 +92,13 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		}
 		return entry, nil
 	}
+	commitForward := func(entry WorkspaceEntry, cause error) (WorkspaceEntry, error) {
+		outcome := transaction.CommitForward()
+		if outcome.State != registrationTransactionCommitted {
+			cause = errors.Join(cause, outcome.Err)
+		}
+		return entry, cause
+	}
 	reg := NewRegistry(regPath)
 	releaseRegistry, err := reg.Lock()
 	if err != nil {
@@ -108,6 +115,9 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		portReady := proxyReadinessFn(prior.Port, lspExistingProxyProbeTimeout) == nil
 		owned, err := lspSupervisorIntentDescriptorExists(prior.WorkspaceKey, prior.Language)
 		if err != nil {
+			if IsAppliedLockReleaseUnconfirmed(err) {
+				return commitForward(prior, err)
+			}
 			return fail(err)
 		}
 		if portReady && owned {
@@ -183,6 +193,9 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 			restoreIntent,
 		)
 		if err != nil {
+			if IsAppliedLockReleaseUnconfirmed(err) {
+				return commitForward(prior, err)
+			}
 			return fail(err)
 		}
 		transaction.AddCompensation("kill possible promoted LSP proxy "+prior.TaskName, func() error {
@@ -262,6 +275,9 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		restoreIntent,
 	)
 	if err != nil {
+		if IsAppliedLockReleaseUnconfirmed(err) {
+			return commitForward(entry, err)
+		}
 		return fail(err)
 	}
 	transaction.AddCompensation("kill possible ensured LSP proxy "+entry.TaskName, func() error {

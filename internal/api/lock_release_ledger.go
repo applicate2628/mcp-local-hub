@@ -40,6 +40,13 @@ func isAppliedLockReleaseUnconfirmed(err error) bool {
 	return errors.As(err, &applied)
 }
 
+// IsAppliedLockReleaseUnconfirmed is the composition-root projection of the
+// ledger's durable-write disposition.  Callers use it to keep a committed
+// prefix instead of compensating through the same poisoned lock leaf.
+func IsAppliedLockReleaseUnconfirmed(err error) bool {
+	return isAppliedLockReleaseUnconfirmed(err)
+}
+
 // flockUnlockFn is the shared release fault-injection seam for ledgered API
 // flocks.
 var flockUnlockFn = func(fl *flock.Flock) error { return fl.Unlock() }
@@ -76,6 +83,21 @@ func ReleaseAndJoin(err *error, release func() error, what string) {
 	}
 	if releaseErr := release(); releaseErr != nil {
 		*err = errors.Join(*err, fmt.Errorf("%s: %w", what, releaseErr))
+	}
+}
+
+// releaseAndJoinApplied is the single mutation-owner spelling for a ledgered
+// release.  A caller supplies applied only after its final durable forward
+// state stands; the ledger continues to own one-shot release and poisoning.
+func releaseAndJoinApplied(err *error, release func() error, what string, applied bool) {
+	if release == nil {
+		return
+	}
+	if releaseErr := release(); releaseErr != nil {
+		*err = errors.Join(*err, fmt.Errorf("%s: %w", what, releaseErr))
+		if applied && errors.Is(releaseErr, ErrLockReleaseUnconfirmed) {
+			*err = markAppliedLockReleaseUnconfirmed(*err)
+		}
 	}
 }
 

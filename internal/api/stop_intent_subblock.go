@@ -336,20 +336,18 @@ func mutateStopSubBlockWithPrearm(
 		return nil, nil, false, fmt.Errorf("stop-intent: resolve supervisor-intent path: %w", err)
 	}
 
-	release, lockErr := lockLeafLedgered(path + supervisorIntentLockSuffix)
+	release, lockErr := lockSupervisorIntent(path)
 	if lockErr != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: flock supervisor-intent: %w", lockErr)
 	}
 	persisted := false
 	defer func() {
-		if unlockErr := release(); unlockErr != nil {
-			releaseErr := fmt.Errorf("stop-intent: release supervisor-intent flock: %w", unlockErr)
-			if persisted && errors.Is(unlockErr, ErrLockReleaseUnconfirmed) {
-				err = markAppliedLockReleaseUnconfirmed(errors.Join(err, releaseErr))
-				return
-			}
-			err = errors.Join(err, releaseErr)
-		}
+		releaseSupervisorIntentAndJoinApplied(
+			&err,
+			release,
+			"stop-intent: release supervisor-intent flock",
+			persisted,
+		)
 	}()
 
 	// Read FRESH under the held lock. Missing file → empty intent (a stop
@@ -462,14 +460,13 @@ func restoreStopIntentTaskSnapshot(
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent rollback: resolve supervisor-intent path: %w", err)
 	}
-	release, lockErr := lockLeafLedgered(path + supervisorIntentLockSuffix)
+	release, lockErr := lockSupervisorIntent(path)
 	if lockErr != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent rollback: flock supervisor-intent: %w", lockErr)
 	}
+	persisted := false
 	defer func() {
-		if unlockErr := release(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("stop-intent rollback: release supervisor-intent flock: %w", unlockErr))
-		}
+		releaseSupervisorIntentAndJoinApplied(&err, release, "stop-intent rollback: release supervisor-intent flock", persisted)
 	}()
 
 	intent, _, rawStopMaps, readErr := readSupervisorIntentForMergeWithRawStopMaps(path)
@@ -535,6 +532,7 @@ func restoreStopIntentTaskSnapshot(
 	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent rollback: write supervisor-intent.json: %w", err)
 	}
+	persisted = true
 	return before, after, !stopEntriesEqual(before, after), nil
 }
 

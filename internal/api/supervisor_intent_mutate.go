@@ -5,15 +5,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/gofrs/flock"
 )
 
 // MutateSupervisorIntentIfChanged serializes a supervisor-intent.json
 // read-modify-write under the same path+".lock" flock used by
 // WriteSupervisorIntent's final write. The mutate callback runs while the
 // flock is held and must only edit the in-memory file.
-func MutateSupervisorIntentIfChanged(path string, mutate func(*SupervisorIntentFile) (bool, error)) error {
+func MutateSupervisorIntentIfChanged(path string, mutate func(*SupervisorIntentFile) (bool, error)) (err error) {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("empty supervisor intent path")
 	}
@@ -21,12 +19,15 @@ func MutateSupervisorIntentIfChanged(path string, mutate func(*SupervisorIntentF
 		return fmt.Errorf("mkdir supervisor intent dir: %w", err)
 	}
 
-	lockPath := path + supervisorIntentLockSuffix
-	lock := flock.New(lockPath)
-	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("supervisor-intent flock %s: %w", lockPath, err)
+	lockPath := supervisorIntentLockPath(path)
+	release, lockErr := lockSupervisorIntent(path)
+	if lockErr != nil {
+		return fmt.Errorf("supervisor-intent flock %s: %w", lockPath, lockErr)
 	}
-	defer func() { _ = lock.Unlock() }()
+	applied := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", applied)
+	}()
 
 	file, _, err := readSupervisorIntentForMerge(path)
 	if err != nil {
@@ -46,5 +47,9 @@ func MutateSupervisorIntentIfChanged(path string, mutate func(*SupervisorIntentF
 	if file.Version == 0 {
 		file.Version = 1
 	}
-	return writeSupervisorIntentLockHeld(path, file)
+	if err := writeSupervisorIntentLockHeld(path, file); err != nil {
+		return err
+	}
+	applied = true
+	return nil
 }

@@ -8,8 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/gofrs/flock"
-
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -478,6 +476,12 @@ func (a *API) registerOneLanguageSupervised(
 		)
 		return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, forwardErr
 	}
+	forwardPrimary := func() error {
+		if forwardErr == nil {
+			return nil
+		}
+		return forwardErr
+	}
 	if err == nil {
 		result, finishErr, disposition := finishSupervisedPhase3(
 			nil, provisionalReceipts, clientPrefixCommitted, postWritePending,
@@ -499,6 +503,14 @@ func (a *API) registerOneLanguageSupervised(
 		restoreIntent,
 	)
 	if err != nil {
+		if isAppliedLockReleaseUnconfirmed(err) {
+			return newRegisterForwardReleaseError(
+				"supervisor-intent", "descriptor-release",
+				registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts},
+				[]string{"registry-row", "client-write-prefix", "supervisor-intent"},
+				[]string{"running-intent-clear", "reconcile", "readiness", "direct-cleanup"}, forwardPrimary(), err,
+			)
+		}
 		return forwardResult("upsert supervisor intent", err)
 	}
 	if canonicalTaskName, err := postWrite.writeRunningIntent(
@@ -511,7 +523,7 @@ func (a *API) registerOneLanguageSupervised(
 				"supervisor-intent", "running-intent-release",
 				registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts},
 				[]string{"registry-row", "client-write-prefix", "supervisor-intent", "running-intent-clear"},
-				[]string{"reconcile", "readiness", "direct-cleanup"}, forwardErr, intentErr,
+				[]string{"reconcile", "readiness", "direct-cleanup"}, forwardPrimary(), intentErr,
 			)
 		}
 		return forwardResult("write running intent", intentErr)
@@ -571,14 +583,13 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	if err != nil {
 		return nil, fmt.Errorf("resolve supervisor-intent path: %w", err)
 	}
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return nil, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return nil, fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
+	applied := false
 	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
-		}
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", applied)
 	}()
 
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
@@ -619,6 +630,7 @@ func (a *API) upsertLSPSupervisorIntent(entry WorkspaceEntry, mcphubBinaryPath s
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
 		return undo, fmt.Errorf("write supervisor-intent LSP row %s: %w", descriptor.TaskName, err)
 	}
+	applied = true
 	return undo, nil
 }
 
@@ -632,15 +644,11 @@ func lspSupervisorIntentDescriptorExists(wsKey, lang string) (exists bool, err e
 	if err != nil {
 		return false, fmt.Errorf("resolve supervisor-intent path: %w", err)
 	}
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return false, fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
-	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
-		}
-	}()
+	defer func() { ReleaseAndJoin(&err, release, "release supervisor-intent flock") }()
 	current, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return false, err
@@ -765,15 +773,11 @@ func supervisorIntentDescriptorForTask(taskName string) (descriptor SupervisorDa
 	if err != nil {
 		return SupervisorDaemon{}, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
 	}
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return SupervisorDaemon{}, false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return SupervisorDaemon{}, false, fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
-	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
-		}
-	}()
+	defer func() { ReleaseAndJoin(&err, release, "release supervisor-intent flock") }()
 	current, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return SupervisorDaemon{}, false, err
@@ -794,14 +798,13 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (undo com
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve supervisor-intent path: %w", err)
 	}
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return nil, false, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return nil, false, fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
+	applied := false
 	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("release supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, unlockErr))
-		}
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", applied)
 	}()
 
 	prior, _, err := readSupervisorIntentForMerge(intentPath)
@@ -841,6 +844,7 @@ func (a *API) removeSupervisorIntentDescriptorForTask(taskName string) (undo com
 	if err := writeSupervisorIntentLockHeld(intentPath, desired); err != nil {
 		return undo, false, fmt.Errorf("write supervisor-intent without LSP row %s: %w", taskName, err)
 	}
+	applied = true
 	return undo, true, nil
 }
 
@@ -898,14 +902,13 @@ func restoreSupervisorStopArtifacts(desired *SupervisorIntentFile, taskName stri
 }
 
 func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorDaemon, artifacts supervisorStopArtifacts) (err error) {
-	lock := flock.New(path + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(path)
+	if lockErr != nil {
+		return fmt.Errorf("supervisor-intent rollback flock %s: %w", supervisorIntentLockPath(path), lockErr)
 	}
+	applied := false
 	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("release supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, unlockErr))
-		}
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent rollback flock", applied)
 	}()
 	current, _, err := readSupervisorIntentForMerge(path)
 	if err != nil {
@@ -922,18 +925,21 @@ func upsertSupervisorIntentDescriptorAndStop(path string, descriptor SupervisorD
 	restoreSupervisorStopArtifacts(desired, descriptor.TaskName, artifacts)
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	return writeSupervisorIntentLockHeld(path, desired)
+	if err := writeSupervisorIntentLockHeld(path, desired); err != nil {
+		return err
+	}
+	applied = true
+	return nil
 }
 
 func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIfEmpty bool, artifacts supervisorStopArtifacts) (err error) {
-	lock := flock.New(path + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return fmt.Errorf("supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(path)
+	if lockErr != nil {
+		return fmt.Errorf("supervisor-intent rollback flock %s: %w", supervisorIntentLockPath(path), lockErr)
 	}
+	applied := false
 	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("release supervisor-intent rollback flock %s: %w", path+supervisorIntentLockSuffix, unlockErr))
-		}
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent rollback flock", applied)
 	}()
 	current, existed, err := readSupervisorIntentForMerge(path)
 	if err != nil || !existed {
@@ -960,11 +966,16 @@ func removeSupervisorIntentDescriptorAndStop(path, taskName string, removeFileIf
 		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
 			return removeErr
 		}
+		applied = true
 		return nil
 	}
 	desired.Version = 1
 	desired.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
-	return writeSupervisorIntentLockHeld(path, desired)
+	if err := writeSupervisorIntentLockHeld(path, desired); err != nil {
+		return err
+	}
+	applied = true
+	return nil
 }
 
 func cloneSupervisorIntentFile(in *SupervisorIntentFile) *SupervisorIntentFile {

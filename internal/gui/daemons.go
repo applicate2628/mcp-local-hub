@@ -122,6 +122,12 @@ func (s *Server) weeklyRefreshMembershipList(w http.ResponseWriter, _ *http.Requ
 // workspaces.yaml under registryMu via api.UpdateWeeklyRefreshMembership.
 // Memo D5 contract: idempotent partial update; entries not in body unchanged.
 func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Request) {
+	weeklyRefreshMembershipPutWithUpdate(w, r, api.UpdateWeeklyRefreshMembership)
+}
+
+// weeklyRefreshMembershipPutWithUpdate keeps the wire owner local while making
+// the storage boundary injectable for deterministic response-projection tests.
+func weeklyRefreshMembershipPutWithUpdate(w http.ResponseWriter, r *http.Request, update func(string, []api.MembershipDelta) (int, error)) {
 	var body []api.MembershipDelta
 	// Membership deltas can carry one entry per (workspace, client) across a
 	// large registry, so they use the generous manifest-class cap rather than
@@ -140,11 +146,12 @@ func (s *Server) weeklyRefreshMembershipPut(w http.ResponseWriter, r *http.Reque
 		writeRegistryError(w, "registry_path", err, "/api/daemons/weekly-refresh-membership PUT registry path")
 		return
 	}
-	updated, err := api.UpdateWeeklyRefreshMembership(regPath, body)
+	updated, err := update(regPath, body)
 	if err != nil {
 		// Validation errors (unknown pair) → 400; storage errors → 500.
 		status := http.StatusBadRequest
-		if strings.HasPrefix(err.Error(), "save registry") ||
+		if errors.Is(err, api.ErrLockReleaseUnconfirmed) ||
+			strings.HasPrefix(err.Error(), "save registry") ||
 			strings.HasPrefix(err.Error(), "load registry") ||
 			strings.HasPrefix(err.Error(), "acquire lock") {
 			status = http.StatusInternalServerError

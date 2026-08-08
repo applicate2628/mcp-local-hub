@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
@@ -1063,6 +1066,120 @@ func TestEnsureLSPRegistered_NewRowRollbackMatrix(t *testing.T) {
 	}
 	if rows := reg.ListByWorkspaceLSP(WorkspaceKey(canonical)); len(rows) != 0 {
 		t.Fatalf("registry rows leaked after rollback: %+v", rows)
+	}
+}
+
+func TestEnsureLSPRegistered_AppliedIntentReleaseCommitsForward(t *testing.T) {
+	tests := []struct {
+		name          string
+		seedPrior     bool
+		failOnRelease int32
+	}{
+		{name: "existing-row-promotion", seedPrior: true, failOnRelease: 2},
+		{name: "new-row-registration", failOnRelease: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+			defer restoreState()
+
+			origScheduler := schedulerFactoryFn
+			schedulerFactoryFn = func() (scheduler.Scheduler, error) { return h.fakeSch, nil }
+			defer func() { schedulerFactoryFn = origScheduler }()
+			origReadiness := proxyReadinessFn
+			proxyReadinessFn = func(int, time.Duration) error { return nil }
+			defer func() { proxyReadinessFn = origReadiness }()
+			origKill := killByPortFn
+			killByPortFn = func(int, time.Duration) error { return nil }
+			defer func() { killByPortFn = origKill }()
+			origReconcile := registerSupervisorReconcileFn
+			var reconcileCalls atomic.Int32
+			registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+				reconcileCalls.Add(1)
+				return ReconcileResponse{}, nil
+			}
+			defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+			ws := t.TempDir()
+			if err := os.WriteFile(filepath.Join(ws, "pyproject.toml"), []byte("[project]\n"), 0o600); err != nil {
+				t.Fatalf("touch marker: %v", err)
+			}
+			canonical, err := CanonicalWorkspacePath(ws)
+			if err != nil {
+				t.Fatalf("CanonicalWorkspacePath: %v", err)
+			}
+			wsKey := WorkspaceKey(canonical)
+			if tc.seedPrior {
+				prior := WorkspaceEntry{
+					WorkspaceKey: wsKey, WorkspacePath: canonical, Language: "python",
+					Backend: "mcp-language-server", Port: 9242,
+					TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+					ClientEntries: map[string]string{"codex": "lsp-python-" + wsKey[:4]},
+					Lifecycle:     LifecycleActive,
+				}
+				reg := NewRegistry(h.regPath)
+				if err := reg.PutLSP(prior); err != nil {
+					t.Fatalf("PutLSP: %v", err)
+				}
+				if err := reg.Save(); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+			}
+
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+			}
+			lockPath := supervisorIntentLockPath(intentPath)
+			releaseCause := errors.New("injected LSP supervisor-intent release failure")
+			previousUnlock := flockUnlockFn
+			var targetReleases atomic.Int32
+			var stranded []*flock.Flock
+			flockUnlockFn = func(fl *flock.Flock) error {
+				if fl.Path() == lockPath && targetReleases.Add(1) == tc.failOnRelease {
+					stranded = append(stranded, fl)
+					return releaseCause
+				}
+				return previousUnlock(fl)
+			}
+			defer func() {
+				flockUnlockFn = previousUnlock
+				for _, fl := range stranded {
+					_ = fl.Unlock()
+				}
+				unconfirmedLockReleasesMu.Lock()
+				delete(unconfirmedLockReleases, lockPath)
+				unconfirmedLockReleasesMu.Unlock()
+			}()
+
+			got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+			if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+				t.Fatalf("error = %v, want applied release class and injected cause", err)
+			}
+			if got.WorkspaceKey != wsKey || got.Language != "python" || got.Port == 0 {
+				t.Fatalf("truthful committed entry = %+v", got)
+			}
+			if reconcileCalls.Load() != 0 {
+				t.Fatalf("reconcile calls = %d, want zero after applied intent release", reconcileCalls.Load())
+			}
+			reg := NewRegistry(h.regPath)
+			if err := reg.Load(); err != nil {
+				t.Fatalf("Load registry: %v", err)
+			}
+			persisted, ok := reg.Get(wsKey, "python")
+			if !ok || persisted.Port != got.Port || !reflect.DeepEqual(persisted.ClientEntries, got.ClientEntries) {
+				t.Fatalf("persisted row = %+v ok=%t, want committed entry %+v", persisted, ok, got)
+			}
+			intent, _, readErr := readSupervisorIntentForMerge(intentPath)
+			if readErr != nil {
+				t.Fatalf("read committed supervisor intent: %v", readErr)
+			}
+			if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")); row == nil {
+				t.Fatalf("committed descriptor missing after applied release: %+v", intent.Daemons)
+			}
+		})
 	}
 }
 

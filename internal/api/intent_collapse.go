@@ -354,7 +354,7 @@ func RunDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	return runDaemonIntentCollapse(stateDir, opts)
 }
 
-func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (DaemonIntentCollapseResult, error) {
+func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (result DaemonIntentCollapseResult, err error) {
 	if stateDir == "" {
 		return DaemonIntentCollapseResult{}, errors.New("intent-collapse: state dir is empty")
 	}
@@ -406,7 +406,7 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 		return DaemonIntentCollapseResult{}, err
 	}
 
-	result := mergeDaemonIntentStops(supervisorIntent, daemonIntent, now)
+	result = mergeDaemonIntentStops(supervisorIntent, daemonIntent, now)
 
 	if !result.Changed {
 		// Idempotent no-op on the SUB-BLOCK: the stops sub-block already
@@ -464,11 +464,14 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 	// via the LOCK-FREE secure-write body — re-entering WriteSupervisorIntent
 	// (which re-acquires the same flock) would deadlock, exactly the
 	// readIntentLocked/writeIntentLocked split daemon_intent.go uses.
-	supLock := flock.New(supervisorIntentPath + supervisorIntentLockSuffix)
-	if err := supLock.Lock(); err != nil {
-		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: flock supervisor-intent: %w", err)
+	supRelease, lockErr := lockSupervisorIntent(supervisorIntentPath)
+	if lockErr != nil {
+		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: flock supervisor-intent: %w", lockErr)
 	}
-	defer func() { _ = supLock.Unlock() }()
+	committed := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, supRelease, "intent-collapse: release supervisor-intent flock", committed)
+	}()
 
 	freshSupervisorIntent, _, err := readSupervisorIntentForMerge(supervisorIntentPath)
 	if err != nil {
@@ -513,6 +516,9 @@ func runDaemonIntentCollapse(stateDir string, opts DaemonIntentCollapseOpts) (Da
 		return DaemonIntentCollapseResult{}, fmt.Errorf("intent-collapse: write supervisor-intent.json: %w", err)
 	}
 	result.Wrote = true
+	// The unified intent is now durable.  A later legacy-file deletion error
+	// must not cause same-leaf compensation after an unconfirmed release.
+	committed = true
 
 	// E2 ORDERED DELETION (spec §5.1-E): the sub-block now carries the active
 	// stops (just written above, under both the daemon-intent flock AND the

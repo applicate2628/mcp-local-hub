@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 )
 
@@ -228,19 +227,25 @@ func mutateRawSettingsMapLocked(path string, mutate func(map[string]string) erro
 // same non-reentrant settingsMu and may also need this settings-file flock.
 // Resolve every settings-derived value before calling this helper, or derive it
 // from the raw map passed to the hook.
-func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) error, after func(map[string]string) error) error {
+func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) error, after func(map[string]string) error) (err error) {
+	lockPath := path + ".lock"
+	// Check before settingsMu so a known ghost holder never waits behind an
+	// unrelated in-process writer. lockLeafLedgered rechecks after the mutex.
+	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
+		return fmt.Errorf("settings flock %s: %w", lockPath, ghost)
+	}
 	settingsMu.Lock()
 	defer settingsMu.Unlock()
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return fmt.Errorf("mkdir settings dir: %w", err)
 	}
-	lockPath := path + ".lock"
-	lk := flock.New(lockPath)
-	if err := lk.Lock(); err != nil {
-		return fmt.Errorf("settings flock %s: %w", lockPath, err)
+	release, lockErr := lockLeafLedgered(lockPath)
+	if lockErr != nil {
+		return fmt.Errorf("settings flock %s: %w", lockPath, lockErr)
 	}
-	defer func() { _ = lk.Unlock() }()
+	applied := false
+	defer func() { releaseAndJoinApplied(&err, release, "release settings flock", applied) }()
 
 	raw, err := readRawSettingsMap(path)
 	if err != nil {
@@ -268,6 +273,7 @@ func mutateRawSettingsMapLockedThen(path string, mutate func(map[string]string) 
 	if err := WriteStateFileBytesLockHeld(path, data); err != nil {
 		return fmt.Errorf("write settings file: %w", err)
 	}
+	applied = true
 	if after != nil {
 		if err := after(raw); err != nil {
 			return err

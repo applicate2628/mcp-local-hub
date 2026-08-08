@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -380,12 +381,12 @@ func TestAutoRegisterSerena_HappyPath_RegistersInstallsReconcilesAndProbes(t *te
 	regPath := autoRegisterTestEnv(t)
 
 	var (
-		installCalled    int32
-		installWS        []WorkspaceEntry
-		reconcileCalled  int32
-		reconcileApply   bool
-		readinessCalled  int32
-		readinessPort    int
+		installCalled   int32
+		installWS       []WorkspaceEntry
+		reconcileCalled int32
+		reconcileApply  bool
+		readinessCalled int32
+		readinessPort   int
 	)
 	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, m *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
 		atomic.AddInt32(&installCalled, 1)
@@ -854,7 +855,10 @@ func TestAutoRegisterSerena_Introduce_NoSupervisor_StartsWithoutReap(t *testing.
 
 	var startCalled int32
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not be called when no supervisor is running"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not be called when no supervisor is running")
+			return nil
+		},
 		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
 	)
 	var installCalled int32
@@ -892,7 +896,10 @@ func TestAutoRegisterSerena_Introduce_ReapFails_RollsBack(t *testing.T) {
 	reapErr := errors.New("synthetic reap failure")
 	stubAutoRegisterCutover(t,
 		func(context.Context) error { return reapErr },
-		func(context.Context) error { t.Fatalf("start must not be called when reap fails before any install"); return nil },
+		func(context.Context) error {
+			t.Fatalf("start must not be called when reap fails before any install")
+			return nil
+		},
 	)
 	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
 		t.Fatalf("install must not be called when the reap fails")
@@ -1276,7 +1283,10 @@ func TestAutoRegisterSerena_Introduce_StartUnsupported_FailsLoudPreCommit(t *tes
 	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })
 	// reap/start are WIRED (non-nil) but the platform does NOT support the start.
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not run when start is unsupported (pre-commit gate)"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not run when start is unsupported (pre-commit gate)")
+			return nil
+		},
 		func(context.Context) error { t.Fatalf("start must not run when start is unsupported"); return nil },
 	)
 	prevSupported := autoRegisterStartSupportedFn
@@ -1355,12 +1365,15 @@ func TestAutoRegisterSerena_ReadinessHonorsContextDeadline(t *testing.T) {
 
 func TestAutoRegisterSerena_LiveAddToStoppedPool_StartsWithoutReap(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
-	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil })  // prior HAS runtime_spec
-	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })  // but supervisor is DOWN
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return true, nil }) // prior HAS runtime_spec
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil }) // but supervisor is DOWN
 
 	var startCalled int32
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not run for a live-add (prior has runtime_spec)"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not run for a live-add (prior has runtime_spec)")
+			return nil
+		},
 		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
 	)
 	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
@@ -1530,6 +1543,131 @@ func TestAutoRegisterSerena_CommittedInstall_KeepsRow(t *testing.T) {
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
 		t.Errorf("registry has %d rows after a committed install, want 1 (row kept at the commit point)", len(rows))
+	}
+}
+
+func TestAutoRegisterSerena_AppliedInstallContinuationMatrix(t *testing.T) {
+	tests := []struct {
+		name                 string
+		introduce            bool
+		reconcileErr         error
+		startSupported       bool
+		startErr             error
+		registryReleaseFails bool
+		wantReconcile        int32
+		wantStart            int32
+		wantGuidance         bool
+	}{
+		{name: "need-start-success", introduce: true, startSupported: true, wantStart: 1},
+		{name: "need-start-failure", introduce: true, startSupported: true, startErr: errors.New("applied-row start failed"), wantStart: 1, wantGuidance: true},
+		{name: "live-reconcile-success", startSupported: true, wantReconcile: 1},
+		{name: "live-reconcile-unavailable-fallback", reconcileErr: ErrSupervisorIPCUnavailable, startSupported: true, wantReconcile: 1, wantStart: 1},
+		{name: "live-reconcile-unavailable-unsupported", reconcileErr: ErrSupervisorIPCUnavailable, wantReconcile: 1, wantGuidance: true},
+		{name: "live-reconcile-other-error", reconcileErr: errors.New("transient reconcile nudge failure"), startSupported: true, wantReconcile: 1},
+		{name: "install-registry-start-causes-join", introduce: true, startSupported: true, startErr: errors.New("joined start failure"), registryReleaseFails: true, wantStart: 1, wantGuidance: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			regPath := autoRegisterTestEnv(t)
+			stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return !tc.introduce, nil })
+			stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return !tc.introduce, nil })
+			var interlockReleases atomic.Int32
+			if tc.introduce {
+				stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
+					return &SupervisorLock{}, func() { interlockReleases.Add(1) }, nil
+				})
+			}
+			origSupported := autoRegisterStartSupportedFn
+			autoRegisterStartSupportedFn = func() bool { return tc.startSupported }
+			t.Cleanup(func() { autoRegisterStartSupportedFn = origSupported })
+
+			requestCtx, cancelRequest := context.WithCancel(context.Background())
+			installCause := errors.New("injected applied install release failure")
+			appliedInstallErr := markAppliedLockReleaseUnconfirmed(errors.Join(ErrLockReleaseUnconfirmed, installCause))
+			stubAutoRegisterInstall(t, func(installCtx context.Context, _ *API, _ *config.ServerManifest, _ InstallParsedManifestOpts) (string, error) {
+				if installCtx.Err() != nil {
+					t.Fatalf("install received cancelled request before commit: %v", installCtx.Err())
+				}
+				cancelRequest()
+				return filepath.Join(t.TempDir(), "supervisor-intent.json"), appliedInstallErr
+			})
+			var reconcileCalls, startCalls, readinessCalls atomic.Int32
+			var continuationSawCancelled atomic.Bool
+			stubAutoRegisterReconcile(t, func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+				reconcileCalls.Add(1)
+				if ctx.Err() != nil {
+					continuationSawCancelled.Store(true)
+				}
+				if !apply {
+					t.Error("reconcile apply=false, want true")
+				}
+				return ReconcileResponse{}, tc.reconcileErr
+			})
+			stubAutoRegisterCutover(t,
+				func(context.Context) error { t.Fatal("reap must not run in this matrix"); return nil },
+				func(ctx context.Context) error {
+					startCalls.Add(1)
+					if ctx.Err() != nil {
+						continuationSawCancelled.Store(true)
+					}
+					return tc.startErr
+				},
+			)
+			stubAutoRegisterReadiness(t, func(int, time.Duration) error {
+				readinessCalls.Add(1)
+				return nil
+			})
+
+			var registryCause error
+			if tc.registryReleaseFails {
+				registryCause = errors.New("injected registry release failure")
+				stubAutoRegisterRegistryUnlockFailure(t, NewRegistry(regPath).LockPath(), registryCause, nil)
+			}
+			root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+			entry, err := NewAPI().AutoRegisterSerenaWorkspace(requestCtx, root)
+			if entry == nil {
+				t.Fatal("entry = nil, want committed entry for applied install")
+			}
+			if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, installCause) {
+				t.Fatalf("error = %v, want applied install class and cause", err)
+			}
+			if tc.startErr != nil && !errors.Is(err, tc.startErr) {
+				t.Fatalf("error = %v, want independent start cause %v", err, tc.startErr)
+			}
+			if registryCause != nil && !errors.Is(err, registryCause) {
+				t.Fatalf("error = %v, want independent registry cause %v", err, registryCause)
+			}
+			if tc.wantGuidance && (!strings.Contains(err.Error(), "NO supervisor is running") || !strings.Contains(err.Error(), "mcphub supervise")) {
+				t.Fatalf("error = %v, want committed-state recovery guidance", err)
+			}
+			if reconcileCalls.Load() != tc.wantReconcile || startCalls.Load() != tc.wantStart {
+				t.Fatalf("reconcile/start calls = %d/%d, want %d/%d", reconcileCalls.Load(), startCalls.Load(), tc.wantReconcile, tc.wantStart)
+			}
+			if readinessCalls.Load() != 0 {
+				t.Fatalf("readiness calls = %d, want zero after applied install cause", readinessCalls.Load())
+			}
+			if continuationSawCancelled.Load() {
+				t.Fatal("postcommit continuation observed cancelled request ctx; want commitCtx")
+			}
+			if tc.introduce && interlockReleases.Load() != 1 {
+				t.Fatalf("interlock releases = %d, want one before start", interlockReleases.Load())
+			}
+			rows := loadRegSerenaRows(t, regPath)
+			if len(rows) != 1 || rows[0].WorkspaceKey != entry.WorkspaceKey {
+				t.Fatalf("registry rows = %+v, want committed entry retained", rows)
+			}
+			stateDir, stateErr := DaemonStateDir()
+			if stateErr != nil {
+				t.Fatalf("DaemonStateDir: %v", stateErr)
+			}
+			events, readErr := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+			if readErr != nil {
+				t.Fatalf("read supervisor event log: %v", readErr)
+			}
+			if got := bytes.Count(events, []byte(`"event":"workspace-auto-registered"`)); got != 1 {
+				t.Fatalf("workspace-auto-registered events = %d, want exactly one; log=%s", got, events)
+			}
+		})
 	}
 }
 
@@ -1900,7 +2038,8 @@ func TestReadUntrustedSerenaProjectYML_SymlinkRejected(t *testing.T) {
 }
 
 // R3b. Symlinked marker rejected end-to-end through auto-register too (the walk
-//      finds it as a hit, the reader refuses it). Same symlink-capability skip.
+//
+//	finds it as a hit, the reader refuses it). Same symlink-capability skip.
 func TestAutoRegisterSerena_SymlinkMarker_Rejected(t *testing.T) {
 	regPath := autoRegisterTestEnv(t)
 	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
@@ -2048,9 +2187,10 @@ func TestReadUntrustedSerenaProjectYML_SizeCapBoundary(t *testing.T) {
 }
 
 // R6b. Missing marker → bare not-exist error (NOT %w-wrapped) so BOTH
-//      os.IsNotExist(err) and errors.Is(err, os.ErrNotExist) detect it. The
-//      `mcphub workspace register` caller relies on os.IsNotExist, which does
-//      not unwrap %w chains.
+//
+//	os.IsNotExist(err) and errors.Is(err, os.ErrNotExist) detect it. The
+//	`mcphub workspace register` caller relies on os.IsNotExist, which does
+//	not unwrap %w chains.
 func TestReadUntrustedSerenaProjectYML_MissingMarker_IsNotExistDetectable(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "does-not-exist.yml")
 	_, err := ReadUntrustedSerenaProjectYML(context.Background(), path)
@@ -2448,7 +2588,10 @@ func TestAutoRegisterSerena_Introduce_NoSupervisor_AcquiresInterlockBeforeSpecBe
 	})
 	// The reap MUST NOT be called — there is no supervisor to reap on this path.
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not be called on the no-supervisor introduce path"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not be called on the no-supervisor introduce path")
+			return nil
+		},
 		func(context.Context) error { startRan = true; record("start"); return nil },
 	)
 	stubAutoRegisterInstall(t, func(_ context.Context, _ *API, _ *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
@@ -2518,8 +2661,14 @@ func TestAutoRegisterSerena_Introduce_NoSupervisor_DefersWhenInterlockHeld_NoRea
 	// The reap MUST NOT run (no supervisor); the start MUST NOT run (no reap → no
 	// recovery restart owed on the defer path, and the install never reaches a start).
 	stubAutoRegisterCutover(t,
-		func(context.Context) error { t.Fatalf("reap must not run on the no-supervisor introduce defer"); return nil },
-		func(context.Context) error { t.Fatalf("start must not run on the no-supervisor introduce defer (no reap → no recovery restart owed)"); return nil },
+		func(context.Context) error {
+			t.Fatalf("reap must not run on the no-supervisor introduce defer")
+			return nil
+		},
+		func(context.Context) error {
+			t.Fatalf("start must not run on the no-supervisor introduce defer (no reap → no recovery restart owed)")
+			return nil
+		},
 	)
 	// The acquire fails (a concurrent cutover holds the freed lock).
 	stubAutoRegisterAcquireInterlock(t, func() (*SupervisorLock, func(), error) {
@@ -2575,7 +2724,7 @@ func TestAutoRegisterSerena_Introduce_NoSupervisor_DefersWhenInterlockHeld_NoRea
 // reports that sentinel — never the caller's os.Getpid(). A regression to the
 // sidecar-overwriting acquire fails this assertion.
 func TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller(t *testing.T) {
-	_ = autoRegisterTestEnv(t) // isolates registry + state dir; path not asserted here
+	_ = autoRegisterTestEnv(t)                                                        // isolates registry + state dir; path not asserted here
 	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil }) // INTRODUCE
 	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return true, nil })   // running → reap
 
@@ -2636,7 +2785,6 @@ func TestAutoRegisterSerena_Introduce_ReapTargetsOldSupervisorNotCaller(t *testi
 		t.Fatalf("the reap must read the OLD supervisor's PID (%d) from the intact sidecar; got %d", oldSupervisorPID, reapSawPID)
 	}
 }
-
 
 // ---------------------------------------------------------------------------
 // AREA-5 TRUST GATE — the security core.

@@ -33,8 +33,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock"
-
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 )
@@ -304,11 +302,14 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// secure-write body (writeSupervisorIntentLockHeld) — re-entering
 	// WriteSupervisorIntent (which re-acquires the same flock) would deadlock,
 	// exactly the readIntentLocked/writeIntentLocked split daemon_intent.go uses.
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return "", fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return "", fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
-	defer func() { _ = lock.Unlock() }()
+	committed := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", committed)
+	}()
 
 	// Build the intent file we intend to write up front (under the held lock)
 	// so the pre-flight dry-write exercises the same payload and the same
@@ -521,6 +522,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	}); err != nil {
 		return "", err
 	}
+	committed = true
 	if len(removedSupervisorTargetsAfterInstall) > 0 {
 		nudgeResult := nudgeSupervisorReconcileAfterRemovedTargets(context.Background())
 		killRemovedSupervisorTargetsAfterGlobalInstall(
@@ -619,7 +621,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 		// return — i.e. while still inside installPlanCore but BEFORE the
 		// post-success stop-subblock write — rather than at installPlanCore's own
 		// return.
-		runLocked := func() error {
+		runLocked := func() (err error) {
 			// Hold the canonical per-file flock across the read-merge AND the
 			// commit inside executeInstallTo's intermediate hook, exactly as
 			// InstallParsedManifest does (FIX 1 there) — otherwise two concurrent
@@ -628,11 +630,14 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			// Because we hold the lock, the inner write uses the LOCK-FREE
 			// writeSupervisorIntentLockHeld body (re-entering WriteSupervisorIntent
 			// would deadlock).
-			lock := flock.New(intentPath + supervisorIntentLockSuffix)
-			if err := lock.Lock(); err != nil {
-				return fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+			release, lockErr := lockSupervisorIntent(intentPath)
+			if lockErr != nil {
+				return fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 			}
-			defer func() { _ = lock.Unlock() }()
+			committed := false
+			defer func() {
+				releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", committed)
+			}()
 
 			// Build the merged intent under the held lock. For a global manifest
 			// serenaOrPlanDaemons takes the supervisorDaemonsFromPlan branch (no
@@ -724,6 +729,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			}); err != nil {
 				return err
 			}
+			committed = intentWriteNeeded
 			// Capture THIS install's committed descriptor rows for the best-effort
 			// daemon-installed audit emit (after the lock releases). Only when an
 			// intent write actually happened — a daemonless full install
@@ -1982,11 +1988,14 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	// server cannot interleave and clobber the other's rows. Because we hold
 	// the lock, the write uses the lock-free writeSupervisorIntentLockHeld
 	// body (re-entering WriteSupervisorIntent would deadlock).
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return false, nil, nil, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return false, nil, nil, fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
-	defer func() { _ = lock.Unlock() }()
+	applied := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", applied)
+	}()
 
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
@@ -2040,6 +2049,7 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	if err := writeSupervisorIntentLockHeld(intentPath, merged); err != nil {
 		return false, nil, nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)
 	}
+	applied = true
 	return true, removedDaemons, removedPIDByTask, nil
 }
 
