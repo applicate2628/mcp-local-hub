@@ -105,6 +105,9 @@ the CLI to install the servers you want shared and verify they connect:
 mcphub install --server serena       # default clients: Claude/Codex/Cursor
 mcphub install --all                 # all 10 servers, default clients
 
+# Materialize one server in supervisor intent without touching client configs
+mcphub install --server fetch --no-client-config
+
 # Optional client targeting
 mcphub install --server serena --clients qwen-cli,vscode
 mcphub install --server serena --all-clients
@@ -188,6 +191,7 @@ The commands you reach for day to day:
 |---|---|
 | `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
 | `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
+| `mcphub install --server <name> --no-client-config` | Materialize only that server's daemon/supervisor intent; do not read or write MCP client configs |
 | `mcphub install --all` | Bulk install every manifest under `servers/` into default clients |
 | `mcphub status` | Show state of every `mcp-local-hub-*` task (Running / Scheduled / Stopped) with PID, RAM, uptime, next-run |
 | `mcphub restart --server <n>` / `--all` | Stop + re-launch one or all daemons |
@@ -209,122 +213,5 @@ scheduler/secrets, and the hidden transport shims â€” is in
 - **Dual-entry pattern** â€” embedded Go servers expose a `NewCommand()` factory imported by both the standalone binary and the hub subcommand; one code path, two shipping shapes.
 - **Native Go stdio-host with child-exit detection** â€” one subprocess per daemon, multiplexed across concurrent HTTP clients, with child-exit detection feeding Task Scheduler's restart policy.
 
-See [docs/architecture-highlights.md](docs/architecture-highlights.md) for the full prose on each highlight, and [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for supervisor / lifecycle depth.
-
-## Supervisor architecture (v0.5.0)
-
-A single long-lived `mcphub supervise` process per user owns every MCP daemon,
-restarts it on failure, and shares it across clients. Full design â€” new commands
-(`supervise`, `strict-mode`, `autostart`, `install --upgrade`), state-file
-layout, v0.4.x migration flow, and per-OS behavior matrix â€” is in
-[docs/supervisor-architecture.md](docs/supervisor-architecture.md).
-
-## Current status
-
-**Preview / Phase 3B-II hardening** â€” the core CLI, daemon layer, Windows GUI,
-tray, secrets, settings, backup, migration, and workspace-scoped LSP surfaces
-are in the tree. Phase 3A and Phase 3B-I are closed; Phase 3B-II has delivered
-multiple follow-up slices, but still needs the live/manual smoke matrix and
-backlog reconciliation before a release-ready claim.
-
-Delivered and documented:
-
-- 15 built-in servers (incl. the gdb/lldb/godbolt/perftools/drmemory/vtune/oneapi-run debug+profile suite) plus a **52-row curated catalog** (one-click install across engineering/CAD, music, data/BI, creative, science, PKM, office) and the direct HTTPS `context7` entry.
-- 22 user-facing CLI commands across install, migration, logs, backups,
-  scheduler, secrets, settings, cleanup, and version surfaces.
-- Go rewrites of godbolt and lldb, embedded as dual-entry servers.
-- Perftools wrapping clang-tidy, opt-in hyperfine, llvm-objdump, and iwyu.
-- PATH-based install model with `mcphub setup`.
-- go:embed manifests for filesystem-independent binaries.
-- Native stdio-host, child-exit detection, and Task Scheduler restart policy.
-- Local-loopback GUI, SSE event bus, dashboard, logs, migration matrix,
-  secrets/settings/about screens, Windows tray subprocess, and Playwright/E2E
-  infrastructure.
-- Workspace-scoped LSP lazy proxies and a Phase 3B-II live/manual smoke
-  checklist for tray, console, reboot, daemon kill, and multi-language LSP
-  validation.
-
-Phase evidence:
-
-- **Phase 1** â€” Serena consolidation across the original 4 clients ([docs/phase-1-verification.md](docs/phase-1-verification.md)).
-- **Phase 2** â€” 7 global daemons added, supergateway -> native Go stdio-host ([docs/phase-2-verification.md](docs/phase-2-verification.md)).
-- **Phase 3A** â€” CLI parity and Go-embedded servers ([docs/phase-3a-verification.md](docs/phase-3a-verification.md)).
-- **Phase 3B-I** â€” GUI Installer MVP ([docs/phase-3b-verification.md](docs/phase-3b-verification.md)).
-- **Phase 3B-II** â€” backlog and manual smoke matrix ([docs/superpowers/plans/phase-3b-ii-backlog.md](docs/superpowers/plans/phase-3b-ii-backlog.md), [docs/phase-3b-ii-verification.md](docs/phase-3b-ii-verification.md)).
-
-Forward development proposals:
-
-- Ideas to evaluate from `ravitemer/mcp-hub` are captured in
-  [docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md](docs/superpowers/plans/2026-05-04-ravitemer-mcp-hub-adoption-proposals.md).
-
-Roadmap / remaining work:
-
-- **Phase 3B-II release hardening** â€” execute the D2/D3 live/manual smoke matrix and reconcile the remaining backlog before tagging.
-- **Phase 3C+ candidate work** â€” optional unified MCP endpoint and VS Code workspace/JSON5 import compatibility. (Richer health/capability status, the curated marketplace + one-click install, and remote-server `http` manifests have since SHIPPED â€” see the matrix below.)
-- **Phase 4+** â€” Linux/macOS scheduler backends (systemd user units + launchd agents).
-
-## Feature & readiness matrix
-
-A surface-by-surface map of what this project actually does today, with explicit honesty about preview-state coverage. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the promotion rules a row follows.
-
-- **âœ… Stable** â€” fresh automated test coverage OR a recent live-smoke pass for the exact user-visible surface, AND no open critical caveat. Not "production-ready"; "works as advertised in this preview, with evidence."
-- **âš  Preview** â€” feature is shipped and reachable, but live-smoke coverage is partial, an open caveat exists in `work-items/bugs/` or the backlog, OR the surface may change in incompatible ways. Backups and dry-run before applying.
-- **ğŸš§ Roadmap** â€” feature is acknowledged in the backlog but not yet shipped, OR currently exists only as a cross-compile path with no runtime evidence.
-
-| Surface | Status | Notes |
-|---|---|---|
-| Run on Windows | âœ… Stable | Tested on Windows 11 (10.0.26100); primary platform |
-| Run on Linux | ğŸš§ Roadmap | Ubuntu CI builds/tests; install/scheduler not implemented |
-| Run on macOS | ğŸš§ Roadmap | darwin cross-build only; scheduler + force-kill probe stubbed |
-| Auto-start on logon â€” Windows | âœ… Stable | Task Scheduler with restart-on-failure |
-| Auto-start on logon â€” Linux | âš  Beta | systemd user units (F2) + `loginctl enable-linger` (F3) both implemented â€” `mcphub autostart enable` writes the `--user` unit, runs `systemctl --user enable --now`, then best-effort `enable-linger` so the supervisor survives logout; live-verify on a real systemd host pending |
-| Auto-start on logon â€” macOS | ğŸš§ Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
-| Default client install | âš  Preview | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix |
-| Opt-in client install | âš  Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay), Zed (stdio-relay), Kiro, Windsurf, Cline, Kilo Code, OpenCode, Hermes, OpenClaw; built from upstream config docs, live smoke pending |
-| GUI dashboard (`mcphub gui`) | âš  Preview | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
-| GUI logs viewer (`/api/logs/:server`) | âš  Preview | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped |
-| Workspace-scoped LSP lazy proxies | âš  Preview | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending |
-| Encrypted secrets vault | âš  Preview | age-encrypted; argv-leak removed (PR #128); open cross-process last-write-wins limitation tracked in `work-items/bugs/a3a-vault-concurrent-edit-lww.md` |
-| Local manifest authoring (GUI Add server / `mcphub manifest create`) | âš  Preview | Form + `Paste YAML` import; YAML smuggling hardened (PR #51) but still surface-may-change before 1.0 |
-| Backups, rollback, migration | âš  Preview | `backups.keep_n` enforced + per-write timestamped; tracked race in interleaved migrate/demigrate (`work-items/bugs/b1-backup-file-race.md`) |
-| Per-server HTTP API (`/mcp` per daemon) | âš  Preview | DNS-rebind + Content-Type + body-size guards; GET/SSE server-notification semantics still being reconciled |
-| Unified health/status snapshot | âš  Preview | Shipped (G2) â€” `/api/health` combines ping/status/version + per-daemon capability probes; drives the GUI Dashboard |
-| Capability browser (tools/resources/prompts) | âš  Preview | Shipped (G3) â€” the Capabilities screen lists each daemon's declared tools/resources/prompts |
-| Catalog / marketplace (one-click install) | âš  Preview | Shipped â€” Catalog screen + a **52-row curated marketplace** (33 installable + 19 docs-only pointers) across engineering/CAD, music/audio, data/BI, creative, science, PKM, office; one-click install/uninstall, theme-grouped, arch-aware install-probe; GUI **and** CLI (`mcphub marketplace`). Remote (`http`) + docs-only OAuth shapes supported |
-
-## License
-
-Mozilla Public License Version 2.0 (`MPL-2.0`) â€” see [LICENSE](LICENSE).
-
-Commercial licenses and commercial versions are available by separate agreement
-for teams that need different licensing terms, private distribution, support,
-warranty, indemnity, integration, packaging, or proprietary deployment terms.
-To discuss a commercial version or commercial license, contact Dmitry Denisenko
-through GitHub at [@applicate2628](https://github.com/applicate2628).
-
-Unless and until a separate commercial agreement is signed, use, modification,
-and distribution of this repository remain governed by `MPL-2.0`. A commercial
-offer does not reduce the rights granted for the public source code under
-`MPL-2.0`.
-
-Copyright 2026 Dmitry Denisenko ([@applicate2628](https://github.com/applicate2628))
-
-## Terms and Abbreviations
-
-- `CLI`: Command-Line Interface; commands such as `mcphub install` and
-  `mcphub status`.
-- `Commercial license`: separate private agreement for different licensing,
-  support, distribution, warranty, indemnity, integration, packaging, or
-  deployment terms.
-- `Cursor`: Cursor editor/agent client; default MCP client target in this
-  preview.
-- `GUI`: Graphical User Interface; the embedded local web interface and tray
-  surface.
-- `MCP`: Model Context Protocol; the protocol used by managed clients and
-  servers.
-- `MPL-2.0`: Mozilla Public License Version 2.0; the open-source license used
-  by this repository.
-- `Qwen Code CLI`: Qwen command-line agent client; opt-in MCP client target.
-- `SSE`: Server-Sent Events; the HTTP event stream used by the GUI.
-- `VS Code`: Visual Studio Code; opt-in MCP client target and future
-  workspace-import surface.
+See [docs/architecture-highlights.md](docs/architecture-highlights.md) for the full prose on each highlight, and [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for supervisor / lifecycle ×}¶ç«h‘éì¶»§q«^uÉÉ½É˜ ‰É•…É•ÍÁ½¹Í”è€•Üˆ°•ÉÈ¤(%ô(%¥˜€…É•ÍÀ¹=,ì($%É•ÑÕÉ¸™…±Í”°¹¥°(%ô(%É•ÍÕ±Ğ°|€èôÉ•ÍÀ¹I•ÍÕ±Ğ¸¡µ…ÁmÍÑÉ¥¹u…¹ä¤(%¥˜É•ÍÕ±Ğ€ôô¹¥°ì($%É•ÑÕÉ¸™…±Í”°¹¥°(%ô(%¥˜Ø°½¬€èôÉ•ÍÕ±Ñl‰É•½¹¥±•}É•…‘ä‰t¸¡‰½½°¤ì½¬ì($%É•ÑÕÉ¸Ø°¹¥°(%ô(%É•ÑÕÉ¸™…±Í”°¹¥°)ô((¼¼€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´(¼¼1½Üµ±•Ù•°%A™É…µ”$½<¸(¼¼€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´((¼¼Í­¥Á!•±±½É…µ”É•…‘Ì€¬‘¥Í…É‘ÌÑ¡”ÍÕÁ•ÉÙ¥Í½ÈÌ¡•±±¼™É…µ”…Ğ(¼¼½¹¹•Ñ¥½¸ÍÑ…ÉĞ¸)™Õ¹ŒÍ­¥Á!•±±½É…µ”¡½¹¸¹•Ğ¹½¹¸¤•ÉÉ½Èì(%Ù…È‰Õ˜lĞÀäÙu‰åÑ”(%™½È¤€èô€Àì¤€ğ€ĞÀäØì¤¬¬ì($%¸°•ÉÈ€èô½¹¸¹I•…¡‰Õ™m¤€è¤¬Åt¤($%¥˜•ÉÈ€„ô¹¥°ì($$%É•ÑÕÉ¸•ÉÈ($%ô($%¥˜¸€ôô€Àì($$%½¹Ñ¥¹Õ”($%ô($%¥˜‰Õ™m¥t€ôô€q¸œì($$%É•ÑÕÉ¸¹¥°($%ô(%ô(%É•ÑÕÉ¸™µĞ¹ÉÉ½É˜ ‰¡•±±¼™É…µ”•á••‘•€Ğ-¥ˆ¤)ô((¼¼Ù•É¥™å!•±±½É…µ”É•…‘ÌÑ¡”¡•±±¼™É…µ”…¹Ù…±¥‘…Ñ•Ì¥Ğ……¥¹ÍĞÑ¡”(¼¼•áÁ•Ñ•ÍÕÁ•ÉÙ¥Í½È¹±½¬½İ¹•È¸5¥Íµ…Ñ É•ÑÕÉ¹Ì…¸•ÉÉ½ÈìÑ¡”(¼¼…±±•È±½Í•ÌÑ¡”½¹¹•Ñ¥½¸¸)™Õ¹ŒÙ•É¥™å!•±±½É…µ”¡½¹¸¹•Ğ¹½¹¸°•áÁ•Ñ•…Á¤¹MÕÁ•ÉÙ¥Í½É1½­=İ¹•È¤•ÉÉ½Èì(%±¥¹”°•ÉÈ€èôÉ•…‘1¥¹”¡½¹¸°€ĞÀäØ¤(%¥˜•ÉÈ€„ô¹¥°ì($%É•ÑÕÉ¸•ÉÈ(%ô(%Ù…È•¹ØÍÑÉÕĞì($%!•±±¼…Á¤¹%A!•±±¼©Í½¸è‰¡•±±¼‰€(%ô(%¥˜•ÉÈ€èô©Í½¸¹U¹µ…ÉÍ¡…°¡±¥¹”°€™•¹Ø¤ì•ÉÈ€„ô¹¥°ì($%É•ÑÕÉ¸™µĞ¹ÉÉ½É˜ ‰‘•½‘”¡•±±¼è€•Ü€¡É…Üô•Ä¤ˆ°•ÉÈ°ÍÑÉ¥¹œ¡±¥¹”¤¤(%ô(%¥˜•áÁ•Ñ•¹A%€ôô€À€˜˜•áÁ•Ñ•¹MÑ…ÉÑ•‘Ğ€ôô€ˆˆì($$¼¼9¼½İ¹•ÈÍ¥‘•…ÈÑ¼½µÁ…É”……¥¹ÍĞƒŠP‰•ÍĞµ•™™½ÉĞ°…•ÁĞ¸($%É•ÑÕÉ¸¹¥°(%ô(%¥˜€……Á¤¹Y…±¥‘…Ñ•!…¹‘Í¡…­”¡•¹Ø¹!•±±¼°•áÁ•Ñ•¤ì($%É•ÑÕÉ¸™µĞ¹ÉÉ½É˜ ‰¡•±±¼µ¥Íµ…Ñ è½ĞÁ¥ô•ÍÑ…ÉÑ•‘}…Ğô•Ì•áÁ•Ñ•Á¥ô•ÍÑ…ÉÑ•‘}…Ğô•Ìˆ°($$%•¹Ø¹!•±±¼¹A%°•¹Ø¹!•±±¼¹MÑ…ÉÑ•‘Ğ°•áÁ•Ñ•¹A%°•áÁ•Ñ•¹MÑ…ÉÑ•‘Ğ¤(%ô(%É•ÑÕÉ¸¹¥°)ô((¼¼İÉ¥Ñ•É…µ”)M=8µ•¹½‘•ÌÉ•Ä€¬…ÁÁ•¹‘Ì„ÑÉ…¥±¥¹œ¹•İ±¥¹”€¡Ñ¡”(¼¼ÍÕÁ•ÉÙ¥Í½ÈÌ™É…µ”‘•±¥µ¥Ñ•ÈÁ•ÈÍÁ•Œƒ
+œ‰]¥É”™½Éµ…Ğˆ¤¸)™Õ¹ŒİÉ¥Ñ•É…µ”¡½¹¸¹•Ğ¹½¹¸°É•Ä…Á¤¹%AI•ÅÕ•ÍĞ¤•ÉÉ½Èì(%É…Ü°•ÉÈ€èô©Í½¸¹5…ÉÍ¡…°¡É•Ä¤(%¥˜•ÉÈ€„ô¹¥°ì($%É•ÑÕÉ¸™µĞ¹ÉÉ½É˜ ‰µ…ÉÍ¡…°É•ÅÕ•ÍĞè€•Üˆ°•ÉÈ¤(%ô(%É…Ü€ô…ÁÁ•¹¡É…Ü°€q¸œ¤(%¥˜|°•ÉÈ€èô½¹¸¹]É¥Ñ”¡É…Ü¤ì•ÉÈ€„ô¹¥°ì($%É•ÑÕÉ¸•ÉÈ(%ô(%É•ÑÕÉ¸¹¥°)ô((¼¼É•…‘É…µ”É•…‘Ì½¹”)M=8±¥¹”™É½´½¹¸…¹‘•½‘•Ì¥Ğ¥¹Ñ¼…¸(¼¼%AI•ÍÁ½¹Í”¸)™Õ¹ŒÉ•…‘É…µ”¡½¹¸¹•Ğ¹½¹¸¤€¡…Á¤¹%AI•ÍÁ½¹Í”°•ÉÉ½È¤ì(%±¥¹”°•ÉÈ€èôÉ•…‘1¥¹”¡½¹¸°€ÄØÌàĞ¤(%¥˜•ÉÈ€„ô¹¥°ì($%É•ÑÕÉ¸…Á¤¹%AI•ÍÁ½¹Í•íô°•ÉÈ(%ô(%Ù…ÈÉ•ÍÀ…Á¤¹%AI•ÍÁ½¹Í”(%¥˜•ÉÈ€èô©Í½¸¹U¹µ…ÉÍ¡…°¡±¥¹”°€™É•ÍÀ¤ì•ÉÈ€„ô¹¥°ì($%É•ÑÕÉ¸…Á¤¹%AI•ÍÁ½¹Í•íô°™µĞ¹ÉÉ½É˜ ‰‘•½‘”É•ÍÁ½¹Í”è€•Ü€¡É…Üô•Ä¤ˆ°•ÉÈ°ÍÑÉ¥¹œ¡±¥¹”¤¤(%ô(%É•ÑÕÉ¸É•ÍÀ°¹¥°)ô((¼¼É•…‘1¥¹”É•…‘Ì‰åÑ•ÌÕ¹Ñ¥°€q¸œ½Èµ…à¥Ì¡¥Ğ¸I•ÑÕÉ¹ÌÑ¡”±¥¹”(¼¼]%Q!=UPÑ¡”ÑÉ…¥±¥¹œ¹•İ±¥¹”¸I•ÑÕÉ¹Ì•ÉÉ½È½¸µ…à•á••‘•¸)™Õ¹ŒÉ•…‘1¥¹”¡½¹¸¹•Ğ¹½¹¸°µ…à¥¹Ğ¤€¡mu‰åÑ”°•ÉÉ½È¤ì(%‰Õ˜€èôµ…­”¡mu‰åÑ”°€À°€ÈÔØ¤(%™½È¤€èô€Àì¤€ğµ…àì¤¬¬ì($%Ù…ÈˆlÅu‰åÑ”($%¸°•ÉÈ€èô½¹¸¹I•…¡‰lét¤($%¥˜•ÉÈ€„ô¹¥°ì($$%É•ÑÕÉ¸¹¥°°•ÉÈ($%ô($%¥˜¸€ôô€Àì($$%½¹Ñ¥¹Õ”($%ô($%¥˜‰lÁt€ôô€q¸œì($$%É•ÑÕÉ¸‰Õ˜°¹¥°($%ô($%‰Õ˜€ô…ÁÁ•¹¡‰Õ˜°‰lÁt¤(%ô(%É•ÑÕÉ¸‰Õ˜°™µĞ¹ÉÉ½É˜ ‰±¥¹”•á••‘•€•‰åÑ•Ìˆ°µ…à¤)ô((¼¼€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´(¼¼5¥ÍŒ¡•±Á•ÉÌ¸(¼¼€´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´´((¼¼MµÄÉ•µ½Ù•Ñ¡”UMI95µ‰…Í•ÍÕÁ•ÉÙ¥Í•%AA¥Á•A…Ñ €¬ÕÉÉ•¹Ñ]¥¹‘½İÍUÍ•É¹…µ”(¼¼¡•±Á•ÉÌ¸Ù•Éä%A‘¥…°¥¸Ñ¡”ÕÁÉ…‘”½µ¥É…Ñ”™±½Ü¹½ÜÕÍ•ÌÑ¡”M%µ‰…Í•(¼¼…¹½¹¥…°É•Í½±Ù•È…Á¤¹MÕÁ•ÉÙ¥Í½É%A‘‘É•ÍÌ€¡Ñ¡”Á…Ñ Ñ¡”ÍÕÁ•ÉÙ¥Í½È1%MQ9L(¼¼½¸¤°±½Í¥¹œÑ¡”AH€ŒÈÄÈÈÌM%µ½¹Í¥ÍÑ•¹äÁÉ½Á……Ñ¥½¸…À¸((¼¼É•…‘AÉ•5¥É…Ñ¥½¹MÑÉ¥Ñ5½‘”É•…‘ÌÍÑÉ¥Ñ}µ½‘”™É½´ÍÕÁ•ÉÙ¥Í½Èµ¥¹Ñ•¹Ğ¹©Í½¸(¼¼¥˜ÁÉ•Í•¹Ğ¸I•ÑÕÉ¹Ì™…±Í”İ¡•¸Ñ¡”™¥±”¥Ìµ¥ÍÍ¥¹œ¸)™Õ¹ŒÉ•…‘AÉ•5¥É…Ñ¥½¹MÑÉ¥Ñ5½‘”¡ÍÑ…Ñ•¥ÈÍÑÉ¥¹œ¤€¡‰½½°°•ÉÉ½È¤ì(%Á…Ñ €èô™¥±•Á…Ñ ¹)½¥¸¡ÍÑ…Ñ•¥È°€‰ÍÕÁ•ÉÙ¥Í½Èµ¥¹Ñ•¹Ğ¹©Í½¸ˆ¤(%¥¹Ñ•¹Ğ°•ÉÈ€èô…Á¤¹I•…‘MÕÁ•ÉÙ¥Í½É%¹Ñ•¹Ğ¡Á…Ñ ¤(%¥˜•ÉÈ€„ô¹¥°ì($%¥˜½Ì¹%Í9½Ñá¥ÍĞ¡•ÉÈ¤ñğ•ÉÉ½ÉÌ¹%Ì¡•ÉÈ°½Ì¹ÉÉ9½Ñá¥ÍĞ¤ì($$%É•ÑÕÉ¸™…±Í”°¹¥°($%ô($$¼¼MÕÉ™…”½Ñ¡•È•ÉÉ½ÉÌÍ¼Ñ¡”…±±•È…¸‘•¥‘”İ¡•Ñ¡•ÈÑ¼($$¼¼…‰½ÉĞ½ÈÁÉ½••İ¥Ñ ÍÑÉ¥Ñ}µ½‘”õ™…±Í”¸($%É•ÑÕÉ¸™…±Í”°•ÉÈ(%ô(%É•ÑÕÉ¸¥¹Ñ•¹Ğ¹MÑÉ¥Ñ5½‘”°¹¥°)ô((¼¼‘ÕÉAÑÈÉ•ÑÕÉ¹Ì„Á½¥¹Ñ•ÈÑ¼¸İ¥¹¥¼¹¥…±A¥Á”Ñ…­•Ì„€©Ñ¥µ”¹ÕÉ…Ñ¥½¸(¼¼€¡¹¥°€ô¹¼Ñ¥µ•½ÕĞ¤ìÑ¡”¡•±Á•ÈÍ…Ù•ÌÑ¡”…±±Í¥Ñ”™É½´„±½…°Ù…È¸)™Õ¹Œ‘ÕÉAÑÈ¡Ñ¥µ”¹ÕÉ…Ñ¥½¸¤€©Ñ¥µ”¹ÕÉ…Ñ¥½¸ì(%É•ÑÕÉ¸€™)ô
