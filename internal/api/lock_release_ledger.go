@@ -14,6 +14,32 @@ import (
 // benign contention.
 var ErrLockReleaseUnconfirmed = errors.New("lock release could not be confirmed; this process still holds the lock leaf")
 
+// appliedLockReleaseUnconfirmedError distinguishes a poisoned lock leaf after
+// its owning mutation reached durable storage.  Callers use this distinction to
+// commit the truthful durable prefix instead of attempting compensations that
+// would re-acquire the same leaf in this process.
+type appliedLockReleaseUnconfirmedError struct {
+	cause error
+}
+
+func (e *appliedLockReleaseUnconfirmedError) Error() string {
+	return fmt.Sprintf("durable mutation applied before lock release became unconfirmed: %v", e.cause)
+}
+
+func (e *appliedLockReleaseUnconfirmedError) Unwrap() error { return e.cause }
+
+func markAppliedLockReleaseUnconfirmed(err error) error {
+	if err == nil || !errors.Is(err, ErrLockReleaseUnconfirmed) {
+		return err
+	}
+	return &appliedLockReleaseUnconfirmedError{cause: err}
+}
+
+func isAppliedLockReleaseUnconfirmed(err error) bool {
+	var applied *appliedLockReleaseUnconfirmedError
+	return errors.As(err, &applied)
+}
+
 // flockUnlockFn is the shared release fault-injection seam for ledgered API
 // flocks.
 var flockUnlockFn = func(fl *flock.Flock) error { return fl.Unlock() }

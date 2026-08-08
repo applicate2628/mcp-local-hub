@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"slices"
 	"sort"
@@ -6375,7 +6376,7 @@ func TestRegisterSupervised_EveryPostAddEntryFailureDiscardsReceipts(t *testing.
 	}
 }
 
-func TestRegisterSupervisedAppliedReleaseUnconfirmedCompletesMandatoryContinuations(t *testing.T) {
+func TestRegisterSupervisedPostClientRegistryReleaseUnconfirmedCommitsForwardWithoutUnsafeContinuations(t *testing.T) {
 	const seedEntry = "register-supervised-forward-seed"
 	codexPath, _, _ := setupAdoptTestEnv(t, seedEntry, "[mcp_servers]\n")
 	h := newRegisterHarness(t)
@@ -6441,9 +6442,12 @@ func TestRegisterSupervisedAppliedReleaseUnconfirmedCompletesMandatoryContinuati
 	if !errors.As(err, &forwardErr) || !errors.Is(err, inducedAddEntryReleaseUnconfirmed) || !errors.Is(err, registryReleaseCause) {
 		t.Fatalf("supervised register error = %v forward=%#v", err, forwardErr)
 	}
-	wantEvents := []string{"upsert-intent", "write-running-intent", "reconcile", "readiness"}
+	wantEvents := []string(nil)
 	if !slices.Equal(events, wantEvents) {
-		t.Fatalf("mandatory continuation order = %v, want %v", events, wantEvents)
+		t.Fatalf("unsafe continuation order = %v, want %v after poisoned registry release", events, wantEvents)
+	}
+	if forwardErr.Target != "workspace-registry" || forwardErr.Operation != "add-entry" {
+		t.Fatalf("forward target/operation = %q/%q, want workspace-registry/add-entry with preserved client operation", forwardErr.Target, forwardErr.Operation)
 	}
 	if undoCalls != 0 {
 		t.Fatalf("forward commit ran %d stale intent compensation(s), want 0", undoCalls)
@@ -6453,6 +6457,597 @@ func TestRegisterSupervisedAppliedReleaseUnconfirmedCompletesMandatoryContinuati
 	}
 	if len(report.Entries) != 1 || report.Entries[0].ClientEntries["codex-cli"] == "" {
 		t.Fatalf("supervised committed receipt missing: %+v", report.Entries)
+	}
+}
+
+type supervisedPhase3TestClient struct {
+	registerClient
+	registryPath string
+	forward      bool
+	breakPersist bool
+	mutationErr  *error
+}
+
+type legacyPhase3TestClient struct {
+	registerClient
+	registryPath     string
+	breakPersist     bool
+	registrySnapshot *[]byte
+	broken           *bool
+	fail             error
+	addCalls         *int
+	findCalls        *int
+	persistCause     error
+	persistHookCalls *int
+}
+
+func (c *legacyPhase3TestClient) AddEntry(entry clients.MCPEntry) error {
+	*c.addCalls++
+	if c.fail != nil {
+		return c.fail
+	}
+	if err := c.registerClient.AddEntry(entry); err != nil {
+		return err
+	}
+	if !c.breakPersist || *c.broken {
+		return nil
+	}
+	raw, err := os.ReadFile(c.registryPath)
+	if err != nil {
+		return err
+	}
+	*c.registrySnapshot = raw
+	*c.broken = true
+	postRenameVerifyFailHook = func() error {
+		*c.persistHookCalls++
+		postRenameVerifyFailHook = nil
+		return c.persistCause
+	}
+	return nil
+}
+
+func (c *legacyPhase3TestClient) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
+	*c.findCalls++
+	return c.registerClient.FindStdioLanguageServerEntries()
+}
+
+type legacyPhase3Fixture struct {
+	t                *testing.T
+	h                *registerHarness
+	canonical        string
+	wsKey            string
+	taskName         string
+	manifest         *config.ServerManifest
+	clients          map[string]registerClient
+	poisonRelease    bool
+	breakPersist     bool
+	ordinaryCause    error
+	persistCause     error
+	releaseCause     error
+	targetStop       DaemonIntent
+	siblingStop      DaemonIntent
+	registrySnapshot []byte
+	addCalls         int
+	findCalls        int
+	persistHookCalls int
+	releaseCalls     int
+	heldRegistryLock *flock.Flock
+	previousUnlock   func(*flock.Flock) error
+	previousPostHook func() error
+}
+
+func newLegacyPhase3Fixture(t *testing.T, poisonRelease, breakPersist bool) *legacyPhase3Fixture {
+	t.Helper()
+	h := newRegisterHarness(t)
+	f := &legacyPhase3Fixture{
+		t:             t,
+		h:             h,
+		canonical:     mustCanonical(t, t.TempDir()),
+		manifest:      nineLanguageManifest(),
+		poisonRelease: poisonRelease,
+		breakPersist:  breakPersist,
+		ordinaryCause: errors.New("legacy later client write failed"),
+		persistCause:  errors.New("legacy receipt persistence failed"),
+		releaseCause:  errors.New("legacy phase3 registry release unconfirmed"),
+	}
+	f.wsKey = WorkspaceKey(f.canonical)
+	f.taskName = LSPTaskNameForWorkspaceLanguage(f.wsKey, "go")
+	f.manifest.ClientBindings = []config.ClientBinding{
+		{Client: "cursor", URLPath: "/mcp"},
+		{Client: "codex-cli", URLPath: "/mcp"},
+	}
+	f.targetStop = DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: time.Now().UTC()}
+	f.siblingStop = DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: time.Now().UTC()}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+	}
+	siblingTask := "\\mcp-local-hub-legacy-phase3-sibling"
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Stops: map[string]DaemonIntent{
+		canonicalIntentTaskKey(f.taskName): f.targetStop,
+		siblingTask:                        f.siblingStop,
+	}}); err != nil {
+		t.Fatalf("seed supervisor stops: %v", err)
+	}
+	if got, ok, err := lookupSupervisorStopChecked(canonicalIntentTaskKey(f.taskName)); err != nil || !ok || !reflect.DeepEqual(got, f.targetStop) {
+		t.Fatalf("seeded target stop = %+v present=%v err=%v, want %+v", got, ok, err, f.targetStop)
+	}
+	if got, ok, err := lookupSupervisorStopChecked(siblingTask); err != nil || !ok || !reflect.DeepEqual(got, f.siblingStop) {
+		t.Fatalf("seeded sibling stop = %+v present=%v err=%v, want %+v", got, ok, err, f.siblingStop)
+	}
+	h.fakeClients.stdioEntries["cursor"]["legacy-go"] = clients.LanguageServerStdioEntry{
+		Name: "legacy-go", Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls", "--workspace", f.canonical},
+	}
+	if _, ok := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !ok {
+		t.Fatal("seeded direct entry is missing before registration")
+	}
+
+	f.clients = testClientFactory()
+	broken := false
+	f.clients["cursor"] = &legacyPhase3TestClient{
+		registerClient: f.clients["cursor"], registryPath: h.regPath,
+		breakPersist: breakPersist, registrySnapshot: &f.registrySnapshot,
+		broken: &broken, addCalls: &f.addCalls, findCalls: &f.findCalls,
+		persistCause: f.persistCause, persistHookCalls: &f.persistHookCalls,
+	}
+	f.clients["codex-cli"] = &legacyPhase3TestClient{
+		registerClient: f.clients["codex-cli"], fail: f.ordinaryCause,
+		broken: &broken, addCalls: &f.addCalls, findCalls: &f.findCalls,
+		persistCause: f.persistCause, persistHookCalls: &f.persistHookCalls,
+	}
+	testClientFactory = func() map[string]registerClient { return f.clients }
+
+	f.previousPostHook = postRenameVerifyFailHook
+	f.previousUnlock = flockUnlockFn
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() != h.regPath+".lock" {
+			return f.previousUnlock(fl)
+		}
+		f.releaseCalls++
+		if f.releaseCalls == 1 {
+			return f.previousUnlock(fl)
+		}
+		if f.releaseCalls == 2 {
+			if f.breakPersist {
+				if len(f.registrySnapshot) == 0 {
+					return errors.New("missing Phase 1 registry snapshot before persistence hook")
+				}
+				if err := os.WriteFile(h.regPath, f.registrySnapshot, 0o600); err != nil {
+					return err
+				}
+			}
+			if f.poisonRelease {
+				f.heldRegistryLock = fl
+				return f.releaseCause
+			}
+		}
+		return f.previousUnlock(fl)
+	}
+	lockPath := h.regPath + ".lock"
+	t.Cleanup(func() {
+		postRenameVerifyFailHook = f.previousPostHook
+		flockUnlockFn = f.previousUnlock
+		if f.heldRegistryLock != nil {
+			_ = f.heldRegistryLock.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+		h.restore()
+	})
+	return f
+}
+
+func (f *legacyPhase3Fixture) assertError(t *testing.T, err error) *RegisterForwardCommittedError {
+	t.Helper()
+	if f.addCalls != 2 {
+		t.Fatalf("client writes=%d, want first applied write and one later ordinary failure", f.addCalls)
+	}
+	if !errors.Is(err, f.ordinaryCause) {
+		t.Fatalf("error=%v, want later client cause", err)
+	}
+	if got := errors.Is(err, f.persistCause); got != f.breakPersist {
+		t.Fatalf("persistence cause match=%v error=%v, want %v", got, err, f.breakPersist)
+	}
+	if got := errors.Is(err, f.releaseCause); got != f.poisonRelease {
+		t.Fatalf("release cause match=%v error=%v, want %v", got, err, f.poisonRelease)
+	}
+	if want := 0; f.breakPersist {
+		want = 1
+		if f.persistHookCalls != want {
+			t.Fatalf("postRename persistence hook calls=%d, want %d", f.persistHookCalls, want)
+		}
+	} else if f.persistHookCalls != want {
+		t.Fatalf("postRename persistence hook calls=%d, want %d", f.persistHookCalls, want)
+	}
+	var forwardErr *RegisterForwardCommittedError
+	if got := errors.As(err, &forwardErr); got != f.poisonRelease {
+		t.Fatalf("forward=%v err=%v, want %v", got, err, f.poisonRelease)
+	}
+	if !f.poisonRelease {
+		return nil
+	}
+	if forwardErr.Target != "workspace-registry" || forwardErr.Operation != "registry-phase3-release" {
+		t.Fatalf("forward classification=%#v err=%v", forwardErr, err)
+	}
+	return forwardErr
+}
+
+func (f *legacyPhase3Fixture) assertLifecycle(t *testing.T) {
+	t.Helper()
+	if f.releaseCalls < 2 {
+		t.Fatalf("registry release precondition=%d, want at least Phase 1 and Phase 3", f.releaseCalls)
+	}
+	postPhase3ReacquireReleases := f.releaseCalls - 2
+	wantReleases, wantReacquire, wantDeletes := 3, 1, 2
+	if f.poisonRelease {
+		wantReleases, wantReacquire, wantDeletes = 2, 0, 1
+	}
+	if f.releaseCalls != wantReleases || postPhase3ReacquireReleases != wantReacquire {
+		t.Fatalf("registry releases=%d post-phase3 reacquire/releases=%d, want %d/%d", f.releaseCalls, postPhase3ReacquireReleases, wantReleases, wantReacquire)
+	}
+	created, ran, deleted := 0, 0, 0
+	for _, spec := range f.h.fakeSch.createdSpecs {
+		if spec.Name == f.taskName {
+			created++
+		}
+	}
+	for _, name := range f.h.fakeSch.runNames {
+		if name == f.taskName {
+			ran++
+		}
+	}
+	for _, name := range f.h.fakeSch.deleteNames {
+		if name == f.taskName {
+			deleted++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("target task creates=%d, want 1; specs=%+v", created, f.h.fakeSch.createdSpecs)
+	}
+	if ran != 1 {
+		t.Fatalf("target task runs=%d, want 1; names=%v", ran, f.h.fakeSch.runNames)
+	}
+	if deleted != wantDeletes {
+		t.Fatalf("target task deletes=%d, want %d; names=%v", deleted, wantDeletes, f.h.fakeSch.deleteNames)
+	}
+	if got := f.h.fakeSch.tasks[f.taskName]; got != f.poisonRelease {
+		t.Fatalf("target task present=%v, want %v", got, f.poisonRelease)
+	}
+	if got, ok, err := lookupSupervisorStopChecked(canonicalIntentTaskKey(f.taskName)); err != nil || ok != !f.poisonRelease || (!f.poisonRelease && !reflect.DeepEqual(got, f.targetStop)) {
+		t.Fatalf("target stop after settlement=%+v present=%v err=%v poison=%v", got, ok, err, f.poisonRelease)
+	}
+	siblingTask := "\\mcp-local-hub-legacy-phase3-sibling"
+	if got, ok, err := lookupSupervisorStopChecked(siblingTask); err != nil || !ok || !reflect.DeepEqual(got, f.siblingStop) {
+		t.Fatalf("sibling stop after settlement=%+v present=%v err=%v, want %+v", got, ok, err, f.siblingStop)
+	}
+	wantCursor := 0
+	if f.poisonRelease {
+		wantCursor = 1
+	}
+	if len(f.h.fakeClients.entries["cursor"]) != wantCursor || len(f.h.fakeClients.entries["codex-cli"]) != 0 {
+		t.Fatalf("client state cursor=%v codex=%v, want cursor count %d and empty codex", f.h.fakeClients.entries["cursor"], f.h.fakeClients.entries["codex-cli"], wantCursor)
+	}
+	if _, ok := f.h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !ok {
+		t.Fatal("seeded direct entry was removed")
+	}
+	if f.findCalls != 0 || f.h.fakeClients.backupKeepCalls["cursor"] != 0 || f.h.fakeClients.backupKeepCalls["codex-cli"] != 0 {
+		t.Fatalf("direct cleanup discovery/backups=%d/%d/%d, want zero", f.findCalls, f.h.fakeClients.backupKeepCalls["cursor"], f.h.fakeClients.backupKeepCalls["codex-cli"])
+	}
+}
+
+func (f *legacyPhase3Fixture) assertForwardRow(t *testing.T, entry WorkspaceEntry) {
+	t.Helper()
+	storedRegistry := NewRegistry(f.h.regPath)
+	if err := storedRegistry.Load(); err != nil {
+		t.Fatalf("load forward registry: %v", err)
+	}
+	stored, ok := storedRegistry.Get(f.wsKey, "go")
+	if !ok || !reflect.DeepEqual(stored, entry) {
+		t.Fatalf("stored/result forward row=%+v/%+v ok=%v", stored, entry, ok)
+	}
+	wantEntries := 1
+	if f.breakPersist {
+		wantEntries = 2
+	}
+	if len(entry.ClientEntries) != wantEntries || entry.ClientEntries["cursor"] == "" || (f.breakPersist && entry.ClientEntries["codex-cli"] == "") {
+		t.Fatalf("forward row clients=%+v, want %d entries with cursor%s", entry.ClientEntries, wantEntries, map[bool]string{true: " and codex-cli", false: ""}[f.breakPersist])
+	}
+}
+
+func TestRegisterLegacyPhase3OrdinaryLaterClientErrorSettlement(t *testing.T) {
+	for _, tc := range []struct {
+		name, _         string
+		poison, persist bool
+	}{
+		{name: "confirmed-release"},
+		{name: "unconfirmed-release", poison: true},
+		{name: "receipt-persist-failure-confirmed-release", persist: true},
+		{name: "receipt-persist-failure-unconfirmed-release", poison: true, persist: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newLegacyPhase3Fixture(t, tc.poison, tc.persist)
+			report, err := mustNewAPI(t).registerWithManifest(f.manifest, f.canonical, []string{"go"}, RegisterOpts{Writer: io.Discard})
+			f.assertError(t, err)
+			if got := len(report.Entries); got != map[bool]int{true: 1, false: 0}[tc.poison] {
+				t.Fatalf("report entries=%+v, want poison=%v", report.Entries, tc.poison)
+			}
+			if tc.poison {
+				f.assertForwardRow(t, report.Entries[0])
+			} else if reg := NewRegistry(f.h.regPath); reg.Load() != nil || len(reg.ListByWorkspaceLSP(f.wsKey)) != 0 {
+				t.Fatalf("confirmed rollback registry rows=%+v", reg.ListByWorkspaceLSP(f.wsKey))
+			}
+			f.assertLifecycle(t)
+		})
+	}
+}
+
+func TestRegisterOneLanguageLegacyPhase3ReceiptPersistFailureKeepsLastConfirmedRow(t *testing.T) {
+	for _, poison := range []bool{false, true} {
+		name := "confirmed-release"
+		if poison {
+			name = "unconfirmed-release"
+		}
+		t.Run(name, func(t *testing.T) {
+			f := newLegacyPhase3Fixture(t, poison, true)
+			tx := newRegistrationTransaction()
+			result, err := mustNewAPI(t).registerOneLanguage(
+				f.manifest, f.canonical, f.wsKey, "go", RegisterOpts{Writer: io.Discard},
+				NewRegistry(f.h.regPath), f.h.fakeSch, f.clients, f.manifest.ClientBindings, io.Discard, tx,
+			)
+			f.assertError(t, err)
+			if len(result.Receipts) != 1 || result.Receipts[0].Key != (clientLanguageKey{Client: "cursor", Language: "go"}) || result.Receipts[0].EntryName == "" {
+				t.Fatalf("receipts=%+v, want one non-empty cursor/go receipt", result.Receipts)
+			}
+			f.assertForwardRow(t, result.Entry)
+			if len(f.h.fakeClients.entries["cursor"]) != 1 || len(f.h.fakeClients.entries["codex-cli"]) != 0 {
+				t.Fatalf("pre-settlement applied clients cursor=%v codex=%v, want first-only prefix", f.h.fakeClients.entries["cursor"], f.h.fakeClients.entries["codex-cli"])
+			}
+			if poison {
+				if outcome := tx.CommitForward(); outcome.State != registrationTransactionCommitted {
+					t.Fatalf("forward settlement=%+v", outcome)
+				}
+			} else if outcome := tx.Fail(err); outcome.State != registrationTransactionRolledBack {
+				t.Fatalf("ordinary settlement=%+v", outcome)
+			}
+			f.assertLifecycle(t)
+		})
+	}
+}
+
+func (c *supervisedPhase3TestClient) AddEntry(entry clients.MCPEntry) error {
+	if err := c.registerClient.AddEntry(entry); err != nil {
+		return err
+	}
+	if c.breakPersist {
+		if err := os.Remove(c.registryPath); err != nil {
+			*c.mutationErr = err
+		} else if err := os.Mkdir(c.registryPath, 0o755); err != nil {
+			*c.mutationErr = err
+		}
+	}
+	if c.forward {
+		return inducedAddEntryReleaseUnconfirmed
+	}
+	return nil
+}
+
+func TestRegisterRegistryReleaseSettlementMatrix(t *testing.T) {
+	type phaseCase struct {
+		name              string
+		phase             string
+		wantReceipts      int
+		wantPostWrite     bool
+		forwardRegardless bool
+	}
+	phaseCases := []phaseCase{
+		{name: "reload-error", phase: "reload"},
+		{name: "missing-row", phase: "missing"},
+		{name: "ordinary-client-error", phase: "ordinary"},
+		{name: "client-forward", phase: "forward", wantReceipts: 1, wantPostWrite: true, forwardRegardless: true},
+		{name: "receipt-persist-error", phase: "persist", wantReceipts: 1, wantPostWrite: true, forwardRegardless: true},
+		{name: "success", phase: "success", wantReceipts: 1, wantPostWrite: true},
+	}
+
+	for _, phase := range phaseCases {
+		for _, poisonRelease := range []bool{false, true} {
+			phase := phase
+			poisonRelease := poisonRelease
+			releaseLabel := "confirmed-release"
+			if poisonRelease {
+				releaseLabel = "unconfirmed-release"
+			}
+			t.Run(phase.name+"/"+releaseLabel, func(t *testing.T) {
+				h := newRegisterHarness(t)
+				defer h.restore()
+				canonical := mustCanonical(t, t.TempDir())
+				wsKey := WorkspaceKey(canonical)
+				m := nineLanguageManifest()
+				m.ClientBindings = []config.ClientBinding{{Client: "cursor", URLPath: "/mcp"}}
+				classifyRegisterReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+
+				var mutationErr error
+				clientMap := testClientFactory()
+				clientMap = map[string]registerClient{"cursor": clientMap["cursor"]}
+				switch phase.phase {
+				case "ordinary":
+					h.fakeClients.failAddEntryCalls = 1
+				case "forward", "persist":
+					clientMap["cursor"] = &supervisedPhase3TestClient{
+						registerClient: clientMap["cursor"], registryPath: h.regPath,
+						forward: true, breakPersist: phase.phase == "persist", mutationErr: &mutationErr,
+					}
+				}
+
+				previousUnlock := flockUnlockFn
+				unlockCalls := 0
+				var heldRegistryLock *flock.Flock
+				releaseCause := errors.New("matrix registry release unconfirmed")
+				flockUnlockFn = func(fl *flock.Flock) error {
+					unlockCalls++
+					if unlockCalls == 1 {
+						if err := previousUnlock(fl); err != nil {
+							return err
+						}
+						switch phase.phase {
+						case "reload":
+							mutationErr = os.WriteFile(h.regPath, []byte("{"), 0o600)
+						case "missing":
+							mutated := NewRegistry(h.regPath)
+							if mutationErr = mutated.Load(); mutationErr == nil {
+								mutated.Remove(wsKey, "go")
+								mutationErr = mutated.Save()
+							}
+						}
+						return mutationErr
+					}
+					if unlockCalls == 2 && poisonRelease {
+						heldRegistryLock = fl
+						return releaseCause
+					}
+					return previousUnlock(fl)
+				}
+				lockPath := h.regPath + ".lock"
+				t.Cleanup(func() {
+					flockUnlockFn = previousUnlock
+					if heldRegistryLock != nil {
+						_ = heldRegistryLock.Unlock()
+					}
+					unconfirmedLockReleasesMu.Lock()
+					delete(unconfirmedLockReleases, lockPath)
+					unconfirmedLockReleasesMu.Unlock()
+				})
+
+				var postWrite []string
+				deps := supervisorPostWriteDeps{
+					upsertIntent: func(WorkspaceEntry, string) (compensation, error) {
+						postWrite = append(postWrite, "upsert")
+						return func() error { return nil }, nil
+					},
+					writeRunningIntent: func(string, stopIntentCompensationSink) (string, error) {
+						postWrite = append(postWrite, "running-intent")
+						return "matrix-task", nil
+					},
+					reconcile: func(context.Context, bool) (ReconcileResponse, error) {
+						postWrite = append(postWrite, "reconcile")
+						return ReconcileResponse{}, nil
+					},
+					readiness: func(int, time.Duration) error {
+						postWrite = append(postWrite, "readiness")
+						return nil
+					},
+				}
+				tx := newRegistrationTransaction()
+				compensationCalls := 0
+				tx.AddCompensation("matrix active sentinel", func() error {
+					compensationCalls++
+					return nil
+				})
+				result, err := mustNewAPI(t).registerOneLanguageSupervised(
+					m, m.Languages[2], canonical, wsKey, "go",
+					RegisterOpts{SupervisedProxy: true, supervisorPostWriteDeps: deps, Writer: io.Discard},
+					NewRegistry(h.regPath), h.fakeSch, clientMap, m.ClientBindings, io.Discard, tx,
+				)
+				if mutationErr != nil {
+					t.Fatalf("matrix mutation setup: %v", mutationErr)
+				}
+
+				wantForward := poisonRelease || phase.forwardRegardless
+				var forwardErr *RegisterForwardCommittedError
+				if gotForward := errors.As(err, &forwardErr); gotForward != wantForward {
+					t.Fatalf("forward=%v err=%v, want %v", gotForward, err, wantForward)
+				}
+				wantDurableResult := poisonRelease || phase.forwardRegardless || phase.phase == "success"
+				if got := result.Entry.WorkspaceKey != ""; got != wantDurableResult {
+					t.Fatalf("durable result=%v result=%+v, want %v", got, result, wantDurableResult)
+				}
+				if got := len(result.Receipts); got != phase.wantReceipts {
+					t.Fatalf("receipts=%d (%+v), want %d", got, result.Receipts, phase.wantReceipts)
+				}
+				wantPostWrite := phase.wantPostWrite && !poisonRelease
+				if got := len(postWrite) == 4; got != wantPostWrite {
+					t.Fatalf("post-write=%v, want all=%v", postWrite, wantPostWrite)
+				}
+				if poisonRelease {
+					if !errors.Is(err, releaseCause) || forwardErr.Target != "workspace-registry" {
+						t.Fatalf("poisoned release classification=%#v err=%v", forwardErr, err)
+					}
+					wantCommitted := []string{"registry-row", "client-write-prefix"}
+					wantPending := []string{"later-client-writes", "supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"}
+					if phase.phase == "reload" || phase.phase == "missing" {
+						wantCommitted = []string{"registry-row"}
+						wantPending = []string{"client-writes", "supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"}
+					} else if phase.phase == "success" {
+						wantPending = []string{"supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"}
+					}
+					if !slices.Equal(forwardErr.CommittedStages, wantCommitted) || !slices.Equal(forwardErr.PendingStages, wantPending) {
+						t.Fatalf("stages committed=%v pending=%v, want %v / %v", forwardErr.CommittedStages, forwardErr.PendingStages, wantCommitted, wantPending)
+					}
+				}
+
+				if wantForward {
+					outcome := tx.CommitForward()
+					if outcome.State != registrationTransactionCommitted || compensationCalls != 0 || len(tx.steps) != 0 {
+						t.Fatalf("forward settlement=%+v compensationCalls=%d remainingSteps=%d", outcome, compensationCalls, len(tx.steps))
+					}
+				} else if err != nil {
+					if outcome := tx.Fail(err); outcome.State != registrationTransactionRolledBack {
+						t.Fatalf("ordinary settlement=%+v", outcome)
+					}
+				} else if outcome := tx.Commit(); !outcome.Committed() {
+					t.Fatalf("success settlement=%+v", outcome)
+				}
+			})
+		}
+	}
+}
+
+func TestRegisterRegistryPhase1ReleaseUnconfirmedRetainsRowAndTask(t *testing.T) {
+	h := newRegisterHarness(t)
+	defer h.restore()
+	releaseCause := errors.New("injected phase1 registry unlock failure")
+	lockPath := h.regPath + ".lock"
+	previousUnlock := flockUnlockFn
+	var stranded *flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = fl
+			return releaseCause
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if stranded != nil {
+			_ = stranded.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	report, err := mustNewAPI(t).registerWithManifest(nineLanguageManifest(), t.TempDir(), []string{"go"}, RegisterOpts{Writer: io.Discard})
+	var forwardErr *RegisterForwardCommittedError
+	if !errors.As(err, &forwardErr) || !errors.Is(err, releaseCause) {
+		t.Fatalf("register error = %v forward=%#v, want phase1 forward release error", err, forwardErr)
+	}
+	if forwardErr.Target != "workspace-registry" || forwardErr.Operation != "registry-phase1-release" {
+		t.Fatalf("forward target/operation = %q/%q, want workspace-registry/registry-phase1-release", forwardErr.Target, forwardErr.Operation)
+	}
+	if len(report.Entries) != 1 || report.Entries[0].TaskName == "" {
+		t.Fatalf("forward report entries = %+v, want durable language entry", report.Entries)
+	}
+	entry := report.Entries[0]
+	reg := NewRegistry(h.regPath)
+	if loadErr := reg.Load(); loadErr != nil {
+		t.Fatalf("load retained registry: %v", loadErr)
+	}
+	if stored, ok := reg.Get(entry.WorkspaceKey, entry.Language); !ok || stored.TaskName != entry.TaskName {
+		t.Fatalf("retained registry row = %+v ok=%v, want %+v", stored, ok, entry)
+	}
+	if !h.fakeSch.tasks[entry.TaskName] || h.fakeSch.runCount != 0 {
+		t.Fatalf("scheduler state tasks=%v runCount=%d, want retained task and no Run", h.fakeSch.tasks, h.fakeSch.runCount)
 	}
 }
 
@@ -6623,7 +7218,7 @@ func TestCleanupDirectLSP_FailureIsolationMatrix(t *testing.T) {
 				},
 				probeRoute: func(_ context.Context, _ int, language, _ string) managedRouteProof {
 					if language == "go" {
-						return managedRouteProof{FailureClass: "route-jsonrpc-error"}
+						return managedRouteProof{FailureClass: string(cleanupWarningClientEntryIndeterminate)}
 					}
 					return managedRouteProof{OK: true}
 				},
@@ -6934,7 +7529,7 @@ func TestManagedCleanup_TakeoverCheckpointMatrix(t *testing.T) {
 		pythonPort = 19132
 	)
 	for language, port := range map[string]int{"go": goPort, "python": pythonPort} {
-		h.fakeClients.entries["cursor"][LSPRouterEntryName(language)] = fmt.Sprintf("http://127.0.0.1:%d/lsp/%s/mcp", port, language)
+		h.fakeClients.entries["claude-code"][LSPRouterEntryName(language)] = fmt.Sprintf("http://127.0.0.1:%d/lsp/%s/mcp", port, language)
 	}
 	for name, entry := range map[string]clients.LanguageServerStdioEntry{
 		"legacy-go": {
@@ -6945,88 +7540,68 @@ func TestManagedCleanup_TakeoverCheckpointMatrix(t *testing.T) {
 			Name: "legacy-python", Command: "mcp-language-server", Language: "pylsp",
 			Args: []string{"--lsp", "pylsp", "--workspace", canonical},
 		},
-		"legacy-rust": {
-			Name: "legacy-rust", Command: "mcp-language-server", Language: "rust-analyzer",
-			Args: []string{"--lsp", "rust-analyzer", "--workspace", canonical},
-		},
 	} {
-		h.fakeClients.stdioEntries["cursor"][name] = entry
+		h.fakeClients.stdioEntries["claude-code"][name] = entry
+	}
+	h.fakeClients.stdioEntries["cursor"]["legacy-rust"] = clients.LanguageServerStdioEntry{
+		Name: "legacy-rust", Command: "mcp-language-server", Language: "rust-analyzer",
+		Args: []string{"--lsp", "rust-analyzer", "--workspace", canonical},
 	}
 
-	events := []string{}
-	clientsMap := testClientFactory()
-	clientsMap["cursor"] = &cleanupMutationLedgerClient{registerClient: clientsMap["cursor"], events: &events}
-	authorizerCalls := map[int]int{}
 	revalidationCalls := map[int]int{}
-	routeCalls := 0
-	replacementInjected := false
+	closeCalls := map[int]int{}
+	revalidateAfterClose := map[int]int{}
+	closed := map[int]bool{}
 	warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
 		map[string]config.LanguageSpec{
 			"go":     {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"},
 			"python": {Name: "python", Backend: "pylsp-mcp", LspCommand: "pylsp"},
 			"rust":   {Name: "rust", Backend: "rust-mcp", LspCommand: "rust-analyzer"},
 		},
-		[]string{"go", "python", "rust"}, canonical, clientsMap,
+		[]string{"go", "python", "rust"}, canonical, testClientFactory(),
 		map[clientLanguageKey]bool{{Client: "cursor", Language: "rust"}: true},
 		[]clientWriteReceipt{{Key: clientLanguageKey{Client: "cursor", Language: "rust"}, EntryName: "router-rust"}},
 		&bytes.Buffer{}, directCleanupPlanDeps{
 			authorizeRouter: func(_ context.Context, port int) ManagedRouterAuthorization {
-				authorizerCalls[port]++
-				events = append(events, fmt.Sprintf("authorize:%d", port))
 				return ManagedRouterAuthorization{Lease: &testManagedRouterLease{
 					revalidate: func(context.Context) string {
+						if closed[port] {
+							revalidateAfterClose[port]++
+						}
 						revalidationCalls[port]++
-						events = append(events, fmt.Sprintf("revalidate:%d:%d", port, revalidationCalls[port]))
-						if port == goPort && replacementInjected {
+						if port == pythonPort && revalidationCalls[port] == 2 {
 							return ManagedRouterFailureIdentityChanged
 						}
 						return ""
 					},
+					close: func() error {
+						closeCalls[port]++
+						closed[port] = true
+						return nil
+					},
 				}}
 			},
-			probeRoute: func(_ context.Context, port int, language, _ string) managedRouteProof {
-				routeCalls++
-				events = append(events, fmt.Sprintf("route:%s:%d:%d", language, port, routeCalls))
-				if routeCalls == 4 {
-					replacementInjected = true
-					events = append(events, "route:settled")
-				}
-				return managedRouteProof{OK: true}
-			},
+			probeRoute:  func(context.Context, int, string, string) managedRouteProof { return managedRouteProof{OK: true} },
 			matchDirect: directLanguageServerCleanupMatches,
 		},
 	)
 
-	if routeCalls != 7 ||
-		authorizerCalls[goPort] != 1 ||
-		authorizerCalls[pythonPort] != 1 ||
-		revalidationCalls[goPort] != 4 ||
-		revalidationCalls[pythonPort] != 4 {
-		t.Fatalf(
-			"proof calls routes=%d authorizer=%v revalidation=%v, want routes=7 authorizer=1/port revalidation=4/port; events=%v",
-			routeCalls, authorizerCalls, revalidationCalls, events,
-		)
+	if revalidationCalls[goPort] != 3 || revalidationCalls[pythonPort] != 2 {
+		t.Fatalf("client-A revalidation calls=%v, want completed first plan=3 and failing second plan=2 without stale final validation", revalidationCalls)
 	}
-	if settled := slices.Index(events, "route:settled"); settled < 0 {
-		t.Fatalf("missing route-settled takeover boundary; events=%v", events)
+	if closeCalls[goPort] != 1 || closeCalls[pythonPort] != 1 || revalidateAfterClose[goPort] != 0 || revalidateAfterClose[pythonPort] != 0 {
+		t.Fatalf("lease lifecycle close=%v revalidate-after-close=%v, want one close and no stale final validation", closeCalls, revalidateAfterClose)
 	}
-	if finalGo := slices.Index(events, fmt.Sprintf("revalidate:%d:4", goPort)); finalGo < 0 {
-		t.Fatalf("final settlement validation did not observe the taken-over go lease; events=%v", events)
-	}
-	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-go"]; !exists {
-		t.Fatal("replacement after route settlement removed the affected go entry")
-	}
-	for _, name := range []string{"legacy-python", "legacy-rust"} {
-		if _, exists := h.fakeClients.stdioEntries["cursor"][name]; !exists {
-			t.Fatalf("outer final-settlement refusal did not restore %q; warnings=%v events=%v", name, warnings, events)
+	for _, name := range []string{"legacy-go", "legacy-python"} {
+		if _, exists := h.fakeClients.stdioEntries["claude-code"][name]; !exists {
+			t.Fatalf("client-A rollback did not restore %q; warnings=%v", name, warnings)
 		}
 	}
-	if h.fakeClients.backupKeepCalls["cursor"] != 3 || !slices.Contains(events, "remove:legacy-go") {
-		t.Fatalf("mutation batch backup=%d events=%v, want one receipt backup per target and final-settlement rollback of every removed target", h.fakeClients.backupKeepCalls["cursor"], events)
+	if _, exists := h.fakeClients.stdioEntries["cursor"]["legacy-rust"]; exists {
+		t.Fatalf("independent client-B receipt plan was not removed; warnings=%v", warnings)
 	}
-	wantWarning := "direct-cleanup-failed: direct entries were preserved because transactional cleanup did not settle"
-	if !slices.Contains(warnings, wantWarning) {
-		t.Fatalf("warnings=%v, want %q", warnings, wantWarning)
+	if slices.Contains(warnings, "direct-cleanup-failed: direct entries were preserved because transactional cleanup did not settle") {
+		t.Fatalf("client-A rollback synthesized an outer settlement failure: warnings=%v", warnings)
 	}
 }
 
@@ -7444,11 +8019,15 @@ func sortedAnyMapKeys(values map[string]any) []string {
 
 type orderedCleanupClient struct {
 	registerClient
-	calls     *[]string
-	backupErr error
+	calls        *[]string
+	captureCalls *int
+	backupErr    error
 }
 
 func (c *orderedCleanupClient) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	if c.captureCalls != nil {
+		*c.captureCalls++
+	}
 	return captureDirectCleanupTargetThrough(c.registerClient, identity)
 }
 
@@ -7513,5 +8092,195 @@ func TestCleanupDirectLSP_BackupBeforeRemovePerClient(t *testing.T) {
 				t.Fatalf("calls=%v, want %v", calls, tc.wantCalls)
 			}
 		})
+	}
+}
+
+func TestCleanupDirectLSP_SharedEntryRequiresAllMatchingPlans(t *testing.T) {
+	shared := clients.LanguageServerStdioEntry{
+		Name: "shared-direct", Command: "mcp-language-server", Language: "gopls",
+		Args: []string{"--lsp", "gopls"},
+	}
+	matchShared := func(registerClient, string, map[string]bool, string) directCleanupMatchResult {
+		return directCleanupMatchResult{matches: []clients.LanguageServerStdioEntry{shared}, complete: true}
+	}
+	bySpec := map[string]config.LanguageSpec{
+		"go":     {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"},
+		"python": {Name: "python", Backend: "pylsp-mcp", LspCommand: "pylsp"},
+	}
+
+	t.Run("failed matching sibling proof retains without capture", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		canonical := mustCanonical(t, t.TempDir())
+		h.fakeClients.stdioEntries["cursor"][shared.Name] = shared
+		for language, port := range map[string]int{"go": 19125, "python": 19126} {
+			h.fakeClients.entries["cursor"][LSPRouterEntryName(language)] = fmt.Sprintf("http://127.0.0.1:%d/lsp/%s/mcp", port, language)
+		}
+		var calls []string
+		captureCalls := 0
+		cursor := &orderedCleanupClient{
+			registerClient: testClientFactory()["cursor"], calls: &calls, captureCalls: &captureCalls,
+		}
+		matchFailedShared := func(_ registerClient, _ string, aliases map[string]bool, _ string) directCleanupMatchResult {
+			if aliases["go"] || aliases["gopls"] {
+				return directCleanupMatchResult{matches: []clients.LanguageServerStdioEntry{shared}, failureClass: cleanupWarningClientEntryIndeterminate}
+			}
+			return matchShared(nil, "", nil, "")
+		}
+		warnings := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+			bySpec, []string{"python", "go"}, canonical, map[string]registerClient{"cursor": cursor}, nil, nil, io.Discard,
+			directCleanupPlanDeps{
+				authorizeRouter: func(context.Context, int) ManagedRouterAuthorization {
+					return ManagedRouterAuthorization{Lease: stableManagedRouterLeaseForTest()}
+				},
+				probeRoute:  allowManagedLanguageRouteForTest,
+				matchDirect: matchFailedShared,
+			},
+		)
+		if _, exists := h.fakeClients.stdioEntries["cursor"][shared.Name]; !exists {
+			t.Fatal("shared direct entry was removed despite failed matching sibling proof")
+		}
+		if !strings.Contains(strings.Join(warnings, "\n"), "client-entry-indeterminate") {
+			t.Fatalf("warnings=%v, want client-entry-indeterminate", warnings)
+		}
+		if captureCalls != 0 || len(calls) != 0 || h.fakeClients.backupKeepCalls["cursor"] != 0 {
+			t.Fatalf("failed sibling capture=%d calls=%v backups=%d, want zero mutation preparation", captureCalls, calls, h.fakeClients.backupKeepCalls["cursor"])
+		}
+	})
+
+	t.Run("no-evidence sibling proof retains without capture", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		h.fakeClients.stdioEntries["cursor"][shared.Name] = shared
+		var calls []string
+		captureCalls := 0
+		cursor := &orderedCleanupClient{
+			registerClient: testClientFactory()["cursor"], calls: &calls, captureCalls: &captureCalls,
+		}
+		mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+			bySpec, []string{"python", "go"}, mustCanonical(t, t.TempDir()), map[string]registerClient{"cursor": cursor},
+			map[clientLanguageKey]bool{{Client: "cursor", Language: "go"}: true, {Client: "cursor", Language: "python"}: true},
+			[]clientWriteReceipt{{Key: clientLanguageKey{Client: "cursor", Language: "go"}, EntryName: "router-go"}},
+			io.Discard, directCleanupPlanDeps{matchDirect: matchShared},
+		)
+		if _, exists := h.fakeClients.stdioEntries["cursor"][shared.Name]; !exists {
+			t.Fatal("shared direct entry was removed without its python proof")
+		}
+		if captureCalls != 0 || len(calls) != 0 || h.fakeClients.backupKeepCalls["cursor"] != 0 {
+			t.Fatalf("proof refusal capture=%d calls=%v backups=%d, want zero mutation preparation", captureCalls, calls, h.fakeClients.backupKeepCalls["cursor"])
+		}
+	})
+
+	t.Run("both proofs remove once regardless language order", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		h.fakeClients.stdioEntries["cursor"][shared.Name] = shared
+		var calls []string
+		captureCalls := 0
+		cursor := &orderedCleanupClient{
+			registerClient: testClientFactory()["cursor"], calls: &calls, captureCalls: &captureCalls,
+		}
+		mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+			bySpec, []string{"python", "go"}, mustCanonical(t, t.TempDir()), map[string]registerClient{"cursor": cursor},
+			map[clientLanguageKey]bool{{Client: "cursor", Language: "go"}: true, {Client: "cursor", Language: "python"}: true},
+			[]clientWriteReceipt{
+				{Key: clientLanguageKey{Client: "cursor", Language: "go"}, EntryName: "router-go"},
+				{Key: clientLanguageKey{Client: "cursor", Language: "python"}, EntryName: "router-python"},
+			},
+			io.Discard, directCleanupPlanDeps{matchDirect: matchShared},
+		)
+		if _, exists := h.fakeClients.stdioEntries["cursor"][shared.Name]; exists {
+			t.Fatal("shared direct entry remained after every matching plan was proved")
+		}
+		if captureCalls != 1 || !slices.Equal(calls, []string{"backup", "remove:" + shared.Name}) {
+			t.Fatalf("all-plan proof capture=%d calls=%v, want one capture and one removal", captureCalls, calls)
+		}
+	})
+}
+
+func TestBuildDirectCleanupPlans_DeterministicWarningOrder(t *testing.T) {
+	type snapshot struct {
+		trace       []string
+		warnings    []string
+		diagnostics []RegistrationDiagnostic
+		writer      string
+		mutations   int
+		remaining   []string
+		input       []string
+	}
+	canonical := mustCanonical(t, t.TempDir())
+	run := func(languages []string) snapshot {
+		t.Helper()
+		h := newRegisterHarness(t)
+		defer h.restore()
+		for language, command := range map[string]string{"go": "gopls", "python": "pylsp"} {
+			name := "legacy-" + language
+			h.fakeClients.stdioEntries["cursor"][name] = clients.LanguageServerStdioEntry{
+				Name: name, Command: "mcp-language-server", Language: command,
+				Args: []string{"--lsp", command, "--workspace", canonical},
+			}
+		}
+		inputBefore := append([]string(nil), languages...)
+		var trace []string
+		var writer bytes.Buffer
+		tx := newRegistrationTransaction()
+		outcome, err := mustNewAPI(t).cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+			map[string]config.LanguageSpec{
+				"go":     {Name: "go", Backend: "gopls-mcp", LspCommand: "gopls"},
+				"python": {Name: "python", Backend: "pylsp-mcp", LspCommand: "pylsp"},
+			},
+			languages,
+			canonical,
+			map[string]registerClient{"cursor": testClientFactory()["cursor"]},
+			map[clientLanguageKey]bool{
+				{Client: "cursor", Language: "go"}:     true,
+				{Client: "cursor", Language: "python"}: true,
+			},
+			nil,
+			&writer,
+			directCleanupPlanDeps{matchDirect: func(_ registerClient, _ string, aliases map[string]bool, _ string) directCleanupMatchResult {
+				language := "python"
+				if aliases["gopls"] {
+					language = "go"
+				}
+				trace = append(trace, language)
+				return directCleanupMatchResult{failureClass: cleanupWarningDirectScanFailed, complete: false}
+			}},
+			tx,
+		)
+		if err != nil {
+			t.Fatalf("deterministic cleanup construction: %v", err)
+		}
+		if commit := tx.Commit(); !commit.Committed() {
+			t.Fatalf("deterministic cleanup settlement: %+v", commit)
+		}
+		remaining := make([]string, 0, len(h.fakeClients.stdioEntries["cursor"]))
+		for name := range h.fakeClients.stdioEntries["cursor"] {
+			remaining = append(remaining, name)
+		}
+		sort.Strings(remaining)
+		if !slices.Equal(languages, inputBefore) {
+			t.Fatalf("buildDirectCleanupPlans mutated caller input: got %v want %v", languages, inputBefore)
+		}
+		return snapshot{
+			trace:       trace,
+			warnings:    outcome.warnings,
+			diagnostics: outcome.diagnostics,
+			writer:      writer.String(),
+			mutations:   h.fakeClients.backupKeepCalls["cursor"],
+			remaining:   remaining,
+			input:       append([]string(nil), languages...),
+		}
+	}
+
+	forward := run([]string{"go", "python"})
+	reverse := run([]string{"python", "go"})
+	forward.input = nil
+	reverse.input = nil
+	if !reflect.DeepEqual(forward, reverse) {
+		t.Fatalf("forward/reverse construction diverged:\nforward=%+v\nreverse=%+v", forward, reverse)
+	}
+	if !slices.Equal(forward.trace, []string{"go", "python"}) || forward.mutations != 0 {
+		t.Fatalf("canonical trace/mutations=%v/%d, want [go python]/0", forward.trace, forward.mutations)
 	}
 }

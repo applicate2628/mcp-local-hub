@@ -39,8 +39,6 @@ import (
 	"errors"
 	"fmt"
 	"time"
-
-	"github.com/gofrs/flock"
 )
 
 // WriteStopIntent is the Phase 4-E2 SOLE stop writer. It records (or clears)
@@ -138,17 +136,13 @@ func (a *API) writeStopIntentWithCompensation(
 			})
 		},
 	)
-	if err != nil {
-		return err
-	}
-
 	// Audit emission matches WriteDaemonIntent: a SET emits set-intent with
 	// the After snapshot; a DROP (entry removed) emits clear-intent with the
 	// Before snapshot. A no-op write (drop of an absent entry) emits nothing.
 	if changed {
 		emitStopIntentAudit(before, after, taskName, who)
 	}
-	return nil
+	return err
 }
 
 // WriteStopIntentIdleGuarded is the reason-guarded idle-stop writer (FIX-2a).
@@ -342,13 +336,19 @@ func mutateStopSubBlockWithPrearm(
 		return nil, nil, false, fmt.Errorf("stop-intent: resolve supervisor-intent path: %w", err)
 	}
 
-	lock := flock.New(path + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return nil, nil, false, fmt.Errorf("stop-intent: flock supervisor-intent: %w", err)
+	release, lockErr := lockLeafLedgered(path + supervisorIntentLockSuffix)
+	if lockErr != nil {
+		return nil, nil, false, fmt.Errorf("stop-intent: flock supervisor-intent: %w", lockErr)
 	}
+	persisted := false
 	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
-			err = errors.Join(err, fmt.Errorf("stop-intent: release supervisor-intent flock: %w", unlockErr))
+		if unlockErr := release(); unlockErr != nil {
+			releaseErr := fmt.Errorf("stop-intent: release supervisor-intent flock: %w", unlockErr)
+			if persisted && errors.Is(unlockErr, ErrLockReleaseUnconfirmed) {
+				err = markAppliedLockReleaseUnconfirmed(errors.Join(err, releaseErr))
+				return
+			}
+			err = errors.Join(err, releaseErr)
 		}
 	}()
 
@@ -442,6 +442,7 @@ func mutateStopSubBlockWithPrearm(
 	if err := writeSupervisorIntentLockHeld(path, intent); err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent: write supervisor-intent.json: %w", err)
 	}
+	persisted = true
 	return before, after, entryChanged, nil
 }
 
@@ -461,12 +462,12 @@ func restoreStopIntentTaskSnapshot(
 	if err != nil {
 		return nil, nil, false, fmt.Errorf("stop-intent rollback: resolve supervisor-intent path: %w", err)
 	}
-	lock := flock.New(path + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return nil, nil, false, fmt.Errorf("stop-intent rollback: flock supervisor-intent: %w", err)
+	release, lockErr := lockLeafLedgered(path + supervisorIntentLockSuffix)
+	if lockErr != nil {
+		return nil, nil, false, fmt.Errorf("stop-intent rollback: flock supervisor-intent: %w", lockErr)
 	}
 	defer func() {
-		if unlockErr := lock.Unlock(); unlockErr != nil {
+		if unlockErr := release(); unlockErr != nil {
 			err = errors.Join(err, fmt.Errorf("stop-intent rollback: release supervisor-intent flock: %w", unlockErr))
 		}
 	}()

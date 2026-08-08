@@ -373,32 +373,100 @@ func (a *API) registerOneLanguageSupervised(
 		return registeredLanguageResult{}, fmt.Errorf("persist registry: %w", err)
 	}
 	if err := transaction.Release(lockToken); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock before client updates: %w", err)
+		return newRegisterForwardReleaseError(
+			"workspace-registry", "registry-phase1-release",
+			registeredLanguageResult{Entry: composedEntry},
+			[]string{"registry-row"},
+			[]string{"client-writes", "supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"},
+			nil, fmt.Errorf("release supervised registry lock before client updates: %w", err),
+		)
 	}
 
 	unlock, err = reg.Lock()
 	if err != nil {
+		if errors.Is(err, ErrLockReleaseUnconfirmed) {
+			return newRegisterForwardReleaseError(
+				"workspace-registry", "registry-phase3-release",
+				registeredLanguageResult{Entry: composedEntry},
+				[]string{"registry-row"},
+				[]string{"client-writes", "supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"},
+				nil, fmt.Errorf("re-acquire registry lock: %w", err),
+			)
+		}
 		return registeredLanguageResult{}, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
 	lockToken = transaction.AddFinalizer("release supervised registry lock before client updates for "+wsKey+"/"+lang, unlock)
+	lastPersistedEntry := composedEntry
+	type supervisedPhase3Disposition struct {
+		registryReleaseConfirmed   bool
+		registryReleaseUnconfirmed bool
+	}
+	finishSupervisedPhase3 := func(
+		primary error,
+		receipts []clientWriteReceipt,
+		committedStages []string,
+		pendingStages []string,
+	) (registeredLanguageResult, error, supervisedPhase3Disposition) {
+		rawReleaseErr := transaction.Release(lockToken)
+		result, classifiedErr := newRegisterForwardReleaseError(
+			"workspace-registry", "registry-phase3-release",
+			registeredLanguageResult{Entry: lastPersistedEntry, Receipts: receipts},
+			committedStages,
+			pendingStages,
+			primary,
+			labeledRegistrationReleaseError("release supervised registry lock after client updates", rawReleaseErr),
+		)
+		disposition := supervisedPhase3Disposition{
+			registryReleaseConfirmed:   rawReleaseErr == nil,
+			registryReleaseUnconfirmed: errors.Is(rawReleaseErr, ErrLockReleaseUnconfirmed),
+		}
+		var forwardErr *RegisterForwardCommittedError
+		if classifiedErr != nil && !errors.As(classifiedErr, &forwardErr) {
+			result = registeredLanguageResult{}
+		}
+		return result, classifiedErr, disposition
+	}
+	registryOnlyCommitted := []string{"registry-row"}
+	registryOnlyPending := []string{"client-writes", "supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"}
+	clientPrefixCommitted := []string{"registry-row", "client-write-prefix"}
+	clientPrefixPending := []string{"later-client-writes", "supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"}
+	postWritePending := []string{"supervisor-intent", "running-intent-clear", "reconcile", "readiness", "direct-cleanup"}
 	if err := reg.Load(); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("reload registry: %w", err)
+		result, finishErr, _ := finishSupervisedPhase3(
+			fmt.Errorf("reload registry: %w", err), nil,
+			registryOnlyCommitted, registryOnlyPending,
+		)
+		return result, finishErr
 	}
 	if _, ok := reg.Get(wsKey, lang); !ok {
-		return registeredLanguageResult{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		result, finishErr, _ := finishSupervisedPhase3(
+			fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang), nil,
+			registryOnlyCommitted, registryOnlyPending,
+		)
+		return result, finishErr
 	}
 	provisionalReceipts, err := writeRegisteredClientEntries(bindings, allClients, entryNameByClient, port, lang, w, transaction)
 	var forwardErr *RegisterForwardCommittedError
 	if err != nil {
-		if !errors.As(err, &forwardErr) {
-			return registeredLanguageResult{}, err
+		isForward := errors.As(err, &forwardErr)
+		persistedCandidate, persistErr := persistRegistrationForwardReceipts(reg, composedEntry, prior, had, provisionalReceipts)
+		if persistErr == nil {
+			lastPersistedEntry = persistedCandidate
 		}
-		var persistErr error
-		composedEntry, persistErr = persistRegistrationForwardReceipts(reg, composedEntry, prior, had, provisionalReceipts)
-		forwardErr.cause = errors.Join(
-			forwardErr.cause,
-			labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr),
+		persistCause := labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr)
+		if isForward {
+			forwardErr.cause = errors.Join(forwardErr.cause, persistCause)
+			err = forwardErr
+		} else {
+			err = errors.Join(err, persistCause)
+		}
+		result, finishErr, disposition := finishSupervisedPhase3(
+			err, provisionalReceipts, clientPrefixCommitted, clientPrefixPending,
 		)
+		if !disposition.registryReleaseConfirmed || !isForward {
+			return result, finishErr
+		}
+		composedEntry = lastPersistedEntry
 	}
 	forwardResult := func(label string, continuationErr error) (registeredLanguageResult, error) {
 		if forwardErr == nil {
@@ -410,17 +478,14 @@ func (a *API) registerOneLanguageSupervised(
 		)
 		return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, forwardErr
 	}
-	if err := transaction.Release(lockToken); err != nil {
-		if forwardErr == nil {
-			return registeredLanguageResult{}, fmt.Errorf("release supervised registry lock after client updates: %w", err)
-		}
-		forwardErr.cause = errors.Join(
-			forwardErr.cause,
-			labeledRegistrationForwardContinuationError(
-				"release supervised registry lock after client updates",
-				fmt.Errorf("release supervised registry lock after client updates: %w", err),
-			),
+	if err == nil {
+		result, finishErr, disposition := finishSupervisedPhase3(
+			nil, provisionalReceipts, clientPrefixCommitted, postWritePending,
 		)
+		if !disposition.registryReleaseConfirmed || finishErr != nil {
+			return result, finishErr
+		}
+		composedEntry = result.Entry
 	}
 	postWrite := opts.supervisorPostWriteDeps
 	if postWrite.upsertIntent == nil || postWrite.writeRunningIntent == nil || postWrite.reconcile == nil || postWrite.readiness == nil {
@@ -440,7 +505,16 @@ func (a *API) registerOneLanguageSupervised(
 		taskName,
 		transaction.AddCompensation,
 	); err != nil {
-		return forwardResult("write running intent", fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err))
+		intentErr := fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
+		if isAppliedLockReleaseUnconfirmed(intentErr) {
+			return newRegisterForwardReleaseError(
+				"supervisor-intent", "running-intent-release",
+				registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts},
+				[]string{"registry-row", "client-write-prefix", "supervisor-intent", "running-intent-clear"},
+				[]string{"reconcile", "readiness", "direct-cleanup"}, forwardErr, intentErr,
+			)
+		}
+		return forwardResult("write running intent", intentErr)
 	}
 	// The reconcile may spawn the replacement and then return an error. Arm the
 	// no-op-safe kill before invoking it, after the running-intent restoration
@@ -470,7 +544,10 @@ func (a *API) registerOneLanguageSupervised(
 		"✓ Supervisor-managed LSP proxy started: %s\n",
 		LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang),
 	)
-	return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, forwardErr
+	if forwardErr != nil {
+		return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, forwardErr
+	}
+	return registeredLanguageResult{Entry: composedEntry, Receipts: provisionalReceipts}, nil
 }
 
 func resolveWorkspaceScopedLSPEntryName(reg *Registry, serverName, language, workspaceKey string) string {

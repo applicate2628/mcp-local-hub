@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/config"
 )
 
@@ -851,6 +853,54 @@ func TestRegisterRunningIntentRollbackMatrix(t *testing.T) {
 				t.Fatalf("target stop = %+v, want %+v", gotTarget, priorStop)
 			}
 		})
+	}
+}
+
+func TestRegisterRunningIntentReleaseUnconfirmedCommitsForwardWithoutRestore(t *testing.T) {
+	a := NewAPI()
+	dir := daemonIntentTestHelper(t)
+	task := `\mcp-local-hub-lsp-release-unconfirmed-go`
+	prior := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	if err := a.WriteStopIntent(task, prior, "tester"); err != nil {
+		t.Fatalf("seed stop: %v", err)
+	}
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("supervisor intent path: %v", err)
+	}
+	lockPath := path + supervisorIntentLockSuffix
+	releaseCause := errors.New("injected stop-intent unlock failure")
+	previousUnlock := flockUnlockFn
+	var stranded *flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = fl
+			return releaseCause
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if stranded != nil {
+			_ = stranded.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	tx := newRegistrationTransaction()
+	if _, err := a.writeRegisterRunningIntentForTask(task, tx.AddCompensation); !isAppliedLockReleaseUnconfirmed(err) || !errors.Is(err, releaseCause) {
+		t.Fatalf("running intent error = %v, want durable applied release-unconfirmed", err)
+	}
+	if _, present := readSubBlockStopForTest(t, dir)[task]; present {
+		t.Fatal("durably cleared stop was restored before forward settlement")
+	}
+	if outcome := tx.CommitForward(); outcome.State != registrationTransactionCommitted {
+		t.Fatalf("forward settlement outcome = %+v, want committed", outcome)
+	}
+	if _, present := readSubBlockStopForTest(t, dir)[task]; present {
+		t.Fatal("forward settlement invoked the pre-armed stop restore")
 	}
 }
 

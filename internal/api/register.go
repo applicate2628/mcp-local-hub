@@ -375,16 +375,54 @@ type RegisterReport struct {
 // skipped; Client and Operation identify the settlement point without exposing
 // config contents or machine-local paths.
 type RegisterForwardCommittedError struct {
-	Client    string
-	Operation string
-	cause     error
+	Client          string
+	Target          string
+	Operation       string
+	CommittedStages []string
+	PendingStages   []string
+	cause           error
 }
 
 func (e *RegisterForwardCommittedError) Error() string {
+	if e.Client == "" && e.Target != "" {
+		return fmt.Sprintf("registration forward subset committed at %s during %s: %v", e.Target, e.Operation, e.cause)
+	}
 	return fmt.Sprintf("registration forward subset committed at client %s during %s: %v", e.Client, e.Operation, e.cause)
 }
 
 func (e *RegisterForwardCommittedError) Unwrap() error { return e.cause }
+
+func newRegisterForwardReleaseError(target, operation string, result registeredLanguageResult, committed, pending []string, primary, releaseErr error) (registeredLanguageResult, error) {
+	if !errors.Is(releaseErr, ErrLockReleaseUnconfirmed) {
+		if releaseErr == nil {
+			return result, primary
+		}
+		return result, errors.Join(primary, releaseErr)
+	}
+	var forward *RegisterForwardCommittedError
+	if errors.As(primary, &forward) {
+		forward.cause = errors.Join(forward.cause, releaseErr)
+		forward.CommittedStages = append(forward.CommittedStages, committed...)
+		forward.PendingStages = append(forward.PendingStages, pending...)
+		if forward.Target == "" {
+			forward.Target = target
+		}
+		return result, forward
+	}
+	return result, &RegisterForwardCommittedError{
+		Target: target, Operation: operation,
+		CommittedStages: append([]string(nil), committed...),
+		PendingStages:   append([]string(nil), pending...),
+		cause:           errors.Join(primary, releaseErr),
+	}
+}
+
+func labeledRegistrationReleaseError(label string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", label, err)
+}
 
 // UnregisterReport summarizes what Unregister actually removed.
 type UnregisterReport struct {
@@ -771,6 +809,8 @@ func buildDirectCleanupPlans(
 ) ([]directCleanupPlan, []directCleanupWarningRecord) {
 	var plans []directCleanupPlan
 	var warningRecords []directCleanupWarningRecord
+	canonicalLanguages := append([]string(nil), languages...)
+	sort.Strings(canonicalLanguages)
 	clientNames := make([]string, 0, len(allClients))
 	for clientName := range allClients {
 		clientNames = append(clientNames, clientName)
@@ -784,7 +824,7 @@ func buildDirectCleanupPlans(
 		}
 		clientStart := len(plans)
 		clientWideFailure := ""
-		for _, language := range languages {
+		for _, language := range canonicalLanguages {
 			spec, ok := bySpec[language]
 			if !ok {
 				continue
@@ -1387,6 +1427,28 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 	for _, record := range warningRecords {
 		warnings.addRecord(record)
 	}
+	// Plans form a proof set for each physical direct entry.  Establish their
+	// order before selecting one plan as the mutation owner so neither map order
+	// nor requested language order decides which proof is observed first.
+	sort.SliceStable(plans, func(i, j int) bool {
+		left, right := plans[i], plans[j]
+		if left.key.Client != right.key.Client {
+			return left.key.Client < right.key.Client
+		}
+		if left.key.Language != right.key.Language {
+			return left.key.Language < right.key.Language
+		}
+		if left.evidence != right.evidence {
+			return left.evidence < right.evidence
+		}
+		if left.observedRouterPort != right.observedRouterPort {
+			return left.observedRouterPort < right.observedRouterPort
+		}
+		if left.backend != right.backend {
+			return left.backend < right.backend
+		}
+		return left.receiptEntry < right.receiptEntry
+	})
 
 	for i := range plans {
 		plan := &plans[i]
@@ -1424,13 +1486,22 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 		var client registerClient
 		leases := map[int]ManagedRouterLease{}
 		plansByEntry := map[string]*directCleanupPlan{}
+		allPlansByEntry := map[string][]*directCleanupPlan{}
 		refusedPorts := map[int]directCleanupWarningClass{}
 		for i := range plans {
 			plan := &plans[i]
-			if plan.key.Client != clientName || plan.failureClass != "" || plan.evidence == cleanupEvidenceNone {
+			if plan.key.Client != clientName {
 				continue
 			}
 			client = plan.client
+			for _, match := range plan.matches {
+				// Include failed/no-evidence plans: they are a proof refusal for
+				// this entry, never a reason to silently drop the ownership edge.
+				allPlansByEntry[match.Name] = append(allPlansByEntry[match.Name], plan)
+			}
+			if plan.failureClass != "" || plan.evidence == cleanupEvidenceNone {
+				continue
+			}
 			if plan.evidence == cleanupEvidenceManagedRouter {
 				lease := leases[plan.observedRouterPort]
 				if lease == nil {
@@ -1459,8 +1530,23 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 					)
 				}
 			}
-			for _, match := range plan.matches {
-				plansByEntry[match.Name] = plan
+		}
+		entryNames := make([]string, 0, len(allPlansByEntry))
+		for entryName := range allPlansByEntry {
+			entryNames = append(entryNames, entryName)
+		}
+		sort.Strings(entryNames)
+		for _, entryName := range entryNames {
+			associated := allPlansByEntry[entryName]
+			eligible := len(associated) > 0
+			for _, plan := range associated {
+				if plan.failureClass != "" || plan.evidence == cleanupEvidenceNone {
+					eligible = false
+					break
+				}
+			}
+			if eligible {
+				plansByEntry[entryName] = associated[0]
 			}
 		}
 		if client == nil {
@@ -1506,7 +1592,22 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 			return false
 		}
 		completedManagedPlans := map[int][]directCleanupPlan{}
+		clientProofFailed := false
+		recordCompletedManagedPlan := func(plan *directCleanupPlan) {
+			if plan.evidence != cleanupEvidenceManagedRouter {
+				return
+			}
+			for _, existing := range completedManagedPlans[plan.observedRouterPort] {
+				if existing.key == plan.key {
+					return
+				}
+			}
+			completedManagedPlans[plan.observedRouterPort] = append(completedManagedPlans[plan.observedRouterPort], *plan)
+		}
 		for i := range plans {
+			if clientProofFailed {
+				break
+			}
 			plan := &plans[i]
 			if plan.key.Client != clientName || !planHasEntries(plan) {
 				continue
@@ -1522,6 +1623,19 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 			sort.Strings(entryNames)
 			for _, entryName := range entryNames {
 				entry := matchesByName[entryName]
+				validateEntryPlans := func() string {
+					for _, associated := range allPlansByEntry[entryName] {
+						if associated.failureClass != "" || associated.evidence == cleanupEvidenceNone {
+							return string(cleanupWarningClientEntryIndeterminate)
+						}
+						if associated.evidence == cleanupEvidenceManagedRouter {
+							if failure := validateManagedCleanupPlan(leases[associated.observedRouterPort], deps.probeRoute, *associated); failure != "" {
+								return failure
+							}
+						}
+					}
+					return ""
+				}
 				atomicClient, ok := client.(atomicDirectCleanupClient)
 				if !ok {
 					invalidatePlan(plan, string(cleanupWarningClientEntryIndeterminate))
@@ -1544,15 +1658,15 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 					planFailed = true
 					break
 				}
-				if plan.evidence == cleanupEvidenceManagedRouter {
-					if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
+				if failure := validateEntryPlans(); failure != "" {
+					if plan.evidence == cleanupEvidenceManagedRouter {
 						invalidatePlan(plan, failure)
-						if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
-							return warnings.outcome(), fmt.Errorf("direct cleanup %s pre-remove proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
-						}
-						planFailed = true
-						break
 					}
+					if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s pre-remove proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+					}
+					planFailed = true
+					break
 				}
 				entryMark := transaction.Mark()
 				cleanupCompensationToken := compensationToken(-1)
@@ -1573,10 +1687,7 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 						return nil
 					},
 					func(_ clients.DirectCleanupCheckpoint) error {
-						if plan.evidence != cleanupEvidenceManagedRouter {
-							return nil
-						}
-						if failure := validateManagedCleanupPlan(leases[plan.observedRouterPort], deps.probeRoute, *plan); failure != "" {
+						if failure := validateEntryPlans(); failure != "" {
 							return directCleanupRevalidationError{failure: failure}
 						}
 						return nil
@@ -1612,10 +1723,11 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 					var validationErr directCleanupRevalidationError
 					if errors.As(cleanupErr, &validationErr) {
 						invalidatePlan(plan, validationErr.failure)
-						if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
 							return warnings.outcome(), fmt.Errorf("direct cleanup %s validation rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(cleanupErr, rollbackErr))
 						}
 						planFailed = true
+						clientProofFailed = true
 						break
 					}
 					if errors.Is(cleanupErr, clients.ErrCASConflict) {
@@ -1653,12 +1765,20 @@ func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnos
 					entry.Language,
 				)
 			}
-			if !planFailed && plan.evidence == cleanupEvidenceManagedRouter {
-				completedManagedPlans[plan.observedRouterPort] = append(
-					completedManagedPlans[plan.observedRouterPort],
-					*plan,
-				)
+			if !planFailed {
+				for _, entryName := range entryNames {
+					for _, associated := range allPlansByEntry[entryName] {
+						recordCompletedManagedPlan(associated)
+					}
+				}
 			}
+		}
+		if clientProofFailed {
+			// RollbackTo(clientMark) released every client-scoped lease and
+			// restored every removal. Proofs recorded before that rollback no
+			// longer own live state and must not enroll final validation.
+			clear(completedManagedPlans)
+			continue
 		}
 		ports := make([]int, 0, len(completedManagedPlans))
 		for port := range completedManagedPlans {
@@ -1961,14 +2081,14 @@ func writeRegisteredClientEntries(
 		key := clientLanguageKey{Client: binding.Client, Language: language}
 		if priorName, duplicate := seen[key]; duplicate {
 			if priorName != entryName {
-				return nil, fmt.Errorf("write-receipt-conflict: client %s language %s resolved both %q and %q", binding.Client, language, priorName, entryName)
+				return receipts, fmt.Errorf("write-receipt-conflict: client %s language %s resolved both %q and %q", binding.Client, language, priorName, entryName)
 			}
 			continue
 		}
 
 		priorEntry, err := client.GetEntry(entryName)
 		if err != nil {
-			return nil, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, binding.Client, err)
+			return receipts, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, binding.Client, err)
 		}
 		urlPath := binding.URLPath
 		if urlPath == "" {
@@ -2001,7 +2121,7 @@ func writeRegisteredClientEntries(
 		addErr := client.AddEntry(entry)
 		switch classifyRegisterClientMutation(addErr) {
 		case clients.ClientMutationNeedsCompensation:
-			return nil, fmt.Errorf("write %s entry: %w", binding.Client, addErr)
+			return receipts, fmt.Errorf("write %s entry: %w", binding.Client, addErr)
 		case clients.ClientMutationAppliedReleaseUnconfirmed:
 			disarmErr := transaction.DisarmCompensation(compensationToken)
 			seen[key] = entryName
@@ -2330,7 +2450,13 @@ func (a *API) registerOneLanguage(
 	// consistent 10s register failure. Regression-guarded by
 	// TestRegisterOneLanguage_ReleasesFlockBeforeSchRun.
 	if err := releaseUnlock(); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("release registry lock before task start: %w", err)
+		return newRegisterForwardReleaseError(
+			"workspace-registry", "registry-phase1-release",
+			registeredLanguageResult{Entry: composedEntry},
+			[]string{"scheduler-task", "registry-row"},
+			[]string{"task-run", "readiness", "running-intent-clear", "client-writes", "direct-cleanup"},
+			nil, fmt.Errorf("release registry lock before task start: %w", err),
+		)
 	}
 
 	// Start the proxy. Registry is already persisted, so daemon startup
@@ -2362,40 +2488,75 @@ func (a *API) registerOneLanguage(
 		taskName,
 		transaction.AddCompensation,
 	); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf(
+		intentErr := fmt.Errorf(
 			"write register running intent for %s: %w",
 			canonicalTaskName,
 			err,
 		)
+		if isAppliedLockReleaseUnconfirmed(intentErr) {
+			return newRegisterForwardReleaseError(
+				"supervisor-intent", "running-intent-release",
+				registeredLanguageResult{Entry: composedEntry},
+				[]string{"scheduler-task", "registry-row", "task-run", "readiness", "running-intent-clear"},
+				[]string{"client-writes", "direct-cleanup"}, nil, intentErr,
+			)
+		}
+		return registeredLanguageResult{}, intentErr
 	}
 	// Phase 3: re-acquire flock before client config writes. Client
 	// adapters perform read-modify-write updates, so these writes must be
 	// serialized against concurrent register/unregister operations.
 	unlock, err = reg.Lock()
 	if err != nil {
+		if errors.Is(err, ErrLockReleaseUnconfirmed) {
+			return newRegisterForwardReleaseError(
+				"workspace-registry", "registry-phase3-release",
+				registeredLanguageResult{Entry: composedEntry},
+				[]string{"scheduler-task", "registry-row", "task-run", "readiness", "running-intent-clear"},
+				[]string{"client-writes", "direct-cleanup"}, nil,
+				fmt.Errorf("re-acquire registry lock: %w", err),
+			)
+		}
 		return registeredLanguageResult{}, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
 	lockToken = transaction.AddFinalizer("release registry lock before client updates for "+wsKey+"/"+lang, unlock)
+	phase3Result := registeredLanguageResult{Entry: composedEntry}
+	finishPhase3 := func(primary error) (registeredLanguageResult, error) {
+		return newRegisterForwardReleaseError(
+			"workspace-registry", "registry-phase3-release", phase3Result,
+			[]string{"scheduler-task", "registry-row", "task-run", "readiness", "running-intent-clear", "client-write-prefix"},
+			[]string{"later-client-writes", "direct-cleanup"}, primary,
+			labeledRegistrationReleaseError("release registry lock after client updates", releaseUnlock()),
+		)
+	}
+	settleLegacyPhase3ClientWriteFailure := func(receipts []clientWriteReceipt, writerErr error) (registeredLanguageResult, error) {
+		lastConfirmedEntry := composedEntry
+		committedEntry, persistErr := persistRegistrationForwardReceipts(reg, composedEntry, prior, had, receipts)
+		if persistErr == nil {
+			lastConfirmedEntry = committedEntry
+		}
+		phase3Result = registeredLanguageResult{Entry: lastConfirmedEntry, Receipts: receipts}
+
+		continuationErr := labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr)
+		var forwardErr *RegisterForwardCommittedError
+		if errors.As(writerErr, &forwardErr) {
+			forwardErr.cause = errors.Join(forwardErr.cause, continuationErr)
+			return finishPhase3(forwardErr)
+		}
+		return finishPhase3(errors.Join(writerErr, continuationErr))
+	}
 	if err := reg.Load(); err != nil {
-		return registeredLanguageResult{}, fmt.Errorf("reload registry: %w", err)
+		return finishPhase3(fmt.Errorf("reload registry: %w", err))
 	}
 	if _, ok := reg.Get(wsKey, lang); !ok {
-		return registeredLanguageResult{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		return finishPhase3(fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang))
 	}
 	receipts, err := writeRegisteredClientEntries(bindings, allClients, entryNameByClient, port, lang, w, transaction)
 	if err != nil {
-		var forwardErr *RegisterForwardCommittedError
-		if !errors.As(err, &forwardErr) {
-			return registeredLanguageResult{}, err
-		}
-		committedEntry, persistErr := persistRegistrationForwardReceipts(reg, composedEntry, prior, had, receipts)
-		forwardErr.cause = errors.Join(
-			forwardErr.cause,
-			labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr),
-		)
-		return registeredLanguageResult{Entry: committedEntry, Receipts: receipts}, forwardErr
+		return settleLegacyPhase3ClientWriteFailure(receipts, err)
 	}
-	return registeredLanguageResult{Entry: composedEntry, Receipts: receipts}, nil
+	phase3Result = registeredLanguageResult{Entry: composedEntry, Receipts: receipts}
+	return finishPhase3(nil)
 }
 
 func persistRegistrationForwardReceipts(

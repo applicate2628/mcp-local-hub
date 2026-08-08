@@ -73,19 +73,24 @@ func TestRegistrationTransaction_CommitFinalizerFailureRollsBack(t *testing.T) {
 
 func TestRegistrationTransaction_CommitForwardRetainsFinalizerErrorWithoutCompensation(t *testing.T) {
 	tx := newRegistrationTransaction()
-	compensated := false
-	observed := false
+	compensationCalls := 0
+	var observers []string
 	closeErr := errors.New("forward finalizer release failed")
-	token := tx.AddTrackedCompensation("must stay disarmed", func() error {
-		compensated = true
+	tx.AddCompensation("active-a", func() error {
+		compensationCalls++
 		return nil
 	})
-	if err := tx.DisarmCompensation(token); err != nil {
-		t.Fatalf("DisarmCompensation: %v", err)
-	}
+	tx.AddCompensation("active-b", func() error {
+		compensationCalls++
+		return nil
+	})
 	tx.AddFinalizer("forward resource", func() error { return closeErr })
-	tx.AddAfterCommit("forward observer", func() error {
-		observed = true
+	tx.AddAfterCommit("forward observer a", func() error {
+		observers = append(observers, "a")
+		return nil
+	})
+	tx.AddAfterCommit("forward observer b", func() error {
+		observers = append(observers, "b")
 		return nil
 	})
 
@@ -93,11 +98,11 @@ func TestRegistrationTransaction_CommitForwardRetainsFinalizerErrorWithoutCompen
 	if outcome.State != registrationTransactionCommitted || !errors.Is(outcome.Err, closeErr) {
 		t.Fatalf("CommitForward outcome = %+v, want committed with finalizer error", outcome)
 	}
-	if compensated {
-		t.Fatal("CommitForward ran a disarmed compensation")
+	if compensationCalls != 0 {
+		t.Fatalf("CommitForward ran %d active compensations, want zero", compensationCalls)
 	}
-	if !observed {
-		t.Fatal("CommitForward skipped the committed observer")
+	if want := []string{"a", "b"}; !reflect.DeepEqual(observers, want) {
+		t.Fatalf("CommitForward observers = %v, want %v", observers, want)
 	}
 }
 
