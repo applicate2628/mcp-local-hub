@@ -32,7 +32,7 @@ func TestLockRelease_ConcurrentOneShotMemoizesFailure(t *testing.T) {
 	release := newLedgeredFlockRelease(path, func() error {
 		calls.Add(1)
 		return cause
-	})
+	}, nil)
 
 	const callers = 32
 	results := make([]error, callers)
@@ -149,7 +149,7 @@ func TestLockRelease_PanicUnwindRecordsGhost(t *testing.T) {
 	cause := errors.New("panic-unwind release")
 	func() {
 		defer func() { _ = recover() }()
-		release := newLedgeredFlockRelease(path, func() error { return cause })
+		release := newLedgeredFlockRelease(path, func() error { return cause }, nil)
 		defer func() {
 			if err := release(); !errors.Is(err, cause) {
 				t.Errorf("panic-unwind release = %v, want cause", err)
@@ -159,5 +159,140 @@ func TestLockRelease_PanicUnwindRecordsGhost(t *testing.T) {
 	}()
 	if err := unconfirmedLockRelease(path); !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
 		t.Fatalf("panic-unwind ledger = %v, want sentinel and cause", err)
+	}
+}
+
+func TestLockLeafLedgered_ForeignHolderStillBlocksUntilReleased(t *testing.T) {
+	path := filepath.Join(apitest.HardenedTempDir(t), "foreign-holder.lock")
+	foreign := flock.New(path)
+	if err := foreign.Lock(); err != nil {
+		t.Fatalf("hold foreign lock leaf: %v", err)
+	}
+	foreignHeld := true
+	t.Cleanup(func() {
+		if foreignHeld {
+			if err := foreign.Unlock(); err != nil {
+				t.Errorf("cleanup foreign lock leaf: %v", err)
+			}
+		}
+	})
+
+	type acquireResult struct {
+		release func() error
+		err     error
+	}
+	done := make(chan acquireResult, 1)
+	go func() {
+		release, err := lockLeafLedgered(path)
+		done <- acquireResult{release: release, err: err}
+	}()
+
+	entry := lockReleaseLedgerEntryFor(path)
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for {
+		entry.mu.Lock()
+		acquiring := entry.acquiring
+		entry.mu.Unlock()
+		if acquiring {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("ledgered acquire did not reserve the foreign-held leaf")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case result := <-done:
+		if result.release != nil {
+			_ = result.release()
+		}
+		t.Fatalf("ledgered acquire returned before foreign release: %v", result.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	if err := foreign.Unlock(); err != nil {
+		t.Fatalf("release foreign lock leaf: %v", err)
+	}
+	foreignHeld = false
+	select {
+	case result := <-done:
+		if result.err != nil {
+			t.Fatalf("ledgered acquire after foreign release: %v", result.err)
+		}
+		if result.release == nil {
+			t.Fatal("ledgered acquire after foreign release returned nil release")
+		}
+		if err := result.release(); err != nil {
+			t.Fatalf("release ledgered lock leaf: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("ledgered acquire did not complete after foreign release")
+	}
+}
+
+func TestLockLeafLedgered_WaiterObservesFailedReleaseBeforeOSAcquire(t *testing.T) {
+	path := filepath.Join(apitest.HardenedTempDir(t), "interleaving.lock")
+	cause := errors.New("synthetic retained handle")
+	var calls atomic.Int32
+	var retained *flock.Flock
+	firstRelease, err := lockLeafLedgeredWithUnlock(path, func(fl *flock.Flock) error {
+		calls.Add(1)
+		retained = fl
+		return cause
+	})
+	if err != nil {
+		t.Fatalf("acquire first ledgered lock leaf: %v", err)
+	}
+	t.Cleanup(func() {
+		if retained != nil {
+			if err := retained.Unlock(); err != nil {
+				t.Errorf("cleanup retained first lock leaf: %v", err)
+			}
+		}
+	})
+
+	waiterReady := make(chan struct{})
+	type acquireResult struct {
+		release func() error
+		err     error
+	}
+	done := make(chan acquireResult, 1)
+	go func() {
+		release, err := lockLeafLedgeredWithUnlockAndWaitObserver(
+			path,
+			func(fl *flock.Flock) error { return fl.Unlock() },
+			func() { close(waiterReady) },
+		)
+		done <- acquireResult{release: release, err: err}
+	}()
+	select {
+	case <-waiterReady:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("second ledgered acquire did not enter the local-held wait")
+	}
+
+	firstErr := firstRelease()
+	if !errors.Is(firstErr, ErrLockReleaseUnconfirmed) || !errors.Is(firstErr, cause) {
+		t.Fatalf("first ledgered release = %v, want release sentinel and cause", firstErr)
+	}
+	select {
+	case result := <-done:
+		if result.release != nil {
+			_ = result.release()
+			t.Fatal("second ledgered acquire returned a release callback after failed first release")
+		}
+		if !errors.Is(result.err, ErrLockReleaseUnconfirmed) || !errors.Is(result.err, cause) {
+			t.Fatalf("second ledgered acquire = %v, want release sentinel and cause", result.err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("second ledgered acquire waited on this process's retained lock leaf")
+	}
+
+	secondErr := firstRelease()
+	if secondErr != firstErr {
+		t.Fatalf("second release result = %v, want memoized first result %v", secondErr, firstErr)
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("underlying unlock calls = %d, want 1", got)
 	}
 }

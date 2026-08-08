@@ -273,6 +273,56 @@ func TestSerenaRemovalFence_ExcludesASecondHolder(t *testing.T) {
 	}
 }
 
+func TestSerenaRemovalFence_FailedReleaseMakesSameProcessReacquireFailLoud(t *testing.T) {
+	dir := t.TempDir()
+	const key = "0123abce"
+	cause := errors.New("synthetic retained fence handle")
+	previousUnlock := serenaRemovalFenceUnlockFn
+	var retained *flock.Flock
+	calls := 0
+	serenaRemovalFenceUnlockFn = func(fl *flock.Flock) error {
+		calls++
+		retained = fl
+		return cause
+	}
+	t.Cleanup(func() {
+		serenaRemovalFenceUnlockFn = previousUnlock
+		if retained != nil {
+			if err := retained.Unlock(); err != nil {
+				t.Errorf("cleanup retained Serena removal fence: %v", err)
+			}
+		}
+	})
+
+	release, err := AcquireSerenaRemovalFence(dir, key)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence first: %v", err)
+	}
+	if err := release(); !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+		t.Fatalf("first fence release = %v, want fence and ledger sentinels with cause", err)
+	}
+	if err := release(); !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+		t.Fatalf("second fence release = %v, want memoized fence and ledger sentinels with cause", err)
+	}
+	if calls != 1 {
+		t.Fatalf("underlying fence unlock calls = %d, want 1", calls)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := AcquireSerenaRemovalFence(dir, key)
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrSerenaRemovalFenceReleaseFailed) || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+			t.Fatalf("second fence acquire = %v, want fence and ledger sentinels with cause", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("second fence acquire waited on this process's retained handle")
+	}
+}
+
 func TestSerenaRemovalFenceHeld_UnconfirmedProbeReleaseIsUndeterminable(t *testing.T) {
 	dir := t.TempDir()
 	const key = "c0ffee00"

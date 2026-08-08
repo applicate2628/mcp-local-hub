@@ -174,15 +174,18 @@ func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func()
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("serena removal fence: mkdir %s: %w", filepath.Dir(path), err)
 	}
-	fl := flock.New(path)
-	if err := fl.Lock(); err != nil {
-		return nil, fmt.Errorf("serena removal fence: lock %s: %w", path, err)
-	}
 	// Capture the seam once so a held release closure cannot observe a test
 	// cleanup restoring the package variable while it is in flight.
 	unlockFn := serenaRemovalFenceUnlockFn
+	ledgeredRelease, err := lockLeafLedgeredWithUnlock(path, unlockFn)
+	if err != nil {
+		if errors.Is(err, ErrLockReleaseUnconfirmed) {
+			return nil, fmt.Errorf("%w: %s: %w", ErrSerenaRemovalFenceReleaseFailed, path, err)
+		}
+		return nil, fmt.Errorf("serena removal fence: lock %s: %w", path, err)
+	}
 	return func() error {
-		if unlockErr := unlockFn(fl); unlockErr != nil {
+		if unlockErr := ledgeredRelease(); unlockErr != nil {
 			return fmt.Errorf("%w: %s: %w", ErrSerenaRemovalFenceReleaseFailed, path, unlockErr)
 		}
 		return nil
@@ -296,17 +299,16 @@ func observeSerenaRemovalFence(registryDir, workspaceKey string) (serenaRemovalF
 		}
 		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: stat %s: %w", path, statErr)
 	}
-	fl := flock.New(path)
 	// Bind the probe's release behavior to this observation. If it fails, the
 	// acquired handle remains held and the result must be undeterminable.
 	unlockFn := serenaRemovalFenceUnlockFn
-	locked, lerr := fl.TryLock()
+	release, locked, lerr := tryLockLeafLedgeredWithUnlock(path, unlockFn)
 	if lerr != nil {
 		return serenaRemovalFenceObservation{}, fmt.Errorf("serena removal fence probe: try-lock %s: %w", path, lerr)
 	}
 	if locked {
 		generation, generationErr := readSerenaRemovalFenceGenerationFn(registryDir, workspaceKey)
-		unlockErr := unlockFn(fl)
+		unlockErr := release()
 		if generationErr != nil || unlockErr != nil {
 			var causes []error
 			if generationErr != nil {
