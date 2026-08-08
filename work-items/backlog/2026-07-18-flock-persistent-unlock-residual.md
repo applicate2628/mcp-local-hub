@@ -1,6 +1,6 @@
 # gofrs/flock: a persistent Unlock failure leaves the OS lock held (definitive release residual)
 
-Status: open (accepted bounded residual)
+Status: candidate
 Severity: P3 (near-impossible trigger + process-exit backstop; pre-existing, not a Phase-E regression)
 Filed: 2026-07-18
 Found: item-3 Unit B Phase E commission (Sol P1 + Terra confirm — the deterministic-lease-release property).

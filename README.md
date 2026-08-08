@@ -105,6 +105,9 @@ the CLI to install the servers you want shared and verify they connect:
 mcphub install --server serena       # default clients: Claude/Codex/Cursor
 mcphub install --all                 # all 10 servers, default clients
 
+# Materialize one server in supervisor intent without touching client configs
+mcphub install --server fetch --no-client-config
+
 # Optional client targeting
 mcphub install --server serena --clients qwen-cli,vscode
 mcphub install --server serena --all-clients
@@ -188,6 +191,7 @@ The commands you reach for day to day:
 |---|---|
 | `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
 | `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
+| `mcphub install --server <name> --no-client-config` | Materialize only that server's daemon/supervisor intent; do not read or write MCP client configs |
 | `mcphub install --all` | Bulk install every manifest under `servers/` into default clients |
 | `mcphub status` | Show state of every `mcp-local-hub-*` task (Running / Scheduled / Stopped) with PID, RAM, uptime, next-run |
 | `mcphub restart --server <n>` / `--all` | Stop + re-launch one or all daemons |

@@ -56,6 +56,13 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve canonical target: %w", err)
 	}
+	staged, err := stageV5UpgradeBinary(exe, target)
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: stage binary beside canonical target: %w", err)
+	}
+	// RenameAsideReplace consumes staged on success. Remove it on every earlier
+	// or failed return so a stale candidate cannot survive into a later upgrade.
+	defer os.Remove(staged)
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
@@ -99,7 +106,7 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 
 	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
 		BinaryPath:                 target,
-		NewBinary:                  exe,
+		NewBinary:                  staged,
 		PipePath:                   deps.pipePath,
 		Deps:                       deps,
 		ExpectedPorts:              expectedPorts,
@@ -111,6 +118,19 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "v0.5 upgrade complete.")
 	return nil
+}
+
+// stageV5UpgradeBinary copies the running candidate into the canonical target
+// directory before rename-aside. MoveFileEx cannot move a file across Windows
+// volumes, while RenameAsideReplace's contract requires newSrc to be a sibling
+// staged by the caller. copyExe provides the existing tempfile+atomic-rename
+// pipeline, so a failed copy never exposes a partial .new file.
+func stageV5UpgradeBinary(exe, target string) (string, error) {
+	staged := target + ".new"
+	if err := copyExe(exe, staged); err != nil {
+		return "", err
+	}
+	return staged, nil
 }
 
 // buildV5UpgradeDeps constructs the production v5UpgradeDeps for the

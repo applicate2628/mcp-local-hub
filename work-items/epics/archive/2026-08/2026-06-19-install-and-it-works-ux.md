@@ -113,7 +113,7 @@ actionable string the install preflight emits in place of the bare error.
 
 ## Closure
 
-Closed: 2026-06-28
+Historical closed date: 2026-06-28
 
 All six areas plus the two per-project follow-ups (D1, D2) are DONE or
 explicitly deferred; no child carries genuinely-unstarted in-epic scope. The
@@ -164,3 +164,8 @@ Per-area outcome:
 - **D1 claude Local-scope write-back** — permanent/separate deferral per `decisions/2026-06-27-per-project-gui-p3b-uxdesign.md`.
 - **D2 stash-full-restore** — `backlog/2026-06-27-d2-stash-full-restore-deferred.md` (the deeper restore beyond #439's catalog-by-name prefill).
 - **Embed-first install shadows same-named disk manifest** — `bugs/2026-06-28-embed-first-install-shadows-disk-manifest.md` (pre-existing adjacent finding; deeper override-precedence decision deferred).
+
+Closed: 2026-08-08T22:58:13Z
+Outcome: Pre-V1 terminal status `closed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `f30b1701be126db9120d244f60138bc61d8110206b6f86392b83cc7b0e958b82`; original terminal status `closed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `f30b1701be126db9120d244f60138bc61d8110206b6f86392b83cc7b0e958b82`; original terminal status `closed`; explicit operator-authorized V1 migration.

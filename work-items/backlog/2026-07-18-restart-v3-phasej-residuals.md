@@ -23,7 +23,7 @@ terminate child first → BindForRecovery re-binds → restore full handler → 
 loud via Interrupt+exit with the ensure-alive `mcphub gui` guidance). The 202-then-interrupted outcome is
 honest async protocol; this is operational tuning only. Fix option: give the child same-port bind budget
 `Bind >= Quiesce` (also raised as a Phase-G follow-up in
-`backlog/2026-07-18-phaseG-coordinator-followups.md`) — consolidate.
+`backlog/2026-07-18-phaseg-coordinator-followups.md`) — consolidate.
 
 ## P3 (fable P1-fix re-check) — owner-mismatch guard + child-path integration coverage
 - `internal/gui/server.go:1138` `ContinueWithGUIListener` reassigns `s.guiListener = owner` AFTER

@@ -5,7 +5,7 @@ context: adjacent-finding
 
 - **status:** fixed
 - **fixed-by:** PR #494 (`c1e59d99`) - embedded manifest-name create refusal and warning surfacing.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # Embed-first install silently shadows a same-named DISK manifest for any embedded server name
 

@@ -14,7 +14,7 @@ context: adjacent-finding
 
 - **status:** fixed
 - **fixed-by:** PR #465 (`9c50960d`) - `mcphub repair-state-dacl`; write invariant test from `8be1721c`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 ## Symptom (the report that triggered this investigation)
 

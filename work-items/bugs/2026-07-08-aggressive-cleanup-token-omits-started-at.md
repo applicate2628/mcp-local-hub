@@ -8,7 +8,7 @@ context: adjacent-finding
 
 - **status:** fixed
 - **fixed-by:** PR #522 (`669951e3`) - aggressive token and kill binding use `{PID, StartedAt}`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 ## Status — FIXED (PR #522 → master 669951e3, deployed + live-verified 2026-07-08; bot FULL PASS first round)
 

@@ -39,4 +39,9 @@ Proof: `TestRestartV3_ActivatedChildAcceptsSecondRestart` (cli/gui_self_restart_
 activation then a SECOND restart returns 202, not the nil-coordinator 200 spawn_error. fable re-check PASS
 (build/vet + `-race -count=3` clean; the listener-reuse is what makes the hoist correct — the coordinator
 captures the compose-time `s.guiListener`). Two non-blocking P3 advisories deferred to
-`backlog/2026-07-18-restart-v3-phaseJ-residuals.md`.
+`backlog/2026-07-18-restart-v3-phasej-residuals.md`.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `dbf02d9ecba72515abe1e50cc3d6e4cab21beeed382cc4b6dd2573ec56909f53`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `dbf02d9ecba72515abe1e50cc3d6e4cab21beeed382cc4b6dd2573ec56909f53`; original terminal status `fixed`; explicit operator-authorized V1 migration.

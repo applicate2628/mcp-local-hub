@@ -1,6 +1,6 @@
 ---
 status: closed
-closed: 2026-06-29
+Historical closed date: 2026-06-29
 ---
 
 # Epic: Desktop-app MCP catalog (engineering/creative tool MCPs)
@@ -97,3 +97,8 @@ All tiers resolved. The catalog grew far beyond the original tier list — a 202
 The original blocker (D-2 executed-clone mechanism for manual-clone Tier-3 MCPs) was SUPERSEDED, not built: the immature/manual-clone servers (COMSOL/SolidWorks/AutoCAD/GuitarPro + 5 more) are now discoverable docs-only pointer rows (operator manual-installs), which the user accepted as the right posture for immature packages. The executed-clone mechanism remains a future backlog item (would upgrade those pointers to one-click) but is NOT required for this epic.
 
 **Net: 8 clean one-click rows + 19 docs-only pointers + the full vendor-breadth catalog, LIVE on npm v0.4.9. Epic CLOSED.**
+
+Closed: 2026-08-08T22:58:13Z
+Outcome: Pre-V1 terminal status `closed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `3d03fbe03a275d20a35bfb010e5b1111abbab644c701a8f22befbb811da3a26c`; original terminal status `closed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `3d03fbe03a275d20a35bfb010e5b1111abbab644c701a8f22befbb811da3a26c`; original terminal status `closed`; explicit operator-authorized V1 migration.
