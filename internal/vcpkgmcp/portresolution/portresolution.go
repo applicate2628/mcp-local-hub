@@ -191,6 +191,7 @@ func DefaultDeps() Deps {
 type depsFS struct{ deps Deps }
 
 func (f depsFS) Open(path string) (io.ReadCloser, error)          { return f.deps.Open(path) }
+func (f depsFS) Stat(path string) (os.FileInfo, error)            { return f.deps.Stat(path) }
 func (f depsFS) OpenDir(path string) (boundedio.DirReader, error) { return f.deps.OpenDir(path) }
 
 type probeKind uint8

@@ -243,6 +243,9 @@ func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Resul
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			reason = ReasonCanceled
 		}
+		if errors.Is(err, cmakegraph.ErrInvalidOptions) {
+			reason = ReasonArgsInvalid
+		}
 		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
 	}
 

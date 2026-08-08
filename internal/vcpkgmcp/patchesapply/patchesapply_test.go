@@ -970,12 +970,11 @@ func TestResolveTripletFile_TraversingNameFindsNothing(t *testing.T) {
 	}
 }
 
-// TestApplyOrder_RelativeOverlayTripletIsIgnored: a relative overlay root
-// would bind to the daemon's working directory, so it can only produce a
-// confident answer about an unrelated tree.
-func TestApplyOrder_RelativeOverlayTripletIsIgnored(t *testing.T) {
-	cands := tripletFileCandidates("cl", []string{"overlays/triplets"}, "")
-	if len(cands) != 0 {
-		t.Fatalf("candidates = %v, want none — a relative overlay root is not usable", cands)
+// TestApplyOrder_RelativeOverlayTripletIsTerminal verifies that a caller's
+// relative root never falls through to a lower-precedence lookup.
+func TestApplyOrder_RelativeOverlayTripletIsTerminal(t *testing.T) {
+	res := applyOrder(Args{PortDir: t.TempDir(), Triplet: "cl", OverlayTriplets: []string{"overlays/triplets"}}, DefaultDeps())
+	if res.Status != evidence.StatusFailed || res.Reason != ReasonRelativeOverlayTripletRoot {
+		t.Fatalf("result = %+v, want failed/%s", res, ReasonRelativeOverlayTripletRoot)
 	}
 }

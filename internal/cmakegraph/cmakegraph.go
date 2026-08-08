@@ -272,6 +272,8 @@ import (
 	"strings"
 )
 
+var ErrInvalidOptions = errors.New("cmakegraph: invalid options")
+
 // Status is the tri-state resolution outcome of one include()/add_subdirectory() edge.
 type Status int
 
@@ -511,6 +513,13 @@ const (
 	DefaultMaxRoots = 200000
 	// DefaultMaxVisitedEntries shares the established enumeration policy.
 	DefaultMaxVisitedEntries = DefaultMaxRoots
+	MaxDepthLimit            = DefaultMaxDepth
+	MaxNodesLimit            = DefaultMaxNodes
+	MaxFileBytesLimit        = DefaultMaxFileBytes
+	MaxRootsLimit            = DefaultMaxRoots
+	MaxVisitedEntriesLimit   = DefaultMaxVisitedEntries
+	MaxEntryFilters          = 64
+	MaxEntryFilterBytes      = 8 << 10
 )
 
 // DefaultOptions returns the recommended bounds for a typical project tree.
@@ -518,7 +527,7 @@ func DefaultOptions() Options {
 	return Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: DefaultMaxFileBytes, MaxRoots: DefaultMaxRoots, MaxVisitedEntries: DefaultMaxVisitedEntries}
 }
 
-func (o Options) normalized() Options {
+func (o Options) normalized() (Options, error) {
 	if o.MaxDepth <= 0 {
 		o.MaxDepth = DefaultMaxDepth
 	}
@@ -534,7 +543,10 @@ func (o Options) normalized() Options {
 	if o.MaxVisitedEntries <= 0 {
 		o.MaxVisitedEntries = DefaultMaxVisitedEntries
 	}
-	return o
+	if o.MaxDepth > MaxDepthLimit || o.MaxNodes > MaxNodesLimit || o.MaxFileBytes > MaxFileBytesLimit || o.MaxRoots > MaxRootsLimit || o.MaxVisitedEntries > MaxVisitedEntriesLimit {
+		return Options{}, fmt.Errorf("%w: requested traversal limit exceeds package maximum", ErrInvalidOptions)
+	}
+	return o, nil
 }
 
 // Walk statically resolves the CMake include()/add_subdirectory() graph
@@ -630,6 +642,10 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 	if strings.TrimSpace(root) == "" {
 		return nil, errors.New("cmakegraph: root is required")
 	}
+	filters, err := compileEntryFilters(entryNames)
+	if err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(workspaceRoot) == "" {
 		workspaceRoot = root
 	}
@@ -685,7 +701,7 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 			}
 			return nil
 		}
-		if d.IsDir() || !matchesEntry(d.Name(), entryNames) {
+		if d.IsDir() || !filters.matches(d.Name()) {
 			return nil
 		}
 		if len(starts) >= w.opts.MaxRoots {
@@ -736,16 +752,43 @@ func isDirectorySymlink(path string) bool {
 // (case-insensitive); any other pattern matches the exact basename
 // (case-insensitive).
 func matchesEntry(name string, patterns []string) bool {
-	lower := strings.ToLower(name)
-	for _, p := range patterns {
-		lp := strings.ToLower(p)
-		if strings.HasPrefix(lp, "*.") {
-			if strings.HasSuffix(lower, lp[1:]) {
-				return true
-			}
+	filters, err := compileEntryFilters(patterns)
+	return err == nil && filters.matches(name)
+}
+
+type compiledEntryFilters struct {
+	exact    map[string]struct{}
+	suffixes []string
+}
+
+func compileEntryFilters(patterns []string) (compiledEntryFilters, error) {
+	if len(patterns) > MaxEntryFilters {
+		return compiledEntryFilters{}, fmt.Errorf("%w: entryNames exceed maximum %d", ErrInvalidOptions, MaxEntryFilters)
+	}
+	bytes := 0
+	filters := compiledEntryFilters{exact: make(map[string]struct{}, len(patterns))}
+	for _, pattern := range patterns {
+		bytes += len(pattern)
+		if bytes > MaxEntryFilterBytes {
+			return compiledEntryFilters{}, fmt.Errorf("%w: entryNames exceed maximum %d bytes", ErrInvalidOptions, MaxEntryFilterBytes)
+		}
+		lower := strings.ToLower(pattern)
+		if strings.HasPrefix(lower, "*.") {
+			filters.suffixes = append(filters.suffixes, lower[1:])
 			continue
 		}
-		if lower == lp {
+		filters.exact[lower] = struct{}{}
+	}
+	return filters, nil
+}
+
+func (filters compiledEntryFilters) matches(name string) bool {
+	lower := strings.ToLower(name)
+	if _, ok := filters.exact[lower]; ok {
+		return true
+	}
+	for _, suffix := range filters.suffixes {
+		if strings.HasSuffix(lower, suffix) {
 			return true
 		}
 	}
@@ -828,7 +871,10 @@ func newWalker(ctx context.Context, workspaceRoot string, opts Options) (*walker
 	if strings.TrimSpace(workspaceRoot) == "" {
 		return nil, errors.New("cmakegraph: workspaceRoot is required (it is the hard outside_workspace boundary and the ${CMAKE_SOURCE_DIR} value)")
 	}
-	normalizedOpts := opts.normalized()
+	normalizedOpts, err := opts.normalized()
+	if err != nil {
+		return nil, err
+	}
 	if err := validateSentinelLimit(normalizedOpts.MaxFileBytes); err != nil {
 		return nil, err
 	}

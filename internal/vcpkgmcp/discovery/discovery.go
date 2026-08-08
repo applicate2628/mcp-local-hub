@@ -80,6 +80,7 @@ const (
 	// ReasonExplicitRootInvalid because the remedy differs: fix access to the
 	// path, rather than correct the path.
 	ReasonExplicitRootUnreadable Reason = "explicit_root_unreadable"
+	ReasonExplicitRootRelative   Reason = "explicit_root_relative"
 	// ReasonHeuristicOnly: the ONLY thing that matched was a hardcoded
 	// heuristic common location (exactly one of them). A heuristic match is a
 	// candidate, never a selection: nothing about C:\vcpkg existing proves it
@@ -172,7 +173,17 @@ func probeVcpkgBinary(deps Deps, dir string) (evidence.Presence, error) {
 	if dir == "" {
 		return evidence.PresenceAbsent, errors.New("empty directory")
 	}
-	return evidence.ProbeFile(evidence.StatFunc(deps.Stat), filepath.Join(dir, vcpkgBinaryName(deps.GOOS)))
+	info, err := deps.Stat(filepath.Join(dir, vcpkgBinaryName(deps.GOOS)))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return evidence.PresenceAbsent, nil
+		}
+		return evidence.PresenceUnreadable, err
+	}
+	if !info.Mode().IsRegular() || (deps.GOOS != "windows" && info.Mode().Perm()&0o111 == 0) {
+		return evidence.PresenceAbsent, nil
+	}
+	return evidence.PresenceExists, nil
 }
 
 // hasVcpkgBinary is the boolean view used by the lower-precedence rules,
@@ -241,6 +252,9 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 	// nobody asked and silently redirect every downstream tool.
 	if strings.TrimSpace(explicitRoot) != "" {
 		res.Evidence.AddPath(explicitRoot)
+		if !filepath.IsAbs(explicitRoot) {
+			return Result{Status: evidence.StatusUnknown, Reason: ReasonExplicitRootRelative, Candidates: []Candidate{{Path: explicitRoot, Rule: RuleExplicit, Detail: "explicit root must be absolute"}}, Evidence: res.Evidence}
+		}
 		presence, probeErr := probeVcpkgBinary(deps, explicitRoot)
 		if presence == evidence.PresenceExists {
 			return Result{
@@ -294,12 +308,14 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 		if p, err := deps.LookPath(strings.TrimSuffix(vcpkgBinaryName(deps.GOOS), ".exe")); err == nil && p != "" {
 			dir := filepath.Dir(p)
 			res.Evidence.AddPath(p)
-			return Result{
-				Status:     evidence.StatusOK,
-				RuleFired:  RulePath,
-				Root:       dir,
-				Candidates: []Candidate{{Path: dir, Rule: RulePath, Detail: "resolved from PATH: " + p}},
-				Evidence:   res.Evidence,
+			if hasVcpkgBinary(deps, dir) {
+				return Result{
+					Status:     evidence.StatusOK,
+					RuleFired:  RulePath,
+					Root:       dir,
+					Candidates: []Candidate{{Path: dir, Rule: RulePath, Detail: "resolved from PATH: " + p}},
+					Evidence:   res.Evidence,
+				}
 			}
 		}
 	}

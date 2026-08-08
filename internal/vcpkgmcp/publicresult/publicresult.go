@@ -4,9 +4,37 @@
 package publicresult
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
+	"fmt"
 )
+
+// AbbreviateEncoded retains an unchanged string when its JSON encoding fits
+// allowance. Otherwise it retains only a rune-safe prefix plus deterministic
+// byte length and digest, never a caller-controlled suffix.
+func AbbreviateEncoded(value string, allowance int) string {
+	encoded, _ := json.Marshal(value)
+	if len(encoded) <= allowance {
+		return value
+	}
+	suffix := fmt.Sprintf("… [bytes=%d sha256=%x]", len(value), sha256.Sum256([]byte(value)))
+	runes := []rune(value)
+	best := suffix
+	low, high := 0, len(runes)
+	for low <= high {
+		middle := low + (high-low)/2
+		candidate := string(runes[:middle]) + suffix
+		encoded, _ = json.Marshal(candidate)
+		if len(encoded) <= allowance {
+			best = candidate
+			low = middle + 1
+		} else {
+			high = middle - 1
+		}
+	}
+	return best
+}
 
 // MaxEncodedBytes is the largest indented JSON body published by a vcpkg MCP
 // tool. The value applies to bytes, not runes or an estimated token count.

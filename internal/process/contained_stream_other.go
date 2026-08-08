@@ -3,6 +3,7 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,13 +14,31 @@ import (
 
 const containedGroupPollInterval = 10 * time.Millisecond
 
+var (
+	errLinuxGroupSettlementBudgetExhausted = errors.New("LINUX_GROUP_SETTLEMENT_BUDGET_EXHAUSTED")
+	errLinuxGroupSettlementIndeterminate   = errors.New("LINUX_GROUP_SETTLEMENT_INDETERMINATE")
+	errPOSIXGroupLiveTimeout               = errors.New("POSIX_GROUP_LIVE_TIMEOUT")
+)
+
+type posixGroupProbe func(int) error
+type posixGroupClassifier func(context.Context, int, posixSettlementBudget) (bool, error)
+
+type posixSettlementBudget struct {
+	probeDeadline         time.Time
+	helperDeadline        time.Time
+	settlementDeadline    time.Time
+	helperShutdownReserve time.Duration
+	joinReserve           time.Duration
+}
+
 type posixContainedChild struct {
-	cmd *exec.Cmd
-	pid int
+	cmd        *exec.Cmd
+	pid        int
+	classifier posixGroupClassifier
 }
 
 func newPlatformContainedChild(cmd *exec.Cmd) (containedChild, error) {
-	return &posixContainedChild{cmd: cmd}, nil
+	return &posixContainedChild{cmd: cmd, classifier: platformContainedGroupClassifier()}, nil
 }
 
 func openContainedNull() (containedInputFile, error) {
@@ -66,27 +85,98 @@ func (c *posixContainedChild) wait() containedWaitResult {
 }
 
 func (c *posixContainedChild) terminate(timeoutMs uint32) error {
+	return c.terminateBy(time.Now().Add(time.Duration(timeoutMs) * time.Millisecond))
+}
+
+func (c *posixContainedChild) terminateBy(deadline time.Time) error {
 	if c == nil || c.pid <= 0 {
 		return nil
 	}
 	if err := syscall.Kill(-c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("terminate contained process group: %w", err)
 	}
+	return settlePOSIXGroup(deadline, c.pid, probePOSIXGroup, c.classifier)
+}
 
-	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
+func probePOSIXGroup(pgid int) error {
+	return syscall.Kill(-pgid, 0)
+}
+
+func newPOSIXSettlementBudget(now, deadline time.Time, classified bool) posixSettlementBudget {
+	remaining := max(time.Duration(0), deadline.Sub(now))
+	if !classified {
+		return posixSettlementBudget{probeDeadline: deadline, settlementDeadline: deadline}
+	}
+	joinReserve := min(containedGroupPollInterval, remaining/4)
+	settlementDeadline := deadline.Add(-joinReserve)
+	probeDeadline := now.Add(settlementDeadline.Sub(now) / 2)
+	helperWindow := settlementDeadline.Sub(probeDeadline)
+	helperShutdownReserve := min(containedGroupPollInterval, max(time.Duration(0), helperWindow/4))
+	helperDeadline := settlementDeadline.Add(-helperShutdownReserve)
+	return posixSettlementBudget{
+		probeDeadline:         probeDeadline,
+		helperDeadline:        helperDeadline,
+		settlementDeadline:    settlementDeadline,
+		helperShutdownReserve: helperShutdownReserve,
+		joinReserve:           joinReserve,
+	}
+}
+
+func settlePOSIXGroup(deadline time.Time, pgid int, probe posixGroupProbe, classify posixGroupClassifier) error {
+	budget := newPOSIXSettlementBudget(time.Now(), deadline, classify != nil)
+	probeUntil := budget.probeDeadline
+	if !time.Now().Before(probeUntil) {
+		if classify != nil {
+			return errLinuxGroupSettlementBudgetExhausted
+		}
+		return errors.Join(ErrCleanupTimeout, errPOSIXGroupLiveTimeout)
+	}
 	for {
-		err := syscall.Kill(-c.pid, 0)
+		err := probe(pgid)
 		if errors.Is(err, syscall.ESRCH) {
 			return nil
 		}
 		if err != nil && !errors.Is(err, syscall.EPERM) {
-			return fmt.Errorf("probe contained process group: %w", err)
+			return fmt.Errorf("POSIX_GROUP_PROBE_FAILED: %w", err)
 		}
-		if !time.Now().Before(deadline) {
-			return errors.Join(ErrCleanupTimeout, errors.New("contained process group did not settle"))
+		if !time.Now().Before(probeUntil) {
+			break
 		}
-		time.Sleep(containedGroupPollInterval)
+		if !sleepPOSIXUntil(probeUntil) {
+			break
+		}
 	}
+
+	if classify == nil {
+		return errors.Join(ErrCleanupTimeout, errPOSIXGroupLiveTimeout)
+	}
+	if !time.Now().Before(budget.settlementDeadline) {
+		return errLinuxGroupSettlementBudgetExhausted
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), budget.settlementDeadline)
+	defer cancel()
+	settled, err := classify(ctx, pgid, budget)
+	if err != nil {
+		if err == errLinuxGroupSettlementBudgetExhausted {
+			return errLinuxGroupSettlementBudgetExhausted
+		}
+		return fmt.Errorf("%w: %w", errLinuxGroupSettlementIndeterminate, err)
+	}
+	if settled {
+		return nil
+	}
+	return errors.Join(ErrCleanupTimeout, errPOSIXGroupLiveTimeout)
+}
+
+func sleepPOSIXUntil(deadline time.Time) bool {
+	remaining := time.Until(deadline)
+	if remaining <= 0 {
+		return false
+	}
+	timer := time.NewTimer(min(containedGroupPollInterval, remaining))
+	defer timer.Stop()
+	<-timer.C
+	return time.Now().Before(deadline)
 }
 
 func (c *posixContainedChild) close() error {

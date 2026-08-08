@@ -19,6 +19,31 @@ import (
 
 const containedPOSIXHelperEnv = "MCPHUB_CONTAINED_POSIX_HELPER"
 
+func receiveContainedTest[T any](t *testing.T, ctx context.Context, ch <-chan T, what string) T {
+	t.Helper()
+	select {
+	case value := <-ch:
+		return value
+	case <-ctx.Done():
+		t.Fatalf("%s: %v", what, ctx.Err())
+		var zero T
+		return zero
+	}
+}
+
+type deadlineScriptedContainedChild struct {
+	*scriptedContainedChild
+	terminateByFn func(time.Time) error
+}
+
+func (c *deadlineScriptedContainedChild) terminateBy(deadline time.Time) error {
+	c.terminateCalls.Add(1)
+	if c.terminateByFn != nil {
+		return c.terminateByFn(deadline)
+	}
+	return nil
+}
+
 func TestContainedStreamPOSIXHelper(t *testing.T) {
 	mode := os.Getenv(containedPOSIXHelperEnv)
 	if mode == "" {
@@ -44,6 +69,22 @@ func TestContainedStreamPOSIXHelper(t *testing.T) {
 	case "hold":
 		fmt.Println("grandchild-ready")
 		time.Sleep(30 * time.Second)
+	case "zombie-owner":
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		grandchild := exec.Command(exe, "-test.run=^TestContainedStreamPOSIXHelper$")
+		grandchild.Env = append(os.Environ(), containedPOSIXHelperEnv+"=exit-now")
+		if err := grandchild.Start(); err != nil {
+			t.Fatal(err)
+		}
+		fmt.Printf("child=%d\nzombie=%d\nzombie-launched\n", os.Getpid(), grandchild.Process.Pid)
+		// Intentionally do not Wait: the parent stays alive while the test
+		// observes the exited child as Z, then product cleanup kills this owner.
+		time.Sleep(30 * time.Second)
+	case "exit-now":
+		return
 	case "sentinel":
 		if err := os.WriteFile(os.Getenv("MCPHUB_SENTINEL_PATH"), []byte("started"), 0o600); err != nil {
 			t.Fatal(err)
@@ -184,7 +225,14 @@ func waitForContainedPOSIXExit(t *testing.T, pid int) {
 }
 
 func TestRunContainedStreamPOSIX_CleanupTimeoutIsTyped(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer testCancel()
 	child := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
+	started := make(chan struct{})
+	child.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
+		close(started)
+		return nil
+	}
 	child.terminateFn = func(uint32) error {
 		child.terminateOnce.Do(func() {
 			child.waitCh <- containedWaitResult{exitCode: 0, exited: true}
@@ -192,8 +240,110 @@ func TestRunContainedStreamPOSIX_CleanupTimeoutIsTyped(t *testing.T) {
 		return ErrCleanupTimeout
 	}
 	h := &containedDependencyHarness{child: child}
-	err := runHarness(context.Background(), h, time.Second, io.Discard, drainContainedReader)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- runHarness(ctx, h, time.Second, io.Discard, drainContainedReader) }()
+	receiveContainedTest(t, testCtx, started, "contained runner start")
+	cancel()
+	err := receiveContainedTest(t, testCtx, done, "contained runner completion")
 	if !errors.Is(err, ErrCleanupTimeout) {
 		t.Fatalf("err=%v, want ErrCleanupTimeout", err)
+	}
+	if child.terminateCalls.Load() != 1 || child.waitCalls.Load() != 1 {
+		t.Fatalf("terminate/wait=%d/%d, want exact-one", child.terminateCalls.Load(), child.waitCalls.Load())
+	}
+}
+
+func TestPOSIXSettlementSlowZombieClassifierLeavesJoinReserve(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), time.Second)
+	defer testCancel()
+	deadline := time.Now().Add(160 * time.Millisecond)
+	budget := newPOSIXSettlementBudget(time.Now(), deadline, true)
+	if budget.joinReserve <= 0 {
+		t.Fatalf("join reserve=%v, want positive", budget.joinReserve)
+	}
+	classifierStarted := make(chan struct{})
+	var receivedBudget posixSettlementBudget
+	classifier := func(ctx context.Context, _ int, actual posixSettlementBudget) (bool, error) {
+		receivedBudget = actual
+		select {
+		case <-classifierStarted:
+		default:
+			close(classifierStarted)
+		}
+		timer := time.NewTimer(25 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-timer.C:
+			return true, nil
+		}
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- settlePOSIXGroup(deadline, 42, func(int) error { return syscall.EPERM }, classifier)
+	}()
+	receiveContainedTest(t, testCtx, classifierStarted, "slow classifier start")
+	if err := receiveContainedTest(t, testCtx, done, "slow classifier completion"); err != nil {
+		t.Fatalf("settlePOSIXGroup: %v", err)
+	}
+	if remaining := time.Until(deadline); remaining < receivedBudget.joinReserve {
+		t.Fatalf("remaining=%v, want full join reserve %v", remaining, receivedBudget.joinReserve)
+	}
+}
+
+func TestRunContainedStreamPOSIX_ReadyCompletionsBeatJoinDeadline(t *testing.T) {
+	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer testCancel()
+	base := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
+	started := make(chan struct{})
+	base.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
+		close(started)
+		return nil
+	}
+	child := &deadlineScriptedContainedChild{scriptedContainedChild: base}
+	child.terminateByFn = func(deadline time.Time) error {
+		base.terminateOnce.Do(func() {
+			base.waitCh <- containedWaitResult{exitCode: 0, exited: true}
+		})
+		timer := time.NewTimer(max(time.Duration(0), time.Until(deadline)) + 5*time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-testCtx.Done():
+			return testCtx.Err()
+		case <-timer.C:
+			return nil
+		}
+	}
+	h := &containedDependencyHarness{child: base}
+	deps := h.dependencies()
+	deps.newChild = func(*exec.Cmd) (containedChild, error) { return child, nil }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- runContainedStreamWithDependencies(ctx, exec.Command("contained-test-helper"), ContainedStreamOptions{CleanupTimeout: 40 * time.Millisecond, Stderr: io.Discard}, drainContainedReader, deps)
+	}()
+	receiveContainedTest(t, testCtx, started, "ready-completion runner start")
+	cancel()
+	err := receiveContainedTest(t, testCtx, done, "ready-completion runner completion")
+	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrCleanupTimeout) {
+		t.Fatalf("err=%v, want context.Canceled without cleanup timeout", err)
+	}
+	if base.terminateCalls.Load() != 1 || base.waitCalls.Load() != 1 {
+		t.Fatalf("terminate/wait=%d/%d, want exact-one", base.terminateCalls.Load(), base.waitCalls.Load())
+	}
+	if len(h.pipes) != 2 {
+		t.Fatalf("pipe count=%d, want stdout and stderr", len(h.pipes))
+	}
+	for index, pipe := range h.pipes {
+		pipe.mu.Lock()
+		readClosed, writeClosed := pipe.readClosed, pipe.writeClosed
+		pipe.mu.Unlock()
+		if !readClosed || !writeClosed {
+			t.Fatalf("pipe %d joined read/write=%v/%v", index, readClosed, writeClosed)
+		}
 	}
 }

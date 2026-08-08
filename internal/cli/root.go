@@ -157,6 +157,9 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 	// Commands". Park them in Maintenance so the listing has no catch-all.
 	root.SetHelpCommandGroupID(groupMaintenance)
 	root.SetCompletionCommandGroupID(groupMaintenance)
+	for _, command := range platformInternalCommands() {
+		root.AddCommand(command)
+	}
 
 	return root
 }
@@ -176,21 +179,21 @@ func addGrouped(root *cobra.Command, groupID string, cmds ...*cobra.Command) {
 func newInstallCmd() *cobra.Command {
 	return newInstallCmdReal()
 }
-func newAdoptCmd() *cobra.Command     { return newAdoptCmdReal() }
-func newDeAdoptCmd() *cobra.Command   { return newDeAdoptCmdReal() }
+func newAdoptCmd() *cobra.Command   { return newAdoptCmdReal() }
+func newDeAdoptCmd() *cobra.Command { return newDeAdoptCmdReal() }
 
 func newAdoptProvenanceCmd() *cobra.Command { return newAdoptProvenanceCmdReal() }
-func newUpgradeCmd() *cobra.Command   { return newUpgradeCmdReal() }
-func newSetupCmd() *cobra.Command     { return newSetupCmdReal() }
-func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
-func newStatusCmd() *cobra.Command    { return newStatusCmdReal() }
-func newScanCmd() *cobra.Command      { return newScanCmdReal() }
-func newMigrateCmd() *cobra.Command   { return newMigrateCmdReal() }
-func newRestartCmd() *cobra.Command   { return newRestartCmdReal() }
-func newRollbackCmd() *cobra.Command  { return newRollbackCmdReal() }
-func newDaemonCmd() *cobra.Command    { return newDaemonCmdReal() }
-func newRelayCmd() *cobra.Command     { return newRelayCmdReal() }
-func newVersionCmd() *cobra.Command   { return newVersionCmdReal() }
+func newUpgradeCmd() *cobra.Command         { return newUpgradeCmdReal() }
+func newSetupCmd() *cobra.Command           { return newSetupCmdReal() }
+func newUninstallCmd() *cobra.Command       { return newUninstallCmdReal() }
+func newStatusCmd() *cobra.Command          { return newStatusCmdReal() }
+func newScanCmd() *cobra.Command            { return newScanCmdReal() }
+func newMigrateCmd() *cobra.Command         { return newMigrateCmdReal() }
+func newRestartCmd() *cobra.Command         { return newRestartCmdReal() }
+func newRollbackCmd() *cobra.Command        { return newRollbackCmdReal() }
+func newDaemonCmd() *cobra.Command          { return newDaemonCmdReal() }
+func newRelayCmd() *cobra.Command           { return newRelayCmdReal() }
+func newVersionCmd() *cobra.Command         { return newVersionCmdReal() }
 func newSecretsCmd() *cobra.Command {
 	return newSecretsCmdReal()
 }

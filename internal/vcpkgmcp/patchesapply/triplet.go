@@ -55,10 +55,7 @@ func tripletFileCandidates(triplet string, overlayTriplets []string, vcpkgRoot s
 	var out []string
 	for _, dir := range overlayTriplets {
 		dir = strings.TrimSpace(dir)
-		// A relative overlay root would bind to the hub daemon's working
-		// directory, so it can only produce a confident answer about an
-		// unrelated tree. Skipped rather than guessed.
-		if dir == "" || !filepath.IsAbs(dir) {
+		if dir == "" {
 			continue
 		}
 		out = append(out, filepath.Join(dir, file))

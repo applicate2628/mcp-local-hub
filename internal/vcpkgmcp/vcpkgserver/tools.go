@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcp-local-hub/internal/cmakegraph"
 	"mcp-local-hub/internal/vcpkgmcp/cmaketrace"
 	"mcp-local-hub/internal/vcpkgmcp/cmakewrap"
 	"mcp-local-hub/internal/vcpkgmcp/discovery"
@@ -76,6 +78,22 @@ func pinStatusDisableNetworkDescription() string {
 	return fmt.Sprintf("When true, do not query remotes; each requested valid absolute port reports unknown(%s).", networkDisabled)
 }
 
+func discoverRootAdmissionDescription() string {
+	return fmt.Sprintf("A relative explicit root is terminal unknown(%s) before every filesystem, environment, PATH, manifest, or heuristic probe. ", discovery.ReasonExplicitRootRelative)
+}
+
+func patchesRootAdmissionDescription() string {
+	return fmt.Sprintf("More than the admitted overlay root maximum fails as failed(%s) before I/O; every nonblank relative overlay root fails as failed(%s), and a relative vcpkg_root fails as failed(%s), also before I/O. ", patchesapply.ReasonTooManyOverlayTripletRoots, patchesapply.ReasonRelativeOverlayTripletRoot, patchesapply.ReasonRelativeVcpkgRoot)
+}
+
+func patchesVcpkgRootDescription() string {
+	return fmt.Sprintf("Optional ABSOLUTE vcpkg root, for $ENV{VCPKG_ROOT} expansion in patch paths and for the builtin triplet lookup (<root>/triplets, <root>/triplets/community). A relative value returns failed(%s) before I/O.", patchesapply.ReasonRelativeVcpkgRoot)
+}
+
+func patchesOverlayTripletsDescription() string {
+	return fmt.Sprintf("Optional ABSOLUTE overlay-triplets directories in precedence order (matches vcpkg's --overlay-triplets); the first directory containing <triplet>.cmake wins, ahead of the builtin triplets. More than %d roots returns failed(%s), and any nonblank relative root returns failed(%s), before I/O.", patchesapply.MaxOverlayTripletRoots, patchesapply.ReasonTooManyOverlayTripletRoots, patchesapply.ReasonRelativeOverlayTripletRoot)
+}
+
 type projectableToolOutcome struct {
 	invalidArgument error
 	err             error
@@ -84,8 +102,21 @@ type projectableToolOutcome struct {
 
 type projectableToolHandler func(context.Context, *mcp.CallToolRequest) projectableToolOutcome
 
-func registerProjectableTool(vs *VcpkgServer, tool *mcp.Tool, handler projectableToolHandler) {
+func registerProjectableTool(vs *VcpkgServer, tool *mcp.Tool, handler projectableToolHandler) error {
+	resolved, err := strictResolvedSchema(tool)
+	if err != nil {
+		return fmt.Errorf("%s: %w", tool.Name, err)
+	}
 	vs.server.AddTool(tool, func(ctx context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		args := map[string]any{}
+		if len(req.Params.Arguments) > 0 {
+			if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+				return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+			}
+		}
+		if err := resolved.Validate(&args); err != nil {
+			return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+		}
 		outcome := handler(ctx, req)
 		if outcome.invalidArgument != nil {
 			return errResult(fmt.Sprintf("invalid arguments: %v", outcome.invalidArgument)), nil
@@ -98,19 +129,53 @@ func registerProjectableTool(vs *VcpkgServer, tool *mcp.Tool, handler projectabl
 		}
 		return jsonResult(outcome.result)
 	})
+	return nil
+}
+
+// strictResolvedSchema preserves nested intentional maps while making the
+// advertised top-level object contract reject misspelled arguments before any
+// semantic handler can observe its zero-value interpretation.
+func strictResolvedSchema(tool *mcp.Tool) (*jsonschema.Resolved, error) {
+	raw, err := json.Marshal(tool.InputSchema)
+	if err != nil {
+		return nil, err
+	}
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, err
+	}
+	if object["type"] != "object" {
+		return nil, fmt.Errorf("input schema must be a top-level object")
+	}
+	object["additionalProperties"] = false
+	raw, err = json.Marshal(object)
+	if err != nil {
+		return nil, err
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, err
+	}
+	resolved, err := schema.Resolve(&jsonschema.ResolveOptions{ValidateDefaults: true})
+	if err != nil {
+		return nil, err
+	}
+	tool.InputSchema = &schema
+	return resolved, nil
 }
 
 // registerTools mounts every increment-1 tool handler. Single registration
 // point, mirroring internal/perftools's registerTools convention.
-func registerTools(vs *VcpkgServer) {
-	registerProjectableTool(vs, &mcp.Tool{
+func registerTools(vs *VcpkgServer) error {
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_discover_root",
 		Description: "Resolve the vcpkg root directory and report WHICH discovery rule fired: " +
 			"explicit root param > VCPKG_ROOT env var > vcpkg resolved on PATH > a nearby " +
 			"vcpkg.json/vcpkg-configuration.json manifest with a co-located vcpkg/ submodule binary > " +
 			"labelled heuristic common locations (C:\\vcpkg, C:\\opt\\vcpkg, %USERPROFILE%\\vcpkg, a " +
 			"Visual Studio VC\\vcpkg install, /opt/vcpkg, ~/vcpkg, ...). " +
-			"An EXPLICIT root is TERMINAL: if it holds no vcpkg binary the answer is " +
+			discoverRootAdmissionDescription() +
+			"An EXPLICIT absolute root is TERMINAL: if it holds no vcpkg binary the answer is " +
 			"unknown(explicit_root_invalid), or unknown(explicit_root_unreadable) when the probe " +
 			"itself failed — it NEVER falls through to another installation the caller did not ask " +
 			"about. A HEURISTIC NEVER SELECTS: one hit -> unknown(heuristic_only), several -> " +
@@ -123,13 +188,15 @@ func registerTools(vs *VcpkgServer) {
 			"properties": map[string]any{
 				"root": map[string]any{
 					"type":        "string",
-					"description": "Optional explicit vcpkg root to validate/use directly (highest-precedence rule).",
+					"description": "Optional explicit ABSOLUTE vcpkg root to validate/use directly (highest-precedence rule). " + discoverRootAdmissionDescription(),
 				},
 			},
 		},
-	}, vs.discoverRootTool)
+	}, vs.discoverRootTool); err != nil {
+		return err
+	}
 
-	registerProjectableTool(vs, &mcp.Tool{
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_last_failure",
 		Description: "Diagnose the last build failure for a vcpkg port. PRIMARY source is the " +
 			"vcpkg-native buildtrees layout (<buildtrees-root>/<port>/<phase>-out/err.log) — always " +
@@ -238,9 +305,11 @@ func registerTools(vs *VcpkgServer) {
 				},
 			},
 		},
-	}, vs.lastFailureTool)
+	}, vs.lastFailureTool); err != nil {
+		return err
+	}
 
-	registerProjectableTool(vs, &mcp.Tool{
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_port_resolution",
 		Description: "Determine which port definition wins across overlay ports and builtin ports, and report every location checked. " +
 			"When vcpkg_root is omitted, the builtin fallback is NOT checked; the result states only what the supplied overlays established. " +
@@ -266,9 +335,11 @@ func registerTools(vs *VcpkgServer) {
 				},
 			},
 		},
-	}, vs.portResolutionTool)
+	}, vs.portResolutionTool); err != nil {
+		return err
+	}
 
-	registerProjectableTool(vs, &mcp.Tool{
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name:        "vcpkg_pin_status",
 		Description: pinStatusToolDescription(),
 		InputSchema: map[string]any{
@@ -286,11 +357,14 @@ func registerTools(vs *VcpkgServer) {
 				},
 			},
 		},
-	}, vs.pinStatusTool)
+	}, vs.pinStatusTool); err != nil {
+		return err
+	}
 
-	registerProjectableTool(vs, &mcp.Tool{
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_patches_apply",
 		Description: "Statically analyze a portfile to report which patches WOULD apply for a triplet, in order. It applies nothing. " +
+			patchesRootAdmissionDescription() +
 			"Guards that static analysis cannot decide are returned in an undecidable bucket instead of guessed either way. " +
 			"Triplet variables are read from the ACTUAL triplet file located via overlay_triplets / " +
 			"vcpkg_root, NEVER derived from the triplet NAME (a custom triplet named corp-windows can " +
@@ -327,12 +401,13 @@ func registerTools(vs *VcpkgServer) {
 				},
 				"vcpkg_root": map[string]any{
 					"type":        "string",
-					"description": "Optional ABSOLUTE vcpkg root, for $ENV{VCPKG_ROOT} expansion in patch paths and for the builtin triplet lookup (<root>/triplets, <root>/triplets/community).",
+					"description": patchesVcpkgRootDescription(),
 				},
 				"overlay_triplets": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
-					"description": "Optional ABSOLUTE overlay-triplets directories in precedence order (matches vcpkg's --overlay-triplets); the first directory containing <triplet>.cmake wins, ahead of the builtin triplets.",
+					"maxItems":    patchesapply.MaxOverlayTripletRoots,
+					"description": patchesOverlayTripletsDescription(),
 				},
 				"port_name": map[string]any{
 					"type":        "string",
@@ -345,9 +420,11 @@ func registerTools(vs *VcpkgServer) {
 				},
 			},
 		},
-	}, vs.patchesApplyTool)
+	}, vs.patchesApplyTool); err != nil {
+		return err
+	}
 
-	registerProjectableTool(vs, &mcp.Tool{
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_cmake_trace",
 		Description: "Read an EXISTING cmake --trace-format=json-v1 trace and report the executed CMake lines, expansions, and include order. " +
 			"Executed lines are positive evidence only: an absent line means \"not observed in this trace\", never \"unreachable\". It never runs cmake. " +
@@ -380,9 +457,11 @@ func registerTools(vs *VcpkgServer) {
 				},
 			},
 		},
-	}, vs.cmakeTraceTool)
+	}, vs.cmakeTraceTool); err != nil {
+		return err
+	}
 
-	registerProjectableTool(vs, &mcp.Tool{
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "cmake_include_graph",
 		Description: "Thin wrapper over the hub's internal/cmakegraph static resolver: statically " +
 			"resolves the CMake include()/add_subdirectory() graph WITHOUT ever invoking cmake. " +
@@ -417,15 +496,19 @@ func registerTools(vs *VcpkgServer) {
 				"entry_names": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
+					"maxItems":    cmakegraph.MaxEntryFilters,
 					"description": "Root mode only. Defaults to [\"CMakeLists.txt\", \"*.cmake\"].",
 				},
-				"max_depth":      map[string]any{"type": "integer", "description": "Optional traversal depth bound (per root)."},
-				"max_nodes":      map[string]any{"type": "integer", "description": "Optional whole-tree node count bound (root ADMISSION)."},
-				"max_file_bytes": map[string]any{"type": "integer", "description": "Optional per-file byte cap."},
-				"max_roots":      map[string]any{"type": "integer", "description": "Root mode only. Optional bound on how many candidate roots are ENUMERATED before the tree walk stops (root_enumeration_capped). Separate from max_nodes, which bounds admission, not discovery."},
+				"max_depth":      map[string]any{"type": "integer", "maximum": cmakegraph.MaxDepthLimit, "description": "Optional traversal depth bound (per root)."},
+				"max_nodes":      map[string]any{"type": "integer", "maximum": cmakegraph.MaxNodesLimit, "description": "Optional whole-tree node count bound (root ADMISSION)."},
+				"max_file_bytes": map[string]any{"type": "integer", "maximum": cmakegraph.MaxFileBytesLimit, "description": "Optional per-file byte cap."},
+				"max_roots":      map[string]any{"type": "integer", "maximum": cmakegraph.MaxRootsLimit, "description": "Root mode only. Optional bound on how many candidate roots are ENUMERATED before the tree walk stops (root_enumeration_capped). Separate from max_nodes, which bounds admission, not discovery."},
 			},
 		},
-	}, vs.cmakeIncludeGraphTool)
+	}, vs.cmakeIncludeGraphTool); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (vs *VcpkgServer) discoverRootTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {

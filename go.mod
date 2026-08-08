@@ -20,7 +20,7 @@ require (
 
 require (
 	filippo.io/hpke v0.4.0 // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
+	github.com/google/jsonschema-go v0.4.3
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect

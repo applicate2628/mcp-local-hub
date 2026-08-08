@@ -172,7 +172,12 @@ func (e endlessReader) Read(p []byte) (int, error) {
 }
 func (endlessReader) Close() error { return nil }
 
-func (f endlessFS) Stat(p string) (os.FileInfo, error)  { return f.inner.Stat(p) }
+func (f endlessFS) Stat(p string) (os.FileInfo, error) {
+	if strings.Contains(filepath.ToSlash(p), f.sub) {
+		return regularTestFileInfo{name: p}, nil
+	}
+	return f.inner.Stat(p)
+}
 func (f endlessFS) OpenDir(p string) (DirReader, error) { return f.inner.OpenDir(p) }
 func (f endlessFS) Open(p string) (io.ReadCloser, error) {
 	if strings.Contains(filepath.ToSlash(p), f.sub) {

@@ -97,6 +97,7 @@ func (r *LineReader) ReadLine() (LineResult, error) {
 
 // FS is the filesystem surface required by bounded admission.
 type FS interface {
+	Stat(path string) (os.FileInfo, error)
 	Open(path string) (io.ReadCloser, error)
 	OpenDir(path string) (DirReader, error)
 }
@@ -132,6 +133,14 @@ func ReadFile(ctx context.Context, fsys FS, path string, maxBytes, pageBytes int
 	}
 	if err := validateFileLimits(maxBytes, pageBytes); err != nil {
 		return FileResult{}, err
+	}
+
+	info, err := fsys.Stat(path)
+	if err != nil {
+		return FileResult{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return FileResult{}, fmt.Errorf("boundedio: refuse non-regular file %q (%s)", path, info.Mode().Type())
 	}
 
 	reader, err := fsys.Open(path)

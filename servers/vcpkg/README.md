@@ -57,14 +57,21 @@ Build and install roots and the overlay chain are taken from vcpkg's own keys �
 parameters. Discovery order when you do not pass a root:
 
 1. explicit parameter — **terminal**: if it is invalid or unreadable you get
-   `unknown(explicit_root_invalid|explicit_root_unreadable)`, never a silent fall-through to some
-   other installation you did not ask about;
+   `unknown(explicit_root_relative|explicit_root_invalid|explicit_root_unreadable)`, never a silent
+   fall-through to some other installation you did not ask about; a relative explicit root returns
+   `unknown(explicit_root_relative)` before any filesystem, environment, PATH, manifest, or heuristic
+   probe;
 2. `VCPKG_ROOT`;
 3. `PATH`;
 4. manifest;
 5. machine-layout heuristics — **reported as candidates, never selected**.
 
 There are no hardcoded machine paths. A path that appears in a test fixture is test data.
+
+Patch analysis admits the complete triplet-root chain before touching the filesystem. More than the
+published overlay maximum returns `failed(too_many_overlay_triplet_roots)`. Every nonblank relative
+overlay root returns `failed(relative_overlay_triplet_root)`, and a relative `vcpkg_root` returns
+`failed(relative_vcpkg_root)`. All three failures occur before filesystem access.
 
 ## Two limits worth knowing
 

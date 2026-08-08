@@ -111,6 +111,13 @@ type containedChild interface {
 	close() error
 }
 
+// containedDeadlineChild is an additive private capability for platform
+// children whose cleanup has multiple phases. RunContainedStream owns the one
+// absolute cleanup deadline; implementations must not extend or resample it.
+type containedDeadlineChild interface {
+	terminateBy(time.Time) error
+}
+
 type containedStreamDependencies struct {
 	newChild func(*exec.Cmd) (containedChild, error)
 	pipe     func() (containedReadFile, containedWriteFile, error)
@@ -379,8 +386,15 @@ func runContainedStreamWithDependencies(
 	}
 
 	cleanupDeadline := time.Now().Add(time.Duration(cleanupTimeoutMs) * time.Millisecond)
-	if err := child.terminate(cleanupTimeoutMs); err != nil {
-		cleanupErr = errors.Join(cleanupErr, err)
+	_, deadlineAware := child.(containedDeadlineChild)
+	var terminateErr error
+	if deadlineChild, ok := child.(containedDeadlineChild); ok {
+		terminateErr = deadlineChild.terminateBy(cleanupDeadline)
+	} else {
+		terminateErr = child.terminate(cleanupTimeoutMs)
+	}
+	if terminateErr != nil {
+		cleanupErr = errors.Join(cleanupErr, terminateErr)
 		// Kill-on-close is the final Windows backstop; on POSIX this is a
 		// harmless no-op. Closing readers then releases owner-blocked I/O.
 		cleanupErr = errors.Join(cleanupErr, childCloser.close())
@@ -388,6 +402,45 @@ func runContainedStreamWithDependencies(
 		readersClosed = true
 	}
 
+	drainReady := func() {
+		for {
+			drained := false
+			if !stdoutCompleted {
+				select {
+				case stdoutResult = <-stdoutDone:
+					stdoutCompleted = true
+					stdoutBeforeReaderClose = !readersClosed
+					drained = true
+				default:
+				}
+			}
+			if !stderrCompleted {
+				select {
+				case stderrResult = <-stderrDone:
+					stderrCompleted = true
+					stderrBeforeReaderClose = !readersClosed
+					drained = true
+				default:
+				}
+			}
+			if !waitCompleted {
+				select {
+				case waitResult = <-waitDone:
+					waitCompleted = true
+					drained = true
+				default:
+				}
+			}
+			if !drained {
+				return
+			}
+		}
+	}
+
+	// Completions published before termination returned outrank an already
+	// expired deadline. Repeating this drain when the timer fires closes the
+	// select race between a ready completion and a ready timer.
+	drainReady()
 	joinTimer := time.NewTimer(time.Until(cleanupDeadline))
 	defer joinTimer.Stop()
 	joinTimeout := joinTimer.C
@@ -402,8 +455,17 @@ func runContainedStreamWithDependencies(
 		case waitResult = <-waitDone:
 			waitCompleted = true
 		case <-joinTimeout:
+			drainReady()
+			if stdoutCompleted && stderrCompleted && waitCompleted {
+				joinTimeout = nil
+				continue
+			}
 			if !readersClosed {
-				cleanupErr = errors.Join(cleanupErr, ErrCleanupTimeout)
+				joinErr := ErrCleanupTimeout
+				if deadlineAware {
+					joinErr = errors.Join(joinErr, errors.New("POSIX_JOIN_TIMEOUT"))
+				}
+				cleanupErr = errors.Join(cleanupErr, joinErr)
 				cleanupErr = errors.Join(cleanupErr, childCloser.close())
 				cleanupErr = errors.Join(cleanupErr, closeOwned(stdoutReadCloser, stderrReadCloser))
 				readersClosed = true

@@ -57,9 +57,9 @@ type Args struct {
 	Triplet string `json:"triplet"`
 	// VcpkgRoot backs $ENV{VCPKG_ROOT} expansion inside the portfile, and
 	// supplies the builtin triplet lookup roots <root>/triplets and
-	// <root>/triplets/community. Must be absolute; a relative value is
-	// ignored for triplet lookup rather than bound to the daemon's working
-	// directory.
+	// <root>/triplets/community. Must be absolute; a relative value returns
+	// failed(relative_vcpkg_root) before filesystem access rather than being
+	// bound to the daemon's working directory.
 	VcpkgRoot string `json:"vcpkg_root,omitempty"`
 	// OverlayTriplets is the ordered --overlay-triplets chain (order IS
 	// precedence, first match wins), taken from vcpkg's own key rather than
@@ -84,6 +84,9 @@ type Args struct {
 type Reason string
 
 const (
+	// MaxOverlayTripletRoots bounds the caller-owned root chain before any
+	// filesystem operation. The MCP schema imports this owner constant.
+	MaxOverlayTripletRoots = 64
 	// ReasonEmptyPortDir: PortDir was empty/whitespace-only. Failed (bad
 	// caller input, not an environment condition).
 	ReasonEmptyPortDir Reason = "empty_port_dir"
@@ -99,7 +102,10 @@ const (
 	// on a daemon whose cwd the caller cannot see it is not even diagnosable.
 	// Same posture, and the same reason spelling, as lastfailure's
 	// relative_root gate for root/buildtrees_root.
-	ReasonRelativePortDir Reason = "relative_port_dir"
+	ReasonRelativePortDir            Reason = "relative_port_dir"
+	ReasonTooManyOverlayTripletRoots Reason = "too_many_overlay_triplet_roots"
+	ReasonRelativeOverlayTripletRoot Reason = "relative_overlay_triplet_root"
+	ReasonRelativeVcpkgRoot          Reason = "relative_vcpkg_root"
 	// ReasonPortDirMissing: the OS positively reported that PortDir does not
 	// exist, or that it exists but is not a directory. A VERIFIED negative —
 	// never a probe that merely failed (see ReasonPortDirUnreadable).
@@ -340,6 +346,8 @@ func (d boundedDeps) Open(path string) (io.ReadCloser, error) {
 	return d.deps.Open(path)
 }
 
+func (d boundedDeps) Stat(path string) (os.FileInfo, error) { return d.deps.Stat(path) }
+
 func (d boundedDeps) OpenDir(path string) (boundedio.DirReader, error) {
 	return d.deps.OpenDir(path)
 }
@@ -347,6 +355,9 @@ func (d boundedDeps) OpenDir(path string) (boundedio.DirReader, error) {
 func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 	if ctx == nil {
 		ctx = context.Background()
+	}
+	if len(args.OverlayTriplets) > MaxOverlayTripletRoots {
+		return Result{Status: evidence.StatusFailed, Reason: ReasonTooManyOverlayTripletRoots}
 	}
 	var ev evidence.Evidence
 	// Declared up front because the port-dir probe below can already produce
@@ -371,6 +382,15 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 			Status: evidence.StatusFailed, Reason: ReasonRelativePortDir,
 			Triplet: triplet, PortDir: portDir, Evidence: ev,
 		}
+	}
+	for _, root := range args.OverlayTriplets {
+		root = strings.TrimSpace(root)
+		if root != "" && !filepath.IsAbs(root) {
+			return Result{Status: evidence.StatusFailed, Reason: ReasonRelativeOverlayTripletRoot, Triplet: triplet, PortDir: portDir, Evidence: ev}
+		}
+	}
+	if root := strings.TrimSpace(args.VcpkgRoot); root != "" && !filepath.IsAbs(root) {
+		return Result{Status: evidence.StatusFailed, Reason: ReasonRelativeVcpkgRoot, Triplet: triplet, PortDir: portDir, Evidence: ev}
 	}
 
 	ev.AddPath(portDir)

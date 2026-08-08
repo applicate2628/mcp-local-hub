@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 // oneFileFS serves exactly one path and refuses everything else, so the test
@@ -15,8 +16,25 @@ type oneFileFS struct {
 	data []byte
 }
 
-func (f oneFileFS) Stat(string) (os.FileInfo, error)  { return nil, fs.ErrNotExist }
+func (f oneFileFS) Stat(p string) (os.FileInfo, error) {
+	if p == f.path {
+		return regularTestFileInfo{name: p, size: int64(len(f.data))}, nil
+	}
+	return nil, fs.ErrNotExist
+}
 func (f oneFileFS) OpenDir(string) (DirReader, error) { return nil, fs.ErrNotExist }
+
+type regularTestFileInfo struct {
+	name string
+	size int64
+}
+
+func (f regularTestFileInfo) Name() string     { return f.name }
+func (f regularTestFileInfo) Size() int64      { return f.size }
+func (regularTestFileInfo) Mode() os.FileMode  { return 0o644 }
+func (regularTestFileInfo) ModTime() time.Time { return time.Time{} }
+func (regularTestFileInfo) IsDir() bool        { return false }
+func (regularTestFileInfo) Sys() any           { return nil }
 
 func (f oneFileFS) ReadFile(p string) ([]byte, error) {
 	if p == f.path {

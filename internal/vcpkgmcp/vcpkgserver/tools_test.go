@@ -38,6 +38,80 @@ type registeredVcpkgToolFixture struct {
 	over       func() publicresult.Projectable
 }
 
+func TestPR591_RootReasonVocabularyMatchesOwnersAndCanonicalREADME(t *testing.T) {
+	tools := liveRegisteredTools(t)
+	discover := registeredToolByName(t, tools, "vcpkg_discover_root")
+	patches := registeredToolByName(t, tools, "vcpkg_patches_apply")
+	discoveryReason := string(discovery.ReasonExplicitRootRelative)
+	patchReasons := []string{
+		string(patchesapply.ReasonTooManyOverlayTripletRoots),
+		string(patchesapply.ReasonRelativeOverlayTripletRoot),
+		string(patchesapply.ReasonRelativeVcpkgRoot),
+	}
+	for label, value := range map[string]string{
+		"discover descriptor": discover.Description,
+		"discover root":       toolInputDescription(t, discover, "root"),
+	} {
+		if !strings.Contains(value, discoveryReason) || !strings.Contains(value, "terminal") || !strings.Contains(value, "before every") {
+			t.Fatalf("%s omits owner reason %q: %q", label, discoveryReason, value)
+		}
+	}
+	for _, reason := range patchReasons {
+		if !strings.Contains(patches.Description, reason) {
+			t.Fatalf("patch descriptor omits owner reason %q", reason)
+		}
+	}
+	if got := toolInputDescription(t, patches, "vcpkg_root"); !strings.Contains(got, string(patchesapply.ReasonRelativeVcpkgRoot)) {
+		t.Fatalf("vcpkg_root description omits owner reason: %q", got)
+	}
+	overlayDescription := toolInputDescription(t, patches, "overlay_triplets")
+	for _, reason := range patchReasons[:2] {
+		if !strings.Contains(overlayDescription, reason) {
+			t.Fatalf("overlay_triplets description omits owner reason %q: %q", reason, overlayDescription)
+		}
+	}
+
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(testFile), "..", "..", ".."))
+	readme, err := os.ReadFile(filepath.Join(repoRoot, "servers", "vcpkg", "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reason := range append([]string{discoveryReason}, patchReasons...) {
+		if !bytes.Contains(readme, []byte(reason)) {
+			t.Fatalf("canonical README omits owner reason %q", reason)
+		}
+	}
+	if !bytes.Contains(readme, []byte("before any filesystem")) || !bytes.Contains(readme, []byte("All three failures occur before filesystem access")) {
+		t.Fatal("canonical README omits terminal pre-I/O semantics")
+	}
+	argsSource, err := os.ReadFile(filepath.Join(repoRoot, "internal", "vcpkgmcp", "patchesapply", "patchesapply.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentComment := "failed(" + string(patchesapply.ReasonRelativeVcpkgRoot) + ") before filesystem access"
+	if !bytes.Contains(argsSource, []byte(currentComment)) {
+		t.Fatalf("Args.VcpkgRoot comment omits current contract %q", currentComment)
+	}
+	observations := map[string]string{
+		"Args.VcpkgRoot comment":    string(argsSource),
+		"canonical README":          string(readme),
+		"discover descriptor":       discover.Description,
+		"discover root property":    toolInputDescription(t, discover, "root"),
+		"patches descriptor":        patches.Description,
+		"vcpkg_root property":       toolInputDescription(t, patches, "vcpkg_root"),
+		"overlay_triplets property": overlayDescription,
+	}
+	for label, observation := range observations {
+		if strings.Contains(strings.ToLower(observation), "relative value is ignored") {
+			t.Fatalf("%s retains superseded ignored-relative-root assertion", label)
+		}
+	}
+}
+
 func TestPinStatusLiveDescriptionUsesExactTypedReasonVocabularies(t *testing.T) {
 	perPortVocabulary, batchVocabulary, noPortDirs, tooManyPortDirs, relativePortDir, commitPinAbbreviated, refUnresolvable, networkDisabled := pinStatusReasonVocabularies()
 	registry := pinstatus.PublicReasonRegistry()
@@ -578,14 +652,21 @@ func TestRegisterTools(t *testing.T) {
 		return body
 	}
 
-	t.Run("pr591_pin_status_batch_admission_is_wire_visible", func(t *testing.T) {
+	t.Run("pr591_pin_status_schema_batch_admission_is_wire_visible", func(t *testing.T) {
 		portDirs := make([]string, pinstatus.MaxPortDirs+1)
 		for i := range portDirs {
 			portDirs[i] = "relative/port"
 		}
-		pin := callBody(t, "vcpkg_pin_status", map[string]any{"port_dirs": portDirs})
-		if pin.Status != "unknown" || pin.Reason != string(pinstatus.BatchReasonTooManyPortDirs) || len(pin.Ports) != 0 {
-			t.Fatalf("pin-status wire body = %+v, want unknown(%s) with no port rows", pin, pinstatus.BatchReasonTooManyPortDirs)
+		result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "vcpkg_pin_status", Arguments: map[string]any{"port_dirs": portDirs}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result == nil || !result.IsError || len(result.Content) != 1 {
+			t.Fatalf("result=%#v, want schema tool error", result)
+		}
+		text, ok := result.Content[0].(*mcp.TextContent)
+		if !ok || !strings.HasPrefix(text.Text, "invalid arguments:") {
+			t.Fatalf("content=%#v, want invalid arguments schema error", result.Content)
 		}
 	})
 

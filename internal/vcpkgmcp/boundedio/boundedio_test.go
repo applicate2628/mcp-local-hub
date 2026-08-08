@@ -8,16 +8,42 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 type testFS struct {
 	file       io.ReadCloser
 	dir        DirReader
+	stat       os.FileInfo
+	statErr    error
 	openErr    error
 	openDirErr error
+	openCalls  *int
+}
+
+type regularFileInfo struct{}
+
+func (regularFileInfo) Name() string       { return "file" }
+func (regularFileInfo) Size() int64        { return 0 }
+func (regularFileInfo) Mode() os.FileMode  { return 0 }
+func (regularFileInfo) ModTime() time.Time { return time.Time{} }
+func (regularFileInfo) IsDir() bool        { return false }
+func (regularFileInfo) Sys() any           { return nil }
+
+func (f testFS) Stat(string) (os.FileInfo, error) {
+	if f.statErr != nil {
+		return nil, f.statErr
+	}
+	if f.stat != nil {
+		return f.stat, nil
+	}
+	return regularFileInfo{}, nil
 }
 
 func (f testFS) Open(string) (io.ReadCloser, error) {
+	if f.openCalls != nil {
+		*f.openCalls++
+	}
 	if f.openErr != nil {
 		return nil, f.openErr
 	}
@@ -131,6 +157,41 @@ func TestBoundedFileIngressRequests(t *testing.T) {
 		t.Fatalf("close count=%d, want 1", reader.closeCount)
 	}
 }
+
+func TestReadFileRejectsEveryNonRegularTypeBeforeOpen(t *testing.T) {
+	for _, mode := range []os.FileMode{
+		os.ModeDir,
+		os.ModeSymlink,
+		os.ModeNamedPipe,
+		os.ModeSocket,
+		os.ModeDevice,
+		os.ModeCharDevice,
+		os.ModeIrregular,
+	} {
+		openCalls := 0
+		info := fakeModeInfo{mode: mode}
+		_, err := ReadFile(context.Background(), testFS{
+			stat:      info,
+			openErr:   errors.New("open must not run"),
+			openCalls: &openCalls,
+		}, "special", 1, 1)
+		if err == nil {
+			t.Fatalf("mode %v was admitted", mode)
+		}
+		if openCalls != 0 {
+			t.Fatalf("mode %v reached Open %d times, want zero", mode, openCalls)
+		}
+	}
+}
+
+type fakeModeInfo struct{ mode os.FileMode }
+
+func (f fakeModeInfo) Name() string       { return "special" }
+func (f fakeModeInfo) Size() int64        { return 0 }
+func (f fakeModeInfo) Mode() os.FileMode  { return f.mode }
+func (f fakeModeInfo) ModTime() time.Time { return time.Time{} }
+func (f fakeModeInfo) IsDir() bool        { return f.mode.IsDir() }
+func (f fakeModeInfo) Sys() any           { return nil }
 
 func TestBoundedDirectoryIngressRequests(t *testing.T) {
 	reader := &recordingDir{entries: dirEntries("d", "c", "b", "a")}

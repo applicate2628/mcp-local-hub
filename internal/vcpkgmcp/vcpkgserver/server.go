@@ -61,17 +61,24 @@ func (vs *VcpkgServer) initLastFailure() {
 // Run wires up a fresh VcpkgServer, registers all tools, and serves the
 // MCP protocol over stdio until ctx is cancelled or the transport closes.
 func Run(ctx context.Context) error {
-	vs := &VcpkgServer{}
-
-	vs.server = mcp.NewServer(&mcp.Implementation{
-		Name:    "vcpkg-mcp",
-		Version: "0.1.0",
-	}, nil)
-
-	registerTools(vs)
-
+	vs, err := newRegisteredServer(registerTools)
+	if err != nil {
+		return fmt.Errorf("vcpkg-mcp server: register tool: %w", err)
+	}
 	if err := vs.server.Run(ctx, &mcp.StdioTransport{}); err != nil {
 		return fmt.Errorf("vcpkg-mcp server: %w", err)
 	}
 	return nil
+}
+
+func newRegisteredServer(register func(*VcpkgServer) error) (*VcpkgServer, error) {
+	vs := &VcpkgServer{}
+	vs.server = mcp.NewServer(&mcp.Implementation{
+		Name:    "vcpkg-mcp",
+		Version: "0.1.0",
+	}, nil)
+	if err := register(vs); err != nil {
+		return nil, err
+	}
+	return vs, nil
 }

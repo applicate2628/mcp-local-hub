@@ -66,9 +66,14 @@ type fakeFileInfo struct {
 	isDir bool
 }
 
-func (f fakeFileInfo) Name() string       { return f.name }
-func (f fakeFileInfo) Size() int64        { return 0 }
-func (f fakeFileInfo) Mode() os.FileMode  { return 0 }
+func (f fakeFileInfo) Name() string { return f.name }
+func (f fakeFileInfo) Size() int64  { return 0 }
+func (f fakeFileInfo) Mode() os.FileMode {
+	if f.isDir {
+		return os.ModeDir | 0o755
+	}
+	return 0o755
+}
 func (f fakeFileInfo) ModTime() time.Time { return time.Time{} }
 func (f fakeFileInfo) IsDir() bool        { return f.isDir }
 func (f fakeFileInfo) Sys() any           { return nil }
@@ -168,7 +173,7 @@ func TestDiscoverRoot_EnvVarWhenNoExplicit(t *testing.T) {
 
 func TestDiscoverRoot_PathLookup(t *testing.T) {
 	pathRoot := testRoot("path-root")
-	deps := baseDeps("windows", newFakeFS())
+	deps := baseDeps("windows", newFakeFS(binIn(pathRoot, "windows")))
 	deps.LookPath = func(file string) (string, error) {
 		if file == "vcpkg" {
 			return binIn(pathRoot, "windows"), nil
