@@ -20,7 +20,7 @@ CLAUDE.md B1 correction + C6 supersession note).
   `-race -count=3` clean; the listener-reuse is what makes the hoist correct).
 - Four fable non-blocking findings handled: P3 stale-v1-comments + P3 rollback-env-skew doc (setx) fixed
   in-PR; P2 reservation-aware CLI acquire + P3 same-port bind budget + P3 owner-mismatch guard + P3 test
-  coverage boundary deferred to `backlog/2026-07-18-restart-v3-phaseJ-residuals.md` (all bounded/fail-safe).
+  coverage boundary deferred to `backlog/2026-07-18-restart-v3-phasej-residuals.md` (all bounded/fail-safe).
 
 ## Verdict
 Phase J is commit-safe: gate-flip verified sound (rollback full + fail-closed, v1 deletion complete, inert

@@ -62,7 +62,7 @@ HEAD; residual hunted and not found.
 FIXED by the `preflightPortInUse` seam (commit `5d91e42`) AND the v0.6
 supervisor-intent port-ownership recognition: `internal/api/install.go:1760-1797`
 checks supervisor-intent (line 1761) BEFORE the scheduler-task fallback, closing
-the residual the TRIAGE-2026-05-28 Rows 6+10 note flagged (a v0.5.0 supervisor
+the residual the triage-2026-05-28 Rows 6+10 note flagged (a v0.5.0 supervisor
 child was not recognised as the legitimate port owner, so the gate could still
 fire a spurious port-9128 collision on supervisor hosts). With the
 supervisor-intent check ahead of the scheduler-task fallback, an own-daemon

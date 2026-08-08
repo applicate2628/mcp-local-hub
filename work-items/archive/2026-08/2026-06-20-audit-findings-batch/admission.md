@@ -1,5 +1,5 @@
 ---
-status: closed
+status: candidate
 date: 2026-06-20
 slug: audit-findings-batch
 source: opus subsystem-audit Workflow (wpaephnqp, 6 areas) + 2 codex audits (CLI/lock-order, cold-restart/IPC)

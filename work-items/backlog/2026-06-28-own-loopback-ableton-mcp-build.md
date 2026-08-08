@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 context: backlog
 defer: true
 needs: a real Ableton Live install to validate P1 (create track→notes→fire→audible)

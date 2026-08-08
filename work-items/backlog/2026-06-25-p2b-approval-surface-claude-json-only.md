@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 context: adjacent-finding
 ---
 

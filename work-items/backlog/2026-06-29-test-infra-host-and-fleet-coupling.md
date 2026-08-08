@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 context: backlog
 date: 2026-06-29
 ---

@@ -32,3 +32,8 @@ The manual `migrate` after install is the supported fresh-onboarding step (alrea
 
 ## If ever revisited
 Do NOT re-attempt as a catalog edit. Router-native-from-install must be designed as a **contract migration**: make ALL six consumers (install, uninstall, relay, matrix/demigrate, register-recovery, the first-introduce daemon-spawn lifecycle) dynamic-pool-aware FIRST (single owner per concern, not scattered `IsSerenaServer` special-cases), with the §7.1 interlock + security-reviewer gate for the lifecycle piece — a multi-PR initiative, user-prioritized, not an autonomous medium-lane pick.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Rationale: Pre-V1 terminal status `dropped` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `a2d693b61481210687aa5aa98d73532abb456aec6b3d10c6068738a863144c0d`; original terminal status `dropped`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `a2d693b61481210687aa5aa98d73532abb456aec6b3d10c6068738a863144c0d`; original terminal status `dropped`; explicit operator-authorized V1 migration.

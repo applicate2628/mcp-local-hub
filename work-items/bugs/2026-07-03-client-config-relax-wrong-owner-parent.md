@@ -7,7 +7,7 @@ context: deep-audit finding (secure-write-dacl × correctness lens; DISPUTED —
 
 - **status:** fixed
 - **fixed-by:** PR #517 (`8dc8d064`) plus PR #518 (`63c93761`) - write/create lanes refuse wrong-owner parents.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # Client-config default-relax lane does not refuse a WRONG-OWNER parent, diverging from the state-file lane that does
 

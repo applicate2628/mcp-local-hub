@@ -1,5 +1,5 @@
 ---
-status: closed
+status: candidate
 severity: P3
 date: 2026-06-20
 slug: gui-post-handlers-unbounded-body
