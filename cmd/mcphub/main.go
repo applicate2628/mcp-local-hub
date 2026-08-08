@@ -36,7 +36,7 @@ func main() {
 	// A bare invocation (no subcommand) is the first-run entry point: route
 	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
 	if shouldAutoLaunchGUI() {
-		os.Args = append(os.Args, "gui")
+		os.Args = routeInvocationArgs(os.Args)
 	}
 
 	if err := cli.NewRootCmd().Execute(); err != nil {
@@ -115,4 +115,15 @@ func autoLaunchGUIOptedOut() bool {
 // treated as bare (defensive; the Go runtime always supplies argv[0]).
 func shouldAutoLaunchGUIForArgs(args []string) bool {
 	return len(args) <= 1
+}
+
+// routeInvocationArgs applies the same bare-invocation rewrite main executes.
+// It returns a copy when routing so callers retaining args cannot observe a
+// mutated backing array. A non-bare invocation is returned unchanged.
+func routeInvocationArgs(args []string) []string {
+	if !shouldAutoLaunchGUIForArgs(args) {
+		return args
+	}
+	routed := append([]string(nil), args...)
+	return append(routed, "gui")
 }
