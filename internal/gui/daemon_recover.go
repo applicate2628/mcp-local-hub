@@ -249,6 +249,14 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		s.writeDaemonRecoverReplay(r.Context(), w, reservation)
 		return
 	}
+	terminalizeAndComplete := func(status, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {
+		receipt, terminalErr := s.auditLock.terminalize(reservation, status, authorization, terminal)
+		// Every ordinary post-reservation return settles its lease exactly once.
+		// This closure is deliberately not deferred: a panic after markCommitted
+		// remains visibly unsettled and the process drain fails loud.
+		completeLease()
+		return receipt, terminalErr
+	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
@@ -257,12 +265,11 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		status, code := daemonRecoverHTTPFailure(err)
 		terminationCommitted := result.TerminationCommitted
 		authorization := auditLockAuthorization(result.AuditHandoff, terminationCommitted)
-		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, terminationCommitted), authorization, auditLockTerminalEvidence{
+		receipt, terminalErr := terminalizeAndComplete(auditLockReceiptStatus(false, terminationCommitted), authorization, auditLockTerminalEvidence{
 			HTTPStatus:           status,
 			ErrorCode:            code,
 			TerminationCommitted: terminationCommitted,
 		})
-		completeLease()
 		if terminalErr != nil {
 			s.writeDaemonRecoverTerminalError(w, receipt, terminalErr)
 			return
@@ -274,12 +281,11 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !result.PortOwnerCheck.Valid() {
-		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
+		receipt, terminalErr := terminalizeAndComplete(auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
 			HTTPStatus:           http.StatusInternalServerError,
 			ErrorCode:            string(daemonRecoverErrorStateRead),
 			TerminationCommitted: result.TerminationCommitted,
 		})
-		completeLease()
 		if terminalErr != nil {
 			s.writeDaemonRecoverTerminalError(w, receipt, terminalErr)
 			return
@@ -288,12 +294,11 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !result.PortWaitOutcome.Valid() {
-		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
+		receipt, terminalErr := terminalizeAndComplete(auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
 			HTTPStatus:           http.StatusInternalServerError,
 			ErrorCode:            string(daemonRecoverErrorStateRead),
 			TerminationCommitted: result.TerminationCommitted,
 		})
-		completeLease()
 		if terminalErr != nil {
 			s.writeDaemonRecoverTerminalError(w, receipt, terminalErr)
 			return
@@ -302,12 +307,11 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !result.AuditHandoff.Valid() {
-		receipt, terminalErr := s.auditLock.terminalize(reservation, auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
+		receipt, terminalErr := terminalizeAndComplete(auditLockReceiptStatus(false, result.TerminationCommitted), auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted), auditLockTerminalEvidence{
 			HTTPStatus:           http.StatusInternalServerError,
 			ErrorCode:            string(daemonRecoverErrorStateRead),
 			TerminationCommitted: result.TerminationCommitted,
 		})
-		completeLease()
 		if terminalErr != nil {
 			s.writeDaemonRecoverTerminalError(w, receipt, terminalErr)
 			return
@@ -317,7 +321,7 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	authorization := auditLockAuthorization(result.AuditHandoff, result.TerminationCommitted)
-	terminalReceipt, terminalErr := s.auditLock.terminalize(reservation, auditLockOccurrenceCommittedSuccess, authorization, auditLockTerminalEvidence{
+	terminalReceipt, terminalErr := terminalizeAndComplete(auditLockOccurrenceCommittedSuccess, authorization, auditLockTerminalEvidence{
 		HTTPStatus: http.StatusOK,
 		Success: &daemonRecoverSuccessEvidence{
 			TaskName:             taskName,
@@ -328,7 +332,6 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 			TerminationCommitted: result.TerminationCommitted,
 		},
 	})
-	completeLease()
 	if terminalErr != nil {
 		s.writeDaemonRecoverTerminalError(w, terminalReceipt, terminalErr)
 		return

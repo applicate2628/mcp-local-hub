@@ -4,6 +4,7 @@ package process
 
 import (
 	"errors"
+	"os"
 	"os/exec"
 )
 
@@ -21,15 +22,25 @@ import (
 // Returns the child PID on success. The caller is responsible for
 // reaping the child via cmd.Wait() / cmd.Process.Wait().
 func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
+	return startWithJobFiles(job, cmd, nil, nil, nil)
+}
+
+func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (int, error) {
 	if cmd == nil {
-		return 0, errors.New("StartWithJob: nil cmd")
+		return 0, startWithJobError(StartWithJobInvalid, errors.New("StartWithJob: nil cmd"))
+	}
+	if (stdin == nil) != (stdout == nil) || (stdin == nil) != (stderr == nil) {
+		return 0, startWithJobError(StartWithJobInvalid, errors.New("StartWithJob: standard files must be all nil or all present"))
+	}
+	if stdin != nil {
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stderr
 	}
 	SetParentDeathSignal(cmd)
 	if err := cmd.Start(); err != nil {
-		return 0, err
+		return 0, startWithJobError(StartWithJobLaunch, err)
 	}
 	if cmd.Process == nil {
-		return 0, errors.New("StartWithJob: cmd.Start returned no Process")
+		return 0, startWithJobError(StartWithJobLaunch, errors.New("StartWithJob: cmd.Start returned no Process"))
 	}
 	return cmd.Process.Pid, nil
 }

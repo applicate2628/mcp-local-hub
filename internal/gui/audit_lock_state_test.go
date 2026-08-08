@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -89,10 +91,103 @@ func successfulTerminalEvidence(taskName string, terminationCommitted bool) audi
 	}
 }
 
+func directTestAuditLockTerminalization() auditLockTerminalizationConfig {
+	return auditLockTerminalizationConfig{mode: auditLockTerminalizationDirectTest}
+}
+
+func boundedTestAuditLockTerminalization(runner auditLockTerminalRunner) auditLockTerminalizationConfig {
+	return auditLockTerminalizationConfig{mode: auditLockTerminalizationBounded, runner: runner}
+}
+
+func newDirectTestAuditLockAdapterInStateDir(events *Broadcaster, stateDir string) *auditLockAdapter {
+	return newAuditLockAdapterInStateDirWithTerminalizationBudget(events, stateDir, auditLockStoreLockTimeout, directTestAuditLockTerminalization())
+}
+
+func newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(
+	events *Broadcaster,
+	stateDir string,
+	factory occurrenceStoreLockFactory,
+	emit occurrenceStoreLockHealthEmitter,
+) *auditLockAdapter {
+	return newAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, factory, emit, directTestAuditLockTerminalization())
+}
+
+func newBoundedTestAuditLockAdapterInStateDir(events *Broadcaster, stateDir string, budget time.Duration, runner auditLockTerminalRunner) *auditLockAdapter {
+	return newAuditLockAdapterInStateDirWithTerminalizationBudget(events, stateDir, budget, boundedTestAuditLockTerminalization(runner))
+}
+
+func TestAuditLockTerminalizationConfigIsExplicitPerInstance(t *testing.T) {
+	const budget = 43 * time.Millisecond
+	server := NewServer(Config{Port: 0, RecoverySettlementTerminalizationBudget: budget})
+	defer server.auditLock.close()
+	defer server.events.Close()
+	if server.auditLock.initErr != nil {
+		t.Fatal(server.auditLock.initErr)
+	}
+	if server.auditLock.terminalization.mode != auditLockTerminalizationBounded || server.auditLock.terminalization.runner == nil {
+		t.Fatalf("production terminalization=%+v, want bounded real worker", server.auditLock.terminalization)
+	}
+	if reflect.ValueOf(server.auditLock.terminalization.runner).Pointer() != reflect.ValueOf(runAuditLockTerminalWorker).Pointer() {
+		t.Fatal("production constructor did not bind the real same-binary worker")
+	}
+	if server.auditLock.terminalizationBudget != budget || server.recoverySettlements.terminalizationBudget != budget {
+		t.Fatalf("budget adapter=%s registry=%s want=%s", server.auditLock.terminalizationBudget, server.recoverySettlements.terminalizationBudget, budget)
+	}
+
+	direct := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
+	defer direct.close()
+	if direct.initErr != nil || direct.terminalization.mode != auditLockTerminalizationDirectTest || direct.terminalization.runner != nil {
+		t.Fatalf("direct test terminalization=%+v init=%v", direct.terminalization, direct.initErr)
+	}
+
+	fakeRunner := auditLockTerminalRunner(func(context.Context, auditLockTerminalWorkerRequest) (auditLockTerminalWorkerResult, error) {
+		return auditLockTerminalWorkerResult{}, nil
+	})
+	bounded := newBoundedTestAuditLockAdapterInStateDir(nil, t.TempDir(), budget, fakeRunner)
+	defer bounded.close()
+	if bounded.initErr != nil || bounded.terminalization.mode != auditLockTerminalizationBounded ||
+		reflect.ValueOf(bounded.terminalization.runner).Pointer() != reflect.ValueOf(fakeRunner).Pointer() {
+		t.Fatalf("bounded test terminalization=%+v init=%v", bounded.terminalization, bounded.initErr)
+	}
+
+	invalid := []struct {
+		name   string
+		config auditLockTerminalizationConfig
+	}{
+		{name: "zero", config: auditLockTerminalizationConfig{}},
+		{name: "unknown", config: auditLockTerminalizationConfig{mode: 99}},
+		{name: "bounded-nil", config: auditLockTerminalizationConfig{mode: auditLockTerminalizationBounded}},
+		{name: "direct-nonnil", config: auditLockTerminalizationConfig{mode: auditLockTerminalizationDirectTest, runner: fakeRunner}},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter := newAuditLockAdapterInStateDirWithTerminalizationBudget(nil, t.TempDir(), budget, tc.config)
+			defer adapter.close()
+			var configErr *auditLockTerminalizationConfigError
+			if !errors.As(adapter.initErr, &configErr) {
+				t.Fatalf("init error=%v, want typed terminalization config failure", adapter.initErr)
+			}
+			if adapter.serverInstance != "" {
+				t.Fatalf("invalid config claimed adapter identity %q", adapter.serverInstance)
+			}
+		})
+	}
+
+	source, err := os.ReadFile("audit_lock_state.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"defaultAuditLockTerminalRunner", "os.Args", "os.Getenv(", "os.LookupEnv(", `".test"`} {
+		if bytes.Contains(source, []byte(forbidden)) {
+			t.Fatalf("terminalization composition retains ambient selector %q", forbidden)
+		}
+	}
+}
+
 func installIsolatedAuditLock(t *testing.T, s *Server) {
 	t.Helper()
 	s.auditLock.close()
-	s.auditLock = newAuditLockAdapterInStateDir(s.events, t.TempDir())
+	s.auditLock = newDirectTestAuditLockAdapterInStateDir(s.events, t.TempDir())
 	if err := s.auditLock.ensureReady(); err != nil {
 		t.Fatalf("isolated audit-lock adapter: %v", err)
 	}
@@ -101,7 +196,7 @@ func installIsolatedAuditLock(t *testing.T, s *Server) {
 
 func TestAuditLockOccurrenceSurvivesNewServerAndReplaysWithoutRecover(t *testing.T) {
 	stateDir := t.TempDir()
-	first := newAuditLockAdapterInStateDir(nil, stateDir)
+	first := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	if err := first.ensureReady(); err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +221,7 @@ func TestAuditLockOccurrenceSurvivesNewServerAndReplaysWithoutRecover(t *testing
 	}
 	first.close()
 
-	second := newAuditLockAdapterInStateDir(nil, stateDir)
+	second := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer second.close()
 	if err := second.ensureReady(); err != nil {
 		t.Fatal(err)
@@ -146,7 +241,7 @@ func TestAuditLockOccurrenceSurvivesNewServerAndReplaysWithoutRecover(t *testing
 
 func TestAuditLockPriorServerInFlightBecomesUncertainAndBlocksNewCorrelation(t *testing.T) {
 	stateDir := t.TempDir()
-	first := newAuditLockAdapterInStateDir(nil, stateDir)
+	first := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	origin := first.serverInstance
 	correlation := validAuditLockCorrelation(origin, 1)
 	binding := auditLockOccurrenceBinding{
@@ -160,7 +255,7 @@ func TestAuditLockPriorServerInFlightBecomesUncertainAndBlocksNewCorrelation(t *
 	}
 	first.close()
 
-	second := newAuditLockAdapterInStateDir(nil, stateDir)
+	second := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer second.close()
 	replay, replayErr := second.reserve(context.Background(), correlation, binding)
 	if replayErr != nil ||
@@ -183,7 +278,7 @@ func TestAuditLockPriorServerInFlightBecomesUncertainAndBlocksNewCorrelation(t *
 
 func TestAuditLockGenerationRejectsLateOldServerTerminalization(t *testing.T) {
 	stateDir := t.TempDir()
-	first := newAuditLockAdapterInStateDir(nil, stateDir)
+	first := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer first.close()
 	correlation := validAuditLockCorrelation(first.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{
@@ -196,7 +291,7 @@ func TestAuditLockGenerationRejectsLateOldServerTerminalization(t *testing.T) {
 		t.Fatal(reserveErr)
 	}
 
-	second := newAuditLockAdapterInStateDir(nil, stateDir)
+	second := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer second.close()
 	receipt, terminalErr := first.terminalize(
 		reservation,
@@ -229,7 +324,7 @@ func TestAuditLockACK_PriorGenerationTerminal_AllStatuses(t *testing.T) {
 	for index, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			stateDir := t.TempDir()
-			first := newAuditLockAdapterInStateDir(nil, stateDir)
+			first := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 			if err := first.ensureReady(); err != nil {
 				t.Fatal(err)
 			}
@@ -261,7 +356,7 @@ func TestAuditLockACK_PriorGenerationTerminal_AllStatuses(t *testing.T) {
 			}
 			first.close()
 
-			second := newAuditLockAdapterInStateDir(nil, stateDir)
+			second := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 			defer second.close()
 			if err := second.ensureReady(); err != nil {
 				t.Fatal(err)
@@ -367,7 +462,7 @@ func TestAuditLockACK_PriorGenerationTerminal_AllStatuses(t *testing.T) {
 
 func TestAuditLockACK_PriorGenerationRejectsLateTerminalizer(t *testing.T) {
 	stateDir := t.TempDir()
-	first := newAuditLockAdapterInStateDir(nil, stateDir)
+	first := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer first.close()
 	originEpoch := first.currentMutationEpoch()
 	correlation := validAuditLockCorrelation(originEpoch.ServerInstance, 500)
@@ -406,7 +501,7 @@ func TestAuditLockACK_PriorGenerationRejectsLateTerminalizer(t *testing.T) {
 	}()
 	<-lateStarted
 
-	second := newAuditLockAdapterInStateDir(nil, stateDir)
+	second := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer second.close()
 	if err := second.ensureReady(); err != nil {
 		t.Fatal(err)
@@ -470,7 +565,7 @@ func TestAuditLockStoreCorruptOversizeUnsupportedVersionFailsClosed(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := newAuditLockAdapterInStateDir(nil, stateDir)
+			adapter := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 			defer adapter.close()
 			if adapter.ensureReady() == nil {
 				t.Fatal("corrupt store was accepted")
@@ -690,7 +785,7 @@ func TestAuditLockStoreUnknownOwnerValuesFailClosedOnDecodeAndWrite(t *testing.T
 			if err != nil {
 				t.Fatal(err)
 			}
-			adapter := newAuditLockAdapterInStateDir(nil, stateDir)
+			adapter := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 			defer adapter.close()
 			if adapter.ensureReady() == nil {
 				t.Fatal("unknown owner value was accepted at startup")
@@ -709,7 +804,7 @@ func TestAuditLockStoreUnknownOwnerValuesFailClosedOnDecodeAndWrite(t *testing.T
 		})
 
 		t.Run(tc.name+"/write", func(t *testing.T) {
-			adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+			adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 			defer adapter.close()
 			before, err := os.ReadFile(adapter.storePath)
 			if err != nil {
@@ -745,7 +840,7 @@ func TestAuditLockStoreUnknownOwnerValuesFailClosedOnDecodeAndWrite(t *testing.T
 }
 
 func TestAuditLockStoreRedactsProcessDetailAndUsesHardenedAtomicWrite(t *testing.T) {
-	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{
@@ -839,7 +934,7 @@ func TestAuditLockStoreRedactsProcessDetailAndUsesHardenedAtomicWrite(t *testing
 
 func TestAuditLockTerminalWriteFailureRetainsUncertainFence(t *testing.T) {
 	stateDir := t.TempDir()
-	adapter := newAuditLockAdapterInStateDir(nil, stateDir)
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	defer adapter.close()
 	adapter.lockTimeout = 25 * time.Millisecond
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
@@ -937,7 +1032,7 @@ func TestAuditLockTerminalize_StoreMuTimeoutPublishesCell(t *testing.T) {
 	}
 	for testIndex, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+			adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 			adapter.lockTimeout = 25 * time.Millisecond
 			correlation := validAuditLockCorrelation(adapter.serverInstance, 200+testIndex)
 			binding := auditLockOccurrenceBinding{
@@ -1060,7 +1155,7 @@ func TestAuditLockTerminalize_StoreMuTimeoutPublishesCell(t *testing.T) {
 }
 
 func TestAuditLockSettlementCell_ACKWinsLatePublication(t *testing.T) {
-	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 230)
 	binding := auditLockOccurrenceBinding{
 		serverInstance: adapter.serverInstance,
@@ -1157,7 +1252,7 @@ func TestAuditLockSettlementCell_ACKWinsLatePublication(t *testing.T) {
 }
 
 func TestAuditLockSettlementCell_DurableTerminalDoesNotDowngrade(t *testing.T) {
-	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 240)
 	binding := auditLockOccurrenceBinding{
@@ -1264,7 +1359,7 @@ func TestDaemonRecoverRouteDemoDefaultNormalizedTaskReplayAndFence(t *testing.T)
 }
 
 func TestAuditLockCorrelationUniquenessAndExactReplay(t *testing.T) {
-	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
 	first := validAuditLockCorrelation(adapter.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{
@@ -1445,7 +1540,7 @@ func TestAuditLockFinalACKClearsReceiptsAndRotatesBaseline(t *testing.T) {
 }
 
 func TestAuditLockFinalAcknowledgementRotatesInstanceAndBoundsCapacity(t *testing.T) {
-	a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	a := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer a.close()
 	correlations := make([]auditLockCorrelation, 0, auditLockOccurrenceCapacity)
 	for i := 0; i < auditLockOccurrenceCapacity; i++ {
@@ -1494,7 +1589,7 @@ func TestAuditLockFinalAcknowledgementRotatesInstanceAndBoundsCapacity(t *testin
 }
 
 func TestAuditLockACKReplayRaceNeverCreatesANewOccurrence(t *testing.T) {
-	a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	a := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer a.close()
 	for i := 0; i < 16; i++ {
 		correlation := validAuditLockCorrelation(a.serverInstance, i)
@@ -1547,7 +1642,7 @@ func TestAuditLockACKReplayRaceNeverCreatesANewOccurrence(t *testing.T) {
 }
 
 func TestAuditLockCommittedSuccessRejectsUnobservedPhysicalRevisionChange(t *testing.T) {
-	a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	a := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer a.close()
 	correlation := validAuditLockCorrelation(a.serverInstance, 47)
 	binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: `\\mcp-local-hub-stale-ack`, confirm: true}
@@ -1625,7 +1720,7 @@ func TestAuditLockAcknowledgementStatusPolicy(t *testing.T) {
 	}
 	for index, tc := range terminalCases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+			a := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 			defer a.close()
 			correlation := validAuditLockCorrelation(a.serverInstance, 80+index)
 			binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: fmt.Sprintf(`\\mcp-local-hub-policy-%d`, index), confirm: true}
@@ -1641,7 +1736,7 @@ func TestAuditLockAcknowledgementStatusPolicy(t *testing.T) {
 			}
 		})
 	}
-	a := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	a := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer a.close()
 	correlation := validAuditLockCorrelation(a.serverInstance, 99)
 	binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: `\\mcp-local-hub-policy-success`, confirm: true}

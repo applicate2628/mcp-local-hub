@@ -953,7 +953,6 @@ func NewServer(cfg Config) *Server {
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
-	s.auditLock = newAuditLockAdapter(s.events)
 	shutdownDrainTimeout := cfg.GUIShutdownDrainTimeout
 	if shutdownDrainTimeout <= 0 {
 		shutdownDrainTimeout = defaultGUIShutdownDrainTimeout
@@ -964,8 +963,9 @@ func NewServer(cfg Config) *Server {
 	}
 	terminalizationBudget := cfg.RecoverySettlementTerminalizationBudget
 	if terminalizationBudget <= 0 {
-		terminalizationBudget = s.auditLock.lockTimeout
+		terminalizationBudget = auditLockStoreLockTimeout
 	}
+	s.auditLock = newAuditLockAdapterWithTerminalizationBudget(s.events, terminalizationBudget)
 	s.shutdownDrainTimeout = shutdownDrainTimeout
 	s.recoverySettlements = newRecoverySettlementRegistry(postCommitBudget, terminalizationBudget, func(event Event) {
 		if s.events != nil {

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -136,6 +137,11 @@ func (s guiTestScheduler) unexpectedOperation(operation string) error {
 
 var testInstallAutostartFixture = &guiTestAutostartFixture{}
 
+const (
+	auditLockTerminalWorkerStderrHelperEnv = "MCPHUB_AUDIT_LOCK_TEST_STDERR_HELPER"
+	auditLockTerminalWorkerStderrMarker    = "audit-lock-test-private-stderr"
+)
+
 // TestMain fences the WHOLE internal/gui test binary off the operator's real
 // per-user state directory. Without it, any gui test that exercises a handler
 // or broadcaster which resolves api.DaemonStateDir() (gui-events.log,
@@ -176,6 +182,17 @@ var testInstallAutostartFixture = &guiTestAutostartFixture{}
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "audit-lock-terminal-worker" {
+		err := RunAuditLockTerminalWorker(os.Stdin, os.Stdout)
+		if os.Getenv(auditLockTerminalWorkerStderrHelperEnv) == "1" {
+			_, _ = os.Stderr.WriteString(strings.Repeat(auditLockTerminalWorkerStderrMarker, auditLockTerminalWorkerStderrMaxBytes/len(auditLockTerminalWorkerStderrMarker)+1))
+			os.Exit(3)
+		}
+		if err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	api.EnableSupervisorIPCTestPipeIsolation()
 
 	tmp, err := os.MkdirTemp("", "mcphub-gui-test-state-*")

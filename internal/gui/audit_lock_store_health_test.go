@@ -249,7 +249,7 @@ func TestOccurrenceStoreLockHealth_ReleaseFailure_AllOperations(t *testing.T) {
 			factory := newScriptedOccurrenceStoreLockFactory()
 			factory.specs[test.failAt] = scriptedOccurrenceStoreLockSpec{closeErr: errors.New("injected release failure")}
 			events := &occurrenceStoreLockHealthEventRecorder{}
-			adapter := newAuditLockAdapterInStateDirWithStoreLockDeps(nil, stateDir, factory.newLock, events.record)
+			adapter := newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, stateDir, factory.newLock, events.record)
 			correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 			binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\demo/default`, confirm: true}
 			if test.name != "claim" {
@@ -298,7 +298,7 @@ func TestOccurrenceStoreLockHealth_ReleaseFailure_AllOperations(t *testing.T) {
 				t.Fatalf("shutdown retried release: before=%d after=%d", closeCalls, closeAfterShutdown)
 			}
 
-			restarted := newAuditLockAdapterInStateDir(nil, stateDir)
+			restarted := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 			defer restarted.close()
 			if readyErr := restarted.ensureReady(); readyErr != nil {
 				t.Fatalf("process restart did not recover: %v", readyErr)
@@ -324,7 +324,7 @@ func TestOccurrenceStoreLockHealth_AcquireFailureDoesNotPoison(t *testing.T) {
 			factory := newScriptedOccurrenceStoreLockFactory()
 			factory.specs[2] = test.spec
 			events := &occurrenceStoreLockHealthEventRecorder{}
-			adapter := newAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
+			adapter := newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
 			defer adapter.close()
 			correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 			binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\demo/default`, confirm: true}
@@ -348,7 +348,7 @@ func TestOccurrenceStoreLockHealth_AcquireFailureDoesNotPoison(t *testing.T) {
 
 func TestOccurrenceStoreLockHealth_CancelAndTimeoutReleaseLease(t *testing.T) {
 	factory := newScriptedOccurrenceStoreLockFactory()
-	adapter := newAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, nil)
+	adapter := newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, nil)
 	defer adapter.close()
 	adapter.lockTimeout = 10 * time.Millisecond
 	adapter.storeMu.Lock()
@@ -403,7 +403,7 @@ func TestOccurrenceStoreLockHealth_NoLockOrderDeadlock(t *testing.T) {
 		adapter.storeMu.Unlock()
 		eventDelivered <- event
 	}
-	adapter = newAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, emit)
+	adapter = newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, emit)
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\demo/default`, confirm: true}
@@ -464,7 +464,7 @@ func TestOccurrenceStoreLockHealth_TerminalizeAfterStrandedPreservesUncertaintyA
 	factory := newScriptedOccurrenceStoreLockFactory()
 	factory.specs[3] = scriptedOccurrenceStoreLockSpec{closeErr: errors.New("injected release failure")}
 	events := &occurrenceStoreLockHealthEventRecorder{}
-	adapter := newAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
+	adapter := newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\demo/default`, confirm: true}
@@ -521,7 +521,7 @@ func TestOccurrenceStoreLockHealth_RouteErrorPlusReleaseFailurePromotes503(t *te
 			factory := newScriptedOccurrenceStoreLockFactory()
 			factory.specs[2] = scriptedOccurrenceStoreLockSpec{closeErr: errors.New("injected release failure")}
 			events := &occurrenceStoreLockHealthEventRecorder{}
-			adapter := newAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
+			adapter := newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
 			defer adapter.close()
 			originalRoute := &auditLockRouteError{status: test.status, code: string(test.code)}
 			operationErr := adapter.withStoreLock(context.Background(), "route failure "+test.name, func(_ *auditLockStoreOperation) error {
@@ -550,7 +550,7 @@ func TestOccurrenceStoreLockHealth_TerminalRouteErrorPlusReleasePreservesInFligh
 	factory := newScriptedOccurrenceStoreLockFactory()
 	factory.specs[3] = scriptedOccurrenceStoreLockSpec{closeErr: errors.New("injected release failure")}
 	events := &occurrenceStoreLockHealthEventRecorder{}
-	adapter := newAuditLockAdapterInStateDirWithStoreLockDeps(nil, stateDir, factory.newLock, events.record)
+	adapter := newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, stateDir, factory.newLock, events.record)
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\demo/default`, confirm: true}
@@ -562,7 +562,7 @@ func TestOccurrenceStoreLockHealth_TerminalRouteErrorPlusReleasePreservesInFligh
 	// A second process claim changes the durable epoch after the first
 	// adapter's pre-check. The first terminalizer therefore returns baseline
 	// stale from inside the physical-lock wrapper while its Close also fails.
-	reclaimer := newAuditLockAdapterInStateDir(nil, stateDir)
+	reclaimer := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
 	if readyErr := reclaimer.ensureReady(); readyErr != nil {
 		t.Fatal(readyErr)
 	}
@@ -652,7 +652,7 @@ func TestDaemonRecoverHandler_TerminalizationStranded_AllFiveExits(t *testing.T)
 			factory := newScriptedOccurrenceStoreLockFactory()
 			factory.specs[3] = scriptedOccurrenceStoreLockSpec{closeErr: errors.New("injected release failure")}
 			events := &occurrenceStoreLockHealthEventRecorder{}
-			s.auditLock = newAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
+			s.auditLock = newDirectTestAuditLockAdapterInStateDirWithStoreLockDeps(nil, t.TempDir(), factory.newLock, events.record)
 			correlation := validAuditLockCorrelation(s.auditLock.serverInstance, 1)
 			var poisonErr *auditLockRouteError
 			fake := &hookedDaemonRecoverer{result: test.result, err: test.err}
@@ -699,7 +699,7 @@ func TestDaemonRecoverHandler_TerminalizationStranded_AllFiveExits(t *testing.T)
 }
 
 func TestWriteDaemonRecoverTerminalError_NonHealthRetainsUncertain409(t *testing.T) {
-	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 	reservation := auditLockReservation{

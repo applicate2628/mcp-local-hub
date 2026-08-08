@@ -1253,8 +1253,22 @@ func ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir string, now time.Tim
 // function can keep assuming the window it reads was opened by an
 // UNINTERRUPTED run of Unknown observations.
 func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool) bool {
+	return runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch, ensureAliveHeadlessFleetNowFn())
+}
+
+// runEnsureAliveGUIOwnerUnknownEscalationAt owns the confirmation decision at
+// one injected observation time. A future durable marker is a clock anomaly,
+// never negative elapsed proof or an unbounded suppression interval.
+func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) bool {
 	markerPath := guiOwnerUnknownConfirmationMarkerPath(stateDir)
-	now := time.Now().UTC()
+	now := observedAt.UTC()
+	if observedAt.IsZero() {
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"gui-owner-unknown-confirmation-clock-anomaly",
+			"GUI-owner-unknown confirmation observation time was invalid; refusing to consume or escalate the confirmation window",
+			map[string]any{"classification": "invalid_observation_time", "supervisor_pid": supervisorPID, "gui_pidport_pid": guiPID})
+		return false
+	}
 
 	unheld, probeErr := guiOwnerLockUnheldProbeFn()
 	if probeErr != nil || !unheld {
@@ -1285,7 +1299,28 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 		return false
 	}
 
-	if now.Sub(firstObserved) < guiOwnerUnknownConfirmationWindow {
+	age := now.Sub(firstObserved.UTC())
+	if age < 0 {
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"gui-owner-unknown-confirmation-clock-anomaly",
+			"GUI-owner-unknown confirmation marker was future-dated; replacing it with the current observation and starting a fresh window",
+			map[string]any{
+				"classification":  "future_first_observed",
+				"first_observed":  firstObserved.UTC().Format(time.RFC3339Nano),
+				"observed_at":     now.Format(time.RFC3339Nano),
+				"age_s":           age.Seconds(),
+				"supervisor_pid":  supervisorPID,
+				"gui_pidport_pid": guiPID,
+			})
+		if writeErr := writeGUIOwnerUnknownConfirmationMarker(markerPath, now); writeErr != nil {
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"gui-owner-unknown-confirmation-write-failed",
+				"could not replace a future-dated GUI-owner-unknown confirmation marker; refusing to escalate",
+				map[string]any{"supervisor_pid": supervisorPID, "error": writeErr.Error()})
+		}
+		return false
+	}
+	if age < guiOwnerUnknownConfirmationWindow {
 		// Confirmation window still open — fall back to the standard
 		// undeterminable/no-action message.
 		return false
@@ -1389,7 +1424,7 @@ func defaultResetGUIOwnerUnknownConfirmationMarker(markerPath string, now time.T
 // harmful, unlike the fail-closed treatment at the escalation point
 // itself), logging rather than silently swallowing a failure.
 func resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir string, supervisorPID int) {
-	if resetErr := resetGUIOwnerUnknownConfirmationMarker(guiOwnerUnknownConfirmationMarkerPath(stateDir), time.Now().UTC()); resetErr != nil {
+	if resetErr := resetGUIOwnerUnknownConfirmationMarker(guiOwnerUnknownConfirmationMarkerPath(stateDir), ensureAliveHeadlessFleetNowFn()); resetErr != nil {
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 			"gui-owner-unknown-confirmation-reset-failed",
 			"could not durably clear the GUI-owner-unknown confirmation marker after a non-Unknown GUI-owner observation; a stale window could otherwise survive into a later Unknown tick",

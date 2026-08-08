@@ -7,6 +7,7 @@ package api
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,47 @@ import (
 
 	"github.com/gofrs/flock"
 )
+
+type fakeSupervisorEventPendingDir struct {
+	names       []string
+	offset      int
+	readErr     error
+	closeErr    error
+	closeCalls  int
+	panicOnRead bool
+	requests    []int
+}
+
+func (d *fakeSupervisorEventPendingDir) Readdirnames(n int) ([]string, error) {
+	d.requests = append(d.requests, n)
+	if d.panicOnRead {
+		panic("injected replay panic")
+	}
+	if d.readErr != nil {
+		return nil, d.readErr
+	}
+	if d.offset >= len(d.names) {
+		return nil, io.EOF
+	}
+	end := d.offset + n
+	if end >= len(d.names) {
+		page := d.names[d.offset:]
+		d.offset = len(d.names)
+		return page, io.EOF
+	}
+	page := d.names[d.offset:end]
+	d.offset = end
+	return page, nil
+}
+
+func (d *fakeSupervisorEventPendingDir) Close() error {
+	d.closeCalls++
+	return d.closeErr
+}
+
+func installFakeSupervisorEventPendingDir(logger *SupervisorEventLog, dir *fakeSupervisorEventPendingDir) {
+	logger.pendingIO.openDir = func(string) (supervisorEventPendingDir, error) { return dir, nil }
+}
 
 // TestSupervisorEvent_EnvelopeShape verifies the wire shape of one
 // emitted event: schema_version "1", event discriminator, task_name
@@ -1413,7 +1455,7 @@ func TestSupervisorEventPending_RetainsOnEveryFailure(t *testing.T) {
 		mutate    func(*SupervisorEventLog)
 	}{
 		{"scan", false, func(l *SupervisorEventLog) {
-			l.pendingIO.readDirNames = func(string, int) ([]string, error) { return nil, injected }
+			l.pendingIO.openDir = func(string) (supervisorEventPendingDir, error) { return nil, injected }
 		}},
 		{"read", false, func(l *SupervisorEventLog) {
 			l.pendingIO.readBounded = func(string, int64) ([]byte, error) { return nil, injected }
@@ -1510,15 +1552,133 @@ func TestSupervisorEventPending_ReplayBatchIsCappedAt64(t *testing.T) {
 	}
 }
 
+func TestSupervisorEventPending_InvalidPrefixDoesNotStarveValidCarrier(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := mustPrepareSupervisorEvent(t, "carrier-after-invalid-prefix")
+	if err := logger.PersistPending(prepared); err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, supervisorEventPendingReplayLimit+1)
+	for i := range names[:supervisorEventPendingReplayLimit+1] {
+		names[i] = fmt.Sprintf(".tmp-stale-%03d", i)
+	}
+	names = append(names, hex.EncodeToString(prepared.digest[:])+supervisorEventPendingFileSuffix)
+	installFakeSupervisorEventPendingDir(logger, &fakeSupervisorEventPendingDir{names: names})
+	if err := logger.TryReplayPending(); err != nil {
+		t.Fatalf("replay valid carrier after invalid prefix: %v", err)
+	}
+	if got := countExactRetainedSupervisorEventRows(t, path, prepared.raw); got != 1 {
+		t.Fatalf("replayed rows = %d, want 1", got)
+	}
+	if _, err := os.Stat(supervisorEventPendingPath(logger, prepared)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("carrier was not retired: %v", err)
+	}
+}
+
+func TestSupervisorEventPending_RawTraversalExhaustedWithoutCarrierIsVisible(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, supervisorEventPendingRawScanBudget+1)
+	for i := range names {
+		names[i] = fmt.Sprintf(".tmp-stale-%04d", i)
+	}
+	installFakeSupervisorEventPendingDir(logger, &fakeSupervisorEventPendingDir{names: names})
+	err = logger.TryReplayPending()
+	var coverageErr *supervisorEventPendingCoverageError
+	if !errors.As(err, &coverageErr) {
+		t.Fatalf("TryReplayPending error = %v, want coverage error", err)
+	}
+	if coverageErr.rawScanned != supervisorEventPendingRawScanBudget+1 {
+		t.Fatalf("raw scanned = %d, want %d", coverageErr.rawScanned, supervisorEventPendingRawScanBudget+1)
+	}
+}
+
+func TestSupervisorEventPending_ExactRawTraversalBoundaryAndJoinedClose(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		count     int
+		closeErr  error
+		wantCover supervisorEventPendingCoverage
+		wantRaw   int
+		wantErr   bool
+	}{
+		{name: "exact-4096-completes", count: supervisorEventPendingRawScanBudget, wantCover: supervisorEventPendingCoverageDirectoryComplete, wantRaw: supervisorEventPendingRawScanBudget},
+		{name: "4097-is-incomplete", count: supervisorEventPendingRawScanBudget + 1, wantCover: supervisorEventPendingCoverageRawTraversalExhausted, wantRaw: supervisorEventPendingRawScanBudget + 1, wantErr: true},
+		{name: "4097-joins-close", count: supervisorEventPendingRawScanBudget + 1, closeErr: errors.New("joined close sentinel"), wantCover: supervisorEventPendingCoverageRawTraversalExhausted, wantRaw: supervisorEventPendingRawScanBudget + 1, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logger, err := OpenSupervisorEventLog(filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := &fakeSupervisorEventPendingDir{closeErr: tc.closeErr, names: make([]string, tc.count)}
+			for i := range dir.names {
+				dir.names[i] = fmt.Sprintf(".tmp-unrecognized-%04d", i)
+			}
+			installFakeSupervisorEventPendingDir(logger, dir)
+			_, raw, coverage, scanErr := logger.scanPendingCarrierNames("pending")
+			if raw != tc.wantRaw || coverage != tc.wantCover || dir.closeCalls != 1 {
+				t.Fatalf("raw=%d coverage=%d closes=%d", raw, coverage, dir.closeCalls)
+			}
+			for _, request := range dir.requests {
+				if request > supervisorEventPendingScanPageSize {
+					t.Fatalf("page request=%d, want <= %d", request, supervisorEventPendingScanPageSize)
+				}
+			}
+			if tc.count == supervisorEventPendingRawScanBudget+1 && dir.requests[len(dir.requests)-1] != 1 {
+				t.Fatalf("boundary probe=%d, want 1", dir.requests[len(dir.requests)-1])
+			}
+			if tc.closeErr != nil && !errors.Is(scanErr, tc.closeErr) {
+				t.Fatalf("scan error=%v does not preserve close cause", scanErr)
+			}
+			if !tc.wantErr {
+				return
+			}
+			// The scanner returns the coverage discriminator; the replay owner
+			// turns it into the public typed incomplete error and joins Close.
+			dir.offset, dir.closeCalls = 0, 0
+			err = logger.TryReplayPending()
+			var coverageErr *supervisorEventPendingCoverageError
+			if !errors.As(err, &coverageErr) || coverageErr.rawScanned != tc.wantRaw || dir.closeCalls != 1 {
+				t.Fatalf("replay error=%v raw=%v closes=%d", err, coverageErr, dir.closeCalls)
+			}
+			if tc.closeErr != nil && !errors.Is(err, tc.closeErr) {
+				t.Fatalf("replay error=%v does not preserve close cause", err)
+			}
+		})
+	}
+}
+
+func TestSupervisorEventPending_PagedScannerClosesHandleAndSurfacesCloseFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := &fakeSupervisorEventPendingDir{closeErr: errors.New("injected pending close failure")}
+	installFakeSupervisorEventPendingDir(logger, dir)
+	if err := logger.TryReplayPending(); err == nil || !strings.Contains(err.Error(), "injected pending close failure") {
+		t.Fatalf("TryReplayPending error = %v, want close failure", err)
+	}
+	if dir.closeCalls != 1 {
+		t.Fatalf("pending directory close calls = %d, want 1", dir.closeCalls)
+	}
+}
+
 func TestSupervisorEventPending_TryReplayReleasesLocksOnPanic(t *testing.T) {
 	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
 	logger, err := OpenSupervisorEventLog(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	logger.pendingIO.readDirNames = func(string, int) ([]string, error) {
-		panic("injected replay panic")
-	}
+	installFakeSupervisorEventPendingDir(logger, &fakeSupervisorEventPendingDir{panicOnRead: true})
 	func() {
 		defer func() {
 			if recovered := recover(); recovered == nil {

@@ -1419,6 +1419,82 @@ func TestEnsureAlive_HeadlessFleet_UnknownEscalatesAfterConfirmationWindow(t *te
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-gui-headless-fleet")
 }
 
+func TestEnsureAliveUnknownEscalationAt_FutureMarkerStartsFreshWindow(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	observedAt := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, observedAt.Add(24*time.Hour)); err != nil {
+		t.Fatalf("seed future confirmation marker: %v", err)
+	}
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+	if runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir, &bytes.Buffer{}, 4242, 0, 0, false, observedAt) {
+		t.Fatal("future marker authorized escalation; want a fresh suppressed window")
+	}
+	got, err := readGUIOwnerUnknownConfirmationMarker(markerPath)
+	if err != nil {
+		t.Fatalf("read repaired confirmation marker: %v", err)
+	}
+	if !got.Equal(observedAt) {
+		t.Fatalf("repaired marker = %s, want injected observation %s", got, observedAt)
+	}
+	assertSupervisorEvent(t, stateDir, "gui-owner-unknown-confirmation-clock-anomaly")
+}
+
+func TestEnsureAliveUnknownEscalationAt_FutureMarkerThreeObservationWindow(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	t0 := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, t0.Add(-2*time.Minute))
+	restoreHeadlessNow := setEnsureAliveHeadlessFleetNowForTest(func() time.Time { return t0 })
+	defer restoreHeadlessNow()
+	var relaunches int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreRelaunch()
+	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
+	defer restoreServingProbe()
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, t0.Add(24*time.Hour)); err != nil {
+		t.Fatalf("seed future confirmation marker: %v", err)
+	}
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+	if runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir, &bytes.Buffer{}, 4242, 0, 0, true, t0) {
+		t.Fatal("future marker authorized escalation")
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Fatalf("future-marker repair relaunched %d times; want 0", got)
+	}
+	if got, err := readGUIOwnerUnknownConfirmationMarker(markerPath); err != nil || !got.Equal(t0) {
+		t.Fatalf("repaired marker = %s err=%v, want %s", got, err, t0)
+	}
+	if runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir, &bytes.Buffer{}, 4242, 0, 0, true, t0.Add(guiOwnerUnknownConfirmationWindow-time.Nanosecond)) {
+		t.Fatal("window-minus-one authorized escalation")
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Fatalf("window-minus-one relaunched %d times; want 0", got)
+	}
+	if got, err := readGUIOwnerUnknownConfirmationMarker(markerPath); err != nil || !got.Equal(t0) {
+		t.Fatalf("marker before elapsed boundary = %s err=%v, want %s", got, err, t0)
+	}
+	if !runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir, &bytes.Buffer{}, 4242, 0, 0, true, t0.Add(guiOwnerUnknownConfirmationWindow)) {
+		t.Fatal("elapsed confirmation window did not delegate recovery")
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Fatalf("elapsed confirmation window relaunched %d times; want exactly 1", got)
+	}
+	if _, err := os.Stat(markerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("marker remains after elapsed confirmation: %v", err)
+	}
+}
+
 // TestEnsureAlive_HeadlessFleet_UnknownAliveUnknownDoesNotReuseStaleTimestamp
 // reproduces round-3 review finding P1-1 (residual 1, part 1): the
 // confirmation window is armed ONLY inside

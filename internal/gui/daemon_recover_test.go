@@ -73,7 +73,7 @@ func decodeDaemonRecoverBody(t *testing.T, rec *httptest.ResponseRecorder) map[s
 }
 
 func TestDaemonRecoverPostTerminalSnapshotFailurePreservesCommittedReceipt(t *testing.T) {
-	adapter := newAuditLockAdapterInStateDir(nil, t.TempDir())
+	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 1)
 	binding := auditLockOccurrenceBinding{

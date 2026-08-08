@@ -66,15 +66,15 @@ func (*recoverySettlementDrainTimeoutError) Is(target error) bool {
 // lease state; recovery, occurrence storage, HTTP, and event publication all
 // happen after it is released.
 type recoverySettlementRegistry struct {
-	mu                        sync.Mutex
-	admitting                 bool
-	nextLeaseID               uint64
-	leases                    map[uint64]recoverySettlementSnapshot
-	changed                   chan struct{}
-	postCommitBudget          time.Duration
-	terminalizationLockBudget time.Duration
-	timedOut                  *recoverySettlementDrainTimeoutError
-	publish                   func(Event)
+	mu                    sync.Mutex
+	admitting             bool
+	nextLeaseID           uint64
+	leases                map[uint64]recoverySettlementSnapshot
+	changed               chan struct{}
+	postCommitBudget      time.Duration
+	terminalizationBudget time.Duration
+	timedOut              *recoverySettlementDrainTimeoutError
+	publish               func(Event)
 }
 
 type recoverySettlementLease struct {
@@ -82,14 +82,14 @@ type recoverySettlementLease struct {
 	id       uint64
 }
 
-func newRecoverySettlementRegistry(postCommitBudget, terminalizationLockBudget time.Duration, publish func(Event)) *recoverySettlementRegistry {
+func newRecoverySettlementRegistry(postCommitBudget, terminalizationBudget time.Duration, publish func(Event)) *recoverySettlementRegistry {
 	return &recoverySettlementRegistry{
-		admitting:                 true,
-		leases:                    make(map[uint64]recoverySettlementSnapshot),
-		changed:                   make(chan struct{}),
-		postCommitBudget:          postCommitBudget,
-		terminalizationLockBudget: terminalizationLockBudget,
-		publish:                   publish,
+		admitting:             true,
+		leases:                make(map[uint64]recoverySettlementSnapshot),
+		changed:               make(chan struct{}),
+		postCommitBudget:      postCommitBudget,
+		terminalizationBudget: terminalizationBudget,
+		publish:               publish,
 	}
 }
 
@@ -130,7 +130,7 @@ func (r *recoverySettlementRegistry) wait() error {
 	if r == nil {
 		return nil
 	}
-	drainBudget := r.postCommitBudget + r.terminalizationLockBudget
+	drainBudget := r.postCommitBudget + r.terminalizationBudget
 	drainCtx, cancel := context.WithTimeout(context.Background(), drainBudget)
 	defer cancel()
 	for {

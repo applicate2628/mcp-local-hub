@@ -11,6 +11,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -21,6 +22,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/daemonrecovery"
+	"mcp-local-hub/internal/process"
 )
 
 const (
@@ -280,23 +282,94 @@ type auditLockAdapter struct {
 	subscription     *api.SupervisorEventLockSubscription
 	events           *Broadcaster
 	lockTimeout      time.Duration
+	// terminalizationBudget is resolved once by the composition root. It bounds
+	// only the contained terminal transaction; lockTimeout remains the ordinary
+	// occurrence-store operation allowance.
+	terminalizationBudget time.Duration
+	// writeStateFileLockHeld is per-instance only so the worker transaction can
+	// prove the hardened writer's post-error reread path without a package-global
+	// hook. Production wiring is api.WriteStateFileBytesLockHeld.
+	writeStateFileLockHeld func(string, []byte) error
+	terminalization        auditLockTerminalizationConfig
+}
+
+// auditLockTerminalRunner is the narrow parent-to-contained-worker seam. The
+// production constructor injects the current-binary runner; tests inject a real
+// contained helper or a bounded protocol result without changing store policy.
+type auditLockTerminalRunner func(context.Context, auditLockTerminalWorkerRequest) (auditLockTerminalWorkerResult, error)
+
+type auditLockTerminalizationMode uint8
+
+const (
+	auditLockTerminalizationBounded auditLockTerminalizationMode = iota + 1
+	auditLockTerminalizationDirectTest
+)
+
+type auditLockTerminalizationConfig struct {
+	mode   auditLockTerminalizationMode
+	runner auditLockTerminalRunner
+}
+
+type auditLockTerminalizationConfigError struct {
+	mode   auditLockTerminalizationMode
+	reason string
+}
+
+func (e *auditLockTerminalizationConfigError) Error() string {
+	return fmt.Sprintf("invalid audit-lock terminalization config: mode=%d: %s", e.mode, e.reason)
+}
+
+func (c auditLockTerminalizationConfig) validate() error {
+	switch c.mode {
+	case auditLockTerminalizationBounded:
+		if c.runner == nil {
+			return &auditLockTerminalizationConfigError{mode: c.mode, reason: "bounded mode requires a runner"}
+		}
+	case auditLockTerminalizationDirectTest:
+		if c.runner != nil {
+			return &auditLockTerminalizationConfigError{mode: c.mode, reason: "direct-test mode forbids a runner"}
+		}
+	default:
+		return &auditLockTerminalizationConfigError{mode: c.mode, reason: "unknown mode"}
+	}
+	return nil
 }
 
 func newAuditLockAdapter(events *Broadcaster) *auditLockAdapter {
+	return newAuditLockAdapterWithTerminalizationBudget(events, auditLockStoreLockTimeout)
+}
+
+func newAuditLockAdapterWithTerminalizationBudget(events *Broadcaster, terminalizationBudget time.Duration) *auditLockAdapter {
+	if terminalizationBudget <= 0 {
+		terminalizationBudget = auditLockStoreLockTimeout
+	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return &auditLockAdapter{
-			events:          events,
-			storeLockHealth: newOccurrenceStoreLockHealth(nil, emitOccurrenceStoreLockHealthEvent),
-			lockTimeout:     auditLockStoreLockTimeout,
-			initErr:         fmt.Errorf("resolve daemon state dir: %w", err),
+			events:                 events,
+			storeLockHealth:        newOccurrenceStoreLockHealth(nil, emitOccurrenceStoreLockHealthEvent),
+			lockTimeout:            auditLockStoreLockTimeout,
+			terminalizationBudget:  terminalizationBudget,
+			writeStateFileLockHeld: api.WriteStateFileBytesLockHeld,
+			terminalization: auditLockTerminalizationConfig{
+				mode:   auditLockTerminalizationBounded,
+				runner: runAuditLockTerminalWorker,
+			},
+			initErr: fmt.Errorf("resolve daemon state dir: %w", err),
 		}
 	}
-	return newAuditLockAdapterInStateDir(events, stateDir)
+	return newAuditLockAdapterInStateDirWithTerminalizationBudget(events, stateDir, terminalizationBudget, auditLockTerminalizationConfig{
+		mode:   auditLockTerminalizationBounded,
+		runner: runAuditLockTerminalWorker,
+	})
 }
 
-func newAuditLockAdapterInStateDir(events *Broadcaster, stateDir string) *auditLockAdapter {
-	return newAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, nil, emitOccurrenceStoreLockHealthEvent)
+func newAuditLockAdapterInStateDirWithTerminalizationBudget(events *Broadcaster, stateDir string, terminalizationBudget time.Duration, terminalization auditLockTerminalizationConfig) *auditLockAdapter {
+	a := newAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, nil, emitOccurrenceStoreLockHealthEvent, terminalization)
+	if terminalizationBudget > 0 {
+		a.terminalizationBudget = terminalizationBudget
+	}
+	return a
 }
 
 func newAuditLockAdapterInStateDirWithStoreLockDeps(
@@ -304,13 +377,21 @@ func newAuditLockAdapterInStateDirWithStoreLockDeps(
 	stateDir string,
 	factory occurrenceStoreLockFactory,
 	emit occurrenceStoreLockHealthEmitter,
+	terminalization auditLockTerminalizationConfig,
 ) *auditLockAdapter {
 	a := &auditLockAdapter{
-		events:          events,
-		storePath:       filepath.Join(stateDir, auditLockOccurrenceFileLeaf),
-		logPath:         filepath.Join(stateDir, api.SupervisorEventLogFileLeaf),
-		storeLockHealth: newOccurrenceStoreLockHealth(factory, emit),
-		lockTimeout:     auditLockStoreLockTimeout,
+		events:                 events,
+		storePath:              filepath.Join(stateDir, auditLockOccurrenceFileLeaf),
+		logPath:                filepath.Join(stateDir, api.SupervisorEventLogFileLeaf),
+		storeLockHealth:        newOccurrenceStoreLockHealth(factory, emit),
+		lockTimeout:            auditLockStoreLockTimeout,
+		terminalizationBudget:  auditLockStoreLockTimeout,
+		writeStateFileLockHeld: api.WriteStateFileBytesLockHeld,
+		terminalization:        terminalization,
+	}
+	if err := terminalization.validate(); err != nil {
+		a.initErr = err
+		return a
 	}
 	instance, err := newAuditLockCorrelationID()
 	if err != nil {
@@ -976,7 +1057,11 @@ func (a *auditLockAdapter) writeStoreLockHeld(store auditLockOccurrenceStore) er
 	if len(raw) > auditLockOccurrenceStoreMaxBytes {
 		return errors.New("occurrence store exceeds one-mebibyte cap")
 	}
-	if err := api.WriteStateFileBytesLockHeld(a.storePath, raw); err != nil {
+	writer := a.writeStateFileLockHeld
+	if writer == nil {
+		writer = api.WriteStateFileBytesLockHeld
+	}
+	if err := writer(a.storePath, raw); err != nil {
 		return fmt.Errorf("write occurrence store: %w", err)
 	}
 	return nil
@@ -1183,7 +1268,207 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 }
 
 func (a *auditLockAdapter) terminalize(reservation auditLockReservation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {
-	return a.terminalizeContext(context.Background(), reservation, receiptStatus, authorization, terminal)
+	// Unit tests exercise the transaction directly through terminalizeContext;
+	// production crosses a process boundary so an uninterruptible secure write
+	// cannot strand this process's mutex, request, or recovery lease.
+	switch a.terminalization.mode {
+	case auditLockTerminalizationDirectTest:
+		return a.terminalizeContext(context.Background(), reservation, receiptStatus, authorization, terminal)
+	case auditLockTerminalizationBounded:
+		return a.terminalizeBounded(reservation, receiptStatus, authorization, terminal)
+	default:
+		return reservation.Receipt, &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit), cause: a.terminalization.validate()}
+	}
+}
+
+func (a *auditLockAdapter) terminalizeBounded(reservation auditLockReservation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {
+	if a.currentMutationEpoch() != reservation.MutationEpoch {
+		return reservation.Receipt, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), a.terminalizationBudget)
+	defer cancel()
+	for !a.storeMu.TryLock() {
+		select {
+		case <-ctx.Done():
+			a.publishUncertainSettlement(reservation)
+			a.publishTerminalWorkerFailure(reservation, auditLockTerminalWorkerFailureTimeout, 0, false, 0, false)
+			return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: ctx.Err()}
+		case <-time.After(auditLockStoreLockRetry):
+		}
+	}
+	defer a.storeMu.Unlock()
+	remaining := time.Until(deadlineFromContext(ctx))
+	allowanceMS := remaining.Milliseconds()
+	if allowanceMS <= 0 {
+		a.publishUncertainSettlement(reservation)
+		a.publishTerminalWorkerFailure(reservation, auditLockTerminalWorkerFailureTimeout, 0, false, 0, false)
+		return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: context.DeadlineExceeded}
+	}
+	result, err := a.terminalization.runner(ctx, auditLockTerminalWorkerRequest{
+		Version:       auditLockTerminalWorkerProtocolVersion,
+		Receipt:       reservation.Receipt,
+		Generation:    reservation.MutationEpoch.Generation,
+		Confirm:       reservation.Binding.confirm,
+		Status:        receiptStatus,
+		Authorization: authorization,
+		Terminal:      terminal,
+		AllowanceMS:   allowanceMS,
+	})
+	if err != nil {
+		a.publishUncertainSettlement(reservation)
+		failureID := auditLockTerminalWorkerFailureExecutionFailed
+		stdoutBytes, stderrBytes := 0, 0
+		stdoutTruncated, stderrTruncated := false, false
+		var workerErr *auditLockTerminalWorkerRunError
+		if errors.As(err, &workerErr) {
+			failureID = workerErr.failure
+			stdoutBytes, stdoutTruncated = workerErr.stdout.bytes, workerErr.stdout.truncated
+			stderrBytes, stderrTruncated = workerErr.stderr.bytes, workerErr.stderr.truncated
+		}
+		var strictErr *process.StrictRunError
+		if errors.As(err, &strictErr) {
+			switch strictErr.Kind {
+			case process.StrictRunTimeout:
+				failureID = auditLockTerminalWorkerFailureTimeout
+			case process.StrictRunContainmentFailed:
+				failureID = auditLockTerminalWorkerFailureContainmentFailed
+			}
+		}
+		a.publishTerminalWorkerFailure(reservation, failureID, stdoutBytes, stdoutTruncated, stderrBytes, stderrTruncated)
+		return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: err}
+	}
+	if result.Version != auditLockTerminalWorkerProtocolVersion {
+		a.publishUncertainSettlement(reservation)
+		a.publishTerminalWorkerFailure(reservation, auditLockTerminalWorkerFailureProtocolInvalid, 0, false, 0, false)
+		return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: errors.New("terminal worker version mismatch")}
+	}
+	switch result.Outcome {
+	case "durable_terminal":
+		if result.Failure != "" || result.Status != 0 || result.Code != "" || result.Receipt.AttemptID != reservation.Receipt.AttemptID ||
+			result.Receipt.OccurrenceID != reservation.Receipt.OccurrenceID ||
+			result.Receipt.ServerInstance != reservation.Receipt.ServerInstance ||
+			result.Receipt.TaskName != reservation.Receipt.TaskName ||
+			result.Receipt.Status != receiptStatus ||
+			result.Receipt.LockAuthorization != authorization {
+			a.publishUncertainSettlement(reservation)
+			a.publishTerminalWorkerFailure(reservation, auditLockTerminalWorkerFailureProtocolInvalid, 0, false, 0, false)
+			return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: errors.New("terminal worker durable receipt contradicts reservation")}
+		}
+		a.publishDurableSettlement(reservation, result.Receipt)
+		return result.Receipt, nil
+	case "baseline_stale":
+		if result.Failure != "" || result.Status != 409 || result.Code != string(daemonRecoverErrorBaselineStale) {
+			a.publishUncertainSettlement(reservation)
+			a.publishTerminalWorkerFailure(reservation, auditLockTerminalWorkerFailureProtocolInvalid, 0, false, 0, false)
+			return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain)}
+		}
+		return reservation.Receipt, &auditLockRouteError{status: 409, code: string(daemonRecoverErrorBaselineStale)}
+	case "uncertain", "rejected":
+		failureID, ok := auditLockTerminalWorkerFailureID(result.Failure)
+		validUncertain := result.Outcome == "uncertain" && ((failureID == auditLockTerminalWorkerFailureStateDirFailed && result.Status == 0 && result.Code == "") ||
+			(failureID == auditLockTerminalWorkerFailureUnproved && result.Status == 409 && result.Code == string(daemonRecoverErrorOutcomeUncertain)))
+		if !ok || (result.Outcome == "rejected" && failureID != auditLockTerminalWorkerFailureProtocolInvalid) || (result.Outcome == "uncertain" && !validUncertain) {
+			failureID = auditLockTerminalWorkerFailureProtocolInvalid
+		}
+		a.publishUncertainSettlement(reservation)
+		a.publishTerminalWorkerFailure(reservation, failureID, 0, false, 0, false)
+		return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain)}
+	default:
+		a.publishUncertainSettlement(reservation)
+		a.publishTerminalWorkerFailure(reservation, auditLockTerminalWorkerFailureProtocolInvalid, 0, false, 0, false)
+		return auditLockUncertainReceipt(reservation), &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain)}
+	}
+}
+
+func deadlineFromContext(ctx context.Context) time.Time {
+	if deadline, ok := ctx.Deadline(); ok {
+		return deadline
+	}
+	return time.Now()
+}
+
+func runAuditLockTerminalWorker(ctx context.Context, request auditLockTerminalWorkerRequest) (auditLockTerminalWorkerResult, error) {
+	var result auditLockTerminalWorkerResult
+	payload, err := json.Marshal(request)
+	if err != nil || len(payload) > auditLockTerminalWorkerMessageMaxBytes {
+		return result, newAuditLockTerminalWorkerRunError(auditLockTerminalWorkerFailureProtocolInvalid, fmt.Errorf("marshal bounded terminal worker request: %w", err), nil)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return result, newAuditLockTerminalWorkerRunError(auditLockTerminalWorkerFailureExecutionFailed, fmt.Errorf("resolve current executable: %w", err), nil)
+	}
+	cmd := exec.Command(exe, "audit-lock-terminal-worker")
+	run, runErr := process.RunStrictlyContained(ctx, process.StrictRunInvocation{
+		Command: cmd, Input: payload, InputLimit: auditLockTerminalWorkerMessageMaxBytes,
+		StdoutLimit: auditLockTerminalWorkerMessageMaxBytes, StderrLimit: auditLockTerminalWorkerStderrMaxBytes,
+	})
+	if runErr != nil {
+		failure := auditLockTerminalWorkerFailureExecutionFailed
+		var strictErr *process.StrictRunError
+		if errors.As(runErr, &strictErr) {
+			switch strictErr.Kind {
+			case process.StrictRunTimeout:
+				failure = auditLockTerminalWorkerFailureTimeout
+			case process.StrictRunContainmentFailed:
+				failure = auditLockTerminalWorkerFailureContainmentFailed
+			}
+		}
+		return result, newAuditLockTerminalWorkerRunError(failure, runErr, &run)
+	}
+	if run.Stdout.Truncated {
+		return result, newAuditLockTerminalWorkerRunError(auditLockTerminalWorkerFailureProtocolInvalid, errors.New("terminal worker result exceeds bound"), &run)
+	}
+	decoder := json.NewDecoder(bytes.NewReader(run.Stdout.Prefix))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		return result, newAuditLockTerminalWorkerRunError(auditLockTerminalWorkerFailureProtocolInvalid, err, &run)
+	}
+	if err := ensureAuditLockTerminalWorkerEOF(decoder); err != nil {
+		return result, newAuditLockTerminalWorkerRunError(auditLockTerminalWorkerFailureProtocolInvalid, err, &run)
+	}
+	return result, nil
+}
+
+type auditLockTerminalWorkerRunError struct {
+	failure auditLockTerminalWorkerFailure
+	cause   error
+	stdout  auditLockWorkerCapture
+	stderr  auditLockWorkerCapture
+}
+
+type auditLockWorkerCapture struct {
+	bytes     int
+	truncated bool
+}
+
+func newAuditLockTerminalWorkerRunError(failure auditLockTerminalWorkerFailure, cause error, run *process.StrictRunResult) *auditLockTerminalWorkerRunError {
+	err := &auditLockTerminalWorkerRunError{failure: failure, cause: cause}
+	if run != nil {
+		err.stdout = auditLockWorkerCapture{bytes: run.Stdout.Bytes, truncated: run.Stdout.Truncated}
+		err.stderr = auditLockWorkerCapture{bytes: run.Stderr.Bytes, truncated: run.Stderr.Truncated}
+	}
+	return err
+}
+
+func (e *auditLockTerminalWorkerRunError) Error() string {
+	return "terminal worker " + string(e.failure)
+}
+func (e *auditLockTerminalWorkerRunError) Unwrap() error { return e.cause }
+
+func (a *auditLockAdapter) publishTerminalWorkerFailure(reservation auditLockReservation, failure auditLockTerminalWorkerFailure, stdoutBytes int, stdoutTruncated bool, stderrBytes int, stderrTruncated bool) {
+	if a == nil || a.events == nil {
+		return
+	}
+	a.events.Publish(Event{Type: "daemon-recovery-terminal-worker-failure", Body: map[string]any{
+		"failure_id":       string(failure),
+		"attempt_id":       reservation.Receipt.AttemptID,
+		"occurrence_id":    reservation.Receipt.OccurrenceID,
+		"server_instance":  reservation.Receipt.ServerInstance,
+		"stdout_bytes":     stdoutBytes,
+		"stdout_truncated": stdoutTruncated,
+		"stderr_bytes":     stderrBytes,
+		"stderr_truncated": stderrTruncated,
+	}})
 }
 
 func (a *auditLockAdapter) terminalizeContext(ctx context.Context, reservation auditLockReservation, receiptStatus, authorization string, terminal auditLockTerminalEvidence) (auditLockReceiptDTO, *auditLockRouteError) {

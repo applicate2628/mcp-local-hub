@@ -103,7 +103,11 @@ const (
 	supervisorEventPendingDirSuffix   = ".pending"
 	supervisorEventPendingFileSuffix  = ".jsonl"
 	supervisorEventPendingReplayLimit = 64
-	supervisorEventPendingScanLimit   = supervisorEventPendingReplayLimit + 1
+	// The valid-carrier quota and raw traversal budget are deliberately separate:
+	// temporary/unrecognized names must not consume all replay slots, but a
+	// damaged directory must not make one replay unbounded.
+	supervisorEventPendingRawScanBudget = supervisorEventPendingReplayLimit * 64
+	supervisorEventPendingScanPageSize  = 64
 )
 
 // supervisorEventIdentityCap is the per-identity-field byte ceiling
@@ -338,12 +342,19 @@ type supervisorEventPendingIO struct {
 	chmod          func(string, fs.FileMode) error
 	createTemp     func(string, string) (supervisorEventFile, error)
 	readBounded    func(string, int64) ([]byte, error)
-	readDirNames   func(string, int) ([]string, error)
+	openDir        func(string) (supervisorEventPendingDir, error)
 	link           func(string, string) error
 	rotateIfNeeded func(string) error
 	openAppend     func(string) (supervisorEventFile, error)
 	containsRecord func(string, []byte) (bool, error)
 	remove         func(string) error
+}
+
+// supervisorEventPendingDir is the one-handle paged pending scan seam. The
+// scanner owns Close on every normal and error return.
+type supervisorEventPendingDir interface {
+	Readdirnames(int) ([]string, error)
+	Close() error
 }
 
 // OpenSupervisorEventLog constructs a SupervisorEventLog rooted at
@@ -918,26 +929,21 @@ func (l *SupervisorEventLog) writeEventBatch(raw []byte, writeFn func(*Superviso
 
 func (l *SupervisorEventLog) replayPendingLocked() error {
 	dir := l.path + supervisorEventPendingDirSuffix
-	names, err := l.pendingIO.readDirNames(dir, supervisorEventPendingScanLimit)
+	names, rawScanned, coverage, err := l.scanPendingCarrierNames(dir)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
+		if coverage == supervisorEventPendingCoverageRawTraversalExhausted && len(names) == 0 {
+			return errors.Join(
+				&supervisorEventPendingCoverageError{directory: dir, rawScanned: rawScanned, rawBudget: supervisorEventPendingRawScanBudget},
+				fmt.Errorf("scan supervisor event pending directory %s: %w", dir, err),
+			)
+		}
 		return fmt.Errorf("scan supervisor event pending directory %s: %w", dir, err)
 	}
 
-	finals := make([]string, 0, len(names))
 	for _, name := range names {
-		if isSupervisorEventPendingFilename(name) {
-			finals = append(finals, name)
-		}
-	}
-	sort.Strings(finals)
-	if len(finals) > supervisorEventPendingReplayLimit {
-		finals = finals[:supervisorEventPendingReplayLimit]
-	}
-
-	for _, name := range finals {
 		pendingPath := filepath.Join(dir, name)
 		raw, readErr := l.pendingIO.readBounded(pendingPath, supervisorEventMaxBytes+1)
 		if readErr != nil {
@@ -971,7 +977,97 @@ func (l *SupervisorEventLog) replayPendingLocked() error {
 			return fmt.Errorf("retire supervisor event pending carrier %s: %w", pendingPath, removeErr)
 		}
 	}
+	if coverage == supervisorEventPendingCoverageRawTraversalExhausted && len(names) == 0 {
+		return &supervisorEventPendingCoverageError{directory: dir, rawScanned: rawScanned, rawBudget: supervisorEventPendingRawScanBudget}
+	}
 	return nil
+}
+
+type supervisorEventPendingCoverage uint8
+
+const (
+	supervisorEventPendingCoverageValidQuota supervisorEventPendingCoverage = iota
+	supervisorEventPendingCoverageDirectoryComplete
+	supervisorEventPendingCoverageRawTraversalExhausted
+)
+
+// supervisorEventPendingCoverageError makes a bounded zero-progress scan
+// observable instead of silently allowing a stale raw-name prefix to starve a
+// valid carrier forever.
+type supervisorEventPendingCoverageError struct {
+	directory  string
+	rawScanned int
+	rawBudget  int
+}
+
+func (e *supervisorEventPendingCoverageError) Error() string {
+	return fmt.Sprintf("SUPERVISOR_EVENT_PENDING_SCAN_INCOMPLETE: pending replay coverage incomplete for %s after %d raw names (budget %d)", e.directory, e.rawScanned, e.rawBudget)
+}
+
+func (l *SupervisorEventLog) scanPendingCarrierNames(dir string) (finals []string, rawScanned int, coverage supervisorEventPendingCoverage, err error) {
+	handle, openErr := l.pendingIO.openDir(dir)
+	if errors.Is(openErr, os.ErrNotExist) {
+		return nil, 0, supervisorEventPendingCoverageDirectoryComplete, nil
+	}
+	if openErr != nil {
+		return nil, 0, supervisorEventPendingCoverageDirectoryComplete, fmt.Errorf("open supervisor event pending directory %s: %w", dir, openErr)
+	}
+	defer func() {
+		if closeErr := handle.Close(); closeErr != nil {
+			err = errors.Join(err, fmt.Errorf("close supervisor event pending directory %s: %w", dir, closeErr))
+		}
+	}()
+
+	finals = make([]string, 0, supervisorEventPendingReplayLimit)
+	for rawScanned < supervisorEventPendingRawScanBudget {
+		pageLimit := supervisorEventPendingScanPageSize
+		if remaining := supervisorEventPendingRawScanBudget - rawScanned; pageLimit > remaining {
+			pageLimit = remaining
+		}
+		page, pageErr := handle.Readdirnames(pageLimit)
+		rawScanned += len(page)
+		for _, name := range page {
+			if !isSupervisorEventPendingFilename(name) {
+				continue
+			}
+			finals = append(finals, name)
+			if len(finals) == supervisorEventPendingReplayLimit {
+				sort.Strings(finals)
+				return finals, rawScanned, supervisorEventPendingCoverageValidQuota, nil
+			}
+		}
+		if errors.Is(pageErr, io.EOF) {
+			sort.Strings(finals)
+			return finals, rawScanned, supervisorEventPendingCoverageDirectoryComplete, nil
+		}
+		if pageErr != nil {
+			return nil, rawScanned, supervisorEventPendingCoverageDirectoryComplete, fmt.Errorf("scan supervisor event pending directory %s: %w", dir, pageErr)
+		}
+		if len(page) == 0 {
+			return nil, rawScanned, supervisorEventPendingCoverageDirectoryComplete, fmt.Errorf("scan supervisor event pending directory %s: empty page without EOF", dir)
+		}
+	}
+
+	// Exact budget needs one bounded probe to distinguish completion from a
+	// prefix that could still hide carriers later in the directory.
+	probe, probeErr := handle.Readdirnames(1)
+	rawScanned += len(probe)
+	if probeErr != nil {
+		if errors.Is(probeErr, io.EOF) && len(probe) == 0 {
+			sort.Strings(finals)
+			return finals, rawScanned, supervisorEventPendingCoverageDirectoryComplete, nil
+		}
+		if errors.Is(probeErr, io.EOF) && len(probe) == 1 {
+			sort.Strings(finals)
+			return finals, rawScanned, supervisorEventPendingCoverageRawTraversalExhausted, nil
+		}
+		return nil, rawScanned, supervisorEventPendingCoverageDirectoryComplete, fmt.Errorf("probe supervisor event pending directory %s: %w", dir, probeErr)
+	}
+	if len(probe) != 1 {
+		return nil, rawScanned, supervisorEventPendingCoverageDirectoryComplete, fmt.Errorf("probe supervisor event pending directory %s: empty page without EOF", dir)
+	}
+	sort.Strings(finals)
+	return finals, rawScanned, supervisorEventPendingCoverageRawTraversalExhausted, nil
 }
 
 // writeEventLine performs the ordinary unsynced current-row append. The caller
@@ -1222,12 +1318,12 @@ func isSupervisorEventPendingFilename(name string) bool {
 
 func defaultSupervisorEventPendingIO() supervisorEventPendingIO {
 	return supervisorEventPendingIO{
-		mkdirAll:     os.MkdirAll,
-		chmod:        os.Chmod,
-		createTemp:   defaultCreateSupervisorEventPendingTemp,
-		readBounded:  readSupervisorEventFileBounded,
-		readDirNames: readSupervisorEventDirNames,
-		link:         os.Link,
+		mkdirAll:    os.MkdirAll,
+		chmod:       os.Chmod,
+		createTemp:  defaultCreateSupervisorEventPendingTemp,
+		readBounded: readSupervisorEventFileBounded,
+		openDir:     func(path string) (supervisorEventPendingDir, error) { return os.Open(path) },
+		link:        os.Link,
 		rotateIfNeeded: func(path string) error {
 			if size, ok := supervisorEventLogFileSize(path); ok && size >= supervisorEventLogRotateSize {
 				return rotateSupervisorEventLogFile(path)
@@ -1273,23 +1369,6 @@ func readSupervisorEventFileBounded(path string, maxBytes int64) (raw []byte, er
 		return nil, fmt.Errorf("file exceeds %d-byte bound", maxBytes)
 	}
 	return raw, nil
-}
-
-func readSupervisorEventDirNames(path string, maxEntries int) (names []string, err error) {
-	dir, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		if closeErr := dir.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-	}()
-	names, err = dir.Readdirnames(maxEntries)
-	if errors.Is(err, io.EOF) {
-		err = nil
-	}
-	return names, err
 }
 
 func retainedSupervisorEventLogContainsRecord(path string, want []byte) (found bool, err error) {
