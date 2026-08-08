@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -273,4 +274,69 @@ func dirEntries(names ...string) []os.DirEntry {
 		entries[index] = testDirEntry(name)
 	}
 	return entries
+}
+
+func TestBoundedLineReaderNMinusOneNAndNPlusOneIncludingDelimiter(t *testing.T) {
+	const limit = 8
+	for _, tc := range []struct {
+		name    string
+		input   string
+		limited bool
+		eof     bool
+	}{
+		{"N minus one payload plus newline", "1234567\n", false, false},
+		{"N final line", "12345678", false, true},
+		{"N payload plus newline", "12345678\n", true, false},
+		{"N plus one final line", "123456789", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader, err := NewLineReader(strings.NewReader(tc.input), limit)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := reader.ReadLine()
+			if got.Limited != tc.limited {
+				t.Fatalf("Limited = %v, want %v", got.Limited, tc.limited)
+			}
+			if (err == io.EOF) != tc.eof {
+				t.Fatalf("error = %v, EOF = %v, want %v", err, err == io.EOF, tc.eof)
+			}
+		})
+	}
+}
+
+func TestBoundedLineReaderSequentialLinesPreservePrefetchedBytes(t *testing.T) {
+	reader, err := NewLineReader(strings.NewReader("one\ntwo\n"), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"one\n", "two\n"} {
+		got, readErr := reader.ReadLine()
+		if readErr != nil || got.Limited || string(got.Data) != want {
+			t.Fatalf("ReadLine = (%q, limited=%v, %v), want (%q, false, nil)", got.Data, got.Limited, readErr, want)
+		}
+	}
+}
+
+func TestBoundedLineReaderNeverRequestsMoreThanLimitPlusOne(t *testing.T) {
+	const limit = 8
+	source := &recordingFile{data: []byte(strings.Repeat("x", limit+4))}
+	reader, err := NewLineReader(source, limit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := reader.ReadLine()
+	if err != nil || !result.Limited {
+		t.Fatalf("ReadLine=(limited=%v, err=%v), want limited without error", result.Limited, err)
+	}
+	totalRequested := 0
+	for _, request := range source.requests {
+		totalRequested += request
+	}
+	if totalRequested > limit+1 {
+		t.Fatalf("cumulative requests=%d, want at most %d; requests=%v", totalRequested, limit+1, source.requests)
+	}
+	if len(reader.buffer) > limit+1 || cap(reader.buffer) != limit+1 {
+		t.Fatalf("retained len/cap=%d/%d, want at most/exactly %d", len(reader.buffer), cap(reader.buffer), limit+1)
+	}
 }

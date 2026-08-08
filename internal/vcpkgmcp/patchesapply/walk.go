@@ -226,6 +226,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			}
 		}
 	}
+	if len(frames) != 0 || declarationDepth != 0 {
+		return nil, false, parserStructuralExpressionUnparsable
+	}
 	if deferredCommandBody {
 		return entries, sawPatchesKeyword, parserStructuralDeferredBody
 	}

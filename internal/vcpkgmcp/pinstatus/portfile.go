@@ -515,8 +515,13 @@ func recordSetAssignment(environment *variableEnvironment, state guardState, uns
 	environment.setKnown(name, tokens[1].Text)
 }
 
-func closeUnsupportedScope(scopes []string, opener string) ([]string, bool) {
-	if len(scopes) == 0 || scopes[len(scopes)-1] != opener {
+type unsupportedScope struct {
+	opener string
+	name   string
+}
+
+func closeUnsupportedScope(scopes []unsupportedScope, opener string) ([]unsupportedScope, bool) {
+	if len(scopes) == 0 || scopes[len(scopes)-1].opener != opener {
 		return scopes, false
 	}
 	return scopes[:len(scopes)-1], true
@@ -809,7 +814,8 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 	state := guardState{active: true}
 	variables := newVariableEnvironment()
 	var stack []conditionFrame
-	var unsupportedScopes []string
+	var unsupportedScopes []unsupportedScope
+	declarationFetches := map[string]bool{}
 	var candidates []FetchCandidate
 	var viableCandidates []FetchCandidate
 	var unresolved string
@@ -857,8 +863,14 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 			}
 			state = stack[len(stack)-1].parent
 			stack = stack[:len(stack)-1]
-		case "foreach", "while", "function", "macro":
-			unsupportedScopes = append(unsupportedScopes, st.Name)
+		case "foreach", "while":
+			unsupportedScopes = append(unsupportedScopes, unsupportedScope{opener: st.Name})
+		case "function", "macro":
+			name := ""
+			if tokens := tokenize(st.Args); len(tokens) != 0 && !tokens[0].Raw {
+				name = strings.ToLower(tokens[0].Text)
+			}
+			unsupportedScopes = append(unsupportedScopes, unsupportedScope{opener: st.Name, name: name})
 		case "endforeach":
 			var closed bool
 			unsupportedScopes, closed = closeUnsupportedScope(unsupportedScopes, "foreach")
@@ -887,6 +899,21 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 			recordSetAssignment(&variables, state, len(unsupportedScopes) != 0, st.Args)
 		default:
 			if !fetchFuncNames[st.Name] {
+				if len(unsupportedScopes) == 0 && state.active && declarationFetches[st.Name] {
+					// Executing a declaration body requires a CMake interpreter. A
+					// lexical parser must fail closed before its deferred fetch can
+					// authorize a remote query.
+					return parsedPortfile{}, false
+				}
+				continue
+			}
+			for i := len(unsupportedScopes) - 1; i >= 0; i-- {
+				scope := unsupportedScopes[i]
+				if (scope.opener == "function" || scope.opener == "macro") && scope.name != "" {
+					declarationFetches[scope.name] = true
+				}
+			}
+			if len(unsupportedScopes) != 0 {
 				continue
 			}
 			candidate := parseFetchCandidate(st.Name, variables, manifest, portName, st.Args)

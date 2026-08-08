@@ -1,7 +1,6 @@
 package pinstatus
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	hubprocess "mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 )
 
 // Bounds on one `git ls-remote` invocation. Every one of these exists because
@@ -167,21 +167,27 @@ func (b *boundedWriter) Write(p []byte) (int, error) {
 // gone" — the exact false verdict this package's contract forbids.
 func parseLsRemoteStream(r io.Reader) (map[string]string, error) {
 	limited := &io.LimitedReader{R: r, N: MaxRemoteOutputBytes + 1}
-	br := bufio.NewReader(limited)
+	lines, err := boundedio.NewLineReader(limited, MaxRemoteRefLineBytes)
+	if err != nil {
+		return nil, err
+	}
 	refs := map[string]string{}
 	consumed := int64(0)
 
 	for {
-		line, err := readBoundedLine(br, MaxRemoteRefLineBytes)
-		consumed += int64(len(line))
+		line, lineErr := lines.ReadLine()
+		if line.Limited {
+			return nil, fmt.Errorf("%w: a single ref line exceeded %d bytes", ErrRemoteRefLimit, MaxRemoteRefLineBytes)
+		}
+		consumed += int64(len(line.Data))
 		if consumed > MaxRemoteOutputBytes {
 			return nil, fmt.Errorf("%w: output exceeded %d bytes", ErrRemoteRefLimit, MaxRemoteOutputBytes)
 		}
-		if err != nil && !errors.Is(err, io.EOF) {
-			return nil, err
+		if lineErr != nil && !errors.Is(lineErr, io.EOF) {
+			return nil, lineErr
 		}
 
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
+		if trimmed := strings.TrimSpace(string(line.Data)); trimmed != "" {
 			sha, name, found := strings.Cut(trimmed, "\t")
 			if found {
 				if len(refs) >= MaxRemoteRefs {
@@ -191,29 +197,8 @@ func parseLsRemoteStream(r io.Reader) (map[string]string, error) {
 			}
 		}
 
-		if errors.Is(err, io.EOF) {
+		if errors.Is(lineErr, io.EOF) {
 			return refs, nil
-		}
-	}
-}
-
-// readBoundedLine reads one newline-terminated line of at most maxBytes. A
-// longer line is not a ref (real ref names are orders of magnitude shorter),
-// so it is refused outright rather than truncated into a plausible-looking
-// half-ref.
-func readBoundedLine(br *bufio.Reader, maxBytes int) (string, error) {
-	var b strings.Builder
-	for {
-		chunk, err := br.ReadString('\n')
-		if b.Len()+len(chunk) > maxBytes {
-			return "", fmt.Errorf("%w: a single ref line exceeded %d bytes", ErrRemoteRefLimit, maxBytes)
-		}
-		b.WriteString(chunk)
-		if err != nil {
-			return b.String(), err
-		}
-		if strings.HasSuffix(chunk, "\n") {
-			return b.String(), nil
 		}
 	}
 }

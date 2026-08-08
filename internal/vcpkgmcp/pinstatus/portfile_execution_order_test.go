@@ -19,6 +19,22 @@ func countingRemote(calls *int, refs map[string]map[string]string) remoteRefsFn 
 	}
 }
 
+func TestUninvokedFunctionAndMacroFetchesAreExcluded(t *testing.T) {
+	parsed, ok := parsePortfile("function(fetch_one)\n  vcpkg_from_github(REPO owner/repo REF main)\nendfunction()\nmacro(fetch_two)\n  vcpkg_from_github(REPO owner/other REF main)\nendmacro()\n")
+	if !ok {
+		t.Fatal("parsePortfile rejected closed uninvoked declarations")
+	}
+	if parsed.Remote.Kind != RemoteNone || len(parsed.Candidates) != 0 {
+		t.Fatalf("parsed=%+v, want no remote/candidates from uninvoked declarations", parsed)
+	}
+}
+
+func TestInvokedFetchBearingDeclarationFailsClosedWithoutRemoteCall(t *testing.T) {
+	if _, ok := parsePortfile("function(fetch_one)\n  vcpkg_from_github(REPO owner/repo REF main)\nendfunction()\nfetch_one()\n"); ok {
+		t.Fatal("parsePortfile accepted an invoked fetch-bearing declaration; lexical analysis must fail closed")
+	}
+}
+
 func TestPinStatusVariableEnvironmentUsesEachFetchCallSite(t *testing.T) {
 	dir := newPort(t, "call-site-values", `
 set(MY_REF "`+commitA+`")

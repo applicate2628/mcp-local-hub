@@ -13,11 +13,14 @@
 package portresolution
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 	"mcp-local-hub/internal/vcpkgmcp/portname"
 )
@@ -41,6 +44,9 @@ type Args struct {
 type Reason string
 
 const (
+	// MaxOverlayRoots bounds request batch admission before normalization or
+	// filesystem work. It is also exported to the MCP schema owner.
+	MaxOverlayRoots = 64
 	// ReasonPortNotFound: port was not found in any overlay or builtin.
 	ReasonPortNotFound Reason = "port_not_found"
 	// ReasonNoRootsSupplied: neither vcpkg_root nor overlay_ports were given,
@@ -68,6 +74,8 @@ const (
 	// ReasonHigherPrecedenceOverlayUnreadable: an overlay before the reported
 	// winner could not be examined, so the true winner is unknown.
 	ReasonHigherPrecedenceOverlayUnreadable Reason = "higher_precedence_overlay_unreadable"
+	// ReasonTooManyOverlayRoots reports a caller batch above MaxOverlayRoots.
+	ReasonTooManyOverlayRoots Reason = "too_many_overlay_roots"
 )
 
 // CandidateState describes whether a candidate was found, absent, unreadable,
@@ -161,8 +169,10 @@ type Status = evidence.Status
 type Deps struct {
 	// Stat reports whether path exists (any file type).
 	Stat func(path string) (os.FileInfo, error)
-	// ReadDir lists entries in a directory.
-	ReadDir func(path string) ([]os.DirEntry, error)
+	// Open supplies bounded file admission.
+	Open func(path string) (io.ReadCloser, error)
+	// OpenDir supplies bounded directory admission.
+	OpenDir func(path string) (boundedio.DirReader, error)
 	// Abs converts a path to an absolute path.
 	Abs func(path string) (string, error)
 }
@@ -172,66 +182,142 @@ type Deps struct {
 func DefaultDeps() Deps {
 	return Deps{
 		Stat:    os.Stat,
-		ReadDir: os.ReadDir,
+		Open:    func(path string) (io.ReadCloser, error) { return os.Open(path) },
+		OpenDir: func(path string) (boundedio.DirReader, error) { return os.Open(path) },
 		Abs:     filepath.Abs,
 	}
+}
+
+type depsFS struct{ deps Deps }
+
+func (f depsFS) Open(path string) (io.ReadCloser, error)          { return f.deps.Open(path) }
+func (f depsFS) OpenDir(path string) (boundedio.DirReader, error) { return f.deps.OpenDir(path) }
+
+type probeKind uint8
+
+const (
+	probeFound probeKind = iota
+	probeAbsent
+	probeUnreadable
+	probeCanceled
+)
+
+type probeOutcome struct {
+	kind   probeKind
+	reason string
+}
+
+func canceledProbe(ctx context.Context) (probeOutcome, bool) {
+	if err := ctx.Err(); err != nil {
+		return probeOutcome{kind: probeCanceled, reason: err.Error()}, true
+	}
+	return probeOutcome{}, false
+}
+
+func probeStat(ctx context.Context, deps Deps, path string) (os.FileInfo, error, probeOutcome, bool) {
+	if outcome, canceled := canceledProbe(ctx); canceled {
+		return nil, nil, outcome, true
+	}
+	fi, err := deps.Stat(path)
+	if outcome, canceled := canceledProbe(ctx); canceled {
+		return nil, nil, outcome, true
+	}
+	return fi, err, probeOutcome{}, false
 }
 
 // inspectRoot establishes whether a supplied root is readable. A missing root
 // is unreadable rather than absent: its unexamined contents could contain the
 // port and therefore affect precedence.
-func inspectRoot(deps Deps, dir string) (CandidateState, string) {
-	fi, err := deps.Stat(dir)
+func inspectRoot(ctx context.Context, deps Deps, dir string) probeOutcome {
+	fi, err, outcome, canceled := probeStat(ctx, deps, dir)
+	if canceled {
+		return outcome
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
-			return CandidateStateUnreadable, "root directory does not exist"
+			return probeOutcome{kind: probeUnreadable, reason: "root directory does not exist"}
 		}
-		return CandidateStateUnreadable, err.Error()
+		return probeOutcome{kind: probeUnreadable, reason: err.Error()}
 	}
 	if !fi.IsDir() {
-		return CandidateStateUnreadable, "root path is not a directory"
+		return probeOutcome{kind: probeUnreadable, reason: "root path is not a directory"}
 	}
-	if _, err := deps.ReadDir(dir); err != nil {
-		return CandidateStateUnreadable, err.Error()
+	_, err = boundedio.ReadDirComplete(ctx, depsFS{deps}, dir, 0, 1)
+	if outcome, canceled := canceledProbe(ctx); canceled {
+		return outcome
 	}
-	return CandidateStateFound, ""
+	if err != nil {
+		return probeOutcome{kind: probeUnreadable, reason: err.Error()}
+	}
+	return probeOutcome{kind: probeFound}
 }
 
 // inspectPortCandidate reports whether dir contains portfile.cmake or
 // vcpkg.json. It distinguishes an absent definition from an unreadable one.
-func inspectPortCandidate(deps Deps, dir string) (CandidateState, string) {
+func inspectPortCandidate(ctx context.Context, deps Deps, dir string) probeOutcome {
 	if dir == "" {
-		return CandidateStateUnreadable, "empty directory path"
+		return probeOutcome{kind: probeUnreadable, reason: "empty directory path"}
 	}
 
 	// Check existence of the directory itself.
-	fi, err := deps.Stat(dir)
+	fi, err, outcome, canceled := probeStat(ctx, deps, dir)
+	if canceled {
+		return outcome
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
-			return CandidateStateAbsent, "directory does not exist"
+			return probeOutcome{kind: probeAbsent, reason: "directory does not exist"}
 		}
-		return CandidateStateUnreadable, err.Error()
+		return probeOutcome{kind: probeUnreadable, reason: err.Error()}
 	}
 	if !fi.IsDir() {
-		return CandidateStateAbsent, "path is not a directory"
+		return probeOutcome{kind: probeAbsent, reason: "path is not a directory"}
 	}
 
-	// Read the directory to check for manifest files.
-	entries, err := deps.ReadDir(dir)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return CandidateStateAbsent, "directory does not exist"
+	var unreadable string
+	for _, name := range []string{"portfile.cmake", "vcpkg.json"} {
+		manifestPath := filepath.Join(dir, name)
+		manifest, manifestErr, outcome, canceled := probeStat(ctx, deps, manifestPath)
+		if canceled {
+			return outcome
 		}
-		return CandidateStateUnreadable, err.Error()
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() && (entry.Name() == "portfile.cmake" || entry.Name() == "vcpkg.json") {
-			return CandidateStateFound, ""
+		if manifestErr != nil {
+			if os.IsNotExist(manifestErr) {
+				continue
+			}
+			unreadable = manifestErr.Error()
+			continue
 		}
+		if !manifest.Mode().IsRegular() {
+			continue
+		}
+		_, readErr := boundedio.ReadFile(ctx, depsFS{deps}, manifestPath, 0, 1)
+		if outcome, canceled := canceledProbe(ctx); canceled {
+			return outcome
+		}
+		if readErr != nil {
+			unreadable = readErr.Error()
+			continue
+		}
+		return probeOutcome{kind: probeFound}
 	}
+	if unreadable != "" {
+		return probeOutcome{kind: probeUnreadable, reason: unreadable}
+	}
+	return probeOutcome{kind: probeAbsent, reason: "no readable regular portfile.cmake or vcpkg.json found"}
+}
 
-	return CandidateStateAbsent, "no portfile.cmake or vcpkg.json found"
+func candidateState(outcome probeOutcome) CandidateState {
+	switch outcome.kind {
+	case probeFound:
+		return CandidateStateFound
+	case probeAbsent:
+		return CandidateStateAbsent
+	case probeUnreadable, probeCanceled:
+		return CandidateStateUnreadable
+	default:
+		panic("portresolution: invalid probe outcome")
+	}
 }
 
 // overlayRoot is one non-blank overlay together with its position in the
@@ -240,6 +326,97 @@ func inspectPortCandidate(deps Deps, dir string) (CandidateState, string) {
 type overlayRoot struct {
 	path        string
 	sourceIndex int
+}
+
+type resolutionState struct {
+	result                    Result
+	winner                    *Winner
+	winnerPrecedence          int
+	blockingOverlay           *CandidateLocation
+	blockingOverlayPrecedence int
+	builtinUnreadable         bool
+	canceled                  bool
+	overlayToOverlayHit       bool
+}
+
+func newResolutionState() *resolutionState {
+	return &resolutionState{
+		result: Result{
+			Shadows:       make([]Shadow, 0),
+			AllCandidates: make([]CandidateLocation, 0),
+		},
+		winnerPrecedence:          -1,
+		blockingOverlayPrecedence: -1,
+	}
+}
+
+// transition is the single consumer of completed probe outcomes. The return
+// value is true only when a readable root permits its candidate probe to begin.
+func (state *resolutionState) transition(ctx context.Context, outcome probeOutcome, candidate CandidateLocation, precedence int, overlay, recordComplete bool, unreadablePrefix string) bool {
+	if ctx.Err() != nil {
+		outcome = probeOutcome{kind: probeCanceled, reason: ctx.Err().Error()}
+	}
+	if outcome.kind == probeFound && !recordComplete {
+		return true
+	}
+
+	candidate.State = candidateState(outcome)
+	candidate.PortDirFound = outcome.kind == probeFound
+	candidate.Reason = outcome.reason
+	if candidate.State == CandidateStateUnreadable && unreadablePrefix != "" {
+		candidate.Reason = unreadablePrefix + candidate.Reason
+	}
+	state.result.AllCandidates = append(state.result.AllCandidates, candidate)
+
+	switch outcome.kind {
+	case probeCanceled:
+		state.canceled = true
+	case probeUnreadable:
+		if overlay && state.blockingOverlay == nil {
+			blocking := candidate
+			state.blockingOverlay = &blocking
+			state.blockingOverlayPrecedence = precedence
+		}
+		if !overlay {
+			state.builtinUnreadable = true
+		}
+	}
+	return false
+}
+
+// finalize is the sole post-validation owner of the public status, reason,
+// winner and blocking-candidate precedence decision.
+func (state *resolutionState) finalize(ctx context.Context) Result {
+	if ctx.Err() != nil || state.canceled {
+		state.result.Status = evidence.StatusUnknown
+		state.result.Reason = ReasonRootUnreadable
+		state.result.Winner = nil
+		state.result.BlockingCandidate = nil
+		return state.result
+	}
+	if state.blockingOverlay != nil && (state.winner == nil || state.blockingOverlayPrecedence < state.winnerPrecedence) {
+		state.result.Status = evidence.StatusUnknown
+		state.result.Reason = ReasonHigherPrecedenceOverlayUnreadable
+		state.result.Winner = nil
+		state.result.BlockingCandidate = state.blockingOverlay
+		return state.result
+	}
+	if state.builtinUnreadable && state.winner == nil {
+		state.result.Status = evidence.StatusUnknown
+		state.result.Reason = ReasonRootUnreadable
+		state.result.Winner = nil
+		return state.result
+	}
+	if state.winner != nil {
+		state.result.Status = evidence.StatusOK
+		state.result.Reason = ""
+		state.result.Winner = state.winner
+		state.result.OverlayToOverlayShadowingOccurred = state.overlayToOverlayHit
+		return state.result
+	}
+	state.result.Status = evidence.StatusUnknown
+	state.result.Reason = ReasonPortNotFound
+	return state.result
 }
 
 // normalizedOverlayRoots is the sole owner of overlay blank filtering and
@@ -260,9 +437,23 @@ func normalizedOverlayRoots(paths []string) []overlayRoot {
 // builtin ports directory. Returns a tri-state result (ok/failed/unknown)
 // with detailed evidence.
 func ResolvePort(args Args, deps Deps) Result {
+	return ResolvePortContext(context.Background(), args, deps)
+}
+
+// ResolvePortContext is ResolvePort with caller cancellation propagated to
+// bounded filesystem probes. ResolvePort remains the compatibility wrapper.
+func ResolvePortContext(ctx context.Context, args Args, deps Deps) Result {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	var res Result
 	res.Shadows = make([]Shadow, 0)
 	res.AllCandidates = make([]CandidateLocation, 0)
+	if len(args.OverlayPorts) > MaxOverlayRoots {
+		res.Status = evidence.StatusFailed
+		res.Reason = ReasonTooManyOverlayRoots
+		return res
+	}
 
 	// Gate 1: Empty port is a failed input error.
 	if strings.TrimSpace(args.Port) == "" {
@@ -311,162 +502,103 @@ func ResolvePort(args Args, deps Deps) Result {
 		return res
 	}
 
-	var winner *Winner
-	winnerPrecedence := -1
-	var overlayToOverlayHit bool
-	var blockingOverlay *CandidateLocation
-	blockingOverlayPrecedence := -1
-	builtinUnreadable := false
-
-	// Check overlays in precedence order (first match wins).
-	for overlayPrecedence, overlay := range overlayRoots {
-		overlayPath := overlay.path
-		sourceIndex := overlay.sourceIndex
-
-		// Containment is re-verified per root: filepath.Rel is what actually
-		// proves the joined path stays beneath THIS root, and it holds even for
-		// platform-specific normalisation a charset regex cannot reason about.
-		portPath, portErr := portname.Join(overlayPath, name)
+	type resolvedOverlay struct {
+		overlayRoot
+		portPath string
+	}
+	resolvedOverlays := make([]resolvedOverlay, 0, len(overlayRoots))
+	for _, overlay := range overlayRoots {
+		portPath, portErr := portname.Join(overlay.path, name)
 		if portErr != nil {
 			res.Status = evidence.StatusFailed
 			res.Reason = ReasonInvalidPortName
 			res.InvalidPort = port
 			return res
 		}
-		res.Evidence.AddPath(portPath)
+		resolvedOverlays = append(resolvedOverlays, resolvedOverlay{overlayRoot: overlay, portPath: portPath})
+	}
+	var builtinPortPath string
+	if hasVcpkg {
+		var portErr error
+		builtinPortPath, portErr = portname.Join(filepath.Join(strings.TrimSpace(args.VcpkgRoot), "ports"), name)
+		if portErr != nil {
+			res.Status = evidence.StatusFailed
+			res.Reason = ReasonInvalidPortName
+			res.InvalidPort = port
+			return res
+		}
+	}
 
-		if state, reason := inspectRoot(deps, overlayPath); state == CandidateStateUnreadable {
-			candidate := CandidateLocation{
-				Directory: portPath,
-				Source:    formatOverlaySource(overlayPath, sourceIndex),
-				State:     CandidateStateUnreadable,
-				Reason:    "overlay root unreadable: " + reason,
-			}
-			res.AllCandidates = append(res.AllCandidates, candidate)
-			if blockingOverlay == nil {
-				blocking := candidate
-				blockingOverlay = &blocking
-				blockingOverlayPrecedence = overlayPrecedence
-			}
+	state := newResolutionState()
+
+	// Check overlays in precedence order (first match wins).
+	for overlayPrecedence, overlay := range resolvedOverlays {
+		if state.canceled {
+			break
+		}
+		overlayPath := overlay.path
+		sourceIndex := overlay.sourceIndex
+		portPath := overlay.portPath
+		source := formatOverlaySource(overlayPath, sourceIndex)
+		state.result.Evidence.AddPath(portPath)
+		candidate := CandidateLocation{Directory: portPath, Source: source}
+
+		if !state.transition(ctx, inspectRoot(ctx, deps, overlayPath), candidate, overlayPrecedence, true, false, "overlay root unreadable: ") {
 			continue
 		}
 
-		state, reason := inspectPortCandidate(deps, portPath)
-		found := state == CandidateStateFound
-		res.AllCandidates = append(res.AllCandidates, CandidateLocation{
-			Directory:    portPath,
-			Source:       formatOverlaySource(overlayPath, sourceIndex),
-			PortDirFound: found,
-			State:        state,
-			Reason:       reason,
-		})
-		if state == CandidateStateUnreadable && blockingOverlay == nil {
-			blocking := res.AllCandidates[len(res.AllCandidates)-1]
-			blockingOverlay = &blocking
-			blockingOverlayPrecedence = overlayPrecedence
-		}
-
-		if found {
-			if winner == nil {
+		outcome := inspectPortCandidate(ctx, deps, portPath)
+		state.transition(ctx, outcome, candidate, overlayPrecedence, true, true, "")
+		if outcome.kind == probeFound && !state.canceled {
+			if state.winner == nil {
 				// First match wins.
-				winner = &Winner{
+				state.winner = &Winner{
 					Directory: portPath,
-					Source:    formatOverlaySource(overlayPath, sourceIndex),
+					Source:    source,
 				}
-				winnerPrecedence = overlayPrecedence
+				state.winnerPrecedence = overlayPrecedence
 			} else {
 				// Overlay-to-overlay shadowing detected.
-				overlayToOverlayHit = true
-				res.Shadows = append(res.Shadows, Shadow{
+				state.overlayToOverlayHit = true
+				state.result.Shadows = append(state.result.Shadows, Shadow{
 					Directory: portPath,
-					Source:    formatOverlaySource(overlayPath, sourceIndex),
+					Source:    source,
 				})
 			}
 		}
 	}
 
 	// Check builtin (only if vcpkg_root is supplied).
-	if hasVcpkg {
+	if hasVcpkg && !state.canceled {
 		vcpkgRoot := strings.TrimSpace(args.VcpkgRoot)
-		builtinPortPath, portErr := portname.Join(filepath.Join(vcpkgRoot, "ports"), name)
-		if portErr != nil {
-			res.Status = evidence.StatusFailed
-			res.Reason = ReasonInvalidPortName
-			res.InvalidPort = port
-			return res
-		}
-		res.Evidence.AddPath(builtinPortPath)
-		if state, reason := inspectRoot(deps, vcpkgRoot); state == CandidateStateUnreadable {
-			builtinUnreadable = true
-			// If we already have a winner from an overlay, don't fail.
-			// But record the builtin as unreadable.
-			res.AllCandidates = append(res.AllCandidates, CandidateLocation{
-				Directory:    builtinPortPath,
-				Source:       "builtin (vcpkg_root)",
-				PortDirFound: false,
-				State:        CandidateStateUnreadable,
-				Reason:       "vcpkg_root unreadable: " + reason,
-			})
-		} else {
-			state, reason := inspectPortCandidate(deps, builtinPortPath)
-			found := state == CandidateStateFound
+		state.result.Evidence.AddPath(builtinPortPath)
+		rootCandidate := CandidateLocation{Directory: builtinPortPath, Source: "builtin (vcpkg_root)"}
+		if state.transition(ctx, inspectRoot(ctx, deps, vcpkgRoot), rootCandidate, len(overlayRoots), false, false, "vcpkg_root unreadable: ") {
 			builtinSource := "builtin " + filepath.Join(vcpkgRoot, "ports")
-			res.AllCandidates = append(res.AllCandidates, CandidateLocation{
-				Directory:    builtinPortPath,
-				Source:       builtinSource,
-				PortDirFound: found,
-				State:        state,
-				Reason:       reason,
-			})
+			candidate := CandidateLocation{Directory: builtinPortPath, Source: builtinSource}
+			outcome := inspectPortCandidate(ctx, deps, builtinPortPath)
+			state.transition(ctx, outcome, candidate, len(overlayRoots), false, true, "")
 
-			if found {
-				if winner == nil {
+			if outcome.kind == probeFound && !state.canceled {
+				if state.winner == nil {
 					// Builtin wins if no overlay matched.
-					winner = &Winner{
-						Directory: builtinPortPath,
-						Source:    builtinSource,
-					}
-					winnerPrecedence = len(overlayRoots)
+					state.winner = &Winner{Directory: builtinPortPath, Source: builtinSource}
+					state.winnerPrecedence = len(overlayRoots)
 				} else {
 					// Overlay already won, builtin is shadowed.
-					res.Shadows = append(res.Shadows, Shadow{
-						Directory: builtinPortPath,
-						Source:    builtinSource,
-					})
+					state.result.Shadows = append(state.result.Shadows, Shadow{Directory: builtinPortPath, Source: builtinSource})
 				}
 			}
 		}
-	} else {
-		res.AllCandidates = append(res.AllCandidates, CandidateLocation{
+	} else if !hasVcpkg {
+		state.result.AllCandidates = append(state.result.AllCandidates, CandidateLocation{
 			Source: "builtin",
 			State:  CandidateStateNotChecked,
 			Reason: "vcpkg_root was not supplied",
 		})
 	}
 
-	// Return final result.
-	if blockingOverlay != nil && (winner == nil || blockingOverlayPrecedence < winnerPrecedence) {
-		res.Status = evidence.StatusUnknown
-		res.Reason = ReasonHigherPrecedenceOverlayUnreadable
-		res.BlockingCandidate = blockingOverlay
-		return res
-	}
-	if winner != nil {
-		res.Status = evidence.StatusOK
-		res.Winner = winner
-		res.OverlayToOverlayShadowingOccurred = overlayToOverlayHit
-		return res
-	}
-	if builtinUnreadable {
-		res.Status = evidence.StatusUnknown
-		res.Reason = ReasonRootUnreadable
-		return res
-	}
-
-	// No winner found anywhere.
-	res.Status = evidence.StatusUnknown
-	res.Reason = ReasonPortNotFound
-	return res
+	return state.finalize(ctx)
 }
 
 // formatOverlaySource is the sole formatter for overlay source identity.

@@ -149,6 +149,9 @@ const (
 	// every guard are unknown for a reason that is fixable (an ACL, a lock)
 	// rather than inherent.
 	ReasonTripletFileUnreadable Reason = "triplet_file_unreadable"
+	// ReasonTripletFileSizeLimitExceeded: a selected triplet exceeded the
+	// complete-CMake-input limit, so no partial facts were parsed.
+	ReasonTripletFileSizeLimitExceeded Reason = "triplet_file_size_limit_exceeded"
 	// ReasonPatchPathUnreadable: at least one declared patch path could not
 	// be probed. Such a path is NOT in Missing — "missing" is a real defect
 	// report, and a permission error is not evidence that a file is absent.
@@ -285,10 +288,9 @@ type Status = evidence.Status
 // tests exercise the exact same code path with t.TempDir() fixtures, never
 // a real vcpkg checkout.
 type Deps struct {
-	Stat     func(path string) (os.FileInfo, error)
-	ReadFile func(path string) ([]byte, error)
-	Open     func(path string) (io.ReadCloser, error)
-	OpenDir  func(path string) (boundedio.DirReader, error)
+	Stat    func(path string) (os.FileInfo, error)
+	Open    func(path string) (io.ReadCloser, error)
+	OpenDir func(path string) (boundedio.DirReader, error)
 }
 
 // DefaultDeps wires Deps to the real OS. Production callers use this; tests
@@ -297,8 +299,7 @@ type Deps struct {
 // the OS boundary, only the environment/inputs are fixture-controlled).
 func DefaultDeps() Deps {
 	return Deps{
-		Stat:     os.Stat,
-		ReadFile: os.ReadFile,
+		Stat: os.Stat,
 		Open: func(path string) (io.ReadCloser, error) {
 			return os.Open(path)
 		},
@@ -326,7 +327,10 @@ func applyOrder(args Args, deps Deps) Result {
 const (
 	// MaxPortfileBytes is the package's complete-portfile admission limit. The
 	// next byte is read only as an overflow sentinel and is never parsed.
-	MaxPortfileBytes       int64 = publicresult.MaxEncodedBytes
+	MaxPortfileBytes int64 = publicresult.MaxEncodedBytes
+	// MaxTripletFileBytes uses the same complete-CMake-input policy as a
+	// portfile. This alias keeps that policy with its semantic owner.
+	MaxTripletFileBytes          = MaxPortfileBytes
 	portfileReadBatchBytes int64 = 32 << 10
 )
 
@@ -425,14 +429,19 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 	switch tripletPresence {
 	case evidence.PresenceExists:
 		ev.AddPath(tripletFile)
-		tripletRaw, terr := deps.ReadFile(tripletFile)
+		tripletRaw, terr := boundedio.ReadFile(ctx, boundedDeps{deps: deps}, tripletFile, MaxTripletFileBytes, portfileReadBatchBytes)
 		if terr != nil {
 			unreadable = append(unreadable, UnreadablePath{
 				Path: tripletFile, Kind: UnreadableTripletFile, Error: terr.Error(),
 			})
+		} else if tripletRaw.Limited {
+			return Result{
+				Status: evidence.StatusUnknown, Reason: ReasonTripletFileSizeLimitExceeded,
+				Triplet: triplet, PortDir: portDir, TripletFile: tripletFile, Evidence: ev,
+			}
 		} else {
 			ev.AddCommand("read " + tripletFile)
-			tripletFacts = parseTripletFacts(string(tripletRaw), portDir, portName, vcpkgRoot)
+			tripletFacts = parseTripletFacts(string(tripletRaw.Data), portDir, portName, vcpkgRoot)
 		}
 	case evidence.PresenceUnreadable:
 		ev.AddPath(tripletFile)

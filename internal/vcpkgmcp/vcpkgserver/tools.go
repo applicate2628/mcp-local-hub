@@ -261,6 +261,7 @@ func registerTools(vs *VcpkgServer) {
 				"overlay_ports": map[string]any{
 					"type":        "array",
 					"items":       map[string]any{"type": "string"},
+					"maxItems":    portresolution.MaxOverlayRoots,
 					"description": "Optional absolute overlay directories in precedence order; the first matching definition wins.",
 				},
 			},
@@ -468,7 +469,7 @@ func (vs *VcpkgServer) portResolutionTool(ctx context.Context, req *mcp.CallTool
 			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
-	res := portresolution.ResolvePort(args, portresolution.DefaultDeps())
+	res := portresolution.ResolvePortContext(ctx, args, portresolution.DefaultDeps())
 	return projectableToolOutcome{result: res}
 }
 

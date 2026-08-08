@@ -374,9 +374,9 @@ const (
 	// refused BEFORE any Stat or read. The boundary is the contract; a
 	// symlinked entry inside the tree does not get to escape it.
 	CoverageRootOutsideWorkspace CoverageReason = "root_outside_workspace"
-	// CoverageRootEnumerationCapped: Options.MaxRoots was reached while
-	// enumerating candidate roots, so enumeration stopped early. Path names
-	// the directory the walk was in when the cap tripped.
+	// CoverageRootEnumerationCapped: an enumeration bound was reached while
+	// walking candidate roots, so enumeration stopped early. Detail identifies
+	// whether MaxRoots or MaxVisitedEntries fired.
 	CoverageRootEnumerationCapped CoverageReason = "root_enumeration_capped"
 	// CoverageSymlinkDirectorySkipped: a directory symlink was encountered
 	// while enumerating WalkTree. Its subtree was deliberately not traversed,
@@ -491,6 +491,9 @@ type Options struct {
 	// far cheaper per item than, admission, so collapsing the two would make
 	// the admission gate unreachable whenever every root is a leaf.
 	MaxRoots int
+	// MaxVisitedEntries bounds every nonfatal WalkDir callback before name or
+	// symlink filtering, so a tree with no matching roots is still bounded.
+	MaxVisitedEntries int
 }
 
 // Default bounds. These are deliberately conservative: this package parses
@@ -506,11 +509,13 @@ const (
 	// (millions of matching files) can no longer grow the enumeration slice
 	// without bound before a single node is admitted.
 	DefaultMaxRoots = 200000
+	// DefaultMaxVisitedEntries shares the established enumeration policy.
+	DefaultMaxVisitedEntries = DefaultMaxRoots
 )
 
 // DefaultOptions returns the recommended bounds for a typical project tree.
 func DefaultOptions() Options {
-	return Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: DefaultMaxFileBytes, MaxRoots: DefaultMaxRoots}
+	return Options{MaxDepth: DefaultMaxDepth, MaxNodes: DefaultMaxNodes, MaxFileBytes: DefaultMaxFileBytes, MaxRoots: DefaultMaxRoots, MaxVisitedEntries: DefaultMaxVisitedEntries}
 }
 
 func (o Options) normalized() Options {
@@ -525,6 +530,9 @@ func (o Options) normalized() Options {
 	}
 	if o.MaxRoots <= 0 {
 		o.MaxRoots = DefaultMaxRoots
+	}
+	if o.MaxVisitedEntries <= 0 {
+		o.MaxVisitedEntries = DefaultMaxVisitedEntries
 	}
 	return o
 }
@@ -638,6 +646,7 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 	}
 
 	var starts []string
+	visitedEntries := 0
 	rootEnumerationFailed := error(nil)
 	walkErr := operations.walkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
 		if ctxErr := w.ctx.Err(); ctxErr != nil {
@@ -651,6 +660,15 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 				rootEnumerationFailed = err
 				return err
 			}
+		}
+		visitedEntries++
+		if visitedEntries > w.opts.MaxVisitedEntries {
+			w.rootEnumerationCapped = true
+			w.recordCoverage(filepath.Dir(path), CoverageRootEnumerationCapped,
+				fmt.Sprintf("stopped enumerating entries at MaxVisitedEntries=%d", w.opts.MaxVisitedEntries))
+			return fs.SkipAll
+		}
+		if err != nil {
 			// A subtree we could not look inside. Skipped, but RECORDED —
 			// whatever matching files it held are missing from the graph.
 			w.recordCoverage(path, CoverageEnumerateFailed, err.Error())

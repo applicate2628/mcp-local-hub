@@ -331,3 +331,85 @@ func TestPR591_MaxInt64FileCapFailsBeforeIO(t *testing.T) {
 		t.Fatal("Walk admitted MaxInt64 MaxFileBytes even though its sentinel cannot be represented")
 	}
 }
+
+func TestPR591_WalkTreeBoundsAllVisitedEntriesBeforeNameFiltering(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "not-a-root.txt")
+	second := filepath.Join(root, "also-not-a-root.txt")
+	callbacks := 0
+	opts := DefaultOptions()
+	opts.MaxVisitedEntries = 2 // root plus one non-matching entry
+	res, err := walkTreeWithOperations(context.Background(), root, root, []string{"*.cmake"}, opts, treeOperations{
+		walkDir: func(_ string, visit fs.WalkDirFunc) error {
+			for _, item := range []struct {
+				path  string
+				entry fs.DirEntry
+			}{{root, fakeWalkDirEntry{name: filepath.Base(root), dir: true}}, {first, fakeWalkDirEntry{name: "not-a-root.txt"}}, {second, fakeWalkDirEntry{name: "also-not-a-root.txt"}}} {
+				callbacks++
+				if err := visit(item.path, item.entry, nil); err != nil {
+					if errors.Is(err, fs.SkipAll) {
+						return nil
+					}
+					return err
+				}
+			}
+			return nil
+		},
+		isDirectorySymlink: func(string) bool { return false },
+		walkRoot:           (*walker).walkRoot,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if callbacks != 3 || !res.RootEnumerationCapped {
+		t.Fatalf("callbacks=%d capped=%v, want 3/true", callbacks, res.RootEnumerationCapped)
+	}
+	if reason, ok := coverageReasonFor(res, root); !ok || reason != CoverageRootEnumerationCapped {
+		t.Fatalf("coverage = (%v, %v), want root_enumeration_capped", reason, ok)
+	}
+}
+
+func TestPR591_VisitedEntryCapPreservesSortedAdmittedRootOrder(t *testing.T) {
+	root := t.TempDir()
+	admitted := []string{
+		filepath.Join(root, "z.cmake"),
+		filepath.Join(root, "a.cmake"),
+		filepath.Join(root, "m.cmake"),
+	}
+	sentinel := filepath.Join(root, "sentinel.cmake")
+	opts := DefaultOptions()
+	opts.MaxVisitedEntries = 4 // root plus exactly three admitted roots
+	var walked []string
+	res, err := walkTreeWithOperations(context.Background(), root, root, []string{"*.cmake"}, opts, treeOperations{
+		walkDir: func(_ string, visit fs.WalkDirFunc) error {
+			items := append([]string{root}, append(admitted, sentinel)...)
+			for index, path := range items {
+				entry := fakeWalkDirEntry{name: filepath.Base(path), dir: index == 0}
+				if err := visit(path, entry, nil); err != nil {
+					if errors.Is(err, fs.SkipAll) {
+						return nil
+					}
+					return err
+				}
+			}
+			return nil
+		},
+		isDirectorySymlink: func(string) bool { return false },
+		walkRoot:           func(_ *walker, start string) (string, error) { walked = append(walked, start); return start, nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{admitted[1], admitted[2], admitted[0]}
+	if strings.Join(walked, "|") != strings.Join(want, "|") {
+		t.Fatalf("walk order=%v, want sorted admitted subset %v", walked, want)
+	}
+	if !res.RootEnumerationCapped {
+		t.Fatal("strict subset did not report the enumeration cap")
+	}
+	for _, path := range walked {
+		if path == sentinel {
+			t.Fatalf("sentinel root was reported as scanned: %v", walked)
+		}
+	}
+}

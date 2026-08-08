@@ -638,6 +638,16 @@ func TestPR591_PatchesApplyDescriptorNamesDeferredInvocation(t *testing.T) {
 	}
 }
 
+func TestPortResolutionSchemaMaxItemsMatchesPackageLimit(t *testing.T) {
+	tool := registeredToolByName(t, liveRegisteredTools(t), "vcpkg_port_resolution")
+	schema := tool.InputSchema.(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	overlays := properties["overlay_ports"].(map[string]any)
+	if got, ok := overlays["maxItems"].(float64); !ok || got != float64(portresolution.MaxOverlayRoots) {
+		t.Fatalf("overlay_ports.maxItems = %#v, want package limit %d", overlays["maxItems"], portresolution.MaxOverlayRoots)
+	}
+}
+
 func liveRegisteredTools(t *testing.T) []*mcp.Tool {
 	t.Helper()
 	ctx := context.Background()

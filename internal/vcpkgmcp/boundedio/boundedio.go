@@ -6,6 +6,7 @@
 package boundedio
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -13,6 +14,86 @@ import (
 	"os"
 	"sort"
 )
+
+// LineResult is one line admitted by LineReader. Limited means the line was
+// longer than the configured semantic limit; Data must not be parsed then.
+// EOF is returned as the error from ReadLine so callers retain normal stream
+// termination semantics.
+type LineResult struct {
+	Data    []byte
+	Limited bool
+}
+
+// LineReader is a persistent, delimiter-aware reader bounded by one semantic
+// line limit plus one sentinel byte. Its buffer is retained across calls so
+// bytes prefetched while finding one delimiter remain available for the next
+// line.
+type LineReader struct {
+	reader   io.Reader
+	buffer   []byte
+	maxBytes int
+	eof      bool
+}
+
+// NewLineReader creates a bounded line reader. maxBytes includes the newline
+// delimiter when one is present.
+func NewLineReader(r io.Reader, maxBytes int) (*LineReader, error) {
+	if maxBytes < 0 {
+		return nil, fmt.Errorf("boundedio: max line bytes must be non-negative")
+	}
+	if maxBytes == int(^uint(0)>>1) {
+		return nil, fmt.Errorf("boundedio: max line bytes leaves no sentinel capacity")
+	}
+	return &LineReader{reader: r, buffer: make([]byte, 0, maxBytes+1), maxBytes: maxBytes}, nil
+}
+
+// ReadLine returns one complete line, an EOF-complete final line, or Limited.
+// It never accumulates fragments in a builder: every read is made directly
+// into the remaining space of its exact maxBytes-plus-one buffer.
+func (r *LineReader) ReadLine() (LineResult, error) {
+	for {
+		if delimiter := bytes.IndexByte(r.buffer, '\n'); delimiter >= 0 {
+			line := r.buffer[:delimiter+1]
+			if len(line) > r.maxBytes {
+				return LineResult{Limited: true}, nil
+			}
+			out := append([]byte(nil), line...)
+			r.buffer = append(r.buffer[:0], r.buffer[delimiter+1:]...)
+			return LineResult{Data: out}, nil
+		}
+		if len(r.buffer) > r.maxBytes {
+			return LineResult{Limited: true}, nil
+		}
+		if r.eof {
+			if len(r.buffer) == 0 {
+				return LineResult{}, io.EOF
+			}
+			out := append([]byte(nil), r.buffer...)
+			r.buffer = r.buffer[:0]
+			return LineResult{Data: out}, io.EOF
+		}
+
+		remaining := cap(r.buffer) - len(r.buffer)
+		if remaining == 0 {
+			return LineResult{Limited: true}, nil
+		}
+		scratch := r.buffer[len(r.buffer) : len(r.buffer)+remaining]
+		n, err := r.reader.Read(scratch)
+		if n < 0 || n > remaining {
+			return LineResult{}, fmt.Errorf("boundedio: line reader returned %d bytes for a %d-byte request", n, remaining)
+		}
+		r.buffer = r.buffer[:len(r.buffer)+n]
+		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				return LineResult{}, err
+			}
+			r.eof = true
+		}
+		if n == 0 && err == nil {
+			return LineResult{}, io.ErrNoProgress
+		}
+	}
+}
 
 // FS is the filesystem surface required by bounded admission.
 type FS interface {

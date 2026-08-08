@@ -6,6 +6,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
@@ -32,30 +34,39 @@ func (fd *fakeDeps) Stat(path string) (os.FileInfo, error) {
 	if fi, ok := fd.files[path]; ok {
 		return fi, nil
 	}
+	if fd.portManifests[filepath.Dir(path)] && (filepath.Base(path) == "portfile.cmake" || filepath.Base(path) == "vcpkg.json") {
+		return newFakeStat(filepath.Base(path), false), nil
+	}
 	return nil, os.ErrNotExist
 }
 
-func (fd *fakeDeps) ReadDir(path string) ([]os.DirEntry, error) {
+func (fd *fakeDeps) Open(path string) (io.ReadCloser, error) {
 	if err := fd.readDirErrors[path]; err != nil {
 		return nil, err
 	}
-	// For simplicity in testing, we pre-populate portManifests.
-	// This avoids complex directory structure simulation.
-	if fd.portManifests[path] {
-		// Return dummy entries indicating a manifest exists.
-		return []os.DirEntry{
-			&fakeDir{name: "portfile.cmake", isDir: false},
-		}, nil
+	if err := fd.readDirErrors[filepath.Dir(path)]; err != nil {
+		return nil, err
 	}
+	if _, err := fd.Stat(path); err != nil {
+		return nil, err
+	}
+	return io.NopCloser(strings.NewReader("")), nil
+}
 
-	// Check if path exists; if not, return not found.
+func (fd *fakeDeps) OpenDir(path string) (boundedio.DirReader, error) {
+	if err := fd.readDirErrors[path]; err != nil {
+		return nil, err
+	}
 	if _, ok := fd.files[path]; !ok {
 		return nil, os.ErrNotExist
 	}
-
-	// Path exists but no manifest.
-	return []os.DirEntry{}, nil
+	return &fakePagedDir{}, nil
 }
+
+type fakePagedDir struct{}
+
+func (*fakePagedDir) ReadDir(int) ([]os.DirEntry, error) { return nil, io.EOF }
+func (*fakePagedDir) Close() error                       { return nil }
 
 func (fd *fakeDeps) Abs(path string) (string, error) {
 	// For testing, assume paths are already absolute (starting with / or C:\).
@@ -70,7 +81,8 @@ func (fd *fakeDeps) Abs(path string) (string, error) {
 func (fd *fakeDeps) toDeps() Deps {
 	return Deps{
 		Stat:    fd.Stat,
-		ReadDir: fd.ReadDir,
+		Open:    fd.Open,
+		OpenDir: fd.OpenDir,
 		Abs:     fd.Abs,
 	}
 }
@@ -322,9 +334,13 @@ func TestPR591_BlankOnlyOverlaysAreNoRootsWithZeroIO(t *testing.T) {
 			dependencyCalls++
 			return nil, errors.New("unexpected Stat call")
 		},
-		ReadDir: func(string) ([]os.DirEntry, error) {
+		Open: func(string) (io.ReadCloser, error) {
 			dependencyCalls++
-			return nil, errors.New("unexpected ReadDir call")
+			return nil, errors.New("unexpected Open call")
+		},
+		OpenDir: func(string) (boundedio.DirReader, error) {
+			dependencyCalls++
+			return nil, errors.New("unexpected OpenDir call")
 		},
 		Abs: func(string) (string, error) {
 			dependencyCalls++
@@ -840,7 +856,7 @@ func TestHigherPrecedencePortCandidateReadErrorFailsClosed(t *testing.T) {
 			lowerOverlay:  newFakeStat("lower-overlay", true),
 			lowerPortDir:  newFakeStat("myport", true),
 		},
-		portManifests: map[string]bool{lowerPortDir: true},
+		portManifests: map[string]bool{higherPortDir: true, lowerPortDir: true},
 		readDirErrors: map[string]error{higherPortDir: errors.New("permission denied")},
 	}
 

@@ -92,6 +92,13 @@ There are no hardcoded machine paths. A path that appears in a test fixture is t
   entry returns `failed(relative_port_dir)` before filesystem or network access; a relative
   `vcpkg_cmake_trace.trace_path` returns `failed(relative_trace_path)` before filesystem access. The hub never
   binds either value to its own working directory.
+- **Overlay batches are admitted before inspection.** `vcpkg_port_resolution`
+  publishes its package-owned maximum in the input schema; requests beyond it
+  return `failed(too_many_overlay_roots)` without probing the filesystem.
+- **Triplet input is complete-or-unknown.** `vcpkg_patches_apply` reads a
+  selected triplet through the same bounded CMake-input admission as its
+  portfile. An over-limit triplet returns
+  `unknown(triplet_file_size_limit_exceeded)`; no prefix establishes facts.
 - **CMake trace parsing is json-v1 only.** An explicit header with another major returns
   `unknown(unsupported_trace_version)` and no partial records.
 - **`vcpkg_last_failure` bounds work before it builds the response.** One call examines at most 1024

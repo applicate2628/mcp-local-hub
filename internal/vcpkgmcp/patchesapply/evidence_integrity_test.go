@@ -1,6 +1,7 @@
 package patchesapply
 
 import (
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -183,15 +184,15 @@ func TestApplyOrder_UnreadableTripletFile_ReportsUnknown(t *testing.T) {
 		t.Fatalf("baseline: status=%v result=%+v", base.Status, base)
 	}
 
-	// Stat succeeds (the file IS found on the lookup path) but ReadFile is
+	// Stat succeeds (the file IS found on the lookup path) but Open is
 	// denied — the case where the tool knows exactly which file governs and
 	// still cannot read it.
 	deps := DefaultDeps()
-	deps.ReadFile = func(p string) ([]byte, error) {
+	deps.Open = func(p string) (io.ReadCloser, error) {
 		if strings.Contains(filepath.ToSlash(p), "corp-windows.cmake") {
 			return nil, errDenied
 		}
-		return DefaultDeps().ReadFile(p)
+		return DefaultDeps().Open(p)
 	}
 	res := applyOrder(args, deps)
 

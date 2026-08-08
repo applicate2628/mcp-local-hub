@@ -969,6 +969,53 @@ func pr591NoProbeDeps(t *testing.T) Deps {
 	return deps
 }
 
+func TestTripletReadBoundaryNAndNPlusOne(t *testing.T) {
+	portDir := writePort(t, "# no patches\n")
+	overlay := t.TempDir()
+	triplet := filepath.Join(overlay, "x64-test.cmake")
+	if err := os.WriteFile(triplet, []byte(strings.Repeat("x", int(MaxTripletFileBytes))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	under := applyOrder(Args{PortDir: portDir, Triplet: "x64-test", OverlayTriplets: []string{overlay}}, DefaultDeps())
+	if under.Reason == ReasonTripletFileSizeLimitExceeded {
+		t.Fatalf("N-byte triplet unexpectedly limited: %+v", under)
+	}
+	if err := os.WriteFile(triplet, []byte(strings.Repeat("x", int(MaxTripletFileBytes+1))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	over := applyOrder(Args{PortDir: portDir, Triplet: "x64-test", OverlayTriplets: []string{overlay}}, DefaultDeps())
+	if over.Status != evidence.StatusUnknown || over.Reason != ReasonTripletFileSizeLimitExceeded || over.TripletFile != triplet {
+		t.Fatalf("oversized triplet result=%+v, want unknown/size-limit with selected path", over)
+	}
+}
+
+func TestWalkPortfileRejectsUnclosedIfFunctionAndMacro(t *testing.T) {
+	for _, src := range []string{
+		"if(ON)\nvcpkg_from_github(PATCHES one.patch)\n",
+		"function(f)\nvcpkg_from_github(PATCHES one.patch)\n",
+		"macro(f)\nvcpkg_from_github(PATCHES one.patch)\n",
+	} {
+		entries, saw, structural := walkPortfile(src, newVarEnv("", "", "", nil, nil))
+		if structural != parserStructuralExpressionUnparsable || saw || len(entries) != 0 {
+			t.Fatalf("walkPortfile(%q) = (%+v,%v,%v), want no entries/expression-unparsable", src, entries, saw, structural)
+		}
+	}
+}
+
+func TestApplyOrderUnclosedScopeStopsBeforePatchAndOrphanProbes(t *testing.T) {
+	for _, tc := range []struct{ name, source string }{
+		{"if", "if(ON)\nvcpkg_from_github(PATCHES one.patch)\n"},
+		{"function", "function(f)\nvcpkg_from_github(PATCHES one.patch)\n"},
+		{"macro", "macro(f)\nvcpkg_from_github(PATCHES one.patch)\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := writePort(t, tc.source, "one.patch", "tail.patch")
+			res := applyOrder(Args{PortDir: dir, Triplet: "x64-windows"}, pr591NoProbeDeps(t))
+			assertPR591ExpressionWithoutProbes(t, res)
+		})
+	}
+}
+
 func assertPR591ExpressionWithoutProbes(t *testing.T, res Result) {
 	t.Helper()
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonPatchesExprUnparsable {
