@@ -1,5 +1,5 @@
 ---
-status: done
+status: candidate
 severity: medium
 context: adjacent-finding
 defer: false

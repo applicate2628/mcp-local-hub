@@ -569,6 +569,15 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 		}
 		rep.Requirements = append(rep.Requirements, r)
 	}
+	if f, blocked := findingByID(admission, "install-scope-applicability"); blocked {
+		add(ReadinessRequirement{
+			Name:   f.Name,
+			OK:     false,
+			Reason: f.Reason,
+			Fix:    f.Fix,
+		})
+		return rep
+	}
 
 	// D-3 inert short-circuit (Tier-0). When the manifest is inert
 	// (watch / disabled-until-probe) and its install-probe has NOT passed,
@@ -1092,10 +1101,7 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	// r7). DefaultInstallClientNamesEffectiveIn reads gui-preferences.yaml (it
 	// derefs no *API state, so the zero value calls it); fall back to the
 	// compile-time default on a read error.
-	clientScope := clients.DefaultInstallClientNames()
-	if eff, cerr := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); cerr == nil && len(eff) > 0 {
-		clientScope = eff
-	}
+	clientScope := resolveReadinessDefaultClientScope(scope, (&API{}).DefaultInstallClientNamesEffectiveIn)
 	// Scope the dry-run to the SAME daemon the real install targets. A
 	// daemon-filtered install (scope.DaemonFilter set) only validates the
 	// chosen daemon's bindings; a sibling's invalid url_path / unknown-daemon
@@ -1115,6 +1121,7 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 		ClientsInclude:         scope.ClientsInclude,
 		IncludeAllClients:      scope.IncludeAllClients,
 		DaemonFilter:           scope.DaemonFilter,
+		SkipClientConfigWrites: scope.SkipClientConfigWrites,
 	}); err != nil {
 		add(ReadinessRequirement{
 			Name: "install plan",
@@ -1141,6 +1148,17 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	}
 
 	return rep
+}
+
+func resolveReadinessDefaultClientScope(scope AdmissionScope, resolve func(string) ([]string, error)) []string {
+	if scope.SkipClientConfigWrites {
+		return nil
+	}
+	clientScope := clients.DefaultInstallClientNames()
+	if eff, err := resolve(SettingsPath()); err == nil && len(eff) > 0 {
+		return eff
+	}
+	return clientScope
 }
 
 // CheckServerReadinessByName resolves a server's manifest embed-first (the same
@@ -1198,6 +1216,7 @@ func checkServerReadinessByNameWithBudget(name string, scope AdmissionScope, bud
 //     FULL ownership chain per in-use port arm — admission_check.go:216 and :227
 //     — BEFORE any budget-gated fixedPortStatus row executes. The budget only
 //     gates the detail rows layered on top.
+//
 //  2. ONE OWNERSHIP CALL IS NOT ONE CHAIN. portHeldByOurDaemonForPortArm stacks
 //     several independently-capped probes, and the ancestry walk mints a FRESH
 //     probeChainBudget per iteration (internalPortParentWalkDepth = 3):

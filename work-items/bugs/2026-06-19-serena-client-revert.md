@@ -7,7 +7,7 @@ decision: work-items/decisions/2026-06-21-serena-router-client-url-single-owner.
 
 - **status:** fixed
 - **fixed-by:** PR #400 (`43e7619a`) - serena install write plane uses `SerenaRouterClientURL`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # Serena client URL reverts to legacy daemon port during install
 

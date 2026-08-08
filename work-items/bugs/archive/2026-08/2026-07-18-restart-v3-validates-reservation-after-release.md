@@ -27,3 +27,8 @@ The current marker-store fakes always return a valid `reserved` record, so `Test
 never reaches the release path. `reservedResultError(reserved)` is a belt-and-suspenders check that cannot
 fire when `err == nil`. The round-3 fable commission independently cleared the marker-store semantics + the
 rollback matrix (no post-release protocol write, no double-release). No behavior change needed.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `d2f211d4c908a8ea51d21de466257f458570e4f8062160b192e14f39ba1d29bd`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `d2f211d4c908a8ea51d21de466257f458570e4f8062160b192e14f39ba1d29bd`; original terminal status `fixed`; explicit operator-authorized V1 migration.

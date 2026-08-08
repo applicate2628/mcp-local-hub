@@ -7,7 +7,7 @@ context: deep-audit finding (multi-agent audit, lsp-router × error-propagation 
 
 - **status:** fixed
 - **fixed-by:** PR #498 (`1a027dd5`) - LSP notifications return 202 and forward detached.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # LSP router notification forward returns a transport error status (502/504) or JSON-RPC error envelope to a JSON-RPC notification, violating the documented notifications→202 contract
 

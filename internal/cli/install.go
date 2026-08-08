@@ -40,6 +40,7 @@ func newInstallCmdReal() *cobra.Command {
 	var reconcileHubMode bool
 	var upgrade bool
 	var check bool
+	var noClientConfig bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -62,6 +63,7 @@ Examples:
   mcphub install --server serena --all-clients # every manifest client binding
   mcphub install --server serena --daemon codex # install only one daemon
   mcphub install --server serena --dry-run     # preview actions, change nothing
+  mcphub install --server fetch --no-client-config # materialize daemon only
   mcphub install --all                         # install every shipped manifest
   mcphub install --upgrade                     # stop daemons, copy this binary, restart
 
@@ -103,8 +105,8 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				// than implementing a half-baked preview; the upgrade
 				// flow is short enough that the operator can run
 				// `mcphub stop --all && mcphub status` for a preview.
-				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun {
-					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run")
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || noClientConfig || reconcileHubMode || dryRun {
+					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--no-client-config/--reconcile-hub-mode/--dry-run")
 				}
 				// v0.6 Phase F: the v0.4.x→v0.5.0 forward-migration engine and
 				// the `--rollback-to-legacy` demotion path are deleted (there
@@ -115,6 +117,20 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				// and the fresh-install binary-copy fallback (no state on
 				// disk). Decision tree in dispatchUpgrade.
 				return dispatchUpgrade(cmd)
+			}
+			if noClientConfig {
+				if server == "" {
+					return fmt.Errorf("--no-client-config requires --server")
+				}
+				if strings.TrimSpace(clientsFlag) != "" || allClients {
+					return fmt.Errorf("--no-client-config is mutually exclusive with --clients/--all-clients")
+				}
+				if all {
+					return fmt.Errorf("--no-client-config is mutually exclusive with --all")
+				}
+				if reconcileHubMode {
+					return fmt.Errorf("--no-client-config is mutually exclusive with --reconcile-hub-mode")
+				}
 			}
 			// codex bot phase5 r3 P1 closure on PR #160:
 			// --reconcile-hub-mode runs the bidirectional install
@@ -150,7 +166,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if server == "" {
 					return fmt.Errorf("--check requires --server")
 				}
-				if all || daemonFilter != "" {
+				if all || (daemonFilter != "" && !noClientConfig) {
 					return fmt.Errorf("--check is mutually exclusive with --all/--daemon")
 				}
 				// --check must report on the SAME client scope the install it
@@ -161,8 +177,10 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					return err
 				}
 				rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{
-					ClientsInclude:    include,
-					IncludeAllClients: allClients,
+					DaemonFilter:           daemonFilter,
+					ClientsInclude:         include,
+					IncludeAllClients:      allClients,
+					SkipClientConfigWrites: noClientConfig,
 				})
 				if rerr != nil {
 					return rerr
@@ -178,15 +196,17 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			//   3. Non-interactive without canonical dir on PATH —
 			//      return the guidance error (preflight would produce
 			//      the same message).
-			if _, err := exec.LookPath(mcphubShortName); err != nil {
-				switch {
-				case targetDirOnPath():
-					if err := Bootstrap(cmd.OutOrStdout()); err != nil {
-						return err
-					}
-				default:
-					if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
-						return err
+			if !dryRun {
+				if _, err := exec.LookPath(mcphubShortName); err != nil {
+					switch {
+					case targetDirOnPath():
+						if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+							return err
+						}
+					default:
+						if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -239,9 +259,10 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				return err
 			}
 			rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{
-				DaemonFilter:      daemonFilter,
-				ClientsInclude:    include,
-				IncludeAllClients: allClients,
+				DaemonFilter:           daemonFilter,
+				ClientsInclude:         include,
+				IncludeAllClients:      allClients,
+				SkipClientConfigWrites: noClientConfig,
 			})
 			if rerr != nil {
 				return rerr
@@ -251,13 +272,14 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			}
 			a := api.NewAPI()
 			return a.Install(api.InstallOpts{
-				Server:            server,
-				DaemonFilter:      daemonFilter,
-				ClientsInclude:    include,
-				IncludeAllClients: allClients,
-				DryRun:            dryRun,
-				Writer:            cmd.OutOrStdout(),
-				GUIPort:           resolveInstallGUIPort(),
+				Server:                 server,
+				DaemonFilter:           daemonFilter,
+				ClientsInclude:         include,
+				IncludeAllClients:      allClients,
+				SkipClientConfigWrites: noClientConfig,
+				DryRun:                 dryRun,
+				Writer:                 cmd.OutOrStdout(),
+				GUIPort:                resolveInstallGUIPort(),
 			})
 		},
 	}
@@ -265,6 +287,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
 	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli)")
 	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
+	c.Flags().BoolVar(&noClientConfig, "no-client-config", false, "materialize the selected server daemon(s) without reading or writing MCP client configs")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	c.Flags().BoolVar(&all, "all", false, "install every manifest under servers/")
 	c.Flags().BoolVar(&reconcileHubMode, "reconcile-hub-mode", false,
@@ -1300,41 +1323,11 @@ func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
 	return results, nil
 }
 
-// upgradeNoClientWriteSentinel is a single empty-string entry passed as
-// InstallOpts.ClientsInclude to materialize a server's supervisor-intent rows
-// WITHOUT rewriting any client config during the legacy-scheduler upgrade
-// migration.
-//
-// bot r33 P2 closure on PR #288: in the legacy migration path,
-// upgradeInstallServer is used ONLY to absorb matched legacy scheduler daemons
-// into supervisor intent AFTER the binary copy — it must NOT touch client
-// configs (the pre-v0.6 upgrade only stopped/copied/restarted daemons). An
-// empty/nil ClientsInclude makes api.installClientPredicate fall back to
-// clients.DefaultInstallClientNames() (claude-code, codex-cli), so the
-// migration would ADD/OVERWRITE those clients' entries even for an operator who
-// installed only an opt-in client or hand-customized those configs.
-//
-// installClientPredicate's contract (internal/api/install.go) is the in-scope
-// lever: when ClientsInclude is NON-empty it is used verbatim, and each entry
-// that trims to "" is silently dropped BEFORE the unknown-client check — the
-// same empty-entry tolerance parseInstallClientsFlag relies on. A single ""
-// entry therefore yields a non-empty slice (len 1 → not the default branch)
-// whose selected-client set is empty → zero ClientUpdates in the plan, while
-// the supervisor-intent / scheduler / daemon materialization (built
-// unconditionally before the client loop) still runs.
-//
-// Scope note: the cleanest fix would be a named api-side knob (e.g.
-// InstallOpts.SkipClientConfig bool); that change lives in internal/api which
-// is out of this lane's file scope, so this preserve-no-client-writes sentinel
-// is the in-scope equivalent. Tracked as a follow-up to replace the sentinel
-// with an explicit option.
-var upgradeNoClientWriteSentinel = []string{""}
-
 // upgradeServerInstallFn is a narrow test seam ONE level below
 // upgradeInstallServerFn: it intercepts the api.InstallOpts the production
 // upgradeInstallServer body constructs, so a test can assert the call site
-// passes the no-client-write sentinel (FIX 3, bot r33 P2 on PR #288) without
-// driving a real install. nil → the real api.NewAPI().Install.
+// passes the typed no-client-write policy without driving a real install.
+// nil → the real api.NewAPI().Install.
 var upgradeServerInstallFn func(api.InstallOpts) error
 
 func resolveInstallGUIPort() int {
@@ -1358,10 +1351,10 @@ func upgradeInstallServer(server string, w io.Writer) error {
 		return upgradeInstallServerFn(server, w)
 	}
 	opts := api.InstallOpts{
-		Server:         server,
-		ClientsInclude: upgradeNoClientWriteSentinel,
-		Writer:         w,
-		GUIPort:        resolveInstallGUIPort(),
+		Server:                 server,
+		SkipClientConfigWrites: true,
+		Writer:                 w,
+		GUIPort:                resolveInstallGUIPort(),
 	}
 	if upgradeServerInstallFn != nil {
 		return upgradeServerInstallFn(opts)

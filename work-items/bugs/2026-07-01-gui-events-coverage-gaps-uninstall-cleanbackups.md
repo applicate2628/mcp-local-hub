@@ -6,7 +6,7 @@ fixed: 2026-07-03 — feat/audit-trail-coverage-completion (e7c828a0). DELETE /a
 
 - **status:** fixed
 - **fixed-by:** PR #491 (`aa865b6b`) - uninstall/install-all audit; backup-clean covered by PR #476.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # gui-events.log operator-action coverage gaps: uninstall, install-all
 

@@ -1,5 +1,5 @@
 ---
-status: closed
+status: candidate
 context: deep-review-findings
 date: 2026-06-30
 closed: 2026-07-01

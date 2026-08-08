@@ -178,10 +178,13 @@ type InstallOpts struct {
 	DaemonFilter      string   // empty = all daemons in the manifest
 	ClientsInclude    []string // empty = default install clients
 	IncludeAllClients bool
-	DryRun            bool
-	Writer            io.Writer // progress output destination; nil = os.Stderr
-	GUIPort           int       // live GUI/router port injected by CLI/GUI; zero means unknown
-	SymlinkConsents   []ResolvedSymlinkConsent
+	// SkipClientConfigWrites materializes daemon/supervisor intent while
+	// producing no client-config updates. It conflicts with client selectors.
+	SkipClientConfigWrites bool
+	DryRun                 bool
+	Writer                 io.Writer // progress output destination; nil = os.Stderr
+	GUIPort                int       // live GUI/router port injected by CLI/GUI; zero means unknown
+	SymlinkConsents        []ResolvedSymlinkConsent
 }
 
 // InstallAllOpts controls a bulk install.
@@ -271,7 +274,7 @@ func (a *API) Install(opts InstallOpts) error {
 		return err
 	}
 	// 2. Preflight.
-	if err := Preflight(m, opts.DaemonFilter); err != nil {
+	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
 	// 3. Build plan (opts resolved by the shared single owner).
@@ -420,7 +423,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	if err := Preflight(m, opts.DaemonFilter); err != nil {
+	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
 	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
@@ -449,6 +452,7 @@ func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
 		DaemonFilter:           opts.DaemonFilter,
 		ClientsInclude:         opts.ClientsInclude,
 		IncludeAllClients:      opts.IncludeAllClients,
+		SkipClientConfigWrites: opts.SkipClientConfigWrites,
 		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
 		GUIPort:                opts.GUIPort,
 	}
@@ -472,7 +476,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	if err := Preflight(m, opts.DaemonFilter); err != nil {
+	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
 	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
@@ -494,7 +498,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // override is a convenience layer; it must never make `mcphub install`
 // harder to complete than it was before the feature existed.
 func (a *API) resolveDefaultClientsOverride(opts InstallOpts) []string {
-	if opts.IncludeAllClients || len(opts.ClientsInclude) > 0 {
+	if opts.SkipClientConfigWrites || opts.IncludeAllClients || len(opts.ClientsInclude) > 0 {
 		return nil
 	}
 	override, err := a.DefaultInstallClientNamesOverride()
@@ -502,6 +506,17 @@ func (a *API) resolveDefaultClientsOverride(opts InstallOpts) []string {
 		return nil
 	}
 	return override
+}
+
+// installScopeFromOpts is the single InstallOpts -> AdmissionScope adapter used
+// by every install entry point before planning or mutation.
+func installScopeFromOpts(opts InstallOpts) AdmissionScope {
+	return AdmissionScope{
+		DaemonFilter:           opts.DaemonFilter,
+		ClientsInclude:         opts.ClientsInclude,
+		IncludeAllClients:      opts.IncludeAllClients,
+		SkipClientConfigWrites: opts.SkipClientConfigWrites,
+	}
 }
 
 // statusInternalDialFn is the test seam for the IPC status dial used by
@@ -1589,6 +1604,9 @@ type BuildPlanOpts struct {
 	DaemonFilter      string
 	ClientsInclude    []string
 	IncludeAllClients bool
+	// SkipClientConfigWrites selects no client bindings while preserving the
+	// daemon and supervisor-intent portions of the plan.
+	SkipClientConfigWrites bool
 
 	// DefaultClientsOverride, when non-empty, REPLACES the compile-time
 	// clients.DefaultInstallClientNames() fallback used when ClientsInclude
@@ -1624,6 +1642,14 @@ func BuildPlan(m *config.ServerManifest, daemonFilter string) (*Plan, error) {
 // does not imply a full-server restart. An unknown DaemonFilter or client
 // selector is an error surfaced before any side effects.
 func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, error) {
+	if err := validateInstallScopeApplicability(m, AdmissionScope{
+		DaemonFilter:           opts.DaemonFilter,
+		ClientsInclude:         opts.ClientsInclude,
+		IncludeAllClients:      opts.IncludeAllClients,
+		SkipClientConfigWrites: opts.SkipClientConfigWrites,
+	}); err != nil {
+		return nil, err
+	}
 	// G6 remote-http branch (sub-PR 2): no daemons, no scheduler
 	// tasks, no per-daemon ports. Bind URL + expanded Headers
 	// directly into each client's config; the client connects
@@ -1750,6 +1776,12 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 }
 
 func installClientPredicate(opts BuildPlanOpts) (func(string) bool, error) {
+	if opts.SkipClientConfigWrites {
+		if opts.IncludeAllClients || len(opts.ClientsInclude) > 0 {
+			return nil, fmt.Errorf("SkipClientConfigWrites is mutually exclusive with ClientsInclude/IncludeAllClients")
+		}
+		return func(string) bool { return false }, nil
+	}
 	if opts.IncludeAllClients && len(opts.ClientsInclude) > 0 {
 		return nil, fmt.Errorf("IncludeAllClients is mutually exclusive with ClientsInclude")
 	}
@@ -1915,7 +1947,11 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 // daemons (already running from a prior install) occupy their assigned ports,
 // even though those ports are not being touched by the current invocation.
 func Preflight(m *config.ServerManifest, daemonFilter string) error {
-	for _, finding := range AdmissionCheck(m, scopeForPreflight(daemonFilter)) {
+	return preflightWithScope(m, scopeForPreflight(daemonFilter))
+}
+
+func preflightWithScope(m *config.ServerManifest, scope AdmissionScope) error {
+	for _, finding := range AdmissionCheck(m, scope) {
 		if !finding.Optional {
 			// SEAM-B: carry the actionable Fix (not just Reason) so the CLI
 			// install render can surface a guided fix. Error() keeps Reason as

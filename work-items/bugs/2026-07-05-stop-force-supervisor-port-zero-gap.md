@@ -11,7 +11,7 @@ depends-on: 2026-07-05-unify-port-resolution-owner
 
 - **status:** fixed
 - **fixed-by:** PR #505 (`e306cbd7`) - force-stop resolves `api.EffectiveDaemonPort`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # force-stop shares the Port=0 kill-by-port gap
 

@@ -78,13 +78,33 @@ type AdmissionScope struct {
 	// This does NOT reopen the "validate everything" behavior readiness
 	// deliberately avoids (readiness.go, Codex #377 r7): the opt-in bindings are
 	// validated only when the CALLER explicitly asked for them.
-	ClientsInclude    []string
-	IncludeAllClients bool
+	ClientsInclude         []string
+	IncludeAllClients      bool
+	SkipClientConfigWrites bool
+}
+
+// validateInstallScopeApplicability rejects install modes that cannot produce
+// the local state they promise. It is side-effect free and runs before any
+// admission probe.
+func validateInstallScopeApplicability(m *config.ServerManifest, scope AdmissionScope) error {
+	if m != nil && scope.SkipClientConfigWrites && m.Transport == config.TransportRemoteHTTP {
+		return fmt.Errorf("manifest %s: transport=remote-http has no local daemon to materialize; SkipClientConfigWrites is not applicable", m.Name)
+	}
+	return nil
 }
 
 func AdmissionCheck(m *config.ServerManifest, scope AdmissionScope) []AdmissionFinding {
 	if m == nil {
 		return nil
+	}
+	if err := validateInstallScopeApplicability(m, scope); err != nil {
+		return []AdmissionFinding{{
+			ID:       "install-scope-applicability",
+			Name:     "install scope",
+			Reason:   err.Error(),
+			Fix:      "Remove --no-client-config or use a local daemon-backed manifest.",
+			Optional: false,
+		}}
 	}
 
 	var findings []AdmissionFinding

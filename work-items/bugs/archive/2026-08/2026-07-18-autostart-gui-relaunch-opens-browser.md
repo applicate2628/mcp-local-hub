@@ -64,3 +64,8 @@ this — Windows-only.)
 The CURRENTLY-running GUI on this host was relaunched as `mcphub gui` (no
 `--no-browser`) before the task was fixed, so it already opened its browser; it
 serves fine. Its NEXT relaunch uses the corrected task action.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `b94472f5cac4c1969ccf91b3519f631d1214424bc0e6499f410335d679408e51`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `b94472f5cac4c1969ccf91b3519f631d1214424bc0e6499f410335d679408e51`; original terminal status `fixed`; explicit operator-authorized V1 migration.
