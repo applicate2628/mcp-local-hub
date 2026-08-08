@@ -239,6 +239,48 @@ func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
 	}
 }
 
+// TestGuiCmd_TrayShownByDefaultOnBareLaunch pins operator requirement #2: a
+// bare `mcphub` (no flags) must show the system-tray icon on a normal
+// launch.
+//
+// cmd/mcphub/main.go's shouldAutoLaunchGUIForArgs routes a bare invocation to
+// EXACTLY `gui` with no other argv appended (see TestShouldAutoLaunchGUIForArgs
+// in cmd/mcphub/main_test.go), so the tray is shown on that path if and only
+// if the `--no-tray` flag defaults to false and stays false when no flags are
+// parsed at all -- which is exactly the argv shape a bare launch produces.
+//
+// Two assertions, deliberately not one: DefValue pins the flag DECLARATION
+// (BoolVar(&noTray, "no-tray", false, ...)); the parse-then-GetBool pins that
+// nothing between declaration and the noTray variable that
+// startGuiServerWithStartup actually reads (guarding `if !noTray { spawn tray }`,
+// internal/cli/gui.go) silently flips the resolved value for an empty argv.
+func TestGuiCmd_TrayShownByDefaultOnBareLaunch(t *testing.T) {
+	cmd := newGuiCmdReal()
+
+	noTrayFlag := cmd.Flags().Lookup("no-tray")
+	if noTrayFlag == nil {
+		t.Fatal("--no-tray flag not registered on the gui command")
+	}
+	if noTrayFlag.DefValue != "false" {
+		t.Fatalf("--no-tray default is %q, want \"false\": a bare `mcphub` (which cmd/mcphub/main.go "+
+			"routes to exactly `gui`, no other flags) must show the tray on a normal launch "+
+			"(operator requirement #2)", noTrayFlag.DefValue)
+	}
+
+	// Exercise the exact argv shape a bare invocation produces: zero flags.
+	if err := cmd.Flags().Parse(nil); err != nil {
+		t.Fatalf("parse empty argv: %v", err)
+	}
+	noTray, err := cmd.Flags().GetBool("no-tray")
+	if err != nil {
+		t.Fatalf("GetBool(no-tray): %v", err)
+	}
+	if noTray {
+		t.Fatal("--no-tray resolved true with no flags passed; a bare `mcphub` would silently " +
+			"suppress the tray, contradicting operator requirement #2")
+	}
+}
+
 func TestSerenaBackendLossReconcileTicker_NilTriggerWaitsForInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
