@@ -246,45 +246,40 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 	})
 }
 
-// SetSerenaRouterReadOnly wires the resolver + session router for a
-// READ-ONLY forwarder — the standalone `mcphub route` front daemon
-// (internal/cli/route.go), which must never write the registry or
-// supervisor-intent (Increment-1 decision record's non-negotiable
-// constraint; bot/architect review finding F1).
+// SetSerenaRouterReadOnly wires the resolver and session router for the
+// standalone `mcphub route` front daemon's restricted control-plane
+// composition. The constructor exposes no registry writer, client-config
+// writer, auto-register capability, cutover primitive, general
+// supervisor-intent writer, or GUI-owned shared-log sink.
 //
-// Unlike SetSerenaRouterProduction, AutoRegisterFn and WakeIdleFn are BOTH
-// left nil:
-//   - AutoRegisterFn nil preserves the pre-Phase-5 back-compat behavior
-//     (writeWorkspaceNotFound / attemptSerenaAutoRegister's documented nil
-//     guard): an unregistered-workspace tool-call gets an immediate 503
-//     "register workspace first" instead of calling
-//     api.AutoRegisterSerenaWorkspace (which allocates a pool port and
-//     mutates workspaces.yaml + supervisor-intent). New-workspace
-//     registration is a GUI concern.
-//   - WakeIdleFn nil is required, not merely conservative: verified via
-//     internal/api/serena_idle_shutdown.go's WakeIdleSerenaDaemon, an idle
-//     wake CLEARS the daemon's IntentReasonIdle stop on the unified
-//     supervisor-intent stops sub-block (ClearStopIntentIfReason) — a real
-//     supervisor-intent WRITE, reachable whenever a client happens to hit an
-//     idle-stopped daemon through this port. The steady-state (no active
-//     stop) path is write-free, but "usually read-only" is not the
-//     guarantee this constraint demands, so the seam is nilled outright.
-//     serena_router.go's recordAndWakeToolCall already treats a nil
-//     WakeIdleFn as "skip the wake, forward as-is" (pre-existing back-compat
-//     for partially-wired routing), so a request to an idle-stopped daemon
-//     via the route daemon fails loud (502/504) rather than resurrecting it
-//     — waking an idle-stopped daemon stays a GUI-owned action.
+// AutoRegisterFn remains nil, so an unregistered workspace receives the
+// existing 503 "register workspace first" response without mutating
+// workspaces.yaml or supervisor-intent. WakeIdleFn is the sole narrow
+// supervisor-intent capability: it is bound only to
+// api.WakeIdleSerenaDaemon. At the pre-forward request cutover that owner may
+// compare-and-clear the current stop only when its reason is
+// api.IntentReasonIdle; operator, user-disabled, chronic-failure, clock-skew,
+// and raced replacement reasons are preserved, reconciliation/readiness must
+// complete before forwarding, and refusal returns 503 without forwarding.
 //
-// This function does NOT change SetSerenaRouterProduction or any existing
-// GUI wiring — it is a new, additive construction path.
+// Route-owned session-expiry and Serena backend-loss reconciliation are
+// composed by internal/cli/runRoute, not by this constructor. They are
+// context-bounded and mutate only the route process's in-memory stores.
+//
+// This function does not change SetSerenaRouterProduction or existing GUI
+// wiring; its name is retained for source compatibility.
 func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResolver, sessions *serena_routing.SessionRouter) {
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
+	wakeAPI := api.NewAPI()
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: resolver,
 		Sessions: sessions,
-		// AutoRegisterFn and WakeIdleFn deliberately nil — see doc comment.
+		// AutoRegisterFn deliberately nil — see doc comment.
+		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
+			return wakeAPI.WakeIdleSerenaDaemon(ctx, taskName, port, who)
+		},
 		//
 		// AuditFn (P1-1 fix, adversarial cross-family review): every other
 		// caller leaves this nil so serenaRouterHandler's own default falls

@@ -17,8 +17,11 @@ serena/LSP URLs to a single-owned `mcp_front.port` (default = DefaultRouteDaemon
 GUI's 9125. The GUI keeps 9125 for its web UI; single-instance + RestartV3 stay
 untouched. A fail-closed `mcphub install --reconcile-mcp-front` performs the one-time,
 reversible client rewrite; both surfaces serve concurrently for an unbounded backward-
-compat window. Route stays READ-ONLY (F1 stands); auto-register-on-miss on client
-traffic becomes an explicit 503 (gated regression), restoration deferred to a follow-up (2b).
+compat window. Route keeps its restricted control-plane composition: auto-register-on-miss
+on client traffic becomes an explicit 503 (gated regression), while the existing
+reason-guarded Serena idle wake is permitted only to compare-and-clear an active idle
+stop and refuses operator/chronic stops before forwarding; restoration is deferred to
+a follow-up (2b).
 
 Lead accepted Mechanism B over Mechanism A (2026-07-25): B avoids the fragile
 single-instance/RestartV3/port-resolution rework + a lock-less cross-process collision
@@ -64,7 +67,7 @@ separate in-process GUI listener); tracked separately, pending open probe P3.
 - 2d (deferred): retire the redundant GUI-side serena/LSP mounts, after 2b.
 
 ## The I6 regression (explicit, gated — the key tradeoff)
-After 2a, clients hit the READ-ONLY route, so a brand-new (unregistered) workspace's
+After 2a, clients hit the restricted route, so a brand-new (unregistered) workspace's
 first serena tool-call returns HTTP 503 "register workspace first" instead of
 auto-registering. This is intended + gated (503, not silent), and restored by 2b.
 Shipping 2a WITHOUT 2b regresses new-workspace auto-registration for the operator's

@@ -208,16 +208,18 @@ func (a *API) prepareInstallClientRoutingDecision(opts *InstallOpts) (ClientRout
 		opts.GUIPort = opts.RoutingTarget.Port
 		return ExactTarget(*opts.RoutingTarget), nil
 	}
+	target, err := a.ResolveClientRoutingTarget()
+	if err != nil {
+		return ClientRoutingAuthorityRequest{}, err
+	}
 	if opts.GUIPort != 0 {
 		legacy := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: opts.GUIPort}
 		if err := ValidateClientRoutingTarget(legacy); err != nil {
 			return ClientRoutingAuthorityRequest{}, err
 		}
-		return StableGUICompatibility(), nil
-	}
-	target, err := a.ResolveClientRoutingTarget()
-	if err != nil {
-		return ClientRoutingAuthorityRequest{}, err
+		if target.Mode == MCPFrontRoutingTargetGUI {
+			return StableGUICompatibility(), nil
+		}
 	}
 	opts.RoutingTarget = &target
 	opts.GUIPort = target.Port
@@ -1242,11 +1244,37 @@ func routeFrontHealthProbe(port int) *HealthProbe {
 
 const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
 
-func singleHealthProbe(port int) *HealthProbe {
+const healthProbeSessionCleanupTimeout = 3 * time.Second
+
+var healthProbeHTTPClient = func() *http.Client {
+	return &http.Client{Timeout: 3 * time.Second}
+}
+
+func cleanupHealthProbeSession(client *http.Client, url, sessionID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), healthProbeSessionCleanupTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Mcp-Session-Id", sessionID)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	return nil
+}
+
+func singleHealthProbe(port int) (probe *HealthProbe) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	url := clients.HubLoopbackURL(port, "/mcp")
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := healthProbeHTTPClient()
 
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcphub-health","version":"1"}}}`
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(initBody))
@@ -1260,6 +1288,23 @@ func singleHealthProbe(port int) *HealthProbe {
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return &HealthProbe{Err: fmt.Sprintf("initialize: HTTP %d", resp.StatusCode)}
+	}
+	if sessionID != "" {
+		defer func() {
+			if err := cleanupHealthProbeSession(client, url, sessionID); err != nil {
+				cleanupErr := "MCP_HEALTH_SESSION_CLEANUP_FAILED: " + err.Error()
+				if probe == nil {
+					probe = &HealthProbe{Err: cleanupErr}
+					return
+				}
+				probe.OK = false
+				if probe.Err == "" {
+					probe.Err = cleanupErr
+				} else {
+					probe.Err += "; " + cleanupErr
+				}
+			}
+		}()
 	}
 
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`

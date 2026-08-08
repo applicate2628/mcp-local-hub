@@ -711,18 +711,20 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	entries := map[string]*ScanEntry{}
 	presence := probeClientConfigPresence(opts)
 	paths := opts.effectiveConfigPaths()
-	// Sub-increment 2a: a serena client entry may now legitimately point at
-	// EITHER the GUI's live port (opts.GUIPort) OR the settings-owned
-	// mcp_front.port (once an operator has run `mcphub install
-	// --reconcile-mcp-front`) — both are the SAME /serena/mcp router shape,
-	// just on two different ports. classify() must recognize both as
-	// via-hub, or a correctly-routed post-reconcile client would misclassify
-	// as a stale/external entry (the exact serena-client-revert-on-manifest-
-	// sync read-side defect this file already guards against for the GUI
-	// port alone). Best-effort/graceful: a settings-read failure degrades to
-	// the compiled default rather than failing the whole scan — this is a
-	// read-only classification widening, not a write path.
-	mcpFrontPort := a.MCPFrontPortOrDefault()
+	// A Serena router URL has at most two admitted live candidates: the GUI
+	// listener supplied by this scan caller, and a settled front routing target.
+	// Requested mcp_front.port is deliberately not a classification input: it
+	// can drift before the routing epoch admits a listener.
+	admittedFrontPort := 0
+	if target, targetErr := a.ResolveClientRoutingTarget(); targetErr == nil {
+		if target.Mode == MCPFrontRoutingTargetFront {
+			admittedFrontPort = target.Port
+		}
+	} else {
+		_ = LogHubMcpEvent("warn", "scan-mcp-front-target-unavailable", map[string]any{
+			"reason": scanMCPFrontTargetUnavailableReason(targetErr),
+		})
+	}
 	// §9.2 drift-prevention: ADJUST the generic per-client presence verdict for
 	// any client with a presencePostProbes hook, dispatched through the registry
 	// instead of inlining a named client. Today only MiMoCode registers one — the
@@ -808,7 +810,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// loopback entry that backend classifies "external" must not render
 		// as a green via-hub cell).
 		e.DaemonPorts = manifestCache.daemonPorts(name)
-		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort, mcpFrontPort)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort, admittedFrontPort)
 		// Managed is the explicit hub-routed flag — set true iff the
 		// classifier landed on "via-hub". Keeping it derived from Status (one
 		// owner) avoids a second hub-detection path drifting out of sync with
@@ -834,7 +836,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 			ClientPresence: map[string]ClientEntry{},
 		}
 		e.DaemonPorts = manifestCache.daemonPorts(name)
-		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort, mcpFrontPort)
+		e.Status = classify(e, name, manifestNames, e.DaemonPorts, opts.GUIPort, admittedFrontPort)
 		e.Managed = e.Status == "via-hub" // always false here (empty presence), kept for symmetry with the main loop.
 		entries[name] = e
 	}
@@ -2021,7 +2023,20 @@ func loopbackPortMatchesDaemon(endpoint string, daemonPorts []int) bool {
 	return false
 }
 
-func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int, guiPort int, mcpFrontPort int) string {
+func scanMCPFrontTargetUnavailableReason(err error) string {
+	switch {
+	case errors.Is(err, ErrMCPFrontTransitionActive):
+		return "transition-active"
+	case errors.Is(err, ErrMCPFrontRoutingPortUnbound):
+		return "port-unbound"
+	case errors.Is(err, ErrMCPFrontTargetInvalid):
+		return "target-invalid"
+	default:
+		return "read-failed"
+	}
+}
+
+func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPorts []int, guiPort int, admittedFrontPort int) string {
 	if perSessionServers[name] {
 		return "per-session"
 	}
@@ -2029,10 +2044,9 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	// knowledge widening may only ADD certainty, never SUBTRACT a prior
 	// degrade. IsLiveSerenaRouterURLAnyPort's own "all-ports-unknown ->
 	// degrade to shape-only" rule requires EVERY supplied port to be <=0 —
-	// but mcpFrontPort is caller-resolved via MCPFrontPortOrDefault(), which
-	// NEVER returns 0 (it falls back to DefaultMCPFrontPort). So on the CLI
+	// but admittedFrontPort is known only after a stable front epoch. So on the CLI
 	// scan path (guiPort==0, the caller has NO live-port context at all),
-	// mcpFrontPort alone was unconditionally making the port "known",
+	// an unconditional second port alone would make the port "known",
 	// silently REMOVING the pre-2a degrade for the CLI's most common case: a
 	// serena client still on today's live GUI port (:9125), which is the
 	// default/dormant state on EVERY host until an operator explicitly runs
@@ -2041,14 +2055,14 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 	// bucket list (internal/cli/scan.go's scanStatusBuckets) — the
 	// operator's serena row vanished from the CLI table entirely.
 	//
-	// Fix: mcpFrontPort only gets to act as a genuine second known-live-port
+	// Fix: admittedFrontPort only gets to act as a genuine second known-live-port
 	// candidate when guiPort is ALSO known (guiPort>0 — the GUI's own scan
 	// call sites, which always pass s.Port()). When guiPort<=0, treat
-	// mcpFrontPort as unknown too, restoring the exact pre-2a degrade for
+	// admittedFrontPort as unknown too, restoring the exact pre-2a degrade for
 	// the CLI path (any serena-router-shaped URL is trusted, on ANY port,
 	// dormant :9125 or post-reconcile :9137 alike — matching
 	// IsLiveSerenaRouterURL's own single-argument guiPort<=0 contract).
-	effectiveMCPFrontPort := mcpFrontPort
+	effectiveMCPFrontPort := admittedFrontPort
 	if guiPort <= 0 {
 		effectiveMCPFrontPort = 0
 	}
@@ -2093,8 +2107,8 @@ func classify(e *ScanEntry, name string, manifestNames map[string]bool, daemonPo
 			switch {
 			case IsSerenaServer(name) && IsLiveSerenaRouterURLAnyPort(c.Endpoint, guiPort, effectiveMCPFrontPort):
 				// serena's canonical client URL is the /serena/mcp router on
-				// EITHER the LIVE GUI port OR the settings-owned mcp_front.port
-				// (sub-increment 2a) — recognize both as via-hub regardless of
+				// EITHER the LIVE GUI port OR the settled admitted front port —
+				// recognize both as via-hub regardless of
 				// the manifest's legacy per-daemon port (9121). Without this, a
 				// correctly-routed serena entry parses its port (the GUI port or
 				// the front-daemon port) as not-a-daemon-port and is misclassified

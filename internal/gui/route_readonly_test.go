@@ -1,10 +1,12 @@
 // internal/gui/route_readonly_test.go
 //
 // Falsifying test for bot/architect review finding F1 (Increment-1,
-// 2026-07-25): the standalone `mcphub route` front daemon must be READ-ONLY
-// on the registry + supervisor-intent — an unregistered-but-trusted
-// workspace path must fail loud (503) WITHOUT creating a registry row,
-// because new-workspace registration stays a GUI-owned concern.
+// 2026-07-25): the standalone `mcphub route` front daemon uses a restricted
+// control-plane composition. An unregistered-but-trusted workspace path must
+// fail loud (503) without creating a registry row or client configuration;
+// new-workspace registration stays GUI-owned. This path cannot reach the sole
+// supervisor-intent capability because no workspace/task resolves for the
+// request-scoped IntentReasonIdle compare-and-clear.
 //
 // Mutation-proven (see the Increment-1 F1 fix report for the terminal
 // transcript): temporarily re-wiring SetSerenaRouterReadOnly's AutoRegisterFn
@@ -26,10 +28,14 @@ import (
 	"encoding/json"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
@@ -117,6 +123,90 @@ func TestSetSerenaRouterReadOnly_UnregisteredWorkspace_Returns503WithNoRegistryM
 	}
 }
 
+func TestSetSerenaRouterReadOnly_WiresIdleWakeWithoutAutoRegister(t *testing.T) {
+	resetSerenaRouterTestSeam(t)
+	serenaRouterTestSeam = nil
+
+	root := t.TempDir()
+	regPath := filepath.Join(root, "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save empty registry: %v", err)
+	}
+	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath)
+	sessions := serena_routing.NewSessionRouter()
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s.SetSerenaRouterReadOnly(resolver, sessions)
+
+	deps := s.serenaRouterDepsProd()
+	if deps == nil || deps.WakeIdleFn == nil {
+		t.Fatal("read-only router must wire the reason-guarded idle wake owner")
+	}
+	if deps.AutoRegisterFn != nil {
+		t.Fatal("read-only router must not wire auto-register")
+	}
+	if deps.AuditFn == nil {
+		t.Fatal("read-only router must retain its non-shared-state audit sink")
+	}
+}
+
+func TestSetSerenaRouterReadOnly_OperatorStopReturns503WithoutForward(t *testing.T) {
+	resetSerenaRouterTestSeam(t)
+	serenaRouterTestSeam = nil
+
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	root := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "hardened-root"))
+	ws := makeSerenaWorkspace(t, root, "Trusted")
+	toolFile := writeWorkspaceFile(t, ws, "src", "main.go")
+
+	forwardHits := 0
+	upstream := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		forwardHits++
+	}))
+	defer upstream.Close()
+	_, portText, err := net.SplitHostPort(strings.TrimPrefix(upstream.URL, "http://"))
+	if err != nil {
+		t.Fatalf("upstream port: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse upstream port: %v", err)
+	}
+
+	taskName := "mcp-local-hub-serena-trusted"
+	regPath := filepath.Join(root, "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	if err := reg.PutSerena(api.WorkspaceEntry{
+		WorkspaceKey: api.WorkspaceKey(ws), WorkspacePath: ws, Language: api.SerenaLanguageSentinel,
+		Backend: "serena", Port: port, TaskName: taskName,
+	}); err != nil {
+		t.Fatalf("register workspace: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if err := api.NewAPI().WriteStopIntent(taskName, api.DaemonIntent{
+		Desired: api.IntentDesiredStopped, Reason: api.IntentReasonUserStop, UpdatedAt: time.Now().UTC(),
+	}, "operator"); err != nil {
+		t.Fatalf("seed operator stop: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s.SetSerenaRouterReadOnly(serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath), serena_routing.NewSessionRouter())
+	rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile}), nil)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if forwardHits != 0 {
+		t.Fatalf("upstream forward hits = %d, want 0 after operator-stop refusal", forwardHits)
+	}
+}
+
 // TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedStateFileWrite
 // is the P1-1 falsifying test (adversarial cross-family review of Increment
 // 1): SetSerenaRouterReadOnly left AuditFn nil, so serenaRouterHandler's
@@ -125,7 +215,7 @@ func TestSetSerenaRouterReadOnly_UnregisteredWorkspace_Returns503WithNoRegistryM
 // backend is unreachable (dial refused) wrote a "serena-upstream-unreachable"
 // event to the SHARED <state-dir>/hub-mcp.log (+ its .log.lock sidecar) — a
 // state file the GUI process owns. That is a shared-state WRITE, falsifying
-// this daemon's documented read-only invariant just as surely as a registry
+// this daemon's no-GUI-owned-shared-state invariant just as surely as a registry
 // write would.
 //
 // Unlike TestSetSerenaRouterReadOnly_UnregisteredWorkspace_..., this test
@@ -213,11 +303,11 @@ func TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedS
 
 	after := snapshotTree(t, stateDir)
 	if !reflect.DeepEqual(before, after) {
-		t.Fatalf("state directory %s changed after a registered-workspace, unreachable-backend request via the READ-ONLY route wiring (want ZERO shared-state writes):\nbefore=%v\nafter=%v", stateDir, before, after)
+		t.Fatalf("state directory %s changed after a registered-workspace, unreachable-backend request via the restricted route wiring (want ZERO shared-state writes):\nbefore=%v\nafter=%v", stateDir, before, after)
 	}
 
 	hubLog := filepath.Join(stateDir, "hub-mcp.log")
 	if _, statErr := os.Stat(hubLog); statErr == nil {
-		t.Fatalf("hub-mcp.log exists at %s after a request via the read-only route wiring — the route daemon must never write the GUI-owned shared event log", hubLog)
+		t.Fatalf("hub-mcp.log exists at %s after a request via the restricted route wiring — the route daemon must never write the GUI-owned shared event log", hubLog)
 	}
 }

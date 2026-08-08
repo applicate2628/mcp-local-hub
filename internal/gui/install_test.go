@@ -227,6 +227,59 @@ func (f *fakeInstallBulk) InstallAll(servers []string, guiPort int) []api.Instal
 	return f.results
 }
 
+func TestRealInstallAdaptersCarryBoundGUIPort(t *testing.T) {
+	previousSingle := realInstallerInstall
+	previousAll := realInstallBulkAll
+	previousSubset := realInstallBulkOne
+	t.Cleanup(func() {
+		realInstallerInstall = previousSingle
+		realInstallBulkAll = previousAll
+		realInstallBulkOne = previousSubset
+	})
+
+	const boundPort = 19425
+	var single api.InstallOpts
+	realInstallerInstall = func(opts api.InstallOpts) error {
+		single = opts
+		return nil
+	}
+	if err := (realInstaller{}).Install("serena", boundPort); err != nil {
+		t.Fatalf("single install: %v", err)
+	}
+	if single.Server != "serena" || single.GUIPort != boundPort {
+		t.Fatalf("single opts = %+v, want server serena and GUI port %d", single, boundPort)
+	}
+
+	var all api.InstallAllOpts
+	realInstallBulkAll = func(opts api.InstallAllOpts) []api.InstallResult {
+		all = opts
+		return nil
+	}
+	if got := (realInstallBulkAPI{}).InstallAll(nil, boundPort); got != nil {
+		t.Fatalf("empty-filter results = %+v, want nil", got)
+	}
+	if all.GUIPort != boundPort {
+		t.Fatalf("empty-filter opts = %+v, want GUI port %d", all, boundPort)
+	}
+
+	var subset []api.InstallOpts
+	realInstallBulkOne = func(opts api.InstallOpts) error {
+		subset = append(subset, opts)
+		return nil
+	}
+	if got := (realInstallBulkAPI{}).InstallAll([]string{"serena", "memory"}, boundPort); len(got) != 2 {
+		t.Fatalf("subset results = %+v, want two rows", got)
+	}
+	if len(subset) != 2 {
+		t.Fatalf("subset calls = %d, want 2", len(subset))
+	}
+	for _, opts := range subset {
+		if opts.GUIPort != boundPort {
+			t.Fatalf("subset opts = %+v, want GUI port %d", opts, boundPort)
+		}
+	}
+}
+
 func newInstallAllTestServer(b *fakeInstallBulk) *Server {
 	s := &Server{mux: http.NewServeMux(), installBulk: b, uninstaller: &fakeUninstaller{}}
 	registerInstallRoutes(s)

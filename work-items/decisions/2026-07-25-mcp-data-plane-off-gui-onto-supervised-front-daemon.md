@@ -58,9 +58,17 @@ lock, RestartV3, or any client config.
    explicit deps struct instead of `*gui.Server`.
 2. `internal/gui` keeps a THIN ADAPTER mounting it on `s.mux` — every existing GUI
    serena/LSP test stays green (the behavior-preserving safety net).
-3. New `mcphub route` subcommand: constructs the router deps READ-ONLY (no
-   cutover primitives, no idle/prune/reconcile tickers), binds a SECONDARY port
-   `Q`, serves `/serena/mcp` + `/lsp/<lang>/mcp`.
+3. New `mcphub route` subcommand: constructs restricted router deps (no cutover
+   primitives, auto-register, prune/activity persistence, client-config write,
+   shared-log write, or GUI-owned lifecycle/policy loop), binds a SECONDARY port
+   `Q`, and serves `/serena/mcp` + `/lsp/<lang>/mcp`. Its sole supervisor-intent
+   capability is the existing request-scoped Serena idle wake: at the
+   pre-forward cutover it compare-and-clears only a current `IntentReasonIdle`
+   and refuses operator, user-disabled, chronic-failure, clock-skew, or raced
+   replacement stops without forwarding. The route owns exactly two
+   process-local maintenance mechanisms — session-expiry sweeps and Serena
+   backend-loss reconciliation — which mutate only its in-memory stores and stop
+   with the route process context.
 4. New supervisor-managed daemon descriptor so reconcile spawns `mcphub route` as
    a Job-Object child (may run standalone first to prove survival, then wire).
 5. North-star probe: GUI up → `curl P/serena/mcp` == `curl Q/serena/mcp` (200).
@@ -70,8 +78,11 @@ lock, RestartV3, or any client config.
 
 - Do NOT touch port `P` ownership, the `gui.pidport` single-instance lock, or the
   RestartV3 coordinator/handoff.
-- The front daemon is READ-ONLY on the registry + supervisor-intent (sole writers
-  unchanged). It must NOT reap/install/start the supervisor (cutover stays in GUI).
+- The front daemon is read-only on the registry and has no autonomous or
+  policy-owning supervisor-intent writer. Its sole narrow exception is the
+  existing reason-guarded Serena idle wake; it must NOT reap/install/start the
+  supervisor, auto-register, prune, persist activity, cut over, write client
+  configuration, or write the shared log (cutover stays in GUI).
 - Preserve: the DNS-rebind/same-origin guard admitting Claude Code's no-Origin
   POSTs; the two-separate-registry-handles data-race fix (`gui.go:1027-1035`); the
   LSP notification→202 detach contract; sticky-session bind/lookup/unbind order.

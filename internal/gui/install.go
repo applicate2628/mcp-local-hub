@@ -23,13 +23,19 @@ type installer interface {
 // realManifestCreator / realManifestValidator idiom: empty value receiver,
 // lazy api.NewAPI() per call so tests can swap the interface without
 // needing to stub a constructor. api.API.Install takes InstallOpts; we
-// populate only Server because the GUI Save & Install flow is "install
-// everything declared in the manifest you just saved."
+// populate the server and the bound GUI listener port because the API routing
+// owner needs both facts to select the stable client target.
 type realInstaller struct{}
 
 func (realInstaller) Install(name string, guiPort int) error {
-	_ = guiPort // retained in the handler interface for wire/source compatibility
-	return api.NewAPI().Install(api.InstallOpts{Server: name})
+	return realInstallerInstall(api.InstallOpts{Server: name, GUIPort: guiPort})
+}
+
+// Package-local seams keep the production adapters testable without letting
+// route tests touch the live API state. Production still creates a fresh API
+// per adapter call, matching the established GUI adapter pattern.
+var realInstallerInstall = func(opts api.InstallOpts) error {
+	return api.NewAPI().Install(opts)
 }
 
 // uninstaller is the narrow interface the DELETE /api/install/:server
@@ -70,17 +76,23 @@ type installBulkAPI interface {
 type realInstallBulkAPI struct{}
 
 func (realInstallBulkAPI) InstallAll(servers []string, guiPort int) []api.InstallResult {
-	_ = guiPort // the durable routing target, not listener-local state, owns writes
-	a := api.NewAPI()
 	if len(servers) == 0 {
-		return a.InstallAllWithOpts(api.InstallAllOpts{})
+		return realInstallBulkAll(api.InstallAllOpts{GUIPort: guiPort})
 	}
 	results := make([]api.InstallResult, 0, len(servers))
 	for _, name := range servers {
-		err := a.Install(api.InstallOpts{Server: name})
+		err := realInstallBulkOne(api.InstallOpts{Server: name, GUIPort: guiPort})
 		results = append(results, api.InstallResult{Server: name, Err: err})
 	}
 	return results
+}
+
+var realInstallBulkAll = func(opts api.InstallAllOpts) []api.InstallResult {
+	return api.NewAPI().InstallAllWithOpts(opts)
+}
+
+var realInstallBulkOne = func(opts api.InstallOpts) error {
+	return api.NewAPI().Install(opts)
 }
 
 type installRequest struct {

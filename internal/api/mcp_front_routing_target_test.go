@@ -204,6 +204,43 @@ func TestAllClientWritersConsumeCanonicalRoutingTarget(t *testing.T) {
 	}
 }
 
+func TestPrepareInstallClientRoutingDecision_BoundGUIWinsOnlyInStableGUI(t *testing.T) {
+	t.Run("stable GUI retains the explicitly bound listener", func(t *testing.T) {
+		t.Setenv("LOCALAPPDATA", t.TempDir())
+		opts := InstallOpts{GUIPort: 19425}
+		authority, err := NewAPI().prepareInstallClientRoutingDecision(&opts)
+		if err != nil {
+			t.Fatalf("prepare stable GUI: %v", err)
+		}
+		if authority.kind != clientRoutingAuthorityStableGUICompatibility || opts.GUIPort != 19425 || opts.RoutingTarget != nil {
+			t.Fatalf("stable GUI opts=%+v authority=%+v", opts, authority)
+		}
+	})
+
+	t.Run("settled front replaces the GUI transport hint", func(t *testing.T) {
+		t.Setenv("LOCALAPPDATA", t.TempDir())
+		seedRoutingSettings(t, SettingsPath(), "mcp_front.routing_target: front\nmcp_front.routing_generation: \"9\"\nmcp_front.routing_admitted_port: \"9666\"\nmcp_front.port: \"9777\"\n")
+		opts := InstallOpts{GUIPort: 19425}
+		authority, err := NewAPI().prepareInstallClientRoutingDecision(&opts)
+		if err != nil {
+			t.Fatalf("prepare settled front: %v", err)
+		}
+		want := ClientRoutingTarget{Mode: MCPFrontRoutingTargetFront, Port: 9666, Generation: 9}
+		if authority.kind != clientRoutingAuthorityExact || authority.exact != want || opts.RoutingTarget == nil || *opts.RoutingTarget != want || opts.GUIPort != want.Port {
+			t.Fatalf("settled front opts=%+v authority=%+v, want target %+v", opts, authority, want)
+		}
+	})
+
+	t.Run("transition fails before a client write can be admitted", func(t *testing.T) {
+		t.Setenv("LOCALAPPDATA", t.TempDir())
+		seedRoutingSettings(t, SettingsPath(), "mcp_front.routing_target: front-preparing\nmcp_front.routing_generation: \"9\"\nmcp_front.routing_admitted_port: \"9666\"\n")
+		opts := InstallOpts{GUIPort: 19425}
+		if _, err := NewAPI().prepareInstallClientRoutingDecision(&opts); !errors.Is(err, ErrMCPFrontTransitionActive) {
+			t.Fatalf("prepare transition error=%T %v, want transition-active", err, err)
+		}
+	})
+}
+
 func TestResolveClientRoutingTargetIn(t *testing.T) {
 	tests := []struct {
 		name       string

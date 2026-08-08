@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -106,6 +107,63 @@ func TestScanClassifiesEntries(t *testing.T) {
 	}
 	if got := byName["playwright"].Status; got != "per-session" {
 		t.Errorf("playwright.Status: got %q, want per-session", got)
+	}
+}
+
+func TestScanFrom_UsesSettledAdmittedFrontPortNotRequestedSetting(t *testing.T) {
+	stateRoot := t.TempDir()
+	t.Setenv("LOCALAPPDATA", stateRoot)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateRoot)
+	root := t.TempDir()
+	configPath := filepath.Join(root, "claude.json")
+	manifestDir := filepath.Join(root, "servers")
+	if err := os.MkdirAll(filepath.Join(manifestDir, "serena"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "serena", "manifest.yaml"), []byte("name: serena\nkind: global\ntransport: native-http\ncommand: uvx\ndaemons:\n  - name: default\n    port: 9121\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	writeConfig := func(port int) {
+		t.Helper()
+		payload, err := json.Marshal(map[string]any{"mcpServers": map[string]any{
+			"serena": map[string]any{"type": "http", "url": "http://127.0.0.1:" + strconv.Itoa(port) + "/serena/mcp"},
+		}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(configPath, payload, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status := func() string {
+		t.Helper()
+		result, err := NewAPI().ScanFrom(ScanOpts{ClaudeConfigPath: configPath, ManifestDir: manifestDir, GUIPort: 9125})
+		if err != nil {
+			t.Fatalf("ScanFrom: %v", err)
+		}
+		for _, entry := range result.Entries {
+			if entry.Name == "serena" {
+				return entry.Status
+			}
+		}
+		t.Fatal("ScanFrom omitted serena")
+		return ""
+	}
+
+	seedRoutingSettings(t, SettingsPath(), "mcp_front.routing_target: front\nmcp_front.routing_generation: \"4\"\nmcp_front.routing_admitted_port: \"9137\"\nmcp_front.port: \"9777\"\n")
+	writeConfig(9137)
+	if got := status(); got != "via-hub" {
+		t.Fatalf("settled admitted port status = %q, want via-hub", got)
+	}
+	writeConfig(9777)
+	if got := status(); got != "external" {
+		t.Fatalf("requested but unadmitted port status = %q, want external", got)
+	}
+
+	seedRoutingSettings(t, SettingsPath(), "mcp_front.routing_target: front-preparing\nmcp_front.routing_generation: \"5\"\nmcp_front.routing_admitted_port: \"9137\"\nmcp_front.port: \"9777\"\n")
+	writeConfig(9137)
+	if got := status(); got != "external" {
+		t.Fatalf("transition front candidate status = %q, want external", got)
 	}
 }
 
@@ -979,13 +1037,13 @@ func TestClassify(t *testing.T) {
 		// of these; non-loopback cases can leave it nil.
 		daemonPorts []int
 		guiPort     int
-		// mcpFrontPort is the settings-owned mcp_front.port ScanFrom now also
-		// passes to classify() (sub-increment 2a) — a serena router-shaped
-		// entry on THIS port must classify identically to one on guiPort.
+		// admittedFrontPort is the settled routing epoch's front listener that
+		// ScanFrom passes to classify() — a serena router-shaped entry on THIS
+		// port must classify identically to one on guiPort.
 		// Zero (the default for every pre-existing case) preserves prior
 		// behavior exactly.
-		mcpFrontPort int
-		want         string
+		admittedFrontPort int
+		want              string
 	}{
 		{
 			name:        "per-session takes precedence",
@@ -1245,7 +1303,7 @@ func TestClassify(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts, tc.guiPort, tc.mcpFrontPort)
+			got := classify(tc.entry, tc.serverName, manifests, tc.daemonPorts, tc.guiPort, tc.admittedFrontPort)
 			if got != tc.want {
 				t.Fatalf("classify(%q) = %q, want %q", tc.serverName, got, tc.want)
 			}
@@ -1255,48 +1313,48 @@ func TestClassify(t *testing.T) {
 
 // TestClassify_MCPFrontPort covers sub-increment 2a's widening: a serena
 // router-shaped entry classifies via-hub when its port matches
-// mcpFrontPort even though it does NOT match guiPort (the post-reconcile
+// the admitted front port even though it does NOT match guiPort (the post-reconcile
 // case: an operator ran `mcphub install --reconcile-mcp-front` and the GUI
 // happens to also be live on a different port), and a router-shaped entry
 // matching NEITHER port stays a stale external (unchanged fail-closed
 // behavior — no over-widening to "any router-shaped URL is via-hub").
 // Mutation-proven: dropping the `|| IsLiveSerenaRouterURL(c.Endpoint,
-// mcpFrontPort)` disjunct from classify() makes the first case fail with
+// admitted-front-port disjunct from classify() makes the first case fail with
 // "external", not "via-hub".
 func TestClassify_MCPFrontPort(t *testing.T) {
 	manifests := map[string]bool{"serena": true}
 	cases := []struct {
-		name         string
-		entry        *ScanEntry
-		guiPort      int
-		mcpFrontPort int
-		want         string
+		name              string
+		entry             *ScanEntry
+		guiPort           int
+		admittedFrontPort int
+		want              string
 	}{
 		{
-			name:         "serena router on mcp_front.port, GUI live on a different port -> via-hub",
-			entry:        &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9137/serena/mcp"}}},
-			guiPort:      9125,
-			mcpFrontPort: 9137,
-			want:         "via-hub",
+			name:              "serena router on mcp_front.port, GUI live on a different port -> via-hub",
+			entry:             &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9137/serena/mcp"}}},
+			guiPort:           9125,
+			admittedFrontPort: 9137,
+			want:              "via-hub",
 		},
 		{
-			name:         "serena relay router on mcp_front.port -> via-hub",
-			entry:        &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", RelayURL: "http://127.0.0.1:9137/serena/mcp"}}},
-			guiPort:      9125,
-			mcpFrontPort: 9137,
-			want:         "via-hub",
+			name:              "serena relay router on mcp_front.port -> via-hub",
+			entry:             &ScanEntry{ClientPresence: map[string]ClientEntry{"antigravity": {Transport: "relay", RelayURL: "http://127.0.0.1:9137/serena/mcp"}}},
+			guiPort:           9125,
+			admittedFrontPort: 9137,
+			want:              "via-hub",
 		},
 		{
-			name:         "serena router matching NEITHER guiPort nor mcpFrontPort -> external (stale)",
-			entry:        &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9124/serena/mcp"}}},
-			guiPort:      9125,
-			mcpFrontPort: 9137,
-			want:         "external",
+			name:              "serena router matching neither GUI nor admitted front port -> external (stale)",
+			entry:             &ScanEntry{ClientPresence: map[string]ClientEntry{"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9124/serena/mcp"}}},
+			guiPort:           9125,
+			admittedFrontPort: 9137,
+			want:              "external",
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classify(tc.entry, "serena", manifests, []int{9121}, tc.guiPort, tc.mcpFrontPort)
+			got := classify(tc.entry, "serena", manifests, []int{9121}, tc.guiPort, tc.admittedFrontPort)
 			if got != tc.want {
 				t.Fatalf("classify(serena) = %q, want %q", got, tc.want)
 			}
@@ -1310,21 +1368,12 @@ func TestClassify_MCPFrontPort(t *testing.T) {
 // "guiPort<=0 -> can't prove staleness, trust shape" degrade
 // IsLiveSerenaRouterURL always had for the CLI-unknown-GUI-port case.
 //
-// The regression: production always resolves mcpFrontPort via
-// MCPFrontPortOrDefault(), which NEVER returns 0 (falls back to
-// DefaultMCPFrontPort=9137). Passing that unconditionally into
-// IsLiveSerenaRouterURLAnyPort(endpoint, guiPort, mcpFrontPort) makes
-// mcpFrontPort ALWAYS "known", which — on the CLI scan path (guiPort==0,
-// e.g. `mcphub scan`, internal/cli/scan.go) — silently removed the
-// existing degrade for a client still on TODAY's live GUI port (:9125),
-// the default/dormant state on EVERY host until an operator explicitly
-// runs `mcphub install --reconcile-mcp-front`. That flips via-hub ->
-// external, and "external" is not in the pretty `mcphub scan` output's
-// bucket list, so the operator's serena row would vanish from the CLI
-// table entirely.
+// The guard: even if classify receives an admitted front port, the CLI scan
+// path has no live GUI port. Its port-agnostic Serena-router classification
+// must therefore remain intact.
 //
 // Mutation-proven: temporarily reverting classify()'s effectiveMCPFrontPort
-// gate to pass mcpFrontPort straight through (the pre-fix behavior) makes
+// gate to pass the admitted front port straight through makes
 // every case below fail — see the implementation note for the exact
 // mutation applied and reverted during verification.
 func TestClassify_MCPFrontPort_DoesNotSubtractCLIUnknownPortDegrade(t *testing.T) {
@@ -1365,13 +1414,11 @@ func TestClassify_MCPFrontPort_DoesNotSubtractCLIUnknownPortDegrade(t *testing.T
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			// guiPort:0 (CLI-unknown, matches internal/cli/scan.go's
-			// ScanOpts{} omission) + mcpFrontPort:9137 (what
-			// MCPFrontPortOrDefault() ALWAYS resolves to in production,
-			// persisted or default) — the exact combination production
-			// passes on every un-reconciled host today.
+			// ScanOpts{} omission) plus a non-zero admitted-front argument. The
+			// CLI gate must still discard that second known port.
 			got := classify(tc.entry, "serena", manifests, []int{9121}, 0, 9137)
 			if got != tc.want {
-				t.Fatalf("classify(serena, guiPort=0, mcpFrontPort=9137) = %q, want %q", got, tc.want)
+				t.Fatalf("classify(serena, guiPort=0, admittedFrontPort=9137) = %q, want %q", got, tc.want)
 			}
 		})
 	}

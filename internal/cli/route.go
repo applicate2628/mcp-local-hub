@@ -8,32 +8,32 @@
 // child (a Job-Object daemon like every other MCP backend), always on.
 //
 // Non-negotiable constraints (see the decision record):
+//
 //   - Port P (the GUI's own port, default 9125), every client config, the
 //     gui.pidport single-instance lock, and the RestartV3 coordinator/handoff
 //     are completely untouched by this file.
-//   - READ-ONLY on the registry + supervisor-intent, ENFORCED (not merely
-//     omission-based — bot/architect review finding F1, 2026-07-25): this
-//     command never wires api.SetSerenaAutoRegisterCutoverPrimitives (the
-//     supervisor reap+install+start cutover stays exclusively GUI-owned —
-//     see internal/cli/gui.go's runGUI) and starts no GUI-owned
-//     idle/prune/event-subscriber loop. Its own in-memory session cleanup and
-//     backend-loss reconcile tickers are process-local and do not touch
-//     registry or intent. Omitting the
-//     cutover primitives is NOT sufficient on its own: the router deps'
-//     AutoRegisterFn (new-workspace registration) and WakeIdleFn (which can
-//     clear an idle-stop on supervisor-intent) are both real registry/intent
-//     WRITES reachable on the happy path regardless of the cutover wiring, so
-//     this command constructs the router deps via gui.Server's dedicated
-//     SetSerenaRouterReadOnly / SetLSPRouterReadOnly (AutoRegisterFn/
-//     WakeIdleFn nil) instead of SetSerenaRouterProduction/
-//     SetLSPRouterProduction, and sets gui.Config.ReadOnlyRouterMode so the
-//     one remaining write call site independent of deps wiring
-//     (maybePersistSerenaActivity's debounced registry LastToolsCallAt
-//     write, internal/gui/serena_idle_sweeper.go) is also gated off. An
-//     unregistered-workspace tool-call therefore fails loud with a 503
-//     "register workspace first" — registration and activity-persistence
-//     stay exclusively GUI-owned; this process only ever forwards to
-//     ALREADY-registered workspaces.
+//
+//   - RESTRICTED CONTROL-PLANE CAPABILITY SET, ENFORCED (not merely
+//     omission-based): this command does not mutate the workspace registry,
+//     client configuration, GUI-owned shared log, GUI port, single-instance
+//     state, or RestartV3 handoff. It has no autonomous, policy-owning, or
+//     general supervisor-intent write authority and never wires
+//     api.SetSerenaAutoRegisterCutoverPrimitives; supervisor reap+install+start
+//     cutover remains exclusively GUI-owned. AutoRegisterFn stays nil, and
+//     ReadOnlyRouterMode blocks registry activity persistence.
+//
+//     The sole supervisor-intent capability reachable here is the existing
+//     request-scoped Serena idle wake. Before a Serena request forwards,
+//     WakeIdleSerenaDaemon may compare-and-clear the current stop only when its
+//     reason is IntentReasonIdle. Operator, user-disabled, chronic-failure,
+//     clock-skew, and raced replacement reasons are preserved; the request
+//     returns 503 without forwarding.
+//
+//     This command starts no GUI-owned idle-shutdown, workspace-prune, or
+//     backend-loss event-subscriber loop. It owns exactly two process-local
+//     maintenance mechanisms: session-expiry sweeps and Serena backend-loss
+//     reconciliation. Both mutate only this route process's in-memory stores
+//     and stop with runRoute's context.
 //
 // Implementation note (Adjacent finding, see the Increment-1 implementation
 // report): the serena/LSP router HANDLER itself (internal/gui/serena_router.go
@@ -158,11 +158,19 @@ SECONDARY port, independent of the GUI process (port P, default 9125).
 It is Increment 1 of the MCP-front-daemon decision record
 (work-items/decisions/2026-07-25-mcp-data-plane-off-gui-onto-supervised-
 front-daemon.md): a supervisor-managed, always-on process so serena+LSP MCP
-keep answering when the GUI dies. It is READ-ONLY on the registry and
-supervisor-intent — it never reaps, installs, or starts the supervisor, and
-runs no GUI-owned idle/prune/event-subscriber loop. Its process-local session
-expiry and backend-loss reconcile ticks do not write shared state. Client
-configs and the GUI's own port are completely untouched.`,
+keep answering when the GUI dies. It uses a restricted control-plane
+composition: it does not mutate the workspace registry, client configuration,
+or GUI-owned shared log, and it has no autonomous, policy-owning, or general
+supervisor-intent authority. On a Serena request only, WakeIdleSerenaDaemon may
+compare-and-clear a current IntentReasonIdle stop before forwarding; operator,
+user-disabled, chronic-failure, clock-skew, and raced replacement stops are
+preserved, and the request returns 503 without forwarding. It never reaps,
+installs, or starts the supervisor and runs no GUI-owned idle-shutdown,
+workspace-prune, or backend-loss event-subscriber loop. The only route-owned
+maintenance mechanisms are process-local session-expiry sweeps and Serena
+backend-loss reconciliation; both mutate only this process's in-memory stores
+and stop when the route daemon stops. The GUI's own port, single-instance state,
+and RestartV3 handoff are untouched.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// Sub-increment 2a: an explicit --port flag always wins (this is
 			// what the supervisor descriptor passes — ensureBuiltinRouteDaemonAtStartup
@@ -200,7 +208,7 @@ configs and the GUI's own port are completely untouched.`,
 // so a test can exercise the real, shipped construction path via
 // s.RouteHandler() without needing a real TCP listener/goroutine — see
 // route_i6_readonly_test.go's mutation-proven regression guard for the F1
-// read-only invariant (registry + supervisor-intent untouched on an
+// no-mutation invariant (registry + supervisor-intent untouched on an
 // unregistered-workspace tool-call), which this increment's new
 // --reconcile-mcp-front command makes reachable from a second, additional
 // client-facing port.
@@ -258,8 +266,8 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 	// serena_routing.NewReadOnlyWorkspaceResolver's doc comment.
 	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, registryPath)
 	sessions := serena_routing.NewSessionRouter()
-	// Read-only wiring (F1): nils AutoRegisterFn + WakeIdleFn — see
-	// gui.Server.SetSerenaRouterReadOnly's doc comment and the file header.
+	// Restricted wiring keeps AutoRegisterFn nil while allowing only the
+	// reason-guarded idle wake owner; see SetSerenaRouterReadOnly's contract.
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 	stores.serena = sessions
 
@@ -302,7 +310,7 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 // it also reclaims the server's two router-owned session stores — those are
 // in-memory maps belonging to THIS process's handler, and SweepSerenaSessions
 // touches nothing else (no registry, no supervisor-intent, no shared log), so
-// it is compatible with this daemon's read-only posture.
+// it is compatible with this daemon's restricted control-plane posture.
 //
 // interval and ttl are parameters rather than the constants read inline so a
 // test can drive a real sweep to completion instead of waiting an hour. ONE
@@ -357,11 +365,11 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	//     server's own stores.
 	//   - gui.Server.Start / ContinueWithGUIListener / composeGuiServerRestartV3:
 	//     this process serves RouteHandler() on its own bare listener instead.
-	//   - a NON-nil AutoRegisterFn / WakeIdleFn on either router's deps, and
-	//     registry writes from maybePersistSerenaActivity: see F1 above —
-	//     SetSerenaRouterReadOnly/SetLSPRouterReadOnly + ReadOnlyRouterMode
-	//     jointly enforce this rather than relying on cutover-primitive
-	//     omission alone.
+	//   - a NON-nil AutoRegisterFn on either router, any generic supervisor-intent
+	//     writer, and registry activity writes from maybePersistSerenaActivity.
+	//     Serena's WakeIdleFn is the sole narrow exception: it is bound only to
+	//     WakeIdleSerenaDaemon's IntentReasonIdle compare-and-clear. See the file
+	//     header and SetSerenaRouterReadOnly contract.
 
 	httpSrv := &http.Server{
 		Handler:           s.RouteHandler(),
