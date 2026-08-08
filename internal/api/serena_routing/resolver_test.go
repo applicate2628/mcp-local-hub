@@ -1,16 +1,75 @@
 package serena_routing
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 )
+
+func TestRefreshCapturesEntriesBeforeRegistryRelease(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	src, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "resolver.go"))
+	if err != nil {
+		t.Fatalf("ReadFile resolver.go: %v", err)
+	}
+	capture := bytes.Index(src, []byte("entries = r.reg.SerenaEntries()"))
+	release := bytes.Index(src, []byte("releaseErr := unlock()"))
+	if capture < 0 || release < 0 {
+		t.Fatalf("refresh ordering anchors missing: capture=%d release=%d", capture, release)
+	}
+	if capture > release {
+		t.Fatal("refresh releases the registry lock before capturing Serena entries")
+	}
+}
+
+func TestRefreshSnapshotsRegistryBeforeUnlock(t *testing.T) {
+	dir := t.TempDir()
+	entries := make([]api.WorkspaceEntry, 512)
+	for i := range entries {
+		entries[i] = api.WorkspaceEntry{
+			WorkspaceKey:  fmt.Sprintf("workspace-%04d", i),
+			WorkspacePath: filepath.Join(dir, fmt.Sprintf("workspace-%04d", i)),
+			Port:          9100 + i,
+		}
+	}
+	regPath := makeRegistryWithSerena(t, dir, entries)
+	reg := api.NewRegistry(regPath)
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for iteration := 0; iteration < 8; iteration++ {
+				resolver.mu.Lock()
+				resolver.loaded = false
+				resolver.mu.Unlock()
+				resolver.refresh()
+			}
+		}()
+	}
+	wg.Wait()
+
+	resolver.mu.RLock()
+	got := len(resolver.cached)
+	resolver.mu.RUnlock()
+	if got != len(entries) {
+		t.Fatalf("cached entries = %d, want %d", got, len(entries))
+	}
+}
 
 func makeWorkspace(t *testing.T, root, name string) string {
 	t.Helper()

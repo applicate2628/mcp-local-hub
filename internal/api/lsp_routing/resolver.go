@@ -328,6 +328,13 @@ func (r *WorkspaceResolver) refresh() {
 		return
 	}
 	loadErr := r.reg.Load()
+	var entries []api.WorkspaceEntry
+	if loadErr == nil {
+		// Capture the registry-owned slice while the cross-process lock still
+		// serializes every Load on this shared Registry instance. Once unlock
+		// returns, another resolver goroutine may replace reg.Workspaces.
+		entries = r.reg.LSPEntries()
+	}
 	releaseErr := unlock()
 	if loadErr != nil {
 		fmt.Fprintf(os.Stderr, "lsp_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, loadErr)
@@ -336,7 +343,6 @@ func (r *WorkspaceResolver) refresh() {
 		}
 		return
 	}
-	entries := r.reg.LSPEntries()
 	if releaseErr != nil {
 		fmt.Fprintf(os.Stderr, "lsp_routing: release registry %s: %v; retaining loaded snapshot\n", r.registryPath, releaseErr)
 	}
