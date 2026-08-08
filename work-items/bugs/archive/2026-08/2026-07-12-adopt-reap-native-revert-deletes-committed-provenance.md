@@ -60,3 +60,8 @@ for v1.
 - P1: high-severity data-loss risk.
 - UPSERT: insert a new row or replace an existing row with the same key.
 - CAS: compare-and-swap (the de-adopt write-target classify/mutate seam).
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `37b7c25fd4bfff83a7ef81d5eb232913f8ebcef46661d5a6c26fb790a5702d0f`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `37b7c25fd4bfff83a7ef81d5eb232913f8ebcef46661d5a6c26fb790a5702d0f`; original terminal status `fixed`; explicit operator-authorized V1 migration.

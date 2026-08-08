@@ -61,3 +61,8 @@ require (row still exists ∧ `OperationState == adopting` ∧ `UpdatedAt == can
 ∧ still older than cutoff) before classify+reap — mirroring Phase 3's under-lease re-check.
 Defense-in-depth: give `reapAdoptProvenanceRow` an expected `(state, UpdatedAt)` identity and
 make it a no-op on mismatch.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `47c6cabc5a8280a9862fc0fdef7afb6e90a6d14af95ae3efae26b2ce06334e97`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `47c6cabc5a8280a9862fc0fdef7afb6e90a6d14af95ae3efae26b2ce06334e97`; original terminal status `fixed`; explicit operator-authorized V1 migration.

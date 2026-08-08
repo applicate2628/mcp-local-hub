@@ -88,3 +88,8 @@ the same class from the de-adopt side — consolidate.
   One-line fix: refuse `.lease`-suffixed manifest names in `adoptSnapshotDir`/lease-path.
 - **P3-3:** GC emits nothing when reap/removeSnapshots fails → a stuck secret-bearing orphan
   has zero operator signal. Emit a warn event.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `518ec3fce60bf578dc6a20858161c63457ce04af9f97b52036398dcb8eba1589`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `518ec3fce60bf578dc6a20858161c63457ce04af9f97b52036398dcb8eba1589`; original terminal status `fixed`; explicit operator-authorized V1 migration.

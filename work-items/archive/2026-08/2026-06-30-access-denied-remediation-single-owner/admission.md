@@ -1,5 +1,5 @@
 ---
-status: closed
+status: candidate
 type: refactor
 severity: P3
 date: 2026-06-30

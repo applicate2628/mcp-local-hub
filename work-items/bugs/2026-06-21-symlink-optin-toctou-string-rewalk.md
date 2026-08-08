@@ -10,7 +10,7 @@ resolved: 2026-06-21
 
 - **status:** fixed
 - **fixed-by:** PR #409 (`9af679e8`) plus PR #415 (`0ccd37c6`) - handle-pinned write and intermediate-component walk.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # AF-1 — symlink opt-in lane TOCTOU: resolve returns a STRING, the write re-walks it
 

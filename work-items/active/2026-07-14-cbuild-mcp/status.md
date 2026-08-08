@@ -1,5 +1,7 @@
 # status — mcp-cbuild (C/C++ build MCP)
 
+Status: active
+
 Template: full-delivery (greenfield). Orchestrator: main conversation ($lead).
 Started: 2026-07-14.
 
@@ -52,5 +54,5 @@ end-to-end — it triggered 6 Codex-bot rounds chasing cmake-presets(7) spec com
 - Keep only the SAFETY guards that are NOT cmake's job (symlink-escape / non-dir / path
   containment on the purge target).
 
-Status: PR #541 PARKED at d521aad3 (8 open bot findings that the delegation redesign obviates).
+Current state: PR #541 PARKED at d521aad3 (8 open bot findings that the delegation redesign obviates).
 The cbuild binary + v1 tools work; the preset-listing accuracy is the only open item.

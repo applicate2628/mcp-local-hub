@@ -15,7 +15,7 @@ Before an npm release the user asked to close ROADMAP-remainder sections 2 (open
 | cli-supervise-statedir gui-side | CLOSE — superseded | prod resolver ignores the env seam (`statedir_seam_test.go:8-31`); seam only in TestMain |
 | §5 manual `/api/supervisor/restart` flagless-retry | CLOSE — already exists | `supervisor_restart_spawn_windows.go:24-36,65-82` already retries flagless on ERROR_ACCESS_DENIED |
 | api-surfaces-status-restart-cleanup-race | CLOSE — fixed | fn-pointers snapshotted before goroutine (`api_surfaces.go:115-120,154-160`); -race passes |
-| TRIAGE-2026-05-28 ledger | CLOSE — stale ledger | rows already closed/moved; archive the ledger, don't count as a release bug |
+| triage-2026-05-28 ledger | CLOSE — stale ledger | rows already closed/moved; archive the ledger, don't count as a release bug |
 | **single_instance R:\Temp DACL flake** | **FIX-NOW** | the ONLY real fix — GUI pidport test fixtures used plain `t.TempDir()`; on a broadened-DACL volume the hardened-read gate (correctly) refuses. Fix = `apitest.HardenedTempDir(t)` in the test fixtures (product path unchanged, security gate intact). Branch `fix/single-instance-test-hardened-tempdir`. |
 | tools-list-live-membership-symmetry | CLOSE — superseded | live-binding filter + fresh hidden-set (`hub_mcp_aggregator.go:318-386,546-561`); tools/call revalidates (`:862-891`) |
 | gui-self-restart-gate-on-port-drift | CLOSE — not-a-bug | bind uses persisted port (`hub_mcp_bind.go:149-182`), fresh only on port==0; same-port-retry invariant (`hub_listener.go:606-611`) |

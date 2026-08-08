@@ -1,6 +1,6 @@
 # Binary Crash Recovery Deferred
 
-Status: deferred
+Status: candidate
 
 ## Feature
 

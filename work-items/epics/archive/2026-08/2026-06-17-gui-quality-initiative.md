@@ -68,3 +68,8 @@ a11y hints on password inputs (Secrets/Add-server); the broader clean-install/en
 productization track (`work-items/active/2026-07-16-productization-gui-solidify/2026-06-18-clean-install-ux-vision.md`) is a SEPARATE
 future epic the user explicitly deferred. Deploy discipline: see
 feedback_deploy_kill_gui_process_directly memory (full-reset + verify-served + zero-quarantine).
+
+Closed: 2026-08-08T22:58:13Z
+Outcome: Pre-V1 terminal status `closed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `67d9500d269cbc0036e4260052ffe0cda8e39c235e1d64900423ef694e6c7c5e`; original terminal status `closed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `67d9500d269cbc0036e4260052ffe0cda8e39c235e1d64900423ef694e6c7c5e`; original terminal status `closed`; explicit operator-authorized V1 migration.

@@ -1,5 +1,7 @@
 # Productization — GUI/hub solidify → clean-install UX
 
+Status: active
+
 State: ADMITTED 2026-07-16 (user unlocked the productization gate: "дев-вариант... давай
 productization погоняем"). User signal: the GUI is broadly rough ("сырое практически всё что
 можно делать в GUI, включая сам хаб — даже сейчас partial").
@@ -94,7 +96,7 @@ self-restart handoff).
   the 13-phase/43-transition CAS graph to a 4-phase marker `{in-progress, reserved, committed,
   interrupted}` + DEGRADE-to-operator-visible for the rare crash-mid-handoff; `ensure-alive` is
   degrade-ONLY (never spawns), which eliminated the whole double-owner class. Decision:
-  `decisions/2026-07-17-item3-unitB-recovery-simplify.md` (accepted). Final fable confirm PASS with
+  `decisions/2026-07-17-item3-unitb-recovery-simplify.md` (accepted). Final fable confirm PASS with
   one non-blocking P3 (a failed `committed`-marker write → a healthy child draws a repeated false
   `--force --kill` advisory) folded into the plan.
 - **Unit B — PLAN READY 2026-07-17.** `item3-unitB-plan.md` (planner PASS). 10 phases A–J:
@@ -298,7 +300,7 @@ Supersedes the stale round-1 resume point above (which described the codex round
 - **Deep-security commission** (Sol auth/trust + Terra concurrency + fable error/regression + $architect
   release-posture): PASS — gate-ON release acceptable, F3 (duplicate browser on restart) inline-fixed,
   F4/T2b kept as-is (retain-guard is the correct fail-safe, test :699), 10 findings backlogged in
-  `work-items/backlog/2026-07-18-restart-v3-phaseJ-residuals.md` (top-2 hardening: S1 nonce-via-inherited-handle,
+  `work-items/backlog/2026-07-18-restart-v3-phasej-residuals.md` (top-2 hardening: S1 nonce-via-inherited-handle,
   T1a Bind<Quiesce<Proof<Reservation timing).
 - **Merged** #563 → master `a078587c` (squash, 2026-07-19T11:52:59Z). **Deployed** via build.sh (a078587c)
   + `install --upgrade` (C: staging to dodge the D:→C: cross-volume MoveFileEx block) + GUI relaunch.

@@ -6,7 +6,7 @@ closed: 2026-06-28
 
 - **status:** fixed
 - **fixed-by:** PR #450 (`784f9475`) - marketplace registry URL single-owned in `internal/api`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 ## Resolution (2026-06-28)
 

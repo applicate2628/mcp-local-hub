@@ -40,3 +40,8 @@ Add a deterministic delayed-listener confirmation test for both port-change and 
 FIXED — the R1 commission (Sol) raised the same single-shot-confirm false-rollback; `confirm()` now retries
 transient/connection-refused failures until `Deadlines.Bind` (auth/protocol failures stay terminal). Test
 `TestRestartV3_ConfirmRetriesConnectionRefusedUntilChildBinds`. See item3-unitB-phaseG-review.md.
+
+Terminal-at: 2026-08-08T22:58:13Z
+Resolution: Pre-V1 terminal status `fixed` is preserved during operator-authorized V1 physical migration.
+Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `261d931007a65eb16445df021ea70384ebcadbbbf65261dd1ee4548eb4782c20`; original terminal status `fixed`; explicit operator-authorized V1 migration.
+V1-Migration-Evidence: Historical terminal time is unknown; preserved pre-V1 input SHA-256 `261d931007a65eb16445df021ea70384ebcadbbbf65261dd1ee4548eb4782c20`; original terminal status `fixed`; explicit operator-authorized V1 migration.

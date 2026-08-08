@@ -6,7 +6,7 @@ context: adjacent-finding (surfaced during the A2 npx-orphan security-design pas
 
 - **status:** fixed
 - **fixed-by:** PR #511 (`93102d91`) - cleanup kills through `TerminatePIDWithIdentity`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # CleanupOrphans reaps with raw `taskkill /PID <pid> /F` — no identity re-verify (PID-recycle friendly-fire window)
 

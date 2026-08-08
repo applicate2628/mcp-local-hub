@@ -1,6 +1,6 @@
 # Work items index
 
-> Canonical open-bug truth: **`bugs/TRIAGE-2026-07-09.md`** (HEAD-reconciled against master
+> Canonical open-bug truth: **`bugs/triage-2026-07-09.md`** (HEAD-reconciled against master
 > `63b6a008`, amended for #525 at master `7898c148`, then amended for #526 at master
 > `b5e6f6f3`). Individual bug-doc frontmatter used to lag reality; the top-level bug registry
 > has now been normalized. Trust the TRIAGE + the "Truly open" list below, NOT a raw count of
@@ -27,10 +27,10 @@
 `66b80ece`. The last open bug,
 [2026-07-07-lsp-router-relay-entries-ignore-per-client-disable](bugs/2026-07-07-lsp-router-relay-entries-ignore-per-client-disable.md),
 was disposed open→fixed by `$lead` on 2026-07-10 (backend #512 `c3fc1801` + GUI Servers-tab
-per-client disable #524 `22c91cab`; see `bugs/TRIAGE-2026-07-09.md` Amendment 3).
+per-client disable #524 `22c91cab`; see `bugs/triage-2026-07-09.md` Amendment 3).
 
-Three triage batch files (`bugs/TRIAGE-2026-05-28.md`, `bugs/TRIAGE-2026-07-08.md`,
-`bugs/TRIAGE-2026-07-09.md`) are
+Three triage batch files (`bugs/triage-2026-05-28.md`, `bugs/triage-2026-07-08.md`,
+`bugs/triage-2026-07-09.md`) are
 reconciliation records, not open tasks.
 
 ## Epics
