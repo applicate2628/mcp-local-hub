@@ -303,6 +303,20 @@ func TestWorkspaceRegisterSerena_TargetSettlementNotReadyCannotSucceed(t *testin
 				!strings.Contains(err.Error(), tt.detail) {
 				t.Errorf("typed settlement diagnostic was not preserved: %q", err)
 			}
+			for _, command := range []string{"mcphub workspace list", "mcphub reconcile --apply"} {
+				if !strings.Contains(err.Error(), command) {
+					t.Errorf("retained registration advice missing %q: %q", command, err)
+				}
+			}
+			if strings.Contains(err.Error(), "retry registration") || strings.Contains(err.Error(), "`mcphub workspace register`") {
+				t.Errorf("retained registration advice prescribed an impossible duplicate register: %q", err)
+			}
+
+			_, duplicateErr := runWorkspaceCmd(t, "register", ws)
+			if duplicateErr == nil || !strings.Contains(duplicateErr.Error(), "already registered") ||
+				!strings.Contains(duplicateErr.Error(), "workspace unregister") {
+				t.Errorf("second registration = %v, want existing duplicate guard with unregister prerequisite", duplicateErr)
+			}
 		})
 	}
 }

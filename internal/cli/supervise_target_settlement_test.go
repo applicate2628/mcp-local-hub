@@ -60,7 +60,7 @@ func newTargetSettlementHarness(t *testing.T) *targetSettlementHarness {
 		targetRegistryPath: func() (string, error) {
 			return registryPath, nil
 		},
-		targetLivenessProbe: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+		targetLivenessProbe: func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 			return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: supervisorLivenessProofPortOwnerPID}
 		},
 	}
@@ -152,9 +152,55 @@ func TestSettleReconcileTarget_FullLoopCancellationIsTyped(t *testing.T) {
 	}
 }
 
+func TestSettleReconcileTarget_CancellationReachesContextBoundPortOwner(t *testing.T) {
+	h := newTargetSettlementHarness(t)
+	entered := make(chan struct{})
+	exited := make(chan struct{})
+	h.ctrl.targetLivenessProbe = func(ctx context.Context, d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) supervisorLivenessVerdict {
+		return targetSettlementLivenessWithContext(ctx, d, entry, now, supervisorLivenessProbe{
+			PIDAlive:     func(int) bool { return true },
+			PIDIdentity:  func(process.PIDIdentityProof) error { return nil },
+			PortOwnerPID: supervisorPortOwnerPID,
+		}, func(ctx context.Context, _ int) (int, bool, error) {
+			close(entered)
+			<-ctx.Done()
+			close(exited)
+			return 0, false, ctx.Err()
+		})
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	settlementDone := make(chan api.ReconcileTargetSettlement, 1)
+	go func() {
+		settlementDone <- h.ctrl.settleReconcileTarget(ctx, h.target)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("context-bound port-owner probe did not start")
+	}
+	cancel()
+
+	var got api.ReconcileTargetSettlement
+	select {
+	case got = <-settlementDone:
+	case <-time.After(time.Second):
+		t.Fatal("target settlement did not return after owner-probe cancellation")
+	}
+	select {
+	case <-exited:
+	default:
+		t.Fatal("target settlement returned before the context-bound owner probe exited")
+	}
+	if got.State != api.ReconcileTargetSettlementIncomplete || got.Reason != api.ReconcileTargetReasonSettlementCancelled {
+		t.Fatalf("settlement = %+v, want incomplete/settlement_cancelled", got)
+	}
+}
+
 func TestSettleReconcileTarget_BindGraceIsNotReady(t *testing.T) {
 	h := newTargetSettlementHarness(t)
-	h.ctrl.targetLivenessProbe = func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 		return supervisorLivenessVerdict{Live: true}
 	}
 	h.ctrl.targetSettlementWait = func(context.Context) error { return context.DeadlineExceeded }
@@ -167,7 +213,7 @@ func TestSettleReconcileTarget_BindGraceIsNotReady(t *testing.T) {
 func TestSettleReconcileTarget_TCPOnlyUnsupportedIdentityNeverReady(t *testing.T) {
 	h := newTargetSettlementHarness(t)
 	var observed supervisorLivenessVerdict
-	h.ctrl.targetLivenessProbe = func(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(_ context.Context, d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) supervisorLivenessVerdict {
 		observed = supervisorDaemonLivenessVerdictWithProbe(d, entry, now, supervisorLivenessProbe{
 			PIDAlive: func(int) bool { return true },
 			PIDIdentity: func(process.PIDIdentityProof) error {
@@ -189,7 +235,7 @@ func TestSettleReconcileTarget_TCPOnlyUnsupportedIdentityNeverReady(t *testing.T
 
 func TestSettleReconcileTarget_VerifiedIdentityAndTCPIsAcceptedEquivalentProof(t *testing.T) {
 	h := newTargetSettlementHarness(t)
-	h.ctrl.targetLivenessProbe = func(d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(_ context.Context, d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) supervisorLivenessVerdict {
 		return supervisorDaemonLivenessVerdictWithProbe(d, entry, now, supervisorLivenessProbe{
 			PIDAlive:    func(int) bool { return true },
 			PIDIdentity: func(process.PIDIdentityProof) error { return nil },
@@ -205,7 +251,7 @@ func TestSettleReconcileTarget_VerifiedIdentityAndTCPIsAcceptedEquivalentProof(t
 
 func TestSettleReconcileTarget_PortOwnerMismatchFails(t *testing.T) {
 	h := newTargetSettlementHarness(t)
-	h.ctrl.targetLivenessProbe = func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 		return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortOwnerMismatch, IdentityDetail: "owner pid 9912"}
 	}
 	got := h.ctrl.settleReconcileTarget(context.Background(), h.target)
@@ -216,7 +262,7 @@ func TestSettleReconcileTarget_PortOwnerMismatchFails(t *testing.T) {
 
 func TestSettleReconcileTarget_PortUnboundIsExplicitIncomplete(t *testing.T) {
 	h := newTargetSettlementHarness(t)
-	h.ctrl.targetLivenessProbe = func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 		return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPortUnbound}
 	}
 	got := h.ctrl.settleReconcileTarget(context.Background(), h.target)
@@ -255,7 +301,7 @@ func TestSettleReconcileTarget_QuarantineAndMissingIntentAreTerminal(t *testing.
 
 func TestSettleReconcileTarget_RegistryReplacementDuringProbeCannotReady(t *testing.T) {
 	h := newTargetSettlementHarness(t)
-	h.ctrl.targetLivenessProbe = func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 		replaced := h.row
 		replaced.RegisteredAt = replaced.RegisteredAt.Add(time.Nanosecond)
 		writeTargetSettlementRegistryRow(t, h.registry, replaced)
@@ -269,7 +315,7 @@ func TestSettleReconcileTarget_RegistryReplacementDuringProbeCannotReady(t *test
 
 func TestSettleReconcileTarget_PIDGenerationReplacementDuringProbeCannotReady(t *testing.T) {
 	h := newTargetSettlementHarness(t)
-	h.ctrl.targetLivenessProbe = func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+	h.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 		h.ctrl.tracker.MarkSpawned(h.target.TaskName, 5923, h.row.RegisteredAt.Add(2*time.Second))
 		return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: supervisorLivenessProofPortOwnerPID}
 	}
@@ -335,7 +381,7 @@ func TestReconcileIPC_TargetSettlementIsReturnedForExactGeneration(t *testing.T)
 	})
 	fx.ctrl.tracker = fx.deps.runtimeTracker
 	fx.ctrl.targetRegistryPath = func() (string, error) { return registryPath, nil }
-	fx.ctrl.targetLivenessProbe = func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
+	fx.ctrl.targetLivenessProbe = func(context.Context, api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) supervisorLivenessVerdict {
 		return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: supervisorLivenessProofPortOwnerPID}
 	}
 	fx.ctrl.tracker.MarkSpawned(target.TaskName, 6042, registeredAt.Add(time.Second))

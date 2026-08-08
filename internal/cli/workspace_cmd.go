@@ -724,8 +724,16 @@ func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.Works
 		if checkErr != nil {
 			fmt.Fprintf(&b, "  additional diagnostic: the post-response persisted-generation check also failed: %v\n", checkErr)
 		}
-		b.WriteString("  next step: run `mcphub reconcile --apply`, then retry registration after the " +
-			"reported target-settlement condition is resolved.\n")
+		if settled.RegistryRowPresent {
+			b.WriteString("  next step: run `mcphub workspace list` to inspect the retained registration; " +
+				"resolve the reported target-settlement condition; then run `mcphub reconcile --apply` " +
+				"to resume materialization. If you intentionally need a replacement, run `mcphub workspace " +
+				"unregister <workspace> --backend serena` before registering it again.\n")
+		} else {
+			b.WriteString("  next step: run `mcphub workspace list` to inspect the current state. Only if " +
+				"the workspace is confirmed absent and you still intend to register it may you run `mcphub " +
+				"workspace register` again.\n")
+		}
 	case checkErr != nil:
 		fmt.Fprintf(&b, "  reason: could not verify the supervisor intent afterward: %v\n", checkErr)
 		b.WriteString("  next step: once the underlying I/O issue is resolved, run `mcphub workspace list` " +

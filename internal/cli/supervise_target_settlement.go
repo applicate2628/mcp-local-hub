@@ -10,6 +10,7 @@ import (
 )
 
 type targetSettlementLivenessProbeFunc func(
+	ctx context.Context,
 	d api.SupervisorDaemon,
 	entry DaemonRuntimeEntry,
 	now time.Time,
@@ -80,7 +81,7 @@ func (c *supervisorController) settleReconcileTarget(ctx context.Context, target
 			case daemonRuntimeStateBackoff:
 				return targetSettlementWithRuntime(result, api.ReconcileTargetSettlementFailed, api.ReconcileTargetReasonBackoff, entry, entry.LastError)
 			case daemonRuntimeStateRunning:
-				verdict := c.probeReconcileTargetLiveness(*descriptor, entry)
+				verdict := c.probeReconcileTargetLiveness(ctx, *descriptor, entry)
 				if verdict.TargetReady() {
 					// Close both replacement windows opened by the liveness probe:
 					// persisted intent/registry replacement and tracker PID generation
@@ -203,15 +204,36 @@ func (c *supervisorController) observeReconcileTargetIdentity(registryPath strin
 	return &copy, nil
 }
 
-func (c *supervisorController) probeReconcileTargetLiveness(d api.SupervisorDaemon, entry DaemonRuntimeEntry) supervisorLivenessVerdict {
+func (c *supervisorController) probeReconcileTargetLiveness(ctx context.Context, d api.SupervisorDaemon, entry DaemonRuntimeEntry) supervisorLivenessVerdict {
 	if c.targetLivenessProbe != nil {
-		return c.targetLivenessProbe(d, entry, time.Now().UTC())
+		return c.targetLivenessProbe(ctx, d, entry, time.Now().UTC())
+	}
+	return targetSettlementLivenessWithContext(ctx, d, entry, time.Now().UTC(), supervisorLivenessProbeFns, api.LoopbackPortOwnerPIDContext)
+}
+
+// targetSettlementLivenessWithContext derives the target request's liveness
+// probe from the shared production probe without mutating it. Only the known
+// production per-port owner probe is rebound to the target's bounded context;
+// custom test probes and unsupported-platform TCP fallback remain unchanged.
+func targetSettlementLivenessWithContext(
+	ctx context.Context,
+	d api.SupervisorDaemon,
+	entry DaemonRuntimeEntry,
+	now time.Time,
+	probe supervisorLivenessProbe,
+	portOwnerPIDContext func(context.Context, int) (int, bool, error),
+) supervisorLivenessVerdict {
+	targetProbe := probe
+	if supervisorLivenessUsesProductionPortOwnerProbe(targetProbe.PortOwnerPID) {
+		targetProbe.PortOwnerPID = func(port int) (int, bool, error) {
+			return portOwnerPIDContext(ctx, port)
+		}
 	}
 	return supervisorDaemonLivenessVerdictWithProbe(
 		d,
 		entry,
-		time.Now().UTC(),
-		supervisorLivenessProbeFns,
+		now,
+		targetProbe,
 		supervisorStartupBindDeadline(d),
 	)
 }
