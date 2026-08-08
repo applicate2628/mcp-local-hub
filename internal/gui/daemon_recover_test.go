@@ -407,6 +407,51 @@ func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
 	}
 }
 
+func TestDaemonRecover_ReservePostRenameErrorRunsOnce(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	installIsolatedAuditLock(t, s)
+	t.Cleanup(func() { s.events.Close() })
+	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
+		TaskName:             `\mcp-local-hub-memory-default`,
+		Reaped:               true,
+		PortOwnerCheck:       daemonrecovery.PortOwnerReaped,
+		PortWaitOutcome:      daemonrecovery.PortWaitReleased,
+		AuditHandoff:         daemonrecovery.AuditHandoffDurable,
+		TerminationCommitted: true,
+	}}
+	s.daemonRecover = fake
+	writeCalls := 0
+	s.auditLock.writeStateFileLockHeld = func(path string, raw []byte) error {
+		writeCalls++
+		if err := api.WriteStateFileBytesLockHeld(path, raw); err != nil {
+			return err
+		}
+		if writeCalls == 1 {
+			return errAuditLockPostRenameTest
+		}
+		return nil
+	}
+	correlation := validAuditLockCorrelation(s.auditLock.serverInstance, 701)
+	body := correlationPOSTBody(correlation, "mcp-local-hub-memory-default")
+
+	first := httptest.NewRecorder()
+	s.mux.ServeHTTP(first, sameOriginRequest(http.MethodPost, "/api/daemon/recover", body))
+	if first.Code != http.StatusOK || fake.calls != 1 {
+		t.Fatalf("first status=%d calls=%d body=%s", first.Code, fake.calls, first.Body.String())
+	}
+	firstBody := decodeDaemonRecoverBody(t, first)
+	firstAuditLock, ok := firstBody["audit_lock"].(map[string]any)
+	if !ok || firstAuditLock["recovery_receipt"] == nil {
+		t.Fatalf("first body lacks retained novel receipt: %v", firstBody)
+	}
+
+	replay := httptest.NewRecorder()
+	s.mux.ServeHTTP(replay, sameOriginRequest(http.MethodPost, "/api/daemon/recover", body))
+	if replay.Code != http.StatusOK || fake.calls != 1 {
+		t.Fatalf("replay status=%d calls=%d body=%s", replay.Code, fake.calls, replay.Body.String())
+	}
+}
+
 // An unconfirmed lock RELEASE is a warning on a SUCCEEDED recovery, and the
 // distinction is the whole point of the AuditHandoff channel: the termination
 // and the respawn both committed, so telling the operator "failed" would invite

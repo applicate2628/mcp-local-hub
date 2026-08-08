@@ -1067,6 +1067,78 @@ func (a *auditLockAdapter) writeStoreLockHeld(store auditLockOccurrenceStore) er
 	return nil
 }
 
+type auditLockStoreWriteOutcome uint8
+
+const (
+	auditLockStoreWriteDurable auditLockStoreWriteOutcome = iota + 1
+	auditLockStoreWriteNotPublished
+	auditLockStoreWriteUncertain
+)
+
+type auditLockStoreWriteResult struct {
+	outcome           auditLockStoreWriteOutcome
+	cause             error
+	durableAfterError bool
+}
+
+func cloneAuditLockOccurrenceStore(store auditLockOccurrenceStore) auditLockOccurrenceStore {
+	clone := store
+	clone.Records = make([]auditLockOccurrenceRecord, len(store.Records))
+	for index, record := range store.Records {
+		clone.Records[index] = record
+		clone.Records[index].Success = cloneDaemonRecoverSuccess(record.Success)
+	}
+	return clone
+}
+
+// writeStoreWithLockedReconciliation owns the one write attempt and, only
+// after a writer error, one exact inode-anchored reread while both occurrence
+// locks are still held. Callers supply independent before/intended values so
+// slice aliasing cannot make either equality proof vacuous.
+func (a *auditLockAdapter) writeStoreWithLockedReconciliation(
+	operation *auditLockStoreOperation,
+	before auditLockOccurrenceStore,
+	intended auditLockOccurrenceStore,
+) auditLockStoreWriteResult {
+	before = cloneAuditLockOccurrenceStore(before)
+	intended = cloneAuditLockOccurrenceStore(intended)
+	writeErr := a.writeStoreLockHeld(intended)
+	if writeErr == nil {
+		operation.proveDurable()
+		return auditLockStoreWriteResult{outcome: auditLockStoreWriteDurable}
+	}
+	actual, readErr := a.readStoreLockHeld(false)
+	if readErr != nil {
+		return auditLockStoreWriteResult{
+			outcome: auditLockStoreWriteUncertain,
+			cause:   errors.Join(writeErr, fmt.Errorf("reread occurrence store after writer error: %w", readErr)),
+		}
+	}
+	switch {
+	case reflect.DeepEqual(actual, intended):
+		operation.proveDurable()
+		return auditLockStoreWriteResult{outcome: auditLockStoreWriteDurable, cause: writeErr, durableAfterError: true}
+	case reflect.DeepEqual(actual, before):
+		return auditLockStoreWriteResult{outcome: auditLockStoreWriteNotPublished, cause: writeErr}
+	default:
+		return auditLockStoreWriteResult{
+			outcome: auditLockStoreWriteUncertain,
+			cause:   errors.Join(writeErr, errors.New("occurrence store matched neither pre-write nor intended state")),
+		}
+	}
+}
+
+func (a *auditLockAdapter) publishStoreWriteReconciled(operation string) {
+	if a == nil || a.events == nil {
+		return
+	}
+	a.events.Publish(Event{Type: "daemon-recovery-occurrence-store-write-reconciled", Body: map[string]any{
+		"operation":    operation,
+		"failure_id":   "post_rename_exact_reread",
+		"data_outcome": "durable_proven",
+	}})
+}
+
 func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 	var claimed auditLockOccurrenceStore
 	err := a.withStoreLock(ctx, "claim occurrence store", func(operation *auditLockStoreOperation) error {
@@ -1189,6 +1261,7 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 	}
 
 	var reservation auditLockReservation
+	var reconciledAfterError bool
 	err := a.withStoreLock(ctx, "reserve occurrence", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(false)
 		if err != nil {
@@ -1238,14 +1311,23 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 			Status:               auditLockOccurrenceInFlight,
 			LockAuthorization:    auditLockAuthorizationNone,
 		}
-		store.Records = append(store.Records, record)
-		if err := a.writeStoreLockHeld(store); err != nil {
-			return err
+		before := cloneAuditLockOccurrenceStore(store)
+		intended := cloneAuditLockOccurrenceStore(store)
+		intended.Records = append(intended.Records, record)
+		writeResult := a.writeStoreWithLockedReconciliation(operation, before, intended)
+		switch writeResult.outcome {
+		case auditLockStoreWriteDurable:
+			reconciledAfterError = writeResult.durableAfterError
+		case auditLockStoreWriteNotPublished:
+			return writeResult.cause
+		case auditLockStoreWriteUncertain:
+			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: writeResult.cause}
+		default:
+			return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: errors.New("unknown occurrence write reconciliation outcome")}
 		}
-		operation.proveDurable()
 		receipt := auditLockReceiptFromRecord(record)
 		settlement := newAuditLockSettlementCell(receipt)
-		a.settlements.Store(auditLockSettlementKeyFor(store.Generation, record), settlement)
+		a.settlements.Store(auditLockSettlementKeyFor(intended.Generation, record), settlement)
 		reservation = auditLockReservation{
 			Novel:         true,
 			Receipt:       receipt,
@@ -1255,6 +1337,9 @@ func (a *auditLockAdapter) reserve(ctx context.Context, c auditLockCorrelation, 
 		}
 		return nil
 	})
+	if reconciledAfterError {
+		a.publishStoreWriteReconciled("reserve occurrence")
+	}
 	if err != nil {
 		routeErr := auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)
 		var healthErr *occurrenceStoreLockStrandedError
@@ -1635,12 +1720,12 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 	c := request.Correlation
 	var rotatedInstance string
 	var err error
-	var rotated bool
 	var nextGeneration uint64
 	var acknowledgedGeneration uint64
 	var acknowledgedRecord auditLockOccurrenceRecord
 	mutationEpoch := a.currentMutationEpoch()
 	rotationDurable := false
+	reconciledAfterError := false
 	err = a.withStoreLock(ctx, "acknowledge occurrence", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(false)
 		if err != nil {
@@ -1688,34 +1773,46 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 			}
 		}
 		consumeAndWrite := func() error {
-			record := &store.Records[recordIndex]
+			before := cloneAuditLockOccurrenceStore(store)
+			intended := cloneAuditLockOccurrenceStore(store)
+			record := &intended.Records[recordIndex]
 			record.Status = auditLockOccurrenceConsumed
 			record.HTTPStatus = 0
 			record.ErrorCode = ""
 			record.LockAuthorization = auditLockAuthorizationNone
 			record.Success = nil
 			unresolved := false
-			for _, candidate := range store.Records {
+			for _, candidate := range intended.Records {
 				if candidate.Status != auditLockOccurrenceConsumed {
 					unresolved = true
 					break
 				}
 			}
+			intendedRotated := false
 			if !unresolved {
-				if store.Generation == math.MaxUint64 {
+				if intended.Generation == math.MaxUint64 {
 					return errors.New("occurrence generation overflow")
 				}
-				store.Records = nil
-				store.Generation++
-				store.ActiveServerInstance = rotatedInstance
-				rotated = true
-				nextGeneration = store.Generation
+				intended.Records = nil
+				intended.Generation++
+				intended.ActiveServerInstance = rotatedInstance
+				intendedRotated = true
 			}
-			if err := a.writeStoreLockHeld(store); err != nil {
-				return err
+			writeResult := a.writeStoreWithLockedReconciliation(operation, before, intended)
+			switch writeResult.outcome {
+			case auditLockStoreWriteDurable:
+				reconciledAfterError = writeResult.durableAfterError
+			case auditLockStoreWriteNotPublished:
+				return writeResult.cause
+			case auditLockStoreWriteUncertain:
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: writeResult.cause}
+			default:
+				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorOutcomeUncertain), cause: errors.New("unknown occurrence write reconciliation outcome")}
 			}
-			operation.proveDurable()
-			rotationDurable = rotated
+			rotationDurable = intendedRotated
+			if intendedRotated {
+				nextGeneration = intended.Generation
+			}
 			a.clearSettlement(acknowledgedGeneration, acknowledgedRecord)
 			return nil
 		}
@@ -1751,6 +1848,9 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 		a.serverInstance = rotatedInstance
 		a.generation = nextGeneration
 		a.mu.Unlock()
+	}
+	if reconciledAfterError {
+		a.publishStoreWriteReconciled("acknowledge occurrence")
 	}
 	if err != nil {
 		return auditLockRouteErrorFromStoreError(err, 500, daemonRecoverErrorAuditLockAdapterInit)

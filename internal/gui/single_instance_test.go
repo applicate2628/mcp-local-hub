@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -18,6 +19,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func TestAcquireSingleInstance_FirstCallerSucceeds(t *testing.T) {
@@ -865,6 +867,52 @@ func TestVerdict_IdentityProbeUnsupported_MatchesProbeOnce(t *testing.T) {
 			t.Fatal("IdentityProbeUnsupported() = false on a Healthy verdict from an unsupported-probe platform; want true (the flag records what the PROBE could do, not what the verdict concluded) — consumers rely on this to know they must gate the accessor by Class")
 		}
 	})
+}
+
+func TestEvaluateProcessIdentity_Matrix(t *testing.T) {
+	if got := []VerdictClass{VerdictHealthy, VerdictLiveUnreachable, VerdictDeadPID, VerdictMalformed, VerdictKilledRecovered, VerdictKillRefused, VerdictKillFailed, VerdictRaceLost, VerdictIndeterminate}; !reflect.DeepEqual(got, []VerdictClass{0, 1, 2, 3, 4, 5, 6, 7, 8}) {
+		t.Fatalf("VerdictClass wire numbering changed: %v", got)
+	}
+	originalOwner := processOwnerSIDMatchesCurrentFn
+	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = originalOwner })
+	mtime := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	matching := Verdict{
+		Class:         VerdictLiveUnreachable,
+		PID:           4242,
+		PIDImage:      `C:\Program Files\mcphub\mcphub.exe`,
+		Mtime:         mtime,
+		PIDStart:      mtime.Add(-time.Minute),
+		pidCmdlineRaw: []string{`C:\Program Files\mcphub\mcphub.exe`, "gui"},
+	}
+	tests := []struct {
+		name       string
+		verdict    Verdict
+		owner      func(int) (bool, error)
+		want       ProcessIdentityClass
+		wantRefuse bool
+	}{
+		{name: "match", verdict: matching, owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMatch},
+		{name: "wrong image", verdict: func() Verdict { v := matching; v.PIDImage = `C:\Windows\System32\notepad.exe`; return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "wrong argv", verdict: func() Verdict { v := matching; v.pidCmdlineRaw = []string{v.PIDImage, "daemon"}; return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "recycled pid", verdict: func() Verdict { v := matching; v.PIDStart = mtime.Add(2 * time.Second); return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "different owner", verdict: matching, owner: func(int) (bool, error) { return false, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "owner uncertain", verdict: matching, owner: func(int) (bool, error) { return false, errors.New("owner lookup failed") }, want: ProcessIdentityUnsupportedOrUncertain, wantRefuse: true},
+		{name: "gone", verdict: matching, owner: func(int) (bool, error) { return false, process.ErrProcessAlreadyExited }, want: ProcessIdentityGone},
+		{name: "unsupported", verdict: NewIdentityProbeUnsupportedVerdictForTest(VerdictLiveUnreachable, 4242, 9125), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityUnsupportedOrUncertain, wantRefuse: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			processOwnerSIDMatchesCurrentFn = test.owner
+			result := EvaluateProcessIdentity(test.verdict)
+			if result.Class != test.want {
+				t.Fatalf("identity class=%v want=%v", result.Class, test.want)
+			}
+			refused, reason := CheckIdentityGate(test.verdict)
+			if refused != test.wantRefuse {
+				t.Fatalf("CheckIdentityGate refused=%v want=%v reason=%q", refused, test.wantRefuse, reason)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------

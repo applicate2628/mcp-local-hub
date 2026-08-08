@@ -1,6 +1,14 @@
 package cli
 
-import "testing"
+import (
+	"bytes"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
 
 // TestNewRootCmd_EveryVisibleCommandHasARegisteredGroup enforces the
 // invariant root.go asserts in prose: every command cobra will actually
@@ -54,5 +62,46 @@ func TestNewRootCmd_EveryVisibleCommandHasARegisteredGroup(t *testing.T) {
 	if visible < 10 {
 		t.Fatalf("only %d visible commands found; expected the full operator listing, so this test "+
 			"is no longer exercising the invariant it claims to guard", visible)
+	}
+}
+
+func TestNewRootCmd_GUIOwnerUnknownConfirmationWorkerIsHiddenAndCallable(t *testing.T) {
+	root := NewRootCmd()
+	const name = "gui-owner-unknown-confirmation-worker"
+	worker, _, err := root.Find([]string{name})
+	if err != nil || worker == nil || worker.Name() != name {
+		t.Fatalf("find hidden worker: command=%v err=%v", worker, err)
+	}
+	if !worker.Hidden || worker.RunE == nil {
+		t.Fatalf("worker hidden=%v runE=%v", worker.Hidden, worker.RunE != nil)
+	}
+	var help bytes.Buffer
+	root.SetOut(&help)
+	if err := root.Help(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(help.String(), name) {
+		t.Fatalf("hidden worker leaked into root help: %s", help.String())
+	}
+	for _, command := range root.Commands() {
+		if !command.Hidden && command.Name() == name {
+			t.Fatal("hidden worker leaked into visible operator commands")
+		}
+	}
+
+	stateDir := ensureAliveTestStateDir(t)
+	observedAt := time.Now().UTC().Truncate(time.Microsecond)
+	payload, err := json.Marshal(guiOwnerUnknownConfirmationWorkerRequest{Version: 1, StateDir: stateDir, ObservedAt: observedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	worker.SetIn(bytes.NewReader(payload))
+	worker.SetOut(&out)
+	if err := worker.RunE(worker, nil); err != nil {
+		t.Fatal(err)
+	}
+	if raw, err := os.ReadFile(filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)); err != nil || string(raw) != observedAt.Format(time.RFC3339Nano) {
+		t.Fatalf("callable worker marker=%q err=%v", raw, err)
 	}
 }

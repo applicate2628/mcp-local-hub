@@ -943,6 +943,40 @@ func (v Verdict) IdentityProbeUnsupported() bool {
 	return v.macOSUnsupported || v.archUnsupported
 }
 
+// ProcessIdentityClass is the read-only result of the GUI package's single
+// image/argv/start-time/owner identity authority. It is intentionally separate
+// from VerdictClass: a live-but-unreachable PID still needs this proof before
+// another package may treat it as the current GUI owner.
+type ProcessIdentityClass uint8
+
+const (
+	ProcessIdentityUnsupportedOrUncertain ProcessIdentityClass = iota
+	ProcessIdentityMatch
+	ProcessIdentityMismatch
+	ProcessIdentityGone
+)
+
+// ProcessIdentityResult exposes only the typed decision. Existing operator
+// diagnostics stay package-private so full argv and owner details cannot leak
+// through a new wire surface.
+type ProcessIdentityResult struct {
+	Class ProcessIdentityClass
+
+	diagnose  string
+	hint      string
+	errReason string
+}
+
+// EvaluateProcessIdentity applies the same authority used by the destructive
+// kill gate without performing a kill or mutating process state.
+func EvaluateProcessIdentity(v Verdict) ProcessIdentityResult {
+	return checkIdentityGateInternal(v)
+}
+
+func (r ProcessIdentityResult) refused() bool {
+	return r.Class == ProcessIdentityMismatch || r.Class == ProcessIdentityUnsupportedOrUncertain
+}
+
 // NewIdentityProbeUnsupportedVerdictForTest builds a Verdict that reports
 // IdentityProbeUnsupported() == true, so a test in ANOTHER package can
 // exercise its consumers' branch logic without running on darwin or a
@@ -1376,11 +1410,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	// the identity protections by skipping the cli's pre-prompt
 	// check. Both call sites share checkIdentityGateInternal so the
 	// gate logic is not duplicated.
-	if refused, diagnose, hint, errReason := checkIdentityGateInternal(v); refused {
+	identity := checkIdentityGateInternal(v)
+	if identity.refused() {
 		v.Class = VerdictKillRefused
-		v.Diagnose = diagnose
-		v.Hint = hint
-		return nil, v, fmt.Errorf("kill refused: %s", errReason)
+		v.Diagnose = identity.diagnose
+		v.Hint = identity.hint
+		return nil, v, fmt.Errorf("kill refused: %s", identity.errReason)
 	}
 
 	// All three gates passed. Kill.
@@ -1465,11 +1500,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 				if len(idNow.Cmdline) >= 2 {
 					vNow.PIDSubcommand = idNow.Cmdline[1]
 				}
-				if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
+				identityNow := checkIdentityGateInternal(vNow)
+				if identityNow.refused() {
 					v.Class = VerdictKillRefused
-					v.Diagnose = "pre-kill recheck: " + diagnose
-					v.Hint = hint
-					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+					v.Diagnose = "pre-kill recheck: " + identityNow.diagnose
+					v.Hint = identityNow.hint
+					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", identityNow.errReason)
 				}
 			} else {
 				// pr301 r7 Finding 2 (P2 #717): the holder is genuinely
@@ -1619,8 +1655,8 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 //
 // Codex iter-9 P2 #1.
 func CheckIdentityGate(v Verdict) (refused bool, reason string) {
-	refused, reason, _, _ = checkIdentityGateInternal(v)
-	return refused, reason
+	result := checkIdentityGateInternal(v)
+	return result.refused(), result.diagnose
 }
 
 // checkIdentityGateInternal is the shared gate implementation used
@@ -1634,17 +1670,14 @@ func CheckIdentityGate(v Verdict) (refused bool, reason string) {
 // only when the override is nil. Codex iter-9 P2 #1 deduplicates the
 // production gate cascade so the public CheckIdentityGate and the
 // internal KillRecordedHolder gate cannot drift.
-func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReason string) {
+func checkIdentityGateInternal(v Verdict) ProcessIdentityResult {
 	// Test override comes first so seam-mocked tests reach this
 	// branch on linux/windows even when v.macOSUnsupported is true.
 	if identityGateOverride != nil {
 		if r, reason := identityGateOverride(v); r {
-			return true,
-				"identity gate (test override): " + reason,
-				"",
-				"override: " + reason
+			return ProcessIdentityResult{Class: ProcessIdentityMismatch, diagnose: "identity gate (test override): " + reason, errReason: "override: " + reason}
 		}
-		return false, "", "", ""
+		return ProcessIdentityResult{Class: ProcessIdentityMatch}
 	}
 
 	// Codex iter-3 P2 #2: macOS shortcut — when probeOnce flagged
@@ -1653,10 +1686,10 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 	// macOS-specific diagnose instead of letting the cascade emit
 	// "image '' is not an mcphub binary".
 	if v.macOSUnsupported {
-		return true,
-			"kill refused: macOS identity probe not supported; reboot is the recovery path",
-			"Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go).",
-			"macOS identity probe not supported"
+		return ProcessIdentityResult{Class: ProcessIdentityUnsupportedOrUncertain,
+			diagnose:  "kill refused: macOS identity probe not supported; reboot is the recovery path",
+			hint:      "Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go).",
+			errReason: "macOS identity probe not supported"}
 	}
 
 	// Same shape on Windows non-amd64 builds: probeOnce sets
@@ -1664,17 +1697,16 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 	// kill with an arch-specific diagnose. Codex bot review on PR
 	// #23 P2 (probeOnce arch sentinel handling).
 	if v.archUnsupported {
-		return true,
-			"kill refused: Windows non-amd64 build cannot enumerate cmdline/start-time; identity gate cannot run",
-			"This Windows build lacks PEB-offset support for the running architecture. Use Task Manager / Get-Process to identify the stuck mcphub PID and end it manually, or rebuild mcphub for amd64.",
-			"Windows arch identity probe not supported"
+		return ProcessIdentityResult{Class: ProcessIdentityUnsupportedOrUncertain,
+			diagnose:  "kill refused: Windows non-amd64 build cannot enumerate cmdline/start-time; identity gate cannot run",
+			hint:      "This Windows build lacks PEB-offset support for the running architecture. Use Task Manager / Get-Process to identify the stuck mcphub PID and end it manually, or rebuild mcphub for amd64.",
+			errReason: "Windows arch identity probe not supported"}
 	}
 
 	if !matchBasename(v.PIDImage) {
-		return true,
-			fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage),
-			"Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools.",
-			"image gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage),
+			hint:     "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools.", errReason: "image gate"}
 	}
 	// Codex iter-3 P2 #1: read v.pidCmdlineRaw (the unmodified
 	// argv populated by probeOnce), not v.PIDCmdline (truncated for
@@ -1696,16 +1728,14 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 		} else {
 			subcommand = "(none)"
 		}
-		return true,
-			fmt.Sprintf("recorded PID %d argv subcommand is %q, not 'gui'", v.PID, subcommand),
-			"Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand.",
-			"argv gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d argv subcommand is %q, not 'gui'", v.PID, subcommand),
+			hint:     "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand.", errReason: "argv gate"}
 	}
 	if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
-		return true,
-			fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
-			"Identity-gate (start-time) failed; the PID has been recycled to a different process.",
-			"start-time gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
+			hint:     "Identity-gate (start-time) failed; the PID has been recycled to a different process.", errReason: "start-time gate"}
 	}
 	// SEC-F3 owner-SID gate (additional, fail-closed): refuse to kill a flock
 	// holder owned by a DIFFERENT user SID even when image/argv/start-time all
@@ -1727,19 +1757,17 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 			// flock-release acquire-poll and yields VerdictKilledRecovered).
 			// Converting this to VerdictKillRefused would strand the operator on
 			// a stuck lock whose holder is already gone.
-			return false, "", "", ""
+			return ProcessIdentityResult{Class: ProcessIdentityGone}
 		}
-		return true,
-			fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
-			"Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.",
-			"owner-SID gate"
+		return ProcessIdentityResult{Class: ProcessIdentityUnsupportedOrUncertain,
+			diagnose: fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
+			hint:     "Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.", errReason: "owner-SID gate"}
 	} else if !match {
-		return true,
-			fmt.Sprintf("recorded PID %d is owned by a different user; refusing to kill", v.PID),
-			"Identity-gate (owner SID) failed; the recorded PID belongs to a different user. mcphub will not terminate another user's process.",
-			"owner-SID gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d is owned by a different user; refusing to kill", v.PID),
+			hint:     "Identity-gate (owner SID) failed; the recorded PID belongs to a different user. mcphub will not terminate another user's process.", errReason: "owner-SID gate"}
 	}
-	return false, "", "", ""
+	return ProcessIdentityResult{Class: ProcessIdentityMatch}
 }
 
 // cmdlineIsGui implements the rev 9 argv-subcommand gate:

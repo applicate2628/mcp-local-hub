@@ -36,6 +36,19 @@ claim converts every prior-generation durable `in_flight` record to durable
 `uncertain` before serving requests, preserving the same fail-closed truth
 after restart.
 
+Reservation and acknowledgement have a separate, exact post-write rule inside
+the same adapter owner. They retain independent deep copies of the complete
+pre-write and intended stores. If the hardened writer returns an error while
+both occurrence locks are still held, the adapter performs one strict
+inode-anchored reread: exact intended state commits the existing continuation,
+exact pre-write state returns the writer failure without a continuation, and a
+reread error or third valid state returns `409 RECOVER_OUTCOME_UNCERTAIN`.
+There is no retry. Exact intended proof emits
+`daemon-recovery-occurrence-store-write-reconciled` with
+`failure_id=post_rename_exact_reread` and `data_outcome=durable_proven` after
+the physical lock is released. Terminalization retains its existing
+current-generation uncertainty overlay; startup claim remains unchanged.
+
 The one downstream-observable state event remains the existing
 `audit-lock-state` Server-Sent Events event. The adapter emits that event after
 an effective occurrence transition; it is a lossy notification only.
@@ -67,15 +80,17 @@ relationship among status, HTTP status, error code, success evidence,
 termination commitment, audit handoff, and lock authorization. Shape-only
 validation is not an enum-membership decision.
 
-Evidence: the current store owner and schema are
-`internal/gui/audit_lock_state.go:25-146`; all read and write routes converge
-on `readStoreLockHeld` and `writeStoreLockHeld` at
-`internal/gui/audit_lock_state.go:669-699`; current terminal failure returns an
-in-memory uncertain receipt at `internal/gui/audit_lock_state.go:844-894`;
-restart claims prior-generation `in_flight` as `uncertain` at
-`internal/gui/audit_lock_state.go:702-740`; exact task admission is already
-enforced at `internal/gui/audit_lock_state.go:799-811`; the contradictory
-Dashboard global veto is `internal/gui/frontend/src/screens/Dashboard.tsx:1138-1160`.
+Evidence: the current effective-state owner is
+`internal/gui/audit_lock_state.go:644`; strict store validation is
+`internal/gui/audit_lock_state.go:777`; all read and write routes converge on
+`readStoreLockHeld` and `writeStoreLockHeld` at
+`internal/gui/audit_lock_state.go:1033` and
+`internal/gui/audit_lock_state.go:1048`; the locked exact reconciliation owner
+is `internal/gui/audit_lock_state.go:1098`; startup claim is
+`internal/gui/audit_lock_state.go:1142`; reservation is
+`internal/gui/audit_lock_state.go:1244`; the protected terminal uncertainty
+owner is `internal/gui/audit_lock_state.go:1559`; acknowledgement is
+`internal/gui/audit_lock_state.go:1716`.
 
 ## Rationale
 
@@ -113,6 +128,11 @@ store without copying a list into the schema layer.
   The overlay is not an outbox, retry queue, instruction, or second source of
   policy; it is a monotonic fail-closed projection owned inside the existing
   adapter.
+- A reservation whose exact intended store is proved after a writer error
+  remains novel and may enter backend recovery once. An acknowledgement whose
+  exact intended store is proved clears the exact settlement and, for final
+  consumption, advances the in-memory epoch to the already-durable epoch
+  before returning.
 - Task A remains fenced by both the Dashboard's task-keyed correlation and the
   adapter's durable per-task check. Task B is independently admissible.
 - Unknown enum-shaped disk values fail initialization or the active operation
@@ -156,6 +176,9 @@ best-effort parsing is forbidden because it erases the at-most-once fence.
 | Different-task unresolved receipt | No receipt-policy error for the different task | Admit through the normal adapter transaction, subject to capacity and baseline checks. |
 | Stale store generation | HTTP `409 RECOVER_BASELINE_STALE` | No relabel, no mutation, no fallback interpretation. |
 | Acknowledgement before effective terminal state | HTTP `409 RECOVER_RECEIPT_IN_FLIGHT` | Do not consume the record. |
+| Reservation or acknowledgement writer error, exact intended reread | Reconciled event with `failure_id=post_rename_exact_reread` and `data_outcome=durable_proven` | Commit the already-durable continuation once; never retry the write. |
+| Reservation or acknowledgement writer error, exact pre-write reread | Existing HTTP `500 AUDIT_LOCK_ADAPTER_INIT_FAILED` | Preserve the prior store and do not execute a continuation. |
+| Reservation or acknowledgement writer error, reread failure or third state | HTTP `409 RECOVER_OUTCOME_UNCERTAIN` | Do not guess publication, create a settlement, advance the epoch, or retry. |
 
 ## Promotion gate
 
@@ -170,6 +193,9 @@ best-effort parsing is forbidden because it erases the at-most-once fence.
 4. one adapter writer-owner, one `audit-lock-state` event family, no second
    policy or state store, and no external wire change;
 5. migration and rollback documentation references this decision id.
+6. reserve and final/non-final acknowledgement matrices prove normal,
+   error-before-write, exact write-then-error, third-state/read-failure, and
+   close-after-proof behavior without changing terminalization or claim.
 
 ## Alternatives rejected
 

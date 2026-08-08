@@ -381,7 +381,11 @@ func probeGUIOwnerAlive() (guiOwnerProbeState, int, int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	v := gui.Probe(ctx, pidportPath)
-	return classifyGUIOwnerVerdict(v), v.PID, v.Port
+	identity := gui.ProcessIdentityResult{}
+	if v.Class == gui.VerdictLiveUnreachable {
+		identity = gui.EvaluateProcessIdentity(v)
+	}
+	return classifyGUIOwnerVerdict(v, identity), v.PID, v.Port
 }
 
 // classifyGUIOwnerVerdict is the single owner of the gui.Verdict →
@@ -443,20 +447,17 @@ func probeGUIOwnerAlive() (guiOwnerProbeState, int, int) {
 // preserves the pre-existing fix for the old PIDAlive-keyed version (PIDAlive
 // was force-set false on those platforms even for a ping-matching owner, so a
 // healthy macOS GUI used to read as alive=false).
-func classifyGUIOwnerVerdict(v gui.Verdict) guiOwnerProbeState {
+func classifyGUIOwnerVerdict(v gui.Verdict, identity gui.ProcessIdentityResult) guiOwnerProbeState {
 	switch v.Class {
 	case gui.VerdictDeadPID:
 		return guiOwnerStateConfirmedDead
 	case gui.VerdictHealthy:
 		return guiOwnerStateAlive
 	case gui.VerdictLiveUnreachable:
-		if v.IdentityProbeUnsupported() {
-			// "Alive but not answering ping" is what this class means only
-			// when the identity probe RAN. Here it did not — see the
-			// PLATFORM NOTE above.
-			return guiOwnerStateUnknown
+		if identity.Class == gui.ProcessIdentityMatch {
+			return guiOwnerStateAlive
 		}
-		return guiOwnerStateAlive
+		return guiOwnerStateUnknown
 	default: // gui.VerdictMalformed, gui.VerdictIndeterminate, or any class this mapping does not expect.
 		return guiOwnerStateUnknown
 	}
@@ -1280,7 +1281,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"gui-owner-unknown-confirmation-reset-failed",
 				"could not durably clear the GUI-owner-unknown confirmation marker after an interrupting (held/undeterminable) flock observation; a stale window could otherwise survive into a later tick",
-				map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
+				guiOwnerUnknownConfirmationFailureBody(resetErr, map[string]any{"supervisor_pid": supervisorPID}))
 		}
 		return false
 	}
@@ -1294,7 +1295,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"gui-owner-unknown-confirmation-write-failed",
 				"could not durably record the start of the GUI-owner-unknown confirmation window; will retry next tick",
-				map[string]any{"supervisor_pid": supervisorPID, "error": writeErr.Error()})
+				guiOwnerUnknownConfirmationFailureBody(writeErr, map[string]any{"supervisor_pid": supervisorPID}))
 		}
 		return false
 	}
@@ -1316,7 +1317,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 				"gui-owner-unknown-confirmation-write-failed",
 				"could not replace a future-dated GUI-owner-unknown confirmation marker; refusing to escalate",
-				map[string]any{"supervisor_pid": supervisorPID, "error": writeErr.Error()})
+				guiOwnerUnknownConfirmationFailureBody(writeErr, map[string]any{"supervisor_pid": supervisorPID}))
 		}
 		return false
 	}
@@ -1341,7 +1342,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 			"gui-owner-unknown-confirmation-consume-failed",
 			"could not durably reset the GUI-owner-unknown confirmation marker before escalating; refusing to relaunch this tick rather than risk an immediate re-arm before the relaunch can take hold",
-			map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
+			guiOwnerUnknownConfirmationFailureBody(resetErr, map[string]any{"supervisor_pid": supervisorPID}))
 		return false
 	}
 	defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
@@ -1428,7 +1429,7 @@ func resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir string, supervisorPID
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 			"gui-owner-unknown-confirmation-reset-failed",
 			"could not durably clear the GUI-owner-unknown confirmation marker after a non-Unknown GUI-owner observation; a stale window could otherwise survive into a later Unknown tick",
-			map[string]any{"supervisor_pid": supervisorPID, "error": resetErr.Error()})
+			guiOwnerUnknownConfirmationFailureBody(resetErr, map[string]any{"supervisor_pid": supervisorPID}))
 	}
 }
 
@@ -1451,7 +1452,7 @@ func readGUIOwnerUnknownConfirmationMarker(path string) (time.Time, error) {
 }
 
 func writeGUIOwnerUnknownConfirmationMarker(path string, at time.Time) error {
-	return api.WriteStateFileBytesAtomic(path, []byte(at.Format(time.RFC3339Nano)))
+	return writeGUIOwnerUnknownConfirmationMarkerContained(path, at)
 }
 
 // guiServingProbeFn is the injectable non-gating serving-attestation SEAM

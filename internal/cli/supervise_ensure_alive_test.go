@@ -19,6 +19,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/gui"
 )
 
@@ -37,13 +38,17 @@ import (
 //     resolution lands in the temp tree.
 func ensureAliveTestStateDir(t *testing.T) string {
 	t.Helper()
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)
 	t.Setenv("LOCALAPPDATA", stateDir)
 	t.Setenv("USERPROFILE", stateDir)
 	t.Setenv("XDG_STATE_HOME", stateDir)
 	return stateDir
+}
+
+func writeGUIOwnerUnknownConfirmationMarkerDirectForTest(path string, at time.Time) error {
+	return api.WriteStateFileBytesAtomic(path, []byte(at.UTC().Format(time.RFC3339Nano)))
 }
 
 // TestEnsureAlive_LiveLock_NoOp covers the common case: a supervisor holds the
@@ -990,7 +995,7 @@ func TestEnsureAliveUnknownEscalation_DetectionWriteCannotBlockRecovery(t *testi
 			restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
 			t.Cleanup(restoreLockProbe)
 			markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
-			if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+			if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
 				t.Fatalf("seed confirmation marker: %v", err)
 			}
 			out := newEnsureAliveOrderingWriter("phase-i-lease-unconfirmed")
@@ -1127,16 +1132,15 @@ func TestProbeGUIOwnerAlive_MalformedPidportMapsToUnknown(t *testing.T) {
 // discard it and reintroduce the older platform gap where a healthy macOS GUI
 // read as not-alive.
 //
-// MUTATION: delete the `if v.IdentityProbeUnsupported()` arm from
-// classifyGUIOwnerVerdict's VerdictLiveUnreachable case — the
-// "LiveUnreachableIdentityProbeUnsupported" subtest fails with
-// "classifyGUIOwnerVerdict = 1 (Alive), want 0 (Unknown)".
+// MUTATION: map every supported LiveUnreachable verdict to Alive without the
+// typed exact-match result — the mismatch/gone/uncertain rows fail.
 func TestClassifyGUIOwnerVerdict_Matrix(t *testing.T) {
 	cases := []struct {
-		name    string
-		verdict gui.Verdict
-		want    guiOwnerProbeState
-		why     string
+		name     string
+		verdict  gui.Verdict
+		identity gui.ProcessIdentityResult
+		want     guiOwnerProbeState
+		why      string
 	}{
 		{
 			name:    "LiveUnreachableIdentityProbeUnsupported",
@@ -1151,10 +1155,32 @@ func TestClassifyGUIOwnerVerdict_Matrix(t *testing.T) {
 			why:     "a ping reply carrying the recorded PID proves liveness independently of the identity probe",
 		},
 		{
-			name:    "LiveUnreachableIdentityProbeRan",
-			verdict: gui.Verdict{Class: gui.VerdictLiveUnreachable, PID: 4242, Port: 9125, PIDAlive: true},
-			want:    guiOwnerStateAlive,
-			why:     "the identity probe ran and reported the PID alive; it is simply not answering ping",
+			name:     "LiveUnreachableIdentityProbeRan",
+			verdict:  gui.Verdict{Class: gui.VerdictLiveUnreachable, PID: 4242, Port: 9125, PIDAlive: true},
+			identity: gui.ProcessIdentityResult{Class: gui.ProcessIdentityMatch},
+			want:     guiOwnerStateAlive,
+			why:      "the current image, argv, start time, and owner all match; it is simply not answering ping",
+		},
+		{
+			name:     "LiveUnreachableIdentityMismatch",
+			verdict:  gui.Verdict{Class: gui.VerdictLiveUnreachable, PID: 4242, Port: 9125, PIDAlive: true},
+			identity: gui.ProcessIdentityResult{Class: gui.ProcessIdentityMismatch},
+			want:     guiOwnerStateUnknown,
+			why:      "a recycled or unrelated PID cannot bypass independent flock confirmation",
+		},
+		{
+			name:     "LiveUnreachableIdentityGone",
+			verdict:  gui.Verdict{Class: gui.VerdictLiveUnreachable, PID: 4242, Port: 9125, PIDAlive: true},
+			identity: gui.ProcessIdentityResult{Class: gui.ProcessIdentityGone},
+			want:     guiOwnerStateUnknown,
+			why:      "an already-gone race does not prove the GUI flock is free",
+		},
+		{
+			name:     "LiveUnreachableIdentityUncertain",
+			verdict:  gui.Verdict{Class: gui.VerdictLiveUnreachable, PID: 4242, Port: 9125, PIDAlive: true},
+			identity: gui.ProcessIdentityResult{Class: gui.ProcessIdentityUnsupportedOrUncertain},
+			want:     guiOwnerStateUnknown,
+			why:      "an owner lookup or platform gap is not positive owner evidence",
 		},
 		{
 			name:    "Healthy",
@@ -1183,7 +1209,7 @@ func TestClassifyGUIOwnerVerdict_Matrix(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := classifyGUIOwnerVerdict(tc.verdict); got != tc.want {
+			if got := classifyGUIOwnerVerdict(tc.verdict, tc.identity); got != tc.want {
 				t.Fatalf("classifyGUIOwnerVerdict = %d, want %d (%s)", got, tc.want, tc.why)
 			}
 		})
@@ -1331,7 +1357,7 @@ func TestEnsureAlive_HeadlessFleet_UnknownFlockHeldClearsMarkerNeverEscalates(t 
 	// hardened READER's file-DACL gate requires — a plain os.WriteFile
 	// inherits the parent's (possibly broadened) DACL and gets refused on
 	// read, silently making the marker look "absent" instead of "stale".
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
 		t.Fatalf("seed confirmation marker: %v", err)
 	}
 
@@ -1392,7 +1418,7 @@ func TestEnsureAlive_HeadlessFleet_UnknownEscalatesAfterConfirmationWindow(t *te
 	// hardened READER's file-DACL gate requires — a plain os.WriteFile
 	// inherits the parent's (possibly broadened) DACL and gets refused on
 	// read, silently making the marker look "absent" instead of "stale".
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
 		t.Fatalf("seed confirmation marker: %v", err)
 	}
 
@@ -1423,7 +1449,7 @@ func TestEnsureAliveUnknownEscalationAt_FutureMarkerStartsFreshWindow(t *testing
 	stateDir := ensureAliveTestStateDir(t)
 	observedAt := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
 	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, observedAt.Add(24*time.Hour)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, observedAt.Add(24*time.Hour)); err != nil {
 		t.Fatalf("seed future confirmation marker: %v", err)
 	}
 	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
@@ -1461,7 +1487,7 @@ func TestEnsureAliveUnknownEscalationAt_FutureMarkerThreeObservationWindow(t *te
 	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
 	defer restoreServingProbe()
 	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, t0.Add(24*time.Hour)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, t0.Add(24*time.Hour)); err != nil {
 		t.Fatalf("seed future confirmation marker: %v", err)
 	}
 	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
@@ -1547,7 +1573,7 @@ func TestEnsureAlive_HeadlessFleet_UnknownAliveUnknownDoesNotReuseStaleTimestamp
 	// small additional elapsed time (test overhead across ticks 2 and 3) is
 	// enough to cross guiOwnerUnknownConfirmationWindow IF -- and only if --
 	// the intervening Alive tick fails to reset it.
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow+200*time.Millisecond)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow+200*time.Millisecond)); err != nil {
 		t.Fatalf("backdate marker: %v", err)
 	}
 
@@ -1618,7 +1644,7 @@ func TestEnsureAlive_HeadlessFleet_UnknownConfirmedDeadUnknownDoesNotReuseStaleT
 	if _, statErr := os.Stat(markerPath); statErr != nil {
 		t.Fatalf("tick1: expected the marker to be armed: %v", statErr)
 	}
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow+200*time.Millisecond)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow+200*time.Millisecond)); err != nil {
 		t.Fatalf("backdate marker: %v", err)
 	}
 
@@ -1726,7 +1752,7 @@ func TestEnsureAlive_SupervisorDownTickResetsUnknownConfirmationMarker(t *testin
 	// assertion discipline: under the fix tick 2 clears the marker and tick 3
 	// arms a FRESH one (0 relaunches); without it tick 3 reads this
 	// already-elapsed timestamp and escalates (1 relaunch).
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow-time.Second)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-guiOwnerUnknownConfirmationWindow-time.Second)); err != nil {
 		t.Fatalf("backdate marker: %v", err)
 	}
 
@@ -1812,7 +1838,7 @@ func TestEnsureAlive_HeadlessFleet_UnknownEscalationRefusesWhenResetFails(t *tes
 	defer restoreLockProbe()
 
 	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
-	if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
 		t.Fatalf("seed confirmation marker: %v", err)
 	}
 
@@ -2354,7 +2380,7 @@ func TestEnsureAliveGUIRecovery_RetainedLeaseSuppressesEveryGUIOwnerRelaunch(t *
 				restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
 				t.Cleanup(restoreLockProbe)
 				markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
-				if err := writeGUIOwnerUnknownConfirmationMarker(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+				if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
 					t.Fatalf("seed confirmation marker: %v", err)
 				}
 			},
