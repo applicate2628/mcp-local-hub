@@ -2,7 +2,7 @@
 
 - id: 2026-07-25-cleanup-aggressive-exe-extension-index-out-of-range-panic
 - context: adjacent-finding
-- status: open
+- status: fixed
 - severity: high
 - area: `internal/api/cleanup.go` (`findWindowsExeExtensionEnd`, `firstTokenBasename`, `isOurOwnProcess`, `parseAggressiveCandidates`)
 - found-by: platform-engineer during console/tray verification
@@ -26,12 +26,12 @@ The failure aborts the `internal/cli` package test binary. The same parser is
 reachable from the operator-facing `mcphub cleanup aggressive` command, so an
 input that triggers the faulty index calculation can terminate that command.
 
-## Status and next step
+## Resolution
 
-This is a preserved open finding, not a claim that the current hosted master
-was re-reproduced by the console-tray candidate. A dedicated investigation
-should isolate a deterministic synthetic input, trace every caller's index
-contract, and add a regression test before changing production logic.
+Commit `0357794596674c3f224d7b083ec1de9341b8e7cb` fixed the byte-offset-space
+defect by searching the original bytes rather than a transformed string. The
+regression oracles are `internal/api/cleanup_test.go:568-616`. PR #592 needs
+no further cleanup production-code change.
 
 ## Terms and Abbreviations
 
