@@ -795,7 +795,7 @@ func TestSerenaRouter_ReconcileReadinessProbeShape_PassesAgainstCompletedRouter(
 
 	const routerPath = "/serena/mcp"
 
-	// --- Step 1: HEAD must answer 405 + Allow: POST (the router signature
+	// --- Step 1: HEAD must answer 405 + Allow: POST, DELETE (the router signature
 	// the probe uses to reject a stale-port reused by another service). ---
 	headReq, err := http.NewRequest(http.MethodHead, ts.URL+routerPath, nil)
 	if err != nil {

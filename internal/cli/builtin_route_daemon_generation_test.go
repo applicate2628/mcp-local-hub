@@ -145,8 +145,16 @@ func TestEnsureBuiltinRouteDaemonAtStartup_AdoptsObservedGenerationOverStaleCall
 // `&api.SupervisorIntentFile{Version: 1}` and reassign the `intent`
 // parameter BEFORE the strict-port check) makes this test fail — the
 // returned value is non-nil.
-func TestEnsureBuiltinRouteDaemonAtStartup_NilInputStrictPortFailurePreservesNil(t *testing.T) {
+func TestEnsureBuiltinRouteDaemonAtStartup_NilInputRoutingTargetFailurePreservesNil(t *testing.T) {
 	stateDir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	settingsPath := api.SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o700); err != nil {
+		t.Fatalf("create settings parent: %v", err)
+	}
+	if err := os.WriteFile(settingsPath, []byte("mcp_front.port: [corrupt"), 0o600); err != nil {
+		t.Fatalf("write corrupt routing settings: %v", err)
+	}
 	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
 	if err != nil {
@@ -154,19 +162,13 @@ func TestEnsureBuiltinRouteDaemonAtStartup_NilInputStrictPortFailurePreservesNil
 	}
 	defer events.Close()
 
-	prevPortFn := resolveMCPFrontPortStrictFn
-	resolveMCPFrontPortStrictFn = func() (int, error) {
-		return 0, os.ErrInvalid
-	}
-	t.Cleanup(func() { resolveMCPFrontPortStrictFn = prevPortFn })
-
 	got := ensureBuiltinRouteDaemonAtStartup(stateDir, nil, events)
 	if got != nil {
-		t.Fatalf("ensureBuiltinRouteDaemonAtStartup(nil, ...) with a forced strict-port failure returned %+v, want nil", got)
+		t.Fatalf("ensureBuiltinRouteDaemonAtStartup(nil, ...) with a routing-target failure returned %+v, want nil", got)
 	}
 
 	if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); statErr == nil {
-		t.Fatalf("supervisor-intent.json was created despite a port-resolution failure on a nil input")
+		t.Fatalf("supervisor-intent.json was created despite a routing-target failure on a nil input")
 	}
 }
 

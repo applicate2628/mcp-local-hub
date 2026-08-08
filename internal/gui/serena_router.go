@@ -475,7 +475,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// method (Finding 3). A Streamable HTTP client sends DELETE /serena/mcp
 	// on shutdown; without this branch it would 405 and leak the upstream
 	// daemon session + the router-owned bindings until idle expiry. GET and
-	// every other non-POST method keep their current 405 (Allow: POST).
+	// every other non-POST method keep their current 405 (Allow: POST, DELETE).
 	if r.Method == http.MethodDelete {
 		s.handleSerenaDelete(w, r)
 		return

@@ -1251,23 +1251,8 @@ var healthProbeHTTPClient = func() *http.Client {
 }
 
 func cleanupHealthProbeSession(client *http.Client, url, sessionID string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), healthProbeSessionCleanupTimeout)
-	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, url, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Mcp-Session-Id", sessionID)
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-	return nil
+	_, err := terminateMCPProbeSession(client, url, sessionID, healthProbeSessionCleanupTimeout)
+	return err
 }
 
 func singleHealthProbe(port int) (probe *HealthProbe) {

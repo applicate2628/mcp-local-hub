@@ -42,11 +42,15 @@ Concretely (see `internal/api/builtin_route_daemon.go` +
    replace if drifted (binary relocated, port constant bumped), no-op if
    already canonical.
 3. `ensureBuiltinRouteDaemonAtStartup` (internal/cli, unexported) calls both of
-   the above right after `runSupervise`'s `loadIntentFiles`, mutates the
-   in-memory `intent` this cold start's own first reconcile pass will use, and
-   — only when the row changed — persists it through the SAME flocked
-   read-modify-write every other supervisor-intent writer uses
-   (`api.MutateSupervisorIntentIfChanged`).
+   the above right after `runSupervise`'s `loadIntentFiles`, projects the
+   canonical routing epoch under the API routing lease, mutates the in-memory
+   `intent` this cold start's own first reconcile pass will use, and — only
+   when the row changed — persists it through the SAME flocked read-modify-write
+   every other supervisor-intent writer uses
+   (`api.MutateSupervisorIntentIfChanged`). Stable GUI uses its requested port;
+   stable or recovering front epochs use the already admitted port. The routing
+   lease spans epoch projection through this descriptor persist, so an explicit
+   epoch transition cannot interleave an A/B descriptor split.
 
 Everything downstream (reconcile's spawn-desired set, the production
 `SpawnFunc`, the restart-policy state machine, the liveness sweep, `mcphub

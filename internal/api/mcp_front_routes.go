@@ -35,18 +35,21 @@ const (
 type MCPFrontProbeStage string
 
 const (
-	MCPFrontProbeStageInput                   MCPFrontProbeStage = "input"
-	MCPFrontProbeStageRouteSetLoad            MCPFrontProbeStage = "route-set-load"
-	MCPFrontProbeStageRouteSetEmpty           MCPFrontProbeStage = "route-set-empty"
-	MCPFrontProbeStageShapeTransport          MCPFrontProbeStage = "shape-transport"
-	MCPFrontProbeStageShapeResponse           MCPFrontProbeStage = "shape-response"
-	MCPFrontProbeStageInitializeTransport     MCPFrontProbeStage = "initialize-transport"
-	MCPFrontProbeStageInitializeHTTPStatus    MCPFrontProbeStage = "initialize-http-status"
-	MCPFrontProbeStageInitializeJSONDecode    MCPFrontProbeStage = "initialize-json-decode"
-	MCPFrontProbeStageInitializeJSONRPCError  MCPFrontProbeStage = "initialize-jsonrpc-error"
-	MCPFrontProbeStageInitializeResultMissing MCPFrontProbeStage = "initialize-result-missing"
-	MCPFrontProbeStageParentDeadline          MCPFrontProbeStage = "parent-deadline"
-	MCPFrontProbeStageParentCanceled          MCPFrontProbeStage = "parent-canceled"
+	MCPFrontProbeStageInput                      MCPFrontProbeStage = "input"
+	MCPFrontProbeStageRouteSetLoad               MCPFrontProbeStage = "route-set-load"
+	MCPFrontProbeStageRouteSetEmpty              MCPFrontProbeStage = "route-set-empty"
+	MCPFrontProbeStageShapeTransport             MCPFrontProbeStage = "shape-transport"
+	MCPFrontProbeStageShapeResponse              MCPFrontProbeStage = "shape-response"
+	MCPFrontProbeStageInitializeTransport        MCPFrontProbeStage = "initialize-transport"
+	MCPFrontProbeStageInitializeHTTPStatus       MCPFrontProbeStage = "initialize-http-status"
+	MCPFrontProbeStageInitializeJSONDecode       MCPFrontProbeStage = "initialize-json-decode"
+	MCPFrontProbeStageInitializeJSONRPCError     MCPFrontProbeStage = "initialize-jsonrpc-error"
+	MCPFrontProbeStageInitializeResultMissing    MCPFrontProbeStage = "initialize-result-missing"
+	MCPFrontProbeStageInitializeSessionIDMissing MCPFrontProbeStage = "initialize-session-id-missing"
+	MCPFrontProbeStageSessionCleanupTransport    MCPFrontProbeStage = "session-cleanup-transport"
+	MCPFrontProbeStageSessionCleanupResponse     MCPFrontProbeStage = "session-cleanup-response"
+	MCPFrontProbeStageParentDeadline             MCPFrontProbeStage = "parent-deadline"
+	MCPFrontProbeStageParentCanceled             MCPFrontProbeStage = "parent-canceled"
 )
 
 // MCPFrontRoutesLiveError preserves both the failed route stage and its

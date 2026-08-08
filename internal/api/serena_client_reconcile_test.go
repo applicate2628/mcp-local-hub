@@ -573,7 +573,7 @@ func TestDefaultGUIPidportIdentityCheck_OSPortOwnerProof(t *testing.T) {
 // P1 guard: the REAL readiness ping must REJECT a non-serena-router response (a
 // stale pidport's port reused by another local HTTP server), not accept any HTTP
 // status. The mcphub serena router answers a non-POST (our HEAD) with 405 +
-// Allow: POST; anything else must fail closed so the reconcile never rewrites
+// Allow: POST, DELETE; anything else must fail closed so the reconcile never rewrites
 // client configs to an unrelated service.
 func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) {
 	portOf := func(t *testing.T, ts *httptest.Server) int {
@@ -581,7 +581,7 @@ func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) 
 		return ts.Listener.Addr().(*net.TCPAddr).Port
 	}
 	// serenaRouterStub mimics the GUI serena router: a non-POST request gets
-	// 405 + Allow: POST (the route signature); a POST (our MCP initialize probe)
+	// 405 + Allow: POST, DELETE (the route signature); a POST (our MCP initialize probe)
 	// gets either a valid JSON-RPC initialize result (serveLifecycle=true →
 	// router-completion landed) or a params.name rejection (serveLifecycle=false →
 	// the current tool-only router that has no MCP lifecycle).
@@ -591,13 +591,18 @@ func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) 
 				http.NotFound(w, r)
 				return
 			}
+			if r.Method == http.MethodDelete {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 			if r.Method != http.MethodPost {
-				w.Header().Set("Allow", "POST")
+				w.Header().Set("Allow", "POST, DELETE")
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
 			if serveLifecycle {
 				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Mcp-Session-Id", "serena-readiness-session")
 				_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"serena"},"capabilities":{}}}`))
 				return
 			}

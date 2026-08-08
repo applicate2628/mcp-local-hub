@@ -252,14 +252,21 @@ func TestSingleHealthProbe_SessionCleanup_AllPostInitializeReturns(t *testing.T)
 }
 
 func TestSingleHealthProbe_SessionCleanupFailureIsVisibleAndPreservesPrimary(t *testing.T) {
+	drainFailure := errors.New("distinct cleanup drain failure")
+	closeFailure := errors.New("distinct cleanup close failure")
 	for _, tc := range []struct {
-		name        string
-		listBody    string
-		cleanupCode int
-		wantPrimary string
+		name            string
+		listBody        string
+		cleanupCode     int
+		cleanupDrainErr error
+		cleanupCloseErr error
+		wantPrimary     string
+		wantCleanup     string
 	}{
 		{name: "cleanup failure after successful probe", listBody: `{"jsonrpc":"2.0","result":{"tools":[]}}`, cleanupCode: http.StatusBadGateway},
 		{name: "cleanup failure retains tools list failure", listBody: `{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary tools failure"}}`, cleanupCode: http.StatusBadGateway, wantPrimary: "primary tools failure"},
+		{name: "drain failure after successful probe", listBody: `{"jsonrpc":"2.0","result":{"tools":[]}}`, cleanupCode: http.StatusNoContent, cleanupDrainErr: drainFailure, wantCleanup: drainFailure.Error()},
+		{name: "close failure retains tools list failure first", listBody: `{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary tools failure"}}`, cleanupCode: http.StatusNoContent, cleanupCloseErr: closeFailure, wantPrimary: "primary tools failure", wantCleanup: closeFailure.Error()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			previous := healthProbeHTTPClient
@@ -276,7 +283,11 @@ func TestSingleHealthProbe_SessionCleanupFailureIsVisibleAndPreservesPrimary(t *
 						}
 						return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(tc.listBody))), nil
 					case http.MethodDelete:
-						return healthProbeResponse(tc.cleanupCode, io.NopCloser(strings.NewReader("cleanup rejected"))), nil
+						var body io.ReadCloser = io.NopCloser(strings.NewReader("cleanup rejected"))
+						if tc.cleanupDrainErr != nil || tc.cleanupCloseErr != nil {
+							body = &failingCleanupBody{drainErr: tc.cleanupDrainErr, closeErr: tc.cleanupCloseErr}
+						}
+						return healthProbeResponse(tc.cleanupCode, body), nil
 					default:
 						return nil, fmt.Errorf("unexpected method %s", req.Method)
 					}
@@ -286,10 +297,43 @@ func TestSingleHealthProbe_SessionCleanupFailureIsVisibleAndPreservesPrimary(t *
 			if h == nil || h.OK || !strings.Contains(h.Err, "MCP_HEALTH_SESSION_CLEANUP_FAILED") {
 				t.Fatalf("cleanup failure probe = %+v", h)
 			}
+			if tc.wantCleanup != "" && !strings.Contains(h.Err, tc.wantCleanup) {
+				t.Fatalf("cleanup cause %q is not visible: %q", tc.wantCleanup, h.Err)
+			}
 			if tc.wantPrimary != "" {
 				if !strings.Contains(h.Err, tc.wantPrimary) || strings.Index(h.Err, tc.wantPrimary) > strings.Index(h.Err, "MCP_HEALTH_SESSION_CLEANUP_FAILED") {
 					t.Fatalf("primary failure was not retained first: %q", h.Err)
 				}
+			}
+		})
+	}
+}
+
+func TestSingleHealthProbe_SessionCleanup404And405PreserveHealthyResult(t *testing.T) {
+	for _, status := range []int{http.StatusNotFound, http.StatusMethodNotAllowed} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			previous := healthProbeHTTPClient
+			defer func() { healthProbeHTTPClient = previous }()
+			healthProbeHTTPClient = func() *http.Client {
+				return &http.Client{Transport: healthProbeRoundTripper(func(req *http.Request) (*http.Response, error) {
+					switch req.Method {
+					case http.MethodPost:
+						body, _ := io.ReadAll(req.Body)
+						if strings.Contains(string(body), `"initialize"`) {
+							resp := healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","result":{}}`)))
+							resp.Header.Set("Mcp-Session-Id", "issued-session")
+							return resp, nil
+						}
+						return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","result":{"tools":[{}]}}`))), nil
+					case http.MethodDelete:
+						return healthProbeResponse(status, io.NopCloser(strings.NewReader("already gone or unsupported"))), nil
+					default:
+						return nil, fmt.Errorf("unexpected method %s", req.Method)
+					}
+				})}
+			}
+			if got := singleHealthProbe(1); got == nil || !got.OK || got.ToolCount != 1 {
+				t.Fatalf("cleanup HTTP %d changed primary health result: %+v", status, got)
 			}
 		})
 	}

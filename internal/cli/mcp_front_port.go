@@ -11,13 +11,9 @@
 // corrupt gui-preferences.yaml must not stop a manually-invoked route daemon
 // from having SOME port to bind.
 //
-// ensureBuiltinRouteDaemonAtStartup (internal/cli/supervise.go) does NOT use
-// this — it is a WRITE path (it durably persists the resolved port into the
-// reserved route-daemon row), so it uses resolveMCPFrontPortStrictFn below
-// instead (P2-5 fix, adversarial cross-family review): a resolution failure
-// there must propagate, not silently substitute the default, or the
-// supervisor could canonicalize the row back onto a port no client was ever
-// reconciled to.
+// The supervisor startup seeder does NOT use this mutable setting directly.
+// It obtains the typed, leased routing-epoch projection from API so a stable
+// or recovering front keeps its admitted port through descriptor persistence.
 package cli
 
 import "mcp-local-hub/internal/api"
@@ -31,16 +27,4 @@ import "mcp-local-hub/internal/api"
 // failure.
 var resolveMCPFrontPortFn = func() int {
 	return api.NewAPI().MCPFrontPortOrDefault()
-}
-
-// resolveMCPFrontPortStrictFn is the STRICT (write-path) counterpart of
-// resolveMCPFrontPortFn — a package-level test seam so tests can pin a
-// deterministic port/error without touching real settings. Production wires
-// it to api.NewAPI().ResolveMCPFrontPort(), which PROPAGATES a
-// read/parse/range failure instead of silently substituting
-// api.DefaultMCPFrontPort (P2-5 fix): ensureBuiltinRouteDaemonAtStartup is a
-// WRITE path and must never canonicalize the reserved route-daemon row onto
-// a port the operator did not actually configure.
-var resolveMCPFrontPortStrictFn = func() (int, error) {
-	return api.NewAPI().ResolveMCPFrontPort()
 }

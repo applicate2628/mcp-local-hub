@@ -2599,43 +2599,6 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 		workingIntent = &api.SupervisorIntentFile{Version: 1}
 	}
 
-	// P2-5 fix (adversarial cross-family review): resolve the STRICT
-	// (write-path) accessor, not the graceful MCPFrontPortOrDefault fallback
-	// resolveMCPFrontPortFn wraps. This function durably PERSISTS the
-	// resolved port into the reserved route-daemon row — exactly the WRITE
-	// path api.ResolveMCPFrontPort's own doc comment says must propagate a
-	// read/parse/range failure rather than silently substitute
-	// DefaultMCPFrontPort. The pre-fix graceful fallback meant a corrupt
-	// gui-preferences.yaml silently canonicalized this row back to port 9137
-	// even after an operator had reconciled every client onto a DIFFERENT
-	// configured port (`mcphub install --reconcile-mcp-front`) — moving the
-	// daemon off the port every client actually points at, with no
-	// resolution-error event at all.
-	port, portErr := resolveMCPFrontPortStrictFn()
-	if portErr != nil {
-		// Preserve the existing descriptor (if any) or fail loudly — never
-		// silently rewrite to the default, and never fabricate a non-nil
-		// intent from a nil one (contract 1). Skip the ensure entirely this
-		// boot: the existing row (if hadRow) is left completely untouched,
-		// and a fresh install with no row yet simply does not get one this
-		// boot rather than getting one seeded with a port the operator never
-		// configured. The next boot (or the next 60s IntentWatcher poll,
-		// which does not re-run this seeder) gets another chance once the
-		// settings file is repaired.
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "lifecycle",
-			Event:    "builtin-route-ensure-failed",
-			TaskName: api.BuiltinRouteTaskName,
-			Body: map[string]any{
-				"err":   portErr.Error(),
-				"path":  supervisorIntentPath,
-				"phase": "resolve-port",
-			},
-		})
-		return originalIntent
-	}
-
 	hadRow := false
 	for _, d := range workingIntent.Daemons {
 		if d.TaskName == api.BuiltinRouteTaskName {
@@ -2656,19 +2619,34 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 	// overwriting or silently accepting the foreign row) — the persist is
 	// correctly aborted, nothing is written, and this function reports the
 	// failure below exactly like a disk-write failure.
-	result, persistErr := api.MutateSupervisorIntentIfChangedReturning(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
-		return api.EnsureBuiltinRouteDaemon(f, cmdPath, port)
+	var observed *api.SupervisorIntentFile
+	var changed bool
+	var target api.MCPFrontRouteDaemonTarget
+	resolvedTarget := false
+	persistErr := api.NewAPI().WithMCPFrontRouteDaemonTargetLease(context.Background(), func(next api.MCPFrontRouteDaemonTarget) error {
+		resolvedTarget = true
+		target = next
+		result, err := api.MutateSupervisorIntentIfChangedReturning(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
+			return api.EnsureBuiltinRouteDaemon(f, cmdPath, next.Port)
+		})
+		if err != nil {
+			return err
+		}
+		observed = result.Intent
+		changed = result.Changed
+		return nil
 	})
 	if persistErr != nil {
+		body := map[string]any{"err": persistErr.Error(), "path": supervisorIntentPath}
+		if !resolvedTarget {
+			body["phase"] = "resolve-routing-target"
+		}
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "warn",
 			Source:   "lifecycle",
 			Event:    "builtin-route-ensure-failed",
 			TaskName: api.BuiltinRouteTaskName,
-			Body: map[string]any{
-				"err":  persistErr.Error(),
-				"path": supervisorIntentPath,
-			},
+			Body:     body,
 		})
 		// The disk write did not land (or was correctly refused, e.g. a
 		// reserved-name collision) — return the ORIGINAL in-memory intent
@@ -2678,7 +2656,7 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 	}
 
 	action := "unchanged"
-	if result.Changed {
+	if changed {
 		if hadRow {
 			action = "replaced"
 		} else {
@@ -2691,13 +2669,15 @@ func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIn
 		Event:    "builtin-route-ensured",
 		TaskName: api.BuiltinRouteTaskName,
 		Body: map[string]any{
-			"action": action,
-			"port":   port,
+			"action":             action,
+			"port":               target.Port,
+			"routing_state":      target.State,
+			"routing_generation": target.Generation,
 		},
 	})
 	// Contract 2: adopt the exact generation observed/committed under the
 	// flock, not the caller's own pre-lock copy.
-	return result.Intent
+	return observed
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and

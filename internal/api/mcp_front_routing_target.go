@@ -57,6 +57,16 @@ type MCPFrontRoutingTargetSnapshot struct {
 	Port       int                   `json:"admitted_port"`
 }
 
+// MCPFrontRouteDaemonTarget is the routing-epoch projection consumed by the
+// supervisor-owned route descriptor. Unlike ordinary client resolution it
+// deliberately includes recovering transitional epochs: the descriptor must
+// keep the already admitted port while the explicit transition completes.
+type MCPFrontRouteDaemonTarget struct {
+	State      MCPFrontRoutingTarget
+	Generation int
+	Port       int
+}
+
 var ErrMCPFrontTransitionActive = errors.New(MCPFrontTransitionActiveCode)
 var ErrMCPFrontTargetConflict = errors.New(MCPFrontTargetConflictCode)
 var ErrMCPFrontTargetInvalid = errors.New(MCPFrontTargetInvalidCode)
@@ -195,6 +205,41 @@ func (a *API) WithClientRoutingAuthorityLeaseIn(
 			}
 		default:
 			return &MCPFrontTargetInvalidError{Detail: fmt.Sprintf("unknown client routing authority kind %d", request.kind)}
+		}
+		return mutate(target)
+	})
+}
+
+// WithMCPFrontRouteDaemonTargetLease holds the shared routing lease from the
+// epoch projection through the supervisor descriptor persist performed by
+// mutate. It is the sole bridge from durable routing authority to the route
+// daemon startup seeder; it neither changes the epoch nor starts a process.
+func (a *API) WithMCPFrontRouteDaemonTargetLease(ctx context.Context, mutate func(MCPFrontRouteDaemonTarget) error) error {
+	return a.WithMCPFrontRouteDaemonTargetLeaseIn(ctx, SettingsPath(), mutate)
+}
+
+func (a *API) WithMCPFrontRouteDaemonTargetLeaseIn(ctx context.Context, path string, mutate func(MCPFrontRouteDaemonTarget) error) error {
+	if mutate == nil {
+		return &MCPFrontTargetInvalidError{Detail: "route daemon target callback is nil"}
+	}
+	return withMCPFrontRoutingFileLease(ctx, path, false, func() error {
+		settingsMu.Lock()
+		raw, err := readRawSettingsMap(path)
+		var target MCPFrontRouteDaemonTarget
+		if err == nil {
+			var snapshot MCPFrontRoutingTargetSnapshot
+			snapshot, err = mcpFrontRoutingEpochFromRaw(raw, false)
+			if err == nil && snapshot.State == MCPFrontRoutingTargetGUI {
+				var port int
+				port, err = routingPortFromRaw(raw, MCPFrontPortSettingKey)
+				target = MCPFrontRouteDaemonTarget{State: snapshot.State, Port: port}
+			} else if err == nil {
+				target = MCPFrontRouteDaemonTarget{State: snapshot.State, Generation: snapshot.Generation, Port: snapshot.Port}
+			}
+		}
+		settingsMu.Unlock()
+		if err != nil {
+			return err
 		}
 		return mutate(target)
 	})

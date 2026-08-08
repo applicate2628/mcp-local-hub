@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,6 +44,82 @@ func TestMCPFrontRoutingLeaseBlocksTransitionAcrossOrdinaryMutation(t *testing.T
 	}
 	close(resumeWrite)
 	if err := <-writerDone; err != nil {
+		t.Fatal(err)
+	}
+	if err := <-transitionDone; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWithMCPFrontRouteDaemonTargetLease_ProjectsAdmittedEpoch(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		yaml    string
+		want    MCPFrontRouteDaemonTarget
+		wantErr error
+	}{
+		{name: "stable gui uses requested port", yaml: "mcp_front.routing_target: gui\nmcp_front.port: \"9444\"\n", want: MCPFrontRouteDaemonTarget{State: MCPFrontRoutingTargetGUI, Port: 9444}},
+		{name: "preparing uses admitted port", yaml: "mcp_front.routing_target: front-preparing\nmcp_front.routing_generation: \"7\"\nmcp_front.routing_admitted_port: \"9555\"\nmcp_front.port: \"9666\"\n", want: MCPFrontRouteDaemonTarget{State: MCPFrontRoutingTargetFrontPreparing, Generation: 7, Port: 9555}},
+		{name: "stable front ignores requested drift", yaml: "mcp_front.routing_target: front\nmcp_front.routing_generation: \"7\"\nmcp_front.routing_admitted_port: \"9555\"\nmcp_front.port: \"9666\"\n", want: MCPFrontRouteDaemonTarget{State: MCPFrontRoutingTargetFront, Generation: 7, Port: 9555}},
+		{name: "restoring uses admitted port", yaml: "mcp_front.routing_target: gui-restoring\nmcp_front.routing_generation: \"7\"\nmcp_front.routing_admitted_port: \"9555\"\nmcp_front.port: \"9666\"\n", want: MCPFrontRouteDaemonTarget{State: MCPFrontRoutingTargetGUIRestoring, Generation: 7, Port: 9555}},
+		{name: "invalid fails closed", yaml: "mcp_front.routing_target: invalid\n", wantErr: ErrMCPFrontTargetInvalid},
+		{name: "unbound fails closed", yaml: "mcp_front.routing_target: front\nmcp_front.routing_generation: \"7\"\n", wantErr: ErrMCPFrontRoutingPortUnbound},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "settings.yaml")
+			if tc.yaml != "" {
+				seedRoutingSettings(t, path, tc.yaml)
+			}
+			called := false
+			var got MCPFrontRouteDaemonTarget
+			err := NewAPI().WithMCPFrontRouteDaemonTargetLeaseIn(context.Background(), path, func(target MCPFrontRouteDaemonTarget) error {
+				called = true
+				got = target
+				return nil
+			})
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) || called {
+					t.Fatalf("err=%T %v called=%v, want %v without callback", err, err, called, tc.wantErr)
+				}
+				return
+			}
+			if err != nil || !called || got != tc.want {
+				t.Fatalf("target=%+v called=%v err=%v, want %+v", got, called, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestWithMCPFrontRouteDaemonTargetLease_BlocksEpochTransitionUntilPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "settings.yaml")
+	a := NewAPI()
+	insidePersist := make(chan struct{})
+	releasePersist := make(chan struct{})
+	seedDone := make(chan error, 1)
+	go func() {
+		seedDone <- a.WithMCPFrontRouteDaemonTargetLeaseIn(context.Background(), path, func(target MCPFrontRouteDaemonTarget) error {
+			if target.State != MCPFrontRoutingTargetGUI {
+				return fmt.Errorf("initial target=%+v, want GUI", target)
+			}
+			close(insidePersist)
+			<-releasePersist
+			return nil
+		})
+	}()
+	<-insidePersist
+	transitionDone := make(chan error, 1)
+	go func() {
+		transitionDone <- a.TransitionMCPFrontRoutingEpochIn(path,
+			MCPFrontRoutingTargetSnapshot{State: MCPFrontRoutingTargetGUI},
+			MCPFrontRoutingTargetSnapshot{State: MCPFrontRoutingTargetFrontPreparing, Generation: 1, Port: DefaultMCPFrontPort})
+	}()
+	select {
+	case err := <-transitionDone:
+		t.Fatalf("epoch transition interleaved before descriptor persist completed: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releasePersist)
+	if err := <-seedDone; err != nil {
 		t.Fatal(err)
 	}
 	if err := <-transitionDone; err != nil {

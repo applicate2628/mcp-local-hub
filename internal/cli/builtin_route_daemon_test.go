@@ -11,8 +11,10 @@
 package cli
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -85,6 +87,129 @@ func TestEnsureBuiltinRouteDaemonAtStartup_PersistsAndSurvivesReread(t *testing.
 	if !supervisorIntentHasBuiltinRouteRow(reread) {
 		t.Fatalf("re-read of supervisor-intent.json (simulating the IntentWatcher's periodic re-read) is missing %s row — the row was not durably persisted, only mutated in-memory", api.BuiltinRouteTaskName)
 	}
+}
+
+func TestEnsureBuiltinRouteDaemonAtStartup_StableFrontKeepsAdmittedPortAcrossRequestedChange(t *testing.T) {
+	const (
+		admittedPort  = 19137
+		requestedPort = 19138
+		generation    = 7
+	)
+	t.Setenv("LOCALAPPDATA", apitest.HardenedTempDir(t))
+	seedBuiltinRouteRoutingSettings(t, api.MCPFrontRoutingTargetFront, generation, admittedPort, requestedPort)
+	stateDir := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	got := ensureBuiltinRouteDaemonAtStartup(stateDir, &api.SupervisorIntentFile{Version: 1}, events)
+	assertBuiltinRouteSeederProjection(t, got, stateDir, eventsPath, api.MCPFrontRoutingTargetFront, generation, admittedPort, requestedPort)
+}
+
+func TestEnsureBuiltinRouteDaemonAtStartup_PreparingRebaseUsesAdmittedPort(t *testing.T) {
+	const (
+		admittedPort  = 20137
+		requestedPort = 20138
+		generation    = 8
+	)
+	t.Setenv("LOCALAPPDATA", apitest.HardenedTempDir(t))
+	seedBuiltinRouteRoutingSettings(t, api.MCPFrontRoutingTargetFrontPreparing, generation, admittedPort, requestedPort)
+	stateDir := apitest.HardenedTempDir(t)
+	eventsPath := filepath.Join(stateDir, "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(eventsPath)
+	if err != nil {
+		t.Fatalf("open event log: %v", err)
+	}
+	defer events.Close()
+
+	got := ensureBuiltinRouteDaemonAtStartup(stateDir, &api.SupervisorIntentFile{Version: 1}, events)
+	assertBuiltinRouteSeederProjection(t, got, stateDir, eventsPath, api.MCPFrontRoutingTargetFrontPreparing, generation, admittedPort, requestedPort)
+}
+
+func seedBuiltinRouteRoutingSettings(t *testing.T, state api.MCPFrontRoutingTarget, generation, admittedPort, requestedPort int) {
+	t.Helper()
+	path := api.SettingsPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatalf("create settings parent: %v", err)
+	}
+	body := strings.Join([]string{
+		"mcp_front.routing_target: " + string(state),
+		"mcp_front.routing_generation: \"" + strconv.Itoa(generation) + "\"",
+		"mcp_front.routing_admitted_port: \"" + strconv.Itoa(admittedPort) + "\"",
+		"mcp_front.port: \"" + strconv.Itoa(requestedPort) + "\"",
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("write routing settings: %v", err)
+	}
+}
+
+func assertBuiltinRouteSeederProjection(t *testing.T, got *api.SupervisorIntentFile, stateDir, eventsPath string, state api.MCPFrontRoutingTarget, generation, admittedPort, requestedPort int) {
+	t.Helper()
+	wantRow := api.BuildBuiltinRouteDaemon(canonicalMcphubPath(), admittedPort)
+	assertSingleCanonicalBuiltinRouteRow(t, got, wantRow, "returned intent")
+
+	disk, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("re-read supervisor intent: %v", err)
+	}
+	assertSingleCanonicalBuiltinRouteRow(t, disk, wantRow, "disk intent")
+
+	settingsAPI := api.NewAPI()
+	requested, err := settingsAPI.SettingsGet(api.MCPFrontPortSettingKey)
+	if err != nil || requested != strconv.Itoa(requestedPort) {
+		t.Fatalf("requested port after seeding=%q err=%v, want %d", requested, err, requestedPort)
+	}
+	snapshot, err := settingsAPI.MCPFrontRoutingTargetSnapshot()
+	wantSnapshot := api.MCPFrontRoutingTargetSnapshot{State: state, Generation: generation, Port: admittedPort}
+	if err != nil || snapshot != wantSnapshot {
+		t.Fatalf("routing epoch after seeding=%+v err=%v, want unchanged %+v", snapshot, err, wantSnapshot)
+	}
+
+	event := readLastBuiltinRouteEnsuredEvent(t, eventsPath)
+	if event.Body["port"] != float64(admittedPort) || event.Body["routing_state"] != string(state) || event.Body["routing_generation"] != float64(generation) {
+		t.Fatalf("builtin-route-ensured body=%v, want port=%d state=%s generation=%d", event.Body, admittedPort, state, generation)
+	}
+}
+
+func assertSingleCanonicalBuiltinRouteRow(t *testing.T, intent *api.SupervisorIntentFile, want api.SupervisorDaemon, source string) {
+	t.Helper()
+	var rows []api.SupervisorDaemon
+	if intent != nil {
+		for _, daemon := range intent.Daemons {
+			if daemon.TaskName == api.BuiltinRouteTaskName {
+				rows = append(rows, daemon)
+			}
+		}
+	}
+	if len(rows) != 1 || !reflect.DeepEqual(rows[0], want) {
+		t.Fatalf("%s route rows=%+v, want exactly canonical %+v", source, rows, want)
+	}
+}
+
+func readLastBuiltinRouteEnsuredEvent(t *testing.T, path string) api.SupervisorEvent {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read event log: %v", err)
+	}
+	var found api.SupervisorEvent
+	for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+		var event api.SupervisorEvent
+		if err := json.Unmarshal([]byte(line), &event); err != nil {
+			t.Fatalf("decode event %q: %v", line, err)
+		}
+		if event.Event == "builtin-route-ensured" {
+			found = event
+		}
+	}
+	if found.Event == "" {
+		t.Fatalf("builtin-route-ensured missing from %s", path)
+	}
+	return found
 }
 
 // TestEnsureBuiltinRouteDaemonAtStartup_PersistFailurePreservesExistingRow is

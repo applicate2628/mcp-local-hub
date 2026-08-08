@@ -51,8 +51,8 @@ var ErrLSPRouterRouteNotLive = errors.New("the /lsp/<language>/mcp router route 
 const routerProbeBudget = 2 * time.Second
 
 // AssertLSPRouterRouteLive proves the LSP router route at port answers the MCP
-// session lifecycle, using the SAME two-step proof the serena route gets:
-// a HEAD that must produce the router's 405 + `Allow: POST` signature, then a
+// session lifecycle, using the SAME POST+DELETE proof the serena route gets:
+// a HEAD that must produce the router's 405 + `Allow: POST, DELETE` signature, then a
 // real `initialize` round-trip that must return a JSON-RPC result.
 //
 // Every language/backend route declared by the accepted embedded manifest is
@@ -67,7 +67,9 @@ const routerProbeBudget = 2 * time.Second
 // paying a cold-start. An unwired router fails it: the dispatcher's
 // "lsp router is not configured" reply is a JSON-RPC error, not a result.
 //
-// Pure read: nothing is mutated on any path.
+// The probe-owned session is immediately released on every path after the
+// initialize response is received; it does not mutate route ownership or
+// client configuration.
 func AssertLSPRouterRouteLive(ctx context.Context, port int) error {
 	if port <= 0 {
 		return newLSPRouterRouteLiveError("", "", MCPFrontProbeStageInput,
@@ -156,7 +158,7 @@ func newRouterProbeError(ctx context.Context, stage MCPFrontProbeStage, cause er
 
 // routerRouteShapeProbe issues a loopback HEAD to path and returns nil only
 // when the answer carries the mcphub MCP router's signature: 405 with `Allow`
-// naming POST. Both the serena router (internal/gui/serena_router.go) and the
+// naming POST and DELETE. Both the serena router (internal/gui/serena_router.go) and the
 // LSP router (internal/gui/lsp_router.go, which answers `Allow: POST, DELETE`)
 // produce it; an unrelated service that merely reused the port does not.
 //
@@ -180,9 +182,9 @@ func routerRouteShapeProbe(ctx context.Context, port int, path string) error {
 		return newRouterProbeError(ctx, MCPFrontProbeStageShapeTransport, err)
 	}
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusMethodNotAllowed || !strings.Contains(strings.ToUpper(resp.Header.Get("Allow")), "POST") {
+	if resp.StatusCode != http.StatusMethodNotAllowed || !routerAllowContains(resp.Header.Get("Allow"), http.MethodPost) || !routerAllowContains(resp.Header.Get("Allow"), http.MethodDelete) {
 		return newRouterProbeError(ctx, MCPFrontProbeStageShapeResponse,
-			fmt.Errorf("port %d responded but is not an mcphub MCP router at %s (HEAD -> status %d, Allow=%q; expected 405 with Allow: POST)", port, path, resp.StatusCode, resp.Header.Get("Allow")))
+			fmt.Errorf("port %d responded but is not an mcphub MCP router at %s (HEAD -> status %d, Allow=%q; expected 405 with Allow: POST, DELETE)", port, path, resp.StatusCode, resp.Header.Get("Allow")))
 	}
 	return nil
 }
@@ -195,7 +197,20 @@ func routerRouteShapeProbe(ctx context.Context, port int, path string) error {
 // Single-owned for the same reason as routerRouteShapeProbe: "the route serves
 // the MCP lifecycle" must mean one thing across every route this codebase
 // points a client config at.
-func routerInitializeLifecycleProbe(ctx context.Context, port int, path string) error {
+func routerAllowContains(allow, method string) bool {
+	for _, token := range strings.Split(allow, ",") {
+		if strings.EqualFold(strings.TrimSpace(token), method) {
+			return true
+		}
+	}
+	return false
+}
+
+func routerInitializeLifecycleProbe(ctx context.Context, port int, path string) (probeErr error) {
+	return routerInitializeLifecycleProbeWithClient(ctx, port, path, &http.Client{Timeout: routerProbeBudget})
+}
+
+func routerInitializeLifecycleProbeWithClient(ctx context.Context, port int, path string, client *http.Client) (probeErr error) {
 	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, path)
 	reqCtx, cancel := context.WithTimeout(ctx, routerProbeBudget)
 	defer cancel()
@@ -205,10 +220,38 @@ func routerInitializeLifecycleProbe(ctx context.Context, port int, path string) 
 		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeTransport, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := &http.Client{Timeout: routerProbeBudget}
 	resp, err := client.Do(req)
 	if err != nil {
 		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeTransport, err)
+	}
+	sessionID := resp.Header.Get("Mcp-Session-Id")
+	if sessionID != "" {
+		defer func() {
+			result, cleanupErr := terminateMCPProbeSession(client, url, sessionID, routerProbeBudget)
+			if cleanupErr != nil {
+				stage := MCPFrontProbeStageSessionCleanupTransport
+				var responseErr *mcpProbeSessionCleanupResponseError
+				if errors.As(cleanupErr, &responseErr) {
+					stage = MCPFrontProbeStageSessionCleanupResponse
+				}
+				cleanup := newRouterProbeError(ctx, stage, cleanupErr)
+				if probeErr == nil {
+					probeErr = cleanup
+				} else {
+					probeErr = errors.Join(probeErr, cleanup)
+				}
+				return
+			}
+			if result.Disposition == mcpProbeSessionTerminationUnsupported {
+				cleanup := newRouterProbeError(ctx, MCPFrontProbeStageSessionCleanupResponse,
+					fmt.Errorf("router at port %d accepted initialize at %s but refused its advertised session DELETE (HTTP %d)", port, path, result.StatusCode))
+				if probeErr == nil {
+					probeErr = cleanup
+				} else {
+					probeErr = errors.Join(probeErr, cleanup)
+				}
+			}
+		}()
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
@@ -231,6 +274,10 @@ func routerInitializeLifecycleProbe(ctx context.Context, port int, path string) 
 	if len(rpc.Result) == 0 {
 		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeResultMissing,
 			fmt.Errorf("router at port %d returned MCP initialize without a result at %s", port, path))
+	}
+	if sessionID == "" {
+		return newRouterProbeError(ctx, MCPFrontProbeStageInitializeSessionIDMissing,
+			fmt.Errorf("router at port %d returned MCP initialize without Mcp-Session-Id at %s", port, path))
 	}
 	return nil
 }

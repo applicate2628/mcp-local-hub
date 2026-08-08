@@ -134,12 +134,17 @@ func TestRouteFrontHealthProbe_RejectsBrokenLaterLSPRoute(t *testing.T) {
 	brokenPath := fmt.Sprintf(lspRouterURLPathTemplate, specs[1].Name)
 	mux := http.NewServeMux()
 	mux.HandleFunc(SerenaRouterURLPath, func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
 		if r.Method != http.MethodPost {
-			// The router's non-POST signature: 405 + Allow: POST.
-			w.Header().Set("Allow", "POST")
+			// The router's non-POST signature: 405 + Allow: POST, DELETE.
+			w.Header().Set("Allow", "POST, DELETE")
 			w.WriteHeader(http.StatusMethodNotAllowed)
 			return
 		}
+		w.Header().Set("Mcp-Session-Id", "route-test-session")
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"jsonrpc": "2.0",

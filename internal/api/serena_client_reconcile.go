@@ -1157,8 +1157,8 @@ func AssertSerenaRouterRouteLive(ctx context.Context, port int) error {
 func defaultRouterReadinessPing(ctx context.Context, port int) error {
 	// Verify this is actually the mcphub serena router, NOT just any local HTTP
 	// server that happened to reuse a stale pidport's port (bot PR #248 P1). The
-	// router answers a non-POST request (our HEAD) with 405 + `Allow: POST`
-	// (internal/gui/serena_router.go:231-232) — a signature a random reused-port
+	// router answers a non-POST request (our HEAD) with 405 + `Allow: POST, DELETE`
+	// (internal/gui/serena_router.go:479-488) — a signature a random reused-port
 	// server would not produce. A 200/404/other status means something ELSE is
 	// listening here; fail closed so the reconcile never rewrites client configs
 	// to an unrelated service (the prior "any HTTP response = live GUI" check

@@ -41,7 +41,10 @@ Gate-ON hub-aggregate clients are OUT of the survival guarantee (the aggregate i
 separate in-process GUI listener); tracked separately, pending open probe P3.
 
 ## Phasing (expand-contract)
-- 2a (first PR): add `mcp_front.port` setting; route seeder + route.go read it; retarget
+- 2a (first PR): add `mcp_front.port` setting; manual `route.go` fallback reads it,
+  while the supervisor route seeder projects the leased routing epoch (GUI uses the
+  requested value; admitted front/preparing/restoring states use their admitted port);
+  retarget
   the 3 client-URL port consumers; new `mcphub install --reconcile-mcp-front[/--rollback]`
   (fail-closed on route OWNERSHIP + liveness, reuses existing reconcile+backup+rollback);
   extend the probe (kill GUI → client still 200 on mcp_front.port). Minimal, reversible,
