@@ -54,7 +54,6 @@ import (
 	"errors"
 	"io"
 	"io/fs"
-	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -297,14 +296,14 @@ type Result struct {
 // never be materialized just to parse it line by line. The caller owns
 // closing the returned reader.
 type FS interface {
-	Stat(path string) (fs.FileInfo, error)
-	Open(path string) (io.ReadCloser, error)
+	OpenRegular(path string) (io.ReadCloser, fs.FileInfo, error)
 }
 
 type osFS struct{}
 
-func (osFS) Stat(p string) (fs.FileInfo, error)   { return os.Stat(p) }
-func (osFS) Open(p string) (io.ReadCloser, error) { return os.Open(p) }
+func (osFS) OpenRegular(p string) (io.ReadCloser, fs.FileInfo, error) {
+	return openRegularTraceFile(p)
+}
 
 // DefaultFS wires FS to the real OS.
 func DefaultFS() FS { return osFS{} }
@@ -377,7 +376,7 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 		return Result{Status: evidence.StatusFailed, Reason: ReasonRelativeTracePath, Evidence: ev}
 	}
 	ev.AddPath(args.TracePath)
-	info, err := deps.FS.Stat(args.TracePath)
+	f, info, err := deps.FS.OpenRegular(args.TracePath)
 	if err != nil {
 		reason := ReasonTraceUnreadable
 		if errors.Is(err, fs.ErrNotExist) {
@@ -386,16 +385,10 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
 	}
 	if !info.Mode().IsRegular() {
-		return Result{Status: evidence.StatusUnknown, Reason: ReasonTraceUnreadable, Evidence: ev}
-	}
-
-	f, err := deps.FS.Open(args.TracePath)
-	if err != nil {
-		reason := ReasonTraceUnreadable
-		if errors.Is(err, fs.ErrNotExist) {
-			reason = ReasonTraceNotFound
+		if f != nil {
+			_ = f.Close()
 		}
-		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonTraceUnreadable, Evidence: ev}
 	}
 	defer f.Close()
 

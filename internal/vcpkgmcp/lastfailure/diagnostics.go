@@ -96,6 +96,7 @@ var (
 	// DetectInterrupted before trusting this as a real failure.
 	ninjaFailedRE = regexp.MustCompile(`^FAILED:\s*(?:\[code=-?\d+\]\s*)?(?P<target>.+)$`)
 	ninjaErrorRE  = regexp.MustCompile(`^ninja\s*:\s*error\s*:\s*(?P<msg>.+)$`)
+	cmakeErrorRE  = regexp.MustCompile(`^CMake Error(?: at (?P<file>.+?):(?P<line>\d+)(?: \([^)]+\))?| in (?P<infile>.+?)|)\s*:\s*(?P<msg>.*)$`)
 )
 
 // interruptMarkers are the exact WHOLE LINES observed when a build was stopped
@@ -649,6 +650,20 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			Tier:     TierSpecific,
 			Text:     line,
 		}, true
+	}
+	if m := cmakeErrorRE.FindStringSubmatch(line); m != nil {
+		file := strings.TrimSpace(m[cmakeErrorRE.SubexpIndex("file")])
+		if file == "" {
+			file = strings.TrimSpace(m[cmakeErrorRE.SubexpIndex("infile")])
+		}
+		if file == "" {
+			file = "cmake"
+		}
+		lineNumber := 0
+		if raw := m[cmakeErrorRE.SubexpIndex("line")]; raw != "" {
+			lineNumber, _ = strconv.Atoi(raw)
+		}
+		return Diagnostic{File: file, Line: lineNumber, Severity: SeverityError, Tier: TierSpecific, Text: line}, true
 	}
 	if m := ninjaFailedRE.FindStringSubmatch(line); m != nil {
 		return Diagnostic{

@@ -81,6 +81,7 @@ const (
 	// path, rather than correct the path.
 	ReasonExplicitRootUnreadable Reason = "explicit_root_unreadable"
 	ReasonExplicitRootRelative   Reason = "explicit_root_relative"
+	ReasonEnvRootRelative        Reason = "env_root_relative"
 	// ReasonHeuristicOnly: the ONLY thing that matched was a hardcoded
 	// heuristic common location (exactly one of them). A heuristic match is a
 	// candidate, never a selection: nothing about C:\vcpkg existing proves it
@@ -292,6 +293,16 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 	// Rule 2: VCPKG_ROOT env var.
 	if envRoot := deps.Getenv("VCPKG_ROOT"); strings.TrimSpace(envRoot) != "" {
 		res.Evidence.AddPath(envRoot)
+		if !filepath.IsAbs(envRoot) {
+			return Result{
+				Status: evidence.StatusUnknown,
+				Reason: ReasonEnvRootRelative,
+				Candidates: []Candidate{{
+					Path: envRoot, Rule: RuleEnv, Detail: "VCPKG_ROOT must be absolute",
+				}},
+				Evidence: res.Evidence,
+			}
+		}
 		if hasVcpkgBinary(deps, envRoot) {
 			return Result{
 				Status:     evidence.StatusOK,

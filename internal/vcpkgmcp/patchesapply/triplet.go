@@ -146,10 +146,24 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			continue
 		case "set":
 			if len(scopes) != 0 {
+				if !insideDeclarationScope(scopes) {
+					if name, ok := mutatedVariableName(st.Args); ok {
+						delete(env.values, name)
+					} else {
+						return nil
+					}
+				}
 				continue
 			}
 		case "unset":
 			if len(scopes) != 0 {
+				if !insideDeclarationScope(scopes) {
+					if name, ok := mutatedVariableName(st.Args); ok {
+						delete(env.values, name)
+					} else {
+						return nil
+					}
+				}
 				continue
 			}
 			toks := tokenize(st.Args)
@@ -195,4 +209,21 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 		facts[name] = value.text
 	}
 	return facts
+}
+
+func insideDeclarationScope(scopes []string) bool {
+	for _, scope := range scopes {
+		if scope == "function" || scope == "macro" {
+			return true
+		}
+	}
+	return false
+}
+
+func mutatedVariableName(args string) (string, bool) {
+	toks := tokenize(args)
+	if len(toks) == 0 || toks[0].Quoted || !rePlainIdent.MatchString(toks[0].Text) {
+		return "", false
+	}
+	return toks[0].Text, true
 }

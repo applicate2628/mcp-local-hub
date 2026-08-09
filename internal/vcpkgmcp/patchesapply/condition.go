@@ -61,20 +61,16 @@ func (p *condParser) isKeyword(t token, kw string) bool {
 	return !t.Quoted && t.Text == kw
 }
 
-func (p *condParser) parseOr() Tri {
-	v := p.parseAnd()
-	for !p.atEnd() && p.isKeyword(p.peek(), "OR") {
-		p.next()
-		v = kleeneOr(v, p.parseAnd())
-	}
-	return v
-}
-
-func (p *condParser) parseAnd() Tri {
+func (p *condParser) parseLogical() Tri {
 	v := p.parseUnary()
-	for !p.atEnd() && p.isKeyword(p.peek(), "AND") {
-		p.next()
-		v = kleeneAnd(v, p.parseUnary())
+	for !p.atEnd() && (p.isKeyword(p.peek(), "AND") || p.isKeyword(p.peek(), "OR")) {
+		op := p.next().Text
+		rhs := p.parseUnary()
+		if op == "AND" {
+			v = kleeneAnd(v, rhs)
+		} else {
+			v = kleeneOr(v, rhs)
+		}
 	}
 	return v
 }
@@ -94,7 +90,7 @@ func (p *condParser) parseAtom() Tri {
 	}
 	if p.isKeyword(p.peek(), "(") {
 		p.next()
-		v := p.parseOr()
+		v := p.parseLogical()
 		if p.atEnd() || !p.isKeyword(p.peek(), ")") {
 			p.errored = true
 			return TriUnknown
@@ -275,7 +271,7 @@ func evalComparison(op string, lhs, rhs *string) Tri {
 func evalCondition(raw string, env *varEnv) (Tri, []string) {
 	toks := tokenize(raw)
 	p := &condParser{toks: toks, env: env}
-	v := p.parseOr()
+	v := p.parseLogical()
 	if p.errored || !p.atEnd() {
 		return TriUnknown, dedupStrings(p.unresolved)
 	}

@@ -1175,6 +1175,7 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 
 	var controlFrames []controlFrame
 	macroDepth := 0
+	lineIndex := buildLineIndex(data)
 	for _, c := range scanTopLevelCommands(data) {
 		if w.ctx.Err() != nil || w.edgeCapTruncated {
 			return
@@ -1232,7 +1233,7 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 		e := Edge{
 			Kind:        kind,
 			FromFile:    canonSelf,
-			Line:        lineOf(data, c.NameOffset),
+			Line:        lineFromIndex(lineIndex, c.NameOffset),
 			RawArg:      rawArg,
 			Conditional: len(controlFrames) > 0,
 		}
@@ -1916,15 +1917,19 @@ func nextArgument(argText []byte, offset int) (value string, next int, bracket, 
 	return string(argText[start:i]), i, false, true, true
 }
 
-func lineOf(data []byte, offset int) int {
-	if offset > len(data) {
-		offset = len(data)
-	}
-	line := 1
-	for _, b := range data[:offset] {
+func buildLineIndex(data []byte) []int {
+	lines := []int{0}
+	for offset, b := range data {
 		if b == '\n' {
-			line++
+			lines = append(lines, offset+1)
 		}
 	}
-	return line
+	return lines
+}
+
+func lineFromIndex(lines []int, offset int) int {
+	if offset < 0 {
+		offset = 0
+	}
+	return sort.Search(len(lines), func(i int) bool { return lines[i] > offset })
 }

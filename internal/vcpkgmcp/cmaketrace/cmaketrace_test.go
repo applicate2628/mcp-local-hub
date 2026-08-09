@@ -208,9 +208,8 @@ func TestTrace_MissingPath(t *testing.T) {
 // platform-specific file permission behavior.
 type fakeUnreadableFS struct{}
 
-func (fakeUnreadableFS) Stat(string) (fs.FileInfo, error) { return regularTraceFileInfo{}, nil }
-func (fakeUnreadableFS) Open(p string) (io.ReadCloser, error) {
-	return nil, &os.PathError{Op: "open", Path: p, Err: os.ErrPermission}
+func (fakeUnreadableFS) OpenRegular(p string) (io.ReadCloser, fs.FileInfo, error) {
+	return nil, nil, &os.PathError{Op: "open", Path: p, Err: os.ErrPermission}
 }
 
 func TestTrace_Unreadable(t *testing.T) {
@@ -520,10 +519,9 @@ type streamFS struct {
 	last    *countingReadCloser
 }
 
-func (s *streamFS) Stat(string) (fs.FileInfo, error) { return regularTraceFileInfo{}, nil }
-func (s *streamFS) Open(string) (io.ReadCloser, error) {
+func (s *streamFS) OpenRegular(string) (io.ReadCloser, fs.FileInfo, error) {
 	s.last = &countingReadCloser{r: strings.NewReader(s.content)}
-	return s.last, nil
+	return s.last, regularTraceFileInfo{}, nil
 }
 
 // cancelAfterReader cancels the request PART WAY THROUGH the stream, which
@@ -591,8 +589,9 @@ func fsReturning(rc io.ReadCloser) FS { return &singleReaderFS{rc: rc} }
 
 type singleReaderFS struct{ rc io.ReadCloser }
 
-func (s *singleReaderFS) Stat(string) (fs.FileInfo, error)   { return regularTraceFileInfo{}, nil }
-func (s *singleReaderFS) Open(string) (io.ReadCloser, error) { return s.rc, nil }
+func (s *singleReaderFS) OpenRegular(string) (io.ReadCloser, fs.FileInfo, error) {
+	return s.rc, regularTraceFileInfo{}, nil
+}
 
 type regularTraceFileInfo struct{}
 

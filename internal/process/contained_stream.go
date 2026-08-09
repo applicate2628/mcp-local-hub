@@ -444,6 +444,7 @@ func runContainedStreamWithDependencies(
 	joinTimer := time.NewTimer(time.Until(cleanupDeadline))
 	defer joinTimer.Stop()
 	joinTimeout := joinTimer.C
+joinLoop:
 	for !stdoutCompleted || !stderrCompleted || !waitCompleted {
 		select {
 		case stdoutResult = <-stdoutDone:
@@ -460,20 +461,20 @@ func runContainedStreamWithDependencies(
 				joinTimeout = nil
 				continue
 			}
+			joinErr := ErrCleanupTimeout
+			if deadlineAware {
+				joinErr = errors.Join(joinErr, errors.New("POSIX_JOIN_TIMEOUT"))
+			}
+			cleanupErr = errors.Join(cleanupErr, joinErr)
 			if !readersClosed {
-				joinErr := ErrCleanupTimeout
-				if deadlineAware {
-					joinErr = errors.Join(joinErr, errors.New("POSIX_JOIN_TIMEOUT"))
-				}
-				cleanupErr = errors.Join(cleanupErr, joinErr)
 				cleanupErr = errors.Join(cleanupErr, childCloser.close())
 				cleanupErr = errors.Join(cleanupErr, closeOwned(stdoutReadCloser, stderrReadCloser))
 				readersClosed = true
 			}
-			// The direct child must still be reaped exactly once. After the
-			// containment backstop and reader closure, keep joining rather
-			// than returning a live child or goroutine.
-			joinTimeout = nil
+			// wait() remains the single reaper and may complete asynchronously,
+			// but a kernel-stuck wait cannot extend the request past its one
+			// advertised cleanup deadline.
+			break joinLoop
 		}
 	}
 

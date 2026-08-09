@@ -17,13 +17,9 @@ import (
 // "you did not supply a path" and "the path you supplied is absent".
 type recordingFS struct{ opened []string }
 
-func (f *recordingFS) Stat(p string) (fs.FileInfo, error) {
+func (f *recordingFS) OpenRegular(p string) (io.ReadCloser, fs.FileInfo, error) {
 	f.opened = append(f.opened, p)
-	return nil, fs.ErrNotExist
-}
-func (f *recordingFS) Open(p string) (io.ReadCloser, error) {
-	f.opened = append(f.opened, p)
-	return nil, fs.ErrNotExist
+	return nil, nil, fs.ErrNotExist
 }
 
 // An absent trace_path must be reported as a fact about the CALL, never as a

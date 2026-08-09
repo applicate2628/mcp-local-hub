@@ -61,7 +61,8 @@ parameters. Discovery order when you do not pass a root:
    fall-through to some other installation you did not ask about; a relative explicit root returns
    `unknown(explicit_root_relative)` before any filesystem, environment, PATH, manifest, or heuristic
    probe;
-2. `VCPKG_ROOT`;
+2. `VCPKG_ROOT` — must be absolute; a relative value is terminal
+   `unknown(env_root_relative)` and is never bound to the hub daemon's working directory;
 3. `PATH`;
 4. manifest;
 5. machine-layout heuristics — **reported as candidates, never selected**.

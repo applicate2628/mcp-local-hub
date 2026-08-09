@@ -272,6 +272,10 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			}
 		case "set":
 			handleSet(st.Args, env, active(), guardText(), activeUnresolved())
+		case "unset":
+			if !handleUnset(st.Args, env, active(), guardText(), activeUnresolved()) {
+				return nil, false, parserStructuralExpressionUnparsable
+			}
 		case "get_filename_component":
 			handleGetFilenameComponent(st.Args, env, active(), guardText(), activeUnresolved())
 		case "list":
@@ -437,6 +441,19 @@ func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unreso
 	value := serializeItems(items)
 	value.resolution = resolution
 	env.setValue(name, value)
+}
+
+func handleUnset(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) bool {
+	toks := tokenize(argsRaw)
+	if len(toks) != 1 || toks[0].Quoted || !rePlainIdent.MatchString(toks[0].Text) {
+		return false
+	}
+	env.unsetValue(toks[0].Text, provenanceMeta{
+		guard:          active,
+		guardText:      guardText,
+		unresolvedVars: dedupStrings(unresolvedVars),
+	})
+	return true
 }
 
 // handleGetFilenameComponent implements get_filename_component(<var>

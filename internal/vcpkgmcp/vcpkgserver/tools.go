@@ -178,7 +178,8 @@ func registerTools(vs *VcpkgServer) error {
 			"An EXPLICIT absolute root is TERMINAL: if it holds no vcpkg binary the answer is " +
 			"unknown(explicit_root_invalid), or unknown(explicit_root_unreadable) when the probe " +
 			"itself failed — it NEVER falls through to another installation the caller did not ask " +
-			"about. A HEURISTIC NEVER SELECTS: one hit -> unknown(heuristic_only), several -> " +
+			"about. A relative VCPKG_ROOT is terminal unknown(env_root_relative), never resolved " +
+			"against the hub daemon's working directory. A HEURISTIC NEVER SELECTS: one hit -> unknown(heuristic_only), several -> " +
 			"unknown(multiple_candidates); both list every candidate so the caller can confirm one by " +
 			"passing it as root. Only the env / PATH / manifest rules yield ok with root+rule_fired. " +
 			"None found -> unknown(no_candidates_found) — never reports \"not installed\"; supply " +

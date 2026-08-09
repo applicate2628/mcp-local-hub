@@ -125,6 +125,25 @@ func (env *varEnv) setValue(name string, value serializedValue) {
 	env.values[name] = value
 }
 
+// unsetValue invalidates the same serialized-value owner used by setValue.
+// A definite unset removes the binding. An undecidable unset taints the
+// retained alternative so downstream reads are undecidable rather than stale.
+func (env *varEnv) unsetValue(name string, meta provenanceMeta) {
+	switch meta.guard {
+	case TriFalse:
+		return
+	case TriTrue:
+		delete(env.values, name)
+	case TriUnknown:
+		value, ok := env.values[name]
+		if !ok {
+			return
+		}
+		value.spans = []provenanceSpan{{start: 0, end: len(value.text), meta: meta}}
+		env.values[name] = value
+	}
+}
+
 // newVarEnv builds the evaluation environment.
 //
 // tripletFacts are the variables an ACTUAL triplet file established (see
