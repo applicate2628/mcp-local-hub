@@ -221,12 +221,11 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 	}()
 
 	waited := make(chan error, 1)
-	go func() { waited <- invocation.Command.Wait() }()
+	go func() { waited <- waitStrictContainedCommand(invocation.Command) }()
 	var waitErr error
 	var timeout bool
 	select {
 	case waitErr = <-waited:
-		killProcessGroup(invocation.Command)
 	case <-ctx.Done():
 		timeout = true
 		if invocation.timeoutKill != nil {
