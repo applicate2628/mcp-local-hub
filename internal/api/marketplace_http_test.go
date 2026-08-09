@@ -256,8 +256,8 @@ func TestMarketplaceHTTPClient_RejectsCredentialHeaders(t *testing.T) {
 			t.Errorf("header %q: expected rejection; got nil", hdr)
 			continue
 		}
-		if !strings.Contains(err.Error(), "credential-bearing header") {
-			t.Errorf("header %q: error %v missing 'credential-bearing header' text", hdr, err)
+		if !strings.Contains(err.Error(), "refusing to send header") {
+			t.Errorf("header %q: error %v missing 'refusing to send header' text", hdr, err)
 		}
 	}
 	if len(seenForbidden) != 0 {
@@ -265,12 +265,96 @@ func TestMarketplaceHTTPClient_RejectsCredentialHeaders(t *testing.T) {
 	}
 }
 
+// TestMarketplaceHTTPClient_HeaderFilterIsAnAllowlist pins the POLARITY of
+// the extraHeaders filter, which is the property the previous denylist did
+// not have.
+//
+// The old filter enumerated {authorization, cookie, proxy-authorization}
+// and forwarded everything else, so the DEFAULT outcome for an
+// unenumerated name was "send it to whatever URL --registry points at".
+// Every name below is a real credential-bearing header, or a protocol header
+// this function sets itself so a caller entry is silently wrong; none of them
+// is a hypothetical.
+//
+// The complement case at the end is what stops the fix from buying
+// correctness by refusing everything: the one documented legitimate use
+// (a User-Agent override) must still reach the wire.
+func TestMarketplaceHTTPClient_HeaderFilterIsAnAllowlist(t *testing.T) {
+	var seen []string
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for k := range r.Header {
+			seen = append(seen, k+": "+r.Header.Get(k))
+		}
+		_, _ = w.Write([]byte(`{"schema_version":"1","entries":[]}`))
+	}))
+	defer srv.Close()
+	client := injectTLSTestClient(srv)
+
+	// Each entry: a header the DENYLIST let through, and why it matters.
+	refused := map[string]string{
+		"PRIVATE-TOKEN":        "GitLab's own credential header — the obvious one for a private catalog host",
+		"X-Api-Key":            "the most common vendor API-key spelling",
+		"X-Auth-Token":         "vendor bearer-token spelling",
+		"X-Amz-Security-Token": "AWS session credential",
+		"Authentication-Info":  "RFC 9110 sibling of Authorization",
+		"Proxy-Authenticate":   "RFC 9110 sibling of Proxy-Authorization",
+		"Cookie2":              "sibling of Cookie",
+		// CORRECTION (2026-07-27): this string used to read "overriding it
+		// defeats the wire-byte gzip-bomb cap this file installs". False —
+		// MarketplaceFetchWithClient's unconditional
+		// Set("Accept-Encoding","identity") runs AFTER the extraHeaders loop,
+		// so such an entry was always a no-op and the cap was never reachable
+		// through it. Measured: sending "gzip" through extraHeaders (with the
+		// name temporarily allowlisted) still put "identity" on the wire.
+		"Accept-Encoding": "this function sets it unconditionally AFTER the extraHeaders loop, so a caller entry is silently DISCARDED — refuse loudly rather than ignore",
+		// The sibling claim is correct and measured the same way: the loop
+		// runs AFTER the ifNoneMatch parameter's Set, so a caller entry WINS.
+		"If-None-Match": "has its own parameter, and the extraHeaders loop runs AFTER it, so a caller entry silently OVERRIDES the parameter",
+	}
+	for hdr, why := range refused {
+		seen = nil
+		_, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", map[string]string{
+			hdr: "leaked-credential-value",
+		})
+		if err == nil {
+			t.Errorf("header %q was accepted, but the filter must be an ALLOWLIST — %s", hdr, why)
+			continue
+		}
+		if !strings.Contains(err.Error(), "refusing to send header") {
+			t.Errorf("header %q: error %v missing 'refusing to send header' text", hdr, err)
+		}
+		for _, got := range seen {
+			if strings.Contains(got, "leaked-credential-value") {
+				t.Errorf("header %q reached the wire as %q despite the refusal", hdr, got)
+			}
+		}
+	}
+
+	// Complement: the allowlisted header still works, end to end.
+	seen = nil
+	if _, err := MarketplaceFetchWithClient(context.Background(), client, MarketplaceTestRegistryURL("/catalog.json"), "", map[string]string{
+		"User-Agent": "mcphub-marketplace/test",
+	}); err != nil {
+		t.Fatalf("the one allowlisted header must still be accepted, or the fix bought correctness by refusing everything: %v", err)
+	}
+	var sawUA bool
+	for _, got := range seen {
+		if got == "User-Agent: mcphub-marketplace/test" {
+			sawUA = true
+		}
+	}
+	if !sawUA {
+		t.Errorf("User-Agent override never reached the server; saw %v", seen)
+	}
+}
+
 // TestMarketplaceHTTPClient_RejectsEmbeddedCredentials pins codex
 // r6 P1 closure (PR #163): a registry URL like
 // `https://user:pass@host/catalog.json` must be rejected at the lib
 // layer. Go's net/http auto-emits an Authorization header from
-// url.URL.User on the outbound request, which would bypass the
-// forbiddenMarketplaceHeaders denylist exercised by
+// url.URL.User on the outbound request, which never passes through
+// extraHeaders at all and so is not covered by the
+// allowedMarketplaceHeaders allowlist exercised by
 // TestMarketplaceHTTPClient_RejectsCredentialHeaders.
 func TestMarketplaceHTTPClient_RejectsEmbeddedCredentials(t *testing.T) {
 	// Server must never receive the request — if the rejection

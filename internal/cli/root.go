@@ -9,6 +9,7 @@ import (
 	"mcp-local-hub/internal/lldb"
 	"mcp-local-hub/internal/oneapirun"
 	"mcp-local-hub/internal/perftools"
+	"mcp-local-hub/internal/vcpkgmcp"
 	"mcp-local-hub/internal/vtune"
 )
 
@@ -164,6 +165,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		oneapirun.NewCommand(),
 		drmemory.NewCommand(),
 		vtune.NewCommand(),
+		vcpkgmcp.NewCommand(),
 	)
 
 	// cobra's auto-generated `help` and `completion` are available commands
@@ -171,6 +173,9 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 	// Commands". Park them in Maintenance so the listing has no catch-all.
 	root.SetHelpCommandGroupID(groupMaintenance)
 	root.SetCompletionCommandGroupID(groupMaintenance)
+	for _, command := range platformInternalCommands() {
+		root.AddCommand(command)
+	}
 
 	return root
 }

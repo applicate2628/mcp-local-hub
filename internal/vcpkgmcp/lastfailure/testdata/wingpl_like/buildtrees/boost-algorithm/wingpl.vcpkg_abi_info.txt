@@ -1,0 +1,3 @@
+cmake 4.4
+compiler_id: MSVC
+compiler_version: 14.51.36231

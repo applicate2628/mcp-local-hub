@@ -261,10 +261,43 @@ func PublishSerenaRemovalFenceGenerationForKeys(registryDir string, workspaceKey
 		return "", fmt.Errorf("serena removal fence generation: random token: %w", err)
 	}
 	generation := hex.EncodeToString(raw[:])
-	for _, key := range keys {
-		path := serenaRemovalFenceGenerationPath(registryDir, key)
-		if err := writeSerenaRemovalFenceGenerationFn(path, []byte(generation+"\n")); err != nil {
-			return "", fmt.Errorf("serena removal fence generation: publish %s: %w", path, err)
+	type priorSidecar struct {
+		path   string
+		raw    []byte
+		exists bool
+	}
+	prior := make([]priorSidecar, len(keys))
+	for i, key := range keys {
+		prior[i].path = serenaRemovalFenceGenerationPath(registryDir, key)
+		raw, readErr := ReadStateFileInodeAnchored(prior[i].path)
+		if readErr == nil {
+			prior[i].raw = raw
+			prior[i].exists = true
+			continue
+		}
+		if !errors.Is(readErr, os.ErrNotExist) {
+			return "", fmt.Errorf("serena removal fence generation: snapshot %s: %w", prior[i].path, readErr)
+		}
+	}
+	for i := range prior {
+		if writeErr := writeSerenaRemovalFenceGenerationFn(prior[i].path, []byte(generation+"\n")); writeErr != nil {
+			primary := fmt.Errorf("serena removal fence generation: publish %s: %w", prior[i].path, writeErr)
+			var rollbackErrs []error
+			for j := i; j >= 0; j-- {
+				var rollbackErr error
+				if prior[j].exists {
+					rollbackErr = WriteStateFileBytesAtomic(prior[j].path, prior[j].raw)
+				} else {
+					rollbackErr = os.Remove(prior[j].path)
+					if errors.Is(rollbackErr, os.ErrNotExist) {
+						rollbackErr = nil
+					}
+				}
+				if rollbackErr != nil {
+					rollbackErrs = append(rollbackErrs, fmt.Errorf("restore %s: %w", prior[j].path, rollbackErr))
+				}
+			}
+			return "", errors.Join(primary, errors.Join(rollbackErrs...))
 		}
 	}
 	return generation, nil

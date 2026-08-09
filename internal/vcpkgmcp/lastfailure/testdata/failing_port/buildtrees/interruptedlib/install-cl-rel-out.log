@@ -1,0 +1,6 @@
+Run Build Command(s): "C:/Program Files/Microsoft Visual Studio/18/Community/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe" -v -v -j8 install
+[1/3] cl.exe /c ... a.cpp
+[2/3] cl.exe /c ... b.cpp
+FAILED: [code=1] CMakeFiles/interruptedlib.dir/b.cpp.obj
+User interrupt
+ninja: build stopped: interrupted by user.

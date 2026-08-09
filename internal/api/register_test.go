@@ -7999,7 +7999,7 @@ func TestRegisterReportJSONExactKeys(t *testing.T) {
 			}
 			entries := decoded["entries"].([]any)
 			nested := entries[0].(map[string]any)
-			wantNested := []string{"Backend", "ClientEntries", "Language", "Languages", "LastError", "LastMaterializedAt", "LastToolsCallAt", "Lifecycle", "Port", "RegisteredAt", "RegisteredVia", "TaskName", "WeeklyRefresh", "WorkspaceKey", "WorkspacePath"}
+			wantNested := []string{"Backend", "ClientEntries", "Language", "Languages", "LastError", "LastMaterializedAt", "LastToolsCallAt", "Lifecycle", "PendingSerenaRemoval", "PendingSerenaRemovalAt", "PendingSerenaRemovalGeneration", "Port", "RegisteredAt", "RegisteredVia", "TaskName", "WeeklyRefresh", "WorkspaceKey", "WorkspacePath"}
 			if got := sortedAnyMapKeys(nested); !slices.Equal(got, wantNested) {
 				t.Fatalf("entry keys=%v want=%v", got, wantNested)
 			}

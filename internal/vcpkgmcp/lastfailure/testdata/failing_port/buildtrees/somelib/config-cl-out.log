@@ -1,0 +1,1 @@
+[1/1] "C:/msys64/ucrt64/bin/cmake.exe" -E chdir ".." "C:/msys64/ucrt64/bin/cmake.exe" "R:/b/cl/somelib/src/somelib-1.0.clean" "-G" "Ninja" "-DCMAKE_BUILD_TYPE=Release" "-DVCPKG_TARGET_TRIPLET=cl"

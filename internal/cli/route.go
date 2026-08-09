@@ -105,6 +105,11 @@ const DefaultRouteDaemonPort = 9137
 // process exits. Mirrors the GUI's own shutdown posture.
 const routeShutdownGrace = 5 * time.Second
 
+// routeRequestReadTimeout bounds the complete HTTP request read, including
+// the JSON-RPC body. The byte cap in the route handlers limits volume but
+// cannot stop a local slow-body client from pinning a connection indefinitely.
+const routeRequestReadTimeout = 15 * time.Second
+
 // routeBackendLossReconcileInterval is the route daemon's fallback cadence for
 // observing a supervisor-reported Serena process restart or absence. The
 // reconciler owns only this process's in-memory router, daemon-session, and
@@ -371,10 +376,7 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	//     WakeIdleSerenaDaemon's IntentReasonIdle compare-and-clear. See the file
 	//     header and SetSerenaRouterReadOnly contract.
 
-	httpSrv := &http.Server{
-		Handler:           s.RouteHandler(),
-		ReadHeaderTimeout: gui.GUIReadHeaderTimeout,
-	}
+	httpSrv := newRouteHTTPServer(s.RouteHandler())
 	errCh := make(chan error, 1)
 	go func() { errCh <- httpSrv.Serve(ln) }()
 
@@ -395,5 +397,13 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 			return err
 		}
 		return nil
+	}
+}
+
+func newRouteHTTPServer(handler http.Handler) *http.Server {
+	return &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: gui.GUIReadHeaderTimeout,
+		ReadTimeout:       routeRequestReadTimeout,
 	}
 }

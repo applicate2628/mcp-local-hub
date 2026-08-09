@@ -17,6 +17,7 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
@@ -265,6 +266,74 @@ func TestSerenaRemovalFence_GenerationPublishFailurePreservesCompleteOldValueAnd
 		if !allowed[entry.Name()] || strings.HasPrefix(entry.Name(), ".") {
 			t.Fatalf("publication failure leaked unexpected/temp artifact %q", entry.Name())
 		}
+	}
+}
+
+func TestSerenaRemovalFence_MultiKeyPublishFailureRestoresEarlierSidecars(t *testing.T) {
+	dir := t.TempDir()
+	const firstKey = "aaaa0001"
+	const secondKey = "bbbb0002"
+	firstPath := serenaRemovalFenceGenerationPath(dir, firstKey)
+	secondPath := serenaRemovalFenceGenerationPath(dir, secondKey)
+	oldFirst := []byte("0123456789abcdef0123456789abcdef\n")
+	oldSecond := []byte("fedcba9876543210fedcba9876543210\n")
+	if err := WriteStateFileBytesAtomic(firstPath, oldFirst); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteStateFileBytesAtomic(secondPath, oldSecond); err != nil {
+		t.Fatal(err)
+	}
+
+	publicationErr := errors.New("injected second sidecar failure")
+	previousWriter := writeSerenaRemovalFenceGenerationFn
+	writeSerenaRemovalFenceGenerationFn = func(path string, raw []byte) error {
+		if path == secondPath {
+			return publicationErr
+		}
+		return WriteStateFileBytesAtomic(path, raw)
+	}
+	t.Cleanup(func() { writeSerenaRemovalFenceGenerationFn = previousWriter })
+
+	if _, err := PublishSerenaRemovalFenceGenerationForKeys(dir, firstKey, secondKey); !errors.Is(err, publicationErr) {
+		t.Fatalf("publish error = %v, want %v", err, publicationErr)
+	}
+	if got, err := os.ReadFile(firstPath); err != nil || !bytes.Equal(got, oldFirst) {
+		t.Fatalf("first sidecar after rollback = %q, err=%v; want %q", got, err, oldFirst)
+	}
+	if got, err := os.ReadFile(secondPath); err != nil || !bytes.Equal(got, oldSecond) {
+		t.Fatalf("second sidecar after rollback = %q, err=%v; want %q", got, err, oldSecond)
+	}
+}
+
+func TestSerenaRemovalFence_MultiKeyPublishFailureRemovesNewEarlierSidecar(t *testing.T) {
+	dir := t.TempDir()
+	const firstKey = "aaaa0001"
+	const secondKey = "bbbb0002"
+	firstPath := serenaRemovalFenceGenerationPath(dir, firstKey)
+	secondPath := serenaRemovalFenceGenerationPath(dir, secondKey)
+	oldSecond := []byte("fedcba9876543210fedcba9876543210\n")
+	if err := WriteStateFileBytesAtomic(secondPath, oldSecond); err != nil {
+		t.Fatal(err)
+	}
+
+	publicationErr := errors.New("injected second sidecar failure")
+	previousWriter := writeSerenaRemovalFenceGenerationFn
+	writeSerenaRemovalFenceGenerationFn = func(path string, raw []byte) error {
+		if path == secondPath {
+			return publicationErr
+		}
+		return WriteStateFileBytesAtomic(path, raw)
+	}
+	t.Cleanup(func() { writeSerenaRemovalFenceGenerationFn = previousWriter })
+
+	if _, err := PublishSerenaRemovalFenceGenerationForKeys(dir, firstKey, secondKey); !errors.Is(err, publicationErr) {
+		t.Fatalf("publish error = %v, want %v", err, publicationErr)
+	}
+	if _, err := os.Stat(firstPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("new first sidecar survived rollback: %v", err)
+	}
+	if got, err := os.ReadFile(secondPath); err != nil || !bytes.Equal(got, oldSecond) {
+		t.Fatalf("second sidecar after rollback = %q, err=%v; want %q", got, err, oldSecond)
 	}
 }
 

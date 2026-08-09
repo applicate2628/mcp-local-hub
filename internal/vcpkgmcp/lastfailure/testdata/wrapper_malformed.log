@@ -1,0 +1,3 @@
+this is not a build_failed.log at all, just some unrelated garbled text
+that happens to be sitting at the path the caller supplied by mistake.
+no recognizable fields here whatsoever.

@@ -1,0 +1,1 @@
+[1/1] "C:/msys64/ucrt64/bin/cmake.exe" -E chdir ".." "C:/msys64/ucrt64/bin/cmake.exe" "R:/b/cl/patchonlylib/src" "-G" "Ninja"

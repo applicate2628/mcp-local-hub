@@ -44,4 +44,7 @@ global:
   - server: route
     daemon: front
     port: 9137
+  - server: vcpkg
+    daemon: default
+    port: 9138
 workspace_scoped: []

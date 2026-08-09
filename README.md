@@ -75,7 +75,7 @@ daemon over loopback HTTP instead of spawning its own copy. See
 [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for the
 full lifecycle, state-file layout, migration, and per-OS behavior.
 
-Stdio-only MCP servers (memory, time, sequential-thinking, wolfram, gdb, paper-search-mcp) run behind a native Go **stdio-host** (`internal/daemon/host.go`): one subprocess per daemon, multiplexed across concurrent HTTP clients via JSON-RPC `id` rewriting and a cached `initialize` response. Three servers (**godbolt**, **lldb-bridge**, **perftools**) ship as Go code **embedded directly in the mcphub binary** — no npm/pip dependency, starts instantly.
+Stdio-only MCP servers (memory, time, sequential-thinking, wolfram, gdb, paper-search-mcp) run behind a native Go **stdio-host** (`internal/daemon/host.go`): one subprocess per daemon, multiplexed across concurrent HTTP clients via JSON-RPC `id` rewriting and a cached `initialize` response. Four servers (**godbolt**, **lldb-bridge**, **perftools**, **vcpkg**) ship as Go code **embedded directly in the mcphub binary** — no npm/pip dependency, starts instantly.
 
 Antigravity's Cascade agent rejects loopback-HTTP MCP entries, so `mcp-local-hub` bridges it via a **stdio relay subprocess**: `mcphub relay` translates between stdio JSON-RPC and the shared HTTP daemon. Cascade sees a normal stdio command; the daemon stays shared.
 
@@ -102,8 +102,8 @@ the CLI to install the servers you want shared and verify they connect:
 
 ```bash
 # Install the MCP servers you want shared
-mcphub install --server serena       # default clients: Claude/Codex
-mcphub install --all                 # all 10 servers, default clients
+mcphub install --server serena       # default clients: Claude/Codex/Cursor
+mcphub install --all                 # all 15 global servers, default clients
 
 # Materialize one server in supervisor intent without touching client configs
 mcphub install --server fetch --no-client-config
@@ -117,7 +117,12 @@ mcphub status
 claude mcp get serena    # shows: Status: ✓ Connected, Type: http
 ```
 
-## Ten shipped servers
+## Eleven highlighted servers
+
+The binary embeds 16 manifests. `mcphub install --all` installs the 15 global
+servers; `mcp-language-server` is workspace-scoped and is materialized through
+`mcphub register`. The table below highlights 11 commonly used servers rather
+than claiming to enumerate the complete embedded catalog.
 
 | Server | Port | Transport | Notes |
 |---|---:|---|---|
@@ -131,12 +136,13 @@ claude mcp get serena    # shows: Status: ✓ Connected, Type: http
 | **gdb** | 9129 | stdio-bridge (uv run) | Multi-debugger with session management |
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
 | **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
+| **vcpkg** | 9138 | **embedded Go** | vcpkg/CMake diagnostics — build-failure triage across nested builds, overlay-port precedence, pin auditing, static patch-apply order, CMake include graph. Read-only: never starts a build. Every tool answers `ok\|failed\|unknown(reason)`; see `servers/vcpkg/README.md` for how to read the verdicts |
 
 Plus **context7** as a direct HTTPS entry (no daemon, no scheduler task).
 
 ### Embedded vs external servers
 
-Three servers (`godbolt`, `lldb-bridge`, `perftools`) are implemented as Go packages inside `internal/<name>/` and run as subcommands of the mcphub binary itself — no external runtime dependency. Each also ships as an independent standalone binary via `go build ./cmd/<name>` for users who want just that one server without the full hub.
+Four servers (`godbolt`, `lldb-bridge`, `perftools`, `vcpkg`) are implemented as Go packages inside `internal/<name>/` and run as subcommands of the mcphub binary itself — no external runtime dependency. The first three also ship as independent standalone binaries via `go build ./cmd/<name>` for users who want just that one server without the full hub. `vcpkg` intentionally follows the hub-only in-binary pattern and has no standalone `cmd/vcpkg` executable.
 
 **Performance-review workflow** combining multiple servers in one chat:
 
@@ -209,8 +215,8 @@ scheduler/secrets, and the hidden transport shims — is in
 
 - **PATH-based install model** — scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path; `mcphub setup` puts the binary there and registers it on user PATH.
 - **First-run onboarding** — `mcphub setup --trusted-root` blesses LSP trusted roots up front; the GUI shows a dismissable welcome banner until the first server is installed.
-- **go:embed manifests** — all 10 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory.
-- **Dual-entry pattern** — embedded Go servers expose a `NewCommand()` factory imported by both the standalone binary and the hub subcommand; one code path, two shipping shapes.
+- **go:embed manifests** — all 16 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory. `install --all` targets the 15 global manifests; the remaining manifest is workspace-scoped.
+- **Embedded entry patterns** — `godbolt`, `lldb-bridge`, and `perftools` expose a `NewCommand()` factory imported by both a standalone binary and the hub subcommand. `vcpkg` exposes the same factory only to the hub subcommand because it is deliberately hub-only.
 - **Native Go stdio-host with child-exit detection** — one subprocess per daemon, multiplexed across concurrent HTTP clients, with child-exit detection feeding Task Scheduler's restart policy.
 
 See [docs/architecture-highlights.md](docs/architecture-highlights.md) for the full prose on each highlight, and [docs/supervisor-architecture.md](docs/supervisor-architecture.md) for supervisor / lifecycle depth.
