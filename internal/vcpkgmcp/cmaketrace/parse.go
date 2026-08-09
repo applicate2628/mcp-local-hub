@@ -139,7 +139,7 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 		}
 		lineNo++
 
-		raw, n, tooLong, err := readLine(br, lim.MaxLineBytes)
+		raw, n, tooLong, err := readLine(ctx, br, lim.MaxLineBytes)
 		consumed += int64(n)
 		if consumed > lim.MaxTraceBytes {
 			res.hitByteLimit = true
@@ -195,9 +195,10 @@ func (p *parseResult) consumeLine(raw string, maxRecords int, maxRetainedRecordB
 		return false
 	}
 
-	if tl.File == "" || tl.Line <= 0 || tl.Cmd == "" {
+	if tl.File == "" || tl.Line <= 0 || tl.Cmd == "" || tl.Args == nil {
 		// A real command record must identify the source location and
-		// command. Anything less is malformed input, never positive
+		// command, and json-v1 always carries an args array (including [] for
+		// zero arguments). Anything less is malformed input, never positive
 		// execution evidence (in particular, never line 0 evidence).
 		p.malformedCount++
 		return false
@@ -260,10 +261,13 @@ func retainedTraceRecordBytes(tl traceLine) int64 {
 // arrives as a sequence of readChunkBytes-sized pieces that are counted,
 // discarded once the ceiling trips, and never concatenated. Peak retention is
 // therefore maxBytes + readChunkBytes regardless of how long the line is.
-func readLine(br *bufio.Reader, maxBytes int) (line string, consumed int, tooLong bool, err error) {
+func readLine(ctx context.Context, br *bufio.Reader, maxBytes int) (line string, consumed int, tooLong bool, err error) {
 	var b strings.Builder
 	overflowed := false
 	for {
+		if err := ctx.Err(); err != nil {
+			return b.String(), consumed, overflowed, err
+		}
 		chunk, readErr := br.ReadSlice('\n')
 		consumed += len(chunk)
 		if !overflowed {

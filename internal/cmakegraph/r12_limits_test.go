@@ -93,7 +93,7 @@ func TestCompiledEntryFiltersPreserveExactAndSuffixSemantics(t *testing.T) {
 		name string
 		want bool
 	}{
-		{"CMAKELISTS.TXT", true},
+		{"CMakeLists.txt", true},
 		{"portfile.cmake", true},
 		{"nested.name.CMAKE", true},
 		{"literal.*", true},

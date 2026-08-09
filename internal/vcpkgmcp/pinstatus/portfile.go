@@ -571,6 +571,10 @@ func recordListMutation(environment *variableEnvironment, state guardState, args
 	switch strings.ToUpper(tokens[0].Text) {
 	case "LENGTH", "GET", "JOIN", "SUBLIST", "FIND":
 		recordVariableInvalidation(environment, state, args, -1)
+	case "POP_BACK", "POP_FRONT":
+		for destination := 1; destination < len(tokens); destination++ {
+			recordVariableInvalidation(environment, state, args, destination)
+		}
 	default:
 		recordVariableInvalidation(environment, state, args, 1)
 	}
@@ -933,16 +937,19 @@ type conditionFrame struct {
 	elseSeen     bool
 }
 
-func defaultCondition(tokens []token) (truth bool, unresolved string) {
+func defaultCondition(tokens []token) (truth bool, unresolved string, valid bool) {
 	if len(tokens) == 0 {
-		return false, "condition"
+		return false, "condition", true
 	}
 	not := false
 	if strings.EqualFold(tokens[0].Text, "NOT") {
+		if tokens[0].Text != "NOT" {
+			return false, "", false
+		}
 		not, tokens = true, tokens[1:]
 	}
 	if len(tokens) != 1 || tokens[0].Raw {
-		return false, "condition"
+		return false, "condition", true
 	}
 	value := tokens[0].Text
 	var known bool
@@ -955,12 +962,12 @@ func defaultCondition(tokens []token) (truth bool, unresolved string) {
 		known, truth = true, false
 	}
 	if !known {
-		return false, value
+		return false, value, true
 	}
 	if not {
 		truth = !truth
 	}
-	return truth, ""
+	return truth, "", true
 }
 
 func conditionText(tokens []token) string {
@@ -1029,7 +1036,10 @@ statementLoop:
 		case "if":
 			tokens := tokenize(st.Args)
 			condition := conditionText(tokens)
-			truth, unknown := defaultCondition(tokens)
+			truth, unknown, valid := defaultCondition(tokens)
+			if !valid {
+				return parsedPortfile{}, false
+			}
 			stack = append(stack, conditionFrame{parent: state, conditions: []string{condition}, priorTrue: unknown == "" && truth, priorUnknown: unknown})
 			state = guardedState(state, unknown != "" || truth, unknown, condition)
 		case "elseif":
@@ -1042,7 +1052,10 @@ statementLoop:
 			}
 			tokens := tokenize(st.Args)
 			condition := conditionText(tokens)
-			truth, unknown := defaultCondition(tokens)
+			truth, unknown, valid := defaultCondition(tokens)
+			if !valid {
+				return parsedPortfile{}, false
+			}
 			branch := negatedConditions(frame.conditions)
 			if branch != "" {
 				branch += " AND "

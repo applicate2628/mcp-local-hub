@@ -647,9 +647,11 @@ func Walk(ctx context.Context, startFile, workspaceRoot string, opts Options) (*
 // (Result.RootEnumerationCapped) so a tree with millions of matching files
 // cannot exhaust memory before the first node is even admitted.
 //
-// entryNames entries are either an exact basename (case-insensitive, e.g.
-// "CMakeLists.txt") or an extension pattern "*.ext" (case-insensitive, e.g.
-// "*.cmake"). Passing []string{"*.cmake", "CMakeLists.txt"} scans the WHOLE
+// entryNames entries are either an exact basename (e.g. "CMakeLists.txt") or
+// an extension pattern "*.ext" (case-insensitive, e.g. "*.cmake"). Exact
+// basenames follow the containing filesystem's actual case semantics: an
+// alternate case matches only when the requested spelling resolves to the
+// same file. Passing []string{"*.cmake", "CMakeLists.txt"} scans the WHOLE
 // tree's CMake-processable files as independent roots — the right choice for
 // a tree with no single top-level CMakeLists.txt (e.g. a vcpkg-style
 // overlay-ports tree). A non-CMakeLists.txt root's source-dir context is
@@ -751,7 +753,7 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 			}
 			return nil
 		}
-		if d.IsDir() || !filters.matches(d.Name()) {
+		if d.IsDir() || !filters.matchesPath(path) {
 			return nil
 		}
 		if len(starts) >= w.opts.MaxRoots {
@@ -812,15 +814,16 @@ func isDirectorySymlink(path string) bool {
 
 // matchesEntry reports whether name (a bare file basename) matches one of
 // patterns. A pattern of the form "*.ext" matches by extension
-// (case-insensitive); any other pattern matches the exact basename
-// (case-insensitive).
+// (case-insensitive); any other pattern matches the exact basename. This
+// name-only helper cannot probe a containing filesystem, so alternate-case
+// exact matches are available only through compiledEntryFilters.matchesPath.
 func matchesEntry(name string, patterns []string) bool {
 	filters, err := compileEntryFilters(patterns)
 	return err == nil && filters.matches(name)
 }
 
 type compiledEntryFilters struct {
-	exact    map[string]struct{}
+	exact    []string
 	suffixes []string
 }
 
@@ -829,7 +832,7 @@ func compileEntryFilters(patterns []string) (compiledEntryFilters, error) {
 		return compiledEntryFilters{}, fmt.Errorf("%w: entryNames exceed maximum %d", ErrInvalidOptions, MaxEntryFilters)
 	}
 	bytes := 0
-	filters := compiledEntryFilters{exact: make(map[string]struct{}, len(patterns))}
+	filters := compiledEntryFilters{exact: make([]string, 0, len(patterns))}
 	for _, pattern := range patterns {
 		bytes += len(pattern)
 		if bytes > MaxEntryFilterBytes {
@@ -840,22 +843,76 @@ func compileEntryFilters(patterns []string) (compiledEntryFilters, error) {
 			filters.suffixes = append(filters.suffixes, lower[1:])
 			continue
 		}
-		filters.exact[lower] = struct{}{}
+		filters.exact = append(filters.exact, pattern)
 	}
 	return filters, nil
 }
 
 func (filters compiledEntryFilters) matches(name string) bool {
-	lower := strings.ToLower(name)
-	if _, ok := filters.exact[lower]; ok {
-		return true
+	for _, exact := range filters.exact {
+		if name == exact {
+			return true
+		}
 	}
+	lower := strings.ToLower(name)
 	for _, suffix := range filters.suffixes {
 		if strings.HasSuffix(lower, suffix) {
 			return true
 		}
 	}
 	return false
+}
+
+func (filters compiledEntryFilters) matchesPath(path string) bool {
+	name := filepath.Base(path)
+	for _, exact := range filters.exact {
+		if filesystemNameMatches(path, exact) {
+			return true
+		}
+	}
+	lower := strings.ToLower(name)
+	for _, suffix := range filters.suffixes {
+		if strings.HasSuffix(lower, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+type fileIdentityOperations struct {
+	stat     func(string) (fs.FileInfo, error)
+	sameFile func(fs.FileInfo, fs.FileInfo) bool
+}
+
+func filesystemNameMatches(path, expectedBase string) bool {
+	return filesystemNameMatchesWith(path, expectedBase, fileIdentityOperations{
+		stat:     os.Stat,
+		sameFile: os.SameFile,
+	})
+}
+
+// filesystemNameMatchesWith uses the filesystem itself as the case-sensitivity
+// oracle. EqualFold is only a cheap eligibility check: an alternate spelling
+// is accepted after both paths stat successfully and identify the same file.
+// This handles case-sensitive directories on Windows and case-insensitive
+// volumes on Unix without deriving filesystem behavior from GOOS.
+func filesystemNameMatchesWith(path, expectedBase string, operations fileIdentityOperations) bool {
+	actualBase := filepath.Base(path)
+	if actualBase == expectedBase {
+		return true
+	}
+	if !strings.EqualFold(actualBase, expectedBase) || operations.stat == nil || operations.sameFile == nil {
+		return false
+	}
+	actual, err := operations.stat(path)
+	if err != nil {
+		return false
+	}
+	expected, err := operations.stat(filepath.Join(filepath.Dir(path), expectedBase))
+	if err != nil {
+		return false
+	}
+	return operations.sameFile(actual, expected)
 }
 
 // sourceContext is this package's tracked approximation of CMake's
@@ -1055,7 +1112,7 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 			fmt.Sprintf("root %s resolves outside workspace root %s", canonStart, w.realWorkspaceRoot))
 		return absStart, nil
 	}
-	verified := strings.EqualFold(filepath.Base(canonStart), "CMakeLists.txt")
+	verified := filesystemNameMatches(canonStart, "CMakeLists.txt")
 	ctx := sourceContext{dir: filepath.Dir(canonStart), verified: verified}
 	key := visitKey{file: canonStart, ctx: dedupCtx(ctx)}
 	if w.visited[key] {
@@ -1251,6 +1308,8 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 				var valid bool
 				optional, valid = includeArgumentOptional(argText)
 				malformed = !valid
+			} else if kind == EdgeAddSubdirectory && !malformed {
+				malformed = !addSubdirectoryArgumentsValid(argText)
 			}
 		}
 
@@ -1937,10 +1996,56 @@ func includeArgumentOptional(argText []byte) (optional, valid bool) {
 	}
 }
 
+// addSubdirectoryArgumentsValid recognizes the documented positional grammar:
+// source_dir [binary_dir] [EXCLUDE_FROM_ALL] [SYSTEM]. The binary directory,
+// when present, must precede both keywords; EXCLUDE_FROM_ALL must precede
+// SYSTEM. Parsing the complete tail before classification prevents an invalid
+// call from producing or traversing a confidently resolved graph edge.
+func addSubdirectoryArgumentsValid(argText []byte) bool {
+	offset := 0
+	argumentIndex := 0
+	seenBinary := false
+	seenExclude := false
+	seenSystem := false
+	for {
+		value, next, _, ok, found := nextArgument(argText, offset)
+		if !ok {
+			return false
+		}
+		if !found {
+			return argumentIndex > 0
+		}
+		offset = next
+		if argumentIndex == 0 {
+			argumentIndex++
+			continue
+		}
+		argumentIndex++
+
+		switch value {
+		case "EXCLUDE_FROM_ALL":
+			if seenExclude || seenSystem {
+				return false
+			}
+			seenExclude = true
+		case "SYSTEM":
+			if seenSystem {
+				return false
+			}
+			seenSystem = true
+		default:
+			if seenBinary || seenExclude || seenSystem {
+				return false
+			}
+			seenBinary = true
+		}
+	}
+}
+
 // nextArgument returns one comment-aware CMake argument token. Bracket
-// arguments are structurally skipped and reported through bracket=true;
-// firstArgument deliberately refuses them as paths while trailing-keyword
-// discovery can continue without interpreting their content.
+// arguments are reported through bracket=true with their literal content;
+// firstArgument deliberately refuses them as paths, while grammar validators
+// may still compare the value to command keywords CMake receives as strings.
 func nextArgument(argText []byte, offset int) (value string, next int, bracket, ok, found bool) {
 	i := offset
 	for i < len(argText) {
@@ -1982,7 +2087,8 @@ func nextArgument(argText []byte, offset int) (value string, next int, bracket, 
 		if end < 0 {
 			return "", i, true, false, false
 		}
-		return "", end, true, true, true
+		contentEnd := end - (eq + 2)
+		return string(argText[contentStart:contentEnd]), end, true, true, true
 	}
 	start := i
 	for i < len(argText) {
