@@ -85,6 +85,31 @@ func TestPinStatusRejectsOversizedBatchBeforeFSClockOrRemote(t *testing.T) {
 	}
 }
 
+func TestR26PinStatusRejectsOversizedPathBeforeRowsFSClockOrRemote(t *testing.T) {
+	prefix := string(filepath.Separator)
+	if volume := filepath.VolumeName(t.TempDir()); volume != "" {
+		prefix = volume + string(filepath.Separator)
+	}
+	portDir := prefix + strings.Repeat("x", MaxPortDirBytes+1)
+	fsys := &boundedRecordingFS{}
+	clockCalls := 0
+	remoteCalls := 0
+	res := PinStatus(context.Background(), Args{PortDirs: []string{portDir}}, Deps{
+		FS:  fsys,
+		Now: func() time.Time { clockCalls++; return time.Time{} },
+		RemoteRefs: func(context.Context, approvedRemoteURL) (map[string]string, error) {
+			remoteCalls++
+			return nil, nil
+		},
+	})
+	if res.Status != evidence.StatusUnknown || res.Reason != BatchReasonPortDirsSizeLimit || len(res.Ports) != 0 {
+		t.Fatalf("result = %+v, want unknown(port_dirs_size_limit) with no rows", res)
+	}
+	if len(fsys.reads) != 0 || clockCalls != 0 || remoteCalls != 0 {
+		t.Fatalf("rejected path performed work: reads=%v clocks=%d remotes=%d", fsys.reads, clockCalls, remoteCalls)
+	}
+}
+
 func TestPinStatusMaxBatchIsAdmitted(t *testing.T) {
 	portDirs := make([]string, MaxPortDirs)
 	for i := range portDirs {

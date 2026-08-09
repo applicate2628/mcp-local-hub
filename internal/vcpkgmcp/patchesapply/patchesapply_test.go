@@ -509,6 +509,30 @@ vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES ghost.patch)
 	}
 }
 
+func TestR26OnlyDefinitelyAppliedAbsentPatchIsMissing(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		portfile string
+		bucket   string
+	}{
+		{name: "false guard", portfile: "if(FALSE)\n  vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES absent.patch)\nendif()\n", bucket: "conditional"},
+		{name: "unknown guard", portfile: "if(UNKNOWN_SELECTOR)\n  vcpkg_from_github(REPO a/b REF v1 SHA512 0 PATCHES absent.patch)\nendif()\n", bucket: "undecidable"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := ApplyOrder(Args{PortDir: writeFixture(t, tc.portfile), Triplet: "x64-windows", PortName: "x"})
+			if len(res.Missing) != 0 {
+				t.Fatalf("missing = %+v, want empty for %s guard", res.Missing, tc.bucket)
+			}
+			if tc.bucket == "conditional" && findConditional(res, "absent.patch") == nil {
+				t.Fatalf("conditional_not_applied = %+v, want absent.patch", res.ConditionalNotApplied)
+			}
+			if tc.bucket == "undecidable" && findUndecidable(res, "absent.patch") == nil {
+				t.Fatalf("undecidable = %+v, want absent.patch", res.Undecidable)
+			}
+		})
+	}
+}
+
 // --- 7. .diff extension (freexl shape) --------------------------------------
 
 func TestApplyOrder_DiffExtension(t *testing.T) {

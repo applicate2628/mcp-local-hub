@@ -217,10 +217,12 @@ const (
 type BatchReason string
 
 const (
-	// MaxPortDirs is the package-owned admission limit for one pin-status call.
-	// The MCP schema imports this value directly, so advertised and enforced
-	// batch capacity cannot drift.
-	MaxPortDirs = 64
+	// MaxPortDirs and the path-byte limits are the package-owned admission
+	// bounds for one pin-status call. The MCP schema imports the per-item values
+	// directly; the aggregate byte limit is enforced before result-row allocation.
+	MaxPortDirs           = 64
+	MaxPortDirBytes       = 4096
+	MaxPortDirsTotalBytes = MaxPortDirs * MaxPortDirBytes
 	// Candidate retention is bounded independently from the semantic-file byte
 	// cap because many short fetch calls can otherwise expand into a large slice
 	// of string-bearing structs. The batch bounds are derived from MaxPortDirs.
@@ -241,7 +243,10 @@ const (
 	// BatchReasonTooManyPortDirs: port_dirs exceeds MaxPortDirs. Rejection is
 	// before filesystem reads, clock samples, result preallocation, or remote
 	// work, so one daemon request cannot claim unbounded sequential work.
-	BatchReasonTooManyPortDirs BatchReason = "too_many_port_dirs"
+	BatchReasonTooManyPortDirs   BatchReason = "too_many_port_dirs"
+	// BatchReasonPortDirsSizeLimit: one path or aggregate retained path bytes
+	// exceed the package-owned bounds before any result row or I/O is created.
+	BatchReasonPortDirsSizeLimit BatchReason = "port_dirs_size_limit"
 )
 
 // ReasonRegistry is the single typed inventory of reason values this package
@@ -280,6 +285,7 @@ var pinStatusReasonRegistry = ReasonRegistry{
 	batch: []BatchReason{
 		BatchReasonNoPortDirs,
 		BatchReasonTooManyPortDirs,
+		BatchReasonPortDirsSizeLimit,
 	},
 }
 

@@ -398,6 +398,9 @@ const (
 	// CoverageEdgeCapExceeded: aggregate retained edge count or byte storage
 	// reached a package-owned bound, so later call sites were not retained.
 	CoverageEdgeCapExceeded CoverageReason = "edge_cap_exceeded"
+	// CoverageCommandCapExceeded: command discovery reached its bounded
+	// retention ceiling before the complete file could be interpreted.
+	CoverageCommandCapExceeded CoverageReason = "command_cap_exceeded"
 )
 
 // EdgeKind distinguishes the two directives this package tracks.
@@ -546,6 +549,9 @@ const (
 	MaxFileBytesLimit        = DefaultMaxFileBytes
 	MaxRootsLimit            = DefaultMaxRoots
 	MaxVisitedEntriesLimit   = DefaultMaxVisitedEntries
+	// MaxCommandInvocationsLimit bounds lexer retention for ignored as well as
+	// graph-producing calls within one admitted source file.
+	MaxCommandInvocationsLimit = 65536
 	// MaxRetainedRootPathBytesLimit bounds aggregate candidate-root path
 	// storage before any root is walked. MaxRoots alone cannot bound retained
 	// bytes when directory entries carry unusually long paths.
@@ -779,7 +785,8 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 			break
 		}
 		if _, err := operations.walkRoot(w, s); err != nil {
-			return nil, fmt.Errorf("cmakegraph: walk %s: %w", s, err)
+			w.recordCoverage(s, readCoverageReason(err), err.Error())
+			continue
 		}
 	}
 	if err := w.ctx.Err(); err != nil {
@@ -1045,12 +1052,6 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 			fmt.Sprintf("root %s resolves outside workspace root %s", canonStart, w.realWorkspaceRoot))
 		return absStart, nil
 	}
-	if fi, statErr := os.Stat(canonStart); statErr != nil || !fi.Mode().IsRegular() {
-		if statErr != nil {
-			return "", fmt.Errorf("cmakegraph: start file %s: %w", absStart, statErr)
-		}
-		return "", fmt.Errorf("cmakegraph: start file %s is not a regular file", absStart)
-	}
 	verified := strings.EqualFold(filepath.Base(canonStart), "CMakeLists.txt")
 	ctx := sourceContext{dir: filepath.Dir(canonStart), verified: verified}
 	key := visitKey{file: canonStart, ctx: dedupCtx(ctx)}
@@ -1065,8 +1066,11 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 	w.visited[key] = true
 	data, readErr := w.readPinnedRoot(canonStart)
 	if readErr != nil {
-		w.recordCoverage(canonStart, readCoverageReason(readErr), readErr.Error())
-		return absStart, nil
+		if errors.Is(readErr, errByteCapExceeded) {
+			w.recordCoverage(canonStart, CoverageByteCapExceeded, readErr.Error())
+			return absStart, nil
+		}
+		return absStart, readErr
 	}
 	// The verified root is parsed from the same handle that enforced the
 	// workspace boundary. Reopening absStart here would recreate a symlink-swap
@@ -1086,7 +1090,7 @@ func (w *walker) readPinnedRoot(canonicalPath string) ([]byte, error) {
 	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
 		return nil, fmt.Errorf("cmakegraph: root %s is outside workspace root %s", canonicalPath, w.realWorkspaceRoot)
 	}
-	f, err := w.workspaceFS.Open(rel)
+	f, err := openRootRegular(w.workspaceFS, rel)
 	if err != nil {
 		return nil, err
 	}
@@ -1177,7 +1181,12 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 	var controlFrames []controlFrame
 	macroDepth := 0
 	lineIndex := buildLineIndex(data)
-	for _, c := range scanTopLevelCommands(data) {
+	commands, commandLimit := scanTopLevelCommands(data, MaxCommandInvocationsLimit)
+	if commandLimit {
+		w.recordCoverage(canonSelf, CoverageCommandCapExceeded,
+			fmt.Sprintf("stopped command discovery at %d invocations", MaxCommandInvocationsLimit))
+	}
+	for _, c := range commands {
 		if w.ctx.Err() != nil || w.edgeCapTruncated {
 			return
 		}
@@ -1623,10 +1632,11 @@ type commandInvocation struct {
 	Malformed  bool   // true if no matching ')' was found before EOF
 }
 
-// scanTopLevelCommands performs ONE forward pass over data and returns every
-// top-level command invocation. See the package doc's "The lexer" section
-// for exactly what "top-level" excludes and why.
-func scanTopLevelCommands(data []byte) []commandInvocation {
+// scanTopLevelCommands performs ONE forward pass over data and returns at most
+// maxCommands top-level invocations. The boolean reports that later commands
+// were deliberately not materialized. See the package doc's "The lexer"
+// section for exactly what "top-level" excludes and why.
+func scanTopLevelCommands(data []byte, maxCommands int) ([]commandInvocation, bool) {
 	var cmds []commandInvocation
 	i := 0
 	for i < len(data) {
@@ -1658,6 +1668,9 @@ func scanTopLevelCommands(data []byte) []commandInvocation {
 				j++
 			}
 			if j < len(data) && data[j] == '(' {
+				if len(cmds) >= maxCommands {
+					return cmds, true
+				}
 				argStart := j + 1
 				argEnd, ok := scanArgList(data, argStart)
 				cmds = append(cmds, commandInvocation{
@@ -1677,7 +1690,7 @@ func scanTopLevelCommands(data []byte) []commandInvocation {
 			i++
 		}
 	}
-	return cmds
+	return cmds, false
 }
 
 // scanArgList returns the index of the ')' matching the '(' whose contents

@@ -141,6 +141,13 @@ func PinStatus(ctx context.Context, args Args, deps Deps) Result {
 			Ports:  []PortResult{},
 		}
 	}
+	totalPortDirBytes := 0
+	for _, portDir := range args.PortDirs {
+		if len(portDir) > MaxPortDirBytes || len(portDir) > MaxPortDirsTotalBytes-totalPortDirBytes {
+			return Result{Status: evidence.StatusUnknown, Reason: BatchReasonPortDirsSizeLimit, Ports: []PortResult{}}
+		}
+		totalPortDirBytes += len(portDir)
+	}
 
 	batchTimeout := deps.BatchTimeout
 	if batchTimeout <= 0 {

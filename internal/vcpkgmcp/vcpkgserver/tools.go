@@ -71,7 +71,7 @@ func pinStatusToolDescription() string {
 
 func pinStatusPortDirsDescription() string {
 	_, _, noPortDirs, tooManyPortDirs, relativePortDir, _, _, _ := pinStatusReasonVocabularies()
-	return fmt.Sprintf("Absolute port directories, each expected to contain portfile.cmake. At most %d entries are admitted; an oversize batch returns unknown(%s) before filesystem, clock, allocation, or remote work. A relative entry returns failed(%s) before filesystem or network access. Required and non-empty; an empty batch is refused with unknown(%s).", pinstatus.MaxPortDirs, tooManyPortDirs, relativePortDir, noPortDirs)
+	return fmt.Sprintf("Absolute port directories, each expected to contain portfile.cmake. At most %d entries of at most %d bytes each are admitted; an oversize batch returns unknown(%s|%s) before filesystem, clock, result-row allocation, or remote work. A relative entry returns failed(%s) before filesystem or network access. Required and non-empty; an empty batch is refused with unknown(%s).", pinstatus.MaxPortDirs, pinstatus.MaxPortDirBytes, tooManyPortDirs, pinstatus.BatchReasonPortDirsSizeLimit, relativePortDir, noPortDirs)
 }
 
 func pinStatusDisableNetworkDescription() string {
@@ -353,7 +353,7 @@ func registerTools(vs *VcpkgServer) error {
 			"properties": map[string]any{
 				"port_dirs": map[string]any{
 					"type":        "array",
-					"items":       map[string]any{"type": "string"},
+					"items":       map[string]any{"type": "string", "maxLength": pinstatus.MaxPortDirBytes},
 					"maxItems":    pinstatus.MaxPortDirs,
 					"description": pinStatusPortDirsDescription(),
 				},

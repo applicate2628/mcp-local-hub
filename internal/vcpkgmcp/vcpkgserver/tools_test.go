@@ -668,6 +668,19 @@ func TestRegisterTools(t *testing.T) {
 		if !ok || !strings.HasPrefix(text.Text, "invalid arguments:") {
 			t.Fatalf("content=%#v, want invalid arguments schema error", result.Content)
 		}
+
+		tooLong := string(filepath.Separator) + strings.Repeat("x", pinstatus.MaxPortDirBytes+1)
+		result, err = clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "vcpkg_pin_status", Arguments: map[string]any{"port_dirs": []string{tooLong}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result == nil || !result.IsError || len(result.Content) != 1 {
+			t.Fatalf("oversize item result=%#v, want schema tool error", result)
+		}
+		text, ok = result.Content[0].(*mcp.TextContent)
+		if !ok || !strings.HasPrefix(text.Text, "invalid arguments:") {
+			t.Fatalf("oversize item content=%#v, want invalid arguments schema error", result.Content)
+		}
 	})
 
 	t.Run("pr591_relative_paths_are_wire_visible", func(t *testing.T) {

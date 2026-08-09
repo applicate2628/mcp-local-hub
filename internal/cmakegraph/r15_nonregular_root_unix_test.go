@@ -24,7 +24,11 @@ func TestR15NonRegularGraphRootsAreRejectedBeforeOpen(t *testing.T) {
 	if _, err := Walk(context.Background(), fifo, dir, Options{}); err == nil {
 		t.Fatal("Walk accepted a FIFO root, want a regular-file admission error")
 	}
-	if _, err := WalkTree(context.Background(), dir, dir, []string{"CMakeLists.txt"}, Options{}); err == nil {
-		t.Fatal("WalkTree accepted a matching FIFO root, want a regular-file admission error")
+	result, err := WalkTree(context.Background(), dir, dir, []string{"CMakeLists.txt"}, Options{})
+	if err != nil {
+		t.Fatalf("WalkTree returned a whole-walk error for one non-regular discovered root: %v", err)
+	}
+	if reason, ok := coverageReasonFor(result, fifo); !ok || reason != CoverageFileUnreadable {
+		t.Fatalf("coverage for FIFO = (%q,%v), want file_unreadable", reason, ok)
 	}
 }

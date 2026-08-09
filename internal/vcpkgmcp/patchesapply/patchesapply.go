@@ -252,9 +252,9 @@ type UndecidablePatch struct {
 	UnresolvedVars []string `json:"unresolved_vars,omitempty"`
 }
 
-// MissingPatch is any declared reference (from Applied, ConditionalNotApplied,
-// or Undecidable — the guard's truth does not matter here) whose resolved
-// path does not exist on disk: "referenced but absent after resolution".
+// MissingPatch is a definitely-applied declared reference whose resolved path
+// does not exist on disk. False or unresolved guards are not definite missing
+// files because CMake may never attempt to consume those references.
 type MissingPatch struct {
 	Filename     string `json:"filename"`
 	ResolvedPath string `json:"resolved_path"`
@@ -589,7 +589,7 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 		// Only a VERIFIED absence is a missing patch. An unreadable path is
 		// reported in Unreadable instead: calling it "missing" would turn an
 		// ACL problem into a false bug report against the port.
-		if existence == evidence.PresenceAbsent {
+		if e.guard == TriTrue && existence == evidence.PresenceAbsent {
 			res.Missing = append(res.Missing, MissingPatch{
 				Filename: e.raw, ResolvedPath: resolvedPath, Guard: e.guardText,
 			})
