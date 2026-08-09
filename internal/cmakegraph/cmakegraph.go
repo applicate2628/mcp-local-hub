@@ -2023,7 +2023,7 @@ func includeArgumentOptional(argText []byte) (optional, valid bool) {
 		if bracket {
 			return false, false
 		}
-		if strings.EqualFold(value, "RESULT_VARIABLE") {
+		if value == "RESULT_VARIABLE" {
 			seenOption = true
 			consumeResultValue = true
 			continue

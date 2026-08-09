@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -313,8 +314,16 @@ func TestRunContainedStreamPOSIX_ZombieOnlyGroupDoesNotFalseTimeout(t *testing.T
 	idsCh := make(chan identities, 1)
 	done := make(chan error, 1)
 	deps := defaultContainedStreamDependencies()
+	productionNewChild := deps.newChild
 	deps.newChild = func(command *exec.Cmd) (containedChild, error) {
-		child := &posixContainedChild{cmd: command}
+		created, err := productionNewChild(command)
+		if err != nil {
+			return nil, err
+		}
+		child, ok := created.(*posixContainedChild)
+		if !ok {
+			return nil, fmt.Errorf("production child type = %T, want *posixContainedChild", created)
+		}
 		child.classifier = func(ctx context.Context, pgid int, budget posixSettlementBudget) (bool, error) {
 			var invocation linuxClassifierInvocation
 			return runLinuxGroupClassifierWithFactory(ctx, pgid, budget, linuxClassifierTestFactory("worker", &invocation))

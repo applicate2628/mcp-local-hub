@@ -14,11 +14,11 @@ A fresh install lands on an empty GUI. Two affordances smooth the first run: pas
 
 ## go:embed manifests
 
-All 10 server manifests are baked into the binary via `//go:embed */manifest.yaml`. Daemons load their config from the embedded FS, not from disk, so `~/.local/bin/mcphub.exe` works without a sibling `servers/` directory.
+All 16 server manifests are baked into the binary via `//go:embed */manifest.yaml`. Fifteen are global install targets; `mcp-language-server` is workspace-scoped. Daemons load their config from the embedded FS, not from disk, so `~/.local/bin/mcphub.exe` works without a sibling `servers/` directory.
 
 ## Dual-entry pattern
 
-Embedded Go servers (godbolt, lldb-bridge, perftools) expose a `NewCommand() *cobra.Command` factory that's imported from two places — `cmd/<name>/main.go` (standalone binary) and `internal/cli/root.go` (hub subcommand). Same code path, zero duplication, two shipping shapes.
+Embedded Go servers (`godbolt`, `lldb-bridge`, `perftools`, `vcpkg`) expose a `NewCommand() *cobra.Command` factory through the hub. The first three also import that factory from `cmd/<name>/main.go` for a standalone binary; `vcpkg` is deliberately hub-only. Same implementation path, with the shipping shape explicit per server.
 
 ## Native Go stdio-host with child-exit detection
 

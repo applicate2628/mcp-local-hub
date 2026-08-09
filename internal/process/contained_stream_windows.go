@@ -126,8 +126,7 @@ func (c *windowsContainedChild) start(
 	}
 
 	var pi windows.ProcessInformation
-	creationFlags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT) |
-		uint32(windows.CREATE_UNICODE_ENVIRONMENT)
+	creationFlags := containedWindowsCreationFlags()
 	if err := windows.CreateProcess(
 		nil,
 		commandLine,
@@ -153,6 +152,12 @@ func (c *windowsContainedChild) start(
 		return fixedContainedError(ContainedStageStart, errors.New("CreateProcess returned no process handle"))
 	}
 	return nil
+}
+
+func containedWindowsCreationFlags() uint32 {
+	return uint32(windows.EXTENDED_STARTUPINFO_PRESENT) |
+		uint32(windows.CREATE_UNICODE_ENVIRONMENT) |
+		uint32(windows.CREATE_NO_WINDOW)
 }
 
 func (c *windowsContainedChild) wait() containedWaitResult {

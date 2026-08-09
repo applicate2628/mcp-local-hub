@@ -260,6 +260,19 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 		if !filepath.IsAbs(explicitRoot) {
 			return Result{Status: evidence.StatusUnknown, Reason: ReasonExplicitRootRelative, Candidates: []Candidate{{Path: explicitRoot, Rule: RuleExplicit, Detail: "explicit root must be absolute"}}, Evidence: res.Evidence}
 		}
+		// A caller-supplied root names a directory. Probe that object before
+		// constructing a child executable path so a regular file is diagnosed as
+		// invalid input, not as an unreadable synthetic file/child path.
+		if rootInfo, rootErr := deps.Stat(explicitRoot); rootErr == nil && !rootInfo.IsDir() {
+			return Result{
+				Status: evidence.StatusUnknown,
+				Reason: ReasonExplicitRootInvalid,
+				Candidates: []Candidate{{
+					Path: explicitRoot, Rule: RuleExplicit, Detail: "explicit root is not a directory",
+				}},
+				Evidence: res.Evidence,
+			}
+		}
 		presence, probeErr := probeVcpkgBinary(deps, explicitRoot)
 		if presence == evidence.PresenceExists {
 			return Result{

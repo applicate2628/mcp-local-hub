@@ -212,10 +212,8 @@ func isRelativeLocalRemote(raw string, parsed *url.URL, parseErr error) bool {
 		return false
 	}
 	// SCP-like remotes are host-qualified transport addresses, not local paths.
-	if at := strings.LastIndexByte(raw, '@'); at > 0 {
-		if colon := strings.IndexByte(raw[at+1:], ':'); colon > 0 {
-			return false
-		}
+	if isSCPLikeRemote(raw) {
+		return false
 	}
 	return true
 }
@@ -237,17 +235,14 @@ func validRemoteURLShape(raw string, parsed *url.URL, parseErr error) bool {
 		strings.IndexFunc(raw, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 {
 		return false
 	}
-	// SCP-like Git form (git@host:owner/repo.git). Go's URL parser rejects
-	// the colon in this query-free spelling, so validate it before parseErr.
+	// SCP-like Git form ([user@]host:owner/repo.git). Go's URL parser rejects
+	// the colon in some query-free spellings, so validate it before parseErr.
 	if !strings.ContainsAny(raw, "?#") {
 		if filepath.IsAbs(raw) {
 			return true
 		}
-		if at := strings.LastIndexByte(raw, '@'); at > 0 {
-			if colon := strings.IndexByte(raw[at+1:], ':'); colon > 0 {
-				colon += at + 1
-				return colon+1 < len(raw)
-			}
+		if isSCPLikeRemote(raw) {
+			return true
 		}
 	}
 	if parseErr != nil || parsed == nil || parsed.Fragment != "" {
@@ -263,6 +258,33 @@ func validRemoteURLShape(raw string, parsed *url.URL, parseErr error) bool {
 		return true
 	}
 	return parsed.Scheme == "" && parsed.Path != "" && filepath.IsAbs(raw)
+}
+
+// isSCPLikeRemote recognizes Git's [user@]host:path transport spelling without
+// confusing local paths containing a later colon or Windows drive-relative
+// paths with a remote host. The slash-before-colon rule mirrors Git's own
+// disambiguation: foo/bar:baz is local, while host:path is remote.
+func isSCPLikeRemote(raw string) bool {
+	if raw == "" || strings.Contains(raw, "://") || strings.ContainsAny(raw, "?#") || filepath.IsAbs(raw) {
+		return false
+	}
+	colon := strings.IndexByte(raw, ':')
+	if colon <= 0 || colon+1 >= len(raw) {
+		return false
+	}
+	authority := raw[:colon]
+	if strings.ContainsAny(authority, `/\`) ||
+		strings.IndexFunc(authority, func(r rune) bool { return r <= 0x20 || r == 0x7f }) >= 0 {
+		return false
+	}
+	if len(authority) == 1 && ((authority[0] >= 'a' && authority[0] <= 'z') ||
+		(authority[0] >= 'A' && authority[0] <= 'Z')) {
+		return false
+	}
+	if at := strings.LastIndexByte(authority, '@'); at >= 0 {
+		return at > 0 && at+1 < len(authority)
+	}
+	return true
 }
 
 // redactURL returns raw with any embedded userinfo and any secret-shaped

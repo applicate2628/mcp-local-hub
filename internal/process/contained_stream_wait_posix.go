@@ -1,4 +1,4 @@
-//go:build !windows && !linux
+//go:build aix || illumos || solaris
 
 package process
 
