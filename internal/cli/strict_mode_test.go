@@ -210,6 +210,44 @@ func (f *strictModeFixture) Deps() StrictModeDeps {
 	return d
 }
 
+type strictIntentAcquisitionTrace struct {
+	total         int
+	snapshots     int
+	writes        int
+	appliedWrite  int
+	appliedCause  error
+	ordinaryWrite int
+	ordinaryCause error
+}
+
+func (trace *strictIntentAcquisitionTrace) mutate(path string, mutate func(*api.SupervisorIntentFile) (bool, error)) error {
+	trace.total++
+	var callbackChanged bool
+	err := api.MutateSupervisorIntentIfChanged(path, func(file *api.SupervisorIntentFile) (bool, error) {
+		changed, callbackErr := mutate(file)
+		callbackChanged = changed
+		if callbackErr != nil {
+			return changed, callbackErr
+		}
+		if changed {
+			trace.writes++
+			if trace.ordinaryWrite == trace.writes && trace.ordinaryCause != nil {
+				return false, trace.ordinaryCause
+			}
+		} else {
+			trace.snapshots++
+		}
+		return changed, nil
+	})
+	if err != nil {
+		return err
+	}
+	if callbackChanged && trace.appliedWrite == trace.writes && trace.appliedCause != nil {
+		return trace.appliedCause
+	}
+	return nil
+}
+
 func (f *strictModeFixture) IntentPath() string     { return f.intentPath }
 func (f *strictModeFixture) BreadcrumbPath() string { return f.breadcrumbPath }
 
@@ -479,6 +517,43 @@ func TestStrictModeEnable_RevertOfRevertFailure_BreadcrumbWritten(t *testing.T) 
 	}
 	if bc.TS == "" {
 		t.Error("breadcrumb missing ts")
+	}
+}
+
+func TestStrictModeEnable_AppliedRevertRecordsDurableOriginalState(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.MakeShimWriteFail()
+	var shimCalls int
+	tmp.backend.onEnable = func() error { shimCalls++; return nil }
+	releaseCause := errors.New("injected applied revert release failure")
+	deps := tmp.Deps()
+	trace := &strictIntentAcquisitionTrace{appliedWrite: 2, appliedCause: releaseCause}
+	deps.MutateIntentFn = trace.mutate
+	deps.IsAppliedIntentError = func(err error) bool { return errors.Is(err, releaseCause) }
+
+	err := RunStrictMode([]string{"enable"}, deps)
+	if exitCode := exitCodeFromError(err); exitCode != ExitStrictModeRevertFailed {
+		t.Fatalf("exit = %d err=%v, want %d", exitCode, err, ExitStrictModeRevertFailed)
+	}
+	if !errors.Is(err, releaseCause) || !errors.Is(err, tmp.backend.shimErr) {
+		t.Fatalf("error = %v, want independent release and shim causes", err)
+	}
+	if trace.total != 3 || trace.snapshots != 1 || trace.writes != 2 {
+		t.Fatalf("intent acquisitions total/snapshot/write = %d/%d/%d, want 3/1/2", trace.total, trace.snapshots, trace.writes)
+	}
+	if shimCalls != 1 {
+		t.Fatalf("shim calls = %d, want one failed step-2 attempt", shimCalls)
+	}
+	bc := tmp.ReadBreadcrumb()
+	if bc.Intended != true || bc.ActualIntentState != false || bc.ActualShimState != false || bc.Phase != strictModeBreadcrumbPhaseTorn {
+		t.Fatalf("breadcrumb = %+v, want intended=true and durable original false state", bc)
+	}
+	if !strings.Contains(bc.RevertError, releaseCause.Error()) {
+		t.Fatalf("breadcrumb revert_error = %q, want release cause", bc.RevertError)
+	}
+	intent, readErr := api.ReadSupervisorIntent(tmp.IntentPath())
+	if readErr != nil || intent.StrictMode {
+		t.Fatalf("durable reverted intent = %+v err=%v, want strict=false", intent, readErr)
 	}
 }
 
@@ -951,9 +1026,11 @@ func TestStrictModeEnable_TornShimPerPlatformSignatures(t *testing.T) {
 func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	deps := tmp.Deps()
-	deps.MutateIntentFn = func(_ string, _ func(*api.SupervisorIntentFile) (bool, error)) error {
-		return errors.New("simulated initial intent write failure")
+	trace := &strictIntentAcquisitionTrace{
+		ordinaryWrite: 1,
+		ordinaryCause: errors.New("simulated initial intent write failure"),
 	}
+	deps.MutateIntentFn = trace.mutate
 
 	err := RunStrictMode([]string{"enable"}, deps)
 	if err == nil {
@@ -977,6 +1054,9 @@ func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testin
 	if len(tmp.backend.enableCalls) != 0 {
 		t.Fatalf("shim enable called %d times even though step 1 failed", len(tmp.backend.enableCalls))
 	}
+	if trace.total != 3 || trace.snapshots != 2 || trace.writes != 1 {
+		t.Fatalf("ordinary initial-write acquisitions total/snapshot/write = %d/%d/%d, want 3/2/1", trace.total, trace.snapshots, trace.writes)
+	}
 
 	// A subsequent invocation should reach the normal mutation path instead of
 	// refusing on a stale breadcrumb.
@@ -992,12 +1072,11 @@ func TestStrictModeEnable_InProgressBreadcrumbDeletedAfterStep1Failure(t *testin
 func TestStrictModeEnable_InProgressBreadcrumbKeptAfterLateStep1Error(t *testing.T) {
 	tmp := setupSupervisorFixture(t)
 	deps := tmp.Deps()
-	deps.MutateIntentFn = func(path string, mutate func(*api.SupervisorIntentFile) (bool, error)) error {
-		if err := api.MutateSupervisorIntentIfChanged(path, mutate); err != nil {
-			return err
-		}
-		return errors.New("simulated late post-rename verification failure")
+	trace := &strictIntentAcquisitionTrace{
+		appliedWrite: 1,
+		appliedCause: errors.New("simulated late post-rename verification failure"),
 	}
+	deps.MutateIntentFn = trace.mutate
 
 	err := RunStrictMode([]string{"enable"}, deps)
 	if err == nil {
@@ -1018,6 +1097,9 @@ func TestStrictModeEnable_InProgressBreadcrumbKeptAfterLateStep1Error(t *testing
 	}
 	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
 		t.Fatalf("in-progress breadcrumb missing after ambiguous late step 1 error: %v", statErr)
+	}
+	if trace.total != 3 || trace.snapshots != 2 || trace.writes != 1 {
+		t.Fatalf("late ordinary write acquisitions total/snapshot/write = %d/%d/%d, want 3/2/1", trace.total, trace.snapshots, trace.writes)
 	}
 
 	deps.MutateIntentFn = nil
@@ -1518,6 +1600,129 @@ func TestStrictModeRecover_BranchB(t *testing.T) {
 	}
 	if _, err := os.Stat(tmp.BreadcrumbPath()); err == nil {
 		t.Error("breadcrumb not deleted after successful recover")
+	}
+}
+
+func TestStrictModeRecover_AppliedIntentSettlementMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		shimFails   bool
+		wantExit    int
+		wantCleanup bool
+	}{
+		{name: "shim-converges", wantExit: -1, wantCleanup: true},
+		{name: "shim-fails", shimFails: true, wantExit: ExitStrictModeRevertFailed},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tmp := setupSupervisorFixture(t)
+			var shimCalls int
+			tmp.backend.onEnable = func() error { shimCalls++; return nil }
+			bc := strictModeBreadcrumb{
+				Intended: true, ActualIntentState: false, ActualShimState: false,
+				Step2Error: "prior shim failure", RevertError: "prior revert failure",
+				TS: "2026-08-08T00:00:00Z", Phase: strictModeBreadcrumbPhaseTorn,
+			}
+			raw, _ := json.MarshalIndent(bc, "", "  ")
+			if err := os.WriteFile(tmp.BreadcrumbPath(), raw, 0o600); err != nil {
+				t.Fatalf("seed breadcrumb: %v", err)
+			}
+			releaseCause := errors.New("injected recovery intent release failure")
+			shimCause := errors.New("injected recovery shim failure")
+			if tc.shimFails {
+				tmp.backend.failEnable = true
+				tmp.backend.shimErr = shimCause
+			}
+			deps := tmp.Deps()
+			var promptCalls int
+			deps.PromptOperator = func() (string, error) {
+				promptCalls++
+				return "A", nil
+			}
+			trace := &strictIntentAcquisitionTrace{appliedWrite: 1, appliedCause: releaseCause}
+			deps.MutateIntentFn = trace.mutate
+			deps.IsAppliedIntentError = func(err error) bool { return errors.Is(err, releaseCause) }
+
+			err := RunStrictModeRecover(deps)
+			if !errors.Is(err, releaseCause) {
+				t.Fatalf("error = %v, want retained applied release cause", err)
+			}
+			if tc.shimFails && !errors.Is(err, shimCause) {
+				t.Fatalf("error = %v, want independent shim cause", err)
+			}
+			if got := exitCodeFromError(err); got != tc.wantExit {
+				t.Fatalf("exit = %d err=%v, want %d", got, err, tc.wantExit)
+			}
+			if promptCalls != 1 || trace.total != 1 || trace.snapshots != 0 || trace.writes != 1 || shimCalls != 1 {
+				t.Fatalf("prompt/intent-total/snapshot/write/shim counts = %d/%d/%d/%d/%d, want 1/1/0/1/1", promptCalls, trace.total, trace.snapshots, trace.writes, shimCalls)
+			}
+			intent, readErr := api.ReadSupervisorIntent(tmp.IntentPath())
+			if readErr != nil || !intent.StrictMode {
+				t.Fatalf("durable recovery target = %+v err=%v, want strict=true", intent, readErr)
+			}
+			_, statErr := os.Stat(tmp.BreadcrumbPath())
+			if tc.wantCleanup {
+				if !errors.Is(statErr, os.ErrNotExist) {
+					t.Fatalf("breadcrumb retained after convergence: %v", statErr)
+				}
+			} else {
+				if statErr != nil {
+					t.Fatalf("breadcrumb missing after failed convergence: %v", statErr)
+				}
+				refreshed := tmp.ReadBreadcrumb()
+				if !refreshed.ActualIntentState || !strings.Contains(refreshed.RevertError, releaseCause.Error()) || !strings.Contains(refreshed.RevertError, shimCause.Error()) {
+					t.Fatalf("refreshed breadcrumb = %+v, want target state and joined causes", refreshed)
+				}
+			}
+		})
+	}
+}
+
+func TestStrictModeRecover_OrdinaryIntentFailureStopsBeforeShim(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	bc := strictModeBreadcrumb{
+		Intended: true, ActualIntentState: false, ActualShimState: false,
+		Step2Error: "prior shim failure", RevertError: "prior revert failure",
+		TS: "2026-08-08T00:00:00Z", Phase: strictModeBreadcrumbPhaseTorn,
+	}
+	raw, _ := json.MarshalIndent(bc, "", "  ")
+	if err := os.WriteFile(tmp.BreadcrumbPath(), raw, 0o600); err != nil {
+		t.Fatalf("seed breadcrumb: %v", err)
+	}
+	ordinaryCause := errors.New("injected ordinary recovery intent failure")
+	trace := &strictIntentAcquisitionTrace{ordinaryWrite: 1, ordinaryCause: ordinaryCause}
+	deps := tmp.Deps()
+	deps.PromptOperator = func() (string, error) { return "A", nil }
+	deps.MutateIntentFn = trace.mutate
+
+	err := RunStrictModeRecover(deps)
+	if !errors.Is(err, ordinaryCause) || exitCodeFromError(err) != ExitStrictModeRevertFailed {
+		t.Fatalf("error = %v, want ordinary cause and exit %d", err, ExitStrictModeRevertFailed)
+	}
+	if trace.total != 1 || trace.snapshots != 0 || trace.writes != 1 || len(tmp.backend.enableCalls) != 0 {
+		t.Fatalf("intent total/snapshot/write and shim calls = %d/%d/%d/%d, want 1/0/1/0", trace.total, trace.snapshots, trace.writes, len(tmp.backend.enableCalls))
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); statErr != nil {
+		t.Fatalf("ordinary recovery failure removed breadcrumb: %v", statErr)
+	}
+}
+
+func TestStrictModeIntentAcquisition_CleanControl(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	trace := &strictIntentAcquisitionTrace{}
+	deps := tmp.Deps()
+	deps.MutateIntentFn = trace.mutate
+	if err := RunStrictMode([]string{"enable"}, deps); err != nil {
+		t.Fatalf("clean enable: %v", err)
+	}
+	if trace.total != 2 || trace.snapshots != 1 || trace.writes != 1 {
+		t.Fatalf("clean acquisitions total/snapshot/write = %d/%d/%d, want 2/1/1", trace.total, trace.snapshots, trace.writes)
+	}
+	if len(tmp.backend.enableCalls) != 1 || !tmp.backend.currentStrict {
+		t.Fatalf("clean shim calls/state = %d/%t, want 1/true", len(tmp.backend.enableCalls), tmp.backend.currentStrict)
+	}
+	if _, statErr := os.Stat(tmp.BreadcrumbPath()); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("clean control retained breadcrumb: %v", statErr)
 	}
 }
 

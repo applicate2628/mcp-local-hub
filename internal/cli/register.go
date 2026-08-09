@@ -13,13 +13,36 @@ import (
 	"io"
 	"os"
 	"sort"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/buildinfo"
+	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/gui"
 	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 )
+
+// relayStdioClientNamesForHelp renders the relay-stdio client ids for
+// `mcphub register --help`, DERIVED from the client registry rather than
+// re-typed. The carve-out the help describes is enforced by
+// clients.IsRelayStdio (api.defaultClientBindingsNow filters on it), so
+// enumerating the names by hand here would silently go stale the first time a
+// relay-stdio adapter is added or reclassified — help that contradicts the
+// behavior is worse than help that omits it. Order follows
+// clients.SupportedClientNames() (registry order), matching every other
+// client-ordered surface.
+func relayStdioClientNamesForHelp() string {
+	var names []string
+	for _, name := range clients.SupportedClientNames() {
+		if clients.IsRelayStdio(name) {
+			names = append(names, name)
+		}
+	}
+	return strings.Join(names, ", ")
+}
 
 // newRegisterCmdReal is the concrete cobra.Command wired by root.go's stub.
 // Usage: `mcphub register <workspace> [language...] [--no-weekly-refresh]`.
@@ -33,8 +56,22 @@ func newRegisterCmdReal() *cobra.Command {
 		Use:   "register <workspace> [language...]",
 		Short: "Register workspace-scoped mcp-language-server daemons (lazy-mode)",
 		Long: `Allocate one lazy proxy per (workspace, language), create the launch
-surface, and write managed entries into every default MCP client config
-(claude-code, codex-cli, cursor).
+surface, and write managed entries into every default-install MCP client config
+(claude-code, codex-cli by default). Cursor and the other clients are opt-in:
+add them to your default-install set in the GUI under Settings -> Clients
+(persisted as ` + "`clients.default_install`" + ` in gui-preferences.yaml) and register
+will bind them too. There is no --clients flag on register, and editing the
+shipped mcp-language-server manifest does not work — it is embedded in the
+binary.
+
+One carve-out versus ` + "`mcphub install`" + `: register SKIPS relay-stdio clients
+(` + relayStdioClientNamesForHelp() + `) even when your default-install set
+selects them, and prints a warning naming each one. A workspace LSP proxy is
+reached by URL, and those clients accept only a stdio relay entry — not the
+URL-only binding register writes. Reach them with ` + "`mcphub install`" + `, which
+does emit the stdio relay form. If your default-install set names ONLY
+relay-stdio clients, register still creates the proxy but binds no client at
+all, and says so.
 
 Lazy mode:
   - No LSP binary preflight at register time. A missing binary surfaces
@@ -57,9 +94,9 @@ Weekly refresh enrollment:
                              settings (default: false). Memo D1.
 
 Examples:
-  mcphub register D:\projects\foo
-  mcphub register D:\projects\foo python typescript rust --weekly-refresh
-  mcphub register /home/u/web typescript --no-weekly-refresh # supervised on schedulerless hosts
+  mcphub register <workspace>
+  mcphub register <workspace> python typescript rust --weekly-refresh
+  mcphub register <workspace> typescript --no-weekly-refresh # supervised on schedulerless hosts
 
 See also: unregister, workspaces, status.`,
 		Args: cobra.MinimumNArgs(1),
@@ -78,16 +115,13 @@ See also: unregister, workspaces, status.`,
 			explicit := weekly || noWeekly
 			a := api.NewAPI()
 			report, err := a.Register(workspace, languages, api.RegisterOpts{
-				WeeklyRefreshExplicit: explicit,
-				WeeklyRefresh:         weekly,
-				SupervisedProxy:       supervised,
-				Writer:                cmd.OutOrStdout(),
+				WeeklyRefreshExplicit:   explicit,
+				WeeklyRefresh:           weekly,
+				SupervisedProxy:         supervised,
+				ManagedRouterAuthorizer: registerManagedRouterAuthorizer(),
+				Writer:                  cmd.OutOrStdout(),
 			})
-			if err != nil {
-				return err
-			}
-			printRegisterReport(cmd, report)
-			return nil
+			return finishRegisterCommand(cmd, report, err)
 		},
 	}
 	c.Flags().BoolVar(&weekly, "weekly-refresh", false,
@@ -97,6 +131,16 @@ See also: unregister, workspaces, status.`,
 	c.Flags().BoolVar(&supervised, "supervised", false,
 		"start LSP proxies through supervisor-intent as Job-protected supervisor children")
 	return c
+}
+
+// registerManagedRouterAuthorizer is the CLI composition boundary. Discovery
+// is read-only: PidportPathNoCreate resolves a candidate path without creating
+// the GUI state directory, while all trust decisions remain in internal/gui.
+func registerManagedRouterAuthorizer() api.ManagedRouterAuthorizer {
+	pidportPath, _ := gui.PidportPathNoCreate()
+	currentExecutable, _ := os.Executable()
+	version, _, _ := buildinfo.Get()
+	return gui.NewManagedRouterAuthorizer(pidportPath, currentExecutable, version)
 }
 
 var registerSchedulerUnavailableForHost = func() (bool, error) {
@@ -147,6 +191,9 @@ func ensureSupervisorForSchedulerlessRegister(cmd *cobra.Command) error {
 }
 
 func printRegisterReport(cmd *cobra.Command, report *api.RegisterReport) {
+	if report == nil {
+		return
+	}
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"\nRegistered %d language(s) for workspace %s (key %s):\n",
 		len(report.Entries), report.Workspace, report.WorkspaceKey)
@@ -154,8 +201,40 @@ func printRegisterReport(cmd *cobra.Command, report *api.RegisterReport) {
 		fmt.Fprintf(cmd.OutOrStdout(), "  %-12s port=%-5d task=%s\n",
 			e.Language, e.Port, e.TaskName)
 	}
-	for _, warn := range report.Warnings {
-		fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warn)
+	printRegistrationDiagnostics(cmd, report.Diagnostics(), report.Warnings)
+}
+
+func finishRegisterCommand(cmd *cobra.Command, report *api.RegisterReport, operationErr error) error {
+	if operationErr != nil {
+		if report != nil {
+			diagnostics := report.Diagnostics()
+			diagnostics = append(diagnostics, api.ClassifyRegistrationError(operationErr, "workspace-register", "cli"))
+			printRegistrationDiagnostics(cmd, diagnostics, report.Warnings)
+		}
+		return operationErr
+	}
+	printRegisterReport(cmd, report)
+	return nil
+}
+
+func printRegistrationDiagnostics(cmd *cobra.Command, diagnostics []api.RegistrationDiagnostic, legacyWarnings []string) {
+	if len(diagnostics) == 0 {
+		for _, warning := range legacyWarnings {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", warning)
+		}
+		return
+	}
+	for _, diagnostic := range diagnostics {
+		label := string(diagnostic.Severity())
+		if label == "" {
+			label = "error"
+		}
+		message := api.RegistrationCompatibilityText(diagnostic)
+		if cause := diagnostic.Cause(); cause != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "%s[%s]: %s: %v\n", label, diagnostic.Code(), message, cause)
+			continue
+		}
+		fmt.Fprintf(cmd.ErrOrStderr(), "%s[%s]: %s\n", label, diagnostic.Code(), message)
 	}
 }
 
@@ -172,8 +251,8 @@ workspace is removed. With one or more language names, only those are
 removed (others stay intact).
 
 Examples:
-  mcphub unregister D:\projects\foo                     # remove all
-  mcphub unregister D:\projects\foo python typescript   # remove two
+  mcphub unregister <workspace>                     # remove all
+  mcphub unregister <workspace> python typescript   # remove two
 
 See also: register, workspaces.`,
 		Args: cobra.MinimumNArgs(1),
@@ -185,25 +264,35 @@ See also: register, workspaces.`,
 			}
 			a := api.NewAPI()
 			report, err := a.Unregister(workspace, langs)
-			if err != nil {
-				return err
-			}
-			if len(langs) == 0 {
-				fmt.Fprintf(cmd.OutOrStdout(),
-					"Removed %s (key %s): %d language(s)\n",
-					report.Workspace, report.WorkspaceKey, len(report.Removed))
-			} else {
-				fmt.Fprintf(cmd.OutOrStdout(),
-					"Removed %d language(s) from %s (key %s): %v\n",
-					len(report.Removed), report.Workspace, report.WorkspaceKey, report.Removed)
-			}
-			for _, warn := range report.Warnings {
-				fmt.Fprintf(cmd.OutOrStderr(), "warning: %s\n", warn)
-			}
-			return nil
+			return finishUnregisterCommand(cmd, report, langs, err)
 		},
 	}
 	return c
+}
+
+func finishUnregisterCommand(cmd *cobra.Command, report *api.UnregisterReport, langs []string, operationErr error) error {
+	if operationErr != nil {
+		if report != nil {
+			diagnostics := report.Diagnostics()
+			diagnostics = append(diagnostics, api.ClassifyRegistrationError(operationErr, "workspace-unregister", "cli"))
+			printRegistrationDiagnostics(cmd, diagnostics, report.Warnings)
+		}
+		return operationErr
+	}
+	if report == nil {
+		return nil
+	}
+	if len(langs) == 0 {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"Removed %s (key %s): %d language(s)\n",
+			report.Workspace, report.WorkspaceKey, len(report.Removed))
+	} else {
+		fmt.Fprintf(cmd.OutOrStdout(),
+			"Removed %d language(s) from %s (key %s): %v\n",
+			len(report.Removed), report.Workspace, report.WorkspaceKey, report.Removed)
+	}
+	printRegistrationDiagnostics(cmd, report.Diagnostics(), report.Warnings)
+	return nil
 }
 
 // newWorkspacesCmdReal: `mcphub workspaces [--json]`. Lists the registry.

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -3315,5 +3316,366 @@ func TestMigrateSerena_HandoffWindowEvent_EmittedOnReconcileRetry(t *testing.T) 
 	}
 	if !strings.Contains(log, "reconcile-ready-retry") {
 		t.Errorf("the hand-off event must carry the phase; log=%s", log)
+	}
+}
+
+func TestMigrateRegistryReleaseSettlementMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		releaseErr  error
+		wantApplied bool
+		wantRestore int
+		wantOrder   []string
+	}{
+		{
+			name:        "release-unconfirmed-keeps-committed-registry-and-does-not-arm-rollback",
+			releaseErr:  api.ErrLockReleaseUnconfirmed,
+			wantApplied: true,
+			wantRestore: 0,
+			wantOrder:   []string{"release"},
+		},
+		{
+			name:        "confirmed-release-arms-rollback-for-later-failure",
+			wantRestore: 1,
+			wantOrder:   []string{"release", "arm", "restore"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var order []string
+			releaseCalls := 0
+			restoreCalls := 0
+			var rollback func()
+			err := settleMigrateRegistryRelease(func() error {
+				releaseCalls++
+				order = append(order, "release")
+				return tc.releaseErr
+			}, func() {
+				order = append(order, "arm")
+				rollback = func() {
+					restoreCalls++
+					order = append(order, "restore")
+				}
+			})
+			if releaseCalls != 1 {
+				t.Fatalf("release calls=%d, want 1", releaseCalls)
+			}
+			if errors.Is(err, api.ErrLockReleaseUnconfirmed) != tc.wantApplied {
+				t.Fatalf("release error=%v, applied=%t", err, tc.wantApplied)
+			}
+			if err == nil && rollback != nil {
+				// Simulate a later pre-intent failure: only the confirmed-release
+				// case may re-acquire the registry leaf to restore the snapshot.
+				rollback()
+			}
+			if restoreCalls != tc.wantRestore {
+				t.Fatalf("restore calls=%d, want %d", restoreCalls, tc.wantRestore)
+			}
+			if got := strings.Join(order, ","); got != strings.Join(tc.wantOrder, ",") {
+				t.Fatalf("order=%v, want %v", order, tc.wantOrder)
+			}
+		})
+	}
+}
+
+func TestMigrateRegistryReleaseSettlement_PersistedFileMatrix(t *testing.T) {
+	t.Run("release-unconfirmed-keeps-allocated-file-and-stops-driver", func(t *testing.T) {
+		_, manifestDir := migrateSerenaTestEnv(t)
+		seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+		workspace := t.TempDir()
+		seedSerenaWorkspaceNoPort(t, workspace)
+		regPath, err := api.DefaultRegistryPath()
+		if err != nil {
+			t.Fatalf("registry path: %v", err)
+		}
+
+		var order []string
+		var acquireCalls, releaseCalls, reconcileCalls, reapCalls, installCalls, startCalls int
+		defer stubReconcile(t, func(context.Context, io.Writer) (*api.MigrateReport, error) {
+			reconcileCalls++
+			order = append(order, "reconcile")
+			return &api.MigrateReport{}, nil
+		})()
+		defer stubReap(t, func(context.Context, io.Writer) error {
+			reapCalls++
+			order = append(order, "reap")
+			return nil
+		})()
+		defer stubInstall(t, func(context.Context, *api.API, *config.ServerManifest, api.InstallParsedManifestOpts) (string, error) {
+			installCalls++
+			order = append(order, "install")
+			return "", nil
+		})()
+		defer stubStart(t, func(context.Context, io.Writer) error {
+			startCalls++
+			order = append(order, "start")
+			return nil
+		})()
+
+		releaseCause := errors.New("injected unconfirmed registry release")
+		err = runMigrateSerenaDynamicPoolWithDeps(context.Background(), io.Discard, migrateSerenaRunDeps{
+			isAppliedInstallError: api.IsAppliedLockReleaseUnconfirmed,
+			acquireInitialRegistry: func(reg *api.Registry) (func() error, error) {
+				acquireCalls++
+				order = append(order, "acquire")
+				release, lockErr := reg.Lock()
+				if lockErr != nil {
+					return nil, lockErr
+				}
+				return func() error {
+					releaseCalls++
+					order = append(order, "release")
+					return errors.Join(release(), api.ErrLockReleaseUnconfirmed, releaseCause)
+				}, nil
+			},
+		})
+		if !errors.Is(err, api.ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+			t.Fatalf("error = %v, want release-unconfirmed and injected cause", err)
+		}
+		if acquireCalls != 1 || releaseCalls != 1 {
+			t.Fatalf("initial registry acquire/release = %d/%d, want 1/1", acquireCalls, releaseCalls)
+		}
+		if reconcileCalls != 0 || reapCalls != 0 || installCalls != 0 || startCalls != 0 {
+			t.Fatalf("downstream reconcile/reap/install/start = %d/%d/%d/%d, want all zero", reconcileCalls, reapCalls, installCalls, startCalls)
+		}
+		if got := strings.Join(order, ","); got != "acquire,release" {
+			t.Fatalf("driver order = %q, want acquire,release", got)
+		}
+		ports := loadRegistrySerenaPorts(t, regPath)
+		if got := ports[api.WorkspaceKey(workspace)]; got == 0 {
+			t.Fatal("release-unconfirmed path rolled back the durably allocated port")
+		}
+	})
+
+	t.Run("confirmed-release-ordinary-install-error-restores-exact-registry", func(t *testing.T) {
+		_, manifestDir := migrateSerenaTestEnv(t)
+		seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+		workspace := t.TempDir()
+		seedSerenaWorkspaceNoPort(t, workspace)
+		regPath, err := api.DefaultRegistryPath()
+		if err != nil {
+			t.Fatalf("registry path: %v", err)
+		}
+		unrelated := api.WorkspaceEntry{
+			WorkspaceKey: "unrelated-lsp", WorkspacePath: t.TempDir(), Language: "python",
+			Backend: "mcp-language-server", Port: 9242, TaskName: "unrelated-task",
+		}
+		seed := api.NewRegistry(regPath)
+		if err := seed.Load(); err != nil {
+			t.Fatalf("load seed registry: %v", err)
+		}
+		if err := seed.PutLSP(unrelated); err != nil {
+			t.Fatalf("put unrelated LSP: %v", err)
+		}
+		if err := seed.Save(); err != nil {
+			t.Fatalf("save unrelated LSP: %v", err)
+		}
+
+		defer stubStartSupported(t, func() bool { return true })()
+		defer stubSupervisorRunning(t, func() (bool, error) { return true, nil })()
+		defer stubAcquireInterlock(t, realInterlockAcquire)()
+		var order []string
+		var acquireCalls, releaseCalls, reconcileCalls, restoreCalls, reapCalls, installCalls, startCalls int
+		defer stubReconcile(t, func(context.Context, io.Writer) (*api.MigrateReport, error) {
+			reconcileCalls++
+			order = append(order, "reconcile")
+			return &api.MigrateReport{}, nil
+		})()
+		defer stubRestoreReconcile(t, func(*api.MigrateReport) error {
+			restoreCalls++
+			order = append(order, "restore-reconcile")
+			return nil
+		})()
+		defer stubReap(t, func(context.Context, io.Writer) error {
+			reapCalls++
+			order = append(order, "reap")
+			return nil
+		})()
+		installCause := errors.New("injected ordinary install failure")
+		defer stubInstall(t, func(context.Context, *api.API, *config.ServerManifest, api.InstallParsedManifestOpts) (string, error) {
+			installCalls++
+			order = append(order, "install")
+			return "", installCause
+		})()
+		defer stubStart(t, func(context.Context, io.Writer) error {
+			startCalls++
+			order = append(order, "start")
+			return nil
+		})()
+
+		err = runMigrateSerenaDynamicPoolWithDeps(context.Background(), io.Discard, migrateSerenaRunDeps{
+			isAppliedInstallError: api.IsAppliedLockReleaseUnconfirmed,
+			acquireInitialRegistry: func(reg *api.Registry) (func() error, error) {
+				acquireCalls++
+				order = append(order, "acquire")
+				release, lockErr := reg.Lock()
+				if lockErr != nil {
+					return nil, lockErr
+				}
+				return func() error {
+					releaseCalls++
+					order = append(order, "release")
+					return release()
+				}, nil
+			},
+		})
+		if !errors.Is(err, installCause) || errors.Is(err, api.ErrLockReleaseUnconfirmed) {
+			t.Fatalf("error = %v, want ordinary install cause only", err)
+		}
+		if acquireCalls != 1 || releaseCalls != 1 || reconcileCalls != 1 || reapCalls != 1 || installCalls != 1 || startCalls != 1 || restoreCalls != 1 {
+			t.Fatalf("driver counts acquire/release/reconcile/reap/install/start/restore = %d/%d/%d/%d/%d/%d/%d, want all one", acquireCalls, releaseCalls, reconcileCalls, reapCalls, installCalls, startCalls, restoreCalls)
+		}
+		if got := strings.Join(order, ","); got != "acquire,release,reconcile,reap,install,start,restore-reconcile" {
+			t.Fatalf("driver order = %q", got)
+		}
+		final := api.NewRegistry(regPath)
+		if err := final.Load(); err != nil {
+			t.Fatalf("load restored registry: %v", err)
+		}
+		prior, ok := final.GetSerena(api.WorkspaceKey(workspace))
+		if !ok || prior.Port != 0 {
+			t.Fatalf("prior serena row after rollback = %+v ok=%t, want port 0", prior, ok)
+		}
+		if got, ok := final.Get(unrelated.WorkspaceKey, unrelated.Language); !ok ||
+			got.WorkspaceKey != unrelated.WorkspaceKey || got.WorkspacePath != unrelated.WorkspacePath ||
+			got.Language != unrelated.Language || got.Backend != unrelated.Backend ||
+			got.Port != unrelated.Port || got.TaskName != unrelated.TaskName {
+			t.Fatalf("unrelated LSP row after rollback = %+v ok=%t, want %+v", got, ok, unrelated)
+		}
+	})
+}
+
+func TestMigrateSerena_AppliedInstallContinuationMatrix(t *testing.T) {
+	timeoutErr := fmt.Errorf("reconcile-ready timeout: %w", ErrMigrateSerenaReconcileReadyTimeout)
+	tests := []struct {
+		name          string
+		workspace     bool
+		running       bool
+		verifyFails   bool
+		startErr      error
+		livenessAlive bool
+		livenessErr   error
+		wantReap      int
+		wantStart     int
+		wantWarning   bool
+		wantHardStart bool
+	}{
+		{name: "zero-workspace-no-start"},
+		{name: "no-supervisor-start", workspace: true, wantStart: 1},
+		{name: "reaped-supervisor-start", workspace: true, running: true, wantReap: 1, wantStart: 1},
+		{name: "verify-failure-still-starts", workspace: true, verifyFails: true, wantStart: 1},
+		{name: "verify-and-start-fail-join", workspace: true, verifyFails: true, startErr: errors.New("verify recovery start failed"), wantStart: 1, wantHardStart: true},
+		{name: "timeout-alive-warning", workspace: true, startErr: timeoutErr, livenessAlive: true, wantStart: 1, wantWarning: true},
+		{name: "timeout-dead-hard", workspace: true, startErr: timeoutErr, wantStart: 1, wantHardStart: true},
+		{name: "timeout-probe-error-hard", workspace: true, startErr: timeoutErr, livenessErr: errors.New("liveness probe failed"), wantStart: 1, wantHardStart: true},
+		{name: "hard-spawn-error", workspace: true, startErr: errors.New("spawn failed"), wantStart: 1, wantHardStart: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir, manifestDir := migrateSerenaTestEnv(t)
+			seedSerenaManifest(t, manifestDir, legacy2DaemonManifestYAML)
+			var ws string
+			if tc.workspace {
+				ws = t.TempDir()
+				seedSerenaWorkspaceNoPort(t, ws)
+			}
+			defer stubStartSupported(t, func() bool { return true })()
+			var livenessCalls int
+			defer stubSupervisorRunning(t, func() (bool, error) {
+				livenessCalls++
+				if livenessCalls <= 2 {
+					return tc.running, nil
+				}
+				return tc.livenessAlive, tc.livenessErr
+			})()
+			var order []string
+			defer stubAcquireInterlock(t, func() (*api.SupervisorLock, func(), error) {
+				lock, release, err := realInterlockAcquire()
+				return lock, func() {
+					order = append(order, "interlock-release")
+					release()
+				}, err
+			})()
+			defer stubReconcile(t, func(context.Context, io.Writer) (*api.MigrateReport, error) {
+				return &api.MigrateReport{}, nil
+			})()
+			var restoreCalls, reapCalls, startCalls int
+			defer stubRestoreReconcile(t, func(*api.MigrateReport) error {
+				restoreCalls++
+				return nil
+			})()
+			defer stubReap(t, func(context.Context, io.Writer) error {
+				reapCalls++
+				return nil
+			})()
+			defer stubStart(t, func(ctx context.Context, _ io.Writer) error {
+				startCalls++
+				order = append(order, "start")
+				if ctx.Err() != nil {
+					t.Fatalf("migration start received cancelled migration ctx: %v", ctx.Err())
+				}
+				return tc.startErr
+			})()
+
+			appliedCause := errors.New("injected applied migration install release failure")
+			defer stubInstall(t, func(ctx context.Context, a *api.API, m *config.ServerManifest, opts api.InstallParsedManifestOpts) (string, error) {
+				path, err := a.InstallParsedManifest(ctx, m, opts)
+				if err != nil {
+					return path, err
+				}
+				if tc.verifyFails {
+					if err := os.WriteFile(path, []byte("{not-valid-json"), 0o600); err != nil {
+						t.Fatalf("corrupt committed intent: %v", err)
+					}
+				}
+				return path, appliedCause
+			})()
+
+			var out bytes.Buffer
+			err := runMigrateSerenaDynamicPoolWithDeps(context.Background(), &out, migrateSerenaRunDeps{
+				isAppliedInstallError: func(err error) bool { return errors.Is(err, appliedCause) },
+			})
+			if !errors.Is(err, appliedCause) {
+				t.Fatalf("error = %v, want retained applied install cause", err)
+			}
+			if tc.startErr != nil && tc.wantHardStart && !errors.Is(err, tc.startErr) {
+				t.Fatalf("error = %v, want independent hard start cause %v", err, tc.startErr)
+			}
+			if tc.livenessErr != nil && !errors.Is(err, tc.livenessErr) {
+				t.Fatalf("error = %v, want independent liveness cause %v", err, tc.livenessErr)
+			}
+			if reapCalls != tc.wantReap || startCalls != tc.wantStart {
+				t.Fatalf("reap/start calls = %d/%d, want %d/%d", reapCalls, startCalls, tc.wantReap, tc.wantStart)
+			}
+			if restoreCalls != 0 {
+				t.Fatalf("outer rollback restore calls = %d, want zero after applied install", restoreCalls)
+			}
+			if tc.workspace {
+				if len(order) < 2 || order[len(order)-2] != "interlock-release" || order[len(order)-1] != "start" {
+					t.Fatalf("postcommit order = %v, want interlock release immediately before start", order)
+				}
+				regPath, pathErr := api.DefaultRegistryPath()
+				if pathErr != nil {
+					t.Fatalf("registry path: %v", pathErr)
+				}
+				if got := loadRegistrySerenaPorts(t, regPath)[api.WorkspaceKey(ws)]; got == 0 {
+					t.Fatalf("committed registry allocation rolled back; port=%d", got)
+				}
+			}
+			if tc.wantWarning && !strings.Contains(out.String(), "did not report reconcile-ready") {
+				t.Fatalf("warning row output = %q", out.String())
+			}
+			if strings.Contains(out.String(), "migration complete") {
+				t.Fatalf("applied install returned false clean terminal output: %q", out.String())
+			}
+			if tc.verifyFails {
+				var syntaxErr *json.SyntaxError
+				if !errors.As(err, &syntaxErr) {
+					t.Fatalf("error = %v, want independently discoverable committed-intent verification cause", err)
+				}
+			}
+			if _, statErr := os.Stat(filepath.Join(stateDir, "supervisor-intent.json")); statErr != nil {
+				t.Fatalf("committed intent missing: %v", statErr)
+			}
+		})
 	}
 }

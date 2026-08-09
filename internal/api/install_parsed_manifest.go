@@ -33,8 +33,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock"
-
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/config"
 )
@@ -235,10 +233,10 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// before any mutation or the intermediate hook), then return an empty path
 	// — nothing was committed, so the caller must not dereference a path.
 	if opts.DryRun {
-		plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(InstallOpts{
 			ClientsInclude:    opts.ClientsInclude,
 			IncludeAllClients: opts.IncludeAllClients,
-		})
+		}))
 		if err != nil {
 			return "", err
 		}
@@ -304,11 +302,14 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// secure-write body (writeSupervisorIntentLockHeld) — re-entering
 	// WriteSupervisorIntent (which re-acquires the same flock) would deadlock,
 	// exactly the readIntentLocked/writeIntentLocked split daemon_intent.go uses.
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return "", fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return "", fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
-	defer func() { _ = lock.Unlock() }()
+	committed := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", committed)
+	}()
 
 	// Build the intent file we intend to write up front (under the held lock)
 	// so the pre-flight dry-write exercises the same payload and the same
@@ -426,10 +427,33 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 
 	// 3. Build the plan. NOTE: refuseWorkspaceScopedInstall is intentionally
 	// NOT called — workspace-scoped is the intended input here.
-	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+	//
+	// Routed through installBuildPlanOpts (the documented single owner of
+	// "which BuildPlanOpts does an install entry point use") rather than the
+	// hand-copied struct literal that used to sit here. Both literals on this
+	// seam omitted DefaultClientsOverride, which is the exact field whose
+	// omission from installUsingEmbedFirst caused bot PR #583 — so leaving them
+	// out kept install.go's claim that every plan-building entry point goes
+	// through the owner literally false.
+	//
+	// Scope note, verified rather than assumed: this omission is currently
+	// UNREACHABLE, and by schema rather than by luck. The seam accepts only
+	// kind=workspace-scoped manifests WITH a daemon_template (enforced just
+	// above by validateDynamicPoolManifest); config.Validate rejects
+	// daemon_template together with a daemons[] block; and a client_binding must
+	// name a daemon from daemons[] ("binding references unknown daemon"). A
+	// manifest that reaches here therefore cannot carry a resolvable client
+	// binding at all, so a dry run plans zero client updates and
+	// DefaultClientsOverride can change nothing today. That is a stronger
+	// guarantee than "the synthesized projection happens to carry no bindings",
+	// but it is a guarantee about the SCHEMA, not about this call site — which
+	// is precisely why the call site should not re-encode it. Routing through
+	// the owner costs nothing, removes the drift vector, and keeps the claim
+	// true if the schema ever admits bindings here.
+	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(InstallOpts{
 		ClientsInclude:    opts.ClientsInclude,
 		IncludeAllClients: opts.IncludeAllClients,
-	})
+	}))
 	if err != nil {
 		return "", err
 	}
@@ -498,6 +522,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	}); err != nil {
 		return "", err
 	}
+	committed = true
 	if len(removedSupervisorTargetsAfterInstall) > 0 {
 		nudgeResult := nudgeSupervisorReconcileAfterRemovedTargets(context.Background())
 		killRemovedSupervisorTargetsAfterGlobalInstall(
@@ -596,7 +621,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 		// return — i.e. while still inside installPlanCore but BEFORE the
 		// post-success stop-subblock write — rather than at installPlanCore's own
 		// return.
-		runLocked := func() error {
+		runLocked := func() (err error) {
 			// Hold the canonical per-file flock across the read-merge AND the
 			// commit inside executeInstallTo's intermediate hook, exactly as
 			// InstallParsedManifest does (FIX 1 there) — otherwise two concurrent
@@ -605,11 +630,14 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			// Because we hold the lock, the inner write uses the LOCK-FREE
 			// writeSupervisorIntentLockHeld body (re-entering WriteSupervisorIntent
 			// would deadlock).
-			lock := flock.New(intentPath + supervisorIntentLockSuffix)
-			if err := lock.Lock(); err != nil {
-				return fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+			release, lockErr := lockSupervisorIntent(intentPath)
+			if lockErr != nil {
+				return fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 			}
-			defer func() { _ = lock.Unlock() }()
+			committed := false
+			defer func() {
+				releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", committed)
+			}()
 
 			// Build the merged intent under the held lock. For a global manifest
 			// serenaOrPlanDaemons takes the supervisorDaemonsFromPlan branch (no
@@ -701,6 +729,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			}); err != nil {
 				return err
 			}
+			committed = intentWriteNeeded
 			// Capture THIS install's committed descriptor rows for the best-effort
 			// daemon-installed audit emit (after the lock releases). Only when an
 			// intent write actually happened — a daemonless full install
@@ -1959,11 +1988,14 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	// server cannot interleave and clobber the other's rows. Because we hold
 	// the lock, the write uses the lock-free writeSupervisorIntentLockHeld
 	// body (re-entering WriteSupervisorIntent would deadlock).
-	lock := flock.New(intentPath + supervisorIntentLockSuffix)
-	if err := lock.Lock(); err != nil {
-		return false, nil, nil, fmt.Errorf("supervisor-intent flock %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	release, lockErr := lockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return false, nil, nil, fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
-	defer func() { _ = lock.Unlock() }()
+	applied := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", applied)
+	}()
 
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
@@ -2017,6 +2049,7 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 	if err := writeSupervisorIntentLockHeld(intentPath, merged); err != nil {
 		return false, nil, nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, err)
 	}
+	applied = true
 	return true, removedDaemons, removedPIDByTask, nil
 }
 

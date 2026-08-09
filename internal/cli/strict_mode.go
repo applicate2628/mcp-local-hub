@@ -181,6 +181,11 @@ type StrictModeDeps struct {
 	// and the implementation falls back to api.MutateSupervisorIntentIfChanged.
 	MutateIntentFn func(path string, mutate func(*api.SupervisorIntentFile) (bool, error)) error
 
+	// IsAppliedIntentError classifies a durable intent write whose lock release
+	// could not be confirmed. Production leaves it nil and uses the API owner;
+	// tests inject an immutable per-call classifier without mutable global state.
+	IsAppliedIntentError func(error) bool
+
 	// Stdout/Stderr override the default os.Stdout / os.Stderr writers.
 	// Tests may inject capture buffers; production leaves them nil and
 	// the helpers below fall back to os.* defaults.
@@ -428,6 +433,12 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 
 	// Step 1: write intent with new strict_mode value.
 	if err := writeStrictModeIntent(deps, desired); err != nil {
+		if strictModeAppliedIntentError(deps, err) {
+			// The durable intent write succeeded but its lock leaf is poisoned.
+			// Keep the in-progress breadcrumb; a same-process re-read/rewrite would
+			// block on our own retained handle, so recovery must happen later.
+			return fmt.Errorf("strict-mode: step 1 (intent write committed but lock release unconfirmed): %w", err)
+		}
 		// A step-1 write error is only safe to treat as pre-mutation if a
 		// best-effort re-read proves strict_mode is still at its original value.
 		// The production writer publishes with an atomic rename before late
@@ -450,9 +461,16 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			// Both writes failed — overwrite the in-progress breadcrumb with
 			// the torn shape + exit 10. The Phase reverts to torn ("") so the
 			// --recover surface treats it as the handled both-failed case.
+			actualIntentState := desired
+			if strictModeAppliedIntentError(deps, revertErr) {
+				// The revert payload reached durable storage; only its release is
+				// unconfirmed. Do not re-read the poisoned leaf, and record the
+				// original value as the truthful on-disk intent state.
+				actualIntentState = originalStrict
+			}
 			bc := strictModeBreadcrumb{
 				Intended:          desired,
-				ActualIntentState: desired,        // step 1 succeeded, so intent IS at desired
+				ActualIntentState: actualIntentState,
 				ActualShimState:   originalStrict, // step 2 failed, so shim stays at original
 				Step1Error:        "",
 				Step2Error:        err.Error(),
@@ -474,6 +492,9 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 			// hunting through the state dir.
 			body, _ := json.MarshalIndent(bc, "", "  ")
 			fmt.Fprintln(stderrOrDefault(deps), string(body))
+			if strictModeAppliedIntentError(deps, revertErr) {
+				return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, err, revertErr)
+			}
 			return &forceExitError{code: ExitStrictModeRevertFailed}
 		}
 		// Revert of step 1 (intent) succeeded — intent is back at
@@ -653,16 +674,14 @@ const strictModeAuditEmitTimeout = 5 * time.Second
 // env+intent gate.
 func readStrictModeIntentSnapshot(deps StrictModeDeps) (*api.SupervisorIntentFile, error) {
 	var snapshot *api.SupervisorIntentFile
-	err := api.WithStrictModeMutationGateBypass(func() error {
-		return api.MutateSupervisorIntentIfChanged(deps.IntentPath, func(file *api.SupervisorIntentFile) (bool, error) {
-			if file == nil {
-				snapshot = &api.SupervisorIntentFile{Version: 1}
-				return false, nil
-			}
-			cp := *file
-			snapshot = &cp
+	err := mutateStrictModeIntent(deps, func(file *api.SupervisorIntentFile) (bool, error) {
+		if file == nil {
+			snapshot = &api.SupervisorIntentFile{Version: 1}
 			return false, nil
-		})
+		}
+		cp := *file
+		snapshot = &cp
+		return false, nil
 	})
 	if err != nil {
 		return nil, err
@@ -671,16 +690,20 @@ func readStrictModeIntentSnapshot(deps StrictModeDeps) (*api.SupervisorIntentFil
 }
 
 func writeStrictModeIntent(deps StrictModeDeps, strict bool) error {
+	return mutateStrictModeIntent(deps, func(file *api.SupervisorIntentFile) (bool, error) {
+		next := supervisorIntentWithStrictMode(file, strict)
+		*file = *next
+		return true, nil
+	})
+}
+
+func mutateStrictModeIntent(deps StrictModeDeps, callback func(*api.SupervisorIntentFile) (bool, error)) error {
 	mutate := deps.MutateIntentFn
 	if mutate == nil {
 		mutate = api.MutateSupervisorIntentIfChanged
 	}
 	return api.WithStrictModeMutationGateBypass(func() error {
-		return mutate(deps.IntentPath, func(file *api.SupervisorIntentFile) (bool, error) {
-			next := supervisorIntentWithStrictMode(file, strict)
-			*file = *next
-			return true, nil
-		})
+		return mutate(deps.IntentPath, callback)
 	})
 }
 
@@ -824,14 +847,19 @@ reconcile:
 	// Atomic two-resource reconcile, same pipeline as RunStrictMode but
 	// without the breadcrumb-refusal pre-check (we're recovering FROM a
 	// breadcrumb, so it MUST exist).
-	if err := reconcileBothResources(target, deps); err != nil {
+	settlement := reconcileBothResources(target, deps)
+	if !settlement.converged {
 		// Re-assert breadcrumb on failure with refreshed TS, so the
 		// operator can retry --recover.
 		newBC := bc
+		if strictModeAppliedIntentError(deps, settlement.err) {
+			// The target intent is durable even though release is poisoned.
+			newBC.ActualIntentState = target
+		}
 		newBC.TS = time.Now().UTC().Format(time.RFC3339Nano)
-		newBC.RevertError = fmt.Sprintf("recover failed: %v", err)
+		newBC.RevertError = fmt.Sprintf("recover failed: %v", settlement.err)
 		_ = writeStrictModeBreadcrumb(deps.BreadcrumbPath, &newBC)
-		return &forceExitError{code: ExitStrictModeRevertFailed}
+		return errors.Join(&forceExitError{code: ExitStrictModeRevertFailed}, settlement.err)
 	}
 
 	// Delete breadcrumb on success.
@@ -843,19 +871,37 @@ reconcile:
 		fmt.Fprintf(stderrOrDefault(deps), "strict-mode --recover: cleanup breadcrumb: %v\n", err)
 	}
 	fmt.Fprintf(stdoutOrDefault(deps), "strict-mode --recover: reconciled to %v\n", target)
-	return nil
+	return settlement.err
+}
+
+type strictModeSettlement struct {
+	converged bool
+	err       error
 }
 
 // reconcileBothResources drives intent + shim to target in one
 // transactional unit. Used by --recover; mirrors the step 4 + step 5
 // sequence of runStrictModeUnderLocks but without revert (recover is
 // the revert path, so a failure here is terminal).
-func reconcileBothResources(target bool, deps StrictModeDeps) error {
+func reconcileBothResources(target bool, deps StrictModeDeps) strictModeSettlement {
+	var result strictModeSettlement
 	if err := writeStrictModeIntent(deps, target); err != nil {
-		return fmt.Errorf("intent write: %w", err)
+		result.err = fmt.Errorf("intent write: %w", err)
+		if !strictModeAppliedIntentError(deps, err) {
+			return result
+		}
 	}
 	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: target}); err != nil {
-		return fmt.Errorf("shim enable: %w", err)
+		result.err = errors.Join(result.err, fmt.Errorf("shim enable: %w", err))
+		return result
 	}
-	return nil
+	result.converged = true
+	return result
+}
+
+func strictModeAppliedIntentError(deps StrictModeDeps, err error) bool {
+	if deps.IsAppliedIntentError != nil {
+		return deps.IsAppliedIntentError(err)
+	}
+	return api.IsAppliedLockReleaseUnconfirmed(err)
 }

@@ -53,12 +53,12 @@ What install does:
   3. Starts the scheduler tasks immediately (won't wait for next logon)
   4. Writes a timestamped backup for each client config it touches
   5. Patches each client's config per the manifest's client_bindings list:
-     default clients are Claude Code, Codex CLI, and Cursor; Gemini CLI,
+     default clients are Claude Code and Codex CLI; Cursor, Gemini CLI,
      Qwen CLI, VS Code, Antigravity, Zed, Kiro, Windsurf, Cline, Kilo Code,
      OpenCode, Hermes, and OpenClaw are opt-in via --clients or --all-clients
 
 Examples:
-  mcphub install --server serena               # default clients: claude-code,codex-cli,cursor
+  mcphub install --server serena               # default clients: claude-code,codex-cli
   mcphub install --server serena --clients qwen-cli,vscode
   mcphub install --server serena --all-clients # every manifest client binding
   mcphub install --server serena --daemon codex # install only one daemon
@@ -169,6 +169,9 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if all || (daemonFilter != "" && !noClientConfig) {
 					return fmt.Errorf("--check is mutually exclusive with --all/--daemon")
 				}
+				// --check must report on the SAME client scope the install it
+				// previews would use, so an explicitly targeted opt-in client's
+				// broken binding is surfaced here instead of only at install time.
 				include, err := parseInstallClientsFlag(clientsFlag, allClients)
 				if err != nil {
 					return err
@@ -246,6 +249,11 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// `mcphub binary` requirement reflects the just-bootstrapped state.
 			// Print blockers (with guided fixes) and STOP if any; print
 			// unset-optional-secret advisories and PROCEED to install.
+			// Parse the client selection BEFORE readiness: readiness must
+			// validate the bindings this very install will apply, not the
+			// default-install set. An explicitly targeted opt-in client (e.g.
+			// `--clients cursor`) whose binding the planner rejects has to show
+			// up as a readiness blocker, not as a surprise install failure.
 			include, err := parseInstallClientsFlag(clientsFlag, allClients)
 			if err != nil {
 				return err
@@ -277,7 +285,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
-	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli,cursor)")
+	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli)")
 	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
 	c.Flags().BoolVar(&noClientConfig, "no-client-config", false, "materialize the selected server daemon(s) without reading or writing MCP client configs")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")

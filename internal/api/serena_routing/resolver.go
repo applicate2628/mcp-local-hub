@@ -134,7 +134,11 @@ func (r *WorkspaceResolver) refresh() {
 		fmt.Fprintf(os.Stderr, "serena_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
 		return
 	}
-	defer unlock()
+	defer func() {
+		if releaseErr := unlock(); releaseErr != nil {
+			fmt.Fprintf(os.Stderr, "serena_routing: release registry lock %s: %v; the lock stays held until this process exits\n", r.registryPath, releaseErr)
+		}
+	}()
 	if err := r.reg.Load(); err != nil {
 		// The registry file exists and was locked, but parsing/loading it failed
 		// (e.g. a malformed YAML after an operator hand-edit). Same fail-loud

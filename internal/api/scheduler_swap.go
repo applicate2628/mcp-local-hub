@@ -1,17 +1,12 @@
-// Package api — Task Scheduler trigger swap helper. Memo D8.
+// Package api — weekly Task Scheduler compatibility adapter.
 //
-// SwapWeeklyTrigger owns ONLY the scheduler XML lifecycle:
-//
-//	Delete → Create → optional ImportXML(priorXML) on Create failure.
-//
-// It does NOT call ExportXML (caller's preflight) and does NOT touch
-// settings YAML (caller's responsibility). The four disjoint return
-// tuples are documented at the swap function's docstring below.
+// swapWeeklyTriggerWith supplies the expected prior generation and delegates
+// Export/Delete/Create/Import/verify plus release settlement to
+// runWeeklyRefreshTaskTransaction. It does not own settings.
 package api
 
 import (
 	"fmt"
-	"path/filepath"
 
 	"mcp-local-hub/internal/scheduler"
 )
@@ -22,6 +17,7 @@ import (
 // to drive deterministic Delete/Create/ImportXML outcomes without
 // touching real Task Scheduler.
 type schedulerSwap interface {
+	ExportXML(name string) ([]byte, error)
 	Delete(name string) error
 	Create(spec scheduler.TaskSpec) error
 	ImportXML(name string, xml []byte) error
@@ -53,34 +49,20 @@ func SwapWeeklyTrigger(spec *ScheduleSpec, priorXML []byte) (restoreStatus strin
 // The caller's truth table at D8 step 8 maps these to response
 // `restore_status` after combining with settings-YAML rollback.
 func swapWeeklyTriggerWith(sch schedulerSwap, spec *ScheduleSpec, priorXML []byte) (restoreStatus string, err error) {
+	if spec == nil || spec.Kind != ScheduleWeekly {
+		return "n/a", fmt.Errorf("weekly schedule is required")
+	}
 	canonical, perr := canonicalMcphubPath()
 	if perr != nil {
 		return "n/a", fmt.Errorf("canonical path: %w", perr)
 	}
-
-	_ = sch.Delete(WeeklyRefreshTaskName) // idempotent; nil if absent
-
-	createErr := sch.Create(scheduler.TaskSpec{
-		Name:        WeeklyRefreshTaskName,
-		Description: "mcp-local-hub: weekly refresh of workspace-scoped lazy proxies",
-		Command:     canonical,
-		Args:        []string{"workspace-weekly-refresh"},
-		WorkingDir:  filepath.Dir(canonical),
-		WeeklyTrigger: &scheduler.WeeklyTrigger{
-			DayOfWeek:   spec.DayOfWeek,
-			HourLocal:   spec.Hour,
-			MinuteLocal: spec.Minute,
+	result, transactionErr := runWeeklyRefreshTaskTransaction(sch, weeklyRefreshMutation{
+		taskName:    WeeklyRefreshTaskName,
+		expectedXML: priorXML,
+		expectedSet: true,
+		desired: func([]byte, bool) (scheduler.TaskSpec, error) {
+			return weeklyRefreshTaskSpec(canonical, spec), nil
 		},
 	})
-	if createErr == nil {
-		return "n/a", nil
-	}
-
-	if priorXML == nil {
-		return "n/a", createErr // fresh-install case: nothing to restore
-	}
-	if importErr := sch.ImportXML(WeeklyRefreshTaskName, priorXML); importErr != nil {
-		return "degraded", createErr // prior task lost; surface original error
-	}
-	return "ok", createErr
+	return result.restoreStatus, transactionErr
 }

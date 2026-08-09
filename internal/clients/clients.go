@@ -855,7 +855,7 @@ type clientDescriptor struct {
 // 7 are the original clients (stable order); then the 8 Wave 2 opt-in clients;
 // then the 4 agent-skills-reconciliation opt-in clients (copilot-cli, amazon-q,
 // openhands, aider). None of the opt-in entries set defaultInstall — every one
-// stays opt-in, so a fresh install touches only the 3 defaultInstall clients.
+// stays opt-in, so a fresh install touches only the 2 defaultInstall clients.
 //
 // This is a function, not a package-level var, on purpose: the descriptors
 // reference the New* factories, and some factories (e.g. NewCursor) call
@@ -866,7 +866,10 @@ func clientRegistry() []clientDescriptor {
 	return []clientDescriptor{
 		{name: "claude-code", defaultInstall: true, factory: NewClaudeCode},
 		{name: "codex-cli", defaultInstall: true, factory: NewCodexCLI},
-		{name: "cursor", defaultInstall: true, factory: NewCursor},
+		// cursor is a SUPPORTED client but OPT-IN (no defaultInstall) — a fresh
+		// install touches only claude-code + codex-cli; target cursor explicitly
+		// via --clients cursor (matches vscode / gemini-cli below).
+		{name: "cursor", factory: NewCursor},
 		{name: "vscode", factory: NewVSCode},
 		{name: "gemini-cli", factory: NewGeminiCLI},
 		{name: "qwen-cli", factory: NewQwenCLI},
@@ -1217,6 +1220,10 @@ func copyFile(src, dst string, perm os.FileMode) error {
 // Errors during listing or removal are intentionally swallowed — pruning is
 // best-effort; a failed unlink must not break a successful Backup call.
 func pruneOldTimestamped(livePath string, keepN int) {
+	pruneOldTimestampedWithRemove(livePath, keepN, os.Remove)
+}
+
+func pruneOldTimestampedWithRemove(livePath string, keepN int, remove func(string) error) {
 	dir := filepath.Dir(livePath)
 	base := filepath.Base(livePath)
 	entries, err := os.ReadDir(dir)
@@ -1260,7 +1267,7 @@ func pruneOldTimestamped(livePath string, keepN int) {
 		return timestamped[i].modTime.After(timestamped[j].modTime)
 	})
 	for _, b := range timestamped[keepN:] {
-		_ = os.Remove(b.path)
+		_ = remove(b.path)
 	}
 }
 
@@ -1268,15 +1275,15 @@ func pruneOldTimestamped(livePath string, keepN int) {
 // cap for the live config that produced backupPath. It is best-effort like
 // BackupKeep pruning: malformed/non-mcphub paths and remove/list failures do
 // not fail the already-successful caller.
-func PruneBackupsForBackupPath(backupPath string, keepN int) {
+func PruneBackupsForBackupPath(backupPath string, keepN int) error {
 	if keepN <= 0 {
-		return
+		return nil
 	}
 	livePath, ok := livePathFromTimestampedBackupPath(backupPath)
 	if !ok {
-		return
+		return nil
 	}
-	_ = withConfigLock(livePath, func() error {
+	return withConfigLock(livePath, func() error {
 		pruneOldTimestamped(livePath, keepN)
 		return nil
 	})

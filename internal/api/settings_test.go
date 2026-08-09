@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,6 +17,84 @@ func tmpSettings(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	return filepath.Join(dir, "gui-preferences.yaml")
+}
+
+func TestSettingsWritersFailBeforeSettingsMuOnPoison(t *testing.T) {
+	controlPath := tmpSettings(t)
+	if err := NewAPI().SettingsSetIn(controlPath, "appearance.theme", "dark"); err != nil {
+		t.Fatalf("control SettingsSetIn: %v", err)
+	}
+	if err := NewAPI().setLSPRouterClientDisabledIn(controlPath, "antigravity", true); err != nil {
+		t.Fatalf("control client preference writer: %v", err)
+	}
+	controlRaw, err := os.ReadFile(controlPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(controlRaw), "appearance.theme: dark") || !strings.Contains(string(controlRaw), "antigravity") {
+		t.Fatalf("control writers did not persist both settings: %q", controlRaw)
+	}
+
+	path := tmpSettings(t)
+	lockPath := path + ".lock"
+	releaseCause := errors.New("injected settings unlock failure")
+	previousUnlock := flockUnlockFn
+	var stranded *flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = fl
+			return releaseCause
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if stranded != nil {
+			_ = stranded.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	err = NewAPI().SettingsSetIn(path, "appearance.theme", "dark")
+	if !errors.Is(err, ErrLockReleaseUnconfirmed) || !IsAppliedLockReleaseUnconfirmed(err) {
+		t.Fatalf("first write error=%v, want applied release-unconfirmed", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	settingsMu.Lock()
+	writers := []struct {
+		name string
+		call func() error
+	}{
+		{"SettingsSetIn", func() error { return NewAPI().SettingsSetIn(path, "appearance.theme", "light") }},
+		{"client preference", func() error { return NewAPI().setLSPRouterClientDisabledIn(path, "antigravity", true) }},
+	}
+	for _, writer := range writers {
+		done := make(chan error, 1)
+		go func(call func() error) { done <- call() }(writer.call)
+		select {
+		case later := <-done:
+			if !errors.Is(later, ErrLockReleaseUnconfirmed) {
+				settingsMu.Unlock()
+				t.Fatalf("%s error=%v, want fail-fast poison", writer.name, later)
+			}
+		case <-time.After(time.Second):
+			settingsMu.Unlock()
+			t.Fatalf("%s waited on settingsMu instead of fail-fast ledger check", writer.name)
+		}
+	}
+	settingsMu.Unlock()
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatalf("poisoned later writer changed bytes: before=%q after=%q", before, after)
+	}
 }
 
 func seedSettingsFile(t *testing.T, path string, raw []byte) {

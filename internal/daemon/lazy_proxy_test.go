@@ -3863,6 +3863,37 @@ func TestLazyProxy_RejectedPublish_ClearsStaleStartingSince_ReapSettlesConfigure
 	}
 }
 
+func TestLazyProxy_AppliedReservationReleaseContinuesMaterialization(t *testing.T) {
+	f := &fakeLifecycle{kind: "mcp-language-server"}
+	p, _ := newTestProxy(t, "mcp-language-server", f)
+	releaseCause := errors.New("sensitive registry path must not be logged")
+	p.reserveMaterializedSlotFn = func() (bool, error) {
+		return true, errors.Join(api.ErrLockReleaseUnconfirmed, releaseCause)
+	}
+	var diagnostics bytes.Buffer
+	restoreDiag := SetDaemonDiagWriterForTest(&diagnostics)
+	defer restoreDiag()
+
+	ep, gen, err := p.ensureMaterialized(context.Background())
+	if err != nil {
+		t.Fatalf("ensureMaterialized: %v", err)
+	}
+	if ep == nil || gen == 0 {
+		t.Fatalf("materialized endpoint=(%v,%d), want published endpoint and generation", ep, gen)
+	}
+	p.endBackendRequest()
+	if got := f.materializeCount.Load(); got != 1 {
+		t.Fatalf("materialize count=%d, want 1 after applied reservation warning", got)
+	}
+	gotDiagnostics := diagnostics.String()
+	if !strings.Contains(gotDiagnostics, "registry lock release unconfirmed; continuing materialization") {
+		t.Fatalf("diagnostics=%q, want stable continuation warning", gotDiagnostics)
+	}
+	if strings.Contains(gotDiagnostics, releaseCause.Error()) {
+		t.Fatalf("diagnostics leaked raw release cause: %q", gotDiagnostics)
+	}
+}
+
 // TestLazyProxy_DocLifecycle_WarmDeliveredThenClientCancel_KeepsRefcount is the
 // Edge 2 guard: on the WARM notification path (raw client ctx, no probation budget),
 // a didOpen that is DELIVERED to the backend and then outlives the client deadline

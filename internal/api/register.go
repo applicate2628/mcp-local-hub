@@ -11,20 +11,27 @@
 //     The proxy itself may re-stamp this on startup, but Register
 //     pre-seeds it so `mcphub workspaces` shows a sensible state
 //     immediately.
-//   - Rollback: if any per-language step fails, every side effect applied
-//     so far is reversed in LIFO order (client entries, scheduler tasks,
-//     port allocations, registry entries).
+//   - Settlement: ordinary per-language failures reverse every side effect
+//     applied so far in LIFO order (client entries, scheduler tasks, port
+//     allocations, registry entries). A *RegisterForwardCommittedError is the
+//     typed exception: the coherent applied prefix is retained and later
+//     optional mutations stop.
 //   - Default-all when caller passes an empty languages slice.
 package api
 
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -35,15 +42,261 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-// defaultClientBindings is the implicit client binding set used when a
-// workspace-scoped manifest does not declare client_bindings. Matches the
-// default install clients that support per-entry URLs. Opt-in clients and
-// Antigravity's stdio-relay model are intentionally excluded from the implicit
-// workspace-scoped write set.
-var defaultClientBindings = []config.ClientBinding{
-	{Client: "claude-code", URLPath: "/mcp"},
-	{Client: "codex-cli", URLPath: "/mcp"},
-	{Client: "cursor", URLPath: "/mcp"},
+// classifyRegisterClientMutation is the registration composition seam for the
+// clients-owned settlement contract. Production always uses the shared owner;
+// focused tests may inject only a deterministic lifecycle outcome.
+var classifyRegisterClientMutation = clients.ClassifyClientMutation
+
+// defaultClientBindingsNow resolves the implicit client binding set used when a
+// workspace-scoped manifest does not declare client_bindings.
+//
+// It reads the operator's EFFECTIVE default-install set AT CALL TIME through
+// DefaultInstallClientNamesEffectiveIn, which client_install_prefs.go declares
+// to be "the single owner of what is the default-install set once an operator
+// override may exist". This used to be a package-level `var` snapshot of
+// clients.DefaultInstallClientNames() evaluated at package init, which made
+// register the ONE consumer that ignored the persisted `clients.default_install`
+// override every other consumer honors — install via resolveDefaultClientsOverride
+// (install.go), the shared LSP router via ClientInstallEnabledSet
+// (lsp_client_router.go), and readiness via this very accessor (readiness.go).
+//
+// Concretely: an operator who ticks Cursor in Settings → Clients got cursor
+// from `mcphub install` but NOT from `mcphub register` or the GUI project-LSP
+// toggle, and had no lever to close the gap — register exposes no --clients
+// flag, RegisterOpts has no client field, and the only manifest register ever
+// loads is the EMBEDDED mcp-language-server manifest, which declares no
+// client_bindings (and manifest_source.go deliberately IGNORES a disk copy of a
+// shipped server's manifest). That makes this fallback not a rare edge but the
+// ONLY path register takes, so the stale snapshot silently governed every
+// workspace registration.
+//
+// Fallback posture mirrors readiness.go's own client-scope resolution: on a
+// read error (corrupt or unreadable gui-preferences.yaml) fall back to the
+// compile-time default set
+// rather than failing the register. The override is a convenience layer and
+// must never make `mcphub register` harder to complete than before it existed.
+//
+// Relay-stdio adapters (e.g. Antigravity's stdio-relay model) are excluded by
+// the IsRelayStdio filter because they require relay context, not a URL-only
+// workspace binding. Those dropped names are RETURNED alongside the bindings —
+// see relayStdioBindingWarning for why they must never be dropped silently.
+func defaultClientBindingsNow() ([]config.ClientBinding, []string) {
+	names := clients.DefaultInstallClientNames()
+	if eff, err := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); err == nil && len(eff) > 0 {
+		names = eff
+	}
+	bindings := make([]config.ClientBinding, 0, len(names))
+	var droppedRelayStdio []string
+	for _, name := range names {
+		if clients.IsRelayStdio(name) {
+			droppedRelayStdio = append(droppedRelayStdio, name)
+			continue
+		}
+		bindings = append(bindings, config.ClientBinding{Client: name, URLPath: "/mcp"})
+	}
+	return bindings, droppedRelayStdio
+}
+
+// relayStdioBindingWarning renders the operator-visible warning for
+// default-install clients this register structurally CANNOT bind.
+//
+// SetDefaultInstallClientNames accepts any non-empty subset of
+// clients.SupportedClientNames(), and the Settings → Clients panel
+// (ClientInstallToggleViewIn) renders EVERY supported client as a toggle —
+// including the relay-stdio ones. So `clients.default_install = zed` is a
+// reachable, VALID operator state in which the IsRelayStdio filter above drops
+// every name and register writes ZERO client entries. Before register learned
+// to read the override this state was unreachable (the compile-time fallback is
+// {claude-code, codex-cli}, both URL-native); honoring the override made it
+// reachable, so honoring it must also make it visible.
+//
+// POSTURE: warn, do NOT substitute. The tempting alternative — mirror
+// DefaultInstallClientNamesOverrideIn's "nothing valid survived ⇒ no override"
+// fallback to the compile-time set — does NOT apply here and would be worse.
+// That fallback fires when the operator's intent is UNRECOVERABLE (every
+// persisted name blank/unknown, i.e. nothing was validly expressed). Here the
+// intent is valid and precise; it is register that cannot honor part of it.
+// Substituting {claude-code, codex-cli} would write entries into clients the
+// operator explicitly DESELECTED, and would re-open the very cross-lane
+// divergence this branch closed — pointing the other way, with register binding
+// clients `mcphub install` would not. Guessing an intent the operator did not
+// express is not a fix; saying plainly what was skipped is.
+//
+// The string goes to BOTH surfaces: the writer (CLI stderr) and
+// RegisterReport.Warnings, which the GUI project-LSP toggle returns to the
+// browser (internal/gui/projects_toggle.go → projectToggleResponse.Warnings).
+func relayStdioBindingWarning(bindings []config.ClientBinding, droppedRelayStdio []string) string {
+	if len(droppedRelayStdio) == 0 {
+		return ""
+	}
+	msg := fmt.Sprintf(
+		"default-install client(s) %s are relay-stdio and cannot take the URL-only entry `mcphub register` writes (they need a stdio relay entry); they were skipped",
+		strings.Join(droppedRelayStdio, ", "))
+	if len(bindings) > 0 {
+		return msg + " — install them with `mcphub install` instead"
+	}
+	return msg + ", leaving NO client bound by this registration: the workspace proxy will run with no client config pointing at it. " +
+		"Add a URL-capable client (claude-code, codex-cli, cursor, …) in Settings → Clients, or reach the relay-stdio client(s) via `mcphub install`"
+}
+
+// effectiveClientBindings is the SINGLE owner of "which clients does THIS
+// registration WRITE to". Both consumers must read it: the write path (which
+// creates the managed entries) and the post-register direct-LSP cleanup
+// (which deletes the entries those managed ones replace).
+//
+// Splitting that question between two call sites is what made cursor's move to
+// opt-in unsafe: the write path narrowed to the bound set while
+// cleanupDirectLanguageServerEntriesAfterRegister kept looping over EVERY
+// installed client, so an opt-in client's working direct entry was backed up
+// and removed with nothing put in its place — leaving that client disconnected
+// (bot PR #583 finding 7). While cursor was still a default the two agreed by
+// accident and the divergence was invisible.
+//
+// NOTE the cleanup's question is the STRICTLY WIDER "does this client end up
+// with a working hub-managed replacement": a binding here is one way to get
+// one, an already-live shared LSP-router entry is the other. See
+// lspCleanupAliasesForClient.
+//
+// RESOLVE ONCE PER REGISTER. Being the single owner is not enough if the owner
+// is CONSULTED repeatedly: this reads gui-preferences.yaml at call time, and a
+// register spans tens of seconds (sch.Create + sch.Run + a readiness probe with
+// a 10s ceiling, per language). Inside the GUI process `POST
+// /api/client-install-prefs` and the project-LSP toggle that calls Register are
+// independent handlers sharing no lock, so an operator ticking a client mid-loop
+// used to make the write path and the cleanup gate disagree ACROSS TIME: early
+// languages written without the new client, cleanup then judging every language
+// against the NEW set and deleting that client's live direct entries with no
+// replacement. Same defect class as the original list divergence, reached
+// through timing instead. So registerWithManifest calls this ONCE, before the
+// language loop, and threads the result into registerOneLanguage /
+// registerOneLanguageSupervised and the cleanup — exactly as routerPort is
+// already resolved once per cleanup run.
+//
+// The second return value is the relay-stdio client names dropped from the
+// operator's selection; see relayStdioBindingWarning.
+func effectiveClientBindings(m *config.ServerManifest) ([]config.ClientBinding, []string) {
+	if len(m.ClientBindings) > 0 {
+		return m.ClientBindings, nil
+	}
+	return defaultClientBindingsNow()
+}
+
+// boundClientNames is the set of client names the supplied bindings write to.
+// The post-register cleanup consults it to answer "did THIS registration just
+// write this client a managed entry for every registered language".
+func boundClientNames(bindings []config.ClientBinding) map[string]bool {
+	out := make(map[string]bool, len(bindings))
+	for _, b := range bindings {
+		out[b.Client] = true
+	}
+	return out
+}
+
+type routerReplacementCandidateKind string
+
+const (
+	routerReplacementNotCandidate  routerReplacementCandidateKind = "not-candidate"
+	routerReplacementStructural    routerReplacementCandidateKind = "structural-candidate"
+	routerReplacementIndeterminate routerReplacementCandidateKind = "indeterminate"
+)
+
+type routerReplacementCandidate struct {
+	kind      routerReplacementCandidateKind
+	entryPort int
+}
+
+// inspectClientLSPRouterReplacement is the single configured-entry inspection
+// owner. It validates entry presence, enablement, route shape, language,
+// ownership, and the positive observed port. No configured GUI port participates
+// in candidate selection or authorization.
+func inspectClientLSPRouterReplacement(client registerClient, language string) routerReplacementCandidate {
+	entryName := LSPRouterEntryName(language)
+	live, err := client.GetEntry(entryName)
+	if err != nil {
+		return routerReplacementCandidate{kind: routerReplacementIndeterminate}
+	}
+	if live == nil || live.Disabled {
+		return routerReplacementCandidate{kind: routerReplacementNotCandidate}
+	}
+	entryLanguage, entryPort, ok := lspRouterURLLanguagePort(entryLSPRouterURL(live))
+	if !ok || entryPort <= 0 || !strings.EqualFold(entryLanguage, language) {
+		return routerReplacementCandidate{kind: routerReplacementNotCandidate}
+	}
+	owned, _ := entryIsOwnedLSPRouterForLanguage(entryName, live, language, 0)
+	if !owned {
+		return routerReplacementCandidate{kind: routerReplacementNotCandidate}
+	}
+	return routerReplacementCandidate{
+		kind:      routerReplacementStructural,
+		entryPort: entryPort,
+	}
+}
+
+const (
+	managedRouterProbeTimeout   = 500 * time.Millisecond
+	managedRouterRouteBodyMax   = 256 * 1024
+	managedRouterRequestIDBytes = 16
+)
+
+// ManagedRouterLease is the opaque retained process-generation authority used
+// by destructive direct-LSP cleanup. The API can revalidate or close it, but
+// cannot inspect or reproduce GUI process identity policy.
+type ManagedRouterLease interface {
+	Revalidate(context.Context) string
+	Close() error
+}
+
+// ManagedRouterAuthorizer is the injected managed-GUI lease factory used by
+// destructive direct-LSP cleanup. The only production implementation lives in
+// internal/gui. A nil authorizer is the fail-closed zero value.
+type ManagedRouterAuthorizer func(context.Context, int) ManagedRouterAuthorization
+
+// ManagedRouterAuthorization deliberately exposes only an opaque retained
+// lease or a stable, sanitized refusal discriminator. Process paths, argv,
+// pidport contents, and raw HTTP bodies never cross this boundary.
+type ManagedRouterAuthorization struct {
+	Lease        ManagedRouterLease
+	FailureClass string
+}
+
+const (
+	ManagedRouterFailurePortInvalid              = "port-invalid"
+	ManagedRouterFailurePIDPortUnavailable       = "pidport-unavailable"
+	ManagedRouterFailurePIDPortPortMismatch      = "pidport-port-mismatch"
+	ManagedRouterFailureSocketOwnerUnavailable   = "socket-owner-unavailable"
+	ManagedRouterFailureSocketOwnerMismatch      = "socket-owner-mismatch"
+	ManagedRouterFailureProcessUnavailable       = "process-unavailable"
+	ManagedRouterFailureExecutableUnavailable    = "executable-unavailable"
+	ManagedRouterFailureExecutableMismatch       = "executable-mismatch"
+	ManagedRouterFailureArgvRoleMismatch         = "argv-role-mismatch"
+	ManagedRouterFailureProcessGenerationInvalid = "process-generation-invalid"
+	ManagedRouterFailureProcessOwnerMismatch     = "process-owner-mismatch"
+	ManagedRouterFailureProcessOwnerUnavailable  = "process-owner-unavailable"
+	ManagedRouterFailureVersionUninformative     = "version-uninformative"
+	ManagedRouterFailurePingTransport            = "ping-transport"
+	ManagedRouterFailurePingHTTPStatus           = "ping-http-status"
+	ManagedRouterFailurePingContentType          = "ping-content-type"
+	ManagedRouterFailurePingResponseTooLarge     = "ping-response-too-large"
+	ManagedRouterFailurePingMalformed            = "ping-malformed"
+	ManagedRouterFailurePingIdentityMismatch     = "ping-identity-mismatch"
+	ManagedRouterFailureIdentityChanged          = "identity-changed"
+	ManagedRouterFailureIdentityNotSupplied      = "identity-not-supplied"
+	ManagedRouterFailureIdentityUnavailable      = "identity-unavailable"
+)
+
+type clientLanguageKey struct {
+	Client   string
+	Language string
+}
+
+type clientWriteReceipt struct {
+	Key       clientLanguageKey
+	EntryName string
+}
+
+type registeredLanguageResult struct {
+	Entry    WorkspaceEntry
+	Receipts []clientWriteReceipt
 }
 
 // RegisterOpts controls a Register invocation.
@@ -65,6 +318,23 @@ type RegisterOpts struct {
 	// supervisor path makes the proxy process a Job-protected child of the
 	// hub supervisor, matching Serena's daemon ownership model.
 	SupervisedProxy bool
+
+	// ManagedRouterAuthorizer verifies that a structurally observed router port
+	// belongs to the current managed GUI process. The configured GUI port and
+	// caller-owned identity tuples are intentionally not accepted as authority.
+	ManagedRouterAuthorizer ManagedRouterAuthorizer
+
+	// probeManagedLanguageRoute is the per-call route-proof seam. Production
+	// leaves it nil and uses ProbeManagedLanguageRoute; focused tests inject an
+	// immutable closure for only this Register invocation. It is deliberately
+	// unexported so callers cannot replace the route policy across the process.
+	probeManagedLanguageRoute func(context.Context, int, string, string) managedRouteProof
+
+	// supervisorPostWriteDeps is normalized once per supervised Register call
+	// and carries the four existing post-AddEntry owners into the private
+	// supervised transaction. It is unexported, non-persisted, and never shared
+	// between calls; tests may replace only their invocation's dependencies.
+	supervisorPostWriteDeps supervisorPostWriteDeps
 
 	Writer io.Writer // progress output; nil = os.Stderr
 }
@@ -96,6 +366,62 @@ type RegisterReport struct {
 	WorkspaceKey string           `json:"workspace_key"`
 	Entries      []WorkspaceEntry `json:"entries"`
 	Warnings     []string         `json:"warnings,omitempty"`
+	diagnostics  []RegistrationDiagnostic
+}
+
+// RegisterForwardCommittedError reports that registration committed the
+// coherent subset required by an applied client mutation whose config-lock
+// release could not be confirmed. Later optional client/cleanup mutations are
+// skipped; Client and Operation identify the settlement point without exposing
+// config contents or machine-local paths.
+type RegisterForwardCommittedError struct {
+	Client          string
+	Target          string
+	Operation       string
+	CommittedStages []string
+	PendingStages   []string
+	cause           error
+}
+
+func (e *RegisterForwardCommittedError) Error() string {
+	if e.Client == "" && e.Target != "" {
+		return fmt.Sprintf("registration forward subset committed at %s during %s: %v", e.Target, e.Operation, e.cause)
+	}
+	return fmt.Sprintf("registration forward subset committed at client %s during %s: %v", e.Client, e.Operation, e.cause)
+}
+
+func (e *RegisterForwardCommittedError) Unwrap() error { return e.cause }
+
+func newRegisterForwardReleaseError(target, operation string, result registeredLanguageResult, committed, pending []string, primary, releaseErr error) (registeredLanguageResult, error) {
+	if !errors.Is(releaseErr, ErrLockReleaseUnconfirmed) {
+		if releaseErr == nil {
+			return result, primary
+		}
+		return result, errors.Join(primary, releaseErr)
+	}
+	var forward *RegisterForwardCommittedError
+	if errors.As(primary, &forward) {
+		forward.cause = errors.Join(forward.cause, releaseErr)
+		forward.CommittedStages = append(forward.CommittedStages, committed...)
+		forward.PendingStages = append(forward.PendingStages, pending...)
+		if forward.Target == "" {
+			forward.Target = target
+		}
+		return result, forward
+	}
+	return result, &RegisterForwardCommittedError{
+		Target: target, Operation: operation,
+		CommittedStages: append([]string(nil), committed...),
+		PendingStages:   append([]string(nil), pending...),
+		cause:           errors.Join(primary, releaseErr),
+	}
+}
+
+func labeledRegistrationReleaseError(label string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", label, err)
 }
 
 // UnregisterReport summarizes what Unregister actually removed.
@@ -104,6 +430,7 @@ type UnregisterReport struct {
 	WorkspaceKey string   `json:"workspace_key"`
 	Removed      []string `json:"removed"` // language names
 	Warnings     []string `json:"warnings,omitempty"`
+	diagnostics  []RegistrationDiagnostic
 }
 
 // Register ensures workspace-scoped lazy proxies exist for each requested
@@ -113,13 +440,18 @@ type UnregisterReport struct {
 // Lazy mode: this function DOES NOT preflight LSP binaries. Missing LSP
 // binaries are surfaced later at first tools/call via LifecycleMissing.
 //
-// Side effects per language (rolled back on later failure):
+// Side effects per language:
 //  1. Allocate port from registry (first-free in the manifest's pool).
 //  2. Create scheduler task whose command is
 //     `mcphub daemon workspace-proxy --port <p> --workspace <ws> --language <lang>`.
-//  3. Write managed entries into each client config (codex-cli, claude-code,
-//     gemini-cli by default, or whatever the manifest declares in
-//     client_bindings).
+//  3. Write managed entries into each client config (the registry-derived
+//     defaults claude-code and codex-cli, or whatever the manifest declares in
+//     client_bindings). Cursor requires an explicit binding.
+//
+// Ordinary later failures roll these effects back in LIFO order. If an applied
+// client mutation cannot confirm config-lock release, Register instead returns
+// *RegisterForwardCommittedError after retaining the coherent applied prefix;
+// later optional client and cleanup mutations are not attempted.
 //
 // Registry is saved once at the end; a mid-loop failure leaves the registry
 // untouched on disk.
@@ -225,40 +557,81 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 			return nil, err
 		}
 	}
+	if opts.SupervisedProxy {
+		opts.supervisorPostWriteDeps = normalizeSupervisorPostWriteDeps(a, opts.supervisorPostWriteDeps)
+	}
 	// 3.1 Ensure the shared weekly-refresh task exists only for the legacy
 	// scheduler-backed path. Supervised registration owns its lifecycle
 	// through the supervisor intent file; touching the shared scheduler task
 	// there would mutate durable state before per-language preconditions
 	// such as legacy-port kill/adoption have been proven.
+	allClients := clientsAllForRegister()
+	transaction := newRegistrationTransaction()
+	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
+	defer report.projectCompatibilityWarnings()
 	if !opts.SupervisedProxy {
 		if err := a.EnsureWeeklyRefreshTask(); err != nil {
 			fmt.Fprintf(w, "warning: ensure shared weekly-refresh task: %v\n", err)
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeWeeklyRefreshFailed, "weekly-refresh", "scheduler", err,
+			))
 		}
 	}
-	allClients := clientsAllForRegister()
-	var rollback []func()
-	runRollback := func() {
-		for i := len(rollback) - 1; i >= 0; i-- {
-			rollback[i]()
-		}
-	}
-	report := &RegisterReport{Workspace: canonical, WorkspaceKey: wsKey}
 	if schedulerUnavailableErr != nil {
-		report.Warnings = append(report.Warnings,
-			fmt.Sprintf("scheduler unavailable (%v); using supervised LSP proxy path and skipping legacy task handling", schedulerUnavailableErr))
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodeSchedulerUnavailable, "workspace-register", "scheduler", schedulerUnavailableErr,
+		))
 		if err := preflightSchedulerlessRegisterSupervisor(); err != nil {
 			return report, err
 		}
 	}
-	for _, lang := range languages {
-		entry, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, w, &rollback)
-		if err != nil {
-			runRollback()
-			return report, fmt.Errorf("register language %s: %w", lang, err)
-		}
-		report.Entries = append(report.Entries, entry)
+	// ONE client-scope decision for the WHOLE registration (see
+	// effectiveClientBindings' RESOLVE ONCE PER REGISTER note). Resolved here —
+	// before the first language, before any client write, before the cleanup
+	// gate — and threaded down, so no consumer can observe a different answer
+	// than another because the operator changed Settings → Clients mid-loop.
+	bindings, droppedRelayStdio := effectiveClientBindings(m)
+	if warning := relayStdioBindingWarning(bindings, droppedRelayStdio); warning != "" {
+		fmt.Fprintf(w, "warning: %s\n", warning)
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodeRelayStdioSkipped, strings.Join(droppedRelayStdio, "."), "client-bindings", nil,
+		))
 	}
-	report.Warnings = append(report.Warnings, a.cleanupDirectLanguageServerEntriesAfterRegister(bySpec, languages, canonical, allClients, w)...)
+	var committedReceipts []clientWriteReceipt
+	for _, lang := range languages {
+		result, err := a.registerOneLanguage(m, canonical, wsKey, lang, opts, reg, sch, allClients, bindings, w, transaction)
+		if err != nil {
+			var forwardErr *RegisterForwardCommittedError
+			if errors.As(err, &forwardErr) {
+				report.Entries = append(report.Entries, result.Entry)
+				committedReceipts = append(committedReceipts, result.Receipts...)
+				return report, settleRegistrationCommit(report, w, transaction, forwardErr)
+			}
+			outcome := transaction.Fail(fmt.Errorf("register language %s: %w", lang, err))
+			return report, outcome.Err
+		}
+		report.Entries = append(report.Entries, result.Entry)
+		committedReceipts = append(committedReceipts, result.Receipts...)
+	}
+	// Cleanup runs only after every language reached its final success point.
+	// The selected bindings remain intent; committedReceipts are the only proof
+	// of writes performed by this invocation.
+	cleanupDiagnostics, cleanupErr := a.cleanupDirectLanguageServerEntriesAfterRegister(
+		bySpec, languages, canonical, allClients, selectedClientLanguageKeys(bindings, languages), committedReceipts,
+		opts.ManagedRouterAuthorizer, opts.probeManagedLanguageRoute, w, transaction)
+	for _, diagnostic := range cleanupDiagnostics {
+		report.addDiagnostic(diagnostic)
+	}
+	if cleanupErr != nil {
+		var forwardErr *RegisterForwardCommittedError
+		if errors.As(cleanupErr, &forwardErr) {
+			return report, settleRegistrationCommit(report, w, transaction, forwardErr)
+		}
+		return report, transaction.Fail(cleanupErr).Err
+	}
+	if err := settleRegistrationCommit(report, w, transaction, nil); err != nil {
+		return report, err
+	}
 	// EXPLICIT register → bless this workspace's canonical root as a
 	// trusted root for the GUI LSP router's first-touch auto-register
 	// gate. This is the operator-action seed: after an explicit register
@@ -272,11 +645,44 @@ func (a *API) registerWithManifest(m *config.ServerManifest, workspacePath strin
 	if len(report.Entries) > 0 {
 		if err := registerBlessTrustedRootFn(canonical); err != nil {
 			fmt.Fprintf(w, "warning: could not record %s as an LSP trusted root (router auto-register of sibling workspaces under this tree may require explicit register): %v\n", canonical, err)
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("could not record %s as an LSP trusted root: %v", canonical, err))
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeTrustedRootRecordFailed, "trusted-root", "workspace-register", err,
+			))
 		}
 	}
 	return report, nil
+}
+
+func settleRegistrationCommit(
+	report *RegisterReport,
+	w io.Writer,
+	transaction *registrationTransaction,
+	forwardErr *RegisterForwardCommittedError,
+) error {
+	var outcome registrationTransactionOutcome
+	if forwardErr == nil {
+		outcome = transaction.Commit()
+		if !outcome.Committed() {
+			return outcome.Err
+		}
+	} else {
+		outcome = transaction.CommitForward()
+		if outcome.State != registrationTransactionCommitted {
+			forwardErr.cause = errors.Join(forwardErr.cause, outcome.Err)
+			return forwardErr
+		}
+		forwardErr.cause = errors.Join(forwardErr.cause, outcome.Err)
+	}
+	if outcome.ObserverErr != nil {
+		fmt.Fprintf(w, "warning: registration committed but a post-commit observer failed: %v\n", outcome.ObserverErr)
+		report.addDiagnostic(NewRegistrationDiagnostic(
+			RegistrationCodePostCommitObserverFailed, "workspace-register", "completion-observer", outcome.ObserverErr,
+		))
+	}
+	if forwardErr != nil {
+		return forwardErr
+	}
+	return nil
 }
 
 // registerBlessTrustedRootFn is the explicit-register bless seam. In
@@ -298,79 +704,1135 @@ func preflightSchedulerlessRegisterSupervisor() error {
 	return nil
 }
 
+type directCleanupMatchResult struct {
+	matches      []clients.LanguageServerStdioEntry
+	failureClass directCleanupWarningClass
+	complete     bool
+}
+
+type cleanupEvidence string
+
+const (
+	cleanupEvidenceNone          cleanupEvidence = "none"
+	cleanupEvidenceReceipt       cleanupEvidence = "receipt"
+	cleanupEvidenceManagedRouter cleanupEvidence = "managed-router-and-route"
+)
+
+type directCleanupPlan struct {
+	key                clientLanguageKey
+	client             registerClient
+	selected           bool
+	receiptEntry       string
+	backend            string
+	observedRouterPort int
+	matches            []clients.LanguageServerStdioEntry
+	evidence           cleanupEvidence
+	failureClass       string
+}
+
+type managedRouteProof struct {
+	OK           bool
+	FailureClass string
+}
+
+type directCleanupWarningClass string
+
+const (
+	cleanupWarningWriteEntryNameEmpty      directCleanupWarningClass = "write-entry-name-empty"
+	cleanupWarningWriteReceiptConflict     directCleanupWarningClass = "write-receipt-conflict"
+	cleanupWarningWriteReceiptMissing      directCleanupWarningClass = "write-receipt-missing"
+	cleanupWarningClientEntryIndeterminate directCleanupWarningClass = "client-entry-indeterminate"
+	cleanupWarningDirectScanFailed         directCleanupWarningClass = "direct-scan-failed"
+	cleanupWarningSurvivorScanFailed       directCleanupWarningClass = "survivor-scan-failed"
+	cleanupWarningCASConflict              directCleanupWarningClass = "cas-conflict"
+	cleanupWarningBackupFailed             directCleanupWarningClass = "backup-failed"
+	cleanupWarningRemoveFailed             directCleanupWarningClass = "remove-failed"
+)
+
+type directCleanupWarningRecord struct {
+	class    directCleanupWarningClass
+	client   string
+	language string
+	entry    string
+}
+
+type directCleanupPlanDeps struct {
+	authorizeRouter ManagedRouterAuthorizer
+	probeRoute      func(context.Context, int, string, string) managedRouteProof
+	matchDirect     func(registerClient, string, map[string]bool, string) directCleanupMatchResult
+}
+
+type managedRouteHTTPDoer interface {
+	Do(*http.Request) (*http.Response, error)
+}
+
+type managedRouteProbeDeps struct {
+	do      managedRouteHTTPDoer
+	entropy io.Reader
+	catalog func(string) (ToolCatalog, bool)
+}
+
+func receiptEntryNames(receipts []clientWriteReceipt) (map[clientLanguageKey]string, *directCleanupWarningRecord) {
+	out := make(map[clientLanguageKey]string, len(receipts))
+	for _, receipt := range receipts {
+		name := strings.TrimSpace(receipt.EntryName)
+		if name == "" {
+			return nil, &directCleanupWarningRecord{
+				class: cleanupWarningWriteEntryNameEmpty, client: receipt.Key.Client, language: receipt.Key.Language,
+			}
+		}
+		if prior, exists := out[receipt.Key]; exists && prior != name {
+			return nil, &directCleanupWarningRecord{
+				class: cleanupWarningWriteReceiptConflict, client: receipt.Key.Client, language: receipt.Key.Language,
+			}
+		}
+		out[receipt.Key] = name
+	}
+	return out, nil
+}
+
+func cleanupAliasesForLanguage(language string, spec config.LanguageSpec) map[string]bool {
+	aliases := map[string]bool{}
+	addLSPCleanupAlias(aliases, language)
+	addLSPCleanupAlias(aliases, spec.LspCommand)
+	return aliases
+}
+
+func buildDirectCleanupPlans(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	selected map[clientLanguageKey]bool,
+	receipts map[clientLanguageKey]string,
+	deps directCleanupPlanDeps,
+) ([]directCleanupPlan, []directCleanupWarningRecord) {
+	var plans []directCleanupPlan
+	var warningRecords []directCleanupWarningRecord
+	canonicalLanguages := append([]string(nil), languages...)
+	sort.Strings(canonicalLanguages)
+	clientNames := make([]string, 0, len(allClients))
+	for clientName := range allClients {
+		clientNames = append(clientNames, clientName)
+	}
+	sort.Strings(clientNames)
+
+	for _, clientName := range clientNames {
+		client := allClients[clientName]
+		if client == nil || !client.Exists() {
+			continue
+		}
+		clientStart := len(plans)
+		clientWideFailure := ""
+		for _, language := range canonicalLanguages {
+			spec, ok := bySpec[language]
+			if !ok {
+				continue
+			}
+			key := clientLanguageKey{Client: clientName, Language: language}
+			plan := directCleanupPlan{
+				key:          key,
+				client:       client,
+				selected:     selected[key],
+				receiptEntry: receipts[key],
+				backend:      spec.Backend,
+				evidence:     cleanupEvidenceNone,
+			}
+
+			candidate := routerReplacementCandidate{kind: routerReplacementNotCandidate}
+			if plan.receiptEntry == "" {
+				// Router inspection is staged. A failure is observable only if the
+				// same plan has a real direct candidate; otherwise it describes no
+				// state that cleanup could have mutated.
+				candidate = inspectClientLSPRouterReplacement(client, language)
+			}
+
+			if plan.receiptEntry == "" && candidate.kind == routerReplacementNotCandidate && !plan.selected {
+				plans = append(plans, plan)
+				continue
+			}
+			result := deps.matchDirect(client, clientName, cleanupAliasesForLanguage(language, spec), canonicalWorkspace)
+			if !result.complete {
+				failureClass := result.failureClass
+				if failureClass == "" {
+					failureClass = cleanupWarningDirectScanFailed
+				}
+				clientWideFailure = string(failureClass)
+				plan.failureClass = clientWideFailure
+				warningRecords = append(warningRecords, directCleanupWarningRecord{
+					class: failureClass, client: clientName,
+				})
+			} else {
+				plan.matches = result.matches
+				if len(plan.matches) > 0 {
+					switch candidate.kind {
+					case routerReplacementIndeterminate:
+						plan.failureClass = string(cleanupWarningClientEntryIndeterminate)
+						warningRecords = append(warningRecords, directCleanupWarningRecord{
+							class: cleanupWarningClientEntryIndeterminate, client: clientName, language: language,
+						})
+					case routerReplacementStructural:
+						plan.observedRouterPort = candidate.entryPort
+					}
+				}
+			}
+			plans = append(plans, plan)
+		}
+		if clientWideFailure != "" {
+			for i := clientStart; i < len(plans); i++ {
+				plans[i].failureClass = clientWideFailure
+			}
+		}
+	}
+	return plans, warningRecords
+}
+
+// ProbeManagedLanguageRoute proves that the exact production language route
+// serves the complete expected backend tool catalog. It is exported only
+// within the repository's internal tree so the real GUI mux can exercise this
+// production contract without creating an api -> gui dependency.
+func ProbeManagedLanguageRoute(ctx context.Context, candidatePort int, language, backend string) (bool, string) {
+	proof := probeManagedLanguageRoute(ctx, candidatePort, language, backend)
+	return proof.OK, proof.FailureClass
+}
+
+func probeManagedLanguageRoute(ctx context.Context, candidatePort int, language, backend string) managedRouteProof {
+	client := &http.Client{
+		Timeout:       managedRouterProbeTimeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	return probeManagedLanguageRouteWithDeps(ctx, candidatePort, language, backend, managedRouteProbeDeps{
+		do:      client,
+		entropy: rand.Reader,
+		catalog: ToolCatalogForBackend,
+	})
+}
+
+func probeManagedLanguageRouteWithDeps(ctx context.Context, candidatePort int, language, backend string, deps managedRouteProbeDeps) managedRouteProof {
+	if candidatePort <= 0 || candidatePort > 65535 {
+		return managedRouteProof{FailureClass: "route-transport"}
+	}
+	if deps.do == nil || deps.entropy == nil || deps.catalog == nil {
+		return managedRouteProof{FailureClass: "route-transport"}
+	}
+	catalog, ok := deps.catalog(backend)
+	if !ok || len(catalog.Tools) == 0 {
+		return managedRouteProof{FailureClass: "route-catalog-mismatch"}
+	}
+	requestIDBytes := make([]byte, managedRouterRequestIDBytes)
+	if _, err := io.ReadFull(deps.entropy, requestIDBytes); err != nil {
+		return managedRouteProof{FailureClass: "route-transport"}
+	}
+	requestID := hex.EncodeToString(requestIDBytes)
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      requestID,
+		"method":  "tools/list",
+		"params":  map[string]any{},
+	})
+	if err != nil {
+		return managedRouteProof{FailureClass: "route-malformed"}
+	}
+
+	requestCtx, cancel := context.WithTimeout(ctx, managedRouterProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(
+		requestCtx,
+		http.MethodPost,
+		fmt.Sprintf("http://127.0.0.1:%d/lsp/%s/mcp", candidatePort, url.PathEscape(language)),
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return managedRouteProof{FailureClass: "route-transport"}
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json")
+	resp, err := deps.do.Do(req)
+	if err != nil {
+		return managedRouteProof{FailureClass: "route-transport"}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return managedRouteProof{FailureClass: "route-http-status"}
+	}
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		return managedRouteProof{FailureClass: "route-content-type"}
+	}
+	responseBody, err := io.ReadAll(io.LimitReader(resp.Body, managedRouterRouteBodyMax+1))
+	if err != nil {
+		return managedRouteProof{FailureClass: "route-transport"}
+	}
+	if len(responseBody) > managedRouterRouteBodyMax {
+		return managedRouteProof{FailureClass: "route-response-too-large"}
+	}
+	var payload struct {
+		JSONRPC string          `json:"jsonrpc"`
+		ID      json.RawMessage `json:"id"`
+		Result  struct {
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"result"`
+		Error json.RawMessage `json:"error"`
+	}
+	decoder := json.NewDecoder(bytes.NewReader(responseBody))
+	if err := decoder.Decode(&payload); err != nil {
+		return managedRouteProof{FailureClass: "route-malformed"}
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return managedRouteProof{FailureClass: "route-malformed"}
+	}
+	if payload.JSONRPC != "2.0" {
+		return managedRouteProof{FailureClass: "route-malformed"}
+	}
+	var responseID string
+	if err := json.Unmarshal(payload.ID, &responseID); err != nil || responseID != requestID {
+		return managedRouteProof{FailureClass: "route-id-mismatch"}
+	}
+	if len(bytes.TrimSpace(payload.Error)) > 0 && string(bytes.TrimSpace(payload.Error)) != "null" {
+		return managedRouteProof{FailureClass: "route-jsonrpc-error"}
+	}
+	if len(payload.Result.Tools) == 0 {
+		return managedRouteProof{FailureClass: "route-tools-invalid"}
+	}
+	want := make(map[string]bool, len(catalog.Tools))
+	for _, tool := range catalog.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" || want[name] {
+			return managedRouteProof{FailureClass: "route-catalog-mismatch"}
+		}
+		want[name] = true
+	}
+	got := make(map[string]bool, len(payload.Result.Tools))
+	for _, tool := range payload.Result.Tools {
+		name := strings.TrimSpace(tool.Name)
+		if name == "" || got[name] || !want[name] {
+			return managedRouteProof{FailureClass: "route-tools-invalid"}
+		}
+		got[name] = true
+	}
+	if len(got) != len(want) {
+		return managedRouteProof{FailureClass: "route-catalog-mismatch"}
+	}
+	return managedRouteProof{OK: true}
+}
+
+func directLanguageServerCleanupMatches(
+	client registerClient,
+	_ string,
+	aliases map[string]bool,
+	canonicalWorkspace string,
+) directCleanupMatchResult {
+	entries, err := findStdioLanguageServerCandidatesForDirectCleanup(client)
+	if err != nil {
+		return directCleanupMatchResult{
+			failureClass: cleanupWarningDirectScanFailed,
+			complete:     false,
+		}
+	}
+	matches, err := matchingDirectLanguageServerEntries(client, entries, aliases, canonicalWorkspace)
+	if err != nil {
+		return directCleanupMatchResult{
+			failureClass: cleanupWarningSurvivorScanFailed,
+			complete:     false,
+		}
+	}
+
+	if aliases["go"] || aliases["gopls"] {
+		stdioEntries, err := removableStdioEntriesForDirectCleanup(client)
+		if err != nil {
+			return directCleanupMatchResult{
+				failureClass: cleanupWarningDirectScanFailed,
+				complete:     false,
+			}
+		}
+		goplsMatches, err := matchingDirectGoplsMCPEntries(client, stdioEntries, aliases, canonicalWorkspace)
+		if err != nil {
+			return directCleanupMatchResult{
+				failureClass: cleanupWarningSurvivorScanFailed,
+				complete:     false,
+			}
+		}
+		matches = append(matches, goplsMatches...)
+	}
+	return directCleanupMatchResult{
+		matches:  dedupeDirectLanguageServerEntries(matches),
+		complete: true,
+	}
+}
+
+type directCleanupWarningAccumulator struct {
+	writer      io.Writer
+	seen        map[string]bool
+	proofPlans  map[directCleanupWarningClass]map[directCleanupPlanIdentity]struct{}
+	warnings    []string
+	diagnostics []RegistrationDiagnostic
+}
+
+type directCleanupOutcome struct {
+	warnings    []string
+	diagnostics []RegistrationDiagnostic
+}
+
+type directCleanupPlanIdentity struct {
+	client   string
+	language string
+	port     int
+}
+
+func newDirectCleanupWarningAccumulator(writer io.Writer) *directCleanupWarningAccumulator {
+	return &directCleanupWarningAccumulator{
+		writer:     writer,
+		seen:       map[string]bool{},
+		proofPlans: map[directCleanupWarningClass]map[directCleanupPlanIdentity]struct{}{},
+	}
+}
+
+func (a *directCleanupWarningAccumulator) addRecord(record directCleanupWarningRecord) {
+	warning := renderDirectCleanupWarning(record)
+	if warning == "" || a.seen[warning] {
+		return
+	}
+	a.seen[warning] = true
+	a.warnings = append(a.warnings, warning)
+	a.diagnostics = append(a.diagnostics, directCleanupRecordDiagnostic(record))
+}
+
+func (a *directCleanupWarningAccumulator) addProofFailure(failureClass directCleanupWarningClass, plan directCleanupPlan) {
+	if failureClass == "" {
+		return
+	}
+	if a.proofPlans[failureClass] == nil {
+		a.proofPlans[failureClass] = map[directCleanupPlanIdentity]struct{}{}
+	}
+	a.proofPlans[failureClass][directCleanupPlanIdentity{
+		client:   sanitizeCleanupPlanIdentifier(plan.key.Client),
+		language: sanitizeCleanupPlanIdentifier(plan.key.Language),
+		port:     plan.observedRouterPort,
+	}] = struct{}{}
+}
+
+func (a *directCleanupWarningAccumulator) flushProofWarnings() {
+	classes := make([]directCleanupWarningClass, 0, len(a.proofPlans))
+	for failureClass := range a.proofPlans {
+		classes = append(classes, failureClass)
+	}
+	sort.Slice(classes, func(i, j int) bool { return classes[i] < classes[j] })
+	for _, failureClass := range classes {
+		plans := make([]directCleanupPlanIdentity, 0, len(a.proofPlans[failureClass]))
+		for plan := range a.proofPlans[failureClass] {
+			plans = append(plans, plan)
+		}
+		sort.Slice(plans, func(i, j int) bool {
+			if plans[i].client != plans[j].client {
+				return plans[i].client < plans[j].client
+			}
+			if plans[i].language != plans[j].language {
+				return plans[i].language < plans[j].language
+			}
+			return plans[i].port < plans[j].port
+		})
+		parts := make([]string, 0, len(plans))
+		for _, plan := range plans {
+			port := plan.port
+			if port < 0 || port > 65535 {
+				port = 0
+			}
+			parts = append(parts, fmt.Sprintf("client=%s,language=%s,port=%d", plan.client, plan.language, port))
+		}
+		warning := fmt.Sprintf("%s: affected_plans=%d [%s]; keeping matching direct LSP entries", failureClass, len(plans), strings.Join(parts, "; "))
+		if failureClass == directCleanupWarningClass(ManagedRouterFailureProcessOwnerUnavailable) {
+			warning += "; retry after verifying the managed GUI is running as the current user"
+		}
+		a.warnings = append(a.warnings, warning)
+		a.diagnostics = append(a.diagnostics, directCleanupProofDiagnostic(failureClass, plans))
+		fmt.Fprintf(a.writer, "warning: %s\n", warning)
+	}
+}
+
+func (a *directCleanupWarningAccumulator) outcome() directCleanupOutcome {
+	return directCleanupOutcome{
+		warnings:    append([]string(nil), a.warnings...),
+		diagnostics: append([]RegistrationDiagnostic(nil), a.diagnostics...),
+	}
+}
+
+func directCleanupRecordDiagnostic(record directCleanupWarningRecord) RegistrationDiagnostic {
+	code := RegistrationCodeCleanupUnsupported
+	switch record.class {
+	case cleanupWarningDirectScanFailed:
+		code = RegistrationCodeCleanupScanFailed
+	case cleanupWarningSurvivorScanFailed:
+		code = RegistrationCodeCleanupSurvivorScanFailed
+	case cleanupWarningCASConflict:
+		code = RegistrationCodeCleanupCASConflict
+	case cleanupWarningBackupFailed:
+		code = RegistrationCodeCleanupBackupFailed
+	case cleanupWarningRemoveFailed:
+		code = RegistrationCodeCleanupRemoveFailed
+	}
+	plan := record.language
+	if record.entry != "" {
+		plan = record.entry
+	}
+	return NewRegistrationDiagnostic(code, plan, record.client, nil)
+}
+
+func directCleanupProofDiagnostic(failureClass directCleanupWarningClass, plans []directCleanupPlanIdentity) RegistrationDiagnostic {
+	code := RegistrationCodeRouterProofFailed
+	if strings.HasPrefix(string(failureClass), "route-") {
+		code = RegistrationCodeRouteProofFailed
+	} else {
+		switch failureClass {
+		case cleanupWarningDirectScanFailed:
+			code = RegistrationCodeCleanupScanFailed
+		case cleanupWarningSurvivorScanFailed:
+			code = RegistrationCodeCleanupSurvivorScanFailed
+		case cleanupWarningCASConflict:
+			code = RegistrationCodeCleanupCASConflict
+		case cleanupWarningWriteEntryNameEmpty,
+			cleanupWarningWriteReceiptConflict,
+			cleanupWarningWriteReceiptMissing,
+			cleanupWarningClientEntryIndeterminate:
+			code = RegistrationCodeCleanupUnsupported
+		}
+	}
+	planIdentity := ""
+	if len(plans) == 1 {
+		planIdentity = fmt.Sprintf("%s-%s-%d", plans[0].client, plans[0].language, plans[0].port)
+	} else if len(plans) > 1 {
+		planIdentity = fmt.Sprintf("affected-plans-%d", len(plans))
+	}
+	return NewRegistrationDiagnostic(code, planIdentity, string(failureClass), nil)
+}
+
+func renderDirectCleanupWarning(record directCleanupWarningRecord) string {
+	client := sanitizeCleanupPlanIdentifier(record.client)
+	language := sanitizeCleanupPlanIdentifier(record.language)
+	entry := sanitizeCleanupPlanIdentifier(record.entry)
+	switch record.class {
+	case cleanupWarningWriteEntryNameEmpty:
+		return fmt.Sprintf("%s: client=%s,language=%s; direct LSP cleanup skipped and matching entries were kept; retry registration", record.class, client, language)
+	case cleanupWarningWriteReceiptConflict:
+		return fmt.Sprintf("%s: client=%s,language=%s; direct LSP cleanup skipped and matching entries were kept; retry registration", record.class, client, language)
+	case cleanupWarningClientEntryIndeterminate:
+		return fmt.Sprintf("%s: client=%s,language=%s; direct LSP cleanup skipped and matching entries were kept; verify client configuration is readable and retry", record.class, client, language)
+	case cleanupWarningDirectScanFailed, cleanupWarningSurvivorScanFailed:
+		return fmt.Sprintf("%s: client=%s; direct LSP cleanup skipped and matching entries were kept; verify client configuration is readable and retry", record.class, client)
+	case cleanupWarningBackupFailed:
+		return fmt.Sprintf("%s: client=%s; direct LSP cleanup skipped and matching entries were kept; verify client-config write permissions and retry", record.class, client)
+	case cleanupWarningRemoveFailed:
+		return fmt.Sprintf("%s: client=%s,language=%s,entry=%s; backup completed but entry removal failed; use the printed backup path if recovery is needed, then retry", record.class, client, language, entry)
+	default:
+		return ""
+	}
+}
+
+func normalizeManagedRouterFailureClass(value string, fallback directCleanupWarningClass) directCleanupWarningClass {
+	switch value {
+	case ManagedRouterFailurePortInvalid,
+		ManagedRouterFailurePIDPortUnavailable,
+		ManagedRouterFailurePIDPortPortMismatch,
+		ManagedRouterFailureSocketOwnerUnavailable,
+		ManagedRouterFailureSocketOwnerMismatch,
+		ManagedRouterFailureProcessUnavailable,
+		ManagedRouterFailureExecutableUnavailable,
+		ManagedRouterFailureExecutableMismatch,
+		ManagedRouterFailureArgvRoleMismatch,
+		ManagedRouterFailureProcessGenerationInvalid,
+		ManagedRouterFailureProcessOwnerMismatch,
+		ManagedRouterFailureProcessOwnerUnavailable,
+		ManagedRouterFailureVersionUninformative,
+		ManagedRouterFailurePingTransport,
+		ManagedRouterFailurePingHTTPStatus,
+		ManagedRouterFailurePingContentType,
+		ManagedRouterFailurePingResponseTooLarge,
+		ManagedRouterFailurePingMalformed,
+		ManagedRouterFailurePingIdentityMismatch,
+		ManagedRouterFailureIdentityChanged,
+		ManagedRouterFailureIdentityNotSupplied,
+		ManagedRouterFailureIdentityUnavailable:
+		return directCleanupWarningClass(value)
+	default:
+		return fallback
+	}
+}
+
+func normalizeManagedRouteFailureClass(value string) directCleanupWarningClass {
+	switch value {
+	case "route-transport",
+		"route-catalog-mismatch",
+		"route-http-status",
+		"route-content-type",
+		"route-response-too-large",
+		"route-malformed",
+		"route-id-mismatch",
+		"route-jsonrpc-error",
+		"route-tools-invalid":
+		return directCleanupWarningClass(value)
+	default:
+		return "route-transport"
+	}
+}
+
+func sanitizeCleanupPlanIdentifier(value string) string {
+	const (
+		maxIdentifierLen = 64
+		maxPrefixLen     = 24
+	)
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	valid := len(value) <= maxIdentifierLen
+	for _, r := range value {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			continue
+		}
+		valid = false
+		break
+	}
+	if valid {
+		return value
+	}
+	var prefix strings.Builder
+	for _, r := range value {
+		if prefix.Len() >= maxPrefixLen {
+			break
+		}
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '.' {
+			prefix.WriteRune(r)
+		} else if prefix.Len() > 0 && !strings.HasSuffix(prefix.String(), "-") {
+			prefix.WriteByte('-')
+		}
+	}
+	cleanPrefix := strings.Trim(prefix.String(), "-._")
+	if cleanPrefix == "" {
+		cleanPrefix = "value"
+	}
+	sum := sha256.Sum256([]byte(value))
+	return fmt.Sprintf("sanitized-%s-%x", cleanPrefix, sum[:6])
+}
+
 func (a *API) cleanupDirectLanguageServerEntriesAfterRegister(
 	bySpec map[string]config.LanguageSpec,
 	languages []string,
 	canonicalWorkspace string,
 	allClients map[string]registerClient,
+	selected map[clientLanguageKey]bool,
+	receipts []clientWriteReceipt,
+	authorizeRouter ManagedRouterAuthorizer,
+	probeRoute func(context.Context, int, string, string) managedRouteProof,
 	w io.Writer,
+	transaction *registrationTransaction,
+) ([]RegistrationDiagnostic, error) {
+	if probeRoute == nil {
+		probeRoute = probeManagedLanguageRoute
+	}
+	outcome, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+		bySpec,
+		languages,
+		canonicalWorkspace,
+		allClients,
+		selected,
+		receipts,
+		w,
+		directCleanupPlanDeps{
+			authorizeRouter: authorizeRouter,
+			probeRoute:      probeRoute,
+			matchDirect:     directLanguageServerCleanupMatches,
+		},
+		transaction,
+	)
+	return outcome.diagnostics, err
+}
+
+func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDeps(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	selected map[clientLanguageKey]bool,
+	receipts []clientWriteReceipt,
+	w io.Writer,
+	deps directCleanupPlanDeps,
 ) []string {
-	aliases := map[string]bool{}
-	for _, lang := range languages {
-		spec, ok := bySpec[lang]
-		if !ok {
+	transaction := newRegistrationTransaction()
+	outcome, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+		bySpec, languages, canonicalWorkspace, allClients, selected, receipts, w, deps, transaction,
+	)
+	warnings := outcome.warnings
+	if err == nil {
+		if outcome := transaction.Commit(); !outcome.Committed() {
+			err = outcome.Err
+		}
+	} else {
+		err = transaction.Fail(err).Err
+	}
+	if err != nil {
+		warnings = append(warnings, "direct-cleanup-failed: direct entries were preserved because transactional cleanup did not settle")
+	}
+	return warnings
+}
+
+func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsTransaction(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	selected map[clientLanguageKey]bool,
+	receipts []clientWriteReceipt,
+	w io.Writer,
+	deps directCleanupPlanDeps,
+	transaction *registrationTransaction,
+) ([]string, error) {
+	outcome, err := a.cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+		bySpec, languages, canonicalWorkspace, allClients, selected, receipts, w, deps, transaction,
+	)
+	return outcome.warnings, err
+}
+
+func (a *API) cleanupDirectLanguageServerEntriesAfterRegisterWithPlanDepsDiagnosticsTransaction(
+	bySpec map[string]config.LanguageSpec,
+	languages []string,
+	canonicalWorkspace string,
+	allClients map[string]registerClient,
+	selected map[clientLanguageKey]bool,
+	receipts []clientWriteReceipt,
+	w io.Writer,
+	deps directCleanupPlanDeps,
+	transaction *registrationTransaction,
+) (directCleanupOutcome, error) {
+	if transaction == nil {
+		return directCleanupOutcome{}, errors.New("direct cleanup requires a registration transaction")
+	}
+	keepN := a.EffectiveBackupKeepN()
+	warnings := newDirectCleanupWarningAccumulator(w)
+	receiptNames, receiptWarning := receiptEntryNames(receipts)
+	if receiptWarning != nil {
+		warnings.addRecord(*receiptWarning)
+		return warnings.outcome(), nil
+	}
+	plans, warningRecords := buildDirectCleanupPlans(
+		bySpec,
+		languages,
+		canonicalWorkspace,
+		allClients,
+		selected,
+		receiptNames,
+		deps,
+	)
+	for _, record := range warningRecords {
+		warnings.addRecord(record)
+	}
+	// Plans form a proof set for each physical direct entry.  Establish their
+	// order before selecting one plan as the mutation owner so neither map order
+	// nor requested language order decides which proof is observed first.
+	sort.SliceStable(plans, func(i, j int) bool {
+		left, right := plans[i], plans[j]
+		if left.key.Client != right.key.Client {
+			return left.key.Client < right.key.Client
+		}
+		if left.key.Language != right.key.Language {
+			return left.key.Language < right.key.Language
+		}
+		if left.evidence != right.evidence {
+			return left.evidence < right.evidence
+		}
+		if left.observedRouterPort != right.observedRouterPort {
+			return left.observedRouterPort < right.observedRouterPort
+		}
+		if left.backend != right.backend {
+			return left.backend < right.backend
+		}
+		return left.receiptEntry < right.receiptEntry
+	})
+
+	for i := range plans {
+		plan := &plans[i]
+		if len(plan.matches) == 0 || plan.failureClass != "" {
 			continue
 		}
-		addLSPCleanupAlias(aliases, lang)
-		addLSPCleanupAlias(aliases, spec.LspCommand)
-	}
-	if len(aliases) == 0 {
-		return nil
+		if plan.receiptEntry != "" {
+			plan.evidence = cleanupEvidenceReceipt
+			continue
+		}
+		if plan.observedRouterPort <= 0 {
+			if plan.selected {
+				class := cleanupWarningWriteReceiptMissing
+				plan.failureClass = string(class)
+				warnings.addProofFailure(class, *plan)
+			}
+			continue
+		}
+		if deps.authorizeRouter == nil {
+			class := directCleanupWarningClass(ManagedRouterFailureIdentityNotSupplied)
+			plan.failureClass = string(class)
+			warnings.addProofFailure(class, *plan)
+			continue
+		}
+		plan.evidence = cleanupEvidenceManagedRouter
 	}
 
-	keepN := a.EffectiveBackupKeepN()
-	var warnings []string
-	for clientName, client := range allClients {
-		if client == nil || !client.Exists() {
-			continue
-		}
-		// WORKSPACE-AWARE register grain (architect REVISE → Option C): consume the
-		// branch-(a)+managed-only CANDIDATE source, NOT the conservative full-survivor
-		// FindStdioLanguageServerEntries (that one stays for the workspace-FREE
-		// `mcphub language-server cleanup`). The FILE-layer survivor is re-applied
-		// workspace-scoped inside matchingDirectLanguageServerEntries below.
-		entries, err := findStdioLanguageServerCandidatesForDirectCleanup(client)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s direct LSP scan failed: %v", clientName, err))
-			continue
-		}
-		matches, err := matchingDirectLanguageServerEntries(client, entries, aliases, canonicalWorkspace)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s direct LSP survivor scan failed: %v", clientName, err))
-			continue
-		}
-		if aliases["go"] || aliases["gopls"] {
-			stdioEntries, err := removableStdioEntriesForDirectCleanup(client)
-			if err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s direct stdio scan failed: %v", clientName, err))
-			} else {
-				goplsMatches, err := matchingDirectGoplsMCPEntries(client, stdioEntries, aliases, canonicalWorkspace)
-				if err != nil {
-					warnings = append(warnings, fmt.Sprintf("%s direct gopls survivor scan failed: %v", clientName, err))
-				} else {
-					matches = append(matches, goplsMatches...)
+	clientNames := make([]string, 0, len(allClients))
+	for clientName := range allClients {
+		clientNames = append(clientNames, clientName)
+	}
+	sort.Strings(clientNames)
+	for _, clientName := range clientNames {
+		clientMark := transaction.Mark()
+		var client registerClient
+		leases := map[int]ManagedRouterLease{}
+		plansByEntry := map[string]*directCleanupPlan{}
+		allPlansByEntry := map[string][]*directCleanupPlan{}
+		refusedPorts := map[int]directCleanupWarningClass{}
+		for i := range plans {
+			plan := &plans[i]
+			if plan.key.Client != clientName {
+				continue
+			}
+			client = plan.client
+			for _, match := range plan.matches {
+				// Include failed/no-evidence plans: they are a proof refusal for
+				// this entry, never a reason to silently drop the ownership edge.
+				allPlansByEntry[match.Name] = append(allPlansByEntry[match.Name], plan)
+			}
+			if plan.failureClass != "" || plan.evidence == cleanupEvidenceNone {
+				continue
+			}
+			if plan.evidence == cleanupEvidenceManagedRouter {
+				lease := leases[plan.observedRouterPort]
+				if lease == nil {
+					if class, refused := refusedPorts[plan.observedRouterPort]; refused {
+						plan.failureClass = string(class)
+						warnings.addProofFailure(class, *plan)
+						continue
+					}
+					authorization := deps.authorizeRouter(context.Background(), plan.observedRouterPort)
+					if authorization.Lease == nil {
+						class := normalizeManagedRouterFailureClass(
+							authorization.FailureClass,
+							directCleanupWarningClass(ManagedRouterFailureIdentityUnavailable),
+						)
+						refusedPorts[plan.observedRouterPort] = class
+						plan.failureClass = string(class)
+						warnings.addProofFailure(class, *plan)
+						continue
+					}
+					lease = authorization.Lease
+					leases[plan.observedRouterPort] = lease
+					port := plan.observedRouterPort
+					transaction.AddFinalizer(
+						fmt.Sprintf("close managed-router lease for %s port %d", sanitizeCleanupPlanIdentifier(clientName), port),
+						lease.Close,
+					)
 				}
 			}
 		}
-		matches = dedupeDirectLanguageServerEntries(matches)
-		if len(matches) == 0 {
+		entryNames := make([]string, 0, len(allPlansByEntry))
+		for entryName := range allPlansByEntry {
+			entryNames = append(entryNames, entryName)
+		}
+		sort.Strings(entryNames)
+		for _, entryName := range entryNames {
+			associated := allPlansByEntry[entryName]
+			eligible := len(associated) > 0
+			for _, plan := range associated {
+				if plan.failureClass != "" || plan.evidence == cleanupEvidenceNone {
+					eligible = false
+					break
+				}
+			}
+			if eligible {
+				plansByEntry[entryName] = associated[0]
+			}
+		}
+		if client == nil {
 			continue
 		}
-		backupPath, err := client.BackupKeep(keepN)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("%s direct LSP backup failed: %v", clientName, err))
+		if len(plansByEntry) == 0 {
+			if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
+				return warnings.outcome(), fmt.Errorf("direct cleanup %s proof refusal rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+			}
 			continue
 		}
-		fmt.Fprintf(w, "✓ %s backup before direct LSP cleanup: %s\n", clientName, backupPath)
-		for _, entry := range matches {
-			if err := client.RemoveEntry(entry.Name); err != nil {
-				warnings = append(warnings, fmt.Sprintf("%s remove direct LSP entry %s failed: %v", clientName, entry.Name, err))
+
+		matchesByName := map[string]clients.LanguageServerStdioEntry{}
+		languageByName := map[string]string{}
+		for i := range plans {
+			plan := &plans[i]
+			if plan.key.Client != clientName || plan.failureClass != "" || plan.evidence == cleanupEvidenceNone {
 				continue
 			}
-			fmt.Fprintf(w, "✓ %s removed direct LSP entry %s (--lsp %s)\n", clientName, entry.Name, entry.Language)
+			for _, match := range plan.matches {
+				matchesByName[match.Name] = match
+				languageByName[match.Name] = plan.key.Language
+			}
+		}
+		invalidatePlan := func(plan *directCleanupPlan, failure string) {
+			class := directCleanupWarningClass(failure)
+			plan.failureClass = string(class)
+			warnings.addProofFailure(class, *plan)
+			for _, match := range plan.matches {
+				if plansByEntry[match.Name] == plan {
+					delete(plansByEntry, match.Name)
+					delete(matchesByName, match.Name)
+					delete(languageByName, match.Name)
+				}
+			}
+		}
+		planHasEntries := func(plan *directCleanupPlan) bool {
+			for _, match := range plan.matches {
+				if plansByEntry[match.Name] == plan {
+					return true
+				}
+			}
+			return false
+		}
+		completedManagedPlans := map[int][]directCleanupPlan{}
+		clientProofFailed := false
+		recordCompletedManagedPlan := func(plan *directCleanupPlan) {
+			if plan.evidence != cleanupEvidenceManagedRouter {
+				return
+			}
+			for _, existing := range completedManagedPlans[plan.observedRouterPort] {
+				if existing.key == plan.key {
+					return
+				}
+			}
+			completedManagedPlans[plan.observedRouterPort] = append(completedManagedPlans[plan.observedRouterPort], *plan)
+		}
+		for i := range plans {
+			if clientProofFailed {
+				break
+			}
+			plan := &plans[i]
+			if plan.key.Client != clientName || !planHasEntries(plan) {
+				continue
+			}
+			planMark := transaction.Mark()
+			planFailed := false
+			entryNames := make([]string, 0, len(plan.matches))
+			for _, match := range plan.matches {
+				if plansByEntry[match.Name] == plan {
+					entryNames = append(entryNames, match.Name)
+				}
+			}
+			sort.Strings(entryNames)
+			for _, entryName := range entryNames {
+				entry := matchesByName[entryName]
+				validateEntryPlans := func() string {
+					for _, associated := range allPlansByEntry[entryName] {
+						if associated.failureClass != "" || associated.evidence == cleanupEvidenceNone {
+							return string(cleanupWarningClientEntryIndeterminate)
+						}
+						if associated.evidence == cleanupEvidenceManagedRouter {
+							if failure := validateManagedCleanupPlan(leases[associated.observedRouterPort], deps.probeRoute, *associated); failure != "" {
+								return failure
+							}
+						}
+					}
+					return ""
+				}
+				atomicClient, ok := client.(atomicDirectCleanupClient)
+				if !ok {
+					invalidatePlan(plan, string(cleanupWarningClientEntryIndeterminate))
+					if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s capability-refusal rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+					}
+					planFailed = true
+					break
+				}
+				target, captureErr := atomicClient.CaptureDirectCleanupTarget(clients.DirectCleanupIdentity{
+					Name:    entry.Name,
+					Command: entry.Command,
+					Args:    append([]string(nil), entry.Args...),
+				})
+				if captureErr != nil {
+					invalidatePlan(plan, string(cleanupWarningClientEntryIndeterminate))
+					if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s target-capture rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(captureErr, rollbackErr))
+					}
+					planFailed = true
+					break
+				}
+				if failure := validateEntryPlans(); failure != "" {
+					if plan.evidence == cleanupEvidenceManagedRouter {
+						invalidatePlan(plan, failure)
+					}
+					if rollbackErr := transaction.RollbackTo(planMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s pre-remove proof rollback: %w", sanitizeCleanupPlanIdentifier(clientName), rollbackErr)
+					}
+					planFailed = true
+					break
+				}
+				entryMark := transaction.Mark()
+				cleanupCompensationToken := compensationToken(-1)
+				backupPath, cleanupErr := atomicClient.CleanupDirectEntryAtomically(
+					target,
+					keepN,
+					func(receipt clients.DirectCleanupReceipt) error {
+						cleanupCompensationToken = transaction.AddTrackedCompensation(
+							fmt.Sprintf("restore %s entry %s from cleanup receipt", sanitizeCleanupPlanIdentifier(clientName), sanitizeCleanupPlanIdentifier(entry.Name)),
+							func() error {
+								return settleRegistrationCompensationMutation(
+									"restore direct-cleanup receipt for "+sanitizeCleanupPlanIdentifier(entry.Name),
+									clientName,
+									receipt.Restore(),
+								)
+							},
+						)
+						return nil
+					},
+					func(_ clients.DirectCleanupCheckpoint) error {
+						if failure := validateEntryPlans(); failure != "" {
+							return directCleanupRevalidationError{failure: failure}
+						}
+						return nil
+					},
+				)
+				if classifyRegisterClientMutation(cleanupErr) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					disarmErr := transaction.DisarmCompensation(cleanupCompensationToken)
+					transaction.AddSuccessOutput(
+						"cleanup backup "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+						w,
+						"✓ %s backup before direct LSP cleanup: %s\n",
+						clientName,
+						backupPath,
+					)
+					transaction.AddSuccessOutput(
+						"cleanup removal "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+						w,
+						"✓ %s removed direct LSP entry %s (--lsp %s; configuration applied; lock release unconfirmed)\n",
+						clientName,
+						entry.Name,
+						entry.Language,
+					)
+					return warnings.outcome(), &RegisterForwardCommittedError{
+						Client:    clientName,
+						Operation: "remove-direct-entry",
+						cause: errors.Join(
+							fmt.Errorf("configuration applied; lock release unconfirmed: %w", cleanupErr),
+							disarmErr,
+						),
+					}
+				}
+				if cleanupErr != nil {
+					var validationErr directCleanupRevalidationError
+					if errors.As(cleanupErr, &validationErr) {
+						invalidatePlan(plan, validationErr.failure)
+						if rollbackErr := transaction.RollbackTo(clientMark); rollbackErr != nil {
+							return warnings.outcome(), fmt.Errorf("direct cleanup %s validation rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(cleanupErr, rollbackErr))
+						}
+						planFailed = true
+						clientProofFailed = true
+						break
+					}
+					if errors.Is(cleanupErr, clients.ErrCASConflict) {
+						invalidatePlan(plan, string(cleanupWarningCASConflict))
+					} else if backupPath == "" {
+						warnings.addRecord(directCleanupWarningRecord{class: cleanupWarningBackupFailed, client: clientName})
+					} else {
+						warnings.addRecord(directCleanupWarningRecord{
+							class: cleanupWarningRemoveFailed, client: clientName,
+							language: languageByName[entry.Name], entry: entry.Name,
+						})
+					}
+					if rollbackErr := transaction.RollbackTo(entryMark); rollbackErr != nil {
+						return warnings.outcome(), fmt.Errorf("direct cleanup %s remove rollback: %w", sanitizeCleanupPlanIdentifier(clientName), errors.Join(cleanupErr, rollbackErr))
+					}
+					if errors.Is(cleanupErr, clients.ErrCASConflict) {
+						planFailed = true
+						break
+					}
+					continue
+				}
+				transaction.AddSuccessOutput(
+					"cleanup backup "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+					w,
+					"✓ %s backup before direct LSP cleanup: %s\n",
+					clientName,
+					backupPath,
+				)
+				transaction.AddSuccessOutput(
+					"cleanup removal "+sanitizeCleanupPlanIdentifier(clientName)+"/"+sanitizeCleanupPlanIdentifier(entry.Name),
+					w,
+					"✓ %s removed direct LSP entry %s (--lsp %s)\n",
+					clientName,
+					entry.Name,
+					entry.Language,
+				)
+			}
+			if !planFailed {
+				for _, entryName := range entryNames {
+					for _, associated := range allPlansByEntry[entryName] {
+						recordCompletedManagedPlan(associated)
+					}
+				}
+			}
+		}
+		if clientProofFailed {
+			// RollbackTo(clientMark) released every client-scoped lease and
+			// restored every removal. Proofs recorded before that rollback no
+			// longer own live state and must not enroll final validation.
+			clear(completedManagedPlans)
+			continue
+		}
+		ports := make([]int, 0, len(completedManagedPlans))
+		for port := range completedManagedPlans {
+			ports = append(ports, port)
+		}
+		sort.Sort(sort.Reverse(sort.IntSlice(ports)))
+		for _, port := range ports {
+			capturedLease := leases[port]
+			capturedPort := port
+			clientPlans := append([]directCleanupPlan(nil), completedManagedPlans[port]...)
+			transaction.AddFinalizer(
+				fmt.Sprintf("final managed-router validation for %s port %d", sanitizeCleanupPlanIdentifier(clientName), capturedPort),
+				func() error {
+					for _, plan := range clientPlans {
+						if failure := validateManagedCleanupPlan(capturedLease, deps.probeRoute, plan); failure != "" {
+							return fmt.Errorf("%s", failure)
+						}
+					}
+					return nil
+				},
+			)
 		}
 	}
-	return warnings
+	warnings.flushProofWarnings()
+	return warnings.outcome(), nil
+}
+
+type directCleanupRevalidationError struct {
+	failure string
+}
+
+func (e directCleanupRevalidationError) Error() string {
+	return e.failure
+}
+
+func validateManagedCleanupPlan(
+	lease ManagedRouterLease,
+	probeRoute func(context.Context, int, string, string) managedRouteProof,
+	plan directCleanupPlan,
+) string {
+	if lease == nil {
+		return ManagedRouterFailureIdentityUnavailable
+	}
+	if failure := lease.Revalidate(context.Background()); failure != "" {
+		return string(normalizeManagedRouterFailureClass(
+			failure,
+			directCleanupWarningClass(ManagedRouterFailureIdentityChanged),
+		))
+	}
+	proof := probeRoute(context.Background(), plan.observedRouterPort, plan.key.Language, plan.backend)
+	if !proof.OK {
+		return string(normalizeManagedRouteFailureClass(proof.FailureClass))
+	}
+	return ""
 }
 
 func addLSPCleanupAlias(aliases map[string]bool, value string) {
@@ -581,11 +2043,142 @@ func stringSliceContainsFold(values []string, want string) bool {
 	return false
 }
 
+func selectedClientLanguageKeys(bindings []config.ClientBinding, languages []string) map[clientLanguageKey]bool {
+	selected := make(map[clientLanguageKey]bool, len(bindings)*len(languages))
+	for _, binding := range bindings {
+		for _, language := range languages {
+			selected[clientLanguageKey{Client: binding.Client, Language: language}] = true
+		}
+	}
+	return selected
+}
+
+// writeRegisteredClientEntries is the single owner of transaction-local write
+// receipts for both normal and supervised registration. A receipt is appended
+// only after AddEntry succeeds and its rollback has been registered. A client
+// that appeared after entry-name composition is skipped rather than receiving
+// an empty write target.
+func writeRegisteredClientEntries(
+	bindings []config.ClientBinding,
+	allClients map[string]registerClient,
+	entryNameByClient map[string]string,
+	port int,
+	language string,
+	w io.Writer,
+	transaction *registrationTransaction,
+) ([]clientWriteReceipt, error) {
+	receipts := make([]clientWriteReceipt, 0, len(bindings))
+	seen := map[clientLanguageKey]string{}
+	for _, binding := range bindings {
+		client, ok := allClients[binding.Client]
+		if !ok || !client.Exists() {
+			continue
+		}
+		entryName := strings.TrimSpace(entryNameByClient[binding.Client])
+		if entryName == "" {
+			continue
+		}
+		key := clientLanguageKey{Client: binding.Client, Language: language}
+		if priorName, duplicate := seen[key]; duplicate {
+			if priorName != entryName {
+				return receipts, fmt.Errorf("write-receipt-conflict: client %s language %s resolved both %q and %q", binding.Client, language, priorName, entryName)
+			}
+			continue
+		}
+
+		priorEntry, err := client.GetEntry(entryName)
+		if err != nil {
+			return receipts, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, binding.Client, err)
+		}
+		urlPath := binding.URLPath
+		if urlPath == "" {
+			urlPath = "/mcp"
+		}
+		entry := clients.MCPEntry{
+			Name: entryName,
+			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
+		}
+		clientRef := client
+		savedPrior := priorEntry
+		capturedName := entryName
+		capturedClientName := binding.Client
+		compensationToken := transaction.AddTrackedCompensation("restore client entry "+capturedClientName+"/"+capturedName, func() error {
+			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
+				restoreErr := clientRef.AddEntry(*savedPrior)
+				if err := settleRegistrationCompensationMutation("restore prior "+capturedName+" entry", capturedClientName, restoreErr); err != nil {
+					return err
+				}
+				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
+				return nil
+			}
+			removeErr := clientRef.RemoveEntry(capturedName)
+			if err := settleRegistrationCompensationMutation("remove "+capturedName+" entry", capturedClientName, removeErr); err != nil {
+				return err
+			}
+			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", capturedName, capturedClientName)
+			return nil
+		})
+		addErr := client.AddEntry(entry)
+		switch classifyRegisterClientMutation(addErr) {
+		case clients.ClientMutationNeedsCompensation:
+			return receipts, fmt.Errorf("write %s entry: %w", binding.Client, addErr)
+		case clients.ClientMutationAppliedReleaseUnconfirmed:
+			disarmErr := transaction.DisarmCompensation(compensationToken)
+			seen[key] = entryName
+			receipts = append(receipts, clientWriteReceipt{Key: key, EntryName: entryName})
+			transaction.AddSuccessOutput(
+				"client entry written "+capturedClientName+"/"+capturedName,
+				w,
+				"\u2713 %s \u2192 %s (entry %s; configuration applied; lock release unconfirmed)\n",
+				binding.Client,
+				entry.URL,
+				entryName,
+			)
+			return receipts, &RegisterForwardCommittedError{
+				Client:    binding.Client,
+				Operation: "add-entry",
+				cause: errors.Join(
+					fmt.Errorf("configuration applied; lock release unconfirmed: %w", addErr),
+					disarmErr,
+				),
+			}
+		}
+
+		seen[key] = entryName
+		receipts = append(receipts, clientWriteReceipt{Key: key, EntryName: entryName})
+		transaction.AddSuccessOutput(
+			"client entry written "+capturedClientName+"/"+capturedName,
+			w,
+			"\u2713 %s \u2192 %s (entry %s)\n",
+			binding.Client,
+			entry.URL,
+			entryName,
+		)
+	}
+	return receipts, nil
+}
+
+func settleRegistrationCompensationMutation(operation, clientName string, err error) error {
+	switch classifyRegisterClientMutation(err) {
+	case clients.ClientMutationApplied:
+		return nil
+	case clients.ClientMutationAppliedReleaseUnconfirmed:
+		return fmt.Errorf("%s in %s: configuration applied; lock release unconfirmed: %w", operation, clientName, err)
+	default:
+		return fmt.Errorf("%s in %s: %w", operation, clientName, err)
+	}
+}
+
 // registerOneLanguage is the per-language unit of work. It (a) allocates a
 // free port (or reuses the existing one for idempotent re-register),
 // (b) creates the scheduler task, (c) writes each client entry, and
 // accumulates rollback closures in order. Returns the entry ready to be
 // Put in the registry.
+//
+// bindings is the registration-wide client scope resolved ONCE by
+// registerWithManifest. It is a PARAMETER, not a re-resolution, so language N+1
+// binds exactly what language 1 did even when the operator edits Settings →
+// Clients while this loop is running (see effectiveClientBindings).
 func (a *API) registerOneLanguage(
 	m *config.ServerManifest,
 	canonical, wsKey, lang string,
@@ -593,9 +2186,10 @@ func (a *API) registerOneLanguage(
 	reg *Registry,
 	sch testScheduler,
 	allClients map[string]registerClient,
+	bindings []config.ClientBinding,
 	w io.Writer,
-	rollback *[]func(),
-) (WorkspaceEntry, error) {
+	transaction *registrationTransaction,
+) (result registeredLanguageResult, err error) {
 	var spec config.LanguageSpec
 	for _, l := range m.Languages {
 		if l.Name == lang {
@@ -603,8 +2197,10 @@ func (a *API) registerOneLanguage(
 			break
 		}
 	}
+	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, lang)
+	enrollRegisterWorkspaceAudit(transaction, taskName)
 	if opts.SupervisedProxy {
-		return a.registerOneLanguageSupervised(m, spec, canonical, wsKey, lang, opts, reg, sch, allClients, w, rollback)
+		return a.registerOneLanguageSupervised(m, spec, canonical, wsKey, lang, opts, reg, sch, allClients, bindings, w, transaction)
 	}
 	// Phase 1: registry write window — acquire flock, load current state,
 	// do all port/task/registry work, release flock BEFORE sch.Run so the
@@ -614,17 +2210,17 @@ func (a *API) registerOneLanguage(
 	// (flock released).
 	unlock, err := reg.Lock()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
+		return registeredLanguageResult{}, fmt.Errorf("acquire registry lock: %w", err)
 	}
-	releaseUnlock := func() {
-		if unlock != nil {
-			unlock()
-			unlock = nil
-		}
+	lockToken := transaction.AddFinalizer("release registry lock for "+wsKey+"/"+lang, unlock)
+	releaseUnlock := func() error {
+		return transaction.Release(lockToken)
 	}
-	defer releaseUnlock()
+	defer func() {
+		err = errors.Join(err, releaseUnlock())
+	}()
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
+		return registeredLanguageResult{}, fmt.Errorf("load registry: %w", err)
 	}
 	// Reuse existing entry port (idempotent re-register) or allocate new.
 	prior, had := reg.Get(wsKey, lang)
@@ -634,7 +2230,7 @@ func (a *API) registerOneLanguage(
 	} else {
 		p, err := AllocatePort(reg, *m.PortPool)
 		if err != nil {
-			return WorkspaceEntry{}, err
+			return registeredLanguageResult{}, err
 		}
 		port = p
 		// Tentatively pin the port into the registry's in-memory set so
@@ -642,21 +2238,21 @@ func (a *API) registerOneLanguage(
 		// return the same port again.
 		//
 		// B.1: this is an LSP-row write; PutLSP enforces the @-prefix gate.
-		if err := reg.PutLSP(WorkspaceEntry{WorkspaceKey: wsKey, WorkspacePath: canonical, Language: lang, Port: port}); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("register: tentative LSP-row write rejected: %w", err)
-		}
 		capturedKey := wsKey
 		capturedLang := lang
-		*rollback = append(*rollback, func() {
+		transaction.AddCompensation("remove tentative registry row "+capturedKey+"/"+capturedLang, func() error {
 			reg.Remove(capturedKey, capturedLang)
+			return nil
 		})
+		if err := reg.PutLSP(WorkspaceEntry{WorkspaceKey: wsKey, WorkspacePath: canonical, Language: lang, Port: port}); err != nil {
+			return registeredLanguageResult{}, fmt.Errorf("register: tentative LSP-row write rejected: %w", err)
+		}
 	}
-	taskName := LSPTaskNameForWorkspaceLanguage(wsKey, lang)
 	// 1. Create scheduler task (or replace — snapshot the prior XML so
 	// rollback can restore it).
 	canonicalExe, err := canonicalMcphubPath()
 	if err != nil {
-		return WorkspaceEntry{}, err
+		return registeredLanguageResult{}, err
 	}
 	// Verify the canonical mcphub binary actually exists before creating a
 	// scheduler task pointing at it. Without this preflight, a fresh user
@@ -667,7 +2263,7 @@ func (a *API) registerOneLanguage(
 	// while no proxy ever comes up. Install does the same preflight in
 	// installUsingEmbedFirst (see install.go:298-300).
 	if _, err := os.Stat(canonicalExe); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		return registeredLanguageResult{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
 	}
 	args := []string{
 		"daemon", "workspace-proxy",
@@ -685,7 +2281,7 @@ func (a *API) registerOneLanguage(
 		// the existing task and leave rollback unable to restore it on a
 		// later failure, turning a recoverable re-register error into a
 		// persistent outage.
-		return WorkspaceEntry{}, fmt.Errorf("export prior task %s: %w", taskName, err)
+		return registeredLanguageResult{}, fmt.Errorf("export prior task %s: %w", taskName, err)
 	}
 	// Register the scheduler rollback BEFORE the destructive Delete+Create
 	// so a Create failure on a re-register path does not orphan the old
@@ -696,7 +2292,8 @@ func (a *API) registerOneLanguage(
 	capturedPriorXML := priorXML
 	capturedPort := port
 	startedNewTask := false
-	*rollback = append(*rollback, func() {
+	transaction.AddCompensation("restore scheduler task "+capturedTaskName, func() error {
+		var joined error
 		// Kill the running proxy BEFORE deleting the task. On Windows,
 		// sch.Delete removes the task definition but does NOT terminate
 		// the already-started process. If sch.Run above succeeded and
@@ -705,21 +2302,34 @@ func (a *API) registerOneLanguage(
 		// keep the allocated port bound and break immediate re-register
 		// attempts. killByPortFn is a no-op if nothing is listening.
 		if startedNewTask && capturedPort > 0 {
-			_ = killByPortFn(capturedPort, 5*time.Second)
+			if killErr := killByPortFn(capturedPort, 5*time.Second); killErr != nil {
+				joined = errors.Join(joined, fmt.Errorf("kill replacement proxy on port %d: %w", capturedPort, killErr))
+			}
 		}
-		_ = sch.Delete(capturedTaskName)
+		if deleteErr := sch.Delete(capturedTaskName); deleteErr != nil && !errors.Is(deleteErr, scheduler.ErrTaskNotFound) {
+			joined = errors.Join(joined, fmt.Errorf("delete replacement task %s: %w", capturedTaskName, deleteErr))
+		}
 		if len(capturedPriorXML) > 0 {
-			_ = sch.ImportXML(capturedTaskName, capturedPriorXML)
+			if importErr := sch.ImportXML(capturedTaskName, capturedPriorXML); importErr != nil {
+				joined = errors.Join(joined, fmt.Errorf("restore prior task %s: %w", capturedTaskName, importErr))
+			}
 			// Restart the prior proxy. Without this, re-register rollback
 			// would restore the old task definition but leave no process
 			// running (we just killed the live proxy above), turning a
 			// recoverable re-register error into a hard outage for the
 			// language until next logon/manual restart.
-			_ = sch.Run(capturedTaskName)
-			fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
+			if runErr := sch.Run(capturedTaskName); runErr != nil {
+				joined = errors.Join(joined, fmt.Errorf("restart prior task %s: %w", capturedTaskName, runErr))
+			}
+			if joined == nil {
+				fmt.Fprintf(w, "  rollback: restored + restarted scheduler task %s\n", capturedTaskName)
+			}
 		} else {
-			fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", capturedTaskName)
+			if joined == nil {
+				fmt.Fprintf(w, "  rollback: deleted scheduler task %s\n", capturedTaskName)
+			}
 		}
+		return joined
 	})
 	// Destructive replace: prior task (if any) is Deleted and the new task
 	// Created. A Create failure triggers runRollback which fires the
@@ -731,9 +2341,13 @@ func (a *API) registerOneLanguage(
 	// to bind. Only meaningful when we're actually replacing (priorXML
 	// non-empty); on a first-time registration the port is unbound.
 	if len(priorXML) > 0 && port > 0 {
-		_ = killByPortFn(port, 5*time.Second)
+		if err := killByPortFn(port, 5*time.Second); err != nil {
+			return registeredLanguageResult{}, fmt.Errorf("kill prior proxy on port %d before replacement: %w", port, err)
+		}
 	}
-	_ = sch.Delete(taskName)
+	if err := sch.Delete(taskName); err != nil && !errors.Is(err, scheduler.ErrTaskNotFound) {
+		return registeredLanguageResult{}, fmt.Errorf("delete prior task %s before replacement: %w", taskName, err)
+	}
 	taskSpec := scheduler.TaskSpec{
 		Name:        taskName,
 		Description: fmt.Sprintf("mcp-local-hub: workspace %s lang %s", canonical, lang),
@@ -761,24 +2375,25 @@ func (a *API) registerOneLanguage(
 		LogonTrigger:     true,
 	}
 	if err := sch.Create(taskSpec); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("create task %s: %w", taskName, err)
+		return registeredLanguageResult{}, fmt.Errorf("create task %s: %w", taskName, err)
 	}
-	fmt.Fprintf(w, "\u2713 Scheduler task created: %s\n", taskName)
+	transaction.AddSuccessOutput(
+		"scheduler task created "+taskName,
+		w,
+		"\u2713 Scheduler task created: %s\n",
+		taskName,
+	)
 	// Pre-compute client entry names so the registry entry can be fully
 	// composed BEFORE we start the proxy. The daemon launched by sch.Run
 	// loads workspaces.yaml on startup and exits if its (workspaceKey,
 	// language) is absent — persisting-before-Run closes that race.
-	bindingsPre := m.ClientBindings
-	if len(bindingsPre) == 0 {
-		bindingsPre = defaultClientBindings
-	}
 	entryNameByClient := map[string]string{}
 	if had {
 		for k, v := range prior.ClientEntries {
 			entryNameByClient[k] = v
 		}
 	}
-	for _, b := range bindingsPre {
+	for _, b := range bindings {
 		client, ok := allClients[b.Client]
 		if !ok || !client.Exists() {
 			continue
@@ -809,51 +2424,21 @@ func (a *API) registerOneLanguage(
 		WeeklyRefresh: weeklyRefresh,
 		Lifecycle:     LifecycleConfigured,
 	}
-	// B.1: composedEntry is an LSP-row write; PutLSP enforces the @-prefix
-	// gate (Language is the per-LSP language string, never the sentinel).
-	if err := reg.PutLSP(composedEntry); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
-	}
-	if err := reg.Save(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
-	}
 	capturedRegKey := wsKey
 	capturedRegLang := lang
 	capturedHad := had
 	capturedPrior := prior
-	*rollback = append(*rollback, func() {
-		// Rollback may fire at any phase — before or after Phase 1 releases
-		// the flock — so re-acquire it here. If acquisition fails (extreme
-		// cases: registry path unreachable, concurrent holder deadlocked),
-		// log and continue so sibling rollback closures still run.
-		unlock, err := reg.Lock()
-		if err != nil {
-			fmt.Fprintf(w, "  rollback: could not lock registry for %s/%s: %v\n",
-				capturedRegKey, capturedRegLang, err)
-			return
-		}
-		defer unlock()
-		if err := reg.Load(); err != nil {
-			fmt.Fprintf(w, "  rollback: could not reload registry for %s/%s: %v\n",
-				capturedRegKey, capturedRegLang, err)
-			return
-		}
-		if capturedHad {
-			// Re-register rollback: restore the prior (workspace, language)
-			// entry. Simply removing would leave the scheduler task
-			// (possibly restored from priorXML and restarted) pointing at
-			// a missing registry row, which workspace-proxy treats as
-			// "not registered" and exits — turning a recoverable
-			// re-register failure into a persistent outage.
-			reg.Put(capturedPrior)
-			_ = reg.Save()
-			fmt.Fprintf(w, "  rollback: restored prior registry entry %s/%s\n", capturedRegKey, capturedRegLang)
-			return
-		}
-		reg.Remove(capturedRegKey, capturedRegLang)
-		_ = reg.Save()
-		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
+	transaction.AddCompensation("restore registry row "+capturedRegKey+"/"+capturedRegLang, func() error {
+		return restoreRegistryRowForRollback(reg.path, capturedRegKey, capturedRegLang, capturedPrior, capturedHad)
 	})
+	// B.1: composedEntry is an LSP-row write; PutLSP enforces the @-prefix
+	// gate (Language is the per-LSP language string, never the sentinel).
+	if err := reg.PutLSP(composedEntry); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("register: composed LSP-row write rejected: %w", err)
+	}
+	if err := reg.Save(); err != nil {
+		return registeredLanguageResult{}, fmt.Errorf("persist registry: %w", err)
+	}
 
 	// Phase 1 complete: the registry row is persisted to disk. Release the
 	// flock BEFORE sch.Run so the proxy subprocess launched by the scheduler
@@ -864,13 +2449,21 @@ func (a *API) registerOneLanguage(
 	// read. Net result: "error: not registered" from the proxy and a
 	// consistent 10s register failure. Regression-guarded by
 	// TestRegisterOneLanguage_ReleasesFlockBeforeSchRun.
-	releaseUnlock()
+	if err := releaseUnlock(); err != nil {
+		return newRegisterForwardReleaseError(
+			"workspace-registry", "registry-phase1-release",
+			registeredLanguageResult{Entry: composedEntry},
+			[]string{"scheduler-task", "registry-row"},
+			[]string{"task-run", "readiness", "running-intent-clear", "client-writes", "direct-cleanup"},
+			nil, fmt.Errorf("release registry lock before task start: %w", err),
+		)
+	}
 
 	// Start the proxy. Registry is already persisted, so daemon startup
 	// finds the entry. Logon-triggered tasks only fire at the next logon,
 	// so this sch.Run prevents the port from advertising dead until reboot.
 	if err := sch.Run(taskName); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("run task %s: %w", taskName, err)
+		return registeredLanguageResult{}, fmt.Errorf("run task %s: %w", taskName, err)
 	}
 	startedNewTask = true
 	// Verify readiness. Windows schtasks /Run only triggers the task
@@ -883,88 +2476,122 @@ func (a *API) registerOneLanguage(
 	// on timeout so registry / scheduler / client entries do not leak
 	// for a proxy that never came up.
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		return registeredLanguageResult{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
 	}
-	fmt.Fprintf(w, "\u2713 Scheduler task started: %s\n", taskName)
-	// Task 10 plan \u00a765: AFTER scheduler create + sch.Run + readiness
-	// PASS, record Desired=running intent + workspace-registered audit
-	// entry. Audit / intent failures are logged + tolerated \u2014 the
-	// workspace is already registered (registry on disk + scheduler
-	// task created + proxy started + readiness probe passed).
-	a.recordRegisterIntentForTask(taskName, w)
+	transaction.AddSuccessOutput(
+		"scheduler task started "+taskName,
+		w,
+		"\u2713 Scheduler task started: %s\n",
+		taskName,
+	)
+	if canonicalTaskName, err := a.writeRegisterRunningIntentForTask(
+		taskName,
+		transaction.AddCompensation,
+	); err != nil {
+		intentErr := fmt.Errorf(
+			"write register running intent for %s: %w",
+			canonicalTaskName,
+			err,
+		)
+		if isAppliedLockReleaseUnconfirmed(intentErr) {
+			return newRegisterForwardReleaseError(
+				"supervisor-intent", "running-intent-release",
+				registeredLanguageResult{Entry: composedEntry},
+				[]string{"scheduler-task", "registry-row", "task-run", "readiness", "running-intent-clear"},
+				[]string{"client-writes", "direct-cleanup"}, nil, intentErr,
+			)
+		}
+		return registeredLanguageResult{}, intentErr
+	}
 	// Phase 3: re-acquire flock before client config writes. Client
 	// adapters perform read-modify-write updates, so these writes must be
 	// serialized against concurrent register/unregister operations.
 	unlock, err = reg.Lock()
 	if err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("re-acquire registry lock: %w", err)
+		if errors.Is(err, ErrLockReleaseUnconfirmed) {
+			return newRegisterForwardReleaseError(
+				"workspace-registry", "registry-phase3-release",
+				registeredLanguageResult{Entry: composedEntry},
+				[]string{"scheduler-task", "registry-row", "task-run", "readiness", "running-intent-clear"},
+				[]string{"client-writes", "direct-cleanup"}, nil,
+				fmt.Errorf("re-acquire registry lock: %w", err),
+			)
+		}
+		return registeredLanguageResult{}, fmt.Errorf("re-acquire registry lock: %w", err)
 	}
-	defer releaseUnlock()
+	lockToken = transaction.AddFinalizer("release registry lock before client updates for "+wsKey+"/"+lang, unlock)
+	phase3Result := registeredLanguageResult{Entry: composedEntry}
+	finishPhase3 := func(primary error) (registeredLanguageResult, error) {
+		return newRegisterForwardReleaseError(
+			"workspace-registry", "registry-phase3-release", phase3Result,
+			[]string{"scheduler-task", "registry-row", "task-run", "readiness", "running-intent-clear", "client-write-prefix"},
+			[]string{"later-client-writes", "direct-cleanup"}, primary,
+			labeledRegistrationReleaseError("release registry lock after client updates", releaseUnlock()),
+		)
+	}
+	settleLegacyPhase3ClientWriteFailure := func(receipts []clientWriteReceipt, writerErr error) (registeredLanguageResult, error) {
+		lastConfirmedEntry := composedEntry
+		committedEntry, persistErr := persistRegistrationForwardReceipts(reg, composedEntry, prior, had, receipts)
+		if persistErr == nil {
+			lastConfirmedEntry = committedEntry
+		}
+		phase3Result = registeredLanguageResult{Entry: lastConfirmedEntry, Receipts: receipts}
+
+		continuationErr := labeledRegistrationForwardContinuationError("persist committed client receipts", persistErr)
+		var forwardErr *RegisterForwardCommittedError
+		if errors.As(writerErr, &forwardErr) {
+			forwardErr.cause = errors.Join(forwardErr.cause, continuationErr)
+			return finishPhase3(forwardErr)
+		}
+		return finishPhase3(errors.Join(writerErr, continuationErr))
+	}
 	if err := reg.Load(); err != nil {
-		return WorkspaceEntry{}, fmt.Errorf("reload registry: %w", err)
+		return finishPhase3(fmt.Errorf("reload registry: %w", err))
 	}
 	if _, ok := reg.Get(wsKey, lang); !ok {
-		return WorkspaceEntry{}, fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
+		return finishPhase3(fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang))
 	}
-	// 2. Write client entries. Names + entry were pre-composed above;
-	// this loop just pushes entries into each client's config and
-	// registers per-client rollbacks.
-	for _, b := range bindingsPre {
-		client, ok := allClients[b.Client]
-		if !ok || !client.Exists() {
-			continue
-		}
-		entryName := entryNameByClient[b.Client]
-		// Snapshot the prior entry; a GetEntry error MUST abort before the
-		// AddEntry below (bot PR #420 finding 1, data-loss). A multi-layer
-		// adapter (mimocode) can confirm a write-target prior yet still fail
-		// reading a malformed lower layer, returning (nil, err); dropping the
-		// error would let AddEntry overwrite and the nil-prior rollback branch
-		// DELETE the operator's entry. The caller (register.go runRollback at
-		// the registerOneLanguage call site) runs the accumulated *rollback on
-		// this returned error, so no local runRollback is needed here.
-		//
-		// Write-target parent-dir creation for an otherwise-active profile whose
-		// GLOBAL dir is absent (bot PR #420 finding 3, r15) is owned by the config
-		// lock chokepoint (clients.withConfigLock MkdirAll's the missing dir before
-		// the flock + AddEntry write), NOT here — that single owner covers install,
-		// register, and GUI Apply at once.
-		priorEntry, err := client.GetEntry(entryName)
-		if err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
-		}
-		urlPath := b.URLPath
-		if urlPath == "" {
-			urlPath = "/mcp"
-		}
-		entry := clients.MCPEntry{
-			Name: entryName,
-			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
-		}
-		if err := client.AddEntry(entry); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("write %s entry: %w", b.Client, err)
-		}
-		clientRef := client
-		savedPrior := priorEntry
-		capturedName := entryName
-		capturedClientName := b.Client
-		*rollback = append(*rollback, func() {
-			// See install.go rollback: a mimo prior sourced BELOW the write target
-			// (config.json) or from the ~/.claude.json import must NOT be copied up
-			// (permanent shadow + import-credential leak — bot PR #420 finding 1).
-			// Take REMOVE for those; the zero value (every other adapter / an
-			// at-or-above mimo prior) copies up.
-			if savedPrior != nil && !savedPrior.SourceBelowWriteTarget {
-				_ = clientRef.AddEntry(*savedPrior)
-				fmt.Fprintf(w, "  rollback: restored prior %s entry in %s\n", capturedName, capturedClientName)
-				return
-			}
-			_ = clientRef.RemoveEntry(capturedName)
-			fmt.Fprintf(w, "  rollback: removed %s entry from %s\n", capturedName, capturedClientName)
-		})
-		fmt.Fprintf(w, "\u2713 %s \u2192 %s (entry %s)\n", b.Client, entry.URL, entryName)
+	receipts, err := writeRegisteredClientEntries(bindings, allClients, entryNameByClient, port, lang, w, transaction)
+	if err != nil {
+		return settleLegacyPhase3ClientWriteFailure(receipts, err)
 	}
-	return composedEntry, nil
+	phase3Result = registeredLanguageResult{Entry: composedEntry, Receipts: receipts}
+	return finishPhase3(nil)
+}
+
+func persistRegistrationForwardReceipts(
+	reg *Registry,
+	entry WorkspaceEntry,
+	prior WorkspaceEntry,
+	hadPrior bool,
+	receipts []clientWriteReceipt,
+) (WorkspaceEntry, error) {
+	actual := map[string]string{}
+	if hadPrior {
+		for clientName, entryName := range prior.ClientEntries {
+			actual[clientName] = entryName
+		}
+	}
+	for _, receipt := range receipts {
+		if receipt.Key.Language == entry.Language {
+			actual[receipt.Key.Client] = receipt.EntryName
+		}
+	}
+	entry.ClientEntries = actual
+	if err := reg.PutLSP(entry); err != nil {
+		return entry, fmt.Errorf("registration: committed receipt row rejected: %w", err)
+	}
+	if err := reg.Save(); err != nil {
+		return entry, fmt.Errorf("registration: persist committed receipt row: %w", err)
+	}
+	return entry, nil
+}
+
+func labeledRegistrationForwardContinuationError(label string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("complete mandatory registration continuation %s: %w", label, err)
 }
 
 // Unregister removes scheduler tasks, client-config entries, and registry
@@ -988,7 +2615,7 @@ func (a *API) Unregister(workspacePath string, languages []string) (*UnregisterR
 	return a.unregisterWithManifest(m, workspacePath, languages, os.Stderr)
 }
 
-func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (*UnregisterReport, error) {
+func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath string, languages []string, w io.Writer) (_ *UnregisterReport, err error) {
 	// Use the existence-tolerant variant: the operator may be cleaning up
 	// a registration whose workspace directory has since been deleted,
 	// moved, or is on an unavailable drive. Without this weakening, an
@@ -1018,7 +2645,7 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	if err != nil {
 		return nil, err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "unregister "+canonical+": removals above stand, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return nil, err
 	}
@@ -1050,6 +2677,7 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	}
 	allClients := clientsAllForRegister()
 	report := &UnregisterReport{Workspace: canonical, WorkspaceKey: activeWSKey}
+	defer report.projectCompatibilityWarnings()
 	sch, schErr := schedulerNewForRegister()
 	// Non-Windows backends return not-implemented; supervised LSP rows have no
 	// scheduled task to delete there, so tolerate absence and skip only the
@@ -1057,8 +2685,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 	if schErr != nil {
 		if schedulerUnavailableError(schErr) {
 			sch = nil
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("scheduler unavailable (%v); skipping legacy task deletion (supervised rows have none)", schErr))
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeUnregisterSchedulerUnavailable, "workspace-unregister", "scheduler", schErr,
+			))
 		} else {
 			return nil, schErr
 		}
@@ -1074,16 +2703,18 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 			}
 		}
 		if len(entries) == 0 {
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("language %s not registered for workspace %s", lang, canonical))
+			report.addDiagnostic(NewRegistrationDiagnostic(
+				RegistrationCodeUnregisterLanguageMissing, canonical, lang, nil,
+			))
 			continue
 		}
 		for _, entry := range entries {
 			targetWSKey := entry.WorkspaceKey
 			intentTaskName := LSPIntentTaskNameForWorkspaceLanguage(targetWSKey, lang)
 			if restoreSupervisorIntent, supervisorManaged, err := a.removeLSPSupervisorIntent(targetWSKey, lang); err != nil {
-				report.Warnings = append(report.Warnings,
-					fmt.Sprintf("remove supervisor intent %s: %v", intentTaskName, err))
+				report.addDiagnostic(NewRegistrationDiagnostic(
+					RegistrationCodeUnregisterIntentRemoveFailed, intentTaskName, lang, err,
+				))
 				continue
 			} else if supervisorManaged {
 				ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
@@ -1091,13 +2722,18 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 				cancel()
 				if err != nil {
 					if !errors.Is(err, ErrSupervisorIPCUnavailable) {
+						restoreErr := error(nil)
 						if restoreSupervisorIntent != nil {
-							restoreSupervisorIntent()
+							restoreErr = restoreSupervisorIntent()
 						}
-						return report, fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; restored supervisor intent descriptor; retry unregister: %w", intentTaskName, err)
+						return report, errors.Join(
+							fmt.Errorf("supervisor reconcile after removing %s failed while supervisor is alive; retry unregister: %w", intentTaskName, err),
+							labeledTransactionError("compensation", "restore supervisor intent "+intentTaskName, restoreErr),
+						)
 					}
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("supervisor reconcile after removing %s: %v", intentTaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterReconcileFailed, intentTaskName, lang, err,
+					))
 				} else {
 					fmt.Fprintf(w, "✓ removed supervisor intent %s\n", intentTaskName)
 				}
@@ -1115,13 +2751,13 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 			if forceKillByPortFn != nil && entry.Port != 0 {
 				outcome, err := forceKillByPortFn(entry.Port, 5*time.Second)
 				if outcome == portKillIdentityMismatch {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("kill proxy on port %d (task %s): port owned by foreign process, not killing: %v",
-							entry.Port, entry.TaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterProxyForeignOwner, entry.TaskName, lang, err,
+					))
 				} else if err != nil {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("kill proxy on port %d (task %s): %v",
-							entry.Port, entry.TaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterProxyKillFailed, entry.TaskName, lang, err,
+					))
 				}
 			}
 			// 2. Remove scheduler task. Task Scheduler's Delete is the
@@ -1130,8 +2766,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 			// Delete prevents it from being re-launched at next logon.
 			if sch != nil {
 				if err := sch.Delete(entry.TaskName); err != nil {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("delete task %s: %v", entry.TaskName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterTaskDeleteFailed, entry.TaskName, lang, err,
+					))
 				} else {
 					fmt.Fprintf(w, "\u2713 deleted scheduler task %s\n", entry.TaskName)
 				}
@@ -1147,8 +2784,9 @@ func (a *API) unregisterWithManifest(_ *config.ServerManifest, workspacePath str
 					continue
 				}
 				if err := client.RemoveEntry(entryName); err != nil {
-					report.Warnings = append(report.Warnings,
-						fmt.Sprintf("remove entry %s from %s: %v", entryName, clientName, err))
+					report.addDiagnostic(NewRegistrationDiagnostic(
+						RegistrationCodeUnregisterClientRemoveFailed, entryName, clientName, err,
+					))
 				} else {
 					fmt.Fprintf(w, "\u2713 removed %s entry from %s\n", entryName, clientName)
 				}
@@ -1452,6 +3090,20 @@ type registerClient interface {
 	FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error)
 }
 
+type atomicDirectCleanupClient interface {
+	CaptureDirectCleanupTarget(clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error)
+	CleanupDirectEntryAtomically(
+		*clients.DirectCleanupTarget,
+		int,
+		func(clients.DirectCleanupReceipt) error,
+		func(clients.DirectCleanupCheckpoint) error,
+	) (string, error)
+}
+
+type registerClientRollbackRestorer interface {
+	RestoreEntryFromBackupForRollback(backupPath, name string) error
+}
+
 // removableStdioCandidatesClient / findStdioLanguageServerCandidatesClient are the
 // OPTIONAL WORKSPACE-AWARE register-grain candidate sources (architect REVISE →
 // Option C, bot PR #425 follow-up GAP 2): the destructive direct-gopls/LSP cleanup
@@ -1589,6 +3241,9 @@ func (a realClientAdapter) RemoveEntry(name string) error     { return a.c.Remov
 func (a realClientAdapter) GetEntry(name string) (*clients.MCPEntry, error) {
 	return a.c.GetEntry(name)
 }
+func (a realClientAdapter) RestoreEntryFromBackupForRollback(backupPath, name string) error {
+	return a.c.RestoreEntryFromBackupForRollback(backupPath, name)
+}
 func (a realClientAdapter) AllStdioEntries() ([]clients.StdioEntry, error) {
 	return a.c.AllStdioEntries()
 }
@@ -1626,4 +3281,23 @@ func (a realClientAdapter) FindStdioLanguageServerCandidatesWriteTargetOwned() (
 }
 func (a realClientAdapter) FindStdioLanguageServerEntries() ([]clients.LanguageServerStdioEntry, error) {
 	return a.c.FindStdioLanguageServerEntries()
+}
+func (a realClientAdapter) CaptureDirectCleanupTarget(identity clients.DirectCleanupIdentity) (*clients.DirectCleanupTarget, error) {
+	mutator, ok := clients.AsDirectCleanupMutator(a.c)
+	if !ok {
+		return nil, fmt.Errorf("client %s does not support atomic direct cleanup", a.c.Name())
+	}
+	return mutator.CaptureDirectCleanupTarget(identity)
+}
+func (a realClientAdapter) CleanupDirectEntryAtomically(
+	target *clients.DirectCleanupTarget,
+	keepN int,
+	preArm func(clients.DirectCleanupReceipt) error,
+	revalidate func(clients.DirectCleanupCheckpoint) error,
+) (string, error) {
+	mutator, ok := clients.AsDirectCleanupMutator(a.c)
+	if !ok {
+		return "", fmt.Errorf("client %s does not support atomic direct cleanup", a.c.Name())
+	}
+	return mutator.CleanupDirectEntryAtomically(target, keepN, preArm, revalidate)
 }

@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/config"
 )
 
@@ -556,7 +558,7 @@ func TestStop_Workspace_RegistryLoadFails_NoKill(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // recordRestartIntentForTask / recordUninstallIntentForTasks /
-// recordRegisterIntentForTask — best-effort behavior on audit failure.
+// writeRegisterRunningIntentForTask — best-effort behavior on audit failure.
 // ---------------------------------------------------------------------------
 
 func TestRecordRestartIntentForTask_AuditFails_LoggedNotPropagated(t *testing.T) {
@@ -674,15 +676,14 @@ func TestRecordUninstallIntentForTasks_AuditFails_LoggedNotPropagated(t *testing
 	}
 }
 
-// Phase 4-E2: recordRegisterIntentForTask writes Desired=running, which CLEARS
-// any prior stop from the sub-block (re-enable) and is a no-op on a clean
-// state. The workspace-registered audit still fires.
-func TestRecordRegisterIntentForTask_E2_ClearsPriorStop(t *testing.T) {
+// Phase 4-E2: the transactional Register intent writer clears the target
+// task's prior stop, and the separate workspace-registered observation fires
+// only after the transaction commits.
+func TestRegisterIntentTransaction_E2_ClearsPriorStopAndAuditsAfterCommit(t *testing.T) {
 	a := NewAPI()
 	dir := daemonIntentTestHelper(t)
 	r := &recordingAuditWriter{}
 	installRecordingAudit(t, r)
-	var buf bytes.Buffer
 
 	taskName := "mcp-local-hub-lsp-deadbeef-python"
 	canonicalTask := "\\" + taskName
@@ -692,7 +693,20 @@ func TestRecordRegisterIntentForTask_E2_ClearsPriorStop(t *testing.T) {
 	}, "tester"); err != nil {
 		t.Fatalf("seed prior stop: %v", err)
 	}
-	a.recordRegisterIntentForTask(taskName, &buf)
+	transaction := newRegistrationTransaction()
+	if _, err := a.writeRegisterRunningIntentForTask(taskName, transaction.AddCompensation); err != nil {
+		t.Fatalf("write running intent: %v", err)
+	}
+	enrollRegisterWorkspaceAudit(transaction, taskName)
+	for _, entry := range r.entries {
+		if entry.Action == AuditActionWorkspaceRegistered {
+			t.Fatalf("workspace-registered audit fired before commit: %+v", r.entries)
+		}
+	}
+	outcome := transaction.Commit()
+	if !outcome.Committed() || outcome.ObserverErr != nil {
+		t.Fatalf("commit outcome = %+v", outcome)
+	}
 
 	if _, ok := readSubBlockStopForTest(t, dir)[canonicalTask]; ok {
 		t.Errorf("register Desired=running should have cleared the prior stop")
@@ -712,18 +726,219 @@ func TestRecordRegisterIntentForTask_E2_ClearsPriorStop(t *testing.T) {
 	}
 }
 
-func TestRecordRegisterIntentForTask_AuditFails_LoggedNotPropagated(t *testing.T) {
-	a := NewAPI()
+func TestRegisterWorkspaceAuditFailure_IsPostCommitObserverError(t *testing.T) {
 	daemonIntentTestHelper(t)
 	r := &recordingAuditWriter{
 		failActions: map[string]error{"*": errors.New("synthetic")},
 	}
 	installRecordingAudit(t, r)
-	var buf bytes.Buffer
 
-	a.recordRegisterIntentForTask("mcp-local-hub-lsp-deadbeef-python", &buf)
-	if buf.Len() == 0 {
-		t.Error("expected warnings written on register audit fail")
+	transaction := newRegistrationTransaction()
+	enrollRegisterWorkspaceAudit(transaction, "mcp-local-hub-lsp-deadbeef-python")
+	outcome := transaction.Commit()
+	if !outcome.Committed() {
+		t.Fatalf("observer failure changed committed state: %+v", outcome)
+	}
+	if outcome.ObserverErr == nil || !strings.Contains(outcome.ObserverErr.Error(), "synthetic") {
+		t.Fatalf("observer error = %v, want synthetic audit failure", outcome.ObserverErr)
+	}
+}
+
+func TestRegisterWorkspaceRegisteredAudit_OnlyAfterOuterCommit(t *testing.T) {
+	for _, failurePoint := range []string{
+		"same-language",
+		"later-language",
+		"cleanup",
+		"finalizer",
+	} {
+		t.Run(failurePoint, func(t *testing.T) {
+			daemonIntentTestHelper(t)
+			recorder := &recordingAuditWriter{}
+			installRecordingAudit(t, recorder)
+			tx := newRegistrationTransaction()
+			enrollRegisterWorkspaceAudit(tx, "mcp-local-hub-lsp-deadbeef-python")
+			outcome := tx.Fail(errors.New("injected " + failurePoint + " failure"))
+			if outcome.State != registrationTransactionRolledBack {
+				t.Fatalf("outcome = %+v, want rolled-back", outcome)
+			}
+			for _, entry := range recorder.entries {
+				if entry.Action == AuditActionWorkspaceRegistered {
+					t.Fatalf("workspace-registered fired before outer commit at %s: %+v", failurePoint, recorder.entries)
+				}
+			}
+		})
+	}
+
+	t.Run("commit", func(t *testing.T) {
+		daemonIntentTestHelper(t)
+		recorder := &recordingAuditWriter{}
+		installRecordingAudit(t, recorder)
+		tx := newRegistrationTransaction()
+		enrollRegisterWorkspaceAudit(tx, "mcp-local-hub-lsp-deadbeef-python")
+		outcome := tx.Commit()
+		if !outcome.Committed() || outcome.ObserverErr != nil {
+			t.Fatalf("commit outcome = %+v", outcome)
+		}
+		count := 0
+		for _, entry := range recorder.entries {
+			if entry.Action == AuditActionWorkspaceRegistered {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("workspace-registered count = %d, want 1; entries=%+v", count, recorder.entries)
+		}
+	})
+}
+
+func TestRegisterRunningIntentRollbackMatrix(t *testing.T) {
+	for _, priorPresent := range []bool{false, true} {
+		name := "prior-absent"
+		if priorPresent {
+			name = "prior-present"
+		}
+		t.Run(name, func(t *testing.T) {
+			a := NewAPI()
+			dir := daemonIntentTestHelper(t)
+			target := "\\mcp-local-hub-lsp-deadbeef-python"
+			sibling := "\\mcp-local-hub-lsp-feedface-go"
+			now := time.Now().UTC().Truncate(time.Second)
+			siblingStop := DaemonIntent{
+				Desired:   IntentDesiredStopped,
+				Reason:    IntentReasonUserStop,
+				UpdatedAt: now,
+			}
+			if err := a.WriteStopIntent(sibling, siblingStop, "tester"); err != nil {
+				t.Fatalf("seed sibling stop: %v", err)
+			}
+			var priorStop DaemonIntent
+			if priorPresent {
+				priorStop = DaemonIntent{
+					Desired:   IntentDesiredStopped,
+					Reason:    IntentReasonInstall,
+					UpdatedAt: now.Add(time.Second),
+				}
+				if err := a.WriteStopIntent(target, priorStop, "tester"); err != nil {
+					t.Fatalf("seed target stop: %v", err)
+				}
+			}
+
+			tx := newRegistrationTransaction()
+			if _, err := a.writeRegisterRunningIntentForTask(target, tx.AddCompensation); err != nil {
+				t.Fatalf("write running intent: %v", err)
+			}
+			if _, present := readSubBlockStopForTest(t, dir)[target]; present {
+				t.Fatal("running intent did not clear target stop")
+			}
+			outcome := tx.Fail(errors.New("injected post-write failure"))
+			if outcome.State != registrationTransactionRolledBack {
+				t.Fatalf("outcome = %+v, want rolled-back", outcome)
+			}
+			stops := readSubBlockStopForTest(t, dir)
+			gotSibling, siblingPresent := stops[sibling]
+			if !siblingPresent ||
+				gotSibling.Desired != siblingStop.Desired ||
+				gotSibling.Reason != siblingStop.Reason ||
+				!gotSibling.UpdatedAt.Equal(siblingStop.UpdatedAt) {
+				t.Fatalf("sibling stop changed: got=%+v present=%v want=%+v all=%+v", gotSibling, siblingPresent, siblingStop, stops)
+			}
+			gotTarget, targetPresent := stops[target]
+			if targetPresent != priorPresent {
+				t.Fatalf("target presence = %v, want %v; stop=%+v", targetPresent, priorPresent, gotTarget)
+			}
+			if priorPresent &&
+				(gotTarget.Desired != priorStop.Desired ||
+					gotTarget.Reason != priorStop.Reason ||
+					!gotTarget.UpdatedAt.Equal(priorStop.UpdatedAt)) {
+				t.Fatalf("target stop = %+v, want %+v", gotTarget, priorStop)
+			}
+		})
+	}
+}
+
+func TestRegisterRunningIntentReleaseUnconfirmedCommitsForwardWithoutRestore(t *testing.T) {
+	a := NewAPI()
+	dir := daemonIntentTestHelper(t)
+	task := `\mcp-local-hub-lsp-release-unconfirmed-go`
+	prior := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	if err := a.WriteStopIntent(task, prior, "tester"); err != nil {
+		t.Fatalf("seed stop: %v", err)
+	}
+	path, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatalf("supervisor intent path: %v", err)
+	}
+	lockPath := path + supervisorIntentLockSuffix
+	releaseCause := errors.New("injected stop-intent unlock failure")
+	previousUnlock := flockUnlockFn
+	var stranded *flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = fl
+			return releaseCause
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		if stranded != nil {
+			_ = stranded.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	tx := newRegistrationTransaction()
+	if _, err := a.writeRegisterRunningIntentForTask(task, tx.AddCompensation); !isAppliedLockReleaseUnconfirmed(err) || !errors.Is(err, releaseCause) {
+		t.Fatalf("running intent error = %v, want durable applied release-unconfirmed", err)
+	}
+	if _, present := readSubBlockStopForTest(t, dir)[task]; present {
+		t.Fatal("durably cleared stop was restored before forward settlement")
+	}
+	if outcome := tx.CommitForward(); outcome.State != registrationTransactionCommitted {
+		t.Fatalf("forward settlement outcome = %+v, want committed", outcome)
+	}
+	if _, present := readSubBlockStopForTest(t, dir)[task]; present {
+		t.Fatal("forward settlement invoked the pre-armed stop restore")
+	}
+}
+
+func TestRegisterRunningIntentRollbackPreservesNewerOperatorStop(t *testing.T) {
+	a := NewAPI()
+	dir := daemonIntentTestHelper(t)
+	target := "\\mcp-local-hub-lsp-deadbeef-python"
+	now := time.Now().UTC().Truncate(time.Second)
+	prior := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonInstall,
+		UpdatedAt: now,
+	}
+	if err := a.WriteStopIntent(target, prior, "tester"); err != nil {
+		t.Fatalf("seed prior stop: %v", err)
+	}
+
+	tx := newRegistrationTransaction()
+	if _, err := a.writeRegisterRunningIntentForTask(target, tx.AddCompensation); err != nil {
+		t.Fatalf("write running intent: %v", err)
+	}
+	newer := DaemonIntent{
+		Desired:   IntentDesiredStopped,
+		Reason:    IntentReasonUserDisabled,
+		UpdatedAt: prior.UpdatedAt.Add(time.Minute),
+	}
+	if err := a.WriteStopIntent(target, newer, "operator"); err != nil {
+		t.Fatalf("write newer operator stop: %v", err)
+	}
+
+	outcome := tx.Fail(errors.New("injected registration failure"))
+	if !errors.Is(outcome.Err, ErrStopIntentRollbackConflict) {
+		t.Fatalf("rollback error = %v, want compare-and-swap conflict", outcome.Err)
+	}
+	stops := readSubBlockStopForTest(t, dir)
+	got, present := stops[target]
+	if !present || got.Desired != newer.Desired || got.Reason != newer.Reason || !got.UpdatedAt.Equal(newer.UpdatedAt) {
+		t.Fatalf("rollback overwrote newer operator stop: got=%+v present=%t want=%+v", got, present, newer)
 	}
 }
 

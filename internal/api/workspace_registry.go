@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 
 	"mcp-local-hub/internal/config"
@@ -189,19 +188,21 @@ func (r *Registry) Save() error {
 	return nil
 }
 
+// LockPath returns the registry's single cross-process lock leaf.
+func (r *Registry) LockPath() string { return r.path + ".lock" }
+
 // Lock acquires a cross-process exclusive file lock on <registry>.lock.
-// The returned function releases the lock; callers must defer it. Prevents
-// two concurrent `mcphub register` invocations from racing on port allocation
-// or client-config writes.
-func (r *Registry) Lock() (func(), error) {
+// The returned one-shot release reports and records failure.
+func (r *Registry) Lock() (func() error, error) {
+	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(r.path + ".lock")
-	if err := fl.Lock(); err != nil {
-		return nil, fmt.Errorf("lock %s: %w", r.path+".lock", err)
+	release, err := lockLeafLedgered(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("lock %s: %w", lockPath, err)
 	}
-	return func() { _ = fl.Unlock() }, nil
+	return release, nil
 }
 
 // TryLock is the non-blocking variant of Lock: it attempts to acquire the
@@ -216,19 +217,19 @@ func (r *Registry) Lock() (func(), error) {
 // never stall on a registry lock held by a concurrent auto-register / migrate
 // (that holder self-heals the orphan anyway), so it TryLocks and skips on
 // contention.
-func (r *Registry) TryLock() (func(), bool, error) {
+func (r *Registry) TryLock() (func() error, bool, error) {
+	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(r.path + ".lock")
-	locked, err := fl.TryLock()
+	release, locked, err := tryLockLeafLedgered(lockPath)
 	if err != nil {
-		return nil, false, fmt.Errorf("try-lock %s: %w", r.path+".lock", err)
+		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, err)
 	}
 	if !locked {
 		return nil, false, nil
 	}
-	return func() { _ = fl.Unlock() }, true, nil
+	return release, true, nil
 }
 
 // Put upserts an entry (primary key = workspace_key + language).
@@ -438,7 +439,7 @@ func (r *Registry) PutLifecycle(workspaceKey, language, state, lastError string)
 // implying a lifecycle transition or clearing a diagnostic. A zero timestamp is
 // a no-op, and a missing row is silently ignored to match PutLifecycle's
 // unregistered-late-write behavior.
-func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) error {
+func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) (err error) {
 	if toolsCallAt.IsZero() {
 		return nil
 	}
@@ -446,7 +447,7 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "put last tools-call timestamp for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}
@@ -463,12 +464,12 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 // materialization edges: state transition + timestamps in one atomic save.
 // Zero-valued materializedAt / toolsCallAt leave the existing stored values
 // unchanged; non-zero values are coerced to UTC before write.
-func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) error {
+func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) (err error) {
 	unlock, err := r.Lock()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "put lifecycle for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}

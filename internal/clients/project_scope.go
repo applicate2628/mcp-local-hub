@@ -17,7 +17,7 @@ import (
 // interface. The accepted design
 // (work-items/decisions/2026-06-24-per-project-gui-design.md, decision 2)
 // rejects a Client.ScopedConfigPath() method because that would force editing
-// all 46 adapters; the registry feeds the EXISTING path-parameterized scan
+// every supported adapter; the registry feeds the EXISTING path-parameterized scan
 // without touching the Client interface or any adapter.
 //
 // SectionKey is documentary / cross-check only here. The actual parse of a
