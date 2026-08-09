@@ -1679,6 +1679,60 @@ func TestAuditLockCommittedSuccessRejectsUnobservedPhysicalRevisionChange(t *tes
 	}
 }
 
+func TestAuditLockCommittedSuccessACKDoesNotHoldPhysicalStateMutexDuringStoreWrite(t *testing.T) {
+	a := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
+	defer a.close()
+	correlation := validAuditLockCorrelation(a.serverInstance, 48)
+	binding := auditLockOccurrenceBinding{serverInstance: a.serverInstance, taskName: `\\mcp-local-hub-bounded-ack`, confirm: true}
+	reservation, reserveErr := a.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil || !reservation.Novel {
+		t.Fatalf("reserve=%+v err=%v", reservation, reserveErr)
+	}
+	if _, terminalErr := a.terminalize(reservation, auditLockOccurrenceCommittedSuccess, auditLockAuthorizationNone, successfulTerminalEvidence(binding.taskName, true)); terminalErr != nil {
+		t.Fatalf("terminalize: %v", terminalErr)
+	}
+	expected := api.SupervisorEventLockSnapshotForPath(a.logPath)
+	originalWriter := a.writeStateFileLockHeld
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	a.writeStateFileLockHeld = func(path string, data []byte) error {
+		close(writeStarted)
+		<-releaseWrite
+		return originalWriter(path, data)
+	}
+	ackDone := make(chan *auditLockRouteError, 1)
+	go func() {
+		ackDone <- a.acknowledgeRequest(context.Background(), auditLockAcknowledgeRequest{
+			Correlation: correlation,
+			ExpectedPhysical: &auditLockExpectedPhysical{
+				ServerInstance: correlation.ServerInstance,
+				Revision:       expected.Revision,
+				State:          expected.State,
+			},
+		})
+	}()
+	select {
+	case <-writeStarted:
+	case <-time.After(time.Second):
+		t.Fatal("acknowledgement store write did not start")
+	}
+	snapshotDone := make(chan struct{})
+	go func() {
+		_ = api.SupervisorEventLockSnapshotForPath(a.logPath)
+		close(snapshotDone)
+	}()
+	select {
+	case <-snapshotDone:
+	case <-time.After(100 * time.Millisecond):
+		close(releaseWrite)
+		t.Fatal("physical-state snapshot blocked behind occurrence-store filesystem I/O")
+	}
+	close(releaseWrite)
+	if ackErr := <-ackDone; ackErr != nil {
+		t.Fatalf("acknowledge: %v", ackErr)
+	}
+}
+
 func TestDecodeAuditLockAcknowledgeExpectedPhysicalIsStrict(t *testing.T) {
 	c := validAuditLockCorrelation("33333333-3333-4333-8333-333333333333", 9)
 	valid := acknowledgeBodyWithExpectedPhysical(c, api.SupervisorEventLockSnapshot{State: api.SupervisorEventLockReleased, Revision: 7})

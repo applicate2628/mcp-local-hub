@@ -199,6 +199,26 @@ func preparedSupervisorEventFromRaw(raw []byte) PreparedSupervisorEvent {
 	}
 }
 
+// PreparedSupervisorEventBytes returns an owned copy of the normalized JSONL
+// record. It exists for bounded same-binary worker transport; callers cannot
+// mutate the prepared value through the returned slice.
+func PreparedSupervisorEventBytes(prepared PreparedSupervisorEvent) ([]byte, error) {
+	if err := validatePreparedSupervisorEvent(prepared); err != nil {
+		return nil, err
+	}
+	return bytes.Clone(prepared.raw), nil
+}
+
+// PreparedSupervisorEventFromBytes restores a normalized record transported to
+// a same-binary worker and revalidates the complete pending-carrier envelope.
+func PreparedSupervisorEventFromBytes(raw []byte) (PreparedSupervisorEvent, error) {
+	prepared := preparedSupervisorEventFromRaw(raw)
+	if err := validatePendingSupervisorEventCarrier(prepared); err != nil {
+		return PreparedSupervisorEvent{}, err
+	}
+	return prepared, nil
+}
+
 // ---------------------------------------------------------------------------
 // Errors.
 // ---------------------------------------------------------------------------

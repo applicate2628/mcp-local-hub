@@ -125,12 +125,13 @@ func recoveryDependencies(t *testing.T, calls *recoveryCallLog, d api.Supervisor
 			calls.respawn = append(calls.respawn, respawnCall{task: task, force: force})
 			return api.RespawnResult{Success: true}, nil
 		},
-		Now:              time.Now,
-		Sleep:            func(context.Context, time.Duration) error { return nil },
-		PortPollInterval: time.Millisecond,
-		PortWaitTimeout:  10 * time.Millisecond,
-		PostKillTimeout:  100 * time.Millisecond,
-		RespawnReserve:   20 * time.Millisecond,
+		Now:                          time.Now,
+		Sleep:                        func(context.Context, time.Duration) error { return nil },
+		PortPollInterval:             time.Millisecond,
+		PortWaitTimeout:              10 * time.Millisecond,
+		PostKillTimeout:              100 * time.Millisecond,
+		RespawnReserve:               20 * time.Millisecond,
+		PersistCommittedAuditHandoff: persistCommittedAuditHandoffDirect,
 	}
 }
 
@@ -1931,7 +1932,7 @@ func TestExecuteTerminateWaitConsumesSharedPostCommitBudgetAndStillRespawns(t *t
 	}
 }
 
-func TestExecuteTerminateConsumesAttemptBudgetStillRespawnsWithReservedDeadline(t *testing.T) {
+func TestExecuteTerminateConsumesAttemptBudgetStillRespawnsAndReportsAuditDurability(t *testing.T) {
 	d := recoveryDescriptor()
 	const ownerPID = 44000
 	calls := &recoveryCallLog{}
@@ -1978,9 +1979,7 @@ func TestExecuteTerminateConsumesAttemptBudgetStillRespawnsWithReservedDeadline(
 			notifications = append(notifications, notification)
 		},
 	}, deps)
-	if err != nil {
-		t.Fatalf("ExecuteWithDependencies: %v", err)
-	}
+	requireFailureKind(t, err, FailureAuditDurability)
 	if len(calls.terminate) != 1 || len(calls.respawn) != 1 {
 		t.Fatalf("calls: terminate=%d respawn=%d", len(calls.terminate), len(calls.respawn))
 	}
@@ -2369,6 +2368,9 @@ func TestQueueIdempotentAuditFallbackOutcomeMatrix(t *testing.T) {
 				prepared:  prepared,
 				attempted: tc.attempted,
 				emitErr:   tc.outcome,
+				deadline:  time.Now().Add(time.Minute),
+				now:       time.Now,
+				persist:   persistCommittedAuditHandoffDirect,
 			}
 			if tc.pending {
 				finalizer.pending = api.NewPendingSupervisorEventEmitForTest(tc.outcome)
@@ -2431,7 +2433,13 @@ func TestCommittedAuditFinalizerHandoffReadsProcessLockOwner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("prepare audit: %v", err)
 		}
-		return &committedAuditFinalizer{stateDir: stateDir, prepared: prepared}
+		return &committedAuditFinalizer{
+			stateDir: stateDir,
+			prepared: prepared,
+			deadline: time.Now().Add(time.Minute),
+			now:      time.Now,
+			persist:  persistCommittedAuditHandoffDirect,
+		}
 	}
 
 	// F6: the 15 daemon-recover audit call sites all funnel through
@@ -2665,5 +2673,40 @@ func TestCommittedAuditFinalizerReportsPendingNotStrandedForAConcurrentHealthyEm
 	}
 	if got := api.SupervisorEventLockStateForPath(logPath); got != api.SupervisorEventLockReleased {
 		t.Fatalf("owner state after the concurrent emit finished = %q, want %q", got, api.SupervisorEventLockReleased)
+	}
+}
+
+func TestCommittedAuditFinalizerBoundsDurableCarrierPersistence(t *testing.T) {
+	prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
+		Event:  "daemon-recovery-bounded-handoff",
+		Source: api.SupervisorEventSourceLifecycle,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := make(chan struct{})
+	finalizer := &committedAuditFinalizer{
+		stateDir: t.TempDir(),
+		prepared: prepared,
+		deadline: time.Now().Add(40 * time.Millisecond),
+		now:      time.Now,
+		persist: func(ctx context.Context, _ string, _ api.PreparedSupervisorEvent, _ bool) error {
+			close(started)
+			<-ctx.Done()
+			return ctx.Err()
+		},
+	}
+	begin := time.Now()
+	_, finalizeErr := finalizer.finalize()
+	if !errors.Is(finalizeErr, context.DeadlineExceeded) {
+		t.Fatalf("finalize error=%v, want deadline exceeded durability failure", finalizeErr)
+	}
+	if elapsed := time.Since(begin); elapsed > 500*time.Millisecond {
+		t.Fatalf("finalize elapsed=%s, full carrier operation was not bounded", elapsed)
+	}
+	select {
+	case <-started:
+	default:
+		t.Fatal("bounded carrier persistence was not invoked")
 	}
 }

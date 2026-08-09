@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/daemonrecovery"
 )
 
 // withTempHome redirects SettingsPath to a tempdir for the test duration.
@@ -288,6 +289,12 @@ func TestMain(m *testing.M) {
 	// which a generated Go test binary does not contain.
 	if len(os.Args) == 2 && os.Args[1] == "gui-owner-unknown-confirmation-worker" {
 		if err := runGUIOwnerUnknownConfirmationMarkerWorker(os.Stdin, os.Stdout); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == daemonrecovery.CommittedAuditHandoffWorkerCommand {
+		if err := daemonrecovery.RunCommittedAuditHandoffWorker(os.Stdin, os.Stdout); err != nil {
 			os.Exit(3)
 		}
 		os.Exit(0)

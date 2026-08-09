@@ -136,6 +136,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		// equivalent is `mcphub setup`.
 		newCanonicalizeCmdReal(),
 		newAuditLockTerminalWorkerCmd(),
+		newDaemonRecoveryAuditHandoffWorkerCmd(),
 		newGUIOwnerUnknownConfirmationMarkerWorkerCmd(),
 	)
 

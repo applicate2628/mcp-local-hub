@@ -279,23 +279,24 @@ type Options struct {
 // retry at this layer: state reads and port probes are point-in-time decisions;
 // the identity reader and IPC client retain their own bounded policies.
 type Dependencies struct {
-	StateDir          func() (string, error)
-	ReadIntent        func(path string) (*api.SupervisorIntentFile, error)
-	ReadState         func(path string) (*api.SupervisorStateFile, error)
-	PortOwner         func(context.Context, int) (pid int, ok bool, err error)
-	SelfPID           func() int
-	LookupIdentity    func(context.Context, int) (process.ProcessIdentity, error)
-	ExecutableMatches func(pid int, expectedPath string) bool
-	HoldProcess       func(pid int) (process.HeldPIDGeneration, error)
-	ProbeSupervisor   func(context.Context) error
-	Respawn           func(context.Context, string, bool) (api.RespawnResult, error)
-	Now               func() time.Time
-	Sleep             func(context.Context, time.Duration) error
-	PortPollInterval  time.Duration
-	PortWaitTimeout   time.Duration
-	PostKillTimeout   time.Duration
-	RespawnReserve    time.Duration
-	AuditEmitTimeout  time.Duration
+	StateDir                     func() (string, error)
+	ReadIntent                   func(path string) (*api.SupervisorIntentFile, error)
+	ReadState                    func(path string) (*api.SupervisorStateFile, error)
+	PortOwner                    func(context.Context, int) (pid int, ok bool, err error)
+	SelfPID                      func() int
+	LookupIdentity               func(context.Context, int) (process.ProcessIdentity, error)
+	ExecutableMatches            func(pid int, expectedPath string) bool
+	HoldProcess                  func(pid int) (process.HeldPIDGeneration, error)
+	ProbeSupervisor              func(context.Context) error
+	Respawn                      func(context.Context, string, bool) (api.RespawnResult, error)
+	Now                          func() time.Time
+	Sleep                        func(context.Context, time.Duration) error
+	PortPollInterval             time.Duration
+	PortWaitTimeout              time.Duration
+	PostKillTimeout              time.Duration
+	RespawnReserve               time.Duration
+	AuditEmitTimeout             time.Duration
+	PersistCommittedAuditHandoff committedAuditHandoffPersist
 }
 
 const (
@@ -338,13 +339,14 @@ func ProductionDependencies() Dependencies {
 		Respawn: func(ctx context.Context, taskName string, force bool) (api.RespawnResult, error) {
 			return api.DialSupervisorIPCRespawn(ctx, taskName, force, 15000)
 		},
-		Now:              time.Now,
-		Sleep:            sleepContext,
-		PortPollInterval: defaultPortPollInterval,
-		PortWaitTimeout:  defaultPortWaitTimeout,
-		PostKillTimeout:  defaultPostKillFinishTimeout,
-		RespawnReserve:   defaultRespawnReserve,
-		AuditEmitTimeout: defaultCommittedAuditTimeout,
+		Now:                          time.Now,
+		Sleep:                        sleepContext,
+		PortPollInterval:             defaultPortPollInterval,
+		PortWaitTimeout:              defaultPortWaitTimeout,
+		PostKillTimeout:              defaultPostKillFinishTimeout,
+		RespawnReserve:               defaultRespawnReserve,
+		AuditEmitTimeout:             defaultCommittedAuditTimeout,
+		PersistCommittedAuditHandoff: persistCommittedAuditHandoffBounded,
 	}
 }
 
@@ -631,6 +633,9 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 				stateDir:   stateDir,
 				prepared:   prepared,
 				prepareErr: prepareErr,
+				deadline:   postKillStarted.Add(deps.PostKillTimeout),
+				now:        deps.Now,
+				persist:    deps.PersistCommittedAuditHandoff,
 			}
 			// Charge the bounded pre-respawn audit only to the non-reserved
 			// post-kill slice. Any time it consumes reduces the subsequent port
@@ -740,6 +745,8 @@ func validateDependencies(deps Dependencies) error {
 		return errors.New("ProbeSupervisor dependency is nil")
 	case deps.Respawn == nil:
 		return errors.New("Respawn dependency is nil")
+	case deps.PersistCommittedAuditHandoff == nil:
+		return errors.New("PersistCommittedAuditHandoff dependency is nil")
 	default:
 		return nil
 	}
@@ -903,6 +910,9 @@ type committedAuditFinalizer struct {
 	attempted  bool
 	pending    *api.PendingSupervisorEventEmit
 	emitErr    error
+	deadline   time.Time
+	now        func() time.Time
+	persist    committedAuditHandoffPersist
 }
 
 // logPath is the single place this finalizer names the supervisor event log it
@@ -1002,21 +1012,21 @@ func (f *committedAuditFinalizer) finalize() (AuditHandoff, error) {
 		}
 	}
 
-	logger, err := api.OpenSupervisorEventLog(f.logPath())
-	if err != nil {
-		return f.handoff(), fmt.Errorf("open committed recovery audit handoff: %w", err)
+	if f.persist == nil {
+		return f.handoff(), errors.New("persist committed recovery audit handoff: missing bounded persistence owner")
 	}
-	defer func() { _ = logger.Close() }()
-	if err := logger.PersistPending(f.prepared); err != nil {
+	now := time.Now
+	if f.now != nil {
+		now = f.now
+	}
+	remaining := f.deadline.Sub(now())
+	if remaining <= 0 {
+		return f.handoff(), fmt.Errorf("persist committed recovery audit handoff: %w", context.DeadlineExceeded)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remaining)
+	defer cancel()
+	if err := f.persist(ctx, f.stateDir, f.prepared, replay); err != nil {
 		return f.handoff(), fmt.Errorf("persist committed recovery audit handoff: %w", err)
-	}
-	if replay {
-		// Persistence is the acknowledgement boundary. Replay stays deliberately
-		// opportunistic: contention or a replay I/O error leaves the carrier for
-		// a later process and does not undo established durability, so it is
-		// still discarded. Its RELEASE outcome is not discarded — TryReplayPending
-		// reports that to the same owner f.handoff() reads below.
-		_ = logger.TryReplayPending()
 	}
 	return f.handoff(), nil
 }

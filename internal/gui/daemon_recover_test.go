@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,6 +22,12 @@ type fakeDaemonRecoverer struct {
 	calls     int
 	taskName  string
 	confirmed bool
+}
+
+type panicBeforeCommitDaemonRecoverer struct{}
+
+func (*panicBeforeCommitDaemonRecoverer) Recover(context.Context, string, bool, func()) (daemonrecovery.Result, error) {
+	panic("synthetic pre-commit recovery panic")
 }
 
 func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confirmed bool, onTerminationCommitted func()) (daemonrecovery.Result, error) {
@@ -61,6 +68,35 @@ func performDaemonRecoverRequest(t *testing.T, s *Server, body string) *httptest
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func TestDaemonRecoverPreCommitPanicTerminalizesDurableReservation(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	installIsolatedAuditLock(t, s)
+	t.Cleanup(func() { s.events.Close() })
+	s.daemonRecover = &panicBeforeCommitDaemonRecoverer{}
+	correlation := validAuditLockCorrelation(s.auditLock.serverInstance, 911)
+	body := fmt.Sprintf(`{"task_name":"mcp-local-hub-memory-default","confirm":true,"audit_lock_attempt":{"attempt_id":"%s","occurrence_id":"%s","server_instance":"%s"}}`,
+		correlation.AttemptID, correlation.OccurrenceID, correlation.ServerInstance)
+	req := httptest.NewRequest(http.MethodPost, "/api/daemon/recover", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatal("handler did not re-panic")
+			}
+		}()
+		s.mux.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	receipt, routeErr := s.auditLock.lookup(context.Background(), correlation)
+	if routeErr != nil || receipt == nil {
+		t.Fatalf("lookup after panic receipt=%+v err=%v", receipt, routeErr)
+	}
+	if receipt.Status != auditLockOccurrenceNotCommitted && receipt.Status != auditLockOccurrenceUncertain {
+		t.Fatalf("receipt status after pre-commit panic=%q, want not_committed or uncertain", receipt.Status)
+	}
 }
 
 func decodeDaemonRecoverBody(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {

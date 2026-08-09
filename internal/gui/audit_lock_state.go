@@ -1822,14 +1822,14 @@ func (a *auditLockAdapter) acknowledgeRequest(ctx context.Context, request audit
 			if expected == nil || expected.ServerInstance != mutationEpoch.ServerInstance || expected.State != api.SupervisorEventLockReleased {
 				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAckPreconditionRequired)}
 			}
-			_, committed, commitErr := api.CommitIfSupervisorEventLockSnapshot(a.logPath, api.SupervisorEventLockSnapshot{
+			_, claimed := api.ClaimSupervisorEventLockSnapshot(a.logPath, api.SupervisorEventLockSnapshot{
 				State: expected.State, Revision: expected.Revision,
-			}, consumeAndWrite)
-			if commitErr != nil {
-				return commitErr
-			}
-			if !committed {
+			})
+			if !claimed {
 				return &auditLockRouteError{status: 409, code: string(daemonRecoverErrorAckPhysicalStateChanged)}
+			}
+			if consumeErr := consumeAndWrite(); consumeErr != nil {
+				return consumeErr
 			}
 		} else if effective.Status == auditLockOccurrenceCommittedError || effective.Status == auditLockOccurrenceUncertain || effective.Status == auditLockOccurrenceNotCommitted {
 			if request.ExpectedPhysical != nil {

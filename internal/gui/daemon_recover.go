@@ -219,6 +219,8 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	leaseCompleted := false
+	var reservation auditLockReservation
+	reservationDurable := false
 	completeLease := func() {
 		if leaseCompleted {
 			return
@@ -227,6 +229,16 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		leaseCompleted = true
 	}
 	defer func() {
+		if recovered := recover(); recovered != nil {
+			if !leaseCompleted && reservationDurable && !lease.committed() {
+				_, _ = s.auditLock.terminalize(reservation, auditLockOccurrenceNotCommitted, auditLockAuthorizationNone, auditLockTerminalEvidence{
+					HTTPStatus: http.StatusInternalServerError,
+					ErrorCode:  string(daemonRecoverErrorUnclassifiedFailure),
+				})
+				completeLease()
+			}
+			panic(recovered)
+		}
 		// A panic after the destructive boundary must remain unsettled so the
 		// process-level drain fails loud rather than reporting a false clean
 		// settlement. Ordinary pre-commit exits have no destructive work and can
@@ -235,7 +247,8 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 			completeLease()
 		}
 	}()
-	reservation, reserveErr := s.auditLock.reserve(r.Context(), correlation, auditLockOccurrenceBinding{
+	var reserveErr *auditLockRouteError
+	reservation, reserveErr = s.auditLock.reserve(r.Context(), correlation, auditLockOccurrenceBinding{
 		serverInstance: correlation.ServerInstance,
 		taskName:       taskName,
 		confirm:        req.Confirm,
@@ -244,6 +257,7 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 		writeAuditLockRouteError(w, reserveErr)
 		return
 	}
+	reservationDurable = reservation.Novel
 	if !reservation.Novel {
 		completeLease()
 		s.writeDaemonRecoverReplay(r.Context(), w, reservation)

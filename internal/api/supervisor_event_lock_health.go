@@ -238,6 +238,20 @@ func SupervisorEventLockSnapshotForPath(path string) SupervisorEventLockSnapshot
 	}
 }
 
+// ClaimSupervisorEventLockSnapshot linearizes one bounded comparison against
+// the physical-state owner. The claim itself is the acknowledgement boundary;
+// callers must perform any filesystem work after this function returns so a
+// stalled store cannot block physical-state transitions process-wide.
+func ClaimSupervisorEventLockSnapshot(path string, expected SupervisorEventLockSnapshot) (current SupervisorEventLockSnapshot, claimed bool) {
+	supervisorEventLockMu.Lock()
+	defer supervisorEventLockMu.Unlock()
+	current = SupervisorEventLockSnapshot{
+		State:    supervisorEventLockStateLocked(path),
+		Revision: supervisorEventLockRevisions[path],
+	}
+	return current, current == expected
+}
+
 // CommitIfSupervisorEventLockSnapshot executes commit only while path still has
 // exactly expected physical state. The caller supplies a bounded, non-reentrant
 // commit: callbacks, subscriptions, logging, and further lock-state reads are
