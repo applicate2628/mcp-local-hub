@@ -30,6 +30,29 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 	}
 	addString := func(value string) bool { return add(len(value) + 1) }
 	addInt := func(value int) bool { return add(len(strconv.Itoa(value))) }
+	addExecutedLineArray := func(lines []int) bool {
+		// MarshalIndent(result, "", "  ") emits this []int at nesting depth
+		// four: '['; then newline + eight spaces + decimal digits for the
+		// first value; a comma before each later newline; and finally newline
+		// + six spaces + ']'. Count that representation exactly without ever
+		// materializing the potentially large array.
+		if add(1) { // '['
+			return true
+		}
+		if len(lines) == 0 {
+			return add(1) // ']'
+		}
+		for index, line := range lines {
+			syntaxBytes := 1 + 8 // newline + value indentation
+			if index != 0 {
+				syntaxBytes++ // comma after the previous value
+			}
+			if add(syntaxBytes) || addInt(line) {
+				return true
+			}
+		}
+		return add(1 + 6 + 1) // newline + closing indentation + ']'
+	}
 	addFloat := func(value float64) bool {
 		if value == 0 {
 			return false
@@ -54,13 +77,8 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		}
 	}
 	for _, item := range r.ExecutedLines {
-		if addString(item.File) {
+		if addString(item.File) || addExecutedLineArray(item.Lines) {
 			return true
-		}
-		for _, line := range item.Lines {
-			if addInt(line) {
-				return true
-			}
 		}
 	}
 	for _, file := range r.FilesInTrace {

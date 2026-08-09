@@ -8,7 +8,9 @@ import (
 )
 
 func TestR18TraceAdmissionAccountsForEncodedLineNumberBytes(t *testing.T) {
-	lineCount := publicresult.MaxEncodedBytes / 8
+	// Decimal digits alone remain below the admission ceiling here; the
+	// indented array separators/whitespace are what push the encoded body over.
+	lineCount := publicresult.MaxEncodedBytes / 12
 	lines := make([]int, lineCount)
 	for i := range lines {
 		lines[i] = 100000000 + i
