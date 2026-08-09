@@ -297,11 +297,13 @@ type Result struct {
 // never be materialized just to parse it line by line. The caller owns
 // closing the returned reader.
 type FS interface {
+	Stat(path string) (fs.FileInfo, error)
 	Open(path string) (io.ReadCloser, error)
 }
 
 type osFS struct{}
 
+func (osFS) Stat(p string) (fs.FileInfo, error)   { return os.Stat(p) }
 func (osFS) Open(p string) (io.ReadCloser, error) { return os.Open(p) }
 
 // DefaultFS wires FS to the real OS.
@@ -375,6 +377,17 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 		return Result{Status: evidence.StatusFailed, Reason: ReasonRelativeTracePath, Evidence: ev}
 	}
 	ev.AddPath(args.TracePath)
+	info, err := deps.FS.Stat(args.TracePath)
+	if err != nil {
+		reason := ReasonTraceUnreadable
+		if errors.Is(err, fs.ErrNotExist) {
+			reason = ReasonTraceNotFound
+		}
+		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
+	}
+	if !info.Mode().IsRegular() {
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonTraceUnreadable, Evidence: ev}
+	}
 
 	f, err := deps.FS.Open(args.TracePath)
 	if err != nil {

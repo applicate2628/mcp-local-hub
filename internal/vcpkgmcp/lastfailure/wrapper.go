@@ -70,10 +70,25 @@ type WrapperInfo struct {
 // self-evidently incomplete — before this guard, querying the OMITTED port
 // returned a confident ok.
 func (w WrapperInfo) FailedPortsListIsComplete() bool {
-	return w.ScanComplete &&
-		w.FailedPortsDropped == 0 &&
-		w.BuildFailedCount != nil &&
-		len(w.FailedPorts) == *w.BuildFailedCount
+	if !w.ScanComplete || w.FailedPortsDropped != 0 || w.BuildFailedCount == nil || len(w.FailedPorts) != *w.BuildFailedCount {
+		return false
+	}
+	seen := make(map[string]struct{}, len(w.FailedPorts))
+	for _, entry := range w.FailedPorts {
+		if strings.Count(entry, ":") != 1 {
+			return false
+		}
+		port, triplet := PortNameFromEntry(entry)
+		if strings.TrimSpace(port) == "" || strings.TrimSpace(triplet) == "" {
+			return false
+		}
+		key := strings.ToLower(port) + "\x00" + strings.ToLower(triplet)
+		if _, duplicate := seen[key]; duplicate {
+			return false
+		}
+		seen[key] = struct{}{}
+	}
+	return true
 }
 
 var (

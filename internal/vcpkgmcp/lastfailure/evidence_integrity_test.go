@@ -322,6 +322,9 @@ func TestWrapperInfo_FailedPortsListIsComplete(t *testing.T) {
 		{"count_mismatch", WrapperInfo{ScanComplete: true, BuildFailedCount: &two, FailedPorts: []string{"a:cl"}}, false},
 		{"no_count_declared", WrapperInfo{ScanComplete: true, FailedPorts: []string{"a:cl"}}, false},
 		{"scan_incomplete", WrapperInfo{ScanComplete: false, BuildFailedCount: &one, FailedPorts: []string{"a:cl"}}, false},
+		{"duplicate", WrapperInfo{ScanComplete: true, BuildFailedCount: &two, FailedPorts: []string{"a:cl", "A:CL"}}, false},
+		{"missing_triplet", WrapperInfo{ScanComplete: true, BuildFailedCount: &one, FailedPorts: []string{"a"}}, false},
+		{"empty_port", WrapperInfo{ScanComplete: true, BuildFailedCount: &one, FailedPorts: []string{":cl"}}, false},
 	}
 	for _, tc := range cases {
 		if got := tc.info.FailedPortsListIsComplete(); got != tc.want {

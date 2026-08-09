@@ -198,7 +198,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			})
 		case "elseif":
 			if len(frames) == 0 {
-				continue // malformed (elseif without if); ignore, degrade gracefully
+				return nil, false, parserStructuralExpressionUnparsable
 			}
 			f := &frames[len(frames)-1]
 			cond, unresolved := evalCondition(st.Args, env)
@@ -213,7 +213,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			f.curUnresolved = localUnresolved
 		case "else":
 			if len(frames) == 0 {
-				continue
+				return nil, false, parserStructuralExpressionUnparsable
 			}
 			f := &frames[len(frames)-1]
 			notPrior, notPriorUnresolved := notAllPrior(f)
@@ -221,9 +221,10 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			f.curText = "NOT(" + strings.Join(f.priorTexts, " OR ") + ")"
 			f.curUnresolved = notPriorUnresolved
 		case "endif":
-			if len(frames) > 0 {
-				frames = frames[:len(frames)-1]
+			if len(frames) == 0 {
+				return nil, false, parserStructuralExpressionUnparsable
 			}
+			frames = frames[:len(frames)-1]
 		case "set":
 			handleSet(st.Args, env, active(), guardText(), activeUnresolved())
 		case "get_filename_component":
@@ -430,10 +431,16 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardTe
 // PATCHES keyword-arg via ${listvar}.
 func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) {
 	toks := tokenize(argsRaw)
-	if len(toks) < 2 || toks[0].Quoted || toks[0].Text != "APPEND" {
+	if len(toks) < 2 || toks[0].Quoted {
 		return
 	}
 	listName := toks[1].Text
+	if toks[0].Text != "APPEND" {
+		if active != TriFalse && listName != "" && listSubcommandMutatesInput(toks[0].Text) {
+			env.setValue(listName, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		}
+		return
+	}
 	var appended []semanticItem
 	resolution := valueResolution{}
 	for _, t := range toks[2:] {
@@ -447,6 +454,15 @@ func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string,
 	value := serializeItems(appended)
 	value.resolution = resolution
 	env.setValue(listName, appendSerializedValue(env.values[listName], value))
+}
+
+func listSubcommandMutatesInput(subcommand string) bool {
+	switch subcommand {
+	case "PREPEND", "INSERT", "POP_BACK", "POP_FRONT", "REMOVE_ITEM", "REMOVE_AT", "REMOVE_DUPLICATES", "FILTER", "TRANSFORM", "REVERSE", "SORT":
+		return true
+	default:
+		return false
+	}
 }
 
 // extractPatchesArg scans one call statement's raw argument text for a bare

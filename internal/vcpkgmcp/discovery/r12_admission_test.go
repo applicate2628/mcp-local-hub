@@ -131,6 +131,21 @@ func TestEveryDiscoveryTierUsesExecutableAdmission(t *testing.T) {
 	}
 }
 
+func TestManifestWalkupRequiresRegularMarker(t *testing.T) {
+	project := testRoot("manifest-special", "project")
+	root := filepath.Join(project, "vcpkg")
+	files := modeFS{
+		filepath.Clean(filepath.Join(project, "vcpkg.json")): os.ModeNamedPipe | 0o644,
+		filepath.Clean(binIn(root, "linux")):                 0o755,
+	}
+	deps := isolatedDiscoveryDeps(files)
+	deps.Getwd = func() (string, error) { return filepath.Join(project, "child"), nil }
+	result := DiscoverRoot("", deps)
+	if result.Status == evidence.StatusOK {
+		t.Fatalf("special manifest marker selected root: %+v", result)
+	}
+}
+
 func isolatedDiscoveryDeps(files modeFS) Deps {
 	return Deps{
 		Getenv:      func(string) string { return "" },

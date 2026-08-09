@@ -1,6 +1,7 @@
 package patchesapply
 
 import (
+	"strconv"
 	"strings"
 )
 
@@ -91,6 +92,9 @@ func truthy(val *string) Tri {
 	}
 	v := strings.ToUpper(strings.TrimSpace(*val))
 	if cmakeFalseConstants[v] {
+		return TriFalse
+	}
+	if number, err := strconv.ParseFloat(v, 64); err == nil && number == 0 {
 		return TriFalse
 	}
 	if strings.HasSuffix(v, "-NOTFOUND") {

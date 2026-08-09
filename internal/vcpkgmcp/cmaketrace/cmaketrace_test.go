@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
@@ -206,6 +208,7 @@ func TestTrace_MissingPath(t *testing.T) {
 // platform-specific file permission behavior.
 type fakeUnreadableFS struct{}
 
+func (fakeUnreadableFS) Stat(string) (fs.FileInfo, error) { return regularTraceFileInfo{}, nil }
 func (fakeUnreadableFS) Open(p string) (io.ReadCloser, error) {
 	return nil, &os.PathError{Op: "open", Path: p, Err: os.ErrPermission}
 }
@@ -517,6 +520,7 @@ type streamFS struct {
 	last    *countingReadCloser
 }
 
+func (s *streamFS) Stat(string) (fs.FileInfo, error) { return regularTraceFileInfo{}, nil }
 func (s *streamFS) Open(string) (io.ReadCloser, error) {
 	s.last = &countingReadCloser{r: strings.NewReader(s.content)}
 	return s.last, nil
@@ -587,7 +591,17 @@ func fsReturning(rc io.ReadCloser) FS { return &singleReaderFS{rc: rc} }
 
 type singleReaderFS struct{ rc io.ReadCloser }
 
+func (s *singleReaderFS) Stat(string) (fs.FileInfo, error)   { return regularTraceFileInfo{}, nil }
 func (s *singleReaderFS) Open(string) (io.ReadCloser, error) { return s.rc, nil }
+
+type regularTraceFileInfo struct{}
+
+func (regularTraceFileInfo) Name() string       { return "trace.json" }
+func (regularTraceFileInfo) Size() int64        { return 0 }
+func (regularTraceFileInfo) Mode() fs.FileMode  { return 0o600 }
+func (regularTraceFileInfo) ModTime() time.Time { return time.Time{} }
+func (regularTraceFileInfo) IsDir() bool        { return false }
+func (regularTraceFileInfo) Sys() any           { return nil }
 
 // F26: a request canceled BEFORE the call fails closed without reading at all.
 //

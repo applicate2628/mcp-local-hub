@@ -685,6 +685,17 @@ func findOrphans(ctx context.Context, deps Deps, portDir string, referenced map[
 		entriesRemaining -= len(admitted.Entries)
 		for _, de := range admitted.Entries {
 			full := filepath.Clean(filepath.Join(dir, de.Name()))
+			if de.Type()&os.ModeSymlink != 0 {
+				info, statErr := deps.Stat(full)
+				if statErr != nil {
+					failures = append(failures, UnreadablePath{Path: full, Kind: UnreadableOrphanDir, Error: statErr.Error()})
+					return OrphanScanStopDirectoryUnreadable
+				}
+				if info.IsDir() {
+					failures = append(failures, UnreadablePath{Path: full, Kind: UnreadableOrphanDir, Error: "symlink directory is outside the bounded orphan traversal"})
+					return OrphanScanStopDirectoryUnreadable
+				}
+			}
 			if de.IsDir() {
 				if depth == MaxOrphanScanDepth {
 					return OrphanScanStopDepthLimit

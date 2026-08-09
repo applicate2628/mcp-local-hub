@@ -12,11 +12,15 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
 
-// recordingFS records every path it was asked to open, so a test can assert
+// recordingFS records every path it was asked to probe, so a test can assert
 // that the tool did not look ANYWHERE — which is the whole difference between
 // "you did not supply a path" and "the path you supplied is absent".
 type recordingFS struct{ opened []string }
 
+func (f *recordingFS) Stat(p string) (fs.FileInfo, error) {
+	f.opened = append(f.opened, p)
+	return nil, fs.ErrNotExist
+}
 func (f *recordingFS) Open(p string) (io.ReadCloser, error) {
 	f.opened = append(f.opened, p)
 	return nil, fs.ErrNotExist

@@ -855,6 +855,7 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 	var candidates []FetchCandidate
 	var viableCandidates []FetchCandidate
 	var unresolved string
+statementLoop:
 	for _, st := range statements {
 		// st.Name is already lower-cased by splitStatementsChecked, so this
 		// switch, the fetchFuncNames lookup, and parseFetchCandidate's own
@@ -937,6 +938,15 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 			recordVariableInvalidation(&variables, state, st.Args, 0)
 		case "list":
 			recordListMutation(&variables, state, st.Args)
+		case "return":
+			if len(unsupportedScopes) != 0 || !state.active {
+				continue
+			}
+			if state.unknown != "" {
+				return parsedPortfile{}, false
+			}
+			stack = nil
+			break statementLoop
 		default:
 			if !fetchFuncNames[st.Name] {
 				if len(unsupportedScopes) == 0 && state.active && declarationFetches[st.Name] {

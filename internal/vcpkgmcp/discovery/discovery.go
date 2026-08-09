@@ -387,7 +387,7 @@ func walkUpForManifest(deps Deps, start string) (dir, file string, ok bool) {
 	cur := start
 	for i := 0; i < 64; i++ { // bounded: never walk unboundedly on a pathological tree
 		for _, m := range manifestFiles {
-			if fi, err := deps.Stat(filepath.Join(cur, m)); err == nil && !fi.IsDir() {
+			if fi, err := deps.Stat(filepath.Join(cur, m)); err == nil && fi.Mode().IsRegular() {
 				return cur, m, true
 			}
 		}

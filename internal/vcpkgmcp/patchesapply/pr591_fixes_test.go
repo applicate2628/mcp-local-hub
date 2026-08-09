@@ -361,15 +361,74 @@ func TestPR591_PortfileReadStopsAtPackageByteCap(t *testing.T) {
 type pr591DirEntry struct {
 	name string
 	dir  bool
+	mode fs.FileMode
 }
 
 func (e pr591DirEntry) Name() string { return e.name }
 func (e pr591DirEntry) IsDir() bool  { return e.dir }
 func (e pr591DirEntry) Type() fs.FileMode {
+	if e.mode != 0 {
+		return e.mode
+	}
 	if e.dir {
 		return fs.ModeDir
 	}
 	return 0
+}
+
+func TestCurrentHeadControlFlowAndValueRegressionsFailClosed(t *testing.T) {
+	t.Run("orphaned conditional markers", func(t *testing.T) {
+		for _, src := range []string{
+			"elseif(ON)\nvcpkg_from_github(PATCHES stale.patch)\n",
+			"else()\nvcpkg_from_github(PATCHES stale.patch)\n",
+			"endif()\nvcpkg_from_github(PATCHES stale.patch)\n",
+		} {
+			entries, saw, structural := walkPortfile(src, newVarEnv("", "", "", nil, nil))
+			if structural != parserStructuralExpressionUnparsable || saw || len(entries) != 0 {
+				t.Fatalf("walk(%q)=(%+v,%t,%v), want fail-closed", src, entries, saw, structural)
+			}
+		}
+	})
+	t.Run("unsupported list mutation taints prior binding", func(t *testing.T) {
+		src := "set(PATCH_LIST stale.patch keep.patch)\nlist(REMOVE_ITEM PATCH_LIST stale.patch)\nvcpkg_from_github(PATCHES ${PATCH_LIST})\n"
+		entries, saw, structural := walkPortfile(src, newVarEnv("", "", "", nil, nil))
+		if structural != parserStructuralExpressionUnparsable || saw || len(entries) != 0 {
+			t.Fatalf("walk=(%+v,%t,%v), want tainted list to fail closed", entries, saw, structural)
+		}
+	})
+	t.Run("numeric zero spellings are false", func(t *testing.T) {
+		for _, value := range []string{"00", "-0", "0.0", "0e12", "+0.000"} {
+			if got := truthy(&value); got != TriFalse {
+				t.Fatalf("truthy(%q)=%v, want false", value, got)
+			}
+		}
+	})
+}
+
+func TestOrphanScanRejectsSymlinkDirectoryAsIncomplete(t *testing.T) {
+	dir := writePort(t, "# no patches\n")
+	targetInfo, err := os.Stat(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &pr591DirReader{entries: []os.DirEntry{pr591DirEntry{name: "linked-patches", mode: fs.ModeSymlink}}}
+	deps := DefaultDeps()
+	baseStat := deps.Stat
+	deps.Stat = func(path string) (os.FileInfo, error) {
+		if filepath.Base(path) == "linked-patches" {
+			return targetInfo, nil
+		}
+		return baseStat(path)
+	}
+	deps.OpenDir = func(string) (boundedio.DirReader, error) { return reader, nil }
+
+	res := applyOrderContext(context.Background(), Args{PortDir: dir, Triplet: "x64-windows"}, deps)
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonOrphanScanIncomplete || res.OrphanScanStopCause != OrphanScanStopDirectoryUnreadable {
+		t.Fatalf("result=%+v, want incomplete symlink-directory scan", res)
+	}
+	if len(res.Unreadable) == 0 || res.Unreadable[0].Path != filepath.Join(dir, "linked-patches") {
+		t.Fatalf("failures=%+v, want linked directory path", res.Unreadable)
+	}
 }
 func (e pr591DirEntry) Info() (fs.FileInfo, error) { return nil, nil }
 

@@ -29,6 +29,20 @@ func TestUninvokedFunctionAndMacroFetchesAreExcluded(t *testing.T) {
 	}
 }
 
+func TestPortfileReturnStopsOrInvalidatesLaterFetches(t *testing.T) {
+	parsed, ok := parsePortfile("return()\nvcpkg_from_github(REPO owner/repo REF main)\n")
+	if !ok || parsed.Remote.Kind != RemoteNone || len(parsed.Candidates) != 0 {
+		t.Fatalf("definite return parsed=%+v ok=%t, want successful no-fetch result", parsed, ok)
+	}
+	if _, ok := parsePortfile("if(UNKNOWN_GUARD)\nreturn()\nendif()\nvcpkg_from_github(REPO owner/repo REF main)\n"); ok {
+		t.Fatal("conditional return accepted; later execution is indeterminate")
+	}
+	parsed, ok = parsePortfile("if(OFF)\nreturn()\nendif()\nvcpkg_from_github(REPO owner/repo REF main)\n")
+	if !ok || parsed.Remote.Kind != RemoteGitHub {
+		t.Fatalf("false-guard return parsed=%+v ok=%t, want later fetch", parsed, ok)
+	}
+}
+
 func TestInvokedFetchBearingDeclarationFailsClosedWithoutRemoteCall(t *testing.T) {
 	if _, ok := parsePortfile("function(fetch_one)\n  vcpkg_from_github(REPO owner/repo REF main)\nendfunction()\nfetch_one()\n"); ok {
 		t.Fatal("parsePortfile accepted an invoked fetch-bearing declaration; lexical analysis must fail closed")

@@ -2,10 +2,41 @@ package cmaketrace
 
 import (
 	"context"
+	"io"
+	"io/fs"
 	"testing"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 )
+
+type specialTraceFS struct{ opened bool }
+
+func (*specialTraceFS) Stat(string) (fs.FileInfo, error) {
+	return modeTraceFileInfo{regularTraceFileInfo: regularTraceFileInfo{}, mode: fs.ModeNamedPipe}, nil
+}
+func (f *specialTraceFS) Open(string) (io.ReadCloser, error) {
+	f.opened = true
+	return nil, fs.ErrInvalid
+}
+
+type modeTraceFileInfo struct {
+	regularTraceFileInfo
+	mode fs.FileMode
+}
+
+func (f modeTraceFileInfo) Mode() fs.FileMode { return f.mode }
+func (f modeTraceFileInfo) IsDir() bool       { return f.mode.IsDir() }
+
+func TestTraceRejectsSpecialFileBeforeOpen(t *testing.T) {
+	spy := &specialTraceFS{}
+	res := Trace(context.Background(), Args{TracePath: unusedTracePath(t)}, Deps{FS: spy})
+	if res.Status != evidence.StatusUnknown || res.Reason != ReasonTraceUnreadable {
+		t.Fatalf("result=%+v, want unknown/%s", res, ReasonTraceUnreadable)
+	}
+	if spy.opened {
+		t.Fatal("special trace file reached Open; FIFO input could block the daemon")
+	}
+}
 
 func TestRelativeTracePathIsRefusedBeforeFilesystemAccess(t *testing.T) {
 	spy := &recordingFS{}
