@@ -75,9 +75,9 @@ overlay root returns `failed(relative_overlay_triplet_root)`, and a relative `vc
 
 ## Two limits worth knowing
 
-- **Every successful result has a 256-KiB exact JSON ceiling.** The server
-  measures the indented JSON text it sends, not an estimate. An ordinary result
-  under that ceiling is unchanged. If a complete result exceeds it, the owning
+- **Every successful result has a 256-KiB exact JSON ceiling.** Aggregate-heavy
+  tools perform bounded admission before full JSON materialization; an ordinary
+  result under the ceiling is unchanged. If a complete result exceeds it, the owning
   tool returns its causal core and an additive `result_projection` object with
   `complete: false` and closed omission metadata; it never slices JSON or
   presents a retained prefix as complete.
@@ -112,6 +112,15 @@ overlay root returns `failed(relative_overlay_triplet_root)`, and a relative `vc
   selected triplet through the same bounded CMake-input admission as its
   portfile. An over-limit triplet returns
   `unknown(triplet_file_size_limit_exceeded)`; no prefix establishes facts.
+- **Patch reachability and orphan identity fail closed.** A definitely active
+  `return()` stops later extraction; a conditionally active one returns
+  `unknown(patches_execution_uncertain)`. If a declared patch path retains an
+  unresolved variable, orphan inventory is suppressed and reported as
+  `unknown(orphan_scan_incomplete)` with
+  `orphan_scan_stop_cause: unresolved_patch_identity`.
+- **Projected CMake traces remain auditable.** Oversized trace results retain a
+  bounded trace-path identity and enumerate exact omissions for `include_chain`,
+  `records`, `executed_lines`, and `files_in_trace`.
 - **CMake trace parsing is json-v1 only.** An explicit header with another major returns
   `unknown(unsupported_trace_version)` and no partial records.
 - **`vcpkg_last_failure` bounds work before it builds the response.** One call examines at most 1024

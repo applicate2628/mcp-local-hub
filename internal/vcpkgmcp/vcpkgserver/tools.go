@@ -20,7 +20,7 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
 
-const resultProjectionDescription = " Every successful result is measured as indented JSON and is bounded to 256 KiB; an oversized complete result retains its package-owned causal core and adds result_projection with explicit omissions."
+const resultProjectionDescription = " Every successful result is bounded to 256 KiB; aggregate-heavy results are admitted before full JSON materialization, and an oversized complete result retains its package-owned causal core with result_projection explicit omissions."
 
 func pinStatusReasonVocabularies() (perPort, batch, noPortDirs, tooManyPortDirs, relativePortDir, commitPinAbbreviated, refUnresolvable, networkDisabled string) {
 	registry := pinstatus.PublicReasonRegistry()
@@ -380,10 +380,11 @@ func registerTools(vs *VcpkgServer) error {
 			"silently presented as a complete one. " +
 			"portfile.cmake is read through a bounded stream: a too-large file returns " +
 			"unknown(portfile_size_limit_exceeded), never a parsed prefix. Orphan scan limits, " +
-			"directory unreadability, and cancellation return unknown(orphan_scan_incomplete) with " +
+			"an unresolved patch identity, directory unreadability, traversal limits, and cancellation return unknown(orphan_scan_incomplete) with " +
 			"orphan_scan_stop_cause. PATCHES inside a function() or macro() body, or carried through a declared " +
 			"function/macro invocation such as ${ARGN}, returns unknown(patches_deferred_command_body); declaration " +
-			"bodies and calls are not modeled. " +
+			"bodies and calls are not modeled. A conditionally active return() before later PATCHES returns " +
+			"unknown(patches_execution_uncertain); a definitely active return stops extraction. " +
 			"port_dir MUST be absolute (a relative one would bind to the hub daemon's working directory and " +
 			"answer about a different port) -> failed(relative_port_dir). An unreadable port_dir is " +
 			"unknown(port_dir_unreadable), NEVER the verified-absence reason port_dir_missing. " +

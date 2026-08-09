@@ -2,12 +2,44 @@ package publicresult
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
 
 type measuredResult struct {
 	Text string `json:"text"`
+}
+
+type admissionResult struct {
+	fullMarshalCalls *int
+}
+
+func (r admissionResult) PublicResultProjection() any {
+	return struct {
+		ResultProjection Projection `json:"result_projection"`
+	}{MinimalProjection("payload")}
+}
+
+func (r admissionResult) PublicResultRequiresProjection(int) bool { return true }
+
+func (r admissionResult) MarshalJSON() ([]byte, error) {
+	(*r.fullMarshalCalls)++
+	return nil, errors.New("full result must not be materialized after pre-admission rejects it")
+}
+
+func TestMarshalIndentProjectsBeforeFullMarshalWhenAdmissionRejects(t *testing.T) {
+	fullMarshalCalls := 0
+	body, err := MarshalIndent(admissionResult{fullMarshalCalls: &fullMarshalCalls})
+	if err != nil {
+		t.Fatalf("MarshalIndent: %v", err)
+	}
+	if fullMarshalCalls != 0 {
+		t.Fatalf("full MarshalJSON calls = %d, want 0", fullMarshalCalls)
+	}
+	if !strings.Contains(string(body), `"result_projection"`) {
+		t.Fatalf("body = %s, want projected result", body)
+	}
 }
 
 func (r measuredResult) PublicResultProjection() any {

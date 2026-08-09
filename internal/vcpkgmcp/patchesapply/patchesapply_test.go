@@ -403,14 +403,17 @@ vcpkg_from_github(
 	// package must preserve that uncertainty rather than asserting missing.
 	t.Run("unresolvable_without_vcpkg_root", func(t *testing.T) {
 		res := ApplyOrder(Args{PortDir: portDir, Triplet: "x64-windows", PortName: "licensepp"})
-		if res.Status != evidence.StatusOK {
-			t.Fatalf("status = %v, want ok; result=%+v", res.Status, res)
+		if res.Status != evidence.StatusUnknown || res.Reason != ReasonOrphanScanIncomplete {
+			t.Fatalf("status/reason = %v/%v, want unknown/orphan_scan_incomplete; result=%+v", res.Status, res.Reason, res)
 		}
 		if len(res.Applied) != 0 {
 			t.Errorf("unresolved path must not be asserted applied, got %+v", res.Applied)
 		}
 		if len(res.Missing) != 0 {
 			t.Errorf("unresolved path must not be asserted missing, got %+v", res.Missing)
+		}
+		if len(res.Orphaned) != 0 || res.OrphanScanStopCause != OrphanScanStopUnresolvedPatchIdentity {
+			t.Errorf("unresolved identity must suppress orphan conclusions, got %+v", res)
 		}
 		u := findUndecidable(res, "${_test_builtin_port_dir}/add-stdint.diff")
 		if u == nil {

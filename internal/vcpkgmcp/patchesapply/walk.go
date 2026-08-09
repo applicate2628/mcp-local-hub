@@ -40,6 +40,7 @@ const (
 	parserStructuralNone parserStructuralSignal = iota
 	parserStructuralExpressionUnparsable
 	parserStructuralDeferredBody
+	parserStructuralExecutionUncertain
 )
 
 func declaredPatchFromSemanticItem(item semanticItem) declaredPatch {
@@ -140,6 +141,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 	var loopScopes []string
 	declaredCommands := map[string]struct{}{}
 	deferredCommandBody := false
+	executionUncertain := false
 	for _, st := range stmts {
 		if declarationDepth > 0 {
 			if containsPatchesKeyword(st.Args) {
@@ -159,6 +161,8 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 				deferredCommandBody = true
 			}
 			switch st.Name {
+			case "return":
+				executionUncertain = true
 			case "foreach", "while":
 				loopScopes = append(loopScopes, st.Name)
 			case "endforeach":
@@ -225,6 +229,15 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 				return nil, false, parserStructuralExpressionUnparsable
 			}
 			frames = frames[:len(frames)-1]
+		case "return":
+			switch active() {
+			case TriTrue:
+				return entries, sawPatchesKeyword, parserStructuralNone
+			case TriUnknown:
+				return nil, false, parserStructuralExecutionUncertain
+			case TriFalse:
+				continue
+			}
 		case "set":
 			handleSet(st.Args, env, active(), guardText(), activeUnresolved())
 		case "get_filename_component":
@@ -258,6 +271,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 	}
 	if deferredCommandBody {
 		return entries, sawPatchesKeyword, parserStructuralDeferredBody
+	}
+	if executionUncertain {
+		return nil, false, parserStructuralExecutionUncertain
 	}
 	return entries, sawPatchesKeyword, parserStructuralNone
 }

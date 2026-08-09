@@ -142,6 +142,9 @@ const (
 	// function or macro declaration or invocation boundary. Static analysis
 	// never executes declaration bodies for their side effects.
 	ReasonPatchesDeferredCommandBody Reason = "patches_deferred_command_body"
+	// ReasonPatchesExecutionUncertain: a return() may or may not execute, so
+	// statements after it cannot be classified by a static linear walk.
+	ReasonPatchesExecutionUncertain Reason = "patches_execution_uncertain"
 
 	// --- Evidence-integrity reasons -------------------------------------
 	// Each of the three below reports "the filesystem declined to answer a
@@ -163,9 +166,9 @@ const (
 	// report, and a permission error is not evidence that a file is absent.
 	ReasonPatchPathUnreadable Reason = "patch_path_unreadable"
 	// ReasonOrphanScanIncomplete: a directory under the port dir could not be
-	// completely scanned because it was unreadable, a traversal budget was
-	// reached, or the request was cancelled. The orphan inventory is therefore
-	// a PREFIX of the truth and must not report an overall ok verdict.
+	// completely classified because a referenced patch identity was unresolved,
+	// a directory was unreadable, a traversal budget was reached, or the request
+	// was cancelled. No partial orphan inventory may report an overall ok verdict.
 	ReasonOrphanScanIncomplete Reason = "orphan_scan_incomplete"
 )
 
@@ -193,17 +196,19 @@ type UnreadablePath struct {
 	Error string `json:"error,omitempty"`
 }
 
-// OrphanScanStopCause is the typed resource boundary that stopped orphan
-// traversal. It remains populated when another evidence-integrity reason has
-// higher verdict precedence, so the incomplete traversal is never hidden.
+// OrphanScanStopCause is the typed boundary that prevented a complete orphan
+// inventory: either reference identity was unresolved or traversal stopped.
+// It remains populated when another evidence-integrity reason has higher
+// verdict precedence, so incomplete coverage is never hidden.
 type OrphanScanStopCause string
 
 const (
-	OrphanScanStopDirectoryUnreadable OrphanScanStopCause = "directory_unreadable"
-	OrphanScanStopEntryLimit          OrphanScanStopCause = "entry_limit_exceeded"
-	OrphanScanStopDirectoryLimit      OrphanScanStopCause = "directory_limit_exceeded"
-	OrphanScanStopDepthLimit          OrphanScanStopCause = "depth_limit_exceeded"
-	OrphanScanStopCancelled           OrphanScanStopCause = "cancelled"
+	OrphanScanStopDirectoryUnreadable     OrphanScanStopCause = "directory_unreadable"
+	OrphanScanStopEntryLimit              OrphanScanStopCause = "entry_limit_exceeded"
+	OrphanScanStopDirectoryLimit          OrphanScanStopCause = "directory_limit_exceeded"
+	OrphanScanStopDepthLimit              OrphanScanStopCause = "depth_limit_exceeded"
+	OrphanScanStopCancelled               OrphanScanStopCause = "cancelled"
+	OrphanScanStopUnresolvedPatchIdentity OrphanScanStopCause = "unresolved_patch_identity"
 )
 
 // AppliedPatch is one patch that WOULD be applied for this triplet, in the
@@ -494,6 +499,7 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 		return finalizePostTripletResult(res, ev, unreadable, sawPatches, structural)
 	}
 	referenced := map[string]bool{}
+	orphanIdentityIncomplete := false
 	ordinal := 0
 	for _, e := range entries {
 		resolvedPath := resolvePatchPath(e.expanded, portDir)
@@ -521,6 +527,7 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 		// the evaluator does not have. Path uncertainty takes precedence over a
 		// decidable control-flow guard.
 		if len(pathUnresolved) != 0 {
+			orphanIdentityIncomplete = true
 			res.Undecidable = append(res.Undecidable, UndecidablePatch{
 				Filename:       e.raw,
 				ResolvedPath:   resolvedPath,
@@ -563,6 +570,10 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 			})
 		}
 	}
+	if orphanIdentityIncomplete {
+		res.OrphanScanStopCause = OrphanScanStopUnresolvedPatchIdentity
+		return finalizePostTripletResult(res, ev, unreadable, sawPatches, parserStructuralNone)
+	}
 
 	orphans, orphanFailures, orphanStop := findOrphans(ctx, deps, portDir, referenced)
 	res.Orphaned = orphans
@@ -593,6 +604,9 @@ func finalizePostTripletResult(res Result, ev evidence.Evidence, unreadable []Un
 	case structural == parserStructuralDeferredBody:
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPatchesDeferredCommandBody
+	case structural == parserStructuralExecutionUncertain:
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonPatchesExecutionUncertain
 	case !sawPatches:
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonNoPatchesDeclared

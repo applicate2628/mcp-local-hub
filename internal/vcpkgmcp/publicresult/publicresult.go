@@ -78,10 +78,22 @@ type Projectable interface {
 	PublicResultProjection() any
 }
 
-// MarshalIndent first measures the ordinary public result and, only when it
-// exceeds MaxEncodedBytes, asks its package-owned projector for a minimal
-// result. It never slices JSON or reflects over fields to invent a projection.
+// ProjectionAdmitter lets a semantic owner prove that an aggregate cannot fit
+// the public budget without first materializing its complete JSON encoding.
+// Implementations must be deterministic: true must prove the complete result
+// cannot fit, while false must leave MarshalIndent with a bounded input.
+type ProjectionAdmitter interface {
+	PublicResultRequiresProjection(limit int) bool
+}
+
+// MarshalIndent asks an aggregate-aware owner for bounded pre-admission when
+// available, otherwise measures the ordinary public result. Oversized values
+// use the package-owned projection; JSON is never sliced or reflected over.
 func MarshalIndent(result Projectable) ([]byte, error) {
+	if admitter, ok := result.(ProjectionAdmitter); ok && admitter.PublicResultRequiresProjection(MaxEncodedBytes) {
+		return marshalProjection(result)
+	}
+
 	body, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return nil, err
@@ -90,7 +102,11 @@ func MarshalIndent(result Projectable) ([]byte, error) {
 		return body, nil
 	}
 
-	body, err = json.MarshalIndent(result.PublicResultProjection(), "", "  ")
+	return marshalProjection(result)
+}
+
+func marshalProjection(result Projectable) ([]byte, error) {
+	body, err := json.MarshalIndent(result.PublicResultProjection(), "", "  ")
 	if err != nil {
 		return nil, err
 	}
