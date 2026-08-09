@@ -239,6 +239,41 @@ func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
 	}
 }
 
+func TestGuiCmd_TrayRuntimePolicyFromRoutedInvocation(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want bool
+	}{
+		{name: "bare invocation routes to tray-enabled GUI", argv: []string{"mcphub"}, want: true},
+		{name: "explicit GUI opt-out suppresses tray", argv: []string{"mcphub", "gui", "--no-tray"}, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			routed := RouteInvocationArgs(tt.argv)
+			root := NewRootCmd()
+			guiCmd, remaining, err := root.Find(routed[1:])
+			if err != nil {
+				t.Fatalf("find routed command for %v: %v", routed, err)
+			}
+			if guiCmd.Name() != "gui" {
+				t.Fatalf("routed command for %v = %q, want gui", routed, guiCmd.Name())
+			}
+			if err := guiCmd.Flags().Parse(remaining); err != nil {
+				t.Fatalf("parse routed GUI args %v: %v", remaining, err)
+			}
+			noTray, err := guiCmd.Flags().GetBool("no-tray")
+			if err != nil {
+				t.Fatalf("GetBool(no-tray): %v", err)
+			}
+			if got := shouldRunTray(noTray); got != tt.want {
+				t.Fatalf("shouldRunTray(noTray=%t) = %t, want %t", noTray, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestSerenaBackendLossReconcileTicker_NilTriggerWaitsForInterval(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

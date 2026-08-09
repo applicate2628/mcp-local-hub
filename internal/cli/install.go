@@ -38,8 +38,11 @@ func newInstallCmdReal() *cobra.Command {
 	var all bool
 	var allClients bool
 	var reconcileHubMode bool
+	var reconcileMCPFront bool
+	var rollbackMCPFront bool
 	var upgrade bool
 	var check bool
+	var noClientConfig bool
 	c := &cobra.Command{
 		Use:   "install",
 		Short: "Install an MCP server as shared daemon(s)",
@@ -52,16 +55,17 @@ What install does:
   3. Starts the scheduler tasks immediately (won't wait for next logon)
   4. Writes a timestamped backup for each client config it touches
   5. Patches each client's config per the manifest's client_bindings list:
-     default clients are Claude Code, Codex CLI, and Cursor; Gemini CLI,
+     default clients are Claude Code and Codex CLI; Cursor, Gemini CLI,
      Qwen CLI, VS Code, Antigravity, Zed, Kiro, Windsurf, Cline, Kilo Code,
      OpenCode, Hermes, and OpenClaw are opt-in via --clients or --all-clients
 
 Examples:
-  mcphub install --server serena               # default clients: claude-code,codex-cli,cursor
+  mcphub install --server serena               # default clients: claude-code,codex-cli
   mcphub install --server serena --clients qwen-cli,vscode
   mcphub install --server serena --all-clients # every manifest client binding
   mcphub install --server serena --daemon codex # install only one daemon
   mcphub install --server serena --dry-run     # preview actions, change nothing
+  mcphub install --server fetch --no-client-config # materialize daemon only
   mcphub install --all                         # install every shipped manifest
   mcphub install --upgrade                     # stop daemons, copy this binary, restart
 
@@ -87,6 +91,37 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// redirected). The restore defer clears the process-level port.
 			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
 
+			// codex bot PR #588 P2 closure: --rollback is a MODIFIER of
+			// --reconcile-mcp-front, not a mode of its own. Its dependency
+			// must be validated BEFORE any mode dispatch, not after — the
+			// per-mode exclusivity lists below each enumerate the OTHER
+			// mode flags, and adding `rollbackMCPFront` to each of them is
+			// the shape that already failed: `--upgrade --rollback` and
+			// `--reconcile-hub-mode --rollback` both fell through to a real,
+			// mutating upgrade/reconcile with `--rollback` silently ignored.
+			// One gate at the top is the single owner: every present and
+			// future mode is covered by construction, so an invalid rollback
+			// combination can never execute an unrelated mutating operation.
+			if rollbackMCPFront && !reconcileMCPFront {
+				return fmt.Errorf("--rollback requires --reconcile-mcp-front")
+			}
+
+			// codex bot PR #588 P1 closure, same shape and same reason as the
+			// --rollback gate above. --check promises a READ-ONLY readiness
+			// report ("print the report and exit 0 WITHOUT installing,
+			// bootstrapping, or mutating anything"), but its own handler sits
+			// BELOW the mode dispatches — so --check combined with --upgrade,
+			// --reconcile-hub-mode, or --reconcile-mcp-front never reached it
+			// and performed the real, mutating operation instead. A flag whose
+			// contract is "change nothing" silently rewriting client configs is
+			// the worst form of this defect, so the gate is hoisted to the top
+			// where it covers every mode by construction rather than being
+			// re-enumerated in each mode's exclusivity list (the shape that
+			// already failed once here).
+			if check && (upgrade || reconcileHubMode || reconcileMCPFront) {
+				return fmt.Errorf("--check is mutually exclusive with --upgrade/--reconcile-hub-mode/--reconcile-mcp-front; --check is a read-only readiness probe and those modes mutate")
+			}
+
 			// Bug-bash A7 minimal closure (#4): --upgrade is the
 			// one-shot binary replacement entry point. Pre-A7 the
 			// operator had to stop daemons, run `mcphub setup` to
@@ -103,8 +138,8 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				// than implementing a half-baked preview; the upgrade
 				// flow is short enough that the operator can run
 				// `mcphub stop --all && mcphub status` for a preview.
-				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || reconcileHubMode || dryRun {
-					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--reconcile-hub-mode/--dry-run")
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || noClientConfig || reconcileHubMode || reconcileMCPFront || dryRun {
+					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--no-client-config/--reconcile-hub-mode/--reconcile-mcp-front/--dry-run")
 				}
 				// v0.6 Phase F: the v0.4.x→v0.5.0 forward-migration engine and
 				// the `--rollback-to-legacy` demotion path are deleted (there
@@ -115,6 +150,20 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				// and the fresh-install binary-copy fallback (no state on
 				// disk). Decision tree in dispatchUpgrade.
 				return dispatchUpgrade(cmd)
+			}
+			if noClientConfig {
+				if server == "" {
+					return fmt.Errorf("--no-client-config requires --server")
+				}
+				if strings.TrimSpace(clientsFlag) != "" || allClients {
+					return fmt.Errorf("--no-client-config is mutually exclusive with --clients/--all-clients")
+				}
+				if all {
+					return fmt.Errorf("--no-client-config is mutually exclusive with --all")
+				}
+				if reconcileHubMode {
+					return fmt.Errorf("--no-client-config is mutually exclusive with --reconcile-hub-mode")
+				}
 			}
 			// codex bot phase5 r3 P1 closure on PR #160:
 			// --reconcile-hub-mode runs the bidirectional install
@@ -140,8 +189,32 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if strings.TrimSpace(clientsFlag) != "" || allClients {
 					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --clients/--all-clients; reconcile walks every (manifest, client) tuple from disk")
 				}
+				if reconcileMCPFront {
+					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --reconcile-mcp-front")
+				}
 				return runReconcileHubMode(cmd, dryRun)
 			}
+			// Sub-increment 2a (work-items/decisions/2026-07-25-increment2-mcp-
+			// front-port-ownership.md): --reconcile-mcp-front is the ONE
+			// operator-gated write path that rewrites in-scope client
+			// serena/LSP entries from the GUI port to the settings-owned
+			// mcp_front.port (the supervisor-managed `mcphub route` front
+			// daemon's port) — nothing else in this codebase runs this
+			// automatically. --rollback reverses the most recent such run.
+			if reconcileMCPFront {
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients {
+					return fmt.Errorf("--reconcile-mcp-front is mutually exclusive with --server/--daemon/--all/--clients/--all-clients")
+				}
+				if dryRun {
+					return fmt.Errorf("--reconcile-mcp-front does not support --dry-run yet (it always proves route liveness before writing; use --rollback to reverse a run)")
+				}
+				return runReconcileMCPFront(cmd, rollbackMCPFront)
+			}
+			// NOTE: the `--rollback requires --reconcile-mcp-front` gate is
+			// NOT repeated here — it now runs at the TOP of RunE, before any
+			// mode dispatch (see the codex bot PR #588 P2 comment there). A
+			// second copy at this depth is unreachable and would re-create
+			// the impression that late validation is sufficient.
 			// --check: read-only readiness probe. Print the report (blockers +
 			// optional advisories) for --server and exit 0 WITHOUT installing,
 			// bootstrapping, or mutating anything. Handled BEFORE the bootstrap
@@ -150,10 +223,22 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if server == "" {
 					return fmt.Errorf("--check requires --server")
 				}
-				if all || daemonFilter != "" {
+				if all || (daemonFilter != "" && !noClientConfig) {
 					return fmt.Errorf("--check is mutually exclusive with --all/--daemon")
 				}
-				rep, rerr := api.CheckServerReadinessByName(server)
+				// --check must report on the SAME client scope the install it
+				// previews would use, so an explicitly targeted opt-in client's
+				// broken binding is surfaced here instead of only at install time.
+				include, err := parseInstallClientsFlag(clientsFlag, allClients)
+				if err != nil {
+					return err
+				}
+				rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{
+					DaemonFilter:           daemonFilter,
+					ClientsInclude:         include,
+					IncludeAllClients:      allClients,
+					SkipClientConfigWrites: noClientConfig,
+				})
 				if rerr != nil {
 					return rerr
 				}
@@ -168,15 +253,17 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			//   3. Non-interactive without canonical dir on PATH —
 			//      return the guidance error (preflight would produce
 			//      the same message).
-			if _, err := exec.LookPath(mcphubShortName); err != nil {
-				switch {
-				case targetDirOnPath():
-					if err := Bootstrap(cmd.OutOrStdout()); err != nil {
-						return err
-					}
-				default:
-					if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
-						return err
+			if !dryRun {
+				if _, err := exec.LookPath(mcphubShortName); err != nil {
+					switch {
+					case targetDirOnPath():
+						if err := Bootstrap(cmd.OutOrStdout()); err != nil {
+							return err
+						}
+					default:
+						if err := maybeBootstrapInteractively(cmd.OutOrStdout(), os.Stdin); err != nil {
+							return err
+						}
 					}
 				}
 			}
@@ -194,7 +281,6 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
 					Writer:            cmd.OutOrStdout(),
-					GUIPort:           resolveInstallGUIPort(),
 				})
 				failed := 0
 				for _, r := range results {
@@ -219,39 +305,61 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// `mcphub binary` requirement reflects the just-bootstrapped state.
 			// Print blockers (with guided fixes) and STOP if any; print
 			// unset-optional-secret advisories and PROCEED to install.
-			rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{DaemonFilter: daemonFilter})
+			// Parse the client selection BEFORE readiness: readiness must
+			// validate the bindings this very install will apply, not the
+			// default-install set. An explicitly targeted opt-in client (e.g.
+			// `--clients cursor`) whose binding the planner rejects has to show
+			// up as a readiness blocker, not as a surprise install failure.
+			include, err := parseInstallClientsFlag(clientsFlag, allClients)
+			if err != nil {
+				return err
+			}
+			rep, rerr := api.CheckServerReadinessByNameWithScope(server, api.AdmissionScope{
+				DaemonFilter:           daemonFilter,
+				ClientsInclude:         include,
+				IncludeAllClients:      allClients,
+				SkipClientConfigWrites: noClientConfig,
+			})
 			if rerr != nil {
 				return rerr
 			}
 			if blocked := renderReadinessReport(cmd.OutOrStdout(), rep); blocked {
 				return fmt.Errorf("%s is not ready to install — fix the blocker(s) above (or run `mcphub install --server %s --check` to re-print them)", server, server)
 			}
-			include, err := parseInstallClientsFlag(clientsFlag, allClients)
-			if err != nil {
-				return err
-			}
 			a := api.NewAPI()
 			return a.Install(api.InstallOpts{
-				Server:            server,
-				DaemonFilter:      daemonFilter,
-				ClientsInclude:    include,
-				IncludeAllClients: allClients,
-				DryRun:            dryRun,
-				Writer:            cmd.OutOrStdout(),
-				GUIPort:           resolveInstallGUIPort(),
+				Server:                 server,
+				DaemonFilter:           daemonFilter,
+				ClientsInclude:         include,
+				IncludeAllClients:      allClients,
+				SkipClientConfigWrites: noClientConfig,
+				DryRun:                 dryRun,
+				Writer:                 cmd.OutOrStdout(),
+				GUIPort:                resolveInstallGUIPort(),
 			})
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")
 	c.Flags().StringVar(&daemonFilter, "daemon", "", "install only this daemon (+ its client bindings); omit to install all")
-	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli,cursor)")
+	c.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated subset of clients (default: claude-code,codex-cli)")
 	c.Flags().BoolVar(&allClients, "all-clients", false, "install into every client binding declared by the manifest")
+	c.Flags().BoolVar(&noClientConfig, "no-client-config", false, "materialize the selected server daemon(s) without reading or writing MCP client configs")
 	c.Flags().BoolVar(&dryRun, "dry-run", false, "print planned actions without making changes")
 	c.Flags().BoolVar(&all, "all", false, "install every manifest under servers/")
 	c.Flags().BoolVar(&reconcileHubMode, "reconcile-hub-mode", false,
 		"run the bidirectional hub-endpoint reconciler against the current gui_server.hub_endpoint_enabled setting; "+
 			"rewrites every client config to/from the mcphub-hub aggregate entry. "+
 			"Run AFTER flipping the Settings toggle and restarting the hub.")
+	c.Flags().BoolVar(&reconcileMCPFront, "reconcile-mcp-front", false,
+		"rewrite in-scope client serena/LSP entries to the settings-owned mcp_front.port "+
+			"(the supervisor-managed `mcphub route` front daemon), instead of the GUI's own port. "+
+			"Fails closed unless a LIVE SUPERVISOR is serving mcp_front.port through its built-in "+
+			"route daemon: a hand-started `mcphub route` answers the readiness probe but nothing "+
+			"restarts it, so start `mcphub supervise` (or enable autostart) first. "+
+			"Combine with --rollback to reverse the most recent run.")
+	c.Flags().BoolVar(&rollbackMCPFront, "rollback", false,
+		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+
+			"(restores serena entries from their captured backups; removes/restores LSP router entries).")
 	c.Flags().BoolVar(&upgrade, "upgrade", false,
 		"upgrade the canonical mcphub binary at ~/.local/bin/mcphub.exe to the currently-running build: "+
 			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+
@@ -1281,41 +1389,11 @@ func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
 	return results, nil
 }
 
-// upgradeNoClientWriteSentinel is a single empty-string entry passed as
-// InstallOpts.ClientsInclude to materialize a server's supervisor-intent rows
-// WITHOUT rewriting any client config during the legacy-scheduler upgrade
-// migration.
-//
-// bot r33 P2 closure on PR #288: in the legacy migration path,
-// upgradeInstallServer is used ONLY to absorb matched legacy scheduler daemons
-// into supervisor intent AFTER the binary copy — it must NOT touch client
-// configs (the pre-v0.6 upgrade only stopped/copied/restarted daemons). An
-// empty/nil ClientsInclude makes api.installClientPredicate fall back to
-// clients.DefaultInstallClientNames() (claude-code, codex-cli, cursor), so the
-// migration would ADD/OVERWRITE those clients' entries even for an operator who
-// installed only an opt-in client or hand-customized those configs.
-//
-// installClientPredicate's contract (internal/api/install.go) is the in-scope
-// lever: when ClientsInclude is NON-empty it is used verbatim, and each entry
-// that trims to "" is silently dropped BEFORE the unknown-client check — the
-// same empty-entry tolerance parseInstallClientsFlag relies on. A single ""
-// entry therefore yields a non-empty slice (len 1 → not the default branch)
-// whose selected-client set is empty → zero ClientUpdates in the plan, while
-// the supervisor-intent / scheduler / daemon materialization (built
-// unconditionally before the client loop) still runs.
-//
-// Scope note: the cleanest fix would be a named api-side knob (e.g.
-// InstallOpts.SkipClientConfig bool); that change lives in internal/api which
-// is out of this lane's file scope, so this preserve-no-client-writes sentinel
-// is the in-scope equivalent. Tracked as a follow-up to replace the sentinel
-// with an explicit option.
-var upgradeNoClientWriteSentinel = []string{""}
-
 // upgradeServerInstallFn is a narrow test seam ONE level below
 // upgradeInstallServerFn: it intercepts the api.InstallOpts the production
 // upgradeInstallServer body constructs, so a test can assert the call site
-// passes the no-client-write sentinel (FIX 3, bot r33 P2 on PR #288) without
-// driving a real install. nil → the real api.NewAPI().Install.
+// passes the typed no-client-write policy without driving a real install.
+// nil → the real api.NewAPI().Install.
 var upgradeServerInstallFn func(api.InstallOpts) error
 
 func resolveInstallGUIPort() int {
@@ -1339,10 +1417,10 @@ func upgradeInstallServer(server string, w io.Writer) error {
 		return upgradeInstallServerFn(server, w)
 	}
 	opts := api.InstallOpts{
-		Server:         server,
-		ClientsInclude: upgradeNoClientWriteSentinel,
-		Writer:         w,
-		GUIPort:        resolveInstallGUIPort(),
+		Server:                 server,
+		SkipClientConfigWrites: true,
+		Writer:                 w,
+		GUIPort:                resolveInstallGUIPort(),
 	}
 	if upgradeServerInstallFn != nil {
 		return upgradeServerInstallFn(opts)

@@ -246,6 +246,53 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 	})
 }
 
+// SetSerenaRouterReadOnly wires the resolver and session router for the
+// standalone `mcphub route` front daemon's restricted control-plane
+// composition. The constructor exposes no registry writer, client-config
+// writer, auto-register capability, cutover primitive, general
+// supervisor-intent writer, or GUI-owned shared-log sink.
+//
+// AutoRegisterFn remains nil, so an unregistered workspace receives the
+// existing 503 "register workspace first" response without mutating
+// workspaces.yaml or supervisor-intent. WakeIdleFn is the sole narrow
+// supervisor-intent capability: it is bound only to
+// api.WakeIdleSerenaDaemon. At the pre-forward request cutover that owner may
+// compare-and-clear the current stop only when its reason is
+// api.IntentReasonIdle; operator, user-disabled, chronic-failure, clock-skew,
+// and raced replacement reasons are preserved, reconciliation/readiness must
+// complete before forwarding, and refusal returns 503 without forwarding.
+//
+// Route-owned session-expiry and Serena backend-loss reconciliation are
+// composed by internal/cli/runRoute, not by this constructor. They are
+// context-bounded and mutate only the route process's in-memory stores.
+//
+// This function does not change SetSerenaRouterProduction or existing GUI
+// wiring; its name is retained for source compatibility.
+func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResolver, sessions *serena_routing.SessionRouter) {
+	if s == nil || resolver == nil || sessions == nil {
+		return
+	}
+	wakeAPI := api.NewAPI()
+	s.SetSerenaRouterDeps(&serenaRouterDeps{
+		Resolver: resolver,
+		Sessions: sessions,
+		// AutoRegisterFn deliberately nil — see doc comment.
+		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
+			return wakeAPI.WakeIdleSerenaDaemonWithAuditSink(ctx, taskName, port, who, routeReadOnlySink)
+		},
+		//
+		// AuditFn (P1-1 fix, adversarial cross-family review): every other
+		// caller leaves this nil so serenaRouterHandler's own default falls
+		// back to api.LogHubMcpEvent, which appends to the SHARED
+		// <state-dir>/hub-mcp.log the GUI process owns. That default is wrong
+		// for THIS constructor specifically — the whole point of the
+		// standalone route daemon is that it never writes GUI-owned shared
+		// state — so it is wired explicitly here to routeReadOnlySink
+		// (route_readonly_audit.go), which never touches hub-mcp.log.
+		AuditFn: routeReadOnlySink,
+	})
+}
+
 // SetSerenaRouterDeps wires the production resolver + session router.
 // CLI boot (cmd/mcphub) calls this after constructing Agent A1's
 // adapters from the live api.Registry. Calling with nil clears the
@@ -428,7 +475,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	// method (Finding 3). A Streamable HTTP client sends DELETE /serena/mcp
 	// on shutdown; without this branch it would 405 and leak the upstream
 	// daemon session + the router-owned bindings until idle expiry. GET and
-	// every other non-POST method keep their current 405 (Allow: POST).
+	// every other non-POST method keep their current 405 (Allow: POST, DELETE).
 	if r.Method == http.MethodDelete {
 		s.handleSerenaDelete(w, r)
 		return
@@ -1014,7 +1061,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				sid := sessionID
 				sessionLive = func() bool { return s.serenaRouterSessions.known(sid) }
 			}
-			daemonSessionID, daemonProtocolVersion, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
+			daemonSessionID, daemonProtocolVersion, daemonSessionCached, hsErr := s.serenaDaemonSessions.resolveDaemonSession(r.Context(), httpClient, upstreamURL, sessionID, ws, clientProtocolVersion, upstreamTimeout, sessionLive)
 			if hsErr != nil {
 				// Finding 4: the router session was DELETEd/swept during the handshake.
 				// resolveDaemonSession already best-effort-released the just-minted daemon
@@ -1282,6 +1329,22 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			_, _ = io.Copy(w, upstreamResp.Body)
+			// A non-SSE 404 from a request that USED a cached daemon session is the
+			// daemon's protocol-level "unknown session" signal. The upstream response
+			// is already copied exactly once; do not replay a potentially
+			// non-idempotent tools/call. Instead, let the next client request perform
+			// the ordinary handshake after removing only the precise stale cache entry.
+			//
+			// The match prevents an old response from deleting a concurrent newer
+			// handshake, workspace switch, or reservation. Other 4xx/5xx responses,
+			// successful responses, and SSE stay untouched.
+			if upstreamResp.StatusCode == http.StatusNotFound && daemonSessionCached &&
+				s.serenaDaemonSessions.unbindIfMatch(sessionID, ws.WorkspaceKey, daemonSessionID, daemonProtocolVersion) {
+				_ = auditFn("warn", "serena-daemon-session-invalidated-unknown-session", map[string]any{
+					"status":  upstreamResp.StatusCode,
+					"trigger": "cached-daemon-session-404",
+				})
+			}
 			return
 		},
 	)

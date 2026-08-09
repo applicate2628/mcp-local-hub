@@ -67,7 +67,7 @@ func (f *fakeSecretsAPI) Delete(name string, confirm bool) error {
 
 func newServerWithSecretsFake(t *testing.T, fake *fakeSecretsAPI) *Server {
 	t.Helper()
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.secrets = fake
 	return s
 }

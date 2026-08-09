@@ -1,11 +1,102 @@
 package api
 
 import (
+	"context"
+	"errors"
+	"io"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api/apitest"
 )
+
+func TestRegisterSupervisedDescriptorReleaseSettlementMatrix(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		upsertErr   func(error) error
+		wantForward bool
+		wantUndo    int
+		wantPost    int
+	}{
+		{name: "clean", wantPost: 3},
+		{name: "ordinary-pre-apply", upsertErr: func(cause error) error { return cause }, wantUndo: 1},
+		{name: "applied-release", upsertErr: func(cause error) error {
+			return markAppliedLockReleaseUnconfirmed(errors.Join(ErrLockReleaseUnconfirmed, cause))
+		}, wantForward: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			canonical := mustCanonical(t, t.TempDir())
+			wsKey := WorkspaceKey(canonical)
+			manifest := nineLanguageManifest()
+			manifest.ClientBindings = nil
+			descriptorPresent := false
+			undoCalls := 0
+			postCalls := 0
+			cause := errors.New("injected descriptor upsert failure")
+			deps := supervisorPostWriteDeps{
+				upsertIntent: func(WorkspaceEntry, string) (compensation, error) {
+					descriptorPresent = true
+					undo := func() error {
+						undoCalls++
+						descriptorPresent = false
+						return nil
+					}
+					if tc.upsertErr != nil {
+						return undo, tc.upsertErr(cause)
+					}
+					return undo, nil
+				},
+				writeRunningIntent: func(string, stopIntentCompensationSink) (string, error) {
+					postCalls++
+					return "descriptor-matrix-task", nil
+				},
+				reconcile: func(context.Context, bool) (ReconcileResponse, error) {
+					postCalls++
+					return ReconcileResponse{}, nil
+				},
+				readiness: func(int, time.Duration) error {
+					postCalls++
+					return nil
+				},
+			}
+			tx := newRegistrationTransaction()
+			result, err := mustNewAPI(t).registerOneLanguageSupervised(
+				manifest, manifest.Languages[2], canonical, wsKey, "go",
+				RegisterOpts{SupervisedProxy: true, supervisorPostWriteDeps: deps, Writer: io.Discard},
+				NewRegistry(h.regPath), h.fakeSch, testClientFactory(), manifest.ClientBindings, io.Discard, tx,
+			)
+			var forward *RegisterForwardCommittedError
+			if got := errors.As(err, &forward); got != tc.wantForward {
+				t.Fatalf("forward=%t err=%v, want %t", got, err, tc.wantForward)
+			}
+			if tc.wantForward {
+				if !errors.Is(err, cause) || forward.Target != "supervisor-intent" || forward.Operation != "descriptor-release" {
+					t.Fatalf("forward=%#v err=%v", forward, err)
+				}
+				if result.Entry.WorkspaceKey != wsKey {
+					t.Fatalf("committed result=%+v, want workspace %s", result.Entry, wsKey)
+				}
+				if outcome := tx.CommitForward(); outcome.State != registrationTransactionCommitted {
+					t.Fatalf("CommitForward=%+v", outcome)
+				}
+			} else if err != nil {
+				if outcome := tx.Fail(err); outcome.State != registrationTransactionRolledBack {
+					t.Fatalf("rollback=%+v", outcome)
+				}
+			} else if outcome := tx.Commit(); !outcome.Committed() {
+				t.Fatalf("commit=%+v", outcome)
+			}
+			if descriptorPresent != (tc.wantUndo == 0) {
+				t.Fatalf("descriptor present=%t, want %t", descriptorPresent, tc.wantUndo == 0)
+			}
+			if undoCalls != tc.wantUndo || postCalls != tc.wantPost {
+				t.Fatalf("undo/post=%d/%d, want %d/%d", undoCalls, postCalls, tc.wantUndo, tc.wantPost)
+			}
+		})
+	}
+}
 
 func TestLSPSupervisorIntentUpsertRollbackRemovesOnlyItsDescriptor(t *testing.T) {
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))

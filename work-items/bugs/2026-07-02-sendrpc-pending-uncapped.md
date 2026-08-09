@@ -2,7 +2,7 @@
 
 - **status:** fixed
 - **fixed-by:** PR #493 (`8de5ed3a`) - `SendRPC` enforces `maxPendingRequests` and returns `ErrTooManyPending`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 - **fixed:** 2026-07-03 (branch fix/sendrpc-pending-cap) — SendRPC now enforces the same maxPendingRequests bound handlePOST uses, refused BEFORE the stdin write (pre-delivery, retry-safe). Regression: TestBackendLifecycle_SendRPCPendingCapRefusesPreDelivery (cap-refusal + drain-then-retry halves; negative-controlled).
 - **severity:** low
 - **filed:** 2026-07-02

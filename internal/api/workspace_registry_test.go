@@ -5,14 +5,85 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v3"
 	"mcp-local-hub/internal/config"
 )
+
+func TestWorkspaceEntryYAMLExactKeys(t *testing.T) {
+	base := WorkspaceEntry{
+		WorkspaceKey: "key", WorkspacePath: "path", Language: "go", Backend: "gopls-mcp",
+		Port: 9125, TaskName: "task", ClientEntries: map[string]string{"cursor": "entry"}, WeeklyRefresh: true,
+	}
+	full := base
+	full.Lifecycle = "ready"
+	full.LastMaterializedAt = time.Unix(1, 0).UTC()
+	full.LastToolsCallAt = time.Unix(2, 0).UTC()
+	full.LastError = "err"
+	full.RegisteredAt = time.Unix(3, 0).UTC()
+	full.RegisteredVia = "manual"
+	full.Languages = []string{"go"}
+	for _, tc := range []struct {
+		name  string
+		entry WorkspaceEntry
+		want  []string
+	}{
+		{name: "base", entry: base, want: []string{"backend", "client_entries", "language", "port", "task_name", "weekly_refresh", "workspace_key", "workspace_path"}},
+		{name: "full", entry: full, want: []string{"backend", "client_entries", "language", "languages", "last_error", "last_materialized_at", "last_tools_call_at", "lifecycle", "port", "registered_at", "registered_via", "task_name", "weekly_refresh", "workspace_key", "workspace_path"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := yaml.Marshal(tc.entry)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var doc yaml.Node
+			if err := yaml.Unmarshal(raw, &doc); err != nil {
+				t.Fatal(err)
+			}
+			if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
+				t.Fatalf("unexpected YAML document: %s", raw)
+			}
+			if got := sortedYAMLMappingKeys(doc.Content[0]); !slices.Equal(got, tc.want) {
+				t.Fatalf("keys=%v want=%v\n%s", got, tc.want, raw)
+			}
+			clientNode := yamlMappingValue(doc.Content[0], "client_entries")
+			if clientNode == nil || !slices.Equal(sortedYAMLMappingKeys(clientNode), []string{"cursor"}) {
+				t.Fatalf("client_entries keys drift: %v", clientNode)
+			}
+		})
+	}
+}
+
+func sortedYAMLMappingKeys(node *yaml.Node) []string {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	keys := make([]string, 0, len(node.Content)/2)
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		keys = append(keys, node.Content[i].Value)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func yamlMappingValue(node *yaml.Node, key string) *yaml.Node {
+	if node == nil || node.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return node.Content[i+1]
+		}
+	}
+	return nil
+}
 
 func TestRegistry_RoundtripEmpty(t *testing.T) {
 	dir := t.TempDir()

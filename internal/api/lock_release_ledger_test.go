@@ -2,15 +2,10 @@ package api
 
 import (
 	"errors"
-	"os"
-	"os/exec"
+	"fmt"
 	"path/filepath"
-	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
-
-	"mcp-local-hub/internal/api/apitest"
 
 	"github.com/gofrs/flock"
 )
@@ -25,274 +20,144 @@ func assertRegistryReleased(t testing.TB, release func() error) {
 	}
 }
 
-func TestLockRelease_ConcurrentOneShotMemoizesFailure(t *testing.T) {
-	path := filepath.Join(apitest.HardenedTempDir(t), "one-shot.lock")
-	cause := errors.New("synthetic unlock failure")
-	var calls atomic.Int32
-	release := newLedgeredFlockRelease(path, func() error {
-		calls.Add(1)
-		return cause
-	}, nil)
-
-	const callers = 32
-	results := make([]error, callers)
-	var wg sync.WaitGroup
-	for i := range results {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			results[i] = release()
-		}(i)
-	}
-	wg.Wait()
-
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("underlying unlock calls = %d, want 1", got)
-	}
-	for i, err := range results {
-		if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
-			t.Fatalf("result[%d] = %v, want sentinel and original cause", i, err)
+func TestRegistryLock_ReleaseFailureIsReportedAndReacquireFailsFast(t *testing.T) {
+	reg := NewRegistry(filepath.Join(t.TempDir(), "workspaces.yaml"))
+	lockPath := reg.LockPath()
+	unlockFailure := errors.New("injected registry unlock failure")
+	previous := flockUnlockFn
+	var stranded []*flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = append(stranded, fl)
+			return unlockFailure
 		}
-		if err != results[0] {
-			t.Fatalf("result[%d] is not the memoized first result", i)
-		}
-	}
-}
-
-func TestGhostRegistryLock_FailsLoudWithoutBlocking(t *testing.T) {
-	reg := NewRegistry(filepath.Join(apitest.HardenedTempDir(t), "workspaces.yaml"))
-	cause := errors.New("synthetic retained handle")
-	recorded := recordUnconfirmedLockRelease(reg.LockPath(), cause)
-
-	if release, locked, err := reg.TryLock(); release != nil || locked || !errors.Is(err, recorded) {
-		t.Fatalf("TryLock ghost = (release_non_nil=%t, %v, %v), want (false, false, recorded error)", release != nil, locked, err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := reg.Lock()
-		done <- err
-	}()
-	select {
-	case err := <-done:
-		if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
-			t.Fatalf("Lock ghost error = %v, want sentinel and cause", err)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("Registry.Lock blocked on a process-local ghost")
-	}
-}
-
-func TestRegistryLock_GenuineContentionRemainsOrdinary(t *testing.T) {
-	reg := NewRegistry(filepath.Join(apitest.HardenedTempDir(t), "workspaces.yaml"))
-	held := flock.New(reg.LockPath())
-	if err := held.Lock(); err != nil {
-		t.Fatalf("hold foreign Registry leaf: %v", err)
-	}
-	defer func() {
-		if err := held.Unlock(); err != nil {
-			t.Fatalf("release foreign Registry leaf: %v", err)
-		}
-	}()
-
-	release, locked, err := reg.TryLock()
-	if release != nil || locked || err != nil {
-		t.Fatalf("TryLock contention = (release_non_nil=%t, %v, %v), want (false, false, nil)", release != nil, locked, err)
-	}
-}
-
-func TestLockRelease_FirstFailureWins(t *testing.T) {
-	path := filepath.Join(apitest.HardenedTempDir(t), "first-wins.lock")
-	first := errors.New("first")
-	second := errors.New("second")
-	gotFirst := recordUnconfirmedLockRelease(path, first)
-	gotSecond := recordUnconfirmedLockRelease(path, second)
-	if gotSecond != gotFirst || !errors.Is(gotSecond, first) || errors.Is(gotSecond, second) {
-		t.Fatalf("second record = %v, want identical first failure %v", gotSecond, gotFirst)
-	}
-}
-
-func TestRegistryLock_ProcessExitRestoresLeafAvailability(t *testing.T) {
-	if path := os.Getenv("MCPHUB_TEST_EXIT_WITH_REGISTRY_LOCK"); path != "" {
-		reg := NewRegistry(path)
-		if _, err := reg.Lock(); err != nil {
-			os.Exit(2)
-		}
-		os.Exit(0)
-	}
-
-	path := filepath.Join(apitest.HardenedTempDir(t), "process-exit.yaml")
-	cmd := exec.Command(os.Args[0], "-test.run=^TestRegistryLock_ProcessExitRestoresLeafAvailability$")
-	cmd.Env = append(os.Environ(), "MCPHUB_TEST_EXIT_WITH_REGISTRY_LOCK="+path)
-	if output, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("locked child exit: %v\n%s", err, output)
-	}
-	release, err := NewRegistry(path).Lock()
-	if err != nil {
-		t.Fatalf("parent reacquire after child exit: %v", err)
-	}
-	assertRegistryReleased(t, release)
-}
-
-func TestReleaseAndJoin_PreservesPrimaryAndReleaseCauses(t *testing.T) {
-	primaryCause := errors.New("primary")
-	releaseCause := errors.New("release")
-	err := primaryCause
-	ReleaseAndJoin(&err, func() error { return releaseCause })
-	if !errors.Is(err, primaryCause) || !errors.Is(err, releaseCause) {
-		t.Fatalf("joined error = %v, want both causes", err)
-	}
-}
-
-func TestLockRelease_PanicUnwindRecordsGhost(t *testing.T) {
-	path := filepath.Join(apitest.HardenedTempDir(t), "panic.lock")
-	cause := errors.New("panic-unwind release")
-	func() {
-		defer func() { _ = recover() }()
-		release := newLedgeredFlockRelease(path, func() error { return cause }, nil)
-		defer func() {
-			if err := release(); !errors.Is(err, cause) {
-				t.Errorf("panic-unwind release = %v, want cause", err)
-			}
-		}()
-		panic("synthetic")
-	}()
-	if err := unconfirmedLockRelease(path); !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
-		t.Fatalf("panic-unwind ledger = %v, want sentinel and cause", err)
-	}
-}
-
-func TestLockLeafLedgered_ForeignHolderStillBlocksUntilReleased(t *testing.T) {
-	path := filepath.Join(apitest.HardenedTempDir(t), "foreign-holder.lock")
-	foreign := flock.New(path)
-	if err := foreign.Lock(); err != nil {
-		t.Fatalf("hold foreign lock leaf: %v", err)
-	}
-	foreignHeld := true
-	t.Cleanup(func() {
-		if foreignHeld {
-			if err := foreign.Unlock(); err != nil {
-				t.Errorf("cleanup foreign lock leaf: %v", err)
-			}
-		}
-	})
-
-	type acquireResult struct {
-		release func() error
-		err     error
-	}
-	done := make(chan acquireResult, 1)
-	go func() {
-		release, err := lockLeafLedgered(path)
-		done <- acquireResult{release: release, err: err}
-	}()
-
-	entry := lockReleaseLedgerEntryFor(path)
-	deadline := time.Now().Add(100 * time.Millisecond)
-	for {
-		entry.mu.Lock()
-		acquiring := entry.acquiring
-		entry.mu.Unlock()
-		if acquiring {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("ledgered acquire did not reserve the foreign-held leaf")
-		}
-		time.Sleep(time.Millisecond)
-	}
-	select {
-	case result := <-done:
-		if result.release != nil {
-			_ = result.release()
-		}
-		t.Fatalf("ledgered acquire returned before foreign release: %v", result.err)
-	case <-time.After(20 * time.Millisecond):
-	}
-
-	if err := foreign.Unlock(); err != nil {
-		t.Fatalf("release foreign lock leaf: %v", err)
-	}
-	foreignHeld = false
-	select {
-	case result := <-done:
-		if result.err != nil {
-			t.Fatalf("ledgered acquire after foreign release: %v", result.err)
-		}
-		if result.release == nil {
-			t.Fatal("ledgered acquire after foreign release returned nil release")
-		}
-		if err := result.release(); err != nil {
-			t.Fatalf("release ledgered lock leaf: %v", err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("ledgered acquire did not complete after foreign release")
-	}
-}
-
-func TestLockLeafLedgered_WaiterObservesFailedReleaseBeforeOSAcquire(t *testing.T) {
-	path := filepath.Join(apitest.HardenedTempDir(t), "interleaving.lock")
-	cause := errors.New("synthetic retained handle")
-	var calls atomic.Int32
-	var retained *flock.Flock
-	firstRelease, err := lockLeafLedgeredWithUnlock(path, func(fl *flock.Flock) error {
-		calls.Add(1)
-		retained = fl
-		return cause
-	})
-	if err != nil {
-		t.Fatalf("acquire first ledgered lock leaf: %v", err)
+		return previous(fl)
 	}
 	t.Cleanup(func() {
-		if retained != nil {
-			if err := retained.Unlock(); err != nil {
-				t.Errorf("cleanup retained first lock leaf: %v", err)
-			}
+		flockUnlockFn = previous
+		for _, fl := range stranded {
+			_ = fl.Unlock()
 		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
 	})
 
-	waiterReady := make(chan struct{})
-	type acquireResult struct {
-		release func() error
-		err     error
+	release, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("Lock: %v", err)
 	}
-	done := make(chan acquireResult, 1)
+	err = release()
+	if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, unlockFailure) {
+		t.Fatalf("release error = %v, want release class and underlying cause", err)
+	}
+	if second := release(); !errors.Is(second, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("one-shot release second result = %v, want memoized failure", second)
+	}
+	if _, err := reg.Lock(); !errors.Is(err, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("blocking reacquire error = %v, want fail-fast release class", err)
+	}
+	if _, locked, err := reg.TryLock(); locked || !errors.Is(err, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("TryLock after failed release = locked=%t err=%v, want fail-fast release class", locked, err)
+	}
+}
+
+func TestLockLeafLedgered_ConcurrentWaiterSeesReleasePoison(t *testing.T) {
+	reg := NewRegistry(filepath.Join(t.TempDir(), "workspaces.yaml"))
+	lockPath := reg.LockPath()
+	releaseCause := errors.New("injected retained registry lock")
+
+	previousUnlock := flockUnlockFn
+	var stranded []*flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = append(stranded, fl)
+			return releaseCause
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		for _, fl := range stranded {
+			_ = fl.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	release, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("first Lock: %v", err)
+	}
+	waiterResult := make(chan error, 1)
+	waiterStarted := make(chan struct{})
 	go func() {
-		release, err := lockLeafLedgeredWithUnlockAndWaitObserver(
-			path,
-			func(fl *flock.Flock) error { return fl.Unlock() },
-			func() { close(waiterReady) },
-		)
-		done <- acquireResult{release: release, err: err}
+		close(waiterStarted)
+		secondRelease, lockErr := reg.Lock()
+		if secondRelease != nil {
+			_ = secondRelease()
+		}
+		waiterResult <- lockErr
 	}()
-	select {
-	case <-waiterReady:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("second ledgered acquire did not enter the local-held wait")
-	}
 
-	firstErr := firstRelease()
-	if !errors.Is(firstErr, ErrLockReleaseUnconfirmed) || !errors.Is(firstErr, cause) {
-		t.Fatalf("first ledgered release = %v, want release sentinel and cause", firstErr)
+	<-waiterStarted
+	time.Sleep(50 * time.Millisecond)
+	// The first release still owns the per-leaf lifecycle gate. The waiter must
+	// not enter the OS flock where a retained handle could strand it forever.
+	select {
+	case waiterErr := <-waiterResult:
+		t.Fatalf("waiter returned before the first lifecycle released its gate: %v", waiterErr)
+	default:
+	}
+	if releaseErr := release(); !errors.Is(releaseErr, releaseCause) {
+		t.Fatalf("first release=%v, want injected cause", releaseErr)
 	}
 	select {
-	case result := <-done:
-		if result.release != nil {
-			_ = result.release()
-			t.Fatal("second ledgered acquire returned a release callback after failed first release")
+	case waiterErr := <-waiterResult:
+		if !errors.Is(waiterErr, ErrLockReleaseUnconfirmed) || !errors.Is(waiterErr, releaseCause) {
+			t.Fatalf("waiter error=%v, want fail-fast poison and cause", waiterErr)
 		}
-		if !errors.Is(result.err, ErrLockReleaseUnconfirmed) || !errors.Is(result.err, cause) {
-			t.Fatalf("second ledgered acquire = %v, want release sentinel and cause", result.err)
-		}
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("second ledgered acquire waited on this process's retained lock leaf")
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("second waiter hung behind a retained flock instead of observing the release poison")
 	}
+}
 
-	secondErr := firstRelease()
-	if secondErr != firstErr {
-		t.Fatalf("second release result = %v, want memoized first result %v", secondErr, firstErr)
-	}
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("underlying unlock calls = %d, want 1", got)
+func TestReleaseAndJoinAppliedSettlementMatrix(t *testing.T) {
+	releaseCause := errors.New("release failed")
+	for _, tc := range []struct {
+		name        string
+		primary     error
+		release     error
+		applied     bool
+		wantApplied bool
+		wantRelease bool
+	}{
+		{"success-nil", nil, nil, false, false, false},
+		{"success-primary", errors.New("primary"), nil, true, false, false},
+		{"release-unapplied", nil, fmt.Errorf("%w: %w", ErrLockReleaseUnconfirmed, releaseCause), false, false, true},
+		{"release-applied", nil, fmt.Errorf("%w: %w", ErrLockReleaseUnconfirmed, releaseCause), true, true, true},
+		{"primary-and-release-applied", errors.New("primary"), fmt.Errorf("%w: %w", ErrLockReleaseUnconfirmed, releaseCause), true, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.primary
+			calls := 0
+			releaseAndJoinApplied(&err, func() error { calls++; return tc.release }, "test release", tc.applied)
+			if calls != 1 {
+				t.Fatalf("release calls=%d, want 1", calls)
+			}
+			if got := IsAppliedLockReleaseUnconfirmed(err); got != tc.wantApplied {
+				t.Fatalf("applied=%t, want %t; err=%v", got, tc.wantApplied, err)
+			}
+			if got := errors.Is(err, ErrLockReleaseUnconfirmed); got != tc.wantRelease {
+				t.Fatalf("release class=%t, want %t; err=%v", got, tc.wantRelease, err)
+			}
+			if tc.primary != nil && !errors.Is(err, tc.primary) {
+				t.Fatalf("primary cause lost: %v", err)
+			}
+			if tc.wantRelease && !errors.Is(err, releaseCause) {
+				t.Fatalf("release cause lost: %v", err)
+			}
+		})
 	}
 }

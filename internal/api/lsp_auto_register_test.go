@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/scheduler"
@@ -816,7 +819,7 @@ func TestEnsureLSPRegistered_ExistingReadyUnownedRowDeletesLegacyTaskBeforePromo
 	}
 }
 
-func TestEnsureLSPRegistered_RestoresLegacyTaskWhenPromoteReconcileFails(t *testing.T) {
+func TestEnsureLSPRegistered_ExistingPromotionRollbackMatrix(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -883,7 +886,7 @@ func TestEnsureLSPRegistered_RestoresLegacyTaskWhenPromoteReconcileFails(t *test
 	}
 }
 
-func TestEnsureLSPRegistered_KillFailureDoesNotRestoreUntouchedLegacyTask(t *testing.T) {
+func TestEnsureLSPRegistered_KillFailureRunsPrearmedLegacyRestore(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -942,8 +945,10 @@ func TestEnsureLSPRegistered_KillFailureDoesNotRestoreUntouchedLegacyTask(t *tes
 	if !strings.Contains(err.Error(), "kill legacy LSP proxy") {
 		t.Fatalf("error = %v, want kill legacy LSP proxy context", err)
 	}
-	if len(h.fakeSch.deleteNames) != 0 || len(h.fakeSch.importNames) != 0 || len(h.fakeSch.runNames) != 0 {
-		t.Fatalf("scheduler mutated after kill failure: delete=%v import=%v run=%v",
+	if len(h.fakeSch.deleteNames) != 0 ||
+		!slices.Contains(h.fakeSch.importNames, prior.TaskName) ||
+		!slices.Contains(h.fakeSch.runNames, prior.TaskName) {
+		t.Fatalf("prearmed legacy restore did not run after possibly-partial kill failure: delete=%v import=%v run=%v",
 			h.fakeSch.deleteNames, h.fakeSch.importNames, h.fakeSch.runNames)
 	}
 }
@@ -1030,7 +1035,7 @@ func TestEnsureLSPRegistered_ExistingDeadRowReconcilesAndWaitsForReady(t *testin
 	}
 }
 
-func TestEnsureLSPRegistered_RollbackDoesNotKillPortBeforeSupervisorSpawn(t *testing.T) {
+func TestEnsureLSPRegistered_NewRowRollbackMatrix(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()
 	restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
@@ -1065,8 +1070,8 @@ func TestEnsureLSPRegistered_RollbackDoesNotKillPortBeforeSupervisorSpawn(t *tes
 	if err == nil {
 		t.Fatal("expected reconcile failure")
 	}
-	if got := killed.Load(); got != 0 {
-		t.Fatalf("rollback killed port before supervisor spawn was requested; kill calls=%d", got)
+	if got := killed.Load(); got != 1 {
+		t.Fatalf("rollback possible-proxy kill calls=%d, want 1 after reconcile attempt", got)
 	}
 	reg := NewRegistry(h.regPath)
 	if err := reg.Load(); err != nil {
@@ -1075,4 +1080,275 @@ func TestEnsureLSPRegistered_RollbackDoesNotKillPortBeforeSupervisorSpawn(t *tes
 	if rows := reg.ListByWorkspaceLSP(WorkspaceKey(canonical)); len(rows) != 0 {
 		t.Fatalf("registry rows leaked after rollback: %+v", rows)
 	}
+}
+
+func TestEnsureLSPRegistered_AppliedReleaseCompletesForwardHandoff(t *testing.T) {
+	tests := []struct {
+		name            string
+		seedPrior       bool
+		registryRelease bool
+		reconcileFails  bool
+		failOnRelease   int32
+	}{
+		{name: "existing-row-promotion", seedPrior: true, failOnRelease: 2},
+		{name: "new-row-registration", failOnRelease: 1},
+		{name: "new-row-registry-release", registryRelease: true, failOnRelease: 1},
+		{name: "new-row-registry-release-reconcile-fails", registryRelease: true, reconcileFails: true, failOnRelease: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+			restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+			defer restoreState()
+
+			origScheduler := schedulerFactoryFn
+			schedulerFactoryFn = func() (scheduler.Scheduler, error) { return h.fakeSch, nil }
+			defer func() { schedulerFactoryFn = origScheduler }()
+			origReadiness := proxyReadinessFn
+			var readinessCalls atomic.Int32
+			proxyReadinessFn = func(int, time.Duration) error {
+				readinessCalls.Add(1)
+				return nil
+			}
+			defer func() { proxyReadinessFn = origReadiness }()
+			origKill := killByPortFn
+			killByPortFn = func(int, time.Duration) error { return nil }
+			defer func() { killByPortFn = origKill }()
+			origReconcile := registerSupervisorReconcileFn
+			var reconcileCalls atomic.Int32
+			reconcileCause := errors.New("injected mandatory reconcile failure")
+			registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+				reconcileCalls.Add(1)
+				if tc.reconcileFails {
+					return ReconcileResponse{}, reconcileCause
+				}
+				return ReconcileResponse{}, nil
+			}
+			defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+			ws := t.TempDir()
+			if err := os.WriteFile(filepath.Join(ws, "pyproject.toml"), []byte("[project]\n"), 0o600); err != nil {
+				t.Fatalf("touch marker: %v", err)
+			}
+			canonical, err := CanonicalWorkspacePath(ws)
+			if err != nil {
+				t.Fatalf("CanonicalWorkspacePath: %v", err)
+			}
+			wsKey := WorkspaceKey(canonical)
+			if tc.seedPrior {
+				prior := WorkspaceEntry{
+					WorkspaceKey: wsKey, WorkspacePath: canonical, Language: "python",
+					Backend: "mcp-language-server", Port: 9242,
+					TaskName:      LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+					ClientEntries: map[string]string{"codex": "lsp-python-" + wsKey[:4]},
+					Lifecycle:     LifecycleActive,
+				}
+				reg := NewRegistry(h.regPath)
+				if err := reg.PutLSP(prior); err != nil {
+					t.Fatalf("PutLSP: %v", err)
+				}
+				if err := reg.Save(); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+			}
+
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+			}
+			lockPath := supervisorIntentLockPath(intentPath)
+			if tc.registryRelease {
+				lockPath = NewRegistry(h.regPath).LockPath()
+			}
+			releaseCause := errors.New("injected LSP durable-state release failure")
+			previousUnlock := flockUnlockFn
+			var targetReleases atomic.Int32
+			var stranded []*flock.Flock
+			flockUnlockFn = func(fl *flock.Flock) error {
+				if fl.Path() == lockPath && targetReleases.Add(1) == tc.failOnRelease {
+					stranded = append(stranded, fl)
+					return releaseCause
+				}
+				return previousUnlock(fl)
+			}
+			defer func() {
+				flockUnlockFn = previousUnlock
+				for _, fl := range stranded {
+					_ = fl.Unlock()
+				}
+				unconfirmedLockReleasesMu.Lock()
+				delete(unconfirmedLockReleases, lockPath)
+				unconfirmedLockReleasesMu.Unlock()
+			}()
+
+			got, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python")
+			if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+				t.Fatalf("error = %v, want applied release class and injected cause", err)
+			}
+			if tc.reconcileFails && !errors.Is(err, reconcileCause) {
+				t.Fatalf("error = %v, want mandatory reconcile cause", err)
+			}
+			if got.WorkspaceKey != wsKey || got.Language != "python" || got.Port == 0 {
+				t.Fatalf("truthful committed entry = %+v", got)
+			}
+			wantReadiness := int32(1)
+			if tc.seedPrior {
+				wantReadiness++ // the existing-row liveness probe precedes promotion
+			}
+			if tc.reconcileFails {
+				wantReadiness = 0
+			}
+			if reconcileCalls.Load() != 1 || readinessCalls.Load() != wantReadiness {
+				t.Fatalf("reconcile=%d readiness=%d, want mandatory handoff 1/%d after applied release", reconcileCalls.Load(), readinessCalls.Load(), wantReadiness)
+			}
+			reg := NewRegistry(h.regPath)
+			if err := reg.Load(); err != nil {
+				t.Fatalf("Load registry: %v", err)
+			}
+			persisted, ok := reg.Get(wsKey, "python")
+			if !ok || persisted.Port != got.Port || !reflect.DeepEqual(persisted.ClientEntries, got.ClientEntries) {
+				t.Fatalf("persisted row = %+v ok=%t, want committed entry %+v", persisted, ok, got)
+			}
+			intent, _, readErr := readSupervisorIntentForMerge(intentPath)
+			if readErr != nil {
+				t.Fatalf("read committed supervisor intent: %v", readErr)
+			}
+			if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "python")); row == nil {
+				t.Fatalf("committed descriptor missing after applied release: %+v", intent.Daemons)
+			}
+		})
+	}
+}
+
+func TestEnsureLSPRegistered_AuditContractUnchanged(t *testing.T) {
+	assertNoWorkspaceRegistered := func(t *testing.T, recorder *recordingAuditWriter) {
+		t.Helper()
+		for _, entry := range recorder.entries {
+			if entry.Action == AuditActionWorkspaceRegistered {
+				t.Fatalf("EnsureLSPRegistered emitted workspace-registered: %+v", recorder.entries)
+			}
+		}
+	}
+
+	t.Run("fast-return", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+		defer restoreState()
+		recorder := &recordingAuditWriter{}
+		installRecordingAudit(t, recorder)
+		origReadiness := proxyReadinessFn
+		proxyReadinessFn = func(int, time.Duration) error { return nil }
+		defer func() { proxyReadinessFn = origReadiness }()
+
+		canonical, err := CanonicalWorkspacePath(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		wsKey := WorkspaceKey(canonical)
+		entry := WorkspaceEntry{
+			WorkspaceKey: wsKey, WorkspacePath: canonical, Language: "python",
+			Backend: "mcp-language-server", Port: 9242,
+			TaskName: LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		}
+		reg := NewRegistry(h.regPath)
+		if err := reg.PutLSP(entry); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.Save(); err != nil {
+			t.Fatal(err)
+		}
+		executable, err := canonicalMcphubPath()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewAPI().upsertLSPSupervisorIntent(entry, executable); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python"); err != nil {
+			t.Fatal(err)
+		}
+		assertNoWorkspaceRegistered(t, recorder)
+	})
+
+	t.Run("promotion", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+		defer restoreState()
+		recorder := &recordingAuditWriter{}
+		installRecordingAudit(t, recorder)
+		origScheduler := schedulerFactoryFn
+		schedulerFactoryFn = func() (scheduler.Scheduler, error) { return h.fakeSch, nil }
+		defer func() { schedulerFactoryFn = origScheduler }()
+		origReconcile := registerSupervisorReconcileFn
+		registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+			return ReconcileResponse{}, nil
+		}
+		defer func() { registerSupervisorReconcileFn = origReconcile }()
+		origReadiness := proxyReadinessFn
+		readinessCalls := 0
+		proxyReadinessFn = func(int, time.Duration) error {
+			readinessCalls++
+			if readinessCalls == 1 {
+				return errors.New("existing proxy not ready")
+			}
+			return nil
+		}
+		defer func() { proxyReadinessFn = origReadiness }()
+
+		canonical, err := CanonicalWorkspacePath(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		wsKey := WorkspaceKey(canonical)
+		entry := WorkspaceEntry{
+			WorkspaceKey: wsKey, WorkspacePath: canonical, Language: "python",
+			Backend: "mcp-language-server", Port: 9242,
+			TaskName: LSPTaskNameForWorkspaceLanguage(wsKey, "python"),
+		}
+		reg := NewRegistry(h.regPath)
+		if err := reg.PutLSP(entry); err != nil {
+			t.Fatal(err)
+		}
+		if err := reg.Save(); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewAPI().EnsureLSPRegistered(context.Background(), wsKey, canonical, "python"); err != nil {
+			t.Fatal(err)
+		}
+		assertNoWorkspaceRegistered(t, recorder)
+	})
+
+	t.Run("new-row", func(t *testing.T) {
+		h := newRegisterHarness(t)
+		defer h.restore()
+		restoreState := SetDaemonStateRootForTest(apitest.HardenedTempDir(t))
+		defer restoreState()
+		recorder := &recordingAuditWriter{}
+		installRecordingAudit(t, recorder)
+		origReconcile := registerSupervisorReconcileFn
+		registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+			return ReconcileResponse{}, nil
+		}
+		defer func() { registerSupervisorReconcileFn = origReconcile }()
+		origReadiness := proxyReadinessFn
+		proxyReadinessFn = func(int, time.Duration) error { return nil }
+		defer func() { proxyReadinessFn = origReadiness }()
+
+		canonical, err := CanonicalWorkspacePath(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := NewAPI().EnsureLSPRegistered(
+			context.Background(),
+			WorkspaceKey(canonical),
+			canonical,
+			"python",
+		); err != nil {
+			t.Fatal(err)
+		}
+		assertNoWorkspaceRegistered(t, recorder)
+	})
 }

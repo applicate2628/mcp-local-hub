@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"mcp-local-hub/internal/process"
 )
 
@@ -69,6 +71,31 @@ func systemBootTime() (time.Time, bool) {
 	return bootTimeValue, bootTimeOK
 }
 
+// classifyKillError maps a Kill(pid, 0) failure to the appropriate
+// ProcessIdentity result. Extracted as a pure function (no syscalls) so its
+// polarity is directly unit-testable with synthetic errors, without needing
+// a real ambiguous kernel failure. Residual 1(a): ESRCH is kill(2)'s
+// documented definitive "no such process" signal — the ONLY error this
+// classifier may treat as proof of death. EPERM means the process exists but
+// signaling it is denied (mirrors Windows ERROR_ACCESS_DENIED). kill(2)
+// documents only EINVAL/EPERM/ESRCH as possible errors, and EINVAL cannot
+// occur for signal 0 (always a valid signal number) — but a future
+// kernel/libc surprise, or any errno this classifier does not recognize,
+// must still fail safe: NOT proof of death, so it returns Indeterminate,
+// never Alive:false. UNVERIFIED on a live Linux host this session (this
+// codebase's implementer environment is Windows-only) — verification step:
+// reproduce classifyKillError's ESRCH mapping against a real just-exited PID
+// on a Linux runner before relying on it beyond this static/logical review.
+func classifyKillError(err error) (ProcessIdentity, error) {
+	if errors.Is(err, syscall.EPERM) {
+		return ProcessIdentity{Alive: true, Denied: true}, nil
+	}
+	if errors.Is(err, syscall.ESRCH) {
+		return ProcessIdentity{Alive: false}, nil
+	}
+	return ProcessIdentity{Indeterminate: true}, err
+}
+
 // processIDImpl is the Linux implementation. Uses Kill(0) for
 // liveness; reads /proc/<pid>/exe + /proc/<pid>/cmdline +
 // /proc/<pid>/stat for image, argv, and start-time. macOS is split
@@ -83,11 +110,7 @@ func systemBootTime() (time.Time, bool) {
 // alive=true,denied=true to mirror Windows ACCESS_DENIED handling.
 func processIDImpl(pid int) (ProcessIdentity, error) {
 	if err := syscall.Kill(pid, 0); err != nil {
-		if errors.Is(err, syscall.EPERM) {
-			return ProcessIdentity{Alive: true, Denied: true}, nil
-		}
-		// ESRCH or other: not alive.
-		return ProcessIdentity{Alive: false}, nil
+		return classifyKillError(err)
 	}
 
 	// /proc/<pid>/exe
@@ -140,6 +163,66 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	}, nil
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	first, err := processIDImpl(pid)
+	if err != nil {
+		return ProcessIdentity{}, err
+	}
+	if !first.Alive || first.Denied {
+		return ProcessIdentity{}, fmt.Errorf("retained process identity for pid %d is unavailable", pid)
+	}
+	pidfd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("pidfd_open(%d): %w", pid, err)
+	}
+	closeFailure := func(cause error) (ProcessIdentity, error) {
+		return ProcessIdentity{}, errors.Join(cause, unix.Close(pidfd))
+	}
+	if err := retainedPIDFDAlive(pidfd); err != nil {
+		return closeFailure(fmt.Errorf("pidfd liveness before identity confirmation for pid %d: %w", pid, err))
+	}
+	second, err := processIDImpl(pid)
+	if err != nil {
+		return closeFailure(err)
+	}
+	if !sameLinuxProcessIdentity(first, second) {
+		return closeFailure(fmt.Errorf("retained process identity changed for pid %d", pid))
+	}
+	if err := retainedPIDFDAlive(pidfd); err != nil {
+		return closeFailure(fmt.Errorf("pidfd liveness after identity confirmation for pid %d: %w", pid, err))
+	}
+	second.Handle = uintptr(pidfd)
+	return second, nil
+}
+
+func retainedPIDFDAlive(pidfd int) error {
+	fds := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+	n, err := unix.Poll(fds, 0)
+	if err != nil {
+		return err
+	}
+	if n != 0 || fds[0].Revents != 0 {
+		return fmt.Errorf("pidfd ready/revents=%#x", fds[0].Revents)
+	}
+	return nil
+}
+
+func sameLinuxProcessIdentity(first, second ProcessIdentity) bool {
+	if first.Alive != second.Alive ||
+		first.Denied != second.Denied ||
+		first.ImagePath != second.ImagePath ||
+		!first.StartTime.Equal(second.StartTime) ||
+		len(first.Cmdline) != len(second.Cmdline) {
+		return false
+	}
+	for i := range first.Cmdline {
+		if first.Cmdline[i] != second.Cmdline[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // killProcessImpl sends SIGKILL by PID. Residual TOCTOU: between
 // gate-pass and Kill the kernel can in theory recycle the PID. A
 // future hardening lane will switch to pidfd_send_signal on Linux
@@ -152,9 +235,9 @@ func killProcessImpl(pid int) error {
 	return nil
 }
 
-// closeProcessHandle no-op companion to ProcessIdentity.Handle.
-// Linux will populate Handle when the pidfd-based hardening lands.
-func closeProcessHandle(_ uintptr) {}
+func closeProcessHandle(handle uintptr) error {
+	return unix.Close(int(handle))
+}
 
 // readStartTimeLinux returns the process's wall-clock start time by
 // combining /proc/<pid>/stat's starttime field with the system boot

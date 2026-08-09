@@ -34,7 +34,7 @@ func (f *fakeRestart) RestartAll() ([]api.RestartResult, error) {
 
 func TestRestartServer_InvokesAPI(t *testing.T) {
 	fr := &fakeRestart{}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/memory/restart", nil)
 	rec := httptest.NewRecorder()
@@ -64,7 +64,7 @@ func TestRestart_PartialFailureReturns207(t *testing.T) {
 			{TaskName: "mcp-local-hub-server-b-default", Err: "scheduler timeout"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/server-a/restart", nil)
@@ -90,7 +90,7 @@ func TestRestart_OrchestrationFailureReturns500(t *testing.T) {
 		results: []api.RestartResult{{TaskName: "x", Err: ""}},
 		err:     fmt.Errorf("scheduler unavailable"),
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/server-a/restart", nil)
@@ -137,7 +137,7 @@ func (f *fakeStop) StopAll() ([]api.RestartResult, error) {
 
 func TestStopServer_InvokesAPI(t *testing.T) {
 	fs := &fakeStop{}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/memory/stop", nil)
 	rec := httptest.NewRecorder()
@@ -167,7 +167,7 @@ func TestStop_PartialFailureReturns207(t *testing.T) {
 			{TaskName: "mcp-local-hub-server-b-default", Err: "kill timeout"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/server-a/stop", nil)
@@ -193,7 +193,7 @@ func TestStop_OrchestrationFailureReturns500(t *testing.T) {
 		results: []api.RestartResult{{TaskName: "x", Err: ""}},
 		err:     fmt.Errorf("scheduler unavailable"),
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/server-a/stop", nil)
@@ -220,7 +220,7 @@ func TestStop_OrchestrationFailureReturns500(t *testing.T) {
 }
 
 func TestStop_MethodNotAllowed(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(http.MethodGet, "/api/servers/memory/stop", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -240,7 +240,7 @@ func TestRestart_DaemonQueryNarrowsToOneTask(t *testing.T) {
 			{TaskName: "mcp-local-hub-serena-codex"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=codex", nil)
@@ -259,7 +259,7 @@ func TestRestart_DaemonQueryNarrowsToOneTask(t *testing.T) {
 }
 
 func TestRestart_EmptyDaemonQueryRejected(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = &fakeRestart{} // would silently succeed if not rejected upstream
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=", nil)
 	rec := httptest.NewRecorder()
@@ -270,7 +270,7 @@ func TestRestart_EmptyDaemonQueryRejected(t *testing.T) {
 }
 
 func TestRestart_RepeatedDaemonQueryRejected(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = &fakeRestart{}
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=claude&daemon=codex", nil)
 	rec := httptest.NewRecorder()
@@ -285,7 +285,7 @@ func TestRestart_UnknownDaemonReturns404(t *testing.T) {
 	// slice and nil error — there are no matching tasks. The handler
 	// must convert that to 404 instead of "Restarted" no-op.
 	fr := &fakeRestart{results: []api.RestartResult{}}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/restart?daemon=ghost", nil)
@@ -310,7 +310,7 @@ func TestStop_DaemonQueryNarrowsToOneTask(t *testing.T) {
 	fs := &fakeStop{
 		results: []api.RestartResult{{TaskName: "mcp-local-hub-serena-codex"}},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/stop?daemon=codex", nil)
@@ -327,7 +327,7 @@ func TestStop_DaemonQueryNarrowsToOneTask(t *testing.T) {
 
 func TestStop_UnknownDaemonReturns404(t *testing.T) {
 	fs := &fakeStop{results: []api.RestartResult{}}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/serena/stop?daemon=ghost", nil)
@@ -346,7 +346,7 @@ func TestRestart_NoDaemonQueryEmptyResultsStill200(t *testing.T) {
 	// stay 200, not 404. The 404 conversion only applies when
 	// ?daemon=<name> was given (= filter targeted nothing).
 	fr := &fakeRestart{results: []api.RestartResult{}}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/servers/empty/restart", nil)
@@ -367,7 +367,7 @@ func TestRestartAll_DispatchesBulkRoute(t *testing.T) {
 			{TaskName: "mcp-local-hub-time-default"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
@@ -398,7 +398,7 @@ func TestStopAll_DispatchesBulkRoute(t *testing.T) {
 			{TaskName: "mcp-local-hub-time-default"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 
 	req := httptest.NewRequest(http.MethodPost, "/api/stop-all", nil)
@@ -420,7 +420,7 @@ func TestRestartAll_PartialFailureReturns207(t *testing.T) {
 			{TaskName: "mcp-local-hub-time-default", Err: "kill timeout"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	req := httptest.NewRequest(http.MethodPost, "/api/restart-all", nil)
@@ -433,7 +433,7 @@ func TestRestartAll_PartialFailureReturns207(t *testing.T) {
 }
 
 func TestStopAll_MethodNotAllowed(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(http.MethodGet, "/api/stop-all", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
@@ -449,7 +449,7 @@ func TestStopAll_MethodNotAllowed(t *testing.T) {
 // UI state.
 func TestRestartAll_PublishesSseLifecycleEvents(t *testing.T) {
 	fr := &fakeRestart{results: []api.RestartResult{{TaskName: "mcp-local-hub-memory-default"}}}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -479,7 +479,7 @@ func TestRestartAll_PublishesSseLifecycleEvents(t *testing.T) {
 
 func TestStopAll_PublishesSseLifecycleEvents(t *testing.T) {
 	fs := &fakeStop{results: []api.RestartResult{{TaskName: "mcp-local-hub-memory-default"}}}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.stop = fs
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -516,7 +516,7 @@ func TestRestartAll_PartialFailurePublishesErrorPhase(t *testing.T) {
 			{TaskName: "mcp-local-hub-time-default", Err: "kill timeout"},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -552,7 +552,7 @@ func TestRestartAll_FailurePublishesErrorPhase(t *testing.T) {
 		results: []api.RestartResult{},
 		err:     fmt.Errorf("scheduler unavailable"),
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.restart = fr
 
 	ctx, cancel := context.WithCancel(context.Background())

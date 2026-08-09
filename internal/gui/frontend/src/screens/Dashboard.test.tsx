@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { render, waitFor, cleanup, fireEvent, act } from "@testing-library/preact";
-import { DashboardScreen, formatUptime, formatBytes } from "./Dashboard";
+import { DashboardScreen, formatUptime, formatBytes, nextAuditLockView } from "./Dashboard";
+import type { AuditLockSnapshot, DaemonRecoverCorrelation } from "../api";
 import type { DaemonStatus, ScanEntry } from "../types";
 
 // happy-dom does not ship EventSource. Dashboard's bulk-action UI state
@@ -1434,7 +1435,7 @@ describe("DashboardScreen — spawn-hold delivery (banner + card row)", () => {
     cleanup();
   });
 
-  const BIN = "C:\\Users\\dev\\.local\\bin\\mcphub.exe";
+  const BIN = "C:\\Users\\<dev>\\.local\\bin\\mcphub.exe";
   const heldRow = (server: string): DaemonStatus => ({
     server,
     daemon: "default",
@@ -1949,25 +1950,240 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     reaped: false,
     port_owner_check: "unbound",
     port_wait_outcome: "not_required",
+    audit_handoff: "not_required",
   })) {
     let statusCalls = 0;
+    let baselineServerInstance = "33333333-3333-4333-8333-333333333333";
+    let baselineAuditState: "released" | "stranded" = "released";
+    let activeRecoveryReceiptStatus: "committed_success" | "not_committed" | null = null;
     const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
-      (input: Request | string | URL) => {
+      async (input: Request | string | URL, init?: RequestInit) => {
         const url = typeof input === "string" ? input : input.toString();
         if (url === "/api/status") {
           statusCalls += 1;
-          return Promise.resolve(statusResponse([quarantinedRow]));
+          return statusResponse([quarantinedRow]);
         }
-        if (url === "/api/scan") return Promise.resolve(scanResponse([]));
+        if (url === "/api/scan") return scanResponse([]);
         if (url === "/api/hub/health") {
-          return Promise.resolve(jsonResponse(200, { state: "healthy", degraded: false }));
+          return jsonResponse(200, { state: "healthy", degraded: false });
         }
-        if (url === "/api/daemon/recover") return Promise.resolve(recoverResponse.clone());
-        return Promise.reject(new Error(`unexpected fetch: ${url}`));
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: baselineServerInstance,
+            revision: 1,
+            state: baselineAuditState,
+            recovery_receipt: null,
+            recovery_receipts: [],
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          if (
+            activeRecoveryReceiptStatus === "not_committed" &&
+            request.expected_physical !== undefined
+          ) {
+            return jsonResponse(400, {
+              error: "internal error",
+              code: "RECOVER_CORRELATION_INVALID",
+            });
+          }
+          activeRecoveryReceiptStatus = null;
+          baselineServerInstance = "44444444-4444-4444-8444-444444444444";
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          const request = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          const responseBody = await recoverResponse.clone().json() as Record<string, unknown>;
+          const receiptFreeCodes = new Set([
+            "AUDIT_LOCK_ADAPTER_INIT_FAILED",
+            "RECOVER_CORRELATION_INVALID",
+            "RECOVER_BASELINE_STALE",
+            "RECOVER_ATTEMPT_CONFLICT",
+            "RECOVER_OCCURRENCE_CONSUMED",
+            "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
+            "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
+          ]);
+          if (
+            responseBody.audit_lock === undefined &&
+            !receiptFreeCodes.has(String(responseBody.code ?? ""))
+          ) {
+            if (responseBody.audit_handoff === "release_unconfirmed") {
+              baselineAuditState = "stranded";
+            }
+            responseBody.audit_lock = {
+              scope: "supervisor_events_log",
+              server_instance: request.audit_lock_attempt.server_instance,
+              revision: 2,
+              state:
+                responseBody.audit_handoff === "release_unconfirmed"
+                  ? "stranded"
+                  : responseBody.audit_handoff === "release_pending"
+                    ? "outstanding"
+                    : "released",
+              recovery_receipt: {
+                attempt_id: request.audit_lock_attempt.attempt_id,
+                occurrence_id: request.audit_lock_attempt.occurrence_id,
+                server_instance: request.audit_lock_attempt.server_instance,
+                task_name: "\\mcp-local-hub-memory-default",
+                status: recoverResponse.ok ? "committed_success" : "not_committed",
+                lock_authorization:
+                  responseBody.audit_handoff === "release_unconfirmed" ||
+                  responseBody.audit_handoff === "release_pending"
+                    ? "current_truth"
+                    : "none",
+                termination_commit_state: recoverResponse.ok
+                  ? "committed"
+                  : "not_committed",
+              },
+              recovery_receipts: [],
+            };
+          }
+          activeRecoveryReceiptStatus = recoverResponse.ok
+            ? "committed_success"
+            : "not_committed";
+          return jsonResponse(recoverResponse.status, responseBody);
+        }
+        throw new Error(`unexpected fetch: ${url}`);
       },
     );
     return { fetchSpy, statusCalls: () => statusCalls };
   }
+
+  it("fences only the pending task while allowing one different eligible recovery", async () => {
+    const otherRow: DaemonStatus = {
+      server: "vector",
+      daemon: "default",
+      port: 9124,
+      state: "Quarantined",
+      task_name: "mcp-local-hub-vector-default",
+      display_name: "Vector daemon",
+    };
+    const pendingCorrelation: DaemonRecoverCorrelation = {
+      attempt_id: "11111111-1111-4111-8111-111111111111",
+      occurrence_id: "22222222-2222-4222-8222-222222222222",
+      server_instance: "33333333-3333-4333-8333-333333333333",
+    };
+    const pendingReceipt = {
+      ...pendingCorrelation,
+      task_name: quarantinedRow.task_name!,
+      status: "uncertain" as const,
+      lock_authorization: "uncertain" as const,
+      termination_commit_state: "unknown" as const,
+    };
+    const postedTasks: string[] = [];
+    let revision = 1;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") {
+          return statusResponse([quarantinedRow, otherRow]);
+        }
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url.startsWith("/api/daemon/recover/audit-lock-state?")) {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: pendingCorrelation.server_instance,
+            revision: ++revision,
+            state: "released",
+            recovery_receipt: pendingReceipt,
+            recovery_receipts: [pendingReceipt],
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: pendingCorrelation.server_instance,
+            revision: ++revision,
+            state: "released",
+            recovery_receipt: null,
+            recovery_receipts: [pendingReceipt],
+          });
+        }
+        if (url === "/api/daemon/recover") {
+          const request = JSON.parse(String(init?.body)) as {
+            task_name: string;
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          postedTasks.push(request.task_name);
+          const committedReceipt = {
+            ...request.audit_lock_attempt,
+            task_name: request.task_name,
+            status: "committed_success",
+            lock_authorization: "none",
+            termination_commit_state: "not_committed",
+          };
+          return jsonResponse(200, {
+            task_name: request.task_name,
+            state: "respawn_accepted",
+            reaped: false,
+            port_owner_check: "unbound",
+            port_wait_outcome: "not_required",
+            audit_handoff: "not_required",
+            termination_committed: false,
+            audit_lock: {
+              scope: "supervisor_events_log",
+              server_instance: pendingCorrelation.server_instance,
+              revision: ++revision,
+              state: "released",
+              recovery_receipt: committedReceipt,
+              recovery_receipts: [pendingReceipt, committedReceipt],
+            },
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          return new Response(null, { status: 204 });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    await view.findByTestId("dashboard-recovery-receipt-ack");
+    const cards = await view.findAllByTestId("dashboard-card");
+    const cardFor = (name: string): HTMLElement => {
+      const card = cards.find((candidate) => candidate.textContent?.includes(name));
+      if (!card) throw new Error(`missing card ${name}`);
+      return card;
+    };
+    const confirmRecovery = async (card: HTMLElement): Promise<void> => {
+      const recover = [...card.querySelectorAll("button")].find(
+        (button) => button.textContent === "Recover",
+      );
+      if (!recover) throw new Error("missing Recover button");
+      fireEvent.click(recover);
+      const modal = card.querySelector(
+        '[data-testid="daemon-recover-modal"]',
+      ) as HTMLDialogElement | null;
+      if (!modal) throw new Error("missing recovery modal");
+      await waitFor(() => expect(modal.open).toBe(true));
+      const confirm = modal.querySelector(
+        '[data-testid="daemon-recover-modal-confirm"]',
+      );
+      if (!confirm) throw new Error("missing recovery confirmation");
+      fireEvent.click(confirm);
+    };
+
+    const pendingCard = cardFor("Memory daemon");
+    await confirmRecovery(pendingCard);
+    await waitFor(() => {
+      expect(pendingCard.textContent).toContain("prior recovery outcome is uncertain");
+    });
+    expect(postedTasks).toEqual([]);
+
+    const eligibleCard = cardFor("Vector daemon");
+    await confirmRecovery(eligibleCard);
+    await waitFor(() => {
+      expect(eligibleCard.textContent).toContain("Recovery accepted; waiting for supervisor status");
+    });
+    expect(postedTasks).toEqual([otherRow.task_name]);
+  });
 
   it("shows the quarantine reason and Recover instead of the refused Restart; Cancel sends nothing", async () => {
     const { fetchSpy } = mockRecoveryFetch();
@@ -2002,14 +2218,589 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     await waitFor(() => expect(statusCalls()).toBeGreaterThanOrEqual(2));
     expect(view.getByTestId("dashboard-card").className).toContain("card warning");
     expect(view.getByTestId("dashboard-card").textContent).toContain("Quarantined");
-    expect(fetchSpy).toHaveBeenCalledWith("/api/daemon/recover", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        task_name: "mcp-local-hub-memory-default",
-        confirm: true,
-      }),
+    const recoveryCall = fetchSpy.mock.calls.find(
+      (call) => call[0].toString() === "/api/daemon/recover",
+    );
+    expect(recoveryCall).toBeTruthy();
+    const request = JSON.parse(String(recoveryCall?.[1]?.body)) as {
+      task_name: string;
+      confirm: boolean;
+      audit_lock_attempt: DaemonRecoverCorrelation;
+    };
+    expect(request.task_name).toBe("mcp-local-hub-memory-default");
+    expect(request.confirm).toBe(true);
+    expect(request.audit_lock_attempt.server_instance).toBe(
+      "33333333-3333-4333-8333-333333333333",
+    );
+    const canonicalV4 =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+    expect(request.audit_lock_attempt.attempt_id).toMatch(canonicalV4);
+    expect(request.audit_lock_attempt.occurrence_id).toMatch(canonicalV4);
+  });
+
+  it("manually consumes a released not_committed receipt correlation-only and then permits a later recovery", async () => {
+    const { fetchSpy } = mockRecoveryFetch(jsonResponse(500, {
+      error: "internal error",
+      code: "RECOVER_RESPAWN_FAILED",
+      termination_committed: false,
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const acknowledgement = await view.findByTestId("dashboard-recovery-receipt-ack");
+    expect(acknowledgement.textContent).toContain("Recovery did not commit");
+    const recoveryCalls = () => fetchSpy.mock.calls.filter(
+      (call) => call[0].toString() === "/api/daemon/recover",
+    );
+    expect(recoveryCalls()).toHaveLength(1);
+    const firstRequest = JSON.parse(String(recoveryCalls()[0]?.[1]?.body)) as {
+      audit_lock_attempt: DaemonRecoverCorrelation;
+    };
+
+    // Production accepts expected_physical only for committed_success. Pin the
+    // opposite arm here so a future frontend regression cannot consume this
+    // durable not_committed receipt through the success-shaped request.
+    const wrongResponse = await globalThis.fetch(
+      "/api/daemon/recover/audit-lock-receipt",
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...firstRequest.audit_lock_attempt,
+          acknowledge: true,
+          expected_physical: {
+            server_instance: firstRequest.audit_lock_attempt.server_instance,
+            revision: 2,
+            state: "released",
+          },
+        }),
+      },
+    );
+    expect(wrongResponse.status).toBe(400);
+    expect(view.getByTestId("dashboard-recovery-receipt-ack")).toBeTruthy();
+    expect(recoveryCalls()).toHaveLength(1);
+
+    fireEvent.click(view.getByRole("button", {
+      name: "I checked current status — acknowledge",
+    }));
+    await waitFor(() => {
+      expect(view.queryByTestId("dashboard-recovery-receipt-ack")).toBeNull();
     });
+
+    const deleteCalls = fetchSpy.mock.calls.filter(
+      (call) => call[0].toString() === "/api/daemon/recover/audit-lock-receipt",
+    );
+    expect(deleteCalls).toHaveLength(2);
+    const manualRequest = JSON.parse(String(deleteCalls[1]?.[1]?.body)) as Record<string, unknown>;
+    expect(manualRequest).toEqual({
+      ...firstRequest.audit_lock_attempt,
+      acknowledge: true,
+    });
+    expect(manualRequest).not.toHaveProperty("expected_physical");
+
+    fireEvent.click(view.getByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await waitFor(() => expect(recoveryCalls()).toHaveLength(2));
+    const secondRequest = JSON.parse(String(recoveryCalls()[1]?.[1]?.body)) as {
+      audit_lock_attempt: DaemonRecoverCorrelation;
+    };
+    expect(secondRequest.audit_lock_attempt).not.toEqual(firstRequest.audit_lock_attempt);
+  });
+
+  it("retains one correlation through response loss and repairs it on EventSource reconnect", async () => {
+    const serverInstance = "33333333-3333-4333-8333-333333333333";
+    let correlation: DaemonRecoverCorrelation | null = null;
+    let postCalls = 0;
+    let exactLookups = 0;
+    let acknowledgeCalls = 0;
+    let acknowledged = false;
+    let currentServerInstance = serverInstance;
+    let acknowledgedBody: Record<string, unknown> | null = null;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          const retainedReceipt = correlation && !acknowledged
+            ? {
+                attempt_id: correlation.attempt_id,
+                occurrence_id: correlation.occurrence_id,
+                server_instance: correlation.server_instance,
+                task_name: "\\mcp-local-hub-memory-default",
+                status: exactLookups === 0 ? "in_flight" : "committed_success",
+                lock_authorization: exactLookups === 0 ? "current_truth" : "none",
+                termination_commit_state:
+                  exactLookups === 0 ? "unknown" : "committed",
+              }
+            : null;
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: currentServerInstance,
+            revision: 1,
+            state: retainedReceipt?.status === "in_flight" ? "outstanding" : "released",
+            recovery_receipt: null,
+            recovery_receipts: retainedReceipt ? [retainedReceipt] : [],
+          });
+        }
+        if (url.startsWith("/api/daemon/recover/audit-lock-state?")) {
+          exactLookups += 1;
+          if (!correlation) throw new Error("lookup before POST");
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: exactLookups === 1 ? 2 : 3,
+            state: exactLookups === 1 ? "outstanding" : "released",
+            recovery_receipt: {
+              attempt_id: correlation.attempt_id,
+              occurrence_id: correlation.occurrence_id,
+              server_instance: correlation.server_instance,
+              task_name: "\\mcp-local-hub-memory-default",
+              status:
+                exactLookups === 1 ? "in_flight" : "committed_success",
+              lock_authorization:
+                exactLookups === 1 ? "current_truth" : "none",
+              termination_commit_state:
+                exactLookups === 1 ? "unknown" : "not_committed",
+            },
+            recovery_receipts: [],
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          acknowledgeCalls += 1;
+          acknowledged = true;
+          currentServerInstance = "44444444-4444-4444-8444-444444444444";
+          acknowledgedBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          postCalls += 1;
+          const body = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          correlation = body.audit_lock_attempt;
+          throw new TypeError("response lost");
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    await waitFor(() => {
+      expect(
+        fetchSpy.mock.calls.some(
+          (call) => call[0].toString() === "/api/daemon/recover/audit-lock-state",
+        ),
+      ).toBe(true);
+    });
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    const unresolved = await view.findByText(/response was lost/);
+    expect(unresolved.textContent).toContain("response was lost");
+    expect(unresolved.textContent).toContain("Do NOT retry");
+    expect(postCalls).toBe(1);
+    expect(exactLookups).toBe(1);
+    expect(acknowledgeCalls).toBe(0);
+
+    act(() => {
+      activeStubEventSource().triggerError();
+      activeStubEventSource().triggerOpen();
+    });
+    await view.findByText("Recovery result restored after reconnecting.");
+    await waitFor(() => expect(acknowledgeCalls).toBe(1));
+
+    expect(postCalls).toBe(1);
+    expect(exactLookups).toBeGreaterThanOrEqual(2);
+    expect(correlation).not.toBeNull();
+    const retainedCorrelation =
+      correlation as unknown as DaemonRecoverCorrelation;
+    expect(acknowledgedBody).toEqual({
+      ...retainedCorrelation,
+      acknowledge: true,
+      expected_physical: {
+        server_instance: serverInstance,
+        revision: 3,
+        state: "released",
+      },
+    });
+    const exactURLs = fetchSpy.mock.calls
+      .map((call) => call[0].toString())
+      .filter((url) => url.startsWith("/api/daemon/recover/audit-lock-state?"));
+    for (const url of exactURLs) {
+      expect(url).toContain(`attempt_id=${retainedCorrelation.attempt_id}`);
+      expect(url).toContain(`occurrence_id=${retainedCorrelation.occurrence_id}`);
+      expect(url).toContain(`server_instance=${retainedCorrelation.server_instance}`);
+    }
+  });
+
+  it("retains a release_pending receipt through status refreshes and acknowledges only after a settled reconnect", async () => {
+    const serverInstance = "33333333-3333-4333-8333-333333333333";
+    let correlation: DaemonRecoverCorrelation | null = null;
+    let settled = false;
+    let acknowledged = false;
+    let acknowledgeCalls = 0;
+    let postCalls = 0;
+    const receipt = () => {
+      if (!correlation) throw new Error("receipt before recovery POST");
+      return {
+        ...correlation,
+        task_name: quarantinedRow.task_name!,
+        status: "committed_success" as const,
+        lock_authorization: "current_truth" as const,
+        termination_commit_state: "committed" as const,
+      };
+    };
+    const snapshot = (exact: boolean) => ({
+      scope: "supervisor_events_log" as const,
+      server_instance: serverInstance,
+      revision: settled ? (exact ? 6 : 5) : (exact ? 4 : 3),
+      state: settled ? ("released" as const) : ("outstanding" as const),
+      recovery_receipt: exact && !acknowledged ? receipt() : null,
+      recovery_receipts: correlation && !acknowledged ? [receipt()] : [],
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return jsonResponse(200, correlation ? snapshot(false) : {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: 1,
+            state: "released",
+            recovery_receipt: null,
+            recovery_receipts: [],
+          });
+        }
+        if (url.startsWith("/api/daemon/recover/audit-lock-state?")) {
+          return jsonResponse(200, snapshot(true));
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          acknowledgeCalls += 1;
+          acknowledged = true;
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          postCalls += 1;
+          const body = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          correlation = body.audit_lock_attempt;
+          return jsonResponse(200, {
+            task_name: quarantinedRow.task_name,
+            state: "respawn_accepted",
+            reaped: true,
+            port_owner_check: "reaped",
+            port_wait_outcome: "released",
+            audit_handoff: "release_pending",
+            termination_committed: true,
+            audit_lock: {
+              ...snapshot(true),
+              revision: 2,
+              state: "outstanding",
+              recovery_receipt: receipt(),
+            },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await view.findByTestId("dashboard-audit-lock-pending");
+    await view.findByText("Recovery accepted; waiting for supervisor status");
+    expect(acknowledgeCalls).toBe(0);
+    expect(postCalls).toBe(1);
+
+    // A reconnect while the writer still holds its physical lock must preserve
+    // the same receipt/task fence and never submit a second destructive POST.
+    act(() => {
+      activeStubEventSource().triggerError();
+      activeStubEventSource().triggerOpen();
+    });
+    await waitFor(() => expect(acknowledgeCalls).toBe(0));
+    expect(postCalls).toBe(1);
+
+    settled = true;
+    act(() => {
+      activeStubEventSource().triggerError();
+      activeStubEventSource().triggerOpen();
+    });
+    await waitFor(() => expect(acknowledgeCalls).toBe(1));
+    expect(postCalls).toBe(1);
+  });
+
+  it("revalidates after status await and sends zero DELETEs when a newer outstanding SSE arrives", async () => {
+    const serverInstance = "33333333-3333-4333-8333-333333333333";
+    let correlation: DaemonRecoverCorrelation | null = null;
+    let holdNextStatus = false;
+    let statusHeld = false;
+    let resolveHeldStatus!: (response: Response) => void;
+    let acknowledgeCalls = 0;
+    let postCalls = 0;
+    const receipt = () => {
+      if (!correlation) throw new Error("receipt before recovery POST");
+      return {
+        ...correlation,
+        task_name: quarantinedRow.task_name!,
+        status: "committed_success" as const,
+        lock_authorization: "current_truth" as const,
+        termination_commit_state: "committed" as const,
+      };
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") {
+          if (!holdNextStatus) return statusResponse([quarantinedRow]);
+          holdNextStatus = false;
+          statusHeld = true;
+          return await new Promise<Response>((resolve) => {
+            resolveHeldStatus = resolve;
+          });
+        }
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: correlation ? 3 : 1,
+            state: correlation ? "outstanding" : "released",
+            recovery_receipt: null,
+            recovery_receipts: correlation ? [receipt()] : [],
+          });
+        }
+        if (url.startsWith("/api/daemon/recover/audit-lock-state?")) {
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: 3,
+            state: "outstanding",
+            recovery_receipt: receipt(),
+            recovery_receipts: [receipt()],
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          acknowledgeCalls += 1;
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          postCalls += 1;
+          const body = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          correlation = body.audit_lock_attempt;
+          return jsonResponse(200, {
+            task_name: quarantinedRow.task_name,
+            state: "respawn_accepted",
+            reaped: true,
+            port_owner_check: "reaped",
+            port_wait_outcome: "released",
+            audit_handoff: "durable",
+            termination_committed: true,
+            audit_lock: {
+              scope: "supervisor_events_log",
+              server_instance: serverInstance,
+              revision: 2,
+              state: "released",
+              recovery_receipt: receipt(),
+              recovery_receipts: [receipt()],
+            },
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    await view.findByTestId("dashboard-card");
+    holdNextStatus = true;
+    fireEvent.click(view.getByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await waitFor(() => expect(statusHeld).toBe(true));
+
+    act(() => {
+      dispatchSse("audit-lock-state", {
+        scope: "supervisor_events_log",
+        server_instance: serverInstance,
+        revision: 3,
+        state: "outstanding",
+        recovery_receipt: receipt(),
+        recovery_receipts: [receipt()],
+      });
+      resolveHeldStatus(statusResponse([quarantinedRow]));
+    });
+
+    await view.findByTestId("dashboard-audit-lock-pending");
+    expect(acknowledgeCalls).toBe(0);
+    expect(postCalls).toBe(1);
+  });
+
+  it("retains an unobserved backend ACK conflict and succeeds once after a later released snapshot", async () => {
+    const serverInstance = "33333333-3333-4333-8333-333333333333";
+    let correlation: DaemonRecoverCorrelation | null = null;
+    let physicalState: "released" | "outstanding" = "released";
+    let physicalRevision = 1;
+    let acknowledged = false;
+    let deleteCalls = 0;
+    let successfulDeletes = 0;
+    let postCalls = 0;
+    let baselineLookups = 0;
+    const deleteBodies: Array<Record<string, unknown>> = [];
+    const receipt = () => {
+      if (!correlation) throw new Error("receipt before recovery POST");
+      return {
+        ...correlation,
+        task_name: quarantinedRow.task_name!,
+        status: "committed_success" as const,
+        lock_authorization: physicalState === "released" ? ("none" as const) : ("current_truth" as const),
+        termination_commit_state: "committed" as const,
+      };
+    };
+    const snapshot = (exact: boolean) => ({
+      scope: "supervisor_events_log" as const,
+      server_instance: serverInstance,
+      revision: physicalRevision,
+      state: physicalState,
+      recovery_receipt: exact && !acknowledged ? receipt() : null,
+      recovery_receipts: correlation && !acknowledged ? [receipt()] : [],
+    });
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          baselineLookups += 1;
+          return jsonResponse(200, correlation ? snapshot(false) : {
+            scope: "supervisor_events_log",
+            server_instance: serverInstance,
+            revision: 1,
+            state: "released",
+            recovery_receipt: null,
+            recovery_receipts: [],
+          });
+        }
+        if (url.startsWith("/api/daemon/recover/audit-lock-state?")) {
+          return jsonResponse(200, snapshot(true));
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          deleteCalls += 1;
+          deleteBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          if (deleteCalls === 1) {
+            // Simulate a backend transition that the browser did not receive.
+            physicalState = "outstanding";
+            physicalRevision = 3;
+            return jsonResponse(409, {
+              error: "internal error",
+              code: "RECOVER_ACK_PHYSICAL_STATE_CHANGED",
+            });
+          }
+          acknowledged = true;
+          successfulDeletes += 1;
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          postCalls += 1;
+          const body = JSON.parse(String(init?.body)) as {
+            audit_lock_attempt: DaemonRecoverCorrelation;
+          };
+          correlation = body.audit_lock_attempt;
+          physicalState = "released";
+          physicalRevision = 2;
+          return jsonResponse(200, {
+            task_name: quarantinedRow.task_name,
+            state: "respawn_accepted",
+            reaped: true,
+            port_owner_check: "reaped",
+            port_wait_outcome: "released",
+            audit_handoff: "durable",
+            termination_committed: true,
+            audit_lock: snapshot(true),
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await view.findByText(/backend physical lock state changed before acknowledgement/);
+    await waitFor(() => expect(baselineLookups).toBeGreaterThanOrEqual(2));
+    expect(deleteCalls).toBe(1);
+    expect(successfulDeletes).toBe(0);
+    expect(postCalls).toBe(1);
+
+    act(() => {
+      activeStubEventSource().triggerError();
+      activeStubEventSource().triggerOpen();
+    });
+    await waitFor(() => expect(deleteCalls).toBe(1));
+
+    physicalState = "released";
+    physicalRevision = 4;
+    act(() => {
+      activeStubEventSource().triggerError();
+      activeStubEventSource().triggerOpen();
+    });
+    await waitFor(() => expect(successfulDeletes).toBe(1));
+    expect(deleteCalls).toBe(2);
+    expect(postCalls).toBe(1);
+    expect(deleteBodies[0]?.expected_physical).toEqual({
+      server_instance: serverInstance,
+      revision: 2,
+      state: "released",
+    });
+    expect(deleteBodies[1]?.expected_physical).toEqual({
+      server_instance: serverInstance,
+      revision: 4,
+      state: "released",
+    });
+  });
+
+  it("surfaces a conflicting binding without relabeling or retrying", async () => {
+    const { fetchSpy } = mockRecoveryFetch(jsonResponse(409, {
+      error: "internal error",
+      code: "RECOVER_ATTEMPT_CONFLICT",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByText(/already bound to a different action/);
+    expect(alert.textContent).toContain("already bound to a different action");
+    expect(alert.textContent).toContain("Nothing was relabeled or retried");
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) => call[0].toString() === "/api/daemon/recover",
+      ),
+    ).toHaveLength(1);
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) =>
+          call[0].toString() ===
+          "/api/daemon/recover/audit-lock-receipt",
+      ),
+    ).toHaveLength(0);
   });
 
   it.each([
@@ -2027,7 +2818,7 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     fireEvent.click(await view.findByRole("button", { name: "Recover" }));
     fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
 
-    const alert = await view.findByRole("alert");
+    const alert = await view.findByText(message, { exact: true });
     expect(alert.textContent).toBe(message);
     expect(alert.textContent).not.toContain("A process was already stopped during this recovery attempt.");
     expect(view.container.textContent).not.toContain(raw);
@@ -2048,8 +2839,700 @@ describe("DashboardScreen — quarantined daemon recovery", () => {
     fireEvent.click(await view.findByRole("button", { name: "Recover" }));
     fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
 
-    const alert = await view.findByRole("alert");
-    expect(alert.textContent).toBe(`${message} A process was already stopped during this recovery attempt.`);
+    const expectedMessage = `${message} A process was already stopped during this recovery attempt.`;
+    const alert = await view.findByText(expectedMessage, { exact: true });
+    expect(alert.textContent).toBe(expectedMessage);
     expect(view.container.textContent).not.toContain(raw);
+  });
+  // F2 regression guard. postDaemonRecover's response used to be DISCARDED by
+  // the Dashboard's onRecover handler, so the audit_handoff warning — the ONLY
+  // signal that this long-lived GUI process may still hold the
+  // supervisor-events.log flock — was invisible in the exact surface where the
+  // strand actually hurts. Only the one-shot CLI reported it.
+  //
+  // MUTATION: restore `await postDaemonRecover(d.task_name!);` (drop the
+  // `result.audit_handoff` branch) in DashboardScreen's onRecover. This test
+  // fails with "Unable to find an element by: [data-testid=\"dashboard-audit-lock-stranded\"]".
+  it("surfaces a release_unconfirmed audit handoff as a persistent screen-level warning", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_unconfirmed",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const banner = await view.findByTestId("dashboard-audit-lock-stranded");
+    expect(banner.textContent).toContain("could not confirm it released");
+    expect(banner.textContent).toContain("Do NOT re-run recovery");
+    expect(banner.textContent).toContain("Restart mcphub to release the lock");
+
+    // Screen-level, NOT inside the daemon tile: the condition is process-scoped
+    // and is not attributable to one daemon.
+    expect(view.getByTestId("dashboard-card").contains(banner)).toBe(false);
+
+    // STICKY. A daemon-state delta clears the Card's own transient recovery
+    // feedback; the lock warning must survive it, because the strand outlives
+    // the recovery and its only remedy is restarting this process.
+    await view.findByText("Recovery accepted; waiting for supervisor status");
+    act(() => {
+      dispatchSse("daemon-state", {
+        server: "memory",
+        daemon: "default",
+        port: 9123,
+        pid: 12345,
+        state: "Running",
+      });
+    });
+    await waitFor(() => {
+      expect(view.queryByText("Recovery accepted; waiting for supervisor status")).toBeNull();
+    });
+    expect(view.getByTestId("dashboard-audit-lock-stranded")).toBeTruthy();
+  });
+
+  // F-1 regression guard, and the one the shipped shape FAILED.
+  //
+  // The banner is a permanent, undismissable "restart the app" alarm. Before the
+  // wire enum was widened, a TRANSIENT condition reached it: a concurrent
+  // healthy bounded emit anywhere in the GUI process made a recovery report
+  // "release_unconfirmed", and nothing ever cleared it. On this product that
+  // advice costs the operator their tray and their whole fleet.
+  //
+  // A later CONFIRMED release is proof the process is clean, so it must clear.
+  //
+  // NOTE ON SCOPE: the clearing pair is release_pending -> durable, NOT
+  // release_unconfirmed -> durable. release_unconfirmed now means a release that
+  // ATTEMPTED AND FAILED, which is permanent for the process's lifetime, so it
+  // deliberately does NOT clear — that latch is pinned by the nextAuditLockWarning
+  // transition table at the bottom of this file.
+  //
+  // MUTATION: replace the reducer call in DashboardScreen's onRecover with the
+  // old assignment, `if (result.audit_handoff === "release_unconfirmed")
+  // setAuditLockWarning("stranded");`. Verified this session: the test fails at
+  // the FIRST await, because that shape drops release_pending on the floor
+  // entirely and no banner is ever rendered:
+  //
+  //	Unable to find an element by: [data-testid="dashboard-audit-lock-pending"]
+  //	  Dashboard.test.tsx:2132  await view.findByTestId("dashboard-audit-lock-pending")
+  it("clears the pending warning only when an authoritative settlement update confirms release", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_pending",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await view.findByTestId("dashboard-audit-lock-pending");
+
+    // A physical-settlement event, not another destructive recovery, proves
+    // that the process-wide writer released its lock.
+    act(() => {
+      dispatchSse("audit-lock-state", {
+        scope: "supervisor_events_log",
+        server_instance: "33333333-3333-4333-8333-333333333333",
+        revision: 3,
+        state: "released",
+        recovery_receipt: null,
+        recovery_receipts: [],
+      });
+    });
+
+    await waitFor(() => {
+      expect(view.queryByTestId("dashboard-audit-lock-pending")).toBeNull();
+    });
+    expect(view.queryByTestId("dashboard-audit-lock-stranded")).toBeNull();
+  });
+
+  // The transient variant must NOT wear the permanent remedy. "Restart mcphub"
+  // for an in-flight write that clears in milliseconds is the specific piece of
+  // advice this split exists to stop emitting.
+  it("tells a pending release to wait, never to restart", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_pending",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const banner = await view.findByTestId("dashboard-audit-lock-pending");
+    expect(banner.textContent).toContain("clears on its own");
+    expect(banner.textContent).toContain("no restart needed");
+    expect(banner.textContent).toContain("Do NOT re-run recovery");
+    expect(banner.textContent).not.toContain("Restart mcphub");
+    expect(view.queryByTestId("dashboard-audit-lock-stranded")).toBeNull();
+  });
+
+  it("orders settlement SSE by revision and clears a pending warning without another recovery", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "release_pending",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+    await view.findByTestId("dashboard-audit-lock-pending");
+
+    dispatchSse("audit-lock-state", {
+      scope: "supervisor_events_log",
+      server_instance: "33333333-3333-4333-8333-333333333333",
+      revision: 1,
+      state: "released",
+      recovery_receipt: null,
+      recovery_receipts: [],
+    });
+    expect(view.getByTestId("dashboard-audit-lock-pending")).toBeTruthy();
+
+    dispatchSse("audit-lock-state", {
+      scope: "supervisor_events_log",
+      server_instance: "33333333-3333-4333-8333-333333333333",
+      revision: 3,
+      state: "released",
+      recovery_receipt: null,
+      recovery_receipts: [],
+    });
+    await waitFor(() => {
+      expect(view.queryByTestId("dashboard-audit-lock-pending")).toBeNull();
+    });
+  });
+
+  // F2 negative: a "durable" handoff must not raise the banner, or the warning
+  // becomes noise on every successful recovery.
+  it("shows no lock warning when the audit handoff is durable", async () => {
+    mockRecoveryFetch(jsonResponse(200, {
+      task_name: quarantinedRow.task_name,
+      state: "respawn_accepted",
+      reaped: true,
+      port_owner_check: "reaped",
+      port_wait_outcome: "released",
+      audit_handoff: "durable",
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    await view.findByText("Recovery accepted; waiting for supervisor status");
+    expect(view.queryByTestId("dashboard-audit-lock-stranded")).toBeNull();
+  });
+
+  // F3 regression guard. RECOVER_AUDIT_DURABILITY_FAILED had no switch arm, so
+  // it fell through to the generic default and told the operator to "try
+  // again" — the one instruction this code exists to prevent, because the
+  // destructive step has already run.
+  //
+  // MUTATION: delete the RECOVER_AUDIT_DURABILITY_FAILED arm from
+  // daemonRecoverCodeMessage. tsc fails the exhaustiveness guard first; forcing
+  // past it, this test fails with the generic "Recovery failed. Check the
+  // supervisor logs and try again." copy.
+  it("never offers a retry for RECOVER_AUDIT_DURABILITY_FAILED", async () => {
+    mockRecoveryFetch(jsonResponse(500, {
+      error: "internal error",
+      code: "RECOVER_AUDIT_DURABILITY_FAILED",
+      termination_committed: true,
+    }));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByText(/Recovery already stopped the process and requested a respawn/);
+    expect(alert.textContent).toContain("Do NOT retry");
+    expect(alert.textContent).toContain("already stopped the process and requested a respawn");
+    expect(alert.textContent).toContain("A process was already stopped during this recovery attempt.");
+    // The generic fall-through copy is exactly what the missing arm produced.
+    expect(alert.textContent).not.toContain("Recovery failed. Check the supervisor logs and try again.");
+  });
+
+  it.each([
+    ["pre-action", {
+      error: "internal error",
+      code: "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
+      occurrence_store_health: "stranded",
+      occurrence_store_health_revision: 1,
+      restart_required: true,
+    }],
+    ["terminal", {
+      error: "internal error",
+      code: "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
+      occurrence_store_health: "stranded",
+      occurrence_store_health_revision: 2,
+      restart_required: true,
+      audit_lock: {
+        scope: "supervisor_events_log",
+        server_instance: "33333333-3333-4333-8333-333333333333",
+        revision: 2,
+        state: "stranded",
+        occurrence_store_health: "stranded",
+        occurrence_store_health_revision: 2,
+        restart_required: true,
+        recovery_receipt: {
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          server_instance: "33333333-3333-4333-8333-333333333333",
+          task_name: "\\mcp-local-hub-memory-default",
+          status: "uncertain",
+          lock_authorization: "uncertain",
+          termination_commit_state: "unknown",
+        },
+        recovery_receipts: [{
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          server_instance: "33333333-3333-4333-8333-333333333333",
+          task_name: "\\mcp-local-hub-memory-default",
+          status: "uncertain",
+          lock_authorization: "uncertain",
+          termination_commit_state: "unknown",
+        }],
+      },
+    }],
+  ])("requires conservative guidance for a %s stranded recovery occurrence-store lock", async (_shape, response) => {
+    mockRecoveryFetch(jsonResponse(503, response));
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByRole("button", { name: "Recover" }));
+    fireEvent.click(view.getByTestId("daemon-recover-modal-confirm"));
+
+    const alert = await view.findByText(/occurrence store lock is stranded/);
+    expect(alert.textContent).toContain("Restart mcphub");
+    expect(alert.textContent).toContain("reconcile the retained recovery outcome");
+    expect(alert.textContent).toContain("inspect the daemon and supervisor state");
+    expect(alert.textContent).toContain("Do NOT retry");
+    expect(alert.textContent).not.toContain("try recovery again");
+    expect(alert.textContent).not.toContain("try again");
+    expect(alert.textContent).not.toContain("before retrying");
+    expect(alert.textContent).not.toContain("Recovery failed. Check the supervisor logs and try again.");
+  });
+
+  it("reconciles a dropped audit-lock event while EventSource remains open", async () => {
+    let auditGets = 0;
+    let advanced = false;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          auditGets += 1;
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: "33333333-3333-4333-8333-333333333333",
+            revision: advanced ? 2 : 1,
+            state: advanced ? "outstanding" : "released",
+            recovery_receipt: advanced
+              ? {
+                  attempt_id: "11111111-1111-4111-8111-111111111111",
+                  occurrence_id: "22222222-2222-4222-8222-222222222222",
+                  server_instance: "33333333-3333-4333-8333-333333333333",
+                  task_name: "\\mcp-local-hub-memory-default",
+                  status: "committed_success",
+                  lock_authorization: "current_truth",
+                  termination_commit_state: "not_committed",
+                }
+              : null,
+            recovery_receipts: [],
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+
+    const view = render(<DashboardScreen />);
+    await view.findByTestId("dashboard-card");
+    const stream = activeStubEventSource();
+    act(() => stream.triggerOpen());
+    await waitFor(() => expect(auditGets).toBeGreaterThanOrEqual(2));
+
+    advanced = true;
+    // No audit-lock SSE is dispatched. The stream remains open while the
+    // authoritative visibility GET observes the newer revision.
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await view.findByTestId("dashboard-audit-lock-pending");
+
+    expect(activeStubEventSource()).toBe(stream);
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) => call[0].toString() === "/api/daemon/recover",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("rejects a delayed GET from a prior server instance after a newer SSE", async () => {
+    let resolveAudit!: (response: Response) => void;
+    let auditIssued = false;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return await new Promise<Response>((resolve) => {
+            resolveAudit = resolve;
+            auditIssued = true;
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    await view.findByTestId("dashboard-card");
+    await waitFor(() => expect(auditIssued).toBe(true));
+    act(() => {
+      dispatchSse("audit-lock-state", {
+        scope: "supervisor_events_log",
+        server_instance: "44444444-4444-4444-8444-444444444444",
+        revision: 5,
+        state: "stranded",
+        recovery_receipt: null,
+        recovery_receipts: [],
+      });
+    });
+    await view.findByTestId("dashboard-audit-lock-stranded");
+
+    act(() => {
+      resolveAudit(jsonResponse(200, {
+        scope: "supervisor_events_log",
+        server_instance: "33333333-3333-4333-8333-333333333333",
+        revision: 99,
+        state: "released",
+        recovery_receipt: null,
+        recovery_receipts: [],
+      }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(view.getByTestId("dashboard-audit-lock-stranded")).toBeTruthy();
+  });
+
+  it("lets the latest issued audit-lock GET win reordered responses", async () => {
+    const resolvers: Array<(response: Response) => void> = [];
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          return await new Promise<Response>((resolve) => resolvers.push(resolve));
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    await view.findByTestId("dashboard-card");
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await waitFor(() => expect(resolvers).toHaveLength(2));
+
+    act(() => {
+      resolvers[1]!(jsonResponse(200, {
+        scope: "supervisor_events_log",
+        server_instance: "44444444-4444-4444-8444-444444444444",
+        revision: 2,
+        state: "outstanding",
+        recovery_receipt: {
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          server_instance: "44444444-4444-4444-8444-444444444444",
+          task_name: "\\mcp-local-hub-memory-default",
+          status: "committed_success",
+          lock_authorization: "current_truth",
+          termination_commit_state: "not_committed",
+        },
+        recovery_receipts: [],
+      }));
+    });
+    await view.findByTestId("dashboard-audit-lock-pending");
+
+    act(() => {
+      resolvers[0]!(jsonResponse(200, {
+        scope: "supervisor_events_log",
+        server_instance: "33333333-3333-4333-8333-333333333333",
+        revision: 99,
+        state: "released",
+        recovery_receipt: null,
+        recovery_receipts: [],
+      }));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(view.getByTestId("dashboard-audit-lock-pending")).toBeTruthy();
+  });
+
+  it("aborts a hung audit-lock GET after eight seconds and keeps the last good view", async () => {
+    let hang = false;
+    const hungSignal: { current: AbortSignal | null } = { current: null };
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          if (hang) {
+            hungSignal.current = init?.signal ?? null;
+            return await new Promise<Response>((_resolve, reject) => {
+              hungSignal.current?.addEventListener("abort", () => {
+                reject(new DOMException("aborted", "AbortError"));
+              }, { once: true });
+            });
+          }
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: "33333333-3333-4333-8333-333333333333",
+            revision: 1,
+            state: "outstanding",
+            recovery_receipt: {
+              attempt_id: "11111111-1111-4111-8111-111111111111",
+              occurrence_id: "22222222-2222-4222-8222-222222222222",
+              server_instance: "33333333-3333-4333-8333-333333333333",
+              task_name: "\\mcp-local-hub-memory-default",
+              status: "committed_success",
+              lock_authorization: "current_truth",
+              termination_commit_state: "not_committed",
+            },
+            recovery_receipts: [],
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    await view.findByTestId("dashboard-audit-lock-pending");
+    vi.useFakeTimers();
+    hang = true;
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(hungSignal.current).not.toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(8_000);
+    });
+    expect(hungSignal.current?.aborted).toBe(true);
+    expect(view.getByTestId("dashboard-audit-lock-pending")).toBeTruthy();
+    vi.useRealTimers();
+  });
+
+  it("requests audit-lock reconciliation on mount, SSE open, visibility, and the 60-second tick", async () => {
+    vi.useFakeTimers();
+    let auditGets = 0;
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") return statusResponse([quarantinedRow]);
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          auditGets += 1;
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: "33333333-3333-4333-8333-333333333333",
+            revision: auditGets,
+            state: "released",
+            recovery_receipt: null,
+            recovery_receipts: [],
+          });
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    render(<DashboardScreen />);
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(auditGets).toBe(1);
+
+    act(() => activeStubEventSource().triggerOpen());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(auditGets).toBe(2);
+
+    act(() => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(auditGets).toBe(3);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(60_000);
+    });
+    expect(auditGets).toBeGreaterThanOrEqual(4);
+    vi.useRealTimers();
+  });
+
+  it("hydrates an uncertain receipt without a second POST and requires explicit acknowledgement", async () => {
+    const correlation: DaemonRecoverCorrelation = {
+      attempt_id: "11111111-1111-4111-8111-111111111111",
+      occurrence_id: "22222222-2222-4222-8222-222222222222",
+      server_instance: "33333333-3333-4333-8333-333333333333",
+    };
+    let acknowledged = false;
+    let postCalls = 0;
+    let statusCalls = 0;
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async (input: Request | string | URL) => {
+        const url = typeof input === "string" ? input : input.toString();
+        if (url === "/api/status") {
+          statusCalls += 1;
+          return statusResponse([quarantinedRow]);
+        }
+        if (url === "/api/scan") return scanResponse([]);
+        if (url === "/api/hub/health") {
+          return jsonResponse(200, { state: "healthy", degraded: false });
+        }
+        if (url === "/api/daemon/recover/audit-lock-state") {
+          const receipt = {
+            ...correlation,
+            task_name: "\\mcp-local-hub-memory-default",
+            status: "uncertain",
+            lock_authorization: "uncertain",
+            termination_commit_state: "unknown",
+          };
+          return jsonResponse(200, {
+            scope: "supervisor_events_log",
+            server_instance: acknowledged
+              ? "44444444-4444-4444-8444-444444444444"
+              : correlation.server_instance,
+            revision: acknowledged ? 0 : 1,
+            state: "released",
+            recovery_receipt: null,
+            recovery_receipts: acknowledged ? [] : [receipt],
+          });
+        }
+        if (url === "/api/daemon/recover/audit-lock-receipt") {
+          acknowledged = true;
+          return new Response(null, { status: 204 });
+        }
+        if (url === "/api/daemon/recover") {
+          postCalls += 1;
+          throw new Error("durable hydration must not POST");
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    );
+
+    const view = render(<DashboardScreen />);
+    const acknowledgement = await view.findByTestId("dashboard-recovery-receipt-ack");
+    expect(acknowledgement.textContent).toContain("Do NOT repeat recovery");
+    expect(postCalls).toBe(0);
+
+    fireEvent.click(view.getByRole("button", {
+      name: "I checked current status — acknowledge",
+    }));
+    await waitFor(() => {
+      expect(view.queryByTestId("dashboard-recovery-receipt-ack")).toBeNull();
+    });
+    expect(statusCalls).toBeGreaterThanOrEqual(2);
+    expect(postCalls).toBe(0);
+    expect(
+      fetchSpy.mock.calls.filter(
+        (call) =>
+          call[0].toString() === "/api/daemon/recover/audit-lock-receipt",
+      ),
+    ).toHaveLength(1);
+  });
+});
+
+describe("nextAuditLockView", () => {
+  const serverInstance = "33333333-3333-4333-8333-333333333333";
+  const snapshot = (
+    revision: number,
+    state: AuditLockSnapshot["state"],
+    authorized = false,
+    instance = serverInstance,
+  ): AuditLockSnapshot => ({
+    scope: "supervisor_events_log",
+    server_instance: instance,
+    revision,
+    state,
+    recovery_receipt: authorized
+      ? {
+          attempt_id: "11111111-1111-4111-8111-111111111111",
+          occurrence_id: "22222222-2222-4222-8222-222222222222",
+          server_instance: instance,
+          task_name: "\\demo/default",
+          status: "committed_success",
+          lock_authorization: "current_truth",
+          termination_commit_state: "committed",
+        }
+      : null,
+    recovery_receipts: [],
+  });
+
+  it("ignores older revisions and clears pending on a newer release", () => {
+    const pending = nextAuditLockView(null, snapshot(8, "outstanding", true));
+    expect(pending.warning).toBe("pending");
+    expect(nextAuditLockView(pending, snapshot(7, "released"))).toBe(pending);
+    expect(nextAuditLockView(pending, snapshot(9, "released")).warning).toBeNull();
+  });
+
+  it("does not alarm for an unrelated outstanding baseline", () => {
+    expect(nextAuditLockView(null, snapshot(1, "outstanding")).warning).toBeNull();
+  });
+
+  it("latches stranded only within the same server instance", () => {
+    const stranded = nextAuditLockView(null, snapshot(4, "stranded"));
+    expect(nextAuditLockView(stranded, snapshot(5, "released")).warning).toBe(
+      "stranded",
+    );
+    const restarted = nextAuditLockView(
+      stranded,
+      snapshot(
+        1,
+        "released",
+        false,
+        "44444444-4444-4444-8444-444444444444",
+      ),
+    );
+    expect(restarted.warning).toBeNull();
+    expect(restarted.revision).toBe(1);
   });
 });

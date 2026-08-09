@@ -28,9 +28,16 @@ func setupGUIAdoptTestEnv(t *testing.T, entryName, codexBody string) (codexPath,
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))
-	t.Setenv("APPDATA", filepath.Join(root, "appdata"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+	// These tests drive the REAL /api/adopt and /api/deadopt routes. BuildAdoptPlan
+	// fans out over DefaultScanConfigPaths and BuildDeAdoptPlan calls ProbeHubGate,
+	// which GetEntry's EVERY constructed adapter — so an APPDATA-only widening is
+	// not enough: opencode/crush/goose (XDG_CONFIG_HOME on all OSes), copilot-cli,
+	// kimi-code-cli and mimocode's %ProgramData% managed layer all read real host
+	// files without the full set. neutralizeClientConfigPathEnv
+	// (client_config_env_isolation_test.go) owns it, APPDATA included.
+	neutralizeClientConfigPathEnv(t, home)
 	t.Setenv("MCPHUB_ALLOW_CLIENT_CONFIG_SYMLINK", "")
 	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "")
 	t.Cleanup(api.ResetStrictModeIntentCacheForTest)
@@ -84,7 +91,7 @@ func guiAdoptDefaultManifestDir(t *testing.T) string {
 
 func postAdoptTest(t *testing.T, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -159,11 +166,37 @@ url = "http://example.invalid/mcp"
 [mcp_servers.gui-adopt-execute]
 command = "go"
 args = ["version"]
-`)
+	`)
 
+	sideEffectsBefore := testInstallAutostartFixture.snapshot()
 	rec := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-execute","client":"codex-cli","port":9322}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status=%d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	sideEffectsAfter := testInstallAutostartFixture.snapshot()
+	if got := sideEffectsAfter.schedulerFactoryCalls - sideEffectsBefore.schedulerFactoryCalls; got != 1 {
+		t.Fatalf("scheduler factory calls delta = %d, want 1", got)
+	}
+	if got := sideEffectsAfter.schedulerListCalls - sideEffectsBefore.schedulerListCalls; got != 1 {
+		t.Fatalf("scheduler List calls delta = %d, want 1", got)
+	}
+	if got := sideEffectsAfter.schedulerListPrefix; got != "mcp-local-hub-gui-adopt-execute-" {
+		t.Fatalf("scheduler List prefix = %q, want %q", got, "mcp-local-hub-gui-adopt-execute-")
+	}
+	if got := sideEffectsAfter.schedulerDeleteCalls - sideEffectsBefore.schedulerDeleteCalls; got != 0 {
+		t.Fatalf("scheduler Delete calls delta = %d, want 0", got)
+	}
+	if got := sideEffectsAfter.schedulerUnexpectedOps - sideEffectsBefore.schedulerUnexpectedOps; got != 0 {
+		t.Fatalf("unexpected scheduler operations delta = %d, want 0", got)
+	}
+	if got := sideEffectsAfter.statusCalls - sideEffectsBefore.statusCalls; got != 1 {
+		t.Fatalf("autostart Status calls delta = %d, want 1", got)
+	}
+	if got := sideEffectsAfter.enableCalls - sideEffectsBefore.enableCalls; got != 0 {
+		t.Fatalf("autostart Enable calls delta = %d, want 0 for an enabled owner", got)
+	}
+	if got := sideEffectsAfter.startOwnerCalls - sideEffectsBefore.startOwnerCalls; got != 1 {
+		t.Fatalf("injected autostart owner start calls delta = %d, want 1 for unavailable-supervisor fallback", got)
 	}
 	body := decodeAdoptJSON(t, rec)
 	if body["name"] != entry || body["port"] != float64(9322) {
@@ -489,13 +522,13 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 		}
 	}
 	pathBearing := []string{
-		`resolve client config path for "codex-cli": open C:\Users\dima_\AppData\config.toml: denied`,
+		`resolve client config path for "codex-cli": open C:\Users\fixture-user\AppData\config.toml: denied`,
 		`resolve client config path for "codex-cli": open /home/user/.config/x.json: denied`,
 		`check existing disk manifest "x": open \\host\share\manifest.yaml: denied`,
 		// fable PR #516 P3-A evasion shapes: a quoted POSIX path and a rooted
 		// (single-backslash) Windows path the prior regex missed.
 		`entry name "/home/evil/secret.toml" is not a valid manifest name`,
-		`open \Users\dima_\AppData\Local\vault.age: access is denied`,
+		`open \Users\fixture-user\AppData\Local\vault.age: access is denied`,
 		`config=/etc/mcphub/secret.yaml unreadable`,
 	}
 	for _, msg := range pathBearing {
@@ -534,13 +567,13 @@ func TestAdoptPlanErrorIsActionable(t *testing.T) {
 		`some brand new backend error we never enumerated`,
 		// Recognized phrase BUT path-bearing -> redact wins (P3-B: a wrapped OS
 		// "already exists: <path>" must not ride the actionable lane).
-		`Cannot create a file when that file already exists: C:\Users\dima_\x.toml`,
+		`Cannot create a file when that file already exists: C:\Users\fixture-user\x.toml`,
 		// Path-bearing, no recognized phrase.
 		`open /home/user/.config/mcphub/x.json: permission denied`,
 		// Even the Area-3 fail-loud phrase must redact if a path ever appears in the
 		// reason — adoptErrorMessageHasPath is the fail-closed backstop ahead of the
 		// allowlist.
-		`cannot adopt into client "cursor": open C:\Users\dima_\.cursor\mcp.json: denied`,
+		`cannot adopt into client "cursor": open C:\Users\fixture-user\.cursor\mcp.json: denied`,
 	}
 	for _, msg := range redacted {
 		if adoptPlanErrorIsActionable(msg) {
@@ -559,7 +592,7 @@ func TestAdoptRoutePublishesOperatorActionEvent(t *testing.T) {
 command = "go"
 args = ["version"]
 `)
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := s.Broadcaster().Subscribe(ctx)

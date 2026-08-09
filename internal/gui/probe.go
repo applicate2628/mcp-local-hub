@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -49,6 +50,15 @@ type ProcessIdentity struct {
 	Cmdline   []string  // argv split honoring CommandLineToArgvW (Win) / NUL-delimited (Linux)
 	StartTime time.Time // process creation time; opaque token for identity equality
 
+	// Indeterminate marks a platform-level probe error that is NOT the
+	// platform's own definitive "no such process" signal (residual 1(a) —
+	// see probe_windows.go's classifyOpenProcessError and probe_linux.go's
+	// classifyKillError). Alive is meaningless (false, zero value) when
+	// this is true. probeOnce (single_instance.go) maps it to
+	// VerdictIndeterminate, never VerdictDeadPID — a transient OS error
+	// must never be treated as proof the recorded process exited.
+	Indeterminate bool
+
 	// Handle is the kernel reference taken at probe time. While held,
 	// the OS pins the PID-table entry (Windows: PROCESS handle reserves
 	// the PID; Linux: pidfd reserves analogous state), preventing
@@ -58,17 +68,55 @@ type ProcessIdentity struct {
 	// killProcess uses it via killProcessByIdentity when non-zero,
 	// falls back to PID-based signal otherwise.
 	Handle uintptr
+
+	// closeHandle is populated only by the processIDOverride test seam when a
+	// retained identity is requested. Production identities always use the
+	// platform closeProcessHandle owner.
+	closeHandle func(uintptr) error
+	closeState  *processIdentityCloseState
+}
+
+type processIdentityCloseState struct {
+	mu     sync.Mutex
+	closed bool
+	err    error
 }
 
 // Close releases any kernel handle held by Handle. Safe to call
-// multiple times; safe to call on a zero ProcessIdentity (no-op).
+// multiple times; safe to call on a zero ProcessIdentity (no-op). The first
+// native close result is retained so a destructive owner can settle it exactly
+// once instead of silently treating a failed release as success.
 // Callers MUST invoke Close once the handle is no longer needed.
-func (id *ProcessIdentity) Close() {
-	if id == nil || id.Handle == 0 {
-		return
+func (id *ProcessIdentity) Close() error {
+	if id == nil {
+		return nil
 	}
-	closeProcessHandle(id.Handle)
+	if id.closeState == nil {
+		if id.Handle == 0 {
+			return nil
+		}
+		id.closeState = &processIdentityCloseState{}
+	}
+	state := id.closeState
+	state.mu.Lock()
+	defer state.mu.Unlock()
+	if state.closed {
+		return state.err
+	}
+	if id.Handle == 0 {
+		state.closed = true
+		return nil
+	}
+	handle := id.Handle
+	closer := id.closeHandle
+	if closer == nil {
+		closer = closeProcessHandle
+	}
+	state.err = closer(handle)
+	state.closed = true
 	id.Handle = 0
+	id.closeHandle = nil
+	return state.err
 }
 
 // pingIncumbent issues GET http://127.0.0.1:<port>/api/ping and
@@ -122,6 +170,29 @@ func processID(pid int) (ProcessIdentity, error) {
 		return processIDOverride(pid)
 	}
 	return processIDImpl(pid)
+}
+
+// retainedProcessID is the destructive-authority variant of processID. Its
+// platform implementation must return a live identity with a non-zero kernel
+// handle or an error; callers retain that handle until the guarded mutation
+// settles. Keeping this separate from processID avoids imposing a new handle
+// lifetime on read-only callers that consume only the snapshot fields.
+func retainedProcessID(pid int) (ProcessIdentity, error) {
+	if pid <= 0 {
+		return ProcessIdentity{Alive: false}, nil
+	}
+	if processIDOverride != nil {
+		identity, err := processIDOverride(pid)
+		if err == nil && identity.Alive && !identity.Denied && identity.Handle == 0 {
+			// The explicit test override proves the snapshot. Supply a logical
+			// retained handle whose close is a no-op so the same established
+			// seam can exercise lease lifetimes without touching an OS handle.
+			identity.Handle = ^uintptr(0)
+			identity.closeHandle = func(uintptr) error { return nil }
+		}
+		return identity, err
+	}
+	return retainedProcessIDImpl(pid)
 }
 
 // killProcess sends SIGKILL / TerminateProcess to the given PID.

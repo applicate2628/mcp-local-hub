@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 type: feature-followup
 severity: P2
 date: 2026-07-11

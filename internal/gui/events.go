@@ -510,6 +510,8 @@ func classifyEvent(eventType string) (source string, severity string) {
 		// supervisor auto-restart, or a manual restart, succeeded). Info
 		// severity: it is the all-clear paired with daemon-failed.
 		return "poller", api.GUIEventSeverityInfo
+	case "audit-lock-state":
+		return "gui", api.GUIEventSeverityInfo
 	case "poller-error":
 		return "poller", api.GUIEventSeverityError
 	case "bulk-action":

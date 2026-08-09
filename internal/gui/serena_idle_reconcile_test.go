@@ -3,10 +3,14 @@ package gui
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -20,12 +24,17 @@ func withSerenaIdleReconcileGlobals(t *testing.T) {
 	prevStatus := serenaBackendStatusFn
 	prevThreshold := serenaIdleThresholdFn
 	prevStop := serenaIdleStopFn
+	prevRoutingAuthority := serenaIdleRoutingAuthorityFn
 	prevRouterSeam := serenaRouterTestSeam
+	serenaIdleRoutingAuthorityFn = func(_ context.Context, admittedTick func() int) (int, error) {
+		return admittedTick(), nil
+	}
 	serenaRouterTestSeam = nil
 	t.Cleanup(func() {
 		serenaBackendStatusFn = prevStatus
 		serenaIdleThresholdFn = prevThreshold
 		serenaIdleStopFn = prevStop
+		serenaIdleRoutingAuthorityFn = prevRoutingAuthority
 		serenaRouterTestSeam = prevRouterSeam
 	})
 }
@@ -38,7 +47,7 @@ func withTempSerenaStateRoot(t *testing.T) {
 func newSerenaStoreSeedServer(t *testing.T, ws *api.WorkspaceEntry) (*Server, *InMemorySessionRouter) {
 	t.Helper()
 	sessions := NewInMemorySessionRouter()
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: &listerStubResolver{
 			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{ws}},
@@ -752,6 +761,139 @@ func TestSerenaRouter_IdleStopConcurrentWakeDoesNotReuseStaleDaemonSession(t *te
 	}
 	if lastToolSession == "" || lastToolSession == staleDaemonSession {
 		t.Fatalf("forward used daemon session %q, want fresh post-wake session", lastToolSession)
+	}
+}
+
+func TestSerenaRouter_IdleStopOldWorkspacePreservesActiveSwitchReservation(t *testing.T) {
+	withSerenaIdleReconcileGlobals(t)
+
+	initEntered := make(chan struct{}, 1)
+	releaseInitialize := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseInitialize) }) })
+	var initializeCount atomic.Int32
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var request struct {
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(body, &request)
+		switch request.Method {
+		case "initialize":
+			mint := initializeCount.Add(1)
+			select {
+			case initEntered <- struct{}{}:
+			default:
+			}
+			<-releaseInitialize
+			w.Header().Set("Mcp-Session-Id", fmt.Sprintf("daemon-beta-session-%d", mint))
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"serena","version":"fake"},"capabilities":{"tools":{}}}}`))
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`))
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	wsA := serenaWS("idle-reservation-alpha", "/proj/idle-reservation-alpha", testServerPort(t, upstream))
+	wsB := serenaWS("idle-reservation-beta", "/proj/idle-reservation-beta", testServerPort(t, upstream))
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver: &listerStubResolver{
+			stubResolver: stubResolver{entries: []*api.WorkspaceEntry{wsA, wsB}},
+			list:         []*api.WorkspaceEntry{wsA, wsB},
+		},
+		Sessions:        sessions,
+		UpstreamURLFn:   func(*api.WorkspaceEntry) string { return upstream.URL },
+		UpstreamTimeout: 2 * time.Second,
+		AuditFn:         func(string, string, map[string]any) error { return nil },
+	}
+	s := NewServer(Config{Port: 9300, Version: "test", PID: 1})
+	s.SetSerenaRouterDeps(deps)
+	init := buildLifecycleBody(t, "initialize", map[string]any{
+		"protocolVersion": "2025-11-25",
+		"capabilities":    map[string]any{},
+	})
+	initResponse := postSerenaOnGUIOrigin(t, s, init, nil)
+	if initResponse.Code != http.StatusOK {
+		t.Fatalf("router initialize status = %d, want 200; body=%s", initResponse.Code, initResponse.Body.String())
+	}
+	sid := initResponse.Header().Get("Mcp-Session-Id")
+	if sid == "" {
+		t.Fatal("router initialize did not mint a client session")
+	}
+	seedBoundSerenaSession(s, sessions, wsA, sid, "daemon-alpha-session")
+
+	now := time.Now().UTC().Truncate(time.Second)
+	serenaIdleThresholdFn = func() (time.Duration, bool) { return time.Minute, true }
+	serenaIdleStopFn = func(taskName string, _ time.Time) (bool, error) {
+		if taskName != wsA.TaskName {
+			t.Fatalf("idle stop task = %q, want %q", taskName, wsA.TaskName)
+		}
+		return true, nil
+	}
+	serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+		return []api.DaemonStatus{{Server: "serena", Workspace: wsA.WorkspacePath, TaskName: wsA.TaskName, State: "Running", Port: wsA.Port, UptimeSec: 7200}}, nil
+	}
+	s.recordSerenaActivity(wsA.WorkspaceKey, now.Add(-2*time.Minute))
+
+	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": wsB.WorkspacePath + "/src/main.go"})
+	firstDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { firstDone <- postSerenaOnGUIOrigin(t, s, body, map[string]string{"Mcp-Session-Id": sid}) }()
+	select {
+	case <-initEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("beta initialize did not enter")
+	}
+
+	if n := s.SweepIdleSerenaDaemons(context.Background(), now); n != 1 {
+		t.Fatalf("idle sweep stopped %d daemons, want 1", n)
+	}
+	if _, _, ok := s.serenaDaemonSessions.lookup(sid, wsA.WorkspaceKey); ok {
+		t.Fatal("idle-stopped alpha daemon payload remained usable")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Fatal("idle-stopped alpha daemon payload remained available for forwarding")
+	}
+
+	secondDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { secondDone <- postSerenaOnGUIOrigin(t, s, body, map[string]string{"Mcp-Session-Id": sid}) }()
+	select {
+	case second := <-secondDone:
+		if second.Code != http.StatusServiceUnavailable {
+			t.Fatalf("second beta request status = %d, want 503; body=%s", second.Code, second.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second beta request did not observe the in-flight reservation")
+	}
+	if got := initializeCount.Load(); got != 1 {
+		t.Fatalf("beta initializes while first handshake is blocked = %d, want exactly 1", got)
+	}
+
+	releaseOnce.Do(func() { close(releaseInitialize) })
+	select {
+	case first := <-firstDone:
+		if first.Code != http.StatusOK {
+			t.Fatalf("first beta request status = %d, want 200; body=%s", first.Code, first.Body.String())
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("first beta request did not finish after initialize release")
+	}
+	if dsid, _, ok := s.serenaDaemonSessions.lookup(sid, wsB.WorkspaceKey); !ok || dsid != "daemon-beta-session-1" {
+		t.Fatalf("final beta binding = (%q,%v), want daemon-beta-session-1/live", dsid, ok)
+	}
+	s.serenaDaemonSessions.mu.Lock()
+	finalBinding := s.serenaDaemonSessions.bindings[sid]
+	bindingCount := len(s.serenaDaemonSessions.bindings)
+	s.serenaDaemonSessions.mu.Unlock()
+	if finalBinding == nil || finalBinding.reservations != 0 || bindingCount != 1 {
+		t.Fatalf("final store state = binding:%+v count:%d, want one beta binding with zero reservations", finalBinding, bindingCount)
+	}
+	if got := deps.Sessions.LookupSession(sid); got == nil || got.WorkspaceKey != wsB.WorkspaceKey {
+		t.Fatalf("sticky session = %+v, want beta", got)
 	}
 }
 

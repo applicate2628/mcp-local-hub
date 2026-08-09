@@ -52,7 +52,10 @@ func ReallocateDynamicPoolPort(registryPath, intentPath string, d SupervisorDaem
 	if err != nil {
 		return 0, fmt.Errorf("reallocate: lock registry: %w", err)
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	applied := false
+	defer func() {
+		releaseAndJoinApplied(&err, unlock, "reallocate: release the registry lock", applied)
+	}()
 	if err := reg.Load(); err != nil {
 		return 0, fmt.Errorf("reallocate: load registry: %w", err)
 	}
@@ -132,6 +135,13 @@ func ReallocateDynamicPoolPort(registryPath, intentPath string, d SupervisorDaem
 		}
 		return true, nil
 	}); err != nil {
+		// The descriptor write reached durable storage, but its leaf release is
+		// unconfirmed.  Keep the registry at newPort: compensating it would make
+		// the two stores diverge and would not be safe to retry in this process.
+		if IsAppliedLockReleaseUnconfirmed(err) {
+			applied = true
+			return newPort, err
+		}
 		// P1-2 compensation: step 4 (intent) failed AFTER step 3 committed the
 		// registry row to newPort. Left uncompensated, registry=newPort while the
 		// descriptor argv/Port still name oldPort. SERENA survives this divergence (it
@@ -159,6 +169,7 @@ func ReallocateDynamicPoolPort(registryPath, intentPath string, d SupervisorDaem
 		return 0, fmt.Errorf("reallocate: intent write for new port %d failed; reverted registry row to old port %d to keep both stores consistent: %w", newPort, oldPort, err)
 	}
 
+	applied = true
 	return newPort, nil
 }
 

@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 context: adjacent-finding (catalog Tier-0 D-3 — deferred runtime-state-change gate)
 ---
 

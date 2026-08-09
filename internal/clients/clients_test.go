@@ -350,7 +350,7 @@ func TestIsHubHTTPURL(t *testing.T) {
 
 func TestDefaultInstallClientsExcludeOptInHeavyClients(t *testing.T) {
 	got := DefaultInstallClientNames()
-	want := []string{"claude-code", "codex-cli", "cursor"}
+	want := []string{"claude-code", "codex-cli"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("DefaultInstallClientNames() = %v, want %v", got, want)
 	}
@@ -359,6 +359,9 @@ func TestDefaultInstallClientsExcludeOptInHeavyClients(t *testing.T) {
 		excluded[c] = true
 	}
 	for _, optIn := range []string{
+		// cursor is a SUPPORTED client but OPT-IN — it must be reachable via
+		// --clients cursor yet never touched by a bare/default install.
+		"cursor",
 		"gemini-cli", "antigravity", "qwen-cli", "vscode",
 		// Wave 2: all opt-in too (mimocode is an opencode fork added alongside).
 		"zed", "kiro", "windsurf", "cline", "kilocode", "opencode", "mimocode", "hermes", "openclaw",
@@ -366,6 +369,16 @@ func TestDefaultInstallClientsExcludeOptInHeavyClients(t *testing.T) {
 		if excluded[optIn] {
 			t.Fatalf("opt-in client %q must not be default", optIn)
 		}
+	}
+	// cursor stays SUPPORTED — opt-in, not removed. Pin both halves of the
+	// invariant the operator asked for: present in SupportedClientNames,
+	// absent from DefaultInstallClientNames.
+	supported := map[string]bool{}
+	for _, c := range SupportedClientNames() {
+		supported[c] = true
+	}
+	if !supported["cursor"] {
+		t.Fatalf("cursor must remain a SUPPORTED client (reachable via --clients cursor); SupportedClientNames() = %v", SupportedClientNames())
 	}
 }
 

@@ -193,12 +193,8 @@ export async function postDeAdopt(
   };
 }
 
-async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
-  const resp = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
+async function requestJSONObject<T>(path: string, init?: RequestInit): Promise<T> {
+  const resp = await fetch(path, init);
   const data = await resp.json().catch(() => null);
   if (!resp.ok) {
     const envelope = data as { error?: string; code?: string } | null;
@@ -209,6 +205,14 @@ async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
     throw new Error(`${path}: expected object, got ${Array.isArray(data) ? "array" : typeof data}`);
   }
   return data as T;
+}
+
+async function postJSONObject<T>(path: string, body: unknown): Promise<T> {
+  return requestJSONObject<T>(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 function normalizeAdoptPlan(plan: AdoptPlan): AdoptPlan {
@@ -741,38 +745,248 @@ export const DAEMON_RECOVER_ERROR_CODES = [
   "RECOVER_BOUNDARY_PROBE_TIMEOUT",
   "RECOVER_RESPAWN_BUDGET_INSUFFICIENT",
   "RECOVER_STATE_READ_FAILED",
+  // Termination WAS committed and the respawn was attempted; only the audit
+  // record or its durable handoff could not be preserved. Never present it as a
+  // retryable failure — the destructive step already ran.
+  "RECOVER_AUDIT_DURABILITY_FAILED",
   "RECOVER_UNCLASSIFIED_FAILURE",
+  "AUDIT_LOCK_ADAPTER_INIT_FAILED",
+  "RECOVER_CORRELATION_INVALID",
+  "RECOVER_BASELINE_STALE",
+  "RECOVER_ATTEMPT_CONFLICT",
+  "RECOVER_OCCURRENCE_CONSUMED",
+  "RECOVER_OCCURRENCE_CAPACITY_EXCEEDED",
+  "RECOVER_RECEIPT_IN_FLIGHT",
+  "RECOVER_OUTCOME_UNCERTAIN",
+  "RECOVER_ACK_PRECONDITION_REQUIRED",
+  "RECOVER_ACK_PHYSICAL_STATE_CHANGED",
+  "RECOVERY_OCCURRENCE_STORE_LOCK_STRANDED",
 ] as const;
 
 export type DaemonRecoverErrorCode = (typeof DAEMON_RECOVER_ERROR_CODES)[number];
+
+// isDaemonRecoverErrorCode narrows an APIError's optional `code` (typed `string
+// | undefined` on the shared APIError) to the recover-route enum, so a consumer
+// can switch over it with a compile-time exhaustiveness guard. It lives here,
+// beside DAEMON_RECOVER_ERROR_CODES, so the list has exactly one owner: a code
+// added to the array is automatically recognized by every consumer.
+export function isDaemonRecoverErrorCode(code: string | undefined): code is DaemonRecoverErrorCode {
+  return code !== undefined && (DAEMON_RECOVER_ERROR_CODES as readonly string[]).includes(code);
+}
+
+export const AUDIT_LOCK_RECEIPT_STATUSES = [
+  "in_flight",
+  "committed_success",
+  "committed_error",
+  "not_committed",
+  "uncertain",
+  "consumed",
+] as const;
+
+export const AUDIT_LOCK_AUTHORIZATIONS = ["none", "current_truth", "uncertain"] as const;
+
+export const AUDIT_LOCK_TERMINATION_STATES = ["committed", "not_committed", "unknown"] as const;
+
+export const PORT_OWNER_CHECKS = [
+  "reaped",
+  "already_exited",
+  "termination_unconfirmed",
+  "unbound",
+  "tracked_child",
+  "port_unresolvable",
+  "probe_unavailable",
+] as const;
+
+export const PORT_WAIT_OUTCOMES = ["not_required", "released", "still_bound", "probe_unavailable"] as const;
+
+export const AUDIT_HANDOFFS = ["not_required", "durable", "release_pending", "release_unconfirmed"] as const;
+
+function isWireValue<T extends string>(values: readonly T[], value: string | undefined): value is T {
+  return value !== undefined && (values as readonly string[]).includes(value);
+}
+
+export function isAuditLockReceiptStatus(value: string | undefined): value is AuditLockReceiptStatus {
+  return isWireValue(AUDIT_LOCK_RECEIPT_STATUSES, value);
+}
+
+export function isAuditLockAuthorization(value: string | undefined): value is AuditLockAuthorization {
+  return isWireValue(AUDIT_LOCK_AUTHORIZATIONS, value);
+}
+
+export function isAuditLockTerminationState(value: string | undefined): value is AuditLockTerminationState {
+  return isWireValue(AUDIT_LOCK_TERMINATION_STATES, value);
+}
+
+export function isPortOwnerCheck(value: string | undefined): value is PortOwnerCheck {
+  return isWireValue(PORT_OWNER_CHECKS, value);
+}
+
+export function isPortWaitOutcome(value: string | undefined): value is PortWaitOutcome {
+  return isWireValue(PORT_WAIT_OUTCOMES, value);
+}
+
+export function isAuditHandoff(value: string | undefined): value is AuditHandoff {
+  return isWireValue(AUDIT_HANDOFFS, value);
+}
+
+export interface DaemonRecoverCorrelation {
+  attempt_id: string;
+  occurrence_id: string;
+  server_instance: string;
+}
+
+export type AuditLockState = "released" | "outstanding" | "stranded";
+export type AuditLockReceiptStatus = (typeof AUDIT_LOCK_RECEIPT_STATUSES)[number];
+export type AuditLockAuthorization = (typeof AUDIT_LOCK_AUTHORIZATIONS)[number];
+export type AuditLockTerminationState = (typeof AUDIT_LOCK_TERMINATION_STATES)[number];
+export type PortOwnerCheck = (typeof PORT_OWNER_CHECKS)[number];
+export type PortWaitOutcome = (typeof PORT_WAIT_OUTCOMES)[number];
+export type AuditHandoff = (typeof AUDIT_HANDOFFS)[number];
+
+export interface AuditLockReceipt {
+  attempt_id: string;
+  occurrence_id: string;
+  server_instance: string;
+  task_name: string;
+  status: AuditLockReceiptStatus;
+  lock_authorization: AuditLockAuthorization;
+  termination_commit_state: AuditLockTerminationState;
+}
+
+export interface AuditLockSnapshot {
+  scope: "supervisor_events_log";
+  server_instance: string;
+  revision: number;
+  state: AuditLockState;
+  recovery_receipt: AuditLockReceipt | null;
+  recovery_receipts: AuditLockReceipt[];
+}
+
+export interface AuditLockExpectedPhysical {
+  server_instance: string;
+  revision: number;
+  state: "released";
+}
 
 export interface DaemonRecoverResponse {
   task_name: string;
   state: "respawn_accepted";
   reaped: boolean;
-  port_owner_check:
-    | "reaped"
-    | "already_exited"
-    | "termination_unconfirmed"
-    | "unbound"
-    | "tracked_child"
-    | "port_unresolvable"
-    | "probe_unavailable";
-  port_wait_outcome:
-    | "not_required"
-    | "released"
-    | "still_bound"
-    | "probe_unavailable";
+  port_owner_check: PortOwnerCheck;
+  port_wait_outcome: PortWaitOutcome;
+  // Warning field on a SUCCESS response: the audit row is durable, but the GUI
+  // process may still hold the supervisor-events.log cross-process lock, which
+  // blocks the supervisor and the install CLI. The recovery succeeded; surface
+  // it as a warning, never as a retry.
+  //
+  // The two non-durable values have OPPOSITE remedies and must not be treated
+  // alike:
+  //   "release_pending"     — a background writer in the GUI still holds the
+  //                           lock. TRANSIENT: it clears when that write
+  //                           finishes, and it is the normal state of any
+  //                           in-flight bounded emit. Remedy: wait.
+  //   "release_unconfirmed" — releasing the lock FAILED. PERMANENT for this
+  //                           process's lifetime. Remedy: restart mcphub.
+  //   "not_required"        — no audit was staged, so the lock owner was never
+  //                           read. Carries NO information about the lock and
+  //                           must not clear a prior warning.
+  audit_handoff: AuditHandoff;
+  termination_committed: boolean;
+  audit_lock: AuditLockSnapshot;
 }
 
-// postDaemonRecover carries the explicit confirmation required by the route.
-// A successful response means the force-respawn was accepted; it does not
-// assert that the daemon has reached Running.
-export async function postDaemonRecover(taskName: string): Promise<DaemonRecoverResponse> {
-  return postJSONObject<DaemonRecoverResponse>("/api/daemon/recover", {
+export interface DaemonRecoverInFlightResponse {
+  state: "recovery_in_flight";
+  audit_lock: AuditLockSnapshot;
+}
+
+export type DaemonRecoverResult =
+  | DaemonRecoverResponse
+  | DaemonRecoverInFlightResponse;
+
+function newCanonicalUUIDv4(): string {
+  const browserCrypto = globalThis.crypto;
+  if (typeof browserCrypto?.randomUUID === "function") {
+    return browserCrypto.randomUUID().toLowerCase();
+  }
+  if (typeof browserCrypto?.getRandomValues !== "function") {
+    throw new Error("Web Crypto is unavailable; recovery was not started.");
+  }
+  const bytes = new Uint8Array(16);
+  browserCrypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x40;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+export function newDaemonRecoverCorrelation(serverInstance: string): DaemonRecoverCorrelation {
+  return {
+    attempt_id: newCanonicalUUIDv4(),
+    occurrence_id: newCanonicalUUIDv4(),
+    server_instance: serverInstance,
+  };
+}
+
+// A correlation is created once by the visible Dashboard action and retained by
+// that caller. This helper never retries the destructive POST.
+export async function postDaemonRecover(
+  taskName: string,
+  correlation: DaemonRecoverCorrelation,
+): Promise<DaemonRecoverResult> {
+  const result = await postJSONObject<DaemonRecoverResult>("/api/daemon/recover", {
     task_name: taskName,
     confirm: true,
+    audit_lock_attempt: correlation,
   });
+  if (result.state === "recovery_in_flight") return result;
+  if (!isPortOwnerCheck(result.port_owner_check)) {
+    throw new Error("invalid daemon recovery port_owner_check");
+  }
+  if (!isPortWaitOutcome(result.port_wait_outcome)) {
+    throw new Error("invalid daemon recovery port_wait_outcome");
+  }
+  if (!isAuditHandoff(result.audit_handoff)) {
+    throw new Error("invalid daemon recovery audit_handoff");
+  }
+  return result;
+}
+
+export async function getDaemonRecoverAuditLockState(
+  correlation?: DaemonRecoverCorrelation,
+  signal?: AbortSignal,
+): Promise<AuditLockSnapshot> {
+  let path = "/api/daemon/recover/audit-lock-state";
+  if (correlation) {
+    const query = new URLSearchParams({
+      attempt_id: correlation.attempt_id,
+      occurrence_id: correlation.occurrence_id,
+      server_instance: correlation.server_instance,
+    });
+    path += `?${query.toString()}`;
+  }
+  return requestJSONObject<AuditLockSnapshot>(path, { signal });
+}
+
+export async function acknowledgeDaemonRecoverReceipt(
+  correlation: DaemonRecoverCorrelation,
+  expectedPhysical?: AuditLockExpectedPhysical,
+): Promise<void> {
+  const path = "/api/daemon/recover/audit-lock-receipt";
+  const resp = await fetch(path, {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      ...correlation,
+      acknowledge: true,
+      ...(expectedPhysical ? { expected_physical: expectedPhysical } : {}),
+    }),
+  });
+  if (resp.status === 204) return;
+  const data = await resp.json().catch(() => null);
+  const envelope = data as { error?: string; code?: string } | null;
+  const message = envelope?.error ?? resp.statusText ?? "unknown";
+  throw makeAPIError(resp.status, envelope?.code, `${path}: ${message}`, data);
 }
 
 // WorkspacePair mirrors the deduplicated (key, path) entries from the
@@ -1347,7 +1561,7 @@ export async function removeTrustedRoot(root: string): Promise<TrustedRootsRespo
 //
 // Thin wrappers around /api/client-install-prefs (GET/POST). The override
 // lets the operator pick which clients are in the default-install set (the
-// compile-time {claude-code, codex-cli, cursor} trio plus opt-ins) without
+// compile-time {claude-code, codex-cli} set plus opt-ins) without
 // CLI flags; the chosen set is persisted to gui-preferences.yaml and becomes
 // the effective default for installs that do not name an explicit --clients
 // target. Both methods return the fresh snapshot so the caller re-renders
@@ -1357,7 +1571,7 @@ export async function removeTrustedRoot(root: string): Promise<TrustedRootsRespo
 export interface ClientInstallPrefRow {
   name: string;
   // True when the compile-time registry marks this client default-install
-  // (the canonical {claude-code, codex-cli, cursor} trio).
+  // (the canonical {claude-code, codex-cli} set; cursor is opt-in).
   compile_default: boolean;
   // True when this client is in the currently-effective default-install set.
   selected: boolean;
@@ -1366,7 +1580,7 @@ export interface ClientInstallPrefRow {
 export interface ClientInstallPrefsResponse {
   clients: ClientInstallPrefRow[];
   // True when an explicit operator override is persisted (vs. the
-  // compile-time trio fallback).
+  // compile-time default-set fallback).
   override_active: boolean;
 }
 
@@ -1390,8 +1604,9 @@ function normalizeClientInstallPrefs(
 }
 
 // getClientInstallPrefs reads the current default-install client set. An
-// absent gui-preferences.yaml yields the compile-time trio selected with
-// override_active=false — the normal first-run path.
+// absent gui-preferences.yaml yields the compile-time default set
+// ({claude-code, codex-cli}) selected with override_active=false — the normal
+// first-run path.
 export async function getClientInstallPrefs(): Promise<ClientInstallPrefsResponse> {
   return normalizeClientInstallPrefs(
     await fetchOrThrow<Partial<ClientInstallPrefsResponse>>("/api/client-install-prefs", "object"),

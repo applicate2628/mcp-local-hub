@@ -72,9 +72,11 @@ type serverNamePresence interface {
 
 // directClientWriter writes the client-native entry for a direct-mode install
 // into each named client config (the SecureWriteClientConfig pipeline via the
-// clients package). Returns the per-client updated / failed split so the
-// handler can 200 (all updated) or 207 (partial). It never touches the hub
-// daemon set or supervisor-intent.
+// clients package). Returns per-client updated / failed outcomes so the handler
+// can 200 (all updated) or 207 (partial). The slices overlap only when a write
+// applied but config-lock release was unconfirmed: the actual update and its
+// lifecycle failure are both reported. It never touches the hub daemon set or
+// supervisor-intent.
 type directClientWriter interface {
 	WriteDirect(entry *api.MarketplaceEntry, clientNames []string) (updated []string, failed []directFailure)
 }
@@ -570,10 +572,20 @@ func (realServerNamePresence) ServerExists(name string) (bool, error) {
 // production SecureWriteClientConfig pipeline). http entries become a remote
 // URL entry via the adapter's AddEntry; stdio entries become a
 // {command,args,env} entry written into the JSON family's `mcpServers` map.
-type realDirectClientWriter struct{}
+type realDirectClientWriter struct {
+	clients                map[string]clients.Client
+	classifyClientMutation func(error) clients.ClientMutationSettlement
+}
 
-func (realDirectClientWriter) WriteDirect(entry *api.MarketplaceEntry, clientNames []string) (updated []string, failed []directFailure) {
-	all := clients.AllClients()
+func (w realDirectClientWriter) WriteDirect(entry *api.MarketplaceEntry, clientNames []string) (updated []string, failed []directFailure) {
+	all := w.clients
+	if all == nil {
+		all = clients.AllClients()
+	}
+	classify := w.classifyClientMutation
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
+	}
 	for _, name := range sortedClientNames(clientNames) {
 		c, ok := all[name]
 		if !ok {
@@ -581,6 +593,11 @@ func (realDirectClientWriter) WriteDirect(entry *api.MarketplaceEntry, clientNam
 			continue
 		}
 		if err := writeDirectEntry(c, entry); err != nil {
+			if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+				updated = append(updated, name)
+				failed = append(failed, directFailure{Client: name, Error: fmt.Sprintf("configuration applied; lock release unconfirmed: %v", err)})
+				continue
+			}
 			failed = append(failed, directFailure{Client: name, Error: err.Error()})
 			continue
 		}

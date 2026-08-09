@@ -144,6 +144,24 @@ func checkManifestName(name string) error {
 	if name == hubReconcileAggregateEntryName {
 		return fmt.Errorf("manifest name %q: reserved (clashes with the gate-ON hub aggregate entry name; pick a different server name)", name)
 	}
+	// codex bot PR #588 P2 closure: reserve the built-in route front
+	// daemon's server identity. BuiltinRouteServer is the Server field of
+	// the supervisor-intent row EnsureBuiltinRouteDaemon seeds, and
+	// buildMergedSupervisorIntent keys per-server ownership by
+	// SupervisorDaemon.Server — so an operator/dev manifest named "route"
+	// would make a full install or uninstall of THAT manifest claim the
+	// built-in row as its own and drop the front daemon until the next cold
+	// supervisor restart. A `route`/`front` daemon inside such a manifest is
+	// worse still: it carries the same (Server, Daemon) identity pair, so
+	// EnsureBuiltinRouteDaemon's ErrBuiltinRouteTaskNameCollision guard —
+	// which keys on identity MISMATCH — would not fire, and the foreign
+	// command could temporarily replace the built-in one.
+	// TestBuiltinRouteDaemon_ReservedServerNameNotClaimedByAnyShippedManifest
+	// only covers SHIPPED manifests; this gate closes the operator/dev
+	// manifest half of the same reservation.
+	if name == BuiltinRouteServer {
+		return fmt.Errorf("manifest name %q: reserved (clashes with the built-in `mcphub route` front daemon's supervisor-intent server identity; pick a different server name)", name)
+	}
 	return nil
 }
 

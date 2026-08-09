@@ -41,6 +41,12 @@ func daemonIntentTestHelper(t *testing.T) string {
 	// production-mirroring posture and keeps gated writes on the relax path.
 	root := hardenedTempDir(t)
 	daemonStateRootOverride = root
+	// The state-root redirect above fences state files, NOT client configs.
+	// Tests on this helper call a.Install with real manifests (servers/time binds
+	// `vscode`), so install's per-binding path resolution (install.go:3180) and
+	// its BackupKeep+AddEntry write loop (install.go:2887) resolved the operator's
+	// REAL client configs. BackupKeep also PRUNES their existing backups.
+	sandboxClientConfigHome(t, root)
 
 	prevQuarantineLog := quarantinePruneLogFn
 	t.Cleanup(func() { quarantinePruneLogFn = prevQuarantineLog })

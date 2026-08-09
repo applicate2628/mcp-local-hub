@@ -143,7 +143,7 @@ func ClearDefaultWorkspaceForAbsentSerenaRegistration(registryPath, workspaceKey
 	if err != nil {
 		return "", fmt.Errorf("lock registry before default marker compensation: %w", err)
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	defer ReleaseAndJoin(&err, unlock, "default workspace compensation: release registry lock")
 
 	if err := reg.Load(); err != nil {
 		return "", fmt.Errorf("load registry before default marker compensation: %w", err)

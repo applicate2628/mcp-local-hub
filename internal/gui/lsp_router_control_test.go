@@ -76,10 +76,14 @@ func (f *fakeLSPRouterControlAPI) EnsureLSPRouterClientEntries(opts api.LSPClien
 
 func withFakeLSPRouterControlAPI(t *testing.T, fake *fakeLSPRouterControlAPI) *Server {
 	t.Helper()
+	// The control API itself is faked, but the handler still resolves the target
+	// through lspRouterControlClientAdapter → clients.AllClients()
+	// (lsp_router_control.go:102, :126), which constructs the whole registry.
+	sandboxClientConfigHome(t)
 	orig := lspRouterControlAPIFactory
 	lspRouterControlAPIFactory = func() lspRouterControlAPI { return fake }
 	t.Cleanup(func() { lspRouterControlAPIFactory = orig })
-	return NewServer(Config{Port: 7777})
+	return newEphemeralServer(t, Config{Port: 7777})
 }
 
 func postLSPRouterControl(t *testing.T, s *Server, path, client string) *httptest.ResponseRecorder {

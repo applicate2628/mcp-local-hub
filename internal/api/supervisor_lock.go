@@ -245,18 +245,68 @@ func isOwnerLive(o SupervisorLockOwner) bool {
 // DisallowUnknownFields and would reject a newly written runtime_spec field, so
 // the gate refuses the spec-bearing write while a supervisor is live (or while
 // liveness is undeterminable).
+//
+// RELEASING THE PROBE LEASE IS PART OF THE ANSWER, NOT CLEANUP. Acquiring the
+// flock only proves nobody ELSE held it at that instant; returning (false, nil)
+// additionally asserts the lock is free NOW — which is FALSE if this probe still
+// owns it. gofrs/flock exposes no file handle and its Close() is literally
+// `return f.Unlock()` (v0.13.0 flock.go:99-101), so on a persistent Unlock
+// syscall failure there is nothing left to try: the descriptor stays open and
+// the OS lock stays held until THIS process exits
+// (work-items/backlog/2026-07-18-flock-persistent-unlock-residual.md). The old
+// code discarded that error via `_ = lk.Unlock()` and still reported a DEFINITE
+// "not running", violating the fail-closed contract stated directly above. The
+// concrete harm is self-defeat in the fleet's most load-bearing liveness
+// primitive: `mcphub supervise --ensure-alive` (the \mcp-local-hub-liveness
+// task) reads "not running" and starts a supervisor, whose AcquireSupervisorLock
+// then blocks on the lock the probing process itself is still holding.
+//
+// Fail closed instead: an unconfirmed release is reported as UNDETERMINABLE
+// through the SAME error return every consumer already treats as "assume
+// running" — no consumer needs to change. This matches the invariant
+// internal/gui.ProbeSingleInstanceLockUnheld already states for the GUI
+// single-instance flock (single_instance.go:239-260) and the serena removal
+// fence, whose self-releasing probes are the same class.
 func SupervisorRunningUnderStateDir(stateDir string) (running bool, pid int, err error) {
+	return supervisorRunningUnderStateDir(stateDir, func(lockFilePath string) supervisorLockProbeLease {
+		return flock.New(lockFilePath)
+	})
+}
+
+// supervisorLockProbeLease is the minimal flock surface the probe needs from its
+// TENTATIVE lease. *flock.Flock satisfies it.
+type supervisorLockProbeLease interface {
+	TryLock() (bool, error)
+	Unlock() error
+}
+
+// supervisorRunningUnderStateDir is SupervisorRunningUnderStateDir with the
+// probe-lease constructor passed in, so a test can supply a lease whose Unlock
+// fails persistently and exercise the fail-closed release branch without needing
+// a real UnlockFileEx failure (which is unreachable synthetically). Taking the
+// seam as a PARAMETER rather than a package-level var keeps it off production
+// global state — the same shape internal/gui.probeSingleInstanceLockUnheld uses
+// for the identical probe on the GUI single-instance lock.
+func supervisorRunningUnderStateDir(
+	stateDir string,
+	newProbeLease func(lockFilePath string) supervisorLockProbeLease,
+) (running bool, pid int, err error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	// Mirror AcquireSupervisorLock's flock leaf: it locks `path + ".lock"`.
-	lk := flock.New(lockPath + ".lock")
+	lk := newProbeLease(lockPath + ".lock")
 	got, lerr := lk.TryLock()
 	if lerr != nil {
 		// Probe error → UNDETERMINABLE. Surface it so the gate fails closed.
 		return false, 0, fmt.Errorf("probe supervisor lock %s: %w", lockPath+".lock", lerr)
 	}
 	if got {
-		// We acquired it → no supervisor held it → not running. Release at once.
-		_ = lk.Unlock()
+		// We acquired it → no supervisor held it at that instant. Release at
+		// once — and report a failed release as UNDETERMINABLE rather than
+		// swallowing it, because an unreleased probe lease makes "not running"
+		// a claim this process itself falsifies (see the doc comment).
+		if uerr := lk.Unlock(); uerr != nil {
+			return false, 0, fmt.Errorf("release supervisor lock probe lease %s: %w", lockPath+".lock", uerr)
+		}
 		return false, 0, nil
 	}
 	// Held by another process → a supervisor is running. The PID is best-effort

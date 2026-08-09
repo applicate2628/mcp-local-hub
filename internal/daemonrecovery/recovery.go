@@ -27,15 +27,29 @@ const (
 	PortOwnerProbeUnavailable       PortOwnerCheck = "probe_unavailable"
 )
 
+var portOwnerChecks = [...]PortOwnerCheck{
+	PortOwnerReaped,
+	PortOwnerAlreadyExited,
+	PortOwnerTerminationUnconfirmed,
+	PortOwnerUnbound,
+	PortOwnerTrackedChild,
+	PortOwnerPortUnresolvable,
+	PortOwnerProbeUnavailable,
+}
+
+// PortOwnerChecks returns the complete safe response enum in wire order.
+func PortOwnerChecks() []PortOwnerCheck {
+	return append([]PortOwnerCheck(nil), portOwnerChecks[:]...)
+}
+
 // Valid reports whether the value belongs to the safe response enum.
 func (p PortOwnerCheck) Valid() bool {
-	switch p {
-	case PortOwnerReaped, PortOwnerAlreadyExited, PortOwnerTerminationUnconfirmed, PortOwnerUnbound, PortOwnerTrackedChild,
-		PortOwnerPortUnresolvable, PortOwnerProbeUnavailable:
-		return true
-	default:
-		return false
+	for _, known := range portOwnerChecks {
+		if p == known {
+			return true
+		}
 	}
+	return false
 }
 
 // PortWaitOutcome reports the best-effort post-termination port-release observation.
@@ -49,23 +63,116 @@ const (
 	PortWaitProbeUnavailable PortWaitOutcome = "probe_unavailable"
 )
 
+var portWaitOutcomes = [...]PortWaitOutcome{
+	PortWaitNotRequired,
+	PortWaitReleased,
+	PortWaitStillBound,
+	PortWaitProbeUnavailable,
+}
+
+// PortWaitOutcomes returns the complete safe response enum in wire order.
+func PortWaitOutcomes() []PortWaitOutcome {
+	return append([]PortWaitOutcome(nil), portWaitOutcomes[:]...)
+}
+
 // Valid reports whether the value belongs to the safe response enum.
 func (p PortWaitOutcome) Valid() bool {
-	switch p {
-	case PortWaitNotRequired, PortWaitReleased, PortWaitStillBound, PortWaitProbeUnavailable:
-		return true
-	default:
-		return false
+	for _, known := range portWaitOutcomes {
+		if p == known {
+			return true
+		}
 	}
+	return false
+}
+
+// AuditHandoff reports whether the committed-recovery audit handoff could
+// confirm the RELEASE of the cross-process supervisor-event-log flock it took.
+// It contains no process-controlled detail and is safe for the GUI wire.
+//
+// It is a WARNING channel, deliberately NOT an outcome channel.
+// AuditHandoffReleaseUnconfirmed never downgrades the recovery verdict, because
+// on that path the audit row IS durable (PersistPending established the carrier)
+// and both the termination and the respawn committed. What it reports is a
+// PROCESS-scoped condition: this process may still hold the flock on
+// supervisor-events.log, blocking every other emitter — the supervisor, the
+// install CLI — until it exits. The remediation is "restart this process", never
+// "retry this recovery"; folding it into the error would invite an operator to
+// re-run a destructive recovery that already completed.
+type AuditHandoff string
+
+const (
+	// AuditHandoffNotRequired means no committed-recovery audit was staged
+	// (no termination was committed, so there is no handoff to make).
+	AuditHandoffNotRequired AuditHandoff = "not_required"
+	// AuditHandoffDurable means the audit row is durable and every event-log
+	// flock THIS PROCESS took on that log was confirmed released.
+	//
+	// The scope is deliberately the process, not this one recovery: the
+	// condition being reported is process-scoped (see the type doc above), and
+	// scoping the verdict per-recovery is what let an unenumerated outcome
+	// report "confirmed released" while an abandoned writer still held the lock.
+	AuditHandoffDurable AuditHandoff = "durable"
+	// AuditHandoffReleasePending means the audit row is durable and a
+	// bounded-emit worker in THIS PROCESS still owns the event-log flock.
+	//
+	// TRANSIENT. It clears by itself when the worker finishes its write, and it
+	// is the normal state of every in-flight bounded emit in the process — the
+	// worker is spawned before the deadline is evaluated, so a healthy
+	// sub-millisecond emit passes through this state too
+	// (api.SupervisorEventLockOutstanding, and its
+	// TestSupervisorEventLockStateOutstandingDuringHealthyBoundedEmit guard).
+	//
+	// The operator remedy is "wait", NEVER "restart this process". It is
+	// reported rather than folded into Durable because a warning channel must
+	// fail closed: a wedged writer sits in this same state indefinitely, and the
+	// reader cannot tell the two apart at the moment it reads.
+	AuditHandoffReleasePending AuditHandoff = "release_pending"
+	// AuditHandoffReleaseUnconfirmed means the audit row is durable and a
+	// cross-process event-log flock release was ATTEMPTED AND FAILED.
+	//
+	// PERMANENT for this process's lifetime (api.SupervisorEventLockStranded is
+	// never cleared). This process holds the flock until it exits, blocking
+	// every other emitter — the supervisor, the install CLI. The only remedy is
+	// restarting this process, and it is never "retry this recovery".
+	//
+	// SCOPE: this value used to also carry the transient AuditHandoffReleasePending
+	// case above. Collapsing the two meant a consumer applying the permanent
+	// remedy ("restart mcphub") to a healthy concurrent emit. They are separate
+	// values precisely so each consumer can state the truthful remedy.
+	AuditHandoffReleaseUnconfirmed AuditHandoff = "release_unconfirmed"
+)
+
+var auditHandoffs = [...]AuditHandoff{
+	AuditHandoffNotRequired,
+	AuditHandoffDurable,
+	AuditHandoffReleasePending,
+	AuditHandoffReleaseUnconfirmed,
+}
+
+// AuditHandoffs returns the complete safe response enum in wire order.
+func AuditHandoffs() []AuditHandoff {
+	return append([]AuditHandoff(nil), auditHandoffs[:]...)
+}
+
+// Valid reports whether the value belongs to the safe response enum.
+func (a AuditHandoff) Valid() bool {
+	for _, known := range auditHandoffs {
+		if a == known {
+			return true
+		}
+	}
+	return false
 }
 
 // Result means the supervisor accepted one force-respawn request. It does not
 // assert that the daemon is Running yet.
 type Result struct {
-	TaskName        string
-	Reaped          bool
-	PortOwnerCheck  PortOwnerCheck
-	PortWaitOutcome PortWaitOutcome
+	TaskName             string
+	Reaped               bool
+	PortOwnerCheck       PortOwnerCheck
+	PortWaitOutcome      PortWaitOutcome
+	AuditHandoff         AuditHandoff
+	TerminationCommitted bool
 }
 
 // FailureKind is the stable internal outcome the CLI and HTTP adapters map to
@@ -83,6 +190,7 @@ const (
 	FailureRequestCanceled           FailureKind = "request_canceled"
 	FailureBoundaryProbeTimeout      FailureKind = "boundary_probe_timeout"
 	FailureRespawnBudgetInsufficient FailureKind = "respawn_budget_insufficient"
+	FailureAuditDurability           FailureKind = "audit_durability_failed"
 )
 
 // OperationError carries adapter-only diagnostics. HTTP handlers must redact it
@@ -161,32 +269,34 @@ type Notification struct {
 
 // Options contains caller-owned confirmation and local progress hooks.
 type Options struct {
-	Confirmed   bool
-	ConfirmReap func(ReapCandidate) bool
-	Notify      func(Notification)
+	Confirmed              bool
+	ConfirmReap            func(ReapCandidate) bool
+	Notify                 func(Notification)
+	OnTerminationCommitted func()
 }
 
 // Dependencies are the operation's injected system boundaries. There is no
 // retry at this layer: state reads and port probes are point-in-time decisions;
 // the identity reader and IPC client retain their own bounded policies.
 type Dependencies struct {
-	StateDir          func() (string, error)
-	ReadIntent        func(path string) (*api.SupervisorIntentFile, error)
-	ReadState         func(path string) (*api.SupervisorStateFile, error)
-	PortOwner         func(context.Context, int) (pid int, ok bool, err error)
-	SelfPID           func() int
-	LookupIdentity    func(context.Context, int) (process.ProcessIdentity, error)
-	ExecutableMatches func(pid int, expectedPath string) bool
-	HoldProcess       func(pid int) (process.HeldPIDGeneration, error)
-	ProbeSupervisor   func(context.Context) error
-	Respawn           func(context.Context, string, bool) (api.RespawnResult, error)
-	Now               func() time.Time
-	Sleep             func(context.Context, time.Duration) error
-	PortPollInterval  time.Duration
-	PortWaitTimeout   time.Duration
-	PostKillTimeout   time.Duration
-	RespawnReserve    time.Duration
-	AuditEmitTimeout  time.Duration
+	StateDir                     func() (string, error)
+	ReadIntent                   func(path string) (*api.SupervisorIntentFile, error)
+	ReadState                    func(path string) (*api.SupervisorStateFile, error)
+	PortOwner                    func(context.Context, int) (pid int, ok bool, err error)
+	SelfPID                      func() int
+	LookupIdentity               func(context.Context, int) (process.ProcessIdentity, error)
+	ExecutableMatches            func(pid int, expectedPath string) bool
+	HoldProcess                  func(pid int) (process.HeldPIDGeneration, error)
+	ProbeSupervisor              func(context.Context) error
+	Respawn                      func(context.Context, string, bool) (api.RespawnResult, error)
+	Now                          func() time.Time
+	Sleep                        func(context.Context, time.Duration) error
+	PortPollInterval             time.Duration
+	PortWaitTimeout              time.Duration
+	PostKillTimeout              time.Duration
+	RespawnReserve               time.Duration
+	AuditEmitTimeout             time.Duration
+	PersistCommittedAuditHandoff committedAuditHandoffPersist
 }
 
 const (
@@ -199,6 +309,13 @@ const (
 	defaultRespawnReserve         = 20 * time.Second
 	defaultSupervisorProbeTimeout = 5 * time.Second
 )
+
+// MaximumPostCommitDuration is the production upper bound for recovery work
+// after termination has committed. It includes the bounded pre-respawn work
+// and preserves the mandatory 20-second respawn reservation.
+func MaximumPostCommitDuration() time.Duration {
+	return defaultPostKillFinishTimeout
+}
 
 // ProductionDependencies wires the shared operation to its owning API/process
 // surfaces. The status probe is a single no-retry call bounded to five seconds;
@@ -222,13 +339,14 @@ func ProductionDependencies() Dependencies {
 		Respawn: func(ctx context.Context, taskName string, force bool) (api.RespawnResult, error) {
 			return api.DialSupervisorIPCRespawn(ctx, taskName, force, 15000)
 		},
-		Now:              time.Now,
-		Sleep:            sleepContext,
-		PortPollInterval: defaultPortPollInterval,
-		PortWaitTimeout:  defaultPortWaitTimeout,
-		PostKillTimeout:  defaultPostKillFinishTimeout,
-		RespawnReserve:   defaultRespawnReserve,
-		AuditEmitTimeout: defaultCommittedAuditTimeout,
+		Now:                          time.Now,
+		Sleep:                        sleepContext,
+		PortPollInterval:             defaultPortPollInterval,
+		PortWaitTimeout:              defaultPortWaitTimeout,
+		PostKillTimeout:              defaultPostKillFinishTimeout,
+		RespawnReserve:               defaultRespawnReserve,
+		AuditEmitTimeout:             defaultCommittedAuditTimeout,
+		PersistCommittedAuditHandoff: persistCommittedAuditHandoffBounded,
 	}
 }
 
@@ -284,6 +402,7 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	terminationCommitted := false
 	var postCommitNotifications []Notification
 	var postCommitAudits []func()
+	var committedAudit *committedAuditFinalizer
 
 	stateDir, err := deps.StateDir()
 	if err != nil {
@@ -489,31 +608,42 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 				return Result{}, &OperationError{Kind: FailureRefusedPortOwner, TaskName: normalized, Cause: terminateErr, Candidate: &candidate}
 			}
 			terminationCommitted = true
-			var committedAudit api.SupervisorEvent
+			if options.OnTerminationCommitted != nil {
+				options.OnTerminationCommitted()
+			}
+			var committedEvent api.SupervisorEvent
 			if terminateErr == nil {
 				reaped = true
 				check = PortOwnerReaped
 				postCommitNotifications = append(postCommitNotifications, Notification{Kind: NotificationReaped, TaskName: normalized, Port: port, PID: ownerPID})
-				committedAudit = auditEvent("daemon-port-squatter-reaped", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
+				committedEvent = auditEvent("daemon-port-squatter-reaped", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
 					"note": "operator recover: verified-own port squatter exit confirmed, forcing a respawn",
 				})
 			} else {
 				check = PortOwnerTerminationUnconfirmed
 				postCommitNotifications = append(postCommitNotifications, Notification{Kind: NotificationTerminationUnconfirmed, TaskName: normalized, Port: port, PID: ownerPID, Cause: terminateErr})
-				committedAudit = auditEvent("daemon-port-squatter-termination-unconfirmed", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
+				committedEvent = auditEvent("daemon-port-squatter-termination-unconfirmed", "recover", verdict, *descriptor, ownerPID, identity, map[string]any{
 					"err":  BoundEventField(terminateErr.Error()),
 					"note": "operator recover: termination committed but process exit was not confirmed; forcing a respawn",
 				})
+			}
+			committedEvent.TS = postKillStarted.UTC().Format(time.RFC3339Nano)
+			prepared, prepareErr := api.PrepareSupervisorEvent(committedEvent)
+			committedAudit = &committedAuditFinalizer{
+				stateDir:   stateDir,
+				prepared:   prepared,
+				prepareErr: prepareErr,
+				deadline:   postKillStarted.Add(deps.PostKillTimeout),
+				now:        deps.Now,
+				persist:    deps.PersistCommittedAuditHandoff,
 			}
 			// Charge the bounded pre-respawn audit only to the non-reserved
 			// post-kill slice. Any time it consumes reduces the subsequent port
 			// wait; the fresh RespawnReserve context below remains untouched.
 			auditBudget := boundedPortWaitBudget(deps.AuditEmitTimeout, deps.PostKillTimeout, deps.RespawnReserve, deps.Now().Sub(postKillStarted))
-			if auditBudget <= 0 || emitRecoverAuditEventWithTimeout(stateDir, committedAudit, auditBudget) != nil {
-				audit := committedAudit
-				postCommitAudits = append(postCommitAudits, func() {
-					emitRecoverAuditEvent(stateDir, audit)
-				})
+			if prepareErr == nil && auditBudget > 0 {
+				committedAudit.attempted = true
+				committedAudit.pending, committedAudit.emitErr = emitRecoverPreparedAuditWithTimeoutTracked(stateDir, prepared, auditBudget)
 			}
 			terminationElapsed := deps.Now().Sub(postKillStarted)
 			waitBudget := boundedPortWaitBudget(deps.PortWaitTimeout, deps.PostKillTimeout, deps.RespawnReserve, terminationElapsed)
@@ -545,15 +675,38 @@ func ExecuteWithDependencies(ctx context.Context, taskName string, options Optio
 	}
 	respawn, respawnErr := deps.Respawn(respawnCtx, normalized, true)
 	// A blocking audit flock must never strand recovery before restart delivery.
-	// Only bounded-attempt fallbacks and the no-kill already-exited audit remain
-	// queued here after the injected supervisor-dispatch boundary.
+	// The committed audit establishes its durable handoff after the injected
+	// supervisor-dispatch boundary; the no-kill already-exited audit remains an
+	// independent best-effort closure.
+	// finalize is nil-receiver safe: with no committed audit it reports
+	// AuditHandoffNotRequired and no error.
+	auditHandoff, auditDurabilityErr := committedAudit.finalize()
 	for _, emitAudit := range postCommitAudits {
 		emitAudit()
 	}
 	for _, notification := range postCommitNotifications {
 		notify(options, notification)
 	}
-	result := Result{TaskName: normalized, Reaped: reaped, PortOwnerCheck: check, PortWaitOutcome: portWaitOutcome}
+	result := Result{
+		TaskName:             normalized,
+		Reaped:               reaped,
+		PortOwnerCheck:       check,
+		PortWaitOutcome:      portWaitOutcome,
+		AuditHandoff:         auditHandoff,
+		TerminationCommitted: terminationCommitted,
+	}
+	if auditDurabilityErr != nil {
+		cause := auditDurabilityErr
+		if respawnErr != nil {
+			cause = errors.Join(auditDurabilityErr, respawnErr)
+		}
+		return result, &OperationError{
+			Kind:     FailureAuditDurability,
+			TaskName: normalized,
+			Cause:    cause,
+			Respawn:  respawn,
+		}
+	}
 	if respawnErr != nil {
 		if !terminationCommitted && (errors.Is(respawnErr, context.Canceled) || errors.Is(respawnErr, context.DeadlineExceeded)) {
 			return result, canceledOperationError(stateDir, *descriptor, 0, "respawn", respawnErr, nil, false)
@@ -592,6 +745,8 @@ func validateDependencies(deps Dependencies) error {
 		return errors.New("ProbeSupervisor dependency is nil")
 	case deps.Respawn == nil:
 		return errors.New("Respawn dependency is nil")
+	case deps.PersistCommittedAuditHandoff == nil:
+		return errors.New("PersistCommittedAuditHandoff dependency is nil")
 	default:
 		return nil
 	}
@@ -732,11 +887,146 @@ func emitRecoverAuditEvent(stateDir string, event api.SupervisorEvent) {
 	_ = logger.Emit(event)
 }
 
-func emitRecoverAuditEventWithTimeout(stateDir string, event api.SupervisorEvent, timeout time.Duration) error {
+// emitRecoverPreparedAuditWithTimeoutTracked preserves the exact prepared
+// bytes while exposing a timed-out worker's eventual outcome to the
+// post-respawn durability finalizer.
+func emitRecoverPreparedAuditWithTimeoutTracked(stateDir string, prepared api.PreparedSupervisorEvent, timeout time.Duration) (*api.PendingSupervisorEventEmit, error) {
 	logger, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer func() { _ = logger.Close() }()
-	return logger.EmitWithTimeout(event, timeout)
+	return logger.EmitPreparedWithTimeoutTracked(prepared, timeout)
+}
+
+// committedAuditFinalizer owns one normalized committed-recovery record across
+// the bounded pre-respawn attempt and the post-respawn durability boundary.
+// It never remarshals the event, and it never reacquires the event-log flock
+// after a release failure.
+type committedAuditFinalizer struct {
+	stateDir   string
+	prepared   api.PreparedSupervisorEvent
+	prepareErr error
+	attempted  bool
+	pending    *api.PendingSupervisorEventEmit
+	emitErr    error
+	deadline   time.Time
+	now        func() time.Time
+	persist    committedAuditHandoffPersist
+}
+
+// logPath is the single place this finalizer names the supervisor event log it
+// writes to and reads lock health for. Both must key off the SAME path or the
+// verdict would be read from a different lock than the one taken.
+func (f *committedAuditFinalizer) logPath() string {
+	return filepath.Join(f.stateDir, api.SupervisorEventLogFileLeaf)
+}
+
+// handoff reads the SINGLE owner of "can this process still be holding the
+// supervisor-events.log flock" and translates it into the wire enum.
+//
+// It is a READ, never a derivation. That is the whole point: the previous shape
+// started from an optimistic `AuditHandoffDurable` and DOWNGRADED it in
+// enumerated release-failure branches, so any outcome nobody had enumerated
+// silently inherited "confirmed released". The abandoned-worker outcome was
+// exactly such an outcome — `Wait(0)` returning ErrSupervisorEventEmitTimeout
+// means the worker still owns BOTH locks — and it reported `durable` while the
+// flock was provably held. Starting from an owner read has no optimistic
+// default to inherit.
+//
+// SCOPE NOTE: this answers a PROCESS-scoped question, not a per-recovery one.
+// A recovery can report release_unconfirmed because an UNRELATED emitter in
+// this process stranded the lock. That is deliberate and fail-closed: the
+// operator remedy ("restart this process") is identical either way, and the
+// per-recovery scoping was the category error that produced this defect class.
+// Decision: work-items/decisions/2026-07-27-supervisor-event-flock-release-single-owner.md
+// The mapping is 1:1 with the owner's three states and deliberately loses
+// nothing. An earlier shape collapsed Outstanding and Stranded into
+// AuditHandoffReleaseUnconfirmed. That was defensible as fail-closed AT THIS
+// layer, but the only long-lived consumer — the GUI Dashboard — has to pick a
+// remedy from the value alone, and the two states have OPPOSITE remedies
+// ("wait" vs "restart this process"). A consumer given one value for both must
+// either understate a permanent strand or raise a permanent, undismissable
+// alarm for a healthy concurrent emit; it chose the latter. Restoring the
+// distinction here is what lets every consumer state the truthful remedy
+// instead of compensating for a lossy field.
+func (f *committedAuditFinalizer) handoff() AuditHandoff {
+	switch api.SupervisorEventLockStateForPath(f.logPath()) {
+	case api.SupervisorEventLockReleased:
+		return AuditHandoffDurable
+	case api.SupervisorEventLockOutstanding:
+		return AuditHandoffReleasePending
+	case api.SupervisorEventLockStranded:
+		return AuditHandoffReleaseUnconfirmed
+	default:
+		// A state this mapping does not know cannot be claimed as released.
+		// Fail closed onto the stronger of the two warnings.
+		return AuditHandoffReleaseUnconfirmed
+	}
+}
+
+// finalize returns the audit handoff verdict alongside the durability error.
+//
+// The two results answer DIFFERENT questions and must not be collapsed. The
+// error answers "is the audit row durable?" — a non-nil error is a genuine
+// FailureAuditDurability. The AuditHandoff answers "can this process still be
+// holding the cross-process event-log flock?" — an unconfirmed release says
+// nothing about the row (it is durable) and everything about the LOCK, which
+// this process may hold for its whole lifetime because SupervisorEventLog.Close
+// is a no-op that does not unlock.
+//
+// The handoff verdict is NOT computed here. It is read from the single
+// process-scoped owner in internal/api (see handoff above). What stays local is
+// the one genuinely per-call decision: whether an opportunistic replay may
+// reacquire the flock. Keeping BOTH a local enumeration and the owner read
+// would be the fix-layering this change exists to remove.
+func (f *committedAuditFinalizer) finalize() (AuditHandoff, error) {
+	if f == nil {
+		return AuditHandoffNotRequired, nil
+	}
+	if f.prepareErr != nil {
+		return AuditHandoffNotRequired, fmt.Errorf("prepare committed recovery audit: %w", f.prepareErr)
+	}
+
+	// A release failure (confirmed, or still unresolved in an abandoned worker)
+	// means this process may still hold the flock, so an opportunistic replay
+	// must not try to take it again.
+	replay := true
+	switch {
+	case !f.attempted:
+		// No writer exists. Establish the durable carrier below.
+	case f.pending == nil && f.emitErr == nil:
+		return f.handoff(), nil
+	case f.pending == nil && errors.Is(f.emitErr, api.ErrSupervisorEventReleaseFailed):
+		replay = false
+	case f.pending != nil:
+		switch waitErr := f.pending.Wait(0); {
+		case waitErr == nil:
+			return f.handoff(), nil
+		case errors.Is(waitErr, api.ErrSupervisorEventReleaseFailed),
+			errors.Is(waitErr, api.ErrSupervisorEventEmitTimeout):
+			// EmitTimeout here is NOT "nothing happened": Wait's non-blocking
+			// probe returns it precisely while the abandoned worker is still
+			// inside its write holding both locks.
+			replay = false
+		}
+	}
+
+	if f.persist == nil {
+		return f.handoff(), errors.New("persist committed recovery audit handoff: missing bounded persistence owner")
+	}
+	now := time.Now
+	if f.now != nil {
+		now = f.now
+	}
+	remaining := f.deadline.Sub(now())
+	if remaining <= 0 {
+		return f.handoff(), fmt.Errorf("persist committed recovery audit handoff: %w", context.DeadlineExceeded)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), remaining)
+	defer cancel()
+	if err := f.persist(ctx, f.stateDir, f.prepared, replay); err != nil {
+		return f.handoff(), fmt.Errorf("persist committed recovery audit handoff: %w", err)
+	}
+	return f.handoff(), nil
 }

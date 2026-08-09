@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 type: hygiene
 severity: P3
 date: 2026-07-10

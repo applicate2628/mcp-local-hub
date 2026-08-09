@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 context: adjacent-finding
 created: 2026-06-27
 ---

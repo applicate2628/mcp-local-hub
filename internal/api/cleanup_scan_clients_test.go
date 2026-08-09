@@ -12,7 +12,6 @@ package api
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -21,14 +20,21 @@ import (
 // (Client.AllStdioEntries reads via os.UserHomeDir) to a fresh
 // temp dir for the duration of the test. Returns the tmp dir so
 // callers can seed per-client config files at known locations.
+// The env set below is NOT optional. patternsFromClientStdio walks an UNFILTERED
+// clients.AllClients() and calls Exists() + AllStdioEntries() on every adapter
+// (cleanup.go:691-696). USERPROFILE alone covers 4 of 47; before this fixture was
+// widened, vscode / zed / amp / cline / roo / kilocode / devin / goose all
+// resolved to the operator's REAL configs and were parsed. That is a READ leak:
+// it made these assertions depend on whatever the host has installed. Setting
+// HOME as well as USERPROFILE matters even on Windows — several resolvers prefer
+// $HOME (e.g. internal/clients/mimocode.go:555-559).
 func withHermeticHomeForCleanup(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Setenv("USERPROFILE", tmp)
-	} else {
-		t.Setenv("HOME", tmp)
-	}
+	t.Setenv("HOME", tmp)
+	t.Setenv("USERPROFILE", tmp)
+	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	neutralizeClientConfigPathEnv(t, tmp)
 	return tmp
 }
 

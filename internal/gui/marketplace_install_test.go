@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // ---- fakes for the four marketplace-install seams ----
@@ -585,5 +586,49 @@ func TestMarketplaceInstall_MissingID_400(t *testing.T) {
 	rec := postInstall(t, s, `{"id":"  ","mode":"hub"}`, "same-origin")
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+type directSettlementClient struct {
+	clients.Client
+	entries      map[string]clients.MCPEntry
+	addErr       error
+	applyOnError bool
+}
+
+func (c *directSettlementClient) AddEntry(entry clients.MCPEntry) error {
+	if c.addErr != nil {
+		if c.applyOnError {
+			c.entries[entry.Name] = entry
+		}
+		return c.addErr
+	}
+	c.entries[entry.Name] = entry
+	return nil
+}
+
+func TestRealMarketplaceDirectWriterAppliedReleaseRecordsUpdatedAndFailed(t *testing.T) {
+	induced := errors.New("induced marketplace direct release failure")
+	first := &directSettlementClient{entries: map[string]clients.MCPEntry{}, addErr: induced, applyOnError: true}
+	second := &directSettlementClient{entries: map[string]clients.MCPEntry{}}
+	writer := realDirectClientWriter{
+		clients: map[string]clients.Client{"alpha": first, "beta": second},
+		classifyClientMutation: func(err error) clients.ClientMutationSettlement {
+			if err == induced {
+				return clients.ClientMutationAppliedReleaseUnconfirmed
+			}
+			return clients.ClassifyClientMutation(err)
+		},
+	}
+
+	updated, failed := writer.WriteDirect(&api.MarketplaceEntry{ID: "remote", Transport: "http", URL: "https://example.invalid/mcp"}, []string{"beta", "alpha"})
+	if strings.Join(updated, ",") != "alpha,beta" {
+		t.Fatalf("updated = %v, want alpha,beta", updated)
+	}
+	if len(failed) != 1 || failed[0].Client != "alpha" || !strings.Contains(failed[0].Error, "configuration applied; lock release unconfirmed") {
+		t.Fatalf("failed = %+v", failed)
+	}
+	if first.entries["remote"].URL == "" || second.entries["remote"].URL == "" {
+		t.Fatalf("actual writes not recorded: first=%+v second=%+v", first.entries, second.entries)
 	}
 }

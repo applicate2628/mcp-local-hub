@@ -33,6 +33,18 @@ const (
 	groupMaintenance = "maintenance"
 )
 
+// RouteInvocationArgs is the single argv rewrite used by the executable's
+// bare-invocation path and by the GUI runtime-policy regression. It returns a
+// copy when routing so callers retaining args cannot observe a mutated backing
+// array; non-bare invocations are returned unchanged.
+func RouteInvocationArgs(args []string) []string {
+	if len(args) > 1 {
+		return args
+	}
+	routed := append([]string(nil), args...)
+	return append(routed, "gui")
+}
+
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "mcphub",
@@ -121,6 +133,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 	// accepted-loss note in its own constructor.
 	root.AddCommand(
 		newDaemonCmd(),
+		newRouteCmd(),
 		newRelayCmd(),
 		newWeeklyRefreshCmd(),
 		newIntentCollapseCmd(),
@@ -135,6 +148,9 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 		// binary. Hidden: machine-invoked, and the documented operator-facing
 		// equivalent is `mcphub setup`.
 		newCanonicalizeCmdReal(),
+		newAuditLockTerminalWorkerCmd(),
+		newDaemonRecoveryAuditHandoffWorkerCmd(),
+		newGUIOwnerUnknownConfirmationMarkerWorkerCmd(),
 	)
 
 	// Debugger / profiler MCP bridges. Each already sets Hidden in its own
@@ -174,21 +190,21 @@ func addGrouped(root *cobra.Command, groupID string, cmds ...*cobra.Command) {
 func newInstallCmd() *cobra.Command {
 	return newInstallCmdReal()
 }
-func newAdoptCmd() *cobra.Command     { return newAdoptCmdReal() }
-func newDeAdoptCmd() *cobra.Command   { return newDeAdoptCmdReal() }
+func newAdoptCmd() *cobra.Command   { return newAdoptCmdReal() }
+func newDeAdoptCmd() *cobra.Command { return newDeAdoptCmdReal() }
 
 func newAdoptProvenanceCmd() *cobra.Command { return newAdoptProvenanceCmdReal() }
-func newUpgradeCmd() *cobra.Command   { return newUpgradeCmdReal() }
-func newSetupCmd() *cobra.Command     { return newSetupCmdReal() }
-func newUninstallCmd() *cobra.Command { return newUninstallCmdReal() }
-func newStatusCmd() *cobra.Command    { return newStatusCmdReal() }
-func newScanCmd() *cobra.Command      { return newScanCmdReal() }
-func newMigrateCmd() *cobra.Command   { return newMigrateCmdReal() }
-func newRestartCmd() *cobra.Command   { return newRestartCmdReal() }
-func newRollbackCmd() *cobra.Command  { return newRollbackCmdReal() }
-func newDaemonCmd() *cobra.Command    { return newDaemonCmdReal() }
-func newRelayCmd() *cobra.Command     { return newRelayCmdReal() }
-func newVersionCmd() *cobra.Command   { return newVersionCmdReal() }
+func newUpgradeCmd() *cobra.Command         { return newUpgradeCmdReal() }
+func newSetupCmd() *cobra.Command           { return newSetupCmdReal() }
+func newUninstallCmd() *cobra.Command       { return newUninstallCmdReal() }
+func newStatusCmd() *cobra.Command          { return newStatusCmdReal() }
+func newScanCmd() *cobra.Command            { return newScanCmdReal() }
+func newMigrateCmd() *cobra.Command         { return newMigrateCmdReal() }
+func newRestartCmd() *cobra.Command         { return newRestartCmdReal() }
+func newRollbackCmd() *cobra.Command        { return newRollbackCmdReal() }
+func newDaemonCmd() *cobra.Command          { return newDaemonCmdReal() }
+func newRelayCmd() *cobra.Command           { return newRelayCmdReal() }
+func newVersionCmd() *cobra.Command         { return newVersionCmdReal() }
 func newSecretsCmd() *cobra.Command {
 	return newSecretsCmdReal()
 }

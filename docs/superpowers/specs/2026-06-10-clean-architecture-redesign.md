@@ -72,7 +72,7 @@ Dependency chain A → C → D → E → F; **B independent**.
 
 ## §6 Feature designs that ride the clean layers
 
-- **idle-shutdown (#6)** — serena pool daemons sleep after N min no-tool-call (default 30m, GUI-configurable off/15m/30m/1h/2h), wake on next `/serena/mcp` request. Stop = `desired=stopped` on the (unified) intent with a NEW `IntentReasonIdle`; the router clears it + 503-retries on wake. 60s in-GUI sweeper (it lives in the GUI process — the only process that observes `/serena/mcp` activity; the supervisor sees the resulting stop/clear via its IntentWatcher + reconcile). Reuses the §4/Phase-E corrected stop-propagation path — do NOT author a second stop path. Open verify: serena `.serena/` cache re-warm cost on cold respawn → drives the default threshold. **wake-mode cold/warm is mcphub-side** (serena has no cache CLI flag — verified) and GUI-settable (warm=keep `.serena/`, cold=clear-before-respawn).
+- **idle-shutdown (#6)** — serena pool daemons sleep after N min no-tool-call (default 30m, GUI-configurable off/15m/30m/1h/2h), wake on next `/serena/mcp` request. Stop = `desired=stopped` on the (unified) intent with a NEW `IntentReasonIdle`; the router clears it + 503-retries on wake. The 60s in-GUI sweeper is the idle-stop authority only while an operation-lifetime canonical routing lease admits stable GUI (the GUI process is the only process that observes `/serena/mcp` activity; the supervisor sees the resulting stop/clear via its IntentWatcher + reconcile). Reuses the §4/Phase-E corrected stop-propagation path — do NOT author a second stop path. Open verify: serena `.serena/` cache re-warm cost on cold respawn → drives the default threshold. **wake-mode cold/warm is mcphub-side** (serena has no cache CLI flag — verified) and GUI-settable (warm=keep `.serena/`, cold=clear-before-respawn).
 - **config-centralization (#8 — split into #8a/#8b, §15 P2)** — §2; **#8a** (before C): a test-port convention (any value reaching killByPortFn/net.Listen uses `pickFreeLocalPort(t)`/Port:0; guard-test greps for live-band literals **across the test tree too**, since the killed-live-daemon incident was a test literal). **#8b** (after F): ports.yaml runtime owner (reconcile stale data first) + tier-A values to SettingsRegistry/GUI.
 - **demigrate-serena-router bug** — the GUI uncheck-cursor-serena fails because the dynamic-pool migrate rewrote the cursor entry to the `/serena/mcp` router shape, which `liveEntryMatchesManifestBinding` doesn't recognize as mcphub-managed → `RemoveEntry` refuses. Fix: the demigrate must recognize the router shape (marker + `/serena/mcp` URL) as mcphub-managed-removable.
 - **hash→name (#4)** — display-only; the `workspace` path is already in `/api/status`; CLI status + GUI Dashboard show `serena · <project>` instead of `serena-<8hex>`.
@@ -109,7 +109,7 @@ This roadmap supersedes the original 8-section sketch by adding the two owner-re
 | **#8b — config-centralization** (§2) | `configs/ports.yaml` becomes runtime port owner (reconcile stale data first); daemon ports auto-allocated 9150+; tier-A → GUI | future (after F) | feeds §10 port alloc |
 | **demigrate-serena-router** | demigrate recognizes `/serena/mcp` router shape as mcphub-managed-removable | next | independent |
 | **#4 — hash→name display** | Show `serena · <project>` not `serena-<8hex>` in CLI + Dashboard | next | independent (display-only) |
-| **§9 — multi-agent/multi-client** | Adapter-registration table; per-client GUI enable/disable; more agents; relay parity | next→future | client-config adapter layer |
+| **§9 — multi-agent/multi-client** | Adapter-registration table; per-client GUI enable/disable; more agents; relay parity | **SHIPPED / current** — 47 registered clients, 2 default-install, 45 opt-in | client-config adapter layer |
 | **§10 — GUI MCP Store** | One-button install (generate+manifest-create-to-disk+install); catalog screen; port alloc; progress stream; secret prompts; runtime probes; **command-confirm gate (§15 P1-d RCE)** | future (v0.7) | G5 (done); #8b port alloc; **NOT §9 table** (hard dep dropped — §15 P2; use per-adapter remote-http capability flag) |
 | **§11 — backlog** | Categorized deferred items (LSP router design, Linux lane, observability, testing, secrets, docs) | mixed | per-item |
 | **LSP router design** | First-class spec for the LSP router (modes/lifecycle/fail-loud parity with serena) — currently named, undesigned | future | §3 |
@@ -123,7 +123,7 @@ Legend: #278 = **MERGED** (2c7c343 on master); STOP-fix (A) = **DONE + DEPLOYED 
 
 ## §9 Multi-agent / multi-client support
 
-"Agents" = the AI client adapters mcphub installs MCP entries into. The architecture is **already multi-client**: one `clients.Client` interface (`internal/clients/clients.go:52-256`), one `AllClients()` registry (`clients.go:661-673`), one shared daemon served to all clients via per-client transport adapters, and a uniform install/migrate/demigrate/reconcile pipeline. "Support a bunch of agents" is therefore mostly (i) collapsing duplicated canonical-set literals into one registration table, (ii) writing more thin adapters, and (iii) surfacing per-client enable/disable in the GUI — NOT new lifecycle machinery.
+"Agents" = the AI client adapters mcphub installs MCP entries into. The architecture is **already multi-client**: one `clients.Client` interface (`internal/clients/clients.go:52-256`), one canonical `clientRegistry()` table (`internal/clients/clients.go:824-937`), derived build-wide accessors (`:940-1025`), one shared daemon served through per-client transport adapters, and a uniform install/migrate/demigrate/reconcile pipeline. The shipped §9 work collapsed the duplicated build-wide client literals into that table, expanded the adapter set, and surfaced the default-install override in the GUI; further clients extend those existing seams rather than adding lifecycle machinery.
 
 ### 9.0 Expansion targets (the selected list — owner-confirmed 2026-06-10)
 
@@ -144,19 +144,22 @@ The vendors to add adapters for, **selected with the owner** (transcript L25954 
 
 **Ollama -> SKIP** — not a native MCP client; would need a bridge (github.com/jonigl/mcp-client-for-ollama). Deferred, NOT in this scope.
 
-Sizeable feature (10 Go adapters + the 9.2 registration table + README client-version table + per-adapter demigrate/rollback symmetry tests) -> **its own PR** (originally scoped "after #268"; now after the legacy-removal/STOP work). Config formats for the newer vendors are researched at build; OpenClaw + Hermes + Zed + Kiro have known config locations (above).
+The original delivery scope was sizeable (10 Go adapters + the §9.2 registration table + README client-version table + per-adapter demigrate/rollback symmetry tests), so it was planned as its own PR after the legacy-removal/STOP work. That registration-table refactor and client expansion are now **shipped**. The selected 10-vendor table above remains the provenance for that expansion wave, not the current full inventory; the live registry now contains 47 supported clients (`internal/clients/clients.go:865-937`, summarized in `docs/supported-clients.md:3-16`).
 
-### 9.1 The canonical client set (7 today)
+### 9.1 The canonical client set (47 current)
 
-The build-wide set is declared in **three places that must stay in sync** — this duplication is the central scaling defect:
+The build-wide supported-client set has one owner: `clientRegistry()` in `internal/clients/clients.go:824-937`. Its 47 descriptors carry the stable name, factory, default-install membership, and relay-stdio metadata. The public/runtime views derive from that table:
 
-- `SupportedClientNames()` — `internal/clients/clients.go:593-603`
-- `AllClients()` factory list — `internal/clients/clients.go:661-673`
-- `serenaReconcileClientSet()` — `internal/api/serena_client_reconcile.go:70-80`
+- `SupportedClientNames()` — `internal/clients/clients.go:940-949`
+- `DefaultInstallClientNames()` — `internal/clients/clients.go:952-964`
+- `ConfigPathForName()` — `internal/clients/clients.go:967-995`, resolving through the registered adapter's `ConfigPath()`
+- `AllClients()` / `AllClientsWithErrors()` — `internal/clients/clients.go:1014-1025` and the continuation below
 
-All three list the same 7 in the same order: `claude-code`, `codex-cli`, `cursor`, `vscode`, `gemini-cli`, `qwen-cli`, `antigravity`.
+Only the `claude-code` and `codex-cli` descriptors set `defaultInstall: true` (`internal/clients/clients.go:867-868`); the other 45 clients are opt-in. `docs/supported-clients.md:3-16` records the matching 47 / 2 / 45 user-facing counts.
 
-Per-client config path + on-disk shape (`ConfigPathForName`, `clients.go:614-654`, plus each adapter's `AddEntry`):
+`serenaReconcileClientSet()` is deliberately **not** another build-wide owner. It is an intentional seven-name literal for the legacy Serena manifest/router migration boundary, intersected at call time with installed clients (`internal/api/serena_client_reconcile.go:139-168`). It must not be described as registry-derived or widened whenever an unrelated supported client is added.
+
+The following seven-row table is representative documentation of the original adapter shapes, not the current full supported-client set. Current membership comes from `clientRegistry()`; each adapter remains the owner of its config path and on-disk shape:
 
 | Client | Config path | Format | Top-level key | Hub entry shape | Anchor |
 |---|---|---|---|---|---|
@@ -168,26 +171,24 @@ Per-client config path + on-disk shape (`ConfigPathForName`, `clients.go:614-654
 | `qwen-cli` | `~/.qwen/settings.json` | JSON | `mcpServers` | `{"httpUrl":..., "timeout":10000}` (note `httpUrl`) | `qwen_cli.go:69-72` |
 | `antigravity` | `~/.gemini/antigravity/mcp_config.json` | JSON | `mcpServers` | **stdio relay** `{"command":"<mcphub.exe>","args":["relay",...],"disabled":false}` | `antigravity.go:89-93` |
 
-The per-client schema quirks are real and load-bearing: VS Code's `servers` vs everyone else's `mcpServers`; qwen's `httpUrl` vs gemini/cursor/codex's `url`; claude/cursor/vscode requiring an explicit `"type":"http"`. The shared base `jsonMCPClient` (`json_mcp.go:13-17`) is parameterized by `urlField` (`"url"` / `"httpUrl"` / `"command"`) and `clientName`, so most variants are one small override (`AddEntry`/`GetEntry`/`Exists`) on top of it — cursor/gemini/qwen are each ~80 lines.
+The schema quirks illustrated by these representative rows are real and load-bearing: VS Code's `servers` vs the original JSON clients' `mcpServers`; qwen's `httpUrl` vs gemini/cursor's `url`; claude/cursor/vscode requiring an explicit `"type":"http"`. The shared base `jsonMCPClient` (`json_mcp.go:13-17`) is parameterized by schema fields and client name, so compatible variants remain small overrides while adapters with distinct formats own their own shape.
 
-Two narrower default sets gate install aggression:
-- `DefaultInstallClientNames()` = `{claude-code, codex-cli, cursor}` (`clients.go:609-611`) — the only clients a plain install touches. vscode/gemini/qwen/antigravity are opt-in so a fresh install does not silently mutate every assistant on the box.
+One derived default-install subset gates install aggression:
+- `DefaultInstallClientNames()` = `{claude-code, codex-cli}` (`internal/clients/clients.go:824-838`, `:865-876`, `:952-964`) — the only clients a plain install touches. Cursor, vscode, gemini, qwen, and antigravity are explicit opt-ins so a fresh install does not silently mutate every assistant on the box.
 
 The format-neutral entry passed to every adapter is `MCPEntry` (`clients.go:23-48`): `Name`, `URL`, `Headers`, `Env`, plus the relay-only fields `RelayServer` / `RelayDaemon` / `RelayExePath` / `RelayURL` (URL adapters ignore the relay fields; the antigravity adapter ignores `URL`).
 
-### 9.2 The adapter abstraction + the registration-table refactor (the §9 work)
+### 9.2 The adapter abstraction + shipped registration table
 
 The `Client` interface (`clients.go:52-256`) core methods: `Name()` (`:54`), `ConfigPath()`/`Exists()` (`:58-63`), `InitEmpty() (created bool, err error)` (`:65-95`, powers the GUI Servers-matrix "Initialize" button), `AddEntry`/`RemoveEntry`/`GetEntry` (`:120-129`, idempotent), plus the backup/restore/demigrate surface (`Backup`/`BackupKeep`/`Restore`/`RestoreEntryFromBackup`/`RestoreEntryFromBackupForRollback`/`BackupContainsEntry`/`BackupEntryIsHubManaged`/`LatestBackupPath`) and the cleanup scanners `AllStdioEntries`/`FindStdioLanguageServerEntries`.
 
-**Adding a NEW agent today touches N hardcoded edit-sites across ≥2 files (this is the defect §9 fixes):**
-1. `internal/clients/<newclient>.go` — `New<Client>() (Client, error)` factory + struct (usually embed `jsonMCPClient`, override `AddEntry`/`GetEntry`/`Exists`).
-2. `SupportedClientNames()` — `clients.go:593`.
-3. `ConfigPathForName()` case — `clients.go:619`.
-4. `AllClients()` factory slice — `clients.go:664`.
-5. (If default-installed) `DefaultInstallClientNames()` — `clients.go:610`.
-6. (If it binds shared daemons) `serenaReconcileClientSet()` — `serena_client_reconcile.go:71` + per-server `client_bindings` in `servers/<server>/manifest.yaml`.
+**Adding a new supported client now has two build-wide steps:**
+1. Add `internal/clients/<newclient>.go` with its `Client` implementation/factory (embedding a shared helper only when its real config contract fits).
+2. Add one `clientDescriptor` row to `clientRegistry()` with the stable name, factory, and only the applicable `defaultInstall` / `relayStdio` metadata.
 
-A registry exists (`AllClients`), but the source-of-truth lists are **duplicated literals that can silently drift**. The §9 refactor collapses sites 2–5 into a **single registration table** — `(name → factory → default-config-path → default-install flag)` — so adding a client is one entry. `serenaReconcileClientSet()` already calls its set "fixed (not hard-coded per workstation)" but it is still a literal list (`serena_client_reconcile.go:61-80`); fold it into the same table.
+`SupportedClientNames()`, `DefaultInstallClientNames()`, `ConfigPathForName()`, and `AllClients()` then derive the new client without another name list or switch. Add per-server manifest `client_bindings` only when that server should bind the client; those bindings are server routing data, not a second build-wide supported/default-client owner.
+
+The fixed `serenaReconcileClientSet()` remains separate by design: it models exactly the clients bound by the legacy Serena surface and is an intentional migration-boundary literal (`internal/api/serena_client_reconcile.go:139-168`). Adding an unrelated clientRegistry row neither requires nor authorizes widening that legacy boundary.
 
 ### 9.3 The antigravity stdio-relay pattern (non-HTTP clients)
 
@@ -201,13 +202,13 @@ The relay subcommand is `mcphub relay` (`internal/cli/relay.go` + `internal/daem
 
 ### 9.4 GUI enable/disable per client
 
-The Servers matrix already renders a per-client column with an "Initialize" affordance backed by `InitEmpty()` (`clients.go:65-95`), and install honors a narrower/wider target set via `DefaultInstallClientNames()`. The §9 UX adds **per-client enable/disable checkboxes wired to that target set** so the operator opts each agent in/out without CLI flags — backed by the §9.2 registration table (`default-install` flag becomes operator-overridable in Settings, persisted to the GUI prefs file).
+The Servers matrix renders per-client columns with an "Initialize" affordance backed by `InitEmpty()` (`clients.go:65-95`), and install honors a narrower/wider target set via `DefaultInstallClientNames()`. The shipped Settings → Clients surface provides **per-client default-install enable/disable** without CLI flags (`internal/gui/frontend/src/components/settings/SectionClients.tsx:1-8`, `:121-153`): the registry's `defaultInstall` flags are the compile-time baseline, while the persisted GUI preference is the effective set for installs that omit an explicit client target.
 
 ### 9.5 Consistent install / migrate / demigrate / reconcile + hardened writes (inherited free)
 
 The lifecycle is already uniform across all clients: every adapter implements backup→`AddEntry`→`RecordManagedEntry`→`RemoveEntry`, with the demigrate guard `ErrBackupEntryAlreadyMigrated` (`clients.go:479-493`) and the `-original` pristine sentinel (`clients.go:680-726`) giving reversible install. The serena router reconcile iterates all in-scope clients identically and rolls back partial failures per-client via `RestoreSerenaReconcileApplied` (`serena_client_reconcile.go:377-401`). A new adapter inherits all of this by satisfying the interface — **but it MUST correctly implement the demigrate/rollback methods** (its schema-specific `isHubURLShapeEntry` / `isHubRelayShapeEntry` detection), or migration symmetry breaks for that client. Every adapter routes writes through `WriteConfigFile` (`write.go:49`), which production swaps to `api.SecureWriteClientConfig` (`secure_write_client_config.go:76-78`) — handle-relative, TOCTOU-safe, DACL/mode-gated; a new adapter gets this automatically by using `WriteConfigFile`/`EnsureClientConfigStub` rather than `os.WriteFile`, so multi-agent expansion does not weaken the write-security posture.
 
-**§9 acceptance:** (1) registration table replaces the 4 duplicated literal lists; adding a client = one table entry + one adapter file; a drift-guard test asserts the table is the single source. (2) GUI per-client enable/disable persists and gates install/reconcile target set. (3) the antigravity relay shape is documented as the canonical non-HTTP path; any new HTTP-incapable adapter reuses it. (4) each new adapter ships demigrate/rollback symmetry tests (round-trip install→demigrate→install).
+**§9 current invariants / acceptance:** (1) `clientRegistry()` is the sole build-wide supported/default owner, and `SupportedClientNames()` / `DefaultInstallClientNames()` / `ConfigPathForName()` / `AllClients()` derive from it; the intentional `serenaReconcileClientSet()` legacy boundary is tested separately and is not folded into that ownership claim. (2) Adding a client requires its adapter plus one descriptor row, with server-manifest bindings only where relevant; no parallel build-wide client literal is introduced. (3) GUI per-client default-install selection persists and controls the effective no-explicit-target install set. (4) the relay shape remains the canonical non-HTTP path, and each new adapter ships demigrate/rollback symmetry tests (round-trip install→demigrate→install).
 
 ---
 
@@ -269,9 +270,9 @@ G6 (`2026-05-12-g6-remote-mcp-manifests-design.md`) adds `transport: remote-http
 
 ## §11 Full backlog (what's left)
 
-Categorized open/deferred inventory. Phase 3B-II GUI, v0.5 supervisor, and serena dynamic-pool are **mostly SHIPPED on master** (PRs through #278); what remains there is polish, residual P2/P3 bugs, and verify-against-HEAD plan-tail items. The single largest open block is the §0–§8 + §9 + §10 redesign itself.
+Categorized open/deferred inventory. Phase 3B-II GUI, v0.5 supervisor, and serena dynamic-pool are **mostly SHIPPED on master** (PRs through #278); what remains there is polish, residual P2/P3 bugs, and verify-against-HEAD plan-tail items. The single largest open block is the §0–§8 + §10 redesign; §9 is shipped/current.
 
-### 11.1 Redesign lane (largest open; §0–§8 + §9 + §10)
+### 11.1 Redesign lane (largest open; §0–§8 + §10)
 A→F legacy-removal, §3 connection-robustness, and feature bugs #4/#6/#8/demigrate. The redesign gaps the architecture review first flagged here are now **CLOSED by Appendix A (implementation elaboration) + §15 (3-angle review-loop findings)** — each line below points to where it is resolved:
 
 - **Per-phase acceptance criteria / test plan** — RESOLVED in §5.x (per-phase Done-gate / Test-surface / Falsification-test triad, mirroring the v0.5.0 supervisor outline).
@@ -388,11 +389,11 @@ The phase numbering below maps onto these milestones; v0.6-core = Phases 1–4 (
 - **Sequence #6 idle-shutdown's `IntentReasonIdle` AFTER E lands** (it writes the file E is rewriting — do not author it on the soon-deleted dual-intent).
 - **#8b lands AFTER F:** promote `configs/ports.yaml` to the **runtime** port owner, but **reconcile its stale data FIRST** — it still lists legacy `serena/unified=9121` and an empty `workspace_scoped`, modeling zero of the dynamic pools (§15 P2 / §2.x SPEC-CORRECTION). Promote the band-authority model (reserved pool ranges, not static ports) per §2.x; C→F stays single-variable so #8b is isolated.
 
-**Phase 4-tail — idle-shutdown (#6, §6).** Lands AFTER Phase 4-E (needs the unified intent + the §4/Phase-A corrected stop path — do NOT author a second stop path). `desired=stopped`+`IntentReasonIdle` on the unified intent; 60s in-GUI sweeper (lives in the GUI process — the only one that observes `/serena/mcp` activity; the supervisor sees the stop/clear via IntentWatcher + reconcile); router clears + 503-retries on wake; GUI-configurable threshold + cold/warm wake-mode. Open verify: serena `.serena/` re-warm cost drives the default.
+**Phase 4-tail — idle-shutdown (#6, §6).** Lands AFTER Phase 4-E (needs the unified intent + the §4/Phase-A corrected stop path — do NOT author a second stop path). `desired=stopped`+`IntentReasonIdle` on the unified intent; the 60s in-GUI sweeper is the idle-stop authority only while an operation-lifetime canonical routing lease admits stable GUI (the GUI process is the only one that observes `/serena/mcp` activity; the supervisor sees the stop/clear via IntentWatcher + reconcile); router clears + 503-retries on wake; GUI-configurable threshold + cold/warm wake-mode. Open verify: serena `.serena/` re-warm cost drives the default.
 
 ### v0.7-adoption
 
-**Phase 5 — multi-agent registration table (§9).** Lands once the client-config adapter layer is stable post-Phase-4 (E/F touch reconcile + intent that the adapter set keys off). Collapse the 4 duplicated canonical-set literals into one registration table; add GUI per-client enable/disable; ship the antigravity relay shape as the documented non-HTTP path. Each new adapter is then one table entry + one ~80-line file + demigrate symmetry tests. **Adapter tiers (consultant §15):** Windsurf / Cline / Zed / Kiro are verifiable-first (known config locations); Hermes / OpenClaw / OpenHands / OpenCode are experimental (config researched at build).
+**Phase 5 — multi-agent registration table (§9): SHIPPED / current.** `clientRegistry()` now owns 47 supported clients; the four build-wide accessors derive from it; the GUI default-install override and relay metadata are live. A new supported client is its adapter plus one descriptor row, with server-manifest bindings only where relevant and demigrate symmetry tests required. The original rollout tiers (consultant §15) remain historical sequencing context: Windsurf / Cline / Zed / Kiro were verifiable-first, while Hermes / OpenClaw / OpenHands / OpenCode were treated as experimental during that delivery wave.
 
 **Phase 6 — GUI MCP Store (§10).** Depends on Phase 4 (#8b port owner) + the §11.9 `install-progress`/`install-done` events. The hard dep on the §9 table is **dropped** (architect §15 P2): use a narrow per-adapter remote-http capability flag instead of coupling the whole store to the table refactor. Sub-sequence: (6a) `GET /api/marketplace`+`POST /api/marketplace/refresh` + Store screen + nav link (thin G5 wrappers); (6b) `POST /api/marketplace/install` orchestrator (generate→port-fill→**manifest-create-to-disk per §10.0**→install) + runtime probe + secret-prompt gate; (6c) install-progress SSE streaming; (6d) **G6 remote-http** install path (§10.4) + antigravity hide/disable. **Two hard security gates (§15 P1-d + P2):** (i) the one-click flow MUST surface the resolved `command + args + env` and require an explicit per-install confirm — `Install` execs `m.Command` (`install.go:1499`) from an UNTRUSTED catalog, so auto-firing generate→create→install with no command/args gate is RCE; the manual generate→edit→create path stays for uncurated entries. (ii) port auto-allocation MUST be the retain-listener (`net.Listen(":0")`+hold) or atomic `AllocatePort`-against-the-live-`Registry` path — the bare `portInUse`-scan-then-create alternative has a TOCTOU window (§10.3#4) and is FORBIDDEN. Also reject manifest names that shadow an embed-FS manifest (§15 P2 / §10.0 shadowing). The §10.0 manifest-persistence regression guard is a hard gate on 6b.
 
@@ -647,7 +648,7 @@ Each phase below has: **Done gate** (the falsifiable PASS condition), **Test sur
 | **#8a test-port convention** (before C) | guard-grep covers BOTH the non-test AND the test tree (§15 P2); tests use `pickFreeLocalPort(t)`/`:0` | Go: guard-test greps for live-band literals (`9121`/`9123`-`9132`/`9200`-`9299`) reaching `killByPortFn`/`net.Listen` **in BOTH the test tree and the non-test tree**. | introduce a hardcoded `Port: 9200` in a **TEST** path (the actual incident class) AND in a non-test path; the guard-test must fail on BOTH. (Memory lesson: this literal once killed a live daemon — and it was a TEST literal.) |
 | **#8b config-centralization** (after F) | `configs/ports.yaml` is the **runtime** port owner (not test-only; stale data reconciled first); daemon ports auto-allocated; tier-A values GUI-settable | Go: a production reader of `ParsePortRegistry` (`config/ports.go:33`) exists and is consulted by `Install`/allocate paths; band-authority model (reserved ranges, not static ports) per §2.x. | promote `ports.yaml` as-is (still listing legacy `serena/unified=9121`, empty `workspace_scoped`); the boot validate must FAIL because it does not model the live dynamic pools. |
 | **demigrate-serena-router** | GUI uncheck-cursor-serena succeeds when the entry is the `/serena/mcp` router shape | Go: extend `internal/api/demigrate_test.go` — `liveEntryMatchesManifestBinding` (`managed_entries.go:355`) recognizes `http://127.0.0.1:9125/serena/mcp` as hub-managed. E2E: existing servers-matrix uncheck-via-hub test, but seeded with a router-shape cursor entry. | seed a cursor entry pointing at a *foreign* remote URL; demigrate must STILL refuse it (the widened matcher must not become "remove anything"). |
-| **§9 multi-agent table** | the 4 duplicated canonical-set literals collapse to one registration table; adding a client = one entry | Go: drift-guard test asserts the table is the single source for `SupportedClientNames`/`AllClients`/`serenaReconcileClientSet`/`DefaultInstallClientNames`. Per-adapter demigrate symmetry test. | add a client to one literal but not the table; the drift-guard must fail. |
+| **§9 multi-agent registry (SHIPPED)** | `clientRegistry()` is the single build-wide owner for 47 supported clients; adding a client = adapter + one descriptor row, with server-manifest bindings only where relevant | Go: drift/parity guards assert `SupportedClientNames` / `DefaultInstallClientNames` / `ConfigPathForName` / `AllClients` derive from the registry; separate tests protect the intentional legacy `serenaReconcileClientSet()` boundary; per-adapter demigrate symmetry test. | introduce a parallel build-wide supported/default literal or a descriptor/adapter mismatch: the guard must fail. Adding an unrelated registry client must not implicitly widen the fixed legacy Serena migration set. |
 | **§10 GUI store** | every install persists a manifest under `defaultManifestDir()`; port auto-allocated, never literal | Go: post-install assert the manifest file exists on disk (the §10.0 "fetch was lost" regression guard). E2E NEW store screen suite. | install a store entry, then trigger a reconcile, then assert the daemon survives (it would vanish if the manifest were in-memory-only — the exact "fetch was lost" failure). |
 
 ---

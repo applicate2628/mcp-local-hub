@@ -36,7 +36,7 @@ func main() {
 	// A bare invocation (no subcommand) is the first-run entry point: route
 	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
 	if shouldAutoLaunchGUI() {
-		os.Args = append(os.Args, "gui")
+		os.Args = cli.RouteInvocationArgs(os.Args)
 	}
 
 	if err := cli.NewRootCmd().Execute(); err != nil {

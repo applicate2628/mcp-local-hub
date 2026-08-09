@@ -5,9 +5,9 @@ Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, Qwen CLI, and the
 Antigravity relay (post-2026-05-20 review replaced the old claude/codex
 split; see manifest.yaml for the rationale).
 
-Default install writes `claude-code`, `codex-cli`, and `cursor`. Use
-`--clients ...` or `--all-clients` to opt in VS Code, Gemini CLI, Qwen CLI, or
-Antigravity.
+Default install writes `claude-code` and `codex-cli`. Use
+`--clients ...` or `--all-clients` to opt in Cursor, VS Code, Gemini CLI, Qwen
+CLI, or Antigravity.
 
 Upstream: https://github.com/oraios/serena
 

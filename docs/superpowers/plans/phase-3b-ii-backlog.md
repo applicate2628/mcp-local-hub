@@ -269,8 +269,8 @@ Phase 3B-II is **closed** on `master`. Tagging happens at Global Phase 4
 
 #### Client expansion (already shipped 2026-05-04, commit `59dcf12`)
 
-- **Default install set:** `claude-code`, `codex-cli`, `cursor`. Safe first-run write set for `install` and workspace `register`.
-- **Opt-in install set:** `vscode`, `gemini-cli`, `qwen-cli`, `antigravity`. User must pass `--clients ...` or `--all-clients`. Live smoke + import compatibility remain in the release-hardening backlog.
+- **Default install set:** `claude-code`, `codex-cli`. Safe first-run write set for `install` and workspace `register`. (This row shipped with `cursor` in the default set; `cursor` was later moved to the opt-in set so a bare install does not silently mutate every assistant on the box.)
+- **Opt-in install set:** `cursor`, `vscode`, `gemini-cli`, `qwen-cli`, `antigravity`. User must pass `--clients ...` or `--all-clients`. Live smoke + import compatibility remain in the release-hardening backlog.
 
 ### Daemon-management hygiene follow-ups (post-A4-a, separate sprint)
 

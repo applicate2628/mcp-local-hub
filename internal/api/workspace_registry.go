@@ -112,6 +112,27 @@ type Registry struct {
 	// registry writer case: a durable rename can succeed before reopening the
 	// replacement file reports an error.
 	savePendingRemovalFn func(*Registry) error
+
+	// auditSink, when non-nil, is the destination Load() passes to the
+	// shared inode-anchored state-file reader for its relax-fallback
+	// diagnostic (finding 1, work-items/bugs/2026-07-26-route-daemon-
+	// state-read-unhardened-parent-fallback-writes-hub-mcp-log.md). Nil
+	// (the zero value every existing NewRegistry caller gets) preserves
+	// today's default: LogHubMcpEvent, the shared hub-mcp.log. Purely
+	// additive — see SetAuditSink.
+	auditSink func(level, event string, fields map[string]any) error
+}
+
+// SetAuditSink overrides the diagnostic sink Load() uses for the shared
+// state-file reader's relax-fallback event. A nil sink restores the default
+// (LogHubMcpEvent). The read-only `mcphub route` front daemon
+// (internal/cli/route.go) calls this with RouteReadOnlyStderrSink right
+// after NewRegistry, before the first Load(), so its registry reads never
+// reach the GUI-owned shared hub-mcp.log even under a default-relax
+// broadened parent — every other caller that never calls SetAuditSink keeps
+// today's behavior unchanged.
+func (r *Registry) SetAuditSink(sink func(level, event string, fields map[string]any) error) {
+	r.auditSink = sink
 }
 
 const registryVersion = 1
@@ -154,7 +175,7 @@ func DefaultRegistryPath() (string, error) {
 // Load reads the registry file. A missing file is not an error — the registry
 // stays empty, ready for the first Save.
 func (r *Registry) Load() error {
-	data, err := readStateFileInodeAnchored(r.path)
+	data, err := ReadStateFileInodeAnchoredWithAuditSink(r.path, r.auditSink)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || isHubMcpStateMissingErr(err) {
 			r.Version = registryVersion
@@ -240,21 +261,24 @@ func (r *Registry) RemoveSerenaRowsAndSave(workspaceKeys ...string) (removed int
 	return removed, true, nil
 }
 
-// LockPath returns the sole Registry lock-leaf derivation.
+// LockPath returns the registry's single cross-process lock leaf.
 func (r *Registry) LockPath() string { return r.path + ".lock" }
 
 // Lock acquires a cross-process exclusive file lock on <registry>.lock.
-// The returned one-shot function reports release failure. Prevents
-// two concurrent `mcphub register` invocations from racing on port allocation
-// or client-config writes.
+// The returned one-shot release reports and records failure.
 func (r *Registry) Lock() (func() error, error) {
+	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
 	}
 	if r.lockFn != nil {
-		return r.lockFn(r.LockPath())
+		return r.lockFn(lockPath)
 	}
-	return lockLeafLedgered(r.LockPath())
+	release, err := lockLeafLedgered(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("lock %s: %w", lockPath, err)
+	}
+	return release, nil
 }
 
 // TryLock is the non-blocking variant of Lock: it attempts to acquire the
@@ -270,10 +294,18 @@ func (r *Registry) Lock() (func() error, error) {
 // (that holder self-heals the orphan anyway), so it TryLocks and skips on
 // contention.
 func (r *Registry) TryLock() (func() error, bool, error) {
+	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	return tryLockLeafLedgered(r.LockPath())
+	release, locked, err := tryLockLeafLedgered(lockPath)
+	if err != nil {
+		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, err)
+	}
+	if !locked {
+		return nil, false, nil
+	}
+	return release, true, nil
 }
 
 // Put upserts an entry (primary key = workspace_key + language).
@@ -531,7 +563,7 @@ func (r *Registry) BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation stri
 	if err != nil {
 		return nil, err
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	defer ReleaseAndJoin(&err, unlock, "begin pending serena removal: release registry lock")
 	if err := r.Load(); err != nil {
 		return nil, err
 	}
@@ -563,7 +595,7 @@ func (r *Registry) BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation stri
 		if err != nil {
 			return err
 		}
-		defer ReleaseAndJoin(&err, unlock)
+		defer ReleaseAndJoin(&err, unlock, "rollback pending serena removal: release registry lock")
 		if err := current.Load(); err != nil {
 			return err
 		}
@@ -636,7 +668,7 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 	if err != nil {
 		return err
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	defer ReleaseAndJoin(&err, unlock, "put last tools-call timestamp for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}
@@ -658,7 +690,7 @@ func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, las
 	if err != nil {
 		return err
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	defer ReleaseAndJoin(&err, unlock, "put lifecycle for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}

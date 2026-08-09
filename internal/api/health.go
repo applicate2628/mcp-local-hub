@@ -156,7 +156,7 @@ type ProbeRow struct {
 	OK        bool   `json:"ok"`
 	ToolCount int    `json:"tool_count"`
 	Err       string `json:"err"`
-	Source    string `json:"source"` // "" | "proxy-synthetic"
+	Source    string `json:"source"` // "" | "proxy-synthetic" | RouteFrontHealthSource
 }
 
 type CapabilitiesSection struct {
@@ -789,6 +789,22 @@ func (a *API) realCapabilityRow(d DaemonStatus) (CapabilityRow, error) {
 		row.Tools = a.syntheticToolsSubSection(d)
 		row.Prompts = a.syntheticPromptsSubSection(d)
 		row.Resources = a.syntheticResourcesSubSection(d)
+		return row, nil
+	}
+
+	// The built-in route front daemon exposes no /mcp endpoint at all — it
+	// serves /serena/mcp + /lsp/<language>/mcp only, and its catalog is
+	// whatever the currently-registered serena workspaces expose (which needs
+	// a live workspace AND a materialized backend to enumerate). Probing it
+	// through the generic /mcp capability path would report three spurious
+	// "error" sub-sections for a healthy daemon; report "unsupported" with the
+	// concrete reason instead.
+	if d.Health != nil && d.Health.Source == RouteFrontHealthSource {
+		const reason = "route front daemon serves " + SerenaRouterURLPath + " + /lsp/<language>/mcp only; its catalog is per-workspace and is enumerated through the routed serena/LSP daemons, not this row"
+		unsupported := CapabilitySubSection{State: "unsupported", Items: []CapabilityItem{}, Err: reason}
+		row.Tools = unsupported
+		row.Prompts = unsupported
+		row.Resources = unsupported
 		return row, nil
 	}
 

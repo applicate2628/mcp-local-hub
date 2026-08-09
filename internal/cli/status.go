@@ -375,6 +375,13 @@ func renderHealthCell(r api.DaemonStatus) string {
 	if !r.Health.OK {
 		return "ERR: " + firstN(r.Health.Err, 40)
 	}
+	// The built-in route front daemon's probe proves the MCP lifecycle on
+	// /serena/mcp and never enumerates tools (see api.RouteFrontHealthSource),
+	// so its ToolCount is structurally 0 — printing "OK (0)" would read as
+	// "healthy but exposes nothing".
+	if r.Health.Source == api.RouteFrontHealthSource {
+		return "OK (lifecycle)"
+	}
 	if r.Health.Source != "proxy-synthetic" {
 		return fmt.Sprintf("OK (%d)", r.Health.ToolCount)
 	}

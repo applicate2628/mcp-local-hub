@@ -151,7 +151,23 @@ construct the backend lifecycle. Human invocation is not supported.`,
 			if err != nil {
 				return fmt.Errorf("registry lock: %w", err)
 			}
-			defer func() { api.ReleaseAndJoin(&err, unlock) }()
+			var releaseErr error
+			releaseUnlock := func() error {
+				if unlock != nil {
+					if unlockErr := unlock(); unlockErr != nil {
+						releaseErr = errors.Join(releaseErr, unlockErr)
+					}
+					unlock = nil
+				}
+				return releaseErr
+			}
+			defer func() {
+				if unlock != nil {
+					if deferredReleaseErr := releaseUnlock(); deferredReleaseErr != nil {
+						err = errors.Join(err, fmt.Errorf("workspace proxy %s/%s: could not release the registry lock: %w", wsKey, languageFlag, deferredReleaseErr))
+					}
+				}
+			}()
 			if err := reg.Load(); err != nil {
 				return fmt.Errorf("load registry: %w", err)
 			}
@@ -282,10 +298,8 @@ construct the backend lifecycle. Human invocation is not supported.`,
 				// bind failure keeps the existing cobra exit-1 (genuine crash).
 				return bindRefusedExit(fmt.Errorf("bind proxy: %w", err))
 			}
-			releaseErr := unlock()
-			unlock = nil
-			if releaseErr != nil {
-				return fmt.Errorf("release registry lock after proxy bind: %w", releaseErr)
+			if releaseErr := releaseUnlock(); releaseErr != nil {
+				return fmt.Errorf("workspace proxy %s/%s: listener bound but could not release the registry lock before serving: %w", wsKey, languageFlag, releaseErr)
 			}
 
 			errCh := make(chan error, 1)

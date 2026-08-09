@@ -81,14 +81,24 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false, LogHubMcpEvent)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false, LogHubMcpEvent)
 }
 
-func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool) ([]byte, error) {
+// readStateFileInodeAnchoredWithOptions's auditSink parameter is the
+// destination for the relax-fallback "unhardened-parent/file-fallback" warn
+// events below (finding 1, work-items/bugs/2026-07-26-route-daemon-state-
+// read-unhardened-parent-fallback-writes-hub-mcp-log.md): every existing
+// caller in this file passes LogHubMcpEvent, preserving today's behavior
+// exactly. A caller that must never write the shared hub-mcp.log (the
+// read-only `mcphub route` front daemon) reaches this via
+// ReadStateFileInodeAnchoredWithAuditSink / Registry.SetAuditSink /
+// LSPWorkspaceRootTrustedWithAuditSink instead, passing
+// RouteReadOnlyStderrSink.
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -133,7 +143,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read because subsequent ReadFile is bound to the file handle, not the path)"
 		}
 		if auditFallbacks {
-			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			_ = auditSink("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
 				"path":   path,
 				"parent": parentDir,
 				"reason": reason,
@@ -206,7 +216,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 		}
 		if auditFallbacks {
 			reason := "default-relax-on-solo-host (file grants read-only access to non-allowlisted SID)"
-			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+			_ = auditSink("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
 				"path":   path,
 				"parent": parentDir,
 				"reason": reason,

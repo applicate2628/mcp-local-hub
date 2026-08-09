@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -34,6 +35,7 @@ type fakeScheduler struct {
 	tasks        map[string]bool
 	xml          map[string][]byte
 	createdSpecs []scheduler.TaskSpec
+	createErr    error
 }
 
 func newFakeScheduler() *fakeScheduler {
@@ -41,22 +43,130 @@ func newFakeScheduler() *fakeScheduler {
 }
 
 func (f *fakeScheduler) Create(spec scheduler.TaskSpec) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	exported := fakeSchedulerXMLForSpec(spec)
 	f.tasks[spec.Name] = true
+	f.xml[spec.Name] = append([]byte(nil), exported...)
 	f.createdSpecs = append(f.createdSpecs, spec)
 	return nil
 }
-func (f *fakeScheduler) Delete(name string) error { delete(f.tasks, name); return nil }
-func (f *fakeScheduler) Run(name string) error    { return nil }
+func (f *fakeScheduler) Delete(name string) error {
+	delete(f.tasks, name)
+	delete(f.xml, name)
+	return nil
+}
+func (f *fakeScheduler) Run(name string) error { return nil }
 func (f *fakeScheduler) ExportXML(name string) ([]byte, error) {
 	if b, ok := f.xml[name]; ok {
-		return b, nil
+		return append([]byte(nil), b...), nil
 	}
 	return nil, scheduler.ErrTaskNotFound
 }
 func (f *fakeScheduler) ImportXML(name string, xml []byte) error {
-	f.xml[name] = xml
+	f.xml[name] = append([]byte(nil), xml...)
 	f.tasks[name] = true
 	return nil
+}
+
+// fakeSchedulerXMLForSpec projects TaskSpec into the Task Scheduler XML shape
+// consumed by the API's post-create verifier. It is generic over the supplied
+// task data: no task name, command, arguments, path, or schedule is special.
+func fakeSchedulerXMLForSpec(spec scheduler.TaskSpec) []byte {
+	xmlText := func(value string) string {
+		var escaped bytes.Buffer
+		_ = xml.EscapeText(&escaped, []byte(value))
+		return escaped.String()
+	}
+	trigger := ""
+	if spec.WeeklyTrigger != nil {
+		days := []string{"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"}
+		trigger = fmt.Sprintf(
+			`<CalendarTrigger><StartBoundary>2026-01-04T%02d:%02d:00</StartBoundary><Enabled>true</Enabled><ScheduleByWeek><DaysOfWeek><%s/></DaysOfWeek><WeeksInterval>1</WeeksInterval></ScheduleByWeek></CalendarTrigger>`,
+			spec.WeeklyTrigger.HourLocal,
+			spec.WeeklyTrigger.MinuteLocal,
+			days[spec.WeeklyTrigger.DayOfWeek],
+		)
+	}
+	restart := ""
+	if spec.RestartOnFailure {
+		restart = "<RestartOnFailure><Interval>PT1M</Interval><Count>3</Count></RestartOnFailure>"
+	}
+	return []byte(fmt.Sprintf(
+		`<Task><RegistrationInfo><Description>%s</Description></RegistrationInfo><Triggers>%s</Triggers><Principals><Principal id="Author"><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals><Settings>%s<AllowHardTerminate>true</AllowHardTerminate><StartWhenAvailable>false</StartWhenAvailable><RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable><MultipleInstancesPolicy>StopExisting</MultipleInstancesPolicy><DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries><StopIfGoingOnBatteries>false</StopIfGoingOnBatteries><IdleSettings><StopOnIdleEnd>false</StopOnIdleEnd><RestartOnIdle>false</RestartOnIdle></IdleSettings><AllowStartOnDemand>true</AllowStartOnDemand><Enabled>true</Enabled><Hidden>false</Hidden><RunOnlyIfIdle>false</RunOnlyIfIdle><WakeToRun>false</WakeToRun><ExecutionTimeLimit>PT0S</ExecutionTimeLimit><Priority>7</Priority></Settings><Actions Context="Author"><Exec><Command>%s</Command><Arguments>%s</Arguments><WorkingDirectory>%s</WorkingDirectory></Exec></Actions></Task>`,
+		xmlText(spec.Description),
+		trigger,
+		restart,
+		xmlText(spec.Command),
+		xmlText(strings.Join(spec.Args, " ")),
+		xmlText(spec.WorkingDir),
+	))
+}
+
+func TestFakeScheduler_CreateExportDeleteRestoreContract(t *testing.T) {
+	sch := newFakeScheduler()
+	spec := scheduler.TaskSpec{
+		Name:        "contract-task",
+		Description: "contract description",
+		Command:     `C:\test\mcphub.exe`,
+		Args:        []string{"workspace-weekly-refresh"},
+		WorkingDir:  `C:\test`,
+		WeeklyTrigger: &scheduler.WeeklyTrigger{
+			DayOfWeek: 2, HourLocal: 4, MinuteLocal: 35,
+		},
+	}
+	if err := sch.Create(spec); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	exported, err := sch.ExportXML(spec.Name)
+	if err != nil {
+		t.Fatalf("ExportXML after Create: %v", err)
+	}
+	if want := fakeSchedulerXMLForSpec(spec); !bytes.Equal(exported, want) {
+		t.Fatalf("ExportXML after Create differs from created task data:\n got %s\nwant %s", exported, want)
+	}
+	if !sch.tasks[spec.Name] || len(sch.createdSpecs) != 1 {
+		t.Fatalf("Create state = task present %v, specs %d; want true, 1", sch.tasks[spec.Name], len(sch.createdSpecs))
+	}
+
+	if err := sch.Delete(spec.Name); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if sch.tasks[spec.Name] {
+		t.Fatal("Delete left task presence behind")
+	}
+	if _, err := sch.ExportXML(spec.Name); !errors.Is(err, scheduler.ErrTaskNotFound) {
+		t.Fatalf("ExportXML after Delete error = %v, want ErrTaskNotFound", err)
+	}
+
+	if err := sch.ImportXML(spec.Name, exported); err != nil {
+		t.Fatalf("ImportXML restore: %v", err)
+	}
+	restored, err := sch.ExportXML(spec.Name)
+	if err != nil {
+		t.Fatalf("ExportXML after restore: %v", err)
+	}
+	if !sch.tasks[spec.Name] || !bytes.Equal(restored, exported) {
+		t.Fatalf("restored state = task present %v, XML equal %v; want true, true", sch.tasks[spec.Name], bytes.Equal(restored, exported))
+	}
+}
+
+func TestFakeScheduler_FailedCreateDoesNotPublishTask(t *testing.T) {
+	sch := newFakeScheduler()
+	createErr := errors.New("injected create failure")
+	sch.createErr = createErr
+	spec := scheduler.TaskSpec{Name: "failed-contract-task", Command: `C:\test\mcphub.exe`}
+
+	if err := sch.Create(spec); !errors.Is(err, createErr) {
+		t.Fatalf("Create error = %v, want %v", err, createErr)
+	}
+	if sch.tasks[spec.Name] || len(sch.createdSpecs) != 0 {
+		t.Fatalf("failed Create published state = task present %v, specs %d; want false, 0", sch.tasks[spec.Name], len(sch.createdSpecs))
+	}
+	if _, err := sch.ExportXML(spec.Name); !errors.Is(err, scheduler.ErrTaskNotFound) {
+		t.Fatalf("ExportXML after failed Create error = %v, want ErrTaskNotFound", err)
+	}
 }
 
 // fakeClient implements api.TestClientIface. A parent map is shared across

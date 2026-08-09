@@ -85,7 +85,7 @@ func TestPoller_EmitsDeltaOnOrphanPIDChange(t *testing.T) {
 		{{Server: "memory", State: "Running", Port: 9123, PID: 67890}},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -165,7 +165,7 @@ func TestPoller_EmitsDeltaOnJobProtectionChange(t *testing.T) {
 		{{Server: "memory", State: "Running", Port: 9123, PID: 99, JobProtection: &fal}},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -225,7 +225,7 @@ func TestPoller_EmitsJobProtectionClearOnFalseToUnknown(t *testing.T) {
 		{{Server: "memory", State: "Running", Port: 9123, PID: 42, JobProtection: nil}},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -266,7 +266,7 @@ func TestPoller_EmitsDeltaOnStateChange(t *testing.T) {
 		{{Server: "memory", State: "Stopped", Port: 9123}},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -307,7 +307,7 @@ func TestPoller_DistinctDaemonsDoNotCollide(t *testing.T) {
 		},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -367,7 +367,7 @@ func TestPoller_SupervisorDownEmitsPollerErrorNotStaleDeltas(t *testing.T) {
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.health = fake
 
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -411,7 +411,7 @@ func TestPoller_EmitsDaemonFailedOnRisingEdge(t *testing.T) {
 		{{Server: "memory", State: "Running", Port: 9123, PID: 99, LastResult: 0}}, // recovered
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -462,7 +462,7 @@ func TestPoller_DaemonFailedOnFailStateString(t *testing.T) {
 		{{Server: "serena", Daemon: "claude", State: "FailedToLaunch", Port: 9121}},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -497,7 +497,7 @@ func TestPoller_EmitsDaemonRecoveredOnFallingEdge(t *testing.T) {
 		{{Server: "memory", State: "Running", Port: 9123, PID: 99, LastResult: 0}}, // recovered
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -839,7 +839,7 @@ func (e errStatus) Status() ([]api.DaemonStatus, error) { return nil, e.err }
 // down-supervisor cycle). Without this feed the tray's only state
 // source goes silent and the icon stays green over a down supervisor.
 func TestPoller_FeedsErrorChannelOnFetchError(t *testing.T) {
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

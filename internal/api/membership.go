@@ -7,7 +7,9 @@
 // acquire; one Registry.Save call.
 package api
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // MembershipDelta is one (workspace_key, language) toggle. Memo D5.
 type MembershipDelta struct {
@@ -27,17 +29,17 @@ type MembershipDelta struct {
 //   - Atomic: one Registry.Save; either all named deltas persist or none.
 //   - Validation: every (workspace_key, language) MUST exist in the
 //     registry; otherwise return an error and skip the save.
-func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (updated int, err error) {
+func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (_ int, err error) {
 	if len(deltas) == 0 {
 		return 0, nil
 	}
 
 	reg := NewRegistry(path)
-	release, err := reg.Lock()
+	unlock, err := reg.Lock()
 	if err != nil {
 		return 0, fmt.Errorf("acquire lock: %w", err)
 	}
-	defer ReleaseAndJoin(&err, release)
+	defer ReleaseAndJoin(&err, unlock, "update weekly-refresh membership: membership write stands, but could not release the registry lock")
 
 	if err := reg.Load(); err != nil {
 		return 0, fmt.Errorf("load registry: %w", err)
@@ -61,7 +63,7 @@ func UpdateWeeklyRefreshMembership(path string, deltas []MembershipDelta) (updat
 		}
 	}
 
-	updated = 0
+	updated := 0
 	for _, d := range deltas {
 		i := idx[[2]string{d.WorkspaceKey, d.Language}]
 		if reg.Workspaces[i].WeeklyRefresh != d.Enabled {

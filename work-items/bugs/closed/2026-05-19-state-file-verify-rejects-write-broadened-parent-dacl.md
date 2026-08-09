@@ -200,7 +200,7 @@ Verified 2026-06-02 (4 checks: `9e89abe` is an ancestor of HEAD; the new
 read-inode files are present; `grep VerifyHubMcpStateDACL(` finds no
 non-test caller; the in-code comment at `hub_mcp_state.go:183-195` names
 this very doc as the fix target). The "OPEN" status was never reconciled
-after the fix landed; `TRIAGE-2026-05-28.md` row 15 re-flagged it
+after the fix landed; `triage-2026-05-28.md` row 15 re-flagged it
 "still-relevant-P2" from a pr-review pass that read this stale doc, not the
 current source.
 

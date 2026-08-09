@@ -231,7 +231,7 @@ func (a *API) ListAllWorkspaceRows() (rows []*WorkspaceEntry, err error) {
 	if lerr != nil {
 		return nil, lerr
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	defer ReleaseAndJoin(&err, unlock, "list workspace rows: rows above are valid, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return nil, lerr
 	}
@@ -375,7 +375,7 @@ func workspaceBackendPresence(regPath, wsKey, legacyWSKey string) (hasLSP bool, 
 	if lerr != nil {
 		return false, false, lerr
 	}
-	defer ReleaseAndJoin(&err, unlock)
+	defer ReleaseAndJoin(&err, unlock, "read workspace backend presence: presence bits above are valid, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return false, false, lerr
 	}

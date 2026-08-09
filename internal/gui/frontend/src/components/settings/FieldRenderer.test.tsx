@@ -72,6 +72,13 @@ describe("FieldRenderer", () => {
     expect(getByText(/coming in A4-b/)).toBeTruthy();
   });
 
+  it("read-only registry values cannot be edited", () => {
+    const def = { ...enumDef, key: "mcp_front.routing_target", read_only: true };
+    const { container, getByText } = render(<FieldRenderer def={def} value="front" onChange={() => {}} />);
+    expect((container.querySelector("select") as HTMLSelectElement).disabled).toBe(true);
+    expect(getByText(/read-only/)).toBeTruthy();
+  });
+
   it("inline error renders with role=alert and aria-describedby", () => {
     const { container } = render(<FieldRenderer def={enumDef} value="system" onChange={() => {}} error="bad value" />);
     const select = container.querySelector("select") as HTMLSelectElement;

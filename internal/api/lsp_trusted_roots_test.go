@@ -55,6 +55,41 @@ func TestLSPTrustedRoots_LoadAbsentFileIsEmpty(t *testing.T) {
 	}
 }
 
+// TestLoadDefaultLSPTrustedRoots_DoesNotCreateStateDirectory is the P2-3
+// falsifying test (adversarial cross-family review of Increment 1):
+// LoadDefaultLSPTrustedRoots used to resolve its path via the
+// WRITE-path DefaultLSPTrustedRootsPath (api.DaemonStateDir, which CREATES
+// the state directory on first call) even though it is a pure READ — the
+// standalone `mcphub route` front daemon's TrustedRootCheckFn calls this on
+// every first-touch LSP request, so a route-only host with no GUI/CLI
+// ever having run there would have the state directory silently
+// provisioned as a side effect of a read, violating the read-only
+// invariant just as surely as a registry write would.
+//
+// Mutation-proven: reverting LoadDefaultLSPTrustedRoots to call
+// DefaultLSPTrustedRootsPath (the pre-fix shape) instead of
+// DefaultLSPTrustedRootsPathReadOnly makes this test fail — the state
+// directory gets created.
+func TestLoadDefaultLSPTrustedRoots_DoesNotCreateStateDirectory(t *testing.T) {
+	parent := t.TempDir()
+	stateDir := filepath.Join(parent, "not-yet-created")
+	restore := SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+
+	f, err := LoadDefaultLSPTrustedRoots()
+	if err != nil {
+		t.Fatalf("LoadDefaultLSPTrustedRoots on a not-yet-created state dir: %v", err)
+	}
+	if f == nil || len(f.Roots) != 0 {
+		t.Fatalf("LoadDefaultLSPTrustedRoots = %+v, want an empty store (no file, no dir)", f)
+	}
+	if _, statErr := os.Stat(stateDir); statErr == nil {
+		t.Fatalf("state directory %s was created as a side effect of a pure read — LoadDefaultLSPTrustedRoots must never provision state", stateDir)
+	} else if !os.IsNotExist(statErr) {
+		t.Fatalf("stat %s: %v", stateDir, statErr)
+	}
+}
+
 func TestLSPTrustedRoots_BlessThenTrustExactAndSubdir(t *testing.T) {
 	path := trustedRootsTestDir(t)
 	base := t.TempDir()

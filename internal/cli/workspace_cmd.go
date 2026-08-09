@@ -181,10 +181,10 @@ Behavior:
   - A second register against the same workspace_key is rejected; use
     ` + "`mcphub workspace unregister`" + ` first if you intend to re-register.
 
-Examples:
-  mcphub workspace register <workspace-path>
-  mcphub workspace register <workspace-path> --default
-  mcphub workspace register <workspace-path> --languages cpp,typescript,markdown
+	Examples:
+	  mcphub workspace register <workspace>
+	  mcphub workspace register <workspace> --default
+	  mcphub workspace register <workspace> --languages cpp,typescript,markdown
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -263,7 +263,9 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	// register — which was the concrete mechanism behind the P1 this fixes
 	// (see the commit message). Clearing unlock after the explicit one-shot
 	// release disarms the deferred early-return guard.
-	defer func() { api.ReleaseAndJoin(&err, unlock) }()
+	defer func() {
+		api.ReleaseAndJoin(&err, unlock, "workspace register: registration outcome above stands, but could not release the registry lock")
+	}()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -631,7 +633,7 @@ func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (result serenaR
 	if err != nil {
 		return serenaRegisterSettledResult{}, err
 	}
-	defer api.ReleaseAndJoin(&err, unlock)
+	defer api.ReleaseAndJoin(&err, unlock, "serena register settlement: release registry lock")
 	if err := reg.Load(); err != nil {
 		return serenaRegisterSettledResult{}, err
 	}
@@ -905,10 +907,10 @@ func newWorkspaceUnregisterCmd() *cobra.Command {
 The .serena/ directory on disk is never touched — disk state survives
 unregister so re-registering later replays the same languages snapshot.
 
-Examples:
-  mcphub workspace unregister <workspace-path>
-  mcphub workspace unregister <workspace-path> --backend serena
-  mcphub workspace unregister <workspace-path> --backend all
+	Examples:
+	  mcphub workspace unregister <workspace>
+	  mcphub workspace unregister <workspace> --backend serena
+	  mcphub workspace unregister <workspace> --backend all
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -1109,7 +1111,7 @@ func classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend string) (l
 	if lerr != nil {
 		return nil, false, lerr
 	}
-	defer api.ReleaseAndJoin(&err, unlock)
+	defer api.ReleaseAndJoin(&err, unlock, "classify workspace unregister: classification above stands, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return nil, false, lerr
 	}
@@ -1197,7 +1199,7 @@ func runWorkspaceList(cmd *cobra.Command, jsonOut bool) (err error) {
 	if err != nil {
 		return err
 	}
-	defer api.ReleaseAndJoin(&err, unlock)
+	defer api.ReleaseAndJoin(&err, unlock, "workspace list: listing above is valid, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -1294,7 +1296,7 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) (err error) {
 	if err != nil {
 		return err
 	}
-	defer api.ReleaseAndJoin(&err, unlock)
+	defer api.ReleaseAndJoin(&err, unlock, "workspace set-default: marker write stands, but could not release the registry lock")
 
 	// Empty string clears the marker.
 	if strings.TrimSpace(rawPath) == "" {

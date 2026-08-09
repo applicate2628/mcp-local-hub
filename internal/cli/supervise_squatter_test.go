@@ -16,12 +16,24 @@ import (
 
 // --- shared fixtures ---------------------------------------------------------
 
+func testExecutablePath() string {
+	command, err := os.Executable()
+	if err != nil {
+		panic(fmt.Sprintf("test executable path: %v", err))
+	}
+	info, err := os.Stat(command)
+	if err != nil || !info.Mode().IsRegular() {
+		panic(fmt.Sprintf("test executable path %q is not a regular file: %v", command, err))
+	}
+	return command
+}
+
 func globalDaemonDescriptor() api.SupervisorDaemon {
 	return api.SupervisorDaemon{
 		TaskName: `\mcp-local-hub-memory-default`,
 		Server:   "memory",
 		Daemon:   "default",
-		Command:  `C:\mcphub.exe`,
+		Command:  testExecutablePath(),
 		Args:     []string{"daemon", "--server", "memory", "--daemon", "default"},
 		Port:     9123,
 	}
@@ -33,7 +45,7 @@ func serenaProxyDescriptor() api.SupervisorDaemon {
 		TaskName: task,
 		Server:   "serena",
 		Daemon:   "wskey",
-		Command:  `C:\mcphub.exe`,
+		Command:  testExecutablePath(),
 		Args: []string{
 			"daemon", "serena-proxy",
 			"--server", "serena",
@@ -50,7 +62,7 @@ func lspWorkspaceProxyDescriptor() api.SupervisorDaemon {
 		TaskName: `\mcp-local-hub-mcp-language-server-go-abc`,
 		Server:   "mcp-language-server",
 		Daemon:   "go-abc",
-		Command:  `C:\mcphub.exe`,
+		Command:  testExecutablePath(),
 		Args: []string{
 			"daemon", "workspace-proxy",
 			"--port", "9401",

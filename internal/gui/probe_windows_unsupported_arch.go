@@ -26,12 +26,16 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{}, errWindowsArchUnsupported
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	return ProcessIdentity{}, errWindowsArchUnsupported
+}
+
 func killProcessImpl(pid int) error {
 	return errWindowsArchUnsupported
 }
 
 // closeProcessHandle no-op (this build never populates Handle).
-func closeProcessHandle(_ uintptr) {}
+func closeProcessHandle(_ uintptr) error { return nil }
 
 // matchBasename: case-insensitive `mcphub.exe` match. Identical to
 // the amd64 implementation; an arch-stub is allowed to keep this

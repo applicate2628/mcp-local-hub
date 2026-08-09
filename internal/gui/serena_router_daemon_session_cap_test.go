@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -10,6 +11,18 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+type panicInitializeRoundTripper struct {
+	entered bool
+}
+
+func (rt *panicInitializeRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodPost {
+		panic("unexpected handshake request method")
+	}
+	rt.entered = true
+	panic("injected panic during initialize")
+}
 
 // A caller that skips initialize and supplies arbitrary unique
 // Mcp-Session-Id values used to be treated as a legacy session each time: the
@@ -77,6 +90,10 @@ func TestDaemonSessionStore_CapAndReservationLifecycle(t *testing.T) {
 	}
 
 	st.unbind("client-000001")
+	if _, exists := st.bindings["client-000001"]; !exists {
+		t.Fatal("reserved invalidation removed the reservation slot before its owner settled")
+	}
+	st.releaseReservation("client-000001")
 	if proceed, _ := st.reserveSlot("reserved-new"); !proceed {
 		t.Fatalf("reserveSlot after freeing one slot failed")
 	}
@@ -148,6 +165,144 @@ func TestDaemonSessionStore_WorkspaceSwitchSerialized(t *testing.T) {
 	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
 		t.Fatalf("switch after release = (proceed=%v, inFlight=%v); want (true, false) — serialization frees up", proceed, inFlight)
 	}
+}
+
+func TestDaemonSessionStore_ReservedInvalidationStoresReplacementAndReleases(t *testing.T) {
+	st := &daemonSessionStore{}
+	const id = "reserved-invalidation-success"
+	if !st.store(id, "alpha", "daemon-alpha", defaultProtocolVersion) {
+		t.Fatal("seed alpha binding")
+	}
+	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+		t.Fatalf("reserve alpha binding = (%v,%v), want (true,false)", proceed, inFlight)
+	}
+	if invalidated := st.unbindWorkspace("alpha"); invalidated != 1 {
+		t.Fatalf("unbindWorkspace invalidated %d bindings, want 1", invalidated)
+	}
+	if _, _, ok := st.lookup(id, "alpha"); ok {
+		t.Fatal("invalidated alpha payload remained usable while beta handshake is reserved")
+	}
+	if _, _, _, ok := st.bindingFor(id); ok {
+		t.Fatal("invalidated alpha payload remained available to delete/cancel forwarding")
+	}
+	if b := st.bindings[id]; b == nil || b.workspaceKey != "" || b.daemonSessionID != "" || b.reservations != 1 {
+		t.Fatalf("reservation placeholder = %+v, want payload-free entry with one reservation", b)
+	}
+	if !st.store(id, "beta", "daemon-beta", defaultProtocolVersion) {
+		t.Fatal("store beta replacement")
+	}
+	st.releaseReservation(id)
+	if ws, daemonSID, _, ok := st.bindingFor(id); !ok || ws != "beta" || daemonSID != "daemon-beta" {
+		t.Fatalf("final binding = (%q,%q,%v), want beta/daemon-beta/live", ws, daemonSID, ok)
+	}
+	if b := st.bindings[id]; b == nil || b.reservations != 0 {
+		t.Fatalf("final beta binding = %+v, want zero reservations", b)
+	}
+}
+
+func TestDaemonSessionStore_ReservedInvalidationFailureAndCancellationReleasePlaceholder(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		upstreamTimeout time.Duration
+		cancel          bool
+		fail            bool
+	}{
+		{name: "handshake-failure", upstreamTimeout: time.Second, fail: true},
+		{name: "context-cancellation", upstreamTimeout: time.Second, cancel: true},
+		{name: "timeout", upstreamTimeout: 75 * time.Millisecond},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			st := &daemonSessionStore{}
+			const id = "reserved-invalidation-cleanup"
+			if !st.store(id, "alpha", "daemon-alpha", defaultProtocolVersion) {
+				t.Fatal("seed alpha binding")
+			}
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				select {
+				case entered <- struct{}{}:
+				default:
+				}
+				if tc.fail {
+					<-release
+					http.Error(w, "initialize failed", http.StatusBadGateway)
+					return
+				}
+				select {
+				case <-r.Context().Done():
+				case <-release:
+				}
+			}))
+			t.Cleanup(upstream.Close)
+			t.Cleanup(func() { releaseOnce.Do(func() { close(release) }) })
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			resolved := make(chan error, 1)
+			go func() {
+				_, _, _, err := st.resolveDaemonSession(ctx, upstream.Client(), upstream.URL, id,
+					&api.WorkspaceEntry{WorkspaceKey: "beta"}, defaultProtocolVersion, tc.upstreamTimeout, nil)
+				resolved <- err
+			}()
+			select {
+			case <-entered:
+			case <-time.After(2 * time.Second):
+				t.Fatal("initialize did not enter")
+			}
+			st.unbindWorkspace("alpha")
+			if tc.cancel {
+				cancel()
+			}
+			if tc.fail || tc.cancel {
+				releaseOnce.Do(func() { close(release) })
+			}
+			select {
+			case err := <-resolved:
+				if err == nil {
+					t.Fatalf("%s resolveDaemonSession returned nil error", tc.name)
+				}
+			case <-time.After(2 * time.Second):
+				t.Fatalf("%s resolveDaemonSession did not return", tc.name)
+			}
+			if _, exists := st.bindings[id]; exists {
+				t.Fatalf("%s retained a reservation-only placeholder", tc.name)
+			}
+			if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+				t.Fatalf("retry after %s = (%v,%v), want (true,false)", tc.name, proceed, inFlight)
+			}
+			st.releaseReservation(id)
+		})
+	}
+}
+
+func TestDaemonSessionStore_ResolveDaemonSessionPanicReleasesReservation(t *testing.T) {
+	st := &daemonSessionStore{}
+	const id = "panic-reservation-cleanup"
+	transport := &panicInitializeRoundTripper{}
+	client := &http.Client{Transport: transport}
+
+	var recovered any
+	func() {
+		defer func() { recovered = recover() }()
+		_, _, _, _ = st.resolveDaemonSession(context.Background(), client, "http://upstream.invalid", id,
+			&api.WorkspaceEntry{WorkspaceKey: "beta"}, defaultProtocolVersion, time.Second, nil)
+	}()
+
+	if !transport.entered {
+		t.Fatal("initialize transport did not run")
+	}
+	if recovered == nil {
+		t.Fatal("resolveDaemonSession did not propagate the injected initialize panic")
+	}
+	if _, exists := st.bindings[id]; exists {
+		t.Fatal("panic retained a reservation-only placeholder")
+	}
+	if proceed, inFlight := st.reserveSlot(id); !proceed || inFlight {
+		t.Fatalf("fresh reservation after panic = (%v,%v), want (true,false)", proceed, inFlight)
+	}
+	st.releaseReservation(id)
 }
 
 // TestDaemonSessionStore_SweepSkipsReservedBinding covers bot PR #251 r3 P2: the

@@ -46,12 +46,33 @@ type WorkspaceResolver struct {
 	reg          *api.Registry
 	registryPath string
 	markers      map[string][]string
+	// readOnly, when true, makes refresh() reload the registry WITHOUT ever
+	// taking Registry.Lock() (the cross-process exclusive flock, which also
+	// CREATES <registry>.lock + the state directory on first acquire). See
+	// NewReadOnlyWorkspaceResolver's doc comment (serena_routing package) for
+	// the safety argument and the P2-3 finding this closes.
+	readOnly bool
 
 	mu        sync.RWMutex
 	lastMtime time.Time
 	loaded    bool
 	cached    []api.WorkspaceEntry
+
+	// refreshMu serializes the reload-and-publish critical section across
+	// concurrent refresh() calls (A2 fix, architecture-adversarial-
+	// reverify.md + qa-adversarial-falsifiers.md, work-items/active/2026-07-
+	// 25-mcp-front-daemon/). See serena_routing.WorkspaceResolver's own
+	// refreshMu doc comment for the full mechanism/safety argument — this
+	// is the LSP twin of the identical fix. It is a purely in-process
+	// mutex and does NOT reintroduce the cross-process Registry.Lock()
+	// flock the read-only variant avoids.
+	refreshMu sync.Mutex
 }
+
+// refreshLoadedHookForTest is the LSP twin of
+// serena_routing.refreshLoadedHookForTest — see its doc comment. Always nil
+// in production.
+var refreshLoadedHookForTest func(entries []api.WorkspaceEntry)
 
 // NewWorkspaceResolver returns a resolver bound to reg, registryPath, and the
 // manifest language specs that define project markers.
@@ -60,6 +81,25 @@ func NewWorkspaceResolver(reg *api.Registry, registryPath string, languages []co
 		reg:          reg,
 		registryPath: registryPath,
 		markers:      markerMap(languages),
+	}
+}
+
+// NewReadOnlyWorkspaceResolver is the LSP twin of
+// serena_routing.NewReadOnlyWorkspaceResolver: a resolver identical to
+// NewWorkspaceResolver except its refresh NEVER takes Registry.Lock() — for
+// the standalone `mcphub route` front daemon (internal/cli/route.go), which
+// must never contend with the GUI's own registry writers for the SAME
+// cross-process exclusive lock (P2-3 finding). See the serena_routing
+// package's NewReadOnlyWorkspaceResolver doc comment for the full safety
+// argument (every registry write is atomic-rename-published, so an unlocked
+// concurrent reader always sees a complete pre- or post-write snapshot,
+// never a torn file).
+func NewReadOnlyWorkspaceResolver(reg *api.Registry, registryPath string, languages []config.LanguageSpec) *WorkspaceResolver {
+	return &WorkspaceResolver{
+		reg:          reg,
+		registryPath: registryPath,
+		markers:      markerMap(languages),
+		readOnly:     true,
 	}
 }
 
@@ -293,16 +333,31 @@ func (r *WorkspaceResolver) snapshotRegistry() *api.Registry {
 
 // refresh re-reads the registry file when its mtime has advanced past the last
 // observed value. Reload failures preserve the previous cache.
+//
+// Locking: the cheap "nothing changed" check (staleness()) is unserialized
+// so the common no-change path stays lock-light. An actual reload is
+// serialized end-to-end (Load through publish) under refreshMu — see the
+// struct's own refreshMu doc comment for why this is required (A2 fix) and
+// why it does not reintroduce the cross-process registry lock the
+// read-only variant avoids.
 func (r *WorkspaceResolver) refresh() {
 	if r == nil || r.reg == nil || r.registryPath == "" {
 		return
 	}
-	fi, statErr := os.Stat(r.registryPath)
+	if stale, _, _ := r.staleness(); !stale {
+		return
+	}
 
-	r.mu.RLock()
-	lastMtime := r.lastMtime
-	cacheEmpty := !r.loaded
-	r.mu.RUnlock()
+	r.refreshMu.Lock()
+	defer r.refreshMu.Unlock()
+
+	// Re-check now that we hold refreshMu: another goroutine may have
+	// already completed an equivalent-or-newer reload while we waited for
+	// the lock.
+	stale, fi, statErr := r.staleness()
+	if !stale {
+		return
+	}
 
 	if statErr != nil {
 		if errors.Is(statErr, fs.ErrNotExist) {
@@ -318,33 +373,33 @@ func (r *WorkspaceResolver) refresh() {
 	}
 
 	mtime := fi.ModTime()
-	if !cacheEmpty && mtime.Equal(lastMtime) {
-		return
-	}
 
-	unlock, err := r.reg.Lock()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "lsp_routing: lock registry %s: %v; preserving cached snapshot\n", r.registryPath, err)
-		return
-	}
-	loadErr := r.reg.Load()
-	var entries []api.WorkspaceEntry
-	if loadErr == nil {
-		// Capture the registry-owned slice while the cross-process lock still
-		// serializes every Load on this shared Registry instance. Once unlock
-		// returns, another resolver goroutine may replace reg.Workspaces.
-		entries = r.reg.LSPEntries()
-	}
-	releaseErr := unlock()
-	if loadErr != nil {
-		fmt.Fprintf(os.Stderr, "lsp_routing: load registry %s: %v; preserving cached snapshot\n", r.registryPath, loadErr)
-		if releaseErr != nil {
-			fmt.Fprintf(os.Stderr, "lsp_routing: release registry %s: %v; preserving cached snapshot\n", r.registryPath, releaseErr)
+	if r.readOnly {
+		// P2-3 fix: never take Registry.Lock() (see
+		// NewReadOnlyWorkspaceResolver's doc comment for the safety
+		// argument). Load() alone performs no locking and creates no
+		// directory/lock file of its own.
+		if err := r.reg.Load(); err != nil {
+			return
 		}
-		return
+	} else {
+		unlock, err := r.reg.Lock()
+		if err != nil {
+			return
+		}
+		defer func() {
+			if releaseErr := unlock(); releaseErr != nil {
+				fmt.Fprintf(os.Stderr, "lsp_routing: release registry lock %s: %v; the lock stays held until this process exits\n", r.registryPath, releaseErr)
+			}
+		}()
+		if err := r.reg.Load(); err != nil {
+			return
+		}
 	}
-	if releaseErr != nil {
-		fmt.Fprintf(os.Stderr, "lsp_routing: release registry %s: %v; retaining loaded snapshot\n", r.registryPath, releaseErr)
+	entries := r.reg.LSPEntries()
+
+	if refreshLoadedHookForTest != nil {
+		refreshLoadedHookForTest(entries)
 	}
 
 	r.mu.Lock()
@@ -352,6 +407,25 @@ func (r *WorkspaceResolver) refresh() {
 	r.loaded = true
 	r.lastMtime = mtime
 	r.mu.Unlock()
+}
+
+// staleness reports whether the registry file's current mtime differs from
+// the resolver's last-observed generation (or nothing has ever loaded
+// successfully), alongside the stat result that produced the answer so a
+// caller does not have to re-stat to act on it.
+func (r *WorkspaceResolver) staleness() (stale bool, fi os.FileInfo, statErr error) {
+	fi, statErr = os.Stat(r.registryPath)
+	r.mu.RLock()
+	lastMtime := r.lastMtime
+	cacheEmpty := !r.loaded
+	r.mu.RUnlock()
+	if statErr != nil {
+		return true, fi, statErr
+	}
+	if !cacheEmpty && fi.ModTime().Equal(lastMtime) {
+		return false, fi, nil
+	}
+	return true, fi, nil
 }
 
 func isWindowsUNCPath(path string) bool {

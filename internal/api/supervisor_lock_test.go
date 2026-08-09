@@ -2,8 +2,11 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +86,148 @@ func TestSupervisorRunningUnderStateDir_FailsClosedOnProbeError(t *testing.T) {
 	}
 	if running {
 		t.Fatalf("undeterminable probe must not report running=true; got running=true, err=%v", err)
+	}
+}
+
+// unlockFailingProbeLease is a supervisorLockProbeLease whose TryLock SUCCEEDS
+// (so the probe takes the "we acquired it → nobody held it" arm) but whose
+// Unlock fails persistently — the shape gofrs/flock produces when UnlockFileEx
+// errors: Close() is `return f.Unlock()` (v0.13.0 flock.go:99-101), so there is
+// no second release to try and the OS lock stays held until the process exits.
+// A real UnlockFileEx failure cannot be produced synthetically, which is why the
+// probe takes its lease constructor as a parameter.
+type unlockFailingProbeLease struct {
+	unlockErr   error
+	tryLocked   bool
+	unlockCalls int
+}
+
+func (l *unlockFailingProbeLease) TryLock() (bool, error) {
+	l.tryLocked = true
+	return true, nil
+}
+
+func (l *unlockFailingProbeLease) Unlock() error {
+	l.unlockCalls++
+	return l.unlockErr
+}
+
+// TestSupervisorRunningUnderStateDir_FailsClosedOnUnconfirmedProbeRelease pins
+// the fix for the P1 in the acquire-succeeded arm: it swallowed its own release
+// (`_ = lk.Unlock()`) and then returned a DEFINITE (false, nil) "not running",
+// violating the fail-closed contract the same function documents two lines
+// above. The probe then HELD the supervisor lock while telling its caller no
+// supervisor was running.
+//
+// MUTATION PROOF — restoring the swallow in supervisorRunningUnderStateDir:
+//
+//	if got {
+//	        _ = lk.Unlock()
+//	        return false, 0, nil
+//	}
+//
+// makes exactly this test fail with:
+//
+//	supervisor_lock_test.go:147: an UNCONFIRMED probe-lease release must be
+//	reported as UNDETERMINABLE (err != nil), not as a definite "not running":
+//	got (running=false, pid=0, err=nil)
+//
+// The two PRE-EXISTING tests above (TestSupervisorRunningUnderStateDir and
+// _FailsClosedOnProbeError) still PASS under that mutation — they only cover the
+// TryLock arms — which is why this one had to be added rather than tightened.
+func TestSupervisorRunningUnderStateDir_FailsClosedOnUnconfirmedProbeRelease(t *testing.T) {
+	dir := hardenedTempDir(t)
+	lease := &unlockFailingProbeLease{unlockErr: errors.New("synthetic UnlockFileEx failure")}
+
+	running, pid, err := supervisorRunningUnderStateDir(dir, func(string) supervisorLockProbeLease {
+		return lease
+	})
+
+	if err == nil {
+		t.Fatalf("an UNCONFIRMED probe-lease release must be reported as UNDETERMINABLE (err != nil), not as a definite \"not running\": got (running=%v, pid=%d, err=nil)", running, pid)
+	}
+	if running || pid != 0 {
+		t.Fatalf("the undeterminable arm must return the zero observation; got (running=%v, pid=%d, err=%v)", running, pid, err)
+	}
+	if !errors.Is(err, lease.unlockErr) {
+		t.Fatalf("the release failure must be wrapped, not replaced: got %v", err)
+	}
+	if !strings.Contains(err.Error(), "release supervisor lock probe lease") {
+		t.Fatalf("the error must name the RELEASE as the cause so an operator can tell it apart from a TryLock probe error; got %q", err)
+	}
+	if !lease.tryLocked || lease.unlockCalls != 1 {
+		t.Fatalf("expected exactly one TryLock+Unlock on the probe lease; got tryLocked=%v unlockCalls=%d", lease.tryLocked, lease.unlockCalls)
+	}
+
+	// The seam must not have changed the happy path: a real flock under the same
+	// dir still answers a definite "not running".
+	if r, p, e := SupervisorRunningUnderStateDir(dir); r || p != 0 || e != nil {
+		t.Fatalf("real-flock probe on a free lock: got (running=%v, pid=%d, err=%v), want (false, 0, nil)", r, p, e)
+	}
+}
+
+// TestSupervisorRunningUnderStateDir_UnconfirmedReleaseStopsAutostartOwnerStart
+// is the CONSUMER-consequence half: it is not enough that the probe returns an
+// error — the caller that would have STARTED a supervisor must actually not do
+// so. startAutostartOwnerAfterUnavailableSupervisor is that caller: on a
+// definite "not running" it invokes installAutostartOwnerStartFn, which is
+// exactly the self-defeating start described in the fix (the new supervisor's
+// AcquireSupervisorLock blocks on the lock the probing process still holds).
+//
+// The REAL production probe body is in the chain — installSupervisorRunningProbeFn
+// is pointed at supervisorRunningUnderStateDir with only the LEASE injected — so
+// this test observes the actual `if got` arm, not a hand-written stand-in.
+//
+// MUTATION PROOF — restoring `_ = lk.Unlock()` in the `if got` arm makes exactly
+// this test fail with:
+//
+//	supervisor_lock_test.go:213: CONSUMER CONSEQUENCE: an unconfirmed probe
+//	release left the supervisor lock held by THIS process, yet the autostart
+//	owner was started anyway (1 call) — that supervisor's AcquireSupervisorLock
+//	blocks on the lock the probe is still holding
+func TestSupervisorRunningUnderStateDir_UnconfirmedReleaseStopsAutostartOwnerStart(t *testing.T) {
+	stateDir := isolateStateDir(t)
+
+	lease := &unlockFailingProbeLease{unlockErr: errors.New("synthetic UnlockFileEx failure")}
+	prevProbe := installSupervisorRunningProbeFn
+	installSupervisorRunningProbeFn = func(sd string) (bool, int, error) {
+		return supervisorRunningUnderStateDir(sd, func(string) supervisorLockProbeLease {
+			return lease
+		})
+	}
+	t.Cleanup(func() { installSupervisorRunningProbeFn = prevProbe })
+
+	starts := 0
+	prevStart := installAutostartOwnerStartFn
+	installAutostartOwnerStartFn = func() error {
+		starts++
+		return nil
+	}
+	t.Cleanup(func() { installAutostartOwnerStartFn = prevStart })
+
+	var out strings.Builder
+	ipcErr := errors.New("supervisor IPC unreachable")
+	res := startAutostartOwnerAfterUnavailableSupervisor(&out, ipcErr)
+
+	if starts != 0 {
+		t.Fatalf("CONSUMER CONSEQUENCE: an unconfirmed probe release left the supervisor lock held by THIS process, yet the autostart owner was started anyway (%d call) — that supervisor's AcquireSupervisorLock blocks on the lock the probe is still holding", starts)
+	}
+	if res.status != supervisorReconcileNudgeIPCUnavailable {
+		t.Fatalf("an undeterminable probe must leave the nudge in the IPC-unavailable arm (no start claimed); got status=%v", res.status)
+	}
+	if !strings.Contains(out.String(), "probe supervisor before start") {
+		t.Fatalf("the operator must see WHY no start happened; got %q", out.String())
+	}
+
+	// Positive control: with a releasable lease the SAME consumer does start the
+	// owner, so the assertion above cannot pass by the consumer being inert.
+	installSupervisorRunningProbeFn = func(sd string) (bool, int, error) {
+		return supervisorRunningUnderStateDir(sd, func(p string) supervisorLockProbeLease {
+			return flock.New(p)
+		})
+	}
+	if res := startAutostartOwnerAfterUnavailableSupervisor(io.Discard, ipcErr); starts != 1 {
+		t.Fatalf("positive control: a CONFIRMED release on a free lock must still start the autostart owner; got starts=%d status=%v (stateDir=%s)", starts, res.status, stateDir)
 	}
 }
 

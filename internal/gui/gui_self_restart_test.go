@@ -87,6 +87,45 @@ func TestGUISelfRestart_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// TestRequestSelfRestartExit_EmitsSynchronouslyBeforeExit reproduces the
+// residual 3(b) direction the round-3 review demanded: "directly test the
+// self-restart synchronous attribution contract." os.Exit runs no deferred
+// functions in ANY goroutine, so RequestSelfRestartExit's attribution MUST
+// happen strictly BEFORE the exit seam runs — a `defer emit(...)` here would
+// simply never fire. This test injects both the emitExitReasonEventFn and
+// selfRestartExitFn seams to record call ORDER directly.
+//
+// MUTATION: swap the two statements in RequestSelfRestartExit (call
+// selfRestartExitFn() before emitExitReasonEventFn(...)) — this test's
+// "want [emit exit]" order assertion fails.
+func TestRequestSelfRestartExit_EmitsSynchronouslyBeforeExit(t *testing.T) {
+	prevEmit := emitExitReasonEventFn
+	prevExit := selfRestartExitFn
+	t.Cleanup(func() {
+		emitExitReasonEventFn = prevEmit
+		selfRestartExitFn = prevExit
+	})
+
+	var order []string
+	var gotReason GUIExitReason
+	emitExitReasonEventFn = func(reason GUIExitReason, extra map[string]any) {
+		order = append(order, "emit")
+		gotReason = reason
+	}
+	selfRestartExitFn = func() {
+		order = append(order, "exit")
+	}
+
+	RequestSelfRestartExit()
+
+	if len(order) != 2 || order[0] != "emit" || order[1] != "exit" {
+		t.Fatalf("call order = %v, want [emit exit] (attribution must be recorded BEFORE the os.Exit-bound seam runs, since os.Exit skips all deferred functions)", order)
+	}
+	if gotReason != GUIExitReasonSelfRestart {
+		t.Fatalf("emitted reason = %q, want %q", gotReason, GUIExitReasonSelfRestart)
+	}
+}
+
 func TestRestartV3_API202RetainsRestartingField(t *testing.T) {
 	coordinator := &phaseGRestartStarter{start: RestartCoordinatorStart{
 		HandoffID: "handoff-g5", Generation: "generation-g5", Phase: HandoffPhaseInProgress,

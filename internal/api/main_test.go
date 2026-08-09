@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/clients"
 )
 
 // TestMain installs the supervisor IPC test-pipe discriminator for the whole
@@ -80,7 +81,8 @@ func TestMain(m *testing.M) {
 	// HOME||USERPROFILE, and not every cleanup/scan test overrides HOME, so this
 	// is the single-owner state-safety default; the import-specific tests opt back
 	// in with t.Setenv(MimoCodeDisableClaudeImportEnv, "") + a temp HOME.
-	os.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
+	priorMimoCodeDisable, hadMimoCodeDisable := os.LookupEnv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP")
+	_ = os.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
 
 	tmp, err := os.MkdirTemp("", "mcphub-api-test-state-*")
 	if err != nil {
@@ -88,6 +90,9 @@ func TestMain(m *testing.M) {
 	}
 	prevOverride := daemonStateRootOverride
 	daemonStateRootOverride = tmp
+	// Install every adapter-path redirect before the audit and before m.Run.
+	// The descriptor is the single inventory shared with CLI and GUI tests.
+	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
 
 	// ── PRIMARY seal: the process-lookup / wmic family ──────────────────────
 	// lookupProcess + lookupProcessBatch are wired at processes.go init() to real
@@ -207,8 +212,28 @@ func TestMain(m *testing.M) {
 	// snapshot so the default test path scans nothing and kills nothing.
 	snapshotProcessesFn = func() ([]processRow, error) { return nil, nil }
 
+	// ── Client-config sandbox audit ─────────────────────────────────────────
+	// Fails any test whose admitted adapters resolve to a config path outside
+	// the test sandbox — including adapters constructed by the production code
+	// under test (adopt's DefaultScanConfigPaths fan-out, cleanup's unfiltered
+	// AllStdioEntries walk, install's per-binding BackupKeep+AddEntry). The
+	// MIMOCODE_DISABLE_CLAUDE_CODE_MCP default above closes exactly ONE channel
+	// of that class; this closes the class. Contract and the report-mode knob:
+	// internal/clients/config_path_sandbox_audit.go.
+	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
+
 	code := m.Run()
 
+	if escapes := auditRestore(); escapes > 0 && code == 0 {
+		code = 1
+	}
+
+	restoreClientEnv()
+	if hadMimoCodeDisable {
+		_ = os.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", priorMimoCodeDisable)
+	} else {
+		_ = os.Unsetenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP")
+	}
 	daemonStateRootOverride = prevOverride
 	lookupProcess = prevLookupProcess
 	lookupProcessBatch = prevLookupProcessBatch

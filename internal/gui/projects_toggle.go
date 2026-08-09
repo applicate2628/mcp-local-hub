@@ -49,6 +49,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 
@@ -100,6 +101,10 @@ type projectToggleResponse struct {
 	// Warnings carries best-effort backend warnings (e.g. a Model-A register
 	// scheduler warning) without failing the toggle.
 	Warnings []string `json:"warnings,omitempty"`
+}
+
+var projectsToggleRegister = func(a *api.API, root string, languages []string, opts api.RegisterOpts) (*api.RegisterReport, error) {
+	return a.Register(root, languages, opts)
 }
 
 func registerProjectsToggleRoutes(s *Server) {
@@ -166,24 +171,30 @@ func (s *Server) toggleWorkspaceLSP(w http.ResponseWriter, req projectToggleRequ
 	a := api.NewAPI()
 	resp := projectToggleResponse{Scope: req.Scope, Server: req.Server}
 	if req.Enable {
-		rep, err := a.Register(req.Root, req.Languages, api.RegisterOpts{})
+		pidportPath, _ := PidportPathNoCreate()
+		currentExecutable, _ := os.Executable()
+		rep, err := projectsToggleRegister(a, req.Root, req.Languages, api.RegisterOpts{
+			ManagedRouterAuthorizer: NewManagedRouterAuthorizer(pidportPath, currentExecutable, s.cfg.Version),
+		})
 		if err != nil {
-			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
+			diagnostic := api.ClassifyRegistrationError(err, "workspace-toggle", "register")
+			writeRegistrationDiagnosticError(w, err, diagnostic, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
 			return
 		}
 		resp.Enabled = rep != nil && len(rep.Entries) > 0
 		if rep != nil {
-			resp.Warnings = rep.Warnings
+			resp.Warnings = projectRegistrationWarnings(rep.Diagnostics())
 		}
 	} else {
 		rep, err := a.Unregister(req.Root, req.Languages)
 		if err != nil {
-			writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
+			diagnostic := api.ClassifyRegistrationError(err, "workspace-toggle", "unregister")
+			writeRegistrationDiagnosticError(w, err, diagnostic, http.StatusInternalServerError, "PROJECT_TOGGLE_FAILED", "/api/projects/toggle")
 			return
 		}
 		resp.Enabled = false // unregistered → not enabled
 		if rep != nil {
-			resp.Warnings = rep.Warnings
+			resp.Warnings = projectRegistrationWarnings(rep.Diagnostics())
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
