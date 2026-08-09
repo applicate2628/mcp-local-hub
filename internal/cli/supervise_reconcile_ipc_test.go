@@ -21,6 +21,19 @@ func TestLSPRegistryInterProcessReconcileSnapshotUnavailableReportsFailOpenState
 	assertLSPRegistrySnapshotUnavailableEvent(t, "inter-process", false)
 }
 
+func TestReconcileRequestTimeout_TargetUsesStartupSettlementBudget(t *testing.T) {
+	if got := reconcileRequestTimeout(api.ReconcileArgs{}); got != reconcileHandlerTimeout {
+		t.Fatalf("targetless timeout = %s, want %s", got, reconcileHandlerTimeout)
+	}
+	target := &api.ReconcileTarget{WorkspaceKey: "ws"}
+	if got := reconcileRequestTimeout(api.ReconcileArgs{SettleTarget: target}); got != api.DefaultTargetedReconcileTimeout {
+		t.Fatalf("targeted timeout = %s, want %s", got, api.DefaultTargetedReconcileTimeout)
+	}
+	if api.DefaultTargetedReconcileTimeout <= 120*time.Second {
+		t.Fatalf("targeted timeout = %s, must cover the 120s first-bind budget plus response margin", api.DefaultTargetedReconcileTimeout)
+	}
+}
+
 // newReconcileTestDeps constructs an ipcDispatchDeps suitable for
 // unit-testing handleReconcile. The controller carries a real
 // supervisorController + EventLoop so we can observe EvIntentUpdate

@@ -42,6 +42,13 @@ var reconcileSchedulerNewFn = scheduler.New
 
 var reconcileHandlerTimeout = 25 * time.Second
 
+func reconcileRequestTimeout(args api.ReconcileArgs) time.Duration {
+	if args.SettleTarget != nil {
+		return api.DefaultTargetedReconcileTimeout
+	}
+	return reconcileHandlerTimeout
+}
+
 // reconcileSchedulerListFnDefault wraps scheduler.New() + sch.List("mcp-local-hub-").
 // Returns the slice + any underlying error verbatim. Kept as a free
 // function (not a method on a wrapper struct) so the test seam swap
@@ -123,7 +130,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			Final: true,
 		})
 	}
-	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileHandlerTimeout)
+	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileRequestTimeout(args))
 	defer cancel()
 
 	// (0) Serena registry/intent self-heal (the P1 fix this closes: `mcphub

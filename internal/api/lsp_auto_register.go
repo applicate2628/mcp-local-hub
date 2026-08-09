@@ -220,23 +220,24 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	}
 	releaseErr := unlock()
 	unlock = nil
-	if releaseErr != nil {
-		return entry, releaseErr
-	}
+	forwardCommitted := releaseErr != nil
 
 	supervisorSpawnRequested := false
 	rollback := func() error {
+		if forwardCommitted {
+			return nil
+		}
 		return rollbackLSPRegistration(entry, supervisorSpawnRequested, func() error {
 			return removeLSPRegistryRow(regPath, workspaceKey, language)
 		})
 	}
 
 	if err := ctx.Err(); err != nil {
-		return WorkspaceEntry{}, errors.Join(err, rollback())
+		return entry, errors.Join(releaseErr, err, rollback())
 	}
 	restoreIntent, err := a.upsertLSPSupervisorIntent(entry, canonicalExe)
 	if err != nil {
-		return WorkspaceEntry{}, errors.Join(err, rollback())
+		return entry, errors.Join(releaseErr, err, rollback())
 	}
 	intentWritten := true
 	rollbackIntent := func() {
@@ -249,18 +250,22 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	reconcileCtx, cancel := context.WithTimeout(ctx, DefaultReconcileTimeout)
 	if _, err := registerSupervisorReconcileFn(reconcileCtx, true); err != nil {
 		cancel()
-		rollbackIntent()
-		return WorkspaceEntry{}, errors.Join(fmt.Errorf("supervisor reconcile after LSP intent write: %w", err), rollback())
+		if !forwardCommitted {
+			rollbackIntent()
+		}
+		return entry, errors.Join(releaseErr, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err), rollback())
 	}
 	cancel()
 	supervisorSpawnRequested = true
 
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		rollbackIntent()
-		return WorkspaceEntry{}, errors.Join(fmt.Errorf("proxy readiness on port %d: %w", port, err), rollback())
+		if !forwardCommitted {
+			rollbackIntent()
+		}
+		return entry, errors.Join(releaseErr, fmt.Errorf("proxy readiness on port %d: %w", port, err), rollback())
 	}
 
-	return entry, nil
+	return entry, releaseErr
 }
 
 func rollbackLSPRegistration(entry WorkspaceEntry, supervisorSpawnRequested bool, removeRow func() error) error {

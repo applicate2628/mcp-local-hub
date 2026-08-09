@@ -214,6 +214,29 @@ func (r *Registry) Save() error {
 	return nil
 }
 
+// RemoveSerenaRowsAndSave removes the named Serena rows and persists the
+// registry while the caller holds r.Lock. If the hardened writer reports an
+// error after publication, it re-reads the live file under that same lock and
+// distinguishes a committed deletion from an uncertain mutation.
+func (r *Registry) RemoveSerenaRowsAndSave(workspaceKeys ...string) (removed int, committed bool, err error) {
+	for _, key := range workspaceKeys {
+		removed += r.RemoveByBackend(key, "serena")
+	}
+	if err := r.Save(); err != nil {
+		live := NewRegistry(r.path)
+		if loadErr := live.Load(); loadErr != nil {
+			return 0, false, errors.Join(err, fmt.Errorf("re-read registry after commit-unknown Serena removal: %w", loadErr))
+		}
+		for _, key := range workspaceKeys {
+			if _, present := live.GetSerena(key); present {
+				return 0, false, err
+			}
+		}
+		return removed, true, err
+	}
+	return removed, true, nil
+}
+
 // LockPath returns the sole Registry lock-leaf derivation.
 func (r *Registry) LockPath() string { return r.path + ".lock" }
 

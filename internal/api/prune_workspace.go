@@ -97,9 +97,10 @@ type PruneWorkspaceTeardown struct {
 // PruneSerenaDeleteResult separates the committed mutation result from lock
 // release confirmation so teardown rollback is driven only by MutationErr.
 type PruneSerenaDeleteResult struct {
-	Removed     int
-	MutationErr error
-	ReleaseErr  error
+	Removed       int
+	MutationErr   error
+	PostCommitErr error
+	ReleaseErr    error
 }
 
 // PruneWorkspace tears down a workspace's daemon rows in the SAME order the CLI
@@ -195,15 +196,14 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 				result.MutationErr = lerr
 				return result
 			}
-			n := reg.RemoveByBackend(wsKey, "serena")
-			if legacyWSKey != wsKey {
-				n += reg.RemoveByBackend(legacyWSKey, "serena")
-			}
-			if serr := reg.Save(); serr != nil {
+			keys := dedupeWorkspaceKeys(wsKey, legacyWSKey)
+			n, committed, serr := reg.RemoveSerenaRowsAndSave(keys...)
+			if !committed {
 				result.MutationErr = serr
 				return result
 			}
 			result.Removed = n
+			result.PostCommitErr = serr
 			return result
 		},
 	}
@@ -357,7 +357,7 @@ func PruneWorkspacePhases(workspacePath, canonical string, lspLangs []string, wa
 			} else {
 				err = rollback(deleteResult.MutationErr)
 			}
-			err = errors.Join(err, deleteResult.ReleaseErr)
+			err = errors.Join(err, deleteResult.PostCommitErr, deleteResult.ReleaseErr)
 			if err != nil {
 				return err
 			}

@@ -868,6 +868,39 @@ func TestWorkspaceRegistryConsumers_ClassifyByBackend(t *testing.T) {
 	}
 }
 
+func TestRegistry_RemoveSerenaRowsAndSave_PostRenameFailureReportsCommittedDeletion(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "workspaces.yaml")
+	reg := NewRegistry(path)
+	if err := reg.PutSerena(WorkspaceEntry{WorkspaceKey: "ws", WorkspacePath: dir, Language: SerenaLanguageSentinel, Backend: "serena", Port: 41000}); err != nil {
+		t.Fatalf("seed row: %v", err)
+	}
+	if err := reg.Save(); err != nil {
+		t.Fatalf("seed registry: %v", err)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("reload registry: %v", err)
+	}
+
+	postRenameErr := errors.New("post-rename verification failed")
+	prevHook := postRenameVerifyFailHook
+	postRenameVerifyFailHook = func() error { return postRenameErr }
+	t.Cleanup(func() { postRenameVerifyFailHook = prevHook })
+
+	removed, committed, err := reg.RemoveSerenaRowsAndSave("ws")
+	postRenameVerifyFailHook = nil
+	if removed != 1 || !committed || !errors.Is(err, postRenameErr) {
+		t.Fatalf("result = (%d,%t,%v), want (1,true,post-rename error)", removed, committed, err)
+	}
+	live := NewRegistry(path)
+	if err := live.Load(); err != nil {
+		t.Fatalf("load committed registry: %v", err)
+	}
+	if _, ok := live.GetSerena("ws"); ok {
+		t.Fatal("Serena row remains after committed post-rename deletion")
+	}
+}
+
 func TestRegistry_Unregister_DefaultBackendSemantics(t *testing.T) {
 	seed := func(t *testing.T) *Registry {
 		t.Helper()

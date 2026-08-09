@@ -350,7 +350,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	releaseErr := unlock()
 	unlock = nil
 	if releaseErr != nil {
-		return fmt.Errorf("release registry after workspace registration: %w", releaseErr)
+		releaseErr = fmt.Errorf("release registry after workspace registration: %w", releaseErr)
 	}
 
 	// 6b. EXPLICIT serena register → bless this workspace's canonical root as a
@@ -411,7 +411,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	//    settled, KEEP the registry row (unless the settled check itself
 	//    confirms it is already gone) and report an explicit, actionable
 	//    partial-state error instead of rolling back.
-	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultReconcileTimeout)
+	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultTargetedReconcileTimeout)
 	defer cancel()
 	reconcileTarget := api.ReconcileTarget{
 		WorkspaceKey:  entry.WorkspaceKey,
@@ -457,8 +457,8 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 				markerCompensation = outcome
 			}
 		}
-		return workspaceRegisterPartialStateError(canonical, wsKey, entry, settled,
-			reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation)
+		return errors.Join(releaseErr, workspaceRegisterPartialStateError(canonical, wsKey, entry, settled,
+			reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation))
 	}
 
 	// A --default result is a terminal snapshot, not a promise derived from the
@@ -492,7 +492,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 			"warning: workspace registered but the terminal default-workspace marker could not be read: %v\n",
 			defaultReadErr)
 	}
-	return nil
+	return releaseErr
 }
 
 // serenaRegisterReconcileFn is the test-injectable seam over the targeted
@@ -1023,12 +1023,13 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 				result.MutationErr = err
 				return result
 			}
-			n := reg.RemoveByBackend(wsKey, "serena")
+			keys := []string{wsKey}
 			if legacyWSKey != wsKey {
-				n += reg.RemoveByBackend(legacyWSKey, "serena")
+				keys = append(keys, legacyWSKey)
 			}
-			if err := reg.Save(); err != nil {
-				result.MutationErr = err
+			n, committed, saveErr := reg.RemoveSerenaRowsAndSave(keys...)
+			if !committed {
+				result.MutationErr = saveErr
 				return result
 			}
 			// Clear the default marker HERE — inside this delete's registry-lock
@@ -1069,6 +1070,7 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 				}
 			}
 			result.Removed = n
+			result.PostCommitErr = saveErr
 			return result
 		},
 	}

@@ -25,6 +25,13 @@ import (
 // a hung supervisor.
 const DefaultReconcileTimeout = 30 * time.Second
 
+// DefaultTargetedReconcileTimeout covers a complete targeted Serena
+// settlement, including the daemon's 120-second first-bind allowance plus a
+// control-plane margin equal to the ordinary reconcile budget. A targeted
+// register must not time out earlier than the runtime descriptor it is waiting
+// on, even after registry repair, drift computation, and IPC response work.
+const DefaultTargetedReconcileTimeout = time.Duration(serenaStartupBindDeadlineSeconds)*time.Second + DefaultReconcileTimeout
+
 // DialSupervisorIPCReconcile sends a reconcile request to the running
 // supervisor and decodes the response. When apply is true the
 // supervisor posts EvIntentUpdate per drift entry; when false the
@@ -58,7 +65,11 @@ func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *Reconci
 	}
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, DefaultReconcileTimeout)
+		timeout := DefaultReconcileTimeout
+		if target != nil {
+			timeout = DefaultTargetedReconcileTimeout
+		}
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
 	stateDir, err := DaemonStateDir()

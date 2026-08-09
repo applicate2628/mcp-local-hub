@@ -68,6 +68,33 @@ func TestPruneWorkspace_MutationReleaseAndRollbackFailuresAllJoin(t *testing.T) 
 	}
 }
 
+func TestPruneWorkspace_PostCommitDeleteErrorDisarmsRollbackAndPreservesAccounting(t *testing.T) {
+	postCommitErr := errors.New("post-rename verification")
+	rollbackCalls := 0
+	report := &PruneReport{}
+	td := PruneWorkspaceTeardown{
+		AcquireSerenaRemovalFence: func() (func() error, error) { return func() error { return nil }, nil },
+		BeginSerenaPendingRemoval: func(string) (func() error, error) {
+			return func() error { rollbackCalls++; return nil }, nil
+		},
+		RemoveSerenaIntent: func(string) (bool, error) { return true, nil },
+		DeleteSerenaRow: func() PruneSerenaDeleteResult {
+			return PruneSerenaDeleteResult{Removed: 1, PostCommitErr: postCommitErr}
+		},
+	}
+
+	err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, report)
+	if !errors.Is(err, postCommitErr) {
+		t.Fatalf("error = %v, want post-commit cause", err)
+	}
+	if rollbackCalls != 0 {
+		t.Fatalf("rollback calls = %d, want 0 for committed deletion", rollbackCalls)
+	}
+	if report.SerenaRemoved != 1 {
+		t.Fatalf("SerenaRemoved = %d, want 1", report.SerenaRemoved)
+	}
+}
+
 func TestPruneWorkspacePhases_PendingRemovalTransactionOrdering(t *testing.T) {
 	t.Run("commit-unknown mark error invokes returned rollback", func(t *testing.T) {
 		markErr := errors.New("registry writer failed reopening after rename")
