@@ -196,7 +196,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//    Save (the install/reap/start steps do not touch the registry); the
 	//    install mutex above is what serializes roots across those steps.
 	reg := NewRegistry(regPath)
-	regUnlock, err := reg.Lock()
+	regUnlock, err := autoRegisterRegistryLockFn(reg)
 	if err != nil {
 		return nil, err
 	}
@@ -601,9 +601,11 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	rowSaved = false
 	releaseErr := regUnlock()
 	regUnlock = nil
-	if releaseErr != nil {
-		return &newEntry, releaseErr
-	}
+	// The intent and registry row are already durable. A release error must be
+	// reported, but it cannot abort the mandatory post-commit handoff below:
+	// doing so would leave a committed workspace with no supervisor start,
+	// reconcile, or readiness attempt. Preserve it and join it with any later
+	// post-commit failure after the handoff has run.
 
 	// 11. Bring the new daemon live.
 	//   - INTRODUCE or stopped/undetermined pool (needStart) → START the supervisor
@@ -626,7 +628,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 				// unwired/unsupported platform cannot self-heal → fail loud.
 				if autoRegisterStartFn == nil || autoRegisterStartSupportedFn == nil || !autoRegisterStartSupportedFn() {
 					emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
-					return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the supervisor exited after the liveness probe and the start primitive is unavailable on this build/platform — run `mcphub supervise` so the current binary reconciles the committed intent", root)
+					return nil, errors.Join(releaseErr, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the supervisor exited after the liveness probe and the start primitive is unavailable on this build/platform — run `mcphub supervise` so the current binary reconciles the committed intent", root))
 				}
 				needPostCommitStart = true
 			}
@@ -647,7 +649,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 			// is the commit point). Audit, then return; the operator restarts the
 			// supervisor and the committed intent is reconciled.
 			emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
-			return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — run `mcphub supervise` so the current binary reconciles the committed intent (the registry is intentionally NOT rolled back: the intent is the commit point)", root, startErr)
+			return nil, errors.Join(releaseErr, fmt.Errorf("serena auto-register: workspace %s registered and intent committed but the supervisor start failed: %w — run `mcphub supervise` so the current binary reconciles the committed intent (the registry is intentionally NOT rolled back: the intent is the commit point)", root, startErr))
 		}
 	}
 
@@ -672,18 +674,18 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	if readinessTimeout <= 0 {
 		// The router's auto-register budget is already spent — do not block at all.
 		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
-		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the auto-register deadline expired before the daemon on port %d became ready (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port)
+		return nil, errors.Join(releaseErr, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the auto-register deadline expired before the daemon on port %d became ready (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port))
 	}
 	if rdErr := autoRegisterReadinessFn(port, readinessTimeout); rdErr != nil {
 		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
-		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr)
+		return nil, errors.Join(releaseErr, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr))
 	}
 
 	// 13. Audit: emit the success event (best-effort; never fatal).
 	emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
 
 	e := newEntry
-	return &e, nil
+	return &e, releaseErr
 }
 
 // serenaAutoRegisterReadinessTimeout bounds the post-spawn readiness probe. It
@@ -936,6 +938,14 @@ var loadSerenaCatalogManifest = func() (*config.ServerManifest, error) {
 // failure without reaching the scheduler / state-file pipeline.
 var autoRegisterInstallParsedManifestFn = func(ctx context.Context, a *API, m *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
 	return a.InstallParsedManifest(ctx, m, opts)
+}
+
+// autoRegisterRegistryLockFn is the seam over Registry.Lock. Production uses
+// the real ledgered registry lock; tests inject a release failure to prove that
+// a durable auto-registration still completes its mandatory post-commit
+// supervisor handoff before the release error is returned.
+var autoRegisterRegistryLockFn = func(reg *Registry) (func() error, error) {
+	return reg.Lock()
 }
 
 // autoRegisterReconcileFn is the seam over DialSupervisorIPCReconcile. Default

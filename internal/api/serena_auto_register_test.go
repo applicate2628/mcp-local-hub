@@ -186,6 +186,13 @@ func stubAutoRegisterReadiness(t *testing.T, fn func(port int, timeout time.Dura
 	t.Cleanup(func() { autoRegisterReadinessFn = orig })
 }
 
+func stubAutoRegisterRegistryLock(t *testing.T, fn func(*Registry) (func() error, error)) {
+	t.Helper()
+	orig := autoRegisterRegistryLockFn
+	autoRegisterRegistryLockFn = fn
+	t.Cleanup(func() { autoRegisterRegistryLockFn = orig })
+}
+
 // stubAutoRegisterPriorIntentHasSpec overrides the LIVE-ADD-vs-INTRODUCE branch
 // seam (true = prior intent already has runtime_spec = live-add).
 func stubAutoRegisterPriorIntentHasSpec(t *testing.T, fn func() (bool, error)) {
@@ -751,6 +758,106 @@ func TestAutoRegisterSerena_Introduce_NoSupervisor_StartsWithoutReap(t *testing.
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
 		t.Errorf("registry has %d serena rows, want 1", len(rows))
+	}
+}
+
+func TestAutoRegisterSerena_RegistryReleaseFails_PostCommitStartStillCompletes(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stubAutoRegisterPriorIntentHasSpec(t, func() (bool, error) { return false, nil })
+	stubAutoRegisterSupervisorRunning(t, func() (bool, error) { return false, nil })
+
+	releaseErr := fmt.Errorf("%w: synthetic registry release failure", ErrLockReleaseUnconfirmed)
+	stubAutoRegisterRegistryLock(t, func(reg *Registry) (func() error, error) {
+		release, err := reg.Lock()
+		if err != nil {
+			return nil, err
+		}
+		return func() error {
+			if err := release(); err != nil {
+				return errors.Join(releaseErr, err)
+			}
+			return releaseErr
+		}, nil
+	})
+
+	var startCalled, readinessCalled int32
+	stubAutoRegisterCutover(t,
+		func(context.Context) error {
+			t.Fatal("reap must not be called when no supervisor is running")
+			return nil
+		},
+		func(context.Context) error { atomic.AddInt32(&startCalled, 1); return nil },
+	)
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		t.Fatal("reconcile must not be called on the introduce/start path")
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error {
+		atomic.AddInt32(&readinessCalled, 1)
+		return nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, releaseErr) {
+		t.Fatalf("error = %v, want registry release failure", err)
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want the durably committed row")
+	}
+	if startCalled != 1 || readinessCalled != 1 {
+		t.Fatalf("start=%d readiness=%d, want both 1 after the committed release error", startCalled, readinessCalled)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Fatalf("registry has %d serena rows, want the committed row retained", len(rows))
+	}
+}
+
+func TestAutoRegisterSerena_RegistryReleaseFails_PostCommitReconcileStillCompletes(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	releaseErr := fmt.Errorf("%w: synthetic registry release failure", ErrLockReleaseUnconfirmed)
+	stubAutoRegisterRegistryLock(t, func(reg *Registry) (func() error, error) {
+		release, err := reg.Lock()
+		if err != nil {
+			return nil, err
+		}
+		return func() error {
+			if err := release(); err != nil {
+				return errors.Join(releaseErr, err)
+			}
+			return releaseErr
+		}, nil
+	})
+
+	var reconcileCalled, readinessCalled int32
+	stubAutoRegisterInstall(t, func(context.Context, *API, *config.ServerManifest, InstallParsedManifestOpts) (string, error) {
+		return filepath.Join(t.TempDir(), "supervisor-intent.json"), nil
+	})
+	stubAutoRegisterReconcile(t, func(context.Context, bool) (ReconcileResponse, error) {
+		atomic.AddInt32(&reconcileCalled, 1)
+		return ReconcileResponse{}, nil
+	})
+	stubAutoRegisterReadiness(t, func(int, time.Duration) error {
+		atomic.AddInt32(&readinessCalled, 1)
+		return nil
+	})
+
+	root := writeSerenaMarker(t, t.TempDir(), validSerenaMarkerYAML)
+	entry, err := NewAPI().AutoRegisterSerenaWorkspace(context.Background(), root)
+	if !errors.Is(err, ErrLockReleaseUnconfirmed) {
+		t.Fatalf("error = %v, want ErrLockReleaseUnconfirmed", err)
+	}
+	if entry == nil {
+		t.Fatal("entry = nil, want the durably committed row")
+	}
+	if reconcileCalled != 1 || readinessCalled != 1 {
+		t.Fatalf("reconcile=%d readiness=%d, want both 1 after the committed release error", reconcileCalled, readinessCalled)
+	}
+	if rows := loadRegSerenaRows(t, regPath); len(rows) != 1 {
+		t.Fatalf("registry has %d serena rows, want the committed row retained", len(rows))
 	}
 }
 
