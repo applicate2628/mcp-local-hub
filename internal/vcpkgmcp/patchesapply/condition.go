@@ -291,8 +291,8 @@ func evalComparison(op string, lhs, rhs *string) Tri {
 	case "STREQUAL":
 		return boolTri(*lhs == *rhs)
 	case "EQUAL":
-		li, lerr := strconv.Atoi(strings.TrimSpace(*lhs))
-		ri, rerr := strconv.Atoi(strings.TrimSpace(*rhs))
+		li, lerr := strconv.ParseFloat(strings.TrimSpace(*lhs), 64)
+		ri, rerr := strconv.ParseFloat(strings.TrimSpace(*rhs), 64)
 		if lerr != nil || rerr != nil {
 			return TriUnknown
 		}

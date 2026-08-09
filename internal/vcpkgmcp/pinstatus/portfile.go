@@ -209,8 +209,11 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 			}
 			name := src[nameStart:i]
 			j := i
-			for j < n && isSpaceOrNL(src[j]) {
+			for j < n && (src[j] == ' ' || src[j] == '\t') {
 				j++
+			}
+			if j < n && (src[j] == '\r' || src[j] == '\n') {
+				return out, false
 			}
 			if j >= n || src[j] != '(' {
 				i = j

@@ -128,9 +128,10 @@ const (
 	// stopped. This bounds parse memory, the per-file line index, AND the
 	// response — every one of those is derived from the record set.
 	ReasonRecordLimit Reason = "record_limit"
-	// ReasonRetainedRecordLimit: decoded record strings and argument cells
-	// reached MaxRetainedRecordBytes. The parsed prefix remains positive
-	// evidence, but the unread tail cannot support absence conclusions.
+	// ReasonRetainedRecordLimit: decoded records plus their derived indexes
+	// reached MaxRetainedRecordBytes. The retained prefix remains positive
+	// evidence, but omitted records or index entries cannot support absence
+	// conclusions.
 	ReasonRetainedRecordLimit Reason = "retained_record_limit"
 	// ReasonCanceled: the caller's context was canceled or its deadline
 	// expired mid-parse. Fails closed: no partial result is returned, because
@@ -173,13 +174,12 @@ const (
 	// MaxLineBytes bounds one JSON Lines record. cmake's own records are a
 	// few KiB at most; a longer line is refused, never buffered whole.
 	MaxLineBytes = 4 << 20 // 4 MiB
-	// MaxParsedRecords bounds records held in memory. Because IncludeChain,
-	// ExecutedLines and FilesInTrace are all DERIVED from the record set,
-	// this single ceiling bounds parse memory, both indexes, and the
-	// response size together.
+	// MaxParsedRecords bounds records held in memory independently of their
+	// byte footprint.
 	MaxParsedRecords = 2000000
-	// MaxRetainedRecordBytes bounds aggregate decoded Record payload and
-	// container storage independently of source-file and record-count limits.
+	// MaxRetainedRecordBytes bounds aggregate decoded Record payload,
+	// container storage, and the IncludeChain/ExecutedLines/FilesInTrace
+	// collections derived from them.
 	MaxRetainedRecordBytes = 64 << 20 // 64 MiB
 )
 
@@ -403,7 +403,8 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 	}
 	defer f.Close()
 
-	parsed, parseErr := parseTraceStream(ctx, f, deps.Limits)
+	limits := deps.Limits.normalized()
+	parsed, parseErr := parseTraceStream(ctx, f, limits)
 	if parseErr != nil {
 		reason := ReasonTraceUnreadable
 		if errors.Is(parseErr, context.Canceled) || errors.Is(parseErr, context.DeadlineExceeded) {
@@ -438,8 +439,11 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 		}
 	}
 
-	includeChain := buildIncludeChain(parsed.records)
-	executedLines, filesInTrace := buildLineIndex(parsed.records)
+	remainingDerivedBytes := limits.MaxRetainedRecordBytes - parsed.retainedRecordBytes
+	includeChain, executedLines, filesInTrace, derivedLimit := buildDerivedIndexes(parsed.records, remainingDerivedBytes)
+	if derivedLimit {
+		parsed.hitRetainedRecordLimit = true
+	}
 	filtered := filterRecords(parsed.records, args.File, args.Command)
 
 	maxRecords := args.MaxRecords
@@ -476,13 +480,14 @@ func Trace(ctx context.Context, args Args, deps Deps) Result {
 	return base
 }
 
-// filterRecords narrows records to those matching file (exact match) and
-// command (case-insensitive), each applied only when non-empty.
+// filterRecords narrows records in place to avoid allocating another
+// record-sized slice outside MaxRetainedRecordBytes. File is exact and command
+// is case-insensitive; each filter applies only when non-empty.
 func filterRecords(records []Record, file, command string) []Record {
 	if file == "" && command == "" {
 		return records
 	}
-	var out []Record
+	out := records[:0]
 	for _, r := range records {
 		if file != "" && r.File != file {
 			continue
@@ -495,11 +500,34 @@ func filterRecords(records []Record, file, command string) []Record {
 	return out
 }
 
-// buildIncludeChain extracts every include()/add_subdirectory() record, in
-// trace order. Case-insensitive match on Cmd (CMake commands are themselves
-// case-insensitive); Kind is always normalized to the closed lower-case form.
-func buildIncludeChain(records []Record) []IncludeChainEntry {
-	var out []IncludeChainEntry
+type derivedTraceBudget struct {
+	remaining int64
+	exhausted bool
+}
+
+func (b *derivedTraceBudget) take(bytes int64) bool {
+	if bytes < 0 || bytes > b.remaining {
+		b.exhausted = true
+		return false
+	}
+	b.remaining -= bytes
+	return true
+}
+
+// buildDerivedIndexes charges the include chain, map/set indexes, and their
+// materialized result slices against the SAME aggregate byte ceiling as the
+// retained records. String payload charges are deliberately conservative even
+// though Go commonly shares their backing bytes with Record fields.
+func buildDerivedIndexes(records []Record, remainingBytes int64) ([]IncludeChainEntry, []FileLines, []string, bool) {
+	if len(records) == 0 {
+		return nil, nil, nil, false
+	}
+	budget := derivedTraceBudget{remaining: remainingBytes}
+	if !budget.take(128) { // top-level map/slice owners
+		return nil, nil, nil, true
+	}
+	var includeChain []IncludeChainEntry
+	byFile := map[string]map[int]struct{}{}
 	for _, r := range records {
 		var kind Kind
 		switch {
@@ -508,31 +536,36 @@ func buildIncludeChain(records []Record) []IncludeChainEntry {
 		case strings.EqualFold(r.Cmd, string(KindAddSubdirectory)):
 			kind = KindAddSubdirectory
 		default:
-			continue
+			kind = ""
 		}
-		arg := ""
-		if len(r.Args) > 0 {
-			arg = r.Args[0]
+		if kind != "" {
+			arg := ""
+			if len(r.Args) > 0 {
+				arg = r.Args[0]
+			}
+			if !budget.take(int64(96 + len(kind) + len(r.File) + len(arg))) {
+				break
+			}
+			includeChain = append(includeChain, IncludeChainEntry{Kind: kind, File: r.File, Line: r.Line, Argument: arg})
 		}
-		out = append(out, IncludeChainEntry{Kind: kind, File: r.File, Line: r.Line, Argument: arg})
-	}
-	return out
-}
-
-// buildLineIndex groups every record's (file, line) pair into a sorted,
-// deduplicated per-file line index, plus the sorted list of distinct files
-// seen. Both are computed from the WHOLE (unfiltered) record set — see
-// Result.ExecutedLines / Result.FilesInTrace doc comments.
-func buildLineIndex(records []Record) ([]FileLines, []string) {
-	byFile := map[string]map[int]bool{}
-	for _, r := range records {
 		if r.File == "" {
 			continue
 		}
 		if byFile[r.File] == nil {
-			byFile[r.File] = map[int]bool{}
+			// Map entry + nested map owner + FilesInTrace string cell +
+			// FileLines result cell, including a conservative path payload.
+			if !budget.take(int64(192 + len(r.File))) {
+				break
+			}
+			byFile[r.File] = map[int]struct{}{}
 		}
-		byFile[r.File][r.Line] = true
+		if _, exists := byFile[r.File][r.Line]; !exists {
+			// Nested map entry plus the final []int cell.
+			if !budget.take(32) {
+				break
+			}
+			byFile[r.File][r.Line] = struct{}{}
+		}
 	}
 
 	files := make([]string, 0, len(byFile))
@@ -551,5 +584,5 @@ func buildLineIndex(records []Record) ([]FileLines, []string) {
 		sort.Ints(lines)
 		out = append(out, FileLines{File: f, Lines: lines})
 	}
-	return out, files
+	return includeChain, out, files, budget.exhausted
 }

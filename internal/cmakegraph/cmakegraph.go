@@ -1905,7 +1905,7 @@ func includeArgumentOptional(argText []byte) bool {
 			consumeResultValue = true
 			continue
 		}
-		if strings.EqualFold(value, "OPTIONAL") {
+		if value == "OPTIONAL" {
 			return true
 		}
 	}

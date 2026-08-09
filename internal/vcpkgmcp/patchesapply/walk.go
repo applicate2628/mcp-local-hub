@@ -346,6 +346,10 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			handleGetFilenameComponent(st.Args, env, active(), guardText(), activeUnresolved())
 		case "list":
 			handleListAppend(st.Args, env, active(), guardText(), activeUnresolved())
+		case "string":
+			if !handleStringMutation(st.Args, env, active(), guardText(), activeUnresolved()) && active() != TriFalse {
+				executionUncertain = true
+			}
 		case "cmake_language":
 			if classifyCMakeLanguage(st.Args, env, active(), guardText(), activeUnresolved()) == cmakeLanguageCallDeferred {
 				deferredCommandBody = true
@@ -384,6 +388,75 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		return nil, false, parserStructuralExecutionUncertain
 	}
 	return entries, sawPatchesKeyword, parserStructuralNone
+}
+
+// handleStringMutation invalidates every destination written by a modeled
+// string() signature. This analyzer does not need the transformed bytes; it
+// only must not let a stale pre-mutation binding drive a definite PATCHES
+// conclusion. Unknown or malformed signatures return false so the caller can
+// fail closed for the whole execution stream.
+func handleStringMutation(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) bool {
+	toks := tokenize(argsRaw)
+	destinations, ok := stringMutationDestinations(toks)
+	if !ok {
+		return false
+	}
+	meta := provenanceMeta{guard: active, guardText: guardText, unresolvedVars: dedupStrings(unresolvedVars)}
+	for _, name := range destinations {
+		env.unsetValue(name, meta)
+	}
+	return true
+}
+
+func stringMutationDestinations(toks []token) ([]string, bool) {
+	if len(toks) == 0 {
+		return nil, false
+	}
+	subcommand := strings.ToUpper(toks[0].Text)
+	destinationIndex := -1
+	switch subcommand {
+	case "APPEND", "PREPEND", "CONCAT", "TIMESTAMP", "UUID",
+		"MD5", "SHA1", "SHA224", "SHA256", "SHA384", "SHA512",
+		"SHA3_224", "SHA3_256", "SHA3_384", "SHA3_512":
+		destinationIndex = 1
+	case "JOIN", "TOLOWER", "TOUPPER", "LENGTH", "STRIP", "GENEX_STRIP", "HEX", "CONFIGURE", "MAKE_C_IDENTIFIER":
+		destinationIndex = 2
+	case "FIND", "REPLACE", "REPEAT":
+		destinationIndex = 3
+	case "SUBSTRING", "COMPARE":
+		destinationIndex = 4
+	case "REGEX":
+		if len(toks) < 2 {
+			return nil, false
+		}
+		switch strings.ToUpper(toks[1].Text) {
+		case "MATCH", "MATCHALL":
+			destinationIndex = 3
+		case "REPLACE":
+			destinationIndex = 4
+		default:
+			return nil, false
+		}
+	case "ASCII", "RANDOM":
+		destinationIndex = len(toks) - 1
+	case "JSON":
+		destinationIndex = 1
+	default:
+		return nil, false
+	}
+	if destinationIndex <= 0 || destinationIndex >= len(toks) || toks[destinationIndex].Quoted || !rePlainIdent.MatchString(toks[destinationIndex].Text) {
+		return nil, false
+	}
+	destinations := []string{toks[destinationIndex].Text}
+	if subcommand == "JSON" {
+		for i := destinationIndex + 1; i+1 < len(toks); i++ {
+			if strings.EqualFold(toks[i].Text, "ERROR_VARIABLE") && !toks[i+1].Quoted && rePlainIdent.MatchString(toks[i+1].Text) {
+				destinations = append(destinations, toks[i+1].Text)
+				break
+			}
+		}
+	}
+	return destinations, true
 }
 
 // invalidateLoopMutation prevents a value established before a potentially
