@@ -875,8 +875,7 @@ func TestRegister_ReleasesFlockBeforeSchRun(t *testing.T) {
 				done <- err
 				return
 			}
-			unlock()
-			done <- nil
+			done <- unlock()
 		}()
 		select {
 		case err := <-done:

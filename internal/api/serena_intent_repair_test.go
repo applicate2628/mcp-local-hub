@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -57,7 +58,7 @@ func seedSerenaRegistryRow(t *testing.T, regPath, path string, port int) string 
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
@@ -126,6 +127,173 @@ func readIntent(t *testing.T, intentPath string) *SupervisorIntentFile {
 	return got
 }
 
+func repairSerenaIntentForTest(t *testing.T, stateDir string) (int, []string, error) {
+	t.Helper()
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	return result.Repaired, result.Deferred, err
+}
+
+func previewSerenaIntentForTest(t *testing.T, stateDir string) (int, []string, error) {
+	t.Helper()
+	result, err := NewAPI().PreviewSerenaIntentRepairFromRegistry(stateDir)
+	return result.Repaired, result.Deferred, err
+}
+
+// TestSerenaIntentRepairResultOutcomeContractFailsClosed keeps the typed
+// outcome wire honest even if a future terminal path is added incorrectly.
+// Every valid terminal classification retains its exact result/error pairing;
+// empty, unknown, and impossible pairs are converted to the only safe error
+// outcome rather than being mistaken for a completed no-op downstream.
+func TestSerenaIntentRepairResultOutcomeContractFailsClosed(t *testing.T) {
+	cause := errors.New("injected repair failure")
+	tests := []struct {
+		name        string
+		result      SerenaIntentRepairResult
+		err         error
+		wantOutcome SerenaIntentRepairOutcome
+		wantErr     bool
+	}{
+		{
+			name:        "completed",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeCompleted},
+			wantOutcome: SerenaIntentRepairOutcomeCompleted,
+		},
+		{
+			name: "completed with typed recovery",
+			result: SerenaIntentRepairResult{
+				Outcome:   SerenaIntentRepairOutcomeCompleted,
+				Recovered: []SerenaIntentRepairRecovery{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairRecoveryLegacyLeaseExpired}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeCompleted,
+		},
+		{
+			name: "completed with invalid recovery",
+			result: SerenaIntentRepairResult{
+				Outcome:   SerenaIntentRepairOutcomeCompleted,
+				Recovered: []SerenaIntentRepairRecovery{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairRecoveryReason("future")}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "skipped registry lock",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeSkippedRegistryLock},
+			wantOutcome: SerenaIntentRepairOutcomeSkippedRegistryLock,
+		},
+		{
+			name: "skipped registry lock with recovery",
+			result: SerenaIntentRepairResult{
+				Outcome:   SerenaIntentRepairOutcomeSkippedRegistryLock,
+				Recovered: []SerenaIntentRepairRecovery{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairRecoveryGenerationReclaimed}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "skipped intent lock",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeSkippedIntentLock},
+			wantOutcome: SerenaIntentRepairOutcomeSkippedIntentLock,
+		},
+		{
+			name:        "skipped removal fence probe",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeSkippedRemovalFenceProbe},
+			wantOutcome: SerenaIntentRepairOutcomeSkippedRemovalFenceProbe,
+		},
+		{
+			name: "incomplete removal fence with typed reason",
+			result: SerenaIntentRepairResult{
+				Outcome:    SerenaIntentRepairOutcomeIncompleteRemovalFence,
+				Incomplete: []SerenaIntentRepairIncomplete{{WorkspaceKey: "abcd1234", Reason: SerenaIntentRepairIncompleteHolderLive}},
+				Recovered:  []SerenaIntentRepairRecovery{{WorkspaceKey: "efgh5678", Reason: SerenaIntentRepairRecoveryGenerationReclaimed}},
+			},
+			wantOutcome: SerenaIntentRepairOutcomeIncompleteRemovalFence,
+		},
+		{
+			name:        "incomplete removal fence without reason",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeIncompleteRemovalFence},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "error with cause",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeError},
+			err:         cause,
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "empty outcome",
+			result:      SerenaIntentRepairResult{},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "unknown outcome",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcome("future")},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "error without cause",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeError},
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+		{
+			name:        "completed with cause",
+			result:      SerenaIntentRepairResult{Outcome: SerenaIntentRepairOutcomeCompleted},
+			err:         cause,
+			wantOutcome: SerenaIntentRepairOutcomeError,
+			wantErr:     true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, gotErr := validateSerenaIntentRepairResult(tt.result, tt.err)
+			if got.Outcome != tt.wantOutcome {
+				t.Fatalf("outcome = %q, want %q", got.Outcome, tt.wantOutcome)
+			}
+			if (gotErr != nil) != tt.wantErr {
+				t.Fatalf("error = %v, want error=%v", gotErr, tt.wantErr)
+			}
+		})
+	}
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry("")
+	if err == nil {
+		t.Fatal("empty state dir must return a causal error")
+	}
+	if result.Outcome != SerenaIntentRepairOutcomeError {
+		t.Fatalf("empty state dir outcome = %q, want %q", result.Outcome, SerenaIntentRepairOutcomeError)
+	}
+}
+
+func TestGhostRegistryLock_SerenaIntentRepairFailsLoud(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stateDir := mustStateDir(t)
+	cause := errors.New("registry ghost")
+	recordUnconfirmedLockRelease(NewRegistry(regPath).LockPath(), cause)
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	if result.Outcome != SerenaIntentRepairOutcomeError || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+		t.Fatalf("repair = (%+v, %v), want typed error outcome with ghost causes", result, err)
+	}
+}
+
+func TestGhostSupervisorIntentLock_SerenaIntentRepairFailsLoud(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	stateDir := mustStateDir(t)
+	seedSerenaRegistryRow(t, regPath, liveWorkspace(t), 43111)
+	cause := errors.New("intent ghost")
+	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
+	recordUnconfirmedLockRelease(intentPath+supervisorIntentLockSuffix, cause)
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	if result.Outcome != SerenaIntentRepairOutcomeError || !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, cause) {
+		t.Fatalf("repair = (%+v, %v), want typed error outcome with ghost causes", result, err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // 1. Healthy — every serena registry row has its intent daemon → (0, nil, nil)
 //    and the intent file is unchanged.
@@ -146,10 +314,15 @@ func TestRepairSerenaIntentFromRegistry_Healthy_NoOp(t *testing.T) {
 		t.Fatalf("read intent bytes before: %v", err)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
+	if result.Outcome != SerenaIntentRepairOutcomeCompleted {
+		t.Fatalf("outcome = %q, want %q", result.Outcome, SerenaIntentRepairOutcomeCompleted)
+	}
+	repaired := result.Repaired
+	deferred := result.Deferred
 	if repaired != 0 {
 		t.Errorf("repaired = %d, want 0 (healthy intent)", repaired)
 	}
@@ -190,7 +363,7 @@ func TestRepairSerenaIntentFromRegistry_MissingRowAppended(t *testing.T) {
 	})
 	beforeCount := len(readIntent(t, intentPath).Daemons)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -244,7 +417,7 @@ func TestRepairSerenaIntentFromRegistry_DoesNotClobberConcurrentRow(t *testing.T
 		Daemons: []SupervisorDaemon{concurrent},
 	})
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -292,7 +465,7 @@ func TestRepairSerenaIntentFromRegistry_IntroduceCrashDefers(t *testing.T) {
 		t.Fatalf("read intent bytes before: %v", err)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error: %v", err)
 	}
@@ -349,15 +522,18 @@ func TestRepairSerenaIntentFromRegistry_IntentLockContended_Skips(t *testing.T) 
 	}
 	defer func() { _ = held.Unlock() }()
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("RepairSerenaIntentFromRegistry: unexpected error on contended lock: %v", err)
 	}
-	if repaired != 0 {
-		t.Errorf("repaired = %d, want 0 (intent lock contended → skip)", repaired)
+	if result.Outcome != SerenaIntentRepairOutcomeSkippedIntentLock {
+		t.Errorf("outcome = %q, want %q", result.Outcome, SerenaIntentRepairOutcomeSkippedIntentLock)
 	}
-	if len(deferred) != 0 {
-		t.Errorf("deferred = %v, want none (contended skip, not a deferral)", deferred)
+	if result.Repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (intent lock contended → skip)", result.Repaired)
+	}
+	if len(result.Deferred) != 0 {
+		t.Errorf("deferred = %v, want none (contended skip, not a deferral)", result.Deferred)
 	}
 
 	after, err := os.ReadFile(intentPath)
@@ -379,7 +555,7 @@ func seedSerenaRegistryRowWithKey(t *testing.T, regPath, key, path string, port 
 	if err != nil {
 		t.Fatalf("lock registry: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 	if err := reg.Load(); err != nil {
 		t.Fatalf("load registry: %v", err)
 	}
@@ -421,7 +597,7 @@ func TestRepairSerenaIntentFromRegistry_SecondCallIsNoOp(t *testing.T) {
 	})
 
 	// First repair appends the orphan.
-	repaired, _, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, _, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("first repair: unexpected error: %v", err)
 	}
@@ -437,7 +613,7 @@ func TestRepairSerenaIntentFromRegistry_SecondCallIsNoOp(t *testing.T) {
 	}
 
 	// Second repair must be a strict no-op — NOT re-append the same daemon.
-	repaired2, deferred2, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired2, deferred2, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("second repair: unexpected error: %v", err)
 	}
@@ -485,17 +661,20 @@ func TestRepairSerenaIntentFromRegistry_RegistryLockContended_Skips(t *testing.T
 	if err != nil {
 		t.Fatalf("test acquire registry lock: %v", err)
 	}
-	defer unlock()
+	defer assertRegistryReleased(t, unlock)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error on contended registry lock: %v", err)
 	}
-	if repaired != 0 {
-		t.Errorf("repaired = %d, want 0 (registry lock contended → skip)", repaired)
+	if result.Outcome != SerenaIntentRepairOutcomeSkippedRegistryLock {
+		t.Errorf("outcome = %q, want %q", result.Outcome, SerenaIntentRepairOutcomeSkippedRegistryLock)
 	}
-	if len(deferred) != 0 {
-		t.Errorf("deferred = %v, want none (contended skip)", deferred)
+	if result.Repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (registry lock contended → skip)", result.Repaired)
+	}
+	if len(result.Deferred) != 0 {
+		t.Errorf("deferred = %v, want none (contended skip)", result.Deferred)
 	}
 	after, err := os.ReadFile(intentPath)
 	if err != nil {
@@ -529,7 +708,7 @@ func TestRepairSerenaIntentFromRegistry_MissingIntentFile_Defers(t *testing.T) {
 		t.Fatalf("precondition: intent file should be absent, stat err = %v", statErr)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error on missing intent file: %v", err)
 	}
@@ -571,7 +750,7 @@ func TestRepairSerenaIntentFromRegistry_DivergentRow_SkippedNotReappended(t *tes
 	})
 	beforeCount := len(readIntent(t, intentPath).Daemons)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -615,7 +794,7 @@ func TestRepairSerenaIntentFromRegistry_StaleWorkspacePath_Skipped(t *testing.T)
 	})
 	beforeCount := len(readIntent(t, intentPath).Daemons)
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -664,7 +843,7 @@ func TestRepairSerenaIntentFromRegistry_LegacyNilSpecRow_Deferred(t *testing.T) 
 		t.Fatalf("read intent before: %v", err)
 	}
 
-	repaired, deferred, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	repaired, deferred, err := repairSerenaIntentForTest(t, mustStateDir(t))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -708,7 +887,7 @@ func TestRepairSerenaIntentFromRegistry_EventLogLockContentionDoesNotBlockOrHold
 	var repairErr error
 	go func() {
 		defer close(done)
-		repaired, deferred, repairErr = NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+		repaired, deferred, repairErr = repairSerenaIntentForTest(t, stateDir)
 	}()
 
 	select {
@@ -734,7 +913,7 @@ func TestRepairSerenaIntentFromRegistry_EventLogLockContentionDoesNotBlockOrHold
 	if !ok {
 		t.Fatal("registry lock remained held after repair returned")
 	}
-	regUnlock()
+	assertRegistryReleased(t, regUnlock)
 
 	intentLock := flock.New(intentPath + supervisorIntentLockSuffix)
 	intentLocked, err := intentLock.TryLock()
@@ -745,4 +924,142 @@ func TestRepairSerenaIntentFromRegistry_EventLogLockContentionDoesNotBlockOrHold
 		t.Fatal("intent lock remained held after repair returned")
 	}
 	_ = intentLock.Unlock()
+}
+
+// ---------------------------------------------------------------------------
+// 12. PendingSerenaRemoval guard (unregister-resurrects-serena-intent fix,
+//     mcphub-register-intent REVISE round 2 BLOCKING 1) — a registry row
+//     flagged PendingSerenaRemoval is SKIPPED, not treated as an orphan, even
+//     though it has no matching intent daemon (the exact transient shape
+//     unregister's teardown-before-delete ordering produces). Mirrors tests
+//     9/10's skip-not-defer-not-append shape.
+// ---------------------------------------------------------------------------
+
+func TestRepairSerenaIntentFromRegistry_PendingSerenaRemoval_SkippedNotReappended(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	pendingPath, pendingPort := liveWorkspace(t), 9151
+
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	pendingKey := seedSerenaRegistryRow(t, regPath, pendingPath, pendingPort)
+
+	// Flag the pending row exactly as PruneWorkspacePhases does before it
+	// removes the matching intent descriptor — through the production owner,
+	// so the row carries the same FRESH lease stamp a real in-flight teardown
+	// has. (Hand-setting the bool alone would model an UNSTAMPED mark, which is
+	// the interrupted-unregister case covered in
+	// serena_pending_removal_lease_test.go, not the in-flight one asserted
+	// here.)
+	rollback, err := NewRegistry(regPath).BeginSerenaPendingRemoval(pendingKey, "", "")
+	if err != nil || rollback == nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v", rollback != nil, err)
+	}
+	_ = rollback // Retain the staged tuple during the simulated in-flight teardown.
+	// A real in-flight unregister owns the per-workspace fence for the complete
+	// marked window. The repair must observe that owner and leave the descriptor
+	// absent; a fresh timestamp by itself is not an authoritative liveness proof.
+	releaseFence, err := AcquireSerenaRemovalFence(filepath.Dir(regPath), pendingKey)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFence: %v", err)
+	}
+	defer func() { releaseFenceOrFail(t, releaseFence) }()
+
+	// Intent carries ONLY the healthy daemon — the pending row's descriptor
+	// has already been removed by the (simulated) in-flight unregister, which
+	// is exactly what makes it look like an orphan without the flag.
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before: %v", err)
+	}
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Outcome != SerenaIntentRepairOutcomeIncompleteRemovalFence || len(result.Incomplete) != 1 || result.Incomplete[0].Reason != SerenaIntentRepairIncompleteHolderLive {
+		t.Fatalf("result = %+v, want holder-live incomplete", result)
+	}
+	if result.Repaired != 0 {
+		t.Errorf("repaired = %d, want 0 (pending-removal row must NOT be resurrected)", result.Repaired)
+	}
+	if len(result.Deferred) != 0 {
+		t.Errorf("deferred = %v, want none (pending-removal is a skip, not a defer)", result.Deferred)
+	}
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("intent written for a pending-removal row (must not append):\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := readIntent(t, intentPath); got.HasSerenaDaemonForWorkspaceKey(pendingKey) {
+		t.Errorf("pending-removal key %q was appended (must be skipped)", pendingKey)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 13. Preview symmetry (BLOCKING 3 fix) — PreviewSerenaIntentRepairFromRegistry
+//     reports the SAME count/deferred-keys RepairSerenaIntentFromRegistry
+//     would act on, but NEVER writes supervisor-intent.json.
+// ---------------------------------------------------------------------------
+
+func TestPreviewSerenaIntentRepairFromRegistry_ReportsWithoutWriting(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+
+	healthyPath, healthyPort := liveWorkspace(t), 9150
+	orphanPath, orphanPort := liveWorkspace(t), 9151
+	seedSerenaRegistryRow(t, regPath, healthyPath, healthyPort)
+	orphanKey := seedSerenaRegistryRow(t, regPath, orphanPath, orphanPort)
+
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, healthyPort)},
+	})
+	before, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before: %v", err)
+	}
+
+	wouldRepair, deferred, err := previewSerenaIntentForTest(t, mustStateDir(t))
+	if err != nil {
+		t.Fatalf("PreviewSerenaIntentRepairFromRegistry: unexpected error: %v", err)
+	}
+	if wouldRepair != 1 {
+		t.Errorf("wouldRepair = %d, want 1 (the orphan)", wouldRepair)
+	}
+	if len(deferred) != 0 {
+		t.Errorf("deferred = %v, want none", deferred)
+	}
+
+	after, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent after preview: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Errorf("preview WROTE supervisor-intent.json (must be read-only):\nbefore=%s\nafter=%s", before, after)
+	}
+	if got := readIntent(t, intentPath); got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("preview appended the orphan key %q (must never write)", orphanKey)
+	}
+
+	// A REAL repair afterward must still append it — the preview did not
+	// consume or otherwise disturb the orphan's eligibility.
+	repaired, deferred2, err := repairSerenaIntentForTest(t, mustStateDir(t))
+	if err != nil {
+		t.Fatalf("RepairSerenaIntentFromRegistry after preview: unexpected error: %v", err)
+	}
+	if repaired != 1 {
+		t.Errorf("repaired after preview = %d, want 1", repaired)
+	}
+	if len(deferred2) != 0 {
+		t.Errorf("deferred after preview = %v, want none", deferred2)
+	}
+	if got := readIntent(t, intentPath); !got.HasSerenaDaemonForWorkspaceKey(orphanKey) {
+		t.Errorf("orphan key %q not appended by the real repair following a preview", orphanKey)
+	}
 }

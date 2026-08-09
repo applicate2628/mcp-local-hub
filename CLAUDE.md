@@ -849,6 +849,39 @@ migration. Codes 9 / 10 below survive (strict-mode + the generic
       until `mcphub strict-mode --recover` runs or operator deletes manually.
 ```
 
+**`mcphub reconcile --apply` exits non-zero whenever the Serena self-heal did
+not reach a completed classification.** Each repair or preview now returns
+`ReconcileResponse.SerenaRepairOutcome`: `completed`,
+`skipped_registry_lock`, `skipped_intent_lock`, or `error`. A real failure also
+carries causal text in `SerenaRepairError`; a lock skip is retryable but is not
+a completed no-op. The CLI prints the report before choosing its exit code and
+never claims alignment for an incomplete classification:
+
+- A real `error` returns `errSerenaRepairFailed` (exit 1).
+- Either lock skip, an absent field from an older supervisor, or an unknown
+  future field returns `errSerenaRepairIncomplete` (exit 1) with retry or
+  restart/upgrade guidance.
+- A dry-run still exits 0, but prints the same incomplete classification rather
+  than reporting an aligned fleet.
+
+This is an **operational-contract change**, deliberately in the fail-loud
+direction (a monitoring surface must not read a swallowed self-heal failure as a
+clean pass). Two boundaries kept intentionally:
+
+- **The IPC frame stays OK.** `stop` / `restart` dispatch an apply-reconcile
+  in-process via `DialSupervisorIPCReconcile`; failing the frame would block
+  them on an unrelated serena repair. They are unaffected by the exit-code
+  change because they never shell out to the CLI.
+- **`--dry-run` still exits 0.** A preview that could not obtain a verdict
+  reports the exact lock skip, error, or version-skew state in its output rather
+  than failing the command.
+
+Nothing in-repo shells out to `mcphub reconcile`, so no internal caller changes
+behavior — but an EXTERNAL script that runs `reconcile --apply` and checks `$?`
+will newly see a non-zero exit for a true self-heal failure, a pass-level lock
+skip, or a mixed-version incomplete outcome. That is the intended fail-loud
+signal, not a regression.
+
 ### Migration journal layout + retention — REMOVED in v0.6 Phase F
 
 > **This entire mechanism is gone.** v0.6 Phase F deleted the

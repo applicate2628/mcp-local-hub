@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -124,7 +125,54 @@ func withStateDir(t *testing.T) string {
 	if !strings.HasPrefix(stateDir, dir) {
 		t.Fatalf("stateDir %s not under tempDir %s — SetDaemonStateRootForTest seam broken", stateDir, dir)
 	}
+
+	// Default supervisor-materialization stubs. `mcphub workspace register`
+	// (step 8) now nudges the supervisor to reconcile-apply and gates its
+	// success message on the result — the fix for the P1 where register
+	// printed an unqualified success without ever touching
+	// supervisor-intent.json. Most existing register tests using this helper
+	// are NOT exercising that materialization gate; they need register to
+	// behave as if a live, healthy supervisor immediately reconciled and
+	// reported the spec-bearing row, so they keep testing what they always
+	// tested (allocation, bless, default-marker, idempotency, ...) without
+	// also having to stub supervisor IPC by hand. Tests that specifically
+	// exercise the new gate (TestWorkspaceRegisterSerena_*) override BOTH
+	// seams again AFTER calling withStateDir and restore via their own
+	// t.Cleanup — cleanup runs LIFO, so their override is in effect for
+	// their own duration and this default resumes afterward.
+	origReconcile := serenaRegisterReconcileFn
+	serenaRegisterReconcileFn = func(_ context.Context, _ bool, target api.ReconcileTarget) (api.ReconcileResponse, error) {
+		return readySerenaRegisterResponse(target, api.ReconcileResponse{DriftCount: 1, AppliedCount: 1}), nil
+	}
+	t.Cleanup(func() { serenaRegisterReconcileFn = origReconcile })
+	origIntentCheck := serenaRegisterSettledCheckFn
+	serenaRegisterSettledCheckFn = func(expected api.WorkspaceEntry) (serenaRegisterSettledResult, error) {
+		// Report the ACTUAL registry port when available (most of these tests
+		// don't inspect it, but a couple of newer assertions do) instead of a
+		// hardcoded placeholder.
+		port := 0
+		if regPath, err := api.DefaultRegistryPath(); err == nil {
+			reg := api.NewRegistry(regPath)
+			if lerr := reg.Load(); lerr == nil {
+				if row, ok := reg.GetSerena(expected.WorkspaceKey); ok {
+					port = row.Port
+				}
+			}
+		}
+		return serenaRegisterSettledResult{Settled: true, RegistryRowPresent: true, Port: port}, nil
+	}
+	t.Cleanup(func() { serenaRegisterSettledCheckFn = origIntentCheck })
+
 	return dir
+}
+
+func readySerenaRegisterResponse(target api.ReconcileTarget, response api.ReconcileResponse) api.ReconcileResponse {
+	response.TargetSettlement = &api.ReconcileTargetSettlement{
+		State:  api.ReconcileTargetSettlementReady,
+		Reason: api.ReconcileTargetReasonReady,
+		Target: target,
+	}
+	return response
 }
 
 // makeWorkspaceDir creates an existing on-disk workspace directory and
@@ -475,7 +523,7 @@ func withStubbedLSPUnregister(t *testing.T) *[]string {
 		if err != nil {
 			return nil, err
 		}
-		defer unlock()
+		defer assertRegistryReleased(t, unlock)
 		if err := reg.Load(); err != nil {
 			return nil, err
 		}
@@ -1362,12 +1410,12 @@ func TestWorkspaceList_LockedDuringRead(t *testing.T) {
 
 	select {
 	case result := <-done:
-		unlock()
+		assertRegistryReleased(t, unlock)
 		t.Fatalf("workspace list returned while registry lock was held: err=%v output=%s", result.err, result.out)
 	case <-time.After(150 * time.Millisecond):
 	}
 
-	unlock()
+	assertRegistryReleased(t, unlock)
 	select {
 	case result := <-done:
 		if result.err != nil {

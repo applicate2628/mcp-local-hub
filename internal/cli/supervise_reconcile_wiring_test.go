@@ -47,6 +47,37 @@ import (
 
 const reconcileWiringTestTaskName = `\mcp-local-hub-memory-default`
 
+func assertLSPRegistrySnapshotUnavailableEvent(t *testing.T, phase string, snapshotUsable bool) {
+	t.Helper()
+	path := filepath.Join(apitest.HardenedTempDir(t), "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatalf("open supervisor event log: %v", err)
+	}
+	releaseErr := errors.Join(api.ErrLockReleaseUnconfirmed, errors.New("synthetic release"))
+	emitLSPRegistryReconcileSnapshotUnavailable(events, phase, snapshotUsable, releaseErr)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read supervisor event log: %v", err)
+	}
+	log := string(raw)
+	for _, want := range []string{
+		`"event":"lsp-registry-reconcile-snapshot-unavailable"`,
+		`"phase":"` + phase + `"`,
+		`"snapshot_usable":` + strconv.FormatBool(snapshotUsable),
+		`"release_unconfirmed":true`,
+		`"restart_recovers":true`,
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("event log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestLSPRegistryStartupReconcileSnapshotUnavailableReportsUsableSnapshot(t *testing.T) {
+	assertLSPRegistrySnapshotUnavailableEvent(t, "startup", true)
+}
+
 // TestRunSupervise_SpawnsDaemonsFromIntent verifies that runSupervise
 // invokes the production reconciler against the parsed supervisor
 // intent. The test seeds supervisor-intent.json with one descriptor

@@ -189,6 +189,13 @@ func stubAutoRegisterReadiness(t *testing.T, fn func(port int, timeout time.Dura
 	t.Cleanup(func() { autoRegisterReadinessFn = orig })
 }
 
+func stubAutoRegisterRegistryLock(t *testing.T, fn func(*Registry) (func() error, error)) {
+	t.Helper()
+	orig := autoRegisterRegistryLockFn
+	autoRegisterRegistryLockFn = fn
+	t.Cleanup(func() { autoRegisterRegistryLockFn = orig })
+}
+
 // stubAutoRegisterPriorIntentHasSpec overrides the LIVE-ADD-vs-INTRODUCE branch
 // seam (true = prior intent already has runtime_spec = live-add).
 func stubAutoRegisterPriorIntentHasSpec(t *testing.T, fn func() (bool, error)) {

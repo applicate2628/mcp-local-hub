@@ -1,15 +1,76 @@
 package lsp_routing
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 )
+
+func TestRefreshCapturesEntriesBeforeRegistryRelease(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	src, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "resolver.go"))
+	if err != nil {
+		t.Fatalf("ReadFile resolver.go: %v", err)
+	}
+	capture := bytes.Index(src, []byte("entries = r.reg.LSPEntries()"))
+	release := bytes.Index(src, []byte("releaseErr := unlock()"))
+	if capture < 0 || release < 0 {
+		t.Fatalf("refresh ordering anchors missing: capture=%d release=%d", capture, release)
+	}
+	if capture > release {
+		t.Fatal("refresh releases the registry lock before capturing LSP entries")
+	}
+}
+
+func TestRefreshSnapshotsRegistryBeforeUnlock(t *testing.T) {
+	dir := t.TempDir()
+	entries := make([]api.WorkspaceEntry, 512)
+	for i := range entries {
+		entries[i] = api.WorkspaceEntry{
+			WorkspaceKey:  fmt.Sprintf("workspace-%04d", i),
+			WorkspacePath: filepath.Join(dir, fmt.Sprintf("workspace-%04d", i)),
+			Language:      "go",
+			Port:          9200 + i,
+		}
+	}
+	regPath := makeRegistryWithLSP(t, dir, entries)
+	reg := api.NewRegistry(regPath)
+	resolver := NewWorkspaceResolver(reg, regPath, testLanguages())
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for iteration := 0; iteration < 8; iteration++ {
+				resolver.mu.Lock()
+				resolver.loaded = false
+				resolver.mu.Unlock()
+				resolver.refresh()
+			}
+		}()
+	}
+	wg.Wait()
+
+	resolver.mu.RLock()
+	got := len(resolver.cached)
+	resolver.mu.RUnlock()
+	if got != len(entries) {
+		t.Fatalf("cached entries = %d, want %d", got, len(entries))
+	}
+}
 
 func testLanguages() []config.LanguageSpec {
 	return []config.LanguageSpec{

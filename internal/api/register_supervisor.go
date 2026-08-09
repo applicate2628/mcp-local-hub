@@ -120,14 +120,14 @@ func BuildSupervisorDaemonForLSP(entry WorkspaceEntry, mcphubBinaryPath string) 
 // loaded registry. See LSPRegistryRowBacksDescriptorIn for the shared
 // predicate and fail-open contract; this wrapper just adds the per-call
 // load around it.
-func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
-	reg, ok := OpenLSPRegistryForReconcile()
+func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) (bool, error) {
+	reg, ok, err := OpenLSPRegistryForReconcile()
 	if !ok {
 		// Load/lock failure — fail OPEN (never suppress a legitimate spawn
 		// on a transient registry hiccup).
-		return true
+		return true, err
 	}
-	return LSPRegistryRowBacksDescriptorIn(d, reg)
+	return LSPRegistryRowBacksDescriptorIn(d, reg), err
 }
 
 // OpenLSPRegistryForReconcile loads workspaces.yaml ONCE (brief-retry lock,
@@ -143,25 +143,29 @@ func LSPRegistryRowBacksDescriptor(d SupervisorDaemon) bool {
 // releases the flock immediately after Load succeeds — a long-held lock
 // across an entire reconcile pass would otherwise contend with concurrent
 // registry writers (workspace register/unregister) for no benefit.
-func OpenLSPRegistryForReconcile() (*Registry, bool) {
+func OpenLSPRegistryForReconcile() (*Registry, bool, error) {
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
-		return nil, false
+		return nil, false, err
 	}
 	reg := NewRegistry(regPath)
 	unlock, ok, err := tryLockRegistryBrief(reg)
-	if err != nil || !ok {
-		return nil, false
+	if err != nil {
+		return nil, false, err
+	}
+	if !ok {
+		return nil, false, nil
 	}
 	loadErr := reg.Load()
 	releaseErr := unlock()
-	if releaseErr != nil {
-		fmt.Fprintf(os.Stderr, "open LSP registry for reconcile: release registry lock %s: %v\n", regPath, releaseErr)
+	return finishOpenLSPRegistryForReconcile(reg, loadErr, releaseErr)
+}
+
+func finishOpenLSPRegistryForReconcile(reg *Registry, loadErr, releaseErr error) (*Registry, bool, error) {
+	if loadErr != nil {
+		return nil, false, errors.Join(loadErr, releaseErr)
 	}
-	if loadErr != nil || releaseErr != nil {
-		return nil, false
-	}
-	return reg, true
+	return reg, true, releaseErr
 }
 
 // LSPRegistryRowBacksDescriptorIn is the registry-injected form of

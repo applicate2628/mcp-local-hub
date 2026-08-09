@@ -332,6 +332,17 @@ func lspEnsureMutex(workspaceKey, language string) *sync.Mutex {
 	return v.(*sync.Mutex)
 }
 
+func rollbackLSPRegistration(entry WorkspaceEntry, supervisorSpawnRequested bool, removeRow func() error) error {
+	var rollbackErrs []error
+	if supervisorSpawnRequested && entry.Port > 0 {
+		rollbackErrs = append(rollbackErrs, killByPortFn(entry.Port, 5*time.Second))
+	}
+	if removeRow != nil {
+		rollbackErrs = append(rollbackErrs, removeRow())
+	}
+	return errors.Join(rollbackErrs...)
+}
+
 func loadLSPRegisterManifest(language string) (*config.ServerManifest, config.LanguageSpec, error) {
 	data, err := loadManifestYAMLEmbedFirst("mcp-language-server")
 	if err != nil {

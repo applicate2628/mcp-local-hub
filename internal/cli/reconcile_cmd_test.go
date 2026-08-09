@@ -77,7 +77,12 @@ func TestReconcileCmd_ApplyFlagPropagates(t *testing.T) {
 	var sawApply bool
 	uninstall := setReconcileDialFnForTest(func(ctx context.Context, apply bool) (api.ReconcileResponse, error) {
 		sawApply = apply
-		return api.ReconcileResponse{DryRun: !apply, DriftCount: 0, AppliedCount: 0}, nil
+		return api.ReconcileResponse{
+			DryRun:              !apply,
+			DriftCount:          0,
+			AppliedCount:        0,
+			SerenaRepairOutcome: api.SerenaIntentRepairOutcomeCompleted,
+		}, nil
 	})
 	defer uninstall()
 

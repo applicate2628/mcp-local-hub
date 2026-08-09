@@ -115,6 +115,10 @@ func releaseAndJoinApplied(err *error, release func() error, what string, applie
 }
 
 func lockLeafLedgered(lockPath string) (func() error, error) {
+	return lockLeafLedgeredWithUnlock(lockPath, flockUnlockFn)
+}
+
+func lockLeafLedgeredWithUnlock(lockPath string, unlockFn func(*flock.Flock) error) (func() error, error) {
 	gate := ledgeredLeafGate(lockPath)
 	gate.Lock()
 	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
@@ -126,10 +130,14 @@ func lockLeafLedgered(lockPath string) (func() error, error) {
 		gate.Unlock()
 		return nil, err
 	}
-	return newLedgeredFlockRelease(fl, lockPath, gate.Unlock), nil
+	return newLedgeredFlockReleaseWithUnlock(fl, lockPath, gate.Unlock, unlockFn), nil
 }
 
 func tryLockLeafLedgered(lockPath string) (func() error, bool, error) {
+	return tryLockLeafLedgeredWithUnlock(lockPath, flockUnlockFn)
+}
+
+func tryLockLeafLedgeredWithUnlock(lockPath string, unlockFn func(*flock.Flock) error) (func() error, bool, error) {
 	gate := ledgeredLeafGate(lockPath)
 	if !gate.TryLock() {
 		return nil, false, nil
@@ -148,11 +156,14 @@ func tryLockLeafLedgered(lockPath string) (func() error, bool, error) {
 		gate.Unlock()
 		return nil, false, nil
 	}
-	return newLedgeredFlockRelease(fl, lockPath, gate.Unlock), true, nil
+	return newLedgeredFlockReleaseWithUnlock(fl, lockPath, gate.Unlock, unlockFn), true, nil
 }
 
 func newLedgeredFlockRelease(fl *flock.Flock, lockPath string, releaseGate func()) func() error {
-	unlockFn := flockUnlockFn
+	return newLedgeredFlockReleaseWithUnlock(fl, lockPath, releaseGate, flockUnlockFn)
+}
+
+func newLedgeredFlockReleaseWithUnlock(fl *flock.Flock, lockPath string, releaseGate func(), unlockFn func(*flock.Flock) error) func() error {
 	var once sync.Once
 	var outcome error
 	return func() error {

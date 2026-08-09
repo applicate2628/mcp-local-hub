@@ -39,7 +39,9 @@
 package api
 
 import (
+	"errors"
 	"fmt"
+	"path/filepath"
 )
 
 // PruneReport summarizes what PruneWorkspace removed. It mirrors the
@@ -70,10 +72,35 @@ type PruneReport struct {
 //   - DeleteSerenaRow commits the serena registry-row delete and returns the
 //     count removed. It runs ONLY after RemoveSerenaIntent succeeds (the
 //     teardown-before-delete invariant).
+//   - BeginSerenaPendingRemoval stages the exact pending-removal tuple before
+//     RemoveSerenaIntent and returns its ownership-aware rollback. A teardown
+//     failure (including a commit-unknown stage error) invokes that rollback so
+//     a retry sees the exact prior tuple, without clobbering a later writer.
+//   - AcquireSerenaRemovalFence takes the per-workspace unregister LIVENESS
+//     FENCE (production: api.AcquireSerenaRemovalFence) and returns its release
+//     closure. PruneWorkspacePhases holds it across the ENTIRE marked window so
+//     RepairSerenaIntentFromRegistry can distinguish a teardown that is merely
+//     SLOW from one that CRASHED: the mark alone cannot, and the wall-clock
+//     lease that used to answer it measured elapsed time, not liveness (see
+//     serena_removal_fence.go). Nil is tolerated and simply skips the fence,
+//     which leaves the pre-fence lease-only behavior — the marked row is still
+//     protected for the lease window, just not beyond it.
 type PruneWorkspaceTeardown struct {
-	LSPUnregister      func(workspacePath string, languages []string) (*UnregisterReport, error)
-	RemoveSerenaIntent func(canonicalWorkspacePath string) (bool, error)
-	DeleteSerenaRow    func() (int, error)
+	LSPUnregister                       func(workspacePath string, languages []string) (*UnregisterReport, error)
+	RemoveSerenaIntent                  func(canonicalWorkspacePath string) (bool, error)
+	DeleteSerenaRow                     func() PruneSerenaDeleteResult
+	BeginSerenaPendingRemoval           func(generation string) (rollback func() error, err error)
+	AcquireSerenaRemovalFence           func() (release func() error, err error)
+	PublishSerenaRemovalFenceGeneration func() (string, error)
+}
+
+// PruneSerenaDeleteResult separates the committed mutation result from lock
+// release confirmation so teardown rollback is driven only by MutationErr.
+type PruneSerenaDeleteResult struct {
+	Removed       int
+	MutationErr   error
+	PostCommitErr error
+	ReleaseErr    error
 }
 
 // PruneWorkspace tears down a workspace's daemon rows in the SAME order the CLI
@@ -142,24 +169,40 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 	td := PruneWorkspaceTeardown{
 		LSPUnregister:      func(p string, langs []string) (*UnregisterReport, error) { return a.Unregister(p, langs) },
 		RemoveSerenaIntent: a.RemoveSerenaSupervisorIntentForWorkspace,
-		DeleteSerenaRow: func() (_ int, err error) {
+		BeginSerenaPendingRemoval: func(generation string) (func() error, error) {
+			reg := NewRegistry(regPath)
+			return reg.BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation)
+		},
+		// Fence every key BeginSerenaPendingRemoval may actually mark. Repair
+		// probes the persisted row's own key before its divergence guard, so a
+		// legacy-only row must carry the same live fence/generation transaction.
+		AcquireSerenaRemovalFence: func() (func() error, error) {
+			return AcquireSerenaRemovalFences(filepath.Dir(regPath), wsKey, legacyWSKey)
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			return PublishSerenaRemovalFenceGenerationForKeys(filepath.Dir(regPath), wsKey, legacyWSKey)
+		},
+		DeleteSerenaRow: func() (result PruneSerenaDeleteResult) {
 			reg := NewRegistry(regPath)
 			unlock, lerr := reg.Lock()
 			if lerr != nil {
-				return 0, lerr
+				result.MutationErr = lerr
+				return result
 			}
-			defer ReleaseAndJoin(&err, unlock, "prune serena row: deletion stands, but could not release the registry lock")
+			defer func() { result.ReleaseErr = unlock() }()
 			if lerr := reg.Load(); lerr != nil {
-				return 0, lerr
+				result.MutationErr = lerr
+				return result
 			}
-			n := reg.RemoveByBackend(wsKey, "serena")
-			if legacyWSKey != wsKey {
-				n += reg.RemoveByBackend(legacyWSKey, "serena")
+			keys := dedupeWorkspaceKeys(wsKey, legacyWSKey)
+			n, committed, serr := reg.RemoveSerenaRowsAndSave(keys...)
+			if !committed {
+				result.MutationErr = serr
+				return result
 			}
-			if serr := reg.Save(); serr != nil {
-				return 0, serr
-			}
-			return n, nil
+			result.Removed = n
+			result.PostCommitErr = serr
+			return result
 		},
 	}
 
@@ -178,7 +221,7 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 // worktrees growing. Reading the registry directly (SerenaEntries + LSPEntries)
 // covers both. The brief read lock is released before the caller prunes, so it
 // does not nest with PruneWorkspace's own per-workspace locks.
-func (a *API) ListAllWorkspaceRows() (_ []*WorkspaceEntry, err error) {
+func (a *API) ListAllWorkspaceRows() (rows []*WorkspaceEntry, err error) {
 	regPath, err := registryPathForRegister()
 	if err != nil {
 		return nil, err
@@ -217,34 +260,105 @@ func (a *API) ListAllWorkspaceRows() (_ []*WorkspaceEntry, err error) {
 //     reconcile failure RemoveSerenaIntent restores the descriptor and returns a
 //     retry-asking error; returning here WITHOUT deleting the row keeps the
 //     durable record that drives the next retry's paired teardown intact.
+//     IMMEDIATELY before RemoveSerenaIntent runs,
+//     td.BeginSerenaPendingRemoval stages the tuple so a reconcile nudged
+//     INSIDE RemoveSerenaIntent cannot mistake this deliberate teardown for a
+//     crash-orphan and resurrect the row. A failure rolls back only that exact
+//     transaction's tuple, preserving pre-existing and later writer state.
+//   - WRAPPING the whole serena phase, td.AcquireSerenaRemovalFence is taken
+//     BEFORE the mark and released only after the row delete (or after the
+//     failure path has cleared the mark). The fence is the LIVENESS half of the
+//     same guard: the mark says "a teardown claims this row", the fence says
+//     "and that teardown is still alive". Acquiring it after the mark, or
+//     releasing it before the delete, would leave a window in which the mark is
+//     set with no live holder — which is precisely the shape the repair reads
+//     as reclaimable crash debris.
 //
 // wantLSP / wantSerena gate the two phases (the caller decides scope from its
 // own classification). report accumulates the per-backend outcome + warnings;
 // it must be non-nil.
-func PruneWorkspacePhases(workspacePath, canonical string, lspLangs []string, wantLSP, wantSerena bool, td PruneWorkspaceTeardown, report *PruneReport) error {
+func PruneWorkspacePhases(workspacePath, canonical string, lspLangs []string, wantLSP, wantSerena bool, td PruneWorkspaceTeardown, report *PruneReport) (err error) {
 	if wantLSP && td.LSPUnregister != nil {
 		ureport, uerr := td.LSPUnregister(workspacePath, lspLangs)
-		if uerr != nil {
-			return fmt.Errorf("paired LSP teardown for workspace %s: %w", canonical, uerr)
-		}
 		if ureport != nil {
 			report.LSPRemoved = append(report.LSPRemoved, ureport.Removed...)
 			report.Warnings = append(report.Warnings, ureport.Warnings...)
 		}
+		if uerr != nil {
+			return fmt.Errorf("paired LSP teardown for workspace %s: %w", canonical, uerr)
+		}
 	}
 
 	if wantSerena {
+		var rollbackPendingRemoval func() error
+		rollback := func(primary error) error {
+			if rollbackPendingRemoval == nil {
+				return primary
+			}
+			rollbackErr := rollbackPendingRemoval()
+			if rollbackErr != nil {
+				return errors.Join(primary, fmt.Errorf("rollback pending Serena-removal tuple: %w", rollbackErr))
+			}
+			return primary
+		}
+
+		// Liveness fence FIRST — before the mark, and held past the row delete.
+		// The deferred release runs at function exit, which is the end of the
+		// serena phase (nothing follows it), so every early return below —
+		// including the RemoveSerenaIntent failure path that clears the mark —
+		// releases the fence only AFTER the registry has been left in a state no
+		// repair can misread.
+		//
+		// A fence failure ABORTS before any mutation. Proceeding unfenced would
+		// silently reinstate the exact race this closes, and nothing has been
+		// changed yet at this point, so the abort is free.
+		if td.AcquireSerenaRemovalFence != nil {
+			release, ferr := td.AcquireSerenaRemovalFence()
+			if ferr != nil {
+				return fmt.Errorf("acquire serena removal fence for workspace %s: %w", canonical, ferr)
+			}
+			if release != nil {
+				defer func() {
+					if releaseErr := release(); releaseErr != nil {
+						err = errors.Join(err, fmt.Errorf("serena teardown for workspace %s completed its mutations but could not release the removal fence: %w", canonical, releaseErr))
+					}
+				}()
+			}
+		}
 		if td.RemoveSerenaIntent != nil {
+			generation := ""
+			if td.PublishSerenaRemovalFenceGeneration != nil {
+				var gerr error
+				generation, gerr = td.PublishSerenaRemovalFenceGeneration()
+				if gerr != nil {
+					return fmt.Errorf("publish serena removal fence generation for workspace %s: %w", canonical, gerr)
+				}
+			}
+			if td.BeginSerenaPendingRemoval != nil {
+				// Store rollback before inspecting the error: Registry.Save can fail
+				// after rename/publication, so its error is commit-unknown.
+				var merr error
+				rollbackPendingRemoval, merr = td.BeginSerenaPendingRemoval(generation)
+				if merr != nil {
+					return fmt.Errorf("mark workspace %s pending serena removal: %w", canonical, rollback(merr))
+				}
+			}
 			if _, serr := td.RemoveSerenaIntent(canonical); serr != nil {
-				return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, serr)
+				return fmt.Errorf("paired serena supervisor teardown for workspace %s: %w", canonical, rollback(serr))
 			}
 		}
 		if td.DeleteSerenaRow != nil {
-			n, serr := td.DeleteSerenaRow()
-			if serr != nil {
-				return serr
+			deleteResult := td.DeleteSerenaRow()
+			report.SerenaRemoved += deleteResult.Removed
+			if deleteResult.MutationErr == nil {
+				rollbackPendingRemoval = nil // deletion commits even when Removed is zero.
+			} else {
+				err = rollback(deleteResult.MutationErr)
 			}
-			report.SerenaRemoved += n
+			err = errors.Join(err, deleteResult.PostCommitErr, deleteResult.ReleaseErr)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	return nil

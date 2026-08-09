@@ -74,6 +74,28 @@ type WorkspaceEntry struct {
 	RegisteredAt  time.Time `yaml:"registered_at,omitempty"`
 	RegisteredVia string    `yaml:"registered_via,omitempty"` // "manual" | "auto-detect" | "migration"
 	Languages     []string  `yaml:"languages,omitempty"`      // snapshot of .serena/project.yml at register time
+
+	// PendingSerenaRemoval, its timestamp, and generation form one tuple.
+	// Registry.BeginSerenaPendingRemoval stages that exact tuple after fence
+	// acquisition and generation publication and immediately before intent
+	// teardown. Successful teardown deletes the row. Any begin, intent-teardown,
+	// or row-delete failure invokes the returned ownership-aware rollback, which
+	// restores the exact prior tuple only while the attempt still owns it, skips
+	// deleted rows, and preserves a later writer with a typed conflict. The fence
+	// is released only after row deletion or rollback has reached its verdict.
+	//
+	// A pending tuple is not an unconditional skip. Repair consults the fence: a
+	// held owner is preserved; a free matching generation is reclaimable;
+	// unattributed legacy state follows the lease fallback; probe failure or
+	// mismatched fresh provenance remains incomplete and fail-closed.
+	PendingSerenaRemoval bool `yaml:"pending_serena_removal,omitempty"`
+
+	// PendingSerenaRemovalAt is the UTC timestamp in the pending-removal tuple.
+	PendingSerenaRemovalAt time.Time `yaml:"pending_serena_removal_at,omitempty"`
+
+	// PendingSerenaRemovalGeneration is the removal-fence generation in the
+	// pending-removal tuple. Empty preserves unattributed legacy state.
+	PendingSerenaRemovalGeneration string `yaml:"pending_serena_removal_generation,omitempty"`
 }
 
 // Registry is the on-disk source of truth for workspace-scoped daemons.
@@ -83,6 +105,13 @@ type Registry struct {
 	path       string
 	Version    int              `yaml:"version"`
 	Workspaces []WorkspaceEntry `yaml:"workspaces"`
+	// lockFn is an instance-local test seam for deterministic release-error
+	// settlement. Production registries leave it nil and use the ledgered leaf.
+	lockFn func(string) (func() error, error)
+	// savePendingRemovalFn is an internal test seam for the commit-unknown
+	// registry writer case: a durable rename can succeed before reopening the
+	// replacement file reports an error.
+	savePendingRemovalFn func(*Registry) error
 
 	// auditSink, when non-nil, is the destination Load() passes to the
 	// shared inode-anchored state-file reader for its relax-fallback
@@ -209,6 +238,29 @@ func (r *Registry) Save() error {
 	return nil
 }
 
+// RemoveSerenaRowsAndSave removes the named Serena rows and persists the
+// registry while the caller holds r.Lock. If the hardened writer reports an
+// error after publication, it re-reads the live file under that same lock and
+// distinguishes a committed deletion from an uncertain mutation.
+func (r *Registry) RemoveSerenaRowsAndSave(workspaceKeys ...string) (removed int, committed bool, err error) {
+	for _, key := range workspaceKeys {
+		removed += r.RemoveByBackend(key, "serena")
+	}
+	if err := r.Save(); err != nil {
+		live := NewRegistry(r.path)
+		if loadErr := live.Load(); loadErr != nil {
+			return 0, false, errors.Join(err, fmt.Errorf("re-read registry after commit-unknown Serena removal: %w", loadErr))
+		}
+		for _, key := range workspaceKeys {
+			if _, present := live.GetSerena(key); present {
+				return 0, false, err
+			}
+		}
+		return removed, true, err
+	}
+	return removed, true, nil
+}
+
 // LockPath returns the registry's single cross-process lock leaf.
 func (r *Registry) LockPath() string { return r.path + ".lock" }
 
@@ -218,6 +270,9 @@ func (r *Registry) Lock() (func() error, error) {
 	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
+	}
+	if r.lockFn != nil {
+		return r.lockFn(lockPath)
 	}
 	release, err := lockLeafLedgered(lockPath)
 	if err != nil {
@@ -440,6 +495,151 @@ func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) in
 	}
 	r.Workspaces = kept
 	return removed
+}
+
+// ErrSerenaPendingRemovalRollbackConflict reports that a pending-removal tuple
+// changed after this transaction staged it. The later writer owns that tuple,
+// so rollback deliberately leaves it untouched.
+var ErrSerenaPendingRemovalRollbackConflict = errors.New("serena pending-removal rollback ownership conflict")
+
+// ErrSerenaPendingRemovalTargetAbsent reports that no canonical or legacy
+// Serena row remained when teardown tried to stage its ownership tuple. The
+// caller must stop before removing supervisor intent: another actor may have
+// deleted and re-registered the workspace since the earlier presence check.
+var ErrSerenaPendingRemovalTargetAbsent = errors.New("serena pending-removal target absent")
+
+// SerenaPendingRemovalRollbackConflict identifies the row a rollback could not
+// restore because its tuple no longer belongs to the staging transaction.
+type SerenaPendingRemovalRollbackConflict struct {
+	WorkspaceKey string
+}
+
+func (e *SerenaPendingRemovalRollbackConflict) Error() string {
+	return fmt.Sprintf("%v: workspace key %q", ErrSerenaPendingRemovalRollbackConflict, e.WorkspaceKey)
+}
+
+func (e *SerenaPendingRemovalRollbackConflict) Unwrap() error {
+	return ErrSerenaPendingRemovalRollbackConflict
+}
+
+type serenaPendingRemovalTuple struct {
+	pending    bool
+	at         time.Time
+	generation string
+}
+
+func serenaPendingRemovalTupleFor(e WorkspaceEntry) serenaPendingRemovalTuple {
+	return serenaPendingRemovalTuple{
+		pending:    e.PendingSerenaRemoval,
+		at:         e.PendingSerenaRemovalAt,
+		generation: e.PendingSerenaRemovalGeneration,
+	}
+}
+
+func (t serenaPendingRemovalTuple) equal(other serenaPendingRemovalTuple) bool {
+	return t.pending == other.pending && t.at.Equal(other.at) && t.generation == other.generation
+}
+
+// BeginSerenaPendingRemoval stages one exact pending-removal tuple for the
+// canonical workspace key and, when distinct, its legacy key. It snapshots the
+// exact prior tuples under the registry lock and returns a rollback that restores
+// only rows still carrying this attempt's tuple. Save errors are commit-unknown:
+// the atomic rename may already have published the staged rows, so staging has a
+// usable rollback even when this method returns an error.
+// This method is the sole production owner of active-teardown tuple staging and
+// rollback.
+//
+// A missing row is never recreated and returns
+// ErrSerenaPendingRemovalTargetAbsent so teardown cannot continue without a
+// row-owned mark. A row whose tuple differs from both the snapshot and this
+// attempt belongs to another writer; rollback reports a typed conflict and
+// preserves it.
+func (r *Registry) BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation string) (rollback func() error, err error) {
+	if generation != "" && !validSerenaRemovalFenceGeneration(generation) {
+		return nil, fmt.Errorf("begin pending serena removal generation: malformed generation")
+	}
+
+	unlock, err := r.Lock()
+	if err != nil {
+		return nil, err
+	}
+	defer ReleaseAndJoin(&err, unlock, "begin pending serena removal: release registry lock")
+	if err := r.Load(); err != nil {
+		return nil, err
+	}
+
+	attempt := serenaPendingRemovalTuple{
+		pending:    true,
+		at:         time.Now().UTC(),
+		generation: generation,
+	}
+	before := make(map[string]serenaPendingRemovalTuple)
+	for _, key := range dedupeWorkspaceKeys(wsKey, legacyWSKey) {
+		e, ok := r.GetSerena(key)
+		if !ok {
+			continue
+		}
+		before[key] = serenaPendingRemovalTupleFor(e)
+		e.PendingSerenaRemoval = attempt.pending
+		e.PendingSerenaRemovalAt = attempt.at
+		e.PendingSerenaRemovalGeneration = attempt.generation
+		r.Put(e)
+	}
+	if len(before) == 0 {
+		return nil, ErrSerenaPendingRemovalTargetAbsent
+	}
+
+	rollback = func() (err error) {
+		current := NewRegistry(r.path)
+		unlock, err := current.Lock()
+		if err != nil {
+			return err
+		}
+		defer ReleaseAndJoin(&err, unlock, "rollback pending serena removal: release registry lock")
+		if err := current.Load(); err != nil {
+			return err
+		}
+
+		changed := false
+		var conflicts []error
+		for key, prior := range before {
+			e, ok := current.GetSerena(key)
+			if !ok {
+				continue // a successful row delete must not be undone.
+			}
+			got := serenaPendingRemovalTupleFor(e)
+			switch {
+			case got.equal(attempt):
+				e.PendingSerenaRemoval = prior.pending
+				e.PendingSerenaRemovalAt = prior.at
+				e.PendingSerenaRemovalGeneration = prior.generation
+				current.Put(e)
+				changed = true
+			case got.equal(prior):
+				// Already restored by an earlier rollback invocation.
+			default:
+				conflicts = append(conflicts, &SerenaPendingRemovalRollbackConflict{WorkspaceKey: key})
+			}
+		}
+		if changed {
+			if err := current.Save(); err != nil {
+				conflicts = append(conflicts, err)
+			}
+		}
+		return errors.Join(conflicts...)
+	}
+
+	if err := r.savePendingRemoval(); err != nil {
+		return rollback, err
+	}
+	return rollback, nil
+}
+
+func (r *Registry) savePendingRemoval() error {
+	if r.savePendingRemovalFn != nil {
+		return r.savePendingRemovalFn(r)
+	}
+	return r.Save()
 }
 
 // PutLifecycle loads the registry under lock, updates the lifecycle state +

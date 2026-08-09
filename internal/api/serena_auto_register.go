@@ -196,7 +196,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//    Save (the install/reap/start steps do not touch the registry); the
 	//    install mutex above is what serializes roots across those steps.
 	reg := NewRegistry(regPath)
-	regUnlock, err := reg.Lock()
+	regUnlock, err := autoRegisterRegistryLockFn(reg)
 	if err != nil {
 		return nil, err
 	}
@@ -991,6 +991,12 @@ var loadSerenaCatalogManifest = func() (*config.ServerManifest, error) {
 // failure without reaching the scheduler / state-file pipeline.
 var autoRegisterInstallParsedManifestFn = func(ctx context.Context, a *API, m *config.ServerManifest, opts InstallParsedManifestOpts) (string, error) {
 	return a.InstallParsedManifest(ctx, m, opts)
+}
+
+// autoRegisterRegistryLockFn is the invocation-local test seam over Registry.Lock.
+// Production always uses the ledgered registry lock.
+var autoRegisterRegistryLockFn = func(reg *Registry) (func() error, error) {
+	return reg.Lock()
 }
 
 // autoRegisterReconcileFn is the seam over DialSupervisorIPCReconcile. Default

@@ -272,6 +272,15 @@ type supervisorController struct {
 	// firing them against a torn-down event loop.
 	ctx context.Context
 
+	// Target-settlement dependencies stay on the runtime owner. Production wires
+	// the canonical registry resolver; nil probe/wait functions use the canonical
+	// supervisor liveness predicate and its existing probe cadence. Tests inject
+	// per-controller functions so race windows are deterministic without
+	// process-global state or wall-clock sleeps.
+	targetRegistryPath   func() (string, error)
+	targetLivenessProbe  targetSettlementLivenessProbeFunc
+	targetSettlementWait targetSettlementWaitFunc
+
 	// failureWindow + quarantineThreshold mirror the deleted
 	// runRespawnDispatcher constants. Kept as struct fields so tests
 	// can shrink the window without touching the package-level
@@ -716,16 +725,13 @@ const (
 	// to ONLY the event's own task (finding B), and no-ops when the event's
 	// generation no longer matches the live pendingReap generation (finding C).
 	evReapFollowup api.SMEvent = "reap-followup"
-	// evReapBarrier is a TEST-ONLY synchronization event. handleLoopEvent signals
-	// the result channel in its body and returns; a test posts it after driving
-	// reap events and blocks on the channel, so when the channel fires every
-	// previously-posted event (FIFO) has been fully processed on the loop
-	// goroutine. Production never posts it. It is the deterministic barrier that
-	// lets the orphan-reap tests run against a REAL concurrent loop (so `-race`
-	// exercises the off-loop→on-loop serialization) while keeping assertions
-	// race-free: the loop's writes happen-before the barrier signal, which
-	// happens-before the test goroutine's post-barrier reads.
-	evReapBarrier api.SMEvent = "reap-barrier"
+	// evControllerBarrier is the controller's FIFO processing acknowledgement.
+	// The reconcile target-settlement owner posts it after drift events and waits
+	// for the result channel, proving every earlier external event was processed
+	// rather than merely enqueued. Existing reap tests use the compatibility alias
+	// below for the same ordering proof.
+	evControllerBarrier api.SMEvent = "controller-barrier"
+	evReapBarrier       api.SMEvent = evControllerBarrier
 )
 
 // evParoleTick is the F2 quarantine-parole scan, run as a controller-internal
@@ -741,9 +747,12 @@ const (
 // between the off-loop tick's Delete and an on-loop threshold record.
 const evParoleTick api.SMEvent = "parole-tick"
 
-// reapBarrierResultBodyKey carries the chan struct{} a test waits on for the
-// evReapBarrier synchronization event.
-const reapBarrierResultBodyKey = "reap_barrier_result"
+// controllerBarrierResultBodyKey carries the acknowledgement channel. The reap
+// alias retains source compatibility for existing tests.
+const (
+	controllerBarrierResultBodyKey = "controller_barrier_result"
+	reapBarrierResultBodyKey       = controllerBarrierResultBodyKey
+)
 
 // Reap event body keys.
 const (
@@ -2834,10 +2843,8 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 		generation, _ := ev.Body[reapFollowupGenerationBodyKey].(int)
 		c.handleReapFollowup(ev.TaskName, generation)
 		return
-	case evReapBarrier:
-		// TEST-ONLY: signal the waiting test goroutine that the loop has drained
-		// up to and including this event.
-		if ch, ok := ev.Body[reapBarrierResultBodyKey].(chan struct{}); ok {
+	case evControllerBarrier:
+		if ch, ok := ev.Body[controllerBarrierResultBodyKey].(chan struct{}); ok {
 			close(ch)
 		}
 		return

@@ -20,6 +20,19 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
+func TestRegisterLSPRollbackReleaseFailureJoinsProcessCleanup(t *testing.T) {
+	killErr := errors.New("kill")
+	releaseErr := errors.New("registry release")
+	origKill := killByPortFn
+	killByPortFn = func(int, time.Duration) error { return killErr }
+	t.Cleanup(func() { killByPortFn = origKill })
+
+	err := rollbackLSPRegistration(WorkspaceEntry{Port: 32123}, true, func() error { return releaseErr })
+	if !errors.Is(err, killErr) || !errors.Is(err, releaseErr) {
+		t.Fatalf("rollback error = %v, want process-cleanup and registry-release causes", err)
+	}
+}
+
 func TestEnsureLSPRegistered_ConcurrentFirstTouchWaitsForReadyPort(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

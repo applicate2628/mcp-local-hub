@@ -490,6 +490,68 @@ type ipcDispatchDeps struct {
 	controllerProvider func() *supervisorController
 }
 
+// emitSerenaIntentRepairOutcome records the result of a
+// RepairSerenaIntentFromRegistry self-heal pass to supervisor-events.log.
+// Shared by the supervisor's own startup self-heal (runSupervise, above) and
+// the `reconcile` IPC handler's apply-mode self-heal
+// (handleReconcile, supervise_reconcile_ipc.go) so both call sites emit the
+// identical audit shape for the same underlying outcome — one owner (C1) of
+// this audit vocabulary ("serena-intent-repair-failed" /
+// "serena-intent-repair-skipped" / "serena-intent-repair-result"), rather
+// than two independently-typed copies drifting apart. events == nil is a no-op (unit tests constructing a bare
+// ipcDispatchDeps{} with no event log configured); the repair itself is
+// non-fatal at every call site — a repair error or a deferred
+// introduce-crash never blocks supervisor startup or a reconcile request.
+func emitSerenaIntentRepairOutcome(events *api.SupervisorEventLog, result api.SerenaIntentRepairResult, rErr error) {
+	if events == nil {
+		return
+	}
+	if rErr != nil {
+		_ = events.TryEmit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "reconcile",
+			Event:    "serena-intent-repair-failed",
+			Body: map[string]any{
+				"err":     rErr.Error(),
+				"outcome": string(result.Outcome),
+			},
+		})
+		return
+	}
+	if result.Outcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedIntentLock || result.Outcome == api.SerenaIntentRepairOutcomeSkippedRemovalFenceProbe || result.Outcome == api.SerenaIntentRepairOutcomeIncompleteRemovalFence {
+		_ = events.TryEmit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "reconcile",
+			Event:    "serena-intent-repair-skipped",
+			Body: map[string]any{
+				"outcome":    string(result.Outcome),
+				"retryable":  true,
+				"incomplete": result.Incomplete,
+				"recovered":  result.Recovered,
+			},
+		})
+		return
+	}
+	if result.Repaired > 0 || len(result.Deferred) > 0 || len(result.Recovered) > 0 {
+		severity := "info"
+		if len(result.Deferred) > 0 {
+			severity = "warn"
+		}
+		_ = events.TryEmit(api.SupervisorEvent{
+			Severity: severity,
+			Source:   "reconcile",
+			Event:    "serena-intent-repair-result",
+			Body: map[string]any{
+				"outcome":            string(result.Outcome),
+				"repaired_count":     result.Repaired,
+				"deferred_count":     len(result.Deferred),
+				"deferred_workspace": result.Deferred,
+				"recovered":          result.Recovered,
+			},
+		})
+	}
+}
+
 const ipcErrorSupervisorStarting = "SUPERVISOR_STARTING"
 
 var daemonIntentReadLockTimeout = 5 * time.Second
@@ -834,31 +896,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// up the now-complete intent and the first reconcile spawns the recovered
 	// daemons. NON-FATAL: a repair error (or a deferred introduce-crash) never
 	// blocks supervisor startup — the supervisor must come up regardless.
-	if repaired, deferredKeys, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir); rErr != nil {
-		_ = events.TryEmit(api.SupervisorEvent{
-			Severity: "warn",
-			Source:   "reconcile",
-			Event:    "serena-intent-repair-failed",
-			Body: map[string]any{
-				"err": rErr.Error(),
-			},
-		})
-	} else if repaired > 0 || len(deferredKeys) > 0 {
-		severity := "info"
-		if len(deferredKeys) > 0 {
-			severity = "warn"
-		}
-		_ = events.TryEmit(api.SupervisorEvent{
-			Severity: severity,
-			Source:   "reconcile",
-			Event:    "serena-intent-repair-result",
-			Body: map[string]any{
-				"repaired_count":     repaired,
-				"deferred_count":     len(deferredKeys),
-				"deferred_workspace": deferredKeys,
-			},
-		})
-	}
+	serenaRepairResult, rErr := api.NewAPI().RepairSerenaIntentFromRegistry(stateDir)
+	emitSerenaIntentRepairOutcome(events, serenaRepairResult, rErr)
 
 	// Phase 4-E2 one-time dual-intent collapse: merge any active stops from
 	// the legacy daemon-intent.json into the unified supervisor-intent.json
@@ -1153,6 +1192,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		terminate:           terminateFn,
 		statePath:           statePath,
 		ctx:                 loopCtx,
+		targetRegistryPath:  api.DefaultRegistryPath,
 		failureWindow:       respawnFailureWindow,
 		quarantineThreshold: respawnQuarantineThreshold,
 		// reapFollowupDelay bounds how long an orphaned daemon lingers after its
@@ -1429,7 +1469,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		)
 		reconciler.LSPRegistryHasRow = func(d api.SupervisorDaemon) bool {
 			if !lspRegistryForReconcilePassLoaded {
-				lspRegistryForReconcilePass, _ = api.OpenLSPRegistryForReconcile()
+				var snapshotErr error
+				lspRegistryForReconcilePass, _, snapshotErr = api.OpenLSPRegistryForReconcile()
+				if snapshotErr != nil {
+					emitLSPRegistryReconcileSnapshotUnavailable(events, "startup", lspRegistryForReconcilePass != nil, snapshotErr)
+				}
 				lspRegistryForReconcilePassLoaded = true
 			}
 			return api.LSPRegistryRowBacksDescriptorIn(d, lspRegistryForReconcilePass)
@@ -1669,6 +1713,24 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		stderrSink.noteGracefulExit("context-cancel")
 		return ctx.Err()
 	}
+}
+
+func emitLSPRegistryReconcileSnapshotUnavailable(events *api.SupervisorEventLog, phase string, snapshotUsable bool, err error) {
+	if events == nil || err == nil {
+		return
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: api.SupervisorEventSeverityWarn,
+		Source:   api.SupervisorEventSourceReconcile,
+		Event:    "lsp-registry-reconcile-snapshot-unavailable",
+		Body: map[string]any{
+			"phase":               phase,
+			"error":               err.Error(),
+			"snapshot_usable":     snapshotUsable,
+			"release_unconfirmed": errors.Is(err, api.ErrLockReleaseUnconfirmed),
+			"restart_recovers":    errors.Is(err, api.ErrLockReleaseUnconfirmed),
+		},
+	})
 }
 
 // resolveWatcherDaemonIntent resolves the unified stops source for one
