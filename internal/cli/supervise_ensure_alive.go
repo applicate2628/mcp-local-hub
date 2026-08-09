@@ -1454,15 +1454,11 @@ func setGUIOwnerUnknownConfirmationConsumeFnForTest(fn func(string, time.Time) (
 }
 
 // defaultResetGUIOwnerUnknownConfirmationMarker is the production reset
-// implementation: try a plain remove first, and only if that fails for a
-// reason OTHER than "already absent" fall back to overwriting the marker
-// with the CURRENT time. See resetGUIOwnerUnknownConfirmationMarker's own
-// doc comment for the full rationale.
+// implementation. The existing bounded current-binary worker performs both
+// removal and fallback write while holding the marker's canonical flock, so
+// reset is ordered with every write and elapsed consume transaction.
 func defaultResetGUIOwnerUnknownConfirmationMarker(markerPath string, now time.Time) error {
-	if err := os.Remove(markerPath); err == nil || errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-	return writeGUIOwnerUnknownConfirmationMarker(markerPath, now)
+	return resetGUIOwnerUnknownConfirmationMarkerContained(markerPath, now)
 }
 
 // resetGUIOwnerUnknownConfirmationMarkerLogged is the non-Unknown-tick

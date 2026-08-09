@@ -268,8 +268,10 @@ func (e *auditLockRouteError) Unwrap() error { return e.cause }
 type auditLockAdapter struct {
 	mu               sync.Mutex
 	storeMu          sync.Mutex
+	activationMu     sync.Mutex
 	serverInstance   string
 	generation       uint64
+	storeClaimed     bool
 	storePath        string
 	logPath          string
 	initErr          error
@@ -340,6 +342,14 @@ func newAuditLockAdapter(events *Broadcaster) *auditLockAdapter {
 }
 
 func newAuditLockAdapterWithTerminalizationBudget(events *Broadcaster, terminalizationBudget time.Duration) *auditLockAdapter {
+	a := newUnclaimedAuditLockAdapterWithTerminalizationBudget(events, terminalizationBudget)
+	if a.initErr == nil {
+		_ = a.activateStore(context.Background())
+	}
+	return a
+}
+
+func newUnclaimedAuditLockAdapterWithTerminalizationBudget(events *Broadcaster, terminalizationBudget time.Duration) *auditLockAdapter {
 	if terminalizationBudget <= 0 {
 		terminalizationBudget = auditLockStoreLockTimeout
 	}
@@ -358,14 +368,22 @@ func newAuditLockAdapterWithTerminalizationBudget(events *Broadcaster, terminali
 			initErr: fmt.Errorf("resolve daemon state dir: %w", err),
 		}
 	}
-	return newAuditLockAdapterInStateDirWithTerminalizationBudget(events, stateDir, terminalizationBudget, auditLockTerminalizationConfig{
+	return newUnclaimedAuditLockAdapterInStateDirWithTerminalizationBudget(events, stateDir, terminalizationBudget, auditLockTerminalizationConfig{
 		mode:   auditLockTerminalizationBounded,
 		runner: runAuditLockTerminalWorker,
 	})
 }
 
 func newAuditLockAdapterInStateDirWithTerminalizationBudget(events *Broadcaster, stateDir string, terminalizationBudget time.Duration, terminalization auditLockTerminalizationConfig) *auditLockAdapter {
-	a := newAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, nil, emitOccurrenceStoreLockHealthEvent, terminalization)
+	a := newUnclaimedAuditLockAdapterInStateDirWithTerminalizationBudget(events, stateDir, terminalizationBudget, terminalization)
+	if a.initErr == nil {
+		_ = a.activateStore(context.Background())
+	}
+	return a
+}
+
+func newUnclaimedAuditLockAdapterInStateDirWithTerminalizationBudget(events *Broadcaster, stateDir string, terminalizationBudget time.Duration, terminalization auditLockTerminalizationConfig) *auditLockAdapter {
+	a := newUnclaimedAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, nil, emitOccurrenceStoreLockHealthEvent, terminalization)
 	if terminalizationBudget > 0 {
 		a.terminalizationBudget = terminalizationBudget
 	}
@@ -373,6 +391,20 @@ func newAuditLockAdapterInStateDirWithTerminalizationBudget(events *Broadcaster,
 }
 
 func newAuditLockAdapterInStateDirWithStoreLockDeps(
+	events *Broadcaster,
+	stateDir string,
+	factory occurrenceStoreLockFactory,
+	emit occurrenceStoreLockHealthEmitter,
+	terminalization auditLockTerminalizationConfig,
+) *auditLockAdapter {
+	a := newUnclaimedAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, factory, emit, terminalization)
+	if a.initErr == nil {
+		_ = a.activateStore(context.Background())
+	}
+	return a
+}
+
+func newUnclaimedAuditLockAdapterInStateDirWithStoreLockDeps(
 	events *Broadcaster,
 	stateDir string,
 	factory occurrenceStoreLockFactory,
@@ -399,12 +431,32 @@ func newAuditLockAdapterInStateDirWithStoreLockDeps(
 		return a
 	}
 	a.serverInstance = instance
-	claimCtx, cancel := context.WithTimeout(context.Background(), a.lockTimeout)
+	return a
+}
+
+func (a *auditLockAdapter) activateStore(ctx context.Context) error {
+	if a == nil {
+		return errors.New("nil audit-lock adapter")
+	}
+	a.activationMu.Lock()
+	defer a.activationMu.Unlock()
+	if a.initErr != nil {
+		return a.initErr
+	}
+	if a.storeClaimed {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	claimCtx, cancel := context.WithTimeout(ctx, a.lockTimeout)
 	defer cancel()
 	if err := a.claimStore(claimCtx); err != nil {
 		a.initErr = fmt.Errorf("claim daemon recovery occurrence store: %w", err)
+		return a.initErr
 	}
-	return a
+	a.storeClaimed = true
+	return nil
 }
 
 func emitOccurrenceStoreLockHealthEvent(event occurrenceStoreLockHealthEvent) {
@@ -1141,6 +1193,7 @@ func (a *auditLockAdapter) publishStoreWriteReconciled(operation string) {
 
 func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 	var claimed auditLockOccurrenceStore
+	reconciledAfterError := false
 	err := a.withStoreLock(ctx, "claim occurrence store", func(operation *auditLockStoreOperation) error {
 		store, err := a.readStoreLockHeld(true)
 		if err != nil {
@@ -1149,8 +1202,10 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 		if store.Generation == math.MaxUint64 {
 			return errors.New("occurrence generation overflow")
 		}
-		records := store.Records[:0]
-		for _, record := range store.Records {
+		before := cloneAuditLockOccurrenceStore(store)
+		intended := cloneAuditLockOccurrenceStore(store)
+		records := intended.Records[:0]
+		for _, record := range intended.Records {
 			if record.Status == auditLockOccurrenceConsumed {
 				continue
 			}
@@ -1163,17 +1218,25 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 			}
 			records = append(records, record)
 		}
-		store.Records = records
-		store.Version = auditLockOccurrenceStoreVersion
-		store.Generation++
-		store.ActiveServerInstance = a.serverInstance
-		if err := a.writeStoreLockHeld(store); err != nil {
-			return err
+		intended.Records = records
+		intended.Version = auditLockOccurrenceStoreVersion
+		intended.Generation++
+		intended.ActiveServerInstance = a.serverInstance
+		writeResult := a.writeStoreWithLockedReconciliation(operation, before, intended)
+		switch writeResult.outcome {
+		case auditLockStoreWriteDurable:
+			reconciledAfterError = writeResult.durableAfterError
+		case auditLockStoreWriteNotPublished, auditLockStoreWriteUncertain:
+			return writeResult.cause
+		default:
+			return errors.New("unknown occurrence-store write outcome")
 		}
-		operation.proveDurable()
-		claimed = store
+		claimed = intended
 		return nil
 	})
+	if reconciledAfterError {
+		a.publishStoreWriteReconciled("claim occurrence store")
+	}
 	if err != nil {
 		return err
 	}
@@ -1182,14 +1245,23 @@ func (a *auditLockAdapter) claimStore(ctx context.Context) error {
 }
 
 func (a *auditLockAdapter) ensureReady() *auditLockRouteError {
-	if a == nil || a.initErr != nil {
+	if a == nil {
+		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
+	}
+	a.activationMu.Lock()
+	initErr := a.initErr
+	storeClaimed := a.storeClaimed
+	a.activationMu.Unlock()
+	if initErr != nil || !storeClaimed {
 		if a != nil {
 			if healthErr := a.storeLockHealth.strandedError("claim occurrence store", occurrenceStoreDataDurableProven); healthErr != nil {
 				return auditLockRouteErrorFromStoreError(healthErr, 500, daemonRecoverErrorAuditLockAdapterInit)
 			}
-			return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit), cause: a.initErr}
+			if initErr == nil {
+				initErr = errors.New("daemon recovery occurrence store is not activated")
+			}
+			return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit), cause: initErr}
 		}
-		return &auditLockRouteError{status: 500, code: string(daemonRecoverErrorAuditLockAdapterInit)}
 	}
 	return nil
 }

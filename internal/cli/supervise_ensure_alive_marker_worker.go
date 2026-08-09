@@ -43,6 +43,7 @@ const (
 const (
 	guiOwnerUnknownConfirmationOperationWrite   = "write"
 	guiOwnerUnknownConfirmationOperationConsume = "consume_elapsed"
+	guiOwnerUnknownConfirmationOperationReset   = "reset"
 )
 
 type guiOwnerUnknownConfirmationWorkerRequest struct {
@@ -126,6 +127,10 @@ func runGUIOwnerUnknownConfirmationMarkerWorker(in io.Reader, out io.Writer) err
 		result.Outcome, result.Failure = consumeGUIOwnerUnknownConfirmationMarkerLockHeld(markerPath, request.ObservedAt)
 		return writeGUIOwnerUnknownConfirmationWorkerResult(out, result)
 	}
+	if operation == guiOwnerUnknownConfirmationOperationReset {
+		result.Outcome, result.Failure = resetGUIOwnerUnknownConfirmationMarkerLockHeld(markerPath, request.ObservedAt)
+		return writeGUIOwnerUnknownConfirmationWorkerResult(out, result)
+	}
 	if operation != guiOwnerUnknownConfirmationOperationWrite {
 		result.Outcome, result.Failure = "rejected", string(guiOwnerUnknownConfirmationFailureProtocol)
 		return writeGUIOwnerUnknownConfirmationWorkerResult(out, result)
@@ -136,6 +141,31 @@ func runGUIOwnerUnknownConfirmationMarkerWorker(in io.Reader, out io.Writer) err
 	}
 	result.Outcome = "written"
 	return writeGUIOwnerUnknownConfirmationWorkerResult(out, result)
+}
+
+// resetGUIOwnerUnknownConfirmationMarkerLockHeld serializes every interruption
+// of an Unknown-owner confirmation window with the same per-marker flock used
+// by writes and elapsed consumption. A reset that overlaps an already-authorized
+// writer therefore runs after that writer publishes and removes its marker,
+// rather than racing a plain os.Remove against the writer's atomic rename.
+func resetGUIOwnerUnknownConfirmationMarkerLockHeld(markerPath string, observedAt time.Time) (outcome, failure string) {
+	lk := flock.New(markerPath + ".lock")
+	if err := lk.Lock(); err != nil {
+		_ = lk.Close()
+		return "failed", string(guiOwnerUnknownConfirmationFailureStateWrite)
+	}
+	defer func() {
+		if err := lk.Close(); err != nil {
+			outcome, failure = "failed", string(guiOwnerUnknownConfirmationFailureStateWrite)
+		}
+	}()
+	if err := os.Remove(markerPath); err == nil || errors.Is(err, os.ErrNotExist) {
+		return "reset", ""
+	}
+	if err := api.WriteStateFileBytesLockHeld(markerPath, []byte(observedAt.UTC().Format(time.RFC3339Nano))); err != nil {
+		return "failed", string(guiOwnerUnknownConfirmationFailureStateWrite)
+	}
+	return "reset", ""
 }
 
 // consumeGUIOwnerUnknownConfirmationMarkerLockHeld is the cross-process
@@ -224,6 +254,24 @@ func consumeGUIOwnerUnknownConfirmationMarker(ctx context.Context, stateDir stri
 	}
 }
 
+func resetGUIOwnerUnknownConfirmationMarkerContained(markerPath string, observedAt time.Time) error {
+	cleanPath := filepath.Clean(markerPath)
+	stateDir := filepath.Dir(cleanPath)
+	if markerPath == "" || !filepath.IsAbs(markerPath) || cleanPath != markerPath || filepath.Base(cleanPath) != guiOwnerUnknownConfirmationFileLeaf {
+		return &guiOwnerUnknownConfirmationWorkerError{failure: guiOwnerUnknownConfirmationFailureInvalidInvocation, cause: errors.New("confirmation marker path is not the canonical leaf")}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), guiOwnerUnknownConfirmationWriteBudget)
+	defer cancel()
+	workerResult, err := runGUIOwnerUnknownConfirmationMarkerOperation(ctx, stateDir, observedAt, guiOwnerUnknownConfirmationOperationReset)
+	if err != nil {
+		return err
+	}
+	if workerResult.Outcome != "reset" || workerResult.Failure != "" {
+		return &guiOwnerUnknownConfirmationWorkerError{failure: guiOwnerUnknownConfirmationFailureProtocol, cause: errors.New("confirmation marker result contradicts reset protocol")}
+	}
+	return nil
+}
+
 func runGUIOwnerUnknownConfirmationMarkerOperation(ctx context.Context, stateDir string, observedAt time.Time, operation string) (guiOwnerUnknownConfirmationWorkerResult, error) {
 	payload, err := json.Marshal(guiOwnerUnknownConfirmationWorkerRequest{
 		Version: guiOwnerUnknownConfirmationWorkerVersion, Operation: operation, StateDir: stateDir, ObservedAt: observedAt.UTC(),
@@ -294,7 +342,7 @@ func decodeGUIOwnerUnknownConfirmationWorkerResult(result process.StrictRunResul
 	if workerResult.Version != guiOwnerUnknownConfirmationWorkerVersion {
 		return workerResult, &guiOwnerUnknownConfirmationWorkerError{failure: guiOwnerUnknownConfirmationFailureProtocol, cause: errors.New("confirmation marker result version mismatch"), stdout: result.Stdout, stderr: result.Stderr}
 	}
-	if workerResult.Failure == "" && (workerResult.Outcome == "written" || workerResult.Outcome == "consumed" || workerResult.Outcome == "not_consumed") {
+	if workerResult.Failure == "" && (workerResult.Outcome == "written" || workerResult.Outcome == "consumed" || workerResult.Outcome == "not_consumed" || workerResult.Outcome == "reset") {
 		return workerResult, nil
 	}
 	if workerResult.Outcome == "failed" && (workerResult.Failure == string(guiOwnerUnknownConfirmationFailureStateWrite) || workerResult.Failure == string(guiOwnerUnknownConfirmationFailureStateRead)) {

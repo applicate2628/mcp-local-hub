@@ -45,6 +45,7 @@ func TestGUIOwnerUnknownConfirmationMarkerWorker_Protocol(t *testing.T) {
 		want    guiOwnerUnknownConfirmationWorkerResult
 	}{
 		{name: "valid", request: guiOwnerUnknownConfirmationWorkerRequest{Version: 1, StateDir: stateDir, ObservedAt: now}, want: guiOwnerUnknownConfirmationWorkerResult{Version: 1, Outcome: "written"}},
+		{name: "valid reset", request: guiOwnerUnknownConfirmationWorkerRequest{Version: 1, Operation: guiOwnerUnknownConfirmationOperationReset, StateDir: stateDir, ObservedAt: now}, want: guiOwnerUnknownConfirmationWorkerResult{Version: 1, Outcome: "reset"}},
 		{name: "zero time", request: guiOwnerUnknownConfirmationWorkerRequest{Version: 1, StateDir: stateDir}, want: guiOwnerUnknownConfirmationWorkerResult{Version: 1, Outcome: "rejected", Failure: "protocol_invalid"}},
 		{name: "future time", request: guiOwnerUnknownConfirmationWorkerRequest{Version: 1, StateDir: stateDir, ObservedAt: now.Add(time.Hour)}, want: guiOwnerUnknownConfirmationWorkerResult{Version: 1, Outcome: "rejected", Failure: "protocol_invalid"}},
 		{name: "relative state", request: guiOwnerUnknownConfirmationWorkerRequest{Version: 1, StateDir: "relative", ObservedAt: now}, want: guiOwnerUnknownConfirmationWorkerResult{Version: 1, Outcome: "rejected", Failure: "protocol_invalid"}},
@@ -209,6 +210,60 @@ func TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockTimesOutAndReaps(t *tes
 	}
 }
 
+func TestGUIOwnerUnknownConfirmationMarkerResetSerializesAfterPublishedWrite(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	markerPath := filepath.Join(stateDir, guiOwnerUnknownConfirmationFileLeaf)
+	holder := flock.New(markerPath + ".lock")
+	if err := holder.Lock(); err != nil {
+		t.Fatal(err)
+	}
+	holderReleased := false
+	t.Cleanup(func() {
+		if !holderReleased {
+			_ = holder.Unlock()
+		}
+	})
+
+	started := make(chan struct{})
+	resetDone := make(chan struct {
+		outcome string
+		failure string
+	}, 1)
+	go func() {
+		close(started)
+		outcome, failure := resetGUIOwnerUnknownConfirmationMarkerLockHeld(markerPath, time.Now().UTC())
+		resetDone <- struct {
+			outcome string
+			failure string
+		}{outcome: outcome, failure: failure}
+	}()
+	<-started
+	select {
+	case result := <-resetDone:
+		t.Fatalf("reset bypassed held marker flock: %+v", result)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	if err := api.WriteStateFileBytesLockHeld(markerPath, []byte(time.Now().UTC().Format(time.RFC3339Nano))); err != nil {
+		t.Fatal(err)
+	}
+	if err := holder.Unlock(); err != nil {
+		t.Fatal(err)
+	}
+	holderReleased = true
+	select {
+	case result := <-resetDone:
+		if result.outcome != "reset" || result.failure != "" {
+			t.Fatalf("reset result=%+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reset did not finish after marker flock release")
+	}
+	if _, err := os.Stat(markerPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("marker survived serialized reset: %v", err)
+	}
+}
+
 func TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockBoundsAllWriteSites(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -246,12 +301,9 @@ func TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockBoundsAllWriteSites(t *
 			wantEvent: "gui-owner-unknown-confirmation-write-failed",
 		},
 		{
-			name: "reset fallback",
+			name: "reset transaction",
 			prepare: func(t *testing.T, _ string, markerPath string) {
-				if err := os.Mkdir(markerPath, 0o700); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(markerPath, "keep"), []byte("x"), 0o600); err != nil {
+				if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, time.Now().UTC().Add(-time.Hour)); err != nil {
 					t.Fatal(err)
 				}
 			},
@@ -273,7 +325,7 @@ func TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockBoundsAllWriteSites(t *
 			start := time.Now()
 			err := test.invoke(stateDir, markerPath, time.Now().UTC())
 			elapsed := time.Since(start)
-			if test.name == "reset fallback" {
+			if test.name == "reset transaction" {
 				var workerErr *guiOwnerUnknownConfirmationWorkerError
 				if !errors.As(err, &workerErr) || workerErr.failure != guiOwnerUnknownConfirmationFailureTimeout || workerErr.pid <= 0 || process.IsPidAlive(workerErr.pid) {
 					t.Fatalf("reset error=%v typed=%+v", err, workerErr)
@@ -298,11 +350,8 @@ func TestGUIOwnerUnknownConfirmationMarkerWorker_HeldLockBoundsAllWriteSites(t *
 			if err := probe.Unlock(); err != nil {
 				t.Fatal(err)
 			}
-			if test.name == "reset fallback" {
-				if err := os.Remove(filepath.Join(markerPath, "keep")); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.Remove(markerPath); err != nil {
+			if test.name == "reset transaction" {
+				if err := os.Remove(markerPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 					t.Fatal(err)
 				}
 			}

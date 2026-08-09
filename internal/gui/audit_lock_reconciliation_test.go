@@ -81,6 +81,57 @@ func readAuditLockStoreForTest(t *testing.T, path string) auditLockOccurrenceSto
 	return store
 }
 
+func TestAuditLockStartupClaimReconcilesPublishedWriteAndPreservesPriorOwnerOnFailure(t *testing.T) {
+	t.Run("post-rename error adopts published claim", func(t *testing.T) {
+		stateDir := t.TempDir()
+		prior := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
+		before := readAuditLockStoreForTest(t, prior.storePath)
+		prior.close()
+
+		events := NewBroadcaster()
+		defer events.Close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		published := events.Subscribe(ctx)
+		adapter := newUnclaimedAuditLockAdapterInStateDirWithStoreLockDeps(events, stateDir, nil, emitOccurrenceStoreLockHealthEvent, directTestAuditLockTerminalization())
+		defer adapter.close()
+		installAuditLockWriterMode(t, adapter, auditLockWriterAfterWrite)
+		if err := adapter.activateStore(context.Background()); err != nil {
+			t.Fatalf("activate reconciled claim: %v", err)
+		}
+		after := readAuditLockStoreForTest(t, adapter.storePath)
+		if !adapter.storeClaimed || adapter.generation != before.Generation+1 || after.Generation != before.Generation+1 || after.ActiveServerInstance != adapter.serverInstance {
+			t.Fatalf("adapter claimed=%t generation=%d store=%+v before=%+v", adapter.storeClaimed, adapter.generation, after, before)
+		}
+		select {
+		case event := <-published:
+			if event.Type != "daemon-recovery-occurrence-store-write-reconciled" || event.Body["operation"] != "claim occurrence store" || event.Body["failure_id"] != "post_rename_exact_reread" {
+				t.Fatalf("event=%+v", event)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("reconciled startup claim event not published")
+		}
+	})
+
+	t.Run("pre-publish failure leaves prior owner unchanged", func(t *testing.T) {
+		stateDir := t.TempDir()
+		prior := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
+		before := readAuditLockStoreForTest(t, prior.storePath)
+		prior.close()
+
+		adapter := newUnclaimedAuditLockAdapterInStateDirWithStoreLockDeps(nil, stateDir, nil, nil, directTestAuditLockTerminalization())
+		defer adapter.close()
+		installAuditLockWriterMode(t, adapter, auditLockWriterBeforeWrite)
+		if err := adapter.activateStore(context.Background()); err == nil {
+			t.Fatal("startup claim unexpectedly succeeded before writer publication")
+		}
+		after := readAuditLockStoreForTest(t, adapter.storePath)
+		if adapter.storeClaimed || adapter.generation != 0 || !reflect.DeepEqual(after, before) {
+			t.Fatalf("failed activation changed state: claimed=%t generation=%d after=%+v before=%+v", adapter.storeClaimed, adapter.generation, after, before)
+		}
+	})
+}
+
 func TestAuditLockReserveWriterReconciliationMatrix(t *testing.T) {
 	tests := []struct {
 		mode            auditLockWriterFailureMode

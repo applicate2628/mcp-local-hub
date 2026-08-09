@@ -965,7 +965,7 @@ func NewServer(cfg Config) *Server {
 	if terminalizationBudget <= 0 {
 		terminalizationBudget = auditLockStoreLockTimeout
 	}
-	s.auditLock = newAuditLockAdapterWithTerminalizationBudget(s.events, terminalizationBudget)
+	s.auditLock = newUnclaimedAuditLockAdapterWithTerminalizationBudget(s.events, terminalizationBudget)
 	s.shutdownDrainTimeout = shutdownDrainTimeout
 	s.recoverySettlements = newRecoverySettlementRegistry(postCommitBudget, terminalizationBudget, func(event Event) {
 		if s.events != nil {
@@ -1180,6 +1180,10 @@ func (s *Server) ContinueWithGUIListener(ctx context.Context, ready chan<- struc
 }
 
 func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struct{}, owner *GUIListenerOwner, ln net.Listener) error {
+	if err := s.auditLock.activateStore(ctx); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("activate daemon recovery occurrence store: %w", err)
+	}
 	s.port.Store(int32(ln.Addr().(*net.TCPAddr).Port))
 
 	// Phase 4 (G4) — hub listener wiring. The gate is read from
