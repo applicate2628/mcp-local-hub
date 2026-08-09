@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 )
 
 type r19SpecialSemanticInfo struct{}
@@ -20,13 +22,21 @@ func (r19SpecialSemanticInfo) IsDir() bool        { return false }
 func (r19SpecialSemanticInfo) Sys() any           { return nil }
 
 func TestR19SemanticFileRejectsSpecialFileBeforeOpen(t *testing.T) {
-	opened := false
-	_, _, err := readSemanticFileWithOps("portfile.cmake",
-		func(string) (os.FileInfo, error) { return r19SpecialSemanticInfo{}, nil },
-		func(string) (io.ReadCloser, error) { opened = true; return nil, io.EOF })
-	if err == nil || opened {
-		t.Fatalf("err=%v opened=%v, want special-file rejection before Open", err, opened)
+	file := &r19SemanticFile{ReadCloser: io.NopCloser(strings.NewReader("ignored"))}
+	_, _, err := readSemanticFileWithOpener("portfile.cmake", func(string) (boundedio.RegularFile, error) { return file, nil })
+	if err == nil || file.statCalls != 1 {
+		t.Fatalf("err=%v stat calls=%d, want same-handle special-file rejection", err, file.statCalls)
 	}
+}
+
+type r19SemanticFile struct {
+	io.ReadCloser
+	statCalls int
+}
+
+func (f *r19SemanticFile) Stat() (os.FileInfo, error) {
+	f.statCalls++
+	return r19SpecialSemanticInfo{}, nil
 }
 
 func TestR19PortfileCapsRetainedFetchCandidates(t *testing.T) {

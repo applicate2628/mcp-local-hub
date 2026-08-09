@@ -162,7 +162,10 @@ type endlessFS struct {
 	fill  byte
 }
 
-type endlessReader struct{ fill byte }
+type endlessReader struct {
+	fill byte
+	info os.FileInfo
+}
 
 func (e endlessReader) Read(p []byte) (int, error) {
 	for i := range p {
@@ -170,7 +173,8 @@ func (e endlessReader) Read(p []byte) (int, error) {
 	}
 	return len(p), nil
 }
-func (endlessReader) Close() error { return nil }
+func (endlessReader) Close() error                 { return nil }
+func (e endlessReader) Stat() (os.FileInfo, error) { return e.info, nil }
 
 func (f endlessFS) Stat(p string) (os.FileInfo, error) {
 	if strings.Contains(filepath.ToSlash(p), f.sub) {
@@ -181,7 +185,7 @@ func (f endlessFS) Stat(p string) (os.FileInfo, error) {
 func (f endlessFS) OpenDir(p string) (DirReader, error) { return f.inner.OpenDir(p) }
 func (f endlessFS) Open(p string) (io.ReadCloser, error) {
 	if strings.Contains(filepath.ToSlash(p), f.sub) {
-		return endlessReader{fill: f.fill}, nil
+		return endlessReader{fill: f.fill, info: regularTestFileInfo{name: p}}, nil
 	}
 	return f.inner.Open(p)
 }

@@ -1228,7 +1228,7 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 			argText := data[c.ArgStart:c.ArgEnd]
 			rawArg, ok = firstArgument(argText)
 			malformed = !ok
-			optional = kind == EdgeInclude && hasArgumentKeyword(argText, "OPTIONAL")
+			optional = kind == EdgeInclude && includeArgumentOptional(argText)
 		}
 
 		e := Edge{
@@ -1549,6 +1549,9 @@ func classifyArg(kind EdgeKind, rawArg string, malformed, deferredMacro bool, li
 	if kind == EdgeInclude && !hadVariable && looksLikeModuleName(substituted) {
 		return "", ReasonModuleNameNotPath, false
 	}
+	if deferredMacro && !filepath.IsAbs(substituted) {
+		return "", ReasonDeferredMacroContext, false
+	}
 
 	p := substituted
 	if !filepath.IsAbs(p) {
@@ -1858,6 +1861,40 @@ func hasArgumentKeyword(argText []byte, keyword string) bool {
 			return true
 		}
 		offset = next
+	}
+}
+
+// includeArgumentOptional recognizes OPTIONAL only as an independent
+// include() option. RESULT_VARIABLE consumes exactly one following argument,
+// even when that value itself is spelled OPTIONAL.
+func includeArgumentOptional(argText []byte) bool {
+	offset := 0
+	argumentIndex := 0
+	consumeResultValue := false
+	for {
+		value, next, bracket, ok, found := nextArgument(argText, offset)
+		if !ok || !found {
+			return false
+		}
+		offset = next
+		if argumentIndex == 0 {
+			argumentIndex++
+			continue
+		}
+		if consumeResultValue {
+			consumeResultValue = false
+			continue
+		}
+		if bracket {
+			continue
+		}
+		if strings.EqualFold(value, "RESULT_VARIABLE") {
+			consumeResultValue = true
+			continue
+		}
+		if strings.EqualFold(value, "OPTIONAL") {
+			return true
+		}
 	}
 }
 

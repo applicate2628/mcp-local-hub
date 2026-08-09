@@ -141,13 +141,13 @@ func TestInspectPortCandidateValidatesManifestTargetMatrix(t *testing.T) {
 		configure func(*testing.T, string, string)
 		want      probeKind
 	}{
-		{"regular target", func(t *testing.T, base, port string) {
+		{"symlink regular target", func(t *testing.T, base, port string) {
 			target := filepath.Join(base, "target.cmake")
 			if err := os.WriteFile(target, []byte("# port"), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			makeLink(t, target, filepath.Join(port, "portfile.cmake"))
-		}, probeFound},
+		}, probeUnreadable},
 		{"dangling target", func(t *testing.T, base, port string) {
 			makeLink(t, filepath.Join(base, "missing.cmake"), filepath.Join(port, "portfile.cmake"))
 		}, probeAbsent},
@@ -172,8 +172,12 @@ func TestInspectPortCandidateValidatesManifestTargetMatrix(t *testing.T) {
 				t.Fatal(err)
 			}
 			tc.configure(t, base, port)
-			if outcome := inspectPortCandidate(context.Background(), DefaultDeps(), port); outcome.kind != tc.want {
-				t.Fatalf("outcome=%+v, want kind=%v", outcome, tc.want)
+			want := tc.want
+			if tc.name == "symlink regular target" && runtime.GOOS == "windows" {
+				want = probeFound
+			}
+			if outcome := inspectPortCandidate(context.Background(), DefaultDeps(), port); outcome.kind != want {
+				t.Fatalf("outcome=%+v, want kind=%v", outcome, want)
 			}
 		})
 	}
@@ -200,6 +204,9 @@ func (f *pr591ProbeFile) Read(p []byte) (int, error) {
 	return n, nil
 }
 func (f *pr591ProbeFile) Close() error { f.closeCount++; return f.closeErr }
+func (f *pr591ProbeFile) Stat() (os.FileInfo, error) {
+	return newFakeStat("portfile.cmake", false), nil
+}
 
 type pr591ProbeDir struct {
 	requests   []int
@@ -278,6 +285,10 @@ type pr591CancelFile struct {
 	cancel context.CancelFunc
 }
 
+func (f *pr591CancelFile) Stat() (os.FileInfo, error) {
+	return f.ReadCloser.(boundedio.RegularFile).Stat()
+}
+
 func (f *pr591CancelFile) Read(p []byte) (int, error) {
 	n, err := f.ReadCloser.Read(p)
 	f.cancel()
@@ -287,6 +298,10 @@ func (f *pr591CancelFile) Read(p []byte) (int, error) {
 type pr591CancelCloseFile struct {
 	io.ReadCloser
 	cancel context.CancelFunc
+}
+
+func (f *pr591CancelCloseFile) Stat() (os.FileInfo, error) {
+	return f.ReadCloser.(boundedio.RegularFile).Stat()
 }
 
 func (f *pr591CancelCloseFile) Close() error { err := f.ReadCloser.Close(); f.cancel(); return err }

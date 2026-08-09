@@ -97,9 +97,17 @@ func (r *LineReader) ReadLine() (LineResult, error) {
 
 // FS is the filesystem surface required by bounded admission.
 type FS interface {
+	OpenRegular(path string) (RegularFile, error)
 	Stat(path string) (os.FileInfo, error)
 	Open(path string) (io.ReadCloser, error)
 	OpenDir(path string) (DirReader, error)
+}
+
+// RegularFile is a file handle whose type is validated from that same open
+// handle, eliminating path-based Stat/Open replacement races.
+type RegularFile interface {
+	io.ReadCloser
+	Stat() (os.FileInfo, error)
 }
 
 // DirReader is the paged directory surface implemented by *os.File.
@@ -135,15 +143,7 @@ func ReadFile(ctx context.Context, fsys FS, path string, maxBytes, pageBytes int
 		return FileResult{}, err
 	}
 
-	info, err := fsys.Stat(path)
-	if err != nil {
-		return FileResult{}, err
-	}
-	if !info.Mode().IsRegular() {
-		return FileResult{}, fmt.Errorf("boundedio: refuse non-regular file %q (%s)", path, info.Mode().Type())
-	}
-
-	reader, err := fsys.Open(path)
+	reader, err := fsys.OpenRegular(path)
 	if err != nil {
 		return FileResult{}, err
 	}
@@ -153,6 +153,13 @@ func ReadFile(ctx context.Context, fsys FS, path string, maxBytes, pageBytes int
 			err = errors.Join(err, closeErr)
 		}
 	}()
+	info, err := reader.Stat()
+	if err != nil {
+		return FileResult{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return FileResult{}, fmt.Errorf("boundedio: refuse non-regular file %q (%s)", path, info.Mode().Type())
+	}
 
 	if err := ctx.Err(); err != nil {
 		return FileResult{}, err

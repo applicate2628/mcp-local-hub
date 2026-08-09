@@ -68,11 +68,26 @@ type DirReader = boundedio.DirReader
 type osFS struct{}
 
 func (osFS) Stat(p string) (os.FileInfo, error)   { return os.Stat(p) }
-func (osFS) Open(p string) (io.ReadCloser, error) { return os.Open(p) }
+func (osFS) Open(p string) (io.ReadCloser, error) { return boundedio.OpenRegular(p) }
 func (osFS) OpenDir(p string) (DirReader, error)  { return os.Open(p) }
 
 // DefaultFS wires FS to the real OS.
 func DefaultFS() FS { return osFS{} }
+
+type boundedFS struct{ FS }
+
+func (f boundedFS) OpenRegular(path string) (boundedio.RegularFile, error) {
+	reader, err := f.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	file, ok := reader.(boundedio.RegularFile)
+	if !ok {
+		_ = reader.Close()
+		return nil, os.ErrInvalid
+	}
+	return file, nil
+}
 
 // maxLogBytes bounds how much of ONE phase log this package streams.
 //
@@ -99,7 +114,7 @@ func readMetadataLimited(fsys FS, path string, limit int64) ([]byte, bool, error
 }
 
 func readMetadataLimitedContext(ctx context.Context, fsys FS, path string, limit int64) ([]byte, bool, error) {
-	result, err := boundedio.ReadFile(ctx, fsys, path, limit, 64<<10)
+	result, err := boundedio.ReadFile(ctx, boundedFS{fsys}, path, limit, 64<<10)
 	if err != nil {
 		return nil, false, err
 	}
@@ -111,7 +126,7 @@ const directoryReadPageEntries = 128
 // readDirBounded delegates generic paging, terminal-request arithmetic, exact
 // close ownership, and whole-directory overflow omission to boundedio.
 func readDirBounded(ctx context.Context, fsys FS, path string, limit int) ([]os.DirEntry, bool, error) {
-	result, err := boundedio.ReadDirComplete(ctx, fsys, path, limit, directoryReadPageEntries)
+	result, err := boundedio.ReadDirComplete(ctx, boundedFS{fsys}, path, limit, directoryReadPageEntries)
 	if err != nil {
 		return nil, false, err
 	}

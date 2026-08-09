@@ -17,6 +17,10 @@ type varEnv struct {
 	// value CMake stores; spans carry provenance only and never create list
 	// element boundaries.
 	values map[string]serializedValue
+	// inactiveValues retains assignments from definitely inactive branches
+	// only for later exact PATCHES-variable reference inventory. These values
+	// never participate in execution or ordinary variable lookup.
+	inactiveValues map[string][]serializedValue
 
 	// vcpkgRoot backs $ENV{VCPKG_ROOT} expansion (Args.VcpkgRoot).
 	vcpkgRoot string
@@ -158,10 +162,11 @@ func (env *varEnv) unsetValue(name string, meta provenanceMeta) {
 // supplied.
 func newVarEnv(portDir, portName, vcpkgRoot string, overrides map[string]string, tripletFacts map[string]string) *varEnv {
 	env := &varEnv{
-		values:    map[string]serializedValue{},
-		vcpkgRoot: vcpkgRoot,
-		portName:  portName,
-		portDir:   portDir,
+		values:         map[string]serializedValue{},
+		inactiveValues: map[string][]serializedValue{},
+		vcpkgRoot:      vcpkgRoot,
+		portName:       portName,
+		portDir:        portDir,
 	}
 	for name, val := range tripletFacts {
 		env.setValue(name, serializedValue{text: val})
@@ -830,11 +835,18 @@ func dedupStrings(in []string) []string {
 // builtin ports tree) without this package assuming every patch reference is
 // port-dir-relative.
 func (env *varEnv) getFilenameComponentAbsolute(input string) string {
+	return env.getFilenameComponentAbsoluteBase(input, env.portDir)
+}
+
+func (env *varEnv) getFilenameComponentAbsoluteBase(input, base string) string {
 	if input == "" {
 		return ""
 	}
 	if filepath.IsAbs(input) {
 		return filepath.Clean(input)
 	}
-	return filepath.Clean(filepath.Join(env.portDir, input))
+	if !filepath.IsAbs(base) {
+		base = filepath.Join(env.portDir, base)
+	}
+	return filepath.Clean(filepath.Join(base, input))
 }

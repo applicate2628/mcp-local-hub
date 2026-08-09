@@ -3,6 +3,8 @@ package pinstatus
 import (
 	"io"
 	"os"
+
+	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 )
 
 // FS abstracts the package's fixed-budget semantic-file read. When err is nil,
@@ -19,22 +21,22 @@ type osFS struct{}
 var _ FS = osFS{}
 
 func (osFS) ReadFile(p string) ([]byte, bool, error) {
-	return readSemanticFileWithOps(p, os.Stat, func(path string) (io.ReadCloser, error) { return os.Open(path) })
+	return readSemanticFileWithOpener(p, boundedio.OpenRegular)
 }
 
-func readSemanticFileWithOps(p string, stat func(string) (os.FileInfo, error), open func(string) (io.ReadCloser, error)) ([]byte, bool, error) {
-	info, err := stat(p)
-	if err != nil {
-		return nil, false, err
-	}
-	if info == nil || !info.Mode().IsRegular() {
-		return nil, false, os.ErrInvalid
-	}
+func readSemanticFileWithOpener(p string, open func(string) (boundedio.RegularFile, error)) ([]byte, bool, error) {
 	file, err := open(p)
 	if err != nil {
 		return nil, false, err
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil || info == nil || !info.Mode().IsRegular() {
+		if err != nil {
+			return nil, false, err
+		}
+		return nil, false, os.ErrInvalid
+	}
 
 	// The sentinel is derived solely from the untyped package constant. Its
 	// conversion is checked at compile time, so an unrepresentable future limit

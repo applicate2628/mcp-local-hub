@@ -321,7 +321,7 @@ func DefaultDeps() Deps {
 	return Deps{
 		Stat: os.Stat,
 		Open: func(path string) (io.ReadCloser, error) {
-			return os.Open(path)
+			return boundedio.OpenRegular(path)
 		},
 		OpenDir: func(path string) (boundedio.DirReader, error) {
 			return os.Open(path)
@@ -358,6 +358,19 @@ type boundedDeps struct{ deps Deps }
 
 func (d boundedDeps) Open(path string) (io.ReadCloser, error) {
 	return d.deps.Open(path)
+}
+
+func (d boundedDeps) OpenRegular(path string) (boundedio.RegularFile, error) {
+	reader, err := d.deps.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	file, ok := reader.(boundedio.RegularFile)
+	if !ok {
+		_ = reader.Close()
+		return nil, os.ErrInvalid
+	}
+	return file, nil
 }
 
 func (d boundedDeps) Stat(path string) (os.FileInfo, error) { return d.deps.Stat(path) }

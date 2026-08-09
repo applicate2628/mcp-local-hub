@@ -185,7 +185,7 @@ type Deps struct {
 func DefaultDeps() Deps {
 	return Deps{
 		Stat:    os.Stat,
-		Open:    func(path string) (io.ReadCloser, error) { return os.Open(path) },
+		Open:    func(path string) (io.ReadCloser, error) { return boundedio.OpenRegular(path) },
 		OpenDir: func(path string) (boundedio.DirReader, error) { return os.Open(path) },
 		Abs:     filepath.Abs,
 	}
@@ -193,7 +193,19 @@ func DefaultDeps() Deps {
 
 type depsFS struct{ deps Deps }
 
-func (f depsFS) Open(path string) (io.ReadCloser, error)          { return f.deps.Open(path) }
+func (f depsFS) Open(path string) (io.ReadCloser, error) { return f.deps.Open(path) }
+func (f depsFS) OpenRegular(path string) (boundedio.RegularFile, error) {
+	reader, err := f.deps.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	file, ok := reader.(boundedio.RegularFile)
+	if !ok {
+		_ = reader.Close()
+		return nil, os.ErrInvalid
+	}
+	return file, nil
+}
 func (f depsFS) Stat(path string) (os.FileInfo, error)            { return f.deps.Stat(path) }
 func (f depsFS) OpenDir(path string) (boundedio.DirReader, error) { return f.deps.OpenDir(path) }
 

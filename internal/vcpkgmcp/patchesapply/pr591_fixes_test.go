@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/vcpkgmcp/boundedio"
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
@@ -323,6 +324,19 @@ func (r *pr591ReadCloser) Close() error {
 	r.closed = true
 	return nil
 }
+
+func (r *pr591ReadCloser) Stat() (os.FileInfo, error) {
+	return pr591RegularInfo{}, nil
+}
+
+type pr591RegularInfo struct{}
+
+func (pr591RegularInfo) Name() string       { return "portfile.cmake" }
+func (pr591RegularInfo) Size() int64        { return 0 }
+func (pr591RegularInfo) Mode() os.FileMode  { return 0 }
+func (pr591RegularInfo) ModTime() time.Time { return time.Time{} }
+func (pr591RegularInfo) IsDir() bool        { return false }
+func (pr591RegularInfo) Sys() any           { return nil }
 
 // TestPR591_PortfileReadStopsAtPackageByteCap proves the parser receives only
 // a complete bounded portfile: the cap-plus-one byte is a sentinel, not a

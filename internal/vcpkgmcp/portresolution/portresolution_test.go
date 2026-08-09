@@ -50,7 +50,28 @@ func (fd *fakeDeps) Open(path string) (io.ReadCloser, error) {
 	if _, err := fd.Stat(path); err != nil {
 		return nil, err
 	}
-	return io.NopCloser(strings.NewReader("")), nil
+	info, _ := fd.Stat(path)
+	return &fakeRegularFile{ReadCloser: io.NopCloser(strings.NewReader("")), info: info}, nil
+}
+
+type fakeRegularFile struct {
+	io.ReadCloser
+	info os.FileInfo
+}
+
+func (f *fakeRegularFile) Stat() (os.FileInfo, error) { return f.info, nil }
+
+func (fd *fakeDeps) OpenRegular(path string) (boundedio.RegularFile, error) {
+	reader, err := fd.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	info, err := fd.Stat(path)
+	if err != nil {
+		_ = reader.Close()
+		return nil, err
+	}
+	return &fakeRegularFile{ReadCloser: reader, info: info}, nil
 }
 
 func (fd *fakeDeps) OpenDir(path string) (boundedio.DirReader, error) {

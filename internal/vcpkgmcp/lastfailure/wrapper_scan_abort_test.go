@@ -46,7 +46,10 @@ func (f oneFileFS) ReadFile(p string) ([]byte, error) {
 
 func (f oneFileFS) Open(p string) (io.ReadCloser, error) {
 	if p == f.path {
-		return io.NopCloser(strings.NewReader(string(f.data))), nil
+		return &testRegularHandle{
+			ReadCloser: io.NopCloser(strings.NewReader(string(f.data))),
+			info:       regularTestFileInfo{name: p, size: int64(len(f.data))},
+		}, nil
 	}
 	return nil, fs.ErrNotExist
 }

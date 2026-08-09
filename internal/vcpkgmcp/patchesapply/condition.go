@@ -99,9 +99,6 @@ func (p *condParser) parseAtom() Tri {
 		return v
 	}
 	lhsTok := p.next()
-	lhsVal, lhsUnresolved := resolveOperand(lhsTok, p.env)
-	p.unresolved = append(p.unresolved, lhsUnresolved...)
-
 	if !p.atEnd() && !p.peek().Quoted && comparisonOps[p.peek().Text] {
 		opTok := p.next()
 		if p.atEnd() {
@@ -109,14 +106,65 @@ func (p *condParser) parseAtom() Tri {
 			return TriUnknown
 		}
 		rhsTok := p.next()
-		rhsVal, rhsUnresolved := resolveOperand(rhsTok, p.env)
+		lhsVal, lhsUnresolved := resolveOperand(lhsTok, p.env)
+		rhsVal, rhsUnresolved := resolveComparisonRHS(rhsTok, p.env)
+		p.unresolved = append(p.unresolved, lhsUnresolved...)
 		p.unresolved = append(p.unresolved, rhsUnresolved...)
 		return evalComparison(opTok.Text, lhsVal, rhsVal)
 	}
+	lhsVal, lhsUnresolved := resolveOperand(lhsTok, p.env)
+	p.unresolved = append(p.unresolved, lhsUnresolved...)
 	if lhsTok.Quoted {
 		return truthyQuoted(lhsVal)
 	}
 	return truthy(lhsVal)
+}
+
+// resolveComparisonRHS follows CMake's comparison-value rule: an unquoted
+// right-hand token is dereferenced only when it names a defined variable;
+// otherwise its original text is the operand literal. The left-hand operand
+// keeps resolveOperand's fail-closed treatment because it is the condition's
+// input variable and an absent triplet fact must remain undecidable.
+func resolveComparisonRHS(tok token, env *varEnv) (*string, []string) {
+	if tok.Quoted {
+		return operandFromExpansion(env.expandToken(tok))
+	}
+	if m := reVarRefFull.FindStringSubmatch(tok.Text); m != nil {
+		value := env.lookupCertain(m[1])
+		if value == nil {
+			return nil, []string{m[1]}
+		}
+		return resolveExpandedComparisonOperand(*value, env)
+	}
+	upper := strings.ToUpper(tok.Text)
+	if cmakeConstants[upper] || strings.HasSuffix(upper, "-NOTFOUND") {
+		value := tok.Text
+		return &value, nil
+	}
+	if rePlainIdent.MatchString(tok.Text) {
+		if value := env.lookupCertain(tok.Text); value != nil {
+			return value, nil
+		}
+		value := tok.Text
+		return &value, nil
+	}
+	return operandFromExpansion(env.expandToken(tok))
+}
+
+func resolveExpandedComparisonOperand(value string, env *varEnv) (*string, []string) {
+	upper := strings.ToUpper(value)
+	if cmakeConstants[upper] || strings.HasSuffix(upper, "-NOTFOUND") {
+		resolved := value
+		return &resolved, nil
+	}
+	if rePlainIdent.MatchString(value) {
+		if resolved := env.lookupCertain(value); resolved != nil {
+			return resolved, nil
+		}
+		resolved := value
+		return &resolved, nil
+	}
+	return operandFromExpansion(env.expandToken(token{Text: value}))
 }
 
 // truthyQuoted applies CMake's CMP0054 NEW operand rule: a quoted operand is

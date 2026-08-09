@@ -332,6 +332,10 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			case TriFalse:
 				continue
 			}
+		case "include", "add_subdirectory":
+			if active() != TriFalse {
+				executionUncertain = true
+			}
 		case "set":
 			handleSet(st.Args, env, active(), guardText(), activeUnresolved())
 		case "unset":
@@ -504,14 +508,16 @@ func notAllPrior(f *ifFrame) (Tri, []string) {
 // — the environment is left exactly as an earlier branch (or no branch)
 // left it, matching real CMake control flow.
 func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) {
-	if active == TriFalse {
-		return
-	}
 	toks := tokenize(argsRaw)
 	if len(toks) == 0 || toks[0].Text == "" {
 		return
 	}
 	name := toks[0].Text
+	for _, t := range toks[1:] {
+		if !t.Quoted && t.Text == "PARENT_SCOPE" {
+			return
+		}
+	}
 	var items []semanticItem
 	resolution := valueResolution{}
 	for _, t := range toks[1:] {
@@ -529,6 +535,10 @@ func handleSet(argsRaw string, env *varEnv, active Tri, guardText string, unreso
 	// semicolon serialization with metadata-only provenance spans.
 	value := serializeItems(items)
 	value.resolution = resolution
+	if active == TriFalse {
+		env.inactiveValues[name] = append(env.inactiveValues[name], value)
+		return
+	}
 	env.setValue(name, value)
 }
 
@@ -565,13 +575,22 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardTe
 	if mode != "ABSOLUTE" {
 		return
 	}
-	meta := provenanceMeta{
-		guard:          kleeneAnd(active, ex.certainty),
-		guardText:      guardText,
-		unresolvedVars: dedupStrings(append(append([]string{}, unresolvedVars...), ex.uncertainVars...)),
-		pathUnresolved: ex.unresolved,
+	base := env.portDir
+	baseExpansion := expansion{certainty: TriTrue}
+	if len(toks) == 5 && !toks[3].Quoted && toks[3].Text == "BASE_DIR" {
+		baseExpansion = env.expandToken(toks[4])
+		base = baseExpansion.text
+	} else if len(toks) != 3 {
+		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		return
 	}
-	env.setValue(name, serializeItems([]semanticItem{{text: env.getFilenameComponentAbsolute(ex.text), meta: meta}}))
+	meta := provenanceMeta{
+		guard:          kleeneAnd(kleeneAnd(active, ex.certainty), baseExpansion.certainty),
+		guardText:      guardText,
+		unresolvedVars: dedupStrings(append(append(append([]string{}, unresolvedVars...), ex.uncertainVars...), baseExpansion.uncertainVars...)),
+		pathUnresolved: dedupStrings(append(append([]string{}, ex.unresolved...), baseExpansion.unresolved...)),
+	}
+	env.setValue(name, serializeItems([]semanticItem{{text: env.getFilenameComponentAbsoluteBase(ex.text, base), meta: meta}}))
 }
 
 // handleListAppend implements list(APPEND <listvar> item...). Only the
@@ -628,6 +647,21 @@ func listSubcommandMutatesInput(subcommand string) bool {
 // collected as declared patch entries. Every token, including an exact
 // unquoted ${VAR}, follows the same serialized-value evaluation path.
 func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string, budget *patchDeclarationBudget) (found bool, items []declaredPatch, resolution valueResolution, limitExceeded bool) {
+	admitToken := func(t token, evaluationEnv *varEnv) (valueResolution, bool) {
+		remainingItems := MaxPatchDeclarations - budget.count
+		semanticItems, itemResolution, itemLimit := semanticItemsFromTokenBounded(t, evaluationEnv, active, guardText, unresolvedVars, remainingItems)
+		if itemResolution.failed() || itemLimit {
+			return itemResolution, itemLimit
+		}
+		for _, item := range semanticItems {
+			patch := declaredPatchFromSemanticItem(item)
+			if !budget.admit(patch) {
+				return valueResolution{}, true
+			}
+			items = append(items, patch)
+		}
+		return valueResolution{}, false
+	}
 	toks := tokenize(argsRaw)
 	for i := 0; i < len(toks); i++ {
 		if toks[i].Quoted || toks[i].Text != "PATCHES" {
@@ -640,20 +674,29 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 			if !t.Quoted && looksLikeKeywordArg(t.Text) {
 				break
 			}
-			remainingItems := MaxPatchDeclarations - budget.count
-			semanticItems, itemResolution, itemLimit := semanticItemsFromTokenBounded(t, env, active, guardText, unresolvedVars, remainingItems)
+			itemResolution, itemLimit := admitToken(t, env)
 			if itemResolution.failed() {
 				return found, nil, itemResolution, false
 			}
 			if itemLimit {
 				return found, nil, valueResolution{}, true
 			}
-			for _, item := range semanticItems {
-				patch := declaredPatchFromSemanticItem(item)
-				if !budget.admit(patch) {
-					return found, nil, valueResolution{}, true
+			if match := reVarRefFull.FindStringSubmatch(t.Text); !t.Quoted && match != nil {
+				for _, alternative := range env.inactiveValues[match[1]] {
+					alternativeEnv := *env
+					alternativeEnv.values = make(map[string]serializedValue, len(env.values)+1)
+					for name, value := range env.values {
+						alternativeEnv.values[name] = value
+					}
+					alternativeEnv.values[match[1]] = alternative
+					alternativeResolution, alternativeLimit := admitToken(t, &alternativeEnv)
+					if alternativeResolution.failed() {
+						return found, nil, alternativeResolution, false
+					}
+					if alternativeLimit {
+						return found, nil, valueResolution{}, true
+					}
 				}
-				items = append(items, patch)
 			}
 			j++
 		}

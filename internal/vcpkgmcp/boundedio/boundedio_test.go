@@ -50,6 +50,26 @@ func (f testFS) Open(string) (io.ReadCloser, error) {
 	return f.file, nil
 }
 
+func (f testFS) OpenRegular(path string) (RegularFile, error) {
+	reader, err := f.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	return &testRegularFile{ReadCloser: reader, info: f.stat}, nil
+}
+
+type testRegularFile struct {
+	io.ReadCloser
+	info os.FileInfo
+}
+
+func (f *testRegularFile) Stat() (os.FileInfo, error) {
+	if f.info != nil {
+		return f.info, nil
+	}
+	return regularFileInfo{}, nil
+}
+
 func (f testFS) OpenDir(string) (DirReader, error) {
 	if f.openDirErr != nil {
 		return nil, f.openDirErr
@@ -158,7 +178,7 @@ func TestBoundedFileIngressRequests(t *testing.T) {
 	}
 }
 
-func TestReadFileRejectsEveryNonRegularTypeBeforeOpen(t *testing.T) {
+func TestReadFileRejectsEveryNonRegularTypeFromOpenedHandle(t *testing.T) {
 	for _, mode := range []os.FileMode{
 		os.ModeDir,
 		os.ModeSymlink,
@@ -172,14 +192,14 @@ func TestReadFileRejectsEveryNonRegularTypeBeforeOpen(t *testing.T) {
 		info := fakeModeInfo{mode: mode}
 		_, err := ReadFile(context.Background(), testFS{
 			stat:      info,
-			openErr:   errors.New("open must not run"),
 			openCalls: &openCalls,
+			file:      io.NopCloser(strings.NewReader("must not read")),
 		}, "special", 1, 1)
 		if err == nil {
 			t.Fatalf("mode %v was admitted", mode)
 		}
-		if openCalls != 0 {
-			t.Fatalf("mode %v reached Open %d times, want zero", mode, openCalls)
+		if openCalls != 1 {
+			t.Fatalf("mode %v reached Open %d times, want one same-handle validation", mode, openCalls)
 		}
 	}
 }
