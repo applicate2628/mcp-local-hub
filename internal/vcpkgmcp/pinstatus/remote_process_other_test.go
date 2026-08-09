@@ -4,6 +4,8 @@ package pinstatus
 
 import (
 	"errors"
+	"os"
+	"strconv"
 	"syscall"
 	"testing"
 	"time"
@@ -18,5 +20,8 @@ func waitForRemoteProcessGone(t *testing.T, pid int) {
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	t.Fatalf("pid %d survived remote runner return", pid)
+	state, _ := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/status")
+	var waitStatus syscall.WaitStatus
+	reaped, waitErr := syscall.Wait4(pid, &waitStatus, syscall.WNOHANG, nil)
+	t.Fatalf("pid %d survived remote runner return (test pid %d, diagnostic wait=%d err=%v): %s", pid, os.Getpid(), reaped, waitErr, state)
 }

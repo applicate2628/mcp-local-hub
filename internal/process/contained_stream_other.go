@@ -95,7 +95,10 @@ func (c *posixContainedChild) terminateBy(deadline time.Time) error {
 	if err := syscall.Kill(-c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return fmt.Errorf("terminate contained process group: %w", err)
 	}
-	return settlePOSIXGroup(deadline, c.pid, probePOSIXGroup, c.classifier)
+	if err := settlePOSIXGroup(deadline, c.pid, probePOSIXGroup, c.classifier); err != nil {
+		return err
+	}
+	return reapPlatformContainedGroup(deadline, c.pid)
 }
 
 func probePOSIXGroup(pgid int) error {

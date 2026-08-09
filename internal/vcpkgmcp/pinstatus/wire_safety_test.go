@@ -147,7 +147,6 @@ func TestS2_CanonicalCredentialCarrierCoversAuthorityAndSafeControls(t *testing.
 		"[2001:db8::1]:8443/group/project",
 		"git@host:owner/repo.git",
 		"group/%2Fproject",
-		"group/project#design=dark",
 		"https://host/group/repo@v1.git",
 	} {
 		t.Run("safe "+raw, func(t *testing.T) {
@@ -225,8 +224,8 @@ func TestS2_SafeRemoteSpellingsRemainAdmissible(t *testing.T) {
 			if hasEmbeddedCredential(remote) {
 				t.Fatalf("safe remote was classified as credential-bearing: %q", remote)
 			}
-			if redacted := redactURL(remote); redacted != remote {
-				t.Fatalf("safe remote redacted to %q, want %q", redacted, remote)
+			if redacted := redactURL(remote); redacted == remote || strings.Contains(redacted, "design=dark") {
+				t.Fatalf("fragment value remained emittable: %q", redacted)
 			}
 		})
 	}

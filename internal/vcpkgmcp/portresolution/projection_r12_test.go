@@ -73,3 +73,38 @@ func TestPortProjectionCombinedWorstCaseAndLegacyCompatibility(t *testing.T) {
 		t.Fatalf("under-budget JSON changed\nwant=%s\ngot=%s", want, got)
 	}
 }
+
+func TestR27ProjectionPreservesShadowingAndNamesEveryOmittedCollection(t *testing.T) {
+	result := Result{
+		Status:                            evidence.StatusOK,
+		OverlayToOverlayShadowingOccurred: true,
+		AllCandidates:                     []CandidateLocation{{Directory: strings.Repeat("candidate/", publicresult.MaxEncodedBytes)}},
+		Shadows:                           []Shadow{{Directory: "/lower-overlay"}},
+		Evidence:                          evidence.Evidence{Paths: []string{"/evidence"}},
+	}
+	body, err := publicresult.MarshalIndent(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var projected struct {
+		Shadowing  bool                    `json:"overlay_to_overlay_shadowing_occurred"`
+		Projection publicresult.Projection `json:"result_projection"`
+	}
+	if err := json.Unmarshal(body, &projected); err != nil {
+		t.Fatal(err)
+	}
+	if !projected.Shadowing {
+		t.Fatal("projected result erased established overlay shadowing")
+	}
+	want := map[string]bool{"all_candidates": false, "shadows": false, "evidence": false}
+	for _, omission := range projected.Projection.Omissions {
+		if _, ok := want[omission.Field]; ok {
+			want[omission.Field] = true
+		}
+	}
+	for field, present := range want {
+		if !present {
+			t.Fatalf("projection omissions=%+v, missing %s", projected.Projection.Omissions, field)
+		}
+	}
+}

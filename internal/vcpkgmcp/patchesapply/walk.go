@@ -717,14 +717,18 @@ func looksLikeKeywordArg(s string) bool {
 }
 
 var knownKeywordArgs = map[string]struct{}{
-	"OUT_SOURCE_PATH":    {},
-	"REPO":               {},
-	"REF":                {},
-	"SHA512":             {},
-	"HEAD_REF":           {},
-	"URL":                {},
-	"URLS":               {},
-	"FILENAME":           {},
-	"DOWNLOADS":          {},
-	"FILE_DISAMBIGUATOR": {},
+	"OUT_SOURCE_PATH":         {},
+	"REPO":                    {},
+	"REF":                     {},
+	"SHA512":                  {},
+	"HEAD_REF":                {},
+	"URL":                     {},
+	"URLS":                    {},
+	"FILENAME":                {},
+	"DOWNLOADS":               {},
+	"FILE_DISAMBIGUATOR":      {},
+	"FETCH_REF":               {},
+	"GITLAB_URL":              {},
+	"AUTHORIZATION_TOKEN":     {},
+	"FILE_DISABLE_SUBMODULES": {},
 }

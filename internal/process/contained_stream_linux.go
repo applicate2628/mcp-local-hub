@@ -31,7 +31,86 @@ var (
 	errLinuxProcParseFailed       = errors.New("LINUX_GROUP_SETTLEMENT_PARSE_FAILED")
 	errLinuxProcCloseFailed       = errors.New("LINUX_GROUP_SETTLEMENT_CLOSE_FAILED")
 	errLinuxProcWorkerFailed      = errors.New("LINUX_GROUP_SETTLEMENT_WORKER_FAILED")
+	errLinuxDescendantReapFailed  = errors.New("LINUX_DESCENDANT_REAP_FAILED")
 )
+
+// reapPlatformContainedGroup reaps only adopted descendants in the contained
+// process group. The direct child remains owned by exec.Cmd.Wait; a negative
+// wait PID cannot steal children belonging to another concurrent command.
+func reapPlatformContainedGroup(deadline time.Time, pgid int) error {
+	if pgid <= 0 {
+		return nil
+	}
+	for {
+		remaining, err := reapLinuxContainedGroupPass(deadline, pgid)
+		if err != nil {
+			return err
+		}
+		if !remaining {
+			return nil
+		}
+		if !sleepPOSIXUntil(deadline) {
+			return errors.Join(ErrCleanupTimeout, errLinuxDescendantReapFailed)
+		}
+	}
+}
+
+func reapLinuxContainedGroupPass(deadline time.Time, pgid int) (remaining bool, resultErr error) {
+	dir, err := os.Open("/proc")
+	if err != nil {
+		return false, errors.Join(errLinuxDescendantReapFailed, errLinuxProcOpenFailed, err)
+	}
+	defer func() {
+		if err := dir.Close(); err != nil {
+			remaining = true
+			resultErr = errors.Join(resultErr, errLinuxDescendantReapFailed, errLinuxProcCloseFailed, err)
+		}
+	}()
+	for {
+		if !time.Now().Before(deadline) {
+			return true, nil
+		}
+		entries, readErr := dir.ReadDir(128)
+		for _, entry := range entries {
+			pid, parseErr := strconv.Atoi(entry.Name())
+			if parseErr != nil || pid <= 0 || pid == pgid {
+				continue
+			}
+			data, statErr := os.ReadFile("/proc/" + entry.Name() + "/stat")
+			if errors.Is(statErr, os.ErrNotExist) {
+				continue
+			}
+			if statErr != nil {
+				return false, errors.Join(errLinuxDescendantReapFailed, errLinuxProcReadFailed, statErr)
+			}
+			_, memberPGID, statErr := linuxProcStateAndGroup(string(data))
+			if statErr != nil {
+				return false, errors.Join(errLinuxDescendantReapFailed, errLinuxProcParseFailed, statErr)
+			}
+			if memberPGID != pgid {
+				continue
+			}
+			var status syscall.WaitStatus
+			reaped, waitErr := syscall.Wait4(pid, &status, syscall.WNOHANG, nil)
+			switch {
+			case reaped == pid:
+				continue
+			case waitErr == nil || errors.Is(waitErr, syscall.ECHILD):
+				remaining = true
+			case errors.Is(waitErr, syscall.EINTR):
+				remaining = true
+			default:
+				return false, errors.Join(errLinuxDescendantReapFailed, waitErr)
+			}
+		}
+		if readErr == io.EOF {
+			return remaining, nil
+		}
+		if readErr != nil {
+			return false, errors.Join(errLinuxDescendantReapFailed, errLinuxProcReadFailed, readErr)
+		}
+	}
+}
 
 type linuxProcSource interface {
 	ReadDirNames(int) ([]string, error)

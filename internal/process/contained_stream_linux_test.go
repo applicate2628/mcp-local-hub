@@ -361,26 +361,19 @@ func TestRunContainedStreamPOSIX_ZombieOnlyGroupDoesNotFalseTimeout(t *testing.T
 		}
 		t.Fatalf("RunContainedStream err=%v", runErr)
 	}
-	// PID 1 owns the adopted zombie after product return. Reap it explicitly
-	// as fixture cleanup, then prove neither direct child nor descendant exists.
+	// Product cleanup owns the adopted zombie and must reap it before return;
+	// a non-reaping PID 1 is the falsifying environment for this contract.
 	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var status syscall.WaitStatus
-		pid, waitErr := syscall.Wait4(ids.zombie, &status, syscall.WNOHANG, nil)
-		if pid == ids.zombie {
-			break
-		}
-		if waitErr != nil && !errors.Is(waitErr, syscall.EINTR) {
-			t.Fatalf("reap adopted zombie: %v", waitErr)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("adopted zombie was not reapable")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
 	for _, pid := range []int{ids.child, ids.zombie} {
-		if _, err := os.Stat("/proc/" + strconv.Itoa(pid)); !errors.Is(err, os.ErrNotExist) {
-			t.Fatalf("pid %d remains after cleanup: %v", pid, err)
+		for {
+			_, err := os.Stat("/proc/" + strconv.Itoa(pid))
+			if errors.Is(err, os.ErrNotExist) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("pid %d remains after product cleanup: %v", pid, err)
+			}
+			time.Sleep(10 * time.Millisecond)
 		}
 	}
 }

@@ -172,6 +172,14 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			}
 			delete(env.values, toks[0].Text)
 			continue
+		case "include":
+			// include() executes in the caller's scope and can mutate any fact.
+			// Declaration bodies are not invoked by this static pass, but an
+			// executable include makes every retained value uncertain.
+			if !insideDeclarationScope(scopes) {
+				return nil
+			}
+			continue
 		default:
 			continue
 		}

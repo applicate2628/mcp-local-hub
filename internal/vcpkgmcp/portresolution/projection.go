@@ -22,12 +22,26 @@ func (r Result) PublicResultProjection() any {
 		blocking = &copy
 	}
 	return struct {
-		Status            Status                  `json:"status"`
-		Reason            Reason                  `json:"reason,omitempty"`
-		Winner            *Winner                 `json:"winner,omitempty"`
-		BlockingCandidate *CandidateLocation      `json:"blocking_candidate,omitempty"`
-		InvalidRoot       string                  `json:"invalid_root,omitempty"`
-		InvalidPort       string                  `json:"invalid_port,omitempty"`
-		ResultProjection  publicresult.Projection `json:"result_projection"`
-	}{r.Status, r.Reason, winner, blocking, publicresult.AbbreviateEncoded(r.InvalidRoot, scalarAllowance), publicresult.AbbreviateEncoded(r.InvalidPort, scalarAllowance), publicresult.MinimalProjection("all_candidates")}
+		Status                            Status                  `json:"status"`
+		Reason                            Reason                  `json:"reason,omitempty"`
+		Winner                            *Winner                 `json:"winner,omitempty"`
+		BlockingCandidate                 *CandidateLocation      `json:"blocking_candidate,omitempty"`
+		InvalidRoot                       string                  `json:"invalid_root,omitempty"`
+		InvalidPort                       string                  `json:"invalid_port,omitempty"`
+		OverlayToOverlayShadowingOccurred bool                    `json:"overlay_to_overlay_shadowing_occurred,omitempty"`
+		ResultProjection                  publicresult.Projection `json:"result_projection"`
+	}{
+		Status:                            r.Status,
+		Reason:                            r.Reason,
+		Winner:                            winner,
+		BlockingCandidate:                 blocking,
+		InvalidRoot:                       publicresult.AbbreviateEncoded(r.InvalidRoot, scalarAllowance),
+		InvalidPort:                       publicresult.AbbreviateEncoded(r.InvalidPort, scalarAllowance),
+		OverlayToOverlayShadowingOccurred: r.OverlayToOverlayShadowingOccurred,
+		ResultProjection: publicresult.Projection{Complete: false, Omissions: []publicresult.Omission{
+			{Field: "all_candidates", Reason: publicresult.InternalProjectionLimit},
+			{Field: "shadows", Reason: publicresult.InternalProjectionLimit},
+			{Field: "evidence", Reason: publicresult.InternalProjectionLimit},
+		}},
+	}
 }

@@ -292,6 +292,11 @@ func redactURL(raw string) string {
 			changed = true
 		}
 	}
+	if parsed.Fragment != "" || parsed.RawFragment != "" {
+		parsed.Fragment = redactedUserinfo
+		parsed.RawFragment = ""
+		changed = true
+	}
 	if !changed {
 		if hasEmbeddedCredential(raw) {
 			return redactedRemoteMetadata
@@ -478,6 +483,9 @@ func redactUnparsable(raw string) string {
 	out := body
 	if hasQuery {
 		out += "?" + query
+	}
+	if fragment != "" && fragment != "#" {
+		fragment = "#" + redactedUserinfo
 	}
 	return out + fragment
 }

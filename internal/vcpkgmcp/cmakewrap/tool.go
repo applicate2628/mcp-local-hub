@@ -255,11 +255,9 @@ func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Resul
 		return Result{Status: evidence.StatusUnknown, Reason: reason, Evidence: ev}
 	}
 
-	var ev evidence.Evidence
-	ev.AddPath(cgResult.Root)
-	ev.AddPath(cgResult.WorkspaceRoot)
-	for _, f := range cgResult.Files {
-		ev.AddPath(f)
+	ev, err := graphEvidence(ctx, cgResult.Root, cgResult.WorkspaceRoot, cgResult.Files)
+	if err != nil {
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonCanceled, Evidence: ev}
 	}
 
 	edges := make([]Edge, 0, len(cgResult.Edges))
@@ -286,4 +284,30 @@ func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Resul
 		UnscannedFiles:        cgResult.UnscannedFiles,
 		Evidence:              ev,
 	}
+}
+
+func graphEvidence(ctx context.Context, root, workspaceRoot string, files []string) (evidence.Evidence, error) {
+	paths := make([]string, 0, len(files)+2)
+	seen := make(map[string]struct{}, len(files)+2)
+	add := func(path string) {
+		if path == "" {
+			return
+		}
+		if _, exists := seen[path]; exists {
+			return
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	add(root)
+	add(workspaceRoot)
+	for index, file := range files {
+		if index%256 == 0 {
+			if err := ctx.Err(); err != nil {
+				return evidence.Evidence{Paths: paths}, err
+			}
+		}
+		add(file)
+	}
+	return evidence.Evidence{Paths: paths}, nil
 }
