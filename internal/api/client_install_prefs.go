@@ -4,7 +4,8 @@
 // table, redesign spec §9.2 / line 204). The compile-time default-install
 // set lives in internal/clients (clients.DefaultInstallClientNames(),
 // derived from each clientRegistry descriptor's defaultInstall flag) and
-// is the {claude-code, codex-cli, cursor} fixed trio. This file lets an
+// is the {claude-code, codex-cli} fixed set (cursor is a supported but
+// opt-in client). This file lets an
 // operator override that set from the GUI Settings → Clients panel without
 // editing source: the chosen set is persisted to gui-preferences.yaml and
 // becomes the effective default for installs that do NOT request an
@@ -24,7 +25,7 @@
 // alongside every appearance.* / gui_server.* key.
 //
 // Absent / empty key ⇒ fall back to clients.DefaultInstallClientNames()
-// (the compile-time trio). This keeps the override purely additive: a host
+// (the compile-time default set). This keeps the override purely additive: a host
 // that has never used the panel installs exactly as before, and the
 // plan-builder stays hermetic in tests that do not write the file.
 package api
@@ -40,7 +41,7 @@ import (
 const (
 	// defaultInstallClientsKey is the gui-preferences.yaml key under which the
 	// operator's chosen default-install client set is stored as a
-	// comma-separated scalar string. Absent ⇒ compile-time default trio.
+	// comma-separated scalar string. Absent ⇒ compile-time default set.
 	defaultInstallClientsKey = "clients.default_install"
 
 	// lspRouterDisabledClientsKey is a narrow LSP-router opt-out list, not an
@@ -88,7 +89,7 @@ func (a *API) DefaultInstallClientNamesOverrideIn(path string) ([]string, error)
 
 // DefaultInstallClientNamesEffective resolves the effective default-install
 // client set: the persisted operator override when present and non-empty,
-// else clients.DefaultInstallClientNames() (the compile-time trio). This is
+// else clients.DefaultInstallClientNames() (the compile-time default set). This is
 // the single owner of "what is the default-install set" once an operator
 // override may exist. Plan-building callers pass the result into
 // BuildPlanOpts.DefaultClientsOverride; the plan-builder itself never reads
@@ -461,7 +462,7 @@ type ClientInstallToggleRow struct {
 // ClientInstallToggleSnapshot is the api-shaped view the GUI GET handler
 // renders: every supported client with its compile-time-default and
 // currently-selected flags, plus whether an explicit operator override is
-// configured (vs. falling back to the compile-time trio). The handler maps
+// configured (vs. falling back to the compile-time default set). The handler maps
 // this to its snake_case wire DTO.
 type ClientInstallToggleSnapshot struct {
 	Rows           []ClientInstallToggleRow
@@ -470,7 +471,7 @@ type ClientInstallToggleSnapshot struct {
 
 // ClientInstallToggleView builds the snapshot from the effective set. Order
 // follows clients.SupportedClientNames() (registry order) so the panel
-// renders the canonical default trio first, then the opt-ins, matching
+// renders the canonical default set first, then the opt-ins, matching
 // every other client-ordered surface.
 func (a *API) ClientInstallToggleView() (ClientInstallToggleSnapshot, error) {
 	return a.ClientInstallToggleViewIn(SettingsPath())

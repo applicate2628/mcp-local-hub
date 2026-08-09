@@ -54,6 +54,10 @@ type LSPClientRouterOpts struct {
 	// McphubExePath is used only by relay-shaped clients such as Antigravity.
 	// Empty means canonicalMcphubPath().
 	McphubExePath string
+	// classifyClientMutation is the per-invocation settlement seam. Production
+	// leaves it nil and uses clients.ClassifyClientMutation; focused tests inject
+	// a classifier without changing the public client mutation contract.
+	classifyClientMutation func(error) clients.ClientMutationSettlement
 }
 
 type LSPClientRouterBackup struct {
@@ -76,10 +80,12 @@ type LSPClientRouterFailure struct {
 	Err       string
 }
 
-// LSPClientRouterReport summarizes client-config mutations. Registry rows are
-// intentionally not included because this reconcile never creates or deletes
-// per-(workspace, language) registrations; existing rows are warm
-// preregistrations that the /lsp/<lang>/mcp router can reuse.
+// LSPClientRouterReport summarizes client-config mutations. When a mutation
+// applied but config-lock release was unconfirmed, its actual-change row and a
+// lifecycle failure are both present. Registry rows are intentionally not
+// included because this reconcile never creates or deletes per-(workspace,
+// language) registrations; existing rows are warm preregistrations that the
+// /lsp/<lang>/mcp router can reuse.
 type LSPClientRouterReport struct {
 	Backups  []LSPClientRouterBackup
 	Applied  []LSPClientRouterChange
@@ -1559,11 +1565,22 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 		return
 	}
 	report.Backups = append(report.Backups, LSPClientRouterBackup{Client: clientName, Path: backupPath})
+	classify := opts.classifyClientMutation
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
+	}
 	addFailedByLanguage := map[string]bool{}
 	for _, op := range ops {
 		switch op.kind {
 		case "add":
 			if err := adapter.AddEntry(op.entry); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					report.Applied = append(report.Applied, LSPClientRouterChange{
+						Client: clientName, Language: op.language, EntryName: op.entryName, URL: op.entry.URL,
+					})
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
+					return
+				}
 				addFailedByLanguage[op.language] = true
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
 				continue
@@ -1576,6 +1593,13 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 				continue
 			}
 			if err := adapter.RemoveEntry(op.entryName); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					report.Removed = append(report.Removed, LSPClientRouterChange{
+						Client: clientName, Language: op.language, EntryName: op.entryName,
+					})
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "remove", err))
+					return
+				}
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "remove", err))
 				continue
 			}
@@ -1584,6 +1608,13 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 			})
 		case "restore":
 			if err := adapter.RestoreEntryFromBackupForRollback(op.backup, op.entryName); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					report.Restored = append(report.Restored, LSPClientRouterChange{
+						Client: clientName, Language: op.language, EntryName: op.entryName,
+					})
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "restore", err))
+					return
+				}
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "restore", err))
 				continue
 			}
@@ -1599,6 +1630,13 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 					continue
 				}
 				if err := adapter.AddEntry(fallback); err != nil {
+					if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+						report.Applied = append(report.Applied, LSPClientRouterChange{
+							Client: clientName, Language: op.language, EntryName: op.entryName, URL: fallback.URL,
+						})
+						report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
+						return
+					}
 					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
 					continue
 				}

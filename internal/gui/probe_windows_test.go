@@ -7,9 +7,26 @@
 package gui
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
+
+func TestRetainedProcessID_WindowsSelfPinsWaitableHandle(t *testing.T) {
+	identity, err := retainedProcessIDImpl(os.Getpid())
+	if err != nil {
+		t.Fatalf("retainedProcessIDImpl(self): %v", err)
+	}
+	if !identity.Alive || identity.Denied || identity.Handle == 0 {
+		t.Fatalf("retained self identity = %+v, want live permitted retained handle", identity)
+	}
+	if err := identity.Close(); err != nil {
+		t.Fatalf("close retained self identity: %v", err)
+	}
+	if err := identity.Close(); err != nil {
+		t.Fatalf("second close retained self identity: %v", err)
+	}
+}
 
 // TestSplitCommandLineW_TabSeparatorBetweenExeAndArgs locks in the
 // Codex iter-4 P2 #1 fix: tabs must be honored as argv separators in

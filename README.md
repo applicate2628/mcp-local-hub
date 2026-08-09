@@ -102,7 +102,7 @@ the CLI to install the servers you want shared and verify they connect:
 
 ```bash
 # Install the MCP servers you want shared
-mcphub install --server serena       # default clients: Claude/Codex/Cursor
+mcphub install --server serena       # default clients: Claude/Codex
 mcphub install --all                 # all 10 servers, default clients
 
 # Materialize one server in supervisor intent without touching client configs
@@ -157,8 +157,8 @@ perftools.llvm_objdump(binary="./new_bin", project_root=".", function="hot_loop"
 
 ## Supported clients
 
-Default install targets are `claude-code`, `codex-cli`, and `cursor`.
-`vscode`, `gemini-cli`, `qwen-cli`, `antigravity`, `zed`, `kiro`, `windsurf`,
+Default install targets are `claude-code` and `codex-cli`.
+`cursor`, `vscode`, `gemini-cli`, `qwen-cli`, `antigravity`, `zed`, `kiro`, `windsurf`,
 `cline`, `kilocode`, `opencode`, `hermes`, and `openclaw` are opt-in via
 `--clients ...` or `--all-clients`, so install does not silently mutate every
 assistant installed on the workstation.
@@ -167,7 +167,7 @@ assistant installed on the workstation.
 |---|---|---|---|---|
 | Claude Code CLI | Default | 2.1.112 tested | `~/.claude.json` | HTTP (`type: "http"`) |
 | Codex CLI | Default | 0.121.0 tested | `~/.codex/config.toml` | HTTP (streamable_http) |
-| Cursor | Default | Preview; live smoke pending | `~/.cursor/mcp.json` | HTTP (`type: "http"`) |
+| Cursor | Opt-in | Preview; live smoke pending | `~/.cursor/mcp.json` | HTTP (`type: "http"`) |
 | VS Code | Opt-in | Preview; live smoke pending | user-profile `mcp.json` | HTTP (`type: "http"`) |
 | Gemini CLI | Opt-in | 0.38.1 tested | `~/.gemini/settings.json` | HTTP (`type: "http"`) |
 | Qwen Code CLI | Opt-in | Preview; live smoke pending | `~/.qwen/settings.json` | HTTP (`httpUrl`) |
@@ -283,8 +283,8 @@ A surface-by-surface map of what this project actually does today, with explicit
 | Auto-start on logon — Windows | ✅ Stable | Task Scheduler with restart-on-failure |
 | Auto-start on logon — Linux | ⚠ Beta | systemd user units (F2) + `loginctl enable-linger` (F3) both implemented — `mcphub autostart enable` writes the `--user` unit, runs `systemctl --user enable --now`, then best-effort `enable-linger` so the supervisor survives logout; live-verify on a real systemd host pending |
 | Auto-start on logon — macOS | 🚧 Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
-| Default client install | ⚠ Preview | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix |
-| Opt-in client install | ⚠ Preview | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay), Zed (stdio-relay), Kiro, Windsurf, Cline, Kilo Code, OpenCode, Hermes, OpenClaw; built from upstream config docs, live smoke pending |
+| Default client install | ⚠ Preview | Claude Code, Codex CLI |
+| Opt-in client install | ⚠ Preview | Cursor (live-smoke pending), VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay), Zed (stdio-relay), Kiro, Windsurf, Cline, Kilo Code, OpenCode, Hermes, OpenClaw; built from upstream config docs, live smoke pending |
 | GUI dashboard (`mcphub gui`) | ⚠ Preview | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
 | GUI logs viewer (`/api/logs/:server`) | ⚠ Preview | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped |
 | Workspace-scoped LSP lazy proxies | ⚠ Preview | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending |
@@ -320,8 +320,8 @@ Copyright 2026 Dmitry Denisenko ([@applicate2628](https://github.com/applicate26
 - `Commercial license`: separate private agreement for different licensing,
   support, distribution, warranty, indemnity, integration, packaging, or
   deployment terms.
-- `Cursor`: Cursor editor/agent client; default MCP client target in this
-  preview.
+- `Cursor`: Cursor editor/agent client; an opt-in MCP client target
+  (`--clients cursor`) in this preview.
 - `GUI`: Graphical User Interface; the embedded local web interface and tray
   surface.
 - `MCP`: Model Context Protocol; the protocol used by managed clients and

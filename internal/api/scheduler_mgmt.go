@@ -238,31 +238,27 @@ func resolveSchedulerUpgradeServerDaemon(taskName, hintServer, hintDaemon string
 // needs refreshing after a binary move. Snapshot + restore on failure
 // mirrors the rest of the upgrade loop.
 func upgradeWorkspaceWeeklyRefreshTask(sch scheduler.Scheduler, taskName, canonicalPath string) *SchedulerUpgradeResult {
-	var priorXML []byte
-	if xml, err := sch.ExportXML(taskName); err != nil {
-		if !errors.Is(err, scheduler.ErrTaskNotFound) {
+	_, err := runWeeklyRefreshTaskTransaction(sch, weeklyRefreshMutation{
+		taskName: taskName,
+		desired: func(priorXML []byte, exists bool) (scheduler.TaskSpec, error) {
+			trigger := &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0}
+			if exists {
+				var triggerErr error
+				trigger, triggerErr = weeklyTaskTriggerFromXML(priorXML)
+				if triggerErr != nil {
+					return scheduler.TaskSpec{}, fmt.Errorf("parse prior weekly trigger: %w", triggerErr)
+				}
+			}
+			return weeklyRefreshTaskSpec(canonicalPath, &ScheduleSpec{
+				Kind: ScheduleWeekly, DayOfWeek: trigger.DayOfWeek, Hour: trigger.HourLocal, Minute: trigger.MinuteLocal,
+			}), nil
+		},
+	})
+	if err != nil {
+		if errors.Is(err, ErrWeeklyRefreshSnapshotUnavailable) {
 			return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("export: %v", err)}
 		}
-	} else {
-		priorXML = xml
-	}
-	if err := sch.Delete(taskName); err != nil {
-		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("delete: %v", err)}
-	}
-	spec := scheduler.TaskSpec{
-		Name:             taskName,
-		Description:      "mcp-local-hub: weekly refresh of workspace-scoped lazy proxies",
-		Command:          canonicalPath,
-		Args:             []string{"workspace-weekly-refresh"},
-		WorkingDir:       filepath.Dir(canonicalPath),
-		WeeklyTrigger:    &scheduler.WeeklyTrigger{DayOfWeek: 0, HourLocal: 3, MinuteLocal: 0},
-		RestartOnFailure: false,
-	}
-	if err := sch.Create(spec); err != nil {
-		if len(priorXML) > 0 {
-			_ = sch.ImportXML(taskName, priorXML)
-		}
-		return &SchedulerUpgradeResult{TaskName: taskName, Err: fmt.Sprintf("create: %v", err)}
+		return &SchedulerUpgradeResult{TaskName: taskName, Err: err.Error()}
 	}
 	return &SchedulerUpgradeResult{TaskName: taskName, NewCmd: canonicalPath}
 }

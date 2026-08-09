@@ -35,7 +35,6 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 
@@ -344,6 +343,10 @@ type SerenaReconcileOpts struct {
 	// file. Discovery (pidport + ping) still runs so a dry-run surfaces the
 	// "start the GUI first" failure too.
 	DryRun bool
+
+	// classifyClientMutation is the per-run settlement seam. Production leaves
+	// it nil and uses clients.ClassifyClientMutation.
+	classifyClientMutation func(error) clients.ClientMutationSettlement
 }
 
 // SerenaReconcileAttemptResult is the complete observable result of one
@@ -420,11 +423,12 @@ var ErrSerenaReconcileRouteNotLive = errors.New("serena client-reconcile: mcp fr
 // flag launches), pings it, and on absent/stale pidport OR ping failure
 // returns ErrSerenaReconcileGUINotLive with NO client writes.
 //
-// The result is a MigrateReport: Applied rows are successful (or dry-run
-// intended) router rewrites; Failed rows carry the per-client error so a
-// partial failure leaves that client on its still-functional legacy
-// endpoint and is retryable. The returned error is non-nil only for a
-// whole-run blocker (GUI not live).
+// The result is a MigrateReport: Applied rows are actual (or dry-run intended)
+// router rewrites; Failed rows carry per-client lifecycle errors. Ordinary add
+// failures leave that client on its still-functional legacy endpoint. When an
+// add/remove applied but lock release was unconfirmed, both rows are present
+// and the in-process rollback owner skips only that unsafe client leaf. The
+// returned error is non-nil only for a whole-run blocker (GUI not live).
 //
 // This function does NOT restart the supervisor, does NOT touch the disk
 // manifest, and does NOT flow through the G4 hub resolver (claim #8). It is
@@ -474,6 +478,10 @@ func reconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 	allClients := opts.Clients
 	if allClients == nil {
 		allClients = clients.AllClients()
+	}
+	classify := opts.classifyClientMutation
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
 	}
 
 	// 2. Antigravity's relay `command` field needs the canonical installed
@@ -549,6 +557,7 @@ func reconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			})
 			continue
 		}
+		var mutationReleaseErr error
 		var prepareCallbackErr error
 		observed := mutator.ConditionalEntryMutation(clients.ConditionalEntryMutationRequest{
 			EntryName: serenaEntryName,
@@ -632,10 +641,13 @@ func reconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			continue
 		}
 		if observed.MutationErr != nil {
-			report.Failed = append(report.Failed, FailedMigration{
-				Server: serenaEntryName, Client: clientName, Err: observed.MutationErr.Error(),
-			})
-			continue
+			if classify(observed.MutationErr) != clients.ClientMutationAppliedReleaseUnconfirmed {
+				report.Failed = append(report.Failed, FailedMigration{
+					Server: serenaEntryName, Client: clientName, Err: observed.MutationErr.Error(),
+				})
+				continue
+			}
+			mutationReleaseErr = observed.MutationErr
 		}
 		if observed.ObservationErr != nil {
 			report.Failed = append(report.Failed, FailedMigration{
@@ -664,9 +676,19 @@ func reconcileSerenaClientsToRouter(ctx context.Context, opts SerenaReconcileOpt
 			})
 		}
 
-		report.Applied = append(report.Applied, AppliedMigration{
+		applied := AppliedMigration{
 			Server: serenaEntryName, Client: clientName, URL: routerURL, BackupPath: observed.BackupPath,
-		})
+		}
+		if mutationReleaseErr != nil {
+			applied.restoreUnsafe = true
+			report.Applied = append(report.Applied, applied)
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: serenaEntryName, Client: clientName,
+				Err: fmt.Sprintf("router rewrite applied; lock release unconfirmed: %v", mutationReleaseErr),
+			})
+			continue
+		}
+		report.Applied = append(report.Applied, applied)
 	}
 
 	return report, nil
@@ -707,9 +729,11 @@ func intendedEntryReadbackProjection(adapter clients.Client, entry clients.MCPEn
 }
 
 // RestoreSerenaReconcileApplied undoes a partially-successful
-// ReconcileSerenaClientsToRouter run by restoring every Applied client's
-// serena entry from the per-client backup the reconcile captured immediately
-// before its rewrite. It is the outer-rollback compensator the serena migrate
+// ReconcileSerenaClientsToRouter run by restoring each safely-reacquirable
+// Applied client's serena entry from the per-client backup captured immediately
+// before its rewrite. An Applied row marked with unconfirmed lock release is
+// reported and skipped so rollback never reacquires that poisoned leaf. It is
+// the outer-rollback compensator the serena migrate
 // driver runs when the reconcile reports per-client failures (report.Failed
 // non-empty): the migrate must NOT proceed to the irreversible supervisor reap
 // while only SOME clients point at the router, so the ones that succeeded are
@@ -735,8 +759,7 @@ func intendedEntryReadbackProjection(adapter clients.Client, entry clients.MCPEn
 // variant bypasses that guard to put the exact pre-reconcile bytes back; the
 // demigrate guard stays in force for the normal demigrate flow.
 func RestoreSerenaReconcileApplied(report *MigrateReport, allClients map[string]clients.Client) error {
-	_, err := restoreSerenaReconcileApplied(report, allClients, nil)
-	return err
+	return restoreSerenaReconcileAppliedWithClassifier(report, allClients, clients.ClassifyClientMutation)
 }
 
 // RestoreSerenaReconcileAppliedOwned is the persisted front-reconcile inverse.
@@ -808,76 +831,46 @@ func RestoreSerenaReconcileAppliedOwned(
 	return results, errors.Join(errs...)
 }
 
-func restoreSerenaReconcileApplied(
+func restoreSerenaReconcileAppliedWithClassifier(
 	report *MigrateReport,
 	allClients map[string]clients.Client,
-	expectedApplied map[string]string,
-) ([]SerenaOwnedRestoreResult, error) {
+	classify func(error) clients.ClientMutationSettlement,
+) error {
 	if report == nil {
-		return nil, nil
+		return nil
 	}
 	if allClients == nil {
 		allClients = clients.AllClients()
 	}
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
+	}
 	var errs []error
-	var results []SerenaOwnedRestoreResult
 	for _, app := range report.Applied {
 		if app.BackupPath == "" {
 			// No snapshot to restore from (dry-run row, or a producer that
 			// does not capture a backup). Nothing to undo for this client.
 			continue
 		}
+		if app.restoreUnsafe {
+			errs = append(errs, fmt.Errorf("restore %s/%s skipped: prior mutation was applied but config-lock release was unconfirmed", app.Server, app.Client))
+			continue
+		}
 		adapter := allClients[app.Client]
 		if adapter == nil {
 			err := fmt.Errorf("restore %s/%s: no adapter on this host", app.Server, app.Client)
 			errs = append(errs, err)
-			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
 			continue
 		}
-		if expectedApplied == nil {
-			if rerr := adapter.RestoreEntryFromBackupForRollback(app.BackupPath, serenaEntryName); rerr != nil {
-				errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
-			}
-			continue
-		}
-		expected, ok := expectedApplied[app.Client]
-		if !ok || expected == "" {
-			err := fmt.Errorf("restore %s/%s: missing expected applied fingerprint", app.Server, app.Client)
-			errs = append(errs, err)
-			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
-			continue
-		}
-		mutator, ok := clients.AsCASEntryMutator(adapter)
-		if !ok {
-			err := fmt.Errorf("restore %s/%s: adapter lacks rollback CAS capability", app.Server, app.Client)
-			errs = append(errs, err)
-			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
-			continue
-		}
-		snapshotBytes, readErr := os.ReadFile(app.BackupPath)
-		if readErr != nil {
-			err := fmt.Errorf("restore %s/%s: read pinned backup: %w", app.Server, app.Client, readErr)
-			errs = append(errs, err)
-			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
-			continue
-		}
-		match := func(live *clients.MCPEntry) bool {
-			sum, err := fingerprintSerenaEntry(live)
-			return err == nil && sum == expected
-		}
-		if rerr := mutator.CASRestoreEntryFromBytesForRollback(serenaEntryName, match, snapshotBytes); rerr != nil {
-			if errors.Is(rerr, clients.ErrCASConflict) {
-				results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreConflict, Err: rerr})
+		if rerr := adapter.RestoreEntryFromBackupForRollback(app.BackupPath, serenaEntryName); rerr != nil {
+			if classify(rerr) == clients.ClientMutationAppliedReleaseUnconfirmed {
+				errs = append(errs, fmt.Errorf("restore %s/%s from %s applied; lock release unconfirmed: %w", app.Server, app.Client, app.BackupPath, rerr))
 				continue
 			}
-			err := fmt.Errorf("restore %s/%s: %w", app.Server, app.Client, rerr)
-			errs = append(errs, err)
-			results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreFailed, Err: err})
-			continue
+			errs = append(errs, fmt.Errorf("restore %s/%s from %s: %w", app.Server, app.Client, app.BackupPath, rerr))
 		}
-		results = append(results, SerenaOwnedRestoreResult{Client: app.Client, Status: SerenaOwnedRestoreRestored})
 	}
-	return results, errors.Join(errs...)
+	return errors.Join(errs...)
 }
 
 // SerenaClientEntryFingerprint returns a stable content hash of ONE client's

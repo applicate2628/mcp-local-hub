@@ -24,12 +24,18 @@ type lspRouterFakeClient struct {
 	// an embedding wrapper on purpose: ConditionalEntryMutation below calls
 	// f.GetEntry, and Go has no virtual dispatch, so an override on an embedder
 	// would be invisible to the very method whose compare object it must shape.
-	belowWriteTarget map[string]bool
-	addErr           error
-	addCalls         int
-	removeCalls      int
-	restoreCalls     int
-	latestBackupErr  error
+	belowWriteTarget    map[string]bool
+	addErr              error
+	addAppliesOnErr     bool
+	removeErr           error
+	removeAppliesOnErr  bool
+	restoreErr          error
+	restoreAppliesOnErr bool
+	addCalls            int
+	removeCalls         int
+	restoreCalls        int
+	getCalls            int
+	latestBackupErr     error
 }
 
 func newLSPRouterFakeClient(t *testing.T, name string, exists bool) *lspRouterFakeClient {
@@ -91,6 +97,9 @@ func (f *lspRouterFakeClient) Restore(string) error { return nil }
 func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 	f.addCalls++
 	if f.addErr != nil {
+		if f.addAppliesOnErr {
+			f.entries[e.Name] = e
+		}
 		return f.addErr
 	}
 	f.entries[e.Name] = intendedEntryReadbackProjection(f, e)
@@ -104,10 +113,17 @@ func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 }
 func (f *lspRouterFakeClient) RemoveEntry(name string) error {
 	f.removeCalls++
+	if f.removeErr != nil {
+		if f.removeAppliesOnErr {
+			delete(f.entries, name)
+		}
+		return f.removeErr
+	}
 	delete(f.entries, name)
 	return nil
 }
 func (f *lspRouterFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
+	f.getCalls++
 	entry, ok := f.entries[name]
 	if !ok {
 		return nil, nil
@@ -129,10 +145,22 @@ func (f *lspRouterFakeClient) LatestBackupPath() (string, bool, error) {
 }
 func (f *lspRouterFakeClient) RestoreEntryFromBackup(backupPath, name string) error {
 	f.restoreCalls++
+	if f.restoreErr != nil {
+		if f.restoreAppliesOnErr {
+			_ = f.restoreEntryFromSnapshot(backupPath, name)
+		}
+		return f.restoreErr
+	}
 	return f.restoreEntryFromSnapshot(backupPath, name)
 }
 func (f *lspRouterFakeClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
 	f.restoreCalls++
+	if f.restoreErr != nil {
+		if f.restoreAppliesOnErr {
+			_ = f.restoreEntryFromSnapshot(backupPath, name)
+		}
+		return f.restoreErr
+	}
 	return f.restoreEntryFromSnapshot(backupPath, name)
 }
 func (f *lspRouterFakeClient) restoreEntryFromSnapshot(backupPath, name string) error {
@@ -1275,6 +1303,102 @@ func seedLSPRouterManifest(t *testing.T, languages []string) {
 		t.Fatalf("write manifest: %v", err)
 	}
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", dir)
+}
+
+func classifyAPITestAppliedRelease(induced error) func(error) clients.ClientMutationSettlement {
+	return func(err error) clients.ClientMutationSettlement {
+		if err == induced {
+			return clients.ClientMutationAppliedReleaseUnconfirmed
+		}
+		return clients.ClassifyClientMutation(err)
+	}
+}
+
+func TestApplyLSPRouterOpsAppliedReleaseUnconfirmedStopsSameLeaf(t *testing.T) {
+	induced := errors.New("induced applied mutation with unconfirmed release")
+	classify := classifyAPITestAppliedRelease(induced)
+
+	t.Run("add records applied and failure before dependent remove", func(t *testing.T) {
+		client := newLSPRouterFakeClient(t, "codex-cli", true)
+		client.addErr = induced
+		client.addAppliesOnErr = true
+		report := &LSPClientRouterReport{}
+		applyLSPRouterOps(LSPClientRouterOpts{classifyClientMutation: classify}, client, client.name, 1, []lspClientRouterOp{
+			{kind: "add", language: "go", entryName: "router-go", entry: clients.MCPEntry{Name: "router-go", URL: "http://127.0.0.1:9125/lsp/go/mcp"}},
+			{kind: "remove", language: "go", entryName: "legacy-go"},
+		}, report)
+
+		if client.addCalls != 1 || client.removeCalls != 0 {
+			t.Fatalf("calls add=%d remove=%d, want 1/0", client.addCalls, client.removeCalls)
+		}
+		if len(report.Applied) != 1 || len(report.Failed) != 1 || report.Failed[0].Op != "add" {
+			t.Fatalf("report = %+v, want one applied plus one add lifecycle failure", report)
+		}
+	})
+
+	t.Run("remove records removal and stops later add", func(t *testing.T) {
+		client := newLSPRouterFakeClient(t, "codex-cli", true)
+		client.entries["legacy-go"] = clients.MCPEntry{Name: "legacy-go"}
+		client.removeErr = induced
+		client.removeAppliesOnErr = true
+		report := &LSPClientRouterReport{}
+		applyLSPRouterOps(LSPClientRouterOpts{classifyClientMutation: classify}, client, client.name, 1, []lspClientRouterOp{
+			{kind: "remove", language: "go", entryName: "legacy-go"},
+			{kind: "add", language: "python", entryName: "router-python", entry: clients.MCPEntry{Name: "router-python", URL: "http://127.0.0.1:9125/lsp/python/mcp"}},
+		}, report)
+
+		if client.removeCalls != 1 || client.addCalls != 0 {
+			t.Fatalf("calls remove=%d add=%d, want 1/0", client.removeCalls, client.addCalls)
+		}
+		if len(report.Removed) != 1 || len(report.Failed) != 1 || report.Failed[0].Op != "remove" {
+			t.Fatalf("report = %+v, want one removed plus one remove lifecycle failure", report)
+		}
+	})
+
+	t.Run("restore records restored and never reads or falls back", func(t *testing.T) {
+		client := newLSPRouterFakeClient(t, "codex-cli", true)
+		client.entries["router-go"] = clients.MCPEntry{Name: "router-go", URL: "http://localhost:9200/mcp"}
+		backup, err := client.BackupKeep(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.restoreErr = induced
+		client.restoreAppliesOnErr = true
+		report := &LSPClientRouterReport{}
+		applyLSPRouterOps(LSPClientRouterOpts{classifyClientMutation: classify}, client, client.name, 1, []lspClientRouterOp{
+			{kind: "restore", language: "go", entryName: "router-go", backup: backup, entry: clients.MCPEntry{Name: "router-go", URL: "http://localhost:9200/mcp"}},
+		}, report)
+
+		if client.restoreCalls != 1 || client.getCalls != 0 || client.addCalls != 0 {
+			t.Fatalf("calls restore=%d get=%d add=%d, want 1/0/0", client.restoreCalls, client.getCalls, client.addCalls)
+		}
+		if len(report.Restored) != 1 || len(report.Failed) != 1 || report.Failed[0].Op != "restore" {
+			t.Fatalf("report = %+v, want one restored plus one restore lifecycle failure", report)
+		}
+	})
+
+	t.Run("fallback add records applied and stops", func(t *testing.T) {
+		client := newLSPRouterFakeClient(t, "codex-cli", true)
+		client.entries["router-go"] = clients.MCPEntry{Name: "router-go", URL: "http://127.0.0.1:9125/lsp/go/mcp"}
+		backup, err := client.BackupKeep(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		client.addErr = induced
+		client.addAppliesOnErr = true
+		report := &LSPClientRouterReport{}
+		applyLSPRouterOps(LSPClientRouterOpts{classifyClientMutation: classify}, client, client.name, 1, []lspClientRouterOp{
+			{kind: "restore", language: "go", entryName: "router-go", backup: backup, entry: clients.MCPEntry{Name: "router-go", URL: "http://localhost:9200/mcp"}},
+			{kind: "remove", language: "python", entryName: "later"},
+		}, report)
+
+		if client.restoreCalls != 1 || client.addCalls != 1 || client.removeCalls != 0 {
+			t.Fatalf("calls restore=%d add=%d remove=%d, want 1/1/0", client.restoreCalls, client.addCalls, client.removeCalls)
+		}
+		if len(report.Applied) != 1 || len(report.Failed) != 1 || report.Failed[0].Op != "add" {
+			t.Fatalf("report = %+v, want one applied fallback plus one add lifecycle failure", report)
+		}
+	})
 }
 
 func seedManifestWithClientBinding(t *testing.T, name, client string, port int) {

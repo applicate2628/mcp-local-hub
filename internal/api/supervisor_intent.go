@@ -298,12 +298,13 @@ func isLegacyOneshotDaemon(d SupervisorDaemon) bool {
 }
 
 // WriteSupervisorIntent goes through the hardened state-file write pipeline.
-func WriteSupervisorIntent(path string, f *SupervisorIntentFile) error {
-	raw, err := marshalSupervisorIntent(f)
+func WriteSupervisorIntent(path string, f *SupervisorIntentFile) (err error) {
+	release, err := lockSupervisorIntent(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(path), err)
 	}
-	return WriteStateFileBytesAtomic(path, raw)
+	defer releaseSupervisorIntentAndJoin(&err, release, "release supervisor-intent flock")
+	return writeSupervisorIntentLockHeld(path, f)
 }
 
 func marshalSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {
@@ -549,18 +550,9 @@ func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, _ *DaemonIntentFil
 	return supervisorIntent.StopsAsDaemonIntentFile()
 }
 
-// supervisorIntentLockSuffix is the gofrs/flock lock-leaf suffix for
-// supervisor-intent.json. It is exactly the `<path>.lock` form
-// WriteStateFileAtomic derives internally (state_file_helper.go:85), so a
-// caller that wants an atomic read-modify-write across the supervisor-intent
-// file can acquire `intentPath + supervisorIntentLockSuffix` and serialize
-// against WriteStateFileAtomic writers (migration, autostart,
-// InstallParsedManifest) across goroutines AND processes.
-const supervisorIntentLockSuffix = ".lock"
-
 // writeSupervisorIntentLockHeld marshals + writes the supervisor-intent file
 // WITHOUT acquiring the per-file flock, for callers that already hold
-// `path + supervisorIntentLockSuffix`. It mirrors daemon_intent.go's
+// canonical supervisor-intent lock leaf. It mirrors daemon_intent.go's
 // readIntentLocked/writeIntentLocked split: WriteSupervisorIntent (and the
 // WriteStateFileAtomic it wraps) re-acquires the same flock, so calling it
 // while the lock is held would DEADLOCK on Windows LockFileEx. This helper

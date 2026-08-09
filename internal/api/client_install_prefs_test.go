@@ -46,7 +46,7 @@ func TestDefaultInstallClientNames_AbsentFileNoOverride(t *testing.T) {
 func TestSetAndReadDefaultInstallClientNames_RoundTrip(t *testing.T) {
 	a := NewAPI()
 	path := tempPrefsPath(t)
-	// Pick a set that differs from the compile-time trio: add an opt-in,
+	// Pick a set that differs from the compile-time default set: add an opt-in,
 	// drop one default. Every name must be supported.
 	want := []string{"claude-code", "vscode"}
 	if err := a.SetDefaultInstallClientNamesIn(path, want); err != nil {
@@ -742,7 +742,7 @@ func TestClientInstallToggleView_OverrideAndDefault(t *testing.T) {
 	a := NewAPI()
 	path := tempPrefsPath(t)
 
-	// No override → compile-time trio selected, override inactive.
+	// No override → compile-time default set selected, override inactive.
 	snap, err := a.ClientInstallToggleViewIn(path)
 	if err != nil {
 		t.Fatalf("view (no override): %v", err)

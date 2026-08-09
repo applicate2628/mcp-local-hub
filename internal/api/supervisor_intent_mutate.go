@@ -5,8 +5,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/gofrs/flock"
 )
 
 // MutateSupervisorIntentIfChanged serializes a supervisor-intent.json
@@ -63,7 +61,7 @@ type MutateSupervisorIntentResult struct {
 // than reapplying its callback to its own copy. MutateSupervisorIntentIfChanged
 // stays the right choice for a caller that only needs the write to happen and
 // does not hold, or does not care about, its own outdated snapshot afterward.
-func MutateSupervisorIntentIfChangedReturning(path string, mutate func(*SupervisorIntentFile) (bool, error)) (MutateSupervisorIntentResult, error) {
+func MutateSupervisorIntentIfChangedReturning(path string, mutate func(*SupervisorIntentFile) (bool, error)) (result MutateSupervisorIntentResult, err error) {
 	if strings.TrimSpace(path) == "" {
 		return MutateSupervisorIntentResult{}, fmt.Errorf("empty supervisor intent path")
 	}
@@ -71,12 +69,15 @@ func MutateSupervisorIntentIfChangedReturning(path string, mutate func(*Supervis
 		return MutateSupervisorIntentResult{}, fmt.Errorf("mkdir supervisor intent dir: %w", err)
 	}
 
-	lockPath := path + supervisorIntentLockSuffix
-	lock := flock.New(lockPath)
-	if err := lock.Lock(); err != nil {
-		return MutateSupervisorIntentResult{}, fmt.Errorf("supervisor-intent flock %s: %w", lockPath, err)
+	lockPath := supervisorIntentLockPath(path)
+	release, lockErr := lockSupervisorIntent(path)
+	if lockErr != nil {
+		return MutateSupervisorIntentResult{}, fmt.Errorf("supervisor-intent flock %s: %w", lockPath, lockErr)
 	}
-	defer func() { _ = lock.Unlock() }()
+	applied := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, release, "release supervisor-intent flock", applied)
+	}()
 
 	file, _, err := readSupervisorIntentForMerge(path)
 	if err != nil {
@@ -99,5 +100,6 @@ func MutateSupervisorIntentIfChangedReturning(path string, mutate func(*Supervis
 	if err := writeSupervisorIntentLockHeld(path, file); err != nil {
 		return MutateSupervisorIntentResult{}, err
 	}
+	applied = true
 	return MutateSupervisorIntentResult{Intent: file, Changed: true}, nil
 }

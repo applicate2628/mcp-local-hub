@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"time"
 
+	"golang.org/x/sys/unix"
+
 	"mcp-local-hub/internal/process"
 )
 
@@ -140,6 +142,66 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	}, nil
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	first, err := processIDImpl(pid)
+	if err != nil {
+		return ProcessIdentity{}, err
+	}
+	if !first.Alive || first.Denied {
+		return ProcessIdentity{}, fmt.Errorf("retained process identity for pid %d is unavailable", pid)
+	}
+	pidfd, err := unix.PidfdOpen(pid, 0)
+	if err != nil {
+		return ProcessIdentity{}, fmt.Errorf("pidfd_open(%d): %w", pid, err)
+	}
+	closeFailure := func(cause error) (ProcessIdentity, error) {
+		return ProcessIdentity{}, errors.Join(cause, unix.Close(pidfd))
+	}
+	if err := retainedPIDFDAlive(pidfd); err != nil {
+		return closeFailure(fmt.Errorf("pidfd liveness before identity confirmation for pid %d: %w", pid, err))
+	}
+	second, err := processIDImpl(pid)
+	if err != nil {
+		return closeFailure(err)
+	}
+	if !sameLinuxProcessIdentity(first, second) {
+		return closeFailure(fmt.Errorf("retained process identity changed for pid %d", pid))
+	}
+	if err := retainedPIDFDAlive(pidfd); err != nil {
+		return closeFailure(fmt.Errorf("pidfd liveness after identity confirmation for pid %d: %w", pid, err))
+	}
+	second.Handle = uintptr(pidfd)
+	return second, nil
+}
+
+func retainedPIDFDAlive(pidfd int) error {
+	fds := []unix.PollFd{{Fd: int32(pidfd), Events: unix.POLLIN}}
+	n, err := unix.Poll(fds, 0)
+	if err != nil {
+		return err
+	}
+	if n != 0 || fds[0].Revents != 0 {
+		return fmt.Errorf("pidfd ready/revents=%#x", fds[0].Revents)
+	}
+	return nil
+}
+
+func sameLinuxProcessIdentity(first, second ProcessIdentity) bool {
+	if first.Alive != second.Alive ||
+		first.Denied != second.Denied ||
+		first.ImagePath != second.ImagePath ||
+		!first.StartTime.Equal(second.StartTime) ||
+		len(first.Cmdline) != len(second.Cmdline) {
+		return false
+	}
+	for i := range first.Cmdline {
+		if first.Cmdline[i] != second.Cmdline[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // killProcessImpl sends SIGKILL by PID. Residual TOCTOU: between
 // gate-pass and Kill the kernel can in theory recycle the PID. A
 // future hardening lane will switch to pidfd_send_signal on Linux
@@ -152,9 +214,9 @@ func killProcessImpl(pid int) error {
 	return nil
 }
 
-// closeProcessHandle no-op companion to ProcessIdentity.Handle.
-// Linux will populate Handle when the pidfd-based hardening lands.
-func closeProcessHandle(_ uintptr) {}
+func closeProcessHandle(handle uintptr) error {
+	return unix.Close(int(handle))
+}
 
 // readStartTimeLinux returns the process's wall-clock start time by
 // combining /proc/<pid>/stat's starttime field with the system boot

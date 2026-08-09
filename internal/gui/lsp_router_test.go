@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -182,6 +183,43 @@ func TestLSPRouter_InitializeAndToolsListUseCatalogWithoutProxy(t *testing.T) {
 	}
 	if !strings.Contains(listRR.Body.String(), `"name":"go_workspace"`) {
 		t.Fatalf("tools/list did not come from the gopls catalog: %s", listRR.Body.String())
+	}
+}
+
+// TestCleanupDirectLSP_RealGUIRouteToolsListPassesOracle anchors the cleanup
+// oracle's positive fixture to the actual GUI mux, not a hand-written response.
+func TestCleanupDirectLSP_ProductionProberPassesRealGUIMux(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	s.SetLSPRouterDeps(&lspRouterDeps{
+		Resolver: &stubLSPResolver{},
+		Sessions: lsp_routing.NewSessionRouter(),
+		BackendKindForLanguage: func(lang string) (string, bool) {
+			if lang == "go" {
+				return "gopls-mcp", true
+			}
+			return "", false
+		},
+	})
+
+	server := httptest.NewUnstartedServer(s.mux)
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.Listener = listener
+	server.Start()
+	t.Cleanup(server.Close)
+	_, rawPort, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(rawPort)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, failureClass := api.ProbeManagedLanguageRoute(context.Background(), port, "go", "gopls-mcp")
+	if !ok || failureClass != "" {
+		t.Fatalf("production prober -> real GUI mux proof ok=%v class=%q", ok, failureClass)
 	}
 }
 
@@ -1375,6 +1413,8 @@ func TestLSPRouter_ForwardsDaemon503AndRetryAfterVerbatim_StillTouchesSession(t 
 // upstream → 202 + the notification is actually delivered; (B) unreachable
 // upstream → still 202, never 502/504.
 func TestLSPRouter_NotificationForwardIsDetached202(t *testing.T) {
+	t.Cleanup(api.SetDaemonStateRootForTest(t.TempDir()))
+
 	got := make(chan string, 1)
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -1421,6 +1461,7 @@ func TestLSPRouter_NotificationForwardIsDetached202(t *testing.T) {
 	if rrB.Code != http.StatusAccepted {
 		t.Fatalf("unreachable-upstream notification status = %d, want 202 (must not propagate 502/504 to a notification); body=%s", rrB.Code, rrB.Body.String())
 	}
+	waitHubRestartTestLogEvent(t, "lsp-notification-forward-failed")
 }
 
 // TestForwardLSPNotificationDetached_UsesProvidedAuditFnNotHardcodedLogHubMcpEvent

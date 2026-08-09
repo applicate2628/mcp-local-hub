@@ -33,6 +33,18 @@ const (
 	groupMaintenance = "maintenance"
 )
 
+// RouteInvocationArgs is the single argv rewrite used by the executable's
+// bare-invocation path and by the GUI runtime-policy regression. It returns a
+// copy when routing so callers retaining args cannot observe a mutated backing
+// array; non-bare invocations are returned unchanged.
+func RouteInvocationArgs(args []string) []string {
+	if len(args) > 1 {
+		return args
+	}
+	routed := append([]string(nil), args...)
+	return append(routed, "gui")
+}
+
 func NewRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:   "mcphub",

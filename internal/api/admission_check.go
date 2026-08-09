@@ -53,11 +53,31 @@ func admissionErrorFromFinding(f AdmissionFinding) *AdmissionError {
 	return &AdmissionError{ID: f.ID, Reason: f.Reason, Fix: f.Fix}
 }
 
+// AdmissionScope narrows an admission / readiness evaluation to the SAME
+// surface the install that immediately follows it will touch. Every field is
+// zero-valued by default, which means "the scope a bare `mcphub install
+// --server X` uses" — so an unscoped AdmissionScope{} behaves exactly as
+// before this type grew fields.
 type AdmissionScope struct {
+	// DaemonFilter restricts the evaluation to one daemon (`--daemon`), so a
+	// sibling daemon's invalid binding cannot block a filtered install.
 	DaemonFilter string
 
-	// Client selectors are validated only when the caller explicitly asks for
-	// them. SkipClientConfigWrites represents a client-inert install.
+	// ClientsInclude / IncludeAllClients carry the caller's EXPLICIT client
+	// selection (`--clients a,b` / `--all-clients`). Readiness feeds them into
+	// its BuildPlanWithOpts dry-run so it validates the bindings the real
+	// install will actually apply.
+	//
+	// Absent them, readiness always validated the effective DEFAULT-install set
+	// while the install that followed applied the explicit one: a manifest with
+	// a broken opt-in binding (bad url_path, unknown daemon, unsupported
+	// transport) reported Ready and then had that exact binding rejected by the
+	// planner seconds later. That was masked for cursor while cursor was a
+	// compile-time default and became reachable when it moved to opt-in.
+	//
+	// This does NOT reopen the "validate everything" behavior readiness
+	// deliberately avoids (readiness.go, Codex #377 r7): the opt-in bindings are
+	// validated only when the CALLER explicitly asked for them.
 	ClientsInclude         []string
 	IncludeAllClients      bool
 	SkipClientConfigWrites bool

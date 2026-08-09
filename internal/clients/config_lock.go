@@ -53,7 +53,23 @@ func perPathMutex(configPath string) *sync.Mutex {
 // recovery row while the lock is held. Its lock order is operation lock ->
 // config lock -> recovery state-file lock, and the callback must never mutate
 // this client or retain the unwrapped adapter.
-func withConfigLock(configPath string, fn func() error) error {
+//
+// configLockExecution records the two independently observable phases of a
+// config-lock operation. A caller that only needs the historical error-shaped
+// contract uses withConfigLock; mutation wrappers additionally use this record
+// to distinguish a failed body from a successful body whose lock release could
+// not be confirmed.
+type configLockExecution struct {
+	bodyEntered bool
+	bodyErr     error
+	releaseErr  error
+}
+
+func (e configLockExecution) bodyApplied() bool {
+	return e.bodyEntered && e.bodyErr == nil
+}
+
+func withConfigLockExecution(configPath string, fn func() error) (execution configLockExecution, err error) {
 	mu := perPathMutex(configPath)
 	mu.Lock()
 	defer mu.Unlock()
@@ -122,21 +138,39 @@ func withConfigLock(configPath string, fn func() error) error {
 	if dir := filepath.Dir(configPath); dir != "" {
 		absDir, absErr := filepath.Abs(dir)
 		if absErr != nil {
-			return fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
+			return execution, fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
 		}
 		if mkErr := SecureCreateParentDir(absDir); mkErr != nil {
-			return fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
+			return execution, fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
 		}
 	}
 
 	lockPath := configPath + ".lock"
+	if ghost := unconfirmedConfigLockRelease(lockPath); ghost != nil {
+		return execution, fmt.Errorf("config lock %s: %w", lockPath, ghost)
+	}
 	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {
-		return fmt.Errorf("config lock %s: %w", lockPath, err)
+		return execution, fmt.Errorf("config lock %s: %w", lockPath, err)
 	}
-	defer func() { _ = fl.Unlock() }()
+	release := newConfigLockRelease(fl, lockPath)
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			execution.releaseErr = releaseErr
+			err = errors.Join(err, fmt.Errorf("release config lock %s: %w", lockPath, releaseErr))
+		}
+	}()
 
-	return fn()
+	execution.bodyEntered = true
+	execution.bodyErr = fn()
+	return execution, execution.bodyErr
+}
+
+// withConfigLock retains the error-only contract used by non-mutation lock
+// clients such as backup selection and pruning.
+func withConfigLock(configPath string, fn func() error) error {
+	_, err := withConfigLockExecution(configPath, fn)
+	return err
 }
 
 // withConfigReadLock is the read-selection variant of withConfigLock used by
@@ -162,9 +196,10 @@ func withConfigReadLock(configPath string, fn func() error) error {
 	return withConfigLock(configPath, fn)
 }
 
-// lockingClient decorates a Client so every MUTATING method serializes its
-// read-modify-write of the underlying config file via withConfigLock. The
-// backup-READ selection/inspection methods (LatestBackupPath,
+// lockingClient decorates a Client so every config-entry mutation serializes
+// its read-modify-write and settlement result via withConfigMutationLock.
+// InitEmpty, Backup, and BackupKeep retain the error-only withConfigLock path.
+// The backup-READ selection/inspection methods (LatestBackupPath,
 // BackupContainsEntry, BackupEntryIsHubManaged) are ALSO serialized under the
 // same per-path lock so the demigrate selection cannot observe a backup
 // directory/file mid-write (b1). The remaining read-only methods (Name,
@@ -174,8 +209,8 @@ func withConfigReadLock(configPath string, fn func() error) error {
 // Re-entrancy safety: each override calls the CONCRETE adapter (l.Client),
 // whose own internal cross-method calls (e.g. cursor/vscode/qwen/zed
 // BackupKeep internally calling InitEmpty) dispatch on the concrete struct
-// directly, NOT through this decorator — so they never re-enter withConfigLock
-// and there is no self-deadlock on the same per-path mutex.
+// directly, NOT through this decorator — so they never re-enter either lock
+// wrapper and there is no self-deadlock on the same per-path mutex.
 type lockingClient struct {
 	Client // embedded: read-only methods + everything not overridden pass through
 }
@@ -475,11 +510,7 @@ func (l *lockingClient) InitEmpty() (created bool, err error) {
 		created, err = l.Client.InitEmpty()
 		return err
 	})
-	if werr != nil && err == nil {
-		// A lock-acquire failure (not an InitEmpty failure) — surface it.
-		return false, werr
-	}
-	return created, err
+	return created, werr
 }
 
 func (l *lockingClient) Backup() (string, error) {
@@ -503,19 +534,19 @@ func (l *lockingClient) BackupKeep(keepN int) (string, error) {
 }
 
 func (l *lockingClient) Restore(backupPath string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.Restore(backupPath)
 	})
 }
 
 func (l *lockingClient) AddEntry(entry MCPEntry) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.AddEntry(entry)
 	})
 }
 
 func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		scoped, ok := l.Client.(interface {
 			AddEntryWithConfigWriter(MCPEntry, WriteConfigFileFunc) error
 		})
@@ -527,25 +558,25 @@ func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteCon
 }
 
 func (l *lockingClient) RemoveEntry(name string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RemoveEntry(name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackup(backupPath, name string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RestoreEntryFromBackup(backupPath, name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RestoreEntryFromBackupForRollback(backupPath, name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		scoped, ok := l.Client.(interface {
 			RestoreEntryFromBackupForRollbackWithConfigWriter(string, string, WriteConfigFileFunc) error
 		})
@@ -575,10 +606,7 @@ func (l *lockingClient) LatestBackupPath() (path string, ok bool, err error) {
 		path, ok, err = l.Client.LatestBackupPath()
 		return err
 	})
-	if werr != nil && err == nil {
-		return "", false, werr
-	}
-	return path, ok, err
+	return path, ok, werr
 }
 
 func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, err error) {
@@ -586,10 +614,7 @@ func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, 
 		has, err = l.Client.BackupContainsEntry(backupPath, name)
 		return err
 	})
-	if werr != nil && err == nil {
-		return false, werr
-	}
-	return has, err
+	return has, werr
 }
 
 func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (managed bool, err error) {
@@ -597,10 +622,7 @@ func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (manage
 		managed, err = l.Client.BackupEntryIsHubManaged(backupPath, name)
 		return err
 	})
-	if werr != nil && err == nil {
-		return false, werr
-	}
-	return managed, err
+	return managed, werr
 }
 
 // RemovableStdioEntries forwards the OPTIONAL Client method of the same name to

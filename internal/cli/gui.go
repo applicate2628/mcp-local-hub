@@ -958,6 +958,14 @@ func shouldAutoLaunchBrowser(startup *guiServerStartup, noBrowser bool) bool {
 	return startup == nil && !noBrowser
 }
 
+// shouldRunTray reports whether the resolved GUI launch options allow the
+// system-tray loop to run. The noTray value is parsed once by newGuiCmdReal;
+// keep the polarity conversion here so the runtime branch and its focused test
+// share one policy owner.
+func shouldRunTray(noTray bool) bool {
+	return !noTray
+}
+
 func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
 	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode, releaseConsole bool, pidportPath string,
 	startup *guiServerStartup) error {
@@ -1339,7 +1347,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not auto-launch browser: %v\n", err)
 		}
 	}
-	if !noTray {
+	if shouldRunTray(noTray) {
 		go func() {
 			// PR #24 added child-failure propagation: tray.Run
 			// returns non-nil when the tray subprocess exits
