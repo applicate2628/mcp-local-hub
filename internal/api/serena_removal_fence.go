@@ -75,6 +75,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"sync"
 
 	"github.com/gofrs/flock"
 )
@@ -164,12 +166,54 @@ func validSerenaRemovalFenceKey(workspaceKey string) bool {
 //
 // registryDir is filepath.Dir of the caller's already-resolved registry path.
 func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func() error, err error) {
+	return AcquireSerenaRemovalFences(registryDir, workspaceKey)
+}
+
+// AcquireSerenaRemovalFences acquires one teardown transaction across every
+// registry key that may name the workspace. Keys are validated, deduplicated,
+// and sorted before blocking so canonical/legacy callers cannot deadlock by
+// presenting the same pair in a different order. A partial acquire is rolled
+// back before returning; the returned release is one-shot and releases every
+// acquired leaf in reverse order while preserving all release failures.
+func AcquireSerenaRemovalFences(registryDir string, workspaceKeys ...string) (release func() error, err error) {
 	if registryDir == "" {
 		return nil, fmt.Errorf("serena removal fence: empty registry dir (caller must thread the resolved registry directory)")
 	}
-	if !validSerenaRemovalFenceKey(workspaceKey) {
-		return nil, fmt.Errorf("serena removal fence: refusing workspace key %q (not the canonical WorkspaceKey hex shape)", workspaceKey)
+	keys, err := normalizedSerenaRemovalFenceKeys(workspaceKeys)
+	if err != nil {
+		return nil, err
 	}
+	releases := make([]func() error, 0, len(keys))
+	for _, key := range keys {
+		keyRelease, acquireErr := acquireSerenaRemovalFence(registryDir, key)
+		if acquireErr != nil {
+			var releaseErrs []error
+			for i := len(releases) - 1; i >= 0; i-- {
+				if releaseErr := releases[i](); releaseErr != nil {
+					releaseErrs = append(releaseErrs, releaseErr)
+				}
+			}
+			return nil, errors.Join(acquireErr, errors.Join(releaseErrs...))
+		}
+		releases = append(releases, keyRelease)
+	}
+	var once sync.Once
+	var releaseErr error
+	return func() error {
+		once.Do(func() {
+			var errs []error
+			for i := len(releases) - 1; i >= 0; i-- {
+				if err := releases[i](); err != nil {
+					errs = append(errs, err)
+				}
+			}
+			releaseErr = errors.Join(errs...)
+		})
+		return releaseErr
+	}, nil
+}
+
+func acquireSerenaRemovalFence(registryDir, workspaceKey string) (release func() error, err error) {
 	path := serenaRemovalFencePath(registryDir, workspaceKey)
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, fmt.Errorf("serena removal fence: mkdir %s: %w", filepath.Dir(path), err)
@@ -197,22 +241,56 @@ func AcquireSerenaRemovalFence(registryDir, workspaceKey string) (release func()
 // the flock leaf: its returned opaque value is at least 128 random bits and is
 // safe to persist in the registry as an identity, not as a credential.
 func PublishSerenaRemovalFenceGeneration(registryDir, workspaceKey string) (string, error) {
+	return PublishSerenaRemovalFenceGenerationForKeys(registryDir, workspaceKey)
+}
+
+// PublishSerenaRemovalFenceGenerationForKeys publishes one shared generation
+// under every fence held for a canonical/legacy workspace-key transaction. The
+// pending-removal tuple therefore matches the sidecar repair will probe on each
+// actual marked row, including a legacy-only row.
+func PublishSerenaRemovalFenceGenerationForKeys(registryDir string, workspaceKeys ...string) (string, error) {
 	if registryDir == "" {
 		return "", fmt.Errorf("serena removal fence generation: empty registry dir")
 	}
-	if !validSerenaRemovalFenceKey(workspaceKey) {
-		return "", fmt.Errorf("serena removal fence generation: refusing workspace key %q (not the canonical WorkspaceKey hex shape)", workspaceKey)
+	keys, err := normalizedSerenaRemovalFenceKeys(workspaceKeys)
+	if err != nil {
+		return "", fmt.Errorf("serena removal fence generation: %w", err)
 	}
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return "", fmt.Errorf("serena removal fence generation: random token: %w", err)
 	}
 	generation := hex.EncodeToString(raw[:])
-	path := serenaRemovalFenceGenerationPath(registryDir, workspaceKey)
-	if err := writeSerenaRemovalFenceGenerationFn(path, []byte(generation+"\n")); err != nil {
-		return "", fmt.Errorf("serena removal fence generation: publish %s: %w", path, err)
+	for _, key := range keys {
+		path := serenaRemovalFenceGenerationPath(registryDir, key)
+		if err := writeSerenaRemovalFenceGenerationFn(path, []byte(generation+"\n")); err != nil {
+			return "", fmt.Errorf("serena removal fence generation: publish %s: %w", path, err)
+		}
 	}
 	return generation, nil
+}
+
+func normalizedSerenaRemovalFenceKeys(workspaceKeys []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(workspaceKeys))
+	keys := make([]string, 0, len(workspaceKeys))
+	for _, key := range workspaceKeys {
+		if key == "" {
+			continue
+		}
+		if !validSerenaRemovalFenceKey(key) {
+			return nil, fmt.Errorf("serena removal fence: refusing workspace key %q (not the canonical WorkspaceKey hex shape)", key)
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	if len(keys) == 0 {
+		return nil, fmt.Errorf("serena removal fence: no workspace keys")
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 // writeSerenaRemovalFenceGenerationFn is the narrow test seam over the

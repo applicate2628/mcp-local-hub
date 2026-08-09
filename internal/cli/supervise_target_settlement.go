@@ -96,10 +96,10 @@ func (c *supervisorController) settleReconcileTarget(ctx context.Context, target
 						return targetSettlementWithRuntime(result, api.ReconcileTargetSettlementReady, api.ReconcileTargetReasonReady, current, "")
 					}
 				} else if verdict.Live && verdict.PortBound {
-					// The canonical liveness owner may retain TCP-only operational
-					// liveness on platforms without socket-owner support. That weaker
-					// proof is terminally unverified for this target attempt: a listener
-					// exists, but it is not attributable to the tracked PID.
+					// A TCP listener without either a strong proof or the canonical
+					// capability-unavailable verdict remains unverified. TargetReady owns
+					// the narrow platform fallback so injected nil probes and transient
+					// owner-probe failures cannot enter it here.
 					return targetSettlementWithRuntime(result, api.ReconcileTargetSettlementIncomplete, api.ReconcileTargetReasonLivenessUnverified, entry, "TCP listener observed without current-PID ownership proof")
 				} else {
 					switch verdict.Reason {

@@ -470,6 +470,12 @@ func (r *Registry) RemoveByBackend(workspaceKey string, backendFilter string) in
 // so rollback deliberately leaves it untouched.
 var ErrSerenaPendingRemovalRollbackConflict = errors.New("serena pending-removal rollback ownership conflict")
 
+// ErrSerenaPendingRemovalTargetAbsent reports that no canonical or legacy
+// Serena row remained when teardown tried to stage its ownership tuple. The
+// caller must stop before removing supervisor intent: another actor may have
+// deleted and re-registered the workspace since the earlier presence check.
+var ErrSerenaPendingRemovalTargetAbsent = errors.New("serena pending-removal target absent")
+
 // SerenaPendingRemovalRollbackConflict identifies the row a rollback could not
 // restore because its tuple no longer belongs to the staging transaction.
 type SerenaPendingRemovalRollbackConflict struct {
@@ -511,9 +517,11 @@ func (t serenaPendingRemovalTuple) equal(other serenaPendingRemovalTuple) bool {
 // This method is the sole production owner of active-teardown tuple staging and
 // rollback.
 //
-// A missing row is never recreated. A row whose tuple differs from both the
-// snapshot and this attempt belongs to another writer; rollback reports a typed
-// conflict and preserves it.
+// A missing row is never recreated and returns
+// ErrSerenaPendingRemovalTargetAbsent so teardown cannot continue without a
+// row-owned mark. A row whose tuple differs from both the snapshot and this
+// attempt belongs to another writer; rollback reports a typed conflict and
+// preserves it.
 func (r *Registry) BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation string) (rollback func() error, err error) {
 	if generation != "" && !validSerenaRemovalFenceGeneration(generation) {
 		return nil, fmt.Errorf("begin pending serena removal generation: malformed generation")
@@ -546,7 +554,7 @@ func (r *Registry) BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation stri
 		r.Put(e)
 	}
 	if len(before) == 0 {
-		return nil, nil
+		return nil, ErrSerenaPendingRemovalTargetAbsent
 	}
 
 	rollback = func() (err error) {

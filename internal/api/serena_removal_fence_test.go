@@ -28,6 +28,45 @@ import (
 	"github.com/gofrs/flock"
 )
 
+func TestAcquireSerenaRemovalFences_LegacyKeySharesGenerationAndLiveness(t *testing.T) {
+	dir := t.TempDir()
+	const (
+		canonicalKey = "abcdef12"
+		legacyKey    = "1234abcd"
+	)
+
+	release, err := AcquireSerenaRemovalFences(dir, canonicalKey, legacyKey, canonicalKey)
+	if err != nil {
+		t.Fatalf("AcquireSerenaRemovalFences: %v", err)
+	}
+	generation, err := PublishSerenaRemovalFenceGenerationForKeys(dir, canonicalKey, legacyKey)
+	if err != nil {
+		t.Fatalf("PublishSerenaRemovalFenceGenerationForKeys: %v", err)
+	}
+	for _, key := range []string{canonicalKey, legacyKey} {
+		observation, observeErr := observeSerenaRemovalFence(dir, key)
+		if observeErr != nil || !observation.exists || !observation.held {
+			t.Fatalf("held observation for %s = %+v, err=%v", key, observation, observeErr)
+		}
+		gotGeneration, readErr := readSerenaRemovalFenceGeneration(dir, key)
+		if readErr != nil || gotGeneration != generation {
+			t.Fatalf("generation for %s = %q, err=%v; want shared %q", key, gotGeneration, readErr, generation)
+		}
+	}
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	if err := release(); err != nil {
+		t.Fatalf("second one-shot release: %v", err)
+	}
+	for _, key := range []string{canonicalKey, legacyKey} {
+		observation, observeErr := observeSerenaRemovalFence(dir, key)
+		if observeErr != nil || !observation.exists || observation.held || observation.generation != generation {
+			t.Fatalf("released observation for %s = %+v, err=%v; want free shared generation", key, observation, observeErr)
+		}
+	}
+}
+
 // failingFenceUnlock retains every handle whose release it rejects so cleanup
 // can explicitly release it after restoring the production seam.
 func failingFenceUnlock(t *testing.T, cause error) {

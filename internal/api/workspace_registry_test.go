@@ -36,7 +36,7 @@ func TestRegistry_RoundtripWithEntries(t *testing.T) {
 	reg := NewRegistry(path)
 	reg.Put(WorkspaceEntry{
 		WorkspaceKey:  "3f2a8c91",
-		WorkspacePath: "c:/users/alice/projects/foo",
+		WorkspacePath: "c:/workspace/projects/foo",
 		Language:      "python",
 		Backend:       "mcp-language-server",
 		Port:          9200,
@@ -473,15 +473,15 @@ func TestRegistry_BeginSerenaPendingRemoval_StagesAndRollbackRestores(t *testing
 	}
 }
 
-// TestRegistry_BeginSerenaPendingRemoval_NoOpOnMissingRow mirrors
-// TestRegistry_PutLifecycleNoOpOnMissingEntry's ghost-resurrection guard: a
-// workspace key with no serena row is a silent no-op, never a ghost row.
-func TestRegistry_BeginSerenaPendingRemoval_NoOpOnMissingRow(t *testing.T) {
+// TestRegistry_BeginSerenaPendingRemoval_AbsentOnMissingRow keeps the
+// ghost-resurrection guard while making absence an explicit teardown-stopping
+// outcome rather than a successful zero-row mark.
+func TestRegistry_BeginSerenaPendingRemoval_AbsentOnMissingRow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "workspaces.yaml")
 	reg := NewRegistry(path)
 	rollback, err := reg.BeginSerenaPendingRemoval("deadbeef", "", "")
-	if err != nil || rollback != nil {
-		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v; want nil, nil", rollback != nil, err)
+	if !errors.Is(err, ErrSerenaPendingRemovalTargetAbsent) || rollback != nil {
+		t.Fatalf("BeginSerenaPendingRemoval = rollback %v, err %v; want nil and target-absent sentinel", rollback != nil, err)
 	}
 	reg2 := NewRegistry(path)
 	if err := reg2.Load(); err != nil {

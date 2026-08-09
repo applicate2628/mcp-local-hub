@@ -173,16 +173,14 @@ func (a *API) PruneWorkspace(workspacePath string, backend string) (*PruneReport
 			reg := NewRegistry(regPath)
 			return reg.BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation)
 		},
-		// Fence on the CANONICAL key only. The legacy key names the same
-		// workspace, so a second leaf would be a second mutex for one resource,
-		// and the repair probes with the row's own WorkspaceKey — which the
-		// divergence guard requires to equal WorkspaceKey(WorkspacePath), i.e.
-		// the canonical key. One key, one fence.
+		// Fence every key BeginSerenaPendingRemoval may actually mark. Repair
+		// probes the persisted row's own key before its divergence guard, so a
+		// legacy-only row must carry the same live fence/generation transaction.
 		AcquireSerenaRemovalFence: func() (func() error, error) {
-			return AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
+			return AcquireSerenaRemovalFences(filepath.Dir(regPath), wsKey, legacyWSKey)
 		},
 		PublishSerenaRemovalFenceGeneration: func() (string, error) {
-			return PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), wsKey)
+			return PublishSerenaRemovalFenceGenerationForKeys(filepath.Dir(regPath), wsKey, legacyWSKey)
 		},
 		DeleteSerenaRow: func() (result PruneSerenaDeleteResult) {
 			reg := NewRegistry(regPath)

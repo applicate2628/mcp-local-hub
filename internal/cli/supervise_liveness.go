@@ -828,15 +828,17 @@ const (
 
 // supervisorLivenessVerdict preserves ordinary operational liveness while also
 // carrying the provenance of a positive port result. TargetReady is deliberately
-// stricter than Live+PortBound: a TCP-only listener is sufficient for legacy
-// macOS/other-POSIX operational liveness, but never proves that the tracked PID
-// owns the target port.
+// stricter than Live+PortBound. TCP-only readiness is accepted only when the
+// canonical probes explicitly established that neither PID identity nor socket
+// ownership proof is available on this platform; a nil/incomplete test probe or
+// a transient probe error cannot silently weaken the target-settlement gate.
 type supervisorLivenessVerdict struct {
-	Live           bool
-	Reason         string
-	PortBound      bool
-	IdentityDetail string
-	OwnershipProof supervisorLivenessOwnershipProof
+	Live                       bool
+	Reason                     string
+	PortBound                  bool
+	IdentityDetail             string
+	OwnershipProof             supervisorLivenessOwnershipProof
+	StrongOwnershipUnavailable bool
 }
 
 func (v supervisorLivenessVerdict) TargetReady() bool {
@@ -846,6 +848,8 @@ func (v supervisorLivenessVerdict) TargetReady() bool {
 	switch v.OwnershipProof {
 	case supervisorLivenessProofPortOwnerPID, supervisorLivenessProofPIDIdentityAndTCP:
 		return true
+	case supervisorLivenessProofTCPOnly:
+		return v.StrongOwnershipUnavailable
 	default:
 		return false
 	}
@@ -886,6 +890,7 @@ func supervisorDaemonLivenessVerdictWithProbe(d api.SupervisorDaemon, entry Daem
 		return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDDead}
 	}
 	pidIdentityVerified := false
+	pidIdentityUnsupported := false
 	if probe.PIDIdentity != nil {
 		if entry.StartedAt.IsZero() {
 			return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDIdentityMissing}
@@ -908,6 +913,7 @@ func supervisorDaemonLivenessVerdictWithProbe(d api.SupervisorDaemon, entry Daem
 		if err != nil {
 			if errors.Is(err, process.ErrProcessIdentityUnsupported) {
 				// Keep the PIDAlive result on platforms without start-time proof.
+				pidIdentityUnsupported = true
 			} else if errors.Is(err, process.ErrProcessAlreadyExited) {
 				return supervisorLivenessVerdict{Reason: supervisorLivenessReasonPIDDead}
 			} else {
@@ -990,7 +996,12 @@ func supervisorDaemonLivenessVerdictWithProbe(d api.SupervisorDaemon, entry Daem
 	if pidIdentityVerified {
 		proof = supervisorLivenessProofPIDIdentityAndTCP
 	}
-	return supervisorLivenessVerdict{Live: true, PortBound: true, OwnershipProof: proof}
+	return supervisorLivenessVerdict{
+		Live:                       true,
+		PortBound:                  true,
+		OwnershipProof:             proof,
+		StrongOwnershipUnavailable: proof == supervisorLivenessProofTCPOnly && pidIdentityUnsupported,
+	}
 }
 
 // supervisorLivenessReasonNeedsRestart reports whether a not-live reason

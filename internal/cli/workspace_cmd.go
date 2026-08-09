@@ -1003,13 +1003,14 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 		// Per-workspace unregister LIVENESS FENCE, held by the sequencer across
 		// the whole marked window so the supervisor's repair can tell this
 		// teardown apart from a crashed one even when it blocks past the
-		// pending-removal lease (api/serena_removal_fence.go). Fenced on the
-		// CANONICAL key only — the legacy key names the same workspace.
+		// pending-removal lease (api/serena_removal_fence.go). Fence every key
+		// BeginSerenaPendingRemoval may mark because repair probes the persisted
+		// row's actual key before applying its divergence guard.
 		AcquireSerenaRemovalFence: func() (func() error, error) {
-			return api.AcquireSerenaRemovalFence(filepath.Dir(regPath), wsKey)
+			return api.AcquireSerenaRemovalFences(filepath.Dir(regPath), wsKey, legacyWSKey)
 		},
 		PublishSerenaRemovalFenceGeneration: func() (string, error) {
-			return api.PublishSerenaRemovalFenceGeneration(filepath.Dir(regPath), wsKey)
+			return api.PublishSerenaRemovalFenceGenerationForKeys(filepath.Dir(regPath), wsKey, legacyWSKey)
 		},
 		DeleteSerenaRow: func() (result api.PruneSerenaDeleteResult) {
 			reg := api.NewRegistry(regPath)

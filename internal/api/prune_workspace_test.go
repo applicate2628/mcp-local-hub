@@ -39,6 +39,38 @@ func TestPruneWorkspace_ReleaseOnlyDisarmsZeroRowRollbackAndPreservesResults(t *
 	}
 }
 
+func TestPruneWorkspacePhases_AbsentMarkStopsBeforeIntentTeardown(t *testing.T) {
+	var releaseCalls int
+	td := PruneWorkspaceTeardown{
+		AcquireSerenaRemovalFence: func() (func() error, error) {
+			return func() error { releaseCalls++; return nil }, nil
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			return "0123456789abcdef0123456789abcdef", nil
+		},
+		BeginSerenaPendingRemoval: func(string) (func() error, error) {
+			// Deterministically model a concurrent unregister/register winning
+			// after classification but before this registry-locked mark.
+			return nil, ErrSerenaPendingRemovalTargetAbsent
+		},
+		RemoveSerenaIntent: func(string) (bool, error) {
+			t.Fatal("RemoveSerenaIntent called without a row-owned pending-removal mark")
+			return false, nil
+		},
+		DeleteSerenaRow: func() PruneSerenaDeleteResult {
+			t.Fatal("DeleteSerenaRow called after an absent mark")
+			return PruneSerenaDeleteResult{}
+		},
+	}
+	err := PruneWorkspacePhases("/ws", "/ws", nil, false, true, td, &PruneReport{})
+	if !errors.Is(err, ErrSerenaPendingRemovalTargetAbsent) {
+		t.Fatalf("err = %v, want target-absent sentinel", err)
+	}
+	if releaseCalls != 1 {
+		t.Fatalf("fence release calls = %d, want 1", releaseCalls)
+	}
+}
+
 func TestPruneWorkspace_MutationReleaseAndRollbackFailuresAllJoin(t *testing.T) {
 	mutationErr := errors.New("row mutation")
 	releaseErr := errors.New("registry release")

@@ -210,7 +210,7 @@ func TestSettleReconcileTarget_BindGraceIsNotReady(t *testing.T) {
 	}
 }
 
-func TestSettleReconcileTarget_TCPOnlyUnsupportedIdentityNeverReady(t *testing.T) {
+func TestSettleReconcileTarget_TCPOnlyUnavailableStrongProofIsReady(t *testing.T) {
 	h := newTargetSettlementHarness(t)
 	var observed supervisorLivenessVerdict
 	h.ctrl.targetLivenessProbe = func(_ context.Context, d api.SupervisorDaemon, entry DaemonRuntimeEntry, now time.Time) supervisorLivenessVerdict {
@@ -225,11 +225,22 @@ func TestSettleReconcileTarget_TCPOnlyUnsupportedIdentityNeverReady(t *testing.T
 		return observed
 	}
 	got := h.ctrl.settleReconcileTarget(context.Background(), h.target)
-	if !observed.Live || !observed.PortBound || observed.OwnershipProof != supervisorLivenessProofTCPOnly {
-		t.Fatalf("canonical operational verdict = %+v, want live TCP-only provenance", observed)
+	if !observed.Live || !observed.PortBound || observed.OwnershipProof != supervisorLivenessProofTCPOnly || !observed.StrongOwnershipUnavailable {
+		t.Fatalf("canonical operational verdict = %+v, want live TCP-only provenance with explicit capability unavailability", observed)
 	}
-	if got.State != api.ReconcileTargetSettlementIncomplete || got.Reason != api.ReconcileTargetReasonLivenessUnverified {
-		t.Fatalf("settlement = %+v, unsupported identity + TCP-only listener must never be ready", got)
+	if got.State != api.ReconcileTargetSettlementReady || got.Reason != api.ReconcileTargetReasonReady {
+		t.Fatalf("settlement = %+v, unavailable strong platform probes + live PID/TCP must be attainable readiness", got)
+	}
+}
+
+func TestSupervisorLivenessVerdict_TCPOnlyWithoutCapabilityEvidenceIsNotReady(t *testing.T) {
+	verdict := supervisorLivenessVerdict{
+		Live:           true,
+		PortBound:      true,
+		OwnershipProof: supervisorLivenessProofTCPOnly,
+	}
+	if verdict.TargetReady() {
+		t.Fatal("TCP-only verdict without explicit strong-proof unavailability became target-ready")
 	}
 }
 
