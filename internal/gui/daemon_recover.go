@@ -230,19 +230,25 @@ func (s *Server) daemonRecoverHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			if !leaseCompleted && reservationDurable && !lease.committed() {
-				_, _ = s.auditLock.terminalize(reservation, auditLockOccurrenceNotCommitted, auditLockAuthorizationNone, auditLockTerminalEvidence{
-					HTTPStatus: http.StatusInternalServerError,
-					ErrorCode:  string(daemonRecoverErrorUnclassifiedFailure),
-				})
+			if !leaseCompleted && reservationDurable {
+				if lease.committed() {
+					// net/http recovers handler panics without draining the GUI
+					// process, so a post-commit panic must leave a bounded durable
+					// uncertainty projection rather than an immortal in-flight
+					// receipt and settlement lease.
+					_, _ = s.auditLock.terminalize(reservation, auditLockOccurrenceUncertain, auditLockAuthorizationUncertain, auditLockTerminalEvidence{})
+				} else {
+					_, _ = s.auditLock.terminalize(reservation, auditLockOccurrenceNotCommitted, auditLockAuthorizationNone, auditLockTerminalEvidence{
+						HTTPStatus: http.StatusInternalServerError,
+						ErrorCode:  string(daemonRecoverErrorUnclassifiedFailure),
+					})
+				}
 				completeLease()
 			}
 			panic(recovered)
 		}
-		// A panic after the destructive boundary must remain unsettled so the
-		// process-level drain fails loud rather than reporting a false clean
-		// settlement. Ordinary pre-commit exits have no destructive work and can
-		// release their admission immediately.
+		// Ordinary pre-commit exits have no destructive work and can release
+		// their admission immediately.
 		if !leaseCompleted && !lease.committed() {
 			completeLease()
 		}

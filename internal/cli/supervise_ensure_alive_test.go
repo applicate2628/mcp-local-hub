@@ -38,6 +38,9 @@ import (
 //     resolution lands in the temp tree.
 func ensureAliveTestStateDir(t *testing.T) string {
 	t.Helper()
+	previousSupervisorOwnerVerify := ensureAliveSupervisorOwnerVerifyFn
+	ensureAliveSupervisorOwnerVerifyFn = func(string, int) error { return nil }
+	t.Cleanup(func() { ensureAliveSupervisorOwnerVerifyFn = previousSupervisorOwnerVerify })
 	stateDir := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)
@@ -92,6 +95,91 @@ func TestEnsureAlive_LiveLock_NoOp(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "supervisor running") {
 		t.Errorf("output should report the running no-op; got %q", out.String())
+	}
+}
+
+func TestEnsureAlive_QuietMigrationLockWithStaleOwnerDefersGUIRelaunch(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	noLiveGUIOwner(t)
+	lockPath := filepath.Join(stateDir, "supervisor.lock")
+	const stalePID = 2147483000
+	if err := api.WriteStateFileAtomic(lockPath+".owner.json", api.SupervisorLockOwner{
+		PID: stalePID, StartedAt: time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("seed stale supervisor owner: %v", err)
+	}
+	quiet, err := api.AcquireSupervisorLockQuiet(lockPath)
+	if err != nil {
+		t.Fatalf("acquire quiet migration lock: %v", err)
+	}
+	defer quiet.Release()
+	ensureAliveSupervisorOwnerVerifyFn = verifyEnsureAliveSupervisorOwner
+
+	var relaunches int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreRelaunch()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Fatalf("GUI relaunches=%d while quiet migration lock held, want 0", got)
+	}
+	if !strings.Contains(out.String(), "possible migration/install interlock") {
+		t.Fatalf("output=%q, want quiet-interlock deferral", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "supervisor-lock-holder-unverified")
+}
+
+func TestEnsureAlive_ConcurrentElapsedMarkerIsConsumedExactlyOnce(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	now := time.Now().UTC()
+	markerPath := guiOwnerUnknownConfirmationMarkerPath(stateDir)
+	if err := writeGUIOwnerUnknownConfirmationMarkerDirectForTest(markerPath, now.Add(-2*guiOwnerUnknownConfirmationWindow)); err != nil {
+		t.Fatalf("seed elapsed confirmation marker: %v", err)
+	}
+	if err := api.WriteStateFileAtomic(filepath.Join(stateDir, "supervisor.lock.owner.json"), api.SupervisorLockOwner{
+		PID: 4242, StartedAt: now.Add(-time.Hour).Format(time.RFC3339Nano),
+	}); err != nil {
+		t.Fatalf("seed supervisor owner: %v", err)
+	}
+	restoreLockProbe := setGUIOwnerLockUnheldProbeFnForTest(func() (bool, error) { return true, nil })
+	defer restoreLockProbe()
+	restoreNow := setEnsureAliveHeadlessFleetNowForTest(func() time.Time { return now })
+	defer restoreNow()
+	var relaunches atomic.Int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		relaunches.Add(1)
+		return nil
+	})
+	defer restoreRelaunch()
+
+	start := make(chan struct{})
+	results := make(chan bool, 2)
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			results <- runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir, &bytes.Buffer{}, 4242, 0, 0, true, now)
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(results)
+	handled := 0
+	for result := range results {
+		if result {
+			handled++
+		}
+	}
+	if handled != 1 || relaunches.Load() != 1 {
+		t.Fatalf("handled=%d relaunches=%d, want exactly one atomic marker consumer", handled, relaunches.Load())
 	}
 }
 
@@ -1809,7 +1897,7 @@ func TestEnsureAlive_SupervisorDownTickResetsUnknownConfirmationMarker(t *testin
 // stayed on disk and the VERY NEXT tick re-read it as "still elapsed,"
 // re-escalating before the FIRST relaunch could possibly have taken hold.
 //
-// This test injects a reset failure via the dedicated seam (not a
+// This test injects an atomic-consume failure via the dedicated seam (not a
 // filesystem-level trick, which would also break the unrelated
 // supervisor-events.log write in the SAME state dir) across THREE ticks:
 // the first two ticks must refuse to escalate (0 relaunches) while the
@@ -1851,8 +1939,9 @@ func TestEnsureAlive_HeadlessFleet_UnknownEscalationRefusesWhenResetFails(t *tes
 	restoreServingProbe := setGUIServingProbeFnForTest(func(int) bool { return true })
 	defer restoreServingProbe()
 
-	injectedErr := errors.New("injected: marker reset unavailable this tick")
-	restoreReset := setGUIOwnerUnknownConfirmationResetFnForTest(func(string, time.Time) error { return injectedErr })
+	injectedErr := errors.New("injected: marker consume unavailable this tick")
+	restoreConsume := setGUIOwnerUnknownConfirmationConsumeFnForTest(func(string, time.Time) (bool, error) { return false, injectedErr })
+	t.Cleanup(restoreConsume)
 
 	// Tick 1: window already elapsed, but the reset is injected to fail.
 	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
@@ -1874,7 +1963,7 @@ func TestEnsureAlive_HeadlessFleet_UnknownEscalationRefusesWhenResetFails(t *tes
 
 	// Tick 3: the transient failure clears -- recovery must proceed exactly
 	// once now that the reset can be durably performed.
-	restoreReset()
+	restoreConsume()
 	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
 		t.Fatalf("tick3 runEnsureAlive: %v", err)
 	}

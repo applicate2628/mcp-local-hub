@@ -34,9 +34,9 @@ func normExeForTest(command string) string {
 // "uses the command" assertions (Codex bot #270 P1).
 func testDaemonCommandPath() string {
 	if runtime.GOOS == "windows" {
-		return `C:\Users\someone\.local\bin\mcphub.exe`
+		return `C:\Users\<you>\.local\bin\mcphub.exe`
 	}
-	return "/home/someone/.local/bin/mcphub"
+	return "/home/<you>/.local/bin/mcphub"
 }
 
 // TestDaemonExpectedIdentityExe_UsesCommandNotSupervisorPath is the unit guard
@@ -161,6 +161,7 @@ func TestSupervisorDaemonEntryLive_GenuineForeignExeStillMismatches(t *testing.T
 func TestSupervisorStatusDaemons_ConfiguredCommandIdentityProjection(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	const taskName = `\mcp-local-hub-memory-default`
+	const testPort = 43123
 	daemonCmd := testDaemonCommandPath()
 	wantExe := normExeForTest(daemonCmd)
 	if wantExe == canonicalMcphubPath() {
@@ -173,12 +174,14 @@ func TestSupervisorStatusDaemons_ConfiguredCommandIdentityProjection(t *testing.
 			Server:   "memory",
 			Daemon:   "default",
 			Command:  daemonCmd,
-			Port:     0,
+			Port:     testPort,
 		}},
 	}); err != nil {
 		t.Fatalf("write supervisor intent: %v", err)
 	}
-
+	withFakePortOwnersSnapshot(t, func() (map[int]int, error) {
+		return map[int]int{testPort: 22036}, nil
+	})
 	tests := []struct {
 		name          string
 		identityError error
@@ -194,6 +197,12 @@ func TestSupervisorStatusDaemons_ConfiguredCommandIdentityProjection(t *testing.
 			var sawExe string
 			restore := setSupervisorLivenessProbeForTest(supervisorLivenessProbe{
 				PIDAlive: func(pid int) bool { return pid == 22036 },
+				PortOwnerPID: func(port int) (int, bool, error) {
+					if port != testPort {
+						t.Fatalf("port owner probe=%d, want isolated test port %d", port, testPort)
+					}
+					return 22036, true, nil
+				},
 				PIDIdentity: func(proof process.PIDIdentityProof) error {
 					sawExe = proof.ExecutablePath
 					return tt.identityError

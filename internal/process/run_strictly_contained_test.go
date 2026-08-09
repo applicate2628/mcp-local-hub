@@ -1,6 +1,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -9,6 +10,27 @@ import (
 	"testing"
 	"time"
 )
+
+func TestRunStrictlyContained_FastExitDrainsBeforeReadEndsClose(t *testing.T) {
+	if os.Getenv("MCPHUB_STRICT_FAST_EXIT_HELPER") == "1" {
+		_, _ = os.Stdout.Write(bytes.Repeat([]byte("o"), 32*1024+17))
+		_, _ = os.Stderr.Write(bytes.Repeat([]byte("e"), 24*1024+11))
+		os.Exit(0)
+	}
+	for iteration := 0; iteration < 40; iteration++ {
+		cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_FastExitDrainsBeforeReadEndsClose$")
+		cmd.Env = append(os.Environ(), "MCPHUB_STRICT_FAST_EXIT_HELPER=1")
+		result, err := RunStrictlyContained(context.Background(), StrictRunInvocation{
+			Command: cmd, Input: []byte{}, InputLimit: 1, StdoutLimit: 64 * 1024, StderrLimit: 64 * 1024,
+		})
+		if err != nil {
+			t.Fatalf("iteration %d: fast worker error=%v", iteration, err)
+		}
+		if result.Stdout.Bytes != 32*1024+17 || result.Stderr.Bytes != 24*1024+11 || result.Stdout.Truncated || result.Stderr.Truncated {
+			t.Fatalf("iteration %d: stdout bytes=%d truncated=%t stderr bytes=%d truncated=%t", iteration, result.Stdout.Bytes, result.Stdout.Truncated, result.Stderr.Bytes, result.Stderr.Truncated)
+		}
+	}
+}
 
 func TestRunStrictlyContained_DeadlineReapsDirectChild(t *testing.T) {
 	if os.Getenv("MCPHUB_STRICT_CONTAINED_HELPER") == "1" {

@@ -237,6 +237,36 @@ func TestRunStrictlyContained_WindowsDeadlineClosesAllResources(t *testing.T) {
 	assertWindowsStrictEndpointsClosed(t, endpoints)
 }
 
+func TestRunStrictlyContained_WindowsTimeoutClosesJobBeforeWaitWhenKillsFail(t *testing.T) {
+	if os.Getenv("MCPHUB_STRICT_WINDOWS_JOB_CLOSE_HELPER") == "1" {
+		time.Sleep(time.Hour)
+		return
+	}
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_WindowsTimeoutClosesJobBeforeWaitWhenKillsFail$")
+	cmd.Env = append(os.Environ(), "MCPHUB_STRICT_WINDOWS_JOB_CLOSE_HELPER=1")
+	killFailure := errors.New("injected TerminateAll and Process.Kill failure")
+	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err = runStrictlyContainedWithJob(ctx, StrictRunInvocation{
+		Command: cmd, Input: []byte("{}"), InputLimit: 2, StdoutLimit: 1024, StderrLimit: 1024,
+		timeoutKill: func(*Job, *exec.Cmd) error { return killFailure },
+	}, job)
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, killFailure) {
+		t.Fatalf("timeout error=%v, want deadline and injected kill failure", err)
+	}
+	if time.Since(started) > 3*time.Second {
+		t.Fatalf("timeout remained blocked after failed kill primitives")
+	}
+	if job.Handle() != 0 || cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+		t.Fatalf("job-close fallback after timeout: handle=%v process=%v alive=%t", job.Handle(), cmd.Process, cmd.Process != nil && IsPidAlive(cmd.Process.Pid))
+	}
+}
+
 func TestRunStrictlyContained_ClosedJobIsContainmentFailure(t *testing.T) {
 	job, err := NewKillOnCloseJob()
 	if err != nil {

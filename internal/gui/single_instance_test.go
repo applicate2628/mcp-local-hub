@@ -876,13 +876,18 @@ func TestEvaluateProcessIdentity_Matrix(t *testing.T) {
 	originalOwner := processOwnerSIDMatchesCurrentFn
 	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = originalOwner })
 	mtime := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	imageLeaf := "mcphub"
+	if runtime.GOOS == "windows" {
+		imageLeaf += ".exe"
+	}
+	matchingImage := filepath.Join(t.TempDir(), imageLeaf)
 	matching := Verdict{
 		Class:         VerdictLiveUnreachable,
 		PID:           4242,
-		PIDImage:      `C:\Program Files\mcphub\mcphub.exe`,
+		PIDImage:      matchingImage,
 		Mtime:         mtime,
 		PIDStart:      mtime.Add(-time.Minute),
-		pidCmdlineRaw: []string{`C:\Program Files\mcphub\mcphub.exe`, "gui"},
+		pidCmdlineRaw: []string{matchingImage, "gui"},
 	}
 	tests := []struct {
 		name       string
@@ -892,7 +897,7 @@ func TestEvaluateProcessIdentity_Matrix(t *testing.T) {
 		wantRefuse bool
 	}{
 		{name: "match", verdict: matching, owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMatch},
-		{name: "wrong image", verdict: func() Verdict { v := matching; v.PIDImage = `C:\Windows\System32\notepad.exe`; return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "wrong image", verdict: func() Verdict { v := matching; v.PIDImage = filepath.Join(t.TempDir(), "not-mcphub"); return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
 		{name: "wrong argv", verdict: func() Verdict { v := matching; v.pidCmdlineRaw = []string{v.PIDImage, "daemon"}; return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
 		{name: "recycled pid", verdict: func() Verdict { v := matching; v.PIDStart = mtime.Add(2 * time.Second); return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
 		{name: "different owner", verdict: matching, owner: func(int) (bool, error) { return false, nil }, want: ProcessIdentityMismatch, wantRefuse: true},

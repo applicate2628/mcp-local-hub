@@ -61,6 +61,7 @@ type StrictRunInvocation struct {
 	StderrLimit int
 	pipe        func() (*os.File, *os.File, error) // per-call test seam
 	started     func(*Job, int)                    // per-call test seam
+	timeoutKill func(*Job, *exec.Cmd) error        // per-call test seam
 }
 
 func (i StrictRunInvocation) validate() error {
@@ -211,12 +212,12 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 	go func() {
 		var e error
 		result.Stdout, e = drainStrictCapture(stdoutParent, invocation.StdoutLimit)
-		stdoutDone <- errors.Join(e, stdoutParent.Close())
+		stdoutDone <- e
 	}()
 	go func() {
 		var e error
 		result.Stderr, e = drainStrictCapture(stderrParent, invocation.StderrLimit)
-		stderrDone <- errors.Join(e, stderrParent.Close())
+		stderrDone <- e
 	}()
 
 	waited := make(chan error, 1)
@@ -228,13 +229,26 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 		killProcessGroup(invocation.Command)
 	case <-ctx.Done():
 		timeout = true
-		waitErr = errors.Join(job.TerminateAll(1), func() error { killProcessGroup(invocation.Command); return nil }())
-		if invocation.Command.Process != nil {
-			_ = invocation.Command.Process.Kill()
+		if invocation.timeoutKill != nil {
+			waitErr = invocation.timeoutKill(job, invocation.Command)
+		} else {
+			waitErr = errors.Join(job.TerminateAll(1), func() error { killProcessGroup(invocation.Command); return nil }())
+			if invocation.Command.Process != nil {
+				waitErr = errors.Join(waitErr, invocation.Command.Process.Kill())
+			}
 		}
+		// Closing a kill-on-close Job is the final containment primitive. It
+		// must happen before joining Wait: TerminateAll and Process.Kill can
+		// both fail, and waiting first would otherwise make the caller's
+		// deadline unbounded while the still-owned Job could still reap the
+		// worker tree.
+		waitErr = errors.Join(waitErr, closeOwnedJob())
 		waitErr = errors.Join(waitErr, <-waited)
 	}
-	cleanupErr := errors.Join(closeOwnedJob(), closeParents(), <-inputDone, <-stdoutDone, <-stderrDone)
+	// The output readers own the active drains until EOF. Closing their read
+	// endpoints before joining them can convert a successful fast-exit worker
+	// into os.ErrClosed and discard already-buffered protocol output.
+	cleanupErr := errors.Join(closeOwnedJob(), <-inputDone, <-stdoutDone, <-stderrDone, closeParents())
 	if timeout {
 		return result, strictRunError(StrictRunTimeout, errors.Join(ctx.Err(), waitErr, cleanupErr))
 	}

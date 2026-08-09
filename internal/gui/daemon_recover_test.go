@@ -30,6 +30,13 @@ func (*panicBeforeCommitDaemonRecoverer) Recover(context.Context, string, bool, 
 	panic("synthetic pre-commit recovery panic")
 }
 
+type immediatePanicAfterCommitDaemonRecoverer struct{}
+
+func (*immediatePanicAfterCommitDaemonRecoverer) Recover(_ context.Context, _ string, _ bool, onTerminationCommitted func()) (daemonrecovery.Result, error) {
+	onTerminationCommitted()
+	panic("synthetic post-commit recovery panic")
+}
+
 func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confirmed bool, onTerminationCommitted func()) (daemonrecovery.Result, error) {
 	f.calls++
 	f.taskName = taskName
@@ -96,6 +103,38 @@ func TestDaemonRecoverPreCommitPanicTerminalizesDurableReservation(t *testing.T)
 	}
 	if receipt.Status != auditLockOccurrenceNotCommitted && receipt.Status != auditLockOccurrenceUncertain {
 		t.Fatalf("receipt status after pre-commit panic=%q, want not_committed or uncertain", receipt.Status)
+	}
+}
+
+func TestDaemonRecoverPostCommitPanicTerminalizesUncertainAndCompletesLease(t *testing.T) {
+	s := NewServer(Config{Port: 9125})
+	installIsolatedAuditLock(t, s)
+	t.Cleanup(func() { s.events.Close() })
+	s.daemonRecover = &immediatePanicAfterCommitDaemonRecoverer{}
+	correlation := validAuditLockCorrelation(s.auditLock.serverInstance, 912)
+	body := fmt.Sprintf(`{"task_name":"mcp-local-hub-memory-default","confirm":true,"audit_lock_attempt":{"attempt_id":"%s","occurrence_id":"%s","server_instance":"%s"}}`,
+		correlation.AttemptID, correlation.OccurrenceID, correlation.ServerInstance)
+	req := httptest.NewRequest(http.MethodPost, "/api/daemon/recover", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Origin", "http://127.0.0.1:9125")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	func() {
+		defer func() {
+			if recovered := recover(); recovered == nil {
+				t.Fatal("handler did not re-panic")
+			}
+		}()
+		s.mux.ServeHTTP(httptest.NewRecorder(), req)
+	}()
+	receipt, routeErr := s.auditLock.lookup(context.Background(), correlation)
+	if routeErr != nil || receipt == nil {
+		t.Fatalf("lookup after post-commit panic receipt=%+v err=%v", receipt, routeErr)
+	}
+	if receipt.Status != auditLockOccurrenceUncertain || receipt.LockAuthorization != auditLockAuthorizationUncertain {
+		t.Fatalf("receipt after post-commit panic=%+v, want bounded uncertain terminal", receipt)
+	}
+	if err := s.recoverySettlements.wait(); err != nil {
+		t.Fatalf("post-commit panic left a live settlement lease: %v", err)
 	}
 }
 

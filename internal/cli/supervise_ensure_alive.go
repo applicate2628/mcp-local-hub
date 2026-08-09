@@ -118,6 +118,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -140,6 +141,36 @@ var livenessRelaunchFn = relaunchSupervisorOwner
 // decision; tests replace it to exercise rollback/forward anomalies without
 // depending on machine time.
 var ensureAliveHeadlessFleetNowFn = func() time.Time { return time.Now().UTC() }
+
+// ensureAliveSupervisorOwnerVerifyFn distinguishes the real supervisor owner
+// from a quiet migration/install interlock that borrows the same flock while
+// deliberately retaining a dead predecessor's sidecar. Headless GUI recovery
+// is destructive, so only a live current-binary PID generation may authorize
+// it; every missing, stale, mismatched, or unsupported proof defers safely.
+var ensureAliveSupervisorOwnerVerifyFn = verifyEnsureAliveSupervisorOwner
+
+func verifyEnsureAliveSupervisorOwner(stateDir string, supervisorPID int) error {
+	if supervisorPID <= 0 {
+		return errors.New("supervisor lock owner PID is unavailable")
+	}
+	owner, err := api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		return fmt.Errorf("read supervisor lock owner: %w", err)
+	}
+	if owner.PID != supervisorPID {
+		return fmt.Errorf("supervisor lock owner PID changed: observed=%d current=%d", supervisorPID, owner.PID)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve current supervisor executable: %w", err)
+	}
+	if err := process.VerifyPIDIdentity(process.PIDIdentityProof{
+		PID: owner.PID, ExecutablePath: executable, StartedAt: owner.StartedAt,
+	}); err != nil {
+		return fmt.Errorf("verify supervisor lock owner identity: %w", err)
+	}
+	return nil
+}
 
 // standaloneRelaunchFn is the GUI-INDEPENDENT relaunch SEAM (§5 permanent
 // fix PART 2). It is used when the supervisor is down BUT a live GUI owner
@@ -1018,6 +1049,14 @@ func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, 
 }
 
 func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) {
+	if identityErr := ensureAliveSupervisorOwnerVerifyFn(stateDir, supervisorPID); identityErr != nil {
+		fmt.Fprintf(out, "ensure-alive: supervisor flock is held but its live owner identity is unverified; treating it as a possible migration/install interlock and deferring GUI relaunch: %v\n", identityErr)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"supervisor-lock-holder-unverified",
+			"supervisor flock is held without a verified live current-binary supervisor owner; deferring headless-fleet recovery because the holder may be a quiet migration/install interlock",
+			map[string]any{"supervisor_pid": supervisorPID, "error": identityErr.Error()})
+		return
+	}
 	supervisorAge, ageErr := ensureAliveHeadlessFleetSupervisorUptime(stateDir, observedAt)
 	detectedBody := map[string]any{
 		"supervisor_pid":  supervisorPID,
@@ -1327,22 +1366,19 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 		return false
 	}
 
-	// Confirmed: the flock has read unheld for longer than the bounded
-	// confirmation window. Round 3 finding P1-1: the prior fix ignored this
-	// reset's error (`_ = os.Remove(markerPath)`), which meant a failed
-	// removal left the ALREADY-CONSUMED, already-elapsed timestamp on disk;
-	// the very next tick then re-read the SAME stale value as "still
-	// elapsed" and escalated AGAIN immediately — before the relaunch this
-	// tick is about to trigger could possibly have acquired the
-	// single-instance lock yet. Refusing to escalate when the reset cannot
-	// be durably performed closes that hazard structurally: this function
-	// never delegates to the (destructive, re-firing) headless-fleet
-	// relaunch without FIRST confirming the window has been consumed.
-	if resetErr := resetGUIOwnerUnknownConfirmationMarker(markerPath, now); resetErr != nil {
+	// Re-check elapsed state and remove the marker under the marker writer's
+	// cross-process flock. The preliminary read above is diagnostic only; this
+	// transaction is the sole authorization point, so overlapping scheduled and
+	// manual ticks cannot both consume one confirmation window.
+	consumed, consumeErr := guiOwnerUnknownConfirmationConsumeFn(markerPath, now)
+	if consumeErr != nil {
 		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
 			"gui-owner-unknown-confirmation-consume-failed",
 			"could not durably reset the GUI-owner-unknown confirmation marker before escalating; refusing to relaunch this tick rather than risk an immediate re-arm before the relaunch can take hold",
-			guiOwnerUnknownConfirmationFailureBody(resetErr, map[string]any{"supervisor_pid": supervisorPID}))
+			guiOwnerUnknownConfirmationFailureBody(consumeErr, map[string]any{"supervisor_pid": supervisorPID}))
+		return false
+	}
+	if !consumed {
 		return false
 	}
 	defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
@@ -1397,6 +1433,11 @@ func resetGUIOwnerUnknownConfirmationMarker(markerPath string, now time.Time) er
 // path.
 var guiOwnerUnknownConfirmationResetFn = defaultResetGUIOwnerUnknownConfirmationMarker
 
+// guiOwnerUnknownConfirmationConsumeFn is the atomic consume seam. Production
+// always executes the bounded current-binary worker; tests may inject a
+// failure without weakening or bypassing the cross-process transaction.
+var guiOwnerUnknownConfirmationConsumeFn = consumeGUIOwnerUnknownConfirmationMarkerContained
+
 // setGUIOwnerUnknownConfirmationResetFnForTest installs a test reset
 // function. Returns an "uninstall" function tests defer to restore
 // production wiring. Only supervise_ensure_alive_test.go invokes this.
@@ -1404,6 +1445,12 @@ func setGUIOwnerUnknownConfirmationResetFnForTest(fn func(string, time.Time) err
 	prev := guiOwnerUnknownConfirmationResetFn
 	guiOwnerUnknownConfirmationResetFn = fn
 	return func() { guiOwnerUnknownConfirmationResetFn = prev }
+}
+
+func setGUIOwnerUnknownConfirmationConsumeFnForTest(fn func(string, time.Time) (bool, error)) func() {
+	prev := guiOwnerUnknownConfirmationConsumeFn
+	guiOwnerUnknownConfirmationConsumeFn = fn
+	return func() { guiOwnerUnknownConfirmationConsumeFn = prev }
 }
 
 // defaultResetGUIOwnerUnknownConfirmationMarker is the production reset

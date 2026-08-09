@@ -353,7 +353,7 @@ func (f *panicAfterCommitDaemonRecoverer) Recover(
 	panic("test panic after committed termination")
 }
 
-func TestRecoverySettlementRegistry_PanicAfterCommitFailsLoud(t *testing.T) {
+func TestRecoverySettlementRegistry_PanicAfterCommitTerminalizesAndSettles(t *testing.T) {
 	const taskName = `\demo/default`
 	s := NewServer(Config{
 		Port:                                    0,
@@ -403,32 +403,23 @@ func TestRecoverySettlementRegistry_PanicAfterCommitFailsLoud(t *testing.T) {
 	if !errors.Is(startErr, context.DeadlineExceeded) {
 		t.Fatalf("Start error=%v, want ordinary GUI drain deadline", startErr)
 	}
-	if !errors.Is(startErr, ErrRecoverySettlementDrainTimeout) {
-		t.Fatalf("Start error=%v, want %v", startErr, ErrRecoverySettlementDrainTimeout)
+	if errors.Is(startErr, ErrRecoverySettlementDrainTimeout) {
+		t.Fatalf("Start error=%v, post-commit panic terminalization must complete the settlement lease", startErr)
 	}
-	timeoutEvent := requireRecoverySettlementEvent(t, events, recoverySettlementPhaseDrainTimeout)
-	if timeoutEvent.Body["event"] != recoverySettlementDrainTimeoutEvent ||
-		timeoutEvent.Body["failure_id"] != recoverySettlementDrainTimeoutCode {
-		t.Fatalf("timeout event body=%#v", timeoutEvent.Body)
-	}
+	requireRecoverySettlementEvent(t, events, recoverySettlementPhaseSettled)
 	waitDaemonRecoveryHandler(t, handlerDone)
 	waitLiveDaemonRecovery(t, requestDone)
 	receipt, receiptErr := s.auditLock.lookup(context.Background(), correlation)
 	if receiptErr != nil || receipt == nil || receipt.Status != auditLockOccurrenceInFlight {
-		t.Fatalf("panic receipt=%+v err=%v, want durable in_flight", receipt, receiptErr)
+		t.Fatalf("panic receipt=%+v err=%v, want the shutdown-closed adapter's durable in_flight record", receipt, receiptErr)
 	}
 	if got := fake.calls.Load(); got != 1 {
 		t.Fatalf("recovery calls=%d, want exactly one", got)
 	}
-	if err := s.recoverySettlements.wait(); !errors.Is(err, ErrRecoverySettlementDrainTimeout) {
-		t.Fatalf("repeated registry wait error=%v, want cached %v", err, ErrRecoverySettlementDrainTimeout)
+	if err := s.recoverySettlements.wait(); err != nil {
+		t.Fatalf("registry wait after post-commit panic=%v, want settled", err)
 	}
-	requireNoRecoverySettlementPhase(
-		t,
-		events,
-		recoverySettlementPhaseDrainTimeout,
-		recoverySettlementPhaseSettled,
-	)
+	requireNoRecoverySettlementPhase(t, events, recoverySettlementPhaseDrainTimeout)
 }
 
 func TestRecoverySettlementRegistry_ClosedAdmissionRejectsBeforeReserve(t *testing.T) {
