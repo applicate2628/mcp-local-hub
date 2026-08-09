@@ -50,6 +50,16 @@ type parsedPortfile struct {
 	Candidates                []FetchCandidate
 	UnresolvedGuardVariable   string
 	MultipleFetchCalls        bool
+	CandidateLimitExceeded    bool
+}
+
+func retainedFetchCandidateBytes(candidate FetchCandidate) int {
+	const fixedCandidateBytes = 256
+	return fixedCandidateBytes +
+		len(candidate.Remote.Kind) + len(candidate.Remote.Repo) + len(candidate.Remote.URL) +
+		len(candidate.Pin.Ref) + len(candidate.Pin.ResolvedRef) + len(candidate.Pin.Shape) +
+		len(candidate.HeadRef) + len(candidate.UnresolvedHeadRefVariable) +
+		len(candidate.Guard) + len(candidate.GuardVariable)
 }
 
 var fetchFuncNames = map[string]bool{
@@ -855,6 +865,7 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 	declaredCommands := map[string]struct{}{}
 	var candidates []FetchCandidate
 	var viableCandidates []FetchCandidate
+	retainedCandidateBytes := 0
 	var unresolved string
 statementLoop:
 	for _, st := range statements {
@@ -975,7 +986,13 @@ statementLoop:
 			candidate.GuardVariable = state.unknown
 			candidate.Guard = state.text
 			candidate.ActiveForDefault = state.active
+			candidateBytes := retainedFetchCandidateBytes(candidate)
+			if len(candidates) >= MaxFetchCandidatesPerPort ||
+				candidateBytes > MaxRetainedFetchCandidateBytesPerPort-retainedCandidateBytes {
+				return parsedPortfile{Candidates: candidates, CandidateLimitExceeded: true}, true
+			}
 			candidates = append(candidates, candidate)
+			retainedCandidateBytes += candidateBytes
 			if !state.active {
 				continue
 			}

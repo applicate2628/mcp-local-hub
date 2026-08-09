@@ -199,6 +199,9 @@ const (
 	// package-owned semantic-file budget. Truncated text is not parsed because
 	// it cannot justify an ok pin-status verdict.
 	ReasonSemanticFileIncomplete Reason = "semantic_file_incomplete"
+	// ReasonFetchCandidateLimit means the portfile contained more recognized
+	// source-acquisition calls than can be retained safely for audit output.
+	ReasonFetchCandidateLimit Reason = "fetch_candidate_limit"
 )
 
 // BatchReason is the CLOSED enum for the WHOLE CALL's outcome — why the tool
@@ -214,6 +217,13 @@ const (
 	// The MCP schema imports this value directly, so advertised and enforced
 	// batch capacity cannot drift.
 	MaxPortDirs = 64
+	// Candidate retention is bounded independently from the semantic-file byte
+	// cap because many short fetch calls can otherwise expand into a large slice
+	// of string-bearing structs. The batch bounds are derived from MaxPortDirs.
+	MaxFetchCandidatesPerPort              = 256
+	MaxRetainedFetchCandidateBytesPerPort  = 256 << 10
+	MaxFetchCandidatesPerBatch             = MaxPortDirs * MaxFetchCandidatesPerPort
+	MaxRetainedFetchCandidateBytesPerBatch = MaxPortDirs * MaxRetainedFetchCandidateBytesPerPort
 
 	// MaxSemanticFileBytes bounds each portfile.cmake and vcpkg.json read. A
 	// cap-truncated semantic input is incomplete evidence, never parseable
@@ -260,6 +270,7 @@ var pinStatusReasonRegistry = ReasonRegistry{
 		ReasonRemoteURLCredentialBearing,
 		ReasonRemoteURLQueryUnclassified,
 		ReasonSemanticFileIncomplete,
+		ReasonFetchCandidateLimit,
 	},
 	batch: []BatchReason{
 		BatchReasonNoPortDirs,

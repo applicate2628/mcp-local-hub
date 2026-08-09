@@ -77,7 +77,10 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		}
 	}
 	for _, item := range r.ExecutedLines {
-		if addString(item.File) || addExecutedLineArray(item.Lines) {
+		// Conservative upper allowance for the surrounding FileLines object:
+		// braces, the two field names, colons, commas, newlines and indentation.
+		// The dynamic file and array payloads are counted separately below.
+		if add(64) || addString(item.File) || addExecutedLineArray(item.Lines) {
 			return true
 		}
 	}

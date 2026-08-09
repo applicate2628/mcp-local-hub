@@ -315,6 +315,11 @@ func pinStatusOne(ctx context.Context, portDir string, disableNetwork bool, fsys
 	res.Candidates = redactCandidates(parsed.Candidates)
 	res.UnresolvedGuardVariable = parsed.UnresolvedGuardVariable
 	res.UnresolvedHeadRefVariable = parsed.UnresolvedHeadRefVariable
+	if parsed.CandidateLimitExceeded {
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonFetchCandidateLimit
+		return res
+	}
 
 	if parsed.UnresolvedGuardVariable != "" {
 		res.Status = evidence.StatusUnknown

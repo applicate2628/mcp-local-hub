@@ -170,7 +170,7 @@ func resolveOperand(tok token, env *varEnv) (*string, []string) {
 		if v == nil {
 			return nil, []string{m[1]}
 		}
-		return v, nil
+		return resolveExpandedUnquoted(*v, env)
 	}
 	upper := strings.ToUpper(tok.Text)
 	if cmakeConstants[upper] || strings.HasSuffix(upper, "-NOTFOUND") {
@@ -185,6 +185,22 @@ func resolveOperand(tok token, env *varEnv) (*string, []string) {
 		return v, nil
 	}
 	return operandFromExpansion(env.expandToken(tok))
+}
+
+func resolveExpandedUnquoted(value string, env *varEnv) (*string, []string) {
+	upper := strings.ToUpper(value)
+	if cmakeConstants[upper] || strings.HasSuffix(upper, "-NOTFOUND") {
+		resolved := value
+		return &resolved, nil
+	}
+	if rePlainIdent.MatchString(value) {
+		resolved := env.lookupCertain(value)
+		if resolved == nil {
+			return nil, []string{value}
+		}
+		return resolved, nil
+	}
+	return operandFromExpansion(env.expandToken(token{Text: value}))
 }
 
 // operandFromExpansion turns an expansion into an if()-operand. An expansion

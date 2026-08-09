@@ -19,7 +19,18 @@ type osFS struct{}
 var _ FS = osFS{}
 
 func (osFS) ReadFile(p string) ([]byte, bool, error) {
-	file, err := os.Open(p)
+	return readSemanticFileWithOps(p, os.Stat, func(path string) (io.ReadCloser, error) { return os.Open(path) })
+}
+
+func readSemanticFileWithOps(p string, stat func(string) (os.FileInfo, error), open func(string) (io.ReadCloser, error)) ([]byte, bool, error) {
+	info, err := stat(p)
+	if err != nil {
+		return nil, false, err
+	}
+	if info == nil || !info.Mode().IsRegular() {
+		return nil, false, os.ErrInvalid
+	}
+	file, err := open(p)
 	if err != nil {
 		return nil, false, err
 	}

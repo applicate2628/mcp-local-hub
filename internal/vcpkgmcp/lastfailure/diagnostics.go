@@ -619,9 +619,13 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 		}, true
 	}
 	if m := gnuLDLocationRE.FindStringSubmatch(line); m != nil && gnuLDCauseRE.MatchString(m[gnuLDLocationRE.SubexpIndex("msg")]) {
+		severity := SeverityError
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(m[gnuLDLocationRE.SubexpIndex("msg")])), "warning:") {
+			severity = "warning"
+		}
 		return Diagnostic{
 			File:     strings.TrimSpace(m[gnuLDLocationRE.SubexpIndex("file")]),
-			Severity: SeverityError,
+			Severity: severity,
 			Tier:     TierSpecific,
 			Text:     line,
 		}, true
