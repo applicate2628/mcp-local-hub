@@ -194,6 +194,16 @@ parseStatements:
 			}
 			continue
 		default:
+			destinations, relevant, modeled := statementMutationDestinations(st)
+			if !relevant || insideDeclarationScope(scopes) {
+				continue
+			}
+			if !modeled {
+				return nil
+			}
+			for _, name := range destinations {
+				delete(env.values, name)
+			}
 			continue
 		}
 

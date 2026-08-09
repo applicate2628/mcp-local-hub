@@ -40,6 +40,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"mcp-local-hub/internal/vcpkgmcp/boundedio"
@@ -711,11 +712,24 @@ const (
 )
 
 // findOrphans recursively scans portDir for .patch/.diff files whose cleaned
-// absolute path never appeared in referenced. Every incomplete traversal
-// returns one typed stop cause, so no prefix can retain an ok verdict.
+// absolute path and filesystem identity never appeared in referenced. Every
+// incomplete traversal returns one typed stop cause, so no prefix can retain
+// an ok verdict.
 func findOrphans(ctx context.Context, deps Deps, portDir string, referenced map[string]bool) ([]OrphanedPatch, []UnreadablePath, OrphanScanStopCause) {
 	var out []OrphanedPatch
 	var failures []UnreadablePath
+	var referencedFiles []os.FileInfo
+	referencedPaths := make([]string, 0, len(referenced))
+	for path := range referenced {
+		referencedPaths = append(referencedPaths, path)
+	}
+	sort.Strings(referencedPaths)
+	for _, path := range referencedPaths {
+		info, err := deps.Stat(path)
+		if err == nil && !info.IsDir() {
+			referencedFiles = append(referencedFiles, info)
+		}
+	}
 	entriesRemaining := MaxOrphanScanEntries
 	directoriesSeen := 0
 
@@ -769,7 +783,21 @@ func findOrphans(ctx context.Context, deps Deps, portDir string, referenced map[
 			if !strings.HasSuffix(name, ".patch") && !strings.HasSuffix(name, ".diff") {
 				continue
 			}
-			if !referenced[full] {
+			isReferenced := referenced[full]
+			if !isReferenced && len(referencedFiles) != 0 {
+				info, statErr := deps.Stat(full)
+				if statErr != nil {
+					failures = append(failures, UnreadablePath{Path: full, Kind: UnreadableOrphanDir, Error: statErr.Error()})
+					return OrphanScanStopDirectoryUnreadable
+				}
+				for _, referencedInfo := range referencedFiles {
+					if os.SameFile(info, referencedInfo) {
+						isReferenced = true
+						break
+					}
+				}
+			}
+			if !isReferenced {
 				out = append(out, OrphanedPatch{Filename: name, Path: full})
 			}
 		}

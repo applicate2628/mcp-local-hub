@@ -5,6 +5,65 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
 
+// PublicResultRequiresProjection pre-admits every repeated diagnostic and
+// evidence value independently from the scalar causal envelope.
+func (r Result) PublicResultRequiresProjection(limit int) bool {
+	envelope := r
+	envelope.Diagnostics = nil
+	envelope.LogPaths = nil
+	envelope.OverlayChain = nil
+	envelope.ContextSource = nil
+	envelope.Notes = nil
+	envelope.Evidence.Paths = nil
+	envelope.Evidence.Commands = nil
+	envelope.Evidence.Locations = nil
+	admission := publicresult.NewProjectionAdmission(limit)
+	if admission.AddJSON(envelope) {
+		return true
+	}
+	for _, diagnostic := range r.Diagnostics {
+		if admission.AddJSON(diagnostic) {
+			return true
+		}
+	}
+	for _, path := range r.LogPaths {
+		if admission.AddJSON(path) {
+			return true
+		}
+	}
+	for _, overlay := range r.OverlayChain {
+		if admission.AddJSON(overlay) {
+			return true
+		}
+	}
+	for _, source := range r.ContextSource {
+		if admission.AddJSON(source) {
+			return true
+		}
+	}
+	for _, note := range r.Notes {
+		if admission.AddJSON(note) {
+			return true
+		}
+	}
+	for _, path := range r.Evidence.Paths {
+		if admission.AddJSON(path) {
+			return true
+		}
+	}
+	for _, command := range r.Evidence.Commands {
+		if admission.AddJSON(command) {
+			return true
+		}
+	}
+	for _, location := range r.Evidence.Locations {
+		if admission.AddJSON(location) {
+			return true
+		}
+	}
+	return false
+}
+
 // PublicResultProjection retains the causal failure core and resource
 // completeness when ranked diagnostics and path collections exceed the common
 // encoded-result budget.

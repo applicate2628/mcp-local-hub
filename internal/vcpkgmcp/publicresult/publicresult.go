@@ -75,6 +75,7 @@ func MinimalProjection(field string) Projection {
 // implementation belongs to the package that owns field priority and must
 // return a self-contained valid JSON value below the universal budget.
 type Projectable interface {
+	ProjectionAdmitter
 	PublicResultProjection() any
 }
 
@@ -86,11 +87,46 @@ type ProjectionAdmitter interface {
 	PublicResultRequiresProjection(limit int) bool
 }
 
-// MarshalIndent asks an aggregate-aware owner for bounded pre-admission when
-// available, otherwise measures the ordinary public result. Oversized values
-// use the package-owned projection; JSON is never sliced or reflected over.
+// ProjectionAdmission is a saturating lower-bound counter for semantic owners.
+// Owners add a scalar envelope and aggregate elements individually, so a large
+// collection is rejected without ever materializing its complete JSON form.
+// Every added value is disjoint wire content; JSON field names and array
+// framing may be omitted because that only makes the lower bound smaller.
+type ProjectionAdmission struct {
+	remaining int
+	required  bool
+}
+
+// NewProjectionAdmission creates a fail-closed admission counter.
+func NewProjectionAdmission(limit int) ProjectionAdmission {
+	return ProjectionAdmission{remaining: limit, required: limit < 0}
+}
+
+// AddJSON adds one bounded, disjoint value to the encoded-size lower bound.
+// Encoding failure also requires projection so the complete aggregate is not
+// attempted through the ordinary path.
+func (a *ProjectionAdmission) AddJSON(value any) bool {
+	if a.required {
+		return true
+	}
+	body, err := json.Marshal(value)
+	if err != nil || len(body) > a.remaining {
+		a.required = true
+		return true
+	}
+	a.remaining -= len(body)
+	return false
+}
+
+// RequiresProjection reports whether the accumulated lower bound exceeds the
+// caller's public-result limit.
+func (a ProjectionAdmission) RequiresProjection() bool { return a.required }
+
+// MarshalIndent requires owner-supplied bounded pre-admission before measuring
+// the ordinary public result. Oversized values use the package-owned
+// projection; JSON is never sliced or reflected over.
 func MarshalIndent(result Projectable) ([]byte, error) {
-	if admitter, ok := result.(ProjectionAdmitter); ok && admitter.PublicResultRequiresProjection(MaxEncodedBytes) {
+	if result.PublicResultRequiresProjection(MaxEncodedBytes) {
 		return marshalProjection(result)
 	}
 

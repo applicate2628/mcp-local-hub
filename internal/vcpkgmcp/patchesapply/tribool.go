@@ -90,7 +90,9 @@ func truthy(val *string) Tri {
 	if val == nil {
 		return TriUnknown
 	}
-	v := strings.ToUpper(strings.TrimSpace(*val))
+	// CMake compares resolved variable bytes case-insensitively, but does not
+	// trim them: " OFF " is not the OFF false constant.
+	v := strings.ToUpper(*val)
 	if cmakeFalseConstants[v] {
 		return TriFalse
 	}

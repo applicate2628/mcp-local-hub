@@ -610,7 +610,11 @@ func recordStringMutation(environment *variableEnvironment, state guardState, ar
 	case "ASCII", "RANDOM":
 		destination = len(tokens) - 1
 	case "JSON":
-		destination = 1
+		recordVariableInvalidation(environment, state, args, 1)
+		if len(tokens) > 3 && strings.EqualFold(tokens[2].Text, "ERROR_VARIABLE") {
+			recordVariableInvalidation(environment, state, args, 3)
+		}
+		return
 	}
 	if destination < 0 {
 		if state.active {

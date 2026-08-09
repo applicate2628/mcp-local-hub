@@ -9,7 +9,7 @@ import (
 	"strings"
 )
 
-var portNameRE = regexp.MustCompile(`^[a-z0-9]+(?:-+[a-z0-9]+)*$`)
+var portNameRE = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 // Name is an opaque, validated vcpkg port name.
 type Name struct {
@@ -25,7 +25,7 @@ type InvalidNameError struct {
 }
 
 func (err *InvalidNameError) Error() string {
-	return fmt.Sprintf("%q is not a legal vcpkg port name (lowercase ASCII letters, digits and hyphens; must not start or end with a hyphen)", err.Name)
+	return fmt.Sprintf("%q is not a legal vcpkg port name (lowercase ASCII alphanumeric components separated by single hyphens)", err.Name)
 }
 
 // EscapesRootError reports a joined port directory that is outside its caller-

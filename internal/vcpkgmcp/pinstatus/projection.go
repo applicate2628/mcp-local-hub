@@ -6,10 +6,42 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
 
+// PublicResultRequiresProjection measures the complete compact wire shape one
+// bounded port row at a time. Compact JSON is a lower bound for the indented
+// public encoding, so exceeding limit proves that the full result cannot fit
+// without ever materializing the aggregate document.
+func (r Result) PublicResultRequiresProjection(limit int) bool {
+	if limit < 0 {
+		return true
+	}
+	type publicResult Result
+	envelope := publicResult(r)
+	envelope.Ports = nil
+	body, err := json.Marshal(envelope)
+	if err != nil {
+		return true
+	}
+	// Replace the envelope's literal null with the [] framing used below.
+	encodedBytes := len(body) - len("null") + len("[]")
+	for index := range r.Ports {
+		row, err := json.Marshal(redactPortResult(r.Ports[index]))
+		if err != nil {
+			return true
+		}
+		if index != 0 {
+			encodedBytes++
+		}
+		if encodedBytes > limit || len(row) > limit-encodedBytes {
+			return true
+		}
+		encodedBytes += len(row)
+	}
+	return encodedBytes > limit
+}
+
 // PublicResultProjection preserves the batch verdict while omitting port rows
 // only after the complete package-owned result exceeds the shared ceiling.
 func (r Result) PublicResultProjection() any {
-	r = redactResult(r)
 	failures := make([]projectedFailurePort, 0)
 	for index, port := range r.Ports {
 		if port.Failure == nil {

@@ -239,7 +239,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		}
 		if len(loopScopes) != 0 {
 			if active() != TriFalse {
-				invalidateLoopMutation(st, env)
+				if !invalidateLoopMutation(st, env) {
+					executionUncertain = true
+				}
 			}
 			if containsPatchesKeyword(st.Args) {
 				sawPatchesKeyword = true
@@ -345,9 +347,19 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		case "get_filename_component":
 			handleGetFilenameComponent(st.Args, env, active(), guardText(), activeUnresolved())
 		case "list":
-			handleListAppend(st.Args, env, active(), guardText(), activeUnresolved())
+			if !handleListAppend(st.Args, env, active(), guardText(), activeUnresolved()) && active() != TriFalse {
+				executionUncertain = true
+			}
 		case "string":
 			if !handleStringMutation(st.Args, env, active(), guardText(), activeUnresolved()) && active() != TriFalse {
+				executionUncertain = true
+			}
+		case "file":
+			if !handleStandardMutation(st, env, active(), guardText(), activeUnresolved()) && active() != TriFalse {
+				executionUncertain = true
+			}
+		case "math":
+			if !handleStandardMutation(st, env, active(), guardText(), activeUnresolved()) && active() != TriFalse {
 				executionUncertain = true
 			}
 		case "cmake_language":
@@ -388,6 +400,18 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		return nil, false, parserStructuralExecutionUncertain
 	}
 	return entries, sawPatchesKeyword, parserStructuralNone
+}
+
+func handleStandardMutation(st statement, env *varEnv, active Tri, guardText string, unresolvedVars []string) bool {
+	destinations, relevant, modeled := statementMutationDestinations(st)
+	if !relevant || !modeled {
+		return modeled
+	}
+	meta := provenanceMeta{guard: active, guardText: guardText, unresolvedVars: dedupStrings(unresolvedVars)}
+	for _, name := range destinations {
+		env.unsetValue(name, meta)
+	}
+	return true
 }
 
 // handleStringMutation invalidates every destination written by a modeled
@@ -464,23 +488,28 @@ func stringMutationDestinations(toks []token) ([]string, bool) {
 // evaluator does not execute loops, so a set/unset/list mutation may run zero
 // or many times; only the destination binding is invalidated, leaving
 // unrelated variables usable.
-func invalidateLoopMutation(st statement, env *varEnv) {
+func invalidateLoopMutation(st statement, env *varEnv) bool {
 	toks := tokenize(st.Args)
-	var name string
+	var destinations []string
 	switch st.Name {
 	case "set", "unset":
 		if len(toks) != 0 {
-			name = toks[0].Text
+			destinations = []string{toks[0].Text}
 		}
-	case "list":
-		if len(toks) >= 2 && !toks[0].Quoted &&
-			(toks[0].Text == "APPEND" || listSubcommandMutatesInput(toks[0].Text)) {
-			name = toks[1].Text
+	default:
+		var relevant, modeled bool
+		destinations, relevant, modeled = statementMutationDestinations(st)
+		if relevant && !modeled {
+			return false
 		}
 	}
-	if name != "" {
+	for _, name := range destinations {
+		if name == "" {
+			continue
+		}
 		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
 	}
+	return true
 }
 
 type patchesPresence uint8
@@ -639,18 +668,24 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardTe
 		return
 	}
 	toks := tokenize(argsRaw)
-	if len(toks) == 0 || toks[0].Quoted || toks[0].Text == "" {
+	destinations, modeled := getFilenameComponentMutationDestinations(toks)
+	if !modeled {
 		return
 	}
-	name := toks[0].Text
+	name := destinations[0]
+	invalidate := func() {
+		for _, destination := range destinations {
+			env.setValue(destination, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		}
+	}
 	if len(toks) < 3 {
-		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		invalidate()
 		return
 	}
 	ex := env.expandToken(toks[1])
 	mode := toks[2].Text
 	if mode != "ABSOLUTE" {
-		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		invalidate()
 		return
 	}
 	base := env.portDir
@@ -659,7 +694,7 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardTe
 		baseExpansion = env.expandToken(toks[4])
 		base = baseExpansion.text
 	} else if len(toks) != 3 {
-		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		invalidate()
 		return
 	}
 	meta := provenanceMeta{
@@ -683,17 +718,23 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardTe
 // set()/list() semantics) and tagged with the guard active AT THIS
 // APPEND — not the guard active when the list is later spliced into a
 // PATCHES keyword-arg via ${listvar}.
-func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) {
+func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) bool {
 	toks := tokenize(argsRaw)
 	if len(toks) < 2 || toks[0].Quoted {
-		return
+		return false
 	}
 	listName := toks[1].Text
 	if toks[0].Text != "APPEND" {
-		if active != TriFalse && listName != "" && listSubcommandMutatesInput(toks[0].Text) {
-			env.setValue(listName, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		destinations, modeled := listMutationDestinations(toks)
+		if !modeled {
+			return false
 		}
-		return
+		if active != TriFalse {
+			for _, name := range destinations {
+				env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+			}
+		}
+		return true
 	}
 	var appended []semanticItem
 	resolution := valueResolution{}
@@ -708,6 +749,7 @@ func handleListAppend(argsRaw string, env *varEnv, active Tri, guardText string,
 	value := serializeItems(appended)
 	value.resolution = resolution
 	env.setValue(listName, appendSerializedValue(env.values[listName], value))
+	return true
 }
 
 func listSubcommandMutatesInput(subcommand string) bool {

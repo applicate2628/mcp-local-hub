@@ -264,7 +264,7 @@ func publicContractCheckSourceContract(t *testing.T, root string) {
 			"const MaxEncodedBytes = 256 << 10",
 			`var ErrBudgetInvariant = errors.New("VCPKG_RESULT_BUDGET_INVARIANT")`,
 			`const InternalProjectionLimit OmissionReason = "internal_projection_limit"`,
-			"type Projectable interface {\n\tPublicResultProjection() any\n}",
+			"type Projectable interface {\n\tProjectionAdmitter\n\tPublicResultProjection() any\n}",
 			"func MarshalIndent(result Projectable) ([]byte, error)",
 		},
 		"internal/vcpkgmcp/boundedio/boundedio.go": {

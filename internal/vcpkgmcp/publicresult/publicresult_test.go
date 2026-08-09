@@ -11,9 +11,34 @@ type measuredResult struct {
 	Text string `json:"text"`
 }
 
+type countedAdmissionValue struct{ calls *int }
+
+func (v countedAdmissionValue) MarshalJSON() ([]byte, error) {
+	(*v.calls)++
+	return []byte(`"tail"`), nil
+}
+
+func TestProjectionAdmissionDoesNotMarshalTailAfterSaturation(t *testing.T) {
+	admission := NewProjectionAdmission(1)
+	if !admission.AddJSON("too-large") {
+		t.Fatal("first value did not saturate admission")
+	}
+	calls := 0
+	if !admission.AddJSON(countedAdmissionValue{calls: &calls}) {
+		t.Fatal("saturated admission became open")
+	}
+	if calls != 0 {
+		t.Fatalf("tail MarshalJSON calls = %d, want 0", calls)
+	}
+}
+
+func (r measuredResult) PublicResultRequiresProjection(int) bool { return false }
+
 type admissionResult struct {
 	fullMarshalCalls *int
 }
+
+var _ Projectable = admissionResult{}
 
 func (r admissionResult) PublicResultProjection() any {
 	return struct {

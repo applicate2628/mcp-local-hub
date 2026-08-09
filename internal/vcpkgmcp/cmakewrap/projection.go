@@ -11,6 +11,53 @@ const (
 	graphProjectionValueBytes      = publicresult.MaxEncodedBytes / 32
 )
 
+// PublicResultRequiresProjection pre-admits graph collections one element at
+// a time so a large graph never needs a complete aggregate JSON allocation.
+func (r Result) PublicResultRequiresProjection(limit int) bool {
+	envelope := r
+	envelope.Edges = nil
+	envelope.Files = nil
+	envelope.UnscannedFiles = nil
+	envelope.Evidence.Paths = nil
+	envelope.Evidence.Commands = nil
+	envelope.Evidence.Locations = nil
+	admission := publicresult.NewProjectionAdmission(limit)
+	if admission.AddJSON(envelope) {
+		return true
+	}
+	for _, edge := range r.Edges {
+		if admission.AddJSON(edge) {
+			return true
+		}
+	}
+	for _, file := range r.Files {
+		if admission.AddJSON(file) {
+			return true
+		}
+	}
+	for _, hole := range r.UnscannedFiles {
+		if admission.AddJSON(hole) {
+			return true
+		}
+	}
+	for _, path := range r.Evidence.Paths {
+		if admission.AddJSON(path) {
+			return true
+		}
+	}
+	for _, command := range r.Evidence.Commands {
+		if admission.AddJSON(command) {
+			return true
+		}
+	}
+	for _, location := range r.Evidence.Locations {
+		if admission.AddJSON(location) {
+			return true
+		}
+	}
+	return false
+}
+
 // PublicResultProjection keeps bounded causal graph identity and explicitly
 // enumerates every collection reduced by the public-result budget.
 func (r Result) PublicResultProjection() any {

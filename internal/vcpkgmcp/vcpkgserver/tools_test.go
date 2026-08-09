@@ -371,6 +371,8 @@ type contentBoundaryResult struct {
 	Text string `json:"text"`
 }
 
+func (r contentBoundaryResult) PublicResultRequiresProjection(int) bool { return false }
+
 func (r contentBoundaryResult) PublicResultProjection() any {
 	return struct {
 		ResultProjection publicresult.Projection `json:"result_projection"`
@@ -1492,6 +1494,8 @@ func oversizedCMakeTraceRecords() []cmaketrace.Record {
 
 type oversizedMissingProjection struct{}
 
+func (oversizedMissingProjection) PublicResultRequiresProjection(int) bool { return true }
+
 func (oversizedMissingProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
 		Text string `json:"text"`
@@ -1501,6 +1505,8 @@ func (oversizedMissingProjection) MarshalJSON() ([]byte, error) {
 func (oversizedMissingProjection) PublicResultProjection() any { return struct{}{} }
 
 type oversizedProjection struct{}
+
+func (oversizedProjection) PublicResultRequiresProjection(int) bool { return true }
 
 func (oversizedProjection) MarshalJSON() ([]byte, error) {
 	return json.Marshal(struct {
