@@ -72,6 +72,9 @@ Patch analysis admits the complete triplet-root chain before touching the filesy
 published overlay maximum returns `failed(too_many_overlay_triplet_roots)`. Every nonblank relative
 overlay root returns `failed(relative_overlay_triplet_root)`, and a relative `vcpkg_root` returns
 `failed(relative_vcpkg_root)`. All three failures occur before filesystem access.
+`var_overrides` is likewise admitted before filesystem access: its entry count,
+per-name bytes, per-value bytes, and aggregate bytes are bounded. Exceeding any
+of those ceilings returns `failed(var_overrides_limit_exceeded)`.
 
 ## Two limits worth knowing
 
@@ -121,6 +124,14 @@ overlay root returns `failed(relative_overlay_triplet_root)`, and a relative `vc
 - **Projected CMake traces remain auditable.** Oversized trace results retain a
   bounded trace-path identity and enumerate exact omissions for `include_chain`,
   `records`, `executed_lines`, and `files_in_trace`.
+- **Projected include graphs retain causal identity.** Oversized graph results
+  keep the histogram plus a bounded prefix of `unscanned_files` and evidence
+  paths. `result_projection.omissions` enumerates reduced `edges`, `files`,
+  coverage holes, and evidence collections instead of silently dropping them.
+- **Coverage-hole retention is bounded.** `cmake_include_graph` caps both the
+  number and retained bytes of `unscanned_files`; `coverage_cap_truncated`,
+  `dropped_coverage_holes`, and `retained_coverage_bytes` make that reduction
+  explicit.
 - **CMake trace parsing is json-v1 only.** An explicit header with another major returns
   `unknown(unsupported_trace_version)` and no partial records.
 - **`vcpkg_last_failure` bounds work before it builds the response.** One call examines at most 1024

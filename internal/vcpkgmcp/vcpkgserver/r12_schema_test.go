@@ -91,6 +91,18 @@ func TestAllAdvertisedInputSchemasAreResolvedStrictObjects(t *testing.T) {
 				if got := int(overlay["maxItems"].(float64)); got != patchesapply.MaxOverlayTripletRoots {
 					t.Fatalf("overlay maxItems=%d, want package constant %d", got, patchesapply.MaxOverlayTripletRoots)
 				}
+				overrides, _ := properties["var_overrides"].(map[string]any)
+				if got := int(overrides["maxProperties"].(float64)); got != patchesapply.MaxVarOverrides {
+					t.Fatalf("var_overrides maxProperties=%d, want %d", got, patchesapply.MaxVarOverrides)
+				}
+				propertyNames, _ := overrides["propertyNames"].(map[string]any)
+				if got := int(propertyNames["maxLength"].(float64)); got != patchesapply.MaxVarOverrideNameBytes {
+					t.Fatalf("var_overrides propertyNames maxLength=%d, want %d", got, patchesapply.MaxVarOverrideNameBytes)
+				}
+				values, _ := overrides["additionalProperties"].(map[string]any)
+				if got := int(values["maxLength"].(float64)); got != patchesapply.MaxVarOverrideValueBytes {
+					t.Fatalf("var_overrides value maxLength=%d, want %d", got, patchesapply.MaxVarOverrideValueBytes)
+				}
 			}
 			if advertised.Name == "cmake_include_graph" {
 				entry, _ := properties["entry_names"].(map[string]any)

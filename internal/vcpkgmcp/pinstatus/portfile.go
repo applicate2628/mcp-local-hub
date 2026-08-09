@@ -767,6 +767,7 @@ type conditionFrame struct {
 	conditions   []string
 	priorTrue    bool
 	priorUnknown string
+	elseSeen     bool
 }
 
 func defaultCondition(tokens []token) (truth bool, unresolved string) {
@@ -851,7 +852,7 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 	variables := newVariableEnvironment()
 	var stack []conditionFrame
 	var unsupportedScopes []unsupportedScope
-	declarationFetches := map[string]bool{}
+	declaredCommands := map[string]struct{}{}
 	var candidates []FetchCandidate
 	var viableCandidates []FetchCandidate
 	var unresolved string
@@ -872,6 +873,9 @@ statementLoop:
 				return parsedPortfile{}, false
 			}
 			frame := &stack[len(stack)-1]
+			if frame.elseSeen {
+				return parsedPortfile{}, false
+			}
 			tokens := tokenize(st.Args)
 			condition := conditionText(tokens)
 			truth, unknown := defaultCondition(tokens)
@@ -893,6 +897,10 @@ statementLoop:
 				return parsedPortfile{}, false
 			}
 			frame := &stack[len(stack)-1]
+			if frame.elseSeen {
+				return parsedPortfile{}, false
+			}
+			frame.elseSeen = true
 			state = guardedState(frame.parent, !frame.priorTrue, frame.priorUnknown, negatedConditions(frame.conditions))
 		case "endif":
 			if len(stack) == 0 {
@@ -906,6 +914,9 @@ statementLoop:
 			name := ""
 			if tokens := tokenize(st.Args); len(tokens) != 0 && !tokens[0].Raw {
 				name = strings.ToLower(tokens[0].Text)
+				if name != "" {
+					declaredCommands[name] = struct{}{}
+				}
 			}
 			unsupportedScopes = append(unsupportedScopes, unsupportedScope{opener: st.Name, name: name})
 		case "endforeach":
@@ -949,19 +960,13 @@ statementLoop:
 			break statementLoop
 		default:
 			if !fetchFuncNames[st.Name] {
-				if len(unsupportedScopes) == 0 && state.active && declarationFetches[st.Name] {
-					// Executing a declaration body requires a CMake interpreter. A
-					// lexical parser must fail closed before its deferred fetch can
-					// authorize a remote query.
+				_, declared := declaredCommands[st.Name]
+				indirectSource := st.Name == "include" || st.Name == "add_subdirectory" || st.Name == "cmake_language"
+				if len(unsupportedScopes) == 0 && state.active && (declared || indirectSource) {
+					// Static selection cannot execute declarations or load more CMake.
 					return parsedPortfile{}, false
 				}
 				continue
-			}
-			for i := len(unsupportedScopes) - 1; i >= 0; i-- {
-				scope := unsupportedScopes[i]
-				if (scope.opener == "function" || scope.opener == "macro") && scope.name != "" {
-					declarationFetches[scope.name] = true
-				}
 			}
 			if len(unsupportedScopes) != 0 {
 				continue

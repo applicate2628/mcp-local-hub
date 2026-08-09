@@ -86,7 +86,11 @@ type Reason string
 const (
 	// MaxOverlayTripletRoots bounds the caller-owned root chain before any
 	// filesystem operation. The MCP schema imports this owner constant.
-	MaxOverlayTripletRoots = 64
+	MaxOverlayTripletRoots   = 64
+	MaxVarOverrides          = 64
+	MaxVarOverrideNameBytes  = 256
+	MaxVarOverrideValueBytes = int(MaxPortfileBytes)
+	MaxVarOverrideTotalBytes = int(MaxPortfileBytes)
 	// ReasonEmptyPortDir: PortDir was empty/whitespace-only. Failed (bad
 	// caller input, not an environment condition).
 	ReasonEmptyPortDir Reason = "empty_port_dir"
@@ -106,6 +110,7 @@ const (
 	ReasonTooManyOverlayTripletRoots Reason = "too_many_overlay_triplet_roots"
 	ReasonRelativeOverlayTripletRoot Reason = "relative_overlay_triplet_root"
 	ReasonRelativeVcpkgRoot          Reason = "relative_vcpkg_root"
+	ReasonVarOverridesLimitExceeded  Reason = "var_overrides_limit_exceeded"
 	// ReasonPortDirMissing: the OS positively reported that PortDir does not
 	// exist, or that it exists but is not a directory. A VERIFIED negative —
 	// never a probe that merely failed (see ReasonPortDirUnreadable).
@@ -364,6 +369,9 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 	if len(args.OverlayTriplets) > MaxOverlayTripletRoots {
 		return Result{Status: evidence.StatusFailed, Reason: ReasonTooManyOverlayTripletRoots}
 	}
+	if !varOverridesWithinLimits(args.VarOverrides) {
+		return Result{Status: evidence.StatusFailed, Reason: ReasonVarOverridesLimitExceeded}
+	}
 	var ev evidence.Evidence
 	// Declared up front because the port-dir probe below can already produce
 	// an entry: an unreadable port dir is the FIRST question the filesystem
@@ -580,6 +588,24 @@ func applyOrderContext(ctx context.Context, args Args, deps Deps) Result {
 	unreadable = append(unreadable, orphanFailures...)
 	res.OrphanScanStopCause = orphanStop
 	return finalizePostTripletResult(res, ev, unreadable, sawPatches, parserStructuralNone)
+}
+
+func varOverridesWithinLimits(overrides map[string]string) bool {
+	if len(overrides) > MaxVarOverrides {
+		return false
+	}
+	total := 0
+	for name, value := range overrides {
+		if len(name) > MaxVarOverrideNameBytes || len(value) > MaxVarOverrideValueBytes {
+			return false
+		}
+		cost := len(name) + len(value)
+		if cost > MaxVarOverrideTotalBytes-total {
+			return false
+		}
+		total += cost
+	}
+	return true
 }
 
 // finalizePostTripletResult is the sole post-triplet result finalizer. It

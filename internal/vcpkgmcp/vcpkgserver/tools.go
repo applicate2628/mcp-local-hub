@@ -417,8 +417,10 @@ func registerTools(vs *VcpkgServer) error {
 				},
 				"var_overrides": map[string]any{
 					"type":                 "object",
-					"additionalProperties": map[string]any{"type": "string"},
-					"description":          "Optional explicit CMake variable values used while evaluating guards. Outrank triplet-file facts, and are the way to decide variables vcpkg derives at build time (VCPKG_TARGET_IS_*, VCPKG_CROSSCOMPILING, ...).",
+					"maxProperties":        patchesapply.MaxVarOverrides,
+					"propertyNames":        map[string]any{"maxLength": patchesapply.MaxVarOverrideNameBytes},
+					"additionalProperties": map[string]any{"type": "string", "maxLength": patchesapply.MaxVarOverrideValueBytes},
+					"description":          "Optional explicit CMake variable values used while evaluating guards. Outrank triplet-file facts. Count, per-name, per-value, and aggregate encoded bytes are bounded; excess returns failed(var_overrides_limit_exceeded).",
 				},
 			},
 		},
@@ -474,10 +476,10 @@ func registerTools(vs *VcpkgServer) error {
 			"re-interpret resolution. Use root to walk every CMakeLists.txt/*.cmake under a tree as " +
 			"independent roots (the right mode for an overlay-ports tree with no single top-level " +
 			"CMakeLists.txt); use file to walk a single starting file. Coverage is always reported, " +
-			"never assumed: unscanned_files[] carries every hole with a CLOSED reason (byte_cap_exceeded, " +
+			"never assumed: bounded unscanned_files[] entries carry holes with a CLOSED reason (byte_cap_exceeded, " +
 			"file_unreadable, enumerate_failed, root_outside_workspace, root_enumeration_capped, symlink_directory_skipped, edge_cap_exceeded), so a " +
 			"subtree that could not be listed appears there rather than being silently omitted from an " +
-			"apparently-complete graph. Per-edge, dangling means VERIFIED absence only; a target whose " +
+			"apparently-complete graph. coverage_cap_truncated plus dropped_coverage_holes reports holes omitted by the aggregate count/byte bound. Per-edge, dangling means VERIFIED absence only; a target whose " +
 			"existence could not be determined (access denied, sharing violation) is " +
 			"unresolved(target_unreadable)." + resultProjectionDescription,
 		InputSchema: map[string]any{

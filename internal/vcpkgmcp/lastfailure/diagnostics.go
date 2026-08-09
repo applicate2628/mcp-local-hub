@@ -76,7 +76,10 @@ var (
 	// exactly the noise this class of nested build buries the real error
 	// under. See wrapperNoiseRE.
 	toolDiagRE = regexp.MustCompile(
-		`^(?P<file>clang-cl|lld-link|clang\+\+|clang|link|cl|ld|gcc|g\+\+)\s*:\s+(?P<sev>fatal error|error|warning)\s*:\s*(?P<msg>.+)$`)
+		`^(?P<file>clang-cl|lld-link|clang\+\+|clang|link|cl|ld|gcc|g\+\+|collect2)\s*:\s+(?P<sev>fatal error|error|warning)\s*:\s*(?P<msg>.+)$`)
+
+	gnuLDLocationRE = regexp.MustCompile(`^(?P<file>(?:[A-Za-z]:)?[/\\][^:\r\n]*[/\\]ld(?:\.exe)?|ld(?:\.exe)?)\s*:\s*(?P<msg>[^\r\n]+)$`)
+	gnuLDCauseRE    = regexp.MustCompile(`(?i)(?:undefined reference|multiple definition|cannot find|cannot open output file|relocation truncated|file format not recognized)`)
 
 	// ninjaFailedRE matches ninja's own build-step failure summary line,
 	// e.g. `FAILED: [code=2] CMakeFiles/cmTC_e5bae.dir/src.cxx.obj` —
@@ -213,7 +216,10 @@ var aggregateLinkCodeRE = regexp.MustCompile(`^LNK(?:1120|1169)$`)
 // Everything else a driver says stays specific, because it names its own cause:
 // `lld-link: error: undefined symbol: X`, `clang-cl: warning: unknown argument
 // ignored in clang-cl: '-fopenmp'`, `clang: error: no such file or directory`.
-var aggregateDriverMsgRE = regexp.MustCompile(`^[A-Za-z][A-Za-z ]* command failed with exit code \d+`)
+var (
+	aggregateDriverMsgRE   = regexp.MustCompile(`^[A-Za-z][A-Za-z ]* command failed with exit code \d+`)
+	aggregateCollect2MsgRE = regexp.MustCompile(`^ld returned \d+ exit status$`)
+)
 
 // msvcLinkTier classifies an MSVC-linker-shaped diagnostic by its LNK code.
 // The code is matched uppercase by msvcLinkDiagRE, so no folding is needed.
@@ -226,7 +232,7 @@ func msvcLinkTier(code string) DiagnosticTier {
 
 // driverTier classifies a compiler/linker-driver diagnostic by its message.
 func driverTier(msg string) DiagnosticTier {
-	if aggregateDriverMsgRE.MatchString(msg) {
+	if aggregateDriverMsgRE.MatchString(msg) || aggregateCollect2MsgRE.MatchString(msg) {
 		return TierAggregate
 	}
 	return TierSpecific
@@ -609,6 +615,14 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			File:     strings.TrimSpace(m[msvcLinkDiagRE.SubexpIndex("file")]),
 			Severity: normalizeSeverity(m[msvcLinkDiagRE.SubexpIndex("sev")]),
 			Tier:     msvcLinkTier(m[msvcLinkDiagRE.SubexpIndex("code")]),
+			Text:     line,
+		}, true
+	}
+	if m := gnuLDLocationRE.FindStringSubmatch(line); m != nil && gnuLDCauseRE.MatchString(m[gnuLDLocationRE.SubexpIndex("msg")]) {
+		return Diagnostic{
+			File:     strings.TrimSpace(m[gnuLDLocationRE.SubexpIndex("file")]),
+			Severity: SeverityError,
+			Tier:     TierSpecific,
 			Text:     line,
 		}, true
 	}

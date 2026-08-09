@@ -137,6 +137,9 @@ type Result struct {
 	EdgeCapTruncated      bool  `json:"edge_cap_truncated"`
 	RootsSkippedByEdgeCap int   `json:"roots_skipped_by_edge_cap,omitempty"`
 	RetainedEdgeBytes     int64 `json:"retained_edge_bytes,omitempty"`
+	CoverageCapTruncated  bool  `json:"coverage_cap_truncated"`
+	DroppedCoverageHoles  int   `json:"dropped_coverage_holes,omitempty"`
+	RetainedCoverageBytes int64 `json:"retained_coverage_bytes,omitempty"`
 	// UnscannedFiles lists every COVERAGE HOLE cmakegraph recorded: a file
 	// whose content could not be read (byte cap, permission error, race), a
 	// subtree that could not be enumerated, a root refused for escaping
@@ -277,6 +280,9 @@ func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Resul
 		EdgeCapTruncated:      cgResult.EdgeCapTruncated,
 		RootsSkippedByEdgeCap: cgResult.RootsSkippedByEdgeCap,
 		RetainedEdgeBytes:     cgResult.RetainedEdgeBytes,
+		CoverageCapTruncated:  cgResult.CoverageCapTruncated,
+		DroppedCoverageHoles:  cgResult.DroppedCoverageHoles,
+		RetainedCoverageBytes: cgResult.RetainedCoverageBytes,
 		UnscannedFiles:        cgResult.UnscannedFiles,
 		Evidence:              ev,
 	}

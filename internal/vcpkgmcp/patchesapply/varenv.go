@@ -402,26 +402,34 @@ func appendBareSource(value *evaluatedValue, source string, meta provenanceMeta)
 			i++
 			continue
 		}
-		j := i
-		for j < len(source) && source[j] == '\\' {
-			j++
+		if i+1 >= len(source) {
+			return appendEvaluatedByte(value, '\\', meta, false)
 		}
-		if j < len(source) && source[j] == ';' {
-			for kept := 0; kept < (j-i-1)/2; kept++ {
-				if !appendEvaluatedByte(value, '\\', meta, false) {
-					return false
-				}
-			}
-			if !appendEvaluatedByte(value, ';', meta, true) {
+		next := source[i+1]
+		switch {
+		case next == '\n':
+			i += 2
+			continue
+		case next == '\r' && i+2 < len(source) && source[i+2] == '\n':
+			i += 3
+			continue
+		case next == 't':
+			next = '\t'
+		case next == 'r':
+			next = '\r'
+		case next == 'n':
+			next = '\n'
+		case (next >= 'A' && next <= 'Z') || (next >= 'a' && next <= 'z') || (next >= '0' && next <= '9'):
+			if !appendEvaluatedByte(value, '\\', meta, false) || !appendEvaluatedByte(value, next, meta, false) {
 				return false
 			}
-			i = j + 1
+			i += 2
 			continue
 		}
-		if !appendLiteral(value, source[i:j], meta) {
+		if !appendEvaluatedByte(value, next, meta, next == ';') {
 			return false
 		}
-		i = j
+		i += 2
 	}
 	return true
 }

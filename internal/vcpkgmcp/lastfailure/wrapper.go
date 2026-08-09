@@ -98,6 +98,7 @@ var (
 	wrapperFailedCountRE   = regexp.MustCompile(`^build_failed_count:\s*(\d+)\s*$`)
 	wrapperFailedHeaderRE  = regexp.MustCompile(`^failed_ports:\s*$`)
 	wrapperFailedEntryRE   = regexp.MustCompile(`^-\s*(\S+)\s*$`)
+	windowsRecordedPathRE  = regexp.MustCompile(`(?:^|[\t ='\"])(?:[A-Za-z]:\\|\\\\)`)
 )
 
 // SplitWindowsCommandLine splits a recorded Windows command line into
@@ -199,7 +200,7 @@ func splitRecordedCommandLine(s, goos string) ([]string, error) {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
-	if goos == "windows" {
+	if goos == "windows" || windowsRecordedPathRE.MatchString(s) {
 		return SplitWindowsCommandLine(s), nil
 	}
 	return splitPOSIXCommandLine(s)

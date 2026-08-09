@@ -498,7 +498,10 @@ type Result struct {
 	RootsSkippedByEdgeCap int
 	// RetainedEdgeBytes is the conservative package-owned accounting total for
 	// the retained edge slice and its string payloads.
-	RetainedEdgeBytes int64
+	RetainedEdgeBytes     int64
+	CoverageCapTruncated  bool
+	DroppedCoverageHoles  int
+	RetainedCoverageBytes int64
 	// UnscannedFiles lists every COVERAGE HOLE — a file whose content could
 	// not be read, a subtree that could not be enumerated or was skipped for a
 	// directory symlink, a root refused for escaping the workspace, and the
@@ -547,8 +550,10 @@ const (
 	MaxEntryFilterBytes      = 8 << 10
 	// MaxEdgesLimit and MaxRetainedEdgeBytesLimit bound the aggregate result,
 	// independently of per-file and traversal-node limits.
-	MaxEdgesLimit             = 20000
-	MaxRetainedEdgeBytesLimit = 8 << 20 // 8 MiB
+	MaxEdgesLimit                       = 20000
+	MaxRetainedEdgeBytesLimit           = 8 << 20 // 8 MiB
+	MaxCoverageHolesLimit               = 4096
+	MaxRetainedCoverageBytesLimit int64 = 2 << 20
 )
 
 // DefaultOptions returns the recommended bounds for a typical project tree.
@@ -892,6 +897,9 @@ type walker struct {
 	edges                 []Edge
 	retainedEdgeBytes     int64
 	unscanned             []UnscannedFile
+	retainedCoverageBytes int64
+	coverageCapTruncated  bool
+	droppedCoverageHoles  int
 	nodeCapTruncated      bool
 	rootsSkippedByNodeCap int
 	rootEnumerationCapped bool
@@ -938,11 +946,24 @@ func newWalker(ctx context.Context, workspaceRoot string, opts Options) (*walker
 // was capped — goes through here, so no future path can quietly drop a hole
 // on the floor by forgetting to append.
 func (w *walker) recordCoverage(path string, reason CoverageReason, detail string) {
-	w.unscanned = append(w.unscanned, UnscannedFile{
+	hole := UnscannedFile{
 		Path:   w.canonicalize(path),
 		Reason: reason,
 		Detail: detail,
-	})
+	}
+	bytes := retainedCoverageBytes(hole)
+	if len(w.unscanned) >= MaxCoverageHolesLimit || bytes > MaxRetainedCoverageBytesLimit-w.retainedCoverageBytes {
+		w.coverageCapTruncated = true
+		w.droppedCoverageHoles++
+		return
+	}
+	w.unscanned = append(w.unscanned, hole)
+	w.retainedCoverageBytes += bytes
+}
+
+func retainedCoverageBytes(hole UnscannedFile) int64 {
+	const fixedCoverageBytes = 64
+	return fixedCoverageBytes + int64(len(hole.Path)+len(hole.Reason)+len(hole.Detail))
 }
 
 // retainedEdgeBytes conservatively accounts both the Edge value retained by
@@ -1053,6 +1074,9 @@ func (w *walker) result(root string) *Result {
 		EdgeCapTruncated:      w.edgeCapTruncated,
 		RootsSkippedByEdgeCap: w.rootsSkippedByEdgeCap,
 		RetainedEdgeBytes:     w.retainedEdgeBytes,
+		CoverageCapTruncated:  w.coverageCapTruncated,
+		DroppedCoverageHoles:  w.droppedCoverageHoles,
+		RetainedCoverageBytes: w.retainedCoverageBytes,
 		UnscannedFiles:        w.unscanned,
 	}
 }

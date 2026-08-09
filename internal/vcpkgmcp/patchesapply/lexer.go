@@ -154,6 +154,15 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 			k := argStart
 			for k < n && depth > 0 {
 				switch {
+				case src[k] == '\\' && k+1 < n:
+					// An unquoted escape keeps its following delimiter inside the
+					// bare argument; escaped # and parentheses are not syntax here.
+					if src[k+1] == '\r' && k+2 < n && src[k+2] == '\n' {
+						k += 3
+					} else {
+						k += 2
+					}
+					continue
 				case src[k] == '"':
 					k = skipQuoted(src, k)
 					continue
@@ -374,9 +383,7 @@ func tokenize(s string) []token {
 			// Not a valid/closed bracket_open: treat '[' as an ordinary
 			// bareword character (same scan rule as the default case).
 			start := i
-			for i < n && !isSpaceOrNL(s[i]) && s[i] != '"' && s[i] != '(' && s[i] != ')' && s[i] != '#' {
-				i++
-			}
+			i = scanBareEnd(s, i)
 			raw := s[start:i]
 			tokens = append(tokens, token{Text: unescapeBare(raw), listText: raw})
 		case c == '(' || c == ')':
@@ -384,14 +391,30 @@ func tokenize(s string) []token {
 			i++
 		default:
 			start := i
-			for i < n && !isSpaceOrNL(s[i]) && s[i] != '"' && s[i] != '(' && s[i] != ')' && s[i] != '#' {
-				i++
-			}
+			i = scanBareEnd(s, i)
 			raw := s[start:i]
 			tokens = append(tokens, token{Text: unescapeBare(raw), listText: raw})
 		}
 	}
 	return tokens
+}
+
+func scanBareEnd(s string, start int) int {
+	for i := start; i < len(s); {
+		if s[i] == '\\' && i+1 < len(s) {
+			if s[i+1] == '\r' && i+2 < len(s) && s[i+2] == '\n' {
+				i += 3
+			} else {
+				i += 2
+			}
+			continue
+		}
+		if isSpaceOrNL(s[i]) || s[i] == '"' || s[i] == '(' || s[i] == ')' || s[i] == '#' {
+			return i
+		}
+		i++
+	}
+	return len(s)
 }
 
 // splitCMakeList is the sole CMake argument-boundary owner. Source-escaped
@@ -471,7 +494,7 @@ func combineItemProvenance(metas []provenanceMeta) provenanceMeta {
 // unescapeBare materializes the bare-argument escape that matters to CMake
 // list semantics while listText retains the source marker for splitCMakeList.
 func unescapeBare(s string) string {
-	return strings.ReplaceAll(s, `\;`, `;`)
+	return unescapeQuoted(s)
 }
 
 // unescapeQuoted resolves quoted_argument escape productions per

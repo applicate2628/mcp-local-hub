@@ -99,6 +99,7 @@ type ifFrame struct {
 	curActive     Tri
 	curText       string
 	curUnresolved []string
+	elseSeen      bool
 }
 
 // walkPortfile scans src (the full portfile.cmake text) and returns every
@@ -205,6 +206,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 				return nil, false, parserStructuralExpressionUnparsable
 			}
 			f := &frames[len(frames)-1]
+			if f.elseSeen {
+				return nil, false, parserStructuralExpressionUnparsable
+			}
 			cond, unresolved := evalCondition(st.Args, env)
 			notPrior, notPriorUnresolved := notAllPrior(f)
 			local := kleeneAnd(notPrior, cond)
@@ -220,6 +224,10 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 				return nil, false, parserStructuralExpressionUnparsable
 			}
 			f := &frames[len(frames)-1]
+			if f.elseSeen {
+				return nil, false, parserStructuralExpressionUnparsable
+			}
+			f.elseSeen = true
 			notPrior, notPriorUnresolved := notAllPrior(f)
 			f.curActive = kleeneAnd(f.parentActive, notPrior)
 			f.curText = "NOT(" + strings.Join(f.priorTexts, " OR ") + ")"
