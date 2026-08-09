@@ -1,7 +1,7 @@
 // Package cmakewrap is a thin wrapper over mcp-local-hub/internal/cmakegraph
 // — the ONE hub-internal dependency this binary is allowed
 // (work-items/decisions/2026-07-25-vcpkg-mcp-tool-contracts.md, "Boundary
-// with the cmake side"). It surfaces cmakegraph's tri-state resolution,
+// with the cmake side"). It surfaces cmakegraph's resolution states,
 // Conditional flag, closed Reason enum, and Histogram VERBATIM — it does
 // NOT re-implement any include()/add_subdirectory() resolution logic
 // itself. The only translation performed here is JSON wire-shaping
@@ -121,7 +121,7 @@ type Result struct {
 	// go/no-go metric this tool must not re-derive or re-interpret.
 	Histogram cmakegraph.Histogram `json:"histogram"`
 
-	// The three fields below are cmakegraph's own COVERAGE-HONESTY signals,
+	// The fields below are cmakegraph's own COVERAGE-HONESTY signals,
 	// forwarded verbatim. They state where the walk stopped short, so a
 	// caller never mistakes a truncated graph for a complete one.
 	//
@@ -133,7 +133,10 @@ type Result struct {
 	// RootEnumerationCapped: root-mode discovery stopped at max_roots, so
 	// candidate roots beyond it were never even enumerated — the count is
 	// unknowable by construction, unlike roots_skipped_by_node_cap.
-	RootEnumerationCapped bool `json:"root_enumeration_capped"`
+	RootEnumerationCapped bool  `json:"root_enumeration_capped"`
+	EdgeCapTruncated      bool  `json:"edge_cap_truncated"`
+	RootsSkippedByEdgeCap int   `json:"roots_skipped_by_edge_cap,omitempty"`
+	RetainedEdgeBytes     int64 `json:"retained_edge_bytes,omitempty"`
 	// UnscannedFiles lists every COVERAGE HOLE cmakegraph recorded: a file
 	// whose content could not be read (byte cap, permission error, race), a
 	// subtree that could not be enumerated, a root refused for escaping
@@ -271,6 +274,9 @@ func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Resul
 		NodeCapTruncated:      cgResult.NodeCapTruncated,
 		RootsSkippedByNodeCap: cgResult.RootsSkippedByNodeCap,
 		RootEnumerationCapped: cgResult.RootEnumerationCapped,
+		EdgeCapTruncated:      cgResult.EdgeCapTruncated,
+		RootsSkippedByEdgeCap: cgResult.RootsSkippedByEdgeCap,
+		RetainedEdgeBytes:     cgResult.RetainedEdgeBytes,
 		UnscannedFiles:        cgResult.UnscannedFiles,
 		Evidence:              ev,
 	}

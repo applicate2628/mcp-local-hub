@@ -102,6 +102,10 @@ const (
 	// touched. Resolving it with filepath.Abs would bind the caller's input to
 	// the hub daemon's private working directory.
 	ReasonRelativePortDir Reason = "relative_port_dir"
+	// ReasonRemoteURLRelative: a scheme-less local Git remote is relative to
+	// the hub daemon's private working directory and therefore has no stable
+	// caller-controlled meaning. It is refused before any child process starts.
+	ReasonRemoteURLRelative Reason = "remote_url_relative"
 	// ReasonNotGitComparable: the port fetches via vcpkg_download_distfile,
 	// or via no recognized fetch call at all (provider/metapackage) — there
 	// is no git remote to compare against, ever.
@@ -237,6 +241,7 @@ type ReasonRegistry struct {
 var pinStatusReasonRegistry = ReasonRegistry{
 	perPort: []Reason{
 		ReasonRelativePortDir,
+		ReasonRemoteURLRelative,
 		ReasonNotGitComparable,
 		ReasonPinNotAtTip,
 		ReasonRefUnresolvable,

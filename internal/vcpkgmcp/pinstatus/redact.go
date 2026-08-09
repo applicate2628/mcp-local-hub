@@ -181,10 +181,29 @@ func approveRemoteURL(raw string) (approvedRemoteURL, Reason) {
 	if hasQuery && queryCarriesValue(rawQuery) {
 		return approvedRemoteURL{}, ReasonRemoteURLQueryUnclassified
 	}
+	if isRelativeLocalRemote(raw, parsed, parseErr) {
+		return approvedRemoteURL{}, ReasonRemoteURLRelative
+	}
 	if !validRemoteURLShape(raw, parsed, parseErr) {
 		return approvedRemoteURL{}, ReasonPortfileUnparsable
 	}
 	return approvedRemoteURL{raw: raw, proof: remoteURLApprovalProof}, ""
+}
+
+func isRelativeLocalRemote(raw string, parsed *url.URL, parseErr error) bool {
+	if raw == "" || strings.TrimSpace(raw) != raw ||
+		strings.IndexFunc(raw, func(r rune) bool { return r < 0x20 || r == 0x7f }) >= 0 ||
+		parseErr != nil || parsed == nil || parsed.Scheme != "" || parsed.Path == "" ||
+		strings.ContainsAny(raw, "?#") || filepath.IsAbs(raw) {
+		return false
+	}
+	// SCP-like remotes are host-qualified transport addresses, not local paths.
+	if at := strings.LastIndexByte(raw, '@'); at > 0 {
+		if colon := strings.IndexByte(raw[at+1:], ':'); colon > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func queryCarriesValue(rawQuery string) bool {
@@ -229,7 +248,7 @@ func validRemoteURLShape(raw string, parsed *url.URL, parseErr error) bool {
 		}
 		return true
 	}
-	return parsed.Scheme == "" && parsed.Path != ""
+	return parsed.Scheme == "" && parsed.Path != "" && filepath.IsAbs(raw)
 }
 
 // redactURL returns raw with any embedded userinfo and any secret-shaped

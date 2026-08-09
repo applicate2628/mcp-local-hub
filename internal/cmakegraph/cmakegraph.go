@@ -44,10 +44,10 @@
 // than a naive lexical scan would suggest. A smaller true number beats a
 // larger unverified one.
 //
-// # Tri-state resolution, never a false positive
+// # Resolution states, never a false positive
 //
 // Every include()/add_subdirectory() call site becomes one Edge with one of
-// three Status values:
+// four Status values:
 //
 //   - StatusResolved: a concrete path was computed AND os.Stat confirms the
 //     target exists (a file for include(), or a directory containing its own
@@ -62,6 +62,8 @@
 //     fails for ANY OTHER reason (access denied, sharing violation,
 //     transient I/O) proves nothing about absence and is
 //     StatusUnresolved/ReasonTargetUnreadable instead — see that constant.
+//   - StatusOptionalAbsent: an include(... OPTIONAL) target is verifiably
+//     absent. CMake permits that absence, so it is not a dangling edge.
 //   - StatusUnresolved: the scanner could not safely compute a verified path
 //     at all. Reason names exactly why (see the Reason constants) — this is
 //     the scanner declining to guess rather than reporting a wrong
@@ -192,7 +194,7 @@
 // # Every coverage hole is REPORTED; bounds are enforced before allocation
 //
 // The one thing this package must never do is hand back a partial graph that
-// LOOKS complete. Four distinct bounds and failures can stop it short, and
+// LOOKS complete. Distinct bounds and failures can stop it short, and
 // each has its own visible signal:
 //
 //   - MaxRoots bounds WalkTree's candidate-root ENUMERATION, so a tree with
@@ -211,6 +213,9 @@
 //     closed CoverageReason — the edge that led to it still carries a genuine
 //     StatusResolved (the filesystem fact "this file exists" remains true),
 //     but its own outgoing edges are known-missing, not silently absent.
+//   - MaxEdgesLimit and MaxRetainedEdgeBytesLimit bound the aggregate returned
+//     edge set. Hitting either stops further scanning and records
+//     CoverageEdgeCapExceeded plus Result.EdgeCapTruncated.
 //
 // Every one of those holes goes through ONE recorder (walker.recordCoverage)
 // into Result.UnscannedFiles, so a caller has a single place to look and no
@@ -236,9 +241,10 @@
 //
 //   - Argument parsing takes only the FIRST whitespace/quote-delimited token
 //     of an include()/add_subdirectory() call as the path/module argument,
-//     ignoring trailing keyword arguments (OPTIONAL, RESULT_VARIABLE,
-//     EXCLUDE_FROM_ALL, add_subdirectory's optional binary-dir argument).
-//     This matches the dominant real-world call shape.
+//     ignoring trailing keyword arguments except include()'s OPTIONAL, which
+//     is recognized so a permitted absence is not reported as dangling.
+//     RESULT_VARIABLE, EXCLUDE_FROM_ALL, and add_subdirectory's optional
+//     binary-dir argument remain outside the graph path calculation.
 //   - Conditional and deferred-macro-context detection are simple per-file
 //     lexical frame stacks; they do not model if()/elseif()/else() branch
 //     selection or loop execution (any call nested inside an open
@@ -274,7 +280,7 @@ import (
 
 var ErrInvalidOptions = errors.New("cmakegraph: invalid options")
 
-// Status is the tri-state resolution outcome of one include()/add_subdirectory() edge.
+// Status is the resolution outcome of one include()/add_subdirectory() edge.
 type Status int
 
 const (
@@ -284,6 +290,9 @@ const (
 	StatusResolved
 	// StatusDangling means a concrete, VERIFIED path was computed but the target is absent.
 	StatusDangling
+	// StatusOptionalAbsent means a concrete, VERIFIED include(... OPTIONAL)
+	// path was computed and the target is absent as explicitly permitted.
+	StatusOptionalAbsent
 	// StatusUnresolved means no concrete, safely-verified path could be computed; see Reason.
 	StatusUnresolved
 )
@@ -294,6 +303,8 @@ func (s Status) String() string {
 		return "resolved"
 	case StatusDangling:
 		return "dangling"
+	case StatusOptionalAbsent:
+		return "optional_absent"
 	case StatusUnresolved:
 		return "unresolved"
 	default:
@@ -384,6 +395,9 @@ const (
 	// while enumerating WalkTree. Its subtree was deliberately not traversed,
 	// so any matching CMake files behind it are absent from the result.
 	CoverageSymlinkDirectorySkipped CoverageReason = "symlink_directory_skipped"
+	// CoverageEdgeCapExceeded: aggregate retained edge count or byte storage
+	// reached a package-owned bound, so later call sites were not retained.
+	CoverageEdgeCapExceeded CoverageReason = "edge_cap_exceeded"
 )
 
 // EdgeKind distinguishes the two directives this package tracks.
@@ -409,7 +423,8 @@ type Edge struct {
 	// Reason is set only when Status == StatusUnresolved.
 	Reason Reason
 	// ResolvedPath is the computed absolute path. Set whenever a concrete
-	// path was computed at all — i.e. for StatusResolved, StatusDangling, and
+	// path was computed at all — i.e. for StatusResolved, StatusDangling,
+	// StatusOptionalAbsent, and
 	// the StatusUnresolved/ReasonOutsideWorkspace and
 	// StatusUnresolved/ReasonDepthLimit cases (where a path WAS computed, but
 	// the scanner chose not to trust or not to follow it). Empty for every
@@ -427,10 +442,11 @@ type Edge struct {
 
 // Histogram tallies edges by outcome. This is the operator-facing go/no-go metric.
 type Histogram struct {
-	Resolved   int
-	Dangling   int
-	Unresolved int
-	ByReason   map[Reason]int
+	Resolved       int
+	Dangling       int
+	OptionalAbsent int
+	Unresolved     int
+	ByReason       map[Reason]int
 }
 
 // UnscannedFile records one COVERAGE HOLE: a file or subtree this package
@@ -474,6 +490,15 @@ type Result struct {
 	// means "never even enumerated", so the number skipped is unknowable by
 	// construction. Either way the graph is incomplete.
 	RootEnumerationCapped bool
+	// EdgeCapTruncated is true when the package-owned aggregate retained-edge
+	// count or byte budget stopped scanning before every call site was kept.
+	EdgeCapTruncated bool
+	// RootsSkippedByEdgeCap counts independently enumerated WalkTree roots not
+	// entered after the shared retained-edge budget was exhausted.
+	RootsSkippedByEdgeCap int
+	// RetainedEdgeBytes is the conservative package-owned accounting total for
+	// the retained edge slice and its string payloads.
+	RetainedEdgeBytes int64
 	// UnscannedFiles lists every COVERAGE HOLE — a file whose content could
 	// not be read, a subtree that could not be enumerated or was skipped for a
 	// directory symlink, a root refused for escaping the workspace, and the
@@ -520,6 +545,10 @@ const (
 	MaxVisitedEntriesLimit   = DefaultMaxVisitedEntries
 	MaxEntryFilters          = 64
 	MaxEntryFilterBytes      = 8 << 10
+	// MaxEdgesLimit and MaxRetainedEdgeBytesLimit bound the aggregate result,
+	// independently of per-file and traversal-node limits.
+	MaxEdgesLimit             = 20000
+	MaxRetainedEdgeBytesLimit = 8 << 20 // 8 MiB
 )
 
 // DefaultOptions returns the recommended bounds for a typical project tree.
@@ -721,9 +750,13 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 	}
 	sort.Strings(starts) // deterministic root order, so a shared file's edge always attributes to the same first-seen context
 
-	for _, s := range starts {
+	for index, s := range starts {
 		if err := w.ctx.Err(); err != nil {
 			return nil, fmt.Errorf("cmakegraph: walk %s: %w", absRoot, err)
+		}
+		if w.edgeCapTruncated {
+			w.rootsSkippedByEdgeCap += len(starts) - index
+			break
 		}
 		if _, err := operations.walkRoot(w, s); err != nil {
 			return nil, fmt.Errorf("cmakegraph: walk %s: %w", s, err)
@@ -857,10 +890,13 @@ type walker struct {
 	visited               map[visitKey]bool
 	files                 map[string]bool
 	edges                 []Edge
+	retainedEdgeBytes     int64
 	unscanned             []UnscannedFile
 	nodeCapTruncated      bool
 	rootsSkippedByNodeCap int
 	rootEnumerationCapped bool
+	edgeCapTruncated      bool
+	rootsSkippedByEdgeCap int
 }
 
 // newWalker validates workspaceRoot and constructs empty shared traversal state.
@@ -909,6 +945,33 @@ func (w *walker) recordCoverage(path string, reason CoverageReason, detail strin
 	})
 }
 
+// retainedEdgeBytes conservatively accounts both the Edge value retained by
+// the slice and the string payloads it keeps live. The fixed allowance is
+// intentionally architecture-independent and rounds up the struct storage.
+func retainedEdgeBytes(edge Edge) int64 {
+	const fixedEdgeBytes = 128
+	return fixedEdgeBytes + int64(len(edge.Kind)+len(edge.FromFile)+len(edge.RawArg)+len(edge.Reason)+len(edge.ResolvedPath))
+}
+
+// appendEdge is the single admission owner for aggregate edge-result memory.
+// Once either bound is reached, scanning stops and records one coverage hole;
+// callers never receive a partial graph that appears complete.
+func (w *walker) appendEdge(edge Edge) bool {
+	bytes := retainedEdgeBytes(edge)
+	if len(w.edges) >= MaxEdgesLimit || bytes > MaxRetainedEdgeBytesLimit-w.retainedEdgeBytes {
+		if !w.edgeCapTruncated {
+			w.recordCoverage(edge.FromFile, CoverageEdgeCapExceeded,
+				fmt.Sprintf("stopped retaining edges at count=%d bytes=%d (limits: count=%d bytes=%d)",
+					len(w.edges), w.retainedEdgeBytes, MaxEdgesLimit, MaxRetainedEdgeBytesLimit))
+		}
+		w.edgeCapTruncated = true
+		return false
+	}
+	w.edges = append(w.edges, edge)
+	w.retainedEdgeBytes += bytes
+	return true
+}
+
 // walkRoot validates startFile and scans it as a fresh traversal root —
 // UNLESS admission is refused because the shared MaxNodes budget is already
 // exhausted (Result.NodeCapTruncated / RootsSkippedByNodeCap), or it was
@@ -934,11 +997,11 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 			fmt.Sprintf("root %s resolves outside workspace root %s", canonStart, w.realWorkspaceRoot))
 		return absStart, nil
 	}
-	if fi, statErr := os.Stat(absStart); statErr != nil || fi.IsDir() {
+	if fi, statErr := os.Stat(absStart); statErr != nil || !fi.Mode().IsRegular() {
 		if statErr != nil {
 			return "", fmt.Errorf("cmakegraph: start file %s: %w", absStart, statErr)
 		}
-		return "", fmt.Errorf("cmakegraph: start file %s is a directory, want a file", absStart)
+		return "", fmt.Errorf("cmakegraph: start file %s is not a regular file", absStart)
 	}
 	verified := strings.EqualFold(filepath.Base(canonStart), "CMakeLists.txt")
 	ctx := sourceContext{dir: filepath.Dir(canonStart), verified: verified}
@@ -971,6 +1034,8 @@ func (w *walker) result(root string) *Result {
 			hist.Resolved++
 		case StatusDangling:
 			hist.Dangling++
+		case StatusOptionalAbsent:
+			hist.OptionalAbsent++
 		case StatusUnresolved:
 			hist.Unresolved++
 			hist.ByReason[e.Reason]++
@@ -985,6 +1050,9 @@ func (w *walker) result(root string) *Result {
 		NodeCapTruncated:      w.nodeCapTruncated,
 		RootsSkippedByNodeCap: w.rootsSkippedByNodeCap,
 		RootEnumerationCapped: w.rootEnumerationCapped,
+		EdgeCapTruncated:      w.edgeCapTruncated,
+		RootsSkippedByEdgeCap: w.rootsSkippedByEdgeCap,
+		RetainedEdgeBytes:     w.retainedEdgeBytes,
 		UnscannedFiles:        w.unscanned,
 	}
 }
@@ -1017,7 +1085,7 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 	var controlFrames []controlFrame
 	macroDepth := 0
 	for _, c := range scanTopLevelCommands(data) {
-		if w.ctx.Err() != nil {
+		if w.ctx.Err() != nil || w.edgeCapTruncated {
 			return
 		}
 		switch c.Name {
@@ -1061,10 +1129,13 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 
 		var rawArg string
 		malformed := c.Malformed
+		optional := false
 		if !malformed {
 			var ok bool
-			rawArg, ok = firstArgument(data[c.ArgStart:c.ArgEnd])
+			argText := data[c.ArgStart:c.ArgEnd]
+			rawArg, ok = firstArgument(argText)
 			malformed = !ok
+			optional = kind == EdgeInclude && hasArgumentKeyword(argText, "OPTIONAL")
 		}
 
 		e := Edge{
@@ -1079,7 +1150,9 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 		if !ok {
 			e.Status = StatusUnresolved
 			e.Reason = reason
-			w.edges = append(w.edges, e)
+			if !w.appendEdge(e) {
+				return
+			}
 			continue
 		}
 
@@ -1087,7 +1160,9 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 			e.Status = StatusUnresolved
 			e.Reason = ReasonOutsideWorkspace
 			e.ResolvedPath = candidate
-			w.edges = append(w.edges, e)
+			if !w.appendEdge(e) {
+				return
+			}
 			continue
 		}
 		e.ResolvedPath = candidate
@@ -1101,9 +1176,11 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 			switch {
 			case statErr != nil && !errors.Is(statErr, fs.ErrNotExist):
 				unreadable = true
-			case statErr == nil && !fi.IsDir():
+			case statErr == nil && fi.Mode().IsRegular():
 				exists = true
 				targetFile = candidate
+			case statErr == nil && !fi.IsDir():
+				unreadable = true
 			}
 			newCtx = ctx // include() never changes CMAKE_CURRENT_SOURCE_DIR
 		case EdgeAddSubdirectory:
@@ -1117,9 +1194,11 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 				switch {
 				case cerr != nil && !errors.Is(cerr, fs.ErrNotExist):
 					unreadable = true
-				case cerr == nil && !cfi.IsDir():
+				case cerr == nil && cfi.Mode().IsRegular():
 					exists = true
 					targetFile = cml
+				case cerr == nil && !cfi.IsDir():
+					unreadable = true
 				}
 			}
 			// Reaching this point means `candidate` was computed either from
@@ -1136,12 +1215,20 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 			// fail closed instead (see ReasonTargetUnreadable).
 			e.Status = StatusUnresolved
 			e.Reason = ReasonTargetUnreadable
-			w.edges = append(w.edges, e)
+			if !w.appendEdge(e) {
+				return
+			}
 			continue
 		}
 		if !exists {
-			e.Status = StatusDangling
-			w.edges = append(w.edges, e)
+			if optional {
+				e.Status = StatusOptionalAbsent
+			} else {
+				e.Status = StatusDangling
+			}
+			if !w.appendEdge(e) {
+				return
+			}
 			continue
 		}
 
@@ -1163,16 +1250,20 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 			e.Reason = ReasonDepthLimit
 		default:
 			e.Status = StatusResolved
-			w.visited[key] = true
 			// w.files is populated inside walkFile, once the read succeeds.
-			w.edges = append(w.edges, e)
+			if !w.appendEdge(e) {
+				return
+			}
+			w.visited[key] = true
 			nextAncestors := make([]string, len(ancestors)+1)
 			copy(nextAncestors, ancestors)
 			nextAncestors[len(ancestors)] = canonTarget
 			w.walkFile(targetFile, newCtx, depth+1, nextAncestors)
 			continue
 		}
-		w.edges = append(w.edges, e)
+		if !w.appendEdge(e) {
+			return
+		}
 	}
 }
 
@@ -1648,17 +1739,33 @@ func isSpace(c byte) bool {
 // an unterminated quote, or CMake bracket-argument syntax (recognized, but
 // its content is never extracted as a path — P1-4).
 func firstArgument(argText []byte) (string, bool) {
-	// Skip leading whitespace AND comments. scanArgList already understands
-	// both CMake comment forms, so a call like
-	//
-	//	include( # pick the platform variant
-	//	        Foo.cmake)
-	//
-	// is a perfectly ordinary, well-formed call it scans correctly — but this
-	// function only skipped whitespace, so it returned "#" as the first
-	// argument and the edge was misparsed. The two must agree about what is
-	// argument text and what is a comment.
-	i := 0
+	value, _, bracket, ok, found := nextArgument(argText, 0)
+	return value, ok && found && !bracket
+}
+
+// hasArgumentKeyword scans the same argument grammar as firstArgument and is
+// used for include()'s trailing OPTIONAL keyword. A malformed trailing token
+// cannot manufacture an OPTIONAL classification.
+func hasArgumentKeyword(argText []byte, keyword string) bool {
+	offset := 0
+	for {
+		value, next, bracket, ok, found := nextArgument(argText, offset)
+		if !ok || !found {
+			return false
+		}
+		if !bracket && strings.EqualFold(value, keyword) {
+			return true
+		}
+		offset = next
+	}
+}
+
+// nextArgument returns one comment-aware CMake argument token. Bracket
+// arguments are structurally skipped and reported through bracket=true;
+// firstArgument deliberately refuses them as paths while trailing-keyword
+// discovery can continue without interpreting their content.
+func nextArgument(argText []byte, offset int) (value string, next int, bracket, ok, found bool) {
+	i := offset
 	for i < len(argText) {
 		if isSpace(argText[i]) {
 			i++
@@ -1673,7 +1780,7 @@ func firstArgument(argText []byte) (string, bool) {
 			// argument to find — malformed, exactly as scanArgList treats it.
 			end := findBracketClose(argText, contentStart, eq)
 			if end < 0 {
-				return "", false
+				return "", i, false, false, false
 			}
 			i = end
 			continue
@@ -1684,17 +1791,21 @@ func firstArgument(argText []byte) (string, bool) {
 		}
 	}
 	if i >= len(argText) {
-		return "", false
+		return "", i, false, true, false
 	}
 	if argText[i] == '"' {
 		end, ok := skipQuoted(argText, i)
 		if !ok {
-			return "", false
+			return "", i, false, false, false
 		}
-		return string(argText[i+1 : end-1]), true
+		return string(argText[i+1 : end-1]), end, false, true, true
 	}
-	if _, _, ok := matchBracketOpen(argText, i); ok {
-		return "", false
+	if contentStart, eq, isBracket := matchBracketOpen(argText, i); isBracket {
+		end := findBracketClose(argText, contentStart, eq)
+		if end < 0 {
+			return "", i, true, false, false
+		}
+		return "", end, true, true, true
 	}
 	start := i
 	for i < len(argText) {
@@ -1711,7 +1822,7 @@ func firstArgument(argText []byte) (string, bool) {
 	if i > len(argText) {
 		i = len(argText)
 	}
-	return string(argText[start:i]), true
+	return string(argText[start:i]), i, false, true, true
 }
 
 func lineOf(data []byte, offset int) int {

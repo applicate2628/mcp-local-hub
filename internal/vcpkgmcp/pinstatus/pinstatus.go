@@ -34,12 +34,13 @@
 // 60.8s total, median ~0.7s per remote, worst 11.7s — interactive for one
 // port, not for a whole-tree scan.
 //
-// # Caching
+// # Bounded batch queries and call-scoped caching
 //
-// This package does not itself persist a cache — that is a caller/
-// orchestration concern — but every PortResult carries ObservedAt so a
-// caller that DOES cache results can never present a cached verdict as
-// live without saying so.
+// One PinStatus call queries duplicate approved remotes once and shares that
+// snapshot across its ports. The cache is never persisted: every PortResult
+// still carries ObservedAt so an outer cache cannot present an old verdict as
+// live without saying so. A package-owned whole-batch deadline and a
+// process-wide remote-query slot pool bound latency and child-process fan-out.
 package pinstatus
 
 import (
@@ -47,6 +48,7 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	hubprocess "mcp-local-hub/internal/process"
@@ -61,20 +63,37 @@ type Deps struct {
 	FS FS
 	// RemoteRefs queries a git remote's advertised refs. Defaults to a real
 	// `git ls-remote` invocation; every test in this package substitutes a
-	// fake so tests never touch the network.
+	// fake so tests never touch the network. Distinct remotes may be queried
+	// concurrently up to MaxConcurrentRemoteQueries, so implementations must
+	// be safe for concurrent calls.
 	RemoteRefs remoteRefsFn
 	// Now mirrors time.Now, injected so ObservedAt is deterministic in
 	// tests.
 	Now func() time.Time
+	// BatchTimeout bounds the whole call, including time waiting for a shared
+	// remote-query slot. Zero uses DefaultBatchTimeout.
+	BatchTimeout time.Duration
 }
+
+const (
+	// MaxConcurrentRemoteQueries is shared across all PinStatus calls in this
+	// process, preventing concurrent batches from multiplying child processes.
+	MaxConcurrentRemoteQueries = 4
+	// DefaultBatchTimeout bounds one whole batch rather than granting every
+	// port an independent RemoteQueryTimeout.
+	DefaultBatchTimeout = RemoteQueryTimeout
+)
+
+var remoteQuerySlots = make(chan struct{}, MaxConcurrentRemoteQueries)
 
 // DefaultDeps wires Deps to the real OS/network. Production callers use
 // this; tests build their own Deps with a fake FS/RemoteRefs/Now.
 func DefaultDeps() Deps {
 	return Deps{
-		FS:         DefaultFS(),
-		RemoteRefs: defaultRemoteRefs,
-		Now:        time.Now,
+		FS:           DefaultFS(),
+		RemoteRefs:   defaultRemoteRefs,
+		Now:          time.Now,
+		BatchTimeout: DefaultBatchTimeout,
 	}
 }
 
@@ -123,11 +142,101 @@ func PinStatus(ctx context.Context, args Args, deps Deps) Result {
 		}
 	}
 
-	out := Result{Status: evidence.StatusOK, Ports: make([]PortResult, 0, len(args.PortDirs))}
-	for _, dir := range args.PortDirs {
-		out.Ports = append(out.Ports, pinStatusOne(ctx, dir, args.DisableNetwork, fsys, remoteRefs, nowFn))
+	batchTimeout := deps.BatchTimeout
+	if batchTimeout <= 0 {
+		batchTimeout = DefaultBatchTimeout
 	}
+	batchCtx, cancel := context.WithTimeout(ctx, batchTimeout)
+	defer cancel()
+
+	cache := newRemoteSnapshotCache(remoteRefs)
+	var fsMu sync.Mutex
+	threadSafeFS := lockedFS{FS: fsys, mu: &fsMu}
+	var nowMu sync.Mutex
+	threadSafeNow := func() time.Time {
+		nowMu.Lock()
+		defer nowMu.Unlock()
+		return nowFn()
+	}
+
+	out := Result{Status: evidence.StatusOK, Ports: make([]PortResult, len(args.PortDirs))}
+	tasks := make(chan int)
+	workerCount := min(len(args.PortDirs), MaxConcurrentRemoteQueries)
+	var workers sync.WaitGroup
+	workers.Add(workerCount)
+	for range workerCount {
+		go func() {
+			defer workers.Done()
+			for index := range tasks {
+				out.Ports[index] = pinStatusOne(batchCtx, args.PortDirs[index], args.DisableNetwork, threadSafeFS, cache.query, threadSafeNow)
+			}
+		}()
+	}
+	for index := range args.PortDirs {
+		tasks <- index
+	}
+	close(tasks)
+	workers.Wait()
 	return out
+}
+
+type lockedFS struct {
+	FS
+	mu *sync.Mutex
+}
+
+func (fs lockedFS) ReadFile(path string) ([]byte, bool, error) {
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	return fs.FS.ReadFile(path)
+}
+
+type remoteSnapshot struct {
+	done chan struct{}
+	refs map[string]string
+	err  error
+}
+
+type remoteSnapshotCache struct {
+	remoteRefs remoteRefsFn
+	mu         sync.Mutex
+	entries    map[string]*remoteSnapshot
+}
+
+func newRemoteSnapshotCache(remoteRefs remoteRefsFn) *remoteSnapshotCache {
+	return &remoteSnapshotCache{remoteRefs: remoteRefs, entries: make(map[string]*remoteSnapshot)}
+}
+
+// query singleflights one approved remote per PinStatus call and applies the
+// process-wide child-process slot bound only to the cache owner.
+func (cache *remoteSnapshotCache) query(ctx context.Context, remote approvedRemoteURL) (map[string]string, error) {
+	key, ok := remote.transportArgument()
+	if !ok {
+		return nil, errors.New("pinstatus: remote URL was not approved")
+	}
+	cache.mu.Lock()
+	if entry, exists := cache.entries[key]; exists {
+		cache.mu.Unlock()
+		select {
+		case <-entry.done:
+			return entry.refs, entry.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	entry := &remoteSnapshot{done: make(chan struct{})}
+	cache.entries[key] = entry
+	cache.mu.Unlock()
+
+	select {
+	case remoteQuerySlots <- struct{}{}:
+		entry.refs, entry.err = cache.remoteRefs(ctx, remote)
+		<-remoteQuerySlots
+	case <-ctx.Done():
+		entry.err = ctx.Err()
+	}
+	close(entry.done)
+	return entry.refs, entry.err
 }
 
 // pinStatusOne answers vcpkg_pin_status for a single port directory. See

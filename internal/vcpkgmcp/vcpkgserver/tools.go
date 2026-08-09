@@ -466,7 +466,7 @@ func registerTools(vs *VcpkgServer) error {
 		Name: "cmake_include_graph",
 		Description: "Thin wrapper over the hub's internal/cmakegraph static resolver: statically " +
 			"resolves the CMake include()/add_subdirectory() graph WITHOUT ever invoking cmake. " +
-			"Surfaces cmakegraph's tri-state per-edge Status (resolved|dangling|unresolved), the " +
+			"Surfaces cmakegraph's per-edge Status (resolved|dangling|optional_absent|unresolved), the " +
 			"Conditional flag (this edge's path IS computed; whether it executes at configure time is " +
 			"a separate, genuinely unknown question requiring a real cmake trace), the closed Reason " +
 			"enum, and the operator-facing Histogram VERBATIM — this tool does not re-implement or " +
@@ -474,7 +474,7 @@ func registerTools(vs *VcpkgServer) error {
 			"independent roots (the right mode for an overlay-ports tree with no single top-level " +
 			"CMakeLists.txt); use file to walk a single starting file. Coverage is always reported, " +
 			"never assumed: unscanned_files[] carries every hole with a CLOSED reason (byte_cap_exceeded, " +
-			"file_unreadable, enumerate_failed, root_outside_workspace, root_enumeration_capped, symlink_directory_skipped), so a " +
+			"file_unreadable, enumerate_failed, root_outside_workspace, root_enumeration_capped, symlink_directory_skipped, edge_cap_exceeded), so a " +
 			"subtree that could not be listed appears there rather than being silently omitted from an " +
 			"apparently-complete graph. Per-edge, dangling means VERIFIED absence only; a target whose " +
 			"existence could not be determined (access denied, sharing violation) is " +

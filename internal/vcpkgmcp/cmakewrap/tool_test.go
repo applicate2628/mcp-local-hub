@@ -51,7 +51,7 @@ func TestRunGraph_RealWalkTree(t *testing.T) {
 		}
 		// Status must be the verbatim cmakegraph string form, never a
 		// re-derived label.
-		if e.Status != "resolved" && e.Status != "dangling" && e.Status != "unresolved" {
+		if e.Status != "resolved" && e.Status != "dangling" && e.Status != "optional_absent" && e.Status != "unresolved" {
 			t.Errorf("unexpected status string %q — must be cmakegraph's own String() output", e.Status)
 		}
 	}

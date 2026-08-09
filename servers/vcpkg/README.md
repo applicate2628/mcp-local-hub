@@ -47,7 +47,7 @@ see a definite verdict you can disprove in ten seconds, that is a bug worth repo
 | `vcpkg_pin_status` | Whether a pinned ref is current. Reports `current` or an honest `unknown` — never a fabricated "behind". Expands `${VERSION}` / `${PORT}` from `vcpkg.json` so the common `"v${VERSION}"` idiom resolves. |
 | `vcpkg_patches_apply` | Which declared patches apply for a triplet, from static analysis of the portfile's guards. Resolves patch paths rather than assuming they are port-dir-relative. |
 | `vcpkg_cmake_trace` | Reads an existing CMake trace. Bounded — it will not materialize an arbitrarily large trace. |
-| `cmake_include_graph` | Which CMake files include which, resolved statically, with dangling and unresolved edges distinguished. |
+| `cmake_include_graph` | Which CMake files include which, resolved statically, with dangling, allowed OPTIONAL absence, and unresolved edges distinguished. |
 | `vcpkg_discover_root` | Where the vcpkg root is, and by which rule it was decided. |
 
 ## Roots and overlays come from you, never from guessing
@@ -91,6 +91,12 @@ overlay root returns `failed(relative_overlay_triplet_root)`, and a relative `vc
   evidence returns `unknown(remote_url_credential_bearing)`; any other non-empty query value returns
   `unknown(remote_url_query_unclassified)`. Empty or valueless query segments remain admissible. Use a
   credential helper.
+- **A scheme-less relative local Git remote is refused, not daemon-relative.** It returns
+  `unknown(remote_url_relative)` before a child process starts. Absolute local paths and
+  host-qualified URL/SCP remotes retain their existing behavior.
+- **Pin-status remote work is bounded as one batch.** Duplicate approved remotes share one
+  call-scoped snapshot, at most four remote queries run across the process, and one 60-second
+  deadline covers the whole batch including slot wait time.
 - **A failed remote lifecycle has a typed causal field.** A per-port remote
   failure retains the established `status` and `reason` and additionally emits
   `failure.id` with a fixed safe `failure.detail`. It never publishes raw Git

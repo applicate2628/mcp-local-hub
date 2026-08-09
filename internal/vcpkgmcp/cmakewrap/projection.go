@@ -13,7 +13,11 @@ func (r Result) PublicResultProjection() any {
 		NodeCapTruncated      bool                    `json:"node_cap_truncated"`
 		RootsSkippedByNodeCap int                     `json:"roots_skipped_by_node_cap,omitempty"`
 		RootEnumerationCapped bool                    `json:"root_enumeration_capped"`
+		EdgeCapTruncated      bool                    `json:"edge_cap_truncated"`
+		RootsSkippedByEdgeCap int                     `json:"roots_skipped_by_edge_cap,omitempty"`
+		RetainedEdgeBytes     int64                   `json:"retained_edge_bytes,omitempty"`
 		ResultProjection      publicresult.Projection `json:"result_projection"`
 	}{r.Status, r.Reason, r.Root, r.WorkspaceRoot, r.NodeCapTruncated,
-		r.RootsSkippedByNodeCap, r.RootEnumerationCapped, publicresult.MinimalProjection("edges")}
+		r.RootsSkippedByNodeCap, r.RootEnumerationCapped, r.EdgeCapTruncated,
+		r.RootsSkippedByEdgeCap, r.RetainedEdgeBytes, publicresult.MinimalProjection("edges")}
 }

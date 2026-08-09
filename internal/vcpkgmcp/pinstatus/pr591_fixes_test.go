@@ -272,7 +272,7 @@ func TestApproveRemoteURLClassification(t *testing.T) {
 	}{
 		{"https", "https://github.com/acme/widget.git", ""},
 		{"scp", "git@github.com:acme/widget.git", ""},
-		{"local path", "../widget.git", ""},
+		{"relative local path", "../widget.git", ReasonRemoteURLRelative},
 		{"valueless query", "https://host/widget.git?flag", ""},
 		{"empty query value", "https://host/widget.git?token=", ""},
 		{"userinfo credential", "https://user:secret@host/widget.git", ReasonRemoteURLCredentialBearing},
@@ -408,8 +408,8 @@ func TestApprovedRemoteURLHasOneConstructorAndTypedConsumers(t *testing.T) {
 	if declarations != 1 {
 		t.Fatalf("approvedRemoteURL declarations = %d, want 1", declarations)
 	}
-	if literals != 4 {
-		t.Fatalf("approvedRemoteURL literals = %d, want 4 all inside approveRemoteURL", literals)
+	if literals != 5 {
+		t.Fatalf("approvedRemoteURL literals = %d, want 5 all inside approveRemoteURL", literals)
 	}
 	if typedCalls != 1 {
 		t.Fatalf("remoteRefs production calls = %d, want 1 typed call", typedCalls)
