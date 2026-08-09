@@ -166,11 +166,37 @@ url = "http://example.invalid/mcp"
 [mcp_servers.gui-adopt-execute]
 command = "go"
 args = ["version"]
-`)
+	`)
 
+	sideEffectsBefore := testInstallAutostartFixture.snapshot()
 	rec := postAdoptTest(t, "/api/adopt", `{"entry":"gui-adopt-execute","client":"codex-cli","port":9322}`)
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status=%d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	sideEffectsAfter := testInstallAutostartFixture.snapshot()
+	if got := sideEffectsAfter.schedulerFactoryCalls - sideEffectsBefore.schedulerFactoryCalls; got != 1 {
+		t.Fatalf("scheduler factory calls delta = %d, want 1", got)
+	}
+	if got := sideEffectsAfter.schedulerListCalls - sideEffectsBefore.schedulerListCalls; got != 1 {
+		t.Fatalf("scheduler List calls delta = %d, want 1", got)
+	}
+	if got := sideEffectsAfter.schedulerListPrefix; got != "mcp-local-hub-gui-adopt-execute-" {
+		t.Fatalf("scheduler List prefix = %q, want %q", got, "mcp-local-hub-gui-adopt-execute-")
+	}
+	if got := sideEffectsAfter.schedulerDeleteCalls - sideEffectsBefore.schedulerDeleteCalls; got != 0 {
+		t.Fatalf("scheduler Delete calls delta = %d, want 0", got)
+	}
+	if got := sideEffectsAfter.schedulerUnexpectedOps - sideEffectsBefore.schedulerUnexpectedOps; got != 0 {
+		t.Fatalf("unexpected scheduler operations delta = %d, want 0", got)
+	}
+	if got := sideEffectsAfter.statusCalls - sideEffectsBefore.statusCalls; got != 1 {
+		t.Fatalf("autostart Status calls delta = %d, want 1", got)
+	}
+	if got := sideEffectsAfter.enableCalls - sideEffectsBefore.enableCalls; got != 0 {
+		t.Fatalf("autostart Enable calls delta = %d, want 0 for an enabled owner", got)
+	}
+	if got := sideEffectsAfter.startOwnerCalls - sideEffectsBefore.startOwnerCalls; got != 1 {
+		t.Fatalf("injected autostart owner start calls delta = %d, want 1 for unavailable-supervisor fallback", got)
 	}
 	body := decodeAdoptJSON(t, rec)
 	if body["name"] != entry || body["port"] != float64(9322) {

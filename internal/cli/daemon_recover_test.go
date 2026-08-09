@@ -169,12 +169,241 @@ func TestDaemonRecoverHermeticExitContract(t *testing.T) {
 		{name: "request canceled", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRequestCanceled, Cause: context.Canceled}, want: daemonRecoverExitUnreachable},
 		{name: "respawn budget insufficient", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureRespawnBudgetInsufficient, Cause: daemonrecovery.ErrInsufficientRespawnBudget}, want: daemonRecoverExitBudgetInsufficient},
 		{name: "respawn setup failure", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure}, want: daemonRecoverExitUnreachable},
+		{name: "audit durability", err: &daemonrecovery.OperationError{Kind: daemonrecovery.FailureAuditDurability, Cause: errors.New("persist handoff")}, want: daemonRecoverExitAuditDurability},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, _, _ := recoverCmd("")
-			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, tc.err)); got != tc.want {
+			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, daemonrecovery.Result{}, tc.err)); got != tc.want {
 				t.Fatalf("exit = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverAuditDurabilityFailureExit7PreservesCommittedRespawnWording(t *testing.T) {
+	tests := []struct {
+		name        string
+		respawn     api.RespawnResult
+		want        []string
+		notExpected []string
+	}{
+		{
+			name:    "accepted respawn",
+			respawn: api.RespawnResult{Success: true},
+			want: []string{
+				"process termination was committed",
+				"forced respawn was accepted",
+				"audit record or durable handoff could not be preserved",
+				"details: persist handoff",
+			},
+			notExpected: []string{
+				"forced respawn was attempted but not accepted",
+				"forced respawn accepted by the supervisor",
+			},
+		},
+		{
+			name: "failed respawn",
+			respawn: api.RespawnResult{
+				Code:    "RESPAWN_REJECTED",
+				Message: "restart policy refused the request",
+			},
+			want: []string{
+				"process termination was committed",
+				"forced respawn was attempted but not accepted",
+				"respawn result [RESPAWN_REJECTED]: restart policy refused the request",
+				"audit record or durable handoff could not be preserved",
+				"details: persist handoff",
+			},
+			notExpected: []string{
+				"forced respawn was accepted",
+				"forced respawn accepted by the supervisor",
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, out, errOut := recoverCmd("")
+			err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, daemonrecovery.Result{TerminationCommitted: true}, &daemonrecovery.OperationError{
+				Kind:    daemonrecovery.FailureAuditDurability,
+				Cause:   errors.New("persist handoff"),
+				Respawn: tc.respawn,
+			})
+			if got := exitCodeOf(t, err); got != daemonRecoverExitAuditDurability {
+				t.Fatalf("exit=%d want=%d", got, daemonRecoverExitAuditDurability)
+			}
+			message := errOut.String()
+			for _, want := range tc.want {
+				if !strings.Contains(message, want) {
+					t.Fatalf("stderr=%q missing %q", message, want)
+				}
+			}
+			for _, notExpected := range tc.notExpected {
+				if strings.Contains(message, notExpected) {
+					t.Fatalf("stderr=%q unexpectedly contains %q", message, notExpected)
+				}
+			}
+			if !strings.Contains(message, "Recovery termination was committed; do not run daemon recover again blindly.") {
+				t.Fatalf("stderr=%q missing committed-state no-retry guard", message)
+			}
+			if strings.Contains(out.String(), "recovered ") {
+				t.Fatalf("stdout reports ordinary success: %q", out.String())
+			}
+		})
+	}
+}
+
+func TestDaemonRecoverCLICommittedErrorMatrixNeverAdvisesRetry(t *testing.T) {
+	tests := []struct {
+		name     string
+		err      error
+		wantExit int
+	}{
+		{
+			name:     "audit durability",
+			err:      &daemonrecovery.OperationError{Kind: daemonrecovery.FailureAuditDurability, Cause: errors.New("persist handoff")},
+			wantExit: daemonRecoverExitAuditDurability,
+		},
+		{
+			name:     "respawn setup",
+			err:      &daemonrecovery.OperationError{Kind: daemonrecovery.FailureStateRead, Cause: api.ErrRespawnSetupFailure},
+			wantExit: daemonRecoverExitUnreachable,
+		},
+		{
+			name:     "transport unavailable",
+			err:      &daemonrecovery.OperationError{Kind: daemonrecovery.FailureSupervisorUnavailable, Cause: errors.New("pipe unavailable")},
+			wantExit: daemonRecoverExitUnreachable,
+		},
+		{
+			name:     "deadline unavailable",
+			err:      &daemonrecovery.OperationError{Kind: daemonrecovery.FailureSupervisorUnavailable, Cause: context.DeadlineExceeded},
+			wantExit: daemonRecoverExitUnreachable,
+		},
+		{
+			name: "unavailable response",
+			err: &daemonrecovery.OperationError{
+				Kind:    daemonrecovery.FailureSupervisorUnavailable,
+				Respawn: api.RespawnResult{Code: "SUPERVISOR_UNAVAILABLE", Message: "not listening"},
+			},
+			wantExit: daemonRecoverExitUnreachable,
+		},
+		{
+			name: "generic unsuccessful response",
+			err: &daemonrecovery.OperationError{
+				Kind:    daemonrecovery.FailureRespawnFailed,
+				Respawn: api.RespawnResult{Code: "RESPAWN_REJECTED", Message: "policy refused"},
+			},
+			wantExit: daemonRecoverExitRespawnError,
+		},
+		{
+			name:     "unclassified operation error",
+			err:      &daemonrecovery.OperationError{Kind: daemonrecovery.FailureKind("future_failure")},
+			wantExit: daemonRecoverExitRespawnError,
+		},
+		{
+			name:     "non-operation error",
+			err:      errors.New("synthetic failure"),
+			wantExit: daemonRecoverExitRespawnError,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, _, errOut := recoverCmd("")
+			err := printRecoverError(
+				cmd,
+				`\mcp-local-hub-memory-default`,
+				daemonrecovery.Result{TerminationCommitted: true},
+				tc.err,
+			)
+			if got := exitCodeOf(t, err); got != tc.wantExit {
+				t.Fatalf("exit=%d want=%d", got, tc.wantExit)
+			}
+			message := strings.ToLower(errOut.String())
+			if strings.Contains(message, "retry") {
+				t.Fatalf("committed error advised retry: %q", message)
+			}
+			if !strings.Contains(message, "do not run daemon recover again blindly") {
+				t.Fatalf("committed error omitted guard: %q", message)
+			}
+		})
+	}
+}
+
+// The unconfirmed-release warning must reach stderr WITHOUT turning a succeeded
+// recovery into a failure. The two halves are inseparable: the reap and the
+// respawn already committed, so wording that reads as failure invites a re-run
+// of a destructive operation — which is exactly what the warning tells the
+// operator NOT to do.
+func TestDaemonRecoverReleaseUnconfirmedWarnsWithoutRetryAdvice(t *testing.T) {
+	cmd, out, errOut := recoverCmd("")
+	printRecoverAuditHandoffWarning(cmd, daemonrecovery.Result{
+		TaskName:     `\mcp-local-hub-memory-default`,
+		AuditHandoff: daemonrecovery.AuditHandoffReleaseUnconfirmed,
+	})
+
+	message := errOut.String()
+	for _, want := range []string{
+		"not confirmed released",
+		"releasing it FAILED",
+		"are blocked",
+		"Do NOT re-run recover",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("stderr=%q missing %q — the operator needs the cause, the blast radius, and the "+
+				"do-not-retry instruction, or the warning is noise", message, want)
+		}
+	}
+	if strings.Contains(out.String(), "warning") {
+		t.Fatalf("the warning belongs on stderr, not stdout: %q", out.String())
+	}
+}
+
+// A PENDING release must warn too — a one-shot CLI cannot tell an in-flight
+// writer from a wedged one, and both block the supervisor while they last — but
+// it must NOT describe the release as failed. The GUI is where the two values
+// diverge into different remedies; here they share one (this process exits).
+//
+// MUTATION: collapse printRecoverAuditHandoffWarning back to a single
+// `!= AuditHandoffReleaseUnconfirmed` early return. This test then fails with
+// `a pending handoff must warn; stderr was ""`.
+func TestDaemonRecoverReleasePendingWarnsWithoutClaimingAFailedRelease(t *testing.T) {
+	cmd, _, errOut := recoverCmd("")
+	printRecoverAuditHandoffWarning(cmd, daemonrecovery.Result{
+		TaskName:     `\mcp-local-hub-memory-default`,
+		AuditHandoff: daemonrecovery.AuditHandoffReleasePending,
+	})
+
+	message := errOut.String()
+	if message == "" {
+		t.Fatal(`a pending handoff must warn; stderr was ""`)
+	}
+	for _, want := range []string{
+		"a background writer in this process still holds it",
+		"Do NOT re-run recover",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("stderr=%q missing %q", message, want)
+		}
+	}
+	// The distinction is the whole point of the separate value: a transient
+	// in-flight write has not failed to release anything.
+	if strings.Contains(message, "releasing it FAILED") {
+		t.Fatalf("a pending handoff must not claim a FAILED release: %q", message)
+	}
+}
+
+// A confirmed release must stay SILENT. A warning printed on every recovery is
+// one the operator stops reading, which costs exactly the case it exists for.
+func TestDaemonRecoverConfirmedReleaseIsSilent(t *testing.T) {
+	for _, handoff := range []daemonrecovery.AuditHandoff{
+		daemonrecovery.AuditHandoffDurable,
+		daemonrecovery.AuditHandoffNotRequired,
+	} {
+		t.Run(string(handoff), func(t *testing.T) {
+			cmd, _, errOut := recoverCmd("")
+			printRecoverAuditHandoffWarning(cmd, daemonrecovery.Result{AuditHandoff: handoff})
+			if errOut.String() != "" {
+				t.Fatalf("a confirmed handoff (%q) must print nothing; got %q", handoff, errOut.String())
 			}
 		})
 	}
@@ -182,7 +411,7 @@ func TestDaemonRecoverHermeticExitContract(t *testing.T) {
 
 func TestDaemonRecoverBudgetRefusalHasHonestOperatorMessage(t *testing.T) {
 	cmd, _, errOut := recoverCmd("")
-	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, daemonrecovery.Result{}, &daemonrecovery.OperationError{
 		Kind:  daemonrecovery.FailureRespawnBudgetInsufficient,
 		Cause: daemonrecovery.ErrInsufficientRespawnBudget,
 	})
@@ -197,7 +426,7 @@ func TestDaemonRecoverBudgetRefusalHasHonestOperatorMessage(t *testing.T) {
 
 func TestDaemonRecoverUnclassifiedFailureHasHonestOperatorMessage(t *testing.T) {
 	cmd, _, errOut := recoverCmd("")
-	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, daemonrecovery.Result{}, &daemonrecovery.OperationError{
 		Kind: daemonrecovery.FailureKind("future_failure"),
 	})
 	if got := exitCodeOf(t, err); got != daemonRecoverExitRespawnError {
@@ -228,7 +457,7 @@ func TestDaemonRecoverZeroBudgetPortWaitMessageSaysSkippedNotStillBound(t *testi
 
 func TestDaemonRecoverRespawnFailurePreservesSupervisorMessage(t *testing.T) {
 	cmd, _, errOut := recoverCmd("")
-	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, &daemonrecovery.OperationError{
+	err := printRecoverError(cmd, `\mcp-local-hub-memory-default`, daemonrecovery.Result{}, &daemonrecovery.OperationError{
 		Kind: daemonrecovery.FailureRespawnFailed,
 		Respawn: api.RespawnResult{
 			Code:    "RESPAWN_REJECTED",
@@ -259,7 +488,7 @@ func TestDaemonRecoverRound4HermeticExitContract(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd, _, _ := recoverCmd("")
-			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, tc.err)); got != tc.want {
+			if got := exitCodeOf(t, printRecoverError(cmd, `\mcp-local-hub-memory-default`, daemonrecovery.Result{}, tc.err)); got != tc.want {
 				t.Fatalf("exit=%d want=%d", got, tc.want)
 			}
 		})

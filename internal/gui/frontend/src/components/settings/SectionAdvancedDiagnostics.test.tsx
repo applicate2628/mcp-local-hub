@@ -10,7 +10,8 @@
 //
 // These tests use the real wire shape:
 //   - class:int (0=Healthy, 1=LiveUnreachable, 2=DeadPID, 3=Malformed,
-//                4=KilledRecovered, 5=KillRefused, 6=KillFailed, 7=RaceLost)
+//                4=KilledRecovered, 5=KillRefused, 6=KillFailed, 7=RaceLost,
+//                8=Indeterminate)
 //   - "Stuck" predicate = pid_alive===true && ping_match===false
 //   - cmdline guard = pid_subcommand === "gui" || pid_subcommand === ""
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -55,6 +56,23 @@ const healthyVerdict = {
   ping_match: true,
 };
 
+// Indeterminate = VerdictIndeterminate (class:8). The server force-sets
+// pid_alive:false because the identity probe produced NO liveness fact — an
+// ambiguous platform error that is explicitly NOT proof of death. The
+// (pid_alive, ping_match) tuple therefore does not summarize this class, which
+// is why classLabel must branch on the numeric class first.
+const indeterminateVerdict = {
+  class: 8, // VerdictIndeterminate
+  pid: 1234,
+  port: 9125,
+  mtime: "2026-05-01T03:00:00Z",
+  pid_alive: false,
+  pid_image: "",
+  pid_subcommand: "",
+  pid_start: "0001-01-01T00:00:00Z",
+  ping_match: false,
+};
+
 function stubFetchOnce(body: unknown) {
   vi.stubGlobal(
     "fetch",
@@ -82,6 +100,75 @@ describe("SectionAdvancedDiagnostics", () => {
     fireEvent.click(screen.getByText("Diagnose lock state"));
     await waitFor(() => screen.getByTestId("kill-button"));
     expect(screen.getByText(/Kill stuck PID 1234/)).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  // Review finding: classLabel branched only on the (pid_alive, ping_match)
+  // tuple, so VerdictIndeterminate's pid_alive:false rendered
+  // "Vacant — lock file present but no live holder" — the exact opposite of
+  // the class's defining guarantee. Telling an operator the lock is vacant
+  // when a live GUI may still hold it invites them to force a second instance.
+  //
+  // MUTATION: delete the `v.class === VERDICT_INDETERMINATE` branch at the top
+  // of classLabel — this test then fails on the "Vacant" assertion.
+  it("Indeterminate → strip says Indeterminate, never Vacant, and no Kill button", async () => {
+    stubFetchOnce(indeterminateVerdict);
+    render(<SectionAdvancedDiagnostics />);
+    fireEvent.click(screen.getByText("Diagnose lock state"));
+    await waitFor(() => screen.getByTestId("verdict-strip"));
+    const strip = screen.getByTestId("verdict-strip");
+    expect(strip.textContent).toMatch(/Indeterminate/i);
+    expect(strip.textContent).not.toMatch(/Vacant/i);
+    expect(strip.textContent).not.toMatch(/no live holder/i);
+    // Ambiguous liveness is never kill-eligible.
+    expect(screen.queryByTestId("kill-button")).toBeNull();
+    vi.unstubAllGlobals();
+  });
+
+  // The 503 companion of the same finding: force_kill.go returns
+  // {error:"liveness_indeterminate"} when the kill was SKIPPED. The generic
+  // non-ok path said "Kill failed", implying a kill was attempted.
+  //
+  // MUTATION: remove the `body.error === "liveness_indeterminate"` branch in
+  // doKill — this test then fails because the banner reads "Kill failed".
+  it("kill 503 liveness_indeterminate → banner says skipped, not failed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        // 1st call: probe returns a Stuck verdict so the Kill button renders.
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(stuckVerdict),
+        } as unknown as Response)
+        // 2nd call: the kill is skipped because liveness went indeterminate
+        // between the probe click and the kill click.
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 503,
+          json: () =>
+            Promise.resolve({
+              error: "liveness_indeterminate",
+              detail: "kill skipped: Indeterminate",
+              verdict: indeterminateVerdict,
+            }),
+        } as unknown as Response),
+    );
+    render(<SectionAdvancedDiagnostics />);
+    fireEvent.click(screen.getByText("Diagnose lock state"));
+    await waitFor(() => screen.getByTestId("kill-button"));
+    fireEvent.click(screen.getByTestId("kill-button"));
+    await waitFor(() => screen.getByTestId("confirm-modal"));
+    fireEvent.click(screen.getByTestId("confirm-modal-confirm"));
+
+    await waitFor(() => {
+      const alert = screen.getByRole("alert");
+      expect(alert.textContent).toMatch(/skipped/i);
+    });
+    expect(screen.getByRole("alert").textContent).not.toMatch(/Kill failed/i);
+    // The strip refreshes from the returned verdict.
+    expect(screen.getByTestId("verdict-strip").textContent).toMatch(/Indeterminate/i);
     vi.unstubAllGlobals();
   });
 

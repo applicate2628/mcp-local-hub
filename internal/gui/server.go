@@ -15,12 +15,15 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/daemonrecovery"
 )
 
 // GUIReadHeaderTimeout is the single HTTP header-read policy shared by normal
 // Server.Start and restart-child listener owners. Bind deadlines govern only
 // listener acquisition and must not alter the lifetime HTTP policy.
 const GUIReadHeaderTimeout = 10 * time.Second
+
+const defaultGUIShutdownDrainTimeout = 5 * time.Second
 
 // Config drives Server construction. Zero values are sensible defaults.
 type Config struct {
@@ -36,6 +39,16 @@ type Config struct {
 	PID int
 	// RestartV3Enabled is the composition-root-resolved GUI restart gate.
 	RestartV3Enabled bool
+	// GUIShutdownDrainTimeout bounds ordinary HTTP draining during process
+	// shutdown. Zero preserves the production five-second drain.
+	GUIShutdownDrainTimeout time.Duration
+	// RecoverySettlementPostCommitBudget is the injected maximum duration of
+	// post-commit recovery work. Zero uses daemonrecovery's production bound.
+	RecoverySettlementPostCommitBudget time.Duration
+	// RecoverySettlementTerminalizationBudget is the injected occurrence
+	// terminalization allowance added to the post-commit recovery bound. Zero
+	// uses the audit-lock adapter's production lock budget.
+	RecoverySettlementTerminalizationBudget time.Duration
 	// ReadOnlyRouterMode marks this Server instance as forbidden from ever
 	// writing the registry or supervisor-intent from router request-handling
 	// paths — the invariant the standalone `mcphub route` front daemon
@@ -671,20 +684,28 @@ type Server struct {
 	installBulk              installBulkAPI
 	restart                  restarter
 	daemonRecover            daemonRecoverer
-	stop                     stopper
-	logs                     logsProvider
-	extractor                extractor
-	events                   *Broadcaster
-	hubHealth                *hubHealthTracker
-	secrets                  secretsAPI
-	settings                 settingsAPI
-	backups                  backupsAPI
-	backupActions            backupActionsAPI
-	cleanup                  cleanupAPI
-	clientInit               clientInitializer
-	symlinkWriter            symlinkResolveWriter
-	lspRegistrar             lspRegistrar
-	groups                   groupsAPI
+	auditLock                *auditLockAdapter
+	recoverySettlements      *recoverySettlementRegistry
+	shutdownDrainTimeout     time.Duration
+	// shutdownDrainObserved is a test-only lifecycle seam invoked after the
+	// normal GUI HTTP drain finishes (or its ordinary deadline expires). It
+	// makes the post-drain recovery-settlement join observable without turning
+	// tests into elapsed-time probes. Production leaves it nil.
+	shutdownDrainObserved func(error)
+	stop                  stopper
+	logs                  logsProvider
+	extractor             extractor
+	events                *Broadcaster
+	hubHealth             *hubHealthTracker
+	secrets               secretsAPI
+	settings              settingsAPI
+	backups               backupsAPI
+	backupActions         backupActionsAPI
+	cleanup               cleanupAPI
+	clientInit            clientInitializer
+	symlinkWriter         symlinkResolveWriter
+	lspRegistrar          lspRegistrar
+	groups                groupsAPI
 
 	// groupsRepublishFn is the live hub-snapshot re-publish seam used by the
 	// /api/groups mutation tail (republishGroupsSnapshot). Production: nil —
@@ -952,6 +973,25 @@ func NewServer(cfg Config) *Server {
 	s.logs = realLogs{}
 	s.extractor = realExtractor{}
 	s.events = NewBroadcaster()
+	shutdownDrainTimeout := cfg.GUIShutdownDrainTimeout
+	if shutdownDrainTimeout <= 0 {
+		shutdownDrainTimeout = defaultGUIShutdownDrainTimeout
+	}
+	postCommitBudget := cfg.RecoverySettlementPostCommitBudget
+	if postCommitBudget <= 0 {
+		postCommitBudget = daemonrecovery.MaximumPostCommitDuration()
+	}
+	terminalizationBudget := cfg.RecoverySettlementTerminalizationBudget
+	if terminalizationBudget <= 0 {
+		terminalizationBudget = auditLockStoreLockTimeout
+	}
+	s.auditLock = newUnclaimedAuditLockAdapterWithTerminalizationBudget(s.events, terminalizationBudget)
+	s.shutdownDrainTimeout = shutdownDrainTimeout
+	s.recoverySettlements = newRecoverySettlementRegistry(postCommitBudget, terminalizationBudget, func(event Event) {
+		if s.events != nil {
+			s.events.Publish(event)
+		}
+	})
 	s.hubHealth = newHubHealthTracker(func(e Event) {
 		if s.events != nil {
 			s.events.Publish(e)
@@ -1160,6 +1200,10 @@ func (s *Server) ContinueWithGUIListener(ctx context.Context, ready chan<- struc
 }
 
 func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struct{}, owner *GUIListenerOwner, ln net.Listener) error {
+	if err := s.auditLock.activateStore(ctx); err != nil {
+		_ = ln.Close()
+		return fmt.Errorf("activate daemon recovery occurrence store: %w", err)
+	}
 	s.port.Store(int32(ln.Addr().(*net.TCPAddr).Port))
 
 	// Phase 4 (G4) — hub listener wiring. The gate is read from
@@ -1305,6 +1349,8 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 
 	select {
 	case <-ctx.Done():
+		s.recoverySettlements.closeAdmission()
+		s.auditLock.beginClose()
 		// Cancel producers and wait only up to the bounded join budget before
 		// taking the current component. Publication admission is already closed,
 		// so a producer that finishes late must shut down its own rejected component.
@@ -1323,34 +1369,49 @@ func (s *Server) runActivatedGUIListener(ctx context.Context, errCh <-chan error
 		s.closeOwnHubListenerForRestart(hubCtx)
 		hubCancel()
 
-		guiCtx, guiCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer guiCancel()
-		if err := s.guiListener.Shutdown(guiCtx); err != nil {
+		guiCtx, guiCancel := context.WithTimeout(context.Background(), s.shutdownDrainTimeout)
+		shutdownErr := s.guiListener.Shutdown(guiCtx)
+		guiCancel()
+		if s.shutdownDrainObserved != nil {
+			s.shutdownDrainObserved(shutdownErr)
+		}
+		if shutdownErr != nil {
 			// codex deep-sec phase4 r24 P2 closure on PR #158 (lane #3):
 			// graceful gui-server shutdown failed (typically context
 			// deadline exceeded). Force-close active connections so
 			// request goroutines unwind before we return — without
 			// this, hung requests survive Start's return.
-			s.events.Close()
-			return fmt.Errorf("graceful shutdown: %w", err)
+			shutdownErr = fmt.Errorf("graceful shutdown: %w", shutdownErr)
 		}
+		settlementErr := s.recoverySettlements.wait()
 		// G9: stop the persist worker after HTTP is quiesced, so
 		// any pending events queued by in-flight handlers are
 		// flushed to gui-events.log before the goroutine exits
 		// (Codex P2 on PR #150 line 101 — without this, every
 		// Start/Stop cycle leaks one drain goroutine).
+		s.auditLock.close()
 		s.events.Close()
-		return nil
+		return errors.Join(shutdownErr, settlementErr)
 	case err := <-errCh:
+		s.recoverySettlements.closeAdmission()
+		s.auditLock.beginClose()
 		// A failed GUI listener uses the same cancel/join/take hub boundary as
 		// normal cancellation, so neither producer can republish after return.
 		drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		s.closeOwnHubListenerForRestart(drainCtx)
 		drainCancel()
+		guiDrainCtx, guiDrainCancel := context.WithTimeout(context.Background(), s.shutdownDrainTimeout)
+		guiDrainErr := s.guiListener.Shutdown(guiDrainCtx)
+		guiDrainCancel()
+		if s.shutdownDrainObserved != nil {
+			s.shutdownDrainObserved(guiDrainErr)
+		}
+		settlementErr := s.recoverySettlements.wait()
+		s.auditLock.close()
 		s.events.Close()
 		if errors.Is(err, http.ErrServerClosed) {
-			return nil
+			return settlementErr
 		}
-		return err
+		return errors.Join(err, settlementErr)
 	}
 }

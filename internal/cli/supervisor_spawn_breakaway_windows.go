@@ -40,11 +40,21 @@ const winCreateBreakawayFromJob = 0x01000000
 // reads (e.g. the stderr tail buffer) still observe the started process.
 // Returns the cmd that actually started so the caller reads Process from it.
 func startSupervisorDetachedBreakaway(cmd *exec.Cmd, rebuild func() *exec.Cmd, onDegrade func(error)) (*exec.Cmd, error) {
+	return startSupervisorDetachedBreakawayWithStart(cmd, rebuild, onDegrade, func(next *exec.Cmd) error {
+		return next.Start()
+	})
+}
+
+// startSupervisorDetachedBreakawayWithStart owns the retry decision while
+// accepting the one operation whose Windows Job behavior cannot be made
+// deterministic with a missing executable fixture. Production supplies
+// exec.Cmd.Start; tests supply a per-call result without mutable package state.
+func startSupervisorDetachedBreakawayWithStart(cmd *exec.Cmd, rebuild func() *exec.Cmd, onDegrade func(error), start func(*exec.Cmd) error) (*exec.Cmd, error) {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &windows.SysProcAttr{}
 	}
 	cmd.SysProcAttr.CreationFlags |= winCreateBreakawayFromJob
-	err := cmd.Start()
+	err := start(cmd)
 	if err == nil {
 		return cmd, nil
 	}
@@ -63,7 +73,7 @@ func startSupervisorDetachedBreakaway(cmd *exec.Cmd, rebuild func() *exec.Cmd, o
 		onDegrade(err)
 	}
 	retry := rebuild()
-	if e2 := retry.Start(); e2 != nil {
+	if e2 := start(retry); e2 != nil {
 		return retry, e2
 	}
 	return retry, nil

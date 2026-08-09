@@ -9,6 +9,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/daemonrecovery"
 )
 
 // withTempHome redirects SettingsPath to a tempdir for the test duration.
@@ -283,6 +284,23 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // has no *testing.T: we snapshot the prior values and reinstate them before
 // os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
+	// Same-test-binary endpoint for the production hidden confirmation-marker
+	// command. The parent still uses the real current executable and strict
+	// process containment; this branch only replaces Cobra's ordinary main,
+	// which a generated Go test binary does not contain.
+	if len(os.Args) == 2 && os.Args[1] == "gui-owner-unknown-confirmation-worker" {
+		if err := runGUIOwnerUnknownConfirmationMarkerWorker(os.Stdin, os.Stdout); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+	if len(os.Args) == 2 && os.Args[1] == daemonrecovery.CommittedAuditHandoffWorkerCommand {
+		if err := daemonrecovery.RunCommittedAuditHandoffWorker(os.Stdin, os.Stdout); err != nil {
+			os.Exit(3)
+		}
+		os.Exit(0)
+	}
+
 	// Env-dump helper fast-path. When the production spawn closure launches THIS
 	// test binary as a child (Command=os.Args[0]) to capture the composed
 	// cmd.Env, the child is gated ONLY by the sentinel env var — its argv may be

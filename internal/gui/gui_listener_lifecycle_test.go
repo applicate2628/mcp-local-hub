@@ -8,12 +8,16 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 type phaseGCloseWaitListener struct {
@@ -51,6 +55,100 @@ func TestRestartV3_CloseListenerReportsPhysicalCloseWhenServeWaitTimesOut(t *tes
 	owner.mu.Unlock()
 	if current != nil {
 		t.Fatalf("owner retained physically closed generation: %+v", current)
+	}
+}
+
+func TestNewServerDefersOccurrenceStoreClaimUntilListenerActivation(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	s := NewServer(Config{Port: 0, PID: 4242, Version: "deferred-claim"})
+	s.events.DisableGUIEventLog = true
+	s.hubEndpointGateFn = func(*api.API) bool { return false }
+	t.Cleanup(func() {
+		s.auditLock.close()
+		s.events.Close()
+	})
+	if s.auditLock.storeClaimed || s.auditLock.generation != 0 {
+		t.Fatalf("constructor claimed occurrence store: claimed=%t generation=%d", s.auditLock.storeClaimed, s.auditLock.generation)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, auditLockOccurrenceFileLeaf)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("constructor touched occurrence store: %v", err)
+	}
+
+	owner := NewGUIListenerOwner(time.Second)
+	bindCtx, bindCancel := context.WithTimeout(context.Background(), time.Second)
+	bound, err := owner.BindStandby(bindCtx, 0, http.NotFoundHandler())
+	bindCancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	ready := make(chan struct{})
+	go func() { done <- s.ContinueWithGUIListener(ctx, ready, owner, bound) }()
+	select {
+	case <-ready:
+	case <-time.After(2 * time.Second):
+		t.Fatal("listener activation did not complete")
+	}
+	// runActivatedGUIListener starts this advisory asynchronously. Calling the
+	// idempotent owner synchronously here joins any in-flight sync.Once body so
+	// the per-test state-root override cannot be restored underneath it.
+	detectSeparateProcessOnce(s)
+	if !s.auditLock.storeClaimed || s.auditLock.generation == 0 {
+		t.Fatalf("activated listener did not claim occurrence store: claimed=%t generation=%d", s.auditLock.storeClaimed, s.auditLock.generation)
+	}
+	store := readAuditLockStoreForTest(t, s.auditLock.storePath)
+	if store.Generation != s.auditLock.generation || store.ActiveServerInstance != s.auditLock.serverInstance {
+		t.Fatalf("activated store=%+v adapter=(%s,%d)", store, s.auditLock.serverInstance, s.auditLock.generation)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("activated server did not stop")
+	}
+}
+
+func TestListenerActivationClaimFailureClosesStandbyAndPreservesPriorOwner(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	prior := newDirectTestAuditLockAdapterInStateDir(nil, stateDir)
+	before := readAuditLockStoreForTest(t, prior.storePath)
+	prior.close()
+
+	s := NewServer(Config{Port: 0, PID: 4343, Version: "claim-rollback"})
+	s.events.DisableGUIEventLog = true
+	t.Cleanup(func() {
+		s.auditLock.close()
+		s.events.Close()
+	})
+	installAuditLockWriterMode(t, s.auditLock, auditLockWriterBeforeWrite)
+	owner := NewGUIListenerOwner(time.Second)
+	bindCtx, bindCancel := context.WithTimeout(context.Background(), time.Second)
+	bound, err := owner.BindStandby(bindCtx, 0, http.NotFoundHandler())
+	bindCancel()
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := bound.Addr().String()
+	err = s.ContinueWithGUIListener(context.Background(), make(chan struct{}), owner, bound)
+	if err == nil || !strings.Contains(err.Error(), "activate daemon recovery occurrence store") {
+		t.Fatalf("activation error=%v", err)
+	}
+	after := readAuditLockStoreForTest(t, s.auditLock.storePath)
+	if s.auditLock.storeClaimed || s.auditLock.generation != 0 || !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed activation changed prior owner: claimed=%t generation=%d after=%+v before=%+v", s.auditLock.storeClaimed, s.auditLock.generation, after, before)
+	}
+	conn, dialErr := net.DialTimeout("tcp", address, 100*time.Millisecond)
+	if dialErr == nil {
+		_ = conn.Close()
+		t.Fatal("standby listener remained reachable after activation claim failure")
 	}
 }
 

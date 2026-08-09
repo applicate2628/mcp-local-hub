@@ -56,12 +56,15 @@ var (
 //	    or the request was canceled before completion
 //	6 — refused before termination because the configured recovery budget could
 //	    not preserve the mandatory detached respawn reservation
+//	7 — process termination committed and respawn was attempted, but the audit
+//	    record or its durable handoff could not be preserved
 const (
 	daemonRecoverExitUnknownTask        = 2
 	daemonRecoverExitRefused            = 3
 	daemonRecoverExitRespawnError       = 4
 	daemonRecoverExitUnreachable        = 5
 	daemonRecoverExitBudgetInsufficient = 6
+	daemonRecoverExitAuditDurability    = 7
 )
 
 // newDaemonRecoverCmd builds `mcphub daemon recover <task> [--yes]`: reap a
@@ -128,10 +131,39 @@ func runDaemonRecover(cmd *cobra.Command, taskArg string, yes bool) error {
 		},
 	}, deps)
 	if err != nil {
-		return printRecoverError(cmd, taskArg, err)
+		return printRecoverError(cmd, taskArg, result, err)
 	}
 	fmt.Fprintf(out, "recovered %s: forced respawn accepted by the supervisor.\n", result.TaskName)
+	printRecoverAuditHandoffWarning(cmd, result)
 	return nil
+}
+
+// printRecoverAuditHandoffWarning reports an unreleased cross-process event-log
+// flock WITHOUT changing the exit code. The recovery succeeded and the audit row
+// is durable; what could not be confirmed is the RELEASE of the lock, which this
+// process may still hold.
+//
+// Both non-durable values are reported, because for a ONE-SHOT CLI they have the
+// same remedy: this process is about to exit, and exiting releases the lock
+// either way. The long-lived GUI is where they diverge — there a pending worker
+// clears itself while a stranded flock never does — so the GUI reads the two
+// values separately (internal/gui/frontend/src/screens/Dashboard.tsx). The
+// wording here still distinguishes them so the stderr line is not misleading if
+// an operator pastes it into a bug report.
+func printRecoverAuditHandoffWarning(cmd *cobra.Command, result daemonrecovery.Result) {
+	var detail string
+	switch result.AuditHandoff {
+	case daemonrecovery.AuditHandoffReleasePending:
+		detail = "a background writer in this process still holds it"
+	case daemonrecovery.AuditHandoffReleaseUnconfirmed:
+		detail = "releasing it FAILED, so this process holds it until it exits"
+	default:
+		return
+	}
+	errOut := cmd.ErrOrStderr()
+	fmt.Fprintf(errOut, "warning: the recovery audit row is durable, but the supervisor-events.log cross-process lock was not confirmed released: %s.\n", detail)
+	fmt.Fprintln(errOut, "  While it is held, event-log writes from the supervisor and `mcphub install` are blocked.")
+	fmt.Fprintln(errOut, "  Do NOT re-run recover: the termination and the respawn already committed. The lock is released when this process exits.")
 }
 
 // confirmRecoverReap prompts for an interactive y/N confirmation. A non-tty /
@@ -191,18 +223,42 @@ func printRecoverCandidate(out interface{ Write([]byte) (int, error) }, candidat
 	}
 }
 
-func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
+func printCommittedRecoveryGuard(errOut interface{ Write([]byte) (int, error) }) {
+	fmt.Fprintln(errOut, "Recovery termination was committed; do not run daemon recover again blindly. Check mcp-local-hub status before any further action.")
+}
+
+func printRecoverError(cmd *cobra.Command, taskArg string, result daemonrecovery.Result, err error) error {
 	errOut := cmd.ErrOrStderr()
 	var operationErr *daemonrecovery.OperationError
 	if !errors.As(err, &operationErr) {
 		fmt.Fprintf(errOut, "error: daemon recovery: %v\n", err)
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitRespawnError)
 	}
 	if operationErr.Kind == daemonrecovery.FailureStateRead && errors.Is(operationErr.Cause, api.ErrRespawnSetupFailure) {
 		fmt.Fprintf(errOut, "error: force respawn call could not be prepared: %v\n", operationErr)
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitUnreachable)
 	}
 	switch operationErr.Kind {
+	case daemonrecovery.FailureAuditDurability:
+		if operationErr.Respawn.Success {
+			fmt.Fprintln(errOut, "error: process termination was committed and forced respawn was accepted, but the recovery audit record or durable handoff could not be preserved.")
+		} else {
+			fmt.Fprintln(errOut, "error: process termination was committed; forced respawn was attempted but not accepted, and the recovery audit record or durable handoff could not be preserved.")
+			if operationErr.Respawn.Code != "" || operationErr.Respawn.Message != "" {
+				fmt.Fprintf(errOut, "respawn result [%s]: %s\n", operationErr.Respawn.Code, operationErr.Respawn.Message)
+			}
+		}
+		if operationErr.Cause != nil {
+			fmt.Fprintf(errOut, "details: %v\n", operationErr.Cause)
+		}
+		printCommittedRecoveryGuard(errOut)
+		return forceExit(daemonRecoverExitAuditDurability)
 	case daemonrecovery.FailureInvalidArgs, daemonrecovery.FailureStateRead, daemonrecovery.FailureUnknownTask:
 		if operationErr.Kind == daemonrecovery.FailureUnknownTask {
 			fmt.Fprintf(errOut, "error: task %q not found in supervisor-intent.json\n", taskArg)
@@ -214,6 +270,9 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 			}
 		} else {
 			fmt.Fprintf(errOut, "error: recover state: %v\n", operationErr)
+		}
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
 		}
 		return forceExit(daemonRecoverExitUnknownTask)
 	case daemonrecovery.FailureConfirmationRequired, daemonrecovery.FailureRefusedPortOwner:
@@ -242,7 +301,11 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 			message = operationErr.Respawn.Message
 		}
 		fmt.Fprintf(errOut, "error: supervisor not reachable: %s\n", message)
-		fmt.Fprintln(errOut, "hint: start it with `mcphub supervise` (or ensure the autostart task is enabled), then retry.")
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		} else {
+			fmt.Fprintln(errOut, "hint: start it with `mcphub supervise` (or ensure the autostart task is enabled), then retry.")
+		}
 		return forceExit(daemonRecoverExitUnreachable)
 	case daemonrecovery.FailureRequestCanceled:
 		fmt.Fprintln(errOut, "error: recovery was canceled before any process termination was committed.")
@@ -256,9 +319,15 @@ func printRecoverError(cmd *cobra.Command, taskArg string, err error) error {
 		return forceExit(daemonRecoverExitBudgetInsufficient)
 	case daemonrecovery.FailureRespawnFailed:
 		fmt.Fprintf(errOut, "error: force respawn refused [%s]: %s\n", operationErr.Respawn.Code, operationErr.Respawn.Message)
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitRespawnError)
 	default:
 		fmt.Fprintln(errOut, "error: daemon recovery failed: unclassified failure.")
+		if result.TerminationCommitted {
+			printCommittedRecoveryGuard(errOut)
+		}
 		return forceExit(daemonRecoverExitRespawnError)
 	}
 }

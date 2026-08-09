@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -51,6 +52,26 @@ type SingleInstanceLease interface {
 	Release()
 }
 
+// OwnedSingleInstanceLease is a lease whose release outcome is OBSERVABLE.
+//
+// ProbeGUIOwnerLease hands a GUIOwnerLeaseStateFree caller an OWNED lease, and
+// that caller's contract is fail-closed on release, exactly like
+// ProbeSingleInstanceLockUnheld's: an UNCONFIRMED release may leave the flock
+// held by this process until it EXITS (see release()'s persistent-failure
+// residual note), so the caller must not go on to act as though the GUI
+// single-instance flock were free. Release() alone cannot express that — it
+// discards release()'s error — so the owned-probe seam requires ReleaseErr.
+type OwnedSingleInstanceLease interface {
+	SingleInstanceLease
+
+	// ReleaseErr releases the flock and REPORTS the outcome instead of
+	// discarding it. A non-nil error means the OS lock may still be held by
+	// this process, and the caller MUST classify its observation as Unknown.
+	// Like Release it is idempotent: a second call after a successful release
+	// is a no-op returning nil.
+	ReleaseErr() error
+}
+
 // SingleInstanceAcquireOptions enables the restart-v3 reservation check for a
 // single acquisition. Existing callers pass no options and retain the legacy
 // single-shot behavior without reading the marker.
@@ -71,6 +92,115 @@ const (
 	GUIOwnerLeaseStateFree
 )
 
+// GUIOwnerLeaseLifecycleState is the monotonic acquisition/release state
+// shared by the GUI-owner probe and its timeout-owning caller.
+type GUIOwnerLeaseLifecycleState uint32
+
+const (
+	// GUIOwnerLeaseLifecycleOpen is the zero value: no flock acquisition has
+	// been admitted.
+	GUIOwnerLeaseLifecycleOpen GUIOwnerLeaseLifecycleState = iota
+	// GUIOwnerLeaseLifecycleClosedBeforeExposure means the timeout owner
+	// closed the gate before the probe could attempt the flock.
+	GUIOwnerLeaseLifecycleClosedBeforeExposure
+	// GUIOwnerLeaseLifecycleExposed means the probe won the gate immediately
+	// before attempting the flock. Until a terminal outcome is published, the
+	// current process may retain the lease.
+	GUIOwnerLeaseLifecycleExposed
+	// GUIOwnerLeaseLifecycleNotAcquired means the admitted flock attempt
+	// returned busy or failed without acquiring a lease.
+	GUIOwnerLeaseLifecycleNotAcquired
+	// GUIOwnerLeaseLifecycleReleased means an acquired lease reported a
+	// successful ReleaseErr.
+	GUIOwnerLeaseLifecycleReleased
+	// GUIOwnerLeaseLifecycleReleaseUnconfirmed means ReleaseErr failed, so
+	// process exit is the remaining release boundary.
+	GUIOwnerLeaseLifecycleReleaseUnconfirmed
+)
+
+// GUIOwnerLeaseDisposition is the tick-local relaunch capability derived from
+// the lifecycle. It deliberately says only whether this process may still own
+// the GUI flock; GUI liveness remains a separate classifier.
+type GUIOwnerLeaseDisposition uint8
+
+const (
+	GUIOwnerLeaseNoRetainedLease GUIOwnerLeaseDisposition = iota
+	GUIOwnerLeaseMayRetainLease
+)
+
+// GUIOwnerLeaseLifecycle atomically arbitrates the outer timeout against the
+// probe's first flock attempt, then publishes exactly one terminal outcome.
+type GUIOwnerLeaseLifecycle struct {
+	state atomic.Uint32
+}
+
+// NewGUIOwnerLeaseLifecycle creates an Open lifecycle.
+func NewGUIOwnerLeaseLifecycle() *GUIOwnerLeaseLifecycle {
+	return &GUIOwnerLeaseLifecycle{}
+}
+
+// TryExpose admits one flock attempt. False means the timeout already closed
+// the gate and the caller must not touch the flock.
+func (l *GUIOwnerLeaseLifecycle) TryExpose() bool {
+	return l != nil && l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleOpen),
+		uint32(GUIOwnerLeaseLifecycleExposed),
+	)
+}
+
+// CloseBeforeExposure prevents a not-yet-admitted probe from touching the
+// flock after the outer deadline.
+func (l *GUIOwnerLeaseLifecycle) CloseBeforeExposure() bool {
+	return l != nil && l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleOpen),
+		uint32(GUIOwnerLeaseLifecycleClosedBeforeExposure),
+	)
+}
+
+// PublishNotAcquired closes an admitted attempt that returned without a lease.
+func (l *GUIOwnerLeaseLifecycle) PublishNotAcquired() bool {
+	return l != nil && l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleExposed),
+		uint32(GUIOwnerLeaseLifecycleNotAcquired),
+	)
+}
+
+// PublishRelease records the observed ReleaseErr outcome without replacing
+// any earlier terminal evidence.
+func (l *GUIOwnerLeaseLifecycle) PublishRelease(err error) bool {
+	if l == nil {
+		return false
+	}
+	next := GUIOwnerLeaseLifecycleReleased
+	if err != nil {
+		next = GUIOwnerLeaseLifecycleReleaseUnconfirmed
+	}
+	return l.state.CompareAndSwap(
+		uint32(GUIOwnerLeaseLifecycleExposed),
+		uint32(next),
+	)
+}
+
+// Disposition fails closed for an exposed, release-unconfirmed, nil, or
+// numerically-invalid lifecycle.
+func (l *GUIOwnerLeaseLifecycle) Disposition() GUIOwnerLeaseDisposition {
+	if l == nil {
+		return GUIOwnerLeaseMayRetainLease
+	}
+	switch GUIOwnerLeaseLifecycleState(l.state.Load()) {
+	case GUIOwnerLeaseLifecycleOpen,
+		GUIOwnerLeaseLifecycleClosedBeforeExposure,
+		GUIOwnerLeaseLifecycleNotAcquired,
+		GUIOwnerLeaseLifecycleReleased:
+		return GUIOwnerLeaseNoRetainedLease
+	case GUIOwnerLeaseLifecycleExposed,
+		GUIOwnerLeaseLifecycleReleaseUnconfirmed:
+		return GUIOwnerLeaseMayRetainLease
+	default:
+		return GUIOwnerLeaseMayRetainLease
+	}
+}
+
 // GUIOwnerLeaseProbeRequest carries the previously-read record plus the
 // read-only store needed to revalidate it after tentatively acquiring a free
 // flock. That re-read closes the marker-change window without introducing a
@@ -80,16 +210,23 @@ type GUIOwnerLeaseProbeRequest struct {
 	Record      *HandoffMarkerRecord
 	MarkerStore HandoffMarkerReader
 	Deadlines   RestartDeadlines
+	Lifecycle   *GUIOwnerLeaseLifecycle
 }
 
 // GUIOwnerLeaseProbeResult represents Held(reason),
 // Free(owned_probe_lease), or Unknown(error). Lease is populated only for Free
 // and remains held until the caller releases it.
+//
+// Lease is an OwnedSingleInstanceLease, not a bare SingleInstanceLease: the
+// Free caller owns the flock and its release is load-bearing, so the seam must
+// let it observe whether the release actually happened.
 type GUIOwnerLeaseProbeResult struct {
 	State  GUIOwnerLeaseState
 	Reason error
-	Lease  SingleInstanceLease
+	Lease  OwnedSingleInstanceLease
 	Record *HandoffMarkerRecord
+	// Lifecycle is the exact lifecycle supplied by the request.
+	Lifecycle *GUIOwnerLeaseLifecycle
 }
 
 // GUIOwnerLeaseUnknownError preserves the concrete uncertainty while exposing
@@ -186,6 +323,80 @@ func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, er
 	return &SingleInstanceLock{pidport: pidportPath, fl: fl}, nil
 }
 
+// ProbeSingleInstanceLockUnheld reports whether the GUI's own single-instance
+// flock (pidportPath + ".lock") is currently held by ANY process — a signal
+// that is INDEPENDENT of whatever CONTENT sits in the pidport file itself
+// (missing, corrupt, or out of range does not matter: the flock is a
+// kernel-enforced exclusivity primitive tied to an open file descriptor, not
+// to the bytes on disk, and the OS releases it automatically when the
+// holding process exits or the descriptor is closed).
+//
+// This mirrors api.SupervisorRunningUnderStateDir's exact idiom for the
+// supervisor's own lock: a non-blocking TryLock that is released immediately
+// on success (proving no holder existed) or refused (proving a live holder
+// exists). Residual 1(b)'s bounded confirmation path
+// (internal/cli/supervise_ensure_alive.go) uses this to establish GUI-owner
+// death when pidport metadata itself cannot be trusted (VerdictMalformed /
+// VerdictIndeterminate / an unresolvable pidport path).
+//
+// Returns:
+//   - (true, nil)  — definitively unheld: no process currently owns the GUI
+//     single-instance lock.
+//   - (false, nil) — definitively held: a live process owns it.
+//   - (false, err) — UNDETERMINABLE (the flock probe itself errored, e.g. a
+//     locked-down filesystem, OR the probe's own tentative lease could not be
+//     released — see below). Callers gating a destructive/unsafe decision
+//     on this MUST treat err != nil the same as "held" (fail closed) — the
+//     same contract SupervisorRunningUnderStateDir documents.
+//
+// RELEASING THE PROBE LEASE IS PART OF THE ANSWER, NOT CLEANUP (review
+// finding). Acquiring the flock only proves nobody ELSE held it at that
+// instant; returning (true, nil) additionally asserts that the lock is unheld
+// NOW — which is false if this probe still owns it. release()'s bounded Unlock
+// retries and its Close() fallback can both fail (gofrs/flock's Close()
+// delegates to Unlock(), so a persistent syscall error leaves the descriptor
+// open and the OS lock held until this process exits — see release()'s comment
+// and work-items/backlog/2026-07-18-flock-persistent-unlock-residual.md). The
+// old code discarded that error via Release() and still reported "definitively
+// unheld", so residual 1(b)'s confirmation window
+// (runEnsureAliveGUIOwnerUnknownEscalation) could consume its marker and launch
+// a replacement GUI while THIS process still owned the single-instance lock —
+// the replacement then loses acquisition and exits, while the tick reports a
+// successful relaunch.
+//
+// Fail closed instead: any release failure is reported as UNDETERMINABLE. This
+// matches every other release() call site in this file, all of which classify a
+// non-nil release() as Unknown. Note release() deliberately reports the FIRST
+// Unlock error even when a later retry succeeded (pinned by
+// TestSingleInstanceLock_ReleaseRecoversTransientUnlockFailure), so a recovered
+// transient also lands here — conservative in the safe direction: a missed
+// recovery tick, never a relaunch against a lock this process still holds.
+func ProbeSingleInstanceLockUnheld(pidportPath string) (unheld bool, err error) {
+	return probeSingleInstanceLockUnheld(pidportPath, tryAcquireSingleInstanceLockAt)
+}
+
+// probeSingleInstanceLockUnheld is ProbeSingleInstanceLockUnheld with the
+// acquire step passed in, so a test can supply a lease whose Unlock/Close fail
+// persistently and exercise the fail-closed release branch without needing a
+// real locked-down filesystem. Taking the seam as a PARAMETER (rather than a
+// package-level var) keeps it off the production global state.
+func probeSingleInstanceLockUnheld(
+	pidportPath string,
+	acquire func(string) (*SingleInstanceLock, error),
+) (unheld bool, err error) {
+	lease, acquireErr := acquire(pidportPath)
+	if acquireErr != nil {
+		if errors.Is(acquireErr, ErrSingleInstanceBusy) {
+			return false, nil
+		}
+		return false, acquireErr
+	}
+	if releaseErr := lease.release(); releaseErr != nil {
+		return false, fmt.Errorf("release single-instance probe lease %s: %w", pidportPath+".lock", releaseErr)
+	}
+	return true, nil
+}
+
 // Release releases ONLY the flock — it does NOT remove the pidport file.
 // Idempotent.
 //
@@ -205,6 +416,26 @@ func tryAcquireSingleInstanceLockAt(pidportPath string) (*SingleInstanceLock, er
 //     handshake can read it.
 func (l *SingleInstanceLock) Release() {
 	_ = l.release()
+}
+
+// ReleaseErr is Release with the outcome REPORTED rather than discarded, so a
+// caller whose next step depends on the flock actually being free can fail
+// closed instead of guessing (review finding 1).
+//
+// Release() is retained for the many call sites that release on a path where
+// nothing downstream re-acquires this flock, and where a discarded error is
+// therefore harmless. ReleaseErr is for the owned-probe callers — the ones this
+// file's own invariant already binds: "any release failure is reported as
+// UNDETERMINABLE", which every release() call site in this file upholds. Before
+// this method existed, the cross-package Phase-I caller in internal/cli could
+// not uphold it, because release() is unexported and Release() drops the error.
+//
+// A non-nil result does NOT mean the caller should retry — release() has
+// already exhausted its bounded Unlock retries and gofrs/flock leaves nothing
+// further to try (see the residual note in release()). It means "this process
+// may still hold the lock until it exits": treat the observation as Unknown.
+func (l *SingleInstanceLock) ReleaseErr() error {
+	return l.release()
 }
 
 func (l *SingleInstanceLock) release() error {
@@ -332,74 +563,89 @@ func acquireReservationAwareSingleInstanceAt(pidportPath string, port int, optio
 // flock and does not write pidport metadata; the caller must retain that exact
 // lease through its guarded operation and release it on every exit path.
 func ProbeGUIOwnerLease(ctx context.Context, request GUIOwnerLeaseProbeRequest) GUIOwnerLeaseProbeResult {
+	lifecycle := request.Lifecycle
+	withLifecycle := func(result GUIOwnerLeaseProbeResult) GUIOwnerLeaseProbeResult {
+		result.Lifecycle = lifecycle
+		return result
+	}
+	if lifecycle == nil {
+		return withLifecycle(unknownGUIOwnerLease(nil, "probe lifecycle", errors.New("GUI owner lease lifecycle is nil")))
+	}
 	if ctx == nil {
-		return unknownGUIOwnerLease(nil, "probe context", errors.New("context is nil"))
+		return withLifecycle(unknownGUIOwnerLease(nil, "probe context", errors.New("context is nil")))
 	}
 	if err := validateGUIOwnerLeasePath(request.PidportPath); err != nil {
-		return unknownGUIOwnerLease(request.Record, "validate pidport path", err)
+		return withLifecycle(unknownGUIOwnerLease(request.Record, "validate pidport path", err))
 	}
 	if request.Record != nil {
 		if err := validateHandoffMarker(request.Record); err != nil {
-			return unknownGUIOwnerLease(nil, "validate observed handoff marker", err)
+			return withLifecycle(unknownGUIOwnerLease(nil, "validate observed handoff marker", err))
 		}
 	}
 	if err := ctx.Err(); err != nil {
-		return unknownGUIOwnerLease(request.Record, "probe cancelled before marker read", err)
+		return withLifecycle(unknownGUIOwnerLease(request.Record, "probe cancelled before marker read", err))
 	}
 	observed, err := readValidatedHandoffMarker(request.MarkerStore)
 	if err != nil {
-		return unknownGUIOwnerLease(request.Record, "read handoff marker", err)
+		return withLifecycle(unknownGUIOwnerLease(request.Record, "read handoff marker", err))
 	}
 	if request.Record != nil && !sameHandoffMarkerObservation(request.Record, observed) {
-		return unknownGUIOwnerLease(observed, "validate observed handoff marker", errors.New("handoff marker changed before owner probe"))
+		return withLifecycle(unknownGUIOwnerLease(observed, "validate observed handoff marker", errors.New("handoff marker changed before owner probe")))
 	}
 	now, err := restartDeadlineNow(request.Deadlines)
 	if err != nil {
-		return unknownGUIOwnerLease(observed, "read restart clock", err)
+		return withLifecycle(unknownGUIOwnerLease(observed, "read restart clock", err))
 	}
 	// A raw reservation is authoritative throughout its protection window.
 	// Returning Held before touching a momentarily-free OS flock prevents a
 	// third entrant or ensure-alive from entering the healthy release gap.
 	if reservationWindowOpen(observed, now) {
-		return heldGUIOwnerLease(observed, ErrHandoffReserved)
+		return withLifecycle(heldGUIOwnerLease(observed, ErrHandoffReserved))
 	}
 
+	if !lifecycle.TryExpose() {
+		return withLifecycle(unknownGUIOwnerLease(observed, "probe flock exposure", errors.New("GUI owner lease probe closed before flock exposure")))
+	}
 	lease, err := tryAcquireSingleInstanceLockAt(request.PidportPath)
 	if err != nil {
+		lifecycle.PublishNotAcquired()
 		if errors.Is(err, ErrSingleInstanceBusy) {
-			return heldGUIOwnerLease(observed, ErrSingleInstanceBusy)
+			return withLifecycle(heldGUIOwnerLease(observed, ErrSingleInstanceBusy))
 		}
-		return unknownGUIOwnerLease(observed, "probe flock", err)
+		return withLifecycle(unknownGUIOwnerLease(observed, "probe flock", err))
 	}
 	if err := ctx.Err(); err != nil {
-		return unknownAfterTentativeLease(lease, observed, "probe cancelled after acquire", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, observed, "probe cancelled after acquire", err))
 	}
 
 	current, err := readValidatedHandoffMarker(request.MarkerStore)
 	if err != nil {
-		return unknownAfterTentativeLease(lease, observed, "revalidate handoff marker", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, observed, "revalidate handoff marker", err))
 	}
 	if !sameHandoffMarkerObservation(observed, current) {
-		return unknownAfterTentativeLease(lease, current, "revalidate handoff marker", errors.New("handoff marker changed during owner probe"))
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, current, "revalidate handoff marker", errors.New("handoff marker changed during owner probe")))
 	}
 	now, err = restartDeadlineNow(request.Deadlines)
 	if err != nil {
-		return unknownAfterTentativeLease(lease, current, "re-read restart clock", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, current, "re-read restart clock", err))
 	}
 	if reservationWindowOpen(current, now) {
-		if releaseErr := lease.release(); releaseErr != nil {
-			return unknownGUIOwnerLease(current, "release tentative lease for reservation", releaseErr)
+		releaseErr := lease.release()
+		lifecycle.PublishRelease(releaseErr)
+		if releaseErr != nil {
+			return withLifecycle(unknownGUIOwnerLease(current, "release tentative lease for reservation", releaseErr))
 		}
-		return heldGUIOwnerLease(current, ErrHandoffReserved)
+		return withLifecycle(heldGUIOwnerLease(current, ErrHandoffReserved))
 	}
 	if err := ctx.Err(); err != nil {
-		return unknownAfterTentativeLease(lease, current, "probe cancelled after marker read", err)
+		return withLifecycle(unknownAfterTentativeLease(lifecycle, lease, current, "probe cancelled after marker read", err))
 	}
 
 	return GUIOwnerLeaseProbeResult{
-		State:  GUIOwnerLeaseStateFree,
-		Lease:  lease,
-		Record: current,
+		State:     GUIOwnerLeaseStateFree,
+		Lease:     lease,
+		Record:    current,
+		Lifecycle: lifecycle,
 	}
 }
 
@@ -423,7 +669,11 @@ func restartDeadlineNow(deadlines RestartDeadlines) (time.Time, error) {
 	if deadlines.Now == nil {
 		return time.Time{}, errors.New("restart clock is nil")
 	}
-	return deadlines.Now().UTC(), nil
+	now := deadlines.Now().UTC()
+	if now.IsZero() {
+		return time.Time{}, errors.New("restart clock returned zero time")
+	}
+	return now, nil
 }
 
 func validateGUIOwnerLeasePath(pidportPath string) error {
@@ -493,8 +743,10 @@ func unknownGUIOwnerLease(record *HandoffMarkerRecord, operation string, cause e
 	}
 }
 
-func unknownAfterTentativeLease(lease *SingleInstanceLock, record *HandoffMarkerRecord, operation string, cause error) GUIOwnerLeaseProbeResult {
-	if releaseErr := lease.release(); releaseErr != nil {
+func unknownAfterTentativeLease(lifecycle *GUIOwnerLeaseLifecycle, lease *SingleInstanceLock, record *HandoffMarkerRecord, operation string, cause error) GUIOwnerLeaseProbeResult {
+	releaseErr := lease.release()
+	lifecycle.PublishRelease(releaseErr)
+	if releaseErr != nil {
 		cause = errors.Join(cause, fmt.Errorf("release tentative lease: %w", releaseErr))
 	}
 	return unknownGUIOwnerLease(record, operation, cause)
@@ -560,6 +812,19 @@ const (
 	VerdictKillRefused                         // three-part identity gate failed
 	VerdictKillFailed                          // SIGKILL/TerminateProcess returned error
 	VerdictRaceLost                            // post-kill, a competitor won the new acquire
+	// VerdictIndeterminate is appended LAST (not inserted among the existing
+	// values) so its numeric JSON encoding never renumbers an already-shipped
+	// class — Verdict.Class serializes to the GUI's /api/force-kill/probe
+	// response. residual 1(a): the per-platform identity probe
+	// (processIDImpl) returned a PLATFORM-LEVEL error that is NOT proof the
+	// recorded PID is gone (a transient OpenProcess/kill(2) failure other
+	// than the platform's OWN definitive "no such process" signal). Before
+	// this class existed, probeOnce collapsed every such ambiguous error
+	// into VerdictDeadPID (id.Alive's zero value), which AUTHORIZES the
+	// headless-fleet relaunch on a merely-transient platform hiccup. Callers
+	// MUST treat VerdictIndeterminate exactly like VerdictMalformed — never
+	// as proof of death.
+	VerdictIndeterminate
 )
 
 func (c VerdictClass) String() string {
@@ -580,6 +845,8 @@ func (c VerdictClass) String() string {
 		return "KillFailed"
 	case VerdictRaceLost:
 		return "RaceLost"
+	case VerdictIndeterminate:
+		return "Indeterminate"
 	}
 	return fmt.Sprintf("VerdictClass(%d)", int(c))
 }
@@ -647,6 +914,78 @@ type Verdict struct {
 	// checkIdentityGateInternal refuses the kill with an
 	// arch-specific reason. Codex bot review on PR #23 P2.
 	archUnsupported bool
+}
+
+// IdentityProbeUnsupported reports whether this Verdict was produced on a
+// platform where the OS identity probe (processIDImpl) could not run AT ALL —
+// darwin (errMacOSProbeUnsupported) or a Windows non-amd64 build
+// (errWindowsArchUnsupported, PEB offsets are 64-bit-only). It is the exported
+// read of the two unexported flags above, so a consumer OUTSIDE this package
+// can tell an OBSERVED liveness fact apart from an unobservable one without
+// those flags (or their JSON-invisibility) leaking.
+//
+// Why a consumer needs it: probeOnce routes an unsupported-probe Verdict to
+// VerdictLiveUnreachable, which on every supported platform means the strong
+// fact "the recorded PID IS alive, it just is not answering /api/ping". On an
+// unsupported platform it means only "we could not look". The Class alone
+// cannot distinguish the two, so a caller that treats VerdictLiveUnreachable
+// as proof of liveness draws a confident conclusion from a probe that never
+// ran (round 4 review finding on probeGUIOwnerAlive in
+// internal/cli/supervise_ensure_alive.go).
+//
+// NOTE the flags are stamped BEFORE probeOnce's pingMatched early return, so a
+// VerdictHealthy can also report true here. That combination is NOT ambiguous:
+// a ping whose reply carries the recorded PID is an independent, positive
+// liveness proof that needs no identity probe. Consumers must therefore branch
+// on this only for classes whose liveness claim actually rests on the identity
+// probe (VerdictLiveUnreachable), never as a blanket "distrust this verdict".
+func (v Verdict) IdentityProbeUnsupported() bool {
+	return v.macOSUnsupported || v.archUnsupported
+}
+
+// ProcessIdentityClass is the read-only result of the GUI package's single
+// image/argv/start-time/owner identity authority. It is intentionally separate
+// from VerdictClass: a live-but-unreachable PID still needs this proof before
+// another package may treat it as the current GUI owner.
+type ProcessIdentityClass uint8
+
+const (
+	ProcessIdentityUnsupportedOrUncertain ProcessIdentityClass = iota
+	ProcessIdentityMatch
+	ProcessIdentityMismatch
+	ProcessIdentityGone
+)
+
+// ProcessIdentityResult exposes only the typed decision. Existing operator
+// diagnostics stay package-private so full argv and owner details cannot leak
+// through a new wire surface.
+type ProcessIdentityResult struct {
+	Class ProcessIdentityClass
+
+	diagnose  string
+	hint      string
+	errReason string
+}
+
+// EvaluateProcessIdentity applies the same authority used by the destructive
+// kill gate without performing a kill or mutating process state.
+func EvaluateProcessIdentity(v Verdict) ProcessIdentityResult {
+	return checkIdentityGateInternal(v)
+}
+
+func (r ProcessIdentityResult) refused() bool {
+	return r.Class == ProcessIdentityMismatch || r.Class == ProcessIdentityUnsupportedOrUncertain
+}
+
+// NewIdentityProbeUnsupportedVerdictForTest builds a Verdict that reports
+// IdentityProbeUnsupported() == true, so a test in ANOTHER package can
+// exercise its consumers' branch logic without running on darwin or a
+// Windows non-amd64 host (this repo's CI and dev host are windows/amd64,
+// where processIDImpl always succeeds and the flags are unreachable).
+// Mirrors NewPendingSupervisorEventEmitForTest's exported-test-constructor
+// pattern in internal/api. Only tests may call it.
+func NewIdentityProbeUnsupportedVerdictForTest(class VerdictClass, pid, port int) Verdict {
+	return Verdict{Class: class, PID: pid, Port: port, archUnsupported: true}
 }
 
 // KillOpts controls KillRecordedHolder behavior.
@@ -945,6 +1284,27 @@ func probeOnce(ctx context.Context, pidportPath string, pingTimeout time.Duratio
 		return v
 	}
 
+	// Residual 1(a) fix: id.Indeterminate marks a platform-level identity
+	// probe error that is NOT the platform's own definitive "no such
+	// process" signal (see probe_windows.go's classifyOpenProcessError /
+	// probe_linux.go's classifyKillError — only ERROR_INVALID_PARAMETER /
+	// ESRCH may claim id.Alive=false; every other OpenProcess/kill(2) error
+	// sets Indeterminate instead). Checked BEFORE the !id.Alive cascade so a
+	// transient platform hiccup can never fall through to VerdictDeadPID,
+	// which is the ONLY class that authorizes a destructive relaunch/kill
+	// downstream (probeGUIOwnerAlive, KillRecordedHolder's skip-list below).
+	if id.Indeterminate {
+		v.Class = VerdictIndeterminate
+		v.PIDAlive = false
+		if idErr != nil {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: liveness probe returned an ambiguous platform error (%v); this is NOT proof the process is dead", pid, idErr)
+		} else {
+			v.Diagnose = fmt.Sprintf("recorded PID %d: liveness probe returned an ambiguous result; this is NOT proof the process is dead", pid)
+		}
+		v.Hint = "The identity probe could not determine whether the previous incumbent is alive or dead (a transient platform error, not a confirmed exit). Retry, or use OS tools (Task Manager/ps) to check the PID directly."
+		return v
+	}
+
 	if !id.Alive {
 		v.Class = VerdictDeadPID
 		v.Diagnose = fmt.Sprintf("recorded PID %d is not alive", pid)
@@ -1004,7 +1364,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 
 	v := probe(ctx, pidportPath, opts.PingTimeout)
 	switch v.Class {
-	case VerdictMalformed, VerdictDeadPID:
+	case VerdictMalformed, VerdictDeadPID, VerdictIndeterminate:
+		// VerdictIndeterminate (residual 1(a)) MUST skip the kill exactly
+		// like Malformed/DeadPID: an ambiguous platform-level identity
+		// error is not proof of anything, and this switch has NO default
+		// arm — any class that falls through here proceeds straight into
+		// the destructive identity gate below.
 		return nil, v, fmt.Errorf("kill skipped: %s", v.Class)
 	case VerdictHealthy:
 		// Codex r5 #7b: incumbent is healthy — do NOT kill. Caller
@@ -1045,11 +1410,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 	// the identity protections by skipping the cli's pre-prompt
 	// check. Both call sites share checkIdentityGateInternal so the
 	// gate logic is not duplicated.
-	if refused, diagnose, hint, errReason := checkIdentityGateInternal(v); refused {
+	identity := checkIdentityGateInternal(v)
+	if identity.refused() {
 		v.Class = VerdictKillRefused
-		v.Diagnose = diagnose
-		v.Hint = hint
-		return nil, v, fmt.Errorf("kill refused: %s", errReason)
+		v.Diagnose = identity.diagnose
+		v.Hint = identity.hint
+		return nil, v, fmt.Errorf("kill refused: %s", identity.errReason)
 	}
 
 	// All three gates passed. Kill.
@@ -1134,11 +1500,12 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 				if len(idNow.Cmdline) >= 2 {
 					vNow.PIDSubcommand = idNow.Cmdline[1]
 				}
-				if refused, diagnose, hint, errReason := checkIdentityGateInternal(vNow); refused {
+				identityNow := checkIdentityGateInternal(vNow)
+				if identityNow.refused() {
 					v.Class = VerdictKillRefused
-					v.Diagnose = "pre-kill recheck: " + diagnose
-					v.Hint = hint
-					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", errReason)
+					v.Diagnose = "pre-kill recheck: " + identityNow.diagnose
+					v.Hint = identityNow.hint
+					return nil, v, fmt.Errorf("kill refused: pre-kill identity recheck: %s", identityNow.errReason)
 				}
 			} else {
 				// pr301 r7 Finding 2 (P2 #717): the holder is genuinely
@@ -1288,8 +1655,8 @@ func KillRecordedHolder(ctx context.Context, pidportPath string, opts KillOpts) 
 //
 // Codex iter-9 P2 #1.
 func CheckIdentityGate(v Verdict) (refused bool, reason string) {
-	refused, reason, _, _ = checkIdentityGateInternal(v)
-	return refused, reason
+	result := checkIdentityGateInternal(v)
+	return result.refused(), result.diagnose
 }
 
 // checkIdentityGateInternal is the shared gate implementation used
@@ -1303,17 +1670,14 @@ func CheckIdentityGate(v Verdict) (refused bool, reason string) {
 // only when the override is nil. Codex iter-9 P2 #1 deduplicates the
 // production gate cascade so the public CheckIdentityGate and the
 // internal KillRecordedHolder gate cannot drift.
-func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReason string) {
+func checkIdentityGateInternal(v Verdict) ProcessIdentityResult {
 	// Test override comes first so seam-mocked tests reach this
 	// branch on linux/windows even when v.macOSUnsupported is true.
 	if identityGateOverride != nil {
 		if r, reason := identityGateOverride(v); r {
-			return true,
-				"identity gate (test override): " + reason,
-				"",
-				"override: " + reason
+			return ProcessIdentityResult{Class: ProcessIdentityMismatch, diagnose: "identity gate (test override): " + reason, errReason: "override: " + reason}
 		}
-		return false, "", "", ""
+		return ProcessIdentityResult{Class: ProcessIdentityMatch}
 	}
 
 	// Codex iter-3 P2 #2: macOS shortcut — when probeOnce flagged
@@ -1322,10 +1686,10 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 	// macOS-specific diagnose instead of letting the cascade emit
 	// "image '' is not an mcphub binary".
 	if v.macOSUnsupported {
-		return true,
-			"kill refused: macOS identity probe not supported; reboot is the recovery path",
-			"Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go).",
-			"macOS identity probe not supported"
+		return ProcessIdentityResult{Class: ProcessIdentityUnsupportedOrUncertain,
+			diagnose:  "kill refused: macOS identity probe not supported; reboot is the recovery path",
+			hint:      "Tracked as backlog: macOS libproc/sysctl-based identity (see probe_darwin.go).",
+			errReason: "macOS identity probe not supported"}
 	}
 
 	// Same shape on Windows non-amd64 builds: probeOnce sets
@@ -1333,17 +1697,16 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 	// kill with an arch-specific diagnose. Codex bot review on PR
 	// #23 P2 (probeOnce arch sentinel handling).
 	if v.archUnsupported {
-		return true,
-			"kill refused: Windows non-amd64 build cannot enumerate cmdline/start-time; identity gate cannot run",
-			"This Windows build lacks PEB-offset support for the running architecture. Use Task Manager / Get-Process to identify the stuck mcphub PID and end it manually, or rebuild mcphub for amd64.",
-			"Windows arch identity probe not supported"
+		return ProcessIdentityResult{Class: ProcessIdentityUnsupportedOrUncertain,
+			diagnose:  "kill refused: Windows non-amd64 build cannot enumerate cmdline/start-time; identity gate cannot run",
+			hint:      "This Windows build lacks PEB-offset support for the running architecture. Use Task Manager / Get-Process to identify the stuck mcphub PID and end it manually, or rebuild mcphub for amd64.",
+			errReason: "Windows arch identity probe not supported"}
 	}
 
 	if !matchBasename(v.PIDImage) {
-		return true,
-			fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage),
-			"Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools.",
-			"image gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d image %q is not an mcphub binary", v.PID, v.PIDImage),
+			hint:     "Identity-gate (image basename) failed; identify and kill the actual flock holder via OS tools.", errReason: "image gate"}
 	}
 	// Codex iter-3 P2 #1: read v.pidCmdlineRaw (the unmodified
 	// argv populated by probeOnce), not v.PIDCmdline (truncated for
@@ -1365,16 +1728,14 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 		} else {
 			subcommand = "(none)"
 		}
-		return true,
-			fmt.Sprintf("recorded PID %d argv subcommand is %q, not 'gui'", v.PID, subcommand),
-			"Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand.",
-			"argv gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d argv subcommand is %q, not 'gui'", v.PID, subcommand),
+			hint:     "Identity-gate (argv subcommand) failed; the recorded PID is a different mcphub subcommand.", errReason: "argv gate"}
 	}
 	if !startTimeBeforeMtime(v.PIDStart, v.Mtime, time.Second) {
-		return true,
-			fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
-			"Identity-gate (start-time) failed; the PID has been recycled to a different process.",
-			"start-time gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d start-time %s postdates pidport mtime %s — PID-recycled", v.PID, v.PIDStart.Format(time.RFC3339), v.Mtime.Format(time.RFC3339)),
+			hint:     "Identity-gate (start-time) failed; the PID has been recycled to a different process.", errReason: "start-time gate"}
 	}
 	// SEC-F3 owner-SID gate (additional, fail-closed): refuse to kill a flock
 	// holder owned by a DIFFERENT user SID even when image/argv/start-time all
@@ -1396,19 +1757,17 @@ func checkIdentityGateInternal(v Verdict) (refused bool, diagnose, hint, errReas
 			// flock-release acquire-poll and yields VerdictKilledRecovered).
 			// Converting this to VerdictKillRefused would strand the operator on
 			// a stuck lock whose holder is already gone.
-			return false, "", "", ""
+			return ProcessIdentityResult{Class: ProcessIdentityGone}
 		}
-		return true,
-			fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
-			"Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.",
-			"owner-SID gate"
+		return ProcessIdentityResult{Class: ProcessIdentityUnsupportedOrUncertain,
+			diagnose: fmt.Sprintf("recorded PID %d owner could not be verified: %v", v.PID, err),
+			hint:     "Identity-gate (owner SID) could not verify the process owner; refusing the kill. Identify and kill the actual flock holder via OS tools.", errReason: "owner-SID gate"}
 	} else if !match {
-		return true,
-			fmt.Sprintf("recorded PID %d is owned by a different user; refusing to kill", v.PID),
-			"Identity-gate (owner SID) failed; the recorded PID belongs to a different user. mcphub will not terminate another user's process.",
-			"owner-SID gate"
+		return ProcessIdentityResult{Class: ProcessIdentityMismatch,
+			diagnose: fmt.Sprintf("recorded PID %d is owned by a different user; refusing to kill", v.PID),
+			hint:     "Identity-gate (owner SID) failed; the recorded PID belongs to a different user. mcphub will not terminate another user's process.", errReason: "owner-SID gate"}
 	}
-	return false, "", "", ""
+	return ProcessIdentityResult{Class: ProcessIdentityMatch}
 }
 
 // cmdlineIsGui implements the rev 9 argv-subcommand gate:

@@ -3,8 +3,11 @@
 package cli
 
 import (
+	"errors"
 	"os/exec"
 	"testing"
+
+	"golang.org/x/sys/windows"
 )
 
 // PART 1: the breakaway-tolerant spawn helper must (a) add
@@ -36,18 +39,68 @@ func TestStartSupervisorDetachedBreakaway_AddsFlagOnSuccess(t *testing.T) {
 }
 
 func TestStartSupervisorDetachedBreakaway_NonAccessDeniedError_NotRetried(t *testing.T) {
-	bad := `Z:\definitely\nonexistent\mcphub-nope.exe`
 	retried := false
 	degraded := false
-	rebuild := func() *exec.Cmd { retried = true; return exec.Command(bad) }
-	_, err := startSupervisorDetachedBreakaway(exec.Command(bad), rebuild, func(error) { degraded = true })
-	if err == nil {
-		t.Fatal("expected a spawn error for a nonexistent binary")
+	want := errors.New("synthetic non-access-denied spawn failure")
+	rebuild := func() *exec.Cmd { retried = true; return exec.Command("cmd", "/c", "exit", "0") }
+	_, err := startSupervisorDetachedBreakawayWithStart(
+		exec.Command("cmd", "/c", "exit", "0"),
+		rebuild,
+		func(error) { degraded = true },
+		func(*exec.Cmd) error { return want },
+	)
+	if !errors.Is(err, want) {
+		t.Fatalf("start error = %v, want synthetic non-ACCESS_DENIED failure", err)
 	}
 	if retried {
 		t.Fatal("a non-ACCESS_DENIED spawn error must NOT trigger the flagless rebuild/retry")
 	}
 	if degraded {
 		t.Fatal("onDegrade must NOT fire for a non-ACCESS_DENIED error")
+	}
+}
+
+func TestStartSupervisorDetachedBreakaway_AccessDeniedRetriesFlagless(t *testing.T) {
+	initial := exec.Command("cmd", "/c", "exit", "0")
+	retry := exec.Command("cmd", "/c", "exit", "0")
+	starts := 0
+	degraded := false
+	started, err := startSupervisorDetachedBreakawayWithStart(
+		initial,
+		func() *exec.Cmd { return retry },
+		func(err error) {
+			if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+				t.Errorf("degrade error = %v, want ERROR_ACCESS_DENIED", err)
+			}
+			degraded = true
+		},
+		func(cmd *exec.Cmd) error {
+			starts++
+			if starts == 1 {
+				if cmd != initial {
+					t.Fatal("first start used retry command")
+				}
+				return windows.ERROR_ACCESS_DENIED
+			}
+			if cmd != retry {
+				t.Fatal("retry start did not use rebuilt command")
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("retry start: %v", err)
+	}
+	if started != retry {
+		t.Fatal("returned command is not the successfully retried command")
+	}
+	if starts != 2 {
+		t.Fatalf("start calls = %d, want 2", starts)
+	}
+	if !degraded {
+		t.Fatal("onDegrade was not called for ERROR_ACCESS_DENIED")
+	}
+	if retry.SysProcAttr != nil && retry.SysProcAttr.CreationFlags&winCreateBreakawayFromJob != 0 {
+		t.Fatalf("retry command retained CREATE_BREAKAWAY_FROM_JOB, flags=%#x", retry.SysProcAttr.CreationFlags)
 	}
 }

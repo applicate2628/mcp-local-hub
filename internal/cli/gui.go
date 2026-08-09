@@ -9,7 +9,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -470,7 +469,23 @@ activates the first window and exits 0.`,
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			ctx, stop := signal.NotifyContext(cmd.Context(), syscall.SIGINT, syscall.SIGTERM)
+			// GUI exit-reason attribution + signal-aware shutdown context,
+			// as ONE causal observer (gui_exit_signal.go; round 3
+			// consolidation of residual 3). This used to be TWO independent
+			// signal registrations racing each other — signal.NotifyContext's
+			// own internal one (driving ctx.Done()) plus a separate
+			// signal.Notify observer here — with causality between them
+			// inferred from a timing race (which channel becomes ready
+			// first). newGUIExitSignalContext removes that race
+			// structurally: there is exactly one SIGINT/SIGTERM
+			// registration, and the SAME goroutine that observes it is the
+			// one that cancels ctx because of it, so "ctx is done because
+			// of a signal" is caused, in order, never inferred after the
+			// fact. ctx behaves exactly like signal.NotifyContext's own
+			// return value for every OTHER consumer in this file
+			// (ctx.Done(), context.WithoutCancel(ctx), the stop()-calling
+			// tray Quit / QuitAndStopAll closures below).
+			ctx, stop := newGUIExitSignalContext(cmd.Context(), gui.EmitExitReasonEvent)
 			defer stop()
 
 			// Phase 5 Task 5.3: --reset-port is a state-dir operation
@@ -676,7 +691,7 @@ activates the first window and exits 0.`,
 				if force {
 					if kill {
 						// Codex iter-10 P2 #1: pass signal-aware ctx
-						// (from signal.NotifyContext above) so Ctrl+C
+						// (from newGUIExitSignalContext above) so Ctrl+C
 						// during the kill path actually cancels the
 						// destructive operation. cmd.Context() is the
 						// cobra parent context and ignores SIGINT.
@@ -1419,8 +1434,21 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 						fmt.Fprintf(cmd.ErrOrStderr(), "tray: toggle state-read-relax: %v\n", err)
 					}
 				},
-				Quit: stop,
+				Quit: func() {
+					// GUI exit-reason attribution: emit BEFORE stop() so the
+					// event is durable even if shutdown proceeds quickly.
+					// Bounded (guiExitReasonEmitTimeout) — never delays Quit
+					// beyond that ceiling. If an OS signal races this click,
+					// gui.EmitExitReasonEvent's own process-wide
+					// first-trigger-wins dedup (P2-5 review fix) ensures only
+					// whichever call actually runs first is durably recorded
+					// — never both.
+					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuit, nil)
+					stop()
+				},
 				QuitAndStopAll: func() {
+					// GUI exit-reason attribution: see Quit above.
+					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuitAndStopAll, nil)
 					// Stop all via HTTP (so the Dashboard sees the SSE
 					// lifecycle), then trigger the GUI shutdown. Errors
 					// don't block the shutdown — partial cleanup beats
@@ -1689,7 +1717,7 @@ func runForceDiagnostic(ctx context.Context, cmd *cobra.Command, pidportPath str
 // (acquiredLock, exitCode). On success acquiredLock is non-nil and
 // exitCode==0; the caller continues into Phase B.
 //
-// ctx is the signal-aware context from RunE (from signal.NotifyContext)
+// ctx is the signal-aware context from RunE (from newGUIExitSignalContext)
 // so Ctrl+C/SIGTERM during the kill path is honored — including the
 // post-kill wait-for-exit loop and the acquire-poll loop inside
 // KillRecordedHolder. cmd.Context() would NOT receive SIGINT.
@@ -1731,29 +1759,20 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	// callers hit exit 6 even for VerdictMalformed (4) or DeadPID (3)
 	// where no kill is attempted; that masks the proper exit codes
 	// and forces automation to add --yes for non-destructive paths.
-	switch v.Class {
-	case gui.VerdictMalformed:
-		// Codex iter-8 P2 #2: kill-mode malformed maps to exit 4
-		// (pidport unrecoverable) per memo §"Exit codes". Bare
-		// --force diagnostic uses exit 2; --force --kill is a
-		// distinct contract and CI scripts must distinguish them.
+	if code, terminal := preKillVerdictExit(v.Class); terminal {
 		fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
-		return nil, 4
-	case gui.VerdictDeadPID:
-		// Probe says the recorded PID is already gone — the OS
-		// should have released the flock as a side effect. Map to
-		// exit 3 (race-lost / already-recovered semantic per memo
-		// §Exit codes).
-		fmt.Fprintln(cmd.OutOrStdout(), formatDiagnostic(v, pidportPath))
-		return nil, 3
-	case gui.VerdictLiveUnreachable:
-		// fall through to identity gate + prompt + KillRecordedHolder
-	default:
+		return nil, code
+	}
+	if v.Class != gui.VerdictLiveUnreachable {
+		// Not a kill target and not a known non-destructive outcome — a
+		// genuinely unexpected class from Probe.
 		fmt.Fprintf(cmd.OutOrStderr(),
 			"internal: unexpected verdict class %q from Probe; refusing kill\n",
 			v.Class.String())
 		return nil, 1
 	}
+	// VerdictLiveUnreachable falls through to identity gate + prompt +
+	// KillRecordedHolder.
 
 	// Gate 0 (Claude r2 #3): non-TTY without --yes → exit 6.
 	// Reached only when verdict == LiveUnreachable — the path that
@@ -1894,29 +1913,87 @@ func runForceKill(ctx context.Context, cmd *cobra.Command, pidportPath string, y
 	if killVerdict.Hint != "" {
 		fmt.Fprintln(cmd.OutOrStderr(), "hint:", killVerdict.Hint)
 	}
-	switch killVerdict.Class {
-	case gui.VerdictKillRefused:
-		return nil, 7
-	case gui.VerdictKillFailed:
-		return nil, 4
-	case gui.VerdictRaceLost:
-		return nil, 3
+	if code, mapped := postKillVerdictExit(killVerdict.Class); mapped {
+		return nil, code
+	}
+	// Forward-compat safety net: Verdict will grow in the A4-b
+	// HTTP API path. If a future class lands without a mapping,
+	// surface the class + err to stderr instead of silently
+	// exiting 1 with no diagnostic.
+	fmt.Fprintf(cmd.OutOrStderr(), "internal: unrecognized verdict class %q (err=%v)\n", killVerdict.Class.String(), err)
+	return nil, 1
+}
+
+// preKillVerdictExit maps a PRE-kill gui.Probe class onto the exit code
+// runForceKill returns for it WITHOUT attempting any kill. terminal=false means
+// the class is not a non-destructive terminal outcome: gui.VerdictLiveUnreachable
+// proceeds to the identity gate + prompt + kill, and every other class is
+// genuinely unexpected from Probe.
+//
+// Extracted from runForceKill's inline switch so the mapping has ONE owner that
+// a test can exercise exhaustively over every gui.VerdictClass — the previous
+// inline form had no seam at all (runForceKill runs a real gui.Probe against a
+// real pidport), so classes whose verdict a test cannot manufacture, such as
+// gui.VerdictIndeterminate, were unreachable by any test.
+func preKillVerdictExit(class gui.VerdictClass) (code int, terminal bool) {
+	switch class {
 	case gui.VerdictMalformed:
-		return nil, 4
+		// Codex iter-8 P2 #2: kill-mode malformed maps to exit 4
+		// (pidport unrecoverable) per memo §"Exit codes". Bare
+		// --force diagnostic uses exit 2; --force --kill is a
+		// distinct contract and CI scripts must distinguish them.
+		return 4, true
+	case gui.VerdictIndeterminate:
+		// Review finding: the identity probe returned an ambiguous PLATFORM
+		// error that is NOT the platform's own "no such process" signal, so
+		// we cannot tell whether the recorded holder is alive.
+		// gui.VerdictClass's doc requires every consumer to treat this
+		// exactly like gui.VerdictMalformed and never as proof of death — so
+		// it takes the same non-destructive exit rather than falling into the
+		// "internal: unexpected verdict class" arm, which mislabelled a
+		// legitimate, expected outcome as an mcphub bug AND hid the Verdict's
+		// own retry guidance. No kill, no consent prompt, diagnostic printed;
+		// the operator's next step comes from Verdict.Hint.
+		return 4, true
+	case gui.VerdictDeadPID:
+		// Probe says the recorded PID is already gone — the OS
+		// should have released the flock as a side effect. Map to
+		// exit 3 (race-lost / already-recovered semantic per memo
+		// §Exit codes).
+		return 3, true
+	}
+	return 0, false
+}
+
+// postKillVerdictExit maps a POST-kill gui.KillRecordedHolder class onto its
+// exit code. mapped=false routes the caller to the forward-compat "unrecognized
+// verdict class" diagnostic. gui.VerdictHealthy and gui.VerdictKilledRecovered
+// are handled by runForceKill BEFORE this mapping (both exit 0), so they are
+// deliberately absent here.
+func postKillVerdictExit(class gui.VerdictClass) (code int, mapped bool) {
+	switch class {
+	case gui.VerdictKillRefused:
+		return 7, true
+	case gui.VerdictKillFailed, gui.VerdictMalformed:
+		return 4, true
+	case gui.VerdictIndeterminate:
+		// Review finding: KillRecordedHolder's own re-probe came back
+		// ambiguous and it SKIPPED the kill (single_instance.go's
+		// Malformed/DeadPID/Indeterminate arm). Same non-destructive exit as
+		// Malformed, for the same reason as preKillVerdictExit: an expected
+		// outcome with its own operator guidance, not an unrecognized class.
+		// The Diagnose + Hint printed by the caller carry it.
+		return 4, true
+	case gui.VerdictRaceLost:
+		return 3, true
 	case gui.VerdictDeadPID:
 		// Probe said dead but acquire failed afterward — treat as
 		// race-lost because the OS should have released flock when
 		// the dead process exited; if we can't acquire, someone
 		// else holds it now.
-		return nil, 3
-	default:
-		// Forward-compat safety net: Verdict will grow in the A4-b
-		// HTTP API path. If a future class lands without a switch
-		// arm, surface the class + err to stderr instead of silently
-		// exiting 1 with no diagnostic.
-		fmt.Fprintf(cmd.OutOrStderr(), "internal: unrecognized verdict class %q (err=%v)\n", killVerdict.Class.String(), err)
-		return nil, 1
+		return 3, true
 	}
+	return 0, false
 }
 
 // formatDiagnostic builds the human-readable diagnostic block from

@@ -36,3 +36,17 @@ func resolveRestartV3Enabled(raw string) bool {
 		return restartV3DefaultEnabled
 	}
 }
+
+// ResetRestartV3ResolvedForTest clears the memoized RestartV3Enabled()
+// resolution so a test can force a fresh env-var read. Production code never
+// calls this — RestartV3Enabled() is deliberately resolved once per process.
+// Exported (rather than a _test.go-local helper) so cross-package tests —
+// e.g. internal/cli's ensure-alive tests proving the P1-2 review fix
+// (recognition of another process's in-flight handoff marker must not
+// depend on THIS process's own RestartV3Enabled() resolution) — can force a
+// deterministic re-resolution without depending on test-execution order
+// across the whole test binary.
+func ResetRestartV3ResolvedForTest() {
+	restartV3Once = sync.Once{}
+	restartV3Resolved = false
+}

@@ -25,6 +25,40 @@ import (
 	"golang.org/x/sys/windows"
 )
 
+// classifyOpenProcessError maps an OpenProcess failure to the appropriate
+// ProcessIdentity result. Extracted as a pure function (no syscalls) so its
+// polarity is directly unit-testable with synthetic errors, without needing
+// to engineer a real ambiguous OS failure.
+//
+// ERROR_INVALID_PARAMETER is treated as the definitive "no such process"
+// signal. Microsoft's OpenProcess documentation confirms ERROR_INVALID_PARAMETER
+// for the System Idle Process special case; the broader claim that
+// OpenProcess returns it for ANY nonexistent PID (this codebase's
+// pre-existing, pre-residual-1 comment already assumed this) was verified
+// empirically this session on this Windows host: spawning and waiting for a
+// real child process, then calling OpenProcess on its now-exited PID,
+// returned exactly ERROR_INVALID_PARAMETER ("The parameter is incorrect.").
+// What residual 1(a) changes is the FAIL-SAFE direction: only this one
+// verified-definitive error, plus ERROR_ACCESS_DENIED (process exists, we
+// lack rights), may produce a definitive verdict. Every OTHER error — handle
+// exhaustion, ERROR_NOT_ENOUGH_MEMORY, or any future/unrecognized failure —
+// is NOT proof the process is gone and must return Indeterminate, never
+// Alive:false.
+func classifyOpenProcessError(err error) (ProcessIdentity, error) {
+	// ERROR_ACCESS_DENIED → process exists but we can't query it.
+	// Match Unix EPERM semantics: alive=true, denied=true.
+	if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		return ProcessIdentity{Alive: true, Denied: true}, nil
+	}
+	// ERROR_INVALID_PARAMETER is OpenProcess's definitive "no such process"
+	// signal — the ONLY error this classifier may treat as proof of death.
+	if errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+		return ProcessIdentity{Alive: false}, nil
+	}
+	// Everything else is ambiguous: we could not determine liveness at all.
+	return ProcessIdentity{Indeterminate: true}, err
+}
+
 // processIDImpl is the Windows implementation. Uses
 // PROCESS_QUERY_LIMITED_INFORMATION (works without admin in most
 // cases) for image path + creation time; reads the command line via
@@ -82,13 +116,7 @@ func processIDWindows(pid int) (ProcessIdentity, error) {
 	)
 	h, err := windows.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
 	if err != nil {
-		// ERROR_ACCESS_DENIED → process exists but we can't query it.
-		// Match Unix EPERM semantics: alive=true, denied=true.
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			return ProcessIdentity{Alive: true, Denied: true}, nil
-		}
-		// Other errors (ERROR_INVALID_PARAMETER for dead PID, etc.) → not alive.
-		return ProcessIdentity{Alive: false}, nil
+		return classifyOpenProcessError(err)
 	}
 	handleOwned := true
 	defer func() {
@@ -97,10 +125,15 @@ func processIDWindows(pid int) (ProcessIdentity, error) {
 		}
 	}()
 
-	// Liveness via GetExitCodeProcess.
+	// Liveness via GetExitCodeProcess. A successful OpenProcess means the
+	// kernel has a live handle to a real process object, so a
+	// GetExitCodeProcess failure here is an anomalous read failure, NOT
+	// proof the process is dead — residual 1(a) (this used to collapse to
+	// Alive:false, which authorized a destructive relaunch/kill on a merely
+	// ambiguous read).
 	var exitCode uint32
 	if err := windows.GetExitCodeProcess(h, &exitCode); err != nil {
-		return ProcessIdentity{Alive: false}, nil
+		return ProcessIdentity{Indeterminate: true}, err
 	}
 	if exitCode != STILL_ACTIVE {
 		return ProcessIdentity{Alive: false}, nil

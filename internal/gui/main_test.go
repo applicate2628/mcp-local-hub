@@ -1,13 +1,147 @@
 package gui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/scheduler"
+)
+
+type guiTestAutostartFixture struct {
+	mu                     sync.Mutex
+	schedulerFactoryCalls  int
+	schedulerListCalls     int
+	schedulerListPrefix    string
+	schedulerDeleteCalls   int
+	schedulerUnexpectedOps int
+	statusCalls            int
+	enableCalls            int
+	startOwnerCalls        int
+}
+
+type guiTestInstallSideEffectSnapshot struct {
+	schedulerFactoryCalls  int
+	schedulerListCalls     int
+	schedulerListPrefix    string
+	schedulerDeleteCalls   int
+	schedulerUnexpectedOps int
+	statusCalls            int
+	enableCalls            int
+	startOwnerCalls        int
+}
+
+func (f *guiTestAutostartFixture) Enable(autostart.Options) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enableCalls++
+	return nil
+}
+
+func (f *guiTestAutostartFixture) Disable() error { return nil }
+
+func (f *guiTestAutostartFixture) Status(autostart.Options) (autostart.State, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.statusCalls++
+	return autostart.StateEnabledStopped, nil
+}
+
+func (f *guiTestAutostartFixture) StatusSnapshot(autostart.Options) (autostart.StatusSnapshot, error) {
+	return autostart.StatusSnapshot{State: autostart.StateEnabledStopped}, nil
+}
+
+func (f *guiTestAutostartFixture) startOwner() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.startOwnerCalls++
+	return nil
+}
+
+func (f *guiTestAutostartFixture) schedulerFactory() (scheduler.Scheduler, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.schedulerFactoryCalls++
+	return guiTestScheduler{fixture: f}, nil
+}
+
+func (f *guiTestAutostartFixture) snapshot() guiTestInstallSideEffectSnapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return guiTestInstallSideEffectSnapshot{
+		schedulerFactoryCalls:  f.schedulerFactoryCalls,
+		schedulerListCalls:     f.schedulerListCalls,
+		schedulerListPrefix:    f.schedulerListPrefix,
+		schedulerDeleteCalls:   f.schedulerDeleteCalls,
+		schedulerUnexpectedOps: f.schedulerUnexpectedOps,
+		statusCalls:            f.statusCalls,
+		enableCalls:            f.enableCalls,
+		startOwnerCalls:        f.startOwnerCalls,
+	}
+}
+
+type guiTestScheduler struct {
+	fixture *guiTestAutostartFixture
+}
+
+func (s guiTestScheduler) Create(scheduler.TaskSpec) error {
+	return s.unexpectedOperation("Create")
+}
+
+func (s guiTestScheduler) Delete(string) error {
+	s.fixture.mu.Lock()
+	defer s.fixture.mu.Unlock()
+	s.fixture.schedulerDeleteCalls++
+	return nil
+}
+
+func (s guiTestScheduler) Run(string) error {
+	return s.unexpectedOperation("Run")
+}
+
+func (s guiTestScheduler) Stop(string) error {
+	return s.unexpectedOperation("Stop")
+}
+
+func (s guiTestScheduler) Status(string) (scheduler.TaskStatus, error) {
+	return scheduler.TaskStatus{}, s.unexpectedOperation("Status")
+}
+
+func (s guiTestScheduler) List(prefix string) ([]scheduler.TaskStatus, error) {
+	s.fixture.mu.Lock()
+	defer s.fixture.mu.Unlock()
+	s.fixture.schedulerListCalls++
+	s.fixture.schedulerListPrefix = prefix
+	return nil, nil
+}
+
+func (s guiTestScheduler) ExportXML(string) ([]byte, error) {
+	return nil, s.unexpectedOperation("ExportXML")
+}
+
+func (s guiTestScheduler) ImportXML(string, []byte) error {
+	return s.unexpectedOperation("ImportXML")
+}
+
+func (s guiTestScheduler) unexpectedOperation(operation string) error {
+	s.fixture.mu.Lock()
+	defer s.fixture.mu.Unlock()
+	s.fixture.schedulerUnexpectedOps++
+	return fmt.Errorf("unexpected GUI test scheduler operation: %s", operation)
+}
+
+var testInstallAutostartFixture = &guiTestAutostartFixture{}
+
+const (
+	auditLockTerminalWorkerStderrHelperEnv = "MCPHUB_AUDIT_LOCK_TEST_STDERR_HELPER"
+	auditLockTerminalWorkerStderrMarker    = "audit-lock-test-private-stderr"
 )
 
 // TestMain fences the WHOLE internal/gui test binary off the operator's real
@@ -50,6 +184,17 @@ import (
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
+	if len(os.Args) == 2 && os.Args[1] == "audit-lock-terminal-worker" {
+		err := RunAuditLockTerminalWorker(os.Stdin, os.Stdout)
+		if os.Getenv(auditLockTerminalWorkerStderrHelperEnv) == "1" {
+			_, _ = os.Stderr.WriteString(strings.Repeat(auditLockTerminalWorkerStderrMarker, auditLockTerminalWorkerStderrMaxBytes/len(auditLockTerminalWorkerStderrMarker)+1))
+			os.Exit(3)
+		}
+		if err != nil {
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 	api.EnableSupervisorIPCTestPipeIsolation()
 
 	tmp, err := os.MkdirTemp("", "mcphub-gui-test-state-*")
@@ -84,6 +229,11 @@ func TestMain(m *testing.M) {
 		// browser window. See browser.go SuppressBrowserLaunchEnv.
 		SuppressBrowserLaunchEnv: "1",
 	})
+	restoreAutostartFixture := api.SetInstallAutostartFixtureForTest(
+		testInstallAutostartFixture.schedulerFactory,
+		func() (autostart.Backend, error) { return testInstallAutostartFixture, nil },
+		testInstallAutostartFixture.startOwner,
+	)
 
 	// Client-config sandbox audit. This TestMain fences the STATE dir but installs
 	// no home barrier, and several gui handler tests drive real /api/adopt,
@@ -103,6 +253,7 @@ func TestMain(m *testing.M) {
 	if escapes := auditRestore(); escapes > 0 && code == 0 {
 		code = 1
 	}
+	restoreAutostartFixture()
 	restoreEnv()
 	restoreClientEnv()
 	restoreState()
