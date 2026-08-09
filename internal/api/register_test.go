@@ -1393,6 +1393,98 @@ func TestRegister_SupervisedWritesIntentAndDeletesLegacyLSPTask(t *testing.T) {
 	}
 }
 
+func TestRegisterOneLanguageSupervised_ReleaseErrorContinuesForwardSettlement(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		failReleaseAt int
+	}{
+		{name: "registry-save-release", failReleaseAt: 1},
+		{name: "client-write-release", failReleaseAt: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newRegisterHarness(t)
+			defer h.restore()
+
+			reconcileCalls := 0
+			origReconcile := registerSupervisorReconcileFn
+			registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
+				reconcileCalls++
+				return ReconcileResponse{DryRun: false}, nil
+			}
+			defer func() { registerSupervisorReconcileFn = origReconcile }()
+
+			workspace := t.TempDir()
+			canonical, err := CanonicalWorkspacePath(workspace)
+			if err != nil {
+				t.Fatalf("CanonicalWorkspacePath: %v", err)
+			}
+			wsKey := WorkspaceKey(canonical)
+			reg := NewRegistry(h.regPath)
+			releaseErr := errors.New("synthetic registry release unconfirmed")
+			lockCalls := 0
+			releaseCalls := 0
+			reg.lockFn = func(string) (func() error, error) {
+				lockCalls++
+				return func() error {
+					releaseCalls++
+					if releaseCalls == tc.failReleaseAt {
+						return releaseErr
+					}
+					return nil
+				}, nil
+			}
+
+			manifest := nineLanguageManifest()
+			var spec config.LanguageSpec
+			for _, candidate := range manifest.Languages {
+				if candidate.Name == "go" {
+					spec = candidate
+					break
+				}
+			}
+			var rollback []func() error
+			result := mustNewAPI(t).registerOneLanguageSupervised(
+				manifest, spec, canonical, wsKey, "go",
+				RegisterOpts{Writer: &bytes.Buffer{}, SupervisedProxy: true},
+				reg, h.fakeSch, clientsAllForRegister(), &bytes.Buffer{}, &rollback,
+			)
+
+			if result.PrimaryErr != nil {
+				t.Fatalf("PrimaryErr = %v, want nil after forward commit", result.PrimaryErr)
+			}
+			if !errors.Is(result.ReleaseErr, releaseErr) {
+				t.Fatalf("ReleaseErr = %v, want %v", result.ReleaseErr, releaseErr)
+			}
+			if result.Entry.WorkspaceKey != wsKey || result.Entry.Language != "go" {
+				t.Fatalf("Entry = %+v, want committed %s/go row", result.Entry, wsKey)
+			}
+			if lockCalls != tc.failReleaseAt || releaseCalls != tc.failReleaseAt {
+				t.Fatalf("lock/release calls = %d/%d, want %d/%d", lockCalls, releaseCalls, tc.failReleaseAt, tc.failReleaseAt)
+			}
+			if reconcileCalls != 1 {
+				t.Fatalf("reconcile calls = %d, want 1", reconcileCalls)
+			}
+			for _, clientName := range []string{"claude-code", "codex-cli", "cursor"} {
+				entryName := result.Entry.ClientEntries[clientName]
+				if entryName == "" || h.fakeClients.entries[clientName][entryName] == "" {
+					t.Fatalf("client %s was not forward-settled; entry=%q rows=%v", clientName, entryName, h.fakeClients.entries[clientName])
+				}
+			}
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatalf("DefaultSupervisorIntentPath: %v", err)
+			}
+			intent, err := ReadSupervisorIntent(intentPath)
+			if err != nil {
+				t.Fatalf("ReadSupervisorIntent: %v", err)
+			}
+			if row := intent.FindSupervisorDaemonByTaskName(LSPIntentTaskNameForWorkspaceLanguage(wsKey, "go")); row == nil {
+				t.Fatalf("supervisor intent missing committed %s/go row", wsKey)
+			}
+		})
+	}
+}
+
 func TestRegister_SupervisedContinuesWhenSchedulerNotImplemented(t *testing.T) {
 	h := newRegisterHarness(t)
 	defer h.restore()

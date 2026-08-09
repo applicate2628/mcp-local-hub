@@ -105,6 +105,9 @@ type Registry struct {
 	path       string
 	Version    int              `yaml:"version"`
 	Workspaces []WorkspaceEntry `yaml:"workspaces"`
+	// lockFn is an instance-local test seam for deterministic release-error
+	// settlement. Production registries leave it nil and use the ledgered leaf.
+	lockFn func(string) (func() error, error)
 	// savePendingRemovalFn is an internal test seam for the commit-unknown
 	// registry writer case: a durable rename can succeed before reopening the
 	// replacement file reports an error.
@@ -247,6 +250,9 @@ func (r *Registry) LockPath() string { return r.path + ".lock" }
 func (r *Registry) Lock() (func() error, error) {
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
+	}
+	if r.lockFn != nil {
+		return r.lockFn(r.LockPath())
 	}
 	return lockLeafLedgered(r.LockPath())
 }

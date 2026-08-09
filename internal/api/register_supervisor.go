@@ -348,26 +348,35 @@ func (a *API) registerOneLanguageSupervised(
 		fmt.Fprintf(w, "  rollback: removed registry entry %s/%s\n", capturedRegKey, capturedRegLang)
 		return nil
 	})
+	forwardFailure := func(err error) registerLanguageResult {
+		if result.ReleaseErr == nil {
+			result.PrimaryErr = err
+			return result
+		}
+		// The registry row is already durable and its lock release is
+		// unconfirmed. Preserve that forward commit and finish reporting the
+		// exact settlement causes; rollback would have to re-acquire the
+		// potentially poisoned leaf and could tear down state that is live.
+		result.Entry = composedEntry
+		result.ReleaseErr = errors.Join(result.ReleaseErr, err)
+		return result
+	}
 	releaseErr := unlock()
 	unlock = nil
 	if releaseErr != nil {
 		result.Entry = composedEntry
 		result.ReleaseErr = releaseErr
-		return result
-	}
-
-	unlock, err = reg.Lock()
-	if err != nil {
-		result.PrimaryErr = fmt.Errorf("re-acquire registry lock: %w", err)
-		return result
-	}
-	if err := reg.Load(); err != nil {
-		result.PrimaryErr = fmt.Errorf("reload registry: %w", err)
-		return result
-	}
-	if _, ok := reg.Get(wsKey, lang); !ok {
-		result.PrimaryErr = fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang)
-		return result
+	} else {
+		unlock, err = reg.Lock()
+		if err != nil {
+			return forwardFailure(fmt.Errorf("re-acquire registry lock: %w", err))
+		}
+		if err := reg.Load(); err != nil {
+			return forwardFailure(fmt.Errorf("reload registry: %w", err))
+		}
+		if _, ok := reg.Get(wsKey, lang); !ok {
+			return forwardFailure(fmt.Errorf("registry entry disappeared before client updates for %s/%s", wsKey, lang))
+		}
 	}
 	for _, b := range bindingsPre {
 		client, ok := allClients[b.Client]
@@ -389,8 +398,7 @@ func (a *API) registerOneLanguageSupervised(
 		// the non-supervised register loop.
 		priorEntry, err := client.GetEntry(entryName)
 		if err != nil {
-			result.PrimaryErr = fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err)
-			return result
+			return forwardFailure(fmt.Errorf("snapshot prior %s entry in %s: %w", entryName, b.Client, err))
 		}
 		urlPath := b.URLPath
 		if urlPath == "" {
@@ -401,8 +409,7 @@ func (a *API) registerOneLanguageSupervised(
 			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", port, urlPath),
 		}
 		if err := client.AddEntry(entry); err != nil {
-			result.PrimaryErr = fmt.Errorf("write %s entry: %w", b.Client, err)
-			return result
+			return forwardFailure(fmt.Errorf("write %s entry: %w", b.Client, err))
 		}
 		clientRef := client
 		savedPrior := priorEntry
@@ -425,18 +432,18 @@ func (a *API) registerOneLanguageSupervised(
 		})
 		fmt.Fprintf(w, "✓ %s → %s (entry %s)\n", b.Client, entry.URL, entryName)
 	}
-	releaseErr = unlock()
-	unlock = nil
-	if releaseErr != nil {
-		result.Entry = composedEntry
-		result.ReleaseErr = releaseErr
-		return result
+	if unlock != nil {
+		releaseErr = unlock()
+		unlock = nil
+		if releaseErr != nil {
+			result.Entry = composedEntry
+			result.ReleaseErr = errors.Join(result.ReleaseErr, releaseErr)
+		}
 	}
 
 	restoreIntent, err := a.upsertLSPSupervisorIntent(composedEntry, canonicalExe)
 	if err != nil {
-		result.PrimaryErr = err
-		return result
+		return forwardFailure(err)
 	}
 	// reconcileAttempted gates the rollback kill-by-port. The spawn TRIGGER is
 	// not proxy readiness — it is the
@@ -457,8 +464,7 @@ func (a *API) registerOneLanguageSupervised(
 		return nil
 	})
 	if canonicalTaskName, err := a.writeRegisterRunningIntentForTask(taskName); err != nil {
-		result.PrimaryErr = fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err)
-		return result
+		return forwardFailure(fmt.Errorf("clear register stop for %s before supervisor reconcile: %w", canonicalTaskName, err))
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), DefaultReconcileTimeout)
 	defer cancel()
@@ -466,12 +472,10 @@ func (a *API) registerOneLanguageSupervised(
 	// reconcile can bind the port, so the rollback must own a port kill.
 	reconcileAttempted = true
 	if _, err := registerSupervisorReconcileFn(ctx, true); err != nil {
-		result.PrimaryErr = fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
-		return result
+		return forwardFailure(fmt.Errorf("supervisor reconcile after LSP intent write: %w", err))
 	}
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		result.PrimaryErr = fmt.Errorf("proxy readiness on port %d: %w", port, err)
-		return result
+		return forwardFailure(fmt.Errorf("proxy readiness on port %d: %w", port, err))
 	}
 	fmt.Fprintf(w, "✓ Supervisor-managed LSP proxy started: %s\n", LSPIntentTaskNameForWorkspaceLanguage(wsKey, lang))
 	a.recordRegisterIntentForTask(taskName, w)
