@@ -226,7 +226,8 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 	var timeout bool
 	select {
 	case waitErr = <-waited:
-		killProcessGroup(invocation.Command)
+		// Wait has reaped the group leader. Do not signal its numeric PGID
+		// afterward: the kernel may already have reassigned it to another group.
 	case <-ctx.Done():
 		timeout = true
 		if invocation.timeoutKill != nil {
