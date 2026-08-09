@@ -389,11 +389,13 @@ func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, go
 	scanner.Buffer(make([]byte, 0, 64*1024), int(limits.metadataBytes))
 
 	inFailedPorts := false
+	tripletHeaderOwned := false
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		if m := wrapperTripletHeaderRE.FindStringSubmatch(line); m != nil {
 			info.Triplet = m[1]
+			tripletHeaderOwned = true
 			ok = true
 			inFailedPorts = false
 			continue
@@ -410,6 +412,9 @@ func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, go
 			info.OverlayPortsDropped = 0
 			info.BuildtreesRoot = ""
 			info.InstallRoot = ""
+			if !tripletHeaderOwned {
+				info.Triplet = ""
+			}
 			info.Command, info.CommandTruncated = truncateWireValue(command, limits.commandBytes)
 			ok = true
 			inFailedPorts = false
@@ -438,8 +443,8 @@ func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, go
 				}
 				info.OverlayPorts = append(info.OverlayPorts, boundedValue(overlay, limits.pathBytes))
 			}
-			if t := commandFlagValue(argv, "--triplet"); t != "" && info.Triplet == "" {
-				info.Triplet = t
+			if !tripletHeaderOwned {
+				info.Triplet = info.CommandTriplet
 			}
 			if b := commandFlagValue(argv, "--x-buildtrees-root"); b != "" {
 				info.BuildtreesRoot = b

@@ -691,7 +691,7 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 	// cannot be squeezed out by warnings; any incomplete scan fails closed above.
 
 	reportedPhase := chosenPhase
-	if reportedPhase == PhaseInstall {
+	if reportedPhase == PhaseInstall && base.FirstError != nil && isCompilerLinkerDiagnostic(*base.FirstError) {
 		// vcpkg's own ninja invocation compiles AND installs in one "install"
 		// step; a compiler/linker-shaped diagnostic found there means the
 		// build (not the file-copy install step) is what actually failed.

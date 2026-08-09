@@ -170,9 +170,27 @@ func RunGraph(ctx context.Context, args Args) Result {
 }
 
 func run(ctx context.Context, args Args, walk walkFn, walkTree walkTreeFn) Result {
-	root := strings.TrimSpace(args.Root)
-	file := strings.TrimSpace(args.File)
-	workspaceRoot := strings.TrimSpace(args.WorkspaceRoot)
+	root := args.Root
+	file := args.File
+	workspaceRoot := args.WorkspaceRoot
+	// Whitespace-only values are absent, but whitespace belonging to an
+	// otherwise valid filesystem path is data and must reach the walker
+	// unchanged.
+	if strings.TrimSpace(root) == "" {
+		root = ""
+	}
+	if strings.TrimSpace(file) == "" {
+		file = ""
+	}
+	if strings.TrimSpace(workspaceRoot) == "" {
+		workspaceRoot = ""
+	}
+
+	// Zero means "use the package default". Negative values are never an
+	// omitted option and must fail before any traversal or filesystem work.
+	if args.MaxDepth < 0 || args.MaxNodes < 0 || args.MaxFileBytes < 0 || args.MaxRoots < 0 {
+		return Result{Status: evidence.StatusUnknown, Reason: ReasonArgsInvalid}
+	}
 
 	// root and file are declared MUTUALLY EXCLUSIVE by the tool schema and
 	// select different traversal modes. Supplying both is not a caller

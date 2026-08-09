@@ -22,14 +22,16 @@ type statement struct {
 }
 
 type token struct {
-	Text   string
-	Quoted bool
-	Raw    bool
+	Text           string
+	Quoted         bool
+	Raw            bool
+	literalDollars []bool
 }
 
 type argValue struct {
-	Text string
-	Raw  bool
+	Text           string
+	Raw            bool
+	literalDollars []bool
 }
 
 type versionManifest struct {
@@ -348,7 +350,8 @@ func tokenize(s string) []token {
 			}
 		case s[i] == '"':
 			end := skipQuoted(s, i)
-			out = append(out, token{Text: unescapeQuoted(s[i+1 : end-1]), Quoted: true})
+			text, literalDollars := unescapeQuoted(s[i+1 : end-1])
+			out = append(out, token{Text: text, Quoted: true, literalDollars: literalDollars})
 			i = end
 		case s[i] == '[':
 			if eq, start, bracket := matchBracketOpen(s, i); bracket {
@@ -374,14 +377,19 @@ func tokenize(s string) []token {
 	return out
 }
 
-func unescapeQuoted(s string) string {
+func unescapeQuoted(s string) (string, []bool) {
 	if !strings.Contains(s, "\\") {
-		return s
+		return s, nil
 	}
 	var out strings.Builder
+	literalDollars := make([]bool, 0, len(s))
+	writeByte := func(value byte, literalDollar bool) {
+		out.WriteByte(value)
+		literalDollars = append(literalDollars, literalDollar)
+	}
 	for i := 0; i < len(s); i++ {
 		if s[i] != '\\' || i+1 >= len(s) {
-			out.WriteByte(s[i])
+			writeByte(s[i], false)
 			continue
 		}
 		next := s[i+1]
@@ -391,24 +399,24 @@ func unescapeQuoted(s string) string {
 		case next == '\r' && i+2 < len(s) && s[i+2] == '\n':
 			i += 2
 		case next == 't':
-			out.WriteByte('\t')
+			writeByte('\t', false)
 			i++
 		case next == 'r':
-			out.WriteByte('\r')
+			writeByte('\r', false)
 			i++
 		case next == 'n':
-			out.WriteByte('\n')
+			writeByte('\n', false)
 			i++
 		case next >= 'A' && next <= 'Z' || next >= 'a' && next <= 'z' || next >= '0' && next <= '9':
-			out.WriteByte(s[i])
-			out.WriteByte(next)
+			writeByte(s[i], false)
+			writeByte(next, false)
 			i++
 		default:
-			out.WriteByte(next)
+			writeByte(next, next == '$')
 			i++
 		}
 	}
-	return out.String()
+	return out.String(), literalDollars
 }
 
 // tokenizeArgs remains the simple string view used by focused existing tests.
@@ -428,7 +436,7 @@ func extractKeyedArgValues(tokens []token) map[string]argValue {
 			continue
 		}
 		if i+1 < len(tokens) && !knownArgKeys[tokens[i+1].Text] {
-			out[tokens[i].Text] = argValue{Text: tokens[i+1].Text, Raw: tokens[i+1].Raw}
+			out[tokens[i].Text] = argValue{Text: tokens[i+1].Text, Raw: tokens[i+1].Raw, literalDollars: tokens[i+1].literalDollars}
 			i++
 		} else {
 			out[tokens[i].Text] = argValue{}
@@ -636,38 +644,116 @@ func closeUnsupportedScope(scopes []unsupportedScope, opener string) ([]unsuppor
 // ok is false and unresolved names it. A partially-expanded string is never
 // returned, because a partially-expanded string compared against a remote is
 // exactly how a wrong negative is manufactured.
+func trimArgValue(raw argValue) (string, []bool) {
+	text := strings.TrimSpace(raw.Text)
+	if text == "" || len(raw.literalDollars) != len(raw.Text) {
+		return text, nil
+	}
+	start := strings.Index(raw.Text, text)
+	return text, raw.literalDollars[start : start+len(text)]
+}
+
+func nextExpandableMatch(re *regexp.Regexp, text string, literalDollars []bool, start int) []int {
+	for start <= len(text) {
+		match := re.FindStringSubmatchIndex(text[start:])
+		if match == nil {
+			return nil
+		}
+		for i := range match {
+			if match[i] >= 0 {
+				match[i] += start
+			}
+		}
+		if match[0] >= len(literalDollars) || !literalDollars[match[0]] {
+			return match
+		}
+		start = match[0] + 1
+	}
+	return nil
+}
+
+func nextExpandableVariableMarker(text string, literalDollars []bool, start int) int {
+	for start < len(text) {
+		offset := strings.Index(text[start:], "${")
+		if offset < 0 {
+			return -1
+		}
+		index := start + offset
+		if index >= len(literalDollars) || !literalDollars[index] {
+			return index
+		}
+		start = index + 1
+	}
+	return -1
+}
+
+func hasLiteralVariableReference(text string, literalDollars []bool) bool {
+	for i, literal := range literalDollars {
+		if literal && i+1 < len(text) && text[i+1] == '{' {
+			return true
+		}
+	}
+	return false
+}
+
+func appendExpanded(builder *strings.Builder, value string, maxBytes int) bool {
+	if maxBytes < builder.Len() || len(value) > maxBytes-builder.Len() {
+		return false
+	}
+	builder.WriteString(value)
+	return true
+}
+
 func expandVariables(environment variableEnvironment, manifest []byte, portName, text string) (expanded string, source RefValueSource, unresolved string, ok bool) {
-	if !strings.Contains(text, "${") {
-		return text, "", "", true
+	expanded, source, unresolved, ok, _ = expandVariablesBounded(
+		environment, manifest, portName, argValue{Text: text}, int(^uint(0)>>1),
+	)
+	return expanded, source, unresolved, ok
+}
+
+// expandVariablesBounded substitutes source-visible ${NAME} references while
+// refusing an aggregate result before it can exceed maxBytes. An escaped
+// dollar is copied as literal data and never becomes a variable opener.
+func expandVariablesBounded(environment variableEnvironment, manifest []byte, portName string, raw argValue, maxBytes int) (expanded string, source RefValueSource, unresolved string, ok, limitExceeded bool) {
+	text, literalDollars := trimArgValue(raw)
+	if nextExpandableVariableMarker(text, literalDollars, 0) < 0 {
+		return text, "", "", true, false
 	}
 	sources := map[RefValueSource]bool{}
-	expanded = embeddedVarRE.ReplaceAllStringFunc(text, func(match string) string {
-		if unresolved != "" {
-			return match
+	var builder strings.Builder
+	for cursor := 0; cursor < len(text); {
+		match := nextExpandableMatch(embeddedVarRE, text, literalDollars, cursor)
+		marker := nextExpandableVariableMarker(text, literalDollars, cursor)
+		if marker >= 0 && (match == nil || marker < match[0]) {
+			return "", "", "nested_expansion", false, false
 		}
-		name := embeddedVarRE.FindStringSubmatch(match)[1]
+		if match == nil {
+			if !appendExpanded(&builder, text[cursor:], maxBytes) {
+				return "", "", "", false, true
+			}
+			break
+		}
+		if !appendExpanded(&builder, text[cursor:match[0]], maxBytes) {
+			return "", "", "", false, true
+		}
+		name := text[match[2]:match[3]]
 		value, src, resolved := resolveRefVariable(environment, manifest, portName, name)
 		if !resolved {
-			unresolved = name
-			return match
+			return "", "", name, false, false
+		}
+		if nested := embeddedVarRE.FindStringSubmatch(value); nested != nil {
+			return "", "", nested[1], false, false
+		}
+		if strings.Contains(value, "${") {
+			return "", "", "nested_expansion", false, false
 		}
 		sources[src] = true
-		return value
-	})
-	if unresolved != "" {
-		return "", "", unresolved, false
-	}
-	// A substituted value may itself contain a variable reference (e.g.
-	// set(A "${B}")). One pass is deliberate — refusing is honest, whereas
-	// looping risks a cycle and returning the half-expanded text would be
-	// the very defect this function exists to prevent.
-	if strings.Contains(expanded, "${") {
-		if m := embeddedVarRE.FindStringSubmatch(expanded); m != nil {
-			return "", "", m[1], false
+		if !appendExpanded(&builder, value, maxBytes) {
+			return "", "", "", false, true
 		}
-		return "", "", "nested_expansion", false
+		cursor = match[1]
 	}
-	return expanded, singleSource(sources), "", true
+	return builder.String(), singleSource(sources), "", true, false
 }
 
 // singleSource reports the one source every substitution came from, or
@@ -706,20 +792,20 @@ func resolveRefVariable(environment variableEnvironment, manifest []byte, portNa
 }
 
 func resolveMaybeVariable(environment variableEnvironment, manifest []byte, portName string, raw argValue) (value string, wasVar, ok bool) {
-	text := strings.TrimSpace(raw.Text)
+	text, literalDollars := trimArgValue(raw)
 	if text == "" {
 		return "", false, false
 	}
 	if raw.Raw {
 		return text, false, true
 	}
-	if environmentOrCacheVarRE.MatchString(text) {
+	if nextExpandableMatch(environmentOrCacheVarRE, text, literalDollars, 0) != nil {
 		return "", true, false
 	}
-	if !strings.Contains(text, "${") {
+	if nextExpandableVariableMarker(text, literalDollars, 0) < 0 {
 		return text, false, true
 	}
-	expanded, _, _, expandedOK := expandVariables(environment, manifest, portName, text)
+	expanded, _, _, expandedOK, _ := expandVariablesBounded(environment, manifest, portName, argValue{Text: text, literalDollars: literalDollars}, int(^uint(0)>>1))
 	return expanded, true, expandedOK
 }
 
@@ -736,29 +822,34 @@ func manifestVersion(data []byte) string {
 	return ""
 }
 
-func buildPin(environment variableEnvironment, manifest []byte, portName string, ref argValue) Pin {
-	refRaw := strings.TrimSpace(ref.Text)
+func buildPin(environment variableEnvironment, manifest []byte, portName string, ref argValue, maxExpandedBytes int) (Pin, bool) {
+	refRaw, literalDollars := trimArgValue(ref)
 	if refRaw == "" {
-		return Pin{Shape: RefShapeNone}
+		return Pin{Shape: RefShapeNone}, false
 	}
+	literal := ref.Raw || hasLiteralVariableReference(refRaw, literalDollars)
 	// A bracket argument ([[...]]) is uninterpreted CMake text, so ${...}
 	// inside it is literal and must NOT be expanded.
-	if !ref.Raw && environmentOrCacheVarRE.MatchString(refRaw) {
-		match := environmentOrCacheVarRE.FindStringSubmatch(refRaw)
-		return Pin{Ref: refRaw, Shape: RefShapeVariableResolved, UnresolvedVariable: match[0]}
+	if !ref.Raw {
+		if match := nextExpandableMatch(environmentOrCacheVarRE, refRaw, literalDollars, 0); match != nil {
+			return Pin{Ref: refRaw, Shape: RefShapeVariableResolved, UnresolvedVariable: refRaw[match[0]:match[1]], Literal: literal}, false
+		}
 	}
-	if !ref.Raw && strings.Contains(refRaw, "${") {
-		pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
-		expanded, source, unresolved, ok := expandVariables(environment, manifest, portName, refRaw)
+	if !ref.Raw && nextExpandableVariableMarker(refRaw, literalDollars, 0) >= 0 {
+		pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved, Literal: literal}
+		expanded, source, unresolved, ok, limitExceeded := expandVariablesBounded(environment, manifest, portName, argValue{Text: refRaw, literalDollars: literalDollars}, maxExpandedBytes)
+		if limitExceeded {
+			return Pin{}, true
+		}
 		if !ok {
 			pin.UnresolvedVariable = unresolved
-			return pin
+			return pin, false
 		}
 		pin.ResolvedRef, pin.ResolvedFrom = expanded, source
-		return pin
+		return pin, false
 	}
 	if isCommitHex(refRaw) {
-		return Pin{Ref: refRaw, Shape: RefShapeCommit40Hex, Literal: ref.Raw}
+		return Pin{Ref: refRaw, Shape: RefShapeCommit40Hex, Literal: literal}, false
 	}
 	if isAbbreviatedCommitHex(refRaw) {
 		// Named as the commit it is, NOT demoted to tag/branch. The comparison
@@ -766,18 +857,19 @@ func buildPin(environment variableEnvironment, manifest []byte, portName string,
 		// advertises only full SHAs, so an abbreviation cannot be matched
 		// against a tip without resolving it server-side, which this package
 		// never does.
-		return Pin{Ref: refRaw, Shape: RefShapeCommitAbbrev, Literal: ref.Raw}
+		return Pin{Ref: refRaw, Shape: RefShapeCommitAbbrev, Literal: literal}, false
 	}
 	if looksLikeTag(refRaw) {
-		return Pin{Ref: refRaw, Shape: RefShapeTag, Literal: ref.Raw}
+		return Pin{Ref: refRaw, Shape: RefShapeTag, Literal: literal}, false
 	}
-	return Pin{Ref: refRaw, Shape: RefShapeBranch, Literal: ref.Raw}
+	return Pin{Ref: refRaw, Shape: RefShapeBranch, Literal: literal}, false
 }
 
-func parseFetchCandidate(name string, environment variableEnvironment, manifest []byte, portName, args string) FetchCandidate {
+func parseFetchCandidate(name string, environment variableEnvironment, manifest []byte, portName, args string, maxExpandedRefBytes int) (FetchCandidate, bool) {
 	kv := extractKeyedArgValues(tokenize(args))
 	headRef, headRefWasVariable, headRefResolved := resolveMaybeVariable(environment, manifest, portName, kv["HEAD_REF"])
 	candidate := FetchCandidate{HeadRef: headRef, BindsSourcePath: kv["OUT_SOURCE_PATH"].Text == "SOURCE_PATH"}
+	expansionLimitExceeded := false
 	if headRefWasVariable && !headRefResolved {
 		candidate.UnresolvedHeadRefVariable = unresolvedVariableName(kv["HEAD_REF"])
 	}
@@ -790,11 +882,11 @@ func parseFetchCandidate(name string, environment variableEnvironment, manifest 
 		if repo != "" {
 			candidate.Remote.URL = "https://github.com/" + repo + ".git"
 		}
-		candidate.Pin = buildPin(environment, manifest, portName, kv["REF"])
+		candidate.Pin, expansionLimitExceeded = buildPin(environment, manifest, portName, kv["REF"], maxExpandedRefBytes)
 	case "vcpkg_from_git":
 		url, _, _ := resolveMaybeVariable(environment, manifest, portName, kv["URL"])
 		candidate.Remote = Remote{Kind: RemoteGit, URL: url}
-		candidate.Pin = buildPin(environment, manifest, portName, kv["REF"])
+		candidate.Pin, expansionLimitExceeded = buildPin(environment, manifest, portName, kv["REF"], maxExpandedRefBytes)
 	case "vcpkg_from_gitlab":
 		gitlabURL := "https://gitlab.com"
 		if strings.TrimSpace(kv["GITLAB_URL"].Text) != "" {
@@ -809,21 +901,21 @@ func parseFetchCandidate(name string, environment variableEnvironment, manifest 
 		if repo != "" && gitlabURL != "" {
 			candidate.Remote.URL = strings.TrimRight(gitlabURL, "/") + "/" + repo + ".git"
 		}
-		candidate.Pin = buildPin(environment, manifest, portName, kv["REF"])
+		candidate.Pin, expansionLimitExceeded = buildPin(environment, manifest, portName, kv["REF"], maxExpandedRefBytes)
 	}
-	return candidate
+	return candidate, expansionLimitExceeded
 }
 
 func unresolvedVariableName(raw argValue) string {
 	if raw.Raw {
 		return ""
 	}
-	text := strings.TrimSpace(raw.Text)
-	if m := embeddedVarRE.FindStringSubmatch(text); m != nil {
-		return m[1]
+	text, literalDollars := trimArgValue(raw)
+	if match := nextExpandableMatch(embeddedVarRE, text, literalDollars, 0); match != nil {
+		return text[match[2]:match[3]]
 	}
-	if m := environmentOrCacheVarRE.FindStringSubmatch(text); m != nil {
-		return m[0]
+	if match := nextExpandableMatch(environmentOrCacheVarRE, text, literalDollars, 0); match != nil {
+		return text[match[0]:match[1]]
 	}
 	return ""
 }
@@ -1068,7 +1160,13 @@ statementLoop:
 				}
 				continue // declaration bodies are not executed at definition time
 			}
-			candidate := parseFetchCandidate(st.Name, variables, manifest, portName, st.Args)
+			candidate, expansionLimitExceeded := parseFetchCandidate(
+				st.Name, variables, manifest, portName, st.Args,
+				MaxRetainedFetchCandidateBytesPerPort-retainedCandidateBytes,
+			)
+			if expansionLimitExceeded {
+				return parsedPortfile{Candidates: candidates, CandidateLimitExceeded: true}, true
+			}
 			candidate.GuardVariable = state.unknown
 			candidate.Guard = state.text
 			candidate.ActiveForDefault = state.active

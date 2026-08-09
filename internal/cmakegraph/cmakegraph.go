@@ -401,6 +401,9 @@ const (
 	// CoverageCommandCapExceeded: command discovery reached its bounded
 	// retention ceiling before the complete file could be interpreted.
 	CoverageCommandCapExceeded CoverageReason = "command_cap_exceeded"
+	// CoverageControlFlowInvalid: an unmatched or mismatched control-flow
+	// terminator made the rest of the CMake file structurally uninterpretable.
+	CoverageControlFlowInvalid CoverageReason = "control_flow_invalid"
 )
 
 // EdgeKind distinguishes the two directives this package tracks.
@@ -876,11 +879,11 @@ const (
 	controlFrameWhile
 )
 
-func closeControlFrame(frames []controlFrame, expected controlFrame) []controlFrame {
+func closeControlFrame(frames []controlFrame, expected controlFrame) ([]controlFrame, bool) {
 	if n := len(frames); n > 0 && frames[n-1] == expected {
-		return frames[:n-1]
+		return frames[:n-1], true
 	}
-	return frames
+	return frames, false
 }
 
 // visitKey identifies one (file, source-context) traversal node. Keying by
@@ -1194,20 +1197,27 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 		case "if":
 			controlFrames = append(controlFrames, controlFrameIf)
 			continue
-		case "endif":
-			controlFrames = closeControlFrame(controlFrames, controlFrameIf)
-			continue
 		case "foreach":
 			controlFrames = append(controlFrames, controlFrameForeach)
-			continue
-		case "endforeach":
-			controlFrames = closeControlFrame(controlFrames, controlFrameForeach)
 			continue
 		case "while":
 			controlFrames = append(controlFrames, controlFrameWhile)
 			continue
-		case "endwhile":
-			controlFrames = closeControlFrame(controlFrames, controlFrameWhile)
+		case "endif", "endforeach", "endwhile":
+			expected := controlFrameIf
+			switch c.Name {
+			case "endforeach":
+				expected = controlFrameForeach
+			case "endwhile":
+				expected = controlFrameWhile
+			}
+			var valid bool
+			controlFrames, valid = closeControlFrame(controlFrames, expected)
+			if !valid {
+				w.recordCoverage(canonSelf, CoverageControlFlowInvalid,
+					fmt.Sprintf("invalid %s() at line %d", c.Name, lineFromIndex(lineIndex, c.NameOffset)))
+				return
+			}
 			continue
 		case "macro", "function":
 			macroDepth++

@@ -243,7 +243,7 @@ const (
 	// BatchReasonTooManyPortDirs: port_dirs exceeds MaxPortDirs. Rejection is
 	// before filesystem reads, clock samples, result preallocation, or remote
 	// work, so one daemon request cannot claim unbounded sequential work.
-	BatchReasonTooManyPortDirs   BatchReason = "too_many_port_dirs"
+	BatchReasonTooManyPortDirs BatchReason = "too_many_port_dirs"
 	// BatchReasonPortDirsSizeLimit: one path or aggregate retained path bytes
 	// exceed the package-owned bounds before any result row or I/O is created.
 	BatchReasonPortDirsSizeLimit BatchReason = "port_dirs_size_limit"
@@ -358,10 +358,10 @@ type Pin struct {
 	// empty. It is the diagnostic that tells an operator which variable to
 	// supply, instead of leaving them with a bare "unresolvable".
 	UnresolvedVariable string `json:"unresolved_variable,omitempty"`
-	// Literal is true when REF came from a CMake BRACKET argument
-	// ([[...]] / [=[...]=]), whose contents CMake does not interpret. A "${"
-	// inside such a ref is part of the ref NAME, not a variable reference, so
-	// it is compared verbatim on purpose. This bit is what lets the
+	// Literal is true when REF contains text CMake does not interpret: either a
+	// BRACKET argument ([[...]] / [=[...]=]) or an escaped variable opener in a
+	// quoted argument. A protected "${" is part of the ref NAME, not a variable
+	// reference, so it is compared verbatim on purpose. This bit is what lets the
 	// unexpanded-ref guard distinguish "CMake would have expanded this and we
 	// could not" from "this genuinely is the ref's name".
 	Literal bool `json:"literal,omitempty"`

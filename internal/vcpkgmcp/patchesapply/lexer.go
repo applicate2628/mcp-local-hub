@@ -437,10 +437,11 @@ func splitCMakeListBounded(t token, value evaluatedValue, maxItems int) ([]seman
 			return nil, true
 		}
 		return []semanticItem{semanticItem{
-			text:    string(value.text),
-			display: string(value.text),
-			meta:    combineItemProvenance(value.metas),
-			spans:   spansFromMetas(value.metas),
+			text:              string(value.text),
+			display:           string(value.text),
+			meta:              combineItemProvenance(value.metas),
+			spans:             spansFromMetas(value.metas),
+			literalReferences: t.Raw,
 		}}, false
 	}
 

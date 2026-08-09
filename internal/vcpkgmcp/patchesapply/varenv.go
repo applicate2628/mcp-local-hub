@@ -45,9 +45,10 @@ type provenanceMeta struct {
 // provenanceSpan is metadata over a byte range of one serialized CMake
 // value. It deliberately contains no semantic-list item cache.
 type provenanceSpan struct {
-	start int
-	end   int
-	meta  provenanceMeta
+	start             int
+	end               int
+	meta              provenanceMeta
+	literalReferences bool
 }
 
 type serializedValue struct {
@@ -96,10 +97,11 @@ func mergeResolution(left, right valueResolution) valueResolution {
 const maxVariableDereferenceDepth = 32
 
 type semanticItem struct {
-	text    string
-	display string
-	meta    provenanceMeta
-	spans   []provenanceSpan
+	text              string
+	display           string
+	meta              provenanceMeta
+	spans             []provenanceSpan
+	literalReferences bool
 }
 
 // expansion is the result of substituting ${VAR}/$ENV{VAR} references in one
@@ -467,6 +469,15 @@ func serializedMetaAt(serialized serializedValue, i int) provenanceMeta {
 	return certainProvenance()
 }
 
+func serializedReferenceLiteralAt(serialized serializedValue, i int) bool {
+	for _, span := range serialized.spans {
+		if i >= span.start && i < span.end {
+			return span.literalReferences
+		}
+	}
+	return false
+}
+
 func appendSerializedRange(value *evaluatedValue, serialized serializedValue, start, end int, callMeta provenanceMeta) bool {
 	for i := start; i < end; i++ {
 		meta := certainProvenance()
@@ -667,6 +678,13 @@ func (env *varEnv) appendSerializedResolved(value *evaluatedValue, serialized se
 		reference := scan.reference
 		reference.start += offset
 		reference.end += offset
+		if serializedReferenceLiteralAt(serialized, reference.start) {
+			if !appendSerializedRange(value, serialized, offset, reference.end, callMeta) {
+				return false
+			}
+			offset = reference.end
+			continue
+		}
 		if !appendSerializedRange(value, serialized, offset, reference.start, callMeta) {
 			return false
 		}
@@ -776,7 +794,7 @@ func serializeItems(items []semanticItem) serializedValue {
 			if meta.source == "" {
 				meta.source = item.display
 			}
-			value.spans = append(value.spans, provenanceSpan{start: offset + span.start, end: offset + span.end, meta: meta})
+			value.spans = append(value.spans, provenanceSpan{start: offset + span.start, end: offset + span.end, meta: meta, literalReferences: item.literalReferences})
 		}
 	}
 	return value

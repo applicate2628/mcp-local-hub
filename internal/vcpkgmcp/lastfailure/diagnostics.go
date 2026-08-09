@@ -692,6 +692,23 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 	return Diagnostic{}, false
 }
 
+// isCompilerLinkerDiagnostic reports whether a diagnostic came from one of
+// the compiler/linker-specific shapes. CMake and ninja diagnostics are
+// deliberately excluded: an install-phase CMake error describes the install
+// step itself, while only compiler/linker output proves that vcpkg's combined
+// ninja install target actually failed while building.
+func isCompilerLinkerDiagnostic(d Diagnostic) bool {
+	line := d.Text
+	if newline := strings.IndexByte(line, '\n'); newline >= 0 {
+		line = line[:newline]
+	}
+	return gccClangDiagRE.MatchString(line) ||
+		msvcCompileDiagRE.MatchString(line) ||
+		msvcLinkDiagRE.MatchString(line) ||
+		(gnuLDLocationRE.MatchString(line) && gnuLDCauseRE.MatchString(line)) ||
+		toolDiagRE.MatchString(line)
+}
+
 // SeverityError is the normalized severity that — and only that — can
 // establish a build FAILURE. normalizeSeverity folds MSVC's "fatal error"
 // into it; "warning" and "note" are deliberately NOT in this set.
