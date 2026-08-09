@@ -137,6 +137,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 	}
 
 	declarationDepth := 0
+	var loopScopes []string
 	declaredCommands := map[string]struct{}{}
 	deferredCommandBody := false
 	for _, st := range stmts {
@@ -152,12 +153,37 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			}
 			continue
 		}
+		if len(loopScopes) != 0 {
+			if containsPatchesKeyword(st.Args) {
+				sawPatchesKeyword = true
+				deferredCommandBody = true
+			}
+			switch st.Name {
+			case "foreach", "while":
+				loopScopes = append(loopScopes, st.Name)
+			case "endforeach":
+				if loopScopes[len(loopScopes)-1] != "foreach" {
+					return nil, false, parserStructuralExpressionUnparsable
+				}
+				loopScopes = loopScopes[:len(loopScopes)-1]
+			case "endwhile":
+				if loopScopes[len(loopScopes)-1] != "while" {
+					return nil, false, parserStructuralExpressionUnparsable
+				}
+				loopScopes = loopScopes[:len(loopScopes)-1]
+			}
+			continue
+		}
 		switch st.Name {
 		case "function", "macro":
 			if toks := tokenize(st.Args); len(toks) > 0 && !toks[0].Quoted {
 				declaredCommands[strings.ToLower(toks[0].Text)] = struct{}{}
 			}
 			declarationDepth = 1
+		case "foreach", "while":
+			loopScopes = append(loopScopes, st.Name)
+		case "endforeach", "endwhile":
+			return nil, false, parserStructuralExpressionUnparsable
 		case "if":
 			cond, unresolved := evalCondition(st.Args, env)
 			parent := active()
@@ -226,7 +252,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			}
 		}
 	}
-	if len(frames) != 0 || declarationDepth != 0 {
+	if len(frames) != 0 || declarationDepth != 0 || len(loopScopes) != 0 {
 		return nil, false, parserStructuralExpressionUnparsable
 	}
 	if deferredCommandBody {

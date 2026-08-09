@@ -549,7 +549,7 @@ func finalizeProjectedResult(result Result, state *callState) Result {
 	result.Resources = state.report
 	result.Resources.Completeness = projected.completeness()
 	result.DiagnosticsDroppedExact = projected.diagnosticsDroppedExact()
-	return boundResponse(result)
+	return boundResponse(redactResultCommands(result))
 }
 
 // projectedScanCompleteness preserves the producer-owned completeness fact

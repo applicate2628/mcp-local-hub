@@ -232,7 +232,8 @@ func registerTools(vs *VcpkgServer) error {
 			"NEVER lifted out of a phase log, which holds a nested build tool's output rather than " +
 			"vcpkg's own command line. When none is recoverable the field is omitted and " +
 			"exact_command_not_recovered is noted — a wrong command an operator pastes into a shell " +
-			"is worse than no command. build_command separately carries the build-layer " +
+			"is worse than no command. Credential-bearing command fields are emitted as REDACTED " +
+			"rather than copying secrets into the result. build_command separately carries the build-layer " +
 			"sub-invocation (CMake's \"Run Build Command(s):\") read from the same (phase, " +
 			"configuration) build step as the reported diagnostic; diagnostic_log names the log the " +
 			"headline diagnostic came from, so both are traceable. " +
@@ -254,7 +255,7 @@ func registerTools(vs *VcpkgServer) error {
 			"-> unknown(phase_log_size_limit_exceeded), never a confident verdict from the prefix; an " +
 			"unreadable root or port directory -> unknown(buildtrees_root_unreadable|port_dir_unreadable), " +
 			"NEVER the verified-absence reasons buildtrees_root_absent|port_dir_not_found. root and " +
-			"buildtrees_root MUST be absolute (a relative root would bind to the hub daemon's working " +
+			"buildtrees_root and build_failed_log MUST be absolute (a relative path would bind to the hub daemon's working " +
 			"directory) -> unknown(relative_root); port must be one legal vcpkg port name -> " +
 			"unknown(invalid_port_name); no root resolvable at all -> unknown(vcpkg_root_not_resolved). " +
 			"A build_failed_log's failed_ports list can prove a port did NOT " +
@@ -295,7 +296,7 @@ func registerTools(vs *VcpkgServer) error {
 				"build_failed_log": map[string]any{
 					"type":        "string",
 					"maxLength":   lastfailure.MaxInputScalarBytes,
-					"description": "Optional path to a build_failed.log-shaped wrapper file. Never auto-discovered.",
+					"description": "Optional ABSOLUTE path to a build_failed.log-shaped wrapper file. Never auto-discovered. A relative value returns unknown(relative_root).",
 				},
 				"overlays": map[string]any{
 					"type":        "array",

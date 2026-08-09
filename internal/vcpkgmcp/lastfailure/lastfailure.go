@@ -103,6 +103,9 @@ func LastFailureContext(ctx context.Context, args Args, deps Deps) Result {
 
 func lastFailureWithLimits(ctx context.Context, args Args, deps Deps, limits responseLimits) Result {
 	state := newCallState(limits)
+	if wrapperPath := strings.TrimSpace(args.BuildFailedLog); wrapperPath != "" && !absoluteRoot(wrapperPath) {
+		return finalizeProjectedResult(unknownResult(ReasonRelativeRoot, state.ev, nil, nil), state)
+	}
 	if err := validateArgs(args, limits); err != nil {
 		state.report.Completeness.Arguments = false
 		res := unknownResult(ReasonArgsInvalid, state.ev, []Note{NoteProducerLimitEngaged}, nil)
@@ -146,7 +149,7 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 				append(notes, NoteProducerLimitEngaged), sources)
 		case err == nil:
 			var parseErr error
-			wrapperInfo, wrapperOK, parseErr = parseWrapperContentWithLimits(data, state.limits)
+			wrapperInfo, wrapperOK, parseErr = parseWrapperContentWithLimitsForGOOS(data, state.limits, deps.Discovery.GOOS)
 			state.report.Omitted.FailedPortEntries += wrapperInfo.FailedPortsDropped
 			state.report.Omitted.OverlayEntries += wrapperInfo.OverlayPortsDropped
 			if wrapperInfo.FailedPortsDropped > 0 || wrapperInfo.OverlayPortsDropped > 0 || wrapperInfo.CommandTruncated {

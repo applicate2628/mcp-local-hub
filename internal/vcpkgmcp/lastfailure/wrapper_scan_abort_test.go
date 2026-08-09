@@ -4,6 +4,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func TestWrapperScanAbort_IsNotReportedAsMalformed(t *testing.T) {
 			"cannot distinguish the two notes and would pass vacuously; got ok=%v err=%v", ok, err)
 	}
 
-	const wrapperPath = "buildtrees/wrap.log"
+	wrapperPath := filepath.Join(t.TempDir(), "wrap.log")
 	res := LastFailure(
 		Args{BuildFailedLog: wrapperPath},
 		Deps{FS: oneFileFS{path: wrapperPath, data: oversize}},
@@ -108,7 +109,7 @@ func TestWrapperReadableButUnrecognizable_IsStillMalformed(t *testing.T) {
 		t.Fatalf("precondition failed: this blob must parse !ok with NO error; got ok=%v err=%v", ok, err)
 	}
 
-	const wrapperPath = "buildtrees/wrap.log"
+	wrapperPath := filepath.Join(t.TempDir(), "wrap.log")
 	res := LastFailure(
 		Args{BuildFailedLog: wrapperPath},
 		Deps{FS: oneFileFS{path: wrapperPath, data: small}},

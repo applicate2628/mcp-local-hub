@@ -142,7 +142,7 @@ func TestLastFailure_TotalLogByteLimitFailsClosed(t *testing.T) {
 func TestLastFailure_WrapperMetadataLimitFailsClosed(t *testing.T) {
 	limits := defaultResponseLimits
 	limits.metadataBytes = 32
-	const path = "wrapper.log"
+	path := filepath.Join(t.TempDir(), "wrapper.log")
 	res := lastFailureWithLimits(context.Background(), Args{BuildFailedLog: path},
 		Deps{FS: oneFileFS{path: path, data: []byte(strings.Repeat("x", 64))}}, limits)
 	if res.Status != Status("unknown") || res.Reason != ReasonMetadataLimitExceeded {

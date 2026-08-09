@@ -3,9 +3,12 @@ package lastfailure
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 // WrapperInfo is whatever could be recovered from a build_failed.log-shaped
@@ -173,6 +176,87 @@ func SplitWindowsCommandLine(s string) []string {
 	return args
 }
 
+// splitRecordedCommandLine applies the quoting rules of the platform that
+// produced the wrapper. A POSIX command must not be interpreted with Windows
+// CommandLineToArgvW rules: single quotes are data on Windows but delimiters
+// in a POSIX shell.
+func splitRecordedCommandLine(s, goos string) ([]string, error) {
+	if goos == "" {
+		goos = runtime.GOOS
+	}
+	if goos == "windows" {
+		return SplitWindowsCommandLine(s), nil
+	}
+	return splitPOSIXCommandLine(s)
+}
+
+func splitPOSIXCommandLine(s string) ([]string, error) {
+	var args []string
+	var cur strings.Builder
+	started := false
+	quote := rune(0)
+	escaped := false
+	flush := func() {
+		if started {
+			args = append(args, cur.String())
+			cur.Reset()
+			started = false
+		}
+	}
+	for _, r := range s {
+		if escaped {
+			if quote == '"' && !strings.ContainsRune("$`\"\\\n", r) {
+				cur.WriteRune('\\')
+			}
+			if r != '\n' {
+				cur.WriteRune(r)
+			}
+			started = true
+			escaped = false
+			continue
+		}
+		if quote == '\'' {
+			if r == '\'' {
+				quote = 0
+			} else {
+				cur.WriteRune(r)
+			}
+			started = true
+			continue
+		}
+		if quote == '"' {
+			switch r {
+			case '"':
+				quote = 0
+			case '\\':
+				escaped = true
+			default:
+				cur.WriteRune(r)
+			}
+			started = true
+			continue
+		}
+		switch {
+		case r == '\\':
+			escaped = true
+			started = true
+		case r == '\'' || r == '"':
+			quote = r
+			started = true
+		case unicode.IsSpace(r):
+			flush()
+		default:
+			cur.WriteRune(r)
+			started = true
+		}
+	}
+	if escaped || quote != 0 {
+		return nil, fmt.Errorf("unterminated POSIX command quoting")
+	}
+	flush()
+	return args, nil
+}
+
 // commandFlagValues extracts every value supplied for flag (e.g.
 // "--overlay-ports") from an already-split argument list, supporting BOTH
 // documented vcpkg spellings: `--key=value` (one argument) and `--key value`
@@ -223,6 +307,10 @@ func ParseWrapperContent(data []byte) (info WrapperInfo, ok bool, err error) {
 }
 
 func parseWrapperContentWithLimits(data []byte, limits responseLimits) (info WrapperInfo, ok bool, err error) {
+	return parseWrapperContentWithLimitsForGOOS(data, limits, runtime.GOOS)
+}
+
+func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, goos string) (info WrapperInfo, ok bool, err error) {
 	scanner := bufio.NewScanner(bytes.NewReader(data))
 	scanner.Buffer(make([]byte, 0, 64*1024), int(limits.metadataBytes))
 
@@ -245,7 +333,10 @@ func parseWrapperContentWithLimits(data []byte, limits responseLimits) (info Wra
 			if len(command) > limits.inputScalarBytes {
 				continue
 			}
-			argv := SplitWindowsCommandLine(command)
+			argv, splitErr := splitRecordedCommandLine(command, goos)
+			if splitErr != nil {
+				continue
+			}
 			for _, overlay := range commandFlagValues(argv, "--overlay-ports") {
 				if len(info.OverlayPorts) >= limits.overlayEntries || len(overlay) > limits.inputScalarBytes {
 					info.OverlayPortsDropped++

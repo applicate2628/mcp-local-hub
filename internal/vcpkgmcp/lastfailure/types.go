@@ -476,8 +476,10 @@ type Args struct {
 	// BuildtreesRoot overrides the default <root>/buildtrees location.
 	// Highest precedence for locating buildtrees (an explicit param).
 	BuildtreesRoot string `json:"buildtrees_root,omitempty"`
-	// BuildFailedLog is the OPTIONAL wrapper-file path. Never
-	// auto-discovered — accepted only when the caller supplies it.
+	// BuildFailedLog is the OPTIONAL ABSOLUTE wrapper-file path. Never
+	// auto-discovered — accepted only when the caller supplies it. Relative
+	// paths are refused because the hub daemon's working directory is not the
+	// directory where the recorded build ran.
 	BuildFailedLog string `json:"build_failed_log,omitempty"`
 	// Overlays is an explicit, ordered overlay-ports chain (order IS
 	// precedence). Echoed back, never used to resolve which port wins
@@ -505,6 +507,8 @@ type Result struct {
 	// .PHONY`. A wrong command an operator pastes into a shell is worse than
 	// no command, so when nothing authoritative is available this field is
 	// omitted and NoteExactCommandNotRecovered says so.
+	// Credential-bearing commands are emitted as the explicit value REDACTED;
+	// the secret cannot be part of a safe reproducible command.
 	ExactCommand string `json:"exact_command,omitempty"`
 	// BuildCommand is the build-layer sub-invocation recorded by CMake
 	// ("Run Build Command(s): ..."), when the log that produced the reported

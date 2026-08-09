@@ -222,7 +222,7 @@ func TestLastFailure_Case_A_BuildtreesPlusWrapper(t *testing.T) {
 	// (a) buildtrees present + wrapper present.
 	args := Args{
 		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
-		BuildFailedLog: "testdata/wrapper_ok.log",
+		BuildFailedLog: absPath(t, "testdata/wrapper_ok.log"),
 		// Port omitted on purpose: exactly one failed port in the wrapper.
 	}
 	res := LastFailure(args, testDeps())
@@ -282,7 +282,7 @@ func TestLastFailure_Case_C_WrapperMalformed_Degrades(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
 		BuildtreesRoot: absPath(t, "testdata/failing_port/buildtrees"),
-		BuildFailedLog: "testdata/wrapper_malformed.log",
+		BuildFailedLog: absPath(t, "testdata/wrapper_malformed.log"),
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusFailed {
@@ -370,7 +370,7 @@ func TestLastFailure_SuccessfulPort_NoDiagnostic_NeverFabricates(t *testing.T) {
 func TestLastFailure_WrapperConfirmsPortDidNotFail(t *testing.T) {
 	args := Args{
 		Port:           "somelib",
-		BuildFailedLog: "testdata/wrapper_confirms_no_failure.log", // lists only otherlib:cl as failed
+		BuildFailedLog: absPath(t, "testdata/wrapper_confirms_no_failure.log"), // lists only otherlib:cl as failed
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusOK {
@@ -383,7 +383,7 @@ func TestLastFailure_WrapperConfirmsPortDidNotFail(t *testing.T) {
 
 func TestLastFailure_MultipleFailedPortsAmbiguous_NeverSilentlyPicks(t *testing.T) {
 	args := Args{
-		BuildFailedLog: "testdata/wrapper_ok_multi.log", // 3 failed ports, no Port param
+		BuildFailedLog: absPath(t, "testdata/wrapper_ok_multi.log"), // 3 failed ports, no Port param
 	}
 	res := LastFailure(args, testDeps())
 	if res.Status != evidence.StatusUnknown || res.Reason != ReasonMultipleFailedPortsAmbiguous {

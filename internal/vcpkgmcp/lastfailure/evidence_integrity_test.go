@@ -302,7 +302,7 @@ func TestLastFailure_IncompleteWrapperList_NeverConfirmsNoFailure(t *testing.T) 
 func TestLastFailure_CompleteWrapperListStillConfirms(t *testing.T) {
 	res := LastFailure(Args{
 		Port:           "somelib",
-		BuildFailedLog: "testdata/wrapper_confirms_no_failure.log", // count 1, 1 entry
+		BuildFailedLog: absPath(t, "testdata/wrapper_confirms_no_failure.log"), // count 1, 1 entry
 	}, testDeps())
 	if res.Status != evidence.StatusOK || !containsNote(res.Notes, NoteWrapperConfirmsNoFailure) {
 		t.Fatalf("a PROVABLY complete wrapper list must still confirm; got %+v", res)

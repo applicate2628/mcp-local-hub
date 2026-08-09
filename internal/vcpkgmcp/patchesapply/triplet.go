@@ -120,24 +120,32 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 		portDir:   portDir,
 	}
 
-	depth := 0
+	var scopes []string
 	for _, st := range stmts {
 		// st.Name is already lower-cased by splitStatementsChecked — CMake
 		// command names are case-insensitive (cmake-language(7)) and the lexer
 		// is the single owner of that normalization.
 		switch st.Name {
 		case "if", "foreach", "while", "function", "macro":
-			depth++
+			scopes = append(scopes, st.Name)
 			continue
 		case "endif", "endforeach", "endwhile", "endfunction", "endmacro":
-			if depth > 0 {
-				depth--
+			expected := map[string]string{
+				"endif": "if", "endforeach": "foreach", "endwhile": "while",
+				"endfunction": "function", "endmacro": "macro",
+			}[st.Name]
+			if len(scopes) == 0 || scopes[len(scopes)-1] != expected {
+				return nil
 			}
+			scopes = scopes[:len(scopes)-1]
 			continue
 		case "elseif", "else":
+			if len(scopes) == 0 || scopes[len(scopes)-1] != "if" {
+				return nil
+			}
 			continue
 		case "set":
-			if depth != 0 {
+			if len(scopes) != 0 {
 				continue
 			}
 		default:
@@ -168,6 +176,9 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			continue
 		}
 		env.setValue(name, serializedValue{text: strings.Join(parts, ";")})
+	}
+	if len(scopes) != 0 {
+		return nil
 	}
 	facts := make(map[string]string, len(env.values))
 	for name, value := range env.values {

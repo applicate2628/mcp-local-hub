@@ -515,6 +515,42 @@ func recordSetAssignment(environment *variableEnvironment, state guardState, uns
 	environment.setKnown(name, tokens[1].Text)
 }
 
+// recordVariableInvalidation covers CMake commands that can change an
+// existing local binding without using set(). The lexical parser does not
+// execute list operations or model cache/parent scopes, so the only sound
+// postcondition is unknown: an older value must never remain authoritative.
+func recordVariableInvalidation(environment *variableEnvironment, state guardState, args string, destination int) {
+	if !state.active {
+		return
+	}
+	tokens := tokenize(args)
+	if destination < 0 {
+		destination += len(tokens)
+	}
+	if destination < 0 || destination >= len(tokens) || tokens[destination].Raw ||
+		tokens[destination].Text == "" || strings.Contains(tokens[destination].Text, "$") {
+		environment.setAllUnknown()
+		return
+	}
+	environment.setUnknown(tokens[destination].Text)
+}
+
+func recordListMutation(environment *variableEnvironment, state guardState, args string) {
+	tokens := tokenize(args)
+	if len(tokens) < 2 || tokens[0].Raw {
+		if state.active {
+			environment.setAllUnknown()
+		}
+		return
+	}
+	switch strings.ToUpper(tokens[0].Text) {
+	case "LENGTH", "GET", "JOIN", "SUBLIST", "FIND":
+		recordVariableInvalidation(environment, state, args, -1)
+	default:
+		recordVariableInvalidation(environment, state, args, 1)
+	}
+}
+
 type unsupportedScope struct {
 	opener string
 	name   string
@@ -897,6 +933,10 @@ func parsePortfileWithManifest(content string, manifest []byte, portName string)
 			}
 		case "set":
 			recordSetAssignment(&variables, state, len(unsupportedScopes) != 0, st.Args)
+		case "unset":
+			recordVariableInvalidation(&variables, state, st.Args, 0)
+		case "list":
+			recordListMutation(&variables, state, st.Args)
 		default:
 			if !fetchFuncNames[st.Name] {
 				if len(unsupportedScopes) == 0 && state.active && declarationFetches[st.Name] {
