@@ -112,3 +112,7 @@ npm/packages/*/bin/mcphub.exe
 /.dev/
 /excalidraw.log
 /goal-claude.md
+
+# codegraph MCP index bootstrap/reindex logs — machine-local, carry absolute
+# workstation paths, and one is ~2.4 MB. Never publishable.
+.codegraph*.log

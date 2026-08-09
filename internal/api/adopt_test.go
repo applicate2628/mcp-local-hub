@@ -30,6 +30,18 @@ func setupAdoptTestEnv(t *testing.T, entryName, body string) (codexPath, manifes
 	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+	// The four env vars above cover only 4 of the 47 registered adapters. Every
+	// test built on this fixture calls BuildAdoptPlan with an EMPTY ScanOpts, and
+	// adoptScanOpts (adopt.go:403-405) then falls back to DefaultScanConfigPaths,
+	// which resolves clients.ConfigPathForName for EVERY client and READS each
+	// resolved file (scan.go:2398) — regardless of the fixture's `--client`
+	// narrowing. Before this line the adopt tests read the operator's real
+	// %APPDATA%\Code\User\mcp.json et al, and a same-named stdio entry there would
+	// have promoted vscode into plan.AdoptClients, at which point a.Install
+	// (adopt.go:318) BACKS UP, PRUNES BACKUPS OF, and REWRITES that real file. It
+	// held only because the operator's real entries happen not to collide by name
+	// and are `type: remote`. See client_config_env_isolation_test.go.
+	neutralizeClientConfigPathEnv(t, home)
 	canonical := filepath.Join(root, mcphubShortName)
 	if err := os.WriteFile(canonical, []byte("test mcphub"), 0o700); err != nil {
 		t.Fatalf("seed canonical mcphub path: %v", err)
@@ -1303,6 +1315,9 @@ func isolateAdoptPortAllocatorForTest(t *testing.T) string {
 	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+	// Same non-home adapter set setupAdoptTestEnv neutralizes — these two
+	// sites are inline copies of that block and leaked identically.
+	neutralizeClientConfigPathEnv(t, home)
 	t.Cleanup(SetDaemonStateRootForTest(filepath.Join(root, "state")))
 	manifestRoot := filepath.Join(root, "servers")
 	if err := os.MkdirAll(manifestRoot, 0o700); err != nil {
@@ -1343,6 +1358,9 @@ func TestAdoptPlanOutputReportsOmittedSameNameClients(t *testing.T) {
 	t.Setenv("LOCALAPPDATA", filepath.Join(root, "localappdata"))
 	t.Setenv("XDG_DATA_HOME", filepath.Join(root, "xdg-data"))
 	t.Setenv("XDG_STATE_HOME", filepath.Join(root, "xdg-state"))
+	// Same non-home adapter set setupAdoptTestEnv neutralizes — these two
+	// sites are inline copies of that block and leaked identically.
+	neutralizeClientConfigPathEnv(t, home)
 	t.Cleanup(SetDaemonStateRootForTest(filepath.Join(root, "state")))
 
 	codexPath := filepath.Join(home, ".codex", "config.toml")

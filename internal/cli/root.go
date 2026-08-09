@@ -133,6 +133,7 @@ Run "mcphub" with no arguments to start the hub and open the GUI.`,
 	// accepted-loss note in its own constructor.
 	root.AddCommand(
 		newDaemonCmd(),
+		newRouteCmd(),
 		newRelayCmd(),
 		newWeeklyRefreshCmd(),
 		newIntentCollapseCmd(),

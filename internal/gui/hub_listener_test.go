@@ -131,7 +131,7 @@ func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", t.TempDir())
-			s := NewServer(Config{})
+			s := newEphemeralServer(t, Config{})
 			s.hubHealth.markReconcilePending()
 			s.hubRestartDriverAlive.Store(tc.driverAlive)
 
@@ -163,7 +163,7 @@ func TestHubListenerFatalServeExitSetsHealthDownUnlessSuperseded(t *testing.T) {
 }
 
 func TestHubListenerRecoveryCallbackRequiresCurrentComponent(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	oldComp := liveRestartTestComp(3439)
 	currentComp := liveRestartTestComp(3439)
 	s.hubMcpComp.Store(currentComp)

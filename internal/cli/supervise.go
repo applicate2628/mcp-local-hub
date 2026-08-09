@@ -210,6 +210,47 @@ func setReconcileSpawnFnForTest(fn SpawnFunc) func() {
 	return func() { reconcileSpawnFn = prev }
 }
 
+// builtinRouteSeedingDisabledForTest is a package-private test seam,
+// mirroring reconcileSpawnFn / setReconcileSpawnFnForTest above.
+// Default (production, and the default for every test that does not
+// call the accessor below) is FALSE — built-in route-daemon seeding
+// stays ON, matching real supervisor behavior. Honored at the top of
+// ensureBuiltinRouteDaemonAtStartup.
+//
+// Why this seam exists (Increment 1b adversarial-review P1, 2026-07-25):
+// ensureBuiltinRouteDaemonAtStartup makes supervisor-intent.json NEVER
+// empty on any cold start (every start now seeds a route row). A small
+// number of EXISTING reconcile-wiring tests
+// (TestRunSupervise_SpawnsDaemonsFromIntent,
+// TestRunSupervise_NoIntentNoSpawn,
+// TestRunSupervise_ReconcileReadyBeforeSpawnCompletes — all in
+// supervise_reconcile_wiring_test.go) install their OWN fake spawn
+// closure via setReconcileSpawnFnForTest and assert an EXACT spawn
+// count/identity for a single non-route descriptor; they are not
+// shielded by reconcileSpawnFn's TestMain-installed no-op default
+// (settings_registry_test.go) because they explicitly override that
+// default with their own fake to observe fan-out. Those tests are
+// about the reconcile→spawn WIRING CONTRACT, not the route feature —
+// so THEY suppress route seeding via this seam, restoring their exact-
+// count assertions, rather than the route feature's own tests
+// (internal/cli/builtin_route_daemon_test.go,
+// TestSuperviseCommand_StatusIPC_ReconcileReady) disabling it, which
+// would hide the very behavior those tests exist to cover. Applied
+// surgically per-test, not as a global TestMain default, so any OTHER
+// wiring test added later that does not call this accessor still sees
+// route seeding ON by default — the same posture production has.
+var builtinRouteSeedingDisabledForTest bool
+
+// setBuiltinRouteSeedingDisabledForTest disables the built-in route-daemon
+// startup seeder for the duration of one test. Returns a restore function
+// the test defers to reinstate the (production-matching) default before the
+// next test runs.
+func setBuiltinRouteSeedingDisabledForTest() func() {
+	prev := builtinRouteSeedingDisabledForTest
+	builtinRouteSeedingDisabledForTest = true
+	return func() { builtinRouteSeedingDisabledForTest = prev }
+}
+
 // setReconcileTerminateFnForTest is the terminate-side companion of
 // setReconcileSpawnFnForTest. Currently unused by tests because the
 // startup-only reconcile scope never terminates daemons (no daemon
@@ -888,6 +929,20 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		})
 		return startupErr
 	}
+
+	// Increment 1b (work-items/decisions/2026-07-25-supervisor-builtin-
+	// singleton-daemon.md): ensure the built-in `mcphub route` front daemon's
+	// reserved row exists in supervisor-intent.json BEFORE the initial
+	// reconcile plan is built, so this cold start's own reconcile pass spawns
+	// it like any other daemon — not just the NEXT restart. The reassignment
+	// is load-bearing, not cosmetic: on a genuinely fresh host `intent` is nil
+	// here (loadIntentFiles found no supervisor-intent.json yet), and the
+	// initial-reconcile call further below is itself gated on `intent !=
+	// nil` — so this MUST replace `intent` with the (possibly
+	// newly-allocated) returned value, not just call the seeder for its
+	// side effect and keep using the old (possibly nil) local variable.
+	intent = ensureBuiltinRouteDaemonAtStartup(stateDir, intent, events)
+
 	statePath := filepath.Join(stateDir, "supervisor-state.json")
 	runtimeTracker, currentRunning, runningPIDs, stateErr := loadSupervisorStartupRuntime(stateDir)
 	if stateErr != nil {
@@ -2463,6 +2518,166 @@ func hasUnmergedActiveLegacyStops(supervisorIntent *api.SupervisorIntentFile, da
 		}
 	}
 	return false
+}
+
+// ensureBuiltinRouteDaemonAtStartup ensures the reserved built-in
+// `mcphub route` front daemon row exists (and stays canonical) in
+// supervisor-intent.json, per work-items/decisions/2026-07-25-supervisor-
+// builtin-singleton-daemon.md. It is a startup seeder ONLY — it does not
+// spawn, reconcile, or restart anything; it just guarantees the descriptor
+// api.EnsureBuiltinRouteDaemon builds is durably on disk before the reconcile
+// plan and the 60s IntentWatcher re-read (which would otherwise orphan-drop
+// an in-memory-only row) ever see it.
+//
+// intent is the already-loaded *api.SupervisorIntentFile this cold start is
+// about to feed into reconcile. It returns the intent this cold start MUST
+// adopt — the CALLER MUST reassign its own `intent` variable to the return
+// value, not just pass its existing pointer and assume in-place mutation.
+//
+// Two independent contracts on the return value (finding A3,
+// work-items/active/2026-07-25-mcp-front-daemon/architecture-adversarial-
+// reverify.md, runtime-proven by qa-adversarial-falsifiers.md):
+//
+//  1. On any PRE-COMMIT failure (binary-path resolution, strict port
+//     resolution, or the locked persist itself) this function returns the
+//     ORIGINAL caller intent completely UNCHANGED — including nil. A
+//     genuinely fresh host (no supervisor-intent.json yet) passes nil here,
+//     and runSupervise's own initial-reconcile call is gated on `intent !=
+//     nil` further below this call site; fabricating a non-nil empty intent
+//     on a resolution failure would incorrectly enable that gate. The
+//     pre-A3-fix version allocated a fresh non-nil intent BEFORE strict port
+//     resolution, so a portErr or persistErr on a nil input silently turned
+//     nil into `&api.SupervisorIntentFile{Version: 1}` — this version keeps
+//     a separate originalIntent reference that is never touched by the
+//     nil-substitution used only for the (read-only) hadRow check below.
+//  2. On SUCCESS (including the "unchanged" no-op case) this function
+//     returns the EXACT generation api.MutateSupervisorIntentIfChangedReturning
+//     observed under the flock — a fresh disk read with the built-in row
+//     applied — NOT the caller's own pre-lock `intent` with the same mutation
+//     reapplied to it. QA proved the reapply-to-stale-copy approach silently
+//     drops a concurrent writer's changes: if a second writer commits a
+//     daemon, a stop, or a strict-mode flip to disk between this boot's
+//     initial load and this seeder's lock acquisition, that generation lands
+//     on disk (this function's own read is fresh, under the lock) but was
+//     invisible to the returned value the old reapply-based version produced.
+//     Adopting the observed snapshot wholesale is what makes the caller's
+//     controller-cache seed and initial reconcile pass agree with disk.
+//
+// A resolution or persist failure is reported via a warn event
+// (builtin-route-ensure-failed) and otherwise swallowed: the route daemon
+// simply won't auto-spawn this session (no worse than before Increment 1b),
+// but the supervisor's own startup must not fail loud over a single
+// best-effort seeding step for an always-secondary daemon.
+func ensureBuiltinRouteDaemonAtStartup(stateDir string, intent *api.SupervisorIntentFile, events *api.SupervisorEventLog) *api.SupervisorIntentFile {
+	if builtinRouteSeedingDisabledForTest {
+		return intent
+	}
+	supervisorIntentPath := filepath.Join(stateDir, "supervisor-intent.json")
+
+	cmdPath := canonicalMcphubPath()
+	if cmdPath == "" {
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "builtin-route-ensure-failed",
+			Body: map[string]any{
+				"err":  "resolve mcphub binary path (os.Executable) failed",
+				"path": supervisorIntentPath,
+			},
+		})
+		return intent
+	}
+
+	// originalIntent preserves EXACTLY what the caller passed, including
+	// nil, for every pre-commit failure return below (contract 1 above).
+	// workingIntent is a non-nil stand-in usable for the read-only hadRow
+	// check further down; it is NEVER itself returned — only originalIntent
+	// or the locked mutation's own observed snapshot are.
+	originalIntent := intent
+	workingIntent := intent
+	if workingIntent == nil {
+		workingIntent = &api.SupervisorIntentFile{Version: 1}
+	}
+
+	hadRow := false
+	for _, d := range workingIntent.Daemons {
+		if d.TaskName == api.BuiltinRouteTaskName {
+			hadRow = true
+			break
+		}
+	}
+
+	// A3 fix: use the Returning variant and adopt its OBSERVED generation
+	// (result.Intent) rather than reapplying this same mutation to the
+	// caller's own possibly-stale `workingIntent`/`originalIntent`. The
+	// locked read is always a fresh disk read regardless of whether a write
+	// happens (Changed==false still returns the freshly-read file), so this
+	// is correct for the "unchanged" no-op case too — a concurrent writer's
+	// change can be visible on disk even when the route row itself needed no
+	// edit. A P2-4 reserved-name collision surfaces here as an ordinary
+	// mutate error (EnsureBuiltinRouteDaemon returns it instead of silently
+	// overwriting or silently accepting the foreign row) — the persist is
+	// correctly aborted, nothing is written, and this function reports the
+	// failure below exactly like a disk-write failure.
+	var observed *api.SupervisorIntentFile
+	var changed bool
+	var target api.MCPFrontRouteDaemonTarget
+	resolvedTarget := false
+	persistErr := api.NewAPI().WithMCPFrontRouteDaemonTargetLease(context.Background(), func(next api.MCPFrontRouteDaemonTarget) error {
+		resolvedTarget = true
+		target = next
+		result, err := api.MutateSupervisorIntentIfChangedReturning(supervisorIntentPath, func(f *api.SupervisorIntentFile) (bool, error) {
+			return api.EnsureBuiltinRouteDaemon(f, cmdPath, next.Port)
+		})
+		if err != nil {
+			return err
+		}
+		observed = result.Intent
+		changed = result.Changed
+		return nil
+	})
+	if persistErr != nil {
+		body := map[string]any{"err": persistErr.Error(), "path": supervisorIntentPath}
+		if !resolvedTarget {
+			body["phase"] = "resolve-routing-target"
+		}
+		_ = events.Emit(api.SupervisorEvent{
+			Severity: "warn",
+			Source:   "lifecycle",
+			Event:    "builtin-route-ensure-failed",
+			TaskName: api.BuiltinRouteTaskName,
+			Body:     body,
+		})
+		// The disk write did not land (or was correctly refused, e.g. a
+		// reserved-name collision) — return the ORIGINAL in-memory intent
+		// completely unchanged (contract 1). This cold start's reconcile
+		// plan must never diverge from what is durably on disk.
+		return originalIntent
+	}
+
+	action := "unchanged"
+	if changed {
+		if hadRow {
+			action = "replaced"
+		} else {
+			action = "added"
+		}
+	}
+	_ = events.Emit(api.SupervisorEvent{
+		Severity: "info",
+		Source:   "lifecycle",
+		Event:    "builtin-route-ensured",
+		TaskName: api.BuiltinRouteTaskName,
+		Body: map[string]any{
+			"action":             action,
+			"port":               target.Port,
+			"routing_state":      target.State,
+			"routing_generation": target.Generation,
+		},
+	})
+	// Contract 2: adopt the exact generation observed/committed under the
+	// flock, not the caller's own pre-lock copy.
+	return observed
 }
 
 // loadIntentFiles attempts to read the supervisor-intent.json and

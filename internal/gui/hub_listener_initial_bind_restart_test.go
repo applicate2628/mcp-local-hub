@@ -14,7 +14,7 @@ import (
 )
 
 func TestHubInitialBindFailureEnqueuesTypedRestartAndKeepsRecovering(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.signalInitialHubBindFailure(3439)
 
 	select {
@@ -34,7 +34,7 @@ func TestHubInitialBindFailureEnqueuesTypedRestartAndKeepsRecovering(t *testing.
 }
 
 func TestHubInitialNonBindStartupFailureEnqueuesNonBindRestart(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.signalInitialHubStartupFailure(errors.New("manifest setup failed before socket bind"))
 
 	select {
@@ -56,7 +56,7 @@ func TestHubListenerRestartDriverInitialNonBindFailureRetriesWithoutProbeOrRotat
 	if err != nil {
 		t.Fatalf("EnsureHubEndpoint: %v", err)
 	}
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	newComp := liveRestartTestComp(ep.Port)
 	var probes, rotations int
 
@@ -94,7 +94,7 @@ func TestHubListenerRestartDriverInitialNonBindFailureRetriesWithoutProbeOrRotat
 }
 
 func TestHubListenerRestartDriverInitialBindFailureRetriesFromNil(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	newComp := liveRestartTestComp(3439)
 	events := make(chan hubRestartTestEvent, 8)
 	var starts, shutdowns int
@@ -255,7 +255,7 @@ func TestHubListenerRestartDriverInitialBindForeignOwnerRotatesOnceAndNeedsRecon
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	newComp := liveRestartTestComp(before.Port)
 	events := make(chan hubRestartTestEvent, 8)
 	var probes, rotations int
@@ -319,7 +319,7 @@ func TestHubListenerRestartDriverRotationPersistsThenCancelStillNeedsReconcile(t
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan struct{})
@@ -371,7 +371,7 @@ func TestHubListenerRestartDriverInitialBindOwnMcphubGUIOwnerDoesNotRotateOrReco
 		t.Fatalf("EnsureHubEndpoint before restart: %v", err)
 	}
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	newComp := liveRestartTestComp(before.Port)
 	events := make(chan hubRestartTestEvent, 8)
 	var probes, rotations int
@@ -469,7 +469,7 @@ func TestHubListenerRestartDriverCancelledContextAbortsBeforeInstanceIDRotation(
 		}
 	})
 
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	rotateEntered := make(chan struct{})
 	startCalled := make(chan struct{}, 1)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -534,7 +534,7 @@ func TestHubListenerRestartDriverCancelledContextAbortsBeforeInstanceIDRotation(
 }
 
 func TestHubListenerRestartDriverInitialBindFailureExhaustionEndsDown(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	events := make(chan hubRestartTestEvent, 64)
 	var starts, shutdowns int
 
@@ -577,7 +577,7 @@ func TestHubListenerRestartDriverNilComponentNonInitialCausesStop(t *testing.T) 
 		hubListenerRestartCause(255),
 	} {
 		t.Run(cause.String(), func(t *testing.T) {
-			s := NewServer(Config{Port: 0})
+			s := newEphemeralServer(t, Config{Port: 0})
 			var starts, shutdowns int
 			outcome := restartHubListenerWithOutcome(context.Background(), s, hubListenerRestartDriverOptions{
 				cause: cause,

@@ -29,6 +29,27 @@ import (
 // constructors to a fresh tmp dir for the duration of the test.
 // Returns the tmp dir so callers can seed config files at known
 // locations.
+//
+// HOME/USERPROFILE ALONE IS NOT ISOLATION, and the gap here was
+// write-capable. Only four adapters of the 47 in clients.AllClients()
+// resolve their config purely from the home dir; the rest read %APPDATA%,
+// $XDG_CONFIG_HOME, %ProgramData%, $COPILOT_HOME, $KIMI_CODE_HOME or the
+// $MIMOCODE_* set. `mcphub language-server cleanup` takes an UNFILTERED
+// clients.AllClients() (language_server.go:141) and, for each stdio
+// `mcp-language-server` entry it finds, calls adapter.BackupKeep (:292 —
+// which also PRUNES the operator's existing backups) and then
+// adapter.RemoveEntry (:302). Three of the four tests here run with no
+// client filter at all, so before this line a plain `go test
+// ./internal/cli/` could delete a real entry from the operator's own
+// machine and rotate away the backup that would have restored it.
+//
+// It did not fire on the dev host only because every real
+// mcp-language-server entry there had already been migrated to a hub URL
+// by mcphub itself — the product's own output happens to be the one shape
+// the cleanup predicate ignores. That is luck, not isolation.
+//
+// neutralizeClientConfigPathEnv is the single owner of the full env set
+// (client_config_env_isolation_test.go); call it, never re-type the list.
 func withHermeticHome(t *testing.T) string {
 	t.Helper()
 	tmp := t.TempDir()
@@ -40,6 +61,7 @@ func withHermeticHome(t *testing.T) string {
 	// State-dir env vars too, in case any path resolves through them.
 	t.Setenv("LOCALAPPDATA", t.TempDir())
 	t.Setenv("XDG_STATE_HOME", t.TempDir())
+	neutralizeClientConfigPathEnv(t, tmp)
 	return tmp
 }
 

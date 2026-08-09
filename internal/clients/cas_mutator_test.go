@@ -105,6 +105,62 @@ func TestCASRestoreGateBranches(t *testing.T) {
 	})
 }
 
+func TestCASRollbackBypassRestoreGateBranches(t *testing.T) {
+	const liveRouterURL = "http://127.0.0.1:9137/serena/mcp"
+	const legacyHubURL = "http://localhost:9121/mcp"
+	liveCfg := `{"mcpServers":{"serena":{"url":"` + liveRouterURL + `"}}}`
+	legacySnapshot := []byte(`{"mcpServers":{"serena":{"url":"` + legacyHubURL + `"}}}`)
+	matchLiveRouter := func(e *MCPEntry) bool {
+		return e != nil && e.URL == liveRouterURL
+	}
+
+	t.Run("ordinary-restore-keeps-demigration-guard", func(t *testing.T) {
+		c := &claudeCode{path: casWriteCfg(t, "cfg.json", liveCfg)}
+		err := c.CASRestoreEntryFromBytes("serena", matchLiveRouter, legacySnapshot)
+		if !errors.Is(err, ErrBackupEntryAlreadyMigrated) {
+			t.Fatalf("ordinary CAS restore err=%v, want ErrBackupEntryAlreadyMigrated", err)
+		}
+		entry, getErr := c.GetEntry("serena")
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if entry == nil || entry.URL != liveRouterURL {
+			t.Fatalf("ordinary refusal changed the live entry: %+v", entry)
+		}
+	})
+
+	t.Run("rollback-restore-allows-exact-legacy-hub-snapshot", func(t *testing.T) {
+		c := &claudeCode{path: casWriteCfg(t, "cfg.json", liveCfg)}
+		if err := c.CASRestoreEntryFromBytesForRollback("serena", matchLiveRouter, legacySnapshot); err != nil {
+			t.Fatalf("rollback CAS restore: %v", err)
+		}
+		entry, getErr := c.GetEntry("serena")
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if entry == nil || entry.URL != legacyHubURL {
+			t.Fatalf("rollback did not restore the legacy hub snapshot: %+v", entry)
+		}
+	})
+
+	t.Run("rollback-still-refuses-concurrent-edit", func(t *testing.T) {
+		const operatorURL = "https://operator.example/serena/mcp"
+		c := &claudeCode{path: casWriteCfg(t, "cfg.json",
+			`{"mcpServers":{"serena":{"url":"`+operatorURL+`"}}}`)}
+		err := c.CASRestoreEntryFromBytesForRollback("serena", matchLiveRouter, legacySnapshot)
+		if !errors.Is(err, ErrCASConflict) {
+			t.Fatalf("rollback CAS restore after concurrent edit err=%v, want ErrCASConflict", err)
+		}
+		entry, getErr := c.GetEntry("serena")
+		if getErr != nil {
+			t.Fatal(getErr)
+		}
+		if entry == nil || entry.URL != operatorURL {
+			t.Fatalf("rollback overwrote the operator entry: %+v", entry)
+		}
+	})
+}
+
 func TestCASRemoveGateBranches(t *testing.T) {
 	hubCfg := `{"mcpServers":{"serena":{"url":"` + casHubURL + `"}}}`
 	foreignCfg := `{"mcpServers":{"serena":{"url":"http://evil.example/mcp"}}}`

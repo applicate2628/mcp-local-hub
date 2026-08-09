@@ -459,6 +459,13 @@ func pointRegistryAtTempDir(t *testing.T) string {
 	root := hardenedTempDir(t)
 	t.Setenv("LOCALAPPDATA", root)
 	t.Setenv("XDG_STATE_HOME", root)
+	// Tests on this fixture call a.Install with a real manifest. servers/time
+	// binds `vscode`, so executeInstallToWithSymlinkConsents (install.go:2887)
+	// resolved the operator's REAL %APPDATA%\Code\User\mcp.json and would have
+	// called BackupKeep — which PRUNES their existing backups — then AddEntry.
+	// The only thing that stopped it was the injected audit writer failing first,
+	// a one-gate-deep margin. Sandbox the client-config roots instead.
+	sandboxClientConfigHome(t, root)
 	regPath, err := DefaultRegistryPath()
 	if err != nil {
 		t.Fatalf("DefaultRegistryPath: %v", err)

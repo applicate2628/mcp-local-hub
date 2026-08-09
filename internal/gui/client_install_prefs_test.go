@@ -28,7 +28,7 @@ func clientInstallPrefsTestServer(
 		clientInstallPrefsViewFn = origView
 		clientInstallPrefsSetFn = origSet
 	})
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	return s
 }
 

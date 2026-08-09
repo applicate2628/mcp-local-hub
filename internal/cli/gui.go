@@ -997,14 +997,17 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	// flight to surface the dead forward. The always-on forward-failure floor
 	// is the primary signal; this is the safety net behind it.
 	gui.SetSerenaBackendStatusFn(api.DialSupervisorIPCStatus)
-	// v0.6 idle-shutdown (#6, spec §6): wire the idle sweeper's two seams.
+	// v0.6 idle-shutdown (#6, spec §6): wire the idle sweeper's seams.
 	// The threshold reader resolves the GUI-settable daemons.serena_idle_shutdown
 	// each tick (so an operator change takes effect within ~60s, no restart); the
 	// stop writer records Desired=stopped+IntentReasonIdle on the unified
 	// supervisor-intent stops sub-block via the §4/Phase-E corrected stop path.
+	// The canonical routing authority shares this API instance and limits idle
+	// shutdown authority to a stably GUI-routed MCP front for the whole tick.
+	guiAPI := api.NewAPI()
 	gui.SetSerenaIdleShutdownFns(
 		func() (time.Duration, bool) {
-			v, err := api.NewAPI().SettingsGet(api.SerenaIdleShutdownSettingKey)
+			v, err := guiAPI.SettingsGet(api.SerenaIdleShutdownSettingKey)
 			if err != nil {
 				// Read failure → disable idle-shutdown for this tick (fail-safe:
 				// never idle a daemon on a settings read error).
@@ -1013,7 +1016,15 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			return api.SerenaIdleShutdownThreshold(v)
 		},
 		func(taskName string, now time.Time) (bool, error) {
-			return api.NewAPI().WriteSerenaIdleStopResult(taskName, now)
+			return guiAPI.WriteSerenaIdleStopResult(taskName, now)
+		},
+		func(ctx context.Context, admittedTick func() int) (int, error) {
+			stopped := 0
+			err := guiAPI.WithClientRoutingAuthorityLease(ctx, api.StableGUICompatibility(), func(api.ClientRoutingTarget) error {
+				stopped = admittedTick()
+				return nil
+			})
+			return stopped, err
 		},
 	)
 	var selfRestartExitRequested atomic.Bool
@@ -1066,7 +1077,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			lspResolver := lsp_routing.NewWorkspaceResolver(lspReg, registryPath, m.Languages)
 			lspSessions := lsp_routing.NewSessionRouter()
 			s.SetLSPRouterProduction(lspResolver, lspSessions, m.Languages)
-			go runLSPSessionCleanupTicker(ctx, lspSessions, time.Hour, lsp_routing.DefaultSessionTTL)
+			go runLSPSessionCleanupTicker(ctx, lspSessions, sessionCleanupInterval, lsp_routing.DefaultSessionTTL)
 		}
 		// Phase 5 (bot PR #253 finding 1): wire the one-time supervisor
 		// cutover the auto-register-on-miss path runs when introducing the
@@ -1094,7 +1105,7 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// goroutine (rather than spawning a second ticker) keeps one
 		// correctly-shutdown background loop and ages every store on the
 		// same 24h idle clock.
-		go runSessionCleanupTicker(ctx, s, sessions, time.Hour, serena_routing.DefaultSessionTTL)
+		go runSessionCleanupTicker(ctx, s, sessions, sessionCleanupInterval, serena_routing.DefaultSessionTTL)
 		// §3 fail-loud reconcile FALLBACK: a faster, lighter ticker that polls
 		// the supervisor IPC status and tears down router sessions for any
 		// serena workspace whose daemon restarted (PID changed) or vanished
@@ -1489,9 +1500,23 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	return <-errCh
 }
 
+// sessionCleanupInterval is the cadence of every MCP session-expiry sweep in
+// this process family (serena + LSP, GUI + standalone route daemon).
+//
+// Single-owned because the route daemon became a THIRD driver of these same
+// sweeps (codex bot PR #588 — see runRouteSessionExpiry): three copies of a
+// bare `time.Hour` literal is exactly the drift the cadence should not be
+// exposed to. It is deliberately far shorter than the 24h
+// serena_routing.DefaultSessionTTL / lsp_routing.DefaultSessionTTL it enforces
+// — the sweep is a cheap map walk, so the interval only bounds how long an
+// already-expired binding lingers.
+const sessionCleanupInterval = time.Hour
+
 // runSessionCleanupTicker drops serena session bindings whose lastSeen
-// is older than ttl. It is owned by the GUI server lifecycle and exits
-// when ctx is cancelled.
+// is older than ttl. It exits when ctx is cancelled.
+//
+// It is driven by the GUI server lifecycle AND by the standalone `mcphub
+// route` front daemon, which owns its own independent session routers.
 //
 // Finding 2: each tick sweeps BOTH the cross-package sticky-routing
 // SessionRouter (sessions.CleanupWithTTL) AND the gui Server's two

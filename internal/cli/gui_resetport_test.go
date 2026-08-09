@@ -27,21 +27,15 @@ func resetPortHermeticHome(t *testing.T) string {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	// APPDATA (Roaming) must be redirected too: defaultVSCodeConfigPath reads
-	// %APPDATA%\Code\User\mcp.json, so without this the gate-ON scan would read
-	// the developer's REAL, live vscode config (a gate-ON mcphub-hub entry ⇒
-	// spurious `force exit 8` on this host). Redirect it under the temp home so
-	// the scan sees an empty sandbox client set.
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	for _, key := range []string{
-		"COPILOT_HOME", "KIMI_CODE_HOME",
-		"MIMOCODE_HOME", "MIMOCODE_CONFIG", "MIMOCODE_CONFIG_DIR", "MIMOCODE_CONFIG_CONTENT",
-	} {
-		t.Setenv(key, "")
-	}
+	// Every remaining client-config path env var (%APPDATA% —
+	// defaultVSCodeConfigPath reads %APPDATA%\Code\User\mcp.json, so without it
+	// the gate-ON scan reads the developer's REAL live vscode config —
+	// $XDG_CONFIG_HOME, the $MIMOCODE_* profile set, %ProgramData%,
+	// $COPILOT_HOME, $KIMI_CODE_HOME) is neutralized by the package's one owner.
+	neutralizeClientConfigPathEnv(t, home)
+	// This fixture additionally wants the SINGLE-layer mimocode shape: it only
+	// needs an empty sandbox client set, not the multi-layer read/write split.
 	t.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", "1")
-	t.Setenv("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join(home, "ProgramData", "opencode"))
 	return home
 }
 

@@ -140,7 +140,7 @@ func (f *fakeGroupsAPI) GroupToken(group string) (string, bool) {
 // s.groupsRepublishFn as needed.
 func groupsTestServer(t *testing.T, g groupsAPI) *Server {
 	t.Helper()
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.groups = g
 	s.groupsRepublishFn = func(_ context.Context, _ *api.API) error { return nil }
 	return s
@@ -788,6 +788,10 @@ func (diskTestGroupsAPI) GroupToken(group string) (string, bool) {
 // proves a GUI group edit is LIVE immediately (Phase 3b staleness closed
 // for GUI edits) and that restart_required is false.
 func TestGroups_LiveRepublishCarriesGroupBinding(t *testing.T) {
+	// This is the one test in the file that leaves groupsRepublishFn nil and so
+	// drives the REAL publishResolverSnapshotForHubBind seam, which walks the
+	// client registry. Its siblings stub the seam and never admit an adapter.
+	sandboxClientConfigHome(t)
 	stateDir := t.TempDir()
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)

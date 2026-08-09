@@ -71,6 +71,14 @@ client_bindings:
 // nil store to reset, then verifies via Load.
 func resetResolverSnapshot(t *testing.T) {
 	t.Helper()
+	// Every caller of this helper drives a REAL hub-listener start or the real
+	// publish seam, and both walk the client registry (api.ResetHubPortContext →
+	// ProbeHubGate → GetEntry on every constructed adapter,
+	// internal/api/hub_gate_detect.go:56). None of them redirected the
+	// client-config roots, so they read the operator's live configs. Installing
+	// the sandbox HERE rather than in each caller is what keeps the next
+	// real-listener test in this family safe by default.
+	sandboxClientConfigHome(t)
 	api.PublishResolverSnapshot(nil)
 	if api.LoadResolverSnapshot() != nil {
 		t.Fatalf("test setup: snapshot non-nil after reset")

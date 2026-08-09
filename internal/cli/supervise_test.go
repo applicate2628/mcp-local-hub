@@ -456,8 +456,22 @@ func TestSuperviseCommand_StatusIPC_ReconcileReady(t *testing.T) {
 	if !ok {
 		t.Fatalf("daemons field not an array: %T (Task 7.1 populates this; Task 6.2 keeps it empty)", lastResult["daemons"])
 	}
-	if len(daemons) != 0 {
-		t.Fatalf("expected empty daemons array in Task 6.2 stub, got %d entries", len(daemons))
+	// Increment 1b (work-items/decisions/2026-07-25-supervisor-builtin-
+	// singleton-daemon.md) changed this from an always-empty array: on
+	// EVERY cold start — including this test's genuinely-fresh state dir
+	// with no supervisor-intent.json on disk — ensureBuiltinRouteDaemonAtStartup
+	// now seeds and persists the reserved built-in `mcphub route` front
+	// daemon's row before the IPC listener starts serving status. So the
+	// array now contains EXACTLY that one entry, not zero.
+	if len(daemons) != 1 {
+		t.Fatalf("expected exactly 1 daemon entry (the built-in route front daemon seeded at startup), got %d entries: %+v", len(daemons), daemons)
+	}
+	daemonEntry, ok := daemons[0].(map[string]any)
+	if !ok {
+		t.Fatalf("daemons[0] not an object: %T", daemons[0])
+	}
+	if daemonEntry["task_name"] != api.BuiltinRouteTaskName {
+		t.Fatalf("daemons[0].task_name = %v, want %q (the built-in route daemon)", daemonEntry["task_name"], api.BuiltinRouteTaskName)
 	}
 }
 

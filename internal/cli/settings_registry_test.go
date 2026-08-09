@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/clients"
 )
 
 // withTempHome redirects SettingsPath to a tempdir for the test duration.
@@ -315,6 +316,66 @@ func TestMain(m *testing.M) {
 		runForensicsSinkCrashChild(stateDir)
 	}
 
+	// Built-in route-daemon spawn fast-path (Increment 1b,
+	// work-items/decisions/2026-07-25-supervisor-builtin-singleton-daemon.md).
+	// DEFENSE-IN-DEPTH, not the primary guard (reviewer O2): the
+	// reconcileSpawnFn default installed below already makes the recursive-exec
+	// path this guards against UNREACHABLE via the normal newSuperviseCmd/
+	// runSupervise path, because no test in this binary ever reaches the real
+	// production spawn closure (makeProductionSpawnFnWithStatePath) anymore
+	// unless it calls that constructor directly (as TestProductionSpawnFn_*
+	// already does, deliberately, with non-route argv). This fast-path exists
+	// as a second, independent layer in case some FUTURE test constructs the
+	// production spawn closure directly with a literal route-shaped
+	// descriptor (Command=canonicalMcphubPath(), Args=["route","--port",...])
+	// and forgets to point Command somewhere other than the test binary: in
+	// this test binary, canonicalMcphubPath() resolves to THIS binary, so
+	// `exec.Command(cmdPath, "route", "--port", <port>)` would launch THIS
+	// test binary with argv[1]=="route" — a bare non-flag positional arg the
+	// `flag` package stops parsing at, so `go test`'s own generated main()
+	// would fall back to its DEFAULT flags (no `-test.run` filter) and re-run
+	// the ENTIRE package's test suite recursively inside what is supposed to
+	// be a lightweight spawned child. Unlike the two sentinel-gated helpers
+	// above (deliberate, explicitly-invoked test doubles), this path is gated
+	// on the descriptor's own fixed, deterministic argv shape rather than an
+	// opt-in env sentinel. Mirrors the same "exit immediately, never call
+	// m.Run()" shape as the two fast-paths above.
+	if len(os.Args) >= 2 && os.Args[1] == "route" {
+		os.Stderr.WriteString("internal/cli test binary invoked with argv[1]==\"route\" " +
+			"(the built-in route daemon's spawn argv) — exiting immediately instead of " +
+			"recursively running the test suite\n")
+		os.Exit(0)
+	}
+
+	// Package-wide safe default for reconcileSpawnFn (Increment 1b). Before
+	// ensureBuiltinRouteDaemonAtStartup existed, supervisor-intent.json was
+	// ALWAYS empty in every test's fresh state dir, so runSupervise's initial
+	// reconcile pass never had anything to spawn and reconcileSpawnFn==nil
+	// (→ falls back to the REAL production spawn closure, supervise.go's
+	// `if spawnFn == nil { spawnFn = makeProductionSpawnFnWithStatePath(...) }`)
+	// was dead code for every test that doesn't explicitly stub it. Now the
+	// built-in route daemon row is ALWAYS seeded, so any test that exercises
+	// the real command (newSuperviseCmd / runSupervise) without calling
+	// setReconcileSpawnFnForTest reaches a REAL exec.Command(canonicalMcphubPath(),
+	// "route", "--port", ...) — i.e. a real child process, real Job-Object
+	// lifecycle, and a real (fixed, shared) port bind, none of which any such
+	// test was written to expect or tear down. The argv fast-path above closes
+	// the worst case (the child recursively re-running this whole suite); this
+	// default closes the rest of the class (child-process lifecycle/handle-
+	// release races against the test's own tempdir cleanup, and a fixed-port
+	// bind that a genuinely concurrent test run could collide on) by making
+	// the SAME default runSupervise already falls back to for a nil
+	// reconcileSpawnFn a harmless no-op instead of the real production spawn,
+	// UNLESS a test explicitly opts in via setReconcileSpawnFnForTest (which
+	// every existing spawn-fan-out test in supervise_reconcile_wiring_test.go
+	// already does, overriding this default with its own fake and restoring
+	// to it afterward — this default is invisible to those tests). No
+	// existing test relied on reconcileSpawnFn==nil reaching production
+	// (verified: none did, because until now nothing was ever in the intent
+	// to spawn), so this changes no test's observed behavior except
+	// neutralizing the newly-introduced real-spawn hazard.
+	reconcileSpawnFn = func(api.SupervisorDaemon) error { return nil }
+
 	api.EnableSupervisorIPCTestPipeIsolation()
 
 	// stateDirFunc ships env-free in production (productionStateDir →
@@ -336,6 +397,9 @@ func TestMain(m *testing.M) {
 		panic("internal/cli TestMain: create global test-state temp dir: " + err.Error())
 	}
 	restore := api.SetDaemonStateRootForTest(tmp)
+	// Redirect every client-adapter path input before installing the audit. The
+	// descriptor is shared with API and GUI package test setup.
+	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
 
 	// Default subprocess state-env safety net (see doc comment above).
 	// MCPHUB_STATE_DIR_OVERRIDE is the authoritative redirect: it routes the
@@ -348,9 +412,6 @@ func TestMain(m *testing.M) {
 	// were redirected. LOCALAPPDATA/XDG redirect the GUI pidport + log base dir.
 	restoreEnv := setEnvWithRestore(map[string]string{
 		"MCPHUB_STATE_DIR_OVERRIDE": tmp,
-		"LOCALAPPDATA":              tmp,
-		"XDG_DATA_HOME":             tmp,
-		"XDG_STATE_HOME":            tmp,
 		// Global browser kill-switch for the whole cli test binary AND any real
 		// `mcphub gui` child a test spawns (inherited env) — no test flashes a
 		// browser window even when it spawns a GUI without an explicit
@@ -358,9 +419,21 @@ func TestMain(m *testing.M) {
 		"MCPHUB_SUPPRESS_BROWSER_LAUNCH": "1",
 	})
 
+	// Client-config sandbox audit. Fails any test in this package whose admitted
+	// adapters resolve to a config path outside the test sandbox — including
+	// adapters constructed by the PRODUCTION CODE under test, which is the shape
+	// that let `withHermeticHome` reach the operator's real configs after
+	// `mcpFrontPR588Env` had supposedly closed the class. Contract, rationale and
+	// the report-mode knob: internal/clients/config_path_sandbox_audit.go.
+	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
+
 	code := m.Run()
 
+	if escapes := auditRestore(); escapes > 0 && code == 0 {
+		code = 1
+	}
 	restoreEnv()
+	restoreClientEnv()
 	restore()
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)

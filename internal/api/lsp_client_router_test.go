@@ -11,12 +11,20 @@ import (
 )
 
 type lspRouterFakeClient struct {
-	name                string
-	path                string
-	exists              bool
-	entries             map[string]clients.MCPEntry
-	snapshots           map[string]map[string]clients.MCPEntry
-	backupPaths         []string
+	name        string
+	path        string
+	exists      bool
+	entries     map[string]clients.MCPEntry
+	snapshots   map[string]map[string]clients.MCPEntry
+	backupPaths []string
+	// belowWriteTarget names the entries GetEntry stamps with
+	// clients.MCPEntry.SourceBelowWriteTarget — the multi-layer adapter shape
+	// (mimocode) where an entry is VISIBLE through the merged read but lives in
+	// a layer the hub never writes. It is a field on the base fake rather than
+	// an embedding wrapper on purpose: ConditionalEntryMutation below calls
+	// f.GetEntry, and Go has no virtual dispatch, so an override on an embedder
+	// would be invisible to the very method whose compare object it must shape.
+	belowWriteTarget    map[string]bool
 	addErr              error
 	addAppliesOnErr     bool
 	removeErr           error
@@ -70,6 +78,22 @@ func (f *lspRouterFakeClient) BackupKeep(int) (string, error) {
 	return backupPath, nil
 }
 func (f *lspRouterFakeClient) Restore(string) error { return nil }
+
+// AddEntry stores the subset a REAL adapter of this family would persist, not
+// the write request verbatim.
+//
+// The request is a command object: lspRouterMCPEntryForClient fills BOTH `URL`
+// and `RelayURL` so either family can consume it, and each real adapter then
+// keeps only its own shape — a URL-native adapter writes `url` and reads
+// RelayURL back empty. A fake that echoes the whole request back is a client no
+// adapter in this repo behaves like, and it makes every caller that compares an
+// intended post-state against a readback (the LSP plan's IntendedState, the
+// serena forward fingerprint) disagree with production in the fake's favour.
+//
+// It calls intendedEntryReadbackProjection rather than re-stating the rule,
+// because a double that re-types the rule can drift from it silently. The
+// projection itself is pinned against a real adapter by
+// TestLSPRouterPlan_IntendedStateMatchesAdapterReadback.
 func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 	f.addCalls++
 	if f.addErr != nil {
@@ -78,7 +102,13 @@ func (f *lspRouterFakeClient) AddEntry(e clients.MCPEntry) error {
 		}
 		return f.addErr
 	}
-	f.entries[e.Name] = e
+	f.entries[e.Name] = intendedEntryReadbackProjection(f, e)
+	// The write LANDS in the write target, so the entry is no longer sourced
+	// from a layer below it — mimoCodeDefinedAtOrAboveWriteTarget flips to true
+	// after a real AddEntry and GetEntry stops stamping SourceBelowWriteTarget.
+	// A fake that kept stamping it would report a successful write as an absent
+	// readback.
+	delete(f.belowWriteTarget, e.Name)
 	return nil
 }
 func (f *lspRouterFakeClient) RemoveEntry(name string) error {
@@ -99,6 +129,9 @@ func (f *lspRouterFakeClient) GetEntry(name string) (*clients.MCPEntry, error) {
 		return nil, nil
 	}
 	cp := entry
+	if f.belowWriteTarget[name] {
+		cp.SourceBelowWriteTarget = true
+	}
 	return &cp, nil
 }
 func (f *lspRouterFakeClient) LatestBackupPath() (string, bool, error) {
@@ -1084,6 +1117,158 @@ func TestEnsureLSPRouterClientEntries_AddFailureSkipsLegacyRemove(t *testing.T) 
 	}
 }
 
+type observedLSPRouterClient struct {
+	*lspRouterFakeClient
+	conditionalCalls int
+}
+
+func (f *observedLSPRouterClient) ConditionalEntryMutation(req clients.ConditionalEntryMutationRequest) clients.EntryMutationObserved {
+	f.conditionalCalls++
+	return f.lspRouterFakeClient.ConditionalEntryMutation(req)
+}
+
+func (f *observedLSPRouterClient) ConditionalEntryGroupMutation(req clients.ConditionalEntryGroupMutationRequest) clients.ConditionalEntryGroupMutationObserved {
+	f.conditionalCalls++
+	return f.lspRouterFakeClient.ConditionalEntryGroupMutation(req)
+}
+
+func planLSPRouterLegacyGroup(t *testing.T, canonicalCorrect bool) (*LSPRouterClientPlan, *observedLSPRouterClient, string, string) {
+	t.Helper()
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	t.Cleanup(restoreRegistry)
+	const clientName = "codex-cli"
+	const legacyName = "mcp-language-server-go-legacy"
+	seedLegacyLSPWorkspace(t, clientName, legacyName)
+	base := newLSPRouterFakeClient(t, clientName, true)
+	base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: "http://127.0.0.1:9200/mcp"}
+	canonicalName := LSPRouterEntryName("go")
+	if canonicalCorrect {
+		base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, "go")}
+	}
+	adapter := &observedLSPRouterClient{lspRouterFakeClient: base}
+	plan, err := NewAPI().PlanLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9137,
+		Clients: map[string]clients.Client{clientName: adapter},
+	})
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	return plan, adapter, legacyName, canonicalName
+}
+
+func TestLSPRouterPlan_GuardLegacyOnlyPlanHasNoCanonicalOperation(t *testing.T) {
+	plan, adapter, legacyName, canonicalName := planLSPRouterLegacyGroup(t, true)
+	if len(plan.Operations) != 1 || plan.Operations[0].Operation != "remove" || plan.Operations[0].EntryName != legacyName {
+		t.Fatalf("operations=%+v, want only legacy removal", plan.Operations)
+	}
+	if len(plan.canonicalDependencies) != 1 ||
+		!lspRouterSnapshotHasIdentity(plan.canonicalDependencies[0].IntendedState, "codex-cli", "go", canonicalName) ||
+		!plan.canonicalDependencies[0].IntendedState.Present {
+		t.Fatalf("canonical dependencies=%+v, want one present canonical snapshot", plan.canonicalDependencies)
+	}
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
+	if err != nil {
+		t.Fatalf("apply legacy-only plan: %v", err)
+	}
+	if len(report.Removed) != 1 || report.Removed[0].EntryName != legacyName || adapter.addCalls != 0 || adapter.removeCalls != 1 {
+		t.Fatalf("report=%+v add=%d remove=%d, want one legacy removal without canonical add", report, adapter.addCalls, adapter.removeCalls)
+	}
+}
+
+func TestLSPRouterPlan_AddThenRemoveUsesFrozenCanonicalDependency(t *testing.T) {
+	plan, adapter, legacyName, canonicalName := planLSPRouterLegacyGroup(t, false)
+	if len(plan.Operations) != 2 || plan.Operations[0].Operation != "add" || plan.Operations[0].EntryName != canonicalName ||
+		plan.Operations[1].Operation != "remove" || plan.Operations[1].EntryName != legacyName || len(plan.canonicalDependencies) != 1 {
+		t.Fatalf("plan=%+v dependencies=%+v, want canonical add then legacy removal with one dependency", plan.Operations, plan.canonicalDependencies)
+	}
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
+	if err != nil {
+		t.Fatalf("apply add/remove plan: %v", err)
+	}
+	if len(report.Applied) != 1 || len(report.Removed) != 1 || adapter.addCalls != 1 || adapter.removeCalls != 1 {
+		t.Fatalf("report=%+v add=%d remove=%d, want one add and one removal", report, adapter.addCalls, adapter.removeCalls)
+	}
+}
+
+func TestLSPRouterPlan_CanonicalDeletionAfterPlanConflictsBeforeLegacyRemoval(t *testing.T) {
+	plan, adapter, legacyName, canonicalName := planLSPRouterLegacyGroup(t, true)
+	delete(adapter.entries, canonicalName)
+	prepared, finished, conflicts := 0, 0, 0
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{
+		OnPrepared:             func(LSPRouterPlannedOperation) error { prepared++; return nil },
+		OnFinished:             func(LSPRouterMutationObservation) error { finished++; return nil },
+		OnPreconditionConflict: func(LSPRouterMutationObservation) error { conflicts++; return nil },
+	})
+	if err == nil || len(report.Failed) != 1 || report.Failed[0].EntryName != legacyName || report.Failed[0].Op != "precondition" {
+		t.Fatalf("report=%+v err=%v, want one dependency precondition conflict", report, err)
+	}
+	if adapter.removeCalls != 0 || len(adapter.backupPaths) != 0 || prepared != 0 || finished != 0 || conflicts != 1 {
+		t.Fatalf("remove=%d backups=%v prepared=%d finished=%d conflicts=%d, want atomic refusal before legacy mutation",
+			adapter.removeCalls, adapter.backupPaths, prepared, finished, conflicts)
+	}
+}
+
+func TestLSPRouterPlan_CanonicalAddFailureKeepsLegacyNotReady(t *testing.T) {
+	plan, adapter, legacyName, _ := planLSPRouterLegacyGroup(t, false)
+	adapter.addErr = errors.New("induced canonical add failure")
+	report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
+	if err == nil || len(report.Failed) != 1 || report.Failed[0].Op != "add" {
+		t.Fatalf("report=%+v err=%v, want canonical add failure", report, err)
+	}
+	if adapter.addCalls != 1 || adapter.removeCalls != 0 || len(adapter.backupPaths) != 1 {
+		t.Fatalf("add=%d remove=%d backups=%v, want failed canonical add and no legacy removal", adapter.addCalls, adapter.removeCalls, adapter.backupPaths)
+	}
+	if _, exists := adapter.entries[legacyName]; !exists {
+		t.Fatalf("legacy entry %q was removed after canonical add failure", legacyName)
+	}
+}
+
+func TestLSPRouterPlan_GuardMalformedLSPPlanRejectedBeforeCallbacks(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		build func(*LSPRouterClientPlan)
+	}{
+		{name: "missing-evidence", build: func(plan *LSPRouterClientPlan) { plan.canonicalDependencies = nil }},
+		{name: "extra-evidence", build: func(plan *LSPRouterClientPlan) {
+			plan.canonicalDependencies = append(plan.canonicalDependencies, lspRouterCanonicalDependency{
+				Client: "other", Language: "go", IntendedState: LSPRouterEntrySnapshot{Client: "other", Language: "go", EntryName: LSPRouterEntryName("go"), Present: true, URL: LSPRouterURL(9137, "go")},
+			})
+		}},
+		{name: "mismatched-evidence", build: func(plan *LSPRouterClientPlan) { plan.canonicalDependencies[0].IntendedState.Present = false }},
+		{name: "duplicate-evidence", build: func(plan *LSPRouterClientPlan) {
+			plan.canonicalDependencies = append(plan.canonicalDependencies, plan.canonicalDependencies[0])
+		}},
+		{name: "duplicate-canonical-operation", build: func(plan *LSPRouterClientPlan) { plan.Operations = append(plan.Operations, plan.Operations[0]) }},
+		{name: "non-add-canonical-operation", build: func(plan *LSPRouterClientPlan) { plan.Operations[0].Operation = "remove" }},
+		{name: "invalid-canonical-order", build: func(plan *LSPRouterClientPlan) {
+			plan.Operations[0], plan.Operations[1] = plan.Operations[1], plan.Operations[0]
+		}},
+		{name: "dependency-identity-disagreement", build: func(plan *LSPRouterClientPlan) {
+			plan.canonicalDependencies[0].IntendedState.EntryName = "mcp-language-server-go-legacy"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan, adapter, _, _ := planLSPRouterLegacyGroup(t, false)
+			tc.build(plan)
+			prepared, finished, conflicts := 0, 0, 0
+			report, err := NewAPI().ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{
+				OnPrepared:             func(LSPRouterPlannedOperation) error { prepared++; return nil },
+				OnFinished:             func(LSPRouterMutationObservation) error { finished++; return nil },
+				OnPreconditionConflict: func(LSPRouterMutationObservation) error { conflicts++; return nil },
+			})
+			if err == nil || len(report.Applied) != 0 || len(report.Removed) != 0 || len(report.Failed) != 0 {
+				t.Fatalf("report=%+v err=%v, want side-effect-free validation rejection", report, err)
+			}
+			if adapter.conditionalCalls != 0 || adapter.addCalls != 0 || adapter.removeCalls != 0 || len(adapter.backupPaths) != 0 ||
+				prepared != 0 || finished != 0 || conflicts != 0 {
+				t.Fatalf("conditional=%d add=%d remove=%d backups=%v prepared=%d finished=%d conflicts=%d, want all zero",
+					adapter.conditionalCalls, adapter.addCalls, adapter.removeCalls, adapter.backupPaths, prepared, finished, conflicts)
+			}
+		})
+	}
+}
+
 func seedLSPRouterManifest(t *testing.T, languages []string) {
 	t.Helper()
 	t.Setenv("LOCALAPPDATA", t.TempDir())
@@ -1361,5 +1546,70 @@ func assertRelayEntryFieldsSufficient(t *testing.T, label string, entry clients.
 	}
 	if entry.RelayURL == "" && entry.URL == "" {
 		t.Errorf("%s: both RelayURL and URL empty — relay-stdio AddEntry has no forward target to relay to", label)
+	}
+}
+
+// TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed pins an
+// invariant surfaced while investigating an adversarial-gate F2 finding on
+// sub-increment 2a (`internal/cli/install_reconcile_mcp_front.go`): the
+// reviewer's literal claim was that a `mcp_front.port` setting change
+// between a forward reconcile and a later `--rollback` would leave the
+// shared `mcp-language-server-<language>` router entry this package writes
+// UNRECOGNIZED at rollback time (port-keyed ownership), stranding it as an
+// orphan.
+//
+// That does not reproduce: RollbackLSPRouterClientEntries's removal check
+// (lsp_client_router.go, the `routerName := LSPRouterEntryName(language)` /
+// `entryIsOwnedLSPRouterForLanguage(routerName, ...)` call) always looks the
+// entry up BY ITS FIXED CANONICAL NAME, so entryIsOwnedLSPRouterForLanguage's
+// own `reservedName` shortcut (entryName == LSPRouterEntryName(language)) is
+// unconditionally true at that call site regardless of which `guiPort` is
+// passed in — the port argument does not gate this removal decision. This
+// test proves it directly: the rollback still removes the entry even when
+// given a GUIPort that differs from the one the forward write used.
+//
+// This guard exists so a FUTURE change that narrows removal to a
+// port-matched entry (which would reintroduce exactly the orphan risk the
+// reviewer described) fails loudly here instead of shipping silently. It
+// does not by itself justify skipping the separate persisted-port hardening
+// in install_reconcile_mcp_front.go — that hardening removes a different,
+// real dependency (rollback needing to successfully RE-RESOLVE the live
+// mcp_front.port setting at all), covered by
+// TestRunReconcileMCPFront_Rollback_UsesPersistedPortNotLiveSetting in
+// internal/cli.
+func TestRollbackLSPRouterClientEntries_RemovalIsNameKeyedNotPortKeyed(t *testing.T) {
+	seedLSPRouterManifest(t, []string{"go"})
+	claude := newLSPRouterFakeClient(t, "claude-code", true)
+	clientMap := map[string]clients.Client{"claude-code": claude}
+
+	if _, err := NewAPI().EnsureLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9137, // port A (forward-time mcp_front.port)
+		Clients: clientMap,
+	}); err != nil {
+		t.Fatalf("forward EnsureLSPRouterClientEntries: %v", err)
+	}
+
+	entryName := "mcp-language-server-go"
+	got, err := claude.GetEntry(entryName)
+	if err != nil {
+		t.Fatalf("GetEntry after forward: %v", err)
+	}
+	if got == nil || got.URL != "http://127.0.0.1:9137/lsp/go/mcp" {
+		t.Fatalf("forward write missing/wrong: %+v", got)
+	}
+
+	if _, err := NewAPI().RollbackLSPRouterClientEntries(LSPClientRouterOpts{
+		GUIPort: 9201, // port B, DIFFERENT from the forward-time port
+		Clients: clientMap,
+	}); err != nil {
+		t.Fatalf("rollback RollbackLSPRouterClientEntries: %v", err)
+	}
+
+	got2, err := claude.GetEntry(entryName)
+	if err != nil {
+		t.Fatalf("GetEntry after rollback: %v", err)
+	}
+	if got2 != nil {
+		t.Errorf("entry NOT removed after port-drifted rollback (removal has become port-keyed — this reintroduces the F2 orphan risk): %+v", got2)
 	}
 }

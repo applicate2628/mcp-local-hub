@@ -83,6 +83,27 @@ type Registry struct {
 	path       string
 	Version    int              `yaml:"version"`
 	Workspaces []WorkspaceEntry `yaml:"workspaces"`
+
+	// auditSink, when non-nil, is the destination Load() passes to the
+	// shared inode-anchored state-file reader for its relax-fallback
+	// diagnostic (finding 1, work-items/bugs/2026-07-26-route-daemon-
+	// state-read-unhardened-parent-fallback-writes-hub-mcp-log.md). Nil
+	// (the zero value every existing NewRegistry caller gets) preserves
+	// today's default: LogHubMcpEvent, the shared hub-mcp.log. Purely
+	// additive — see SetAuditSink.
+	auditSink func(level, event string, fields map[string]any) error
+}
+
+// SetAuditSink overrides the diagnostic sink Load() uses for the shared
+// state-file reader's relax-fallback event. A nil sink restores the default
+// (LogHubMcpEvent). The read-only `mcphub route` front daemon
+// (internal/cli/route.go) calls this with RouteReadOnlyStderrSink right
+// after NewRegistry, before the first Load(), so its registry reads never
+// reach the GUI-owned shared hub-mcp.log even under a default-relax
+// broadened parent — every other caller that never calls SetAuditSink keeps
+// today's behavior unchanged.
+func (r *Registry) SetAuditSink(sink func(level, event string, fields map[string]any) error) {
+	r.auditSink = sink
 }
 
 const registryVersion = 1
@@ -125,7 +146,7 @@ func DefaultRegistryPath() (string, error) {
 // Load reads the registry file. A missing file is not an error — the registry
 // stays empty, ready for the first Save.
 func (r *Registry) Load() error {
-	data, err := readStateFileInodeAnchored(r.path)
+	data, err := ReadStateFileInodeAnchoredWithAuditSink(r.path, r.auditSink)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || isHubMcpStateMissingErr(err) {
 			r.Version = registryVersion

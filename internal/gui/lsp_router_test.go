@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -1461,4 +1462,104 @@ func TestLSPRouter_NotificationForwardIsDetached202(t *testing.T) {
 		t.Fatalf("unreachable-upstream notification status = %d, want 202 (must not propagate 502/504 to a notification); body=%s", rrB.Code, rrB.Body.String())
 	}
 	waitHubRestartTestLogEvent(t, "lsp-notification-forward-failed")
+}
+
+// TestForwardLSPNotificationDetached_UsesProvidedAuditFnNotHardcodedLogHubMcpEvent
+// is the P1-1 falsifying test for the LSP half (adversarial cross-family
+// review of Increment 1): forwardLSPNotificationDetached used to hardcode
+// api.LogHubMcpEvent directly at all three of its diagnostic call sites, so
+// a caller (SetLSPRouterReadOnly) had NO way to redirect it — the standalone
+// route daemon's best-effort notification-forward failures always wrote the
+// SHARED, GUI-owned <state-dir>/hub-mcp.log. This test drives the function
+// directly (the narrowest reproduction of the exact lines the finding cites)
+// against a definitely-closed port and proves the supplied auditFn is
+// actually invoked.
+//
+// Deliberately does NOT also assert hub-mcp.log's absence here (unlike the
+// router-level tests, which DO assert it): this package's OTHER notification
+// tests (e.g. TestLSPRouter_NotificationForwardIsDetached202) legitimately
+// launch a REAL detached forwardLSPNotificationDetached goroutine against an
+// unreachable upstream, bounded only by lspForwardUpstreamTimeout (150s) —
+// far longer than any one test runs. That goroutine can still be in flight
+// when a LATER test (such as this one) overrides the process-global
+// daemonStateRootOverride, so an immediate file-absence check here is prone
+// to a cross-test false failure from a DIFFERENT test's leftover goroutine,
+// not a regression in this function. Filed as an adjacent finding
+// (test-isolation gap, not a P1-1 regression). The end-to-end "hub-mcp.log
+// is genuinely never written by the read-only wiring" claim is proven by
+// TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedStateFileWrite
+// (internal/gui/route_readonly_test.go) and
+// TestBuildRouteServer_RegisteredWorkspaceUnreachableBackend_NoSharedStateFileWrite
+// (internal/cli/route_i6_readonly_test.go), both of which exercise a
+// SYNCHRONOUS forward-failure path with no detached goroutine involved.
+//
+// Mutation-proven: reverting the three call sites back to api.LogHubMcpEvent
+// makes this test fail — the auditFn is never invoked.
+func TestForwardLSPNotificationDetached_UsesProvidedAuditFnNotHardcodedLogHubMcpEvent(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("reserve port: %v", err)
+	}
+	deadPort := ln.Addr().(*net.TCPAddr).Port
+	if err := ln.Close(); err != nil {
+		t.Fatalf("close reserved port: %v", err)
+	}
+
+	var auditCalls int32
+	auditFn := func(level, event string, fields map[string]any) error {
+		atomic.AddInt32(&auditCalls, 1)
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	upstreamURL := fmt.Sprintf("http://127.0.0.1:%d/mcp", deadPort)
+	forwardLSPNotificationDetached(ctx, http.DefaultClient, upstreamURL, "textDocument/didOpen", nil, []byte(`{"jsonrpc":"2.0","method":"textDocument/didOpen"}`), deadPort, auditFn)
+
+	if atomic.LoadInt32(&auditCalls) == 0 {
+		t.Fatal("the supplied auditFn was never called — forwardLSPNotificationDetached must route its diagnostics through the caller-supplied sink")
+	}
+}
+
+// TestSetLSPRouterReadOnly_WiresRouteReadOnlySinkAsAuditFn is the P1-1
+// wiring-level falsifying test: SetLSPRouterReadOnly must set a non-nil
+// AuditFn (routeReadOnlySink), and invoking that AuditFn must never write
+// hub-mcp.log. This directly targets the constructor line itself — the
+// unit test above proves forwardLSPNotificationDetached ROUTES to whatever
+// auditFn it is handed, and this test proves SetLSPRouterReadOnly hands it
+// the correct (never-writes-hub-mcp.log) one.
+//
+// Mutation-proven: removing the `AuditFn: routeReadOnlySink` line from
+// SetLSPRouterReadOnly makes this test fail at the first assertion
+// (deps.AuditFn nil), since forwardLSPNotificationDetached's own default-fill
+// (`if auditFn == nil { auditFn = api.LogHubMcpEvent }`) only happens in
+// handleLSPNotification, not inside SetLSPRouterReadOnly itself.
+func TestSetLSPRouterReadOnly_WiresRouteReadOnlySinkAsAuditFn(t *testing.T) {
+	root := t.TempDir()
+	regPath := filepath.Join(root, "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	if err := reg.Save(); err != nil {
+		t.Fatalf("Save empty registry: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	resolver := lsp_routing.NewReadOnlyWorkspaceResolver(reg, regPath, nil)
+	sessions := lsp_routing.NewSessionRouter()
+	s.SetLSPRouterReadOnly(resolver, sessions, nil)
+
+	deps := s.lspRouterDepsProd()
+	if deps == nil || deps.AuditFn == nil {
+		t.Fatal("SetLSPRouterReadOnly must wire a non-nil AuditFn")
+	}
+
+	stateDir := t.TempDir()
+	restore := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+
+	if err := deps.AuditFn("warn", "test-event", map[string]any{"k": "v"}); err != nil {
+		t.Fatalf("AuditFn: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, "hub-mcp.log")); statErr == nil {
+		t.Fatal("SetLSPRouterReadOnly's AuditFn wrote hub-mcp.log — must route through routeReadOnlySink, not api.LogHubMcpEvent")
+	}
 }

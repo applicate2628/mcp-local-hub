@@ -39,7 +39,7 @@ func TestMigrate_CallsAPIWithServerList(t *testing.T) {
 			},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.migrator = fm
 
 	req := httptest.NewRequest(http.MethodPost, "/api/migrate",
@@ -83,7 +83,7 @@ func TestMigrate_EmitsGUIEventOnSuccess(t *testing.T) {
 			},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.migrator = fm
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -127,7 +127,7 @@ func TestMigrate_NoGUIEventOnFullFailure(t *testing.T) {
 			},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.migrator = fm
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -162,7 +162,7 @@ func TestMigrate_ForwardsClientsSubset(t *testing.T) {
 			Applied: []api.AppliedMigration{{Server: "memory", Client: "claude-code", URL: "http://127.0.0.1:9128/mcp"}},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.migrator = fm
 
 	req := httptest.NewRequest(http.MethodPost, "/api/migrate",
@@ -195,7 +195,7 @@ func TestMigrate_PartialFailureReturns207(t *testing.T) {
 			},
 		},
 	}
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	s.migrator = fm
 
 	req := httptest.NewRequest(http.MethodPost, "/api/migrate",
@@ -219,7 +219,7 @@ func TestMigrate_PartialFailureReturns207(t *testing.T) {
 }
 
 func TestMigrate_BadMethodReturns405(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(http.MethodGet, "/api/migrate", nil)
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)

@@ -31,6 +31,7 @@
 package api
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -240,15 +241,26 @@ func (a *API) DisableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LS
 	if err != nil {
 		return nil, err
 	}
+	var report *LSPClientRouterReport
+	err = a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var disableErr error
+		report, disableErr = a.disableLSPRouterClient(name, admitted)
+		return disableErr
+	})
+	return report, err
+}
+
+func (a *API) disableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	keepN := opts.BackupKeepN
 	if keepN == 0 {
 		keepN = a.EffectiveBackupKeepN()
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return nil, err
 	}
-	opts.GUIPort = port
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
 	var report *LSPClientRouterReport
 	err = a.setLSPRouterClientDisabledInThen(SettingsPath(), name, true, func(map[string]string) error {
 		var runErr error
@@ -265,6 +277,16 @@ func (a *API) EnableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSP
 	if err != nil {
 		return nil, err
 	}
+	var report *LSPClientRouterReport
+	err = a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var enableErr error
+		report, enableErr = a.enableLSPRouterClient(name, admitted)
+		return enableErr
+	})
+	return report, err
+}
+
+func (a *API) enableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	clientMap := opts.Clients
 	if clientMap == nil {
 		clientMap = clients.AllClients()
@@ -275,21 +297,31 @@ func (a *API) EnableLSPRouterClient(name string, opts LSPClientRouterOpts) (*LSP
 	if keepN == 0 {
 		keepN = a.EffectiveBackupKeepN()
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return nil, err
 	}
-	opts.GUIPort = port
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
 	var report *LSPClientRouterReport
 	err = a.setLSPRouterClientDisabledInThen(SettingsPath(), name, false, func(raw map[string]string) error {
-		var runErr error
-		report, runErr = a.ensureLSPRouterClientEntriesWithState(
-			opts,
-			lspRouterDisabledClientSetFromRaw(raw),
-			clientInstallEnabledSetFromRaw(raw),
-			keepN,
-		)
-		return runErr
+		plan, planErr := a.planLSPRouterClientEntries(opts, &lspRouterPlanningState{
+			disabledClients: lspRouterDisabledClientSetFromRaw(raw),
+			enabledClients:  clientInstallEnabledSetFromRaw(raw),
+			keepN:           keepN,
+		})
+		if planErr != nil {
+			report = &LSPClientRouterReport{}
+			return planErr
+		}
+		canonicalDependencies, validationErr := validateLSPRouterClientPlan(plan)
+		if validationErr != nil {
+			report = &LSPClientRouterReport{}
+			return validationErr
+		}
+		var applyErr error
+		report, applyErr = a.applyValidatedLSPRouterClientPlanUnderAuthority(plan, canonicalDependencies, LSPRouterApplyCallbacks{})
+		return applyErr
 	})
 	return report, err
 }

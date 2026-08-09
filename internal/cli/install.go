@@ -38,6 +38,8 @@ func newInstallCmdReal() *cobra.Command {
 	var all bool
 	var allClients bool
 	var reconcileHubMode bool
+	var reconcileMCPFront bool
+	var rollbackMCPFront bool
 	var upgrade bool
 	var check bool
 	var noClientConfig bool
@@ -89,6 +91,37 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// redirected). The restore defer clears the process-level port.
 			defer installInteractiveSymlinkConsent(cmd.OutOrStdout(), os.Stdin)()
 
+			// codex bot PR #588 P2 closure: --rollback is a MODIFIER of
+			// --reconcile-mcp-front, not a mode of its own. Its dependency
+			// must be validated BEFORE any mode dispatch, not after — the
+			// per-mode exclusivity lists below each enumerate the OTHER
+			// mode flags, and adding `rollbackMCPFront` to each of them is
+			// the shape that already failed: `--upgrade --rollback` and
+			// `--reconcile-hub-mode --rollback` both fell through to a real,
+			// mutating upgrade/reconcile with `--rollback` silently ignored.
+			// One gate at the top is the single owner: every present and
+			// future mode is covered by construction, so an invalid rollback
+			// combination can never execute an unrelated mutating operation.
+			if rollbackMCPFront && !reconcileMCPFront {
+				return fmt.Errorf("--rollback requires --reconcile-mcp-front")
+			}
+
+			// codex bot PR #588 P1 closure, same shape and same reason as the
+			// --rollback gate above. --check promises a READ-ONLY readiness
+			// report ("print the report and exit 0 WITHOUT installing,
+			// bootstrapping, or mutating anything"), but its own handler sits
+			// BELOW the mode dispatches — so --check combined with --upgrade,
+			// --reconcile-hub-mode, or --reconcile-mcp-front never reached it
+			// and performed the real, mutating operation instead. A flag whose
+			// contract is "change nothing" silently rewriting client configs is
+			// the worst form of this defect, so the gate is hoisted to the top
+			// where it covers every mode by construction rather than being
+			// re-enumerated in each mode's exclusivity list (the shape that
+			// already failed once here).
+			if check && (upgrade || reconcileHubMode || reconcileMCPFront) {
+				return fmt.Errorf("--check is mutually exclusive with --upgrade/--reconcile-hub-mode/--reconcile-mcp-front; --check is a read-only readiness probe and those modes mutate")
+			}
+
 			// Bug-bash A7 minimal closure (#4): --upgrade is the
 			// one-shot binary replacement entry point. Pre-A7 the
 			// operator had to stop daemons, run `mcphub setup` to
@@ -105,8 +138,8 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				// than implementing a half-baked preview; the upgrade
 				// flow is short enough that the operator can run
 				// `mcphub stop --all && mcphub status` for a preview.
-				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || noClientConfig || reconcileHubMode || dryRun {
-					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--no-client-config/--reconcile-hub-mode/--dry-run")
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || noClientConfig || reconcileHubMode || reconcileMCPFront || dryRun {
+					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--no-client-config/--reconcile-hub-mode/--reconcile-mcp-front/--dry-run")
 				}
 				// v0.6 Phase F: the v0.4.x→v0.5.0 forward-migration engine and
 				// the `--rollback-to-legacy` demotion path are deleted (there
@@ -156,8 +189,32 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if strings.TrimSpace(clientsFlag) != "" || allClients {
 					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --clients/--all-clients; reconcile walks every (manifest, client) tuple from disk")
 				}
+				if reconcileMCPFront {
+					return fmt.Errorf("--reconcile-hub-mode is mutually exclusive with --reconcile-mcp-front")
+				}
 				return runReconcileHubMode(cmd, dryRun)
 			}
+			// Sub-increment 2a (work-items/decisions/2026-07-25-increment2-mcp-
+			// front-port-ownership.md): --reconcile-mcp-front is the ONE
+			// operator-gated write path that rewrites in-scope client
+			// serena/LSP entries from the GUI port to the settings-owned
+			// mcp_front.port (the supervisor-managed `mcphub route` front
+			// daemon's port) — nothing else in this codebase runs this
+			// automatically. --rollback reverses the most recent such run.
+			if reconcileMCPFront {
+				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients {
+					return fmt.Errorf("--reconcile-mcp-front is mutually exclusive with --server/--daemon/--all/--clients/--all-clients")
+				}
+				if dryRun {
+					return fmt.Errorf("--reconcile-mcp-front does not support --dry-run yet (it always proves route liveness before writing; use --rollback to reverse a run)")
+				}
+				return runReconcileMCPFront(cmd, rollbackMCPFront)
+			}
+			// NOTE: the `--rollback requires --reconcile-mcp-front` gate is
+			// NOT repeated here — it now runs at the TOP of RunE, before any
+			// mode dispatch (see the codex bot PR #588 P2 comment there). A
+			// second copy at this depth is unreachable and would re-create
+			// the impression that late validation is sufficient.
 			// --check: read-only readiness probe. Print the report (blockers +
 			// optional advisories) for --server and exit 0 WITHOUT installing,
 			// bootstrapping, or mutating anything. Handled BEFORE the bootstrap
@@ -224,7 +281,6 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
 					Writer:            cmd.OutOrStdout(),
-					GUIPort:           resolveInstallGUIPort(),
 				})
 				failed := 0
 				for _, r := range results {
@@ -294,6 +350,16 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		"run the bidirectional hub-endpoint reconciler against the current gui_server.hub_endpoint_enabled setting; "+
 			"rewrites every client config to/from the mcphub-hub aggregate entry. "+
 			"Run AFTER flipping the Settings toggle and restarting the hub.")
+	c.Flags().BoolVar(&reconcileMCPFront, "reconcile-mcp-front", false,
+		"rewrite in-scope client serena/LSP entries to the settings-owned mcp_front.port "+
+			"(the supervisor-managed `mcphub route` front daemon), instead of the GUI's own port. "+
+			"Fails closed unless a LIVE SUPERVISOR is serving mcp_front.port through its built-in "+
+			"route daemon: a hand-started `mcphub route` answers the readiness probe but nothing "+
+			"restarts it, so start `mcphub supervise` (or enable autostart) first. "+
+			"Combine with --rollback to reverse the most recent run.")
+	c.Flags().BoolVar(&rollbackMCPFront, "rollback", false,
+		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+
+			"(restores serena entries from their captured backups; removes/restores LSP router entries).")
 	c.Flags().BoolVar(&upgrade, "upgrade", false,
 		"upgrade the canonical mcphub binary at ~/.local/bin/mcphub.exe to the currently-running build: "+
 			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+

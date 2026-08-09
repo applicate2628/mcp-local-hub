@@ -354,8 +354,8 @@ Examples:
   mcphub setup                    # after pulling + rebuilding — replaces the canonical copy
   mcphub setup --rollback-lsp-router
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
-  mcphub setup --trusted-root D:\dev\myproj    # bless one LSP trusted root
-  mcphub setup --trusted-root D:\dev\a --trusted-root D:\dev\b  # bless several
+  mcphub setup --trusted-root <project-root>    # bless one LSP trusted root
+  mcphub setup --trusted-root <project-a> --trusted-root <project-b>  # bless several
   mcphub setup --server serena    # canonicalize binary + install serena headlessly (CI)
 
 Caveats:
@@ -536,9 +536,8 @@ func runSetupInstallServer(out io.Writer, server string) error {
 		return setupInstallServerFn(name, out)
 	}
 	return api.NewAPI().Install(api.InstallOpts{
-		Server:  name,
-		Writer:  out,
-		GUIPort: resolveInstallGUIPort(),
+		Server: name,
+		Writer: out,
 	})
 }
 

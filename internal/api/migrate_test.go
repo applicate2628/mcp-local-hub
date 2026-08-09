@@ -30,8 +30,7 @@ func TestMigrateReplacesStdioWithHTTPForOneClient(t *testing.T) {
 
 	// Redirect UserHomeDir() to tmp for Claude/Codex/Gemini/Antigravity
 	// adapter path resolution on both POSIX (HOME) and Windows (USERPROFILE).
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+	sandboxClientConfigHome(t, tmp)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"memory":{"command":"npx","args":["-y","@x/memory"]}}}`), 0600); err != nil {
@@ -133,8 +132,7 @@ func TestMigrateRotatesBackupsToKeepN(t *testing.T) {
 	// write gate on Windows.
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+	sandboxClientConfigHome(t, tmp)
 	// Redirect SettingsPath() to tmp so the test's SettingsSet doesn't
 	// touch the developer machine's gui-preferences.yaml. SettingsPath
 	// prefers LOCALAPPDATA, then XDG_DATA_HOME, then $HOME/.local/share.
@@ -301,8 +299,7 @@ func TestMigrateSetsRelayExePathForZed(t *testing.T) {
 	// on both Windows (USERPROFILE/APPDATA/LOCALAPPDATA) and POSIX
 	// (HOME/XDG_CONFIG_HOME). zed's defaultZedConfigPath reads APPDATA first
 	// on Windows, then HOME; XDG_CONFIG_HOME/HOME on POSIX.
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+	sandboxClientConfigHome(t, tmp)
 	t.Setenv("APPDATA", tmp)
 	t.Setenv("LOCALAPPDATA", tmp)
 	t.Setenv("XDG_CONFIG_HOME", tmp)
@@ -432,8 +429,7 @@ weekly_refresh: false
 func TestMigrateNonBindingClientSynthesizesEntry(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+	sandboxClientConfigHome(t, tmp)
 
 	// Pre-create gemini's config so adapter.Exists() returns true (migrate
 	// skips non-existent clients). gemini resolves ~/.gemini/settings.json.
@@ -521,8 +517,7 @@ weekly_refresh: false
 func TestMigrateNonBindingClientOverwritesStalePortEntry(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-	t.Setenv("USERPROFILE", tmp)
+	sandboxClientConfigHome(t, tmp)
 
 	geminiDir := filepath.Join(tmp, ".gemini")
 	if err := os.MkdirAll(geminiDir, 0755); err != nil {

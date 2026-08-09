@@ -48,6 +48,7 @@ type SettingDef struct {
 	Pattern    string
 	Optional   bool // for TypeString/TypePath: empty value allowed (memo §4.1, Codex r1 P1.3)
 	Deferred   bool
+	ReadOnly   bool // visible through list/get, mutable only through its owning typed API
 	Help       string
 	RenderKind RenderKind // memo D14: "" = default, "custom" = section owns rendering
 }
@@ -195,6 +196,42 @@ var SettingsRegistry = []SettingDef{
 	{Key: "advanced.force_kill", Section: "advanced", Type: TypeAction,
 		RenderKind: RenderCustom,
 		Help:       "Kill the recorded mcphub process holding the lock. Only available when diagnostic shows Stuck."},
+	// mcp_front.port lives under the "advanced" section (not a new
+	// "mcp_front" section) deliberately: the frontend's SECTION_IDS union
+	// (internal/gui/frontend/src/screens/Settings.tsx) is a fixed, hand-
+	// maintained list with a dedicated component per section, and adding a
+	// new section is a frontend concern out of scope for this (backend-only)
+	// sub-increment.
+	//
+	// The supported management surfaces are `mcphub settings {list,get,set}`
+	// and the explicit MCP front port control in SectionAdvanced
+	// (internal/gui/frontend/src/components/settings/SectionAdvanced.tsx).
+	// That component selects this typed registry definition from the settings
+	// snapshot and routes edits through the shared section save flow; declaring
+	// `Section: "advanced"` alone does not create a generic field renderer.
+	// TestMCPFrontPortSetting_IsManageableThroughTheSettingsCLI and
+	// TestSectionAdvanced_RendersMCPFrontPortThroughExplicitControl pin those
+	// two surfaces independently.
+	//
+	// Key name intentionally does NOT follow the "prefix must match Section"
+	// convention every other entry in this table uses — nothing in the
+	// codebase enforces that convention mechanically, and the bare
+	// "mcp_front.port" key is the literal key name the front-daemon decision
+	// record + every resolver in this codebase already reference
+	// (api.MCPFrontPortSettingKey).
+	{Key: MCPFrontPortSettingKey, Section: "advanced", Type: TypeInt,
+		Default: strconv.Itoa(DefaultMCPFrontPort), Min: intPtr(1024), Max: intPtr(65535),
+		Help: "Port for the supervisor-managed MCP front daemon (`mcphub route`) that serves /serena/mcp + /lsp/<language>/mcp independently of the GUI process, so serena+LSP MCP survive GUI restarts/exits. Restart of `mcphub route` (or the supervisor) is required to take effect. This setting alone does not rewrite any client config — run `mcphub install --reconcile-mcp-front` to repoint installed clients at the new port."},
+	{Key: MCPFrontRoutingTargetSettingKey, Section: "advanced", Type: TypeEnum,
+		Default: string(MCPFrontRoutingTargetGUI),
+		Enum: []string{
+			string(MCPFrontRoutingTargetGUI),
+			string(MCPFrontRoutingTargetFrontPreparing),
+			string(MCPFrontRoutingTargetFront),
+			string(MCPFrontRoutingTargetGUIRestoring),
+		},
+		ReadOnly: true,
+		Help:     "Current client-routing target. Read-only: only the journaled `mcphub install --reconcile-mcp-front` transaction may transition it."},
 }
 
 // findDef returns the SettingDef for the given key, or nil if unknown.

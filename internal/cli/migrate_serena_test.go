@@ -98,6 +98,17 @@ func migrateSerenaTestEnv(t *testing.T) (stateDir, manifestDir string) {
 	// Belt-and-suspenders: the cli stateDirFunc honors this too (used by the
 	// audit-log open path).
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", stateDir)
+	// HOME/USERPROFILE/LOCALAPPDATA cover only 4 of the 47 adapters in
+	// clients.AllClients(). This fixture drives a REAL InstallParsedManifest,
+	// whose executeInstallToWithSymlinkConsents enumerates the whole registry
+	// (internal/api/install.go:2887) and WRITES an entry into every selected
+	// client's config. Without the line below the vscode / cursor / mimocode /
+	// opencode adapters resolved to the operator's live files and the install
+	// wrote into them. neutralizeClientConfigPathEnv
+	// (client_config_env_isolation_test.go) is the single owner of that env set;
+	// the escape was caught by the client-config sandbox audit
+	// (internal/clients/config_path_sandbox_audit.go).
+	neutralizeClientConfigPathEnv(t, home)
 
 	// Install a fake canonical mcphub at <home>/.local/bin/mcphub[.exe] so
 	// ensureCanonicalMcphubPresent (os.Stat) passes inside the real install.

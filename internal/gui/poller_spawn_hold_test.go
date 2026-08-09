@@ -44,7 +44,7 @@ func TestPoller_EmitsDeltaOnSpawnHoldChange(t *testing.T) {
 		{{Server: "memory", State: "Running", Port: 9123, PID: 77}},
 	}
 	status := &scriptedStatus{frames: frames}
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)

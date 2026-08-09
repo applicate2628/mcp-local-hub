@@ -161,6 +161,16 @@ func TestReconcileHubMode_SupervisorIntentOnlyServerCountsInstalled(t *testing.T
 	restoreState := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restoreState)
 
+	// runReconcileHubMode enumerates clients.AllClients(). Redirecting the STATE
+	// dir does not redirect CLIENT-CONFIG paths, and claude-code resolves its
+	// config from the home dir — so without this the reconcile read the
+	// operator's real ~/.claude.json. Caught by the sandbox audit, not by a
+	// human noticing damage.
+	sandboxHome := t.TempDir()
+	t.Setenv("USERPROFILE", sandboxHome)
+	t.Setenv("HOME", sandboxHome)
+	neutralizeClientConfigPathEnv(t, sandboxHome)
+
 	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{{

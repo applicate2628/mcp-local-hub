@@ -37,7 +37,11 @@ func sameOriginPostJSON(s *Server, path, body string) *httptest.ResponseRecorder
 	return rr
 }
 
+// Every test here POSTs a draft manifest to /api/server/readiness, whose report
+// probes each client_bindings target through the client registry — so each one
+// needs the client-config sandbox (see client_config_env_isolation_test.go).
 func TestReadinessHandler_DraftPOST(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	// A complete stdio-bridge DRAFT manifest the Add-server screen would compose
 	// before saving (command `go` is on PATH in every test env).
@@ -62,6 +66,7 @@ func TestReadinessHandler_DraftPOST(t *testing.T) {
 }
 
 func TestReadinessHandler_DraftPOST_ReservedNameBlocks(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	// "con" is a Windows-reserved device name the frontend regex still allows but
 	// CheckManifestName (the Save & Install storage gate) rejects. Draft readiness
@@ -94,6 +99,7 @@ func TestReadinessHandler_DraftPOST_ReservedNameBlocks(t *testing.T) {
 }
 
 func TestReadinessHandler_DraftPOST_DoubleUnderscoreNameBlocks(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	// A `__` substring passes config.ParseManifest AND CheckManifestName but is
 	// rejected by the strict-mode gate Save & Install runs (ManifestValidateMode
@@ -126,6 +132,7 @@ func TestReadinessHandler_DraftPOST_DoubleUnderscoreNameBlocks(t *testing.T) {
 }
 
 func TestReadinessHandler_DraftPOST_BlockingValidationWarningsBlock(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	// Save/create rejects this storage-blocking warning through
 	// validateManifestForStorageName/manifestBlockingWarnings even though
@@ -155,6 +162,7 @@ func TestReadinessHandler_DraftPOST_BlockingValidationWarningsBlock(t *testing.T
 }
 
 func TestReadinessHandler_DraftPOST_CreateModeExistingManifestBlocks(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.manifestPresence = fakeManifestPresence{"saved": true}
 	yaml := "name: saved\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
@@ -188,6 +196,7 @@ func TestReadinessHandler_DraftPOST_CreateModeExistingManifestBlocks(t *testing.
 // reports Ready=false with a "shipped server name" blocker instead of showing
 // "Ready to install" and then failing the create at ManifestCreateIn.
 func TestReadinessHandler_DraftPOST_EmbeddedShippedNameBlocks(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	// "wolfram" is a shipped/embedded server. The create write gate refuses a
 	// disk manifest under it (embed reads win); readiness must mirror that.
@@ -218,6 +227,7 @@ func TestReadinessHandler_DraftPOST_EmbeddedShippedNameBlocks(t *testing.T) {
 }
 
 func TestReadinessHandler_DraftPOST_EditTargetExistingManifestDoesNotBlock(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.manifestPresence = fakeManifestPresence{"saved": true}
 	yaml := "name: saved\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
@@ -240,6 +250,7 @@ func TestReadinessHandler_DraftPOST_EditTargetExistingManifestDoesNotBlock(t *te
 }
 
 func TestReadinessHandler_DraftPOST_EditTargetMissingManifestBlocks(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.manifestPresence = fakeManifestPresence{}
 	yaml := "name: saved\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
@@ -269,6 +280,7 @@ func TestReadinessHandler_DraftPOST_EditTargetMissingManifestBlocks(t *testing.T
 }
 
 func TestReadinessHandler_DraftPOST_MirrorsManifestWriteGate(t *testing.T) {
+	sandboxClientConfigHome(t)
 	tmpState := t.TempDir()
 	t.Setenv("LOCALAPPDATA", tmpState)
 	t.Setenv("XDG_DATA_HOME", tmpState)
@@ -422,6 +434,7 @@ func freeTCPPort(t *testing.T) int {
 }
 
 func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	body, _ := json.Marshal(map[string]string{"yaml": ":::not a manifest:::"})
 	rr := sameOriginPostJSON(s, "/api/server/readiness", string(body))
@@ -431,6 +444,7 @@ func TestReadinessHandler_DraftPOST_Unparseable400(t *testing.T) {
 }
 
 func TestReadinessHandler_DraftPOST_TrailingGarbageRejected(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	yaml := "name: drafttrail\nkind: global\ntransport: stdio-bridge\ncommand: go\n" +
 		"daemons:\n  - name: default\n    port: 9327\n" +
@@ -447,6 +461,7 @@ func TestReadinessHandler_DraftPOST_TrailingGarbageRejected(t *testing.T) {
 }
 
 func TestReadinessHandler_ByName_EmbeddedServer(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	rr := sameOriginGet(s, "/api/server/readiness?server=memory")
 	if rr.Code != 200 {
@@ -465,6 +480,7 @@ func TestReadinessHandler_ByName_EmbeddedServer(t *testing.T) {
 }
 
 func TestReadinessHandler_AllServers(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	rr := sameOriginGet(s, "/api/server/readiness")
 	if rr.Code != 200 {
@@ -480,6 +496,7 @@ func TestReadinessHandler_AllServers(t *testing.T) {
 }
 
 func TestReadinessHandler_UnknownServer404(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	rr := sameOriginGet(s, "/api/server/readiness?server=no-such-zzz")
 	if rr.Code != 404 {
@@ -488,6 +505,7 @@ func TestReadinessHandler_UnknownServer404(t *testing.T) {
 }
 
 func TestReadinessHandler_RejectsCrossOrigin(t *testing.T) {
+	sandboxClientConfigHome(t)
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	req := httptest.NewRequest("GET", "/api/server/readiness?server=memory", nil)
 	req.Header.Set("Sec-Fetch-Site", "cross-site")

@@ -91,6 +91,13 @@ type CASEntryMutator interface {
 	// derefs live.URL).
 	CASRestoreEntryFromBytes(entryName string, match func(*MCPEntry) bool, snapshotBytes []byte) error
 
+	// CASRestoreEntryFromBytesForRollback has the same lock-scoped compare
+	// contract as CASRestoreEntryFromBytes, but composes the restore core with
+	// allowHubEntry=true. Recovery snapshots intentionally contain the
+	// pre-reconcile hub entry, so the ordinary de-adopt polarity would refuse
+	// the exact bytes rollback is required to restore.
+	CASRestoreEntryFromBytesForRollback(entryName string, match func(*MCPEntry) bool, snapshotBytes []byte) error
+
 	// CASGuardedRemoveEntry, under the held lock: re-read the named live entry, then
 	//   - live == nil            -> already-done idempotent SUCCESS (nothing to remove).
 	//   - match(live) == false   -> ErrCASConflict.
@@ -461,6 +468,7 @@ func casRestoreFromBytes(
 	entryPresentInBytes func([]byte, string) (bool, error),
 	restoreFromBytes func([]byte, string, bool, WriteConfigFileFunc) error,
 	higherLayerDefined func(string) (bool, error),
+	allowHubEntry bool,
 ) error {
 	if match == nil {
 		return fmt.Errorf("%w: nil recognizer for entry %q (fail-closed)", ErrCASConflict, entryName)
@@ -511,7 +519,7 @@ func casRestoreFromBytes(
 	// refusals as ErrBackupEntryAlreadyMigrated (a hub-shaped snapshot entry), NOT
 	// ErrCASConflict. That is fail-closed and correct; a downstream refusal classifier
 	// must NOT assume every CAS refusal is ErrCASConflict.
-	return restoreFromBytes(snapshotBytes, entryName, false, nil)
+	return restoreFromBytes(snapshotBytes, entryName, allowHubEntry, nil)
 }
 
 // casGuardedRemove is the SINGLE owner of the CAS remove gate. Same lock/injection
@@ -714,7 +722,10 @@ func (c *claudeCode) ClassifyEntryUnderLock(name string, match func(*MCPEntry) b
 	})
 }
 func (c *claudeCode) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil, false)
+}
+func (c *claudeCode) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil, true)
 }
 func (c *claudeCode) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
@@ -729,7 +740,10 @@ func (c *codexCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) boo
 	})
 }
 func (c *codexCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil, false)
+}
+func (c *codexCLI) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil, true)
 }
 func (c *codexCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
@@ -744,7 +758,10 @@ func (v *vscodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry)
 	})
 }
 func (v *vscodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, v.GetEntry, v.EntryPresentInBytes, v.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, v.GetEntry, v.EntryPresentInBytes, v.restoreEntryFromBytes, nil, false)
+}
+func (v *vscodeClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, v.GetEntry, v.EntryPresentInBytes, v.restoreEntryFromBytes, nil, true)
 }
 func (v *vscodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, v.GetEntry, v.RemoveEntry, nil)
@@ -757,7 +774,10 @@ func (o *openCodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntr
 	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, classifyOpenCodeRawEntry)
 }
 func (o *openCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, nil, false)
+}
+func (o *openCodeClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, nil, true)
 }
 func (o *openCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, o.GetEntry, o.RemoveEntry, nil)
@@ -782,7 +802,10 @@ func (o *mimoCodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntr
 	})
 }
 func (o *mimoCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined)
+	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined, false)
+}
+func (o *mimoCodeClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined, true)
 }
 func (o *mimoCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, o.casWriteTargetEntry, o.RemoveEntry, o.casHigherLayerRetainsServer)
@@ -856,7 +879,10 @@ func (c *cursorClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry)
 	})
 }
 func (c *cursorClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil, false)
+}
+func (c *cursorClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, c.GetEntry, c.EntryPresentInBytes, c.restoreEntryFromBytes, nil, true)
 }
 func (c *cursorClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, c.GetEntry, c.RemoveEntry, nil)
@@ -871,7 +897,10 @@ func (g *geminiCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bo
 	})
 }
 func (g *geminiCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, g.GetEntry, g.EntryPresentInBytes, g.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, g.GetEntry, g.EntryPresentInBytes, g.restoreEntryFromBytes, nil, false)
+}
+func (g *geminiCLI) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, g.GetEntry, g.EntryPresentInBytes, g.restoreEntryFromBytes, nil, true)
 }
 func (g *geminiCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, g.GetEntry, g.RemoveEntry, nil)
@@ -886,7 +915,10 @@ func (q *qwenCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool
 	})
 }
 func (q *qwenCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, q.GetEntry, q.EntryPresentInBytes, q.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, q.GetEntry, q.EntryPresentInBytes, q.restoreEntryFromBytes, nil, false)
+}
+func (q *qwenCLI) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, q.GetEntry, q.EntryPresentInBytes, q.restoreEntryFromBytes, nil, true)
 }
 func (q *qwenCLI) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, q.GetEntry, q.RemoveEntry, nil)
@@ -899,7 +931,10 @@ func (a *antigravityClient) ClassifyEntryUnderLock(name string, match func(*MCPE
 	return classifyEntryFromPhysicalBytes(a.path, name, match, snapshotSubtree, a.EntryRawSubtree, classifyAntigravityRawEntry)
 }
 func (a *antigravityClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes, nil)
+	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes, nil, false)
+}
+func (a *antigravityClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes, nil, true)
 }
 func (a *antigravityClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, a.GetEntry, a.RemoveEntry, nil)
@@ -953,6 +988,16 @@ func (l *lockingClient) CASRestoreEntryFromBytes(name string, match func(*MCPEnt
 			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())
 		}
 		return m.CASRestoreEntryFromBytes(name, match, snapshotBytes)
+	})
+}
+
+func (l *lockingClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
+	return withConfigLock(l.Client.ConfigPath(), func() error {
+		m, ok := l.Client.(CASEntryMutator)
+		if !ok {
+			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())
+		}
+		return m.CASRestoreEntryFromBytesForRollback(name, match, snapshotBytes)
 	})
 }
 

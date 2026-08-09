@@ -21,6 +21,7 @@ export type ConfigSettingDTO = BaseSettingDTO & {
   max?: number;
   pattern?: string;
   optional?: boolean;
+  read_only?: boolean;
 };
 
 export type ActionSettingDTO = BaseSettingDTO & {

@@ -13,6 +13,11 @@ const (
 	// files are per-task maps/lists and can legitimately exceed the small
 	// hub-state cap.
 	maxIntentFileBytes = 16 << 20
+	// MaxClientConfigBackupBytes bounds a rolling client-config backup before it
+	// becomes a retained reconcile pin. Client configs can legitimately exceed
+	// ordinary hub-state files, but a pin must remain bounded before a client
+	// mutation can proceed.
+	MaxClientConfigBackupBytes = maxIntentFileBytes
 	// maxAgeKeyFileBytes bounds the age identity file. Real X25519 identity
 	// files are tiny; 64 KiB leaves room for comments / future multi-identity
 	// forms without allowing an unbounded key read.
