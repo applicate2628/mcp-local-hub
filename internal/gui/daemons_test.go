@@ -417,10 +417,44 @@ func TestWeeklyScheduleHandler_SwapFails_DegradedRestore(t *testing.T) {
 	}
 }
 
-func TestWeeklyScheduleHandler_ReleaseUnconfirmedReportsManualRecovery(t *testing.T) {
+func TestWeeklyScheduleHandler_AppliedReleaseUnconfirmedReportsCommittedUpdate(t *testing.T) {
 	srv := newDaemonsTestServer(t)
 	setWeeklyScheduleApplyForRoute(t, func(*api.ScheduleSpec) (string, error) {
-		return "n/a", fmt.Errorf("release weekly lock: %w", api.ErrLockReleaseUnconfirmed)
+		return "n/a", errors.Join(api.ErrAppliedLockReleaseUnconfirmed, api.ErrLockReleaseUnconfirmed)
+	})
+	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(`{"schedule":"weekly Tue 14:30"}`))
+	req.Header = sameOriginHeaders()
+	rec := httptest.NewRecorder()
+	srv.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp["updated"] != true || resp["schedule"] != "weekly Tue 14:30" || resp["restore_status"] != "n/a" {
+		t.Fatalf("release-unconfirmed response = %#v, want committed update projection", resp)
+	}
+	if resp["warning"] != "lock_release_unconfirmed" {
+		t.Fatalf("warning = %q, want lock_release_unconfirmed", resp["warning"])
+	}
+	const wantManualRecovery = "The weekly schedule was committed, but its lock release could not be confirmed. Restart the running mcp-local-hub process before making another schedule change."
+	if resp["manual_recovery"] != wantManualRecovery {
+		t.Fatalf("manual_recovery = %q, want %q", resp["manual_recovery"], wantManualRecovery)
+	}
+	if _, has := resp["error"]; has {
+		t.Fatalf("committed response must not report a failed mutation: %#v", resp)
+	}
+	if len(resp) != 5 {
+		t.Fatalf("release-unconfirmed response fields = %#v, want five-field committed schema", resp)
+	}
+}
+
+func TestWeeklyScheduleHandler_UnappliedReleaseUnconfirmedStaysFailure(t *testing.T) {
+	srv := newDaemonsTestServer(t)
+	setWeeklyScheduleApplyForRoute(t, func(*api.ScheduleSpec) (string, error) {
+		return "n/a", fmt.Errorf("acquire weekly lock: %w", api.ErrLockReleaseUnconfirmed)
 	})
 	req := httptest.NewRequest(http.MethodPut, "/api/daemons/weekly-schedule", strings.NewReader(`{"schedule":"weekly Tue 14:30"}`))
 	req.Header = sameOriginHeaders()
@@ -433,15 +467,11 @@ func TestWeeklyScheduleHandler_ReleaseUnconfirmedReportsManualRecovery(t *testin
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal response: %v", err)
 	}
-	if resp["error"] != "scheduler_swap_failed" || resp["updated"] != false || resp["restore_status"] != "n/a" {
-		t.Fatalf("release-unconfirmed response = %#v, want existing failure projection", resp)
+	if resp["updated"] != false || resp["error"] != "scheduler_swap_failed" {
+		t.Fatalf("unapplied response = %#v, want failure projection", resp)
 	}
-	const wantManualRecovery = "The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying."
-	if resp["manual_recovery"] != wantManualRecovery {
-		t.Fatalf("manual_recovery = %q, want %q", resp["manual_recovery"], wantManualRecovery)
-	}
-	if len(resp) != 5 {
-		t.Fatalf("release-unconfirmed response fields = %#v, want existing five-field failure schema", resp)
+	if resp["manual_recovery"] != weeklyScheduleReleaseUnconfirmedRecoveryHint {
+		t.Fatalf("manual_recovery = %q, want retry guidance for unapplied result", resp["manual_recovery"])
 	}
 }
 

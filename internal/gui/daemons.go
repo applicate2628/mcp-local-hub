@@ -17,6 +17,7 @@ const (
 	// neither the new task nor the prior task is currently registered.
 	manualRecoveryHint = "Run `mcphub workspace-weekly-refresh-restore` or restart mcphub to re-create the task."
 
+	weeklyScheduleAppliedReleaseUnconfirmedHint  = "The weekly schedule was committed, but its lock release could not be confirmed. Restart the running mcp-local-hub process before making another schedule change."
 	weeklyScheduleReleaseUnconfirmedRecoveryHint = "The weekly schedule transaction did not commit because its lock release could not be confirmed. Restart the running mcp-local-hub process before retrying."
 )
 
@@ -230,6 +231,17 @@ func (s *Server) weeklyScheduleHandler(w http.ResponseWriter, r *http.Request) {
 			"updated":        true,
 			"schedule":       canonical,
 			"restore_status": "n/a",
+		})
+		return
+	}
+	if api.IsAppliedLockReleaseUnconfirmed(applyErr) {
+		log.Printf("/api/daemons/weekly-schedule committed with an unconfirmed lock release: %v", applyErr)
+		writeJSON(w, http.StatusOK, map[string]any{
+			"updated":         true,
+			"schedule":        canonical,
+			"restore_status":  helperStatus,
+			"warning":         "lock_release_unconfirmed",
+			"manual_recovery": weeklyScheduleAppliedReleaseUnconfirmedHint,
 		})
 		return
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/gofrs/flock"
 )
@@ -48,6 +49,67 @@ func TestRegistryLock_ReleaseFailureIsReportedAndReacquireFailsFast(t *testing.T
 	}
 	if _, locked, err := reg.TryLock(); locked || !errors.Is(err, ErrLockReleaseUnconfirmed) {
 		t.Fatalf("TryLock after failed release = locked=%t err=%v, want fail-fast release class", locked, err)
+	}
+}
+
+func TestLockLeafLedgered_ConcurrentWaiterSeesReleasePoison(t *testing.T) {
+	reg := NewRegistry(filepath.Join(t.TempDir(), "workspaces.yaml"))
+	lockPath := reg.LockPath()
+	releaseCause := errors.New("injected retained registry lock")
+
+	previousUnlock := flockUnlockFn
+	var stranded []*flock.Flock
+	flockUnlockFn = func(fl *flock.Flock) error {
+		if fl.Path() == lockPath {
+			stranded = append(stranded, fl)
+			return releaseCause
+		}
+		return previousUnlock(fl)
+	}
+	t.Cleanup(func() {
+		flockUnlockFn = previousUnlock
+		for _, fl := range stranded {
+			_ = fl.Unlock()
+		}
+		unconfirmedLockReleasesMu.Lock()
+		delete(unconfirmedLockReleases, lockPath)
+		unconfirmedLockReleasesMu.Unlock()
+	})
+
+	release, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("first Lock: %v", err)
+	}
+	waiterResult := make(chan error, 1)
+	waiterStarted := make(chan struct{})
+	go func() {
+		close(waiterStarted)
+		secondRelease, lockErr := reg.Lock()
+		if secondRelease != nil {
+			_ = secondRelease()
+		}
+		waiterResult <- lockErr
+	}()
+
+	<-waiterStarted
+	time.Sleep(50 * time.Millisecond)
+	// The first release still owns the per-leaf lifecycle gate. The waiter must
+	// not enter the OS flock where a retained handle could strand it forever.
+	select {
+	case waiterErr := <-waiterResult:
+		t.Fatalf("waiter returned before the first lifecycle released its gate: %v", waiterErr)
+	default:
+	}
+	if releaseErr := release(); !errors.Is(releaseErr, releaseCause) {
+		t.Fatalf("first release=%v, want injected cause", releaseErr)
+	}
+	select {
+	case waiterErr := <-waiterResult:
+		if !errors.Is(waiterErr, ErrLockReleaseUnconfirmed) || !errors.Is(waiterErr, releaseCause) {
+			t.Fatalf("waiter error=%v, want fail-fast poison and cause", waiterErr)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("second waiter hung behind a retained flock instead of observing the release poison")
 	}
 }
 

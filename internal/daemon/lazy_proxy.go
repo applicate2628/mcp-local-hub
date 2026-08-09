@@ -195,6 +195,10 @@ type LazyProxy struct {
 	gate     *InflightGate
 	server   *http.Server
 	listener net.Listener // populated by Bind; consumed by Serve
+	// reserveMaterializedSlotFn is an invocation-local test seam for the
+	// reservation settlement boundary. Production leaves it nil and uses
+	// reserveMaterializedSlot directly.
+	reserveMaterializedSlotFn func() (bool, error)
 
 	mu       sync.Mutex
 	endpoint MCPEndpoint
@@ -1305,9 +1309,21 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 	// Slow path: reserve a cold-start slot (marks Starting BEFORE entering the
 	// gate so `status` shows "starting" while the singleflight is in flight),
 	// then go through the gate.
-	wroteStarting, err := p.reserveMaterializedSlot()
+	reserveSlot := p.reserveMaterializedSlot
+	if p.reserveMaterializedSlotFn != nil {
+		reserveSlot = p.reserveMaterializedSlotFn
+	}
+	wroteStarting, err := reserveSlot()
 	if err != nil {
-		return nil, 0, err
+		if !wroteStarting || !errors.Is(err, api.ErrLockReleaseUnconfirmed) {
+			return nil, 0, err
+		}
+		// reserveMaterializedSlot's named result is true only after the Starting
+		// row reached durable storage. A final registry unlock error poisons this
+		// process's leaf, but abandoning here would strand the durable reservation
+		// forever because a retry cannot reacquire it. Continue this already-owned
+		// materialization and publish only a stable, path-free warning.
+		fmt.Fprintln(daemonDiagWriter(), "warn: lazy_proxy: materialized slot reservation applied; registry lock release unconfirmed; continuing materialization (restart mcphub before another cold start)")
 	}
 	if wroteStarting {
 		// reserve wrote Starting out-of-band under the flock — invalidate the

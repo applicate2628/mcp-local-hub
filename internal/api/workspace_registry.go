@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 
 	"mcp-local-hub/internal/config"
@@ -196,17 +195,14 @@ func (r *Registry) LockPath() string { return r.path + ".lock" }
 // The returned one-shot release reports and records failure.
 func (r *Registry) Lock() (func() error, error) {
 	lockPath := r.LockPath()
-	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
-		return nil, fmt.Errorf("lock %s: %w", lockPath, ghost)
-	}
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(lockPath)
-	if err := fl.Lock(); err != nil {
+	release, err := lockLeafLedgered(lockPath)
+	if err != nil {
 		return nil, fmt.Errorf("lock %s: %w", lockPath, err)
 	}
-	return newLedgeredFlockRelease(fl, lockPath), nil
+	return release, nil
 }
 
 // TryLock is the non-blocking variant of Lock: it attempts to acquire the
@@ -223,21 +219,17 @@ func (r *Registry) Lock() (func() error, error) {
 // contention.
 func (r *Registry) TryLock() (func() error, bool, error) {
 	lockPath := r.LockPath()
-	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
-		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, ghost)
-	}
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(lockPath)
-	locked, err := fl.TryLock()
+	release, locked, err := tryLockLeafLedgered(lockPath)
 	if err != nil {
 		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, err)
 	}
 	if !locked {
 		return nil, false, nil
 	}
-	return newLedgeredFlockRelease(fl, lockPath), true, nil
+	return release, true, nil
 }
 
 // Put upserts an entry (primary key = workspace_key + language).

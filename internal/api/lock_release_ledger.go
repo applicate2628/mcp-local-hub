@@ -14,6 +14,12 @@ import (
 // benign contention.
 var ErrLockReleaseUnconfirmed = errors.New("lock release could not be confirmed; this process still holds the lock leaf")
 
+// ErrAppliedLockReleaseUnconfirmed is the public, path-free disposition for a
+// mutation that reached durable storage before its lock release became
+// unconfirmed. Composition roots may project the committed result while still
+// warning that this process must not touch the poisoned leaf again.
+var ErrAppliedLockReleaseUnconfirmed = errors.New("durable mutation applied before lock release became unconfirmed")
+
 // appliedLockReleaseUnconfirmedError distinguishes a poisoned lock leaf after
 // its owning mutation reached durable storage.  Callers use this distinction to
 // commit the truthful durable prefix instead of attempting compensations that
@@ -26,7 +32,9 @@ func (e *appliedLockReleaseUnconfirmedError) Error() string {
 	return fmt.Sprintf("durable mutation applied before lock release became unconfirmed: %v", e.cause)
 }
 
-func (e *appliedLockReleaseUnconfirmedError) Unwrap() error { return e.cause }
+func (e *appliedLockReleaseUnconfirmedError) Unwrap() []error {
+	return []error{ErrAppliedLockReleaseUnconfirmed, e.cause}
+}
 
 func markAppliedLockReleaseUnconfirmed(err error) error {
 	if err == nil || !errors.Is(err, ErrLockReleaseUnconfirmed) {
@@ -36,8 +44,7 @@ func markAppliedLockReleaseUnconfirmed(err error) error {
 }
 
 func isAppliedLockReleaseUnconfirmed(err error) bool {
-	var applied *appliedLockReleaseUnconfirmedError
-	return errors.As(err, &applied)
+	return errors.Is(err, ErrAppliedLockReleaseUnconfirmed)
 }
 
 // IsAppliedLockReleaseUnconfirmed is the composition-root projection of the
@@ -54,7 +61,13 @@ var flockUnlockFn = func(fl *flock.Flock) error { return fl.Unlock() }
 var (
 	unconfirmedLockReleasesMu sync.Mutex
 	unconfirmedLockReleases   = map[string]error{}
+	ledgeredLeafGates         sync.Map // map[string]*sync.Mutex
 )
+
+func ledgeredLeafGate(lockPath string) *sync.Mutex {
+	gate, _ := ledgeredLeafGates.LoadOrStore(lockPath, &sync.Mutex{})
+	return gate.(*sync.Mutex)
+}
 
 func recordUnconfirmedLockRelease(lockPath string, cause error) error {
 	unconfirmedLockReleasesMu.Lock()
@@ -102,37 +115,49 @@ func releaseAndJoinApplied(err *error, release func() error, what string, applie
 }
 
 func lockLeafLedgered(lockPath string) (func() error, error) {
+	gate := ledgeredLeafGate(lockPath)
+	gate.Lock()
 	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
+		gate.Unlock()
 		return nil, ghost
 	}
 	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {
+		gate.Unlock()
 		return nil, err
 	}
-	return newLedgeredFlockRelease(fl, lockPath), nil
+	return newLedgeredFlockRelease(fl, lockPath, gate.Unlock), nil
 }
 
 func tryLockLeafLedgered(lockPath string) (func() error, bool, error) {
+	gate := ledgeredLeafGate(lockPath)
+	if !gate.TryLock() {
+		return nil, false, nil
+	}
 	if ghost := unconfirmedLockRelease(lockPath); ghost != nil {
+		gate.Unlock()
 		return nil, false, ghost
 	}
 	fl := flock.New(lockPath)
 	locked, err := fl.TryLock()
 	if err != nil {
+		gate.Unlock()
 		return nil, false, err
 	}
 	if !locked {
+		gate.Unlock()
 		return nil, false, nil
 	}
-	return newLedgeredFlockRelease(fl, lockPath), true, nil
+	return newLedgeredFlockRelease(fl, lockPath, gate.Unlock), true, nil
 }
 
-func newLedgeredFlockRelease(fl *flock.Flock, lockPath string) func() error {
+func newLedgeredFlockRelease(fl *flock.Flock, lockPath string, releaseGate func()) func() error {
 	unlockFn := flockUnlockFn
 	var once sync.Once
 	var outcome error
 	return func() error {
 		once.Do(func() {
+			defer releaseGate()
 			if err := unlockFn(fl); err != nil {
 				outcome = recordUnconfirmedLockRelease(lockPath, err)
 			}
