@@ -152,21 +152,29 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		return dedupStrings(all)
 	}
 
-	declarationDepth := 0
+	var declarationScopes []string
 	var loopScopes []string
 	declaredCommands := map[string]struct{}{}
 	deferredCommandBody := false
 	executionUncertain := false
 	for _, st := range stmts {
-		if declarationDepth > 0 {
+		if len(declarationScopes) > 0 {
 			if containsPatchesKeyword(st.Args) {
 				deferredCommandBody = true
 			}
 			switch st.Name {
 			case "function", "macro":
-				declarationDepth++
-			case "endfunction", "endmacro":
-				declarationDepth--
+				declarationScopes = append(declarationScopes, st.Name)
+			case "endfunction":
+				if declarationScopes[len(declarationScopes)-1] != "function" {
+					return nil, false, parserStructuralExpressionUnparsable
+				}
+				declarationScopes = declarationScopes[:len(declarationScopes)-1]
+			case "endmacro":
+				if declarationScopes[len(declarationScopes)-1] != "macro" {
+					return nil, false, parserStructuralExpressionUnparsable
+				}
+				declarationScopes = declarationScopes[:len(declarationScopes)-1]
 			}
 			continue
 		}
@@ -198,7 +206,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			if toks := tokenize(st.Args); len(toks) > 0 && !toks[0].Quoted {
 				declaredCommands[strings.ToLower(toks[0].Text)] = struct{}{}
 			}
-			declarationDepth = 1
+			declarationScopes = append(declarationScopes, st.Name)
+		case "endfunction", "endmacro":
+			return nil, false, parserStructuralExpressionUnparsable
 		case "foreach", "while":
 			loopScopes = append(loopScopes, st.Name)
 		case "endforeach", "endwhile":
@@ -291,7 +301,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			}
 		}
 	}
-	if len(frames) != 0 || declarationDepth != 0 || len(loopScopes) != 0 {
+	if len(frames) != 0 || len(declarationScopes) != 0 || len(loopScopes) != 0 {
 		return nil, false, parserStructuralExpressionUnparsable
 	}
 	if deferredCommandBody {

@@ -126,7 +126,10 @@ type Status = evidence.Status
 type Deps struct {
 	Getenv   func(key string) string
 	LookPath func(file string) (string, error)
-	Getwd    func() (string, error)
+	// EvalSymlinks resolves the executable returned by LookPath before its
+	// containing directory is treated as the vcpkg root.
+	EvalSymlinks func(path string) (string, error)
+	Getwd        func() (string, error)
 	// Stat reports whether path exists (any file type); tests can fake this
 	// without touching a real filesystem.
 	Stat func(path string) (os.FileInfo, error)
@@ -140,12 +143,13 @@ type Deps struct {
 // tests build their own Deps with fake functions.
 func DefaultDeps() Deps {
 	return Deps{
-		Getenv:      os.Getenv,
-		LookPath:    lookPath,
-		Getwd:       os.Getwd,
-		Stat:        os.Stat,
-		GOOS:        runtime.GOOS,
-		UserHomeDir: os.UserHomeDir,
+		Getenv:       os.Getenv,
+		LookPath:     lookPath,
+		EvalSymlinks: filepath.EvalSymlinks,
+		Getwd:        os.Getwd,
+		Stat:         os.Stat,
+		GOOS:         runtime.GOOS,
+		UserHomeDir:  os.UserHomeDir,
 	}
 }
 
@@ -306,9 +310,22 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 	// Rule 3: vcpkg resolved on PATH -> containing directory.
 	if deps.LookPath != nil {
 		if p, err := deps.LookPath(strings.TrimSuffix(vcpkgBinaryName(deps.GOOS), ".exe")); err == nil && p != "" {
-			dir := filepath.Dir(p)
 			res.Evidence.AddPath(p)
-			if hasVcpkgBinary(deps, dir) {
+			resolvedPath := p
+			if deps.EvalSymlinks != nil {
+				resolved, resolveErr := deps.EvalSymlinks(p)
+				if resolveErr != nil {
+					res.Candidates = append(res.Candidates, Candidate{Path: p, Rule: RulePath, Detail: "PATH executable target could not be resolved: " + resolveErr.Error()})
+					resolvedPath = ""
+				} else {
+					resolvedPath = resolved
+					if resolved != p {
+						res.Evidence.AddPath(resolved)
+					}
+				}
+			}
+			dir := filepath.Dir(resolvedPath)
+			if resolvedPath != "" && hasVcpkgBinary(deps, dir) {
 				return Result{
 					Status:     evidence.StatusOK,
 					RuleFired:  RulePath,

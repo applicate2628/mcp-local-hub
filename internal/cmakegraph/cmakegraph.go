@@ -604,6 +604,7 @@ func Walk(ctx context.Context, startFile, workspaceRoot string, opts Options) (*
 	if err != nil {
 		return nil, err
 	}
+	defer w.close()
 	absStart, err := w.walkRoot(startFile)
 	if err != nil {
 		return nil, err
@@ -691,6 +692,7 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 	if err != nil {
 		return nil, err
 	}
+	defer w.close()
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return nil, fmt.Errorf("cmakegraph: resolve tree root: %w", err)
@@ -903,8 +905,9 @@ func dedupCtx(ctx sourceContext) sourceContext {
 type walker struct {
 	ctx                   context.Context
 	opts                  Options
-	workspaceRoot         string // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
-	realWorkspaceRoot     string // symlink-resolved, used for the boundary check
+	workspaceRoot         string   // absolute, NOT symlink-resolved (used for ${CMAKE_SOURCE_DIR} substitution)
+	realWorkspaceRoot     string   // symlink-resolved, used for the boundary check
+	workspaceFS           *os.Root // handle-pinned workspace boundary for root admission
 	visited               map[visitKey]bool
 	files                 map[string]bool
 	edges                 []Edge
@@ -943,14 +946,25 @@ func newWalker(ctx context.Context, workspaceRoot string, opts Options) (*walker
 	if resolved, evalErr := filepath.EvalSymlinks(absRoot); evalErr == nil {
 		realRoot = resolved
 	}
+	workspaceFS, err := os.OpenRoot(realRoot)
+	if err != nil {
+		return nil, fmt.Errorf("cmakegraph: open workspace root: %w", err)
+	}
 	return &walker{
 		ctx:               ctx,
 		opts:              normalizedOpts,
 		workspaceRoot:     absRoot,
 		realWorkspaceRoot: realRoot,
+		workspaceFS:       workspaceFS,
 		visited:           map[visitKey]bool{},
 		files:             map[string]bool{},
 	}, nil
+}
+
+func (w *walker) close() {
+	if w != nil && w.workspaceFS != nil {
+		_ = w.workspaceFS.Close()
+	}
 }
 
 // recordCoverage is the SINGLE owner of Result.UnscannedFiles. Every coverage
@@ -1031,7 +1045,7 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 			fmt.Sprintf("root %s resolves outside workspace root %s", canonStart, w.realWorkspaceRoot))
 		return absStart, nil
 	}
-	if fi, statErr := os.Stat(absStart); statErr != nil || !fi.Mode().IsRegular() {
+	if fi, statErr := os.Stat(canonStart); statErr != nil || !fi.Mode().IsRegular() {
 		if statErr != nil {
 			return "", fmt.Errorf("cmakegraph: start file %s: %w", absStart, statErr)
 		}
@@ -1049,9 +1063,45 @@ func (w *walker) walkRoot(startFile string) (string, error) {
 		return absStart, nil
 	}
 	w.visited[key] = true
-	// w.files is populated inside walkFile, once the read succeeds — see there.
-	w.walkFile(absStart, ctx, 0, []string{canonStart})
+	data, readErr := w.readPinnedRoot(canonStart)
+	if readErr != nil {
+		w.recordCoverage(canonStart, readCoverageReason(readErr), readErr.Error())
+		return absStart, nil
+	}
+	// The verified root is parsed from the same handle that enforced the
+	// workspace boundary. Reopening absStart here would recreate a symlink-swap
+	// window between canonicalization and read.
+	w.walkFileData(canonStart, data, ctx, 0, []string{canonStart})
 	return absStart, nil
+}
+
+func (w *walker) readPinnedRoot(canonicalPath string) ([]byte, error) {
+	if w.workspaceFS == nil {
+		return nil, errors.New("cmakegraph: workspace root handle is unavailable")
+	}
+	rel, err := filepath.Rel(w.realWorkspaceRoot, canonicalPath)
+	if err != nil {
+		return nil, fmt.Errorf("cmakegraph: derive workspace-relative root: %w", err)
+	}
+	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return nil, fmt.Errorf("cmakegraph: root %s is outside workspace root %s", canonicalPath, w.realWorkspaceRoot)
+	}
+	f, err := w.workspaceFS.Open(rel)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("cmakegraph: start file %s is not a regular file", canonicalPath)
+	}
+	if info.Size() > w.opts.MaxFileBytes {
+		return nil, fmt.Errorf("%w: %s (%d > %d)", errByteCapExceeded, canonicalPath, info.Size(), w.opts.MaxFileBytes)
+	}
+	return readBoundedFrom(f, canonicalPath, w.opts.MaxFileBytes)
 }
 
 func (w *walker) result(root string) *Result {
@@ -1108,6 +1158,10 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 		w.recordCoverage(file, readCoverageReason(err), err.Error())
 		return
 	}
+	w.walkFileData(file, data, ctx, depth, ancestors)
+}
+
+func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth int, ancestors []string) {
 	canonSelf := w.canonicalize(file)
 	// Recorded as SCANNED only here, after the read actually succeeded. This is
 	// the single owner of w.files: both callers (walkRoot for a root, the

@@ -148,6 +148,16 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			if len(scopes) != 0 {
 				continue
 			}
+		case "unset":
+			if len(scopes) != 0 {
+				continue
+			}
+			toks := tokenize(st.Args)
+			if len(toks) == 0 || toks[0].Text == "" || toks[0].Quoted {
+				return nil
+			}
+			delete(env.values, toks[0].Text)
+			continue
 		default:
 			continue
 		}

@@ -14,6 +14,7 @@ package portresolution
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -46,7 +47,9 @@ type Reason string
 const (
 	// MaxOverlayRoots bounds request batch admission before normalization or
 	// filesystem work. It is also exported to the MCP schema owner.
-	MaxOverlayRoots = 64
+	MaxOverlayRoots                = 64
+	maxOverlayMetadataBytes  int64 = 64 << 10
+	overlayMetadataPageBytes int64 = 4 << 10
 	// ReasonPortNotFound: port was not found in any overlay or builtin.
 	ReasonPortNotFound Reason = "port_not_found"
 	// ReasonNoRootsSupplied: neither vcpkg_root nor overlay_ports were given,
@@ -308,6 +311,81 @@ func inspectPortCandidate(ctx context.Context, deps Deps, dir string) probeOutco
 	return probeOutcome{kind: probeAbsent, reason: "no readable regular portfile.cmake or vcpkg.json found"}
 }
 
+// inspectIndividualOverlay implements vcpkg's two overlay forms. A supplied
+// root that contains portfile.cmake plus vcpkg.json/CONTROL is one port whose
+// name comes from that metadata; only when that shape is absent may resolution
+// probe <root>/<requested-port> as a collection overlay.
+func inspectIndividualOverlay(ctx context.Context, deps Deps, dir, requested string) (bool, probeOutcome) {
+	portfile := filepath.Join(dir, "portfile.cmake")
+	portInfo, portErr, outcome, canceled := probeStat(ctx, deps, portfile)
+	if canceled {
+		return true, outcome
+	}
+	if portErr != nil {
+		if os.IsNotExist(portErr) {
+			return false, probeOutcome{}
+		}
+		return true, probeOutcome{kind: probeUnreadable, reason: portErr.Error()}
+	}
+	if !portInfo.Mode().IsRegular() {
+		return true, probeOutcome{kind: probeUnreadable, reason: "individual overlay portfile.cmake is not a regular file"}
+	}
+	if _, err := boundedio.ReadFile(ctx, depsFS{deps}, portfile, 1, 1); err != nil {
+		return true, probeOutcome{kind: probeUnreadable, reason: err.Error()}
+	}
+
+	for _, metadata := range []string{"vcpkg.json", "CONTROL"} {
+		path := filepath.Join(dir, metadata)
+		info, statErr, statOutcome, statCanceled := probeStat(ctx, deps, path)
+		if statCanceled {
+			return true, statOutcome
+		}
+		if statErr != nil {
+			if os.IsNotExist(statErr) {
+				continue
+			}
+			return true, probeOutcome{kind: probeUnreadable, reason: statErr.Error()}
+		}
+		if !info.Mode().IsRegular() {
+			return true, probeOutcome{kind: probeUnreadable, reason: metadata + " is not a regular file"}
+		}
+		admitted, readErr := boundedio.ReadFile(ctx, depsFS{deps}, path, maxOverlayMetadataBytes, overlayMetadataPageBytes)
+		if readErr != nil {
+			return true, probeOutcome{kind: probeUnreadable, reason: readErr.Error()}
+		}
+		if admitted.Limited {
+			return true, probeOutcome{kind: probeUnreadable, reason: metadata + " exceeds the metadata byte limit"}
+		}
+
+		declared := ""
+		if metadata == "vcpkg.json" {
+			var manifest struct {
+				Name string `json:"name"`
+			}
+			if err := json.Unmarshal(admitted.Data, &manifest); err != nil {
+				return true, probeOutcome{kind: probeUnreadable, reason: "invalid vcpkg.json: " + err.Error()}
+			}
+			declared = strings.TrimSpace(manifest.Name)
+		} else {
+			for _, line := range strings.Split(string(admitted.Data), "\n") {
+				key, value, found := strings.Cut(line, ":")
+				if found && strings.EqualFold(strings.TrimSpace(key), "Source") {
+					declared = strings.TrimSpace(value)
+					break
+				}
+			}
+		}
+		if declared == "" {
+			return true, probeOutcome{kind: probeUnreadable, reason: metadata + " does not declare a port name"}
+		}
+		if declared != requested {
+			return true, probeOutcome{kind: probeAbsent, reason: fmt.Sprintf("individual overlay declares port %q, not %q", declared, requested)}
+		}
+		return true, probeOutcome{kind: probeFound}
+	}
+	return false, probeOutcome{}
+}
+
 func candidateState(outcome probeOutcome) CandidateState {
 	switch outcome.kind {
 	case probeFound:
@@ -539,14 +617,30 @@ func ResolvePortContext(ctx context.Context, args Args, deps Deps) Result {
 		}
 		overlayPath := overlay.path
 		sourceIndex := overlay.sourceIndex
-		portPath := overlay.portPath
 		source := formatOverlaySource(overlayPath, sourceIndex)
-		state.result.Evidence.AddPath(portPath)
-		candidate := CandidateLocation{Directory: portPath, Source: source}
-
-		if !state.transition(ctx, inspectRoot(ctx, deps, overlayPath), candidate, overlayPrecedence, true, false, "overlay root unreadable: ") {
+		rootCandidate := CandidateLocation{Directory: overlayPath, Source: source}
+		if !state.transition(ctx, inspectRoot(ctx, deps, overlayPath), rootCandidate, overlayPrecedence, true, false, "overlay root unreadable: ") {
 			continue
 		}
+		if individual, outcome := inspectIndividualOverlay(ctx, deps, overlayPath, name.String()); individual {
+			state.result.Evidence.AddPath(overlayPath)
+			candidate := CandidateLocation{Directory: overlayPath, Source: source}
+			state.transition(ctx, outcome, candidate, overlayPrecedence, true, true, "")
+			if outcome.kind == probeFound && !state.canceled {
+				if state.winner == nil {
+					state.winner = &Winner{Directory: overlayPath, Source: source}
+					state.winnerPrecedence = overlayPrecedence
+				} else {
+					state.overlayToOverlayHit = true
+					state.result.Shadows = append(state.result.Shadows, Shadow{Directory: overlayPath, Source: source})
+				}
+			}
+			continue
+		}
+
+		portPath := overlay.portPath
+		state.result.Evidence.AddPath(portPath)
+		candidate := CandidateLocation{Directory: portPath, Source: source}
 
 		outcome := inspectPortCandidate(ctx, deps, portPath)
 		state.transition(ctx, outcome, candidate, overlayPrecedence, true, true, "")

@@ -95,6 +95,7 @@ var (
 	// immediately follows), which callers must check separately via
 	// DetectInterrupted before trusting this as a real failure.
 	ninjaFailedRE = regexp.MustCompile(`^FAILED:\s*(?:\[code=-?\d+\]\s*)?(?P<target>.+)$`)
+	ninjaErrorRE  = regexp.MustCompile(`^ninja\s*:\s*error\s*:\s*(?P<msg>.+)$`)
 )
 
 // interruptMarkers are the exact WHOLE LINES observed when a build was stopped
@@ -638,6 +639,14 @@ func matchDiagnosticLine(line string) (Diagnostic, bool) {
 			File:     strings.TrimSpace(m[toolDiagRE.SubexpIndex("file")]),
 			Severity: normalizeSeverity(m[toolDiagRE.SubexpIndex("sev")]),
 			Tier:     driverTier(m[toolDiagRE.SubexpIndex("msg")]),
+			Text:     line,
+		}, true
+	}
+	if m := ninjaErrorRE.FindStringSubmatch(line); m != nil {
+		return Diagnostic{
+			File:     "ninja",
+			Severity: SeverityError,
+			Tier:     TierSpecific,
 			Text:     line,
 		}, true
 	}
