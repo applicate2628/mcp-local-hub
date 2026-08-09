@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"path"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -33,6 +34,7 @@ import (
 type WrapperInfo struct {
 	Triplet          string
 	Command          string
+	CommandTriplet   string
 	CommandTargets   []string // install target specs recovered from argv
 	OverlayPorts     []string // in command-line order == precedence order
 	BuildtreesRoot   string
@@ -102,7 +104,7 @@ func (w WrapperInfo) RequestedTargetWasAttempted(port, triplet string) bool {
 		return false
 	}
 	for _, target := range w.CommandTargets {
-		targetPort, targetTriplet := commandTargetIdentity(target, w.Triplet)
+		targetPort, targetTriplet := commandTargetIdentity(target, w.CommandTriplet)
 		if strings.EqualFold(targetPort, port) && strings.EqualFold(targetTriplet, triplet) {
 			return true
 		}
@@ -128,6 +130,10 @@ func commandTargetIdentity(target, defaultTriplet string) (port, triplet string)
 
 func installCommandTargets(argv []string) ([]string, bool) {
 	if len(argv) < 3 || !strings.EqualFold(argv[1], "install") {
+		return nil, false
+	}
+	executable := path.Base(strings.ReplaceAll(argv[0], "\\", "/"))
+	if !strings.EqualFold(executable, "vcpkg") && !strings.EqualFold(executable, "vcpkg.exe") {
 		return nil, false
 	}
 	var targets []string
@@ -414,6 +420,7 @@ func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, go
 					info.CommandTargets = append(info.CommandTargets, boundedValue(target, limits.pathBytes))
 				}
 			}
+			info.CommandTriplet = commandFlagValue(argv, "--triplet")
 			for _, overlay := range commandFlagValues(argv, "--overlay-ports") {
 				if len(info.OverlayPorts) >= limits.overlayEntries || len(overlay) > limits.inputScalarBytes {
 					info.OverlayPortsDropped++

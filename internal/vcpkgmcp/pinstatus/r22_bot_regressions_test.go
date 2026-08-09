@@ -14,3 +14,11 @@ func TestR22PortfileFailsClosedOnFetchInsideExecutableLoop(t *testing.T) {
 		})
 	}
 }
+
+func TestR22InactiveLoopDoesNotPoisonKnownSourceSelection(t *testing.T) {
+	source := "if(OFF)\nforeach(item IN ITEMS one)\nvcpkg_from_github(REPO ignored/repo REF ignored)\nendforeach()\nendif()\nvcpkg_from_github(REPO owner/repo REF main)\n"
+	parsed, ok := parsePortfile(source)
+	if !ok || parsed.Remote.Repo != "owner/repo" {
+		t.Fatalf("inactive loop poisoned active source selection: ok=%v parsed=%+v", ok, parsed)
+	}
+}

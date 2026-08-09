@@ -980,7 +980,7 @@ statementLoop:
 				continue
 			}
 			if len(unsupportedScopes) != 0 {
-				if fetchIsInsideExecutableLoop(unsupportedScopes) {
+				if state.active && fetchIsInsideExecutableLoop(unsupportedScopes) {
 					return parsedPortfile{}, false
 				}
 				continue // declaration bodies are not executed at definition time
