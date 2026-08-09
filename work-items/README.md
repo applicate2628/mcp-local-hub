@@ -5,8 +5,8 @@ Read this page for current delivery status. Make lifecycle changes through `scri
 <!-- BEGIN GENERATED WORK-ITEMS STATUS -->
 Read-model: work-items-readme-v1
 Ordered sources: backlog|active|roadmaps|archive
-Canonical changes through: 2026-08-08T23:02:33Z
-Canonical input digest: sha256:b6b392a5d30f8073b76207b52dd8a5e1c73365029aafb25f5d2b5dbb5e9c6653
+Canonical changes through: 2026-08-09T19:49:44Z
+Canonical input digest: sha256:d2e66185c38aa2b2383d739fba34c7cd5b4b05889bb3b2f6e1301d6660d4693e
 
 ## Current focus
 
@@ -14,6 +14,7 @@ Canonical input digest: sha256:b6b392a5d30f8073b76207b52dd8a5e1c73365029aafb25f5
 - [ ] [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) — [work item](active/2026-07-16-productization-gui-solidify/status.md)
 - [ ] [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) — [work item](active/2026-07-20-cli-first-run-ux/status.md)
 - [ ] [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) — investigation complete → design lanes dispatched — [work item](active/2026-07-20-supervisor-never-crash-reliability/status.md)
+- [ ] [2026-07-25-mcp-front-daemon](active/2026-07-25-mcp-front-daemon/status.md) — [work item](active/2026-07-25-mcp-front-daemon/status.md)
 
 ## Next actions
 
@@ -73,6 +74,11 @@ Canonical input digest: sha256:b6b392a5d30f8073b76207b52dd8a5e1c73365029aafb25f5
 - [x] [2026-07-09-test-leftover-reaper](archive/2026-07/2026-07-09-test-leftover-reaper/closure.md) — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED — merged as PR #533 (squash `e1e3f029` on master), deployed, fleet live-verified.](archive/2026-07/2026-07-12-adopt-abort-preserve-provenance/closure.md) — WI-LEGACY-READ-COMPAT
 - [x] [2026-07-13-daemon-port-ephemeral-self-heal](archive/2026-07/2026-07-13-daemon-port-ephemeral-self-heal/closure.md) — WI-LEGACY-READ-COMPAT
+- [x] [2026-07-25-liveness-headless-gui-recovery](archive/2026-07/2026-07-25-liveness-headless-gui-recovery/closure.md) — WI-LEGACY-READ-COMPAT
+- [x] [2026-07-26-cursor-opt-in-review-fixes](archive/2026-07/2026-07-26-cursor-opt-in-review-fixes/closure.md) — WI-LEGACY-READ-COMPAT
+- [x] [2026-07-27-pr583-live-bot-findings](archive/2026-07/2026-07-27-pr583-live-bot-findings/closure.md) — WI-LEGACY-READ-COMPAT
+- [x] [DELIVERED — PR #591 was merged into `master` and deployed as part of the completed open-PR wave.](archive/2026-08/2026-07-27-pr591-bot-findings/closure.md) — Darwin/BSD strict-process lifecycle behavior remains compile-verified rather than runtime-verified; no Windows or Linux runtime blocker remains. — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED and DEPLOYED in PR #594, squash commit `3d87718393b09b7770662df367653a5b09309a29`.](archive/2026-08/2026-08-01-fetch-mcp-dependency-compat/closure.md) — the deployed recovery build should be replaced by an ordinary `master` deployment after its other integrated PRs merge; no fetch blocker remains. — WI-LEGACY-READ-COMPAT
+- [x] [DELIVERED — PRs #583, #588, #589, #590, #591, #592, and #595 are merged; GitHub reports no open pull requests.](archive/2026-08/2026-08-08-finish-open-pr-bot-findings/closure.md) — the scheduled weekly refresh is intentionally Stopped; four unmanaged stdio MCP entries remain an operational advisory and do not represent hub downtime. — WI-LEGACY-READ-COMPAT
 
 <!-- END GENERATED WORK-ITEMS STATUS -->

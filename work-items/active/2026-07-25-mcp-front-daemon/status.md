@@ -1,6 +1,7 @@
 ---
 template: full-delivery
 orchestration: full-lead
+status: active
 started: 2026-07-26
 updated: 2026-07-27 08:07
 ---
