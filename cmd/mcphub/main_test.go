@@ -9,9 +9,9 @@ import (
 )
 
 func TestRouteBareInvocationProducesTrayEnabledGUIArgs(t *testing.T) {
-	routed := routeInvocationArgs([]string{"mcphub"})
+	routed := cli.RouteInvocationArgs([]string{"mcphub"})
 	if want := []string{"mcphub", "gui"}; !reflect.DeepEqual(routed, want) {
-		t.Fatalf("routeInvocationArgs(bare) = %q, want %q", routed, want)
+		t.Fatalf("cli.RouteInvocationArgs(bare) = %q, want %q", routed, want)
 	}
 
 	root := cli.NewRootCmd()

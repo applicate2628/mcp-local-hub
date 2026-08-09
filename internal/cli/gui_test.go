@@ -239,25 +239,31 @@ func TestGuiCmd_HelpIncludesFlags(t *testing.T) {
 	}
 }
 
-func TestGuiCmd_TrayRuntimePolicyFromParsedArgs(t *testing.T) {
+func TestGuiCmd_TrayRuntimePolicyFromRoutedInvocation(t *testing.T) {
 	tests := []struct {
 		name string
-		args []string
+		argv []string
 		want bool
 	}{
-		{name: "bare-routed GUI", args: nil, want: true},
-		{name: "explicit opt-out", args: []string{"--no-tray"}, want: false},
+		{name: "bare invocation routes to tray-enabled GUI", argv: []string{"mcphub"}, want: true},
+		{name: "explicit GUI opt-out suppresses tray", argv: []string{"mcphub", "gui", "--no-tray"}, want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Cobra/pflag parsing mutates command state, so every case needs a
-			// fresh real command to exercise the actual GUI flag binding.
-			cmd := newGuiCmdReal()
-			if err := cmd.Flags().Parse(tt.args); err != nil {
-				t.Fatalf("parse %v: %v", tt.args, err)
+			routed := RouteInvocationArgs(tt.argv)
+			root := NewRootCmd()
+			guiCmd, remaining, err := root.Find(routed[1:])
+			if err != nil {
+				t.Fatalf("find routed command for %v: %v", routed, err)
 			}
-			noTray, err := cmd.Flags().GetBool("no-tray")
+			if guiCmd.Name() != "gui" {
+				t.Fatalf("routed command for %v = %q, want gui", routed, guiCmd.Name())
+			}
+			if err := guiCmd.Flags().Parse(remaining); err != nil {
+				t.Fatalf("parse routed GUI args %v: %v", remaining, err)
+			}
+			noTray, err := guiCmd.Flags().GetBool("no-tray")
 			if err != nil {
 				t.Fatalf("GetBool(no-tray): %v", err)
 			}
