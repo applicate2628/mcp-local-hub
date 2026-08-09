@@ -47,6 +47,10 @@ func processIDImpl(pid int) (ProcessIdentity, error) {
 	return ProcessIdentity{}, errMacOSProbeUnsupported
 }
 
+func retainedProcessIDImpl(pid int) (ProcessIdentity, error) {
+	return ProcessIdentity{}, errMacOSProbeUnsupported
+}
+
 // killProcessImpl is the macOS stub. Never reached in practice
 // because the probe stub above keeps KillRecordedHolder from
 // passing the early-class check, but kept defined so the build
@@ -59,7 +63,7 @@ func killProcessImpl(pid int) error {
 
 // closeProcessHandle is a no-op on darwin (no handle-pinning until
 // the libproc-based macOS probe lane lands).
-func closeProcessHandle(_ uintptr) {}
+func closeProcessHandle(_ uintptr) error { return nil }
 
 // matchBasename mirrors the Linux POSIX rule (no .exe suffix).
 // Defined here to keep probe_linux.go tagged `linux` exactly —

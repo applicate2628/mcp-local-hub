@@ -245,7 +245,7 @@ func TestWakeIdleSerenaDaemon_CompareAndClear_OperatorStopSurvives(t *testing.T)
 	// the wake saw, while the ON-DISK entry is then replaced by an operator stop
 	// (as a concurrent operator-stop write would do between read and clear).
 	origRead := serenaWakeReadStopFn
-	serenaWakeReadStopFn = func(string) (DaemonIntent, error) {
+	serenaWakeReadStopFn = func(string, func(string, string, map[string]any) error) (DaemonIntent, error) {
 		// The stale snapshot the wake observed: an idle stop.
 		return DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonIdle, UpdatedAt: now}, nil
 	}
@@ -420,7 +420,9 @@ func ReadSupervisorIntentForTest(t *testing.T, stateDir string) *SupervisorInten
 func withWakeSeams(t *testing.T, readStop func(string) (DaemonIntent, error), reconcile func(context.Context, bool) (ReconcileResponse, error), readiness func(context.Context, string, int, time.Duration) error) {
 	t.Helper()
 	origRead, origRec, origReady := serenaWakeReadStopFn, serenaWakeReconcileFn, serenaWakeReadinessFn
-	serenaWakeReadStopFn = readStop
+	serenaWakeReadStopFn = func(task string, _ func(string, string, map[string]any) error) (DaemonIntent, error) {
+		return readStop(task)
+	}
 	serenaWakeReconcileFn = reconcile
 	serenaWakeReadinessFn = readiness
 	t.Cleanup(func() {

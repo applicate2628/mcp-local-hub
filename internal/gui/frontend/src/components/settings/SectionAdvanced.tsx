@@ -1,18 +1,104 @@
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { postAction } from "../../lib/settings-api";
 import { restartSupervisor } from "../../api";
-import type { SettingsSnapshot } from "../../lib/settings-types";
+import type { ConfigSettingDTO, SettingsSnapshot } from "../../lib/settings-types";
 import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
+import { SectionFooter } from "./SectionAppearance";
+import { useSectionSaveFlow } from "./useSectionSaveFlow";
 import { InfoTip } from "../InfoTip";
 import { SettingsCard } from "./SettingsCard";
 
 export type SectionAdvancedProps = {
   snapshot: SettingsSnapshot;
+  onDirtyChange?: (b: boolean) => void;
 };
 
-export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.JSX.Element {
+const MCP_FRONT_PORT_KEY = "mcp_front.port";
+const SECTION_KEYS = [MCP_FRONT_PORT_KEY];
+const ignoreDirtyChange = () => {};
+type PortActionPhase = "clean" | "dirty" | "saving" | "save-settling" | "restarting";
+
+export function SectionAdvanced({
+  snapshot,
+  onDirtyChange = ignoreDirtyChange,
+}: SectionAdvancedProps): preact.JSX.Element {
+  const sectionFlow = useSectionSaveFlow(snapshot, SECTION_KEYS, onDirtyChange);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // This one transition owner is authoritative for port Input/Save/Reset and
+  // supervisor Restart. The ref rejects stale handlers before rendering catches
+  // up; the state is only its disabled-control projection.
+  const portActionPhaseRef = useRef<PortActionPhase>("clean");
+  const [portActionPhase, setPortActionPhase] = useState<PortActionPhase>("clean");
+
+  const portDef = snapshot.status === "ok"
+    ? snapshot.data.settings.find(
+      (setting): setting is ConfigSettingDTO =>
+        setting.key === MCP_FRONT_PORT_KEY && setting.type === "int",
+    )
+    : undefined;
+  const portError = sectionFlow.errors[MCP_FRONT_PORT_KEY];
+
+  function transitionPortAction(next: PortActionPhase) {
+    portActionPhaseRef.current = next;
+    setPortActionPhase(next);
+  }
+
+  useEffect(() => {
+    const phase = portActionPhaseRef.current;
+    if (phase === "save-settling" && !sectionFlow.busy) {
+      transitionPortAction(sectionFlow.dirty ? "dirty" : "clean");
+      return;
+    }
+    if (phase === "clean" && sectionFlow.dirty) {
+      transitionPortAction("dirty");
+    } else if (phase === "dirty" && !sectionFlow.dirty) {
+      transitionPortAction("clean");
+    }
+  }, [sectionFlow.busy, sectionFlow.dirty]);
+
+  function setPortLocal(value: string) {
+    const phase = portActionPhaseRef.current;
+    if (phase !== "clean" && phase !== "dirty") return;
+    transitionPortAction("dirty");
+    flow.setLocal(
+      MCP_FRONT_PORT_KEY,
+      value,
+    );
+  }
+
+  async function savePort() {
+    if (portActionPhaseRef.current !== "dirty" || !sectionFlow.dirty || sectionFlow.busy) return;
+    transitionPortAction("saving");
+    try {
+      await sectionFlow.save();
+    } finally {
+      // The shared flow remains the authority for success, failure, errors,
+      // refresh, and banners. Wait for its rendered projection before admitting
+      // another action.
+      transitionPortAction("save-settling");
+    }
+  }
+
+  function resetPort() {
+    if (portActionPhaseRef.current !== "dirty") return;
+    transitionPortAction("clean");
+    sectionFlow.reset();
+  }
+
+  const portSaveBusy = portActionPhase === "saving" || portActionPhase === "save-settling";
+  // Input projection includes Restart; the footer deliberately does not so it
+  // never presents Restart as a Save in progress.
+  const flow = {
+    ...sectionFlow,
+    busy: sectionFlow.busy || portSaveBusy || portActionPhase === "restarting",
+  };
+  const footerFlow = {
+    ...sectionFlow,
+    busy: sectionFlow.busy || portSaveBusy,
+    save: savePort,
+    reset: resetPort,
+  };
 
   // state-read-relax toggle — see internal/gui/state_relax_setting_windows.go
   // for the underlying HKCU\Environment write + WM_SETTINGCHANGE
@@ -124,7 +210,13 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
   const [supRestartBusy, setSupRestartBusy] = useState(false);
   const [supRestartMsg, setSupRestartMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   async function restartSupervisorNow() {
-    if (supRestartBusy) return;
+    if (
+      portActionPhaseRef.current !== "clean"
+      || sectionFlow.dirty
+      || sectionFlow.busy
+      || supRestartBusy
+    ) return;
+    transitionPortAction("restarting");
     setSupRestartBusy(true);
     setSupRestartMsg(null);
     try {
@@ -140,6 +232,7 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
     } catch (e: any) {
       setSupRestartMsg({ kind: "error", text: e?.message ?? "Restart failed" });
     } finally {
+      transitionPortAction("clean");
       setSupRestartBusy(false);
     }
   }
@@ -151,10 +244,55 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
       section="advanced"
       title="Advanced"
       infoTipLabel="About this section"
-      infoTip="Power-user actions: open the app-data folder on disk, export a configuration bundle, toggle autorun on corp-managed Windows hosts (the MCPHUB_ALLOW_UNHARDENED_STATE_READ env var), restart the supervisor, and diagnose the single-instance lock."
-      subtitle="Power-user actions."
+      infoTip="Configure the supervisor-managed MCP front port and use power-user actions: open the app-data folder on disk, export a configuration bundle, toggle autorun on corp-managed Windows hosts (the MCPHUB_ALLOW_UNHARDENED_STATE_READ env var), restart the supervisor, and diagnose the single-instance lock."
+      subtitle="MCP front daemon and power-user actions."
     >
-      <div class="divide-y divide-app-border/60">
+      {portDef ? (
+        <>
+          <div class="divide-y divide-app-border/60">
+            <div class={`settings-field flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3${portError ? " has-error" : ""}`}>
+              <label class="flex items-center gap-1.5 text-sm font-medium text-app-text" for={portDef.key}>
+                MCP front port
+                {portDef.help ? <InfoTip text={portDef.help} /> : null}
+              </label>
+              <div class="flex flex-col items-start gap-1 sm:items-end">
+                <input
+                  id={portDef.key}
+                  type="number"
+                  class="field-ctl w-24"
+                  value={flow.effective(MCP_FRONT_PORT_KEY)}
+                  min={portDef.min}
+                  max={portDef.max}
+                  step={1}
+                  disabled={portDef.deferred || flow.busy}
+                  onInput={(event) => {
+                    setPortLocal((event.currentTarget as HTMLInputElement).value);
+                  }}
+                  aria-invalid={portError ? true : undefined}
+                  aria-describedby={portError
+                    ? `${portDef.key}-constraints ${portDef.key}-error`
+                    : `${portDef.key}-constraints`}
+                  data-testid="mcp-front-port-input"
+                />
+                <small id={`${portDef.key}-constraints`} class="text-xs text-app-muted">
+                  Default {portDef.default}
+                  {portDef.min !== undefined && portDef.max !== undefined
+                    ? `; allowed ${portDef.min}–${portDef.max}.`
+                    : "."}
+                </small>
+                {portError ? (
+                  <small id={`${portDef.key}-error`} class="settings-field-error text-xs text-app-danger" role="alert">
+                    {portError}
+                  </small>
+                ) : null}
+              </div>
+            </div>
+          </div>
+          <SectionFooter flow={footerFlow} />
+        </>
+      ) : null}
+
+      <div class={`${portDef ? "mt-5 border-t border-app-border/60 pt-4 " : ""}divide-y divide-app-border/60`}>
         <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 py-3">
           <span class="flex items-center gap-1.5 text-sm font-medium text-app-text">Open app-data folder</span>
           <button type="button" onClick={() => void openFolder()} disabled={busy} data-test-id="open-folder">
@@ -207,7 +345,7 @@ export function SectionAdvanced({ snapshot: _ }: SectionAdvancedProps): preact.J
           <button
             type="button"
             onClick={() => void restartSupervisorNow()}
-            disabled={supRestartBusy}
+            disabled={portActionPhase !== "clean" || flow.dirty || flow.busy || supRestartBusy}
             data-testid="advanced-restart-supervisor"
           >
             {supRestartBusy ? "Restarting…" : "Restart supervisor now"}

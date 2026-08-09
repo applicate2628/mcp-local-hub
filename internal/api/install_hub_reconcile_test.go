@@ -10,6 +10,7 @@
 package api
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -585,4 +586,46 @@ func TestPerServerInstallSkipsHubEntryRemoval(t *testing.T) {
 	if !strings.HasPrefix(strings.ToLower(string(ClientUpdateAddReplace)), "add") {
 		t.Errorf("ClientUpdateAddReplace stringer regression: %q", ClientUpdateAddReplace)
 	}
+}
+
+func TestApplyHubReconcileOpsAppliedReleaseUnconfirmedStopsSameLeaf(t *testing.T) {
+	induced := errors.New("induced hub reconcile release failure")
+	classify := classifyAPITestAppliedRelease(induced)
+
+	t.Run("add phase stops before later add and remove", func(t *testing.T) {
+		client := newLSPRouterFakeClient(t, "codex-cli", true)
+		client.addErr = induced
+		client.addAppliesOnErr = true
+		err := applyOpsForClientWithDeps("codex-cli", []ClientUpdatePlan{
+			{Client: "codex-cli", Action: ClientUpdateAddReplace, EntryName: "mcphub-hub", URL: "http://127.0.0.1:9125/clients/codex-cli/mcp"},
+			{Client: "codex-cli", Action: ClientUpdateAddReplace, EntryName: "memory", URL: "http://127.0.0.1:9123/mcp"},
+			{Client: "codex-cli", Action: ClientUpdateRemove, EntryName: "legacy"},
+		}, map[string]clients.Client{"codex-cli": client}, classify)
+
+		if err == nil || !strings.Contains(err.Error(), "applied; lock release unconfirmed") {
+			t.Fatalf("error = %v", err)
+		}
+		if client.addCalls != 1 || client.removeCalls != 0 {
+			t.Fatalf("calls add=%d remove=%d, want 1/0", client.addCalls, client.removeCalls)
+		}
+	})
+
+	t.Run("remove phase stops before later remove", func(t *testing.T) {
+		client := newLSPRouterFakeClient(t, "codex-cli", true)
+		client.entries["memory"] = clients.MCPEntry{Name: "memory"}
+		client.entries["git"] = clients.MCPEntry{Name: "git"}
+		client.removeErr = induced
+		client.removeAppliesOnErr = true
+		err := applyOpsForClientWithDeps("codex-cli", []ClientUpdatePlan{
+			{Client: "codex-cli", Action: ClientUpdateRemove, EntryName: "memory"},
+			{Client: "codex-cli", Action: ClientUpdateRemove, EntryName: "git"},
+		}, map[string]clients.Client{"codex-cli": client}, classify)
+
+		if err == nil || !strings.Contains(err.Error(), "applied; lock release unconfirmed") {
+			t.Fatalf("error = %v", err)
+		}
+		if client.removeCalls != 1 {
+			t.Fatalf("remove calls = %d, want 1", client.removeCalls)
+		}
+	})
 }

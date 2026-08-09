@@ -1,6 +1,8 @@
 package api
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
@@ -252,7 +254,7 @@ func TestMigrateOneBinding_SerenaUsesRouterURL(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			report := &MigrateReport{}
-			migrateOneBinding(report, allClients, tc.m, tc.server, tc.binding, true /*dryRun*/, 0, tc.guiPort)
+			migrateOneBinding(report, allClients, tc.m, tc.server, tc.binding, true /*dryRun*/, 0, tc.guiPort, clients.ClassifyClientMutation)
 			if len(report.Applied) != 1 {
 				t.Fatalf("Applied = %d rows, want 1 (failed: %+v)", len(report.Applied), report.Failed)
 			}
@@ -274,7 +276,7 @@ func TestMigrateOneBinding_SerenaRelayStdioSetsRelayURL(t *testing.T) {
 	client := &captureMigrateClient{}
 	report := &MigrateReport{}
 
-	migrateOneBinding(report, map[string]clients.Client{"antigravity": client}, serenaManifest, "serena", binding, false, 0, 9125)
+	migrateOneBinding(report, map[string]clients.Client{"antigravity": client}, serenaManifest, "serena", binding, false, 0, 9125, clients.ClassifyClientMutation)
 
 	if len(report.Failed) != 0 {
 		t.Fatalf("Failed = %+v, want none", report.Failed)
@@ -285,6 +287,42 @@ func TestMigrateOneBinding_SerenaRelayStdioSetsRelayURL(t *testing.T) {
 	}
 	if client.entry.RelayURL != want {
 		t.Fatalf("entry.RelayURL = %q, want %q", client.entry.RelayURL, want)
+	}
+}
+
+func TestMigrateOneBindingAppliedReleaseUnconfirmedRecordsActualChangeAndFailure(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	induced := errors.New("induced migrate add release failure")
+	client := newLSPRouterFakeClient(t, "codex-cli", true)
+	client.addErr = induced
+	client.addAppliesOnErr = true
+	report := &MigrateReport{}
+	manifest := &config.ServerManifest{
+		Name:    "memory",
+		Daemons: []config.DaemonSpec{{Name: "default", Port: 9128}},
+	}
+	binding := config.ClientBinding{Client: "codex-cli", Daemon: "default", URLPath: "/mcp"}
+
+	migrateOneBinding(
+		report,
+		map[string]clients.Client{"codex-cli": client},
+		manifest,
+		"memory",
+		binding,
+		false,
+		1,
+		0,
+		classifyAPITestAppliedRelease(induced),
+	)
+
+	if len(report.Applied) != 1 || len(report.Failed) != 1 {
+		t.Fatalf("report = %+v, want one actual applied row plus one lifecycle failure", report)
+	}
+	if got := client.entries["memory"].URL; got != "http://127.0.0.1:9128/mcp" {
+		t.Fatalf("applied URL = %q", got)
+	}
+	if !strings.Contains(report.Failed[0].Err, "configuration applied; lock release unconfirmed") {
+		t.Fatalf("failure = %q", report.Failed[0].Err)
 	}
 }
 

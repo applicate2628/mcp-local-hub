@@ -42,6 +42,13 @@ var reconcileSchedulerNewFn = scheduler.New
 
 var reconcileHandlerTimeout = 25 * time.Second
 
+func reconcileRequestTimeout(args api.ReconcileArgs) time.Duration {
+	if args.SettleTarget != nil {
+		return api.DefaultTargetedReconcileTimeout
+	}
+	return reconcileHandlerTimeout
+}
+
 // reconcileSchedulerListFnDefault wraps scheduler.New() + sch.List("mcp-local-hub-").
 // Returns the slice + any underlying error verbatim. Kept as a free
 // function (not a method on a wrapper struct) so the test seam swap
@@ -123,8 +130,64 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			Final: true,
 		})
 	}
-	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileHandlerTimeout)
+	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileRequestTimeout(args))
 	defer cancel()
+
+	// (0) Serena registry/intent self-heal (the P1 fix this closes: `mcphub
+	// workspace register` used to commit a workspaces.yaml row and print
+	// success WITHOUT ever touching supervisor-intent.json — no daemon row, no
+	// reconcile, no spawn). RepairSerenaIntentFromRegistry re-converges any
+	// serena registry row not yet reflected in intent (an explicit register, or
+	// a crash between an auto-register Save and its install commit) by
+	// APPENDING the missing daemon row — it never replace-alls. Running it
+	// here, BEFORE the intent read at step (1) below, means an apply-mode pass
+	// computes drift (and spawns) against the now-complete intent in the SAME
+	// round trip that `mcphub workspace register` triggers via
+	// DialSupervisorIPCReconcile (apply=true). Mirrors the supervisor's own
+	// startup self-heal (runSupervise, supervise.go).
+	//
+	// BOTH modes now compute the SAME classification (mcphub-register-intent
+	// REVISE round 2, BLOCKING 3 fix): before this, ONLY apply mode ever
+	// computed which orphaned serena rows would be materialized, so a dry-run
+	// reconcile could never show an operator what the very next `--apply`
+	// (possibly for a completely unrelated reason — a plain `mcphub reconcile
+	// --apply`, `mcphub stop`, `mcphub restart`, ...) was about to silently
+	// materialize. Apply mode COMMITS the append (RepairSerenaIntentFromRegistry,
+	// unchanged behavior, still audited via emitSerenaIntentRepairOutcome);
+	// dry-run mode only PREVIEWS it (PreviewSerenaIntentRepairFromRegistry —
+	// read-only, never writes, never audited, since the event log records
+	// actual repairs and a dry-run preview describes nothing that happened). A
+	// repair/preview error or a deferred introduce-crash never fails this
+	// reconcile request either way.
+	//
+	// A repair/preview FAILURE is reported to the caller in
+	// ReconcileResponse.SerenaRepairError. It must be: a failed repair leaves
+	// the orphan out of the intent, hence out of the drift report too, so
+	// without this field the response is byte-identical to a healthy "no drift"
+	// pass and `mcphub reconcile --apply` printed `no drift` + exited 0 over a
+	// workspace that stayed unusable. Reporting it is NOT the same as failing
+	// the request: the drift report is still valid, and `mcphub stop` /
+	// `mcphub restart` dispatch apply-mode reconciles whose own work must not
+	// be blocked by an unrelated serena row — so the frame still carries OK.
+	// The same holds in dry-run, where a swallowed preview error would report
+	// `serena orphans would repair: 0` for a preview that never got a verdict;
+	// surfacing it keeps that number honest without making a dry-run fail.
+	var serenaRepairResult api.SerenaIntentRepairResult
+	var serenaRepairErr string
+	if args.Apply {
+		var rErr error
+		serenaRepairResult, rErr = api.NewAPI().RepairSerenaIntentFromRegistry(deps.stateDir)
+		emitSerenaIntentRepairOutcome(deps.events, serenaRepairResult, rErr)
+		if rErr != nil {
+			serenaRepairErr = rErr.Error()
+		}
+	} else {
+		var pErr error
+		serenaRepairResult, pErr = api.NewAPI().PreviewSerenaIntentRepairFromRegistry(deps.stateDir)
+		if pErr != nil {
+			serenaRepairErr = pErr.Error()
+		}
+	}
 
 	// (1) Read supervisor-intent.json. Missing file is not a hard
 	// error — it just means the supervisor has no intent → no drift
@@ -330,7 +393,11 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		isOrphanedLSP := false
 		if intentDesired == api.ReconcileIntentDesiredRunning && isLSPWorkspaceProxyDescriptor(d) {
 			if !lspRegistryLoaded {
-				lspRegistry, _ = api.OpenLSPRegistryForReconcile()
+				var snapshotErr error
+				lspRegistry, _, snapshotErr = api.OpenLSPRegistryForReconcile()
+				if snapshotErr != nil {
+					emitLSPRegistryReconcileSnapshotUnavailable(deps.events, "inter-process", lspRegistry != nil, snapshotErr)
+				}
 				lspRegistryLoaded = true
 			}
 			isOrphanedLSP = !api.LSPRegistryRowBacksDescriptorIn(d, lspRegistry)
@@ -386,7 +453,24 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		// supervisor-intent.json is physically absent under apply) rather than the
 		// always-non-nil synthetic empty files, so applyReconcileDrift's nil guards
 		// preserve the prior controller caches on a missing sole source.
-		appliedCount = applyReconcileDrift(deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+		if args.SettleTarget == nil {
+			appliedCount = applyReconcileDrift(deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+		} else {
+			// A targeted caller needs the same handler deadline to bound event
+			// enqueue as well as controller processing. The target-less path above
+			// remains byte-for-byte on its historical blocking Post behavior.
+			appliedCount, _ = applyReconcileDriftForTarget(ctx, deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+		}
+	}
+
+	var targetSettlement *api.ReconcileTargetSettlement
+	if args.SettleTarget != nil {
+		var ctrl *supervisorController
+		if deps.controllerProvider != nil {
+			ctrl = deps.controllerProvider()
+		}
+		settled := ctrl.settleReconcileTarget(ctx, *args.SettleTarget)
+		targetSettlement = &settled
 	}
 
 	// (8) Audit emit. Failures are non-fatal (the response is still
@@ -398,19 +482,27 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			Source:   "ipc",
 			Event:    "mcphub-reconcile-invoked",
 			Body: map[string]any{
-				"dry_run":       !args.Apply,
-				"drift_count":   len(drift),
-				"applied_count": appliedCount,
+				"dry_run":               !args.Apply,
+				"drift_count":           len(drift),
+				"applied_count":         appliedCount,
+				"serena_repair_outcome": string(serenaRepairResult.Outcome),
 			},
 		})
 	}
 
 	// (9) Response.
 	resp := api.ReconcileResponse{
-		DryRun:       !args.Apply,
-		DriftCount:   len(drift),
-		AppliedCount: appliedCount,
-		Drift:        drift,
+		DryRun:                 !args.Apply,
+		DriftCount:             len(drift),
+		AppliedCount:           appliedCount,
+		Drift:                  drift,
+		SerenaOrphansRepaired:  serenaRepairResult.Repaired,
+		SerenaOrphansDeferred:  serenaRepairResult.Deferred,
+		SerenaRepairOutcome:    serenaRepairResult.Outcome,
+		SerenaRepairIncomplete: serenaRepairResult.Incomplete,
+		SerenaRepairRecovered:  serenaRepairResult.Recovered,
+		SerenaRepairError:      serenaRepairErr,
+		TargetSettlement:       targetSettlement,
 	}
 	body, err := json.Marshal(resp)
 	if err != nil {
@@ -510,6 +602,23 @@ func parseReconcileArgs(raw map[string]any) (api.ReconcileArgs, error) {
 	}
 	if err := json.Unmarshal(b, &args); err != nil {
 		return args, fmt.Errorf("unmarshal args into ReconcileArgs: %w", err)
+	}
+	if target := args.SettleTarget; target != nil {
+		if !args.Apply {
+			return args, fmt.Errorf("settle_target requires apply=true")
+		}
+		if strings.TrimSpace(target.WorkspaceKey) == "" ||
+			strings.TrimSpace(target.WorkspacePath) == "" ||
+			strings.TrimSpace(target.TaskName) == "" {
+			return args, fmt.Errorf("settle_target requires workspace_key, workspace_path, and task_name")
+		}
+		registeredAt, err := time.Parse(time.RFC3339Nano, target.RegisteredAt)
+		if err != nil || registeredAt.IsZero() {
+			return args, fmt.Errorf("settle_target registered_at must be a non-zero RFC3339Nano timestamp")
+		}
+		if target.ExpectedPort <= 0 || target.ExpectedPort > 65535 {
+			return args, fmt.Errorf("settle_target expected_port must be in 1..65535")
+		}
 	}
 	return args, nil
 }
@@ -1000,12 +1109,33 @@ func applyReconcileDrift(
 	updatedIntent *api.SupervisorIntentFile,
 	daemonIntentCacheRefresh *api.DaemonIntentFile,
 ) int {
+	applied, _ := applyReconcileDriftWithContext(nil, deps, drift, updatedIntent, daemonIntentCacheRefresh)
+	return applied
+}
+
+func applyReconcileDriftForTarget(
+	ctx context.Context,
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
+) (int, error) {
+	return applyReconcileDriftWithContext(ctx, deps, drift, updatedIntent, daemonIntentCacheRefresh)
+}
+
+func applyReconcileDriftWithContext(
+	postCtx context.Context,
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
+) (int, error) {
 	if deps.controllerProvider == nil {
-		return 0
+		return 0, nil
 	}
 	ctrl := deps.controllerProvider()
 	if ctrl == nil {
-		return 0
+		return 0, nil
 	}
 	// (#303) Capture the OLD (pre-refresh) descriptor each StRunning command-drift
 	// restart will terminate against, BEFORE the cache refresh below rewrites the
@@ -1054,7 +1184,7 @@ func applyReconcileDrift(
 		ctrl.daemonIntent.Refresh(daemonIntentCacheRefresh)
 	}
 	if ctrl.eventLoop == nil {
-		return 0
+		return 0, nil
 	}
 	applied := 0
 	for _, entry := range drift {
@@ -1074,14 +1204,19 @@ func applyReconcileDrift(
 				body = map[string]any{reconcileManualRestartTerminateDescriptorBodyKey: d}
 			}
 		}
-		ctrl.eventLoop.Post(api.LoopEvent{
+		event := api.LoopEvent{
 			Kind:     kind,
 			TaskName: entry.TaskName,
 			Body:     body,
-		})
+		}
+		if postCtx == nil {
+			ctrl.eventLoop.Post(event)
+		} else if err := ctrl.eventLoop.PostCtx(postCtx, event); err != nil {
+			return applied, err
+		}
 		applied++
 	}
-	return applied
+	return applied, nil
 }
 
 func emitReconcileDaemonIntentReadFailed(events *api.SupervisorEventLog, path string, res api.IntentReadResult) {

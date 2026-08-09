@@ -6,6 +6,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"runtime/debug"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -43,7 +46,7 @@ func TestDefaultInstallClientNames_AbsentFileNoOverride(t *testing.T) {
 func TestSetAndReadDefaultInstallClientNames_RoundTrip(t *testing.T) {
 	a := NewAPI()
 	path := tempPrefsPath(t)
-	// Pick a set that differs from the compile-time trio: add an opt-in,
+	// Pick a set that differs from the compile-time default set: add an opt-in,
 	// drop one default. Every name must be supported.
 	want := []string{"claude-code", "vscode"}
 	if err := a.SetDefaultInstallClientNamesIn(path, want); err != nil {
@@ -268,7 +271,7 @@ func TestLSPRouterClientToggleZeroGUIPortCompletes(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestLSPRouterClientToggleZeroGUIPortCompletes$")
-			cmd.Env = append(os.Environ(), lspRouterToggleZeroPortChildEnv+"="+mode)
+			cmd.Env = lspRouterToggleZeroPortChildEnvironment(os.Environ(), mode, runtime.GOOS == "windows")
 			out, err := cmd.CombinedOutput()
 			if ctx.Err() == context.DeadlineExceeded {
 				t.Fatalf("%s with zero GUIPort timed out; possible settings self-deadlock\n%s", mode, out)
@@ -278,6 +281,224 @@ func TestLSPRouterClientToggleZeroGUIPortCompletes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func lspRouterToggleZeroPortChildEnvironment(env []string, mode string, windowsEnvKeys bool) []string {
+	childEnv := append([]string(nil), env...)
+	goraceIndex := -1
+	for index, entry := range childEnv {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok && (key == "GORACE" || windowsEnvKeys && strings.ToLower(key) == "gorace") {
+			goraceIndex = index
+		}
+	}
+	if goraceIndex == -1 {
+		childEnv = append(childEnv, "GORACE=atexit_sleep_ms=0")
+	} else {
+		key, value, _ := strings.Cut(childEnv[goraceIndex], "=")
+		childEnv[goraceIndex] = key + "=" + lspRouterToggleZeroPortChildGORACE(value)
+	}
+	return append(childEnv, lspRouterToggleZeroPortChildEnv+"="+mode)
+}
+
+func lspRouterToggleZeroPortChildGORACE(options string) string {
+	normalized := make([]string, 0, len(strings.Fields(options))+1)
+	for _, option := range strings.Fields(options) {
+		key, _, ok := strings.Cut(option, "=")
+		if !ok || key != "atexit_sleep_ms" {
+			normalized = append(normalized, option)
+		}
+	}
+	return strings.Join(append(normalized, "atexit_sleep_ms=0"), " ")
+}
+
+func TestLSPRouterClientToggleZeroGUIPortChildEnvironment(t *testing.T) {
+	processGORACE := os.Getenv("GORACE")
+	for _, tc := range []struct {
+		name           string
+		windowsEnvKeys bool
+		env            []string
+		want           []string
+	}{
+		{
+			name:           "replaces exit sleep and preserves other tokens",
+			windowsEnvKeys: false,
+			env: []string{
+				"PATH=test-path",
+				"GORACE=log_path=child-race-log exitcode=77 atexit_sleep_ms=2500 halt_on_error=1 history_size=7",
+			},
+			want: []string{
+				"PATH=test-path",
+				"GORACE=log_path=child-race-log exitcode=77 halt_on_error=1 history_size=7 atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "normalizes duplicate exit sleep tokens",
+			windowsEnvKeys: false,
+			env:            []string{"GORACE=atexit_sleep_ms=2500 history_size=3 atexit_sleep_ms=100"},
+			want: []string{
+				"GORACE=history_size=3 atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "sets exit sleep when GORACE is empty",
+			windowsEnvKeys: false,
+			env:            []string{"GORACE="},
+			want: []string{
+				"GORACE=atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "sets exit sleep when GORACE is unset",
+			windowsEnvKeys: false,
+			env:            []string{"PATH=test-path"},
+			want: []string{
+				"PATH=test-path",
+				"GORACE=atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "windows lowercase GORACE preserves key spelling and index",
+			windowsEnvKeys: true,
+			env:            []string{"PATH=test-path", "gorace=history_size=7 atexit_sleep_ms=2500", "HOME=test-home"},
+			want: []string{
+				"PATH=test-path",
+				"gorace=history_size=7 atexit_sleep_ms=0",
+				"HOME=test-home",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "windows mixed case GORACE preserves spelling",
+			windowsEnvKeys: true,
+			env:            []string{"GoRaCe=history_size=7 atexit_sleep_ms=2500"},
+			want: []string{
+				"GoRaCe=history_size=7 atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "windows duplicates normalize only last matching assignment",
+			windowsEnvKeys: true,
+			env: []string{
+				"GORACE=history_size=3 atexit_sleep_ms=2500",
+				"PATH=test-path",
+				"gOrAcE=log_path=effective halt_on_error=1 atexit_sleep_ms=100",
+			},
+			want: []string{
+				"GORACE=history_size=3 atexit_sleep_ms=2500",
+				"PATH=test-path",
+				"gOrAcE=log_path=effective halt_on_error=1 atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "POSIX duplicates normalize only last matching assignment",
+			windowsEnvKeys: false,
+			env: []string{
+				"GORACE=history_size=3 atexit_sleep_ms=2500",
+				"PATH=test-path",
+				"GORACE=log_path=effective halt_on_error=1 atexit_sleep_ms=100",
+			},
+			want: []string{
+				"GORACE=history_size=3 atexit_sleep_ms=2500",
+				"PATH=test-path",
+				"GORACE=log_path=effective halt_on_error=1 atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "POSIX lowercase GORACE remains unrelated",
+			windowsEnvKeys: false,
+			env:            []string{"gorace=history_size=7 atexit_sleep_ms=2500"},
+			want: []string{
+				"gorace=history_size=7 atexit_sleep_ms=2500",
+				"GORACE=atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "POSIX selects exact uppercase GORACE only",
+			windowsEnvKeys: false,
+			env:            []string{"gorace=history_size=7 atexit_sleep_ms=2500", "GORACE=log_path=effective atexit_sleep_ms=100"},
+			want: []string{
+				"gorace=history_size=7 atexit_sleep_ms=2500",
+				"GORACE=log_path=effective atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "preserves malformed atexit sleep token",
+			windowsEnvKeys: false,
+			env:            []string{"GORACE=log_path=x atexit_sleep_ms history_size=7 atexit_sleep_ms=2500"},
+			want: []string{
+				"GORACE=log_path=x atexit_sleep_ms history_size=7 atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+		{
+			name:           "preserves unrelated token order",
+			windowsEnvKeys: false,
+			env:            []string{"GORACE=log_path=x exitcode=77 halt_on_error=1 history_size=7 unknown=value atexit_sleep_ms=2500"},
+			want: []string{
+				"GORACE=log_path=x exitcode=77 halt_on_error=1 history_size=7 unknown=value atexit_sleep_ms=0",
+				lspRouterToggleZeroPortChildEnv + "=disable",
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := append([]string(nil), tc.env...)
+			if got := lspRouterToggleZeroPortChildEnvironment(input, "disable", tc.windowsEnvKeys); !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("child environment = %q, want %q", got, tc.want)
+			}
+			if !reflect.DeepEqual(input, tc.env) {
+				t.Fatalf("input environment mutated to %q, want %q", input, tc.env)
+			}
+			if got := os.Getenv("GORACE"); got != processGORACE {
+				t.Fatalf("process GORACE mutated to %q, want %q", got, processGORACE)
+			}
+		})
+	}
+}
+
+func TestLSPRouterToggleZeroPortChildPreservesMalformedGORACEDiagnostic(t *testing.T) {
+	if !lspRouterToggleZeroPortRaceEnabled() {
+		return
+	}
+
+	env := append([]string(nil), os.Environ()...)
+	env = append(env, "GORACE=atexit_sleep_ms")
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
+	cmd.Env = lspRouterToggleZeroPortChildEnvironment(env, "race-diagnostic", runtime.GOOS == "windows")
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		t.Fatalf("race child timed out; expected malformed GORACE diagnostic\n%s", out)
+	}
+	if err == nil {
+		t.Fatalf("race child succeeded with malformed GORACE; want non-zero exit\n%s", out)
+	}
+	if !strings.Contains(string(out), "expected '=' in GORACE") {
+		t.Fatalf("race child output missing malformed GORACE diagnostic: %v\n%s", err, out)
+	}
+}
+
+func lspRouterToggleZeroPortRaceEnabled() bool {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		return false
+	}
+	for _, setting := range info.Settings {
+		if setting.Key == "-race" {
+			return setting.Value == "true"
+		}
+	}
+	return false
 }
 
 func runLSPRouterClientToggleZeroGUIPortChild(t *testing.T, mode string) {
@@ -317,6 +538,78 @@ func runLSPRouterClientToggleZeroGUIPortChild(t *testing.T, mode string) {
 		}
 	default:
 		t.Fatalf("unknown child mode %q", mode)
+	}
+}
+
+type enableConflictLSPRouterClient struct {
+	*lspRouterFakeClient
+	beforeGroupMutation func(clients.ConditionalEntryGroupMutationRequest)
+	groupCalls          int
+	groupObserved       clients.ConditionalEntryGroupMutationObserved
+}
+
+func (c *enableConflictLSPRouterClient) ConditionalEntryGroupMutation(req clients.ConditionalEntryGroupMutationRequest) clients.ConditionalEntryGroupMutationObserved {
+	c.groupCalls++
+	c.beforeGroupMutation(req)
+	c.groupObserved = c.lspRouterFakeClient.ConditionalEntryGroupMutation(req)
+	return c.groupObserved
+}
+
+func TestEnableLSPRouterClient_CanonicalChangeBeforeLegacyRemovalConflicts(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	seedLSPRouterManifest(t, []string{"go"})
+	restoreRegistry := overrideLSPRouterRegistry(t)
+	defer restoreRegistry()
+
+	const clientName = "codex-cli"
+	const legacyName = "mcp-language-server-go-legacy"
+	const legacyURL = "http://127.0.0.1:9200/mcp"
+	const operatorURL = "https://operator.example/lsp/go/mcp"
+	canonicalName := LSPRouterEntryName("go")
+	seedLegacyLSPWorkspace(t, clientName, legacyName)
+
+	a := NewAPI()
+	if err := a.SetLSPRouterDisabledClients([]string{clientName}); err != nil {
+		t.Fatalf("seed persisted LSP-router opt-out: %v", err)
+	}
+	base := newLSPRouterFakeClient(t, clientName, true)
+	base.entries[canonicalName] = clients.MCPEntry{Name: canonicalName, URL: LSPRouterURL(9137, "go")}
+	base.entries[legacyName] = clients.MCPEntry{Name: legacyName, URL: legacyURL}
+	operatorCanonical := clients.MCPEntry{Name: canonicalName, URL: operatorURL}
+	client := &enableConflictLSPRouterClient{
+		lspRouterFakeClient: base,
+		beforeGroupMutation: func(req clients.ConditionalEntryGroupMutationRequest) {
+			if req.EntryName == legacyName {
+				base.entries[canonicalName] = operatorCanonical
+			}
+		},
+	}
+
+	report, err := a.EnableLSPRouterClient(clientName, LSPClientRouterOpts{
+		GUIPort:     9137,
+		Languages:   []string{"go"},
+		BackupKeepN: 3,
+		Clients:     map[string]clients.Client{clientName: client},
+	})
+	if err == nil {
+		t.Fatal("EnableLSPRouterClient returned nil after canonical dependency conflict")
+	}
+	if report == nil || len(report.Removed) != 0 || base.removeCalls != 0 || len(base.backupPaths) != 0 {
+		t.Fatalf("report=%+v removeCalls=%d backups=%v, want no legacy mutation or backup", report, base.removeCalls, base.backupPaths)
+	}
+	if len(report.Failed) != 1 || report.Failed[0].EntryName != legacyName || report.Failed[0].Op != "precondition" ||
+		report.Failed[0].Err != ErrLSPRouterPlanPreconditionConflict.Error() {
+		t.Fatalf("failed=%+v, want one legacy precondition conflict", report.Failed)
+	}
+	if client.groupCalls != 1 || client.groupObserved.Invoked || !client.groupObserved.PreconditionConflict ||
+		client.groupObserved.ConflictScope != "dependency" || client.groupObserved.ConflictEntryName != canonicalName {
+		t.Fatalf("group calls=%d observed=%+v, want one uninvoked canonical dependency conflict", client.groupCalls, client.groupObserved)
+	}
+	if got, exists := base.entries[canonicalName]; !exists || !reflect.DeepEqual(got, operatorCanonical) {
+		t.Fatalf("operator canonical entry=%+v exists=%v, want unchanged injected entry=%+v", got, exists, operatorCanonical)
+	}
+	if got, exists := base.entries[legacyName]; !exists || got.URL != legacyURL {
+		t.Fatalf("legacy entry=%+v exists=%v, want unchanged legacy URL %q", got, exists, legacyURL)
 	}
 }
 
@@ -449,7 +742,7 @@ func TestClientInstallToggleView_OverrideAndDefault(t *testing.T) {
 	a := NewAPI()
 	path := tempPrefsPath(t)
 
-	// No override → compile-time trio selected, override inactive.
+	// No override → compile-time default set selected, override inactive.
 	snap, err := a.ClientInstallToggleViewIn(path)
 	if err != nil {
 		t.Fatalf("view (no override): %v", err)

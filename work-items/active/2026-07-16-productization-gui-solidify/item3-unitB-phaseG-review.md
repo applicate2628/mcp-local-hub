@@ -40,4 +40,4 @@ post-release no-op, lease release-once, self-restart exit skips `manager.Stop`, 
 ## Verdict
 Phase G is commit-safe (gated, default-OFF): fable PASS, the one Terra P1 refuted 2-way, 2 non-blocking P3s
 deferred. Authoritative $lead full tagged `./internal/gui/ ./internal/cli/` run green (not trusting the
-subagent -race runs). Deferred P3s: `backlog/2026-07-18-phaseG-coordinator-followups.md`.
+subagent -race runs). Deferred P3s: `backlog/2026-07-18-phaseg-coordinator-followups.md`.

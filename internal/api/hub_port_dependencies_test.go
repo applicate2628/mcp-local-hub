@@ -145,6 +145,14 @@ func TestProbeHubPortDependenciesUnknownPrecedesDependent(t *testing.T) {
 
 func TestProbeHubPortDependenciesUnknownWhenSupportedClientFactoryFails(t *testing.T) {
 	setupHubPortDependenciesTest(t)
+	// Deliberately degenerate env: a blank home makes os.UserHomeDir error, which
+	// is what forces the factory failures this test is about. Suspending the
+	// client-config sandbox audit is required and safe here: the few adapters
+	// that do NOT go through os.UserHomeDir fall back to a RELATIVE path when
+	// their root env var is empty, so they resolve against the test process cwd
+	// (the repo checkout) rather than the operator's profile — no real client
+	// config is reachable. See SuspendSandboxAudit's contract before copying this.
+	defer clients.SuspendSandboxAudit()()
 	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
 		t.Setenv(key, "")
 	}
@@ -167,6 +175,14 @@ func TestProbeHubPortDependenciesUnknownWhenSupportedClientFactoryFails(t *testi
 
 func TestProbeHubPortDependenciesIgnoresRelayStdioFactoryFailures(t *testing.T) {
 	setupHubPortDependenciesTest(t)
+	// Deliberately degenerate env: a blank home makes os.UserHomeDir error, which
+	// is what forces the factory failures this test is about. Suspending the
+	// client-config sandbox audit is required and safe here: the few adapters
+	// that do NOT go through os.UserHomeDir fall back to a RELATIVE path when
+	// their root env var is empty, so they resolve against the test process cwd
+	// (the repo checkout) rather than the operator's profile — no real client
+	// config is reachable. See SuspendSandboxAudit's contract before copying this.
+	defer clients.SuspendSandboxAudit()()
 	for _, key := range []string{"HOME", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"} {
 		t.Setenv(key, "")
 	}

@@ -41,6 +41,9 @@ global:
   - server: vtune
     daemon: default
     port: 9136
+  - server: route
+    daemon: front
+    port: 9137
   - server: vcpkg
     daemon: default
     port: 9138

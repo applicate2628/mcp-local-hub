@@ -21,6 +21,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -180,10 +181,10 @@ Behavior:
   - A second register against the same workspace_key is rejected; use
     ` + "`mcphub workspace unregister`" + ` first if you intend to re-register.
 
-Examples:
-  mcphub workspace register D:\dev\PaperPane
-  mcphub workspace register D:\dev\PaperPane --default
-  mcphub workspace register D:\dev\PaperPane --languages cpp,typescript,markdown
+	Examples:
+	  mcphub workspace register <workspace>
+	  mcphub workspace register <workspace> --default
+	  mcphub workspace register <workspace> --languages cpp,typescript,markdown
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -197,7 +198,7 @@ Examples:
 	return c
 }
 
-func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, languagesFlag string) error {
+func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, languagesFlag string) (err error) {
 	canonical, err := api.CanonicalWorkspacePath(rawPath)
 	if err != nil {
 		return err
@@ -249,7 +250,22 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	// The release callback is called explicitly after reg.Save() and the --default
+	// marker write below (steps 6 + 6a), BEFORE the supervisor-materialization
+	// step (8) — never held across it. The marker write is deliberately INSIDE
+	// the hold so it is ordered against a concurrent unregister's row delete
+	// (see step 6a); the hold still ends before step 8, which is the part that
+	// matters. RepairSerenaIntentFromRegistry (invoked server-side, inside the
+	// running supervisor's handleReconcile, by the reconcile-apply call at
+	// step 8) takes its OWN registry flock with only a brief bounded retry
+	// (~250ms total, tryLockRegistryBrief); holding THIS command's lock
+	// across that call would starve it into a silent no-op on every single
+	// register — which was the concrete mechanism behind the P1 this fixes
+	// (see the commit message). Clearing unlock after the explicit one-shot
+	// release disarms the deferred early-return guard.
+	defer func() {
+		api.ReleaseAndJoin(&err, unlock, "workspace register: registration outcome above stands, but could not release the registry lock")
+	}()
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -290,6 +306,55 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 		return err
 	}
 
+	// 6a. Write the --default marker while STILL HOLDING the registry lock, so
+	//     the marker is ordered with respect to this row's creation rather than
+	//     racing its removal.
+	//
+	//     Outside the lock this was a real corruption window: `mcphub workspace
+	//     unregister` deletes the serena row (DeleteSerenaRow, under this same
+	//     lock) and only THEN clears a matching default marker. A concurrent
+	//     unregister could therefore complete BOTH steps in the gap between the
+	//     release above and the marker write — its clear finding no marker to
+	//     clear — after which this command created one pointing at a row that no
+	//     longer exists. The settled check at step 8 reports the row gone but
+	//     writing a marker is not something it can un-do, so the persisted
+	//     default stayed dangling and no-path routing broke.
+	//
+	//     Under the lock, an unregister's row delete can only be sequenced
+	//     BEFORE this whole hold (then step 4's duplicate check runs against a
+	//     registry without the row, and this register legitimately recreates
+	//     both) or AFTER it (then its own clear runs after this write and
+	//     removes the marker with the row). No interleaving leaves a marker
+	//     without its row.
+	//
+	//     This does NOT re-widen the hold across step 8 — the P1 defect this
+	//     branch fixes. The marker write is a small local state-file write with
+	//     no registry-lock dependency of its own (api.WriteDefaultWorkspace),
+	//     and the release still happens before the supervisor materialization.
+	//     Lock order stays registry -> marker everywhere (`workspace
+	//     set-default` already does exactly this); nothing takes them the other
+	//     way round, so there is no cycle.
+	//
+	//     Errors are non-fatal — registration already succeeded and the default
+	//     is a UX nicety.
+	defaultMarkerWritten := false
+	if setDefault {
+		if err := writeDefaultWorkspaceFn(filepath.Dir(regPath), canonical); err != nil {
+			fmt.Fprintf(cmd.OutOrStderr(),
+				"warning: workspace registered but failed to write default marker: %v\n", err)
+		} else {
+			defaultMarkerWritten = true
+		}
+	}
+
+	// Release the registry lock NOW — see the acquisition comment at
+	// acquisition time (step 3) for why this must happen before step 8 below.
+	releaseErr := unlock()
+	unlock = nil
+	if releaseErr != nil {
+		releaseErr = fmt.Errorf("release registry after workspace registration: %w", releaseErr)
+	}
+
 	// 6b. EXPLICIT serena register → bless this workspace's canonical root as a
 	//     trusted root (area-5 co-design — REGRESSION-SAFETY). This is the serena
 	//     counterpart of the LSP explicit-register bless (internal/api/register.go
@@ -318,23 +383,493 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 				"`mcphub trust %s` or explicit register): %v\n", canonical, canonical, err)
 	}
 
-	// 7. Optionally write the default marker. Errors here are non-fatal
-	// — registration already succeeded; the default is a UX nicety.
-	if setDefault {
-		if err := writeDefaultWorkspace(filepath.Dir(regPath), canonical); err != nil {
-			fmt.Fprintf(cmd.OutOrStderr(),
-				"warning: workspace registered but failed to write default marker: %v\n", err)
+	// 7. (The --default marker is written at step 6a, under the registry lock.)
+
+	// 8. Materialize the registration through the supervisor. Nudge an
+	//    apply-mode reconcile: the running supervisor's handleReconcile
+	//    self-heals any registry/intent split (RepairSerenaIntentFromRegistry,
+	//    called server-side) BEFORE computing drift — so THIS workspace's
+	//    just-committed registry row is appended to supervisor-intent.json
+	//    and reconciled in the same round trip.
+	//
+	//    This is the fix for the register/unregister asymmetry: unregister
+	//    already has a supervisor-materialization counterpart
+	//    (removeSerenaSupervisorIntentFn ->
+	//    RemoveSerenaSupervisorIntentForWorkspace), but register had none —
+	//    it only ever wrote workspaces.yaml and printed an unconditional
+	//    success, regardless of whether any daemon would ever spawn.
+	//
+	//    Gate the final success message on the COMPLETE SETTLED TUPLE (BLOCKING
+	//    2 fix, mcphub-register-intent REVISE round 2): the reconcile request
+	//    acknowledged (no error) AND, re-read FRESH from disk, the registry row
+	//    STILL exists AND a spec-bearing supervisor-intent row exists for the
+	//    SAME workspace key AND the two AGREE on port. A bare intent-presence
+	//    boolean is not enough — it cannot tell a healthy registration apart
+	//    from one whose registry row a concurrent unregister deleted in the
+	//    same window, nor detect a stale captured port (a port reallocation
+	//    after entry.Port was captured at step 5, or two descriptors converging
+	//    on one port). Printing an unqualified success without the full tuple
+	//    would reproduce the exact defect this fixes. On anything short of
+	//    settled, KEEP the registry row (unless the settled check itself
+	//    confirms it is already gone) and report an explicit, actionable
+	//    partial-state error instead of rolling back.
+	reconcileCtx, cancel := context.WithTimeout(cmd.Context(), api.DefaultTargetedReconcileTimeout)
+	defer cancel()
+	reconcileTarget := api.ReconcileTarget{
+		WorkspaceKey:  entry.WorkspaceKey,
+		WorkspacePath: entry.WorkspacePath,
+		TaskName:      entry.TaskName,
+		RegisteredAt:  entry.RegisteredAt.UTC().Format(time.RFC3339Nano),
+		ExpectedPort:  entry.Port,
+	}
+	reconcileResp, reconcileErr := serenaRegisterReconcileFn(reconcileCtx, true, reconcileTarget)
+	var settlementErr error
+	if reconcileErr == nil {
+		settlementErr = validateWorkspaceRegisterTargetSettlement(reconcileTarget, reconcileResp.TargetSettlement)
+	}
+	// Re-read the persisted generation after the server's settlement response.
+	// On ready this closes the replacement window between the controller's
+	// positive runtime proof and terminal output. On a non-ready/transport path
+	// the same read remains diagnostic-only and cannot turn that path into
+	// success.
+	settled, checkErr := serenaRegisterSettledCheckFn(entry)
+	if reconcileErr != nil || settlementErr != nil || checkErr != nil || !settled.Settled {
+		// Compensate our own step-6a marker write when the check CONFIRMS the
+		// row is gone. The step-6a ordering keeps a concurrent `workspace
+		// unregister` from stranding it, but that is not the only way a row can
+		// disappear under us (the GUI auto-prune sweeper's PruneWorkspace, a
+		// hand-edited workspaces.yaml, an unregister whose own best-effort clear
+		// failed). This command wrote the marker, so it owns undoing it once it
+		// learns the row it named is not there — rather than leaving no-path
+		// routing aimed at an unregistered workspace.
+		//
+		// Gated on checkErr == nil: a check that ERRORED proves nothing about
+		// the row, and clearing a legitimately-set default on an I/O blip would
+		// be its own defect. clearDefaultIfMatches is itself a no-op unless the
+		// marker still names THIS canonical path, so a default someone else has
+		// since claimed is never clobbered.
+		markerCompensation := api.DefaultMarkerCompensationOutcome("")
+		if defaultMarkerWritten && checkErr == nil && !settled.RegistryRowPresent {
+			outcome, clearErr := clearDefaultWorkspaceForAbsentSerenaRegistrationFn(regPath, wsKey, canonical)
+			if clearErr != nil {
+				fmt.Fprintf(cmd.OutOrStderr(),
+					"warning: could not clear the default-workspace marker for the vanished registration %s: %v\n",
+					canonical, clearErr)
+			} else {
+				markerCompensation = outcome
+			}
 		}
+		return errors.Join(releaseErr, workspaceRegisterPartialStateError(canonical, wsKey, entry, settled,
+			reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation))
 	}
 
+	// A --default result is a terminal snapshot, not a promise derived from the
+	// successful step-6a write. Another set-default may have won while reconcile
+	// and the persisted-generation check ran. Re-read through the marker owner
+	// immediately before any success output and project that fresh observation;
+	// never compensate or overwrite a newer decision here.
+	defaultProjection := workspaceRegisterDefaultNotRequested
+	var defaultReadErr error
+	if setDefault {
+		defaultProjection, defaultReadErr = observeWorkspaceRegisterDefault(
+			filepath.Dir(regPath), canonical)
+	}
+
+	// Print what is ACTUALLY committed (settled.Port, re-read fresh from the
+	// registry by the settled check), never the entry.Port captured at
+	// allocation time — the two agree here by construction (settled.Settled is
+	// only true when they do), but settled.Port is the value the check itself
+	// verified, so it is the honest one to print.
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Registered serena workspace %s (key %s)\n  port: %d\n  task: %s\n  languages: %s\n",
-		canonical, wsKey, entry.Port, entry.TaskName, strings.Join(languages, ", "))
-	if setDefault {
+		canonical, wsKey, settled.Port, entry.TaskName, strings.Join(languages, ", "))
+	switch defaultProjection {
+	case workspaceRegisterDefaultConfirmed:
 		fmt.Fprintln(cmd.OutOrStdout(), "  default: yes")
+	case workspaceRegisterDefaultChanged:
+		fmt.Fprintln(cmd.OutOrStdout(), "  default: changed")
+	case workspaceRegisterDefaultUnknown:
+		fmt.Fprintln(cmd.OutOrStdout(), "  default: unknown")
+		fmt.Fprintf(cmd.OutOrStderr(),
+			"warning: workspace registered but the terminal default-workspace marker could not be read: %v\n",
+			defaultReadErr)
+	}
+	return releaseErr
+}
+
+// serenaRegisterReconcileFn is the test-injectable seam over the targeted
+// post-register supervisor settlement (step 8 above). Production uses the
+// additive target-aware client; the old targetless API remains unchanged for
+// every legacy caller that does not need a readiness proof.
+// Tests stub this to avoid a live supervisor / IPC transport; a stub that
+// wants to faithfully model "the supervisor received the request and
+// self-healed" calls the real api.RepairSerenaIntentFromRegistry itself
+// before returning its canned response — see
+// TestWorkspaceRegisterSerena_LiveSupervisorMaterializesBeforeSuccess.
+var serenaRegisterReconcileFn = api.DialSupervisorIPCReconcileTarget
+
+type workspaceRegisterTargetSettlementError struct {
+	State  api.ReconcileTargetSettlementState
+	Reason string
+	Detail string
+}
+
+func (e *workspaceRegisterTargetSettlementError) Error() string {
+	if e.Detail != "" {
+		return fmt.Sprintf("target settlement state=%s reason=%s: %s", e.State, e.Reason, e.Detail)
+	}
+	return fmt.Sprintf("target settlement state=%s reason=%s", e.State, e.Reason)
+}
+
+// validateWorkspaceRegisterTargetSettlement enforces only the additive wire
+// contract. Runtime readiness remains exclusively controller-owned: the CLI
+// accepts the exact echoed target when and only when the controller returns
+// ready/ready, and never attempts its own PID, port, or liveness proof.
+func validateWorkspaceRegisterTargetSettlement(expected api.ReconcileTarget, got *api.ReconcileTargetSettlement) error {
+	if got == nil {
+		return &workspaceRegisterTargetSettlementError{
+			State:  api.ReconcileTargetSettlementIncomplete,
+			Reason: api.ReconcileTargetReasonTargetUnsupported,
+			Detail: "supervisor response omitted target_settlement",
+		}
+	}
+	if got.Target != expected {
+		return &workspaceRegisterTargetSettlementError{
+			State:  api.ReconcileTargetSettlementFailed,
+			Reason: api.ReconcileTargetReasonTargetGenerationReplaced,
+			Detail: fmt.Sprintf("supervisor echoed a different target: got=%+v want=%+v", got.Target, expected),
+		}
+	}
+	if got.State != api.ReconcileTargetSettlementReady || got.Reason != api.ReconcileTargetReasonReady {
+		reason := got.Reason
+		if reason == "" {
+			reason = api.ReconcileTargetReasonTargetUnsupported
+		}
+		return &workspaceRegisterTargetSettlementError{
+			State:  got.State,
+			Reason: reason,
+			Detail: got.Error,
+		}
 	}
 	return nil
 }
+
+// serenaRegisterSettledResult is the outcome of the post-materialize SETTLED
+// check (step 8): the complete tuple workspaceRegisterPartialStateError and
+// the success print both need, instead of a bare presence boolean (BLOCKING 2
+// fix, mcphub-register-intent REVISE round 2).
+type serenaRegisterSettledResult struct {
+	// Settled is true ONLY when RegistryRowPresent is true AND the intent
+	// carries a matching spec-bearing daemon row AND the two AGREE on port.
+	Settled bool
+	// RegistryRowPresent reports whether THIS re-read (not the earlier
+	// in-memory entry the command allocated) still finds the registry row.
+	// Lets the partial-state error say honestly whether the registration is
+	// still on disk, instead of unconditionally claiming "the registration
+	// was kept" — false under a concurrent unregister.
+	RegistryRowPresent bool
+	// Port is the registry's currently-committed port when RegistryRowPresent
+	// is true (0 otherwise) — what the command should PRINT on success, never
+	// the entry.Port captured at allocation time (step 5), which a
+	// concurrent port reallocation could have made stale by now.
+	Port int
+	// PoolIntroduced reports whether supervisor-intent.json carries ANY
+	// runtime_spec-bearing daemon row — i.e. whether the serena dynamic pool
+	// has been introduced at all on this host.
+	//
+	// It decides which recovery advice an unreachable supervisor gets. The
+	// startup self-heal (RepairSerenaIntentFromRegistry) refuses to introduce
+	// the FIRST runtime_spec row while a supervisor may be running (design
+	// §7.1) and DEFERS instead, so "start the supervisor and it will pick this
+	// up" is simply false on a host whose pool was never introduced — the
+	// operator needs `mcphub migrate serena legacy-to-dynamic-pool` first, and
+	// a retry of `workspace register` in the meantime is rejected as already
+	// registered. Meaningful only when the check returned a nil error; a failed
+	// intent read leaves it false without having proven anything, which is why
+	// the message builder consults it only alongside checkErr == nil.
+	PoolIntroduced bool
+}
+
+// serenaRegisterSettledCheckFn is the test-injectable seam that computes the
+// settled tuple AFTER the reconcile-apply nudge (step 8 above) to gate the
+// final success message. Defaults to the named production function below
+// (rather than an inline closure) so a test that stubs it for one scenario
+// can restore the REAL check for another by referencing
+// realSerenaRegisterSettledCheck directly, instead of duplicating its body.
+var serenaRegisterSettledCheckFn = realSerenaRegisterSettledCheck
+
+// realSerenaRegisterSettledCheck is the production body of
+// serenaRegisterSettledCheckFn. It re-reads BOTH the registry and
+// supervisor-intent.json fresh (no caller-supplied snapshot) so the verdict
+// reflects what is ACTUALLY committed at the moment of the call:
+//
+//  1. The registry row for the captured registration must still exist — a concurrent unregister
+//     racing this register would otherwise leave an intent-presence-only
+//     check reporting success for a workspace with NO registry row backing
+//     it (worse than the original bug: an operator-invisible daemon).
+//  2. The intent must carry a spec-bearing daemon row for the SAME key
+//     (api.SupervisorIntentFile.SpecBearingSerenaDaemonForWorkspaceKey — the
+//     single-owner matching loop shared with the bare presence predicate).
+//  3. The registry row must retain the captured registration generation
+//     (RegisteredAt) and workspace path. A same-key unregister/re-register can
+//     otherwise make an older invocation certify the newer row.
+//  4. The registry's Port and the matched daemon's api.EffectiveDaemonPort
+//     must AGREE — catching a port reallocation that raced this register, or
+//     (pre-BLOCKING-1-fix) a resurrected duplicate descriptor converging on
+//     someone else's port.
+//
+// A missing intent file or a missing daemon row means "not settled" (false,
+// nil error) rather than an error — the caller already has an explicit
+// reconcileErr to report when the IPC call itself failed; this seam only
+// answers the observable after-the-fact question "is this workspace's
+// registration fully settled right now".
+func realSerenaRegisterSettledCheck(expected api.WorkspaceEntry) (result serenaRegisterSettledResult, err error) {
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		return serenaRegisterSettledResult{}, err
+	}
+	reg := api.NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		return serenaRegisterSettledResult{}, err
+	}
+	defer api.ReleaseAndJoin(&err, unlock, "serena register settlement: release registry lock")
+	if err := reg.Load(); err != nil {
+		return serenaRegisterSettledResult{}, err
+	}
+	row, ok := reg.GetSerena(expected.WorkspaceKey)
+	if !ok {
+		// The registry row is gone — a concurrent unregister beat this
+		// register to it. Never settled regardless of intent state.
+		return serenaRegisterSettledResult{}, nil
+	}
+	result = serenaRegisterSettledResult{RegistryRowPresent: true, Port: row.Port}
+	if row.WorkspacePath != expected.WorkspacePath || !row.RegisteredAt.Equal(expected.RegisteredAt) {
+		// A current row with this deterministic key is not enough: a concurrent
+		// unregister/re-register owns a distinct invocation generation and must
+		// not let this older command print success for it.
+		return result, nil
+	}
+
+	intentPath, err := api.DefaultSupervisorIntentPath()
+	if err != nil {
+		return result, err
+	}
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			// No intent file at all: nothing is settled AND the dynamic pool is
+			// definitively not introduced (PoolIntroduced stays false, which is
+			// the truth here, not a default).
+			return result, nil
+		}
+		return result, err
+	}
+	result.PoolIntroduced = intent.HasRuntimeSpecRow()
+	daemon := intent.SpecBearingSerenaDaemonForWorkspaceKey(expected.WorkspaceKey)
+	if daemon == nil {
+		return result, nil
+	}
+	effPort, ok := api.EffectiveDaemonPort(*daemon)
+	if !ok || effPort != row.Port {
+		// Present on both sides but DISAGREEING — report the registry's port
+		// for diagnostics but do not certify settlement.
+		return result, nil
+	}
+	result.Settled = true
+	return result, nil
+}
+
+// workspaceRegisterPartialStateError builds the operator-facing error for a
+// serena register whose registration is NOT (yet) confirmed settled. Per the
+// design this fixes: never print an unqualified success while the workspace
+// is unusable — either it converged, or the message says plainly what did
+// not happen and what to run next. The FIRST line is gated on
+// settled.RegistryRowPresent (medium-item fix): claiming "the registration
+// was kept" is only honest when THIS re-read actually confirmed the registry
+// row is still there; a concurrent unregister that deleted it gets a
+// different, accurate statement instead.
+func workspaceRegisterPartialStateError(canonical, wsKey string, entry api.WorkspaceEntry, settled serenaRegisterSettledResult, reconcileErr, settlementErr, checkErr error, serenaRepairOutcome api.SerenaIntentRepairOutcome, serenaRepairErr string, markerCompensation api.DefaultMarkerCompensationOutcome) error {
+	var b strings.Builder
+	if settlementErr != nil && settled.RegistryRowPresent {
+		fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
+			"but the supervisor did not confirm runtime readiness for this exact registration generation — "+
+			"the registration was kept (this process did not roll it back).\n", canonical, wsKey, settled.Port, entry.TaskName)
+	} else if settled.RegistryRowPresent {
+		fmt.Fprintf(&b, "workspace %s (key %s) is registered in workspaces.yaml (port %d, task %s), "+
+			"but no settled spec-bearing supervisor daemon row is confirmed yet — the registration was "+
+			"kept (this process did not roll it back).\n", canonical, wsKey, settled.Port, entry.TaskName)
+	} else {
+		fmt.Fprintf(&b, "workspace %s (key %s): the registry row could not be confirmed present on "+
+			"re-check — a concurrent `mcphub workspace unregister` (or other process) may have removed "+
+			"it. This process did NOT delete it and did not create a new one.\n", canonical, wsKey)
+	}
+	switch markerCompensation {
+	case api.DefaultMarkerCompensationCleared:
+		b.WriteString("  note: the --default marker this command wrote was cleared again, so the " +
+			"persisted default is not left pointing at an unregistered workspace.\n")
+	case api.DefaultMarkerCompensationPreservedRegistrationPresent:
+		b.WriteString("  note: the --default marker was retained because a current serena registration now owns " +
+			"this canonical workspace path.\n")
+	case api.DefaultMarkerCompensationPreservedMarkerChanged:
+		b.WriteString("  note: the --default marker had already changed, so this process left it untouched.\n")
+	}
+	switch {
+	case reconcileErr != nil && errors.Is(reconcileErr, api.ErrSupervisorIPCUnavailable):
+		b.WriteString(workspaceRegisterNoSupervisorAdvice(settled, checkErr))
+	case reconcileErr != nil:
+		fmt.Fprintf(&b, "  reason: the supervisor reconcile request failed: %v\n", reconcileErr)
+		b.WriteString("  next step: once the supervisor is healthy, run `mcphub reconcile --apply` " +
+			"to retry materializing this workspace.\n")
+	case settlementErr != nil:
+		fmt.Fprintf(&b, "  reason: the supervisor did not confirm the requested runtime target: %v\n", settlementErr)
+		if checkErr != nil {
+			fmt.Fprintf(&b, "  additional diagnostic: the post-response persisted-generation check also failed: %v\n", checkErr)
+		}
+		if settled.RegistryRowPresent {
+			b.WriteString("  next step: run `mcphub workspace list` to inspect the retained registration; " +
+				"resolve the reported target-settlement condition; then run `mcphub reconcile --apply` " +
+				"to resume materialization. If you intentionally need a replacement, run `mcphub workspace " +
+				"unregister <workspace> --backend serena` before registering it again.\n")
+		} else {
+			b.WriteString("  next step: run `mcphub workspace list` to inspect the current state. Only if " +
+				"the workspace is confirmed absent and you still intend to register it may you run `mcphub " +
+				"workspace register` again.\n")
+		}
+	case checkErr != nil:
+		fmt.Fprintf(&b, "  reason: could not verify the supervisor intent afterward: %v\n", checkErr)
+		b.WriteString("  next step: once the underlying I/O issue is resolved, run `mcphub workspace list` " +
+			"to check the current state, then `mcphub reconcile --apply` to retry materializing this " +
+			"workspace if it is still unsettled.\n")
+	case !settled.RegistryRowPresent:
+		b.WriteString("  next step: if you intended to keep this workspace registered, run `mcphub " +
+			"workspace register` again; if the unregister was intentional, no action is needed.\n")
+	case serenaRepairOutcome == api.SerenaIntentRepairOutcomeSkippedRegistryLock:
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request, but Serena classification was " +
+			"skipped because the registry lock remained contended.\n")
+		b.WriteString("  next step: run `mcphub reconcile --apply` again after the registry writer finishes to retry " +
+			"materializing this workspace.\n")
+	case serenaRepairOutcome == api.SerenaIntentRepairOutcomeSkippedIntentLock:
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request, but Serena classification was " +
+			"skipped because the supervisor-intent lock remained contended.\n")
+		b.WriteString("  next step: run `mcphub reconcile --apply` again after the intent writer finishes to retry " +
+			"materializing this workspace.\n")
+	case serenaRepairErr != "":
+		fmt.Fprintf(&b, "  reason: the supervisor acknowledged the reconcile request, but its serena "+
+			"registry/intent self-heal FAILED: %s\n", serenaRepairErr)
+		b.WriteString("  next step: resolve that cause (supervisor-events.log carries the matching " +
+			"`serena-intent-repair-*` entry), then run `mcphub reconcile --apply` to retry materializing " +
+			"this workspace.\n")
+	case serenaRepairOutcome != api.SerenaIntentRepairOutcomeCompleted:
+		fmt.Fprintf(&b, "  reason: the supervisor acknowledged the reconcile request, but its Serena repair outcome %q "+
+			"is unavailable or unknown, so classification is incomplete.\n", serenaRepairOutcome)
+		b.WriteString("  next step: restart or upgrade the supervisor, then run `mcphub reconcile --apply` to retry " +
+			"materializing this workspace.\n")
+	default:
+		b.WriteString("  reason: the supervisor acknowledged the reconcile request but no settled " +
+			"spec-bearing daemon row is confirmed for this workspace yet — this happens when this is the " +
+			"FIRST serena workspace and the dynamic pool has not been introduced (run `mcphub migrate " +
+			"serena legacy-to-dynamic-pool`), or when the registry and intent ports disagree (a concurrent port " +
+			"reallocation). Retry with `mcphub reconcile --apply`; check supervisor-events.log for a " +
+			"`serena-intent-repair-*` entry naming the exact cause.\n")
+	}
+	return errors.New(b.String())
+}
+
+// workspaceRegisterNoSupervisorAdvice returns the reason + next-step lines for a
+// register whose reconcile nudge failed because NO supervisor is reachable.
+//
+// "Start the supervisor and its startup self-heal will pick this up" is true
+// only once the serena dynamic pool exists. RepairSerenaIntentFromRegistry's
+// introduce guard (design §7.1: a live append must not introduce the FIRST
+// runtime_spec row) DEFERS instead of appending when supervisor-intent.json
+// carries no runtime_spec row at all — the state of any host where no serena
+// workspace has ever been introduced. Promising automatic startup repair there
+// sends the operator into a loop: the supervisor starts, defers, the workspace
+// stays orphaned, and re-running `workspace register` is rejected as already
+// registered. The pool has to be introduced first.
+//
+// The three outcomes are kept distinct rather than collapsed into a hedge: two
+// of them are known facts and deserve a definite instruction.
+func workspaceRegisterNoSupervisorAdvice(settled serenaRegisterSettledResult, checkErr error) string {
+	if checkErr != nil {
+		// The intent read failed, so pool introduction is genuinely unknown —
+		// say so instead of asserting either branch.
+		return "  reason: no supervisor is running, and this process could not read " +
+			"supervisor-intent.json afterward to tell whether the serena dynamic pool has been " +
+			"introduced yet.\n" +
+			"  next step: start the supervisor with `mcphub supervise` (or wait for autostart), then " +
+			"check `mcphub workspace list`. If this workspace still has no daemon, the pool was never " +
+			"introduced — run `mcphub migrate serena legacy-to-dynamic-pool`, then `mcphub reconcile " +
+			"--apply`.\n"
+	}
+	if !settled.PoolIntroduced {
+		return "  reason: no supervisor is running AND the serena dynamic pool has never been " +
+			"introduced on this host (supervisor-intent.json carries no runtime_spec row). Merely " +
+			"starting the supervisor will NOT materialize this registration: its startup self-heal " +
+			"deliberately defers a first introduction rather than performing it live (design §7.1).\n" +
+			"  next step: run `mcphub migrate serena legacy-to-dynamic-pool` to introduce the pool, " +
+			"then start the supervisor with `mcphub supervise` (or wait for autostart).\n"
+	}
+	return "  reason: no supervisor is running. Start it with `mcphub supervise` " +
+		"(or wait for autostart) — the serena dynamic pool is already introduced on this host, so the " +
+		"supervisor's own startup self-heal will pick up this registration automatically.\n"
+}
+
+// writeDefaultWorkspaceFn is the test-injectable seam over the `--default`
+// marker write at step 6a. Production is the thin api wrapper below; the seam
+// exists because step 6a's whole point is WHEN the write happens (inside the
+// registry-lock hold, ordered against a concurrent unregister's row delete),
+// and lock-hold state at that instant is not observable from outside the
+// critical section — so without a hook there the ordering could only be
+// asserted by racing it. Mirrors the seam idiom the rest of this file uses
+// (unregisterLSPWorkspaceFn / removeSerenaSupervisorIntentFn /
+// serenaRegisterBlessTrustedRootFn).
+var writeDefaultWorkspaceFn = writeDefaultWorkspace
+
+// readDefaultWorkspaceFn is the test-injectable seam for the terminal
+// --default snapshot. Production delegates to the same API owner as every
+// other marker read; tests use the seam to deterministically force an
+// indeterminate read without changing process-global filesystem policy.
+var readDefaultWorkspaceFn = readDefaultWorkspace
+
+type workspaceRegisterDefaultProjection uint8
+
+const (
+	workspaceRegisterDefaultNotRequested workspaceRegisterDefaultProjection = iota
+	workspaceRegisterDefaultConfirmed
+	workspaceRegisterDefaultChanged
+	workspaceRegisterDefaultUnknown
+)
+
+// observeWorkspaceRegisterDefault maps the marker owner's fresh read contract
+// to the CLI's terminal tri-state. Empty/missing and a different marker are
+// both known changed-away observations; an actual read failure is unknown.
+func observeWorkspaceRegisterDefault(stateDir, canonical string) (workspaceRegisterDefaultProjection, error) {
+	observed, err := readDefaultWorkspaceFn(stateDir)
+	if err != nil {
+		return workspaceRegisterDefaultUnknown, err
+	}
+	if observed == canonical {
+		return workspaceRegisterDefaultConfirmed, nil
+	}
+	return workspaceRegisterDefaultChanged, nil
+}
+
+// clearDefaultWorkspaceIfMatchesFn is the test-injectable seam over the
+// unregister-side default-marker clear. It mirrors writeDefaultWorkspaceFn and
+// exists for the same reason: the whole point of that clear is WHEN it happens
+// (inside DeleteSerenaRow's registry-lock hold, ordered against the row delete
+// it depends on), and lock-hold state at that instant is not observable from
+// outside the critical section — so without a hook the ordering could only be
+// asserted by racing it.
+var clearDefaultWorkspaceIfMatchesFn = clearDefaultIfMatches
+
+// clearDefaultWorkspaceForAbsentSerenaRegistrationFn is the test seam for the
+// registry-ordered stale-register compensation. Production delegates the
+// compare-and-clear ownership to internal/api; tests use the real helper for
+// deterministic interleavings and may replace it only to force an error path.
+var clearDefaultWorkspaceForAbsentSerenaRegistrationFn = api.ClearDefaultWorkspaceForAbsentSerenaRegistration
 
 // serenaRegisterBlessTrustedRootFn is the explicit-serena-register bless seam
 // (area-5 co-design). Production blesses the workspace's canonical root in the
@@ -372,10 +907,10 @@ func newWorkspaceUnregisterCmd() *cobra.Command {
 The .serena/ directory on disk is never touched — disk state survives
 unregister so re-registering later replays the same languages snapshot.
 
-Examples:
-  mcphub workspace unregister D:\dev\PaperPane
-  mcphub workspace unregister D:\dev\PaperPane --backend serena
-  mcphub workspace unregister D:\dev\PaperPane --backend all
+	Examples:
+	  mcphub workspace unregister <workspace>
+	  mcphub workspace unregister <workspace> --backend serena
+	  mcphub workspace unregister <workspace> --backend all
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -419,10 +954,11 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	//     later spawn the now-unbacked proxy → "not registered" exit 1 →
 	//     restart-backoff → quarantine. (*api.API).Unregister acquires its OWN
 	//     registry lock, so we must NOT hold the lock across that call.
-	//   - The serena (sentinel) row owns a per-workspace supervisor-intent
-	//     descriptor keyed by api.SerenaTaskNameForWorkspace(canonical). The
-	//     registry row is removed directly via RemoveByBackend("serena"), then
-	//     the descriptor teardown nudges a running supervisor to reconcile.
+	//   - The Serena descriptor is torn down through the shared sequencer while
+	//     the removal fence is held and the exact pending tuple is staged. Only
+	//     successful descriptor teardown proceeds to RemoveByBackend("serena").
+	//     Any staging, teardown, or row-delete error invokes the exact rollback;
+	//     fence release is the final action.
 	lspLangs, removeSerena, err := classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend)
 	if err != nil {
 		return err
@@ -462,24 +998,83 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 			return unregisterLSPWorkspaceFn(rawPath, langs)
 		},
 		RemoveSerenaIntent: removeSerenaSupervisorIntentFn,
-		DeleteSerenaRow: func() (int, error) {
+		BeginSerenaPendingRemoval: func(generation string) (func() error, error) {
+			reg := api.NewRegistry(regPath)
+			return reg.BeginSerenaPendingRemoval(wsKey, legacyWSKey, generation)
+		},
+		// Per-workspace unregister LIVENESS FENCE, held by the sequencer across
+		// the whole marked window so the supervisor's repair can tell this
+		// teardown apart from a crashed one even when it blocks past the
+		// pending-removal lease (api/serena_removal_fence.go). Fence every key
+		// BeginSerenaPendingRemoval may mark because repair probes the persisted
+		// row's actual key before applying its divergence guard.
+		AcquireSerenaRemovalFence: func() (func() error, error) {
+			return api.AcquireSerenaRemovalFences(filepath.Dir(regPath), wsKey, legacyWSKey)
+		},
+		PublishSerenaRemovalFenceGeneration: func() (string, error) {
+			return api.PublishSerenaRemovalFenceGenerationForKeys(filepath.Dir(regPath), wsKey, legacyWSKey)
+		},
+		DeleteSerenaRow: func() (result api.PruneSerenaDeleteResult) {
 			reg := api.NewRegistry(regPath)
 			unlock, err := reg.Lock()
 			if err != nil {
-				return 0, err
+				result.MutationErr = err
+				return result
 			}
-			defer unlock()
+			defer func() { result.ReleaseErr = unlock() }()
 			if err := reg.Load(); err != nil {
-				return 0, err
+				result.MutationErr = err
+				return result
 			}
-			n := reg.RemoveByBackend(wsKey, "serena")
+			keys := []string{wsKey}
 			if legacyWSKey != wsKey {
-				n += reg.RemoveByBackend(legacyWSKey, "serena")
+				keys = append(keys, legacyWSKey)
 			}
-			if err := reg.Save(); err != nil {
-				return 0, err
+			n, committed, saveErr := reg.RemoveSerenaRowsAndSave(keys...)
+			if !committed {
+				result.MutationErr = saveErr
+				return result
 			}
-			return n, nil
+			// Clear the default marker HERE — inside this delete's registry-lock
+			// hold, and only for a delete that actually removed a row. This is
+			// the mirror image of register's step 6a, and it closes the same
+			// ordering defect from the other side.
+			//
+			// Outside the hold (where this used to run, after PruneWorkspacePhases
+			// had returned) a concurrent `workspace register --default` could
+			// recreate BOTH the row and its marker in the gap, and this older
+			// unregister would then clear the NEW marker even though that
+			// registration succeeded — leaving the operator registered with no
+			// default and nothing to blame it on. Under the lock the two commands
+			// can only sequence: a register that lands BEFORE this delete has its
+			// row removed here (so clearing its marker is correct), and one that
+			// lands AFTER writes its marker at its own step 6a, after this clear.
+			//
+			// Gating on n > 0 makes the clear an OWNERSHIP statement rather than a
+			// blanket cleanup: only the process that actually removed the serena
+			// row clears the marker naming it. A racing unregister that finds the
+			// row already gone (n == 0) is not the remover and must not touch a
+			// marker someone else may have just legitimately written. This does
+			// drop the previous opportunistic clear of an ALREADY-dangling marker
+			// on a `--backend all` run that had no serena row to remove — that
+			// clear was itself the racy one, and the marker it targeted was
+			// dangling before the command started.
+			//
+			// Lock order stays registry -> marker, matching register step 6a and
+			// `workspace set-default`; nothing takes them the other way round.
+			// Errors are non-fatal: the rows ARE removed, and failing the
+			// unregister over marker bookkeeping would misreport a completed
+			// teardown.
+			if n > 0 {
+				if cerr := clearDefaultWorkspaceIfMatchesFn(filepath.Dir(regPath), canonical); cerr != nil {
+					fmt.Fprintf(cmd.OutOrStderr(),
+						"warning: registry rows removed but failed to clear the default-workspace marker for %s: %v\n",
+						canonical, cerr)
+				}
+			}
+			result.Removed = n
+			result.PostCommitErr = saveErr
+			return result
 		},
 	}
 	if err := api.PruneWorkspacePhases(rawPath, canonical, lspLangs, len(lspLangs) > 0, removeSerena, td, report); err != nil {
@@ -490,12 +1085,8 @@ func runWorkspaceUnregister(cmd *cobra.Command, rawPath, backend string) error {
 	}
 	removed := len(report.LSPRemoved) + report.SerenaRemoved
 
-	// If the default marker pointed at this workspace AND we removed the
-	// serena row (or --backend all), clear the marker. Otherwise stale
-	// default would route Phase F to a workspace that no longer exists.
-	if backend == "all" || backend == "serena" {
-		_ = clearDefaultIfMatches(filepath.Dir(regPath), canonical)
-	}
+	// (The default marker is cleared inside DeleteSerenaRow above, under the
+	// registry-lock hold that commits the row delete it depends on.)
 
 	fmt.Fprintf(cmd.OutOrStdout(),
 		"Removed %d registry row(s) for workspace %s (key %s) with --backend=%q\n",
@@ -520,7 +1111,7 @@ func classifyWorkspaceUnregister(regPath, wsKey, legacyWSKey, backend string) (l
 	if lerr != nil {
 		return nil, false, lerr
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "classify workspace unregister: classification above stands, but could not release the registry lock")
 	if lerr := reg.Load(); lerr != nil {
 		return nil, false, lerr
 	}
@@ -598,7 +1189,7 @@ type workspaceListJSONRow struct {
 	Default bool `json:"default"`
 }
 
-func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
+func runWorkspaceList(cmd *cobra.Command, jsonOut bool) (err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -608,7 +1199,7 @@ func runWorkspaceList(cmd *cobra.Command, jsonOut bool) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "workspace list: listing above is valid, but could not release the registry lock")
 	if err := reg.Load(); err != nil {
 		return err
 	}
@@ -694,7 +1285,7 @@ which clears the marker as a side effect.
 	return c
 }
 
-func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
+func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) (err error) {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
 		return err
@@ -705,7 +1296,7 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) error {
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer api.ReleaseAndJoin(&err, unlock, "workspace set-default: marker write stands, but could not release the registry lock")
 
 	// Empty string clears the marker.
 	if strings.TrimSpace(rawPath) == "" {

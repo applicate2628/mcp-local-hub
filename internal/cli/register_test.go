@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -63,6 +65,26 @@ func TestRegisterCmd_HasSupervisedFlag(t *testing.T) {
 	}
 }
 
+func TestRegisterManagedRouterAuthorizerDiscoveryDoesNotCreateState(t *testing.T) {
+	base := t.TempDir()
+	t.Setenv("LOCALAPPDATA", base)
+	t.Setenv("XDG_STATE_HOME", base)
+	stateDir := filepath.Join(base, "mcp-local-hub")
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("precondition: state dir exists or stat failed unexpectedly: %v", err)
+	}
+	authorizer := registerManagedRouterAuthorizer()
+	if authorizer == nil {
+		t.Fatal("register managed-router authorizer is nil")
+	}
+	if got := authorizer(context.Background(), 0); got.Lease != nil || got.FailureClass != "port-invalid" {
+		t.Fatalf("invalid-port authorization = %+v", got)
+	}
+	if _, err := os.Stat(stateDir); !os.IsNotExist(err) {
+		t.Fatalf("read-only authorizer discovery created state dir or stat failed unexpectedly: %v", err)
+	}
+}
+
 func TestRegisterCmd_SchedulerlessRegisterEnsuresSupervisor(t *testing.T) {
 	origScheduler := registerSchedulerUnavailableForHost
 	origResolve := registerResolveMCPHubBinary
@@ -74,7 +96,7 @@ func TestRegisterCmd_SchedulerlessRegisterEnsuresSupervisor(t *testing.T) {
 	})
 
 	registerSchedulerUnavailableForHost = func() (bool, error) { return true, nil }
-	registerResolveMCPHubBinary = func() (string, error) { return "D:/dev/mcphub.exe", nil }
+	registerResolveMCPHubBinary = func() (string, error) { return "testdata/mcphub.exe", nil }
 	var gotBin string
 	var gotStrict bool
 	var gotWait time.Duration
@@ -91,7 +113,7 @@ func TestRegisterCmd_SchedulerlessRegisterEnsuresSupervisor(t *testing.T) {
 	if err := ensureSupervisorForSchedulerlessRegister(c); err != nil {
 		t.Fatalf("ensureSupervisorForSchedulerlessRegister: %v", err)
 	}
-	if gotBin != "D:/dev/mcphub.exe" || gotStrict {
+	if gotBin != "testdata/mcphub.exe" || gotStrict {
 		t.Fatalf("ensure args = bin %q strict %v, want resolved binary strict=false", gotBin, gotStrict)
 	}
 	if gotWait != 15*time.Second {
@@ -113,7 +135,7 @@ func TestRegisterCmd_SchedulerlessSupervisorFailureStopsBeforeRegister(t *testin
 	})
 
 	registerSchedulerUnavailableForHost = func() (bool, error) { return true, nil }
-	registerResolveMCPHubBinary = func() (string, error) { return "D:/dev/mcphub.exe", nil }
+	registerResolveMCPHubBinary = func() (string, error) { return "testdata/mcphub.exe", nil }
 	registerEnsureSupervisorRunning = func(ctx context.Context, mcphubBin string, strictMode bool, waitFor time.Duration) (*supervisorOwner, error) {
 		return nil, errors.New("IPC unavailable")
 	}
@@ -147,7 +169,7 @@ func TestRegisterCmd_SchedulerCapableRegisterSkipsSupervisorEnsure(t *testing.T)
 	}
 }
 
-func TestRegisterCmd_PrintsWarningsOnSuccess(t *testing.T) {
+func TestRegisterCLI_RetainsRawOperatorDiagnostic(t *testing.T) {
 	c := newRegisterCmdReal()
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -169,6 +191,42 @@ func TestRegisterCmd_PrintsWarningsOnSuccess(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "warning: codex-cli remove direct LSP entry mcp-language-server-go failed: induced failure") {
 		t.Fatalf("stderr missing warning:\n%s", stderr.String())
+	}
+}
+
+func TestRegisterCLIPartialReportPrintsTypedCauseBeforeReturningError(t *testing.T) {
+	const rawSentinel = `D:\local\operator --password=hunter2`
+	operationErr := errors.New(rawSentinel)
+	command := newRegisterCmdReal()
+	var stderr bytes.Buffer
+	command.SetErr(&stderr)
+
+	report := &api.RegisterReport{Workspace: "project", WorkspaceKey: "key"}
+	returned := finishRegisterCommand(command, report, operationErr)
+	if !errors.Is(returned, operationErr) {
+		t.Fatalf("returned error=%v, want original operation cause", returned)
+	}
+	output := stderr.String()
+	if !strings.Contains(output, string(api.RegistrationCodeUnknown)) || !strings.Contains(output, rawSentinel) {
+		t.Fatalf("local CLI diagnostic did not preserve code and cause: %q", output)
+	}
+}
+
+func TestUnregisterCLIPartialReportPrintsTypedCauseBeforeReturningError(t *testing.T) {
+	const rawSentinel = "unregister-local-cause"
+	operationErr := errors.New(rawSentinel)
+	command := newUnregisterCmdReal()
+	var stderr bytes.Buffer
+	command.SetErr(&stderr)
+
+	report := &api.UnregisterReport{Workspace: "project", WorkspaceKey: "key"}
+	returned := finishUnregisterCommand(command, report, []string{"go"}, operationErr)
+	if !errors.Is(returned, operationErr) {
+		t.Fatalf("returned error=%v, want original operation cause", returned)
+	}
+	output := stderr.String()
+	if !strings.Contains(output, string(api.RegistrationCodeUnknown)) || !strings.Contains(output, rawSentinel) {
+		t.Fatalf("local CLI diagnostic did not preserve code and cause: %q", output)
 	}
 }
 

@@ -32,14 +32,18 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false, LogHubMcpEvent)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false, LogHubMcpEvent)
 }
 
-func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool) ([]byte, error) {
+// readStateFileInodeAnchoredWithOptions's auditSink parameter mirrors the
+// Windows leg (hub_mcp_state_read_inode_windows.go) — see its doc comment
+// for the finding-1 rationale. Every existing caller in this file passes
+// LogHubMcpEvent, preserving today's behavior exactly.
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error) ([]byte, error) {
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -81,7 +85,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, parentErr
 		}
 		if auditFallbacks {
-			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			_ = auditSink("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
 				"path":        path,
 				"parent":      parentPath,
 				"reason":      "default-relax-on-solo-host (parent grants group/world write; safe under inode-anchored read because subsequent read(2) is bound to the openat fd, not the path)",
@@ -98,7 +102,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, parentErr
 		}
 		if auditFallbacks {
-			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			_ = auditSink("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
 				"path":        path,
 				"parent":      parentPath,
 				"reason":      "default-relax-on-solo-host (parent group/world read/exec bits set; write bits cleared)",
@@ -146,7 +150,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, fmt.Errorf("%w: path=%s mode=%04o exposes read/exec bits to group/world on secret-bearing state file.%s", ErrTooLoose, path, mode, stateFileReadRemediation(path))
 		}
 		if auditFallbacks {
-			_ = LogHubMcpEvent("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
+			_ = auditSink("warn", "hub-mcp-state-read-unhardened-file-fallback", map[string]any{
 				"path":      path,
 				"parent":    parentPath,
 				"reason":    "default-relax-on-solo-host (file group/world read/exec bits set; write bits cleared)",

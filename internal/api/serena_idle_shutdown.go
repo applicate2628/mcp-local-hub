@@ -125,7 +125,7 @@ var serenaWakeReadinessFn = func(ctx context.Context, taskName string, port int,
 // WakeIdleSerenaDaemon's operator-stop guard. Default reads the on-disk
 // supervisor-intent.json stops sub-block; tests override it to inject a
 // specific prior stop without a real state dir.
-var serenaWakeReadStopFn = readSerenaUnifiedStopForTask
+var serenaWakeReadStopFn = readSerenaUnifiedStopForTaskWithAuditSink
 
 func (a *API) serenaWakeIsInFlight(taskName string) bool {
 	if a == nil {
@@ -222,6 +222,16 @@ func ReadSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
 // readSerenaUnifiedStopForTask expects a canonical taskName and implements the
 // cached stop read behind ReadSerenaUnifiedStopForTask.
 func readSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
+	return readSerenaUnifiedStopForTaskWithAuditSink(taskName, LogHubMcpEvent)
+}
+
+// readSerenaUnifiedStopForTaskWithAuditSink is the per-call route-owned
+// variant. It keeps the shared cache, but any cache miss that has to inspect
+// supervisor-intent.json routes broadened-parent diagnostics through sink.
+func readSerenaUnifiedStopForTaskWithAuditSink(taskName string, sink func(level, event string, fields map[string]any) error) (DaemonIntent, error) {
+	if sink == nil {
+		sink = LogHubMcpEvent
+	}
 	path, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return DaemonIntent{}, fmt.Errorf("serena idle wake: resolve supervisor-intent path: %w", err)
@@ -258,9 +268,13 @@ func readSerenaUnifiedStopForTask(taskName string) (DaemonIntent, error) {
 	// Miss: (re)read + parse and refresh the cache.
 	var stops map[string]DaemonIntent
 	if fileExists {
-		intent, _, rerr := readSupervisorIntentForMerge(path)
+		raw, rerr := ReadStateFileInodeAnchoredWithAuditSink(path, sink)
 		if rerr != nil {
 			return DaemonIntent{}, fmt.Errorf("serena idle wake: read supervisor-intent.json: %w", rerr)
+		}
+		intent, _, rerr := decodeSupervisorIntentFile(path, raw)
+		if rerr != nil {
+			return DaemonIntent{}, fmt.Errorf("serena idle wake: decode supervisor-intent.json: %w", rerr)
 		}
 		if intent != nil {
 			stops = UnifiedStopsFile(intent, nil).Tasks
@@ -474,10 +488,20 @@ func sleepUntilNextSerenaWakePoll(ctx context.Context, deadline time.Time) error
 // audit attribution for the clear. ctx bounds the whole wake (the router
 // passes its detached+bounded request context).
 func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port int, who string) error {
+	return a.WakeIdleSerenaDaemonWithAuditSink(ctx, taskName, port, who, LogHubMcpEvent)
+}
+
+// WakeIdleSerenaDaemonWithAuditSink applies the same wake transition while
+// routing its best-effort warning through the caller-owned audit boundary.
+// A nil sink preserves the ordinary API contract and uses LogHubMcpEvent.
+func (a *API) WakeIdleSerenaDaemonWithAuditSink(ctx context.Context, taskName string, port int, who string, auditSink func(level, event string, fields map[string]any) error) error {
+	if auditSink == nil {
+		auditSink = LogHubMcpEvent
+	}
 	now := time.Now().UTC()
 	taskKey := canonicalIntentTaskKey(taskName)
 
-	prior, err := serenaWakeReadStopFn(taskKey)
+	prior, err := serenaWakeReadStopFn(taskKey, auditSink)
 	if err != nil {
 		return err
 	}
@@ -549,7 +573,7 @@ func (a *API) WakeIdleSerenaDaemon(ctx context.Context, taskName string, port in
 			}
 			return fmt.Errorf("serena idle wake: supervisor IPC unavailable after clearing idle stop for %s: %w", taskName, recErr)
 		}
-		_ = LogHubMcpEvent("warn", "serena-idle-wake-reconcile-nudge-failed", map[string]any{
+		_ = auditSink("warn", "serena-idle-wake-reconcile-nudge-failed", map[string]any{
 			"task_name": taskName,
 			"err":       recErr.Error(),
 		})

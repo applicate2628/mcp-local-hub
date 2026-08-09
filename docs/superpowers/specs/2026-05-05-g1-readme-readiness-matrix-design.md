@@ -53,8 +53,8 @@ No fourth "❌ Not planned" state in the matrix. Items we explicitly decline (e.
 | Auto-start on logon — Windows                 | ✅ Stable  | Task Scheduler with restart-on-failure                                             |
 | Auto-start on logon — Linux                   | 🚧 Roadmap | systemd user units (F2) + `mcphub setup --server` with `loginctl enable-linger` (F3) tracked in backlog |
 | Auto-start on logon — macOS                   | 🚧 Roadmap | launchd auto-start is not currently tracked in the backlog F-tier; manual launch only |
-| Default client install                        | ⚠ Preview  | Claude Code, Codex CLI, Cursor; Cursor live-smoke pending in verification matrix   |
-| Opt-in client install                         | ⚠ Preview  | VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay); manual smoke pending     |
+| Default client install                        | ⚠ Preview  | Claude Code, Codex CLI                                                             |
+| Opt-in client install                         | ⚠ Preview  | Cursor, VS Code, Gemini-CLI, Qwen-CLI, Antigravity (stdio-relay); Cursor live-smoke and other manual smoke pending |
 | GUI dashboard (`mcphub gui`)                  | ⚠ Preview  | Loopback-only; CSRF/DNS-rebind hardened (PR #51); manual GUI browser smoke pending |
 | GUI logs viewer (`/api/logs/:server`)         | ⚠ Preview  | SSE tail follow + filter + ERROR/WARN highlight + Open folder all shipped          |
 | Workspace-scoped LSP lazy proxies             | ⚠ Preview  | `mcphub register` + per-language proxy; D3 manual multi-language smoke pending     |

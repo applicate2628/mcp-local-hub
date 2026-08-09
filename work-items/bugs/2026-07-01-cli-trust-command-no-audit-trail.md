@@ -6,7 +6,7 @@ fixed: 2026-07-03 — feat/audit-trail-coverage-completion (e7c828a0). runTrustA
 
 - **status:** fixed
 - **fixed-by:** PR #491 (`aa865b6b`) - CLI trust/untrust audit coverage.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # `mcphub trust`/`untrust` CLI verbs mutate the trusted-roots boundary with no audit trail
 

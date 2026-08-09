@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 const (
@@ -21,8 +23,21 @@ const (
 // LSPClientRouterOpts controls the client-config reconcile that points
 // eligible present MCP clients at the workspace-agnostic LSP router.
 type LSPClientRouterOpts struct {
-	// GUIPort is the configured GUI/router port. Zero means read the
-	// validated gui_server.port setting through SettingsGet.
+	// RoutingTarget is the frozen, typed client-routing decision supplied by a
+	// composition root. Production callers should use this field (or leave it
+	// nil so the API resolves the canonical durable state exactly once).
+	RoutingTarget *ClientRoutingTarget
+	// GUIPort is the port written into LSP router client URLs. Zero means
+	// resolve the canonical routing target. A non-zero value is retained only
+	// as a source-compatible adapter for older callers and tests; it is treated
+	// as a stable GUI target and never consulted alongside RoutingTarget.
+	// Despite the field name it is a plain port value, not GUI-specific:
+	// sub-increment 2a's `mcphub install --reconcile-mcp-front` command
+	// passes the settings-owned mcp_front.port here explicitly (a non-zero
+	// value skips the gui_server.port read entirely), pointing LSP router
+	// client URLs at the supervisor-managed front daemon instead of the
+	// GUI. Every existing caller keeps passing 0 or the live GUI port, so
+	// this is purely an additive use of an already-generic field.
 	GUIPort int
 	// Languages optionally narrows the manifest language set. Empty means
 	// every language declared by servers/mcp-language-server/manifest.yaml.
@@ -39,6 +54,10 @@ type LSPClientRouterOpts struct {
 	// McphubExePath is used only by relay-shaped clients such as Antigravity.
 	// Empty means canonicalMcphubPath().
 	McphubExePath string
+	// classifyClientMutation is the per-invocation settlement seam. Production
+	// leaves it nil and uses clients.ClassifyClientMutation; focused tests inject
+	// a classifier without changing the public client mutation contract.
+	classifyClientMutation func(error) clients.ClientMutationSettlement
 }
 
 type LSPClientRouterBackup struct {
@@ -61,10 +80,12 @@ type LSPClientRouterFailure struct {
 	Err       string
 }
 
-// LSPClientRouterReport summarizes client-config mutations. Registry rows are
-// intentionally not included because this reconcile never creates or deletes
-// per-(workspace, language) registrations; existing rows are warm
-// preregistrations that the /lsp/<lang>/mcp router can reuse.
+// LSPClientRouterReport summarizes client-config mutations. When a mutation
+// applied but config-lock release was unconfirmed, its actual-change row and a
+// lifecycle failure are both present. Registry rows are intentionally not
+// included because this reconcile never creates or deletes per-(workspace,
+// language) registrations; existing rows are warm preregistrations that the
+// /lsp/<lang>/mcp router can reuse.
 type LSPClientRouterReport struct {
 	Backups  []LSPClientRouterBackup
 	Applied  []LSPClientRouterChange
@@ -72,6 +93,21 @@ type LSPClientRouterReport struct {
 	Restored []LSPClientRouterChange
 	Skipped  []LSPClientRouterChange
 	Failed   []LSPClientRouterFailure
+
+	// Pending is written ONLY by RestoreLSPRouterClientEntriesSnapshot. It
+	// carries recovery rows that are neither restored nor failed but
+	// UNREACHABLE right now: a client that was present when the pre-state was
+	// captured but whose adapter or config file is absent at restore time.
+	//
+	// It is deliberately distinct from both siblings. Skipped means "we
+	// decided not to touch this, and that decision is final"; Failed means "we
+	// tried and the attempt errored". Pending means "this row still needs
+	// restoring and we could not even attempt it" — the caller must NOT retire
+	// the recovery record while any Pending row remains, or the row is lost
+	// forever the moment the client reappears. Treating an unreachable client
+	// as restored is precisely how a rollback record gets deleted while the
+	// client it describes is still on the new endpoint.
+	Pending []LSPClientRouterChange
 }
 
 type LSPRouterClientStatus struct {
@@ -90,6 +126,551 @@ type lspClientRouterOp struct {
 	entry     clients.MCPEntry
 }
 
+// LSPRouterPlannedOperation is one exact, immutable mutation captured before a
+// front-reconcile generation writes any client configuration.
+type LSPRouterPlannedOperation struct {
+	Client        string                 `json:"client"`
+	Language      string                 `json:"language"`
+	EntryName     string                 `json:"entry_name"`
+	Operation     string                 `json:"operation"`
+	PreState      LSPRouterEntrySnapshot `json:"pre_state"`
+	IntendedState LSPRouterEntrySnapshot `json:"intended_state"`
+	entry         clients.MCPEntry
+}
+
+// LSPRouterClientPlan freezes the client population and exact entry states for
+// one operation. The adapter map is deliberately private and never persisted;
+// applying a plan can only use the same concrete population captured here.
+type LSPRouterClientPlan struct {
+	Port                  int                         `json:"port"`
+	Operations            []LSPRouterPlannedOperation `json:"operations"`
+	CaptureFailures       []LSPClientRouterFailure    `json:"capture_failures,omitempty"`
+	canonicalDependencies []lspRouterCanonicalDependency
+	clientMap             map[string]clients.Client
+	keepN                 int
+	opts                  LSPClientRouterOpts
+	transactionOwned      bool
+	authorityRequest      ClientRoutingAuthorityRequest
+}
+
+// lspRouterCanonicalDependency freezes the one canonical state that authorizes
+// legacy removals for a client/language group. It is deliberately private:
+// callers may observe operations, but only Plan owns the complete relation
+// between a legacy-removal group and its canonical readback.
+type lspRouterCanonicalDependency struct {
+	Client        string
+	Language      string
+	IntendedState LSPRouterEntrySnapshot
+}
+
+// lspRouterPlanningState supplies settings already held by a caller that owns
+// the settings mutation lock. A nil state leaves the public planner as the
+// canonical settings reader.
+type lspRouterPlanningState struct {
+	disabledClients map[string]bool
+	enabledClients  map[string]bool
+	keepN           int
+}
+
+// PlanLSPRouterClientEntriesForMCPFrontTransaction is the explicit front
+// transaction lane. Its caller already owns the durable transitional state;
+// ordinary callers must use PlanLSPRouterClientEntries and are fenced again
+// at Apply time by the routing-target lease.
+func (a *API) PlanLSPRouterClientEntriesForMCPFrontTransaction(opts LSPClientRouterOpts) (*LSPRouterClientPlan, error) {
+	plan, err := a.PlanLSPRouterClientEntries(opts)
+	if plan != nil {
+		plan.transactionOwned = true
+	}
+	return plan, err
+}
+
+type LSPRouterMutationObservation struct {
+	Operation                     LSPRouterPlannedOperation
+	ObservedState                 LSPRouterEntrySnapshot
+	Invoked                       bool
+	PreconditionConflict          bool
+	PreconditionConflictScope     string
+	PreconditionConflictEntryName string
+	DependencyFailure             *clients.EntryMutationDependencyFailure
+	PreparationErr                error
+	AdapterErr                    error
+	ObservationErr                error
+}
+
+type LSPRouterApplyCallbacks struct {
+	OnPrepared             func(LSPRouterPlannedOperation) error
+	OnFinished             func(LSPRouterMutationObservation) error
+	OnPreconditionConflict func(LSPRouterMutationObservation) error
+}
+
+var ErrLSPRouterPlanPreconditionConflict = errors.New("lsp router plan precondition no longer matches")
+
+// PlanLSPRouterClientEntries captures one complete eligible client population,
+// its exact canonical/legacy pre-state, and every operation the forward pass
+// may perform. It calls clients.AllClients at most once; application never
+// enumerates or re-admits clients.
+func (a *API) PlanLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPRouterClientPlan, error) {
+	return a.planLSPRouterClientEntries(opts, nil)
+}
+
+// planLSPRouterClientEntries owns the one forward operation/evidence producer.
+// Callers holding the settings mutation lock pass its committed raw settings
+// state so planning does not re-enter that non-reentrant owner.
+func (a *API) planLSPRouterClientEntries(opts LSPClientRouterOpts, state *lspRouterPlanningState) (*LSPRouterClientPlan, error) {
+	authorityRequest := lspClientRoutingAuthorityRequest(opts)
+	resolveCanonical := opts.RoutingTarget == nil && opts.GUIPort == 0
+	languages, err := loadLSPRouterLanguages(opts.Languages)
+	if err != nil {
+		return nil, err
+	}
+	target, err := a.resolveLSPClientRoutingTarget(opts)
+	if err != nil {
+		return nil, err
+	}
+	if resolveCanonical {
+		// Planning freezes client URLs before Apply acquires the operation lease,
+		// so the frozen target must still be exact at admission time.
+		authorityRequest = ExactTarget(target)
+	}
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
+	port := target.Port
+	regEntries, err := loadLSPRouterRegistryEntries()
+	if err != nil {
+		return nil, err
+	}
+	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
+	var disabledClients, enabledClients map[string]bool
+	keepN := 0
+	if state != nil {
+		disabledClients = state.disabledClients
+		enabledClients = state.enabledClients
+		keepN = state.keepN
+	} else {
+		disabledClients, err = a.LSPRouterDisabledClientSet()
+		if err != nil {
+			return nil, err
+		}
+		enabledClients, err = a.ClientInstallEnabledSet()
+		if err != nil {
+			return nil, err
+		}
+		keepN = opts.BackupKeepN
+		if keepN == 0 {
+			keepN = a.EffectiveBackupKeepN()
+		}
+	}
+	clientMap := opts.Clients
+	if clientMap == nil {
+		clientMap = clients.AllClients()
+	}
+	capturedClients := make(map[string]clients.Client, len(clientMap))
+	for clientName, adapter := range clientMap {
+		capturedClients[clientName] = adapter
+	}
+	plan := &LSPRouterClientPlan{
+		Port:             port,
+		clientMap:        capturedClients,
+		keepN:            keepN,
+		opts:             opts,
+		authorityRequest: authorityRequest,
+	}
+	forceClientName := strings.TrimSpace(opts.ForceClientName)
+	for _, clientName := range sortedLSPClientNames(capturedClients) {
+		adapter := capturedClients[clientName]
+		if adapter == nil || !adapter.Exists() || disabledClients[clientName] {
+			continue
+		}
+		if !enabledClients[clientName] && clientName != forceClientName {
+			hasEvidence, evidenceErr := clientHasLSPRouterEnablementEvidence(
+				clientName, adapter, languages, port, regEntries, portsByLanguage)
+			if evidenceErr != nil {
+				plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, "", "", "enablement", evidenceErr))
+				continue
+			}
+			if !hasEvidence {
+				continue
+			}
+		}
+		for _, language := range languages {
+			targetName := LSPRouterEntryName(language)
+			targetURL := LSPRouterURL(port, language)
+			current, readErr := adapter.GetEntry(targetName)
+			if readErr != nil {
+				plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "read", readErr))
+				continue
+			}
+			canonicalPre := lspSnapshotFromEntry(clientName, language, targetName, current)
+			canonicalIntended := canonicalPre
+			if !entryMatchesLSPRouter(current, targetURL) {
+				if current != nil && !entryIsHubOwnedLSPClientEntry(targetName, current, language, port, portsByLanguage[language]) {
+					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "ownership",
+						errors.New("live entry is not hub-owned; refusing to overwrite")))
+					continue
+				}
+				entry, prepErr := lspRouterMCPEntryForClient(opts, adapter, targetName, targetURL)
+				if prepErr != nil {
+					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, targetName, "prepare", prepErr))
+					continue
+				}
+				// IntendedState must be the expected READBACK, not a projection
+				// of the write request: PreState and ObservedState are both
+				// readbacks, so projecting the command object here would make
+				// every successful add compare unequal to its own readback and
+				// settle as `forward-ownership-unknown`. The family rule is
+				// owned by intendedEntryReadbackProjection.
+				intendedReadback := intendedEntryReadbackProjection(adapter, entry)
+				canonicalIntended = lspSnapshotFromEntry(clientName, language, targetName, &intendedReadback)
+				plan.Operations = append(plan.Operations, LSPRouterPlannedOperation{
+					Client: clientName, Language: language, EntryName: targetName, Operation: "add",
+					PreState:      canonicalPre,
+					IntendedState: canonicalIntended,
+					entry:         entry,
+				})
+			}
+			legacyEntries, legacyReadErrs := collectLegacyLSPEntriesToMigrate(
+				adapter, regEntries, portsByLanguage[language], language, clientName, targetName)
+			if len(legacyReadErrs) > 0 {
+				for _, legacyReadErr := range legacyReadErrs {
+					plan.CaptureFailures = append(plan.CaptureFailures, lspFailure(clientName, language, legacyReadErr.Name, "read", legacyReadErr.Err))
+				}
+				continue
+			}
+			if len(legacyEntries) > 0 {
+				plan.canonicalDependencies = append(plan.canonicalDependencies, lspRouterCanonicalDependency{
+					Client: clientName, Language: language, IntendedState: canonicalIntended,
+				})
+			}
+			for _, legacy := range legacyEntries {
+				plan.Operations = append(plan.Operations, LSPRouterPlannedOperation{
+					Client: clientName, Language: language, EntryName: legacy.Name, Operation: "remove",
+					PreState:      lspSnapshotFromEntry(clientName, language, legacy.Name, legacy.Entry),
+					IntendedState: LSPRouterEntrySnapshot{Client: clientName, Language: language, EntryName: legacy.Name},
+				})
+			}
+		}
+	}
+	return plan, nil
+}
+
+// ApplyLSPRouterClientPlan applies only the frozen operations and adapters in
+// plan. Every write is preceded by an exact pre-state check and a durable
+// OnPrepared callback; OnFinished is total over adapter success and error.
+// A pre-state mismatch invokes the separate OnPreconditionConflict callback
+// because no mutation attempt was prepared or made.
+func (a *API) ApplyLSPRouterClientPlan(plan *LSPRouterClientPlan, callbacks LSPRouterApplyCallbacks) (*LSPClientRouterReport, error) {
+	if plan == nil {
+		return &LSPClientRouterReport{}, errors.New("nil lsp router client plan")
+	}
+	canonicalDependencies, err := validateLSPRouterClientPlan(plan)
+	if err != nil {
+		return &LSPClientRouterReport{}, err
+	}
+	if plan.transactionOwned {
+		return a.applyValidatedLSPRouterClientPlanUnderAuthority(plan, canonicalDependencies, callbacks)
+	}
+	var report *LSPClientRouterReport
+	err = a.WithClientRoutingAuthorityLease(context.Background(), plan.authorityRequest, func(ClientRoutingTarget) error {
+		var applyErr error
+		report, applyErr = a.applyValidatedLSPRouterClientPlanUnderAuthority(plan, canonicalDependencies, callbacks)
+		return applyErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+type lspRouterPlanGroup struct {
+	canonicalOperationIndexes []int
+	legacyRemovalIndexes      []int
+}
+
+// validateLSPRouterClientPlan is the one owner of the complete canonical to
+// legacy-removal relation. It runs before Apply acquires an adapter or invokes
+// a callback, so malformed plans cannot create a backup or mutate a config.
+func validateLSPRouterClientPlan(plan *LSPRouterClientPlan) (map[string]LSPRouterEntrySnapshot, error) {
+	groups := map[string]*lspRouterPlanGroup{}
+	seenEntries := map[string]bool{}
+	for index, op := range plan.Operations {
+		if !lspRouterSnapshotHasIdentity(op.PreState, op.Client, op.Language, op.EntryName) ||
+			!lspRouterSnapshotHasIdentity(op.IntendedState, op.Client, op.Language, op.EntryName) {
+			return nil, fmt.Errorf("lsp router plan operation %d has state identity disagreement", index)
+		}
+		entryKey := op.Client + "\x00" + op.Language + "\x00" + op.EntryName
+		if seenEntries[entryKey] {
+			return nil, fmt.Errorf("duplicate lsp router plan operation for %s/%s/%s", op.Client, op.Language, op.EntryName)
+		}
+		seenEntries[entryKey] = true
+		groupKey := op.Client + "\x00" + op.Language
+		group := groups[groupKey]
+		if group == nil {
+			group = &lspRouterPlanGroup{}
+			groups[groupKey] = group
+		}
+		if op.EntryName == LSPRouterEntryName(op.Language) {
+			group.canonicalOperationIndexes = append(group.canonicalOperationIndexes, index)
+			continue
+		}
+		if op.Operation != "remove" {
+			return nil, fmt.Errorf("lsp router plan operation %d has unsupported legacy operation %q", index, op.Operation)
+		}
+		if op.IntendedState.Present {
+			return nil, fmt.Errorf("lsp router plan legacy removal %s/%s/%s has a present intended state", op.Client, op.Language, op.EntryName)
+		}
+		group.legacyRemovalIndexes = append(group.legacyRemovalIndexes, index)
+	}
+
+	dependencies := map[string]LSPRouterEntrySnapshot{}
+	for index, dependency := range plan.canonicalDependencies {
+		groupKey := dependency.Client + "\x00" + dependency.Language
+		if _, exists := dependencies[groupKey]; exists {
+			return nil, fmt.Errorf("duplicate frozen canonical dependency %d for %s/%s", index, dependency.Client, dependency.Language)
+		}
+		canonicalName := LSPRouterEntryName(dependency.Language)
+		if !lspRouterSnapshotHasIdentity(dependency.IntendedState, dependency.Client, dependency.Language, canonicalName) ||
+			!dependency.IntendedState.Present {
+			return nil, fmt.Errorf("frozen canonical dependency %d has identity or intended-state disagreement", index)
+		}
+		dependencies[groupKey] = dependency.IntendedState
+	}
+	for groupKey, group := range groups {
+		if len(group.legacyRemovalIndexes) == 0 {
+			if _, exists := dependencies[groupKey]; exists {
+				return nil, fmt.Errorf("frozen canonical dependency has no legacy removal group %q", groupKey)
+			}
+			continue
+		}
+		canonical, exists := dependencies[groupKey]
+		if !exists {
+			return nil, fmt.Errorf("legacy removal group %q has no frozen canonical dependency", groupKey)
+		}
+		if len(group.canonicalOperationIndexes) > 1 {
+			return nil, fmt.Errorf("legacy removal group %q has duplicate canonical plan operations", groupKey)
+		}
+		if len(group.canonicalOperationIndexes) == 0 {
+			continue
+		}
+		canonicalIndex := group.canonicalOperationIndexes[0]
+		canonicalOperation := plan.Operations[canonicalIndex]
+		if canonicalOperation.Operation != "add" {
+			return nil, fmt.Errorf("legacy removal group %q has non-add canonical operation %q", groupKey, canonicalOperation.Operation)
+		}
+		if canonicalIndex > group.legacyRemovalIndexes[0] {
+			return nil, fmt.Errorf("legacy removal group %q puts canonical add after a removal", groupKey)
+		}
+		if !lspSnapshotStateEqual(canonicalOperation.IntendedState, canonical) {
+			return nil, fmt.Errorf("legacy removal group %q canonical operation disagrees with frozen dependency", groupKey)
+		}
+	}
+	for groupKey := range dependencies {
+		group := groups[groupKey]
+		if group == nil || len(group.legacyRemovalIndexes) == 0 {
+			return nil, fmt.Errorf("frozen canonical dependency has no complete relation for group %q", groupKey)
+		}
+	}
+	return dependencies, nil
+}
+
+func lspRouterSnapshotHasIdentity(snapshot LSPRouterEntrySnapshot, client, language, entryName string) bool {
+	return snapshot.Client == client && snapshot.Language == language && snapshot.EntryName == entryName
+}
+
+// applyValidatedLSPRouterClientPlanUnderAuthority applies a plan whose
+// canonical-to-legacy relation has already been validated by the caller. The
+// caller owns either the ordinary routing authority lease or the admitted
+// MCP-front transaction authority.
+func (a *API) applyValidatedLSPRouterClientPlanUnderAuthority(
+	plan *LSPRouterClientPlan,
+	canonicalDependencies map[string]LSPRouterEntrySnapshot,
+	callbacks LSPRouterApplyCallbacks,
+) (*LSPClientRouterReport, error) {
+	report := &LSPClientRouterReport{}
+	report.Failed = append(report.Failed, plan.CaptureFailures...)
+	backedUp := map[string]bool{}
+	canonicalReady := map[string]bool{}
+	for _, op := range plan.Operations {
+		group := op.Client + "\x00" + op.Language
+		if _, ok := canonicalReady[group]; !ok {
+			canonicalReady[group] = true
+		}
+		if op.Operation == "remove" && !canonicalReady[group] {
+			continue
+		}
+		adapter := plan.clientMap[op.Client]
+		if adapter == nil {
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "unavailable",
+				errors.New("planned adapter is unavailable")))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		mutator, ok := adapter.(clients.ConditionalEntryMutator)
+		if !ok {
+			capabilityErr := errors.New("planned adapter lacks conditional entry mutation capability")
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "capability", capabilityErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		var backupKeepN *int
+		if !backedUp[op.Client] {
+			backupKeepN = &plan.keepN
+		}
+		var prepareCallbackErr error
+		mutation := clients.EntryMutationOperation(op.Operation)
+		request := clients.ConditionalEntryMutationRequest{
+			EntryName: op.EntryName,
+			ExpectedLive: func(live *clients.MCPEntry) bool {
+				return lspSnapshotStateEqual(
+					lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, live),
+					op.PreState,
+				)
+			},
+			BackupKeepN: backupKeepN,
+			Operation:   mutation,
+			Entry:       op.entry,
+			BeforeMutation: func(clients.EntryMutationPreparation) error {
+				if callbacks.OnPrepared != nil {
+					prepareCallbackErr = callbacks.OnPrepared(op)
+				}
+				return prepareCallbackErr
+			},
+		}
+		var observed clients.EntryMutationObserved
+		conflictScope := ""
+		conflictEntryName := ""
+		var dependencyFailure *clients.EntryMutationDependencyFailure
+		if op.Operation == "remove" && op.EntryName != LSPRouterEntryName(op.Language) {
+			canonical := canonicalDependencies[group]
+			groupMutator, groupOK := adapter.(clients.ConditionalEntryGroupMutator)
+			if !groupOK {
+				capabilityErr := errors.New("planned adapter lacks conditional entry group mutation capability")
+				report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "dependency-capability", capabilityErr))
+				continue
+			}
+			groupObserved := groupMutator.ConditionalEntryGroupMutation(clients.ConditionalEntryGroupMutationRequest{
+				ConditionalEntryMutationRequest: request,
+				Dependencies: []clients.EntryMutationDependency{{
+					EntryName: LSPRouterEntryName(op.Language),
+					ExpectedLive: func(live *clients.MCPEntry) bool {
+						return lspSnapshotStateEqual(
+							lspSnapshotFromEntry(op.Client, op.Language, LSPRouterEntryName(op.Language), live),
+							canonical,
+						)
+					},
+				}},
+			})
+			observed = groupObserved.EntryMutationObserved
+			conflictScope = groupObserved.ConflictScope
+			conflictEntryName = groupObserved.ConflictEntryName
+			dependencyFailure = groupObserved.DependencyFailure
+		} else {
+			observed = mutator.ConditionalEntryMutation(request)
+		}
+		observation := LSPRouterMutationObservation{
+			Operation:                     op,
+			Invoked:                       observed.Invoked,
+			PreconditionConflict:          observed.PreconditionConflict,
+			PreconditionConflictScope:     conflictScope,
+			PreconditionConflictEntryName: conflictEntryName,
+			DependencyFailure:             dependencyFailure,
+			PreparationErr:                observed.PreparationErr,
+			AdapterErr:                    observed.MutationErr,
+			ObservationErr:                observed.ObservationErr,
+			ObservedState:                 lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.After),
+		}
+		if observed.BackupPath != "" {
+			report.Backups = append(report.Backups, LSPClientRouterBackup{Client: op.Client, Path: observed.BackupPath})
+			backedUp[op.Client] = true
+		}
+		if observed.PreconditionConflict {
+			observation.AdapterErr = ErrLSPRouterPlanPreconditionConflict
+			observation = LSPRouterMutationObservation{
+				Operation: op, ObservedState: lspSnapshotFromEntry(op.Client, op.Language, op.EntryName, observed.Before),
+				Invoked: false, PreconditionConflict: true,
+				PreconditionConflictScope: conflictScope, PreconditionConflictEntryName: conflictEntryName,
+				DependencyFailure: dependencyFailure,
+				PreparationErr:    observed.PreparationErr, AdapterErr: ErrLSPRouterPlanPreconditionConflict,
+			}
+			if callbacks.OnPreconditionConflict != nil {
+				if callbackErr := callbacks.OnPreconditionConflict(observation); callbackErr != nil {
+					return report, callbackErr
+				}
+			}
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "precondition",
+				ErrLSPRouterPlanPreconditionConflict))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		if prepareCallbackErr != nil {
+			return report, prepareCallbackErr
+		}
+		if observed.PreparationErr != nil {
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "prepare", observed.PreparationErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		if callbacks.OnFinished != nil {
+			if callbackErr := callbacks.OnFinished(observation); callbackErr != nil {
+				return report, callbackErr
+			}
+		}
+		if observed.ObservationErr != nil {
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "readback", observed.ObservationErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			if callbacks.OnFinished != nil {
+				return report, fmt.Errorf("lsp router plan readback %s/%s/%s: %w", op.Client, op.Language, op.EntryName, observed.ObservationErr)
+			}
+			continue
+		}
+		if observation.DependencyFailure != nil {
+			failureErr := observation.DependencyFailure.Cause
+			if failureErr == nil {
+				failureErr = errors.New("dependency readback no longer matches its requested live state")
+			}
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, "dependency-readback", failureErr))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			continue
+		}
+		if !lspSnapshotStateEqual(observation.ObservedState, op.IntendedState) {
+			err := observed.MutationErr
+			if err == nil {
+				err = errors.New("post-write state differs from intended state")
+			}
+			report.Failed = append(report.Failed, lspFailure(op.Client, op.Language, op.EntryName, op.Operation, err))
+			if op.Operation == "add" {
+				canonicalReady[group] = false
+			}
+			if callbacks.OnFinished != nil {
+				return report, fmt.Errorf("lsp router plan ownership unknown for %s/%s/%s", op.Client, op.Language, op.EntryName)
+			}
+			continue
+		}
+		if op.Operation == "add" {
+			canonicalReady[group] = true
+			report.Applied = append(report.Applied, LSPClientRouterChange{
+				Client: op.Client, Language: op.Language, EntryName: op.EntryName, URL: snapshotPriorURL(op.IntendedState),
+			})
+		} else {
+			report.Removed = append(report.Removed, LSPClientRouterChange{
+				Client: op.Client, Language: op.Language, EntryName: op.EntryName,
+			})
+		}
+	}
+	return report, lspRouterReportError(report, "lsp client router plan")
+}
+
 // EnsureLSPRouterClientEntries ensures every effectively-enabled present
 // client has one mcp-language-server-<language> entry pointing at the GUI LSP
 // router. Effective enablement is the single rule for setup writes:
@@ -101,147 +682,11 @@ type lspClientRouterOp struct {
 // migrated away after a per-client backup. The workspace registry is kept
 // intact; those rows are harmless warm preregistrations.
 func (a *API) EnsureLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
-	report := &LSPClientRouterReport{}
-	languages, err := loadLSPRouterLanguages(opts.Languages)
+	plan, err := a.PlanLSPRouterClientEntries(opts)
 	if err != nil {
-		return report, err
+		return &LSPClientRouterReport{}, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
-	if err != nil {
-		return report, err
-	}
-	opts.GUIPort = port
-	regEntries, err := loadLSPRouterRegistryEntries()
-	if err != nil {
-		return report, err
-	}
-	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
-	disabledClients, err := a.LSPRouterDisabledClientSet()
-	if err != nil {
-		return report, err
-	}
-	enabledClients, err := a.ClientInstallEnabledSet()
-	if err != nil {
-		return report, err
-	}
-	keepN := opts.BackupKeepN
-	if keepN == 0 {
-		keepN = a.EffectiveBackupKeepN()
-	}
-	return a.ensureLSPRouterClientEntriesWithLoaded(opts, languages, port, regEntries, portsByLanguage, disabledClients, enabledClients, keepN)
-}
-
-func (a *API) ensureLSPRouterClientEntriesWithState(
-	opts LSPClientRouterOpts,
-	disabledClients map[string]bool,
-	enabledClients map[string]bool,
-	keepN int,
-) (*LSPClientRouterReport, error) {
-	report := &LSPClientRouterReport{}
-	languages, err := loadLSPRouterLanguages(opts.Languages)
-	if err != nil {
-		return report, err
-	}
-	port, err := resolvedLSPRouterGUIPort(opts.GUIPort)
-	if err != nil {
-		return report, err
-	}
-	regEntries, err := loadLSPRouterRegistryEntries()
-	if err != nil {
-		return report, err
-	}
-	portsByLanguage := lspRegistryPortsByLanguage(regEntries)
-	return a.ensureLSPRouterClientEntriesWithLoaded(opts, languages, port, regEntries, portsByLanguage, disabledClients, enabledClients, keepN)
-}
-
-func (a *API) ensureLSPRouterClientEntriesWithLoaded(
-	opts LSPClientRouterOpts,
-	languages []string,
-	port int,
-	regEntries []WorkspaceEntry,
-	portsByLanguage map[string]map[int]bool,
-	disabledClients map[string]bool,
-	enabledClients map[string]bool,
-	keepN int,
-) (*LSPClientRouterReport, error) {
-	report := &LSPClientRouterReport{}
-	forceClientName := strings.TrimSpace(opts.ForceClientName)
-	if keepN == 0 {
-		keepN = registryDefaultKeepN()
-	}
-	clientMap := opts.Clients
-	if clientMap == nil {
-		clientMap = clients.AllClients()
-	}
-
-	for _, clientName := range sortedLSPClientNames(clientMap) {
-		adapter := clientMap[clientName]
-		if adapter == nil || !adapter.Exists() || disabledClients[clientName] {
-			continue
-		}
-		if !enabledClients[clientName] && clientName != forceClientName {
-			hasEvidence, err := clientHasLSPRouterEnablementEvidence(clientName, adapter, languages, port, regEntries, portsByLanguage)
-			if err != nil {
-				report.Failed = append(report.Failed, lspFailure(clientName, "", "", "enablement", err))
-				continue
-			}
-			if !hasEvidence {
-				continue
-			}
-		}
-		ops := make([]lspClientRouterOp, 0, len(languages))
-		for _, language := range languages {
-			targetName := LSPRouterEntryName(language)
-			targetURL := LSPRouterURL(port, language)
-			current, err := adapter.GetEntry(targetName)
-			if err != nil {
-				report.Failed = append(report.Failed, lspFailure(clientName, language, targetName, "read", err))
-				continue
-			}
-			if !entryMatchesLSPRouter(current, targetURL) {
-				if current != nil && !entryIsHubOwnedLSPClientEntry(targetName, current, language, port, portsByLanguage[language]) {
-					report.Failed = append(report.Failed, lspFailure(clientName, language, targetName, "ownership",
-						errors.New("live entry is not hub-owned; refusing to overwrite")))
-					continue
-				}
-				entry, err := lspRouterMCPEntryForClient(opts, adapter, targetName, targetURL)
-				if err != nil {
-					report.Failed = append(report.Failed, lspFailure(clientName, language, targetName, "prepare", err))
-					continue
-				}
-				ops = append(ops, lspClientRouterOp{
-					kind:      "add",
-					language:  language,
-					entryName: targetName,
-					entry:     entry,
-				})
-			}
-
-			for _, legacyName := range lspLegacyCandidateEntryNames(regEntries, language, clientName) {
-				if legacyName == targetName {
-					continue
-				}
-				legacy, err := adapter.GetEntry(legacyName)
-				if err != nil {
-					report.Failed = append(report.Failed, lspFailure(clientName, language, legacyName, "read", err))
-					continue
-				}
-				if legacy == nil || !entryPointsAtLegacyLSPPort(legacy, portsByLanguage[language]) {
-					continue
-				}
-				// Leave registry ClientEntries on the legacy name so rollback
-				// can reconstruct pre-router entries; GUI reads recognize the
-				// shared router name separately for visibility.
-				ops = append(ops, lspClientRouterOp{
-					kind:      "remove",
-					language:  language,
-					entryName: legacyName,
-				})
-			}
-		}
-		applyLSPRouterOps(opts, adapter, clientName, keepN, ops, report)
-	}
-	return report, lspRouterReportError(report, "lsp client router wiring")
+	return a.ApplyLSPRouterClientPlan(plan, LSPRouterApplyCallbacks{})
 }
 
 func clientHasLSPRouterEnablementEvidence(
@@ -326,16 +771,31 @@ func clientHasLSPRouterEnablementEvidence(
 // The current router state is still backed up before any mutation so rollback
 // itself remains reversible through the normal backup files.
 func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	var report *LSPClientRouterReport
+	err := a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var rollbackErr error
+		report, rollbackErr = a.rollbackLSPRouterClientEntries(admitted)
+		return rollbackErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+func (a *API) rollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
 	languages, err := loadLSPRouterLanguages(opts.Languages)
 	if err != nil {
 		return report, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return report, err
 	}
-	opts.GUIPort = port
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
+	port := target.Port
 	regEntries, err := loadLSPRouterRegistryEntries()
 	if err != nil {
 		return report, err
@@ -429,16 +889,30 @@ func (a *API) RollbackLSPRouterClientEntries(opts LSPClientRouterOpts) (*LSPClie
 // mcp-language-server-<language> router entries without restoring legacy
 // per-workspace entries and without touching sibling clients.
 func (a *API) RollbackLSPRouterClientEntriesForClient(clientName string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
+	var report *LSPClientRouterReport
+	err := a.withLSPClientRoutingAuthority(context.Background(), opts, func(admitted LSPClientRouterOpts) error {
+		var rollbackErr error
+		report, rollbackErr = a.rollbackLSPRouterClientEntriesForClient(clientName, admitted)
+		return rollbackErr
+	})
+	if report == nil {
+		report = &LSPClientRouterReport{}
+	}
+	return report, err
+}
+
+func (a *API) rollbackLSPRouterClientEntriesForClient(clientName string, opts LSPClientRouterOpts) (*LSPClientRouterReport, error) {
 	report := &LSPClientRouterReport{}
 	keepN := opts.BackupKeepN
 	if keepN == 0 {
 		keepN = a.EffectiveBackupKeepN()
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return report, err
 	}
-	opts.GUIPort = port
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
 	return a.rollbackLSPRouterClientEntriesForClientWithKeepN(clientName, opts, keepN)
 }
 
@@ -512,10 +986,11 @@ func (a *API) LSPRouterClientStatuses(opts LSPClientRouterOpts) ([]LSPRouterClie
 	if err != nil {
 		return nil, err
 	}
-	port, err := a.lspRouterGUIPort(opts.GUIPort)
+	target, err := a.resolveLSPClientRoutingTarget(opts)
 	if err != nil {
 		return nil, err
 	}
+	port := target.Port
 	disabledClients, err := a.LSPRouterDisabledClientSet()
 	if err != nil {
 		return nil, err
@@ -564,19 +1039,69 @@ func LSPRouterURL(guiPort int, language string) string {
 	return fmt.Sprintf(lspRouterURLTemplate, guiPort, language)
 }
 
-func (a *API) lspRouterGUIPort(port int) (int, error) {
-	if port == 0 {
-		setting, err := a.SettingsGet("gui_server.port")
-		if err != nil {
-			return 0, fmt.Errorf("read gui_server.port: %w", err)
+func (a *API) resolveLSPClientRoutingTarget(opts LSPClientRouterOpts) (ClientRoutingTarget, error) {
+	if opts.RoutingTarget != nil {
+		if err := ValidateClientRoutingTarget(*opts.RoutingTarget); err != nil {
+			return ClientRoutingTarget{}, err
 		}
-		n, err := strconv.Atoi(strings.TrimSpace(setting))
-		if err != nil || n < 1024 || n > 65535 {
-			return 0, fmt.Errorf("gui_server.port resolved to invalid value %q", setting)
-		}
-		port = n
+		return *opts.RoutingTarget, nil
 	}
-	return resolvedLSPRouterGUIPort(port)
+	if opts.GUIPort != 0 {
+		target := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: opts.GUIPort}
+		if err := ValidateClientRoutingTarget(target); err != nil {
+			return ClientRoutingTarget{}, err
+		}
+		return target, nil
+	}
+	return a.ResolveClientRoutingTarget()
+}
+
+func lspClientRoutingAuthorityRequest(opts LSPClientRouterOpts) ClientRoutingAuthorityRequest {
+	if opts.RoutingTarget != nil {
+		return ExactTarget(*opts.RoutingTarget)
+	}
+	if opts.GUIPort != 0 {
+		return StableGUICompatibility()
+	}
+	return CanonicalAtAdmission()
+}
+
+// withLSPClientRoutingAuthority keeps routing authority separate from endpoint
+// provenance. Typed and default callers use the admitted canonical target;
+// source-compatible GUIPort callers keep their explicit endpoint while the
+// owner only proves that durable routing remains stable GUI for the operation.
+func (a *API) withLSPClientRoutingAuthority(
+	ctx context.Context,
+	opts LSPClientRouterOpts,
+	work func(LSPClientRouterOpts) error,
+) error {
+	legacyPort := opts.GUIPort
+	if opts.RoutingTarget == nil && legacyPort != 0 {
+		legacy := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: legacyPort}
+		if err := ValidateClientRoutingTarget(legacy); err != nil {
+			return err
+		}
+	}
+	request := lspClientRoutingAuthorityRequest(opts)
+	return a.WithClientRoutingAuthorityLease(ctx, request, func(canonical ClientRoutingTarget) error {
+		target := canonical
+		if opts.RoutingTarget == nil && legacyPort != 0 {
+			target = ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: legacyPort}
+		}
+		opts.RoutingTarget = &target
+		opts.GUIPort = target.Port
+		return work(opts)
+	})
+}
+
+// lspRouterGUIPort is the legacy single-port adapter kept for source
+// compatibility. New production paths resolve a ClientRoutingTarget instead.
+func (a *API) lspRouterGUIPort(port int) (int, error) {
+	target, err := a.resolveLSPClientRoutingTarget(LSPClientRouterOpts{GUIPort: port})
+	if err != nil {
+		return 0, err
+	}
+	return target.Port, nil
 }
 
 func resolvedLSPRouterGUIPort(port int) (int, error) {
@@ -586,7 +1111,7 @@ func resolvedLSPRouterGUIPort(port int) (int, error) {
 	return port, nil
 }
 
-func loadLSPRouterLanguages(requested []string) ([]string, error) {
+func loadLSPRouterLanguageSpecs(requested []string) ([]config.LanguageSpec, error) {
 	data, err := loadManifestYAMLEmbedFirst(lspManifestServerName)
 	if err != nil {
 		return nil, fmt.Errorf("load manifest %s: %w", lspManifestServerName, err)
@@ -595,32 +1120,47 @@ func loadLSPRouterLanguages(requested []string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	known := map[string]bool{}
-	all := make([]string, 0, len(m.Languages))
+	known := map[string]config.LanguageSpec{}
+	all := make([]config.LanguageSpec, 0, len(m.Languages))
+	allNames := make([]string, 0, len(m.Languages))
 	for _, spec := range m.Languages {
 		if spec.Name == "" {
 			continue
 		}
-		known[spec.Name] = true
-		all = append(all, spec.Name)
+		known[spec.Name] = spec
+		all = append(all, spec)
+		allNames = append(allNames, spec.Name)
 	}
 	if len(requested) == 0 {
 		return all, nil
 	}
-	out := make([]string, 0, len(requested))
+	out := make([]config.LanguageSpec, 0, len(requested))
 	seen := map[string]bool{}
 	for _, language := range requested {
 		language = strings.TrimSpace(language)
 		if language == "" || seen[language] {
 			continue
 		}
-		if !known[language] {
-			return nil, fmt.Errorf("unknown LSP language %q (manifest %s supports: %v)", language, lspManifestServerName, all)
+		spec, ok := known[language]
+		if !ok {
+			return nil, fmt.Errorf("unknown LSP language %q (manifest %s supports: %v)", language, lspManifestServerName, allNames)
 		}
 		seen[language] = true
-		out = append(out, language)
+		out = append(out, spec)
 	}
 	return out, nil
+}
+
+func loadLSPRouterLanguages(requested []string) ([]string, error) {
+	specs, err := loadLSPRouterLanguageSpecs(requested)
+	if err != nil {
+		return nil, err
+	}
+	languages := make([]string, 0, len(specs))
+	for _, spec := range specs {
+		languages = append(languages, spec.Name)
+	}
+	return languages, nil
 }
 
 func loadLSPRouterRegistryEntries() ([]WorkspaceEntry, error) {
@@ -731,6 +1271,82 @@ func entryMatchesLSPRouter(entry *clients.MCPEntry, targetURL string) bool {
 		return true
 	}
 	return entry.RelayURL == targetURL && isCurrentMcphubRelayBinary(entry.RelayExePath)
+}
+
+// lspLegacyLiveEntry is one legacy per-workspace LSP entry that is present in
+// a client's config right now AND still points at a registry-owned proxy port.
+type lspLegacyLiveEntry struct {
+	Name  string
+	Entry *clients.MCPEntry
+}
+
+// lspLegacyEntryReadError is a per-candidate read failure, surfaced to the
+// caller rather than swallowed so each call site keeps its own error polarity
+// (the forward pass records a per-entry Failed row and continues; the snapshot
+// fails the whole capture closed).
+type lspLegacyEntryReadError struct {
+	Name string
+	Err  error
+}
+
+// collectLegacyLSPEntriesToMigrate is the SINGLE OWNER of the question "which
+// legacy per-workspace entries does the router reconcile migrate away for this
+// (client, language)".
+//
+// It exists because two sides must agree on that answer and used to derive it
+// independently — with only one of them actually implementing it (codex bot PR
+// #588). The forward Plan/Apply pipeline DELETES every entry this
+// returns, while SnapshotLSPRouterClientEntries captured only the canonical
+// `mcp-language-server-<language>` row. A client still on registry-backed
+// per-workspace entries therefore had its real pre-state silently outside the
+// recovery record: the forward pass removed those entries and `--rollback`,
+// iterating the snapshot, could not put back what was never captured. The host
+// ends up worse than before the "reversible" cutover — the failure class the
+// whole recovery-record lifecycle exists to prevent, reached through a client
+// shape the record did not model.
+//
+// Routing both the mutation and the capture through this one function makes
+// the two surfaces equal BY CONSTRUCTION: a future change to which entries are
+// migrated away automatically changes what the snapshot preserves, so they
+// cannot drift apart again.
+//
+// A candidate that equals targetName is skipped: that is the canonical entry,
+// which the forward pass rewrites (never deletes) and the snapshot captures on
+// its own canonical row.
+func collectLegacyLSPEntriesToMigrate(
+	adapter clients.Client,
+	regEntries []WorkspaceEntry,
+	legacyPorts map[int]bool,
+	language, clientName, targetName string,
+) ([]lspLegacyLiveEntry, []lspLegacyEntryReadError) {
+	var found []lspLegacyLiveEntry
+	var readErrs []lspLegacyEntryReadError
+	for _, legacyName := range lspLegacyCandidateEntryNames(regEntries, language, clientName) {
+		if legacyName == targetName {
+			continue
+		}
+		legacy, err := adapter.GetEntry(legacyName)
+		if err != nil {
+			readErrs = append(readErrs, lspLegacyEntryReadError{Name: legacyName, Err: err})
+			continue
+		}
+		if legacy == nil || !entryPointsAtLegacyLSPPort(legacy, legacyPorts) {
+			continue
+		}
+		// A multi-layer adapter's merged read can surface an entry that is NOT
+		// in the write target (mimocode: the operator's config.json below it, or
+		// the ~/.claude.json import). RemoveEntry only ever deletes the write
+		// target's own key, so such an entry is not this reconcile's to migrate
+		// away: planning it would emit an operation that cannot take effect and
+		// record a pre-state whose inverse the rollback cannot honour. Skipping
+		// it here keeps this function's whole reason for existing intact — the
+		// captured surface equals the MUTATED surface by construction.
+		if legacy.SourceBelowWriteTarget {
+			continue
+		}
+		found = append(found, lspLegacyLiveEntry{Name: legacyName, Entry: legacy})
+	}
+	return found, readErrs
 }
 
 func entryMatchesURL(entry *clients.MCPEntry, targetURL string) bool {
@@ -949,11 +1565,22 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 		return
 	}
 	report.Backups = append(report.Backups, LSPClientRouterBackup{Client: clientName, Path: backupPath})
+	classify := opts.classifyClientMutation
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
+	}
 	addFailedByLanguage := map[string]bool{}
 	for _, op := range ops {
 		switch op.kind {
 		case "add":
 			if err := adapter.AddEntry(op.entry); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					report.Applied = append(report.Applied, LSPClientRouterChange{
+						Client: clientName, Language: op.language, EntryName: op.entryName, URL: op.entry.URL,
+					})
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
+					return
+				}
 				addFailedByLanguage[op.language] = true
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
 				continue
@@ -966,6 +1593,13 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 				continue
 			}
 			if err := adapter.RemoveEntry(op.entryName); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					report.Removed = append(report.Removed, LSPClientRouterChange{
+						Client: clientName, Language: op.language, EntryName: op.entryName,
+					})
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "remove", err))
+					return
+				}
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "remove", err))
 				continue
 			}
@@ -974,6 +1608,13 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 			})
 		case "restore":
 			if err := adapter.RestoreEntryFromBackupForRollback(op.backup, op.entryName); err != nil {
+				if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+					report.Restored = append(report.Restored, LSPClientRouterChange{
+						Client: clientName, Language: op.language, EntryName: op.entryName,
+					})
+					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "restore", err))
+					return
+				}
 				report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "restore", err))
 				continue
 			}
@@ -989,6 +1630,13 @@ func applyLSPRouterOps(opts LSPClientRouterOpts, adapter clients.Client, clientN
 					continue
 				}
 				if err := adapter.AddEntry(fallback); err != nil {
+					if classify(err) == clients.ClientMutationAppliedReleaseUnconfirmed {
+						report.Applied = append(report.Applied, LSPClientRouterChange{
+							Client: clientName, Language: op.language, EntryName: op.entryName, URL: fallback.URL,
+						})
+						report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
+						return
+					}
 					report.Failed = append(report.Failed, lspFailure(clientName, op.language, op.entryName, "add", err))
 					continue
 				}

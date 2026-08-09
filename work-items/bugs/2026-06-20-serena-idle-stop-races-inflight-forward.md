@@ -8,7 +8,7 @@ closed-by: PR #386 (serena per-workspace stop-gate refactored into the withSeren
 
 - **status:** fixed
 - **fixed-by:** PR #386 (`edee81fe`) - shared `withSerenaWorkspaceGate` stop/forward gate.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # Serena idle-stop races an in-flight request's pre-forward window
 

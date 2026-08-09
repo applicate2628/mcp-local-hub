@@ -9,8 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"mcp-local-hub/internal/api/apitest"
 )
+
+// This compile-time assertion keeps audit attribution owned by the transition:
+// callers cannot provide a separate reason to emitStopIntentAudit.
+var _ func(before, after *DaemonIntent, taskName, who string) = emitStopIntentAudit
 
 // readSupervisorIntentFromDisk loads the supervisor-intent.json under the test
 // state dir for assertions.
@@ -21,6 +27,100 @@ func readSupervisorIntentFromDisk(t *testing.T, stateDir string) *SupervisorInte
 		t.Fatalf("read supervisor-intent.json: %v", err)
 	}
 	return got
+}
+
+func TestMutateStopSubBlock_ReleaseSettlementMatrix(t *testing.T) {
+	tests := []struct {
+		name        string
+		seed        bool
+		change      bool
+		unconfirmed bool
+		wantApplied bool
+	}{
+		{name: "changed-persisted-release-unconfirmed", change: true, unconfirmed: true, wantApplied: true},
+		{name: "no-persistence-change-release-unconfirmed", seed: true, unconfirmed: true},
+		{name: "changed-confirmed-release", change: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			defer SetDaemonStateRootForTest(stateDir)()
+			task := `\mcp-local-hub-stop-release-settlement`
+			value := DaemonIntent{
+				Desired: IntentDesiredStopped, Reason: IntentReasonUserStop,
+				UpdatedAt: time.Now().UTC().Add(time.Hour),
+			}
+			if tc.seed {
+				if err := NewAPI().WriteStopIntent(task, value, "seed"); err != nil {
+					t.Fatalf("seed stop: %v", err)
+				}
+			}
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatalf("intent path: %v", err)
+			}
+			beforeBytes, readErr := os.ReadFile(intentPath)
+			if readErr != nil && !errors.Is(readErr, os.ErrNotExist) {
+				t.Fatalf("read before bytes: %v", readErr)
+			}
+
+			lockPath := supervisorIntentLockPath(intentPath)
+			originalUnlock := flockUnlockFn
+			var releaseCalls int
+			releaseCause := errors.New("injected stop release failure")
+			flockUnlockFn = func(fl *flock.Flock) error {
+				releaseCalls++
+				physicalErr := fl.Unlock()
+				if tc.unconfirmed {
+					return errors.Join(physicalErr, releaseCause)
+				}
+				return physicalErr
+			}
+			defer func() {
+				flockUnlockFn = originalUnlock
+				unconfirmedLockReleasesMu.Lock()
+				delete(unconfirmedLockReleases, lockPath)
+				unconfirmedLockReleasesMu.Unlock()
+			}()
+
+			_, _, _, err = mutateStopSubBlock(task, func(stops map[string]DaemonIntent) {
+				if tc.change {
+					stops[task] = value
+				}
+			})
+			if releaseCalls != 1 {
+				t.Fatalf("release calls = %d, want 1", releaseCalls)
+			}
+			if tc.unconfirmed {
+				if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
+					t.Fatalf("error = %v, want release sentinel and injected cause", err)
+				}
+			} else if err != nil {
+				t.Fatalf("confirmed release returned error: %v", err)
+			}
+			if IsAppliedLockReleaseUnconfirmed(err) != tc.wantApplied {
+				t.Fatalf("applied classifier = %t, want %t; err=%v", IsAppliedLockReleaseUnconfirmed(err), tc.wantApplied, err)
+			}
+
+			afterBytes, readErr := os.ReadFile(intentPath)
+			if readErr != nil {
+				t.Fatalf("read after bytes: %v", readErr)
+			}
+			if !tc.change {
+				if string(afterBytes) != string(beforeBytes) {
+					t.Fatalf("no-op mutation changed persisted bytes\nbefore=%s\nafter=%s", beforeBytes, afterBytes)
+				}
+				return
+			}
+			var persisted SupervisorIntentFile
+			if err := json.Unmarshal(afterBytes, &persisted); err != nil {
+				t.Fatalf("decode persisted intent: %v", err)
+			}
+			if got, ok := persisted.Stops[task]; !ok || !stopEntriesEqual(&got, &value) {
+				t.Fatalf("persisted stop = %+v ok=%t, want %+v", got, ok, value)
+			}
+		})
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -488,6 +588,9 @@ func TestWriteStopIntent_EmitsSetIntentAndClearIntentAudit(t *testing.T) {
 	if captured[0].After == nil || captured[0].After.Desired != IntentDesiredStopped {
 		t.Fatalf("set-intent After snapshot missing/wrong: %+v", captured[0].After)
 	}
+	if captured[0].Reason != captured[0].After.Reason {
+		t.Fatalf("set-intent audit reason = %q, want persisted After reason %q", captured[0].Reason, captured[0].After.Reason)
+	}
 
 	// Re-enable → clear-intent with Before.
 	captured = nil
@@ -499,6 +602,109 @@ func TestWriteStopIntent_EmitsSetIntentAndClearIntentAudit(t *testing.T) {
 	if len(captured) != 1 || captured[0].Action != "clear-intent" || captured[0].Before == nil {
 		t.Fatalf("expected one clear-intent audit entry with Before, got %+v", captured)
 	}
+	if captured[0].Reason != captured[0].Before.Reason {
+		t.Fatalf("clear-intent audit reason = %q, want persisted Before reason %q", captured[0].Reason, captured[0].Before.Reason)
+	}
+}
+
+func TestWriteStopIntent_RestoredAuditUsesPersistedAfterReason(t *testing.T) {
+	t.Run("user-disabled", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		defer SetDaemonStateRootForTest(stateDir)()
+
+		var captured []IntentAuditEntry
+		installTestAuditFn(t, &captured, nil)
+
+		a := NewAPI()
+		task := `\\mcp-local-hub-restored-audit`
+		now := time.Now().UTC()
+		restored := DaemonIntent{
+			Desired: IntentDesiredStopped, Reason: IntentReasonUserDisabled, UpdatedAt: now,
+		}
+		if err := a.WriteStopIntent(task, restored, "tester"); err != nil {
+			t.Fatalf("seed restored stop: %v", err)
+		}
+		captured = nil
+
+		var undo compensation
+		attempted := DaemonIntent{
+			Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(time.Minute),
+		}
+		if err := a.writeStopIntentWithCompensation(task, attempted, "tester", func(_ string, fn compensation) {
+			undo = fn
+		}); err != nil {
+			t.Fatalf("write replacement stop: %v", err)
+		}
+		if undo == nil {
+			t.Fatal("write replacement stop did not enroll compensation")
+		}
+		captured = nil
+
+		if err := undo(); err != nil {
+			t.Fatalf("restore stop intent: %v", err)
+		}
+		if len(captured) != 1 || captured[0].Action != "set-intent" || captured[0].After == nil {
+			t.Fatalf("expected one restored set-intent audit entry with After, got %+v", captured)
+		}
+		if captured[0].After.Reason != restored.Reason {
+			t.Fatalf("restored After reason = %q, want %q", captured[0].After.Reason, restored.Reason)
+		}
+		if captured[0].Reason != captured[0].After.Reason {
+			t.Fatalf("restored set-intent audit reason = %q, want persisted After reason %q", captured[0].Reason, captured[0].After.Reason)
+		}
+	})
+
+	t.Run("chronic-failure", func(t *testing.T) {
+		stateDir := apitest.HardenedTempDir(t)
+		defer SetDaemonStateRootForTest(stateDir)()
+
+		var captured []IntentAuditEntry
+		installTestAuditFn(t, &captured, nil)
+
+		a := NewAPI()
+		task := "\\mcp-local-hub-restored-chronic-failure-audit"
+		now := time.Now().UTC()
+		restored := DaemonIntent{
+			Desired: IntentDesiredStopped, Reason: IntentReasonChronicFailure, UpdatedAt: now,
+		}
+		if err := a.WriteStopIntent(task, restored, "tester"); err != nil {
+			t.Fatalf("seed chronic-failure stop: %v", err)
+		}
+		captured = nil
+
+		var undo compensation
+		attempted := DaemonIntent{
+			Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: now.Add(time.Minute),
+		}
+		if err := a.writeStopIntentWithCompensation(task, attempted, "tester", func(_ string, fn compensation) {
+			undo = fn
+		}); err != nil {
+			t.Fatalf("write replacement stop: %v", err)
+		}
+		if undo == nil {
+			t.Fatal("write replacement stop did not enroll compensation")
+		}
+		captured = nil
+
+		if err := undo(); err != nil {
+			t.Fatalf("restore chronic-failure stop intent: %v", err)
+		}
+		if len(captured) != 1 || captured[0].Action != "set-intent" || captured[0].Before == nil || captured[0].After == nil {
+			t.Fatalf("expected one restored chronic-failure set-intent audit entry with Before and After, got %+v", captured)
+		}
+		if captured[0].Task != task || captured[0].Who != "tester" {
+			t.Fatalf("restored chronic-failure audit correlation = task %q who %q, want task %q who tester", captured[0].Task, captured[0].Who, task)
+		}
+		if captured[0].Before.Reason != attempted.Reason {
+			t.Fatalf("chronic-failure restore Before reason = %q, want attempted reason %q", captured[0].Before.Reason, attempted.Reason)
+		}
+		if captured[0].After.Reason != restored.Reason {
+			t.Fatalf("chronic-failure restored After reason = %q, want %q", captured[0].After.Reason, restored.Reason)
+		}
+		if captured[0].Reason != captured[0].After.Reason {
+			t.Fatalf("chronic-failure restored audit reason = %q, want persisted After reason %q", captured[0].Reason, captured[0].After.Reason)
+		}
+	})
 }
 
 func TestWriteStopIntentIdleGuarded_AuditsRefusalWithoutSetIntent(t *testing.T) {

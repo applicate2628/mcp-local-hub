@@ -42,8 +42,9 @@ type MigrateReport struct {
 	Failed  []FailedMigration  `json:"failed"`
 }
 
-// AppliedMigration is one successfully rewritten (or dry-run-intended)
-// (server, client) pair.
+// AppliedMigration is one actually rewritten (or dry-run-intended) (server,
+// client) pair. An applied mutation with unconfirmed lock release also has a
+// FailedMigration lifecycle row; the two collections are not disjoint.
 type AppliedMigration struct {
 	Server string `json:"server"`
 	Client string `json:"client"`
@@ -59,6 +60,10 @@ type AppliedMigration struct {
 	// (e.g. MigrateFrom) or for dry-run rows; omitempty keeps the JSON
 	// surface backward-compatible.
 	BackupPath string `json:"backup_path,omitempty"`
+	// restoreUnsafe is set only when the config mutation applied but its lock
+	// release could not be confirmed. It is deliberately not serialized: the
+	// in-process rollback owner consumes it to avoid reacquiring that same leaf.
+	restoreUnsafe bool
 }
 
 // FailedMigration is one (server, client) pair that could not be migrated.
@@ -130,7 +135,7 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 			if !includedClient(binding.Client) {
 				continue
 			}
-			migrateOneBinding(report, allClients, m, server, binding, opts.DryRun, keepN, opts.GUIPort)
+			migrateOneBinding(report, allClients, m, server, binding, opts.DryRun, keepN, opts.GUIPort, clients.ClassifyClientMutation)
 		}
 		// Servers-matrix fix: the matrix renders a toggleable cell for
 		// EVERY detected client, not only the manifest's static
@@ -176,7 +181,7 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 				Daemon:  primaryDaemon,
 				URLPath: "/mcp",
 			}
-			migrateOneBinding(report, allClients, m, server, synth, opts.DryRun, keepN, opts.GUIPort)
+			migrateOneBinding(report, allClients, m, server, synth, opts.DryRun, keepN, opts.GUIPort, clients.ClassifyClientMutation)
 		}
 	}
 	return report, nil
@@ -184,10 +189,11 @@ func (a *API) MigrateFrom(opts MigrateOpts) (*MigrateReport, error) {
 
 // migrateOneBinding performs the per-(server, client) migrate for a single
 // binding — real (from m.ClientBindings) or synthesized (for a targeted
-// non-binding client). It appends exactly one row to report.Applied (or
-// report.Failed), or none when the client is skipped (DryRun preview aside,
-// a missing adapter / non-existent client). Extracted so manifest-bound and
-// synthesized clients run identical logic (no duplication).
+// non-binding client). Ordinary outcomes append exactly one row to
+// report.Applied or report.Failed; a skipped client appends none. The typed
+// applied-release outcome is the exception: it records the actual change in
+// Applied and its lifecycle failure in Failed. Manifest-bound and synthesized
+// clients run this identical logic.
 //
 // The adapter's AddEntry overwrites any existing same-name entry wholesale
 // (map-key assignment on every adapter; see addentry_overwrites note in the
@@ -202,6 +208,7 @@ func migrateOneBinding(
 	dryRun bool,
 	keepN int,
 	guiPort int,
+	classify func(error) clients.ClientMutationSettlement,
 ) {
 	adapter := allClients[binding.Client]
 	if adapter == nil {
@@ -278,11 +285,18 @@ func migrateOneBinding(
 			entry.RelayExePath = canonical
 		}
 	}
+	if classify == nil {
+		classify = clients.ClassifyClientMutation
+	}
+	var releaseErr error
 	if err := adapter.AddEntry(entry); err != nil {
-		report.Failed = append(report.Failed, FailedMigration{
-			Server: server, Client: binding.Client, Err: err.Error(),
-		})
-		return
+		if classify(err) != clients.ClientMutationAppliedReleaseUnconfirmed {
+			report.Failed = append(report.Failed, FailedMigration{
+				Server: server, Client: binding.Client, Err: err.Error(),
+			})
+			return
+		}
+		releaseErr = err
 	}
 	// PR #187 (B4 ownership marker): record this (client,
 	// server) tuple in the managed-entries marker file so
@@ -291,10 +305,10 @@ func migrateOneBinding(
 	// Best-effort: a marker-write failure must NOT roll back
 	// the successful AddEntry (operator's config is the
 	// load-bearing artifact; the marker is observability
-	// for the future demigrate path). The Failed slice
-	// stays empty for this row — we still report Applied —
-	// but the marker error is surfaced as a soft warning
-	// via the standard hub-mcp event log.
+	// for the future demigrate path). A marker-only error does not add a Failed
+	// row; it is surfaced as a soft warning via the standard hub-mcp event log.
+	// The independent applied-release lifecycle failure, when present, is still
+	// reported after the actual Applied row below.
 	if recErr := RecordManagedEntry(binding.Client, server); recErr != nil {
 		_ = LogHubMcpEvent("warn", "managed-entries-record-failed", map[string]any{
 			"server": server,
@@ -306,6 +320,12 @@ func migrateOneBinding(
 	report.Applied = append(report.Applied, AppliedMigration{
 		Server: server, Client: binding.Client, URL: url,
 	})
+	if releaseErr != nil {
+		report.Failed = append(report.Failed, FailedMigration{
+			Server: server, Client: binding.Client,
+			Err: fmt.Sprintf("configuration applied; lock release unconfirmed: %v", releaseErr),
+		})
+	}
 }
 
 // primaryDaemonName returns the name of the manifest's primary daemon — the
@@ -358,4 +378,3 @@ func findDaemonPort(m *config.ServerManifest, daemonName string) (int, bool) {
 	}
 	return d.Port, true
 }
-

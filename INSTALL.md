@@ -89,8 +89,6 @@ Expected output:
 ✓ claude-code → http://localhost:9121/mcp
   backup: C:\Users\<you>\.codex\config.toml.bak-mcp-local-hub-<timestamp>
 ✓ codex-cli → http://localhost:9122/mcp
-  backup: C:\Users\<you>\.cursor\mcp.json.bak-mcp-local-hub-<timestamp>
-✓ cursor → http://localhost:9121/mcp
 ✓ Started: mcp-local-hub-serena-claude
 ✓ Started: mcp-local-hub-serena-codex
 
@@ -109,12 +107,12 @@ codex mcp get serena    # enabled: true, transport: streamable_http
 
 ### Client selection
 
-By default, `install` writes only `claude-code`, `codex-cli`, and `cursor`.
-Heavier or more experimental clients are explicit opt-ins so a bulk install
+By default, `install` writes only `claude-code` and `codex-cli`. Cursor and the
+heavier or more experimental clients are explicit opt-ins so a bulk install
 does not silently burn config churn across every assistant on the machine.
 
 ```bash
-# Explicit subset
+# Explicit subset (e.g. the default two plus cursor, an opt-in client)
 ./mcphub.exe install --server serena --clients claude-code,codex-cli,cursor
 ./mcphub.exe install --server serena --clients qwen-cli,vscode
 
@@ -129,12 +127,12 @@ Default clients:
 |---|---|
 | `claude-code` | `~/.claude.json` |
 | `codex-cli` | `~/.codex/config.toml` |
-| `cursor` | `~/.cursor/mcp.json` |
 
 Opt-in clients:
 
 | Client id | Config path |
 |---|---|
+| `cursor` | `~/.cursor/mcp.json` |
 | `vscode` | VS Code user-profile `mcp.json` |
 | `gemini-cli` | `~/.gemini/settings.json` |
 | `qwen-cli` | `~/.qwen/settings.json` |
@@ -190,9 +188,10 @@ Writes to `~/.cursor/mcp.json`:
 }
 ```
 
-Cursor is part of the default install target set. If Cursor has never created
-`~/.cursor/` on this machine, install reports it as not installed and skips it;
-open Cursor once or create the directory, then rerun install.
+Cursor is opt-in — pass `--clients cursor` (or `--all-clients`) to include it.
+If Cursor has never created `~/.cursor/` on this machine, install reports it as
+not installed and skips it; open Cursor once or create the directory, then
+rerun install with `--clients cursor`.
 
 ### VS Code
 

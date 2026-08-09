@@ -160,7 +160,7 @@ type HealthProbe struct {
 	OK        bool   `json:"ok"`
 	ToolCount int    `json:"tool_count,omitempty"`
 	Err       string `json:"err,omitempty"`
-	Source    string `json:"source,omitempty"` // "proxy-synthetic" for workspace-scoped rows; "" otherwise
+	Source    string `json:"source,omitempty"` // "proxy-synthetic" for workspace-scoped rows; RouteFrontHealthSource for the built-in route front daemon; "" otherwise
 }
 
 // ScanEntry is one row in the unified "across all clients" view.

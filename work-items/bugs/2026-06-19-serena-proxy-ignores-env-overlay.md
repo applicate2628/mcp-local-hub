@@ -5,7 +5,7 @@ found-by: pre-catch review (PR #377 exhaustive r9 Workflow)
 
 - **status:** fixed
 - **fixed-by:** PR #403 (`9747900a`) - serena proxy launch applies `mergeResolvedDaemonEnvWithOverlay`.
-- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `TRIAGE-2026-07-09.md` for code/test evidence.
+- **HEAD reconciliation (2026-07-09):** Verified against master `63b6a008`; see `triage-2026-07-09.md` for code/test evidence.
 
 # serena workspace-proxy ignores the per-daemon env overlay
 

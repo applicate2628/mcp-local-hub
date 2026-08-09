@@ -12,7 +12,7 @@
 // /api/force-kill/probe (handler in internal/gui/force_kill.go) is
 // what encoding/json marshals from internal/gui/single_instance.go's
 // Verdict struct. That shape is snake_case, uses numeric VerdictClass
-// iota (0=Healthy..7=RaceLost), and excludes PIDCmdline entirely
+// iota (0=Healthy..8=Indeterminate), and excludes PIDCmdline entirely
 // (json:"-" because argv may carry secrets like
 // `mcphub secrets set --value <SECRET>`). Only pid_subcommand —
 // argv[1] — is exposed.
@@ -41,7 +41,8 @@ import { InfoTip } from "../InfoTip";
 // rest of the command line.
 type Verdict = {
   class: number; // 0=Healthy, 1=LiveUnreachable, 2=DeadPID, 3=Malformed,
-                 // 4=KilledRecovered, 5=KillRefused, 6=KillFailed, 7=RaceLost
+                 // 4=KilledRecovered, 5=KillRefused, 6=KillFailed, 7=RaceLost,
+                 // 8=Indeterminate
   pid?: number;
   port?: number;
   mtime?: string;
@@ -53,6 +54,17 @@ type Verdict = {
 };
 
 const MCPHUB_BASENAMES = new Set(["mcphub.exe", "mcphub"]);
+
+// VERDICT_INDETERMINATE is single_instance.go's VerdictIndeterminate (appended
+// LAST in the iota precisely so the wire numbers of already-shipped classes
+// never shift). It marks an identity probe that hit an ambiguous PLATFORM
+// error which is NOT the platform's own "no such process" signal.
+//
+// It is the ONE class whose (pid_alive, ping_match) tuple does NOT summarize
+// it: the server force-sets pid_alive:false because it has no liveness fact to
+// report, NOT because the holder is dead. classLabel must therefore branch on
+// the numeric class BEFORE that tuple — see its comment.
+const VERDICT_INDETERMINATE = 8;
 
 // canKill applies the memo-D12 identity gate client-side.
 //
@@ -99,7 +111,18 @@ function canKill(v: Verdict | null): boolean {
 // (Healthy / Stuck / Vacant / Mismatched) is observable in those two
 // booleans without re-encoding the iota. The numeric class remains
 // the canonical source for the kill-eligibility decision in canKill.
+//
+// Indeterminate is the ONE exception to that tuple rule and MUST be checked
+// first (review finding). The server sets pid_alive:false on that class
+// because the probe produced NO liveness fact, so the tuple rule rendered
+// "Vacant — lock file present but no live holder" — the exact opposite of the
+// class's defining guarantee that the ambiguous platform error is NOT proof of
+// death. Telling an operator the lock is vacant when a live GUI may still hold
+// it invites them to force a second instance.
 function classLabel(v: Verdict): string {
+  if (v.class === VERDICT_INDETERMINATE) {
+    return `Indeterminate — could not determine whether PID ${v.pid ?? "?"} is alive (a transient platform error, not a confirmed exit). Retry, or check the PID with Task Manager / ps.`;
+  }
   if (v.pid_alive === true && v.ping_match === true) {
     return "Healthy — lock holder alive and responding.";
   }
@@ -160,8 +183,19 @@ export function SectionAdvancedDiagnostics(): preact.JSX.Element {
         const body = (await r.json().catch(() => ({}))) as {
           detail?: string;
           error?: string;
+          verdict?: Verdict;
         };
-        setErr(`Kill failed: ${body.detail ?? body.error ?? `HTTP ${r.status}`}`);
+        if (body.error === "liveness_indeterminate") {
+          // 503 from force_kill.go: the kill was SKIPPED because liveness
+          // could not be established. Saying "Kill failed" would imply a
+          // kill was attempted; refresh the strip from the returned verdict
+          // so the operator sees the Indeterminate label and its retry
+          // guidance instead.
+          if (body.verdict) setVerdict(body.verdict);
+          setErr("Kill skipped — could not determine whether the lock holder is alive. Retry, or check the PID with Task Manager / ps.");
+        } else {
+          setErr(`Kill failed: ${body.detail ?? body.error ?? `HTTP ${r.status}`}`);
+        }
       }
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);

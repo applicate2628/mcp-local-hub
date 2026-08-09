@@ -1,9 +1,11 @@
 # Supervisor reliability — "must not crash AT ALL"
 
+Status: active
+
 Template: full-delivery (requiresLead: true)
 Owner: main conversation (Lead)
 Opened: 2026-07-20
-Status: investigation complete → design lanes dispatched
+Current step: investigation complete → design lanes dispatched
 
 ## Operator mandate (verbatim)
 
@@ -135,7 +137,7 @@ TOTAL 8215 respawns across 32 daemons; 29 daemons >10 generations; 24 >50.
 `supervisor-events.log.1`, `daemon-spawn-failed`:
 
 ```json
-2026-07-18T20:55:04 serena-4f8e3c32 {"command":"C:\\Users\\dima_\\.local\\bin\\mcphub.exe",
+2026-07-18T20:55:04 serena-4f8e3c32 {"command":"%USERPROFILE%\\.local\\bin\\mcphub.exe",
                                      "err":"CreateProcess: The directory name is invalid.",
                                      "orphan": false}
 2026-07-18T20:55:05 serena-4f8e3c32 {... same ...}

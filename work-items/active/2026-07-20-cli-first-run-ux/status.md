@@ -1,5 +1,7 @@
 # CLI first-run UX: `mcphub` should just work
 
+Status: active
+
 Template: quick-fix (requiresLead: false) · Lead: main conversation · Opened: 2026-07-20
 
 ## Goal (operator, verbatim)

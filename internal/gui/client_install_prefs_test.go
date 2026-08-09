@@ -28,7 +28,7 @@ func clientInstallPrefsTestServer(
 		clientInstallPrefsViewFn = origView
 		clientInstallPrefsSetFn = origSet
 	})
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	return s
 }
 
@@ -38,7 +38,7 @@ func sampleSnapshot(overrideActive bool, selected map[string]bool) api.ClientIns
 		Rows: []api.ClientInstallToggleRow{
 			{Name: "claude-code", CompileDefault: true, Selected: selected["claude-code"]},
 			{Name: "codex-cli", CompileDefault: true, Selected: selected["codex-cli"]},
-			{Name: "cursor", CompileDefault: true, Selected: selected["cursor"]},
+			{Name: "cursor", CompileDefault: false, Selected: selected["cursor"]},
 			{Name: "vscode", CompileDefault: false, Selected: selected["vscode"]},
 		},
 	}
@@ -57,7 +57,7 @@ func TestClientInstallPrefs_GetDefault(t *testing.T) {
 	s := clientInstallPrefsTestServer(t,
 		func() (api.ClientInstallToggleSnapshot, error) {
 			return sampleSnapshot(false, map[string]bool{
-				"claude-code": true, "codex-cli": true, "cursor": true,
+				"claude-code": true, "codex-cli": true,
 			}), nil
 		},
 		nil,
@@ -89,6 +89,9 @@ func TestClientInstallPrefs_GetDefault(t *testing.T) {
 	}
 	if byName["vscode"].CompileDefault || byName["vscode"].Selected {
 		t.Fatalf("vscode = %+v, want neither compile_default nor selected", byName["vscode"])
+	}
+	if byName["cursor"].CompileDefault || byName["cursor"].Selected {
+		t.Fatalf("cursor = %+v, want neither compile_default nor selected", byName["cursor"])
 	}
 }
 

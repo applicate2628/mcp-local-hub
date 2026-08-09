@@ -84,13 +84,8 @@ func TestLegacyUpgradeTaskLooksDaemon_ExcludesWorkspaceScopedTasks(t *testing.T)
 // absorb matched legacy daemons into supervisor intent AFTER the binary copy;
 // it must NOT rewrite client configs.
 //
-// Pre-fix the body passed api.InstallOpts{Server, Writer} with NO
-// ClientsInclude → api.installClientPredicate fell back to
-// clients.DefaultInstallClientNames() (claude-code/codex-cli/cursor) and the
-// install ADDED/OVERWROTE those clients' entries. This test asserts the
-// captured ClientsInclude selects ZERO supported clients (via the same api
-// predicate), so it FAILS pre-fix (the captured opts would carry no/nil
-// ClientsInclude → predicate selects the default 3).
+// The captured typed policy must select zero clients through the same API
+// planner the real install uses while retaining supervisor intent.
 func TestUpgradeInstallServer_PassesNoClientWriteOpts(t *testing.T) {
 	resetUpgradeSeams(t)
 
@@ -114,35 +109,33 @@ func TestUpgradeInstallServer_PassesNoClientWriteOpts(t *testing.T) {
 	if captured.Server != "memory" {
 		t.Fatalf("captured Server = %q, want memory", captured.Server)
 	}
+	if !captured.SkipClientConfigWrites {
+		t.Fatal("upgrade materialization did not set SkipClientConfigWrites")
+	}
+	if len(captured.ClientsInclude) != 0 {
+		t.Fatalf("upgrade materialization retained malformed client selector(s): %v", captured.ClientsInclude)
+	}
 
-	// Resolve the captured ClientsInclude through the SAME predicate the real
-	// install uses, against a manifest with all three default-client bindings.
-	// Zero ClientUpdates proves the call site suppressed default-client writes.
+	// Resolve the captured typed policy through the SAME predicate the real
+	// install uses. Zero ClientUpdates proves default-client writes are suppressed.
 	m := defaultClientManifestFixture()
 	plan, err := api.BuildPlanWithOpts(m, api.BuildPlanOpts{
-		ClientsInclude: captured.ClientsInclude,
+		SkipClientConfigWrites: captured.SkipClientConfigWrites,
 	})
 	if err != nil {
-		t.Fatalf("BuildPlanWithOpts(captured ClientsInclude): %v", err)
+		t.Fatalf("BuildPlanWithOpts(captured policy): %v", err)
 	}
 	if len(plan.ClientUpdates) != 0 {
-		t.Fatalf("captured ClientsInclude=%v selected %d client(s) → %d ClientUpdates; "+
-			"legacy upgrade must materialize supervisor intent WITHOUT touching client configs",
-			captured.ClientsInclude, len(plan.ClientUpdates), len(plan.ClientUpdates))
+		t.Fatalf("captured typed policy emitted %d ClientUpdates; legacy upgrade must not touch client configs", len(plan.ClientUpdates))
 	}
 	if len(plan.SupervisorIntent) == 0 {
 		t.Fatal("captured opts suppressed supervisor-intent materialization; must only skip client writes")
 	}
 }
 
-// TestUpgradeNoClientWriteSentinel_SelectsZeroClients pins the api contract the
-// FIX 3 sentinel relies on (bot r33 P2, PR #288): a non-empty ClientsInclude
-// whose entries all trim to "" selects zero clients (the empty entry is
-// dropped before the unknown-client check), so the plan carries zero
-// ClientUpdates while supervisor-intent / scheduler rows still materialize. If
-// that empty-entry tolerance ever changes, this test fails loud so the
-// sentinel is revisited.
-func TestUpgradeNoClientWriteSentinel_SelectsZeroClients(t *testing.T) {
+// TestSkipClientConfigWrites_SelectsZeroClients pins the typed API contract
+// shared by legacy-upgrade materialization and the public install flag.
+func TestSkipClientConfigWrites_SelectsZeroClients(t *testing.T) {
 	m := defaultClientManifestFixture()
 
 	// Negative control: the DEFAULT (nil ClientsInclude) — what the buggy
@@ -156,31 +149,21 @@ func TestUpgradeNoClientWriteSentinel_SelectsZeroClients(t *testing.T) {
 			"the manifest fixture must have client bindings for this regression to be meaningful")
 	}
 
-	// FIX 3: the no-client-write sentinel upgradeInstallServer passes must
-	// select zero clients → zero ClientUpdates, while still being a valid
-	// (error-free) plan that materializes the supervisor-intent / scheduler
-	// rows.
-	sentinelPlan, err := api.BuildPlanWithOpts(m, api.BuildPlanOpts{
-		ClientsInclude: upgradeNoClientWriteSentinel,
-	})
+	plan, err := api.BuildPlanWithOpts(m, api.BuildPlanOpts{SkipClientConfigWrites: true})
 	if err != nil {
-		t.Fatalf("BuildPlanWithOpts(no-client-write sentinel): %v", err)
+		t.Fatalf("BuildPlanWithOpts(SkipClientConfigWrites): %v", err)
 	}
-	if len(sentinelPlan.ClientUpdates) != 0 {
-		t.Fatalf("no-client-write sentinel emitted %d ClientUpdates, want 0 (legacy upgrade must not touch client configs)",
-			len(sentinelPlan.ClientUpdates))
+	if len(plan.ClientUpdates) != 0 {
+		t.Fatalf("SkipClientConfigWrites emitted %d ClientUpdates, want 0", len(plan.ClientUpdates))
 	}
-	// Supervisor-intent rows must still materialize — the sentinel only
-	// suppresses client writes, not daemon/intent materialization.
-	if len(sentinelPlan.SupervisorIntent) == 0 {
-		t.Fatal("no-client-write sentinel suppressed supervisor-intent materialization; " +
-			"it must only skip client-config writes")
+	if len(plan.SupervisorIntent) == 0 {
+		t.Fatal("SkipClientConfigWrites suppressed supervisor-intent materialization")
 	}
 }
 
 // defaultClientManifestFixture returns a minimal global manifest carrying one
-// daemon and the three default-install client bindings (claude-code, codex-cli,
-// cursor). A non-empty ClientBindings set is load-bearing for the FIX 3
+// daemon and three explicit client bindings (claude-code, codex-cli, cursor).
+// A non-empty ClientBindings set is load-bearing for the FIX 3
 // regression: it is what makes the default-client install plan emit
 // ClientUpdates, so the zero-ClientUpdates assertion is meaningful.
 func defaultClientManifestFixture() *config.ServerManifest {

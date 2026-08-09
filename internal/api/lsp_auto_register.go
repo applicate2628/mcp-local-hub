@@ -80,125 +80,181 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 	if err != nil {
 		return WorkspaceEntry{}, err
 	}
+	transaction := newRegistrationTransaction()
+	fail := func(cause error) (WorkspaceEntry, error) {
+		outcome := transaction.Fail(cause)
+		return WorkspaceEntry{}, outcome.Err
+	}
+	commit := func(entry WorkspaceEntry) (WorkspaceEntry, error) {
+		outcome := transaction.Commit()
+		if !outcome.Committed() {
+			return WorkspaceEntry{}, outcome.Err
+		}
+		return entry, nil
+	}
+	commitForward := func(entry WorkspaceEntry, cause error) (WorkspaceEntry, error) {
+		outcome := transaction.CommitForward()
+		if outcome.State != registrationTransactionCommitted {
+			cause = errors.Join(cause, outcome.Err)
+		}
+		return entry, cause
+	}
+	var forwardCause error
+	recordForward := func(cause error) {
+		forwardCause = errors.Join(forwardCause, cause)
+	}
+	finishFailure := func(entry WorkspaceEntry, cause error) (WorkspaceEntry, error) {
+		if forwardCause != nil {
+			return commitForward(entry, errors.Join(forwardCause, cause))
+		}
+		return fail(cause)
+	}
+	finishSuccess := func(entry WorkspaceEntry) (WorkspaceEntry, error) {
+		if forwardCause != nil {
+			return commitForward(entry, forwardCause)
+		}
+		return commit(entry)
+	}
+	reconcileBaseContext := func() context.Context {
+		if forwardCause != nil {
+			return context.WithoutCancel(ctx)
+		}
+		return ctx
+	}
 	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
+	releaseRegistry, err := reg.Lock()
 	if err != nil {
 		return WorkspaceEntry{}, fmt.Errorf("acquire registry lock: %w", err)
 	}
+	registryLockToken := transaction.AddFinalizer("release ensure registry lock", releaseRegistry)
 	if err := reg.Load(); err != nil {
-		unlock()
-		return WorkspaceEntry{}, fmt.Errorf("load registry: %w", err)
+		return fail(fmt.Errorf("load registry: %w", err))
 	}
 	if prior, ok := reg.Get(workspaceKey, language); ok {
-		unlock()
+		if err := transaction.Release(registryLockToken); err != nil {
+			recordForward(fmt.Errorf("release registry lock before existing-row promotion: %w", err))
+		}
 		portReady := proxyReadinessFn(prior.Port, lspExistingProxyProbeTimeout) == nil
 		owned, err := lspSupervisorIntentDescriptorExists(prior.WorkspaceKey, prior.Language)
 		if err != nil {
-			return WorkspaceEntry{}, err
+			if IsAppliedLockReleaseUnconfirmed(err) {
+				recordForward(err)
+			} else {
+				return finishFailure(prior, err)
+			}
 		}
 		if portReady && owned {
-			return prior, nil
+			return finishSuccess(prior)
 		}
-		if err := ctx.Err(); err != nil {
-			return WorkspaceEntry{}, err
+		if err := ctx.Err(); err != nil && forwardCause == nil {
+			return fail(err)
 		}
 		canonicalExe, err := canonicalMcphubPath()
 		if err != nil {
-			return WorkspaceEntry{}, err
+			return finishFailure(prior, err)
 		}
 		if _, err := os.Stat(canonicalExe); err != nil {
-			return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+			return finishFailure(prior, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err))
 		}
-		restoreLegacyTask := func() {}
 		if !owned {
 			if sch, schErr := newScheduler(); schErr == nil {
 				var legacyXML []byte
 				if xml, xerr := sch.ExportXML(prior.TaskName); xerr == nil {
 					legacyXML = xml
 				} else if !errors.Is(xerr, scheduler.ErrTaskNotFound) {
-					return WorkspaceEntry{}, fmt.Errorf("export legacy LSP task %s: %w", prior.TaskName, xerr)
+					return finishFailure(prior, fmt.Errorf("export legacy LSP task %s: %w", prior.TaskName, xerr))
 				}
 				if len(legacyXML) > 0 {
 					capturedXML := legacyXML
-					legacyTaskDeleted := false
-					restoreLegacyTask = func() {
-						if !legacyTaskDeleted {
-							return
+					legacyTaskTouched := false
+					transaction.AddCompensation("restore promoted legacy LSP task "+prior.TaskName, func() error {
+						if !legacyTaskTouched {
+							return nil
 						}
+						var restoreErr error
 						if prior.Port > 0 {
-							_ = killByPortFn(prior.Port, 5*time.Second)
+							restoreErr = errors.Join(
+								restoreErr,
+								labeledTransactionError(
+									"compensation",
+									"kill replacement LSP proxy before restoring "+prior.TaskName,
+									killByPortFn(prior.Port, 5*time.Second),
+								),
+							)
 						}
-						_ = sch.ImportXML(prior.TaskName, capturedXML)
-						_ = sch.Run(prior.TaskName)
-					}
+						restoreErr = errors.Join(
+							restoreErr,
+							labeledTransactionError("compensation", "import legacy LSP task "+prior.TaskName, sch.ImportXML(prior.TaskName, capturedXML)),
+							labeledTransactionError("compensation", "run restored legacy LSP task "+prior.TaskName, sch.Run(prior.TaskName)),
+						)
+						return restoreErr
+					})
+					legacyTaskTouched = true
 					if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
-						return WorkspaceEntry{}, err
+						return finishFailure(prior, err)
 					}
 					if derr := sch.Delete(prior.TaskName); derr != nil && !errors.Is(derr, scheduler.ErrTaskNotFound) {
-						restoreLegacyTask()
-						return WorkspaceEntry{}, fmt.Errorf("delete legacy LSP task %s before promote: %w", prior.TaskName, derr)
+						return finishFailure(prior, fmt.Errorf("delete legacy LSP task %s before promote: %w", prior.TaskName, derr))
 					}
-					legacyTaskDeleted = true
 				} else if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
-					return WorkspaceEntry{}, err
+					return finishFailure(prior, err)
 				}
 			} else if schedulerUnavailableError(schErr) {
 				// No scheduler (Linux/macOS): no legacy task exists; still free a
 				// stale unowned proxy on the port so reconcile can bind cleanly.
 				if err := killObservedLiveLSPProxy(prior.Port, prior.TaskName, portReady); err != nil {
-					return WorkspaceEntry{}, err
+					return finishFailure(prior, err)
 				}
 			} else {
-				return WorkspaceEntry{}, schErr
+				return finishFailure(prior, schErr)
 			}
 		}
 		restoreIntent, err := a.upsertLSPSupervisorIntent(prior, canonicalExe)
+		enrollSupervisorIntentUndo(
+			transaction,
+			"restore existing-row LSP supervisor intent "+prior.TaskName,
+			restoreIntent,
+		)
 		if err != nil {
-			restoreLegacyTask()
-			return WorkspaceEntry{}, err
-		}
-		intentWritten := true
-		rollbackIntent := func() {
-			if intentWritten {
-				restoreIntent()
-				intentWritten = false
+			if IsAppliedLockReleaseUnconfirmed(err) {
+				recordForward(err)
+			} else {
+				return finishFailure(prior, err)
 			}
 		}
+		transaction.AddCompensation("kill possible promoted LSP proxy "+prior.TaskName, func() error {
+			if prior.Port <= 0 {
+				return nil
+			}
+			return killByPortFn(prior.Port, 5*time.Second)
+		})
 
-		reconcileCtx, cancel := context.WithTimeout(ctx, DefaultReconcileTimeout)
+		reconcileCtx, cancel := context.WithTimeout(reconcileBaseContext(), DefaultReconcileTimeout)
 		if _, err := registerSupervisorReconcileFn(reconcileCtx, true); err != nil {
 			cancel()
-			rollbackIntent()
-			restoreLegacyTask()
-			return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+			return finishFailure(prior, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err))
 		}
 		cancel()
 
 		if err := proxyReadinessFn(prior.Port, 10*time.Second); err != nil {
-			rollbackIntent()
-			restoreLegacyTask()
-			return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", prior.Port, err)
+			return finishFailure(prior, fmt.Errorf("proxy readiness on port %d: %w", prior.Port, err))
 		}
-		return prior, nil
+		return finishSuccess(prior)
 	}
 	if keyMismatchErr != nil {
-		unlock()
-		return WorkspaceEntry{}, keyMismatchErr
+		return fail(keyMismatchErr)
 	}
 
 	port, err := AllocatePort(reg, *m.PortPool)
 	if err != nil {
-		unlock()
-		return WorkspaceEntry{}, err
+		return fail(err)
 	}
 	canonicalExe, err := canonicalMcphubPath()
 	if err != nil {
-		unlock()
-		return WorkspaceEntry{}, err
+		return fail(err)
 	}
 	if _, err := os.Stat(canonicalExe); err != nil {
-		unlock()
-		return WorkspaceEntry{}, fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err)
+		return fail(fmt.Errorf("%s not present — run `mcphub setup` once: %w", canonicalExe, err))
 	}
 
 	entry := WorkspaceEntry{
@@ -212,64 +268,79 @@ func (a *API) EnsureLSPRegistered(ctx context.Context, workspaceKey, workspacePa
 		WeeklyRefresh: resolveWeeklyRefresh(a, RegisterOpts{}),
 		Lifecycle:     LifecycleConfigured,
 	}
+	transaction.AddCompensation(
+		"remove ensured LSP registry row "+entry.TaskName,
+		func() error {
+			return removeLSPRegistryRow(regPath, workspaceKey, language)
+		},
+	)
 	if err := reg.PutLSP(entry); err != nil {
-		unlock()
-		return WorkspaceEntry{}, fmt.Errorf("ensure LSP register: row write rejected: %w", err)
+		releaseErr := transaction.Release(registryLockToken)
+		return fail(errors.Join(
+			fmt.Errorf("ensure LSP register: row write rejected: %w", err),
+			releaseErr,
+		))
 	}
 	if err := reg.Save(); err != nil {
-		unlock()
-		return WorkspaceEntry{}, fmt.Errorf("persist registry: %w", err)
+		releaseErr := transaction.Release(registryLockToken)
+		return fail(errors.Join(fmt.Errorf("persist registry: %w", err), releaseErr))
 	}
-	unlock()
-
-	supervisorSpawnRequested := false
-	rollback := func() {
-		if supervisorSpawnRequested && entry.Port > 0 {
-			_ = killByPortFn(entry.Port, 5*time.Second)
-		}
-		removeLSPRegistryRow(regPath, workspaceKey, language)
+	if err := transaction.Release(registryLockToken); err != nil {
+		recordForward(fmt.Errorf("release registry lock after ensure row write: %w", err))
 	}
 
-	if err := ctx.Err(); err != nil {
-		rollback()
-		return WorkspaceEntry{}, err
+	if err := ctx.Err(); err != nil && forwardCause == nil {
+		return fail(err)
 	}
 	restoreIntent, err := a.upsertLSPSupervisorIntent(entry, canonicalExe)
+	enrollSupervisorIntentUndo(
+		transaction,
+		"restore ensured LSP supervisor intent "+entry.TaskName,
+		restoreIntent,
+	)
 	if err != nil {
-		rollback()
-		return WorkspaceEntry{}, err
-	}
-	intentWritten := true
-	rollbackIntent := func() {
-		if intentWritten {
-			restoreIntent()
-			intentWritten = false
+		if IsAppliedLockReleaseUnconfirmed(err) {
+			recordForward(err)
+		} else {
+			return finishFailure(entry, err)
 		}
 	}
+	transaction.AddCompensation("kill possible ensured LSP proxy "+entry.TaskName, func() error {
+		if entry.Port <= 0 {
+			return nil
+		}
+		return killByPortFn(entry.Port, 5*time.Second)
+	})
 
-	reconcileCtx, cancel := context.WithTimeout(ctx, DefaultReconcileTimeout)
+	reconcileCtx, cancel := context.WithTimeout(reconcileBaseContext(), DefaultReconcileTimeout)
 	if _, err := registerSupervisorReconcileFn(reconcileCtx, true); err != nil {
 		cancel()
-		rollbackIntent()
-		rollback()
-		return WorkspaceEntry{}, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err)
+		return finishFailure(entry, fmt.Errorf("supervisor reconcile after LSP intent write: %w", err))
 	}
 	cancel()
-	supervisorSpawnRequested = true
 
 	if err := proxyReadinessFn(port, 10*time.Second); err != nil {
-		rollbackIntent()
-		rollback()
-		return WorkspaceEntry{}, fmt.Errorf("proxy readiness on port %d: %w", port, err)
+		return finishFailure(entry, fmt.Errorf("proxy readiness on port %d: %w", port, err))
 	}
 
-	return entry, nil
+	return finishSuccess(entry)
 }
 
 func lspEnsureMutex(workspaceKey, language string) *sync.Mutex {
 	key := workspaceKey + "\x00" + language
 	v, _ := lspEnsureLocks.LoadOrStore(key, &sync.Mutex{})
 	return v.(*sync.Mutex)
+}
+
+func rollbackLSPRegistration(entry WorkspaceEntry, supervisorSpawnRequested bool, removeRow func() error) error {
+	var rollbackErrs []error
+	if supervisorSpawnRequested && entry.Port > 0 {
+		rollbackErrs = append(rollbackErrs, killByPortFn(entry.Port, 5*time.Second))
+	}
+	if removeRow != nil {
+		rollbackErrs = append(rollbackErrs, removeRow())
+	}
+	return errors.Join(rollbackErrs...)
 }
 
 func loadLSPRegisterManifest(language string) (*config.ServerManifest, config.LanguageSpec, error) {
@@ -290,18 +361,4 @@ func loadLSPRegisterManifest(language string) (*config.ServerManifest, config.La
 		}
 	}
 	return nil, config.LanguageSpec{}, fmt.Errorf("unknown language %q (manifest %s supports: %v)", language, m.Name, sortedLanguageNames(m))
-}
-
-func removeLSPRegistryRow(regPath, workspaceKey, language string) {
-	reg := NewRegistry(regPath)
-	unlock, err := reg.Lock()
-	if err != nil {
-		return
-	}
-	defer unlock()
-	if err := reg.Load(); err != nil {
-		return
-	}
-	reg.Remove(workspaceKey, language)
-	_ = reg.Save()
 }

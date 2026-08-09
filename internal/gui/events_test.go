@@ -15,7 +15,7 @@ import (
 )
 
 func TestBroadcaster_SubscribeReceivesPublishedEvent(t *testing.T) {
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := b.Subscribe(ctx)
@@ -32,7 +32,7 @@ func TestBroadcaster_SubscribeReceivesPublishedEvent(t *testing.T) {
 }
 
 func TestBroadcaster_UnsubscribeOnContextCancel(t *testing.T) {
-	b := NewBroadcaster()
+	b := newEphemeralBroadcaster(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := b.Subscribe(ctx)
 	cancel()
@@ -489,7 +489,7 @@ func TestBroadcaster_DropReporter_EmitsWarnOutOfBand(t *testing.T) {
 }
 
 func TestEventsSSE_StreamsPublishedEvents(t *testing.T) {
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	go func() {
 		time.Sleep(100 * time.Millisecond)
 		s.Broadcaster().Publish(Event{Type: "daemon-state", Body: map[string]any{"server": "memory"}})

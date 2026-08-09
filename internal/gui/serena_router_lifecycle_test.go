@@ -11,12 +11,14 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
 	"testing"
@@ -793,7 +795,7 @@ func TestSerenaRouter_ReconcileReadinessProbeShape_PassesAgainstCompletedRouter(
 
 	const routerPath = "/serena/mcp"
 
-	// --- Step 1: HEAD must answer 405 + Allow: POST (the router signature
+	// --- Step 1: HEAD must answer 405 + Allow: POST, DELETE (the router signature
 	// the probe uses to reject a stale-port reused by another service). ---
 	headReq, err := http.NewRequest(http.MethodHead, ts.URL+routerPath, nil)
 	if err != nil {
@@ -2521,6 +2523,112 @@ func TestSerenaRouter_BackendLoss_TearsDownAllThreeStores(t *testing.T) {
 	}
 }
 
+func TestDaemonSessionStore_BackendLossDuringSlowWorkspaceSwitchKeepsReservationUntilCleanup(t *testing.T) {
+	initializeEntered := make(chan struct{}, 1)
+	releaseInitialize := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseInitialize) }) })
+	var initializeCount, deleteCount int
+	var daemonMu sync.Mutex
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			daemonMu.Lock()
+			deleteCount++
+			daemonMu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		body, _ := io.ReadAll(r.Body)
+		var request struct {
+			Method string `json:"method"`
+		}
+		_ = json.Unmarshal(body, &request)
+		switch request.Method {
+		case "initialize":
+			daemonMu.Lock()
+			initializeCount++
+			daemonMu.Unlock()
+			select {
+			case initializeEntered <- struct{}{}:
+			default:
+			}
+			<-releaseInitialize
+			w.Header().Set("Mcp-Session-Id", "daemon-beta-session")
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-11-25","serverInfo":{"name":"serena","version":"fake"},"capabilities":{"tools":{}}}}`))
+		case "notifications/initialized":
+			w.WriteHeader(http.StatusAccepted)
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+		}
+	}))
+	t.Cleanup(upstream.Close)
+
+	wsA := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/backend-loss-alpha", Port: 9201}
+	wsB := &api.WorkspaceEntry{WorkspaceKey: "beta", WorkspacePath: "/proj/backend-loss-beta", Port: 9202}
+	sessions := NewInMemorySessionRouter()
+	s := newSerenaTestServer(t, &serenaRouterDeps{Sessions: sessions})
+	const sid = "backend-loss-switch-session"
+	s.serenaRouterSessions.store(sid, "2025-11-25")
+	s.serenaRouterSessions.bindWorkspace(sid, wsA.WorkspaceKey)
+	if !s.serenaDaemonSessions.store(sid, wsA.WorkspaceKey, "daemon-alpha-session", "2025-11-25") {
+		t.Fatal("seed alpha daemon binding")
+	}
+	sessions.BindSession(sid, wsA)
+
+	type result struct {
+		dsid string
+		err  error
+	}
+	resolved := make(chan result, 1)
+	go func() {
+		dsid, _, _, err := s.serenaDaemonSessions.resolveDaemonSession(context.Background(), upstream.Client(), upstream.URL, sid, wsB, "2025-11-25", time.Second, func() bool {
+			return s.serenaRouterSessions.known(sid)
+		})
+		resolved <- result{dsid: dsid, err: err}
+	}()
+	select {
+	case <-initializeEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("beta initialize did not enter")
+	}
+
+	s.coordinateBackendLossUnbind(sid, sessions)
+	if proceed, inFlight := s.serenaDaemonSessions.reserveSlot(sid); proceed || !inFlight {
+		t.Fatalf("second beta reservation after backend loss = (%v,%v), want (false,true)", proceed, inFlight)
+	}
+	releaseOnce.Do(func() { close(releaseInitialize) })
+	select {
+	case got := <-resolved:
+		if !errors.Is(got.err, errRouterSessionTerminated) || got.dsid != "" {
+			t.Fatalf("switch after backend loss = (%q,%v), want empty daemon session and errRouterSessionTerminated", got.dsid, got.err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("slow switch did not finish after backend loss")
+	}
+	daemonMu.Lock()
+	gotInitializeCount, gotDeleteCount := initializeCount, deleteCount
+	daemonMu.Unlock()
+	if gotInitializeCount != 1 || gotDeleteCount != 1 {
+		t.Fatalf("upstream initialize/delete counts = %d/%d, want 1/1", gotInitializeCount, gotDeleteCount)
+	}
+	if s.serenaRouterSessions.known(sid) {
+		t.Fatal("router session survived backend loss")
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Fatal("daemon binding survived backend loss cleanup")
+	}
+	s.serenaDaemonSessions.mu.Lock()
+	_, placeholder := s.serenaDaemonSessions.bindings[sid]
+	s.serenaDaemonSessions.mu.Unlock()
+	if placeholder {
+		t.Fatal("reservation-only placeholder survived backend-loss cleanup")
+	}
+	if got := sessions.LookupSession(sid); got != nil {
+		t.Fatalf("sticky binding survived backend loss: %+v", got)
+	}
+}
+
 // ---------------------------------------------------------------------
 // §3 fail-loud — IPC reconcile FALLBACK (signal #2). A serena daemon
 // can restart (advancing its PID) without any client request in flight
@@ -2861,11 +2969,16 @@ func TestSerenaRouter_BackendLoss_IPCReconcileNoTeardownOnStatusError(t *testing
 	}
 }
 
-func TestSerenaRouter_BackendLoss_CachedDaemonSession404CopiedToClient(t *testing.T) {
+func TestGuardUnknownSessionNoReplayKeepsClientSession(t *testing.T) {
 	var mu sync.Mutex
 	validDaemonSID := "daemon-a-session"
 	initCount := 0
 	var forwardedSIDs []string
+	type auditEvent struct {
+		event  string
+		fields map[string]any
+	}
+	var auditEvents []auditEvent
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		body, _ := io.ReadAll(r.Body)
 		var probe struct {
@@ -2900,6 +3013,7 @@ func TestSerenaRouter_BackendLoss_CachedDaemonSession404CopiedToClient(t *testin
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if !known {
+			w.Header().Set("X-Upstream-Unknown-Session", "opaque-404")
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = fmt.Fprintf(w, `{"jsonrpc":"2.0","id":%s,"error":{"code":-32600,"message":"unknown session"}}`, idOrNull(probe.ID))
 			return
@@ -2914,7 +3028,12 @@ func TestSerenaRouter_BackendLoss_CachedDaemonSession404CopiedToClient(t *testin
 		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
 		Sessions:      NewInMemorySessionRouter(),
 		UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
-		AuditFn:       func(level, event string, fields map[string]any) error { return nil },
+		AuditFn: func(level, event string, fields map[string]any) error {
+			mu.Lock()
+			auditEvents = append(auditEvents, auditEvent{event: event, fields: fields})
+			mu.Unlock()
+			return nil
+		},
 	}
 	s := newSerenaTestServer(t, deps)
 
@@ -2935,18 +3054,138 @@ func TestSerenaRouter_BackendLoss_CachedDaemonSession404CopiedToClient(t *testin
 	if got := rr.Header().Get("Mcp-Session-Id"); got != sid {
 		t.Fatalf("client session header = %q, want router session %q preserved while copying upstream 404", got, sid)
 	}
-	if !strings.Contains(rr.Body.String(), `"unknown session"`) {
-		t.Fatalf("404 body was not copied from upstream; body=%s", rr.Body.String())
+	if got := rr.Header().Get("X-Upstream-Unknown-Session"); got != "opaque-404" {
+		t.Fatalf("404 header = %q, want exact upstream header", got)
+	}
+	if got, want := rr.Body.String(), `{"jsonrpc":"2.0","id":1,"error":{"code":-32600,"message":"unknown session"}}`; got != want {
+		t.Fatalf("404 body = %q, want exact upstream body %q", got, want)
+	}
+	if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); ok {
+		t.Fatal("cached daemon binding survived an upstream non-SSE 404; the next request cannot re-handshake")
+	}
+	if !s.serenaRouterSessions.known(sid) {
+		t.Fatal("upstream unknown session removed the client router session; only the daemon cache may be invalidated")
+	}
+	if got := deps.Sessions.LookupSession(sid); got == nil || got.WorkspaceKey != ws.WorkspaceKey {
+		t.Fatalf("upstream unknown session removed sticky workspace binding: got %+v", got)
+	}
+
+	// The triggering 404 was forwarded once and never replayed. The NEXT client
+	// request is the retry boundary: it creates one replacement daemon session
+	// and forwards exactly once under that new id.
+	rr = postSerena(t, s, body, map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("next request after 404 status = %d, want 200 after ordinary re-handshake; body=%s", rr.Code, rr.Body.String())
 	}
 	mu.Lock()
 	gotInitCount := initCount
 	gotForwardedSIDs := append([]string(nil), forwardedSIDs...)
+	gotAuditEvents := append([]auditEvent(nil), auditEvents...)
 	mu.Unlock()
-	if gotInitCount != 1 {
-		t.Fatalf("router performed %d upstream initializes, want 1; stale request must reuse cached daemon session and receive B's 404", gotInitCount)
+	if gotInitCount != 2 {
+		t.Fatalf("router performed %d upstream initializes, want 2: initial handshake plus next-request re-handshake only", gotInitCount)
 	}
-	if len(gotForwardedSIDs) != 2 || gotForwardedSIDs[0] != "daemon-a-session" || gotForwardedSIDs[1] != "daemon-a-session" {
-		t.Fatalf("forwarded daemon session ids = %v, want cached daemon-a-session on both forwards", gotForwardedSIDs)
+	if got, want := gotForwardedSIDs, []string{"daemon-a-session", "daemon-a-session", "daemon-b-session"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("forwarded daemon session ids = %v, want %v (no replay of 404 request)", got, want)
+	}
+	if len(gotAuditEvents) != 1 || gotAuditEvents[0].event != "serena-daemon-session-invalidated-unknown-session" {
+		t.Fatalf("unknown-session invalidation audit = %+v, want one structured invalidation event", gotAuditEvents)
+	}
+	auditRaw, err := json.Marshal(gotAuditEvents[0].fields)
+	if err != nil {
+		t.Fatalf("marshal audit fields: %v", err)
+	}
+	if got := string(auditRaw); strings.Contains(got, sid) || strings.Contains(got, "daemon-a-session") || strings.Contains(got, ws.WorkspacePath) {
+		t.Fatalf("invalidation audit exposed identity or path: %s", got)
+	}
+}
+
+func TestGuardUnknownSessionConditionalUnbind(t *testing.T) {
+	const (
+		clientSID = "client-session"
+		protocol  = "2025-11-25"
+	)
+	var st daemonSessionStore
+	if !st.store(clientSID, "alpha", "daemon-old", protocol) {
+		t.Fatal("seed old daemon binding")
+	}
+	if !st.store(clientSID, "beta", "daemon-new", protocol) {
+		t.Fatal("seed newer daemon binding")
+	}
+	if st.unbindIfMatch(clientSID, "alpha", "daemon-old", protocol) {
+		t.Fatal("old 404 erased a newer daemon handshake")
+	}
+	if ws, daemonSID, _, ok := st.bindingFor(clientSID); !ok || ws != "beta" || daemonSID != "daemon-new" {
+		t.Fatalf("newer binding = (%q,%q,%v), want beta/daemon-new/live", ws, daemonSID, ok)
+	}
+
+	if !st.store(clientSID, "alpha", "daemon-old", protocol) {
+		t.Fatal("reset old binding for reservation guard")
+	}
+	if proceed, inFlight := st.reserveSlot(clientSID); !proceed || inFlight {
+		t.Fatalf("reserve completed binding = (%v,%v), want (true,false)", proceed, inFlight)
+	}
+	if st.unbindIfMatch(clientSID, "alpha", "daemon-old", protocol) {
+		t.Fatal("old 404 erased a reservation-owned binding")
+	}
+	st.releaseReservation(clientSID)
+	if _, daemonSID, _, ok := st.bindingFor(clientSID); !ok || daemonSID != "daemon-old" {
+		t.Fatalf("reserved binding after release = (%q,%v), want daemon-old/live", daemonSID, ok)
+	}
+
+	if proceed, inFlight := st.reserveSlot("placeholder"); !proceed || inFlight {
+		t.Fatalf("reserve fresh placeholder = (%v,%v), want (true,false)", proceed, inFlight)
+	}
+	if st.unbindIfMatch("placeholder", "alpha", "daemon-old", protocol) {
+		t.Fatal("old 404 erased an in-flight placeholder")
+	}
+	st.mu.Lock()
+	placeholder := st.bindings["placeholder"]
+	st.mu.Unlock()
+	if placeholder == nil || placeholder.daemonSessionID != "" || placeholder.reservations != 1 {
+		t.Fatalf("placeholder after conditional unbind = %+v, want live reservation", placeholder)
+	}
+	st.releaseReservation("placeholder")
+}
+
+func TestGuardUnknownSessionDoesNotInvalidateOtherResponses(t *testing.T) {
+	tests := []struct {
+		name        string
+		status      int
+		contentType string
+		body        string
+	}{
+		{name: "success", status: http.StatusOK, contentType: "application/json", body: `{"jsonrpc":"2.0","id":1,"result":{"ok":true}}`},
+		{name: "other-4xx", status: http.StatusBadRequest, contentType: "application/json", body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32602,"message":"bad request"}}`},
+		{name: "5xx", status: http.StatusInternalServerError, contentType: "application/json", body: `{"jsonrpc":"2.0","id":1,"error":{"code":-32603,"message":"daemon failure"}}`},
+		{name: "sse-404", status: http.StatusNotFound, contentType: "text/event-stream", body: "event: message\ndata: unknown session\n\n"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			daemon := newFakeSerenaDaemon("alpha")
+			daemon.tool = func(w http.ResponseWriter, r *http.Request, body []byte) {
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(tc.status)
+				_, _ = io.WriteString(w, tc.body)
+			}
+			ts := httptest.NewServer(daemon.handler())
+			t.Cleanup(ts.Close)
+			ws := &api.WorkspaceEntry{WorkspaceKey: "alpha", WorkspacePath: "/proj/alpha", Port: 9201}
+			deps := &serenaRouterDeps{
+				Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+				Sessions:      NewInMemorySessionRouter(),
+				UpstreamURLFn: func(ws *api.WorkspaceEntry) string { return ts.URL },
+			}
+			s := newSerenaTestServer(t, deps)
+			sid := mintRouterSession(t, s, "2025-11-25")
+			rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/alpha/src/main.go"}), map[string]string{"Mcp-Session-Id": sid})
+			if rr.Code != tc.status {
+				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.status, rr.Body.String())
+			}
+			if _, _, _, ok := s.serenaDaemonSessions.bindingFor(sid); !ok {
+				t.Fatalf("daemon binding was invalidated by %s; only a non-SSE 404 from a cached binding may invalidate", tc.name)
+			}
+		})
 	}
 }
 

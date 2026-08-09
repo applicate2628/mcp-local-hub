@@ -1,5 +1,5 @@
 ---
-status: open
+status: candidate
 severity: medium
 context: adjacent-finding
 defer: true

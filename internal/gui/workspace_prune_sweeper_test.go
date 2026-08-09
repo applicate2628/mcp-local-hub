@@ -2,6 +2,7 @@ package gui
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -392,6 +393,41 @@ func TestSweepPruneWorkspaces_ClearsDefaultMarker(t *testing.T) {
 		}
 		if len(cleared) != 1 || cleared[0] != agentPath {
 			t.Fatalf("want default-clear for %q, got %v", agentPath, cleared)
+		}
+	})
+
+	t.Run("committed Serena removal with late error clears marker and counts work", func(t *testing.T) {
+		cleared = nil
+		agentPath := "d:/dev/x/.claude/worktrees/agent-partial/sub"
+		lateErr := errors.New("serena removal fence release failed")
+		pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+			return &api.PruneReport{Workspace: path, SerenaRemoved: 1}, lateErr
+		}
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(agentPath, "kpartial", api.SerenaLanguageSentinel)}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 1 {
+			t.Fatalf("committed partial prune = %d, want 1", n)
+		}
+		if len(cleared) != 1 || cleared[0] != agentPath {
+			t.Fatalf("want default-clear for committed partial prune %q, got %v", agentPath, cleared)
+		}
+	})
+
+	t.Run("zero-commit error is not counted or cleared", func(t *testing.T) {
+		cleared = nil
+		agentPath := "d:/dev/x/.claude/worktrees/agent-zero/sub"
+		pruneActionFn = func(_ *Server, path string) (*api.PruneReport, error) {
+			return &api.PruneReport{Workspace: path}, errors.New("teardown failed before mutations")
+		}
+		pruneWorkspaceRowsFn = func(*Server) []*api.WorkspaceEntry {
+			return []*api.WorkspaceEntry{mkPruneEntry(agentPath, "kzero-error", api.SerenaLanguageSentinel)}
+		}
+		if n := s.SweepPruneWorkspaces(context.Background(), time.Now()); n != 0 {
+			t.Fatalf("zero-commit failure = %d, want 0", n)
+		}
+		if len(cleared) != 0 {
+			t.Fatalf("zero-commit failure cleared default marker: %v", cleared)
 		}
 	})
 

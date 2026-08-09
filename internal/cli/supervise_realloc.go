@@ -428,7 +428,11 @@ func (c *supervisorController) handleReallocReq(ctx context.Context, req realloc
 	newPort, err := c.reallocFn(req.d)
 	outcome := reallocOutcomeFailed
 	switch {
-	case err == nil:
+	case err == nil || (newPort > 0 && errors.Is(err, api.ErrLockReleaseUnconfirmed)):
+		// ReallocateDynamicPoolPort returns a non-zero port with a release error
+		// only after the registry and supervisor intent both reached durable
+		// storage. Continue the cache refresh and respawn while retaining the
+		// lifecycle warning in the event body.
 		outcome = reallocOutcomeReallocated
 	case errors.Is(err, api.ErrPortPoolExhausted):
 		outcome = reallocOutcomePoolExhausted
@@ -465,12 +469,19 @@ func (c *supervisorController) handleReallocReq(ctx context.Context, req realloc
 	// confirms the real outcome. Pool-exhausted carries foreignHolderPort=0 anyway
 	// (no identity probe), so nothing blocking moves onto the loop.
 	if outcome == reallocOutcomeReallocated {
-		c.emitBindAccessDenied(req.d, bindAccessDeniedActionReallocated, oldPort, map[string]any{
+		details := map[string]any{
 			"old_port":             oldPort,
 			"new_port":             newPort,
 			"reallocation_attempt": req.attempt,
 			"cap":                  reallocationCap,
-		}, oldPort)
+		}
+		if err != nil {
+			// The raw error names the local lock path. Publish only the stable
+			// lifecycle classification while the internal loop event retains the
+			// causal error for same-process diagnostics.
+			details["lock_release_warning"] = "lock-release-unconfirmed"
+		}
+		c.emitBindAccessDenied(req.d, bindAccessDeniedActionReallocated, oldPort, details, oldPort)
 	}
 
 	if c.eventLoop == nil {

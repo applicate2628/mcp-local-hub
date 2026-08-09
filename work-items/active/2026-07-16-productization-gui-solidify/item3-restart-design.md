@@ -1,7 +1,7 @@
 # Item 3 DESIGN v3.1 (design-B) — GUI self-restart and port change
 
 Design package by `$architect`. This revision implements the accepted decision
-`work-items/decisions/2026-07-17-item3-unitB-recovery-simplify.md`: keep the restartable listener,
+`work-items/decisions/2026-07-17-item3-unitb-recovery-simplify.md`: keep the restartable listener,
 authenticated confirm-then-release standby, parent pre-release rollback, and reservation/Held mapping; delete
 the fully automatic post-release recovery graph. V3.1 also incorporates the accepted two-lane design-gate
 findings: extend the one existing hub restart owner to cover an initial bind failure from a nil component, close
@@ -908,7 +908,7 @@ plain `mcphub gui`, and a live wedged holder restored only through the existing 
 ## 16. Alternatives and rejection drivers
 
 The superseded v2.2 fully automatic recovery graph is not an available alternative: accepted decision
-`2026-07-17-item3-unitB-recovery-simplify` rejects it because a record CAS cannot serialize OS kills, binds, or
+`2026-07-17-item3-unitb-recovery-simplify` rejects it because a record CAS cannot serialize OS kills, binds, or
 flocks, and its no-owner freeze relocated across repeated revisions. The three remaining alternatives are:
 
 ### A. Keep `Server.Start` monolithic and close the listener indirectly — rejected
@@ -947,42 +947,42 @@ Each claim is a falsifiable `{guarantee, single-owner, enforcement-probe}` contr
    ensure-alive can preempt the designated child; single-owner: SingleInstanceLease reservation-aware acquire;
    enforcement-probe: TestRestartV3_ReservationRejectsThirdEntrantAndDesignatedChildWins and
    TestRestartV3_RawReservedFreeFlockMapsHeldDuringWindow }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 4. `{ guarantee: a successful automatic parent rollback retains the owned lease and rebinds P without
    reacquire, while a failed restoration durably interrupts when possible, performs bounded cleanup, releases
    the lease, and exits; single-owner: RestartCoordinator pre-release rollback;
    enforcement-probe: TestRestartV3_SamePort_PreReleaseRollbackRetainsLeaseAndRebindsWithoutReacquire and
    TestRestartV3_PreReleaseRollbackFailureInterruptsReleasesLeaseAndExits }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 5. `{ guarantee: the parent closes its own hub listener before flock release, then performs no child-phase
    write, wait gate, termination, claim, reclaim, activation signal, or delayed hub teardown, so
    claimant-death/wedge/self-advance races have no actor or edge;
    single-owner: RestartCoordinator post-release no-op boundary; enforcement-probe:
    TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately and
    TestRestartV3_ParentPerformsNoProtocolWriteWaitTerminateOrReclaimAfterRelease }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 6. `{ guarantee: child flock acquisition immediately activates full GUI without a parent signal, parent-status
    wait, or hub-health gate; single-owner: GUIOwnerLifecycle activation barrier; enforcement-probe:
    TestRestartV3_PortChange_ParentClosesHubBeforeFlockReleaseThenChildActivatesImmediately }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 7. `{ guarantee: a never-bound initial hub failure enters the one existing restart driver from nil with
    unchanged backoff, rolling-window, exhaustion, abandonment, event, and health semantics; single-owner:
    runHubListenerRestartDriver; enforcement-probe:
    TestRestartV3_ChildActivatesImmediatelyAndInitialHubBindRetriesFromNilThroughExistingDriver }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 8. `{ guarantee: ensure-alive never spawns, kills, binds, retries, or transfers its probe lease; after the
    phase deadline an exact nonterminal + Free record can only become interrupted, and a late surviving standby
    child rejects that changed marker;
    single-owner: GUI ensure-alive predicate; enforcement-probe:
    TestEnsureAliveGUIRecovery_ExpiredReservedFreeInterruptsAndNeverSpawns }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 9. `{ guarantee: only an owned Free probe advertises plain mcphub gui, while an expired nonterminal Held probe
    advertises only the existing identity-gated mcphub gui --force --kill; Unknown advertises neither;
    single-owner: ensure-alive flock discriminator/manual recovery boundary;
    enforcement-probe: TestEnsureAliveGUIRecovery_FreeVsHeldSelectsExactOperatorCommand,
    TestRestartV3_FreeFlockInterruptedPlainLaunchRecoversEndToEnd, and
    TestRestartV3_LiveHeldInterruptedForceKillRecoversEndToEnd }`
-   (decision `2026-07-17-item3-unitB-recovery-simplify`).
+   (decision `2026-07-17-item3-unitb-recovery-simplify`).
 10. `{ guarantee: valid persisted port intent wins only for self-restart while unset/invalid intent preserves
    explicit inherited port forms including 0; single-owner: resolveGuiPort typed helper;
    enforcement-probe: TestRestartV3_PortArgvMatrix }`

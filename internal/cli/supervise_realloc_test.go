@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -477,6 +478,36 @@ func TestRealloc_ReadMiss_TargetedPatchRespawnsOnNewPort(t *testing.T) {
 	if got := crashCount(ctrl, task); got != 0 {
 		t.Fatalf("crash count = %d after a within-cap reallocation, want 0", got)
 	}
+}
+
+func TestRealloc_AppliedRegistryRelease_ContinuesCacheAndRespawn(t *testing.T) {
+	d := lspWorkspaceProxyDescriptor()
+	const newPort = 9460
+	releaseCause := errors.New("registry release could not be confirmed")
+	reallocFn := func(api.SupervisorDaemon) (int, error) {
+		return newPort, fmt.Errorf("durable port move: %w: %v", api.ErrLockReleaseUnconfirmed, releaseCause)
+	}
+	configure := func(c *supervisorController) {
+		c.reapIntentReader = func() (*api.SupervisorIntentFile, error) {
+			return nil, errors.New("intent read unavailable")
+		}
+	}
+
+	foreignHolderFn := func(int) (int, string) { return 0, "" }
+	ctrl, _, eventsPath := reallocRunningControllerCfg(t, reallocFn, foreignHolderFn, configure, d)
+	task := canonicalSupervisorTaskName(d.TaskName)
+	ctrl.smStates.Store(task, api.StBackoffWaiting)
+	ctrl.handleReallocReq(ctrl.ctx, reallocReq{d: d, attempt: 1})
+	waitForCount(t, func() int32 { return int32(ctrl.respawnArmEpoch.Load()) }, 1, "respawn arm after applied registry release failure")
+	cached := ctrl.intentCache.CurrentIntent().FindSupervisorDaemonByTaskName(task)
+	if cached == nil {
+		t.Fatal("reallocated descriptor missing from cache")
+	}
+	if got, ok := api.EffectiveDaemonPort(*cached); !ok || got != newPort {
+		t.Fatalf("cached port=(%d,%t), want (%d,true) before respawn", got, ok, newPort)
+	}
+	assertEventInLog(t, eventsPath, `"action":"reallocated"`)
+	assertEventInLog(t, eventsPath, `"lock_release_warning":"lock-release-unconfirmed"`)
 }
 
 // TestRealloc_EqualTimestamp_CommonPath_RespawnsOnNewPort is the round-4b regression

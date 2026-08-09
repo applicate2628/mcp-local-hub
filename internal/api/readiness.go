@@ -569,6 +569,15 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 		}
 		rep.Requirements = append(rep.Requirements, r)
 	}
+	if f, blocked := findingByID(admission, "install-scope-applicability"); blocked {
+		add(ReadinessRequirement{
+			Name:   f.Name,
+			OK:     false,
+			Reason: f.Reason,
+			Fix:    f.Fix,
+		})
+		return rep
+	}
 
 	// D-3 inert short-circuit (Tier-0). When the manifest is inert
 	// (watch / disabled-until-probe) and its install-probe has NOT passed,
@@ -1085,24 +1094,35 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	// user-actionable inline prompts; this is the one catch-all blocker.
 	// Validate EXACTLY the operator's effective default-install client set —
 	// the same scope a normal `mcphub install` uses. NOT the bare
-	// BuildPlan(m,"") compile-time trio (which would MISS a bad binding on a
+	// BuildPlan(m,"") compile-time default set (which would MISS a bad binding on a
 	// client the operator persisted into their default set), and NOT
 	// IncludeAllClients (which would validate OPT-IN bindings a default install
 	// never touches → a false Ready=false on a bad opt-in binding, Codex #377
 	// r7). DefaultInstallClientNamesEffectiveIn reads gui-preferences.yaml (it
 	// derefs no *API state, so the zero value calls it); fall back to the
 	// compile-time default on a read error.
-	clientScope := clients.DefaultInstallClientNames()
-	if eff, cerr := (&API{}).DefaultInstallClientNamesEffectiveIn(SettingsPath()); cerr == nil && len(eff) > 0 {
-		clientScope = eff
-	}
+	clientScope := resolveReadinessDefaultClientScope(scope, (&API{}).DefaultInstallClientNamesEffectiveIn)
 	// Scope the dry-run to the SAME daemon the real install targets. A
 	// daemon-filtered install (scope.DaemonFilter set) only validates the
 	// chosen daemon's bindings; a sibling's invalid url_path / unknown-daemon
 	// binding must not block readiness when BuildPlanWithOpts(DaemonFilter)
 	// would skip it (bot review readiness.go:366). Empty filter = full install
 	// = validate every daemon, unchanged from the global path.
-	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{DefaultClientsOverride: clientScope, DaemonFilter: scope.DaemonFilter}); err != nil {
+	// An EXPLICIT client selection (`--clients a,b` / `--all-clients`) overrides
+	// the default scope, because that is the scope the install about to run will
+	// use. installClientPredicate's documented precedence is IncludeAllClients >
+	// ClientsInclude > DefaultClientsOverride, so passing all three here
+	// reproduces the real install's resolution exactly rather than re-deriving
+	// it. Both fields are zero for a bare install, leaving the default-set
+	// behavior (and the Codex #377 r7 "do not validate untargeted opt-in
+	// bindings" rule) untouched.
+	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		DefaultClientsOverride: clientScope,
+		ClientsInclude:         scope.ClientsInclude,
+		IncludeAllClients:      scope.IncludeAllClients,
+		DaemonFilter:           scope.DaemonFilter,
+		SkipClientConfigWrites: scope.SkipClientConfigWrites,
+	}); err != nil {
 		add(ReadinessRequirement{
 			Name: "install plan",
 			OK:   false,
@@ -1128,6 +1148,17 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	}
 
 	return rep
+}
+
+func resolveReadinessDefaultClientScope(scope AdmissionScope, resolve func(string) ([]string, error)) []string {
+	if scope.SkipClientConfigWrites {
+		return nil
+	}
+	clientScope := clients.DefaultInstallClientNames()
+	if eff, err := resolve(SettingsPath()); err == nil && len(eff) > 0 {
+		return eff
+	}
+	return clientScope
 }
 
 // CheckServerReadinessByName resolves a server's manifest embed-first (the same
@@ -1185,6 +1216,7 @@ func checkServerReadinessByNameWithBudget(name string, scope AdmissionScope, bud
 //     FULL ownership chain per in-use port arm — admission_check.go:216 and :227
 //     — BEFORE any budget-gated fixedPortStatus row executes. The budget only
 //     gates the detail rows layered on top.
+//
 //  2. ONE OWNERSHIP CALL IS NOT ONE CHAIN. portHeldByOurDaemonForPortArm stacks
 //     several independently-capped probes, and the ancestry walk mints a FRESH
 //     probeChainBudget per iteration (internalPortParentWalkDepth = 3):

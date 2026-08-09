@@ -660,7 +660,7 @@ describe("perClientRouting with client_config_presence", () => {
 
   it("classifies EVERY ALL_CLIENTS member, not just the core seven", () => {
     // The routing second pass must cover the full registry mirror so a
-    // detected non-core client (any of the 46) gets a correctly classified
+    // detected non-core client (any of the 47) gets a correctly classified
     // cell, not a missing key. Pre-fix only the 15 hardcoded clients were
     // classified.
     const r = perClientRouting({}, {});
@@ -759,7 +759,7 @@ describe("perClientRouting with client_config_presence", () => {
 // render. visibleClients() decides the columns. The non-core candidate
 // universe is derived from the scan's client_config_presence map (one key
 // per clients.SupportedClientNames()), NOT a frontend-hardcoded list, so all
-// 46 backend clients can surface when detected — and a backend client newer
+// 47 backend clients can surface when detected — and a backend client newer
 // than the frontend NON_CORE_CLIENTS list still surfaces when detected.
 describe("visibleClients (scannable + file-present non-core columns)", () => {
   // capsFor builds a client_capabilities map marking the given client ids as
@@ -819,10 +819,10 @@ describe("visibleClients (scannable + file-present non-core columns)", () => {
   });
 
   it("never shows a non-core client that is merely present in the presence map as 'missing'", () => {
-    // The presence map carries ALL 46 backend clients, most as plain
+    // The presence map carries ALL 47 backend clients, most as plain
     // "missing" on a typical host. Those must NOT become columns — only a
     // DETECTED state (or a referencing entry) gates a column. This is the
-    // core anti-overflow guarantee with the now-46-wide candidate universe.
+    // core anti-overflow guarantee with the now-47-wide candidate universe.
     const allMissing: Record<string, string> = {};
     for (const c of NON_CORE_CLIENTS) allMissing[c] = "missing";
     const cols = visibleClients(scan(allMissing));

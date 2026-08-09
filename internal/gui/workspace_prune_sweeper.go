@@ -53,13 +53,13 @@ var pruneActionFn = func(s *Server, path string) (*api.PruneReport, error) {
 }
 
 // pruneClearDefaultFn clears the default-workspace marker when a just-pruned
-// workspace (canonical path) was the persisted default. It runs after a
-// successful prune that removed a serena row so a stale default cannot outlive
-// the workspace it pointed at — the SAME api.ClearDefaultWorkspaceIfMatches
-// owner the CLI `workspace unregister --backend serena|all` and `workspace
-// prune` call. Best-effort: a marker-clear failure is logged, never fatal to
-// the sweep. Test seam (the production form resolves the state dir from the
-// registry path so the marker stays co-located with workspaces.yaml).
+// workspace (canonical path) was the persisted default. The default marker is
+// cleared whenever the returned report records a committed Serena-row removal,
+// including a late error after that removal. Such an operation remains an error
+// outcome: committed work is counted and the marker is cleared,
+// workspace-prune-failed is emitted with removal counts, and workspace-pruned
+// is not emitted. Test seam (the production form resolves the state dir from
+// the registry path so the marker stays co-located with workspaces.yaml).
 var pruneClearDefaultFn = func(canonical string) error {
 	regPath, err := api.DefaultRegistryPath()
 	if err != nil {
@@ -269,20 +269,10 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 		s.pruneEnoentMu.Lock()
 		delete(s.pruneEnoentTicks, path) // clear; re-accrues next tick if still dead.
 		s.pruneEnoentMu.Unlock()
-		if err != nil {
-			_ = api.LogHubMcpEvent("warn", "workspace-prune-failed", map[string]any{
-				"workspace": path, "reason": reason, "err": err.Error(),
-			})
-			continue
-		}
-		pruned++
-		// If this prune removed the serena row the default marker pointed at,
-		// clear the marker so a stale default cannot route to a workspace that no
-		// longer has a live registration (the gap the manual `workspace
-		// unregister` already closes; the sweeper previously did not). Best-effort
-		// — a clear failure is logged, never fatal to the sweep. Use report.Workspace
-		// (the prune owner's canonical form) so it compares equal to the marker's
-		// stored canonical path even if `path` arrived in a non-canonical shape.
+		// A fence release can fail after the row delete has committed. Consume the
+		// report first so committed work is counted and a removed Serena row clears
+		// its default marker, while the operation remains an error outcome.
+		committed := report != nil && (len(report.LSPRemoved) > 0 || report.SerenaRemoved > 0)
 		if report != nil && report.SerenaRemoved > 0 && pruneClearDefaultFn != nil {
 			markerPath := report.Workspace
 			if markerPath == "" {
@@ -294,6 +284,21 @@ func (s *Server) SweepPruneWorkspaces(ctx context.Context, now time.Time) int {
 				})
 			}
 		}
+		if err != nil {
+			body := map[string]any{
+				"workspace": path, "reason": reason, "err": err.Error(),
+			}
+			if report != nil {
+				body["lsp_removed"] = len(report.LSPRemoved)
+				body["serena_removed"] = report.SerenaRemoved
+			}
+			_ = api.LogHubMcpEvent("warn", "workspace-prune-failed", body)
+			if committed {
+				pruned++
+			}
+			continue
+		}
+		pruned++
 		body := map[string]any{"workspace": path, "reason": reason}
 		if report != nil {
 			body["lsp_removed"] = len(report.LSPRemoved)

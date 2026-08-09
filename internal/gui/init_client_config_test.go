@@ -256,8 +256,12 @@ func TestRealClientInitializer_RefusesSymlinkParent(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	// APPDATA alone sandboxes vscode only on Windows: defaultVSCodeConfigPath
+	// falls through to XDG_CONFIG_HOME on Linux/macOS (clients.go:1004), so on
+	// POSIX this InitEmpty wrote a real stub into $XDG_CONFIG_HOME/Code/User/.
+	// The full set is owned by neutralizeClientConfigPathEnv.
+	neutralizeClientConfigPathEnv(t, tmp)
 
 	all := clients.AllClients()
 	vscode, ok := all["vscode"]
@@ -322,8 +326,12 @@ func TestRealClientInitializer_StrictModeProceedsToHardenedPipeline(t *testing.T
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	// APPDATA alone sandboxes vscode only on Windows: defaultVSCodeConfigPath
+	// falls through to XDG_CONFIG_HOME on Linux/macOS (clients.go:1004), so on
+	// POSIX this InitEmpty wrote a real stub into $XDG_CONFIG_HOME/Code/User/.
+	// The full set is owned by neutralizeClientConfigPathEnv.
+	neutralizeClientConfigPathEnv(t, tmp)
 	t.Setenv("MCPHUB_REQUIRE_SINGLE_USER_HOME", "1")
 
 	all := clients.AllClients()
@@ -427,8 +435,12 @@ func TestRealClientInitializer_HappyPath(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	// APPDATA alone sandboxes vscode only on Windows: defaultVSCodeConfigPath
+	// falls through to XDG_CONFIG_HOME on Linux/macOS (clients.go:1004), so on
+	// POSIX this InitEmpty wrote a real stub into $XDG_CONFIG_HOME/Code/User/.
+	// The full set is owned by neutralizeClientConfigPathEnv.
+	neutralizeClientConfigPathEnv(t, tmp)
 
 	all := clients.AllClients()
 	vscode, ok := all["vscode"]
@@ -487,8 +499,12 @@ func TestRealClientInitializer_CreatesAbsentParent(t *testing.T) {
 	tmp := t.TempDir()
 	t.Setenv("HOME", tmp)
 	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("APPDATA", filepath.Join(tmp, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(tmp, "AppData", "Local"))
+	// APPDATA alone sandboxes vscode only on Windows: defaultVSCodeConfigPath
+	// falls through to XDG_CONFIG_HOME on Linux/macOS (clients.go:1004), so on
+	// POSIX this InitEmpty wrote a real stub into $XDG_CONFIG_HOME/Code/User/.
+	// The full set is owned by neutralizeClientConfigPathEnv.
+	neutralizeClientConfigPathEnv(t, tmp)
 
 	all := clients.AllClients()
 	vscode, ok := all["vscode"]

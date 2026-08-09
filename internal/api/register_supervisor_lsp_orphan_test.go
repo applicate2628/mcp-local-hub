@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -66,7 +67,11 @@ func TestLSPRegistryRowBacksDescriptor_TrueWhenRowPresent_FalseWhenOrphaned(t *t
 	}
 
 	// Row present → backed.
-	if !LSPRegistryRowBacksDescriptor(d) {
+	backed, err := LSPRegistryRowBacksDescriptor(d)
+	if err != nil {
+		t.Fatalf("LSPRegistryRowBacksDescriptor: %v", err)
+	}
+	if !backed {
 		t.Fatalf("descriptor with a live registry row must be reported as backed")
 	}
 
@@ -81,7 +86,11 @@ func TestLSPRegistryRowBacksDescriptor_TrueWhenRowPresent_FalseWhenOrphaned(t *t
 		t.Fatalf("Save after remove: %v", err)
 	}
 
-	if LSPRegistryRowBacksDescriptor(d) {
+	backed, err = LSPRegistryRowBacksDescriptor(d)
+	if err != nil {
+		t.Fatalf("LSPRegistryRowBacksDescriptor after remove: %v", err)
+	}
+	if backed {
 		t.Fatalf("descriptor whose registry row was removed must be reported as orphaned (unbacked)")
 	}
 }
@@ -102,7 +111,29 @@ func TestLSPRegistryRowBacksDescriptor_FailsOpen(t *testing.T) {
 		Server:   "mcp-language-server",
 		Args:     []string{"daemon", "workspace-proxy", "--workspace", dir},
 	}
-	if !LSPRegistryRowBacksDescriptor(noLang) {
+	backed, err := LSPRegistryRowBacksDescriptor(noLang)
+	if err != nil {
+		t.Fatalf("LSPRegistryRowBacksDescriptor malformed descriptor: %v", err)
+	}
+	if !backed {
 		t.Fatalf("descriptor missing --language must fail OPEN (backed=true)")
+	}
+}
+
+func TestOpenLSPRegistryForReconcile_UsableSnapshotPreservesReleaseFailure(t *testing.T) {
+	reg := NewRegistry(filepath.Join(t.TempDir(), "workspaces.yaml"))
+	releaseErr := errors.New("release unconfirmed")
+	got, ok, err := finishOpenLSPRegistryForReconcile(reg, nil, releaseErr)
+	if got != reg || !ok || !errors.Is(err, releaseErr) {
+		t.Fatalf("snapshot = (%p, %v, %v), want (%p, true, release error)", got, ok, err, reg)
+	}
+}
+
+func TestOpenLSPRegistryForReconcile_LoadAndReleaseFailuresJoin(t *testing.T) {
+	loadErr := errors.New("load")
+	releaseErr := errors.New("release")
+	got, ok, err := finishOpenLSPRegistryForReconcile(NewRegistry("unused"), loadErr, releaseErr)
+	if got != nil || ok || !errors.Is(err, loadErr) || !errors.Is(err, releaseErr) {
+		t.Fatalf("snapshot = (%v, %v, %v), want (nil, false, both errors)", got, ok, err)
 	}
 }

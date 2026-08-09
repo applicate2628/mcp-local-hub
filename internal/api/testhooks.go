@@ -11,9 +11,11 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -112,6 +114,47 @@ func SetTestCanonicalMcphubPath(path string) (restore func()) {
 // canonicalMcphubPath() would return after SetTestCanonicalMcphubPath.
 func MCPHubBinaryName() string {
 	return mcphubShortName
+}
+
+// SetInstallAutostartFixtureForTest replaces the install-time scheduler and
+// autostart seams for a cross-package test. The install owner lives in this
+// package, so callers must use this composite fixture rather than creating a
+// GUI-local scheduler bypass. The returned closure restores all prior bindings
+// exactly once.
+//
+// Production callers never invoke this helper. Nil inputs are test setup errors
+// and panic before any install path can observe a partial fixture.
+func SetInstallAutostartFixtureForTest(
+	schedulerFactory func() (scheduler.Scheduler, error),
+	factory func() (autostart.Backend, error),
+	startOwner func() error,
+) (restore func()) {
+	if !testing.Testing() {
+		panic("api.SetInstallAutostartFixtureForTest called outside a test binary — test-only hook")
+	}
+	if schedulerFactory == nil {
+		panic("api.SetInstallAutostartFixtureForTest called with nil scheduler factory")
+	}
+	if factory == nil {
+		panic("api.SetInstallAutostartFixtureForTest called with nil factory")
+	}
+	if startOwner == nil {
+		panic("api.SetInstallAutostartFixtureForTest called with nil start owner")
+	}
+	origSchedulerFactory := schedulerFactoryFn
+	origFactory := installAutostartBackendFactoryFn
+	origStartOwner := installAutostartOwnerStartFn
+	schedulerFactoryFn = schedulerFactory
+	installAutostartBackendFactoryFn = factory
+	installAutostartOwnerStartFn = startOwner
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			schedulerFactoryFn = origSchedulerFactory
+			installAutostartBackendFactoryFn = origFactory
+			installAutostartOwnerStartFn = origStartOwner
+		})
+	}
 }
 
 // SetDaemonStateRootForTest overrides the per-user state directory
@@ -288,6 +331,46 @@ func SetClientWriteFallbackForTest() (restore func()) {
 		return os.WriteFile(path, contents, 0o600)
 	}
 	return func() { clients.WriteConfigFile = orig }
+}
+
+// SetPortOwnerIdentityProbesForTest injects the two OS-level identity
+// primitives (loopback port -> owner PID, and owner PID -> image basename)
+// that AssertMCPFrontPortSupervisorOwned and defaultGUIPidportIdentityCheck
+// depend on. A nil argument leaves that probe at its production default.
+//
+// It exists so a CROSS-PACKAGE test (internal/cli drives the whole
+// `--reconcile-mcp-front` command) can exercise the REAL ownership gate
+// instead of stubbing the gate itself out. That distinction is the point: a
+// test that neutralized the gate would prove only that the gate is callable,
+// never that it refuses an unsupervised listener. With these two probes
+// injected, every other step of the chain — supervisor lock, canonical intent
+// descriptor, supervisor-state row, PID liveness — runs its production code
+// against files the test seeded.
+//
+// Same testing.Testing() production guard as SetDaemonStateRootForTest: a
+// shipped binary that reached this surface would be able to forge a port
+// ownership proof, so calling it outside a test binary panics loudly.
+//
+// Returns a restore function; always invoke via t.Cleanup / defer.
+func SetPortOwnerIdentityProbesForTest(
+	owner func(port int) (int, bool, error),
+	image func(pid int) (string, bool),
+) (restore func()) {
+	if !testing.Testing() {
+		panic("api.SetPortOwnerIdentityProbesForTest called outside a test binary — this hook can forge an OS-level port-ownership proof; it exists exclusively for tests")
+	}
+	origOwner := loopbackPortOwnerFn
+	origImage := guiImageForPIDFn
+	if owner != nil {
+		loopbackPortOwnerFn = owner
+	}
+	if image != nil {
+		guiImageForPIDFn = image
+	}
+	return func() {
+		loopbackPortOwnerFn = origOwner
+		guiImageForPIDFn = origImage
+	}
 }
 
 // testSchedulerShim adapts a caller-supplied TestSchedulerIface to the

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"sort"
 	"strings"
 	"unsafe"
@@ -54,14 +55,24 @@ const procThreadAttributeJobList uintptr = 0x0002000D
 //     do not need creation-flag overrides beyond what this helper
 //     already sets.
 func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
+	return startWithJobFiles(job, cmd, nil, nil, nil)
+}
+
+// startWithJobFiles is the sole Windows at-create containment owner. The
+// exported legacy path deliberately supplies no standard handles; the strict
+// runner supplies all three and receives an allowlisted child handle set.
+func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (int, error) {
 	if job == nil {
-		return 0, errors.New("StartWithJob: nil job")
+		return 0, startWithJobError(StartWithJobContainment, errors.New("StartWithJob: nil job"))
 	}
 	if cmd == nil {
-		return 0, errors.New("StartWithJob: nil cmd")
+		return 0, startWithJobError(StartWithJobInvalid, errors.New("StartWithJob: nil cmd"))
 	}
 	if cmd.Path == "" {
-		return 0, errors.New("StartWithJob: cmd.Path is empty (use exec.Command or set Path explicitly)")
+		return 0, startWithJobError(StartWithJobInvalid, errors.New("StartWithJob: cmd.Path is empty (use exec.Command or set Path explicitly)"))
+	}
+	if (stdin == nil) != (stdout == nil) || (stdin == nil) != (stderr == nil) {
+		return 0, startWithJobError(StartWithJobInvalid, errors.New("StartWithJob: standard files must be all nil or all present"))
 	}
 	// Normalize empty cmd.Args — os/exec.Cmd lets callers construct a
 	// Cmd directly with only Path set (Args left nil), in which case the
@@ -73,14 +84,18 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	}
 	jobHandle := job.Handle()
 	if jobHandle == 0 {
-		return 0, errors.New("StartWithJob: job handle is 0 (closed?)")
+		return 0, startWithJobError(StartWithJobContainment, errors.New("StartWithJob: job handle is 0 (closed?)"))
 	}
 
 	// Allocate a one-attribute thread-attribute list via x/sys helper.
 	// The container owns the LocalAlloc'd buffer; Delete frees it.
-	attrList, err := windows.NewProcThreadAttributeList(1)
+	attributeCount := 1
+	if stdin != nil {
+		attributeCount++
+	}
+	attrList, err := windows.NewProcThreadAttributeList(uint32(attributeCount))
 	if err != nil {
-		return 0, fmt.Errorf("NewProcThreadAttributeList: %w", err)
+		return 0, startWithJobError(StartWithJobContainment, fmt.Errorf("NewProcThreadAttributeList: %w", err))
 	}
 	defer attrList.Delete()
 
@@ -93,7 +108,33 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		unsafe.Pointer(&jobHandle),
 		unsafe.Sizeof(jobHandle),
 	); err != nil {
-		return 0, fmt.Errorf("ProcThreadAttributeList.Update(JOB_LIST): %w", err)
+		return 0, startWithJobError(StartWithJobContainment, fmt.Errorf("ProcThreadAttributeList.Update(JOB_LIST): %w", err))
+	}
+
+	var childHandles []windows.Handle
+	if stdin != nil {
+		for _, file := range []*os.File{stdin, stdout, stderr} {
+			duplicate, duplicateErr := duplicateInheritableHandle(file)
+			if duplicateErr != nil {
+				for _, handle := range childHandles {
+					_ = windows.CloseHandle(handle)
+				}
+				return 0, startWithJobError(StartWithJobLaunch, duplicateErr)
+			}
+			childHandles = append(childHandles, duplicate)
+		}
+		defer func() {
+			for _, handle := range childHandles {
+				_ = windows.CloseHandle(handle)
+			}
+		}()
+		if err := attrList.Update(
+			windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+			unsafe.Pointer(&childHandles[0]),
+			uintptr(len(childHandles))*unsafe.Sizeof(childHandles[0]),
+		); err != nil {
+			return 0, startWithJobError(StartWithJobLaunch, fmt.Errorf("ProcThreadAttributeList.Update(HANDLE_LIST): %w", err))
+		}
 	}
 
 	// Build STARTUPINFOEX. Cb must be sizeof(StartupInfoEx) — the
@@ -104,10 +145,16 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		},
 		ProcThreadAttributeList: attrList.List(),
 	}
+	if stdin != nil {
+		si.StartupInfo.Flags |= windows.STARTF_USESTDHANDLES
+		si.StartupInfo.StdInput = childHandles[0]
+		si.StartupInfo.StdOutput = childHandles[1]
+		si.StartupInfo.StdErr = childHandles[2]
+	}
 
 	commandLine, cwdPtr, envPtr, err := prepareWindowsCommand(cmd)
 	if err != nil {
-		return 0, err
+		return 0, startWithJobError(StartWithJobInvalid, err)
 	}
 
 	// Always-required creation flags:
@@ -133,14 +180,14 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		commandLine,     // lpCommandLine
 		nil,             // lpProcessAttributes
 		nil,             // lpThreadAttributes
-		false,           // bInheritHandles
+		stdin != nil,    // bInheritHandles; HANDLE_LIST restricts inheritance
 		creationFlags,   // dwCreationFlags
 		envPtr,          // lpEnvironment
 		cwdPtr,          // lpCurrentDirectory
 		&si.StartupInfo, // lpStartupInfo (see comment above)
 		&pi,             // lpProcessInformation
 	); err != nil {
-		return 0, fmt.Errorf("CreateProcess: %w", err)
+		return 0, startWithJobError(StartWithJobLaunch, fmt.Errorf("CreateProcess: %w", err))
 	}
 
 	// Close the thread handle; we don't need it for orchestration.
@@ -167,7 +214,11 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 		//
 		// Closes bot finding on PR #236 1c0ea09 (P2 #5).
 		_ = windows.CloseHandle(pi.Process)
-		return int(pi.ProcessId), fmt.Errorf("%w: os.FindProcess(pid=%d): %v", ErrSpawnPostCreate, pi.ProcessId, err)
+		if stdin != nil {
+			_ = job.TerminateAll(1)
+			_ = job.Close()
+		}
+		return int(pi.ProcessId), startWithJobError(StartWithJobLaunch, fmt.Errorf("%w: os.FindProcess(pid=%d): %v", ErrSpawnPostCreate, pi.ProcessId, err))
 	}
 	cmd.Process = p
 
@@ -175,6 +226,7 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	// returned by CreateProcess to avoid leaking it for the lifetime
 	// of the supervisor.
 	_ = windows.CloseHandle(pi.Process)
+	runtime.KeepAlive(childHandles)
 
 	return int(pi.ProcessId), nil
 }
@@ -209,6 +261,20 @@ func prepareWindowsCommand(cmd *exec.Cmd) (commandLine, cwdPtr, envPtr *uint16, 
 		return nil, nil, nil, fmt.Errorf("createEnvBlock: %w", err)
 	}
 	return commandLine, cwdPtr, envPtr, nil
+}
+
+func duplicateInheritableHandle(file *os.File) (windows.Handle, error) {
+	if file == nil {
+		return 0, errors.New("nil standard file")
+	}
+	var duplicate windows.Handle
+	if err := windows.DuplicateHandle(
+		windows.CurrentProcess(), windows.Handle(file.Fd()), windows.CurrentProcess(),
+		&duplicate, 0, true, windows.DUPLICATE_SAME_ACCESS,
+	); err != nil {
+		return 0, fmt.Errorf("duplicate standard handle %s: %w", file.Name(), err)
+	}
+	return duplicate, nil
 }
 
 // createEnvBlock builds the UTF-16 NUL-separated environment block

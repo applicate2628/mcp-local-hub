@@ -315,11 +315,13 @@ What setup does:
      a manual GUI bless. Each path must be ABSOLUTE (relative is rejected);
      blessing is idempotent. Runs last, after the state dir is ensured.
      Omitting the flag leaves the default flow unchanged.
-  9. If --server <name> is given, installs that one server headlessly via
-     the same code path as 'mcphub install --server <name>' (default
-     clients claude-code,codex-cli,cursor). No prompts — intended for
-     scripted/CI setup. The name is validated against the shipped manifest
-     set up front and the whole command fails loud (before any side effect)
+  9. 'mcphub setup --server <name>' installs that one server headlessly with
+     the built-in default clients claude-code,codex-cli. To add Cursor, run
+     this separately:
+       mcphub install --server <name> --clients cursor
+     No prompts — intended for scripted/CI setup. The server name is validated
+     against the shipped manifest set up front, and the whole command fails
+     loud (before any side effect)
      if it is unknown. Runs last, after the binary is canonicalized and the
      maintenance task is installed. Omitting the flag leaves the default
      flow unchanged (setup installs no server).
@@ -352,8 +354,8 @@ Examples:
   mcphub setup                    # after pulling + rebuilding — replaces the canonical copy
   mcphub setup --rollback-lsp-router
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
-  mcphub setup --trusted-root D:\dev\myproj    # bless one LSP trusted root
-  mcphub setup --trusted-root D:\dev\a --trusted-root D:\dev\b  # bless several
+  mcphub setup --trusted-root <project-root>    # bless one LSP trusted root
+  mcphub setup --trusted-root <project-a> --trusted-root <project-b>  # bless several
   mcphub setup --server serena    # canonicalize binary + install serena headlessly (CI)
 
 Caveats:
@@ -522,7 +524,7 @@ var setupInstallServerFn func(server string, out io.Writer) error
 
 // runSetupInstallServer installs the named server headlessly via the same
 // api.Install path the `mcphub install --server` command uses, with the
-// default install clients (claude-code, codex-cli, cursor). A no-op when
+// default install clients (claude-code, codex-cli). A no-op when
 // server is empty. Callers MUST have run validateSetupServerArg first; this
 // function trusts the name is a known manifest.
 func runSetupInstallServer(out io.Writer, server string) error {
@@ -534,9 +536,8 @@ func runSetupInstallServer(out io.Writer, server string) error {
 		return setupInstallServerFn(name, out)
 	}
 	return api.NewAPI().Install(api.InstallOpts{
-		Server:  name,
-		Writer:  out,
-		GUIPort: resolveInstallGUIPort(),
+		Server: name,
+		Writer: out,
 	})
 }
 

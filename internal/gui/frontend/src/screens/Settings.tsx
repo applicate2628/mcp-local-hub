@@ -29,7 +29,8 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
   const [guiServerDirty, setGuiServerDirty] = useState(false);
   const [daemonsDirty, setDaemonsDirty] = useState(false);
   const [backupsDirty, setBackupsDirty] = useState(false);
-  const anyDirty = appearanceDirty || guiServerDirty || daemonsDirty || backupsDirty;
+  const [advancedDirty, setAdvancedDirty] = useState(false);
+  const anyDirty = appearanceDirty || guiServerDirty || daemonsDirty || backupsDirty || advancedDirty;
 
   useEffect(() => {
     onDirtyChange(anyDirty);
@@ -136,7 +137,7 @@ export function SettingsScreen({ route, onDirtyChange, snapshot }: SettingsScree
         <SectionClients />
         <SectionTrustedRoots />
         <SectionMaintenance />
-        <SectionAdvanced   snapshot={snapshot} />
+        <SectionAdvanced   snapshot={snapshot} onDirtyChange={setAdvancedDirty} />
       </div>
     </div>
   );

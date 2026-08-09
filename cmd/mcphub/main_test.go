@@ -2,8 +2,37 @@ package main
 
 import (
 	"os"
+	"reflect"
 	"testing"
+
+	"mcp-local-hub/internal/cli"
 )
+
+func TestRouteBareInvocationProducesTrayEnabledGUIArgs(t *testing.T) {
+	routed := cli.RouteInvocationArgs([]string{"mcphub"})
+	if want := []string{"mcphub", "gui"}; !reflect.DeepEqual(routed, want) {
+		t.Fatalf("cli.RouteInvocationArgs(bare) = %q, want %q", routed, want)
+	}
+
+	root := cli.NewRootCmd()
+	guiCmd, remaining, err := root.Find(routed[1:])
+	if err != nil {
+		t.Fatalf("find routed command: %v", err)
+	}
+	if guiCmd.Name() != "gui" {
+		t.Fatalf("routed command = %q, want gui", guiCmd.Name())
+	}
+	if err := guiCmd.Flags().Parse(remaining); err != nil {
+		t.Fatalf("parse routed GUI args %q: %v", remaining, err)
+	}
+	noTray, err := guiCmd.Flags().GetBool("no-tray")
+	if err != nil {
+		t.Fatalf("GetBool(no-tray): %v", err)
+	}
+	if noTray {
+		t.Fatal("bare invocation routed to GUI with --no-tray enabled")
+	}
+}
 
 // TestShouldAutoLaunchGUIForArgs pins the bare-run routing contract:
 // `mcphub` with no subcommand routes to `gui`; anything carrying an

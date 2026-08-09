@@ -298,12 +298,13 @@ func isLegacyOneshotDaemon(d SupervisorDaemon) bool {
 }
 
 // WriteSupervisorIntent goes through the hardened state-file write pipeline.
-func WriteSupervisorIntent(path string, f *SupervisorIntentFile) error {
-	raw, err := marshalSupervisorIntent(f)
+func WriteSupervisorIntent(path string, f *SupervisorIntentFile) (err error) {
+	release, err := lockSupervisorIntent(path)
 	if err != nil {
-		return err
+		return fmt.Errorf("supervisor-intent flock %s: %w", supervisorIntentLockPath(path), err)
 	}
-	return WriteStateFileBytesAtomic(path, raw)
+	defer releaseSupervisorIntentAndJoin(&err, release, "release supervisor-intent flock")
+	return writeSupervisorIntentLockHeld(path, f)
 }
 
 func marshalSupervisorIntent(f *SupervisorIntentFile) ([]byte, error) {
@@ -503,6 +504,42 @@ func (f *SupervisorIntentFile) HasSerenaDaemonForWorkspaceKey(key string) bool {
 	return false
 }
 
+// SpecBearingSerenaDaemonForWorkspaceKey returns a pointer to the serena
+// per-workspace daemon row for the given workspace key WITH a non-nil
+// RuntimeSpec — i.e. a row the reconciler will actually spawn — or nil when no
+// such row exists. A bare HasSerenaDaemonForWorkspaceKey match is NOT
+// sufficient: a legacy pre-redesign nil-RuntimeSpec serena row occupies the
+// task name, but the reconciler excludes it from the spawn-desired set
+// (internal/cli/supervise_reconcile.go), so it is not a live daemon.
+//
+// Single owner of this predicate (C1): HasSpecBearingSerenaDaemonForWorkspaceKey
+// (the bare presence check RepairSerenaIntentFromRegistry uses) and the
+// explicit `mcphub workspace register` post-materialize SETTLED-tuple gate
+// (internal/cli/workspace_cmd.go, which additionally needs the matched row's
+// port to confirm registry/intent agreement) both resolve through this ONE
+// matching loop rather than re-deriving the task-name-plus-spec check.
+func (f *SupervisorIntentFile) SpecBearingSerenaDaemonForWorkspaceKey(key string) *SupervisorDaemon {
+	if f == nil {
+		return nil
+	}
+	want := "mcp-local-hub-serena-" + key
+	for i := range f.Daemons {
+		if strings.TrimPrefix(f.Daemons[i].TaskName, `\`) == want && f.Daemons[i].RuntimeSpec != nil {
+			return &f.Daemons[i]
+		}
+	}
+	return nil
+}
+
+// HasSpecBearingSerenaDaemonForWorkspaceKey reports whether this intent
+// carries a serena per-workspace daemon row for the given workspace key WITH
+// a non-nil RuntimeSpec. Thin bool wrapper over
+// SpecBearingSerenaDaemonForWorkspaceKey so callers that only need presence
+// (not the matched row itself) keep their existing call shape.
+func (f *SupervisorIntentFile) HasSpecBearingSerenaDaemonForWorkspaceKey(key string) bool {
+	return f.SpecBearingSerenaDaemonForWorkspaceKey(key) != nil
+}
+
 // StopsAsDaemonIntentFile returns the supervisor-intent stops sub-block
 // shaped as a *DaemonIntentFile so the existing IsActiveStop readers
 // consume it with NO change to their value shape. The returned file's
@@ -549,18 +586,9 @@ func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, _ *DaemonIntentFil
 	return supervisorIntent.StopsAsDaemonIntentFile()
 }
 
-// supervisorIntentLockSuffix is the gofrs/flock lock-leaf suffix for
-// supervisor-intent.json. It is exactly the `<path>.lock` form
-// WriteStateFileAtomic derives internally (state_file_helper.go:85), so a
-// caller that wants an atomic read-modify-write across the supervisor-intent
-// file can acquire `intentPath + supervisorIntentLockSuffix` and serialize
-// against WriteStateFileAtomic writers (migration, autostart,
-// InstallParsedManifest) across goroutines AND processes.
-const supervisorIntentLockSuffix = ".lock"
-
 // writeSupervisorIntentLockHeld marshals + writes the supervisor-intent file
 // WITHOUT acquiring the per-file flock, for callers that already hold
-// `path + supervisorIntentLockSuffix`. It mirrors daemon_intent.go's
+// canonical supervisor-intent lock leaf. It mirrors daemon_intent.go's
 // readIntentLocked/writeIntentLocked split: WriteSupervisorIntent (and the
 // WriteStateFileAtomic it wraps) re-acquires the same flock, so calling it
 // while the lock is held would DEADLOCK on Windows LockFileEx. This helper

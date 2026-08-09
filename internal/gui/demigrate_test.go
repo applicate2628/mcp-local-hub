@@ -25,7 +25,7 @@ func (f *fakeDemigrater) Demigrate(servers, clients []string) (*api.DemigrateRep
 }
 
 func TestDemigrateHandler_RejectsNonPOST(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.demigrater = &fakeDemigrater{}
 	req := httptest.NewRequest(http.MethodGet, "/api/demigrate", nil)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
@@ -45,7 +45,7 @@ func TestDemigrateHandler_ForwardsServersAndClients(t *testing.T) {
 			Restored: []api.RestoredMigration{{Server: "memory", Client: "claude-code"}},
 		},
 	}
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.demigrater = fake
 	body := bytes.NewReader([]byte(`{"servers":["memory"],"clients":["claude-code"]}`))
 	req := httptest.NewRequest(http.MethodPost, "/api/demigrate", body)
@@ -91,7 +91,7 @@ func TestDemigrateHandler_PartialFailureReturns207(t *testing.T) {
 			},
 		},
 	}
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.demigrater = fake
 	body := bytes.NewReader([]byte(`{"servers":["memory","time"]}`))
 	req := httptest.NewRequest(http.MethodPost, "/api/demigrate", body)
@@ -133,7 +133,7 @@ func TestDemigrateHandler_PartialFailureReturns207(t *testing.T) {
 // happen but failing loudly via Encode(nil) would corrupt the frontend.
 func TestDemigrateHandler_NilReportTreatedAsEmpty(t *testing.T) {
 	fake := &fakeDemigrater{} // report=nil, err=nil
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.demigrater = fake
 	body := bytes.NewReader([]byte(`{"servers":["memory"]}`))
 	req := httptest.NewRequest(http.MethodPost, "/api/demigrate", body)
@@ -161,7 +161,7 @@ func TestDemigrateHandler_NilReportTreatedAsEmpty(t *testing.T) {
 func TestDemigrateHandler_SurfacesDemigrateError(t *testing.T) {
 	leaky := errStub("open C:\\Users\\alice\\AppData\\Local\\mcp-local-hub\\manifests\\demo: permission denied")
 	fake := &fakeDemigrater{err: leaky}
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.demigrater = fake
 	body := bytes.NewReader([]byte(`{"servers":["memory"]}`))
 	req := httptest.NewRequest(http.MethodPost, "/api/demigrate", body)
@@ -187,7 +187,7 @@ func TestDemigrateHandler_SurfacesDemigrateError(t *testing.T) {
 }
 
 func TestDemigrateHandler_RejectsCrossOrigin(t *testing.T) {
-	s := NewServer(Config{Port: 0})
+	s := newEphemeralServer(t, Config{Port: 0})
 	s.demigrater = &fakeDemigrater{}
 	body := bytes.NewReader([]byte(`{"servers":["memory"]}`))
 	req := httptest.NewRequest(http.MethodPost, "/api/demigrate", body)

@@ -47,6 +47,37 @@ import (
 
 const reconcileWiringTestTaskName = `\mcp-local-hub-memory-default`
 
+func assertLSPRegistrySnapshotUnavailableEvent(t *testing.T, phase string, snapshotUsable bool) {
+	t.Helper()
+	path := filepath.Join(apitest.HardenedTempDir(t), "supervisor-events.log")
+	events, err := api.OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatalf("open supervisor event log: %v", err)
+	}
+	releaseErr := errors.Join(api.ErrLockReleaseUnconfirmed, errors.New("synthetic release"))
+	emitLSPRegistryReconcileSnapshotUnavailable(events, phase, snapshotUsable, releaseErr)
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read supervisor event log: %v", err)
+	}
+	log := string(raw)
+	for _, want := range []string{
+		`"event":"lsp-registry-reconcile-snapshot-unavailable"`,
+		`"phase":"` + phase + `"`,
+		`"snapshot_usable":` + strconv.FormatBool(snapshotUsable),
+		`"release_unconfirmed":true`,
+		`"restart_recovers":true`,
+	} {
+		if !strings.Contains(log, want) {
+			t.Fatalf("event log missing %q:\n%s", want, log)
+		}
+	}
+}
+
+func TestLSPRegistryStartupReconcileSnapshotUnavailableReportsUsableSnapshot(t *testing.T) {
+	assertLSPRegistrySnapshotUnavailableEvent(t, "startup", true)
+}
+
 // TestRunSupervise_SpawnsDaemonsFromIntent verifies that runSupervise
 // invokes the production reconciler against the parsed supervisor
 // intent. The test seeds supervisor-intent.json with one descriptor
@@ -64,6 +95,14 @@ const reconcileWiringTestTaskName = `\mcp-local-hub-memory-default`
 func TestRunSupervise_SpawnsDaemonsFromIntent(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+
+	// This test is about the reconcile→spawn WIRING CONTRACT for the seeded
+	// descriptor, not the built-in route daemon (Increment 1b) — suppress
+	// route seeding so the exact "called once, with THIS task name" assertion
+	// below stays a clean single-descriptor proof. The route daemon's own
+	// spawn behavior is covered separately (builtin_route_daemon_test.go,
+	// TestSuperviseCommand_StatusIPC_ReconcileReady) WITH seeding on.
+	defer setBuiltinRouteSeedingDisabledForTest()()
 
 	// Seed supervisor-intent.json with one descriptor. Command is a
 	// no-op the spawn closure never executes — the fake captures the
@@ -152,9 +191,19 @@ func TestRunSupervise_SpawnsDaemonsFromIntent(t *testing.T) {
 // This is the fresh-install / first-boot path: no descriptors means
 // no daemons to start, and the supervisor must still reach
 // reconcile-ready cleanly.
+//
+// Increment 1b (work-items/decisions/2026-07-25-supervisor-builtin-singleton-
+// daemon.md) made supervisor-intent.json NEVER truly empty on a real cold
+// start (the built-in route daemon is always seeded) — this test is
+// specifically about the "absent intent -> no spawn" WIRING CONTRACT for
+// manifest/operator-owned descriptors, so route seeding is suppressed here;
+// the route daemon's own always-seeded behavior is covered separately
+// (builtin_route_daemon_test.go's TestEnsureBuiltinRouteDaemonAtStartup_
+// PersistsAndSurvivesReread + TestSuperviseCommand_StatusIPC_ReconcileReady).
 func TestRunSupervise_NoIntentNoSpawn(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	defer setBuiltinRouteSeedingDisabledForTest()()
 
 	var spawnCalled atomic.Int32
 	cleanupSpawn := setReconcileSpawnFnForTest(func(d api.SupervisorDaemon) error {
@@ -381,6 +430,15 @@ func TestLoadIntentFiles_RespectsDaemonIntentFlock(t *testing.T) {
 func TestRunSupervise_ReconcileReadyBeforeSpawnCompletes(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	// The fake spawn closure below does an unconditional close(spawnEntered)
+	// on every call — it is written for exactly ONE descriptor entering
+	// spawn. With Increment 1b's always-seeded built-in route daemon, a
+	// second (route) spawn call would double-close that channel and panic.
+	// This test is about the reconcile-ready-vs-spawn-in-flight TIMING
+	// contract for the single seeded descriptor, not the route feature, so
+	// route seeding is suppressed here (see TestRunSupervise_NoIntentNoSpawn's
+	// doc comment for where route's own behavior is covered instead).
+	defer setBuiltinRouteSeedingDisabledForTest()()
 
 	intent := &api.SupervisorIntentFile{
 		Version:   1,

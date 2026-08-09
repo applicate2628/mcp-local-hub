@@ -3,11 +3,13 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync/atomic"
@@ -17,6 +19,7 @@ import (
 	"github.com/gofrs/flock"
 
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/process"
 )
 
 func TestAcquireSingleInstance_FirstCallerSucceeds(t *testing.T) {
@@ -735,6 +738,291 @@ func TestProbe_MacOSUnsupported_NoPing_ClassifiesLiveUnreachable(t *testing.T) {
 	}
 	if !strings.Contains(killV.Diagnose, "macOS") {
 		t.Errorf("Diagnose = %q; want macOS-specific message (not the image-gate cascade)", killV.Diagnose)
+	}
+}
+
+// TestVerdict_IdentityProbeUnsupported_MatchesProbeOnce anchors the exported
+// IdentityProbeUnsupported() accessor to what probeOnce ACTUALLY produces, so
+// an out-of-package consumer (probeGUIOwnerAlive's classifier in
+// internal/cli) branches on the same fact the probe recorded rather than on a
+// re-derived guess. It also pins the non-obvious Healthy row.
+//
+// Both sentinels are injected through the processIDOverride seam, so the
+// darwin AND windows-non-amd64 shapes are both exercised on this
+// windows/amd64 host where neither is otherwise reachable — win32-arm64 is a
+// SHIPPED npm target, so its behavior cannot go untested just because the dev
+// host cannot produce it natively.
+//
+// MUTATION: change IdentityProbeUnsupported to `return v.macOSUnsupported`
+// (dropping the arch half) — the "windows-arch-unsupported, ping fails"
+// subtest fails with "IdentityProbeUnsupported() = false, want true".
+func TestVerdict_IdentityProbeUnsupported_MatchesProbeOnce(t *testing.T) {
+	cases := []struct {
+		name        string
+		identityErr error
+		// listen makes the probe find a live /api/ping answering with the
+		// recorded PID, so probeOnce takes its pingMatched early return.
+		listen   bool
+		wantCls  VerdictClass
+		wantFlag bool
+		why      string
+	}{
+		{
+			name:        "macos-unsupported-ping-fails",
+			identityErr: errMacOSProbeUnsupported,
+			wantCls:     VerdictLiveUnreachable,
+			wantFlag:    true,
+			why:         "the identity probe could not run and no ping answered: nothing at all is known about the PID",
+		},
+		{
+			name:        "windows-arch-unsupported-ping-fails",
+			identityErr: errWindowsArchUnsupported,
+			wantCls:     VerdictLiveUnreachable,
+			wantFlag:    true,
+			why:         "same shape on a Windows non-amd64 build (PEB offsets are 64-bit-only)",
+		},
+		{
+			name:        "identity-probe-ran-ping-fails",
+			identityErr: nil,
+			wantCls:     VerdictLiveUnreachable,
+			wantFlag:    false,
+			why:         "the probe ran and reported the PID alive; the class carries a real liveness fact",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			prev := ProcessIDForTest()
+			defer RestoreProcessID(prev)
+			SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+				if tc.identityErr != nil {
+					return ProcessIdentity{}, tc.identityErr
+				}
+				return ProcessIdentity{Alive: true}, nil
+			})
+
+			dir := apitest.HardenedTempDir(t)
+			pidport := filepath.Join(dir, "gui.pidport")
+			// Port 1 has no listener — ping fails.
+			const probablyClosedPort = 1
+			if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			// Backdate so the LiveUnreachable startup-retry loop does not fire.
+			oldMtime := time.Now().Add(-1 * time.Hour)
+			if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+				t.Fatalf("Chtimes: %v", err)
+			}
+
+			v := Probe(context.Background(), pidport)
+			if v.Class != tc.wantCls {
+				t.Fatalf("Class = %v, want %v (%s). Diagnose=%q", v.Class, tc.wantCls, tc.why, v.Diagnose)
+			}
+			if got := v.IdentityProbeUnsupported(); got != tc.wantFlag {
+				t.Fatalf("IdentityProbeUnsupported() = %v, want %v (%s)", got, tc.wantFlag, tc.why)
+			}
+		})
+	}
+
+	// The non-obvious row: probeOnce stamps the unsupported flags BEFORE its
+	// pingMatched early return, so a VerdictHealthy ALSO reports true here.
+	// Consumers must therefore branch on this accessor only for classes whose
+	// liveness claim rests on the identity probe — never as a blanket
+	// "distrust every verdict from this platform", which would throw away the
+	// independent positive proof a matching ping provides.
+	t.Run("healthy-under-unsupported-probe-still-flags", func(t *testing.T) {
+		prev := ProcessIDForTest()
+		defer RestoreProcessID(prev)
+		SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+			return ProcessIdentity{}, errWindowsArchUnsupported
+		})
+
+		// Healthy ping server reporting our own PID (same shape as
+		// TestProbe_MacOSUnsupported_HealthyPing_StillClassifiesHealthy).
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/ping" {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "pid": os.Getpid()})
+		}))
+		defer srv.Close()
+		port := portFromURL(t, srv.URL)
+
+		dir := apitest.HardenedTempDir(t)
+		pidport := filepath.Join(dir, "gui.pidport")
+		if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), port)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		oldMtime := time.Now().Add(-1 * time.Hour)
+		if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+			t.Fatalf("Chtimes: %v", err)
+		}
+
+		v := Probe(context.Background(), pidport)
+		if v.Class != VerdictHealthy {
+			t.Fatalf("Class = %v, want VerdictHealthy (a matching ping is a complete verdict regardless of identity-probe support). Diagnose=%q", v.Class, v.Diagnose)
+		}
+		if !v.IdentityProbeUnsupported() {
+			t.Fatal("IdentityProbeUnsupported() = false on a Healthy verdict from an unsupported-probe platform; want true (the flag records what the PROBE could do, not what the verdict concluded) — consumers rely on this to know they must gate the accessor by Class")
+		}
+	})
+}
+
+func TestEvaluateProcessIdentity_Matrix(t *testing.T) {
+	if got := []VerdictClass{VerdictHealthy, VerdictLiveUnreachable, VerdictDeadPID, VerdictMalformed, VerdictKilledRecovered, VerdictKillRefused, VerdictKillFailed, VerdictRaceLost, VerdictIndeterminate}; !reflect.DeepEqual(got, []VerdictClass{0, 1, 2, 3, 4, 5, 6, 7, 8}) {
+		t.Fatalf("VerdictClass wire numbering changed: %v", got)
+	}
+	originalOwner := processOwnerSIDMatchesCurrentFn
+	t.Cleanup(func() { processOwnerSIDMatchesCurrentFn = originalOwner })
+	mtime := time.Date(2026, time.August, 8, 12, 0, 0, 0, time.UTC)
+	imageLeaf := "mcphub"
+	if runtime.GOOS == "windows" {
+		imageLeaf += ".exe"
+	}
+	matchingImage := filepath.Join(t.TempDir(), imageLeaf)
+	matching := Verdict{
+		Class:         VerdictLiveUnreachable,
+		PID:           4242,
+		PIDImage:      matchingImage,
+		Mtime:         mtime,
+		PIDStart:      mtime.Add(-time.Minute),
+		pidCmdlineRaw: []string{matchingImage, "gui"},
+	}
+	tests := []struct {
+		name       string
+		verdict    Verdict
+		owner      func(int) (bool, error)
+		want       ProcessIdentityClass
+		wantRefuse bool
+	}{
+		{name: "match", verdict: matching, owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMatch},
+		{name: "wrong image", verdict: func() Verdict { v := matching; v.PIDImage = filepath.Join(t.TempDir(), "not-mcphub"); return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "wrong argv", verdict: func() Verdict { v := matching; v.pidCmdlineRaw = []string{v.PIDImage, "daemon"}; return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "recycled pid", verdict: func() Verdict { v := matching; v.PIDStart = mtime.Add(2 * time.Second); return v }(), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "different owner", verdict: matching, owner: func(int) (bool, error) { return false, nil }, want: ProcessIdentityMismatch, wantRefuse: true},
+		{name: "owner uncertain", verdict: matching, owner: func(int) (bool, error) { return false, errors.New("owner lookup failed") }, want: ProcessIdentityUnsupportedOrUncertain, wantRefuse: true},
+		{name: "gone", verdict: matching, owner: func(int) (bool, error) { return false, process.ErrProcessAlreadyExited }, want: ProcessIdentityGone},
+		{name: "unsupported", verdict: NewIdentityProbeUnsupportedVerdictForTest(VerdictLiveUnreachable, 4242, 9125), owner: func(int) (bool, error) { return true, nil }, want: ProcessIdentityUnsupportedOrUncertain, wantRefuse: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			processOwnerSIDMatchesCurrentFn = test.owner
+			result := EvaluateProcessIdentity(test.verdict)
+			if result.Class != test.want {
+				t.Fatalf("identity class=%v want=%v", result.Class, test.want)
+			}
+			refused, reason := CheckIdentityGate(test.verdict)
+			if refused != test.wantRefuse {
+				t.Fatalf("CheckIdentityGate refused=%v want=%v reason=%q", refused, test.wantRefuse, reason)
+			}
+		})
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Residual 1(a) review fix: probeOnce must map id.Indeterminate to
+// VerdictIndeterminate, never VerdictDeadPID, and KillRecordedHolder must
+// skip the kill for it exactly like VerdictMalformed/VerdictDeadPID. These
+// tests inject ProcessIdentity{Indeterminate: true} via the processIDOverride
+// seam, so they exercise the CONSUMER side (single_instance.go) independent
+// of platform — the platform-specific PRODUCER side (only
+// ERROR_INVALID_PARAMETER / ESRCH may claim definitive death) is covered by
+// probe_windows_test.go's classifyOpenProcessError tests (and
+// probe_linux_test.go's classifyKillError tests, cross-compile-verified but
+// not executed on this Windows host).
+// ---------------------------------------------------------------------------
+
+// TestProbe_IndeterminateIdentity_ClassifiesIndeterminate reproduces the
+// residual 1(a) danger directly at the consumer layer: BEFORE this fix,
+// probeOnce's `if !id.Alive { v.Class = VerdictDeadPID }` cascade had no way
+// to distinguish "the platform proved this PID doesn't exist" from "the
+// platform probe itself failed ambiguously" — both collapsed to
+// id.Alive==false. VerdictDeadPID is the ONLY class that authorizes a
+// destructive relaunch downstream (probeGUIOwnerAlive maps it to
+// guiOwnerStateConfirmedDead). A transient platform error must never reach
+// it.
+//
+// MUTATION: delete the `if id.Indeterminate { v.Class = VerdictIndeterminate;
+// ...; return v }` branch in probeOnce (single_instance.go) — id.Alive's
+// zero-value false then falls straight into the `if !id.Alive` cascade and
+// this test's "want VerdictIndeterminate" assertion fails (got
+// VerdictDeadPID instead).
+func TestProbe_IndeterminateIdentity_ClassifiesIndeterminate(t *testing.T) {
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{Indeterminate: true}, errors.New("injected ambiguous platform failure")
+	})
+
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	// Port 1 has no listener — ping will fail, so the identity probe result
+	// is what decides classification.
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Backdate so the startup-window retry loop doesn't fire.
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	v := Probe(context.Background(), pidport)
+	if v.Class != VerdictIndeterminate {
+		t.Fatalf("Class = %v, want VerdictIndeterminate (NOT DeadPID — an ambiguous platform error is not proof of death). Diagnose=%q", v.Class, v.Diagnose)
+	}
+	if v.PIDAlive {
+		t.Errorf("PIDAlive = true, want false")
+	}
+}
+
+// TestKillRecordedHolder_IndeterminateIdentity_SkipsKill proves the
+// destructive path also refuses on VerdictIndeterminate: KillRecordedHolder's
+// top-of-function switch has NO default arm, so a class it does not
+// explicitly list falls through into the destructive identity-gate cascade
+// below instead of refusing at the early skip-list.
+//
+// MUTATION: remove VerdictIndeterminate from KillRecordedHolder's
+// `case VerdictMalformed, VerdictDeadPID, VerdictIndeterminate:` skip-list —
+// execution then falls through into the identity-gate cascade below, which
+// refuses for a DIFFERENT reason (empty ImagePath fails matchBasename), so
+// this test's "err contains kill skipped" assertion fails: the error message
+// becomes the image-gate's "is not an mcphub binary" wording instead.
+func TestKillRecordedHolder_IndeterminateIdentity_SkipsKill(t *testing.T) {
+	prev := ProcessIDForTest()
+	defer RestoreProcessID(prev)
+	SetProcessIDOverride(func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{Indeterminate: true}, errors.New("injected ambiguous platform failure")
+	})
+
+	dir := apitest.HardenedTempDir(t)
+	pidport := filepath.Join(dir, "gui.pidport")
+	const probablyClosedPort = 1
+	if err := os.WriteFile(pidport, []byte(formatPidport(os.Getpid(), probablyClosedPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldMtime := time.Now().Add(-1 * time.Hour)
+	if err := os.Chtimes(pidport, oldMtime, oldMtime); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	fl := flock.New(pidport + ".lock")
+	if ok, _ := fl.TryLock(); !ok {
+		t.Fatal("could not pre-lock")
+	}
+	defer fl.Unlock()
+
+	_, v, err := KillRecordedHolder(context.Background(), pidport, KillOpts{})
+	if err == nil {
+		t.Fatalf("KillRecordedHolder on an indeterminate identity returned nil error; expected refused")
+	}
+	if v.Class != VerdictIndeterminate {
+		t.Fatalf("Class = %v, want VerdictIndeterminate", v.Class)
+	}
+	if !strings.Contains(err.Error(), "kill skipped") {
+		t.Errorf("err = %q, want the early skip-list message (\"kill skipped: ...\"), not a cascade into the destructive identity gate", err.Error())
 	}
 }
 

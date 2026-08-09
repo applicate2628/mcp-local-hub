@@ -1,15 +1,76 @@
 package lsp_routing
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
 	"testing"
 	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
 )
+
+func TestRefreshCapturesEntriesBeforeRegistryRelease(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	src, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "resolver.go"))
+	if err != nil {
+		t.Fatalf("ReadFile resolver.go: %v", err)
+	}
+	capture := bytes.Index(src, []byte("entries = r.reg.LSPEntries()"))
+	release := bytes.Index(src, []byte("releaseErr := unlock()"))
+	if capture < 0 || release < 0 {
+		t.Fatalf("refresh ordering anchors missing: capture=%d release=%d", capture, release)
+	}
+	if capture > release {
+		t.Fatal("refresh releases the registry lock before capturing LSP entries")
+	}
+}
+
+func TestRefreshSnapshotsRegistryBeforeUnlock(t *testing.T) {
+	dir := t.TempDir()
+	entries := make([]api.WorkspaceEntry, 512)
+	for i := range entries {
+		entries[i] = api.WorkspaceEntry{
+			WorkspaceKey:  fmt.Sprintf("workspace-%04d", i),
+			WorkspacePath: filepath.Join(dir, fmt.Sprintf("workspace-%04d", i)),
+			Language:      "go",
+			Port:          9200 + i,
+		}
+	}
+	regPath := makeRegistryWithLSP(t, dir, entries)
+	reg := api.NewRegistry(regPath)
+	resolver := NewWorkspaceResolver(reg, regPath, testLanguages())
+
+	var wg sync.WaitGroup
+	for worker := 0; worker < 4; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for iteration := 0; iteration < 8; iteration++ {
+				resolver.mu.Lock()
+				resolver.loaded = false
+				resolver.mu.Unlock()
+				resolver.refresh()
+			}
+		}()
+	}
+	wg.Wait()
+
+	resolver.mu.RLock()
+	got := len(resolver.cached)
+	resolver.mu.RUnlock()
+	if got != len(entries) {
+		t.Fatalf("cached entries = %d, want %d", got, len(entries))
+	}
+}
 
 func testLanguages() []config.LanguageSpec {
 	return []config.LanguageSpec{
@@ -299,5 +360,116 @@ func TestResolveByPath_RefreshesRegistryOnMtimeAdvance(t *testing.T) {
 	}
 	if second.Entry == nil || second.Entry.Port != 9203 {
 		t.Fatalf("second Entry = %+v, want port 9203", second.Entry)
+	}
+}
+
+// TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock is the
+// LSP twin of serena_routing's identically-named test — the P2-3 falsifying
+// test (adversarial cross-family review of Increment 1). See that package's
+// doc comment for the full safety argument. This test holds the registry's
+// exclusive lock externally (simulating a concurrent GUI mutation) and proves
+// a read-only LSP resolver's refresh still completes instead of blocking.
+//
+// Mutation-proven: constructing via NewWorkspaceResolver (the locked path)
+// instead of NewReadOnlyWorkspaceResolver reproduces the pre-fix blocking
+// behavior — see TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock
+// immediately below for the contrasting, intentional production behavior.
+func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *testing.T) {
+	root := t.TempDir()
+	regPath := filepath.Join(root, "workspaces.yaml")
+	seedReg := api.NewRegistry(regPath)
+	if err := seedReg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewReadOnlyWorkspaceResolver(reg, regPath, testLanguages())
+	writeFile(t, filepath.Join(root, "anything", "go.mod"))
+	loose := filepath.Join(root, "anything", "main.go")
+	writeFile(t, loose)
+	if _, err := resolver.ResolveByPath(loose, "go"); err != nil && !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("prime resolve: %v", err)
+	}
+
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(regPath, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	holderReg := api.NewRegistry(regPath)
+	unlock, err := holderReg.Lock()
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+	defer unlock()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = resolver.ResolveByPath(loose, "go")
+		close(done)
+	}()
+	select {
+	case <-done:
+		// Correct: the read-only resolver never contended for the lock.
+	case <-time.After(3 * time.Second):
+		t.Fatal("read-only LSP resolver blocked on a concurrently-held exclusive registry lock — it must reload unlocked, not contend with a GUI writer")
+	}
+}
+
+// TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock pins the
+// CONTRASTING, intentional production behavior: the ordinary (non-read-only)
+// LSP resolver's refresh DOES take the registry's exclusive lock. Mirrors
+// the serena_routing package's identically-named test.
+func TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock(t *testing.T) {
+	root := t.TempDir()
+	regPath := filepath.Join(root, "workspaces.yaml")
+	seedReg := api.NewRegistry(regPath)
+	if err := seedReg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath, testLanguages())
+	writeFile(t, filepath.Join(root, "anything", "go.mod"))
+	loose := filepath.Join(root, "anything", "main.go")
+	writeFile(t, loose)
+	if _, err := resolver.ResolveByPath(loose, "go"); err != nil && !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("prime resolve: %v", err)
+	}
+
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(regPath, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	holderReg := api.NewRegistry(regPath)
+	unlock, err := holderReg.Lock()
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = resolver.ResolveByPath(loose, "go")
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("production LSP resolver did NOT block on a concurrently-held exclusive registry lock — expected it to wait")
+	case <-time.After(300 * time.Millisecond):
+		// Correct: still blocked after a short wait.
+	}
+	unlock()
+	select {
+	case <-done:
+		// Correct: unblocks once the holder releases.
+	case <-time.After(3 * time.Second):
+		t.Fatal("production LSP resolver never unblocked after the holder released the lock")
 	}
 }
