@@ -44,17 +44,19 @@ type parseResult struct {
 	// whose every line was malformed — without buffering the file to run a
 	// whole-content TrimSpace over it.
 	sawAnyContent bool
-	// The three ceilings, each recorded independently: they are different
+	// The four ceilings, each recorded independently: they are different
 	// facts and a caller may need to act on them differently.
-	hitByteLimit   bool
-	hitLineLimit   bool
-	hitRecordLimit bool
+	hitByteLimit           bool
+	hitLineLimit           bool
+	hitRecordLimit         bool
+	hitRetainedRecordLimit bool
+	retainedRecordBytes    int64
 }
 
 func (p parseResult) sawNoContent() bool { return !p.sawAnyContent }
 
 func (p parseResult) incomplete() bool {
-	return p.malformedCount > 0 || p.hitByteLimit || p.hitLineLimit || p.hitRecordLimit
+	return p.malformedCount > 0 || p.hitByteLimit || p.hitLineLimit || p.hitRecordLimit || p.hitRetainedRecordLimit
 }
 
 // incompleteReasons returns every reason this parse is incomplete, in a
@@ -78,6 +80,9 @@ func (p parseResult) incompleteReasons() []Reason {
 	}
 	if p.hitRecordLimit {
 		out = append(out, ReasonRecordLimit)
+	}
+	if p.hitRetainedRecordLimit {
+		out = append(out, ReasonRetainedRecordLimit)
 	}
 	return out
 }
@@ -155,7 +160,7 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 			return parseResult{}, err
 		}
 
-		if stop := res.consumeLine(raw, lim.MaxParsedRecords); stop {
+		if stop := res.consumeLine(raw, lim.MaxParsedRecords, lim.MaxRetainedRecordBytes); stop {
 			return res, nil
 		}
 
@@ -165,9 +170,9 @@ func parseTraceStream(ctx context.Context, r io.Reader, lim Limits) (parseResult
 	}
 }
 
-// consumeLine folds one raw line into res. It returns stop=true when the
-// record ceiling was reached, so the caller abandons the rest of the file.
-func (p *parseResult) consumeLine(raw string, maxRecords int) (stop bool) {
+// consumeLine folds one raw line into res. It returns stop=true when either
+// record-retention ceiling was reached, so the caller abandons the rest.
+func (p *parseResult) consumeLine(raw string, maxRecords int, maxRetainedRecordBytes int64) (stop bool) {
 	line := strings.TrimRight(raw, "\r\n")
 	line = strings.TrimRight(line, "\r")
 	if strings.TrimSpace(line) == "" {
@@ -203,6 +208,13 @@ func (p *parseResult) consumeLine(raw string, maxRecords int) (stop bool) {
 		return true
 	}
 
+	retainedBytes := retainedTraceRecordBytes(tl)
+	if retainedBytes > maxRetainedRecordBytes-p.retainedRecordBytes {
+		p.hitRetainedRecordLimit = true
+		return true
+	}
+	p.retainedRecordBytes += retainedBytes
+
 	p.records = append(p.records, Record{
 		File:        tl.File,
 		Line:        tl.Line,
@@ -214,6 +226,20 @@ func (p *parseResult) consumeLine(raw string, maxRecords int) (stop bool) {
 		Defer:       len(tl.Defer) > 0 && string(tl.Defer) != "null",
 	})
 	return false
+}
+
+// retainedTraceRecordBytes conservatively accounts for the retained Record
+// object, string/slice headers, and decoded backing bytes. It deliberately
+// does not use unsafe.Sizeof: the fixed allowance is safe on both supported
+// pointer widths and keeps the resource contract portable.
+func retainedTraceRecordBytes(tl traceLine) int64 {
+	const recordAndHeaders = 128
+	const argumentCell = 16
+	n := int64(recordAndHeaders + len(tl.File) + len(tl.Cmd))
+	for _, arg := range tl.Args {
+		n += int64(argumentCell + len(arg))
+	}
+	return n
 }
 
 // readLine reads one newline-terminated line. When the line exceeds maxBytes

@@ -128,6 +128,10 @@ const (
 	// stopped. This bounds parse memory, the per-file line index, AND the
 	// response — every one of those is derived from the record set.
 	ReasonRecordLimit Reason = "record_limit"
+	// ReasonRetainedRecordLimit: decoded record strings and argument cells
+	// reached MaxRetainedRecordBytes. The parsed prefix remains positive
+	// evidence, but the unread tail cannot support absence conclusions.
+	ReasonRetainedRecordLimit Reason = "retained_record_limit"
 	// ReasonCanceled: the caller's context was canceled or its deadline
 	// expired mid-parse. Fails closed: no partial result is returned, because
 	// a truncated index would look exactly like a complete one that happened
@@ -174,6 +178,9 @@ const (
 	// this single ceiling bounds parse memory, both indexes, and the
 	// response size together.
 	MaxParsedRecords = 2000000
+	// MaxRetainedRecordBytes bounds aggregate decoded Record payload and
+	// container storage independently of source-file and record-count limits.
+	MaxRetainedRecordBytes = 64 << 20 // 64 MiB
 )
 
 // Args is the vcpkg_cmake_trace tool's input contract.
@@ -317,9 +324,10 @@ func DefaultFS() FS { return osFS{} }
 // bound nobody has ever seen work. This is config passed down from the
 // composition root, not a mutable package global.
 type Limits struct {
-	MaxTraceBytes    int64
-	MaxLineBytes     int
-	MaxParsedRecords int
+	MaxTraceBytes          int64
+	MaxLineBytes           int
+	MaxParsedRecords       int
+	MaxRetainedRecordBytes int64
 }
 
 func (l Limits) normalized() Limits {
@@ -331,6 +339,9 @@ func (l Limits) normalized() Limits {
 	}
 	if l.MaxParsedRecords <= 0 {
 		l.MaxParsedRecords = MaxParsedRecords
+	}
+	if l.MaxRetainedRecordBytes <= 0 {
+		l.MaxRetainedRecordBytes = MaxRetainedRecordBytes
 	}
 	return l
 }

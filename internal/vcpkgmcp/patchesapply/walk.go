@@ -238,6 +238,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			continue
 		}
 		if len(loopScopes) != 0 {
+			if active() != TriFalse {
+				invalidateLoopMutation(st, env)
+			}
 			if containsPatchesKeyword(st.Args) {
 				sawPatchesKeyword = true
 				deferredCommandBody = true
@@ -377,6 +380,30 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 		return nil, false, parserStructuralExecutionUncertain
 	}
 	return entries, sawPatchesKeyword, parserStructuralNone
+}
+
+// invalidateLoopMutation prevents a value established before a potentially
+// repeating body from surviving as certain after that body. The textual
+// evaluator does not execute loops, so a set/unset/list mutation may run zero
+// or many times; only the destination binding is invalidated, leaving
+// unrelated variables usable.
+func invalidateLoopMutation(st statement, env *varEnv) {
+	toks := tokenize(st.Args)
+	var name string
+	switch st.Name {
+	case "set", "unset":
+		if len(toks) != 0 {
+			name = toks[0].Text
+		}
+	case "list":
+		if len(toks) >= 2 && !toks[0].Quoted &&
+			(toks[0].Text == "APPEND" || listSubcommandMutatesInput(toks[0].Text)) {
+			name = toks[1].Text
+		}
+	}
+	if name != "" {
+		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+	}
 }
 
 type patchesPresence uint8

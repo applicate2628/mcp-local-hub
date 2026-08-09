@@ -184,10 +184,24 @@ func approveRemoteURL(raw string) (approvedRemoteURL, Reason) {
 	if isRelativeLocalRemote(raw, parsed, parseErr) {
 		return approvedRemoteURL{}, ReasonRemoteURLRelative
 	}
+	if parseErr == nil && parsed != nil && parsed.Scheme != "" && strings.Contains(raw, "://") &&
+		!approvedGitTransport(parsed.Scheme) {
+		var rejected approvedRemoteURL
+		return rejected, ReasonRemoteURLTransportUnapproved
+	}
 	if !validRemoteURLShape(raw, parsed, parseErr) {
 		return approvedRemoteURL{}, ReasonPortfileUnparsable
 	}
 	return approvedRemoteURL{raw: raw, proof: remoteURLApprovalProof}, ""
+}
+
+func approvedGitTransport(scheme string) bool {
+	switch strings.ToLower(scheme) {
+	case "file", "git", "http", "https", "ssh", "ftp", "ftps":
+		return true
+	default:
+		return false
+	}
 }
 
 func isRelativeLocalRemote(raw string, parsed *url.URL, parseErr error) bool {

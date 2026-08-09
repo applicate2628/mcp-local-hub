@@ -400,6 +400,16 @@ func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, go
 		}
 		if m := wrapperCommandRE.FindStringSubmatch(line); m != nil {
 			command := m[1]
+			// Each command line is one invocation context. Replace every
+			// command-derived field together so a target from an earlier
+			// invocation can never inherit the later invocation's triplet.
+			info.CommandTargets = nil
+			info.CommandTargetsDropped = 0
+			info.CommandTriplet = ""
+			info.OverlayPorts = nil
+			info.OverlayPortsDropped = 0
+			info.BuildtreesRoot = ""
+			info.InstallRoot = ""
 			info.Command, info.CommandTruncated = truncateWireValue(command, limits.commandBytes)
 			ok = true
 			inFailedPorts = false

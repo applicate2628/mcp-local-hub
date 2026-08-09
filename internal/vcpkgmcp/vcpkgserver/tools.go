@@ -64,7 +64,8 @@ func pinStatusToolDescription() string {
 		"so an abbreviation has nothing to be matched against. A ${VARIABLE} REF assigned only inside an if()/foreach()/macro() body is "+
 		"unknown(%s), never resolved from a branch that may not have executed. Remote URLs are redacted on every emitted field "+
 		"— including ones url.Parse rejects — and a credential-bearing remote is "+
-		"refused rather than queried (its secret would otherwise appear in the child process's command line). "+
+		"refused rather than queried (its secret would otherwise appear in the child process's command line). URL schemes are "+
+		"restricted to Git's approved transports so an arbitrary git-remote-* executable cannot be selected from PATH. "+
 		"A remote-query lifecycle failure also includes failure.id and a fixed safe failure.detail; status/reason remain the compatibility verdict.", noPortDirs, tooManyPortDirs, batchReasons, relativePortDir, perPortReasons, commitPinAbbreviated, refUnresolvable) + resultProjectionDescription
 }
 
@@ -387,7 +388,8 @@ func registerTools(vs *VcpkgServer) error {
 			"orphan_scan_stop_cause. PATCHES inside a function() or macro() body, or carried through a declared " +
 			"function/macro invocation such as ${ARGN}, returns unknown(patches_deferred_command_body); declaration " +
 			"bodies and calls are not modeled. A conditionally active return() before later PATCHES returns " +
-			"unknown(patches_execution_uncertain); a definitely active return stops extraction. Both " +
+			"unknown(patches_execution_uncertain); a definitely active return stops extraction. set/unset/list destinations mutated inside " +
+			"a potentially executing loop are invalidated before later PATCHES use. Both " +
 			"vcpkg_extract_source_archive and its legacy _ex helper contribute PATCHES. Declaration " +
 			"count/retained-byte overflow returns unknown(patch_declaration_limit_exceeded) before probes. " +
 			"port_dir MUST be absolute (a relative one would bind to the hub daemon's working directory and " +
@@ -439,7 +441,7 @@ func registerTools(vs *VcpkgServer) error {
 			"Executed lines are positive evidence only: an absent line means \"not observed in this trace\", never \"unreachable\". It never runs cmake. " +
 			"Parsing STREAMS under hard ceilings (total bytes, per-line bytes, records materialized) rather than reading the file whole; any ceiling " +
 			"that trips, and any malformed line, is reported in input_incomplete_reasons[] (closed enum: input_malformed, byte_limit, line_limit, " +
-			"record_limit) so a bounded read is never mistaken for a complete one. Cancellation is observed and returns unknown(canceled) with no " +
+			"record_limit, retained_record_limit) so a bounded read is never mistaken for a complete one. Cancellation is observed and returns unknown(canceled) with no " +
 			"partial result. Note truncated (the returned records cap) is a SEPARATE, narrower signal from input_incomplete. " +
 			"An omitted or empty trace_path is unknown(trace_path_not_supplied) — a fact about the CALL, never " +
 			"unknown(trace_not_found), which is reserved for a path that WAS supplied and verified absent. A relative path is " +

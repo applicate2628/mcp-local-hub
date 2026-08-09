@@ -195,6 +195,10 @@ const (
 	// not positively identified as a credential. It is still refused because an
 	// unknown credential spelling must not gain child-process authority.
 	ReasonRemoteURLQueryUnclassified Reason = "remote_url_query_unclassified"
+	// ReasonRemoteURLTransportUnapproved: the URL scheme would select an
+	// arbitrary git-remote-* executable rather than one of Git's approved
+	// built-in transports. Refused before a child process starts.
+	ReasonRemoteURLTransportUnapproved Reason = "remote_url_transport_unapproved"
 	// ReasonSemanticFileIncomplete: portfile.cmake or vcpkg.json exceeded the
 	// package-owned semantic-file budget. Truncated text is not parsed because
 	// it cannot justify an ok pin-status verdict.
@@ -269,6 +273,7 @@ var pinStatusReasonRegistry = ReasonRegistry{
 		ReasonRemoteRefLimit,
 		ReasonRemoteURLCredentialBearing,
 		ReasonRemoteURLQueryUnclassified,
+		ReasonRemoteURLTransportUnapproved,
 		ReasonSemanticFileIncomplete,
 		ReasonFetchCandidateLimit,
 	},

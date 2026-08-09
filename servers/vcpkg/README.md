@@ -98,6 +98,9 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
 - **A scheme-less relative local Git remote is refused, not daemon-relative.** It returns
   `unknown(remote_url_relative)` before a child process starts. Absolute local paths and
   host-qualified URL/SCP remotes retain their existing behavior.
+- **A URL remote cannot select an arbitrary Git helper from `PATH`.** Only Git's approved
+  `file`, `git`, HTTP(S), SSH, and FTP(S) transports are admitted; another URL scheme returns
+  `unknown(remote_url_transport_unapproved)` before a child process starts.
 - **Pin-status remote work is bounded as one batch.** Duplicate approved remotes share one
   call-scoped snapshot, at most four remote queries run across the process, and one 60-second
   deadline covers the whole batch including slot wait time.
@@ -122,6 +125,9 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
   `vcpkg_extract_source_archive` and its legacy `_ex` helper are recognized.
   Declaration expansion is bounded by count and retained bytes; overflow
   returns `unknown(patch_declaration_limit_exceeded)` before any patch probe.
+  A `set`, `unset`, or mutating `list` command inside a potentially executing
+  loop invalidates its destination before a later PATCHES declaration, so a
+  pre-loop value is never reused as certain execution evidence.
   If a declared patch path retains an
   unresolved variable, orphan inventory is suppressed and reported as
   `unknown(orphan_scan_incomplete)` with
@@ -139,6 +145,9 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
   explicit.
 - **CMake trace parsing is json-v1 only.** An explicit header with another major returns
   `unknown(unsupported_trace_version)` and no partial records.
+- **CMake trace record retention has an aggregate byte ceiling.** Decoded record objects,
+  strings, and argument cells are admitted before retention; reaching the ceiling records
+  `retained_record_limit` in `input_incomplete_reasons` and stops parsing the unknown tail.
 - **`vcpkg_last_failure` bounds work before it builds the response.** One call examines at most 1024
   port-directory entries, admits at most 64 relevant logs, reads at most 32 MiB per log and 256 MiB
   total, retains bounded diagnostic rank cells, and emits at most 256 KiB of inner result JSON. The
@@ -147,7 +156,9 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
   `resource_busy`; it never turns partial evidence into `ok` or `failed`.
 - **Wrapper negative evidence is invocation-bound.** Even an exhaustive
   `failed_ports` list proves a queried port did not fail only when the recorded
-  install command also names that port and triplet. Public command fields redact
+  install command also names that port and triplet. When metadata contains more
+  than one command line, command-derived fields come only from the same latest
+  invocation and are never cross-paired. Public command fields redact
   every non-empty URL query and every unclassified value-bearing assignment.
 - **Bounded-output metadata is explicit.** `resources.completeness` names every evidence class,
   `resources.omitted` reports exact drops or lower-bound sentinel counts, and

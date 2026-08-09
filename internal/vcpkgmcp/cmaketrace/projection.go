@@ -67,12 +67,17 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		}
 	}
 	for _, record := range r.Records {
-		if addString(record.File) || addInt(record.Line) || addString(record.Cmd) || addFloat(record.Time) ||
+		// A zero-valued Record still emits four field names, braces, commas,
+		// the args null value, newlines, and indentation. Charge a conservative
+		// complete structural allowance before its dynamic values; every arg
+		// gets its own separator/newline/indent allowance as well. This keeps
+		// thousands of short records from bypassing pre-marshal admission.
+		if add(128) || addString(record.File) || addInt(record.Line) || addString(record.Cmd) || addFloat(record.Time) ||
 			addInt(record.Frame) || addInt(record.GlobalFrame) || add(5) {
 			return true
 		}
 		for _, arg := range record.Args {
-			if addString(arg) {
+			if add(16) || addString(arg) {
 				return true
 			}
 		}
