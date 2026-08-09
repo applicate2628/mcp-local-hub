@@ -40,12 +40,10 @@ func commandCarriesCredential(command string) bool {
 			if u.User != nil {
 				return true
 			}
-			for key, values := range u.Query() {
-				if credentialCommandKey(key) {
-					for _, value := range values {
-						if value != "" {
-							return true
-						}
+			for _, values := range u.Query() {
+				for _, value := range values {
+					if value != "" {
+						return true
 					}
 				}
 			}
@@ -59,16 +57,40 @@ func commandCarriesCredential(command string) bool {
 		field = strings.Trim(field, `"'`)
 		key, value, hasValue := strings.Cut(field, "=")
 		key = strings.TrimLeft(key, "-/")
-		if credentialCommandKey(key) {
-			if hasValue && value != "" {
+		if hasValue && value != "" {
+			if credentialCommandKey(key) || !safeCommandValueKey(key) {
 				return true
 			}
-			if !hasValue && i+1 < len(fields) && strings.Trim(fields[i+1], `"'`) != "" {
+			continue
+		}
+		if !hasValue && i+1 < len(fields) {
+			next := strings.Trim(fields[i+1], `"'`)
+			if next != "" && !strings.HasPrefix(next, "-") &&
+				credentialCommandKey(key) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// safeCommandValueKey is deliberately a small allowlist of public vcpkg
+// routing/context fields. Every other value-bearing assignment or option is
+// redacted: an open-ended denylist cannot classify tool-specific credentials.
+func safeCommandValueKey(key string) bool {
+	var normalized strings.Builder
+	for _, r := range strings.ToLower(key) {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			normalized.WriteRune(r)
+		}
+	}
+	switch normalized.String() {
+	case "triplet", "hosttriplet", "overlayports", "overlaytriplets",
+		"xbuildtreesroot", "xpackagesroot", "xinstallroot", "downloadsroot":
+		return true
+	default:
+		return false
+	}
 }
 
 func credentialCommandKey(key string) bool {
@@ -78,13 +100,21 @@ func credentialCommandKey(key string) bool {
 			normalized.WriteRune(r)
 		}
 	}
-	switch normalized.String() {
+	name := normalized.String()
+	switch name {
 	case "token", "accesstoken", "refreshtoken", "secret", "clientsecret",
 		"password", "passwd", "pwd", "key", "apikey", "xapikey",
 		"privatekey", "accesskey", "auth", "authorization", "credential",
 		"signature", "sig", "jwt", "assertion", "pat", "session", "sid", "ticket":
 		return true
 	default:
-		return false
+		for _, marker := range []string{"token", "secret", "password", "passwd", "apikey",
+			"privatekey", "accesskey", "auth", "credential", "signature", "jwt",
+			"assertion", "session", "ticket"} {
+			if strings.Contains(name, marker) {
+				return true
+			}
+		}
+		return strings.HasSuffix(name, "pat")
 	}
 }

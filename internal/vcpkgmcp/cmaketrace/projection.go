@@ -2,6 +2,7 @@ package cmaketrace
 
 import (
 	"strconv"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
@@ -28,7 +29,7 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		weight += n
 		return false
 	}
-	addString := func(value string) bool { return add(len(value) + 1) }
+	addString := func(value string) bool { return add(encodedJSONStringBytes(value)) }
 	addInt := func(value int) bool { return add(len(strconv.Itoa(value))) }
 	addExecutedLineArray := func(lines []int) bool {
 		// MarshalIndent(result, "", "  ") emits this []int at nesting depth
@@ -110,6 +111,43 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		}
 	}
 	return false
+}
+
+// encodedJSONStringBytes matches encoding/json's default string escaping
+// without allocating the encoded string. Admission must charge wire bytes,
+// not decoded source bytes.
+func encodedJSONStringBytes(value string) int {
+	encoded := 2 // opening and closing quote
+	for i := 0; i < len(value); {
+		b := value[i]
+		if b < utf8.RuneSelf {
+			switch b {
+			case '\\', '"', '\b', '\f', '\n', '\r', '\t':
+				encoded += 2
+			case '<', '>', '&':
+				encoded += 6
+			default:
+				if b < 0x20 {
+					encoded += 6
+				} else {
+					encoded++
+				}
+			}
+			i++
+			continue
+		}
+		r, size := utf8.DecodeRuneInString(value[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			encoded += 6
+		case r == '\u2028' || r == '\u2029':
+			encoded += 6
+		default:
+			encoded += size
+		}
+		i += size
+	}
+	return encoded
 }
 
 // PublicResultProjection retains the trace-verdict completeness signals while

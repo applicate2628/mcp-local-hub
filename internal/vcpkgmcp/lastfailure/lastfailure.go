@@ -233,7 +233,7 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 	// falls through to buildtree evidence, which is strictly better than
 	// either guessing or refusing to answer.
 	if wrapperOK && len(wrapperInfo.FailedPorts) > 0 && !portListedAsFailed(wrapperInfo.FailedPorts, port, triplet) {
-		if wrapperInfo.FailedPortsListIsComplete() {
+		if wrapperInfo.FailedPortsListIsComplete() && wrapperInfo.RequestedTargetWasAttempted(port, triplet) {
 			return Result{
 				Status:        evidence.StatusOK,
 				FailedTarget:  port,
@@ -242,7 +242,12 @@ func lastFailure(ctx context.Context, args Args, deps Deps, state *callState) Re
 				Evidence:      ev,
 			}
 		}
-		notes = append(notes, NoteWrapperFailedPortsCompletenessUnproven)
+		if !wrapperInfo.FailedPortsListIsComplete() {
+			notes = append(notes, NoteWrapperFailedPortsCompletenessUnproven)
+		}
+		if !wrapperInfo.RequestedTargetWasAttempted(port, triplet) {
+			notes = append(notes, NoteWrapperRequestedContextUnproven)
+		}
 	}
 
 	// --- Step 3: determine buildtrees root -----------------------------------

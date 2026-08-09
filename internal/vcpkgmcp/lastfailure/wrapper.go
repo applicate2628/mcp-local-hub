@@ -33,16 +33,18 @@ import (
 type WrapperInfo struct {
 	Triplet          string
 	Command          string
+	CommandTargets   []string // install target specs recovered from argv
 	OverlayPorts     []string // in command-line order == precedence order
 	BuildtreesRoot   string
 	InstallRoot      string
 	ExitCode         *int
 	BuildFailedCount *int
 	// FailedPorts entries are exactly as written, "port:triplet".
-	FailedPorts         []string
-	FailedPortsDropped  int
-	OverlayPortsDropped int
-	CommandTruncated    bool
+	FailedPorts           []string
+	FailedPortsDropped    int
+	CommandTargetsDropped int
+	OverlayPortsDropped   int
+	CommandTruncated      bool
 	// ScanComplete reports whether the whole file was read to EOF without a
 	// scanner error. When false, FailedPorts is a PREFIX of an unknown-length
 	// list, so its ABSENCE of an entry proves nothing — see
@@ -89,6 +91,56 @@ func (w WrapperInfo) FailedPortsListIsComplete() bool {
 		seen[key] = struct{}{}
 	}
 	return true
+}
+
+// RequestedTargetWasAttempted is the context gate for a negative wrapper
+// conclusion. A complete failed_ports list only describes the install
+// invocation recorded by that wrapper; it says nothing about ports that the
+// command never attempted.
+func (w WrapperInfo) RequestedTargetWasAttempted(port, triplet string) bool {
+	if strings.TrimSpace(port) == "" || strings.TrimSpace(triplet) == "" {
+		return false
+	}
+	for _, target := range w.CommandTargets {
+		targetPort, targetTriplet := commandTargetIdentity(target, w.Triplet)
+		if strings.EqualFold(targetPort, port) && strings.EqualFold(targetTriplet, triplet) {
+			return true
+		}
+	}
+	return false
+}
+
+func commandTargetIdentity(target, defaultTriplet string) (port, triplet string) {
+	target = strings.TrimSpace(target)
+	triplet = defaultTriplet
+	if colon := strings.LastIndex(target, ":"); colon >= 0 {
+		triplet = target[colon+1:]
+		target = target[:colon]
+	}
+	if features := strings.IndexByte(target, '['); features >= 0 {
+		if !strings.HasSuffix(target, "]") {
+			return "", ""
+		}
+		target = target[:features]
+	}
+	return target, triplet
+}
+
+func installCommandTargets(argv []string) ([]string, bool) {
+	if len(argv) < 3 || !strings.EqualFold(argv[1], "install") {
+		return nil, false
+	}
+	var targets []string
+	for _, arg := range argv[2:] {
+		if strings.HasPrefix(arg, "-") {
+			break
+		}
+		if arg == "" || strings.HasPrefix(arg, "@") {
+			return nil, false
+		}
+		targets = append(targets, arg)
+	}
+	return targets, len(targets) != 0
 }
 
 var (
@@ -352,6 +404,15 @@ func parseWrapperContentWithLimitsForGOOS(data []byte, limits responseLimits, go
 			argv, splitErr := splitRecordedCommandLine(command, goos)
 			if splitErr != nil {
 				continue
+			}
+			if targets, recognized := installCommandTargets(argv); recognized {
+				for _, target := range targets {
+					if len(info.CommandTargets) >= limits.listEntries || len(target) > limits.pathBytes {
+						info.CommandTargetsDropped++
+						continue
+					}
+					info.CommandTargets = append(info.CommandTargets, boundedValue(target, limits.pathBytes))
+				}
 			}
 			for _, overlay := range commandFlagValues(argv, "--overlay-ports") {
 				if len(info.OverlayPorts) >= limits.overlayEntries || len(overlay) > limits.inputScalarBytes {

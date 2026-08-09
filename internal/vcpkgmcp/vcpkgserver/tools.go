@@ -261,8 +261,10 @@ func registerTools(vs *VcpkgServer) error {
 			"unknown(invalid_port_name); no root resolvable at all -> unknown(vcpkg_root_not_resolved). " +
 			"A build_failed_log's failed_ports list can prove a port did NOT " +
 			"fail only when it is provably exhaustive (clean scan AND len(failed_ports) == " +
-			"build_failed_count); otherwise the tool falls back to buildtree evidence and notes " +
-			"wrapper_failed_ports_list_completeness_unproven. Diagnostics found are returned whatever " +
+			"build_failed_count) AND its recorded install command attempted the queried port and triplet; " +
+			"otherwise the tool falls back to buildtree evidence and notes the unproven completeness or " +
+			"requested context. Command-shaped output is redacted for every non-empty URL query and " +
+			"unclassified value-bearing assignment. Diagnostics found are returned whatever " +
 			"the verdict. " +
 			"VOCABULARY RULE: every reason and note names what the tool OBSERVED — a verified fact, " +
 			"something not supplied to it, or something not found where it looked — never a " +
@@ -385,7 +387,9 @@ func registerTools(vs *VcpkgServer) error {
 			"orphan_scan_stop_cause. PATCHES inside a function() or macro() body, or carried through a declared " +
 			"function/macro invocation such as ${ARGN}, returns unknown(patches_deferred_command_body); declaration " +
 			"bodies and calls are not modeled. A conditionally active return() before later PATCHES returns " +
-			"unknown(patches_execution_uncertain); a definitely active return stops extraction. " +
+			"unknown(patches_execution_uncertain); a definitely active return stops extraction. Both " +
+			"vcpkg_extract_source_archive and its legacy _ex helper contribute PATCHES. Declaration " +
+			"count/retained-byte overflow returns unknown(patch_declaration_limit_exceeded) before probes. " +
 			"port_dir MUST be absolute (a relative one would bind to the hub daemon's working directory and " +
 			"answer about a different port) -> failed(relative_port_dir). An unreadable port_dir is " +
 			"unknown(port_dir_unreadable), NEVER the verified-absence reason port_dir_missing. " +

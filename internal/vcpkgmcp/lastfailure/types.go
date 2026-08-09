@@ -307,6 +307,10 @@ const (
 	// build_failed_count emits a perfectly complete list that this guard
 	// still (correctly) declines to rely on.
 	NoteWrapperFailedPortsCompletenessUnproven Note = "wrapper_failed_ports_list_completeness_unproven"
+	// NoteWrapperRequestedContextUnproven: the wrapper command did not prove
+	// that it attempted the queried port and triplet, so another invocation's
+	// complete failed_ports list was not used as negative evidence.
+	NoteWrapperRequestedContextUnproven Note = "wrapper_requested_context_unproven"
 
 	// --- Response-budget notes ------------------------------------------
 	// All four name what the TOOL did to its own output, never anything about

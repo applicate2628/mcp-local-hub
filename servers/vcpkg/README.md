@@ -118,7 +118,11 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
   `unknown(triplet_file_size_limit_exceeded)`; no prefix establishes facts.
 - **Patch reachability and orphan identity fail closed.** A definitely active
   `return()` stops later extraction; a conditionally active one returns
-  `unknown(patches_execution_uncertain)`. If a declared patch path retains an
+  `unknown(patches_execution_uncertain)`. PATCHES from both
+  `vcpkg_extract_source_archive` and its legacy `_ex` helper are recognized.
+  Declaration expansion is bounded by count and retained bytes; overflow
+  returns `unknown(patch_declaration_limit_exceeded)` before any patch probe.
+  If a declared patch path retains an
   unresolved variable, orphan inventory is suppressed and reported as
   `unknown(orphan_scan_incomplete)` with
   `orphan_scan_stop_cause: unresolved_patch_identity`.
@@ -141,6 +145,10 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
   shared server admits two such scans at once. A limit, cancellation, or saturation returns the normal
   tri-state reasons `artifact_limit_exceeded`, `metadata_limit_exceeded`, `resource_cancelled`, or
   `resource_busy`; it never turns partial evidence into `ok` or `failed`.
+- **Wrapper negative evidence is invocation-bound.** Even an exhaustive
+  `failed_ports` list proves a queried port did not fail only when the recorded
+  install command also names that port and triplet. Public command fields redact
+  every non-empty URL query and every unclassified value-bearing assignment.
 - **Bounded-output metadata is explicit.** `resources.completeness` names every evidence class,
   `resources.omitted` reports exact drops or lower-bound sentinel counts, and
   `resources.high_water` records the retained producer maxima. `diagnostics_dropped_exact=false` means

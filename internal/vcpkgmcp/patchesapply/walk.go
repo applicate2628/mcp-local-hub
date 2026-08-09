@@ -36,13 +36,14 @@ type declaredPatch struct {
 // arbitrary CMake command's identically named argument as a patch declaration
 // creates confident false positives (for example, message(STATUS PATCHES ...)).
 var patchAcceptingCommands = map[string]struct{}{
-	"vcpkg_apply_patches":          {},
-	"vcpkg_extract_source_archive": {},
-	"vcpkg_from_bitbucket":         {},
-	"vcpkg_from_git":               {},
-	"vcpkg_from_github":            {},
-	"vcpkg_from_gitlab":            {},
-	"vcpkg_from_sourceforge":       {},
+	"vcpkg_apply_patches":             {},
+	"vcpkg_extract_source_archive":    {},
+	"vcpkg_extract_source_archive_ex": {},
+	"vcpkg_from_bitbucket":            {},
+	"vcpkg_from_git":                  {},
+	"vcpkg_from_github":               {},
+	"vcpkg_from_gitlab":               {},
+	"vcpkg_from_sourceforge":          {},
 }
 
 // parserStructuralSignal reports a whole-portfile structural condition that
@@ -55,6 +56,12 @@ const (
 	parserStructuralExpressionUnparsable
 	parserStructuralDeferredBody
 	parserStructuralExecutionUncertain
+	parserStructuralDeclarationLimit
+)
+
+const (
+	MaxPatchDeclarations             = 4096
+	MaxRetainedPatchDeclarationBytes = 2 << 20
 )
 
 func declaredPatchFromSemanticItem(item semanticItem) declaredPatch {
@@ -94,6 +101,57 @@ func semanticItemsFromToken(t token, env *varEnv, active Tri, guardText string, 
 		}
 	}
 	return items, valueResolution{}
+}
+
+func semanticItemsFromTokenBounded(t token, env *varEnv, active Tri, guardText string, unresolvedVars []string, maxItems int) ([]semanticItem, valueResolution, bool) {
+	callMeta := provenanceMeta{
+		guard:          active,
+		guardText:      guardText,
+		unresolvedVars: dedupStrings(unresolvedVars),
+	}
+	evaluated := env.evaluateValue(t, callMeta)
+	if evaluated.resolution.failed() {
+		return nil, evaluated.resolution, false
+	}
+	items, exceeded := splitCMakeListBounded(t, evaluated, maxItems)
+	if exceeded {
+		return nil, valueResolution{}, true
+	}
+	if len(items) == 1 && items[0].text != "" {
+		if evaluated.exactReference && items[0].meta.source != "" {
+			items[0].display = items[0].meta.source
+		} else {
+			items[0].display = t.Text
+		}
+	}
+	return items, valueResolution{}, false
+}
+
+type patchDeclarationBudget struct {
+	count int
+	bytes int
+}
+
+func retainedDeclaredPatchBytes(patch declaredPatch) int {
+	const fixedDeclarationBytes = 128
+	total := fixedDeclarationBytes + len(patch.raw) + len(patch.expanded) + len(patch.guardText)
+	for _, value := range patch.unresolvedVars {
+		total += len(value)
+	}
+	for _, value := range patch.pathUnresolved {
+		total += len(value)
+	}
+	return total
+}
+
+func (budget *patchDeclarationBudget) admit(patch declaredPatch) bool {
+	cost := retainedDeclaredPatchBytes(patch)
+	if budget.count >= MaxPatchDeclarations || cost > MaxRetainedPatchDeclarationBytes-budget.bytes {
+		return false
+	}
+	budget.count++
+	budget.bytes += cost
+	return true
 }
 
 // ifFrame tracks one open if()/elseif()/else() block while walking.
@@ -157,6 +215,7 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 	declaredCommands := map[string]struct{}{}
 	deferredCommandBody := false
 	executionUncertain := false
+	declarationBudget := patchDeclarationBudget{}
 	for _, st := range stmts {
 		if len(declarationScopes) > 0 {
 			if containsPatchesKeyword(st.Args) {
@@ -295,12 +354,15 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 			if _, acceptsPatches := patchAcceptingCommands[st.Name]; !acceptsPatches {
 				continue
 			}
-			found, items, resolution := extractPatchesArg(st.Args, env, active(), guardText(), activeUnresolved())
+			found, items, resolution, declarationLimit := extractPatchesArg(st.Args, env, active(), guardText(), activeUnresolved(), &declarationBudget)
 			if resolution.failed() {
 				return nil, false, parserStructuralExpressionUnparsable
 			}
 			if found {
 				sawPatchesKeyword = true
+				if declarationLimit {
+					return nil, true, parserStructuralDeclarationLimit
+				}
 				entries = append(entries, items...)
 			}
 		}
@@ -538,7 +600,7 @@ func listSubcommandMutatesInput(subcommand string) bool {
 // looks like a different ALL-CAPS keyword-arg (or end of the call), is
 // collected as declared patch entries. Every token, including an exact
 // unquoted ${VAR}, follows the same serialized-value evaluation path.
-func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string) (found bool, items []declaredPatch, resolution valueResolution) {
+func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string, unresolvedVars []string, budget *patchDeclarationBudget) (found bool, items []declaredPatch, resolution valueResolution, limitExceeded bool) {
 	toks := tokenize(argsRaw)
 	for i := 0; i < len(toks); i++ {
 		if toks[i].Quoted || toks[i].Text != "PATCHES" {
@@ -551,18 +613,26 @@ func extractPatchesArg(argsRaw string, env *varEnv, active Tri, guardText string
 			if !t.Quoted && looksLikeKeywordArg(t.Text) {
 				break
 			}
-			semanticItems, itemResolution := semanticItemsFromToken(t, env, active, guardText, unresolvedVars)
+			remainingItems := MaxPatchDeclarations - budget.count
+			semanticItems, itemResolution, itemLimit := semanticItemsFromTokenBounded(t, env, active, guardText, unresolvedVars, remainingItems)
 			if itemResolution.failed() {
-				return found, nil, itemResolution
+				return found, nil, itemResolution, false
+			}
+			if itemLimit {
+				return found, nil, valueResolution{}, true
 			}
 			for _, item := range semanticItems {
-				items = append(items, declaredPatchFromSemanticItem(item))
+				patch := declaredPatchFromSemanticItem(item)
+				if !budget.admit(patch) {
+					return found, nil, valueResolution{}, true
+				}
+				items = append(items, patch)
 			}
 			j++
 		}
 		i = j - 1
 	}
-	return found, items, valueResolution{}
+	return found, items, valueResolution{}, false
 }
 
 // looksLikeKeywordArg identifies the vcpkg helper keyword names that end a

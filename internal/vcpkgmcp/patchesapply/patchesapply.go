@@ -150,6 +150,10 @@ const (
 	// ReasonPatchesExecutionUncertain: a return() may or may not execute, so
 	// statements after it cannot be classified by a static linear walk.
 	ReasonPatchesExecutionUncertain Reason = "patches_execution_uncertain"
+	// ReasonPatchDeclarationLimitExceeded: PATCHES expansion exceeded the
+	// bounded declaration count or retained-byte budget. No patch path was
+	// probed from a partial declaration inventory.
+	ReasonPatchDeclarationLimitExceeded Reason = "patch_declaration_limit_exceeded"
 
 	// --- Evidence-integrity reasons -------------------------------------
 	// Each of the three below reports "the filesystem declined to answer a
@@ -633,6 +637,9 @@ func finalizePostTripletResult(res Result, ev evidence.Evidence, unreadable []Un
 	case structural == parserStructuralExecutionUncertain:
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonPatchesExecutionUncertain
+	case structural == parserStructuralDeclarationLimit:
+		res.Status = evidence.StatusUnknown
+		res.Reason = ReasonPatchDeclarationLimitExceeded
 	case !sawPatches:
 		res.Status = evidence.StatusUnknown
 		res.Reason = ReasonNoPatchesDeclared

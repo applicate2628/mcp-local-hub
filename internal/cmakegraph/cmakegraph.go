@@ -1153,12 +1153,13 @@ func (w *walker) walkFile(file string, ctx sourceContext, depth int, ancestors [
 	if w.ctx.Err() != nil {
 		return
 	}
-	data, err := readBounded(file, w.opts.MaxFileBytes)
+	canonicalFile := w.canonicalize(file)
+	data, err := w.readPinnedRoot(canonicalFile)
 	if err != nil {
-		w.recordCoverage(file, readCoverageReason(err), err.Error())
+		w.recordCoverage(canonicalFile, readCoverageReason(err), err.Error())
 		return
 	}
-	w.walkFileData(file, data, ctx, depth, ancestors)
+	w.walkFileData(canonicalFile, data, ctx, depth, ancestors)
 }
 
 func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth int, ancestors []string) {
@@ -1325,6 +1326,14 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 		}
 
 		canonTarget := w.canonicalize(targetFile)
+		if !w.withinWorkspace(canonTarget) {
+			e.Status = StatusUnresolved
+			e.Reason = ReasonOutsideWorkspace
+			if !w.appendEdge(e) {
+				return
+			}
+			continue
+		}
 		key := visitKey{file: canonTarget, ctx: dedupCtx(newCtx)}
 		switch {
 		case containsStr(ancestors, canonTarget):

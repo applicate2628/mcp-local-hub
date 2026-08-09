@@ -980,7 +980,10 @@ statementLoop:
 				continue
 			}
 			if len(unsupportedScopes) != 0 {
-				continue
+				if fetchIsInsideExecutableLoop(unsupportedScopes) {
+					return parsedPortfile{}, false
+				}
+				continue // declaration bodies are not executed at definition time
 			}
 			candidate := parseFetchCandidate(st.Name, variables, manifest, portName, st.Args)
 			candidate.GuardVariable = state.unknown
@@ -1034,6 +1037,20 @@ statementLoop:
 	}
 	selected := viableCandidates[0]
 	return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, UnresolvedHeadRefVariable: selected.UnresolvedHeadRefVariable, Candidates: candidates}, true
+}
+
+func fetchIsInsideExecutableLoop(scopes []unsupportedScope) bool {
+	for _, scope := range scopes {
+		if scope.opener == "function" || scope.opener == "macro" {
+			return false
+		}
+	}
+	for _, scope := range scopes {
+		if scope.opener == "foreach" || scope.opener == "while" {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

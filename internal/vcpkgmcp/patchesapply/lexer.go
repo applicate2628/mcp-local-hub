@@ -421,21 +421,38 @@ func scanBareEnd(s string, start int) int {
 // semicolons arrive marked by evaluateValue; serialized bytes inserted from a
 // variable are governed by CMake's serialized list rules instead.
 func splitCMakeList(t token, value evaluatedValue) []semanticItem {
+	items, _ := splitCMakeListBounded(t, value, int(^uint(0)>>1))
+	return items
+}
+
+// splitCMakeListBounded retains at most maxItems semantic arguments and
+// reports whether another non-empty argument existed. PATCHES extraction uses
+// this while scanning the serialized bytes so expansion cannot first create
+// an unbounded temporary slice and only then discover the result is too large.
+func splitCMakeListBounded(t token, value evaluatedValue, maxItems int) ([]semanticItem, bool) {
 	if t.Quoted || t.Raw {
+		if maxItems < 1 {
+			return nil, true
+		}
 		return []semanticItem{semanticItem{
 			text:    string(value.text),
 			display: string(value.text),
 			meta:    combineItemProvenance(value.metas),
 			spans:   spansFromMetas(value.metas),
-		}}
+		}}, false
 	}
 
 	items := make([]semanticItem, 0, 1)
 	current := make([]byte, 0, len(value.text))
 	metas := make([]provenanceMeta, 0, len(value.text))
+	exceeded := false
 	flush := func() {
 		if len(current) == 0 {
 			return // empty unquoted list elements are not command arguments.
+		}
+		if len(items) >= maxItems {
+			exceeded = true
+			return
 		}
 		items = append(items, semanticItem{
 			text:    string(current),
@@ -473,6 +490,9 @@ func splitCMakeList(t token, value evaluatedValue) []semanticItem {
 				continue
 			}
 			flush()
+			if exceeded {
+				return items, true
+			}
 			openBrackets, closeBrackets = 0, 0
 			continue
 		}
@@ -480,7 +500,7 @@ func splitCMakeList(t token, value evaluatedValue) []semanticItem {
 		metas = append(metas, value.metas[i])
 	}
 	flush()
-	return items
+	return items, exceeded
 }
 
 func combineItemProvenance(metas []provenanceMeta) provenanceMeta {
