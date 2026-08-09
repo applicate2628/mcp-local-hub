@@ -867,14 +867,14 @@ func waitForMCPFrontRouteListener(ctx context.Context, port int) error {
 	}
 }
 
-func restorePriorMCPFrontRoute(ctx context.Context, stateDir string, priorPort, attemptedPort int) error {
+func restorePriorMCPFrontRoute(ctx context.Context, priorPort, attemptedPort int, ops mcpFrontRouteActivationOps) error {
 	if priorPort <= 0 || priorPort == attemptedPort {
 		return nil
 	}
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
-	if err := stageMCPFrontRouteDaemon(cleanupCtx, stateDir, priorPort); err != nil {
-		return fmt.Errorf("restore prior built-in route descriptor at port %d: %w", priorPort, err)
+	if err := activateMCPFrontRoute(cleanupCtx, priorPort, ops); err != nil {
+		return fmt.Errorf("restore prior built-in route listener at port %d: %w", priorPort, err)
 	}
 	return nil
 }
@@ -1224,7 +1224,7 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	}
 	priorRoutePort := targetState.Port
 	if gerr := activateMCPFrontRoute(ctx, decision.Port, activationOps); gerr != nil {
-		restoreErr := restorePriorMCPFrontRoute(ctx, stateDir, priorRoutePort, decision.Port)
+		restoreErr := restorePriorMCPFrontRoute(ctx, priorRoutePort, decision.Port, activationOps)
 		return errors.Join(
 			fmt.Errorf("reconcile-mcp-front: route activation failed before generation admission: %w", gerr),
 			restoreErr,
@@ -1234,11 +1234,11 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	// durable and finalized before the first prepare callback can run.
 	if decision.Admission {
 		if err := admitMCPFrontGeneration(ctx, journal, decision, admissionOps); err != nil {
-			restoreErr := restorePriorMCPFrontRoute(ctx, stateDir, priorRoutePort, decision.Port)
+			restoreErr := restorePriorMCPFrontRoute(ctx, priorRoutePort, decision.Port, activationOps)
 			return errors.Join(fmt.Errorf("reconcile-mcp-front: %w", err), restoreErr)
 		}
 	} else if persistErr := journal.persist(); persistErr != nil {
-		restoreErr := restorePriorMCPFrontRoute(ctx, stateDir, priorRoutePort, decision.Port)
+		restoreErr := restorePriorMCPFrontRoute(ctx, priorRoutePort, decision.Port, activationOps)
 		return errors.Join(
 			fmt.Errorf("reconcile-mcp-front: persist active recovery plan: %w (nothing was written)", persistErr),
 			restoreErr,

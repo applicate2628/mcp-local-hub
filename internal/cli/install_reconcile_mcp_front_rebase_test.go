@@ -112,6 +112,72 @@ func TestActivateMCPFrontRoute_WaitsForReconciledListener(t *testing.T) {
 	}
 }
 
+func TestRestorePriorMCPFrontRoute_WaitsForListenerAndStrictProof(t *testing.T) {
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	var order []string
+	ops := mcpFrontRouteActivationOps{
+		stage: func(ctx context.Context, port int) error {
+			if err := ctx.Err(); err != nil {
+				t.Fatalf("cleanup activation inherited canceled caller context: %v", err)
+			}
+			if port != 9554 {
+				t.Fatalf("stage port=%d, want prior port 9554", port)
+			}
+			order = append(order, "stage")
+			return nil
+		},
+		waitListener: func(_ context.Context, port int) error {
+			if port != 9554 {
+				t.Fatalf("listener port=%d, want prior port 9554", port)
+			}
+			order = append(order, "wait-listener")
+			return nil
+		},
+		preflight: func(_ context.Context, port int) error {
+			if port != 9554 {
+				t.Fatalf("preflight port=%d, want prior port 9554", port)
+			}
+			order = append(order, "preflight")
+			return nil
+		},
+	}
+	if err := restorePriorMCPFrontRoute(parent, 9554, 9555, ops); err != nil {
+		t.Fatalf("restore prior route: %v", err)
+	}
+	if got := order; len(got) != 3 || got[0] != "stage" || got[1] != "wait-listener" || got[2] != "preflight" {
+		t.Fatalf("restore order=%v, want [stage wait-listener preflight]", got)
+	}
+
+	order = nil
+	if err := restorePriorMCPFrontRoute(context.Background(), 9554, 9554, ops); err != nil {
+		t.Fatalf("same-port restore: %v", err)
+	}
+	if len(order) != 0 {
+		t.Fatalf("same-port restore invoked activation: %v", order)
+	}
+
+	waitErr := errors.New("prior listener did not recover")
+	preflightCalled := false
+	err := restorePriorMCPFrontRoute(context.Background(), 9554, 9555, mcpFrontRouteActivationOps{
+		stage: func(context.Context, int) error { return nil },
+		waitListener: func(context.Context, int) error {
+			return waitErr
+		},
+		preflight: func(context.Context, int) error {
+			preflightCalled = true
+			return nil
+		},
+	})
+	if !errors.Is(err, waitErr) {
+		t.Fatalf("listener recovery error=%v, want sentinel", err)
+	}
+	if preflightCalled {
+		t.Fatal("strict preflight ran after prior-listener recovery failure")
+	}
+}
+
 func TestWaitForMCPFrontRouteListener_StopsAtCallerDeadline(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
