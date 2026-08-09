@@ -48,7 +48,7 @@ func TestMutateStopSubBlock_ReleaseSettlementMatrix(t *testing.T) {
 			task := `\mcp-local-hub-stop-release-settlement`
 			value := DaemonIntent{
 				Desired: IntentDesiredStopped, Reason: IntentReasonUserStop,
-				UpdatedAt: time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC),
+				UpdatedAt: time.Now().UTC().Add(time.Hour),
 			}
 			if tc.seed {
 				if err := NewAPI().WriteStopIntent(task, value, "seed"); err != nil {

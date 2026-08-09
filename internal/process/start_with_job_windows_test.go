@@ -3,10 +3,186 @@
 package process
 
 import (
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
+	"unsafe"
 )
+
+const startWithJobEnvironmentHelper = "MCPHUB_PR591_START_ENV_HELPER"
+
+func TestStartWithJobWindowsEnvironmentHelper(t *testing.T) {
+	if os.Getenv(startWithJobEnvironmentHelper) != "probe" {
+		return
+	}
+	path := os.Getenv("MCPHUB_PR591_START_ENV_OUTPUT")
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := strings.Join([]string{
+		"case=" + os.Getenv("MCPHUB_PR591_CASE"),
+		"systemroot=" + os.Getenv("SYSTEMROOT"),
+		"pwd=" + os.Getenv("PWD"),
+		"wd=" + wd,
+	}, "\n")
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareWindowsCommand_EnvironmentParity(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		env  []string
+	}{
+		{name: "nil"},
+		{name: "explicit_empty", env: []string{}},
+		{name: "mixed_case_last_wins", env: []string{"McpHub_PR591_Case=first", "MCPHUB_PR591_CASE=last", "PWD=explicit"}},
+		{name: "explicit_empty_systemroot", env: []string{"SYSTEMROOT="}},
+		{name: "leading_equals", env: []string{"=C:=C:\\work", "MCPHUB_PR591_CASE=value"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd := &exec.Cmd{Path: exe, Args: []string{exe}, Env: tc.env}
+			_, _, block, err := prepareWindowsCommand(cmd)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := decodeWindowsEnvironmentBlock(t, block)
+			want := sortedWindowsEnvironment(cmd.Environ())
+			if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+				t.Fatalf("environment block=%q, want Cmd.Environ normalization=%q", got, want)
+			}
+		})
+	}
+}
+
+func TestPrepareWindowsCommand_RejectsNULBeforeSpawn(t *testing.T) {
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := &exec.Cmd{Path: exe, Args: []string{exe}, Env: []string{"MCPHUB_PR591_NUL=bad\x00value"}}
+	if _, _, _, err := prepareWindowsCommand(cmd); err == nil || err.Error() != "invalid command environment" {
+		t.Fatalf("prepareWindowsCommand error=%v, want stable non-echoing error", err)
+	}
+}
+
+func TestStartWithJob_ChildSeesNormalizedEnvironment(t *testing.T) {
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer job.Close()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	output := filepath.Join(dir, "environment.txt")
+	cmd := &exec.Cmd{
+		Path: exe,
+		Args: []string{exe, "-test.run=^TestStartWithJobWindowsEnvironmentHelper$"},
+		Dir:  dir,
+		Env: []string{
+			startWithJobEnvironmentHelper + "=probe",
+			"MCPHUB_PR591_START_ENV_OUTPUT=" + output,
+			"McpHub_PR591_Case=first",
+			"MCPHUB_PR591_CASE=last",
+			"PWD=explicit-pwd",
+		},
+	}
+	if _, err := StartWithJob(job, cmd); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+		}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		body, readErr := os.ReadFile(output)
+		if readErr == nil {
+			got := string(body)
+			for _, want := range []string{"case=last", "systemroot=", "pwd=explicit-pwd", "wd=" + dir} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("child environment=%q, missing %q", got, want)
+				}
+			}
+			if strings.Contains(got, "systemroot=\n") {
+				t.Fatalf("child environment=%q, missing Go-owned SYSTEMROOT", got)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("child did not write normalized environment probe")
+}
+
+func decodeWindowsEnvironmentBlock(t *testing.T, ptr *uint16) []string {
+	t.Helper()
+	if ptr == nil {
+		t.Fatal("nil environment block")
+	}
+	words := unsafe.Slice(ptr, 1<<20)
+	var out []string
+	start := 0
+	for i, word := range words {
+		if word != 0 {
+			continue
+		}
+		if i == start {
+			return out
+		}
+		out = append(out, string(utf16.Decode(words[start:i])))
+		start = i + 1
+	}
+	t.Fatal("environment block lacks final double NUL")
+	return nil
+}
+
+func sortedWindowsEnvironment(env []string) []string {
+	out := append([]string(nil), env...)
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && testWindowsEnvironmentLess(out[j], out[j-1]); j-- {
+			out[j], out[j-1] = out[j-1], out[j]
+		}
+	}
+	return out
+}
+
+func testWindowsEnvironmentLess(left, right string) bool {
+	for i := 0; ; i++ {
+		var l, r byte
+		if i < len(left) {
+			l = left[i]
+		}
+		if i < len(right) {
+			r = right[i]
+		}
+		if l == '=' || r == '=' || i == len(left) || i == len(right) {
+			return l < r
+		}
+		if l >= 'a' && l <= 'z' {
+			l -= 'a' - 'A'
+		}
+		if r >= 'a' && r <= 'z' {
+			r -= 'a' - 'A'
+		}
+		if l != r {
+			return l < r
+		}
+	}
+}
 
 // TestStartWithJob_AssignsAtCreate proves that StartWithJob spawns a
 // child process that is *already* a member of the supervisor's Job

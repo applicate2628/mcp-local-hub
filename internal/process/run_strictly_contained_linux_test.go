@@ -1,9 +1,10 @@
-//go:build !windows
+//go:build linux
 
 package process
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -13,13 +14,13 @@ import (
 	"time"
 )
 
-func TestRunStrictlyContained_NormalExitDoesNotSignalReapedProcessGroup(t *testing.T) {
+func TestRunStrictlyContained_NormalExitSettlesDescendantBeforeReap(t *testing.T) {
 	if os.Getenv("MCPHUB_STRICT_PROCESS_GROUP_HELPER") == "1" {
 		devNull, err := os.OpenFile(os.DevNull, os.O_RDWR, 0)
 		if err != nil {
 			os.Exit(2)
 		}
-		child := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_NormalExitDoesNotSignalReapedProcessGroup$")
+		child := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_NormalExitSettlesDescendantBeforeReap$")
 		child.Env = append(os.Environ(), "MCPHUB_STRICT_PROCESS_GROUP_DESCENDANT=1")
 		child.Stdin, child.Stdout, child.Stderr = devNull, devNull, devNull
 		if err := child.Start(); err != nil {
@@ -33,9 +34,11 @@ func TestRunStrictlyContained_NormalExitDoesNotSignalReapedProcessGroup(t *testi
 		return
 	}
 
-	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_NormalExitDoesNotSignalReapedProcessGroup$")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.Command(os.Args[0], "-test.run=^TestRunStrictlyContained_NormalExitSettlesDescendantBeforeReap$")
 	cmd.Env = append(os.Environ(), "MCPHUB_STRICT_PROCESS_GROUP_HELPER=1")
-	result, err := RunStrictlyContained(context.Background(), StrictRunInvocation{
+	result, err := RunStrictlyContained(ctx, StrictRunInvocation{
 		Command: cmd, InputLimit: 1, StdoutLimit: 64, StderrLimit: 64,
 	})
 	if err != nil {
@@ -46,7 +49,15 @@ func TestRunStrictlyContained_NormalExitDoesNotSignalReapedProcessGroup(t *testi
 		t.Fatalf("parse descendant PID from %q: %v", result.Stdout.Prefix, err)
 	}
 	t.Cleanup(func() { _ = syscall.Kill(descendantPID, syscall.SIGKILL) })
-	if err := syscall.Kill(descendantPID, 0); err != nil {
-		t.Fatalf("normal completion signalled the process group after reaping its leader: %v", err)
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		err = syscall.Kill(descendantPID, 0)
+		if errors.Is(err, syscall.ESRCH) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("descendant PID %d remains after contained normal completion: %v", descendantPID, err)
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 }

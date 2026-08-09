@@ -1,0 +1,16 @@
+---
+events:
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "CMakeLists.txt"
+    checks:
+      - "Determining if the pthread_create exist"
+    directories:
+      source: "R:/b/cl/probelib/rel/CMakeFiles/CMakeScratch/TryCompile-abcde"
+    buildResult:
+      exitCode: 2
+      log: |
+        src.cxx(1): fatal error C1083: Cannot open include file: 'pthread.h': No such file or directory
+        FAILED: [code=2] CMakeFiles/cmTC_e5bae.dir/src.cxx.obj
+        ninja: build stopped: subcommand failed.

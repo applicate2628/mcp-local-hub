@@ -170,6 +170,23 @@ type jobObjectBasicAccountingInformation struct {
 	TotalTerminatedProcesses  uint32
 }
 
+type jobTerminateTimeoutError struct {
+	timeoutMs       uint32
+	activeProcesses uint32
+}
+
+func (e *jobTerminateTimeoutError) Error() string {
+	return fmt.Sprintf(
+		"TerminateAll: timeout after %dms with %d processes still in job",
+		e.timeoutMs,
+		e.activeProcesses,
+	)
+}
+
+func (e *jobTerminateTimeoutError) Unwrap() error {
+	return ErrCleanupTimeout
+}
+
 // terminateAllPollInterval is how often TerminateAll re-queries
 // JobObjectBasicAccountingInformation while waiting for
 // ActiveProcesses to reach zero. 50ms is a balance between
@@ -391,7 +408,10 @@ func (j *Job) TerminateAll(timeoutMs uint32) error {
 			return nil
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("TerminateAll: timeout after %dms with %d processes still in job", timeoutMs, info.ActiveProcesses)
+			return &jobTerminateTimeoutError{
+				timeoutMs:       timeoutMs,
+				activeProcesses: info.ActiveProcesses,
+			}
 		}
 		time.Sleep(terminateAllPollInterval)
 	}

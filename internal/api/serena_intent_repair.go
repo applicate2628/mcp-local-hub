@@ -474,8 +474,8 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 	//    registry via the earlier defer). The fresh locked read below is the
 	//    clobber-safety point: `missing` is computed from THIS read, never a
 	//    stale snapshot.
-	intentLockPath := intentPath + supervisorIntentLockSuffix
-	intentRelease, intentLocked, err := tryLockLeafLedgered(intentLockPath)
+	intentLockPath := supervisorIntentLockPath(intentPath)
+	intentRelease, intentLocked, err := tryLockSupervisorIntent(intentPath)
 	if err != nil {
 		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentLockPath, err))
 	}

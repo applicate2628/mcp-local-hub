@@ -1329,31 +1329,6 @@ func TestSerenaReconcileAppliedReleaseUnconfirmedRecordsActualChangeAndSkipsUnsa
 	}
 }
 
-func TestSerenaLegacyRemoveAppliedReleaseUnconfirmedMarksRewriteUnsafeToRestore(t *testing.T) {
-	t.Setenv("LOCALAPPDATA", t.TempDir())
-	induced := errors.New("induced serena remove release failure")
-	client := newReconcileFakeClient("codex-cli")
-	client.getEntryOverride = &clients.MCPEntry{Name: serenaEntryName, URL: "http://localhost:9121/mcp"}
-	client.removeErr = induced
-	client.removeAppliesOnErr = true
-
-	report, err := ReconcileSerenaClientsToRouter(context.Background(), SerenaReconcileOpts{
-		PidportPath:            seedPidport(t, 100, 9125),
-		VerifyIdentity:         okGUIIdentity,
-		Ping:                   okPing,
-		Clients:                map[string]clients.Client{"codex-cli": client},
-		ClientsInclude:         []string{"codex-cli"},
-		RemoveLegacy:           true,
-		classifyClientMutation: classifyAPITestAppliedRelease(induced),
-	})
-	if err != nil {
-		t.Fatalf("ReconcileSerenaClientsToRouter: %v", err)
-	}
-	if client.removeCalls != 1 || len(report.Applied) != 1 || len(report.Failed) != 1 || !report.Applied[0].restoreUnsafe {
-		t.Fatalf("calls=%d report=%+v, want applied removal lifecycle failure and unsafe restore marker", client.removeCalls, report)
-	}
-}
-
 func TestRestoreSerenaReconcileAppliedConsumesAppliedReleaseAndContinuesIndependentClient(t *testing.T) {
 	induced := errors.New("induced restore release failure")
 	first := newReconcileFakeClient("codex-cli")

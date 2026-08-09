@@ -19,6 +19,7 @@ import (
 	"net/netip"
 	"net/url"
 	"os"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -239,23 +240,85 @@ func MarketplaceFetch(ctx context.Context, rawURL, ifNoneMatch string, extraHead
 	return MarketplaceFetchWithClient(ctx, newMarketplaceClient(), rawURL, ifNoneMatch, extraHeaders)
 }
 
-// forbiddenMarketplaceHeaders enumerates auth/cookie headers that a
-// caller MUST NOT smuggle into a marketplace fetch. The threat model
-// is an unauthenticated GET against a curated public registry; any
-// Authorization/Cookie/Proxy-Authorization header carries operator
-// credentials that should never be sent to whatever URL the operator
-// (or a downstream caller) happens to pass through --registry.
+// allowedMarketplaceHeaders is the CLOSED set of extra request headers a
+// caller may add to a marketplace fetch. Everything not listed here is
+// refused.
 //
-// codex deep-sec PR #163 lane 1 P2 closure: prior to this fix
-// extraHeaders was set unfiltered, so a future internal caller could
-// accidentally leak credentials.
+// This is an ALLOWLIST on purpose. It replaces a denylist of
+// {authorization, cookie, proxy-authorization}, which had the wrong
+// polarity for a security control: the default outcome of an unenumerated
+// name was "send it". The threat model is an unauthenticated GET against
+// whatever URL the operator passes through --registry, so every header
+// that leaks is a credential handed to a host of the operator's (or a
+// downstream caller's) choosing — and the set of credential-bearing header
+// names is open, not closed. The denylist missed, by construction, every
+// one of:
+//
+//   - vendor-specific credential headers a private catalog host would
+//     plausibly want: GitLab's PRIVATE-TOKEN, X-Api-Key, X-Auth-Token,
+//     X-Access-Token, X-Amz-Security-Token, Circle-Token, X-JFrog-Art-Api;
+//   - the RFC-standard siblings of the three it did list: Authentication-Info,
+//     Proxy-Authenticate, Cookie2;
+//   - protocol headers this function already sets ITSELF, where a caller's
+//     value is silently wrong: If-None-Match and Accept-Encoding.
+//
+// Those last two are silently wrong in OPPOSITE directions, and the asymmetry
+// is the whole reason to name them. Measured against a live httptest server
+// with each name temporarily allowlisted (2026-07-27):
+//
+//	If-None-Match     the extraHeaders loop runs AFTER the Set that applies the
+//	                  ifNoneMatch PARAMETER, so a caller entry WINS. Parameter
+//	                  `"param-etag"` + extraHeaders `"caller-etag"` put
+//	                  `"caller-etag"` on the wire: the parameter is overridden.
+//	Accept-Encoding   the unconditional Set("Accept-Encoding","identity") runs
+//	                  AFTER the extraHeaders loop, so a caller entry LOSES.
+//	                  extraHeaders `gzip` still put `identity` on the wire: the
+//	                  caller's intent is discarded.
+//
+// CORRECTION (2026-07-27): an earlier revision of this comment, of aed0d7e9's
+// message, and of the matching test assertion all claimed that overriding
+// Accept-Encoding "defeats the wire-byte gzip-bomb cap this file installs".
+// That was never true — the Set below it made such an entry a no-op, so the cap
+// was never reachable through this path (and that Set already preceded
+// aed0d7e9). The real reason to refuse it is fail-loud over silently-ignored.
+// The If-None-Match half of the claim was, and remains, correct.
+//
+// A per-name reason is not what makes any of these refused, though — that is
+// the point of the polarity. Everything outside the map is refused BY DEFAULT;
+// the list above records which names the predecessor denylist demonstrably let
+// through, not a set of bespoke rules.
+//
+// Inverting the polarity makes the safe outcome the DEFAULT and makes
+// widening the surface a deliberate, reviewable edit to this map, rather
+// than a name nobody thought to add to a ban list.
+//
+// The map is currently minimal by intent: User-Agent is the one use the
+// contract ever named ("permitted only for non-credentialed metadata (e.g.
+// a future User-Agent override)"), and no in-repo caller passes any header
+// at all — both production call sites pass nil (marketplace_cache.go:92,
+// marketplace_cache.go:153). A future caller that genuinely needs another
+// non-credentialed header adds it here with its own justification.
 //
 // Header names compared lowercase since http.Header canonicalizes on
-// set; we check the lowered key before letting it through.
-var forbiddenMarketplaceHeaders = map[string]struct{}{
-	"authorization":       {},
-	"cookie":              {},
-	"proxy-authorization": {},
+// set; we lower the caller's key before looking it up. A name carrying
+// stray whitespace or any other non-token byte therefore does not match an
+// entry and is refused here, instead of reaching http.Transport and dying
+// there with an opaque "invalid header field name".
+var allowedMarketplaceHeaders = map[string]struct{}{
+	"user-agent": {},
+}
+
+// sortedAllowedMarketplaceHeaders renders the allowlist for the refusal
+// message. Sorted because Go map iteration order is randomized per run, and
+// an error string that changes between two identical calls is an ambient
+// input an operator (or a test) cannot rely on.
+func sortedAllowedMarketplaceHeaders() string {
+	names := make([]string, 0, len(allowedMarketplaceHeaders))
+	for k := range allowedMarketplaceHeaders {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // MarketplaceFetchWithClient is the injectable form. Tests pass a
@@ -263,21 +326,25 @@ var forbiddenMarketplaceHeaders = map[string]struct{}{
 // MarketplaceFetch.
 //
 // `extraHeaders` is permitted only for non-credentialed metadata
-// (e.g. a future User-Agent override). Authorization, Cookie, and
-// Proxy-Authorization are dropped with an error before the request
-// is built.
+// (e.g. a User-Agent override). Every name outside
+// allowedMarketplaceHeaders — which includes but is not limited to
+// Authorization, Cookie and Proxy-Authorization — is refused with an
+// error before the request is built.
 func MarketplaceFetchWithClient(ctx context.Context, client *http.Client, rawURL, ifNoneMatch string, extraHeaders map[string]string) (*MarketplaceFetchResult, error) {
 	u, err := parseMarketplacePublicHTTPSURL(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("marketplace url must be public https:// without embedded credentials or unsafe characters (got %q): %w", urlredact.MarketplaceURLForError(rawURL), err)
 	}
-	// Reject credential-bearing headers BEFORE building the request
-	// (defense-in-depth: if a future caller passes Authorization,
-	// fail loud, do not silently strip — the caller's intent is
-	// either a programming error or a privilege escalation).
+	// Refuse every header outside the allowlist BEFORE building the request
+	// (defense-in-depth: if a future caller passes a credential, fail loud,
+	// do not silently strip — the caller's intent is either a programming
+	// error or a privilege escalation). Fail-closed: an unrecognized name is
+	// refused, never forwarded, because the set of credential-bearing header
+	// names is open and this fetch is an unauthenticated GET against an
+	// operator-supplied URL.
 	for k := range extraHeaders {
-		if _, banned := forbiddenMarketplaceHeaders[strings.ToLower(k)]; banned {
-			return nil, fmt.Errorf("refusing to send credential-bearing header %q to marketplace registry — fetches are unauthenticated GETs", k)
+		if _, allowed := allowedMarketplaceHeaders[strings.ToLower(k)]; !allowed {
+			return nil, fmt.Errorf("refusing to send header %q to marketplace registry — fetches are unauthenticated GETs, so only %s may be added (add the name to allowedMarketplaceHeaders if a non-credentialed header is genuinely needed)", k, sortedAllowedMarketplaceHeaders())
 		}
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

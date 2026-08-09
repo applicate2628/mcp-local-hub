@@ -221,13 +221,11 @@ func runStrictlyContainedWithJob(ctx context.Context, invocation StrictRunInvoca
 	}()
 
 	waited := make(chan error, 1)
-	go func() { waited <- invocation.Command.Wait() }()
+	go func() { waited <- waitStrictContainedCommand(invocation.Command) }()
 	var waitErr error
 	var timeout bool
 	select {
 	case waitErr = <-waited:
-		// Wait has reaped the group leader. Do not signal its numeric PGID
-		// afterward: the kernel may already have reassigned it to another group.
 	case <-ctx.Done():
 		timeout = true
 		if invocation.timeoutKill != nil {

@@ -293,7 +293,7 @@ func (a *API) Install(opts InstallOpts) error {
 	// 1. Load manifest (embed FS first, disk fallback for dev flow).
 	//    The canonical installed binary resolves manifests from its
 	//    embedded FS so an install launched from any cwd finds the same
-	//    10 servers the daemon sees — previously install opened disk
+	//    16 manifests the daemon sees — previously install opened disk
 	//    and failed or saw a stale subset.
 	data, err := loadManifestYAMLEmbedFirst(opts.Server)
 	if err != nil {

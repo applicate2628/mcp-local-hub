@@ -16,6 +16,7 @@
 | [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) | Revision FIX-1 … FIX-9 delivered; awaiting lead gate. |
 | [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) | Investigation complete; design lanes dispatched. |
 | [2026-07-25-mcp-front-daemon](active/2026-07-25-mcp-front-daemon/status.md) | PR #588 live-finding closure active; 14 reported rows map to 10 defect classes pending evidence, fixes, mutation QA, and independent architecture review. |
+| [2026-07-27-pr591-bot-findings](active/2026-07-27-pr591-bot-findings/status.md) | Active — final integration and merge verification in progress. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 

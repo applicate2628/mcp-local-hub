@@ -3075,12 +3075,13 @@ func TestWeeklyRefreshLockOrderInventory(t *testing.T) {
 	}
 	flockLock := weeklyFlockLockFunction(t, inventory)
 	settingsWrite := weeklyRequiredPackageFunc(t, inventory, "WriteStateFileBytesLockHeld")
-	lockLeaf := weeklyRequiredPackageFunc(t, inventory, "lockLeafLedgered")
+	lockLeafFactory := weeklyRequiredPackageFunc(t, inventory, "lockLeafLedgered")
+	lockLeafRawOwner := weeklyRequiredPackageFunc(t, inventory, "lockLeafLedgeredWithUnlock")
 	transactionNode := inventory.byFunction[options.transaction]
 	if transactionNode == nil {
 		t.Fatal("weekly transaction root is not indexed")
 	}
-	wantReleaseOrigin := weeklyFunctionResultOrigin{factory: lockLeaf, resultIndex: 0}
+	wantReleaseOrigin := weeklyFunctionResultOrigin{factory: lockLeafFactory, resultIndex: 0}
 	if dispatches := graph.approvedFunctionResultDispatches[transactionNode.key]; len(dispatches) != 1 || dispatches[0] != wantReleaseOrigin {
 		t.Fatalf("weekly approved release dispatches = %#v, want [%#v]", dispatches, wantReleaseOrigin)
 	}
@@ -3095,13 +3096,13 @@ func TestWeeklyRefreshLockOrderInventory(t *testing.T) {
 			t.Fatalf("weekly transaction path has direct settings write primitive in %s", source.key)
 		}
 		if count := weeklyDirectFlockNewCount(inventory, source, flockNew); count != 0 {
-			if source.function != lockLeaf {
+			if source.function != lockLeafRawOwner {
 				t.Fatalf("weekly transaction path has direct flock.New acquisition in %s", source.key)
 			}
 			flockNewCalls += count
 		}
 		if count := weeklyDirectFlockLockCount(inventory, source, flockLock); count != 0 {
-			if source.function != lockLeaf {
+			if source.function != lockLeafRawOwner {
 				t.Fatalf("weekly transaction path has direct flock Lock acquisition in %s", source.key)
 			}
 			flockLockCalls += count
