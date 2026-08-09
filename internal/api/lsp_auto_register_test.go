@@ -1069,14 +1069,18 @@ func TestEnsureLSPRegistered_NewRowRollbackMatrix(t *testing.T) {
 	}
 }
 
-func TestEnsureLSPRegistered_AppliedIntentReleaseCommitsForward(t *testing.T) {
+func TestEnsureLSPRegistered_AppliedReleaseCompletesForwardHandoff(t *testing.T) {
 	tests := []struct {
-		name          string
-		seedPrior     bool
-		failOnRelease int32
+		name            string
+		seedPrior       bool
+		registryRelease bool
+		reconcileFails  bool
+		failOnRelease   int32
 	}{
 		{name: "existing-row-promotion", seedPrior: true, failOnRelease: 2},
 		{name: "new-row-registration", failOnRelease: 1},
+		{name: "new-row-registry-release", registryRelease: true, failOnRelease: 1},
+		{name: "new-row-registry-release-reconcile-fails", registryRelease: true, reconcileFails: true, failOnRelease: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1089,15 +1093,23 @@ func TestEnsureLSPRegistered_AppliedIntentReleaseCommitsForward(t *testing.T) {
 			schedulerFactoryFn = func() (scheduler.Scheduler, error) { return h.fakeSch, nil }
 			defer func() { schedulerFactoryFn = origScheduler }()
 			origReadiness := proxyReadinessFn
-			proxyReadinessFn = func(int, time.Duration) error { return nil }
+			var readinessCalls atomic.Int32
+			proxyReadinessFn = func(int, time.Duration) error {
+				readinessCalls.Add(1)
+				return nil
+			}
 			defer func() { proxyReadinessFn = origReadiness }()
 			origKill := killByPortFn
 			killByPortFn = func(int, time.Duration) error { return nil }
 			defer func() { killByPortFn = origKill }()
 			origReconcile := registerSupervisorReconcileFn
 			var reconcileCalls atomic.Int32
+			reconcileCause := errors.New("injected mandatory reconcile failure")
 			registerSupervisorReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
 				reconcileCalls.Add(1)
+				if tc.reconcileFails {
+					return ReconcileResponse{}, reconcileCause
+				}
 				return ReconcileResponse{}, nil
 			}
 			defer func() { registerSupervisorReconcileFn = origReconcile }()
@@ -1133,7 +1145,10 @@ func TestEnsureLSPRegistered_AppliedIntentReleaseCommitsForward(t *testing.T) {
 				t.Fatalf("DefaultSupervisorIntentPath: %v", err)
 			}
 			lockPath := supervisorIntentLockPath(intentPath)
-			releaseCause := errors.New("injected LSP supervisor-intent release failure")
+			if tc.registryRelease {
+				lockPath = NewRegistry(h.regPath).LockPath()
+			}
+			releaseCause := errors.New("injected LSP durable-state release failure")
 			previousUnlock := flockUnlockFn
 			var targetReleases atomic.Int32
 			var stranded []*flock.Flock
@@ -1158,11 +1173,21 @@ func TestEnsureLSPRegistered_AppliedIntentReleaseCommitsForward(t *testing.T) {
 			if !errors.Is(err, ErrLockReleaseUnconfirmed) || !errors.Is(err, releaseCause) {
 				t.Fatalf("error = %v, want applied release class and injected cause", err)
 			}
+			if tc.reconcileFails && !errors.Is(err, reconcileCause) {
+				t.Fatalf("error = %v, want mandatory reconcile cause", err)
+			}
 			if got.WorkspaceKey != wsKey || got.Language != "python" || got.Port == 0 {
 				t.Fatalf("truthful committed entry = %+v", got)
 			}
-			if reconcileCalls.Load() != 0 {
-				t.Fatalf("reconcile calls = %d, want zero after applied intent release", reconcileCalls.Load())
+			wantReadiness := int32(1)
+			if tc.seedPrior {
+				wantReadiness++ // the existing-row liveness probe precedes promotion
+			}
+			if tc.reconcileFails {
+				wantReadiness = 0
+			}
+			if reconcileCalls.Load() != 1 || readinessCalls.Load() != wantReadiness {
+				t.Fatalf("reconcile=%d readiness=%d, want mandatory handoff 1/%d after applied release", reconcileCalls.Load(), readinessCalls.Load(), wantReadiness)
 			}
 			reg := NewRegistry(h.regPath)
 			if err := reg.Load(); err != nil {
