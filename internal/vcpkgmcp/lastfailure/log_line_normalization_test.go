@@ -91,10 +91,10 @@ func TestDetectInterrupted_SurvivesTerminalDisplayBytes(t *testing.T) {
 	interrupts := []struct{ name, content string }{
 		{"ANSI-wrapped ninja narration", "FAILED: [code=1]\n\x1b[31mninja: build stopped: interrupted by user.\x1b[0m\n"},
 		{"ANSI-wrapped relayed subprocess line", "FAILED: [code=1]\n\x1b[31mUser interrupt\x1b[0m\n"},
-		{"OSC title sequence before the marker", "\x1b]0;build\x07User interrupt\n"},
-		{"UTF-8 BOM prefix", utf8BOM + "User interrupt\n"},
-		{"NUL suffix", "User interrupt\x00\n"},
-		{"colour reset leaving trailing space", "\x1b[31mUser interrupt \x1b[0m\n"},
+		{"OSC title sequence before the marker", "FAILED: [code=1]\n\x1b]0;build\x07User interrupt\n"},
+		{"UTF-8 BOM prefix", "FAILED: [code=1]\n" + utf8BOM + "User interrupt\n"},
+		{"NUL suffix", "FAILED: [code=1]\nUser interrupt\x00\n"},
+		{"colour reset leaving trailing space", "FAILED: [code=1]\n\x1b[31mUser interrupt \x1b[0m\n"},
 	}
 	for _, tc := range interrupts {
 		if !DetectInterrupted([]byte(tc.content)) {

@@ -137,9 +137,11 @@ func splitStatementsChecked(src string) (out []statement, ok bool) {
 				idEnd++
 			}
 			name := src[start:idEnd]
-			// Skip whitespace/newlines between name and '('.
+			// CMake's command_invocation grammar permits only horizontal
+			// space between the identifier and '('. A line ending terminates
+			// recognition; accepting it would execute syntax CMake rejects.
 			j := idEnd
-			for j < n && isSpaceOrNL(src[j]) {
+			for j < n && (src[j] == ' ' || src[j] == '\t') {
 				j++
 			}
 			if j >= n || src[j] != '(' {

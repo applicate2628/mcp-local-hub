@@ -43,7 +43,7 @@ import (
 // source line, so no parens).
 var (
 	gccClangDiagRE = regexp.MustCompile(
-		`^(?P<file>.+?):(?P<line>\d+):(?P<col>\d+):\s+(?P<sev>fatal error|error|warning|note):\s*(?P<msg>.+)$`)
+		`^(?P<file>.+?):(?P<line>\d+):(?:(?P<col>\d+):)?\s+(?P<sev>fatal error|error|warning|note):\s*(?P<msg>.+)$`)
 
 	// The diagnostic CODE is OPTIONAL. cl.exe always emits one (error C2065),
 	// but clang-cl in MSVC-compatible mode emits the same POSITION shape with
@@ -528,9 +528,9 @@ func (n *logLineNormalizer) finish(emit func(byte)) {
 	n.bom = 0
 }
 
-// DetectInterrupted reports whether content carries a user-interrupt marker as
-// a WHOLE LINE. A "FAILED:" line in the same log must NOT be reported as a real
-// build failure when this is true — the build was stopped, not broken.
+// DetectInterrupted reports whether content carries corroborated interruption
+// evidence. Ninja's own terminal narration is sufficient; the generic relayed
+// "User interrupt" line also requires a ninja FAILED line in the same log.
 //
 // See interruptMarkers for the producer evidence and for why a whole-file
 // substring scan was the wrong predicate, and normalizeLogLine for why the
@@ -544,6 +544,7 @@ func (n *logLineNormalizer) finish(emit func(byte)) {
 // on '\n' AND '\r' so a CRLF log, and a capture that retained a terminal's
 // carriage-return overwrites, both decompose correctly.
 func DetectInterrupted(content []byte) bool {
+	weak, failed := false, false
 	for len(content) > 0 {
 		line := content
 		if i := bytes.IndexAny(content, "\r\n"); i >= 0 {
@@ -551,26 +552,37 @@ func DetectInterrupted(content []byte) bool {
 		} else {
 			content = nil
 		}
-		if isInterruptLogLine(line) {
+		switch classifyInterruptLogLine(line) {
+		case 1:
+			weak = true
+		case 2:
 			return true
 		}
+		normalized := strings.TrimSpace(normalizeLogLine(string(line)))
+		failed = failed || ninjaFailedRE.MatchString(normalized)
 	}
-	return false
+	return weak && failed
 }
 
-func isInterruptLogLine(line []byte) bool {
+// classifyInterruptLogLine distinguishes the relayed subprocess phrase from
+// ninja's own terminal narration. The former is weak evidence and needs a
+// FAILED line in the same log; the latter is independently authoritative.
+func classifyInterruptLogLine(line []byte) int {
 	// Normalize BEFORE trimming: stripping a trailing reset sequence or a
 	// leading BOM can expose whitespace the trim then has to remove.
 	trimmed := strings.TrimSpace(normalizeLogLine(string(line)))
 	if trimmed == "" {
-		return false
+		return 0
 	}
 	for _, marker := range interruptMarkers {
 		if trimmed == marker {
-			return true
+			if marker == "User interrupt" {
+				return 1
+			}
+			return 2
 		}
 	}
-	return false
+	return 0
 }
 
 // normalizeSeverity folds "fatal error" into "error" (same category, just

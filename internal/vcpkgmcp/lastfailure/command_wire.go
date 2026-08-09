@@ -55,6 +55,7 @@ func commandCarriesCredential(command string) bool {
 	fields := strings.Fields(command)
 	for i, field := range fields {
 		field = strings.Trim(field, `"'`)
+		isOption := strings.HasPrefix(field, "-") && field != "-"
 		key, value, hasValue := strings.Cut(field, "=")
 		key = strings.TrimLeft(key, "-/")
 		if hasValue && value != "" {
@@ -63,15 +64,30 @@ func commandCarriesCredential(command string) bool {
 			}
 			continue
 		}
-		if !hasValue && i+1 < len(fields) {
+		if !hasValue && isOption && i+1 < len(fields) {
+			if safeCommandFlagKey(key) {
+				continue
+			}
 			next := strings.Trim(fields[i+1], `"'`)
 			if next != "" && !strings.HasPrefix(next, "-") &&
-				credentialCommandKey(key) {
+				(credentialCommandKey(key) || !safeCommandValueKey(key)) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// safeCommandFlagKey lists value-less flags whose following token remains a
+// positional argument. Without this distinction, ninja's ordinary "-v all"
+// build command would be mistaken for an unsafe option/value pair.
+func safeCommandFlagKey(key string) bool {
+	switch strings.ToLower(strings.TrimLeft(key, "-/")) {
+	case "v", "verbose":
+		return true
+	default:
+		return false
+	}
 }
 
 // safeCommandValueKey is deliberately a small allowlist of public vcpkg

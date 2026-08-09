@@ -85,7 +85,7 @@ func TestDetectInterrupted_RealProducerLinesAreStillDetected(t *testing.T) {
 		{"CRLF log", "FAILED: [code=1] x.obj\r\nUser interrupt\r\nninja: build stopped: interrupted by user.\r\n"},
 		{"indented by a capture wrapper", "FAILED: [code=1] x.obj\n   User interrupt   \n"},
 		{"no trailing newline at end of file", "FAILED: [code=1] x.obj\nUser interrupt"},
-		{"carriage-return separated (terminal overwrite retained in a capture)", "[2/3] compiling\rUser interrupt\r"},
+		{"carriage-return separated (terminal overwrite retained in a capture)", "FAILED: [code=1] x.obj\rUser interrupt\r"},
 	}
 	for _, tc := range realShapes {
 		t.Run(tc.name, func(t *testing.T) {

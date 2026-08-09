@@ -12,7 +12,7 @@ func TestR28LowercaseOptionalIsNotCMakeOption(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.Edges) != 1 || result.Edges[0].Status != StatusDangling {
-		t.Fatalf("edges=%+v, want required missing include to be dangling", result.Edges)
+	if len(result.Edges) != 1 || result.Edges[0].Status != StatusUnresolved || result.Edges[0].Reason != ReasonParseError {
+		t.Fatalf("edges=%+v, want lowercase non-keyword tail to remain a parse error", result.Edges)
 	}
 }

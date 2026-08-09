@@ -1237,7 +1237,11 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 			argText := data[c.ArgStart:c.ArgEnd]
 			rawArg, ok = firstArgument(argText)
 			malformed = !ok
-			optional = kind == EdgeInclude && includeArgumentOptional(argText)
+			if kind == EdgeInclude && !malformed {
+				var valid bool
+				optional, valid = includeArgumentOptional(argText)
+				malformed = !valid
+			}
 		}
 
 		e := Edge{
@@ -1664,7 +1668,7 @@ func scanTopLevelCommands(data []byte, maxCommands int) ([]commandInvocation, bo
 			}
 			name := strings.ToLower(string(data[start:i]))
 			j := i
-			for j < len(data) && isSpace(data[j]) {
+			for j < len(data) && isCommandGapSpace(data[j]) {
 				j++
 			}
 			if j < len(data) && data[j] == '(' {
@@ -1849,6 +1853,10 @@ func isSpace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n'
 }
 
+func isCommandGapSpace(c byte) bool {
+	return c == ' ' || c == '\t'
+}
+
 // firstArgument returns the first argument in argText (the raw bytes between
 // a call's outer parens), stripping surrounding quotes but NEVER decoding
 // escape sequences (the caller refuses any argument containing a backslash —
@@ -1880,14 +1888,17 @@ func hasArgumentKeyword(argText []byte, keyword string) bool {
 // includeArgumentOptional recognizes OPTIONAL only as an independent
 // include() option. RESULT_VARIABLE consumes exactly one following argument,
 // even when that value itself is spelled OPTIONAL.
-func includeArgumentOptional(argText []byte) bool {
+func includeArgumentOptional(argText []byte) (optional, valid bool) {
 	offset := 0
 	argumentIndex := 0
 	consumeResultValue := false
 	for {
 		value, next, bracket, ok, found := nextArgument(argText, offset)
-		if !ok || !found {
-			return false
+		if !ok {
+			return false, false
+		}
+		if !found {
+			return optional, argumentIndex > 0 && !consumeResultValue
 		}
 		offset = next
 		if argumentIndex == 0 {
@@ -1899,15 +1910,20 @@ func includeArgumentOptional(argText []byte) bool {
 			continue
 		}
 		if bracket {
-			continue
+			return false, false
 		}
 		if strings.EqualFold(value, "RESULT_VARIABLE") {
 			consumeResultValue = true
 			continue
 		}
 		if value == "OPTIONAL" {
-			return true
+			if optional {
+				return false, false
+			}
+			optional = true
+			continue
 		}
+		return false, false
 	}
 }
 

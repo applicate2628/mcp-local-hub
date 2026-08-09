@@ -45,9 +45,12 @@ type phaseLogParser struct {
 	budget       [severityBudgetClasses][tierBudgetClasses]int
 	result       phaseLogScanResult
 
-	interruptStart int
-	lineOverlong   bool
-	interrupt      interruptStreamMatcher
+	interruptStart  int
+	lineOverlong    bool
+	interrupt       interruptStreamMatcher
+	interruptWeak   bool
+	interruptStrong bool
+	ninjaFailed     bool
 }
 
 func newPhaseLogParser(scanner *phaseLogStreamScanner, file phaseLogFile, perCellLimit, commandBytes, lineBytes int, accumulator *diagnosticAccumulator) *phaseLogParser {
@@ -215,18 +218,24 @@ func (p *phaseLogParser) growLine(needed int) {
 }
 
 func (p *phaseLogParser) finishInterruptSegment() {
-	matched := p.interrupt.matches()
+	kind := p.interrupt.matches()
 	if !p.lineOverlong && p.interruptStart <= len(p.scanner.lineBuffer) {
-		matched = isInterruptLogLine(p.scanner.lineBuffer[p.interruptStart:])
+		kind = classifyInterruptLogLine(p.scanner.lineBuffer[p.interruptStart:])
 	}
-	if matched {
-		p.result.interrupted = true
+	switch kind {
+	case 1:
+		p.interruptWeak = true
+	case 2:
+		p.interruptStrong = true
 	}
+	p.updateInterrupted()
 }
 
 func (p *phaseLogParser) finishLFLine() {
 	if !p.lineOverlong {
 		line := normalizeLFLogLine(string(p.scanner.lineBuffer))
+		p.ninjaFailed = p.ninjaFailed || ninjaFailedRE.MatchString(strings.TrimSpace(line))
+		p.updateInterrupted()
 		if p.result.buildCommand == "" {
 			if command, ok := buildCommandFromNormalizedLine(line); ok {
 				p.result.buildCommand = boundedValue(command, p.commandBytes)
@@ -248,6 +257,10 @@ func (p *phaseLogParser) finishLFLine() {
 	p.lineOverlong = false
 }
 
+func (p *phaseLogParser) updateInterrupted() {
+	p.result.interrupted = p.interruptStrong || (p.interruptWeak && p.ninjaFailed)
+}
+
 func (p *phaseLogParser) finish() {
 	p.finishInterruptSegment()
 	if len(p.scanner.lineBuffer) > 0 || p.lineOverlong {
@@ -259,8 +272,9 @@ func normalizeLFLogLine(line string) string {
 	return normalizeLogLine(strings.TrimRight(line, "\r"))
 }
 
-// interruptStreamMatcher recognizes the two exact ASCII interrupt markers
-// without retaining their surrounding line. It exists for an LF line that is
+// interruptStreamMatcher classifies the two exact ASCII interrupt markers
+// without retaining their surrounding line. The parser then applies the same
+// strong-vs-correlated-weak rule as DetectInterrupted. It exists for an LF line that is
 // too long for the diagnostic framing buffer: DetectInterrupted historically
 // scans CR/LF segments independently of the diagnostic line ceiling, so an
 // overlong whitespace-padded marker must still win verdict precedence.
@@ -285,14 +299,22 @@ func (m *interruptStreamMatcher) reset() {
 	m.runeLen = 0
 }
 
-func (m *interruptStreamMatcher) matches() bool {
+func (m *interruptStreamMatcher) matches() int {
 	if !m.invalid {
 		m.normalizer.finish(m.feedVisible)
 	}
 	if m.runeLen != 0 {
 		m.invalid = true
 	}
-	return m.matched && !m.invalid
+	if !m.matched || m.invalid {
+		return 0
+	}
+	for i, marker := range interruptMarkers {
+		if m.candidates&(1<<i) != 0 && m.position == len(marker) {
+			return i + 1
+		}
+	}
+	return 0
 }
 
 func (m *interruptStreamMatcher) feed(data []byte) {

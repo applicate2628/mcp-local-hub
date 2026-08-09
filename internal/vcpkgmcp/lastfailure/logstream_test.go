@@ -345,7 +345,7 @@ func TestScanPhaseLogStream_PreservesThreeConsumerLineSemantics(t *testing.T) {
 	// segment. A line can exceed the diagnostic scanner's 4 MiB ceiling solely
 	// through leading whitespace and still be exactly an interrupt marker after
 	// TrimSpace; streaming must not lose that higher-precedence fact.
-	paddedInterrupt := strings.Repeat("\u2003", defaultResponseLimits.logLineBytes/3+1) +
+	paddedInterrupt := "FAILED: [code=1] x.obj\n" + strings.Repeat("\u2003", defaultResponseLimits.logLineBytes/3+1) +
 		"\ufeff\x1b[31mUser interrupt\x1b[0m \t\n"
 	fsys.open = func() io.ReadCloser { return io.NopCloser(strings.NewReader(paddedInterrupt)) }
 	result, err = newPhaseLogStreamScanner().scan(context.Background(), fsys,
