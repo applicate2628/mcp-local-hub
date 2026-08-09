@@ -936,11 +936,11 @@ func TestRelativeRootsAreRejected(t *testing.T) {
 	}
 }
 
-// Test: validation trims overlay roots, and the inspected path must use that
-// same normalized value rather than the whitespace-padded input spelling.
-func TestWhitespacePaddedAbsoluteOverlayResolves(t *testing.T) {
+// Test: validation trims overlay roots only to recognize blank entries. Any
+// whitespace in a nonblank path remains filesystem-significant path data.
+func TestWhitespaceInAbsoluteOverlayPathIsPreserved(t *testing.T) {
 	tmpDir := t.TempDir()
-	overlayDir := filepath.Join(tmpDir, "overlay")
+	overlayDir := filepath.Join(tmpDir, " overlay ")
 	overlayPortDir := filepath.Join(overlayDir, "myport")
 	deps := &fakeDeps{
 		files: map[string]os.FileInfo{
@@ -953,9 +953,9 @@ func TestWhitespacePaddedAbsoluteOverlayResolves(t *testing.T) {
 
 	res := ResolvePort(Args{
 		Port:         "myport",
-		OverlayPorts: []string{"  " + overlayDir + "  "},
+		OverlayPorts: []string{" \t ", overlayDir},
 	}, deps.toDeps())
 	if res.Status != evidence.StatusOK || res.Winner == nil || res.Winner.Directory != overlayPortDir {
-		t.Fatalf("expected padded absolute overlay to resolve %q, got status=%v winner=%+v", overlayPortDir, res.Status, res.Winner)
+		t.Fatalf("expected whitespace-bearing absolute overlay to resolve %q, got status=%v winner=%+v", overlayPortDir, res.Status, res.Winner)
 	}
 }

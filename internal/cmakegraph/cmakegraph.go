@@ -55,10 +55,12 @@
 //     rested only on premises this package can verify (see the sections
 //     below) — never on an invented or invocation-dependent guess.
 //   - StatusDangling: a concrete, verified path was computed and the target
-//     is VERIFIABLY absent — os.Stat returned fs.ErrNotExist, or the target
-//     exists as the wrong TYPE (a directory where include() needs a file, a
-//     non-directory where add_subdirectory() needs one). This is a real
-//     finding (a broken include), not a scanner failure. An os.Stat that
+//     is VERIFIABLY absent — os.Stat returned fs.ErrNotExist. For
+//     add_subdirectory(), a non-directory or a child without a regular
+//     CMakeLists.txt is also a verified broken target. An include() target
+//     that is a directory instead becomes StatusUnresolved/
+//     ReasonTargetWrongType: it exists, so reporting absence would be false.
+//     An os.Stat that
 //     fails for ANY OTHER reason (access denied, sharing violation,
 //     transient I/O) proves nothing about absence and is
 //     StatusUnresolved/ReasonTargetUnreadable instead — see that constant.
@@ -362,6 +364,11 @@ const (
 	// means VERIFIED ABSENCE and must never be used for that: an unreadable
 	// target is an unknown target, so it fails closed here instead.
 	ReasonTargetUnreadable Reason = "target_unreadable"
+	// ReasonTargetWrongType: a concrete, verified include() path exists, but
+	// names a directory rather than a regular file. That is neither absence nor
+	// an OPTIONAL absence, so the scanner fails closed instead of calling it
+	// dangling.
+	ReasonTargetWrongType Reason = "target_wrong_type"
 )
 
 // CoverageReason is the CLOSED set of ways this package can fail to cover
@@ -925,19 +932,26 @@ type sourceContext struct {
 	verified bool
 }
 
-// controlFrame is one lexically-open CMake control construct. It records
-// static uncertainty only: scanning never attempts to execute any branch or
-// loop. An edge is Conditional while any control frame remains open.
-type controlFrame uint8
+// controlFrame is one lexically-open CMake control construct. edgeStart is
+// the retained-edge boundary before the opener: if EOF arrives before the
+// matching terminator, every edge at or after that boundary is structurally
+// untrustworthy and is retracted together.
+type controlFrame struct {
+	kind      controlFrameKind
+	edgeStart int
+	line      int
+}
+
+type controlFrameKind uint8
 
 const (
-	controlFrameIf controlFrame = iota
+	controlFrameIf controlFrameKind = iota
 	controlFrameForeach
 	controlFrameWhile
 )
 
-func closeControlFrame(frames []controlFrame, expected controlFrame) ([]controlFrame, bool) {
-	if n := len(frames); n > 0 && frames[n-1] == expected {
+func closeControlFrame(frames []controlFrame, expected controlFrameKind) ([]controlFrame, bool) {
+	if n := len(frames); n > 0 && frames[n-1].kind == expected {
 		return frames[:n-1], true
 	}
 	return frames, false
@@ -1085,6 +1099,16 @@ func (w *walker) appendEdge(edge Edge) bool {
 	w.edges = append(w.edges, edge)
 	w.retainedEdgeBytes += bytes
 	return true
+}
+
+func (w *walker) retractEdges(start int) {
+	if start < 0 || start >= len(w.edges) {
+		return
+	}
+	for _, edge := range w.edges[start:] {
+		w.retainedEdgeBytes -= retainedEdgeBytes(edge)
+	}
+	w.edges = w.edges[:start]
 }
 
 // walkRoot validates startFile and scans it as a fresh traversal root —
@@ -1252,13 +1276,13 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 		}
 		switch c.Name {
 		case "if":
-			controlFrames = append(controlFrames, controlFrameIf)
+			controlFrames = append(controlFrames, controlFrame{kind: controlFrameIf, edgeStart: len(w.edges), line: lineFromIndex(lineIndex, c.NameOffset)})
 			continue
 		case "foreach":
-			controlFrames = append(controlFrames, controlFrameForeach)
+			controlFrames = append(controlFrames, controlFrame{kind: controlFrameForeach, edgeStart: len(w.edges), line: lineFromIndex(lineIndex, c.NameOffset)})
 			continue
 		case "while":
-			controlFrames = append(controlFrames, controlFrameWhile)
+			controlFrames = append(controlFrames, controlFrame{kind: controlFrameWhile, edgeStart: len(w.edges), line: lineFromIndex(lineIndex, c.NameOffset)})
 			continue
 		case "endif", "endforeach", "endwhile":
 			expected := controlFrameIf
@@ -1343,7 +1367,7 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 		e.ResolvedPath = candidate
 
 		var targetFile string
-		var exists, unreadable bool
+		var exists, unreadable, wrongType bool
 		var newCtx sourceContext
 		switch kind {
 		case EdgeInclude:
@@ -1354,6 +1378,8 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 			case statErr == nil && fi.Mode().IsRegular():
 				exists = true
 				targetFile = candidate
+			case statErr == nil && fi.IsDir():
+				wrongType = true
 			case statErr == nil && !fi.IsDir():
 				unreadable = true
 			}
@@ -1384,6 +1410,14 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 			newCtx = sourceContext{dir: candidate, verified: true}
 		}
 
+		if wrongType {
+			e.Status = StatusUnresolved
+			e.Reason = ReasonTargetWrongType
+			if !w.appendEdge(e) {
+				return
+			}
+			continue
+		}
 		if unreadable {
 			// The filesystem refused to tell us whether the target exists.
 			// StatusDangling asserts VERIFIED ABSENCE, which we do not have —
@@ -1447,6 +1481,12 @@ func (w *walker) walkFileData(file string, data []byte, ctx sourceContext, depth
 		if !w.appendEdge(e) {
 			return
 		}
+	}
+	if !commandLimit && len(controlFrames) > 0 {
+		outermost := controlFrames[0]
+		w.retractEdges(outermost.edgeStart)
+		w.recordCoverage(canonSelf, CoverageControlFlowInvalid,
+			fmt.Sprintf("unterminated control frame opened at line %d", outermost.line))
 	}
 }
 
@@ -1933,7 +1973,7 @@ func isCommandGapSpace(c byte) bool {
 // an unterminated quote, or CMake bracket-argument syntax (recognized, but
 // its content is never extracted as a path — P1-4).
 func firstArgument(argText []byte) (string, bool) {
-	value, _, bracket, ok, found := nextArgument(argText, 0)
+	value, _, _, bracket, ok, found := nextArgument(argText, 0)
 	return value, ok && found && !bracket
 }
 
@@ -1943,7 +1983,7 @@ func firstArgument(argText []byte) (string, bool) {
 func hasArgumentKeyword(argText []byte, keyword string) bool {
 	offset := 0
 	for {
-		value, next, bracket, ok, found := nextArgument(argText, offset)
+		value, next, _, bracket, ok, found := nextArgument(argText, offset)
 		if !ok || !found {
 			return false
 		}
@@ -1961,8 +2001,10 @@ func includeArgumentOptional(argText []byte) (optional, valid bool) {
 	offset := 0
 	argumentIndex := 0
 	consumeResultValue := false
+	ignoredListContinuation := false
+	seenOption := false
 	for {
-		value, next, bracket, ok, found := nextArgument(argText, offset)
+		value, next, listContinuation, bracket, ok, found := nextArgument(argText, offset)
 		if !ok {
 			return false, false
 		}
@@ -1982,6 +2024,7 @@ func includeArgumentOptional(argText []byte) (optional, valid bool) {
 			return false, false
 		}
 		if strings.EqualFold(value, "RESULT_VARIABLE") {
+			seenOption = true
 			consumeResultValue = true
 			continue
 		}
@@ -1989,7 +2032,16 @@ func includeArgumentOptional(argText []byte) (optional, valid bool) {
 			if optional {
 				return false, false
 			}
+			seenOption = true
 			optional = true
+			continue
+		}
+		// CMake ignores one otherwise-unrecognized continuation produced by
+		// unquoted list expansion before any option, so
+		// include(a.cmake;b.cmake) still executes a.cmake. A separately spelled
+		// token is not that continuation and remains invalid.
+		if listContinuation && !seenOption && !ignoredListContinuation {
+			ignoredListContinuation = true
 			continue
 		}
 		return false, false
@@ -2008,7 +2060,7 @@ func addSubdirectoryArgumentsValid(argText []byte) bool {
 	seenExclude := false
 	seenSystem := false
 	for {
-		value, next, _, ok, found := nextArgument(argText, offset)
+		value, next, _, _, ok, found := nextArgument(argText, offset)
 		if !ok {
 			return false
 		}
@@ -2042,11 +2094,12 @@ func addSubdirectoryArgumentsValid(argText []byte) bool {
 	}
 }
 
-// nextArgument returns one comment-aware CMake argument token. Bracket
-// arguments are reported through bracket=true with their literal content;
-// firstArgument deliberately refuses them as paths, while grammar validators
-// may still compare the value to command keywords CMake receives as strings.
-func nextArgument(argText []byte, offset int) (value string, next int, bracket, ok, found bool) {
+// nextArgument returns one comment-aware CMake argument after unquoted-list
+// expansion. It inspects quote provenance before stripping delimiters: a
+// semicolon inside "..." stays literal, while an unescaped semicolon in an
+// unquoted token separates list elements before command grammar sees them.
+// Bracket arguments are reported through bracket=true with literal content.
+func nextArgument(argText []byte, offset int) (value string, next int, listContinuation, bracket, ok, found bool) {
 	i := offset
 	for i < len(argText) {
 		if isSpace(argText[i]) {
@@ -2062,7 +2115,7 @@ func nextArgument(argText []byte, offset int) (value string, next int, bracket, 
 			// argument to find — malformed, exactly as scanArgList treats it.
 			end := findBracketClose(argText, contentStart, eq)
 			if end < 0 {
-				return "", i, false, false, false
+				return "", i, false, false, false, false
 			}
 			i = end
 			continue
@@ -2072,29 +2125,33 @@ func nextArgument(argText []byte, offset int) (value string, next int, bracket, 
 			i++
 		}
 	}
+	listContinuation = i == offset && offset > 0 && argText[offset-1] == ';'
 	if i >= len(argText) {
-		return "", i, false, true, false
+		return "", i, false, false, true, false
 	}
 	if argText[i] == '"' {
 		end, ok := skipQuoted(argText, i)
 		if !ok {
-			return "", i, false, false, false
+			return "", i, false, false, false, false
 		}
-		return string(argText[i+1 : end-1]), end, false, true, true
+		return string(argText[i+1 : end-1]), end, false, false, true, true
 	}
 	if contentStart, eq, isBracket := matchBracketOpen(argText, i); isBracket {
 		end := findBracketClose(argText, contentStart, eq)
 		if end < 0 {
-			return "", i, true, false, false
+			return "", i, false, true, false, false
 		}
 		contentEnd := end - (eq + 2)
-		return string(argText[contentStart:contentEnd]), end, true, true, true
+		return string(argText[contentStart:contentEnd]), end, false, true, true, true
 	}
 	start := i
 	for i < len(argText) {
 		c := argText[i]
 		if isSpace(c) {
 			break
+		}
+		if c == ';' {
+			return string(argText[start:i]), i + 1, listContinuation, false, true, true
 		}
 		if c == '\\' {
 			i += 2
@@ -2105,7 +2162,7 @@ func nextArgument(argText []byte, offset int) (value string, next int, bracket, 
 	if i > len(argText) {
 		i = len(argText)
 	}
-	return string(argText[start:i]), i, false, true, true
+	return string(argText[start:i]), i, listContinuation, false, true, true
 }
 
 func buildLineIndex(data []byte) []int {

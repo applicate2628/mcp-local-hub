@@ -513,13 +513,12 @@ func (state *resolutionState) finalize(ctx context.Context) Result {
 	return state.result
 }
 
-// normalizedOverlayRoots is the sole owner of overlay blank filtering and
-// whitespace normalization for ResolvePort.
+// normalizedOverlayRoots is the sole owner of overlay blank filtering for
+// ResolvePort. Nonblank paths remain byte-for-byte caller-owned path data.
 func normalizedOverlayRoots(paths []string) []overlayRoot {
 	var roots []overlayRoot
 	for sourceIndex, path := range paths {
-		path = strings.TrimSpace(path)
-		if path == "" {
+		if strings.TrimSpace(path) == "" {
 			continue
 		}
 		roots = append(roots, overlayRoot{path: path, sourceIndex: sourceIndex})
@@ -714,5 +713,5 @@ func ResolvePortContext(ctx context.Context, args Args, deps Deps) Result {
 // formatOverlaySource is the sole formatter for overlay source identity.
 // Width two is a minimum, so supplied index 103 remains "103".
 func formatOverlaySource(overlayPath string, idx int) string {
-	return fmt.Sprintf("overlay-%02d: %s", idx, strings.TrimSpace(overlayPath))
+	return fmt.Sprintf("overlay-%02d: %s", idx, overlayPath)
 }

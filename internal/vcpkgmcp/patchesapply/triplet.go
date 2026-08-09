@@ -121,6 +121,7 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 	}
 
 	var scopes []string
+parseStatements:
 	for _, st := range stmts {
 		// st.Name is already lower-cased by splitStatementsChecked — CMake
 		// command names are case-insensitive (cmake-language(7)) and the lexer
@@ -172,6 +173,18 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			}
 			delete(env.values, toks[0].Text)
 			continue
+		case "return":
+			// A declaration body is not executed by this pass, so its return
+			// cannot affect the surrounding triplet. Any other nested return is
+			// execution-dependent because this fact parser deliberately does not
+			// guess whether an if/loop scope runs.
+			if insideDeclarationScope(scopes) {
+				continue
+			}
+			if len(scopes) != 0 {
+				return nil
+			}
+			break parseStatements
 		case "include":
 			// include() executes in the caller's scope and can mutate any fact.
 			// Declaration bodies are not invoked by this static pass, but an

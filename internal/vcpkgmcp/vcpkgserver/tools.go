@@ -465,6 +465,7 @@ func registerTools(vs *VcpkgServer) error {
 				},
 				"max_records": map[string]any{
 					"type":        "integer",
+					"minimum":     0,
 					"description": "Optional cap for returned records; zero uses the package default.",
 				},
 			},

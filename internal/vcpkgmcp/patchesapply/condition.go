@@ -106,18 +106,18 @@ func (p *condParser) parseAtom() Tri {
 			return TriUnknown
 		}
 		rhsTok := p.next()
-		lhsVal, lhsUnresolved := resolveOperand(lhsTok, p.env)
+		lhs := resolveOperand(lhsTok, p.env)
 		rhsVal, rhsUnresolved := resolveComparisonRHS(rhsTok, p.env)
-		p.unresolved = append(p.unresolved, lhsUnresolved...)
+		p.unresolved = append(p.unresolved, lhs.unresolved...)
 		p.unresolved = append(p.unresolved, rhsUnresolved...)
-		return evalComparison(opTok.Text, lhsVal, rhsVal)
+		return evalComparison(opTok.Text, lhs.value, rhsVal)
 	}
-	lhsVal, lhsUnresolved := resolveOperand(lhsTok, p.env)
-	p.unresolved = append(p.unresolved, lhsUnresolved...)
-	if lhsTok.Quoted {
-		return truthyQuoted(lhsVal)
+	lhs := resolveOperand(lhsTok, p.env)
+	p.unresolved = append(p.unresolved, lhs.unresolved...)
+	if lhs.variableDerived {
+		return truthy(lhs.value)
 	}
-	return truthy(lhsVal)
+	return truthyConstant(lhs.value)
 }
 
 // resolveComparisonRHS follows CMake's comparison-value rule: an unquoted
@@ -167,11 +167,12 @@ func resolveExpandedComparisonOperand(value string, env *varEnv) (*string, []str
 	return operandFromExpansion(env.expandToken(token{Text: value}))
 }
 
-// truthyQuoted applies CMake's CMP0054 NEW operand rule: a quoted operand is
-// not a variable dereference and is true only when its expanded value is a
-// documented true constant or a non-zero number. An unresolved expansion
-// remains Unknown rather than being guessed false.
-func truthyQuoted(val *string) Tri {
+// truthyConstant applies CMake's constant-expression rule to an operand that
+// did not come from a successful variable lookup. Quoted operands and bare
+// non-variable tokens share this rule: only a documented true constant or a
+// non-zero number is true. An unresolved expansion remains Unknown rather
+// than being guessed false.
+func truthyConstant(val *string) Tri {
 	if val == nil {
 		return TriUnknown
 	}
@@ -201,9 +202,16 @@ func truthyQuoted(val *string) Tri {
 // looked up as a bare variable dereference (if() does this implicitly);
 // anything else (numbers, bare paths) is used as a literal, still expanded
 // for embedded ${VAR} references.
-func resolveOperand(tok token, env *varEnv) (*string, []string) {
+type resolvedConditionOperand struct {
+	value           *string
+	unresolved      []string
+	variableDerived bool
+}
+
+func resolveOperand(tok token, env *varEnv) resolvedConditionOperand {
 	if tok.Quoted {
-		return operandFromExpansion(env.expandToken(tok))
+		value, unresolved := operandFromExpansion(env.expandToken(tok))
+		return resolvedConditionOperand{value: value, unresolved: unresolved}
 	}
 	if m := reVarRefFull.FindStringSubmatch(tok.Text); m != nil {
 		// lookupCertain, not lookup: a variable assigned under a guard this
@@ -212,39 +220,41 @@ func resolveOperand(tok token, env *varEnv) (*string, []string) {
 		// evaluating against a value that may never have been assigned.
 		v := env.lookupCertain(m[1])
 		if v == nil {
-			return nil, []string{m[1]}
+			return resolvedConditionOperand{unresolved: []string{m[1]}}
 		}
 		return resolveExpandedUnquoted(*v, env)
 	}
 	upper := strings.ToUpper(tok.Text)
 	if cmakeConstants[upper] || strings.HasSuffix(upper, "-NOTFOUND") {
 		s := tok.Text
-		return &s, nil
+		return resolvedConditionOperand{value: &s}
 	}
 	if rePlainIdent.MatchString(tok.Text) {
 		v := env.lookupCertain(tok.Text)
 		if v == nil {
-			return nil, []string{tok.Text}
+			return resolvedConditionOperand{unresolved: []string{tok.Text}}
 		}
-		return v, nil
+		return resolvedConditionOperand{value: v, variableDerived: true}
 	}
-	return operandFromExpansion(env.expandToken(tok))
+	value, unresolved := operandFromExpansion(env.expandToken(tok))
+	return resolvedConditionOperand{value: value, unresolved: unresolved}
 }
 
-func resolveExpandedUnquoted(value string, env *varEnv) (*string, []string) {
+func resolveExpandedUnquoted(value string, env *varEnv) resolvedConditionOperand {
 	upper := strings.ToUpper(value)
 	if cmakeConstants[upper] || strings.HasSuffix(upper, "-NOTFOUND") {
 		resolved := value
-		return &resolved, nil
+		return resolvedConditionOperand{value: &resolved}
 	}
 	if rePlainIdent.MatchString(value) {
 		resolved := env.lookupCertain(value)
 		if resolved == nil {
-			return nil, []string{value}
+			return resolvedConditionOperand{unresolved: []string{value}}
 		}
-		return resolved, nil
+		return resolvedConditionOperand{value: resolved, variableDerived: true}
 	}
-	return operandFromExpansion(env.expandToken(token{Text: value}))
+	resolved, unresolved := operandFromExpansion(env.expandToken(token{Text: value}))
+	return resolvedConditionOperand{value: resolved, unresolved: unresolved}
 }
 
 // operandFromExpansion turns an expansion into an if()-operand. An expansion

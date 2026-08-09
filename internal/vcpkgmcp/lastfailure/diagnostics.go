@@ -58,7 +58,7 @@ var (
 	// LINE NUMBER at the start of the line, which no "-- Installing: .../
 	// error_category.hpp" status line has.
 	msvcCompileDiagRE = regexp.MustCompile(
-		`^(?P<file>[^()\r\n]+)\((?P<line>\d+)(?:,\d+)?\):\s+(?P<sev>fatal error|error|warning)(?:\s+(?P<code>[A-Za-z]+\d+))?\s*:\s*(?P<msg>.+)$`)
+		`^(?P<file>[^\r\n]+)\((?P<line>\d+)(?:,\d+)?\):\s+(?P<sev>fatal error|error|warning)(?:\s+(?P<code>[A-Za-z]+\d+))?\s*:\s*(?P<msg>.+)$`)
 
 	msvcLinkDiagRE = regexp.MustCompile(
 		`^(?P<file>[^()\r\n]+?)[ \t]*:[ \t]+(?P<sev>fatal error|error|warning)[ \t]+(?P<code>LNK[0-9]+)[ \t]*:[ \t]*(?P<msg>[^\r\n]+)$`)
