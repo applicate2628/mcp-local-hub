@@ -115,6 +115,9 @@ of those ceilings returns `failed(var_overrides_limit_exceeded)`.
 - **Overlay batches are admitted before inspection.** `vcpkg_port_resolution`
   publishes its package-owned maximum in the input schema; requests beyond it
   return `failed(too_many_overlay_roots)` without probing the filesystem.
+- **Cancellation is not reported as a broken root.** A canceled or expired
+  `vcpkg_port_resolution` request returns `unknown(request_cancelled)`, while
+  `root_unreadable` remains reserved for filesystem evidence.
 - **Triplet input is complete-or-unknown.** `vcpkg_patches_apply` reads a
   selected triplet through the same bounded CMake-input admission as its
   portfile. An over-limit triplet returns

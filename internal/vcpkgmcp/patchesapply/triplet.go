@@ -199,6 +199,12 @@ func parseTripletFacts(src, portDir, portName, vcpkgRoot string) map[string]stri
 			delete(env.values, name)
 			continue
 		}
+		if len(parts) == 0 {
+			// CMake set(VAR) is the unset form. A quoted empty argument still
+			// contributes one value token and therefore remains a defined fact.
+			delete(env.values, name)
+			continue
+		}
 		env.setValue(name, serializedValue{text: strings.Join(parts, ";")})
 	}
 	if len(scopes) != 0 {

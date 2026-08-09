@@ -335,6 +335,18 @@ func DiscoverRoot(explicitRoot string, deps Deps) Result {
 					}
 				}
 			}
+			if resolvedPath != "" && !filepath.IsAbs(resolvedPath) {
+				if deps.Getwd == nil {
+					res.Candidates = append(res.Candidates, Candidate{Path: resolvedPath, Rule: RulePath, Detail: "PATH executable target is relative and cwd is unavailable"})
+					resolvedPath = ""
+				} else if cwd, cwdErr := deps.Getwd(); cwdErr != nil || !filepath.IsAbs(cwd) {
+					res.Candidates = append(res.Candidates, Candidate{Path: resolvedPath, Rule: RulePath, Detail: "PATH executable target could not be made absolute"})
+					resolvedPath = ""
+				} else {
+					resolvedPath = filepath.Clean(filepath.Join(cwd, resolvedPath))
+					res.Evidence.AddPath(resolvedPath)
+				}
+			}
 			dir := filepath.Dir(resolvedPath)
 			if resolvedPath != "" && hasVcpkgBinary(deps, dir) {
 				return Result{

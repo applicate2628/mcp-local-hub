@@ -318,6 +318,7 @@ func registerTools(vs *VcpkgServer) error {
 		Name: "vcpkg_port_resolution",
 		Description: "Determine which port definition wins across overlay ports and builtin ports, and report every location checked. " +
 			"When vcpkg_root is omitted, the builtin fallback is NOT checked; the result states only what the supplied overlays established. " +
+			"Caller cancellation or deadline expiry returns unknown(request_cancelled), never a filesystem unreadability diagnosis. " +
 			"port must be ONE legal vcpkg port-name segment (lowercase ASCII letters, digits and hyphens, not leading/trailing) AND its joined path " +
 			"must stay beneath each root -> failed(invalid_port_name), with the rejected value echoed in invalid_port. A traversal name is refused " +
 			"before the join, never normalised into a directory outside the roots the caller granted." + resultProjectionDescription,

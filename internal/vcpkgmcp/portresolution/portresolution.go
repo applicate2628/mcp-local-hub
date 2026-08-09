@@ -58,6 +58,9 @@ const (
 	// ReasonRootUnreadable: a supplied root (vcpkg_root or overlay) could not
 	// be read (permission denied, doesn't exist, not a directory).
 	ReasonRootUnreadable Reason = "root_unreadable"
+	// ReasonRequestCanceled reports caller cancellation or deadline expiry;
+	// it is not a filesystem diagnosis and must not be folded into unreadable.
+	ReasonRequestCanceled Reason = "request_cancelled"
 	// ReasonEmptyPort: the port name is empty or whitespace-only.
 	ReasonEmptyPort Reason = "empty_port"
 	// ReasonInvalidPortName: port is not ONE legal vcpkg port-name segment, or
@@ -480,7 +483,7 @@ func (state *resolutionState) transition(ctx context.Context, outcome probeOutco
 func (state *resolutionState) finalize(ctx context.Context) Result {
 	if ctx.Err() != nil || state.canceled {
 		state.result.Status = evidence.StatusUnknown
-		state.result.Reason = ReasonRootUnreadable
+		state.result.Reason = ReasonRequestCanceled
 		state.result.Winner = nil
 		state.result.BlockingCandidate = nil
 		return state.result

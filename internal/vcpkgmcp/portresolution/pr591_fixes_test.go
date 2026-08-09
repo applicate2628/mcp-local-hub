@@ -381,8 +381,8 @@ func TestResolvePortContextCancellationNeverStartsNextProbe(t *testing.T) {
 				args.OverlayPorts = []string{overlay}
 			}
 			res := ResolvePortContext(ctx, args, deps)
-			if res.Status != evidence.StatusUnknown || res.Reason != ReasonRootUnreadable || res.Winner != nil {
-				t.Fatalf("result=%+v trace=%v, want unknown/root_unreadable/nil winner", res, trace)
+			if res.Status != evidence.StatusUnknown || res.Reason != ReasonRequestCanceled || res.Winner != nil {
+				t.Fatalf("result=%+v trace=%v, want unknown/request_cancelled/nil winner", res, trace)
 			}
 			if len(res.AllCandidates) == 0 || res.AllCandidates[len(res.AllCandidates)-1].State != CandidateStateUnreadable {
 				t.Fatalf("active canceled candidate was not retained as unreadable: %+v", res.AllCandidates)

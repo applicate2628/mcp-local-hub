@@ -955,10 +955,19 @@ statementLoop:
 				return parsedPortfile{}, false
 			}
 		case "set":
+			if mutationInsideDeclaration(unsupportedScopes) {
+				continue
+			}
 			recordSetAssignment(&variables, state, len(unsupportedScopes) != 0, st.Args)
 		case "unset":
+			if mutationInsideDeclaration(unsupportedScopes) {
+				continue
+			}
 			recordVariableInvalidation(&variables, state, st.Args, 0)
 		case "list":
+			if mutationInsideDeclaration(unsupportedScopes) {
+				continue
+			}
 			recordListMutation(&variables, state, st.Args)
 		case "return":
 			if len(unsupportedScopes) != 0 || !state.active {
@@ -1037,6 +1046,15 @@ statementLoop:
 	}
 	selected := viableCandidates[0]
 	return parsedPortfile{Remote: selected.Remote, Pin: selected.Pin, HeadRef: selected.HeadRef, UnresolvedHeadRefVariable: selected.UnresolvedHeadRefVariable, Candidates: candidates}, true
+}
+
+func mutationInsideDeclaration(scopes []unsupportedScope) bool {
+	for _, scope := range scopes {
+		if scope.opener == "function" || scope.opener == "macro" {
+			return true
+		}
+	}
+	return false
 }
 
 func fetchIsInsideExecutableLoop(scopes []unsupportedScope) bool {
