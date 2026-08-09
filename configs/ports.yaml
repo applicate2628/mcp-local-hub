@@ -47,4 +47,10 @@ global:
   - server: vcpkg
     daemon: default
     port: 9138
+  - server: hfss
+    daemon: default
+    port: 9139
+  - server: cst
+    daemon: default
+    port: 9140
 workspace_scoped: []

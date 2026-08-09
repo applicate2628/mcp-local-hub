@@ -1,0 +1,42 @@
+name: hfss
+description: "Ansys HFSS automation — cancellable solves, validated volume-mesh export, and generalized plus renormalized Touchstone."
+kind: global
+transport: stdio-bridge
+command: uvx
+base_args:
+  - "--from"
+  - "git+https://github.com/applicate2628/mcp-local-hub.git@e56b87dad0395fff90365e40259eb9dc84802d2f#subdirectory=servers/electromagnetics-mcp"
+  - "mcphub-hfss-mcp"
+required_binaries: [uvx]
+
+env:
+  PYTHONUNBUFFERED: "1"
+
+daemons:
+  - name: default
+    port: 9139
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

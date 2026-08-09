@@ -103,7 +103,7 @@ the CLI to install the servers you want shared and verify they connect:
 ```bash
 # Install the MCP servers you want shared
 mcphub install --server serena       # default clients: Claude/Codex/Cursor
-mcphub install --all                 # all 15 global servers, default clients
+mcphub install --all                 # all 17 global servers, default clients
 
 # Materialize one server in supervisor intent without touching client configs
 mcphub install --server fetch --no-client-config
@@ -117,11 +117,11 @@ mcphub status
 claude mcp get serena    # shows: Status: ✓ Connected, Type: http
 ```
 
-## Eleven highlighted servers
+## Thirteen highlighted servers
 
-The binary embeds 16 manifests. `mcphub install --all` installs the 15 global
+The binary embeds 18 manifests. `mcphub install --all` installs the 17 global
 servers; `mcp-language-server` is workspace-scoped and is materialized through
-`mcphub register`. The table below highlights 11 commonly used servers rather
+`mcphub register`. The table below highlights 13 commonly used servers rather
 than claiming to enumerate the complete embedded catalog.
 
 | Server | Port | Transport | Notes |
@@ -137,6 +137,8 @@ than claiming to enumerate the complete embedded catalog.
 | **lldb** | 9130 | **embedded Go bridge** | Auto-spawns `lldb.exe`, HTTP-multiplexes concurrent clients onto single TCP connection |
 | **perftools** | 9131 | **embedded Go** | clang-tidy + llvm-objdump + include-what-you-use over real projects; `hyperfine` is **opt-in only** (RCE surface — set `MCP_LOCAL_HUB_ENABLE_UNSAFE_HYPERFINE=1`, see INSTALL) |
 | **vcpkg** | 9138 | **embedded Go** | vcpkg/CMake diagnostics — build-failure triage across nested builds, overlay-port precedence, pin auditing, static patch-apply order, CMake include graph. Read-only: never starts a build. Every tool answers `ok\|failed\|unknown(reason)`; see `servers/vcpkg/README.md` for how to read the verdicts |
+| **hfss** | 9139 | stdio-bridge (uvx) | Ansys HFSS — cancellable solves, validated volume meshes, and generalized plus renormalized Touchstone |
+| **cst** | 9140 | stdio-bridge (uvx) | CST Studio Suite — cancellable solves, documented mesh export, portable results, and port-mode progression |
 
 Plus **context7** as a direct HTTPS entry (no daemon, no scheduler task).
 
@@ -215,7 +217,7 @@ scheduler/secrets, and the hidden transport shims — is in
 
 - **PATH-based install model** — scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path; `mcphub setup` puts the binary there and registers it on user PATH.
 - **First-run onboarding** — `mcphub setup --trusted-root` blesses LSP trusted roots up front; the GUI shows a dismissable welcome banner until the first server is installed.
-- **go:embed manifests** — all 16 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory. `install --all` targets the 15 global manifests; the remaining manifest is workspace-scoped.
+- **go:embed manifests** — all 18 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory. `install --all` targets the 17 global manifests; the remaining manifest is workspace-scoped.
 - **Embedded entry patterns** — `godbolt`, `lldb-bridge`, and `perftools` expose a `NewCommand()` factory imported by both a standalone binary and the hub subcommand. `vcpkg` exposes the same factory only to the hub subcommand because it is deliberately hub-only.
 - **Native Go stdio-host with child-exit detection** — one subprocess per daemon, multiplexed across concurrent HTTP clients, with child-exit detection feeding Task Scheduler's restart policy.
 
@@ -239,7 +241,7 @@ backlog reconciliation before a release-ready claim.
 
 Delivered and documented:
 
-- 15 built-in servers (incl. the gdb/lldb/godbolt/perftools/drmemory/vtune/oneapi-run debug+profile suite) plus a **52-row curated catalog** (one-click install across engineering/CAD, music, data/BI, creative, science, PKM, office) and the direct HTTPS `context7` entry.
+- 17 built-in global servers (incl. HFSS, CST, and the gdb/lldb/godbolt/perftools/drmemory/vtune/oneapi-run debug+profile suite) plus a **52-row curated catalog** (one-click install across engineering/CAD, music, data/BI, creative, science, PKM, office) and the direct HTTPS `context7` entry.
 - 22 user-facing CLI commands across install, migration, logs, backups,
   scheduler, secrets, settings, cleanup, and version surfaces.
 - Go rewrites of godbolt and lldb, embedded as dual-entry servers.
