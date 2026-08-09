@@ -103,6 +103,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -807,6 +808,7 @@ func newMCPFrontRouteActivationOps(a *api.API, stateDir string) mcpFrontRouteAct
 		stage: func(ctx context.Context, port int) error {
 			return stageMCPFrontRouteDaemon(ctx, stateDir, port)
 		},
+		waitListener: waitForMCPFrontRouteListener,
 		preflight: func(ctx context.Context, port int) error {
 			return preflightMCPFrontReconcile(ctx, a, port)
 		},
@@ -814,18 +816,55 @@ func newMCPFrontRouteActivationOps(a *api.API, stateDir string) mcpFrontRouteAct
 }
 
 type mcpFrontRouteActivationOps struct {
-	stage     func(context.Context, int) error
-	preflight func(context.Context, int) error
+	stage        func(context.Context, int) error
+	waitListener func(context.Context, int) error
+	preflight    func(context.Context, int) error
 }
 
 func activateMCPFrontRoute(ctx context.Context, port int, ops mcpFrontRouteActivationOps) error {
-	if ops.stage == nil || ops.preflight == nil {
+	if ops.stage == nil || ops.waitListener == nil || ops.preflight == nil {
 		return errors.New("route activation dependencies are unavailable")
 	}
 	if err := ops.stage(ctx, port); err != nil {
 		return err
 	}
+	if err := ops.waitListener(ctx, port); err != nil {
+		return err
+	}
 	return ops.preflight(ctx, port)
+}
+
+const mcpFrontRouteListenerPollInterval = 50 * time.Millisecond
+
+func waitForMCPFrontRouteListener(ctx context.Context, port int) error {
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("wait for built-in route listener: port %d is invalid", port)
+	}
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	var lastErr error
+	for {
+		conn, err := (&net.Dialer{}).DialContext(ctx, "tcp", address)
+		if err == nil {
+			if closeErr := conn.Close(); closeErr != nil {
+				return fmt.Errorf("close built-in route readiness connection on port %d: %w", port, closeErr)
+			}
+			return nil
+		}
+		lastErr = err
+
+		timer := time.NewTimer(mcpFrontRouteListenerPollInterval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return fmt.Errorf("wait for built-in route listener on port %d: %w", port, errors.Join(ctx.Err(), lastErr))
+		case <-timer.C:
+		}
+	}
 }
 
 func restorePriorMCPFrontRoute(ctx context.Context, stateDir string, priorPort, attemptedPort int) error {
