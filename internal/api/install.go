@@ -197,7 +197,7 @@ type InstallResult struct {
 }
 
 func installOptsMayWriteClients(opts InstallOpts) bool {
-	return !(len(opts.ClientsInclude) == 1 && strings.TrimSpace(opts.ClientsInclude[0]) == "")
+	return !opts.SkipClientConfigWrites && !(len(opts.ClientsInclude) == 1 && strings.TrimSpace(opts.ClientsInclude[0]) == "")
 }
 
 func (a *API) prepareInstallClientRoutingDecision(opts *InstallOpts) (ClientRoutingAuthorityRequest, error) {

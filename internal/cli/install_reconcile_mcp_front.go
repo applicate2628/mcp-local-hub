@@ -157,6 +157,11 @@ const mcpFrontReconcilePinDirLeaf = "mcp-front-reconcile-pins"
 // with `legacy-ownership-unproven`; neither is upgraded in place.
 const mcpFrontReconcileReportVersion = 4
 
+// The state-file reader caps ordinary control files at 1 MiB. Refuse a
+// recovery record before publishing it when the same reader could not load it
+// on the next invocation.
+const mcpFrontReconcileReportMaxBytes = 1 << 20
+
 const mcpFrontReconcileVersion3 = 3
 
 const mcpFrontReconcileVersion2 = 2
@@ -183,6 +188,25 @@ type mcpFrontReconcileReport struct {
 	ActivePlan          *mcpFrontReconcilePlan          `json:"active_plan,omitempty"`
 	Settled             bool                            `json:"settled,omitempty"`
 	GenerationAdmission *mcpFrontGenerationAdmission    `json:"generation_admission,omitempty"`
+}
+
+func writeMCPFrontReconcileReport(path string, report *mcpFrontReconcileReport) error {
+	raw, err := marshalMCPFrontReconcileReport(report)
+	if err != nil {
+		return err
+	}
+	return api.WriteStateFileBytesAtomic(path, raw)
+}
+
+func marshalMCPFrontReconcileReport(report *mcpFrontReconcileReport) ([]byte, error) {
+	raw, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("marshal recovery report: %w", err)
+	}
+	if len(raw) > mcpFrontReconcileReportMaxBytes {
+		return nil, fmt.Errorf("recovery report size %d exceeds readable cap %d", len(raw), mcpFrontReconcileReportMaxBytes)
+	}
+	return raw, nil
 }
 
 type mcpFrontGenerationAdmission struct {
@@ -568,7 +592,7 @@ func settleMCPFrontReconcileAttempts(reportPath string, report *mcpFrontReconcil
 	}
 	sort.Strings(uncertain)
 	if changed {
-		if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
+		if err := writeMCPFrontReconcileReport(reportPath, report); err != nil {
 			return uncertain, fmt.Errorf("settle recovery attempts: %w", err)
 		}
 	}
@@ -726,6 +750,96 @@ func preflightMCPFrontReconcile(ctx context.Context, a *api.API, port int) error
 	return nil
 }
 
+type mcpFrontRouteStageOps struct {
+	commandPath func() string
+	reconcile   func(context.Context, bool) (api.ReconcileResponse, error)
+}
+
+var mcpFrontSupervisorReconcileFn = api.DialSupervisorIPCReconcile
+
+func newMCPFrontRouteStageOps() mcpFrontRouteStageOps {
+	return mcpFrontRouteStageOps{
+		commandPath: canonicalMcphubPath,
+		reconcile:   mcpFrontSupervisorReconcileFn,
+	}
+}
+
+// stageMCPFrontRouteDaemonWithOps publishes the exact route descriptor before
+// asking the live supervisor to reconcile it. The later readiness proof may
+// therefore observe the requested listener instead of probing an endpoint the
+// supervisor has never been told to start.
+func stageMCPFrontRouteDaemonWithOps(ctx context.Context, stateDir string, port int, ops mcpFrontRouteStageOps) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if port <= 0 || port > 65535 {
+		return fmt.Errorf("route staging port %d is invalid", port)
+	}
+	if ops.commandPath == nil || ops.reconcile == nil {
+		return errors.New("route staging dependencies are unavailable")
+	}
+	command := ops.commandPath()
+	if command == "" {
+		return errors.New("resolve mcphub binary path for route staging")
+	}
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	result, err := api.MutateSupervisorIntentIfChangedReturning(intentPath, func(intent *api.SupervisorIntentFile) (bool, error) {
+		return api.EnsureBuiltinRouteDaemon(intent, command, port)
+	})
+	if err != nil {
+		return fmt.Errorf("persist built-in route descriptor at port %d: %w", port, err)
+	}
+	if result.Intent == nil {
+		return errors.New("persist built-in route descriptor returned no observed intent")
+	}
+	if _, err := ops.reconcile(ctx, true); err != nil {
+		return fmt.Errorf("apply built-in route descriptor at port %d: %w", port, err)
+	}
+	return nil
+}
+
+func stageMCPFrontRouteDaemon(ctx context.Context, stateDir string, port int) error {
+	return stageMCPFrontRouteDaemonWithOps(ctx, stateDir, port, newMCPFrontRouteStageOps())
+}
+
+func newMCPFrontRouteActivationOps(a *api.API, stateDir string) mcpFrontRouteActivationOps {
+	return mcpFrontRouteActivationOps{
+		stage: func(ctx context.Context, port int) error {
+			return stageMCPFrontRouteDaemon(ctx, stateDir, port)
+		},
+		preflight: func(ctx context.Context, port int) error {
+			return preflightMCPFrontReconcile(ctx, a, port)
+		},
+	}
+}
+
+type mcpFrontRouteActivationOps struct {
+	stage     func(context.Context, int) error
+	preflight func(context.Context, int) error
+}
+
+func activateMCPFrontRoute(ctx context.Context, port int, ops mcpFrontRouteActivationOps) error {
+	if ops.stage == nil || ops.preflight == nil {
+		return errors.New("route activation dependencies are unavailable")
+	}
+	if err := ops.stage(ctx, port); err != nil {
+		return err
+	}
+	return ops.preflight(ctx, port)
+}
+
+func restorePriorMCPFrontRoute(ctx context.Context, stateDir string, priorPort, attemptedPort int) error {
+	if priorPort <= 0 || priorPort == attemptedPort {
+		return nil
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if err := stageMCPFrontRouteDaemon(cleanupCtx, stateDir, priorPort); err != nil {
+		return fmt.Errorf("restore prior built-in route descriptor at port %d: %w", priorPort, err)
+	}
+	return nil
+}
+
 func verifyMCPFrontIntendedStates(report *mcpFrontReconcileReport) error {
 	if report == nil || report.ActivePlan == nil {
 		return errors.New("active recovery plan is missing")
@@ -783,7 +897,7 @@ func newMCPFrontGenerationAdmissionOps(a *api.API) mcpFrontGenerationAdmissionOp
 		routingState: a.MCPFrontRoutingTargetSnapshot,
 		transition:   a.TransitionMCPFrontRoutingEpochContext,
 		persist: func(path string, report *mcpFrontReconcileReport) error {
-			return api.WriteStateFileAtomic(path, report)
+			return writeMCPFrontReconcileReport(path, report)
 		},
 	}
 }
@@ -958,6 +1072,8 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 
 	ctx, cancel := context.WithTimeout(cmd.Context(), mcpFrontReconcileTimeout)
 	defer cancel()
+	stateDir := filepath.Dir(reportPath)
+	activationOps := newMCPFrontRouteActivationOps(a, stateDir)
 	keepN := effectiveBackupKeepN()
 	// Read any prior, not-yet-rolled-back generation BEFORE anything is
 	// written. A prior artifact that exists but cannot be read/parsed is a
@@ -993,6 +1109,9 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	}
 	admissionOps := newMCPFrontGenerationAdmissionOps(a)
 	if prior != nil && prior.GenerationAdmission != nil {
+		if err := activateMCPFrontRoute(ctx, prior.GenerationAdmission.ToEpoch.Port, activationOps); err != nil {
+			return fmt.Errorf("reconcile-mcp-front: recover generation admission route activation: %w", err)
+		}
 		if err := reconcileMCPFrontGenerationAdmission(ctx, reportPath, prior, admissionOps); err != nil {
 			return fmt.Errorf("reconcile-mcp-front: %w", err)
 		}
@@ -1005,11 +1124,11 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	if stateErr != nil {
 		return fmt.Errorf("reconcile-mcp-front: %w", stateErr)
 	}
-	// Recover any already-durable admission before consulting the mutable
-	// requested endpoint's readiness. This probe is still before plan capture,
-	// new admission persistence, or client mutation.
-	if gerr := preflightMCPFrontReconcile(ctx, a, port); gerr != nil {
-		return fmt.Errorf("reconcile-mcp-front: refusing to write any client config: %w", gerr)
+	// Refuse a port already owned by a known foreign process before publishing
+	// a recovery generation. Listener liveness and supervisor ownership are
+	// proved only after the requested descriptor has been staged below.
+	if oerr := assertMCPFrontPortNotForeignOwned(a, port); oerr != nil {
+		return fmt.Errorf("reconcile-mcp-front: refusing to write any client config: %w", oerr)
 	}
 	if targetState.State == api.MCPFrontRoutingTargetGUIRestoring {
 		return fmt.Errorf("reconcile-mcp-front: %w", &api.MCPFrontTransitionActiveError{State: targetState.State, Generation: targetState.Generation})
@@ -1032,7 +1151,7 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 		}
 		if !prior.Settled {
 			prior.Settled = true
-			if err := api.WriteStateFileAtomic(reportPath, prior); err != nil {
+			if err := writeMCPFrontReconcileReport(reportPath, prior); err != nil {
 				return fmt.Errorf("reconcile-mcp-front: repair settled journal marker: %w", err)
 			}
 		}
@@ -1061,24 +1180,37 @@ func runForwardReconcileMCPFront(cmd *cobra.Command, a *api.API, reportPath stri
 	if journalErr != nil {
 		return fmt.Errorf("reconcile-mcp-front: build recovery plan: %w", journalErr)
 	}
+	if _, sizeErr := marshalMCPFrontReconcileReport(&journal.record); sizeErr != nil {
+		return fmt.Errorf("reconcile-mcp-front: recovery plan is not readable: %w (nothing was written)", sizeErr)
+	}
+	priorRoutePort := targetState.Port
+	if gerr := activateMCPFrontRoute(ctx, decision.Port, activationOps); gerr != nil {
+		restoreErr := restorePriorMCPFrontRoute(ctx, stateDir, priorRoutePort, decision.Port)
+		return errors.Join(
+			fmt.Errorf("reconcile-mcp-front: route activation failed before generation admission: %w", gerr),
+			restoreErr,
+		)
+	}
 	// The complete plan and, for a new generation, the recoverable handoff are
 	// durable and finalized before the first prepare callback can run.
 	if decision.Admission {
 		if err := admitMCPFrontGeneration(ctx, journal, decision, admissionOps); err != nil {
-			return fmt.Errorf("reconcile-mcp-front: %w", err)
+			restoreErr := restorePriorMCPFrontRoute(ctx, stateDir, priorRoutePort, decision.Port)
+			return errors.Join(fmt.Errorf("reconcile-mcp-front: %w", err), restoreErr)
 		}
 	} else if persistErr := journal.persist(); persistErr != nil {
-		return fmt.Errorf("reconcile-mcp-front: persist active recovery plan: %w (nothing was written)", persistErr)
-	}
-	if gerr := preflightMCPFrontReconcile(ctx, a, decision.Port); gerr != nil {
-		return fmt.Errorf("reconcile-mcp-front: post-transition readiness failed; routing remains front-preparing: %w", gerr)
+		restoreErr := restorePriorMCPFrontRoute(ctx, stateDir, priorRoutePort, decision.Port)
+		return errors.Join(
+			fmt.Errorf("reconcile-mcp-front: persist active recovery plan: %w (nothing was written)", persistErr),
+			restoreErr,
+		)
 	}
 
 	// Serena first. Its own port-liveness proof (Port>0 path,
 	// serena_client_reconcile.go's resolveSerenaReconcilePort) still runs
 	// inside this call as defense-in-depth, but it is NO LONGER this command's
 	// gate — preflightMCPFrontReconcile above established both routes before
-	// anything here could write (codex bot PR #588; a gate embedded in one
+	// anything here could write a client config (codex bot PR #588; a gate embedded in one
 	// surface's mutation cannot cover the other surface). RemoveLegacy is
 	// deliberately false: the pre-dynamic-pool legacy port-9121 daemon is an
 	// unrelated lifecycle concern this reconcile does not touch.
@@ -1200,7 +1332,7 @@ func persistMCPFrontDisposition(
 	}
 	row.Disposition = disposition
 	report.Rows[key] = row
-	if err := api.WriteStateFileAtomic(reportPath, report); err != nil {
+	if err := writeMCPFrontReconcileReport(reportPath, report); err != nil {
 		return fmt.Errorf("persist rollback disposition for %q: %w", key, err)
 	}
 	return nil
@@ -1417,7 +1549,7 @@ func newMCPFrontRollbackOps(a *api.API) mcpFrontRollbackOps {
 		routingState: a.MCPFrontRoutingTargetSnapshotForMigration,
 		transition:   a.TransitionMCPFrontRoutingEpochContext,
 		persist: func(path string, report *mcpFrontReconcileReport) error {
-			return api.WriteStateFileAtomic(path, report)
+			return writeMCPFrontReconcileReport(path, report)
 		},
 		bindMigration: func(ctx context.Context, report *mcpFrontReconcileReport, routing api.MCPFrontRoutingTargetSnapshot) (api.MCPFrontRoutingTargetSnapshot, error) {
 			return bindMCPFrontRoutingPortForMigration(ctx, a, report, routing)
@@ -2471,7 +2603,7 @@ func newMCPFrontV3Journal(
 }
 
 func (j *mcpFrontReconcileJournal) persist() error {
-	return api.WriteStateFileAtomic(j.reportPath, j.record)
+	return writeMCPFrontReconcileReport(j.reportPath, &j.record)
 }
 
 func (j *mcpFrontReconcileJournal) prepareSerenaAttempt(result api.SerenaReconcileAttemptResult) error {

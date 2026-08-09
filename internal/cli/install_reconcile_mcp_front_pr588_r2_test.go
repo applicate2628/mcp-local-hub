@@ -105,13 +105,20 @@ func startMCPFrontReadinessServerWithFilter(t *testing.T, lspLiveRequests int, o
 }
 
 func serveMCPFrontReadinessResponse(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", "POST")
+	switch r.Method {
+	case http.MethodDelete:
+		w.WriteHeader(http.StatusNoContent)
+		return
+	case http.MethodPost:
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Mcp-Session-Id", "mcp-front-readiness-test-session")
+		fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"mcp-front-readiness","version":"test"}}}`)
+		return
+	default:
+		w.Header().Set("Allow", "POST, DELETE")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprint(w, `{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","capabilities":{},"serverInfo":{"name":"mcp-front-readiness","version":"test"}}}`)
 }
 
 func TestMCPFrontR2_ZeroRowGenerationRoundTripsAndRetriesCleanly(t *testing.T) {
@@ -226,10 +233,10 @@ func TestMCPFrontR2_ForwardFinalVerificationRefusesLostLSPRoute(t *testing.T) {
 	tmp := redirectMCPFrontTestEnv(t)
 	reportPath := withMCPFrontReportPathSeam(t)
 
-	// Two complete pre-write route probes are mandatory now: the admission
-	// preflight and the post-front-preparing re-probe. Drop the route only for
-	// the final post-write verification.
-	port, lspRequests, cleanup := startMCPFrontReadinessServer(t, 4)
+	// One complete staged pre-write lifecycle probe is mandatory now
+	// (HEAD+initialize+DELETE). Drop the route only for the final post-write
+	// verification.
+	port, lspRequests, cleanup := startMCPFrontReadinessServer(t, 3)
 	defer cleanup()
 	seedSupervisorOwnedRoutePort(t, port)
 
@@ -252,7 +259,7 @@ func TestMCPFrontR2_ForwardFinalVerificationRefusesLostLSPRoute(t *testing.T) {
 	if readinessErr.Code != api.MCPFrontRouteNotReadyCode || readinessErr.Language != "go" || readinessErr.Backend != "gopls-mcp" || readinessErr.ProbeStage != api.MCPFrontProbeStageShapeResponse {
 		t.Fatalf("final verification must identify the dropped gopls backend route and exact substage; got %+v", readinessErr)
 	}
-	if got := lspRequests.Load(); got <= 4 {
+	if got := lspRequests.Load(); got <= 3 {
 		t.Fatalf("LSP requests=%d, want more than one route's preflight pair so final all-route verification is proven to have run", got)
 	}
 	if got, ok := claudeCodeEntryURL(t, configPath, "serena"); !ok || got != api.SerenaRouterClientURL(port) {
@@ -362,6 +369,25 @@ func TestMCPFrontR2_RerunAtANewPortRecordsTheLatestPort(t *testing.T) {
 	rec := readPersistedMCPFrontReport(t, reportPath)
 	if rec.Version != mcpFrontReconcileReportVersion || rec.Generation != 2 || rec.ActivePlan.Generation != 2 || rec.ActivePlan.Port != portB || !rec.Settled || rec.GenerationAdmission != nil {
 		t.Fatalf("admitted generation is incomplete: %+v", rec)
+	}
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("state dir: %v", err)
+	}
+	intent, err := api.ReadSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"))
+	if err != nil {
+		t.Fatalf("read staged route descriptor: %v", err)
+	}
+	wantTask := api.BuiltinRouteTaskName
+	foundPort := 0
+	for _, daemon := range intent.Daemons {
+		if daemon.TaskName == wantTask {
+			foundPort = daemon.Port
+			break
+		}
+	}
+	if foundPort != portB {
+		t.Fatalf("supervisor route descriptor port=%d, want admitted port B=%d", foundPort, portB)
 	}
 	// The pre-state must NOT have moved with it: opposite polarity, same record.
 	serenaKey := mcpFrontReconcileRowKey(mcpFrontSurfaceSerena, "claude-code", "", "serena")

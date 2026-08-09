@@ -278,7 +278,7 @@ func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResol
 		Sessions: sessions,
 		// AutoRegisterFn deliberately nil — see doc comment.
 		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
-			return wakeAPI.WakeIdleSerenaDaemon(ctx, taskName, port, who)
+			return wakeAPI.WakeIdleSerenaDaemonWithAuditSink(ctx, taskName, port, who, routeReadOnlySink)
 		},
 		//
 		// AuditFn (P1-1 fix, adversarial cross-family review): every other

@@ -760,6 +760,12 @@ func RestoreSerenaReconcileAppliedOwned(
 			results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreFailed, Err: err})
 			continue
 		}
+		if !adapter.Exists() {
+			err := fmt.Errorf("restore serena/%s: client config is unavailable; retry when the client is installed", request.Client)
+			errs = append(errs, err)
+			results = append(results, SerenaOwnedRestoreResult{Client: request.Client, Status: SerenaOwnedRestoreFailed, Err: err})
+			continue
+		}
 		if request.ExpectedAppliedFingerprint == "" {
 			err := fmt.Errorf("restore serena/%s: missing expected applied fingerprint", request.Client)
 			errs = append(errs, err)

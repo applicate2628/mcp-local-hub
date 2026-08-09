@@ -199,6 +199,11 @@ func redirectMCPFrontTestEnv(t *testing.T) string {
 	t.Setenv("HOME", tmp)
 	neutralizeClientConfigPathEnv(t, tmp)
 	t.Cleanup(api.SetDaemonStateRootForTest(tmp))
+	origReconcile := mcpFrontSupervisorReconcileFn
+	mcpFrontSupervisorReconcileFn = func(context.Context, bool) (api.ReconcileResponse, error) {
+		return api.ReconcileResponse{}, nil
+	}
+	t.Cleanup(func() { mcpFrontSupervisorReconcileFn = origReconcile })
 	return tmp
 }
 
