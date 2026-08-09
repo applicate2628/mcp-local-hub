@@ -542,51 +542,42 @@ func (a *API) recordUninstallIntentForTasks(taskNames []string, w io.Writer) {
 	}
 }
 
-// recordRegisterIntentForTask is invoked by Register's per-language
-// loop AFTER the readiness probe passes. Audit + intent failures
-// are logged through w and never propagate — the workspace is
-// already registered (registry on disk + scheduler task created).
-func (a *API) recordRegisterIntentForTask(taskName string, w io.Writer) {
-	// Register's task names come from the workspace registry path
-	// without the leading backslash (e.g. "mcp-local-hub-lsp-...").
-	// Codex deep-sec PR #135 Finding 1 fixed the original key-mismatch
-	// bug: WriteDaemonIntent now prepends the canonical "\" before
-	// storage so the entry shape matches the supervisor reconcile loop's
-	// lookup (internal/cli/supervise_reconcile.go; row.TaskName carries
-	// the leading backslash).
-	// Callers may pass either shape; canonicalIntentTaskKey enforces
-	// the storage invariant.
-	// Phase 4-E2: Desired=running clears any prior stop from the
-	// supervisor-intent.json `stops` sub-block, re-enabling a re-registered
-	// workspace daemon. WriteStopIntent drops the entry because
-	// Desired=running is not an active stop.
-	canonical, err := a.writeRegisterRunningIntentForTask(taskName)
-	if err != nil {
-		if w != nil {
-			fmt.Fprintf(w, "warning: write register intent for %s: %v\n", canonical, err)
-		}
-	}
+// enrollRegisterWorkspaceAudit pre-declares the durable registration-success
+// event without physically appending it. The outer registration transaction
+// discards it on rollback and invokes it only after all compensations are
+// disarmed and every resource finalizer succeeded.
+func enrollRegisterWorkspaceAudit(transaction *registrationTransaction, taskName string) {
+	canonical := canonicalIntentTaskKey(taskName)
 	entry := NewIntentAuditEntry(
 		WithAction(AuditActionWorkspaceRegistered),
 		WithTask(canonical),
 		WithWho(auditWhoMcphubRegister),
 		WithReason(IntentReasonRegister),
 	)
-	if err := emitCommandAudit(entry); err != nil {
-		if w != nil {
-			fmt.Fprintf(w, "warning: write register audit for %s: %v\n", canonical, err)
-		}
-	}
+	transaction.AddAfterCommit("workspace-registered "+canonical, func() error {
+		return emitCommandAudit(entry)
+	})
 }
 
-func (a *API) writeRegisterRunningIntentForTask(taskName string) (string, error) {
+// writeRegisterRunningIntentForTask clears any active stop before the proxy is
+// relied on. The stop-intent owner snapshots and pre-arms exact task-scoped
+// restoration under its existing lock before the write can partially persist.
+func (a *API) writeRegisterRunningIntentForTask(
+	taskName string,
+	enroll stopIntentCompensationSink,
+) (string, error) {
 	canonical := canonicalIntentTaskKey(taskName)
 	intent := DaemonIntent{
 		Desired:   IntentDesiredRunning,
 		Reason:    IntentReasonRegister,
 		UpdatedAt: time.Now().UTC(),
 	}
-	return canonical, a.WriteStopIntent(canonical, intent, auditWhoMcphubRegister)
+	return canonical, a.writeStopIntentWithCompensation(
+		canonical,
+		intent,
+		auditWhoMcphubRegister,
+		enroll,
+	)
 }
 
 // ---------------------------------------------------------------------------

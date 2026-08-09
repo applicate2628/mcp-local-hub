@@ -11,6 +11,7 @@ export type FieldRendererProps = {
 // FieldRenderer maps registry def types to native HTML controls.
 // Memo §8.3.
 export function FieldRenderer({ def, value, onChange, disabled, error }: FieldRendererProps): preact.JSX.Element {
+  const controlDisabled = disabled || def.read_only;
   const ariaProps = error
     ? { "aria-invalid": true as const, "aria-describedby": `${def.key}-error` }
     : {};
@@ -21,7 +22,7 @@ export function FieldRenderer({ def, value, onChange, disabled, error }: FieldRe
         <select
           id={def.key}
           value={value}
-          disabled={disabled}
+          disabled={controlDisabled}
           onChange={(e) => onChange((e.target as HTMLSelectElement).value)}
           {...ariaProps}
         >
@@ -37,7 +38,7 @@ export function FieldRenderer({ def, value, onChange, disabled, error }: FieldRe
           id={def.key}
           type="checkbox"
           checked={value === "true"}
-          disabled={disabled}
+          disabled={controlDisabled}
           onChange={(e) => onChange((e.target as HTMLInputElement).checked ? "true" : "false")}
           {...ariaProps}
         />
@@ -49,7 +50,7 @@ export function FieldRenderer({ def, value, onChange, disabled, error }: FieldRe
           id={def.key}
           type="number"
           value={value}
-          disabled={disabled}
+          disabled={controlDisabled}
           min={def.min}
           max={def.max}
           onInput={(e) => onChange((e.target as HTMLInputElement).value)}
@@ -64,7 +65,7 @@ export function FieldRenderer({ def, value, onChange, disabled, error }: FieldRe
           id={def.key}
           type="text"
           value={value}
-          disabled={disabled}
+          disabled={controlDisabled}
           onInput={(e) => onChange((e.target as HTMLInputElement).value)}
           {...ariaProps}
         />
@@ -72,10 +73,11 @@ export function FieldRenderer({ def, value, onChange, disabled, error }: FieldRe
       break;
   }
   return (
-    <div class={`settings-field${error ? " has-error" : ""}${disabled ? " disabled" : ""}`}>
+    <div class={`settings-field${error ? " has-error" : ""}${controlDisabled ? " disabled" : ""}`}>
       <label for={def.key} class="settings-field-label">
         {labelFromKey(def.key)}
         {disabled && def.deferred ? <span class="deferred-badge"> (coming in A4-b)</span> : null}
+        {def.read_only ? <span class="deferred-badge"> (read-only)</span> : null}
       </label>
       {control}
       {def.help ? <small class="settings-field-help">{def.help}</small> : null}

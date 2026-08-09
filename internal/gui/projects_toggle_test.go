@@ -26,6 +26,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -35,6 +36,31 @@ import (
 
 	"mcp-local-hub/internal/api"
 )
+
+func TestProjectsToggleRegistrationErrorUsesFixedProjector(t *testing.T) {
+	const rawSentinel = `D:\secret\toggle --password=hunter2`
+	root := t.TempDir()
+	server := NewServer(Config{})
+	originalRegister := projectsToggleRegister
+	t.Cleanup(func() { projectsToggleRegister = originalRegister })
+	projectsToggleRegister = func(*api.API, string, []string, api.RegisterOpts) (*api.RegisterReport, error) {
+		return &api.RegisterReport{}, errors.New(rawSentinel)
+	}
+
+	body := `{"root":"` + jsonEscPath(root) +
+		`","scope":"workspace-lsp","server":"mcp-language-server","enable":true,"languages":["go"]}`
+	recorder := postToggle(t, server, body)
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d want=500 body=%s", recorder.Code, recorder.Body.String())
+	}
+	wire := recorder.Body.String()
+	if strings.Contains(wire, rawSentinel) || strings.Contains(wire, "hunter2") {
+		t.Fatalf("wire response leaked registration cause: %s", wire)
+	}
+	if !strings.Contains(wire, registrationUnknownErrorPublic) {
+		t.Fatalf("wire response lacks fixed registration fallback: %s", wire)
+	}
+}
 
 // postToggle issues a same-origin POST /api/projects/toggle with the given body.
 func postToggle(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
@@ -56,6 +82,53 @@ func decodeToggleResp(t *testing.T, rec *httptest.ResponseRecorder) projectToggl
 		t.Fatalf("decode toggle resp: %v (body=%s)", err, rec.Body.String())
 	}
 	return out
+}
+
+func TestProjectsToggle_RegisterSuppliesManagedRouterAuthorizer(t *testing.T) {
+	const (
+		expectedPID     = 42424
+		expectedVersion = "project-toggle-identity-test"
+	)
+	root := t.TempDir()
+	s := NewServer(Config{PID: expectedPID, Version: expectedVersion})
+
+	originalRegister := projectsToggleRegister
+	t.Cleanup(func() { projectsToggleRegister = originalRegister })
+	var (
+		gotRoot      string
+		gotLanguages []string
+		gotOpts      api.RegisterOpts
+		calls        int
+	)
+	projectsToggleRegister = func(_ *api.API, root string, languages []string, opts api.RegisterOpts) (*api.RegisterReport, error) {
+		calls++
+		gotRoot = root
+		gotLanguages = append([]string(nil), languages...)
+		gotOpts = opts
+		return &api.RegisterReport{Entries: []api.WorkspaceEntry{{Language: "go"}}}, nil
+	}
+
+	body := `{"root":"` + jsonEscPath(root) +
+		`","scope":"workspace-lsp","server":"mcp-language-server","enable":true,"languages":["go","python"]}`
+	rec := postToggle(t, s, body)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if calls != 1 {
+		t.Fatalf("register calls = %d, want 1", calls)
+	}
+	if gotRoot != root {
+		t.Fatalf("register root = %q, want %q", gotRoot, root)
+	}
+	if len(gotLanguages) != 2 || gotLanguages[0] != "go" || gotLanguages[1] != "python" {
+		t.Fatalf("register languages = %v, want [go python]", gotLanguages)
+	}
+	if gotOpts.ManagedRouterAuthorizer == nil {
+		t.Fatal("RegisterOpts.ManagedRouterAuthorizer is nil")
+	}
+	if got := gotOpts.ManagedRouterAuthorizer(context.Background(), 0); got.Lease != nil || got.FailureClass != "port-invalid" {
+		t.Fatalf("authorizer invalid-port verdict = %+v, want fail-closed port-invalid", got)
+	}
 }
 
 // TestProjectsToggle_ObjectMember_Cursor: enable then disable a cursor project

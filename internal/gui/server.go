@@ -49,6 +49,23 @@ type Config struct {
 	// terminalization allowance added to the post-commit recovery bound. Zero
 	// uses the audit-lock adapter's production lock budget.
 	RecoverySettlementTerminalizationBudget time.Duration
+	// ReadOnlyRouterMode marks this Server instance as forbidden from ever
+	// writing the registry or supervisor-intent from router request-handling
+	// paths — the invariant the standalone `mcphub route` front daemon
+	// (internal/cli/route.go) needs so a second, GUI-independent process
+	// serving /serena/mcp + /lsp/<language>/mcp can never split-brain-write
+	// alongside the GUI (the decision record's non-negotiable "READ-ONLY on
+	// the registry + supervisor-intent" constraint —
+	// work-items/decisions/2026-07-25-mcp-data-plane-off-gui-onto-supervised-
+	// front-daemon.md). Consulted at the specific persist site
+	// (maybePersistSerenaActivity, internal/gui/serena_idle_sweeper.go) that
+	// writes on the router's happy path independent of which AutoRegisterFn/
+	// WakeIdleFn a caller wires — a construction-time flag rather than a
+	// per-deps toggle, so it holds even if a future caller mis-wires
+	// SetSerenaRouterProduction on a Server meant to stay read-only. False
+	// (the zero value) for every existing caller (the GUI itself), so this is
+	// purely additive and changes no existing behavior.
+	ReadOnlyRouterMode bool
 }
 
 // scanner is the narrow interface that the /api/scan handler needs.
@@ -750,6 +767,9 @@ type Server struct {
 	// registry plus startHubMcpListenerWithOptions directly.
 	hubEndpointGateFn     func(*api.API) bool
 	startHubMcpListenerFn func(context.Context, bool, *api.API, startHubMcpListenerOptions) (*HubListenerComponents, error)
+	// serveFullFn is a test-only failure seam for the post-readiness ServeFull
+	// return path. Production leaves it nil and always calls owner.ServeFull.
+	serveFullFn func(net.Listener, http.Handler) error
 
 	// Phase C.2 (v0.5.x serena routing) -- holds the resolver +
 	// session-router bundle wired by SetSerenaRouterDeps. Atomic so a
@@ -1203,8 +1223,13 @@ func (s *Server) continueWithGUIListener(ctx context.Context, ready chan<- struc
 	// + start srv.Serve FIRST; run hub startup AFTER. Shutdown still
 	// handles a nil s.hubMcpComp cleanly.
 	close(ready)
-	if err := owner.ServeFull(ln, s.httpHandler()); err != nil {
+	serveFull := owner.ServeFull
+	if s.serveFullFn != nil {
+		serveFull = s.serveFullFn
+	}
+	if err := serveFull(ln, s.httpHandler()); err != nil {
 		_ = ln.Close()
+		s.events.Close()
 		return err
 	}
 	return s.runActivatedGUIListener(ctx, owner.Errors())

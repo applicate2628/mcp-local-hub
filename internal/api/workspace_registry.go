@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofrs/flock"
 	"gopkg.in/yaml.v3"
 
 	"mcp-local-hub/internal/config"
@@ -84,6 +83,27 @@ type Registry struct {
 	path       string
 	Version    int              `yaml:"version"`
 	Workspaces []WorkspaceEntry `yaml:"workspaces"`
+
+	// auditSink, when non-nil, is the destination Load() passes to the
+	// shared inode-anchored state-file reader for its relax-fallback
+	// diagnostic (finding 1, work-items/bugs/2026-07-26-route-daemon-
+	// state-read-unhardened-parent-fallback-writes-hub-mcp-log.md). Nil
+	// (the zero value every existing NewRegistry caller gets) preserves
+	// today's default: LogHubMcpEvent, the shared hub-mcp.log. Purely
+	// additive — see SetAuditSink.
+	auditSink func(level, event string, fields map[string]any) error
+}
+
+// SetAuditSink overrides the diagnostic sink Load() uses for the shared
+// state-file reader's relax-fallback event. A nil sink restores the default
+// (LogHubMcpEvent). The read-only `mcphub route` front daemon
+// (internal/cli/route.go) calls this with RouteReadOnlyStderrSink right
+// after NewRegistry, before the first Load(), so its registry reads never
+// reach the GUI-owned shared hub-mcp.log even under a default-relax
+// broadened parent — every other caller that never calls SetAuditSink keeps
+// today's behavior unchanged.
+func (r *Registry) SetAuditSink(sink func(level, event string, fields map[string]any) error) {
+	r.auditSink = sink
 }
 
 const registryVersion = 1
@@ -126,7 +146,7 @@ func DefaultRegistryPath() (string, error) {
 // Load reads the registry file. A missing file is not an error — the registry
 // stays empty, ready for the first Save.
 func (r *Registry) Load() error {
-	data, err := readStateFileInodeAnchored(r.path)
+	data, err := ReadStateFileInodeAnchoredWithAuditSink(r.path, r.auditSink)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) || isHubMcpStateMissingErr(err) {
 			r.Version = registryVersion
@@ -189,19 +209,21 @@ func (r *Registry) Save() error {
 	return nil
 }
 
+// LockPath returns the registry's single cross-process lock leaf.
+func (r *Registry) LockPath() string { return r.path + ".lock" }
+
 // Lock acquires a cross-process exclusive file lock on <registry>.lock.
-// The returned function releases the lock; callers must defer it. Prevents
-// two concurrent `mcphub register` invocations from racing on port allocation
-// or client-config writes.
-func (r *Registry) Lock() (func(), error) {
+// The returned one-shot release reports and records failure.
+func (r *Registry) Lock() (func() error, error) {
+	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(r.path + ".lock")
-	if err := fl.Lock(); err != nil {
-		return nil, fmt.Errorf("lock %s: %w", r.path+".lock", err)
+	release, err := lockLeafLedgered(lockPath)
+	if err != nil {
+		return nil, fmt.Errorf("lock %s: %w", lockPath, err)
 	}
-	return func() { _ = fl.Unlock() }, nil
+	return release, nil
 }
 
 // TryLock is the non-blocking variant of Lock: it attempts to acquire the
@@ -216,19 +238,19 @@ func (r *Registry) Lock() (func(), error) {
 // never stall on a registry lock held by a concurrent auto-register / migrate
 // (that holder self-heals the orphan anyway), so it TryLocks and skips on
 // contention.
-func (r *Registry) TryLock() (func(), bool, error) {
+func (r *Registry) TryLock() (func() error, bool, error) {
+	lockPath := r.LockPath()
 	if err := os.MkdirAll(filepath.Dir(r.path), 0700); err != nil {
 		return nil, false, fmt.Errorf("mkdir registry dir: %w", err)
 	}
-	fl := flock.New(r.path + ".lock")
-	locked, err := fl.TryLock()
+	release, locked, err := tryLockLeafLedgered(lockPath)
 	if err != nil {
-		return nil, false, fmt.Errorf("try-lock %s: %w", r.path+".lock", err)
+		return nil, false, fmt.Errorf("try-lock %s: %w", lockPath, err)
 	}
 	if !locked {
 		return nil, false, nil
 	}
-	return func() { _ = fl.Unlock() }, true, nil
+	return release, true, nil
 }
 
 // Put upserts an entry (primary key = workspace_key + language).
@@ -438,7 +460,7 @@ func (r *Registry) PutLifecycle(workspaceKey, language, state, lastError string)
 // implying a lifecycle transition or clearing a diagnostic. A zero timestamp is
 // a no-op, and a missing row is silently ignored to match PutLifecycle's
 // unregistered-late-write behavior.
-func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) error {
+func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt time.Time) (err error) {
 	if toolsCallAt.IsZero() {
 		return nil
 	}
@@ -446,7 +468,7 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "put last tools-call timestamp for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}
@@ -463,12 +485,12 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 // materialization edges: state transition + timestamps in one atomic save.
 // Zero-valued materializedAt / toolsCallAt leave the existing stored values
 // unchanged; non-zero values are coerced to UTC before write.
-func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) error {
+func (r *Registry) PutLifecycleWithTimestamps(workspaceKey, language, state, lastError string, materializedAt, toolsCallAt time.Time) (err error) {
 	unlock, err := r.Lock()
 	if err != nil {
 		return err
 	}
-	defer unlock()
+	defer ReleaseAndJoin(&err, unlock, "put lifecycle for "+workspaceKey+"/"+language+": write stands, but could not release the registry lock")
 	if err := r.Load(); err != nil {
 		return err
 	}

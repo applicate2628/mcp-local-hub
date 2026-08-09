@@ -456,6 +456,47 @@ describe("ServersScreen — LSP matrix rows", () => {
     cleanup();
   });
 
+  function mountExistingWorkspaceRegistration(
+    registerResponse: (init?: RequestInit) => Response,
+  ) {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const registerBodies: unknown[] = [];
+    let workspacesCallCount = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => {
+          workspacesCallCount += 1;
+          return jsonResponse(200, {
+            workspaces: [
+              {
+                workspace_key: "default",
+                workspace_path: "D:/dev/project",
+              },
+            ],
+            entries: [],
+          });
+        },
+        "/api/lsp/register": (init?: RequestInit) => {
+          registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return registerResponse(init);
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    return {
+      registerBodies,
+      workspacesCallCount: () => workspacesCallCount,
+    };
+  }
+
   it("unchecking a routed language-server client posts the per-client LSP router disable endpoint", async () => {
     const scan: ScanResult = {
       at: "2026-06-03T00:00:00Z",
@@ -736,13 +777,15 @@ describe("ServersScreen — LSP matrix rows", () => {
       client_config_presence: { "codex-cli": "ok" },
     };
     const registerBodies: unknown[] = [];
+    let workspacesCallCount = 0;
 
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
         "/api/scan": () => jsonResponse(200, scan),
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
-        "/api/workspaces": () =>
-          jsonResponse(200, {
+        "/api/workspaces": () => {
+          workspacesCallCount += 1;
+          return jsonResponse(200, {
             workspaces: [
               {
                 workspace_key: "default",
@@ -750,7 +793,8 @@ describe("ServersScreen — LSP matrix rows", () => {
               },
             ],
             entries: [],
-          }),
+          });
+        },
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
@@ -766,6 +810,7 @@ describe("ServersScreen — LSP matrix rows", () => {
                 task_name: "\\mcp-local-hub-lsp-default-go",
               },
             ],
+            results: [{ language: "go", status: "ok" }],
           });
         },
       }) as unknown as typeof fetch,
@@ -775,6 +820,7 @@ describe("ServersScreen — LSP matrix rows", () => {
 
     const enable = await screen.findByTestId("lsp-enable-go");
     expect(enable.textContent).toBe("Enable");
+    const callsBeforeRegister = workspacesCallCount;
 
     fireEvent.click(enable);
 
@@ -785,6 +831,101 @@ describe("ServersScreen — LSP matrix rows", () => {
       workspace_path: "D:/dev/project",
       language: "go",
     });
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toBe("Enabled go. Refreshing…");
+    expect(message.getAttribute("role")).toBe("status");
+    await waitFor(() => {
+      expect(workspacesCallCount).toBe(callsBeforeRegister + 1);
+    });
+  });
+
+  it("existing workspace surfaces cleanup warnings", async () => {
+    const harness = mountExistingWorkspaceRegistration(() =>
+      jsonResponse(200, {
+        workspace: "D:/dev/project",
+        workspace_key: "default",
+        entries: [],
+        warnings: [" cleanup preserved\nlegacy entry "],
+        results: [{ language: "go", status: "ok" }],
+      }),
+    );
+
+    const enable = await screen.findByTestId("lsp-enable-go");
+    const callsBeforeRegister = harness.workspacesCallCount();
+    fireEvent.click(enable);
+
+    await waitFor(() => expect(harness.registerBodies).toHaveLength(1));
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toContain("Partial success enabling go");
+    expect(message.textContent).toContain("cleanup preserved legacy entry");
+    expect(message.textContent).not.toContain("Enabled go. Refreshing…");
+    expect(message.classList.contains("lsp-register-warning")).toBe(true);
+    expect(message.getAttribute("role")).toBe("status");
+    await waitFor(() => {
+      expect(harness.workspacesCallCount()).toBe(callsBeforeRegister + 1);
+    });
+  });
+
+  it("unconfirmed registration response is an error", async () => {
+    const harness = mountExistingWorkspaceRegistration(() =>
+      jsonResponse(200, {
+        workspace: "D:/dev/project",
+        workspace_key: "default",
+        entries: [],
+        warnings: [" unrelated result\nwas ignored "],
+        results: [{ language: "python", status: "ok" }],
+      }),
+    );
+
+    const enable = await screen.findByTestId("lsp-enable-go");
+    const callsBeforeRegister = harness.workspacesCallCount();
+    fireEvent.click(enable);
+
+    await waitFor(() => expect(harness.registerBodies).toHaveLength(1));
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toContain("registration-unconfirmed");
+    expect(message.textContent).toContain("Warnings: unrelated result was ignored");
+    expect(message.classList.contains("error")).toBe(true);
+    expect(message.getAttribute("role")).toBe("alert");
+    await act(async () => Promise.resolve());
+    expect(harness.workspacesCallCount()).toBe(callsBeforeRegister);
+  });
+
+  it("requested-language registration error stays error without refresh", async () => {
+    const harness = mountExistingWorkspaceRegistration(() =>
+      jsonResponse(207, {
+        workspace: "D:/dev/project",
+        workspace_key: "default",
+        entries: [],
+        warnings: [" cleanup\tpreserved "],
+        results: [{ language: "go", status: "error", error: "client write failed" }],
+      }),
+    );
+
+    const enable = await screen.findByTestId("lsp-enable-go");
+    const callsBeforeRegister = harness.workspacesCallCount();
+    fireEvent.click(enable);
+
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toContain("Enable go failed: client write failed");
+    expect(message.textContent).toContain("Warnings: cleanup preserved");
+    expect(message.getAttribute("role")).toBe("alert");
+    expect(harness.workspacesCallCount()).toBe(callsBeforeRegister);
+  });
+
+  it("non-2xx registration stays error without refresh", async () => {
+    const harness = mountExistingWorkspaceRegistration(() =>
+      jsonResponse(500, { error: "registration transport failed" }),
+    );
+
+    const enable = await screen.findByTestId("lsp-enable-go");
+    const callsBeforeRegister = harness.workspacesCallCount();
+    fireEvent.click(enable);
+
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toContain("Enable go failed");
+    expect(message.getAttribute("role")).toBe("alert");
+    expect(harness.workspacesCallCount()).toBe(callsBeforeRegister);
   });
 
   // Fresh-machine connect path: a host with ZERO registered workspaces must be
@@ -868,6 +1009,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
     fireEvent.change(langSelect, { target: { value: "python" } });
     expect(submit.disabled).toBe(false);
+    const callsBeforeRegister = workspacesCallCount;
 
     fireEvent.click(submit);
 
@@ -878,9 +1020,70 @@ describe("ServersScreen — LSP matrix rows", () => {
       workspace_path: "D:/dev/my-project",
       language: "python",
     });
-    // After a successful register the workspace list reloads (selector reflects it).
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toBe("Registered python for D:/dev/my-project. Refreshing…");
+    // After a successful register the workspace list reloads exactly once.
     await waitFor(() => {
-      expect(workspacesCallCount).toBeGreaterThan(1);
+      expect(workspacesCallCount).toBe(callsBeforeRegister + 1);
+    });
+  });
+
+  it("first workspace surfaces cleanup warnings", async () => {
+    const scan: ScanResult = {
+      at: "2026-06-03T00:00:00Z",
+      entries: [],
+      client_config_presence: { "codex-cli": "ok" },
+    };
+    const registerBodies: unknown[] = [];
+    let workspacesCallCount = 0;
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, scan),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/workspaces": () => {
+          workspacesCallCount += 1;
+          return jsonResponse(200, { workspaces: [], entries: [] });
+        },
+        "/api/lsp/register": (init?: RequestInit) => {
+          registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
+          return jsonResponse(200, {
+            workspace: "D:/dev/my-project",
+            workspace_key: "my-project",
+            entries: [],
+            warnings: [" cleanup preserved\nlegacy entry "],
+            results: [{ language: "python", status: "ok" }],
+          });
+        },
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    const pathInput = (await screen.findByTestId(
+      "lsp-register-workspace-path",
+    )) as HTMLInputElement;
+    const langSelect = screen.getByTestId(
+      "lsp-register-workspace-language",
+    ) as HTMLSelectElement;
+    const submit = screen.getByTestId(
+      "lsp-register-workspace-submit",
+    ) as HTMLButtonElement;
+    fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
+    fireEvent.change(langSelect, { target: { value: "python" } });
+    const callsBeforeRegister = workspacesCallCount;
+    fireEvent.click(submit);
+
+    await waitFor(() => expect(registerBodies).toHaveLength(1));
+    const message = await screen.findByTestId("lsp-register-msg");
+    expect(message.textContent).toContain("Partial success registering python");
+    expect(message.textContent).toContain("cleanup preserved legacy entry");
+    expect(message.textContent).not.toContain(
+      "Registered python for D:/dev/my-project. Refreshing…",
+    );
+    expect(message.classList.contains("lsp-register-warning")).toBe(true);
+    expect(message.getAttribute("role")).toBe("status");
+    await waitFor(() => {
+      expect(workspacesCallCount).toBe(callsBeforeRegister + 1);
     });
   });
 

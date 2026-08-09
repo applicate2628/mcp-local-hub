@@ -162,8 +162,8 @@ func TestSkipClientConfigWrites_SelectsZeroClients(t *testing.T) {
 }
 
 // defaultClientManifestFixture returns a minimal global manifest carrying one
-// daemon and the three default-install client bindings (claude-code, codex-cli,
-// cursor). A non-empty ClientBindings set is load-bearing for the FIX 3
+// daemon and three explicit client bindings (claude-code, codex-cli, cursor).
+// A non-empty ClientBindings set is load-bearing for the FIX 3
 // regression: it is what makes the default-client install plan emit
 // ClientUpdates, so the zero-ClientUpdates assertion is meaningful.
 func defaultClientManifestFixture() *config.ServerManifest {

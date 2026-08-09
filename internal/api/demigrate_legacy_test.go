@@ -54,8 +54,7 @@ client_bindings:
 func TestDemigrate_UserDirectEntry_RestoredNotDeleted(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -138,8 +137,7 @@ func TestDemigrate_UserDirectEntry_RestoredNotDeleted(t *testing.T) {
 func TestDemigrate_IteratesNewestFirst_SkipsHubManaged(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
@@ -185,8 +183,7 @@ func TestDemigrate_IteratesNewestFirst_SkipsHubManaged(t *testing.T) {
 // existed in pre-hub form here — it was installed by mcphub from scratch.
 func TestDemigrate_FallbackToRemoveEntry_WhenNoPreHubFormFound(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -245,8 +242,7 @@ func TestDemigrate_FallbackToRemoveEntry_WhenNoPreHubFormFound(t *testing.T) {
 func TestDemigrate_LegacyPrefixFallback(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -323,8 +319,7 @@ func TestDemigrate_LegacyPrefixFallback(t *testing.T) {
 func TestDemigrate_LegacyPrefixSkipsHubManagedAndAbsentLegacyBackups(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -396,8 +391,7 @@ func TestDemigrate_LegacyPrefixSkipsHubManagedAndAbsentLegacyBackups(t *testing.
 func TestDemigrate_LegacyPrefixFallback_NoCurrentBackup(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -456,8 +450,7 @@ func TestDemigrate_LegacyPrefixFallback_NoCurrentBackup(t *testing.T) {
 func TestDemigrate_UnreadableLegacyBackup_FailsClosed(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -515,8 +508,7 @@ func TestDemigrate_UnreadableLegacyBackup_FailsClosed(t *testing.T) {
 func TestDemigrate_LegacyOnlyHost_AllowsURLBackfillRemove(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")

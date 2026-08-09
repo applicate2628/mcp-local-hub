@@ -29,7 +29,7 @@ func trustedRootsHandlerTestServer(t *testing.T) (*Server, string) {
 	if err != nil {
 		t.Fatalf("resolve trusted-roots path: %v", err)
 	}
-	srv := NewServer(Config{})
+	srv := newEphemeralServer(t, Config{})
 	// The Broadcaster lazily spawns an async gui-events.log persist drain on
 	// the first operator-action Publish (the POST/DELETE trusted-root audit
 	// added in this PR). Without an explicit Close, that drain goroutine can
@@ -41,7 +41,6 @@ func trustedRootsHandlerTestServer(t *testing.T) (*Server, string) {
 	// t.TempDir and after restore) runs BEFORE both the state-root restore and
 	// the temp-dir removal — the drain flushes to the still-redirected root,
 	// then teardown proceeds with no live writer.
-	t.Cleanup(func() { srv.Broadcaster().Close() })
 	return srv, path
 }
 

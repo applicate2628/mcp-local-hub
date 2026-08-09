@@ -9,7 +9,9 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -211,13 +213,17 @@ func TestMain(m *testing.M) {
 		_ = os.RemoveAll(tmp)
 		panic("internal/gui TestMain: create state root: " + mkErr.Error())
 	}
+	if hardenErr := apitest.HardenedDirForTestMain(stateRoot); hardenErr != nil {
+		_ = os.RemoveAll(tmp)
+		panic("internal/gui TestMain: harden state root: " + hardenErr.Error())
+	}
 
 	restoreState := api.SetDaemonStateRootForTest(stateRoot)
+	// Redirect every client-adapter path input before installing the audit. The
+	// descriptor is shared with API and CLI package test setup.
+	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
 	restoreEnv := setEnvWithRestore(map[string]string{
 		"MCPHUB_STATE_DIR_OVERRIDE": stateRoot,
-		"LOCALAPPDATA":              localAppData,
-		"XDG_STATE_HOME":            localAppData,
-		"XDG_DATA_HOME":             localAppData,
 		// Global browser kill-switch for the whole gui test binary AND any
 		// `mcphub gui` child a test spawns (inherited env) — no test flashes a
 		// browser window. See browser.go SuppressBrowserLaunchEnv.
@@ -229,10 +235,27 @@ func TestMain(m *testing.M) {
 		testInstallAutostartFixture.startOwner,
 	)
 
-	code := m.Run()
+	// Client-config sandbox audit. This TestMain fences the STATE dir but installs
+	// no home barrier, and several gui handler tests drive real /api/adopt,
+	// /api/deadopt and global-scan routes that fan out over the whole client
+	// registry. The audit fails any test whose admitted adapters resolve outside
+	// the sandbox. Contract: internal/clients/config_path_sandbox_audit.go.
+	auditRestore := clients.EnforceSandboxedConfigPaths(tmp)
 
+	code := m.Run()
+	if leakErr := assertNoBroadcasterWorkers(); leakErr != nil {
+		if code == 0 {
+			code = 1
+		}
+		_, _ = os.Stderr.WriteString(leakErr.Error() + "\n")
+	}
+
+	if escapes := auditRestore(); escapes > 0 && code == 0 {
+		code = 1
+	}
 	restoreAutostartFixture()
 	restoreEnv()
+	restoreClientEnv()
 	restoreState()
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)

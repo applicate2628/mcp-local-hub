@@ -115,6 +115,14 @@ func TestConfigPaths_AutoCoversRegistryClientViaMapOnly(t *testing.T) {
 // in the map. On a normal test host UserHomeDir resolves, so all of them must
 // be present.
 func TestDefaultScanConfigPaths_CoversEverySupportedClient(t *testing.T) {
+	// Real path derivation IS the subject here: the test resolves every
+	// registered client through both resolvers and string-compares them. It
+	// opens no file, so it cannot leak — but it also cannot satisfy the sandbox
+	// predicate by construction. This is the documented narrow exception the
+	// audit's SuspendSandboxAudit contract carves out; do NOT copy it into a
+	// fixture that touches the filesystem at the resolved path.
+	defer clients.SuspendSandboxAudit()()
+
 	paths := DefaultScanConfigPaths()
 	for _, name := range clients.SupportedClientNames() {
 		wantPath, err := clients.ConfigPathForName(name)

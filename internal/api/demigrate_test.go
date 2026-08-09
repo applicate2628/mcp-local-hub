@@ -28,8 +28,7 @@ func setupTmpHomeAndClaude(t *testing.T, body string) string {
 	// client_adapter_dacl_test.go).
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claude := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claude, []byte(body), 0600); err != nil {
 		t.Fatal(err)
@@ -110,8 +109,7 @@ client_bindings:
 
 func TestDemigrate_OnlyIteratesManifestBindings(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
@@ -175,8 +173,7 @@ client_bindings:
 func TestDemigrate_ClientsIncludeFilter(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
@@ -221,8 +218,7 @@ client_bindings:
 func TestDemigrate_MultiServerNewestFirstSucceeds(t *testing.T) {
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"},"fs":{"type":"http","url":"http://localhost:9201/mcp"}}}`),
@@ -277,8 +273,7 @@ func TestDemigrate_MultiServerFallsBackToSentinel(t *testing.T) {
 	// a clear but unhelpful failure.
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	if err := os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"},"fs":{"type":"http","url":"http://localhost:9201/mcp"}}}`),
@@ -368,8 +363,7 @@ func TestDemigrate_FailsWhenBothLatestAndSentinelRefuseAndMarkerAbsent(t *testin
 	managedEntriesTestHelper(t) // redirects state-dir; marker file absent
 
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	// Note: port 9201 (NOT 9200 — see test docstring).
 	_ = os.WriteFile(claudePath, []byte(
@@ -437,8 +431,7 @@ func TestDemigrate_SucceedsWhenBothLatestAndSentinelRefuseAndMarkerConfirms(t *t
 	}
 
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
@@ -504,8 +497,7 @@ func TestDemigrate_MarkerPreseededButLiveURLMismatch_FailsClosed(t *testing.T) {
 	}
 
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9999/mcp"}}}`), 0o600)
@@ -584,8 +576,7 @@ func TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillMatch_Succeeds(t *tes
 	// TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillRejects_FailsClosed
 	// below.
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
@@ -639,8 +630,7 @@ func TestDemigrate_OnlySentinelExistsAndLacksEntry_BackfillRejects_FailsClosed(t
 	// (live URL points at port 9999 vs manifest port 9200). Backfill
 	// rejects, marker has no record, demigrate fails-closed.
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
@@ -710,8 +700,7 @@ client_bindings:
 // sibling demigrate tests guard; the fix ENRICHES the message, it does not drop it.
 func TestDemigrate_InheritedImport_ClearerError(t *testing.T) {
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t) // isolate the marker store → no marker for `time`
 	claudePath := filepath.Join(tmp, ".claude.json")
 	// A hub-loopback URL (IsHubHTTPURL true) at a port that does NOT match the
@@ -803,8 +792,7 @@ func TestDemigrate_ServerAddedAfterSentinelThenMigratedTwice_OnlyHubBackups_Back
 	// TestDemigrate_PreservesUserDirectFormViaOlderBackup covers
 	// the case where such a backup exists.
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
@@ -863,8 +851,7 @@ func TestDemigrate_ServerAddedAfterSentinel_AllBackupsHubManaged_BackfillRejects
 	// fails-closed with the "marker has no record" reason. Live
 	// config untouched.
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
@@ -927,8 +914,7 @@ func TestDemigrate_SingleServerMigratedTwiceRestoresViaSentinel(t *testing.T) {
 	// Demigrate must fall back to the sentinel.
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
 		`{"mcpServers":{"memory":{"type":"http","url":"http://localhost:9200/mcp"}}}`), 0600)
@@ -1021,8 +1007,7 @@ func TestDemigrate_PreservesUserDirectFormViaOlderBackup(t *testing.T) {
 	// unblocks the UI.
 	t.Cleanup(SetClientWriteFallbackForTest())
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 
 	claudePath := filepath.Join(tmp, ".claude.json")
@@ -1130,8 +1115,7 @@ func TestDemigrate_NoBackupHubURLEntry_RemovedViaHubURLCorroboration(t *testing.
 	// negative — a NON-hub URL with no backup still fails closed — is
 	// TestDemigrate_NoBackupNonHubURLEntry_FailsClosed below.)
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t) // marker store init; marker file absent (pre-marker entry)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
@@ -1189,8 +1173,7 @@ func TestDemigrate_NoBackupNonHubURLEntry_FailsClosed(t *testing.T) {
 	// keeps refusing to delete it (it might be a genuine user-configured
 	// server). Live config untouched.
 	tmp := t.TempDir()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	managedEntriesTestHelper(t)
 	claudePath := filepath.Join(tmp, ".claude.json")
 	_ = os.WriteFile(claudePath, []byte(
@@ -1247,8 +1230,7 @@ client_bindings:
 // claude-code).
 func seedGeminiForNonBinding(t *testing.T, tmp, body string) string {
 	t.Helper()
-	t.Setenv("USERPROFILE", tmp)
-	t.Setenv("HOME", tmp)
+	sandboxClientConfigHome(t, tmp)
 	geminiDir := filepath.Join(tmp, ".gemini")
 	if err := os.MkdirAll(geminiDir, 0o700); err != nil {
 		t.Fatal(err)

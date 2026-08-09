@@ -3,6 +3,7 @@ package gui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,34 @@ import (
 	"testing"
 	"time"
 )
+
+func TestProcessIdentityClose_CachesNativeFailureOnce(t *testing.T) {
+	closeErr := errors.New("native close failed")
+	closeCalls := 0
+	identity := ProcessIdentity{
+		Handle: 17,
+		closeHandle: func(handle uintptr) error {
+			closeCalls++
+			if handle != 17 {
+				t.Fatalf("close handle = %d, want 17", handle)
+			}
+			return closeErr
+		},
+	}
+
+	if err := identity.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("first Close() error = %v, want native close error", err)
+	}
+	if identity.Handle != 0 {
+		t.Fatalf("Handle after Close() = %d, want 0", identity.Handle)
+	}
+	if err := identity.Close(); !errors.Is(err, closeErr) {
+		t.Fatalf("second Close() error = %v, want cached native close error", err)
+	}
+	if closeCalls != 1 {
+		t.Fatalf("native close calls = %d, want 1", closeCalls)
+	}
+}
 
 // TestProcessID_SelfAlive verifies the current test process is reported
 // as alive with a non-empty image path, an argv that includes "test"

@@ -11,10 +11,11 @@
 
 | Item | Status |
 |---|---|
-| [2026-07-14-cbuild-mcp](active/2026-07-14-cbuild-mcp/status.md) | PARKED at PR #541; the CMake-delegated preset-listing redesign remains open |
-| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B delivered and deployed; phase-0 items 4-6 remain |
-| [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) | Requirement 4 records the terminal-lifetime root cause and bounded fix options; empirical console-close verification remains required |
-| [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) | Investigation complete; four reliability design lanes are dispatched |
+| [2026-07-14-cbuild-mcp](active/2026-07-14-cbuild-mcp/status.md) | Status text is internally inconsistent: the first State section says DESIGN ACCEPTED → IMPLEMENTING, while the later deferred section says PR #541 is PARKED; active placement retained pending owner reconciliation. |
+| [2026-07-16-productization-gui-solidify](active/2026-07-16-productization-gui-solidify/status.md) | Item 3 Unit B RestartV3 gate ON; PR #563 round-1 three-finding correction QA PASS on `feat/gui-restart-unitb-gated` at `37b39ebc`; changes remain uncommitted and undeployed; next gate is human/PR review |
+| [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) | Revision FIX-1 … FIX-9 delivered; awaiting lead gate. |
+| [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) | Investigation complete; design lanes dispatched. |
+| [2026-07-25-mcp-front-daemon](active/2026-07-25-mcp-front-daemon/status.md) | PR #588 live-finding closure active; 14 reported rows map to 10 defect classes pending evidence, fixes, mutation QA, and independent architecture review. |
 
 ## Reaper kill-authority hardening — COMPLETE (2026-07-08, all bot-PASS + deployed)
 
@@ -57,6 +58,8 @@ reconciliation records, not open tasks.
 | Item | Closed | Outcome |
 |---|---|---|
 | [2026-07-25-liveness-headless-gui-recovery](archive/2026-07/2026-07-25-liveness-headless-gui-recovery/closure.md) | 2026-07-27 | DELIVERED LOCALLY — all seven PR #589 findings classified; F1-F4 retained from `f150be61`; F5 typed lease lifecycle, F6 durable audit handoff/replay/exit 7, and both F7 action-before-log sites fixed, mutation-proven, build/vet clean, architecture PASS; not pushed. |
+| [2026-07-27-pr583-live-bot-findings](archive/2026-07/2026-07-27-pr583-live-bot-findings/closure.md) | 2026-07-27 | PASS — six findings were already closed by `c826a48d`; the two router-liveness duplicates were fixed by `50a0e4b0` with a cached managed-GUI identity proof before router-origin cleanup. Mutation, focused tests, build, vet, publication safety, QA, and architecture gates passed; no push. |
+| [2026-07-26-cursor-opt-in-review-fixes](archive/2026-07/2026-07-26-cursor-opt-in-review-fixes/closure.md) | 2026-07-26 | PASS — Cursor remains explicit opt-in; workspace-register fallback derives from registry-owned defaults; all stale user-facing/count derivatives corrected; scoped tests, build, vet, generator, exhaustive sweep, external QA, and external architecture gates passed. |
 | [2026-06-17-phase1-audit-findings](archive/2026-07/2026-06-17-phase1-audit-findings.md) | 2026-07-15 | Phase 1 arch+security audit. **HEAD-reconciled 2026-07-15 (the inline fixed-markers were stale):** 6/6 findings resolved-or-exempt (P1 state-fanout, config-path |
 | | | double-encode, dual state-enum, hand-rolled atomic writers, path-validate raw-error — all FIXED with backing tests; backups path-echo EXEMPT-by-design). Finding 4's residual (4 GUI state-dir-error POSIX path-leak sites) |
 | | | **FIXED 2026-07-15** — the 4 sites now route through `writeAPIErrorRedacted` + a `state_dir_error_redaction_test.go` structural guard; the backlog tracker is removed on delivery. See the doc's |

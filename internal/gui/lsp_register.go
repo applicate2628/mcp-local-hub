@@ -15,16 +15,17 @@ var ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspac
 }
 
 type lspRegisterLanguageResult struct {
-	Language string `json:"language"`
-	Status   string `json:"status"`
-	Error    string `json:"error,omitempty"`
+	Language   string `json:"language"`
+	Status     string `json:"status"`
+	Error      string `json:"error,omitempty"`
+	diagnostic *api.RegistrationDiagnostic
 }
 
 type lspRegisterReport struct {
 	Workspace    string
 	WorkspaceKey string
 	Entries      []api.WorkspaceEntry
-	Warnings     []string
+	Diagnostics  []api.RegistrationDiagnostic
 	Results      []lspRegisterLanguageResult
 }
 
@@ -50,10 +51,12 @@ func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*
 	for _, language := range languages {
 		entry, err := ensureLSPRegisteredForGUI(context.Background(), "", workspacePath, language)
 		if err != nil {
+			diagnostic := api.ClassifyLSPEnsureError(err, language, "lsp-register")
 			report.Results = append(report.Results, lspRegisterLanguageResult{
-				Language: language,
-				Status:   "error",
-				Error:    err.Error(),
+				Language:   language,
+				Status:     "error",
+				Error:      registrationDiagnosticPublicText(diagnostic),
+				diagnostic: &diagnostic,
 			})
 			continue
 		}
@@ -87,8 +90,9 @@ func (realLSPRegistrar) RegisterLSP(workspacePath string, languages []string) (*
 			// failure as a warning so a later sibling-workspace
 			// auto-register failure is diagnosable, but never fail the
 			// register over it.
-			report.Warnings = append(report.Warnings,
-				fmt.Sprintf("could not record %s as an LSP trusted root (router auto-register of sibling workspaces under this tree may require explicit register): %v", blessedRoot, err))
+			report.Diagnostics = append(report.Diagnostics, api.NewRegistrationDiagnostic(
+				api.RegistrationCodeTrustedRootRecordFailed, "trusted-root", "lsp-register", err,
+			))
 		}
 	}
 	return report, nil
@@ -132,7 +136,8 @@ func (s *Server) lspRegisterHandler(w http.ResponseWriter, r *http.Request) {
 
 	report, err := s.lspRegistrar.RegisterLSP(workspacePath, languages)
 	if err != nil {
-		writeAPIError(w, err, http.StatusInternalServerError, "LSP_REGISTER_FAILED")
+		diagnostic := api.ClassifyRegistrationError(err, "lsp-register", "handler")
+		writeRegistrationDiagnosticError(w, err, diagnostic, http.StatusInternalServerError, "LSP_REGISTER_FAILED", "/api/lsp/register")
 		return
 	}
 	if report == nil {
@@ -164,11 +169,17 @@ func lspRegisterResponseFromReport(report *lspRegisterReport) lspRegisterRespons
 		entries = append(entries, workspaceEntryDTOFromAPI(entry))
 	}
 	results := append([]lspRegisterLanguageResult(nil), report.Results...)
+	for i := range results {
+		if results[i].diagnostic != nil {
+			results[i].Error = registrationDiagnosticPublicText(*results[i].diagnostic)
+		}
+	}
+	warnings := projectRegistrationWarnings(report.Diagnostics)
 	return lspRegisterResponse{
 		Workspace:    report.Workspace,
 		WorkspaceKey: report.WorkspaceKey,
 		Entries:      entries,
-		Warnings:     append([]string(nil), report.Warnings...),
+		Warnings:     warnings,
 		Results:      results,
 	}
 }

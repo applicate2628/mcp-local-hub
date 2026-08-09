@@ -57,7 +57,7 @@ func (f *fakeBackups) CleanPreviewInClient(client string, n int) ([]string, erro
 
 func newBackupsTestServer(t *testing.T) (*Server, *fakeBackups) {
 	t.Helper()
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s := newEphemeralServer(t, Config{Port: 9125, Version: "test", PID: 1})
 	fb := &fakeBackups{}
 	s.backups = fb
 	return s, fb

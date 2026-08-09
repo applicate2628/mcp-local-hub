@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -47,8 +48,28 @@ func perPathMutex(configPath string) *sync.Mutex {
 // internal/api/workspace_registry.go:200): the live GUI + CLI client-config
 // write paths depend on these critical sections staying tight, so each
 // mutating adapter method does exactly one open → mutate → atomic-write under
-// the lock and nothing slow or interactive.
-func withConfigLock(configPath string, fn func() error) error {
+// the lock and nothing interactive. The mcp-front recovery flow is the one
+// deliberate extension: ConditionalEntryMutation may persist its prepared
+// recovery row while the lock is held. Its lock order is operation lock ->
+// config lock -> recovery state-file lock, and the callback must never mutate
+// this client or retain the unwrapped adapter.
+//
+// configLockExecution records the two independently observable phases of a
+// config-lock operation. A caller that only needs the historical error-shaped
+// contract uses withConfigLock; mutation wrappers additionally use this record
+// to distinguish a failed body from a successful body whose lock release could
+// not be confirmed.
+type configLockExecution struct {
+	bodyEntered bool
+	bodyErr     error
+	releaseErr  error
+}
+
+func (e configLockExecution) bodyApplied() bool {
+	return e.bodyEntered && e.bodyErr == nil
+}
+
+func withConfigLockExecution(configPath string, fn func() error) (execution configLockExecution, err error) {
 	mu := perPathMutex(configPath)
 	mu.Lock()
 	defer mu.Unlock()
@@ -117,21 +138,39 @@ func withConfigLock(configPath string, fn func() error) error {
 	if dir := filepath.Dir(configPath); dir != "" {
 		absDir, absErr := filepath.Abs(dir)
 		if absErr != nil {
-			return fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
+			return execution, fmt.Errorf("config lock %s: resolve parent dir %q to absolute: %w", configPath+".lock", dir, absErr)
 		}
 		if mkErr := SecureCreateParentDir(absDir); mkErr != nil {
-			return fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
+			return execution, fmt.Errorf("config lock %s: create parent dir: %w", configPath+".lock", mkErr)
 		}
 	}
 
 	lockPath := configPath + ".lock"
+	if ghost := unconfirmedConfigLockRelease(lockPath); ghost != nil {
+		return execution, fmt.Errorf("config lock %s: %w", lockPath, ghost)
+	}
 	fl := flock.New(lockPath)
 	if err := fl.Lock(); err != nil {
-		return fmt.Errorf("config lock %s: %w", lockPath, err)
+		return execution, fmt.Errorf("config lock %s: %w", lockPath, err)
 	}
-	defer func() { _ = fl.Unlock() }()
+	release := newConfigLockRelease(fl, lockPath)
+	defer func() {
+		if releaseErr := release(); releaseErr != nil {
+			execution.releaseErr = releaseErr
+			err = errors.Join(err, fmt.Errorf("release config lock %s: %w", lockPath, releaseErr))
+		}
+	}()
 
-	return fn()
+	execution.bodyEntered = true
+	execution.bodyErr = fn()
+	return execution, execution.bodyErr
+}
+
+// withConfigLock retains the error-only contract used by non-mutation lock
+// clients such as backup selection and pruning.
+func withConfigLock(configPath string, fn func() error) error {
+	_, err := withConfigLockExecution(configPath, fn)
+	return err
 }
 
 // withConfigReadLock is the read-selection variant of withConfigLock used by
@@ -157,9 +196,10 @@ func withConfigReadLock(configPath string, fn func() error) error {
 	return withConfigLock(configPath, fn)
 }
 
-// lockingClient decorates a Client so every MUTATING method serializes its
-// read-modify-write of the underlying config file via withConfigLock. The
-// backup-READ selection/inspection methods (LatestBackupPath,
+// lockingClient decorates a Client so every config-entry mutation serializes
+// its read-modify-write and settlement result via withConfigMutationLock.
+// InitEmpty, Backup, and BackupKeep retain the error-only withConfigLock path.
+// The backup-READ selection/inspection methods (LatestBackupPath,
 // BackupContainsEntry, BackupEntryIsHubManaged) are ALSO serialized under the
 // same per-path lock so the demigrate selection cannot observe a backup
 // directory/file mid-write (b1). The remaining read-only methods (Name,
@@ -169,11 +209,140 @@ func withConfigReadLock(configPath string, fn func() error) error {
 // Re-entrancy safety: each override calls the CONCRETE adapter (l.Client),
 // whose own internal cross-method calls (e.g. cursor/vscode/qwen/zed
 // BackupKeep internally calling InitEmpty) dispatch on the concrete struct
-// directly, NOT through this decorator — so they never re-enter withConfigLock
-// and there is no self-deadlock on the same per-path mutex.
+// directly, NOT through this decorator — so they never re-enter either lock
+// wrapper and there is no self-deadlock on the same per-path mutex.
 type lockingClient struct {
 	Client // embedded: read-only methods + everything not overridden pass through
 }
+
+// EntryMutationOperation is the single typed operation accepted by
+// ConditionalEntryMutator.
+type EntryMutationOperation string
+
+const (
+	EntryMutationAdd    EntryMutationOperation = "add"
+	EntryMutationRemove EntryMutationOperation = "remove"
+)
+
+// ErrEntryMutationPreconditionConflict means the exact live entry observed
+// under the config lock did not match the caller's captured pre-state.
+var ErrEntryMutationPreconditionConflict = errors.New("clients: conditional entry mutation precondition conflict")
+
+// EntryMutationPreparation is passed to BeforeMutation while the config lock
+// is still held and before the adapter mutation is invoked.
+type EntryMutationPreparation struct {
+	Before     *MCPEntry
+	BackupPath string
+}
+
+// ConditionalEntryMutationRequest describes one compare-backup-prepare-mutate
+// transaction. BackupKeepN=nil means no backup; a non-nil value passes the
+// pointed retention value to the concrete adapter.
+type ConditionalEntryMutationRequest struct {
+	EntryName      string
+	ExpectedLive   func(*MCPEntry) bool
+	BackupKeepN    *int
+	Operation      EntryMutationOperation
+	Entry          MCPEntry
+	BeforeMutation func(EntryMutationPreparation) error
+}
+
+// EntryMutationDependency is one additional live-entry predicate that must
+// hold under the target mutation's config lock. The wrapper derives the shared
+// ConfigPath; callers cannot supply a second path or a second mutation.
+type EntryMutationDependency struct {
+	EntryName    string
+	ExpectedLive func(*MCPEntry) bool
+}
+
+// EntryMutationDependencyObserved is one dependency observation made while
+// the target mutation's config lock was held. After is populated after an
+// invoked target mutation, even when that mutation returned an error.
+type EntryMutationDependencyObserved struct {
+	EntryName            string
+	Before               *MCPEntry
+	After                *MCPEntry
+	AfterMatchesExpected *bool
+	ObservationErr       error
+}
+
+// EntryMutationDependencyFailurePhase identifies the point in the one-lock
+// transaction where a dependency became unverifiable. The post-mutation cases
+// are deliberately distinct from a precondition conflict: the target may
+// already have been invoked, so callers must treat them as ownership unknown.
+type EntryMutationDependencyFailurePhase string
+
+const (
+	EntryMutationDependencyFailureBeforeRead             EntryMutationDependencyFailurePhase = "before-read"
+	EntryMutationDependencyFailureAfterRead              EntryMutationDependencyFailurePhase = "after-read"
+	EntryMutationDependencyFailureAfterPredicateMismatch EntryMutationDependencyFailurePhase = "after-predicate-mismatch"
+)
+
+// EntryMutationDependencyFailureKind distinguishes an unreadable dependency
+// from a readable dependency whose request-owned predicate no longer holds.
+type EntryMutationDependencyFailureKind string
+
+const (
+	EntryMutationDependencyFailureObservation       EntryMutationDependencyFailureKind = "observation"
+	EntryMutationDependencyFailurePredicateMismatch EntryMutationDependencyFailureKind = "predicate-mismatch"
+)
+
+// EntryMutationDependencyFailure is the typed, first-in-request-order
+// dependency failure. Cause is set only for an observation failure.
+type EntryMutationDependencyFailure struct {
+	Phase     EntryMutationDependencyFailurePhase
+	Kind      EntryMutationDependencyFailureKind
+	EntryName string
+	Cause     error
+}
+
+// ConditionalEntryGroupMutationRequest authorizes one existing target
+// Add/Remove operation against its target predicate and ordered dependency
+// predicates in one config-lock critical section.
+type ConditionalEntryGroupMutationRequest struct {
+	ConditionalEntryMutationRequest
+	Dependencies []EntryMutationDependency
+}
+
+// EntryMutationObserved is the complete same-critical-section observation.
+// Invoked is true only when AddEntry/RemoveEntry was actually called.
+type EntryMutationObserved struct {
+	Invoked              bool
+	Before               *MCPEntry
+	After                *MCPEntry
+	BackupPath           string
+	PreconditionConflict bool
+	PreparationErr       error
+	MutationErr          error
+	ObservationErr       error
+}
+
+// ConditionalEntryGroupMutationObserved retains the target observation and
+// adds the ordered dependency observations plus the exact failed predicate.
+// PreconditionConflict remains true for either target or dependency mismatch.
+type ConditionalEntryGroupMutationObserved struct {
+	EntryMutationObserved
+	Dependencies      []EntryMutationDependencyObserved
+	ConflictScope     string // "target" | "dependency"
+	ConflictEntryName string
+	DependencyFailure *EntryMutationDependencyFailure
+}
+
+// ConditionalEntryMutator is implemented only by lockingClient. Concrete
+// adapters intentionally do not carry this method: the wrapper is the owner of
+// the cross-process critical section.
+type ConditionalEntryMutator interface {
+	ConditionalEntryMutation(ConditionalEntryMutationRequest) EntryMutationObserved
+}
+
+// ConditionalEntryGroupMutator is implemented only by lockingClient. Concrete
+// adapters cannot bypass the single config-lock owner for dependency checks.
+type ConditionalEntryGroupMutator interface {
+	ConditionalEntryGroupMutation(ConditionalEntryGroupMutationRequest) ConditionalEntryGroupMutationObserved
+}
+
+var _ ConditionalEntryMutator = (*lockingClient)(nil)
+var _ ConditionalEntryGroupMutator = (*lockingClient)(nil)
 
 // newLockingClient wraps c so its mutating methods are config-file-locked.
 // Every clients factory (NewX / AllClients) returns the wrapped adapter so the
@@ -182,16 +351,166 @@ func newLockingClient(c Client) Client {
 	return &lockingClient{Client: c}
 }
 
+// ConditionalEntryMutation performs the exact read/check/backup/prepare/write/
+// readback sequence under one withConfigLock call. Every pre-invocation failure
+// returns Invoked=false; a post-invocation readback is attempted even when the
+// adapter mutation itself returns an error.
+func (l *lockingClient) ConditionalEntryMutation(req ConditionalEntryMutationRequest) (observed EntryMutationObserved) {
+	return l.conditionalEntryMutationLocked(ConditionalEntryGroupMutationRequest{
+		ConditionalEntryMutationRequest: req,
+	}).EntryMutationObserved
+}
+
+// ConditionalEntryGroupMutation performs one target mutation only after the
+// target and every ordered dependency predicate pass under the same config
+// lock. It never accepts a caller-supplied path or performs a dependency write.
+func (l *lockingClient) ConditionalEntryGroupMutation(req ConditionalEntryGroupMutationRequest) ConditionalEntryGroupMutationObserved {
+	return l.conditionalEntryMutationLocked(req)
+}
+
+func (l *lockingClient) conditionalEntryMutationLocked(req ConditionalEntryGroupMutationRequest) (observed ConditionalEntryGroupMutationObserved) {
+	if req.EntryName == "" {
+		observed.PreparationErr = errors.New("conditional entry mutation: entry name is empty")
+		return observed
+	}
+	if req.ExpectedLive == nil {
+		observed.PreparationErr = errors.New("conditional entry mutation: expected-live matcher is nil")
+		return observed
+	}
+	switch req.Operation {
+	case EntryMutationAdd:
+		if req.Entry.Name != req.EntryName {
+			observed.PreparationErr = fmt.Errorf(
+				"conditional entry mutation: add entry name %q does not match target %q",
+				req.Entry.Name, req.EntryName)
+			return observed
+		}
+	case EntryMutationRemove:
+	default:
+		observed.PreparationErr = fmt.Errorf(
+			"conditional entry mutation: unsupported operation %q", req.Operation)
+		return observed
+	}
+	seen := map[string]struct{}{req.EntryName: {}}
+	observed.Dependencies = make([]EntryMutationDependencyObserved, len(req.Dependencies))
+	for i, dependency := range req.Dependencies {
+		if dependency.EntryName == "" {
+			observed.PreparationErr = errors.New("conditional entry mutation: dependency entry name is empty")
+			return observed
+		}
+		if dependency.ExpectedLive == nil {
+			observed.PreparationErr = fmt.Errorf("conditional entry mutation: dependency %q expected-live matcher is nil", dependency.EntryName)
+			return observed
+		}
+		if _, duplicate := seen[dependency.EntryName]; duplicate {
+			observed.PreparationErr = fmt.Errorf("conditional entry mutation: dependency %q is duplicate or equals target", dependency.EntryName)
+			return observed
+		}
+		seen[dependency.EntryName] = struct{}{}
+		observed.Dependencies[i].EntryName = dependency.EntryName
+	}
+
+	lockErr := withConfigLock(l.Client.ConfigPath(), func() error {
+		before, readErr := l.Client.GetEntry(req.EntryName)
+		observed.Before = before
+		if readErr != nil {
+			observed.ObservationErr = readErr
+			return nil
+		}
+		if !req.ExpectedLive(before) {
+			observed.PreconditionConflict = true
+			observed.PreparationErr = ErrEntryMutationPreconditionConflict
+			observed.ConflictScope = "target"
+			observed.ConflictEntryName = req.EntryName
+			return nil
+		}
+		for i, dependency := range req.Dependencies {
+			dependencyBefore, dependencyErr := l.Client.GetEntry(dependency.EntryName)
+			observed.Dependencies[i].Before = dependencyBefore
+			if dependencyErr != nil {
+				observed.Dependencies[i].ObservationErr = dependencyErr
+				observed.ObservationErr = dependencyErr
+				observed.DependencyFailure = &EntryMutationDependencyFailure{
+					Phase:     EntryMutationDependencyFailureBeforeRead,
+					Kind:      EntryMutationDependencyFailureObservation,
+					EntryName: dependency.EntryName,
+					Cause:     dependencyErr,
+				}
+				return nil
+			}
+			if !dependency.ExpectedLive(dependencyBefore) {
+				observed.PreconditionConflict = true
+				observed.PreparationErr = ErrEntryMutationPreconditionConflict
+				observed.ConflictScope = "dependency"
+				observed.ConflictEntryName = dependency.EntryName
+				return nil
+			}
+		}
+		if req.BackupKeepN != nil {
+			backupPath, backupErr := l.Client.BackupKeep(*req.BackupKeepN)
+			if backupErr != nil {
+				observed.PreparationErr = backupErr
+				return nil
+			}
+			observed.BackupPath = backupPath
+		}
+		if req.BeforeMutation != nil {
+			if prepareErr := req.BeforeMutation(EntryMutationPreparation{
+				Before: before, BackupPath: observed.BackupPath,
+			}); prepareErr != nil {
+				observed.PreparationErr = prepareErr
+				return nil
+			}
+		}
+
+		observed.Invoked = true
+		switch req.Operation {
+		case EntryMutationAdd:
+			observed.MutationErr = l.Client.AddEntry(req.Entry)
+		case EntryMutationRemove:
+			observed.MutationErr = l.Client.RemoveEntry(req.EntryName)
+		}
+		observed.After, observed.ObservationErr = l.Client.GetEntry(req.EntryName)
+		for i, dependency := range req.Dependencies {
+			dependencyAfter, dependencyErr := l.Client.GetEntry(dependency.EntryName)
+			observed.Dependencies[i].After = dependencyAfter
+			observed.Dependencies[i].ObservationErr = dependencyErr
+			if dependencyErr == nil {
+				matches := dependency.ExpectedLive(dependencyAfter)
+				observed.Dependencies[i].AfterMatchesExpected = &matches
+				if !matches && observed.DependencyFailure == nil {
+					observed.DependencyFailure = &EntryMutationDependencyFailure{
+						Phase:     EntryMutationDependencyFailureAfterPredicateMismatch,
+						Kind:      EntryMutationDependencyFailurePredicateMismatch,
+						EntryName: dependency.EntryName,
+					}
+				}
+			} else if observed.DependencyFailure == nil {
+				observed.DependencyFailure = &EntryMutationDependencyFailure{
+					Phase:     EntryMutationDependencyFailureAfterRead,
+					Kind:      EntryMutationDependencyFailureObservation,
+					EntryName: dependency.EntryName,
+					Cause:     dependencyErr,
+				}
+			}
+			if observed.ObservationErr == nil && dependencyErr != nil {
+				observed.ObservationErr = dependencyErr
+			}
+		}
+		return nil
+	})
+	if lockErr != nil && observed.ObservationErr == nil && observed.PreparationErr == nil {
+		observed.PreparationErr = lockErr
+	}
+	return observed
+}
+
 func (l *lockingClient) InitEmpty() (created bool, err error) {
 	werr := withConfigLock(l.Client.ConfigPath(), func() error {
 		created, err = l.Client.InitEmpty()
 		return err
 	})
-	if werr != nil && err == nil {
-		// A lock-acquire failure (not an InitEmpty failure) — surface it.
-		return false, werr
-	}
-	return created, err
+	return created, werr
 }
 
 func (l *lockingClient) Backup() (string, error) {
@@ -215,19 +534,19 @@ func (l *lockingClient) BackupKeep(keepN int) (string, error) {
 }
 
 func (l *lockingClient) Restore(backupPath string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.Restore(backupPath)
 	})
 }
 
 func (l *lockingClient) AddEntry(entry MCPEntry) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.AddEntry(entry)
 	})
 }
 
 func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		scoped, ok := l.Client.(interface {
 			AddEntryWithConfigWriter(MCPEntry, WriteConfigFileFunc) error
 		})
@@ -239,25 +558,25 @@ func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteCon
 }
 
 func (l *lockingClient) RemoveEntry(name string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RemoveEntry(name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackup(backupPath, name string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RestoreEntryFromBackup(backupPath, name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackupForRollback(backupPath, name string) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RestoreEntryFromBackupForRollback(backupPath, name)
 	})
 }
 
 func (l *lockingClient) RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		scoped, ok := l.Client.(interface {
 			RestoreEntryFromBackupForRollbackWithConfigWriter(string, string, WriteConfigFileFunc) error
 		})
@@ -287,10 +606,7 @@ func (l *lockingClient) LatestBackupPath() (path string, ok bool, err error) {
 		path, ok, err = l.Client.LatestBackupPath()
 		return err
 	})
-	if werr != nil && err == nil {
-		return "", false, werr
-	}
-	return path, ok, err
+	return path, ok, werr
 }
 
 func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, err error) {
@@ -298,10 +614,7 @@ func (l *lockingClient) BackupContainsEntry(backupPath, name string) (has bool, 
 		has, err = l.Client.BackupContainsEntry(backupPath, name)
 		return err
 	})
-	if werr != nil && err == nil {
-		return false, werr
-	}
-	return has, err
+	return has, werr
 }
 
 func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (managed bool, err error) {
@@ -309,10 +622,7 @@ func (l *lockingClient) BackupEntryIsHubManaged(backupPath, name string) (manage
 		managed, err = l.Client.BackupEntryIsHubManaged(backupPath, name)
 		return err
 	})
-	if werr != nil && err == nil {
-		return false, werr
-	}
-	return managed, err
+	return managed, werr
 }
 
 // RemovableStdioEntries forwards the OPTIONAL Client method of the same name to

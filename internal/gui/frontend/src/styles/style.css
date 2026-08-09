@@ -2406,6 +2406,7 @@ section[data-section] button.btn-danger:not(:disabled):hover {
    styles onto classes so they pick up the density tokens and the
    AA-compliant --text-muted / --warning-color values. */
 .lsp-matrix-intro { color: var(--text-muted); margin-bottom: var(--gap-xs); }
+.lsp-register-warning { color: var(--warning-color); }
 /* First-workspace register affordance (fresh-machine connect path): a path
    input + language select + submit on one row, with a guidance line above. */
 .lsp-register-workspace {

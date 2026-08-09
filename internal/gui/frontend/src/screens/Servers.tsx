@@ -8,6 +8,7 @@ import {
   postLspRegister,
   resolveClientSymlink,
   writeClientSymlink,
+  type LspRegisterResponse,
   type ResolveSymlinkResult,
   type WorkspaceEntryDTO,
   type WorkspacePair,
@@ -53,7 +54,7 @@ import type {
 // show while every non-core opt-in client appears only when detected on the
 // host (detection-gated, see routing.ts::visibleClients). The non-core
 // universe is derived live from the scan's client_config_presence map (one
-// key per clients.SupportedClientNames(), all 46 backend clients), so any
+// key per clients.SupportedClientNames(), all 47 backend clients), so any
 // supported client surfaces when installed — no hardcoded column list to
 // drift behind the backend registry.
 // On top of that auto-detected base the operator's manual show/hide
@@ -144,6 +145,78 @@ function objectRecord(value: unknown): Record<string, unknown> | null {
 function apiErrorMessage(body: unknown, fallback: string): string {
   const obj = objectRecord(body);
   return typeof obj?.error === "string" ? obj.error : fallback;
+}
+
+type LspRegistrationMessage = {
+  text: string;
+  kind: "ok" | "warning" | "error";
+};
+
+type LspRegistrationClassification = LspRegistrationMessage & {
+  refresh: boolean;
+};
+
+type LspRegistrationAction =
+  | { kind: "enable" }
+  | { kind: "register"; workspacePath: string };
+
+function sanitizedLspRegistrationWarnings(response: LspRegisterResponse): string[] {
+  if (!Array.isArray(response.warnings)) return [];
+  return response.warnings
+    .filter((warning): warning is string => typeof warning === "string")
+    .map((warning) => warning.replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim())
+    .filter((warning) => warning.length > 0);
+}
+
+// The single response owner for both Servers-screen registration flows. A 2xx
+// transport result is not success on its own: only the requested language's
+// affirmative result authorizes a refresh. Warnings are partial success and
+// remain visible instead of being overwritten by the clean-success copy.
+function classifyLspRegistrationResponse(
+  action: LspRegistrationAction,
+  language: string,
+  response: LspRegisterResponse,
+): LspRegistrationClassification {
+  const warnings = sanitizedLspRegistrationWarnings(response);
+  const warningContext = warnings.length > 0 ? ` Warnings: ${warnings.join("; ")}` : "";
+  const requestedResult = Array.isArray(response.results)
+    ? response.results.find((result) => result?.language === language)
+    : undefined;
+  const actionVerb = action.kind === "enable" ? "Enable" : "Register";
+
+  if (requestedResult?.status === "error") {
+    return {
+      kind: "error",
+      text: `${actionVerb} ${language} failed: ${requestedResult.error ?? response.error ?? "unknown error"}.${warningContext}`,
+      refresh: false,
+    };
+  }
+  if (requestedResult?.status !== "ok") {
+    return {
+      kind: "error",
+      text: `registration-unconfirmed: ${actionVerb} ${language} response did not confirm the requested language.${warningContext}`,
+      refresh: false,
+    };
+  }
+
+  if (warnings.length > 0) {
+    const target = action.kind === "register"
+      ? ` for ${response.workspace || action.workspacePath}`
+      : "";
+    return {
+      kind: "warning",
+      text: `Partial success ${action.kind === "enable" ? "enabling" : "registering"} ${language}${target}: ${warnings.join("; ")} Refreshing…`,
+      refresh: true,
+    };
+  }
+
+  return action.kind === "enable"
+    ? { kind: "ok", text: `Enabled ${language}. Refreshing…`, refresh: true }
+    : {
+        kind: "ok",
+        text: `Registered ${language} for ${response.workspace || action.workspacePath}. Refreshing…`,
+        refresh: true,
+      };
 }
 
 function lspRouterFailedCount(body: unknown): number {
@@ -242,7 +315,7 @@ export function ServersScreen() {
   const [selectedWorkspaceKey, setSelectedWorkspaceKey] = useState<string>(ALL_WORKSPACES_KEY);
   const [openDrawerFor, setOpenDrawerFor] = useState<LspRow | null>(null);
   const [lspRegisterBusy, setLspRegisterBusy] = useState<Record<string, boolean>>({});
-  const [lspRegisterMsg, setLspRegisterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
+  const [lspRegisterMsg, setLspRegisterMsg] = useState<LspRegistrationMessage | null>(null);
   const [lspRouterBusy, setLspRouterBusy] = useState<Record<string, boolean>>({});
   const [lspRouterMsg, setLspRouterMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   const [lspRouterClientOverrides, setLspRouterClientOverrides] = useState<Record<string, boolean>>({});
@@ -965,15 +1038,13 @@ export function ServersScreen() {
     try {
       const response = await postLspRegister(lspRegisterWorkspacePath, row.language);
       if (!mountedRef.current) return;
-      const failed = response.results?.find((result) => result.status === "error");
-      if (failed) {
-        setLspRegisterMsg({
-          kind: "error",
-          text: `Enable ${row.language} failed: ${failed.error ?? "unknown error"}`,
-        });
-        return;
-      }
-      setLspRegisterMsg({ kind: "ok", text: `Enabled ${row.language}. Refreshing…` });
+      const classification = classifyLspRegistrationResponse(
+        { kind: "enable" },
+        row.language,
+        response,
+      );
+      setLspRegisterMsg(classification);
+      if (!classification.refresh) return;
       setReloadToken((n) => n + 1);
     } catch (err) {
       if (!mountedRef.current) return;
@@ -1011,18 +1082,13 @@ export function ServersScreen() {
     try {
       const response = await postLspRegister(path, language);
       if (!mountedRef.current) return;
-      const failed = response.results?.find((result) => result.status === "error");
-      if (failed) {
-        setLspRegisterMsg({
-          kind: "error",
-          text: `Register ${language} failed: ${failed.error ?? response.error ?? "unknown error"}`,
-        });
-        return;
-      }
-      setLspRegisterMsg({
-        kind: "ok",
-        text: `Registered ${language} for ${response.workspace || path}. Refreshing…`,
-      });
+      const classification = classifyLspRegistrationResponse(
+        { kind: "register", workspacePath: path },
+        language,
+        response,
+      );
+      setLspRegisterMsg(classification);
+      if (!classification.refresh) return;
       // Auto-select the newly-registered workspace so the operator can enable
       // more languages against it without first opening the selector.
       if (response.workspace_key) {
@@ -1894,7 +1960,7 @@ function LspMatrix(props: {
   onOpenDrawer: (row: LspRow) => void;
   targetWorkspacePath: string;
   registerBusy: Record<string, boolean>;
-  registerMsg: { text: string; kind: "ok" | "error" } | null;
+  registerMsg: LspRegistrationMessage | null;
   routerBusy: Record<string, boolean>;
   routerMsg: { text: string; kind: "ok" | "error" } | null;
   routerClientOverrides: Record<string, boolean>;
@@ -1944,8 +2010,15 @@ function LspMatrix(props: {
       />
       {registerMsg && (
         <div
-          class={registerMsg.kind === "error" ? "error" : ""}
+          class={
+            registerMsg.kind === "error"
+              ? "error"
+              : registerMsg.kind === "warning"
+                ? "lsp-register-warning"
+                : ""
+          }
           data-testid="lsp-register-msg"
+          role={registerMsg.kind === "error" ? "alert" : "status"}
           style="margin:var(--gap-xs) 0"
         >
           {registerMsg.text}

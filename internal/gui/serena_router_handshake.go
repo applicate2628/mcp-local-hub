@@ -432,14 +432,59 @@ func (st *daemonSessionStore) releaseReservation(clientSessionID string) {
 	}
 }
 
-// unbind drops the mapping for clientSessionID (no-op if absent).
+// invalidateBindingLocked removes a completed binding immediately unless an
+// in-flight handshake owns its reservation. A reserved entry keeps its map/LRU
+// slot solely to serialize that handshake; its old workspace/session payload is
+// cleared so it cannot be used after an idle stop or terminal unbind. The
+// reservation owner's existing store/release path either replaces the payload
+// or removes this placeholder.
+func (st *daemonSessionStore) invalidateBindingLocked(clientSessionID string, b *daemonSessionBinding) {
+	if b == nil || b.reservations <= 0 {
+		st.removeLocked(clientSessionID)
+		return
+	}
+	b.workspaceKey = ""
+	b.daemonSessionID = ""
+	b.daemonProtocolVersion = ""
+	b.lastSeen = st.now()
+}
+
+// unbind drops the mapping for clientSessionID (no-op if absent). A reserved
+// binding becomes a payload-free reservation placeholder until its handshake
+// settles.
 func (st *daemonSessionStore) unbind(clientSessionID string) {
 	if clientSessionID == "" {
 		return
 	}
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	st.invalidateBindingLocked(clientSessionID, st.bindings[clientSessionID])
+}
+
+// unbindIfMatch drops a completed daemon-session binding only when it is still
+// the exact binding a just-completed upstream request used. A stale upstream
+// response can race a workspace-switch handshake: in that case the entry may
+// now name a different workspace or daemon session, or be a reserved
+// placeholder. Those newer lifecycle states must survive the old response.
+//
+// The caller supplies every identity present in the cached binding: the
+// client-session map key, workspace key, daemon session id, and daemon's
+// negotiated protocol version. A reservation also prevents removal even if
+// those fields still match, because a re-handshake owns that entry until it
+// either stores its replacement or releases the reservation.
+func (st *daemonSessionStore) unbindIfMatch(clientSessionID, wsKey, daemonSessionID, daemonProtocolVersion string) bool {
+	if clientSessionID == "" || daemonSessionID == "" {
+		return false
+	}
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	b, ok := st.bindings[clientSessionID]
+	if !ok || b == nil || b.reservations > 0 || b.workspaceKey != wsKey ||
+		b.daemonSessionID != daemonSessionID || b.daemonProtocolVersion != daemonProtocolVersion {
+		return false
+	}
 	st.removeLocked(clientSessionID)
+	return true
 }
 
 // unbindWorkspace drops only daemon-session bindings for wsKey. It is used when
@@ -458,7 +503,7 @@ func (st *daemonSessionStore) unbindWorkspace(wsKey string) int {
 		if b == nil || b.workspaceKey != wsKey {
 			continue
 		}
-		st.removeLocked(id)
+		st.invalidateBindingLocked(id, b)
 		n++
 	}
 	return n
@@ -876,13 +921,13 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	clientProtocolVersion string,
 	upstreamTimeout time.Duration,
 	sessionLive func() bool,
-) (daemonSessionID string, daemonProtocolVersion string, err error) {
+) (daemonSessionID string, daemonProtocolVersion string, cached bool, err error) {
 	if ws == nil {
-		return "", "", fmt.Errorf("resolveDaemonSession: nil workspace")
+		return "", "", false, fmt.Errorf("resolveDaemonSession: nil workspace")
 	}
 	if clientSessionID != "" {
 		if dsid, dpv, ok := st.lookup(clientSessionID, ws.WorkspaceKey); ok {
-			return dsid, dpv, nil
+			return dsid, dpv, true, nil
 		}
 		proceed, inFlight := st.reserveSlot(clientSessionID)
 		if !proceed {
@@ -891,21 +936,18 @@ func (st *daemonSessionStore) resolveDaemonSession(
 				// id is already in flight — reject this duplicate so it does not mint a
 				// second upstream session. The client retries; the retry hits the
 				// completed binding via lookup.
-				return "", "", errDaemonSessionHandshakeInFlight
+				return "", "", false, errDaemonSessionHandshakeInFlight
 			}
-			return "", "", errDaemonSessionStoreFull
+			return "", "", false, errDaemonSessionStoreFull
 		}
+		defer st.releaseReservation(clientSessionID)
 	}
-	reserved := clientSessionID != ""
 	// Finding 3 (round-10): thread the upstream timeout into the handshake so a
 	// daemon that opens an SSE stream on initialize but never sends a complete
 	// response event cannot hang this tool-call indefinitely.
 	dsid, dpv, err := establishDaemonSession(ctx, httpClient, upstreamURL, clientProtocolVersion, upstreamTimeout)
 	if err != nil {
-		if reserved {
-			st.releaseReservation(clientSessionID)
-		}
-		return "", "", err
+		return "", "", false, err
 	}
 	// Finding 4: re-check the router session is STILL live before storing. The
 	// handshake above is the slow upstream work; a DELETE/sweep can have
@@ -915,13 +957,10 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	// when a daemon session was actually minted (dsid != "") is there anything to
 	// release; a sessionless daemon has nothing to clean up.
 	if clientSessionID != "" && sessionLive != nil && !sessionLive() {
-		if reserved {
-			st.releaseReservation(clientSessionID)
-		}
 		if dsid != "" {
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
 		}
-		return "", "", errRouterSessionTerminated
+		return "", "", false, errRouterSessionTerminated
 	}
 	// Only record a mapping when BOTH a client session id and a daemon
 	// session id exist. A sessionless daemon (empty dsid) needs no
@@ -932,30 +971,9 @@ func (st *daemonSessionStore) resolveDaemonSession(
 	// daemon's idle clock).
 	if clientSessionID != "" && dsid != "" {
 		if !st.store(clientSessionID, ws.WorkspaceKey, dsid, dpv) {
-			// Finding 1 (Codex PR #251): release the reservation this call placed
-			// so a store that loses the cap race does not leak the placeholder
-			// refcount. With the reserveSlot above this is normally unreachable
-			// (the placeholder makes store see the id as existing, so it never
-			// hits the cap-reject branch), but releasing keeps every reserve paired
-			// with exactly one release on every return path. releaseReservation is a
-			// safe no-op when the placeholder is already gone.
-			if reserved {
-				st.releaseReservation(clientSessionID)
-			}
 			bestEffortDeleteDaemonSession(httpClient, upstreamURL, dsid, dpv, upstreamTimeout)
-			return "", "", errDaemonSessionStoreFull
+			return "", "", false, errDaemonSessionStoreFull
 		}
 	}
-	// bot PR #251 r2 P2: release the reservation on EVERY success / sessionless
-	// path — the handshake is complete (or there was no session to bind), so the
-	// in-flight reservation must drop. For a STORED binding this decrements to 0
-	// WITHOUT removing it (daemonSessionID != ""), so the reclaim guard (which now
-	// protects reserved bindings from eviction) can idle-reclaim it later; without
-	// this release the reservation would pin the completed binding forever and it
-	// would never be reclaimed. (The store-fail path above already released before
-	// its early return.)
-	if reserved {
-		st.releaseReservation(clientSessionID)
-	}
-	return dsid, dpv, nil
+	return dsid, dpv, false, nil
 }

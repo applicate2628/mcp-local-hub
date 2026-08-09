@@ -1094,7 +1094,7 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	// user-actionable inline prompts; this is the one catch-all blocker.
 	// Validate EXACTLY the operator's effective default-install client set —
 	// the same scope a normal `mcphub install` uses. NOT the bare
-	// BuildPlan(m,"") compile-time trio (which would MISS a bad binding on a
+	// BuildPlan(m,"") compile-time default set (which would MISS a bad binding on a
 	// client the operator persisted into their default set), and NOT
 	// IncludeAllClients (which would validate OPT-IN bindings a default install
 	// never touches → a false Ready=false on a bad opt-in binding, Codex #377
@@ -1108,11 +1108,19 @@ func checkServerReadinessWithBudget(m *config.ServerManifest, scope AdmissionSco
 	// binding must not block readiness when BuildPlanWithOpts(DaemonFilter)
 	// would skip it (bot review readiness.go:366). Empty filter = full install
 	// = validate every daemon, unchanged from the global path.
+	// An EXPLICIT client selection (`--clients a,b` / `--all-clients`) overrides
+	// the default scope, because that is the scope the install about to run will
+	// use. installClientPredicate's documented precedence is IncludeAllClients >
+	// ClientsInclude > DefaultClientsOverride, so passing all three here
+	// reproduces the real install's resolution exactly rather than re-deriving
+	// it. Both fields are zero for a bare install, leaving the default-set
+	// behavior (and the Codex #377 r7 "do not validate untargeted opt-in
+	// bindings" rule) untouched.
 	if _, err := BuildPlanWithOpts(m, BuildPlanOpts{
 		DefaultClientsOverride: clientScope,
-		DaemonFilter:           scope.DaemonFilter,
 		ClientsInclude:         scope.ClientsInclude,
 		IncludeAllClients:      scope.IncludeAllClients,
+		DaemonFilter:           scope.DaemonFilter,
 		SkipClientConfigWrites: scope.SkipClientConfigWrites,
 	}); err != nil {
 		add(ReadinessRequirement{

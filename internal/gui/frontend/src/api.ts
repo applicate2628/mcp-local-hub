@@ -1561,7 +1561,7 @@ export async function removeTrustedRoot(root: string): Promise<TrustedRootsRespo
 //
 // Thin wrappers around /api/client-install-prefs (GET/POST). The override
 // lets the operator pick which clients are in the default-install set (the
-// compile-time {claude-code, codex-cli, cursor} trio plus opt-ins) without
+// compile-time {claude-code, codex-cli} set plus opt-ins) without
 // CLI flags; the chosen set is persisted to gui-preferences.yaml and becomes
 // the effective default for installs that do not name an explicit --clients
 // target. Both methods return the fresh snapshot so the caller re-renders
@@ -1571,7 +1571,7 @@ export async function removeTrustedRoot(root: string): Promise<TrustedRootsRespo
 export interface ClientInstallPrefRow {
   name: string;
   // True when the compile-time registry marks this client default-install
-  // (the canonical {claude-code, codex-cli, cursor} trio).
+  // (the canonical {claude-code, codex-cli} set; cursor is opt-in).
   compile_default: boolean;
   // True when this client is in the currently-effective default-install set.
   selected: boolean;
@@ -1580,7 +1580,7 @@ export interface ClientInstallPrefRow {
 export interface ClientInstallPrefsResponse {
   clients: ClientInstallPrefRow[];
   // True when an explicit operator override is persisted (vs. the
-  // compile-time trio fallback).
+  // compile-time default-set fallback).
   override_active: boolean;
 }
 
@@ -1604,8 +1604,9 @@ function normalizeClientInstallPrefs(
 }
 
 // getClientInstallPrefs reads the current default-install client set. An
-// absent gui-preferences.yaml yields the compile-time trio selected with
-// override_active=false — the normal first-run path.
+// absent gui-preferences.yaml yields the compile-time default set
+// ({claude-code, codex-cli}) selected with override_active=false — the normal
+// first-run path.
 export async function getClientInstallPrefs(): Promise<ClientInstallPrefsResponse> {
   return normalizeClientInstallPrefs(
     await fetchOrThrow<Partial<ClientInstallPrefsResponse>>("/api/client-install-prefs", "object"),

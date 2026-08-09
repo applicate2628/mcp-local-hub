@@ -92,6 +92,10 @@ func TestNewServerDefersOccurrenceStoreClaimUntilListenerActivation(t *testing.T
 	case <-time.After(2 * time.Second):
 		t.Fatal("listener activation did not complete")
 	}
+	// runActivatedGUIListener starts this advisory asynchronously. Calling the
+	// idempotent owner synchronously here joins any in-flight sync.Once body so
+	// the per-test state-root override cannot be restored underneath it.
+	detectSeparateProcessOnce(s)
 	if !s.auditLock.storeClaimed || s.auditLock.generation == 0 {
 		t.Fatalf("activated listener did not claim occurrence store: claimed=%t generation=%d", s.auditLock.storeClaimed, s.auditLock.generation)
 	}
@@ -145,6 +149,57 @@ func TestListenerActivationClaimFailureClosesStandbyAndPreservesPriorOwner(t *te
 	if dialErr == nil {
 		_ = conn.Close()
 		t.Fatal("standby listener remained reachable after activation claim failure")
+	}
+}
+
+func TestContinueWithGUIListener_ServeFullFailureClosesEventsBeforeReturn(t *testing.T) {
+	s := NewServer(Config{})
+	owner := NewGUIListenerOwner(time.Second)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = ln.Close() })
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	want := errors.New("injected ServeFull failure")
+	s.serveFullFn = func(net.Listener, http.Handler) error {
+		close(entered)
+		<-release
+		return want
+	}
+
+	ready := make(chan struct{})
+	done := make(chan error, 1)
+	go func() { done <- s.ContinueWithGUIListener(context.Background(), ready, owner, ln) }()
+	select {
+	case <-ready:
+	case <-time.After(time.Second):
+		t.Fatal("ContinueWithGUIListener did not publish readiness")
+	}
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("ServeFull failure seam was not entered")
+	}
+
+	// This publish happens after readiness but before the injected ServeFull
+	// return, making the formerly-unowned error window deterministic.
+	s.Broadcaster().Publish(Event{Type: "listener-lifecycle-window"})
+	close(release)
+	select {
+	case got := <-done:
+		if !errors.Is(got, want) {
+			t.Fatalf("ContinueWithGUIListener error = %v, want %v", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ContinueWithGUIListener did not return after injected failure")
+	}
+	select {
+	case <-s.Broadcaster().persistDoneCh:
+	case <-time.After(time.Second):
+		t.Fatal("ContinueWithGUIListener returned before broadcaster persistence drained")
 	}
 }
 

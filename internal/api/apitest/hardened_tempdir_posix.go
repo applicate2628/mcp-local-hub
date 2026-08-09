@@ -8,6 +8,7 @@
 package apitest
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -30,13 +31,22 @@ func HardenedTempDir(t *testing.T) string {
 // child of the temp root.
 func HardenedDir(t *testing.T, dir string) string {
 	t.Helper()
+	if err := HardenedDirForTestMain(dir); err != nil {
+		t.Fatalf("apitest.HardenedDir %s: %v", dir, err)
+	}
+	return dir
+}
+
+// HardenedDirForTestMain creates dir if needed and chmods it to 0700. It is
+// the error-returning form used by package TestMain functions.
+func HardenedDirForTestMain(dir string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatalf("apitest.HardenedDir mkdir %s: %v", dir, err)
+		return fmt.Errorf("mkdir: %w", err)
 	}
 	// Defensive: explicit chmod after creation in case umask
 	// stripped bits from the mode arg to os.Mkdir.
 	if err := os.Chmod(dir, 0o700); err != nil {
-		t.Fatalf("apitest.HardenedDir chmod %s: %v", dir, err)
+		return fmt.Errorf("chmod: %w", err)
 	}
-	return dir
+	return nil
 }

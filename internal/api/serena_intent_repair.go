@@ -34,8 +34,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/gofrs/flock"
 )
 
 // registryLockRetry bounds the brief retry on the registry flock. A non-mutating
@@ -144,7 +142,7 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	if !ok {
 		return 0, nil, nil // long-held mutating lock — that holder self-heals; next startup re-scans
 	}
-	defer regUnlock()
+	defer ReleaseAndJoin(&err, regUnlock, "serena intent repair: release the registry lock")
 
 	if err := reg.Load(); err != nil {
 		return 0, nil, fmt.Errorf("serena intent repair: load registry: %w", err)
@@ -160,15 +158,17 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	//    registry via the earlier defer). The fresh locked read below is the
 	//    clobber-safety point: `missing` is computed from THIS read, never a
 	//    stale snapshot.
-	intentLock := flock.New(intentPath + supervisorIntentLockSuffix)
-	intentLocked, err := intentLock.TryLock()
-	if err != nil {
-		return 0, nil, fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", intentPath+supervisorIntentLockSuffix, err)
+	intentRelease, intentLocked, lockErr := tryLockSupervisorIntent(intentPath)
+	if lockErr != nil {
+		return 0, nil, fmt.Errorf("serena intent repair: try-lock supervisor intent %s: %w", supervisorIntentLockPath(intentPath), lockErr)
 	}
 	if !intentLocked {
 		return 0, nil, nil // contended — the holder commits its own intent; next startup re-scans
 	}
-	defer func() { _ = intentLock.Unlock() }()
+	intentApplied := false
+	defer func() {
+		releaseSupervisorIntentAndJoinApplied(&err, intentRelease, "serena intent repair: release supervisor intent flock", intentApplied)
+	}()
 
 	intent, rerr := ReadSupervisorIntent(intentPath)
 	if rerr != nil {
@@ -335,6 +335,7 @@ func (a *API) RepairSerenaIntentFromRegistry(stateDir string) (repaired int, def
 	if werr := writeSupervisorIntentLockHeld(intentPath, intent); werr != nil {
 		return 0, nil, fmt.Errorf("serena intent repair: write supervisor intent %s: %w", intentPath, werr)
 	}
+	intentApplied = true
 
 	appliedKeys := missingWorkspaceKeys(missing)
 	repairEvents = append(repairEvents, serenaIntentRepairEvent{
@@ -365,7 +366,7 @@ func missingWorkspaceKeys(entries []WorkspaceEntry) []string {
 // (unlock, true, nil) on success, (nil, false, nil) if every attempt found the
 // lock contended, or (nil, false, err) on a real filesystem error. See the
 // registryLockRetry constants for why a single TryLock-then-skip is too eager.
-func tryLockRegistryBrief(reg *Registry) (func(), bool, error) {
+func tryLockRegistryBrief(reg *Registry) (func() error, bool, error) {
 	for attempt := range registryLockRetryAttempts {
 		unlock, ok, err := reg.TryLock()
 		if err != nil {

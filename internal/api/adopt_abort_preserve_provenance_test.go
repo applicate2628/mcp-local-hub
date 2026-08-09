@@ -40,8 +40,9 @@ import (
 type addEntryOutcome int
 
 const (
-	addEntrySucceed     addEntryOutcome = iota // realWrite, no error (client committed)
-	addEntryFailMutated                        // realWrite THEN error — reproduces SecureWriteClientConfig
+	addEntrySucceed                   addEntryOutcome = iota // realWrite, no error (client committed)
+	addEntryFailMutated                                      // realWrite THEN error — reproduces SecureWriteClientConfig
+	addEntryAppliedReleaseUnconfirmed                        // realWrite THEN typed lifecycle failure (client committed)
 	// post-rename path #2 (config left = the hub relay, error returned)
 	addEntryFailUnmutated // return error, NO write (pre-rename failure, config untouched)
 	addEntryFailRemoved   // realWrite THEN os.Remove THEN error — reproduces SecureWriteClientConfig
@@ -54,10 +55,16 @@ const (
 type restoreOutcome int
 
 const (
-	restoreSucceed     restoreOutcome = iota // realWrite the restored bytes (client reverted)
-	restoreFail                              // return error, config left as AddEntry left it
-	restoreFailMutated                       // realWrite the restore bytes THEN error (config = restored, err returned)
-	restoreFailRemoved                       // remove the live file THEN error (Sol P2: restore DAMAGED an untouched config)
+	restoreSucceed                   restoreOutcome = iota // realWrite the restored bytes (client reverted)
+	restoreFail                                            // return error, config left as AddEntry left it
+	restoreFailMutated                                     // realWrite the restore bytes THEN error (config = restored, err returned)
+	restoreAppliedReleaseUnconfirmed                       // realWrite restore bytes THEN typed lifecycle failure
+	restoreFailRemoved                                     // remove the live file THEN error (Sol P2: restore DAMAGED an untouched config)
+)
+
+var (
+	inducedAddEntryReleaseUnconfirmed = errors.New("induced add-entry lock release unconfirmed")
+	inducedRestoreReleaseUnconfirmed  = errors.New("induced restore lock release unconfirmed")
 )
 
 // recoverOutcome controls the round-6 whole-file recovery CREATE
@@ -71,10 +78,10 @@ const (
 type recoverOutcome int
 
 const (
-	recoverNone    recoverOutcome = iota // delegate to the real CreateConfigFileIfMissing (no scripting)
-	recoverCreated                       // realWrite(path, backupData) THEN (true, nil): whole backup published race-free
-	recoverConflict                      // realWrite(path, recoverConflictBytes [external S']) THEN (false, nil): EEXIST conflict
-	recoverFail                          // (false, injectedErr): no-replace-create refusal / hard fail → sentinel → PRESERVE
+	recoverNone     recoverOutcome = iota // delegate to the real CreateConfigFileIfMissing (no scripting)
+	recoverCreated                        // realWrite(path, backupData) THEN (true, nil): whole backup published race-free
+	recoverConflict                       // realWrite(path, recoverConflictBytes [external S']) THEN (false, nil): EEXIST conflict
+	recoverFail                           // (false, injectedErr): no-replace-create refusal / hard fail → sentinel → PRESERVE
 )
 
 // clientWriteSpec is the per-path script: what its AddEntry write does, what its
@@ -148,6 +155,11 @@ func seedInstallWriteSeam(t *testing.T, specs map[string]clientWriteSpec) *insta
 					return err
 				}
 				return fmt.Errorf("induced mutated add-entry failure for %s", filepath.Base(cp))
+			case addEntryAppliedReleaseUnconfirmed:
+				if err := realWrite(path, contents); err != nil {
+					return err
+				}
+				return errors.Join(clients.ErrConfigLockReleaseUnconfirmed, inducedAddEntryReleaseUnconfirmed)
 			case addEntryFailUnmutated:
 				return fmt.Errorf("induced add-entry failure for %s", filepath.Base(cp))
 			case addEntryFailRemoved:
@@ -176,6 +188,11 @@ func seedInstallWriteSeam(t *testing.T, specs map[string]clientWriteSpec) *insta
 					return err
 				}
 				return fmt.Errorf("induced mutated restore failure for %s", filepath.Base(cp))
+			case restoreAppliedReleaseUnconfirmed:
+				if err := realWrite(path, contents); err != nil {
+					return err
+				}
+				return errors.Join(clients.ErrConfigLockReleaseUnconfirmed, inducedRestoreReleaseUnconfirmed)
 			case restoreFailRemoved:
 				// Remove the live file THEN fail — models SecureWriteClientConfig's
 				// definitive post-rename verify-failure removing the just-published file
@@ -1592,6 +1609,99 @@ func TestExecuteAdopt_PreservedRowReclaimableAfterOperatorReversal(t *testing.T)
 	}
 	if !containsStr(remaining, unrelatedKey) {
 		t.Errorf("unrelated vault key %q was deleted by the reclaiming GC; want SURVIVES: %v", unrelatedKey, remaining)
+	}
+}
+
+func TestExecuteAdopt_ForwardCommittedPreservesPartialPrefixForRecovery(t *testing.T) {
+	entry := "adopt-forward-prefix"
+	codexPath, cursorPath, manifestRoot, _ := seedTwoPresentClients(t, entry)
+	if _, err := NewAPI().SecretsInit(); err != nil {
+		t.Fatalf("SecretsInit: %v", err)
+	}
+	preAdopt := map[string][]byte{
+		filepath.Clean(codexPath):  mustReadFileForAdoptTest(t, codexPath),
+		filepath.Clean(cursorPath): mustReadFileForAdoptTest(t, cursorPath),
+	}
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
+	opts := AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: port,
+		Clients:  []string{"codex-cli", "cursor"},
+		ScanOpts: ScanOpts{CodexConfigPath: codexPath, CursorConfigPath: cursorPath},
+	}
+	plan, err := NewAPI().BuildAdoptPlan(opts)
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if len(plan.SecretRoutedKeys) == 0 || len(plan.AdoptClients) != 2 {
+		t.Fatalf("forward-prefix precondition failed: keys=%v clients=%v", plan.SecretRoutedKeys, plan.AdoptClients)
+	}
+	seam := seedInstallWriteSeam(t, map[string]clientWriteSpec{
+		codexPath: {addEntry: addEntryAppliedReleaseUnconfirmed},
+	})
+	classifyInstallReleaseForTest(t, inducedAddEntryReleaseUnconfirmed)
+	promoteCalls := 0
+	previousPromote := promoteAdoptProvenanceFn
+	promoteAdoptProvenanceFn = func(string) error {
+		promoteCalls++
+		return nil
+	}
+	t.Cleanup(func() { promoteAdoptProvenanceFn = previousPromote })
+
+	var out bytes.Buffer
+	err = NewAPI().ExecuteAdopt(plan, &out)
+	if err == nil {
+		t.Fatal("ExecuteAdopt succeeded; want forward-committed lifecycle failure")
+	}
+	var forwardCommitted *InstallForwardCommittedError
+	if !errors.As(err, &forwardCommitted) || forwardCommitted.Client != "codex-cli" {
+		t.Fatalf("adopt forward outcome = %#v err=%v, want codex-cli InstallForwardCommittedError", forwardCommitted, err)
+	}
+	var rollbackIncomplete *InstallClientRollbackIncompleteError
+	if errors.As(err, &rollbackIncomplete) {
+		t.Fatalf("forward prefix was falsely reported rollback-incomplete: %v", err)
+	}
+	for _, want := range []string{"later requested clients may have been skipped", "PRESERVED", "without promoting", "restart the process"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("adopt forward error missing %q: %v", want, err)
+		}
+	}
+	if promoteCalls != 0 || strings.Contains(out.String(), "Adopted ") {
+		t.Fatalf("partial plan was promoted as full success: promote=%d output=%q", promoteCalls, out.String())
+	}
+	if got := seam.writeCount(codexPath); got != 1 {
+		t.Fatalf("codex writes=%d, want one applied write and no restore", got)
+	}
+	if got := seam.writeCount(cursorPath); got != 0 {
+		t.Fatalf("skipped cursor was mutated after forward commit: writes=%d", got)
+	}
+	if raw := mustReadFileForAdoptTest(t, codexPath); !bytes.Contains(raw, []byte(strconv.Itoa(port))) {
+		t.Fatalf("applied codex entry lacks adopted port %d: %s", port, raw)
+	}
+	if raw := mustReadFileForAdoptTest(t, cursorPath); !bytes.Equal(raw, preAdopt[filepath.Clean(cursorPath)]) {
+		t.Fatalf("skipped cursor changed:\n got: %q\nwant: %q", raw, preAdopt[filepath.Clean(cursorPath)])
+	}
+	assertPreservedProvenance(t, entry, plan, manifestRoot, preAdopt)
+
+	rec, found, readErr := ReadAdoptProvenance(entry)
+	if readErr != nil || !found {
+		t.Fatalf("read preserved provenance: found=%v err=%v", found, readErr)
+	}
+	if got := classifyDeadAdoptingRow(*rec); got != adoptRowCommittedKeep {
+		t.Fatalf("GC classification = %v, want committed-keep", got)
+	}
+	if _, retryErr := NewAPI().BuildAdoptPlan(opts); retryErr == nil {
+		t.Fatal("same-process retry rebuilt a plan over the preserved manifest")
+	}
+	appliedDisposition, _, _ := mapDeAdoptClientDisposition(
+		DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyStillHub)
+	skippedDisposition, _, _ := mapDeAdoptClientDisposition(
+		DeAdoptRoutingFresh, AdoptOriginalStatePresent, deAdoptSnapshotAvailable, false, clients.ClassifyRestoreDone)
+	if appliedDisposition != DeAdoptClientRestorePending || skippedDisposition != DeAdoptClientRestoreDone {
+		t.Fatalf("partial-prefix de-adopt dispositions: applied=%s skipped=%s", appliedDisposition, skippedDisposition)
+	}
+	stateDir, _ := DaemonStateDir()
+	if raw, _ := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf)); bytes.Contains(raw, []byte(`"event":"adopt-executed"`)) {
+		t.Fatalf("partial plan emitted adopt-executed success event: %s", raw)
 	}
 }
 

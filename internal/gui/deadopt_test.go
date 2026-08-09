@@ -48,7 +48,7 @@ func seedGUIDeAdoptGateOn(t *testing.T) {
 
 func requestGUIDeAdopt(t *testing.T, method, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	s := NewServer(Config{})
+	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	if body != "" {
 		req.Header.Set("Content-Type", "application/json")
@@ -104,7 +104,7 @@ func TestDeAdoptRoutesRequireSameOrigin(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.path, func(t *testing.T) {
-			s := NewServer(Config{})
+			s := newEphemeralServer(t, Config{})
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body))
 			req.Header.Set("Sec-Fetch-Site", "cross-site")
 			rec := httptest.NewRecorder()
@@ -221,7 +221,7 @@ func TestDeAdoptRouteReturnsReportAndRedactsRefusal(t *testing.T) {
 		codexPath := setupGUIDeAdoptAdopted(t, name, native)
 		restoreGUIDeAdoptNativeConfig(t, codexPath, native)
 
-		s := NewServer(Config{})
+		s := newEphemeralServer(t, Config{})
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		events := s.Broadcaster().Subscribe(ctx)

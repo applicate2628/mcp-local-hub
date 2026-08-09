@@ -563,3 +563,124 @@ func TestCanonicalizeWorkspacePath_EmptyReturnsEmpty(t *testing.T) {
 		t.Errorf("canonicalize(empty) = %q, want empty", got)
 	}
 }
+
+// TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock is the
+// P2-3 falsifying test (adversarial cross-family review of Increment 1): the
+// standalone `mcphub route` front daemon's resolver must never contend with
+// the GUI's own registry writers for the SAME cross-process exclusive lock
+// (Registry.Lock(), which also CREATES <registry>.lock + the state
+// directory). This test holds that lock externally (simulating a concurrent
+// GUI mutation) and proves a read-only resolver's refresh still completes —
+// using its last-cached snapshot — instead of blocking for the lock.
+//
+// Mutation-proven: constructing the resolver via the ordinary
+// NewWorkspaceResolver (the pre-fix-equivalent, locked path) instead of
+// NewReadOnlyWorkspaceResolver makes this test fail (times out) — see
+// TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock immediately below,
+// which pins the CONTRASTING (intentional) production behavior so a change
+// that made BOTH resolvers behave identically would be caught either way.
+func TestNewReadOnlyWorkspaceResolver_NeverBlocksOnConcurrentExclusiveLock(t *testing.T) {
+	root := t.TempDir()
+	regPath := filepath.Join(root, "workspaces.yaml")
+	seedReg := api.NewRegistry(regPath)
+	if err := seedReg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewReadOnlyWorkspaceResolver(reg, regPath)
+	// Prime the cache (loaded=true) via one uncontended resolve before the
+	// concurrent holder acquires the lock, matching how the route daemon's
+	// resolver is used in steady state (a first refresh already succeeded).
+	if _, err := resolver.ResolveByPath(filepath.Join(root, "anything")); err != nil && !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("prime resolve: %v", err)
+	}
+
+	// Bump the registry file's mtime so the NEXT refresh() sees a change and
+	// attempts a reload — otherwise the mtime-unchanged fast path would
+	// short-circuit before ever reaching the lock/no-lock branch.
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(regPath, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	// Simulate a concurrent GUI writer holding the exclusive registry lock —
+	// a SEPARATE Registry handle (a real cross-process lock, exercised here
+	// in-process for determinism) on the SAME path.
+	holderReg := api.NewRegistry(regPath)
+	unlock, err := holderReg.Lock()
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+	defer unlock()
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = resolver.ResolveByPath(filepath.Join(root, "anything"))
+		close(done)
+	}()
+	select {
+	case <-done:
+		// Correct: the read-only resolver never contended for the lock.
+	case <-time.After(3 * time.Second):
+		t.Fatal("read-only resolver blocked on a concurrently-held exclusive registry lock — it must reload unlocked, not contend with a GUI writer")
+	}
+}
+
+// TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock pins the
+// CONTRASTING, intentional production behavior: the ordinary (non-read-only)
+// resolver's refresh DOES take the registry's exclusive lock, so it
+// genuinely waits out a concurrent holder rather than serving a stale
+// snapshot. This is the mutation-test counterpart to the read-only test
+// above — a change that accidentally made the production resolver skip
+// locking too would be caught here.
+func TestNewWorkspaceResolver_BlocksOnConcurrentExclusiveLock(t *testing.T) {
+	root := t.TempDir()
+	regPath := filepath.Join(root, "workspaces.yaml")
+	seedReg := api.NewRegistry(regPath)
+	if err := seedReg.Save(); err != nil {
+		t.Fatalf("seed Save: %v", err)
+	}
+
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+	if _, err := resolver.ResolveByPath(filepath.Join(root, "anything")); err != nil && !errors.Is(err, ErrWorkspaceNotFound) {
+		t.Fatalf("prime resolve: %v", err)
+	}
+
+	future := time.Now().Add(2 * time.Second)
+	if err := os.Chtimes(regPath, future, future); err != nil {
+		t.Fatalf("Chtimes: %v", err)
+	}
+
+	holderReg := api.NewRegistry(regPath)
+	unlock, err := holderReg.Lock()
+	if err != nil {
+		t.Fatalf("acquire holder lock: %v", err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_, _ = resolver.ResolveByPath(filepath.Join(root, "anything"))
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("production resolver did NOT block on a concurrently-held exclusive registry lock — expected it to wait")
+	case <-time.After(300 * time.Millisecond):
+		// Correct: still blocked after a short wait.
+	}
+	unlock()
+	select {
+	case <-done:
+		// Correct: unblocks once the holder releases.
+	case <-time.After(3 * time.Second):
+		t.Fatal("production resolver never unblocked after the holder released the lock")
+	}
+}

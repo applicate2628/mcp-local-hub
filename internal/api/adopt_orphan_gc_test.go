@@ -20,6 +20,14 @@ import (
 // before it reaps — see TestGcCase* / TestGcClassifierManifestSignals.)
 func TestGcOrphanedReapsStaleAdoptingOrphan(t *testing.T) {
 	isolateStateDir(t)
+	// isolateStateDir redirects the STATE dir, not CLIENT-CONFIG paths. The GC
+	// walks adopt provenance, which admits real adapters, and claude-code
+	// resolves its config from the home dir — so without this the test read the
+	// operator's real ~/.claude.json. Caught by the sandbox audit.
+	sandboxHome := t.TempDir()
+	t.Setenv("USERPROFILE", sandboxHome)
+	t.Setenv("HOME", sandboxHome)
+	neutralizeClientConfigPathEnv(t, sandboxHome)
 	manifest := "gcstale"
 	seed := &AdoptedEntries{Version: 1, Records: []AdoptProvenanceRecord{{
 		ManifestName:   manifest,

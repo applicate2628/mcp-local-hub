@@ -82,8 +82,11 @@ func TestUnregister_ReconcileFailureRestoresBareKeySupervisorStop(t *testing.T) 
 	if err == nil {
 		t.Fatal("unregister should fail when live-supervisor reconcile fails")
 	}
-	if !strings.Contains(err.Error(), "restored supervisor intent descriptor") {
-		t.Fatalf("unregister error = %v, want restored-descriptor failure", err)
+	if !strings.Contains(err.Error(), "synthetic live supervisor reconcile failure") {
+		t.Fatalf("unregister error = %v, want original reconcile cause", err)
+	}
+	if strings.Contains(err.Error(), "compensation restore supervisor intent") {
+		t.Fatalf("successful restore was reported as a compensation failure: %v", err)
 	}
 	if reconcileCalls != 1 {
 		t.Fatalf("reconcile calls = %d, want 1", reconcileCalls)

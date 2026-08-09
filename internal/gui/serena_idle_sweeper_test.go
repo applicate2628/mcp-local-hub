@@ -15,21 +15,43 @@ import (
 	"mcp-local-hub/internal/api"
 )
 
-// withIdleSweeperSeams wires the threshold + stop seams and a backend status
-// reader, restoring all three on cleanup. capturedStops receives every
+// routingLeaseAttemptContext turns the flock retry point into a test
+// rendezvous. flock.TryLockContext calls Done only after its real nonblocking
+// TryLock attempt has failed, so each send proves that the canonical exclusive
+// routing lease was attempted while the sweeper's shared lease was held.
+// The test controls resume to place one observed attempt in each blocked
+// callback boundary without using a timing-based negative assertion.
+type routingLeaseAttemptContext struct {
+	context.Context
+	attempted chan<- struct{}
+	resume    <-chan struct{}
+}
+
+func (c routingLeaseAttemptContext) Done() <-chan struct{} {
+	c.attempted <- struct{}{}
+	<-c.resume
+	return c.Context.Done()
+}
+
+// withIdleSweeperSeams wires the threshold, stop, stable-GUI authority, and
+// backend-status seams, restoring each on cleanup. capturedStops receives every
 // task_name the sweeper idle-stops.
 func withIdleSweeperSeams(t *testing.T, threshold time.Duration, enabled bool, status func(context.Context) ([]api.DaemonStatus, error)) *[]string {
 	t.Helper()
-	origThresh, origStop, origStatus := serenaIdleThresholdFn, serenaIdleStopFn, serenaBackendStatusFn
+	origThresh, origStop, origAuthority, origAudit, origStatus := serenaIdleThresholdFn, serenaIdleStopFn, serenaIdleRoutingAuthorityFn, serenaIdleAuditFn, serenaBackendStatusFn
 	captured := &[]string{}
 	serenaIdleThresholdFn = func() (time.Duration, bool) { return threshold, enabled }
 	serenaIdleStopFn = func(taskName string, _ time.Time) (bool, error) {
 		*captured = append(*captured, taskName)
 		return true, nil
 	}
+	serenaIdleRoutingAuthorityFn = func(_ context.Context, admittedTick func() int) (int, error) {
+		return admittedTick(), nil
+	}
+	serenaIdleAuditFn = func(string, string, map[string]any) error { return nil }
 	serenaBackendStatusFn = status
 	t.Cleanup(func() {
-		serenaIdleThresholdFn, serenaIdleStopFn, serenaBackendStatusFn = origThresh, origStop, origStatus
+		serenaIdleThresholdFn, serenaIdleStopFn, serenaIdleRoutingAuthorityFn, serenaIdleAuditFn, serenaBackendStatusFn = origThresh, origStop, origAuthority, origAudit, origStatus
 	})
 	return captured
 }
@@ -133,6 +155,257 @@ func TestIdleSweeper_Off_Disabled(t *testing.T) {
 	}
 	if len(*captured) != 0 {
 		t.Fatalf("off must stop nothing; captured=%v", *captured)
+	}
+}
+
+func TestIdleSweeper_RoutingTargetGuardsIdleStop(t *testing.T) {
+	const wsPath = "/proj/routing-target"
+	const taskName = `\mcp-local-hub-serena-routing-target`
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+
+	tests := []struct {
+		name               string
+		enabled            bool
+		routingAuthorityFn serenaIdleRoutingAuthorityFunc
+		wantAuthorityCalls int
+		wantStatusCalls    int
+		wantStopCalls      int
+		wantAuditCalls     int
+		wantAuditEvent     string
+	}{
+		{
+			name:    "GUI permits existing idle stop",
+			enabled: true,
+			routingAuthorityFn: func(_ context.Context, admittedTick func() int) (int, error) {
+				return admittedTick(), nil
+			},
+			wantAuthorityCalls: 1,
+			wantStatusCalls:    1,
+			wantStopCalls:      1,
+			wantAuditCalls:     1,
+			wantAuditEvent:     "serena-idle-stopped",
+		},
+		{
+			name:    "GuardFrontTargetDisablesGUIIdleStop",
+			enabled: true,
+			routingAuthorityFn: func(_ context.Context, _ func() int) (int, error) {
+				return 0, &api.MCPFrontTargetConflictError{Expected: api.MCPFrontRoutingTargetGUI, Actual: api.MCPFrontRoutingTargetFront, ActualGeneration: 1}
+			},
+			wantAuthorityCalls: 1,
+		},
+		{
+			name:    "GuardRoutingTransitionDisablesGUIIdleStop",
+			enabled: true,
+			routingAuthorityFn: func(_ context.Context, _ func() int) (int, error) {
+				return 0, &api.MCPFrontTransitionActiveError{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: 1}
+			},
+			wantAuthorityCalls: 1,
+			wantAuditCalls:     1,
+			wantAuditEvent:     "serena-idle-skipped-routing-target-unavailable",
+		},
+		{
+			name:    "corrupt target disables idle stop",
+			enabled: true,
+			routingAuthorityFn: func(_ context.Context, _ func() int) (int, error) {
+				return 0, &api.MCPFrontTargetInvalidError{Detail: "invalid persisted routing target"}
+			},
+			wantAuthorityCalls: 1,
+			wantAuditCalls:     1,
+			wantAuditEvent:     "serena-idle-skipped-routing-target-unavailable",
+		},
+		{
+			name:    "routing target read error disables idle stop",
+			enabled: true,
+			routingAuthorityFn: func(_ context.Context, _ func() int) (int, error) {
+				return 0, context.DeadlineExceeded
+			},
+			wantAuthorityCalls: 1,
+			wantAuditCalls:     1,
+			wantAuditEvent:     "serena-idle-skipped-routing-target-unavailable",
+		},
+		{
+			name:               "unwired routing target fails safe",
+			enabled:            true,
+			wantAuthorityCalls: 0,
+		},
+		{
+			name:               "disabled threshold is cheapest no-op",
+			enabled:            false,
+			wantAuthorityCalls: 0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := serenaWS("routing-target", wsPath, 9208)
+			s := serenaSweeperServer(t, ws)
+			s.recordSerenaActivity("routing-target", now.Add(-time.Hour))
+
+			origThreshold, origStop, origAuthority, origAudit, origStatus := serenaIdleThresholdFn, serenaIdleStopFn, serenaIdleRoutingAuthorityFn, serenaIdleAuditFn, serenaBackendStatusFn
+			t.Cleanup(func() {
+				serenaIdleThresholdFn, serenaIdleStopFn, serenaIdleRoutingAuthorityFn, serenaIdleAuditFn, serenaBackendStatusFn = origThreshold, origStop, origAuthority, origAudit, origStatus
+			})
+
+			authorityCalls, statusCalls, stopCalls, auditCalls := 0, 0, 0, 0
+			var auditEvents []string
+			serenaIdleThresholdFn = func() (time.Duration, bool) { return time.Minute, tc.enabled }
+			serenaIdleStopFn = func(gotTaskName string, _ time.Time) (bool, error) {
+				stopCalls++
+				if gotTaskName != taskName {
+					t.Fatalf("stop task name = %q, want %q", gotTaskName, taskName)
+				}
+				return true, nil
+			}
+			if tc.routingAuthorityFn == nil {
+				serenaIdleRoutingAuthorityFn = nil
+			} else {
+				serenaIdleRoutingAuthorityFn = func(ctx context.Context, admittedTick func() int) (int, error) {
+					authorityCalls++
+					return tc.routingAuthorityFn(ctx, admittedTick)
+				}
+			}
+			serenaIdleAuditFn = func(_ string, event string, fields map[string]any) error {
+				auditCalls++
+				auditEvents = append(auditEvents, event)
+				if event == "serena-idle-skipped-routing-target-unavailable" {
+					if len(fields) != 1 || fields["reason"] != "canonical-routing-target-unavailable" {
+						t.Fatalf("routing-target audit fields = %#v, want only a non-secret reason", fields)
+					}
+				}
+				return nil
+			}
+			serenaBackendStatusFn = func(context.Context) ([]api.DaemonStatus, error) {
+				statusCalls++
+				return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: 9208, UptimeSec: 7200}}, nil
+			}
+
+			gotStops := s.SweepIdleSerenaDaemons(context.Background(), now)
+			if authorityCalls != tc.wantAuthorityCalls || statusCalls != tc.wantStatusCalls || stopCalls != tc.wantStopCalls || auditCalls != tc.wantAuditCalls {
+				t.Fatalf("authority/status/stop/audit calls = %d/%d/%d/%d, want %d/%d/%d/%d", authorityCalls, statusCalls, stopCalls, auditCalls, tc.wantAuthorityCalls, tc.wantStatusCalls, tc.wantStopCalls, tc.wantAuditCalls)
+			}
+			if gotStops != tc.wantStopCalls {
+				t.Fatalf("stops = %d, want %d", gotStops, tc.wantStopCalls)
+			}
+			if tc.wantAuditEvent == "" {
+				if len(auditEvents) != 0 {
+					t.Fatalf("audit events = %v, want none", auditEvents)
+				}
+			} else if len(auditEvents) != 1 || auditEvents[0] != tc.wantAuditEvent {
+				t.Fatalf("audit events = %v, want [%s]", auditEvents, tc.wantAuditEvent)
+			}
+		})
+	}
+}
+
+func TestIdleSweeper_RoutingAuthorityLeaseBlocksGUIToFrontPreparingThroughStop(t *testing.T) {
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+
+	const wsPath = "/proj/routing-lease"
+	const generation = 31
+	const port = 9431
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	ws := serenaWS("routing-lease", wsPath, 9208)
+	s := serenaSweeperServer(t, ws)
+	s.recordSerenaActivity(ws.WorkspaceKey, now.Add(-time.Hour))
+	a := api.NewAPI()
+
+	statusEntered := make(chan struct{})
+	releaseStatus := make(chan struct{})
+	stopEntered := make(chan struct{})
+	releaseStop := make(chan struct{})
+	stopArgsOK := false
+	withIdleSweeperSeams(t, time.Minute, true, func(context.Context) ([]api.DaemonStatus, error) {
+		close(statusEntered)
+		<-releaseStatus
+		return []api.DaemonStatus{{Server: "serena", Workspace: wsPath, State: "Running", PID: 1000, Port: ws.Port, UptimeSec: 7200}}, nil
+	})
+	serenaIdleRoutingAuthorityFn = func(ctx context.Context, admittedTick func() int) (int, error) {
+		stopped := 0
+		err := a.WithClientRoutingAuthorityLease(ctx, api.StableGUICompatibility(), func(api.ClientRoutingTarget) error {
+			stopped = admittedTick()
+			return nil
+		})
+		return stopped, err
+	}
+	serenaIdleStopFn = func(taskName string, gotNow time.Time) (bool, error) {
+		stopArgsOK = taskName == ws.TaskName && gotNow.Equal(now)
+		close(stopEntered)
+		<-releaseStop
+		return true, nil
+	}
+
+	sweepDone := make(chan int, 1)
+	go func() { sweepDone <- s.SweepIdleSerenaDaemons(context.Background(), now) }()
+	select {
+	case <-statusEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle sweep did not enter status under the routing lease")
+	}
+
+	leaseAttempted := make(chan struct{})
+	resumeLeaseRetry := make(chan struct{})
+	transitionDone := make(chan error, 1)
+	go func() {
+		transitionDone <- a.TransitionMCPFrontRoutingEpochContext(routingLeaseAttemptContext{
+			Context:   context.Background(),
+			attempted: leaseAttempted,
+			resume:    resumeLeaseRetry,
+		},
+			api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetGUI},
+			api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: generation, Port: port})
+	}()
+	awaitExclusiveAttempt := func(boundary string) {
+		t.Helper()
+		select {
+		case <-leaseAttempted:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("GUI -> front-preparing transition did not attempt the canonical exclusive lease while %s", boundary)
+		}
+		select {
+		case err := <-transitionDone:
+			t.Fatalf("GUI -> front-preparing transition settled after its exclusive lease attempt while %s: %v", boundary, err)
+		default:
+		}
+	}
+	awaitExclusiveAttempt("status was blocked")
+
+	close(releaseStatus)
+	select {
+	case <-stopEntered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle sweep did not enter guarded stop under the routing lease")
+	}
+	resumeLeaseRetry <- struct{}{}
+	awaitExclusiveAttempt("guarded stop was blocked")
+
+	close(releaseStop)
+	select {
+	case stopped := <-sweepDone:
+		if stopped != 1 {
+			t.Fatalf("idle stops = %d, want 1", stopped)
+		}
+		if !stopArgsOK {
+			t.Fatalf("idle stop arguments did not match task %q and evaluation time %s", ws.TaskName, now)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle sweep did not finish after releasing guarded stop")
+	}
+	resumeLeaseRetry <- struct{}{}
+	select {
+	case err := <-transitionDone:
+		if err != nil {
+			t.Fatalf("GUI -> front-preparing transition after sweep: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("GUI -> front-preparing transition did not complete after sweep")
+	}
+	snapshot, err := a.MCPFrontRoutingTargetSnapshot()
+	if err != nil {
+		t.Fatalf("read final routing target: %v", err)
+	}
+	want := api.MCPFrontRoutingTargetSnapshot{State: api.MCPFrontRoutingTargetFrontPreparing, Generation: generation, Port: port}
+	if snapshot != want {
+		t.Fatalf("final routing target = %+v, want %+v", snapshot, want)
 	}
 }
 

@@ -448,6 +448,12 @@ func runAuditLockR6ReceiverScenario(t *testing.T, stateRoot string) {
 	server := NewServer(Config{Port: 9125, RecoverySettlementTerminalizationBudget: 2 * time.Second})
 	defer server.events.Close()
 	defer server.auditLock.close()
+	// Production activates the occurrence store only after the GUI listener is
+	// owned. This direct-handler receiver harness bypasses that lifecycle, so
+	// explicitly establish the same precondition before exercising recovery.
+	if err := server.auditLock.activateStore(context.Background()); err != nil {
+		t.Fatalf("activate isolated occurrence store: %v", err)
+	}
 	recoverer := &committedTerminalRecoverer{}
 	server.daemonRecover = recoverer
 	ctx, cancel := context.WithCancel(context.Background())

@@ -26,6 +26,15 @@ import (
 	"mcp-local-hub/internal/secrets"
 )
 
+// pruneBackupsForBackupPath is the post-commit retention seam. Production uses
+// the clients owner; tests inject only its lock-lifecycle result.
+var pruneBackupsForBackupPath = clients.PruneBackupsForBackupPath
+
+// classifyInstallClientMutation keeps install settlement on the single
+// clients-owned classifier. The variable is a narrow fault-injection seam for
+// transaction tests; production always points at clients.ClassifyClientMutation.
+var classifyInstallClientMutation = clients.ClassifyClientMutation
+
 // mcphubShortName is the bare executable name. Used for Antigravity relay
 // entries (subprocess spawners like Node's child_process do honor PATH) and
 // for the install preflight "is mcphub on PATH?" check.
@@ -175,6 +184,7 @@ type InstallOpts struct {
 	DryRun                 bool
 	Writer                 io.Writer // progress output destination; nil = os.Stderr
 	GUIPort                int       // live GUI/router port injected by CLI/GUI; zero means unknown
+	RoutingTarget          *ClientRoutingTarget
 	SymlinkConsents        []ResolvedSymlinkConsent
 }
 
@@ -186,12 +196,46 @@ type InstallAllOpts struct {
 	DryRun            bool
 	Writer            io.Writer
 	GUIPort           int
+	RoutingTarget     *ClientRoutingTarget
 }
 
 // InstallResult is one row in an InstallAll report.
 type InstallResult struct {
 	Server string
 	Err    error
+}
+
+func installOptsMayWriteClients(opts InstallOpts) bool {
+	return !opts.SkipClientConfigWrites && !(len(opts.ClientsInclude) == 1 && strings.TrimSpace(opts.ClientsInclude[0]) == "")
+}
+
+func (a *API) prepareInstallClientRoutingDecision(opts *InstallOpts) (ClientRoutingAuthorityRequest, error) {
+	if opts == nil {
+		return ClientRoutingAuthorityRequest{}, &MCPFrontTargetInvalidError{Detail: "install routing options are nil"}
+	}
+	if opts.RoutingTarget != nil {
+		if err := ValidateClientRoutingTarget(*opts.RoutingTarget); err != nil {
+			return ClientRoutingAuthorityRequest{}, err
+		}
+		opts.GUIPort = opts.RoutingTarget.Port
+		return ExactTarget(*opts.RoutingTarget), nil
+	}
+	target, err := a.ResolveClientRoutingTarget()
+	if err != nil {
+		return ClientRoutingAuthorityRequest{}, err
+	}
+	if opts.GUIPort != 0 {
+		legacy := ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: opts.GUIPort}
+		if err := ValidateClientRoutingTarget(legacy); err != nil {
+			return ClientRoutingAuthorityRequest{}, err
+		}
+		if target.Mode == MCPFrontRoutingTargetGUI {
+			return StableGUICompatibility(), nil
+		}
+	}
+	opts.RoutingTarget = &target
+	opts.GUIPort = target.Port
+	return ExactTarget(target), nil
 }
 
 // UninstallReport summarizes what Uninstall actually did. Callers (CLI/GUI)
@@ -264,11 +308,19 @@ func (a *API) Install(opts InstallOpts) error {
 	if err := refuseWorkspaceScopedInstall(m, w); err != nil {
 		return err
 	}
+	authorityRequest := CanonicalAtAdmission()
+	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+		var targetErr error
+		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
+		if targetErr != nil {
+			return fmt.Errorf("resolve client routing target: %w", targetErr)
+		}
+	}
 	// 2. Preflight.
 	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
-	// 3. Build plan.
+	// 3. Build plan (opts resolved by the shared single owner).
 	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
 	if err != nil {
 		return err
@@ -277,7 +329,7 @@ func (a *API) Install(opts InstallOpts) error {
 	// global daemons spawn from supervisor-intent.json (installPlanCore writes
 	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
 	// rather than from per-daemon scheduler tasks.
-	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -317,6 +369,7 @@ func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 			DryRun:            opts.DryRun,
 			Writer:            opts.Writer,
 			GUIPort:           opts.GUIPort,
+			RoutingTarget:     opts.RoutingTarget,
 		})
 		results = append(results, InstallResult{Server: name, Err: err})
 	}
@@ -362,6 +415,7 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			DryRun:            opts.DryRun,
 			Writer:            opts.Writer,
 			GUIPort:           opts.GUIPort,
+			RoutingTarget:     opts.RoutingTarget,
 		}, opts.ManifestDir)
 		results = append(results, InstallResult{Server: e.Name(), Err: err})
 	}
@@ -414,6 +468,14 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
+	authorityRequest := CanonicalAtAdmission()
+	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+		var targetErr error
+		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
+		if targetErr != nil {
+			return fmt.Errorf("resolve client routing target: %w", targetErr)
+		}
+	}
 	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
@@ -421,7 +483,32 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
+}
+
+// installBuildPlanOpts is the SINGLE owner of "which BuildPlanOpts does an
+// install entry point use". Every plan-building install entry point — Install,
+// installUsingEmbedFirst (the per-server entry InstallAllWithOpts drives), and
+// installFromManifestDir — must go through it.
+//
+// It exists because the three had hand-copied the same struct literal and one
+// copy drifted: installUsingEmbedFirst omitted DefaultClientsOverride, so
+// `mcphub install --all` and the unfiltered GUI bulk install silently ignored
+// the operator's persisted `clients.default_install` set while single-server
+// installs honored it. The omission was invisible for as long as every
+// commonly-overridden client was ALSO a compile-time default; it became
+// reachable the moment cursor moved to opt-in (bot PR #583). Resolving the opts
+// in one place makes that class of drift structurally impossible rather than
+// re-fixed per site.
+func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
+	return BuildPlanOpts{
+		DaemonFilter:           opts.DaemonFilter,
+		ClientsInclude:         opts.ClientsInclude,
+		IncludeAllClients:      opts.IncludeAllClients,
+		SkipClientConfigWrites: opts.SkipClientConfigWrites,
+		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
+		GUIPort:                opts.GUIPort,
+	}
 }
 
 // installFromManifestDir is Install-like but with an explicit manifestDir
@@ -442,6 +529,14 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
+	authorityRequest := CanonicalAtAdmission()
+	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
+		var targetErr error
+		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
+		if targetErr != nil {
+			return fmt.Errorf("resolve client routing target: %w", targetErr)
+		}
+	}
 	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
 		return err
 	}
@@ -449,7 +544,26 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	return a.installPlanCoreWithSymlinkConsents(context.Background(), m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
+}
+
+func (a *API) installPlanCoreWithRoutingTargetLease(
+	ctx context.Context,
+	m *config.ServerManifest,
+	plan *Plan,
+	opts InstallOpts,
+	authorityRequest ClientRoutingAuthorityRequest,
+	w io.Writer,
+) error {
+	run := func() error {
+		return a.installPlanCoreWithSymlinkConsents(ctx, m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
+	}
+	if opts.DryRun || !IsSerenaServer(m.Name) || !installOptsMayWriteClients(opts) {
+		return run()
+	}
+	return a.WithClientRoutingAuthorityLease(ctx, authorityRequest, func(ClientRoutingTarget) error {
+		return run()
+	})
 }
 
 // resolveDefaultClientsOverride returns the operator's persisted
@@ -459,7 +573,7 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 // selection wins and the predicate never even consults the override.
 //
 // A read error (corrupt gui-preferences.yaml) is swallowed to nil: the
-// install then proceeds on the compile-time default trio rather than
+// install then proceeds on the compile-time default set rather than
 // failing the whole install over an unreadable GUI-preference file. The
 // override is a convenience layer; it must never make `mcphub install`
 // harder to complete than it was before the feature existed.
@@ -472,17 +586,6 @@ func (a *API) resolveDefaultClientsOverride(opts InstallOpts) []string {
 		return nil
 	}
 	return override
-}
-
-func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
-	return BuildPlanOpts{
-		DaemonFilter:           opts.DaemonFilter,
-		ClientsInclude:         opts.ClientsInclude,
-		IncludeAllClients:      opts.IncludeAllClients,
-		SkipClientConfigWrites: opts.SkipClientConfigWrites,
-		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
-		GUIPort:                opts.GUIPort,
-	}
 }
 
 // installScopeFromOpts is the single InstallOpts -> AdmissionScope adapter used
@@ -1097,6 +1200,21 @@ func probeDaemonHealth(rows []DaemonStatus) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			// codex bot PR #588 P2 closure: the built-in `mcphub route` front
+			// daemon is an ordinary global descriptor (nonzero Port, not
+			// maintenance-classified), so mergeSupervisorOnlyDaemonRows feeds
+			// it here — but it serves ONLY /serena/mcp and /lsp/<language>/mcp
+			// (internal/gui/route_adapter.go RouteHandler). The generic probe
+			// POSTs to /mcp, which that mux never mounts, so a perfectly
+			// healthy front daemon rendered as a FAILED probe in
+			// `mcphub status --health` and the GUI health view. Route it to
+			// the endpoint it actually serves instead of excluding it (an
+			// excluded row loses the "is the data plane up?" signal precisely
+			// where an operator goes looking for it).
+			if canonicalIntentTaskKey(rows[idx].TaskName) == BuiltinRouteTaskName {
+				rows[idx].Health = routeFrontHealthProbeFn(rows[idx].Port)
+				return
+			}
 			h := singleHealthProbeFn(rows[idx].Port)
 			// Mark lazy-proxy probes by task-name structure, not by
 			// registry-populated Language. Language can be empty when
@@ -1123,13 +1241,56 @@ func probeDaemonHealth(rows []DaemonStatus) {
 // is not exercised and the probe result is deterministic.
 var singleHealthProbeFn = singleHealthProbe
 
+// RouteFrontHealthSource tags a HealthProbe produced by routeFrontHealthProbe
+// rather than the generic /mcp singleHealthProbe. Consumers MUST NOT read
+// ToolCount off such a row: the front daemon is a ROUTER, so its tool catalog
+// is whatever the currently-registered serena workspaces expose, and
+// enumerating it would require a live workspace + a materialized backend. The
+// probe therefore proves the MCP LIFECYCLE only, and leaves ToolCount at 0
+// with this Source set so no renderer prints a phantom "OK (0)".
+const RouteFrontHealthSource = "route-front"
+
+// routeFrontHealthProbeFn is the test seam for routeFrontHealthProbe, mirroring
+// singleHealthProbeFn.
+var routeFrontHealthProbeFn = routeFrontHealthProbe
+
+// routeFrontHealthProbe health-probes the built-in `mcphub route` front daemon
+// on both endpoints it writes into client configuration. It reuses
+// AssertMCPFrontRoutesLive — the SAME predicate `mcphub install
+// --reconcile-mcp-front` requires before and after client writes. Single owner:
+// "the front daemon is healthy" and "the front daemon is safe to reconcile
+// clients onto" are the same claim, so they must not drift into two predicates.
+//
+// tools/list is deliberately NOT part of the probe: /serena/mcp's tools/list
+// requires a minted session AND at least one registered serena workspace
+// (internal/gui/serena_router_lifecycle.go handleToolsList returns the
+// no-workspace error otherwise), so including it would report a healthy front
+// daemon as failed on every host that has not registered a workspace yet.
+func routeFrontHealthProbe(port int) *HealthProbe {
+	if err := AssertMCPFrontRoutesLive(context.Background(), port); err != nil {
+		return &HealthProbe{Source: RouteFrontHealthSource, Err: "route front: " + err.Error()}
+	}
+	return &HealthProbe{OK: true, Source: RouteFrontHealthSource}
+}
+
 const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
 
-func singleHealthProbe(port int) *HealthProbe {
+const healthProbeSessionCleanupTimeout = 3 * time.Second
+
+var healthProbeHTTPClient = func() *http.Client {
+	return &http.Client{Timeout: 3 * time.Second}
+}
+
+func cleanupHealthProbeSession(client *http.Client, url, sessionID string) error {
+	_, err := terminateMCPProbeSession(client, url, sessionID, healthProbeSessionCleanupTimeout)
+	return err
+}
+
+func singleHealthProbe(port int) (probe *HealthProbe) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	url := clients.HubLoopbackURL(port, "/mcp")
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := healthProbeHTTPClient()
 
 	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"mcphub-health","version":"1"}}}`
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url, strings.NewReader(initBody))
@@ -1143,6 +1304,23 @@ func singleHealthProbe(port int) *HealthProbe {
 	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return &HealthProbe{Err: fmt.Sprintf("initialize: HTTP %d", resp.StatusCode)}
+	}
+	if sessionID != "" {
+		defer func() {
+			if err := cleanupHealthProbeSession(client, url, sessionID); err != nil {
+				cleanupErr := "MCP_HEALTH_SESSION_CLEANUP_FAILED: " + err.Error()
+				if probe == nil {
+					probe = &HealthProbe{Err: cleanupErr}
+					return
+				}
+				probe.OK = false
+				if probe.Err == "" {
+					probe.Err = cleanupErr
+				} else {
+					probe.Err += "; " + cleanupErr
+				}
+			}
+		}()
 	}
 
 	listBody := `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`
@@ -1595,7 +1773,7 @@ type BuildPlanOpts struct {
 	// seam ON PURPOSE: it keeps BuildPlanWithOpts hermetic. A direct
 	// BuildPlanWithOpts/BuildPlan caller (every unit test, plus any future
 	// caller that wants the pure compile-time default) leaves this nil and
-	// gets the {claude-code, codex-cli, cursor} trio regardless of what
+	// gets the {claude-code, codex-cli} set regardless of what
 	// gui-preferences.yaml on the host happens to contain. Only the
 	// top-level install entry points (Install / installFromManifestDir)
 	// resolve the override from disk and populate this.
@@ -1771,7 +1949,7 @@ func installClientPredicate(opts BuildPlanOpts) (func(string) bool, error) {
 	//   2. DefaultClientsOverride (the operator's persisted default-install
 	//      set, resolved from gui-preferences.yaml by the top-level Install
 	//      entry points) — replaces the compile-time fallback;
-	//   3. clients.DefaultInstallClientNames() — the compile-time trio.
+	//   3. clients.DefaultInstallClientNames() — the compile-time default set.
 	// Keeping the override in this field (not a disk read here) is what
 	// keeps BuildPlanWithOpts hermetic for direct callers/tests.
 	var names []string
@@ -2680,6 +2858,23 @@ func (e *InstallClientRollbackIncompleteError) Error() string {
 // caller wrapped) keep working through this sentinel.
 func (e *InstallClientRollbackIncompleteError) Unwrap() error { return e.cause }
 
+// InstallForwardCommittedError reports that install committed a coherent
+// forward subset after one client mutation applied but its config-lock release
+// could not be confirmed. Client is a name only; cause retains the lifecycle
+// error and any mandatory-intent failure. Generic rollback or caller-side abort
+// is forbidden for this outcome, but the full requested plan is not certified
+// complete because later optional clients may have been skipped.
+type InstallForwardCommittedError struct {
+	Client string
+	cause  error
+}
+
+func (e *InstallForwardCommittedError) Error() string {
+	return fmt.Sprintf("install forward subset committed at client %s: %v", e.Client, e.cause)
+}
+
+func (e *InstallForwardCommittedError) Unwrap() error { return e.cause }
+
 func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, p *Plan, keepN int, startTasks bool, intermediate intentWriteStep, skipPrune bool, skipTasks bool, symlinkConsents []ResolvedSymlinkConsent) error {
 	// v0.6 Phase F: when skipTasks is set (GLOBAL manifest install routed to the
 	// supervisor model) NEITHER Pass A scheduler-task creation NOR Pass B start
@@ -2735,28 +2930,41 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	var rollback []func()
 	var installBackupPaths []string
 	// rollbackClientRestoreFailures accumulates the NAMES of clients whose
-	// client-config restore callback FAILED during runRollback — the client's pre-adopt
-	// state could not be confirmed (it may have been rewritten to the hub relay and not
-	// reversed, OR the restore write itself failed on an otherwise-untouched config).
+	// client-config restore did not settle as applied during runRollback — the
+	// client's pre-adopt state could not be confirmed (it may have been rewritten
+	// to the hub relay and not reversed, OR the restore write itself failed on an
+	// otherwise-untouched config).
 	// Only the client-restore closure below appends to it — scheduler-task /
 	// supervisor-intent undo failures do NOT, and a client whose entry-scoped
 	// restore is a no-op (provably unmutated) never appends either (the folded
 	// skip-if-unchanged returns nil WITHOUT writing) — so the sentinel is scoped to
 	// client-config restores that actually ran and failed.
 	var rollbackClientRestoreFailures []string
+	// rollbackClientLifecycleErrors retains release-lifecycle failures from
+	// restores whose bytes were nevertheless applied. Those restores are
+	// reconciled, not rollback-incomplete, but the lifecycle failure must remain
+	// visible at the composition boundary.
+	var rollbackClientLifecycleErrors []error
 	runRollback := func() {
 		for i := len(rollback) - 1; i >= 0; i-- {
 			rollback[i]()
 		}
 	}
 	// failAfterRollback runs the compensating rollback stack, then returns the
-	// caller's error. When ≥1 client-config restore FAILED during rollback it wraps
-	// the cause in a typed *InstallClientRollbackIncompleteError naming those clients
-	// so ExecuteAdoptWithOpts can PRESERVE the pre-adopt provenance instead of
-	// deleting it (bug 2026-07-12). With zero restore failures the returned error is
-	// byte-identical to today's happy-failure path (bare cause, no sentinel).
+	// caller's error. When ≥1 client-config restore did not settle as applied it
+	// wraps the cause in a typed *InstallClientRollbackIncompleteError naming those
+	// clients so ExecuteAdoptWithOpts can PRESERVE the pre-adopt provenance instead
+	// of deleting it (bug 2026-07-12). A restore that applied but could not confirm
+	// lock release contributes only its lifecycle error. With neither class, the
+	// returned error remains the bare cause.
 	failAfterRollback := func(cause error) error {
 		runRollback()
+		if len(rollbackClientLifecycleErrors) > 0 {
+			joined := make([]error, 0, 1+len(rollbackClientLifecycleErrors))
+			joined = append(joined, cause)
+			joined = append(joined, rollbackClientLifecycleErrors...)
+			cause = errors.Join(joined...)
+		}
 		if len(rollbackClientRestoreFailures) == 0 {
 			return cause
 		}
@@ -2857,6 +3065,9 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// spawn the relay command.
 	allClients := clients.AllClients()
 	symlinkConsentWriters := clientConfigSymlinkConsentWriters(symlinkConsents)
+	var forwardOnlyClientErr *InstallForwardCommittedError
+
+clientUpdates:
 	for _, u := range p.ClientUpdates {
 		client := allClients[u.Client]
 		if client == nil {
@@ -2921,55 +3132,98 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 		// rollback \u2014 before, the closure was appended only after AddEntry success, so a
 		// mutated-then-error AddEntry left the client config committed with NO
 		// compensator, and adopt aborted (deleting the pre-adopt snapshot that reverses
-		// it) = the P1 data-loss. A restore that cannot prove the pre-adopt state (its
-		// OWN write errors) appends clientName to rollbackClientRestoreFailures, feeding
-		// the sentinel so adopt PRESERVES its provenance instead of aborting. The
-		// adapter-level restore is surgical: it restores/removes only entryName, leaving
-		// other live entries untouched.
+		// it) = the P1 data-loss. A restore that cannot prove the pre-adopt state
+		// appends clientName to rollbackClientRestoreFailures, feeding the sentinel
+		// so adopt PRESERVES its provenance instead of aborting; an applied restore
+		// with unconfirmed release retains only the lifecycle error. The adapter-level
+		// restore is surgical: it restores/removes only entryName, leaving other live
+		// entries untouched.
 		//
-		// The closure has two outcomes (design round-4 — the atomic entry-scoped
+		// The closure has three outcomes (design round-4 — the atomic entry-scoped
 		// skip-if-unchanged is now FOLDED INTO the restore body under its single
 		// withConfigLock hold, so no separate unlocked pre-check lives here). (1)
 		// RECONCILED — the restore returns nil: either it reverted a mutated entry, or
 		// the write-target already held the pre-adopt entry value (unmutated client, or
 		// a sibling edit left THIS entry untouched) so the body skipped the write. Both
 		// mean the client is reconciled to its pre-adopt state with no damage and no
-		// sentinel append. (2) RESTORE-FAIL→SENTINEL — a restore that RAN and errored
-		// feeds clientName to rollbackClientRestoreFailures + the sentinel so adopt
-		// preserves.
+		// sentinel append. (2) APPLIED-RELEASE-UNCONFIRMED — the intended bytes are
+		// restored and the lifecycle error remains visible, but no rollback-incomplete
+		// sentinel is emitted. (3) RESTORE-FAIL→SENTINEL — a restore that did not
+		// settle as applied feeds clientName to rollbackClientRestoreFailures so adopt
+		// preserves its recovery provenance.
 		clientRef := client
 		entryName := m.Name
 		clientName := u.Client
 		backupPath := bak
 		rollbackWriter := configWriter
 		rollback = append(rollback, func() {
-			if err := clients.RestoreEntryFromBackupForRollbackWithConfigWriter(clientRef, backupPath, entryName, rollbackWriter); err != nil {
+			restoreErr := clients.RestoreEntryFromBackupForRollbackWithConfigWriter(clientRef, backupPath, entryName, rollbackWriter)
+			switch classifyInstallClientMutation(restoreErr) {
+			case clients.ClientMutationApplied:
+				fmt.Fprintf(w, "  rollback: reconciled %s entry in %s to pre-adopt backup\n", entryName, clientName)
+			case clients.ClientMutationAppliedReleaseUnconfirmed:
+				rollbackClientLifecycleErrors = append(rollbackClientLifecycleErrors,
+					fmt.Errorf("restore %s entry in %s from backup: configuration applied; lock release unconfirmed: %w", entryName, clientName, restoreErr))
+				fmt.Fprintf(w, "  rollback: reconciled %s entry in %s to pre-adopt backup; lock release unconfirmed: %v\n", entryName, clientName, restoreErr)
+			case clients.ClientMutationNeedsCompensation:
 				rollbackClientRestoreFailures = append(rollbackClientRestoreFailures, clientName)
-				fmt.Fprintf(w, "  rollback: restore %s entry in %s from backup failed: %v\n", entryName, clientName, err)
-				return
+				fmt.Fprintf(w, "  rollback: restore %s entry in %s from backup failed: %v\n", entryName, clientName, restoreErr)
 			}
-			fmt.Fprintf(w, "  rollback: reconciled %s entry in %s to pre-adopt backup\n", entryName, clientName)
 		})
-		if err := clients.AddEntryWithConfigWriter(client, entry, configWriter); err != nil {
-			return failAfterRollback(fmt.Errorf("add entry to %s: %w", u.Client, err))
+		addErr := clients.AddEntryWithConfigWriter(client, entry, configWriter)
+		switch classifyInstallClientMutation(addErr) {
+		case clients.ClientMutationApplied:
+			fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, displayURLOf(u))
+		case clients.ClientMutationAppliedReleaseUnconfirmed:
+			// The entry is live, so its own pre-armed compensator is now wrong:
+			// reacquiring this poisoned leaf is unsafe and rolling independent
+			// scheduler state back would strand the applied target. Stop optional
+			// client mutations, keep prior side effects, and continue only through
+			// the mandatory intermediate intent settlement below.
+			rollback = rollback[:len(rollback)-1]
+			forwardOnlyClientErr = &InstallForwardCommittedError{
+				Client: u.Client,
+				cause:  fmt.Errorf("configuration applied; lock release unconfirmed: %w", addErr),
+			}
+			fmt.Fprintf(w, "\u2713 %s \u2192 %s (configuration applied; lock release unconfirmed)\n", u.Client, displayURLOf(u))
+			break clientUpdates
+		case clients.ClientMutationNeedsCompensation:
+			return failAfterRollback(fmt.Errorf("add entry to %s: %w", u.Client, addErr))
 		}
-		fmt.Fprintf(w, "\u2713 %s \u2192 %s\n", u.Client, displayURLOf(u))
 	}
-	// Intermediate step (InstallParsedManifest only): write supervisor
-	// intent INSIDE the rollback scope so a write failure undoes the
-	// scheduler tasks + client configs already applied. Legacy api.Install
-	// callers pass a nil hook and skip this entirely.
+	// Intermediate step (InstallParsedManifest only): write supervisor intent
+	// INSIDE the rollback scope so an ordinary write failure undoes scheduler
+	// tasks + client configs already applied. After an applied client mutation
+	// whose lock release is unconfirmed, this becomes the mandatory forward-only
+	// continuation: its failure is joined without compensating the poisoned leaf
+	// or independent scheduler state. Legacy api.Install callers pass a nil hook.
 	if intermediate != nil {
 		undo, err := intermediate()
 		if err != nil {
+			if forwardOnlyClientErr != nil {
+				return &InstallForwardCommittedError{
+					Client: forwardOnlyClientErr.Client,
+					cause: errors.Join(
+						forwardOnlyClientErr.cause,
+						fmt.Errorf("complete mandatory install intent after applied client configuration: %w", err),
+					),
+				}
+			}
 			return failAfterRollback(err)
 		}
-		if undo != nil {
+		if undo != nil && forwardOnlyClientErr == nil {
 			rollback = append(rollback, undo)
 		}
 	}
+	if forwardOnlyClientErr != nil {
+		return forwardOnlyClientErr
+	}
+	postCommitWarnings := false
 	for _, backupPath := range installBackupPaths {
-		clients.PruneBackupsForBackupPath(backupPath, keepN)
+		if err := pruneBackupsForBackupPath(backupPath, keepN); err != nil {
+			postCommitWarnings = true
+			fmt.Fprintf(w, "warning: backup retention lock lifecycle failed; install changes remain committed: %v\n", err)
+		}
 	}
 	// Pass B - start daemons immediately (without waiting for next logon).
 	// Gated by startTasks: the migrate driver passes false to defer daemon
@@ -2989,7 +3243,11 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 			}
 		}
 	}
-	fmt.Fprintln(w, "\nInstall complete.")
+	if postCommitWarnings {
+		fmt.Fprintln(w, "\nInstall complete with warnings.")
+	} else {
+		fmt.Fprintln(w, "\nInstall complete.")
+	}
 	return nil
 }
 
