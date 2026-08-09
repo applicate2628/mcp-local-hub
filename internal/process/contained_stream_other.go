@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -32,13 +33,20 @@ type posixSettlementBudget struct {
 }
 
 type posixContainedChild struct {
-	cmd        *exec.Cmd
-	pid        int
-	classifier posixGroupClassifier
+	cmd            *exec.Cmd
+	pid            int
+	classifier     posixGroupClassifier
+	waitObserved   chan struct{}
+	waitObserveErr error
+	reapStartOnce  sync.Once
+	reapDone       chan struct{}
+	reapResult     containedWaitResult
 }
 
 func newPlatformContainedChild(cmd *exec.Cmd) (containedChild, error) {
-	return &posixContainedChild{cmd: cmd, classifier: platformContainedGroupClassifier()}, nil
+	child := &posixContainedChild{cmd: cmd, classifier: platformContainedGroupClassifier()}
+	initializePlatformContainedWait(child)
+	return child, nil
 }
 
 func openContainedNull() (containedInputFile, error) {
@@ -69,7 +77,7 @@ func (c *posixContainedChild) start(
 	return nil
 }
 
-func (c *posixContainedChild) wait() containedWaitResult {
+func (c *posixContainedChild) waitCommand() containedWaitResult {
 	if c == nil || c.cmd == nil {
 		return containedWaitResult{err: errors.New("invalid POSIX child")}
 	}
@@ -93,8 +101,22 @@ func (c *posixContainedChild) terminateBy(deadline time.Time) error {
 		return nil
 	}
 	if err := syscall.Kill(-c.pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
-		return fmt.Errorf("terminate contained process group: %w", err)
+		// The direct child is still unreaped, so its positive PID cannot be
+		// recycled here. Kill that stable child identity to unblock the one
+		// eventual reaper even though descendant cleanup is indeterminate.
+		var directErr error
+		if c.cmd != nil && c.cmd.Process != nil {
+			directErr = c.cmd.Process.Kill()
+		}
+		startPlatformContainedLeaderReapAfterSignal(c)
+		return errors.Join(fmt.Errorf("terminate contained process group: %w", err), directErr)
 	}
+	// The group signal MUST precede cmd.Wait. Once sent, reaping the direct
+	// leader is safe: descendants keep the old group alive and prevent PGID
+	// reuse; with no descendants, no later group signal is needed. Keeping the
+	// zombie through settlement would make kill(-pgid, 0) report it alive until
+	// the cleanup deadline.
+	startPlatformContainedLeaderReapAfterSignal(c)
 	if err := settlePOSIXGroup(deadline, c.pid, probePOSIXGroup, c.classifier); err != nil {
 		return err
 	}

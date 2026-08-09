@@ -98,7 +98,11 @@ var (
 	// do exist. A wrong negative is the worst output this contract can
 	// produce, so containment, not equality, is the correct test.
 	embeddedVarRE = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
-	commitHexRE   = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
+	// environmentOrCacheVarRE identifies CMake's process-environment and cache
+	// lookup forms. Their values are ambient inputs this analyzer deliberately
+	// does not model, so they must never fall through to a literal remote ref.
+	environmentOrCacheVarRE = regexp.MustCompile(`\$(?:ENV|CACHE)\{([^{}\r\n]+)\}`)
+	commitHexRE             = regexp.MustCompile(`^[0-9a-fA-F]{40}$`)
 	// abbrevCommitHexRE matches a pure-hex token too short to be a full SHA
 	// but long enough to be an ABBREVIATED commit. The lower bound is 7, git's
 	// own default short-SHA length (`--short` / core.abbrev): below that a
@@ -564,6 +568,47 @@ func recordListMutation(environment *variableEnvironment, state guardState, args
 	}
 }
 
+func recordStringMutation(environment *variableEnvironment, state guardState, args string) {
+	tokens := tokenize(args)
+	if len(tokens) == 0 || tokens[0].Raw {
+		if state.active {
+			environment.setAllUnknown()
+		}
+		return
+	}
+	destination := -1
+	switch strings.ToUpper(tokens[0].Text) {
+	case "APPEND", "PREPEND", "CONCAT", "TIMESTAMP", "UUID", "MD5", "SHA1", "SHA224", "SHA256", "SHA384", "SHA512", "SHA3_224", "SHA3_256", "SHA3_384", "SHA3_512":
+		destination = 1
+	case "JOIN", "TOLOWER", "TOUPPER", "LENGTH", "STRIP", "GENEX_STRIP", "HEX", "CONFIGURE", "MAKE_C_IDENTIFIER":
+		destination = 2
+	case "FIND", "REPLACE", "REPEAT":
+		destination = 3
+	case "SUBSTRING", "COMPARE":
+		destination = 4
+	case "REGEX":
+		if len(tokens) > 1 {
+			switch strings.ToUpper(tokens[1].Text) {
+			case "MATCH", "MATCHALL":
+				destination = 3
+			case "REPLACE":
+				destination = 4
+			}
+		}
+	case "ASCII", "RANDOM":
+		destination = len(tokens) - 1
+	case "JSON":
+		destination = 1
+	}
+	if destination < 0 {
+		if state.active {
+			environment.setAllUnknown()
+		}
+		return
+	}
+	recordVariableInvalidation(environment, state, args, destination)
+}
+
 type unsupportedScope struct {
 	opener string
 	name   string
@@ -665,7 +710,13 @@ func resolveMaybeVariable(environment variableEnvironment, manifest []byte, port
 	if text == "" {
 		return "", false, false
 	}
-	if raw.Raw || !strings.Contains(text, "${") {
+	if raw.Raw {
+		return text, false, true
+	}
+	if environmentOrCacheVarRE.MatchString(text) {
+		return "", true, false
+	}
+	if !strings.Contains(text, "${") {
 		return text, false, true
 	}
 	expanded, _, _, expandedOK := expandVariables(environment, manifest, portName, text)
@@ -692,6 +743,10 @@ func buildPin(environment variableEnvironment, manifest []byte, portName string,
 	}
 	// A bracket argument ([[...]]) is uninterpreted CMake text, so ${...}
 	// inside it is literal and must NOT be expanded.
+	if !ref.Raw && environmentOrCacheVarRE.MatchString(refRaw) {
+		match := environmentOrCacheVarRE.FindStringSubmatch(refRaw)
+		return Pin{Ref: refRaw, Shape: RefShapeVariableResolved, UnresolvedVariable: match[0]}
+	}
 	if !ref.Raw && strings.Contains(refRaw, "${") {
 		pin := Pin{Ref: refRaw, Shape: RefShapeVariableResolved}
 		expanded, source, unresolved, ok := expandVariables(environment, manifest, portName, refRaw)
@@ -763,11 +818,14 @@ func unresolvedVariableName(raw argValue) string {
 	if raw.Raw {
 		return ""
 	}
-	m := embeddedVarRE.FindStringSubmatch(strings.TrimSpace(raw.Text))
-	if m == nil {
-		return ""
+	text := strings.TrimSpace(raw.Text)
+	if m := embeddedVarRE.FindStringSubmatch(text); m != nil {
+		return m[1]
 	}
-	return m[1]
+	if m := environmentOrCacheVarRE.FindStringSubmatch(text); m != nil {
+		return m[0]
+	}
+	return ""
 }
 
 type guardState struct {
@@ -972,6 +1030,19 @@ statementLoop:
 				continue
 			}
 			recordListMutation(&variables, state, st.Args)
+		case "string":
+			if mutationInsideDeclaration(unsupportedScopes) {
+				continue
+			}
+			recordStringMutation(&variables, state, st.Args)
+		case "block", "endblock":
+			// block() introduces a temporary variable scope, optionally with
+			// PROPAGATE semantics. Until that scope is modeled, accepting an
+			// active block would let inner assignments escape into the outer
+			// call-site environment and select the wrong ref.
+			if state.active && len(unsupportedScopes) == 0 {
+				return parsedPortfile{}, false
+			}
 		case "return":
 			if len(unsupportedScopes) != 0 || !state.active {
 				continue

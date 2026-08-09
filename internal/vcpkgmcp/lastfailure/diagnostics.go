@@ -817,6 +817,23 @@ func scanDiagnostics(content []byte, perCellLimit int) ([]Diagnostic, int, error
 			budget[s][t] = perCellLimit
 		}
 	}
+	admit := func(d Diagnostic) {
+		sev, tier := severityBudgetClass(d), tierRank(d.Tier)
+		if budget[sev][tier] == 0 {
+			dropped++
+			return
+		}
+		budget[sev][tier]--
+		out = append(out, d)
+	}
+	var pendingCMake *Diagnostic
+	flushPendingCMake := func() {
+		if pendingCMake == nil {
+			return
+		}
+		admit(*pendingCMake)
+		pendingCMake = nil
+	}
 
 	scanner := bufio.NewScanner(bytes.NewReader(content))
 	scanner.Buffer(make([]byte, 0, phaseLogReadChunkBytes), defaultResponseLimits.logLineBytes)
@@ -827,18 +844,24 @@ func scanDiagnostics(content []byte, perCellLimit int) ([]Diagnostic, int, error
 		// plainly failed. It also decides what Diagnostic.Text carries on the
 		// wire — see the normalizer's doc for that contract change.
 		line := normalizeLFLogLine(scanner.Text())
+		if pendingCMake != nil {
+			if strings.TrimSpace(line) != "" && (strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")) {
+				pendingCMake.Text += "\n" + line
+				continue
+			}
+			flushPendingCMake()
+		}
 		d, ok := matchDiagnosticLine(line)
 		if !ok {
 			continue
 		}
-		sev, tier := severityBudgetClass(d), tierRank(d.Tier)
-		if budget[sev][tier] == 0 {
-			dropped++
+		if match := cmakeErrorRE.FindStringSubmatch(line); match != nil && match[cmakeErrorRE.SubexpIndex("msg")] == "" {
+			pendingCMake = &d
 			continue
 		}
-		budget[sev][tier]--
-		out = append(out, d)
+		admit(d)
 	}
+	flushPendingCMake()
 	return out, dropped, scanner.Err()
 }
 

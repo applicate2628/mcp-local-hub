@@ -118,6 +118,13 @@ type containedDeadlineChild interface {
 	terminateBy(time.Time) error
 }
 
+// containedDeferredReapChild keeps the direct POSIX group leader waitable
+// until terminate has signaled its process group. This prevents a numeric
+// process-group ID from being recycled between cmd.Wait and kill(-pid).
+type containedDeferredReapChild interface {
+	reapBy(time.Time) (containedWaitResult, bool)
+}
+
 type containedStreamDependencies struct {
 	newChild func(*exec.Cmd) (containedChild, error)
 	pipe     func() (containedReadFile, containedWriteFile, error)
@@ -400,6 +407,14 @@ func runContainedStreamWithDependencies(
 		cleanupErr = errors.Join(cleanupErr, childCloser.close())
 		cleanupErr = errors.Join(cleanupErr, closeOwned(stdoutReadCloser, stderrReadCloser))
 		readersClosed = true
+	}
+	if deferred, ok := child.(containedDeferredReapChild); ok {
+		// POSIX terminateBy reaps only after its group signal; this retrieves
+		// that one final wait result without issuing a second wait.
+		if reaped, completed := deferred.reapBy(cleanupDeadline); completed {
+			waitResult = reaped
+			waitCompleted = true
+		}
 	}
 
 	drainReady := func() {

@@ -639,13 +639,18 @@ func handleGetFilenameComponent(argsRaw string, env *varEnv, active Tri, guardTe
 		return
 	}
 	toks := tokenize(argsRaw)
-	if len(toks) < 3 {
+	if len(toks) == 0 || toks[0].Quoted || toks[0].Text == "" {
 		return
 	}
 	name := toks[0].Text
+	if len(toks) < 3 {
+		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
+		return
+	}
 	ex := env.expandToken(toks[1])
 	mode := toks[2].Text
 	if mode != "ABSOLUTE" {
+		env.setValue(name, serializedValue{resolution: valueResolution{issue: valueResolutionMalformedReference}})
 		return
 	}
 	base := env.portDir
