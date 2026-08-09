@@ -1,6 +1,8 @@
 package cmaketrace
 
 import (
+	"strconv"
+
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
 )
@@ -27,14 +29,22 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		return false
 	}
 	addString := func(value string) bool { return add(len(value) + 1) }
+	addInt := func(value int) bool { return add(len(strconv.Itoa(value))) }
+	addFloat := func(value float64) bool {
+		if value == 0 {
+			return false
+		}
+		return add(len(strconv.FormatFloat(value, 'g', -1, 64)))
+	}
 
 	for _, item := range r.IncludeChain {
-		if addString(string(item.Kind)) || addString(item.File) || add(1) || addString(item.Argument) {
+		if addString(string(item.Kind)) || addString(item.File) || addInt(item.Line) || addString(item.Argument) {
 			return true
 		}
 	}
 	for _, record := range r.Records {
-		if addString(record.File) || add(1) || addString(record.Cmd) || add(4) {
+		if addString(record.File) || addInt(record.Line) || addString(record.Cmd) || addFloat(record.Time) ||
+			addInt(record.Frame) || addInt(record.GlobalFrame) || add(5) {
 			return true
 		}
 		for _, arg := range record.Args {
@@ -44,8 +54,13 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		}
 	}
 	for _, item := range r.ExecutedLines {
-		if addString(item.File) || add(len(item.Lines)) {
+		if addString(item.File) {
 			return true
+		}
+		for _, line := range item.Lines {
+			if addInt(line) {
+				return true
+			}
 		}
 	}
 	for _, file := range r.FilesInTrace {
@@ -69,7 +84,7 @@ func (r Result) PublicResultRequiresProjection(limit int) bool {
 		}
 	}
 	for _, location := range r.Evidence.Locations {
-		if addString(location.File) || add(1) {
+		if addString(location.File) || addInt(location.Line) {
 			return true
 		}
 	}

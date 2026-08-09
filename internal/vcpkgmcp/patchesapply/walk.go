@@ -31,6 +31,20 @@ type declaredPatch struct {
 	pathUnresolved []string
 }
 
+// patchAcceptingCommands is the closed set of vcpkg helper APIs whose
+// argument contract gives PATCHES its patch-list meaning. Treating an
+// arbitrary CMake command's identically named argument as a patch declaration
+// creates confident false positives (for example, message(STATUS PATCHES ...)).
+var patchAcceptingCommands = map[string]struct{}{
+	"vcpkg_apply_patches":          {},
+	"vcpkg_extract_source_archive": {},
+	"vcpkg_from_bitbucket":         {},
+	"vcpkg_from_git":               {},
+	"vcpkg_from_github":            {},
+	"vcpkg_from_gitlab":            {},
+	"vcpkg_from_sourceforge":       {},
+}
+
 // parserStructuralSignal reports a whole-portfile structural condition that
 // prevents patch probing while still allowing the caller to retain evidence
 // observed before parsing.
@@ -262,6 +276,9 @@ func walkPortfile(src string, env *varEnv) (entries []declaredPatch, sawPatchesK
 				if declaredInvocationPatches(st.Args, env, active(), guardText(), activeUnresolved()) != patchesAbsent {
 					deferredCommandBody = true
 				}
+				continue
+			}
+			if _, acceptsPatches := patchAcceptingCommands[st.Name]; !acceptsPatches {
 				continue
 			}
 			found, items, resolution := extractPatchesArg(st.Args, env, active(), guardText(), activeUnresolved())

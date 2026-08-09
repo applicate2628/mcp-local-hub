@@ -117,7 +117,34 @@ func (p *condParser) parseAtom() Tri {
 		p.unresolved = append(p.unresolved, rhsUnresolved...)
 		return evalComparison(opTok.Text, lhsVal, rhsVal)
 	}
+	if lhsTok.Quoted {
+		return truthyQuoted(lhsVal)
+	}
 	return truthy(lhsVal)
+}
+
+// truthyQuoted applies CMake's CMP0054 NEW operand rule: a quoted operand is
+// not a variable dereference and is true only when its expanded value is a
+// documented true constant or a non-zero number. An unresolved expansion
+// remains Unknown rather than being guessed false.
+func truthyQuoted(val *string) Tri {
+	if val == nil {
+		return TriUnknown
+	}
+	v := strings.ToUpper(strings.TrimSpace(*val))
+	if cmakeFalseConstants[v] || strings.HasSuffix(v, "-NOTFOUND") {
+		return TriFalse
+	}
+	if number, err := strconv.ParseFloat(v, 64); err == nil {
+		if number == 0 {
+			return TriFalse
+		}
+		return TriTrue
+	}
+	if cmakeConstants[v] {
+		return TriTrue
+	}
+	return TriFalse
 }
 
 // resolveOperand resolves one if()-condition operand token to a concrete

@@ -546,8 +546,12 @@ const (
 	MaxFileBytesLimit        = DefaultMaxFileBytes
 	MaxRootsLimit            = DefaultMaxRoots
 	MaxVisitedEntriesLimit   = DefaultMaxVisitedEntries
-	MaxEntryFilters          = 64
-	MaxEntryFilterBytes      = 8 << 10
+	// MaxRetainedRootPathBytesLimit bounds aggregate candidate-root path
+	// storage before any root is walked. MaxRoots alone cannot bound retained
+	// bytes when directory entries carry unusually long paths.
+	MaxRetainedRootPathBytesLimit = 8 << 20
+	MaxEntryFilters               = 64
+	MaxEntryFilterBytes           = 8 << 10
 	// MaxEdgesLimit and MaxRetainedEdgeBytesLimit bound the aggregate result,
 	// independently of per-file and traversal-node limits.
 	MaxEdgesLimit                       = 20000
@@ -696,6 +700,7 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 	}
 
 	var starts []string
+	retainedRootPathBytes := int64(0)
 	visitedEntries := 0
 	rootEnumerationFailed := error(nil)
 	walkErr := operations.walkDir(absRoot, func(path string, d fs.DirEntry, err error) error {
@@ -744,7 +749,15 @@ func walkTreeWithOperations(ctx context.Context, root, workspaceRoot string, ent
 				fmt.Sprintf("stopped enumerating candidate roots at MaxRoots=%d", w.opts.MaxRoots))
 			return fs.SkipAll
 		}
+		pathBytes := int64(len(path)) + 1
+		if pathBytes > MaxRetainedRootPathBytesLimit-retainedRootPathBytes {
+			w.rootEnumerationCapped = true
+			w.recordCoverage(filepath.Dir(path), CoverageRootEnumerationCapped,
+				fmt.Sprintf("stopped enumerating candidate roots at retained-path byte limit=%d", MaxRetainedRootPathBytesLimit))
+			return fs.SkipAll
+		}
 		starts = append(starts, path)
+		retainedRootPathBytes += pathBytes
 		return nil
 	})
 	if rootEnumerationFailed != nil {

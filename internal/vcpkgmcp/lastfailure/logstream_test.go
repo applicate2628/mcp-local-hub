@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type streamTestFS struct {
@@ -17,7 +18,16 @@ type streamTestFS struct {
 	openError error
 }
 
-func (*streamTestFS) Stat(string) (os.FileInfo, error)  { return nil, os.ErrNotExist }
+type streamRegularFileInfo struct{}
+
+func (streamRegularFileInfo) Name() string       { return "stream.log" }
+func (streamRegularFileInfo) Size() int64        { return 0 }
+func (streamRegularFileInfo) Mode() os.FileMode  { return 0 }
+func (streamRegularFileInfo) ModTime() time.Time { return time.Time{} }
+func (streamRegularFileInfo) IsDir() bool        { return false }
+func (streamRegularFileInfo) Sys() any           { return nil }
+
+func (*streamTestFS) Stat(string) (os.FileInfo, error)  { return streamRegularFileInfo{}, nil }
 func (*streamTestFS) OpenDir(string) (DirReader, error) { return nil, os.ErrNotExist }
 func (f *streamTestFS) Open(string) (io.ReadCloser, error) {
 	f.opens++

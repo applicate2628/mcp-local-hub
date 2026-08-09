@@ -77,6 +77,13 @@ func (s *phaseLogStreamScanner) scan(ctx context.Context, fsys FS, file phaseLog
 	if lineBytes <= 0 {
 		return result, errors.New("non-positive phase-log line limit")
 	}
+	info, err := fsys.Stat(file.Path)
+	if err != nil {
+		return result, err
+	}
+	if info == nil || !info.Mode().IsRegular() {
+		return result, errors.New("phase log is not a regular file")
+	}
 	rc, err := fsys.Open(file.Path)
 	if err != nil {
 		return result, err
