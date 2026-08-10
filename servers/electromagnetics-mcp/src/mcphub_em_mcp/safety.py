@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 
@@ -40,6 +40,11 @@ def output_project_file(raw_path: str, suffix: str, allow_overwrite: bool) -> Pa
 
 
 def existing_output_root(raw_path: str) -> Path:
+    # Parse with Windows semantics even when tests run on another platform. UNC
+    # and device-namespace paths have drives beginning with ``\\`` and may
+    # cause project data (and credentials) to be sent to a remote host.
+    if PureWindowsPath(raw_path).drive.startswith("\\\\"):
+        raise ValueError("output_root must be a local directory")
     path = Path(raw_path)
     if not path.is_absolute():
         raise ValueError("output_root must be absolute")
