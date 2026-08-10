@@ -5,8 +5,8 @@ Read this page for current delivery status. Make lifecycle changes through `scri
 <!-- BEGIN GENERATED WORK-ITEMS STATUS -->
 Read-model: work-items-readme-v1
 Ordered sources: backlog|active|roadmaps|archive
-Canonical changes through: 2026-08-09T19:49:44Z
-Canonical input digest: sha256:d2e66185c38aa2b2383d739fba34c7cd5b4b05889bb3b2f6e1301d6660d4693e
+Canonical changes through: 2026-08-10T09:17:11Z
+Canonical input digest: sha256:3e9a64560afd9436cef655756bc7748835091165be4181f3a8f836fe99af4d15
 
 ## Current focus
 
@@ -80,5 +80,6 @@ Canonical input digest: sha256:d2e66185c38aa2b2383d739fba34c7cd5b4b05889bb3b2f6e
 - [x] [DELIVERED — PR #591 was merged into `master` and deployed as part of the completed open-PR wave.](archive/2026-08/2026-07-27-pr591-bot-findings/closure.md) — Darwin/BSD strict-process lifecycle behavior remains compile-verified rather than runtime-verified; no Windows or Linux runtime blocker remains. — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED and DEPLOYED in PR #594, squash commit `3d87718393b09b7770662df367653a5b09309a29`.](archive/2026-08/2026-08-01-fetch-mcp-dependency-compat/closure.md) — the deployed recovery build should be replaced by an ordinary `master` deployment after its other integrated PRs merge; no fetch blocker remains. — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED — PRs #583, #588, #589, #590, #591, #592, and #595 are merged; GitHub reports no open pull requests.](archive/2026-08/2026-08-08-finish-open-pr-bot-findings/closure.md) — the scheduled weekly refresh is intentionally Stopped; four unmanaged stdio MCP entries remain an operational advisory and do not represent hub downtime. — WI-LEGACY-READ-COMPAT
+- [x] [DELIVERED — PR #596 was merged, the canonical hub was upgraded, and the new HFSS and CST MCP servers are running and connected.](archive/2026-08/2026-08-10-hfss-cst-mcp-servers/closure.md) — HFSS exports the latest adaptive mesh pass; selecting an arbitrary historical pass remains fail-closed because AEDT does not expose a stable documented cache interface for it. Legacy ACIS projects may require a one-time vendor conversion before automated project construction.
 
 <!-- END GENERATED WORK-ITEMS STATUS -->
