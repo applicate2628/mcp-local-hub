@@ -5,7 +5,7 @@ transport: stdio-bridge
 command: uvx
 base_args:
   - "--from"
-  - "git+https://github.com/applicate2628/mcp-local-hub.git@e56b87dad0395fff90365e40259eb9dc84802d2f#subdirectory=servers/electromagnetics-mcp"
+  - "git+https://github.com/applicate2628/mcp-local-hub.git@6d6517eca4e1f5219d20838c4dee318eee2ea375#subdirectory=servers/electromagnetics-mcp"
   - "mcphub-hfss-mcp"
 required_binaries: [uvx]
 
