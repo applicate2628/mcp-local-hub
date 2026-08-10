@@ -5,8 +5,8 @@ Read this page for current delivery status. Make lifecycle changes through `scri
 <!-- BEGIN GENERATED WORK-ITEMS STATUS -->
 Read-model: work-items-readme-v1
 Ordered sources: backlog|active|roadmaps|archive
-Canonical changes through: 2026-08-10T09:17:11Z
-Canonical input digest: sha256:0078d5f5b52acb70e4b9bdc63022763416d480aa4d1fcde9243af07a0a69738e
+Canonical changes through: 2026-08-10T10:45:07Z
+Canonical input digest: sha256:3a3c45ddab8c323388995682b2eef603fb5d022790d64daf0f74fe04257d2956
 
 ## Current focus
 
@@ -15,7 +15,6 @@ Canonical input digest: sha256:0078d5f5b52acb70e4b9bdc63022763416d480aa4d1fcde92
 - [ ] [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) — [work item](active/2026-07-20-cli-first-run-ux/status.md)
 - [ ] [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) — investigation complete → design lanes dispatched — [work item](active/2026-07-20-supervisor-never-crash-reliability/status.md)
 - [ ] [2026-07-25-mcp-front-daemon](active/2026-07-25-mcp-front-daemon/status.md) — [work item](active/2026-07-25-mcp-front-daemon/status.md)
-- [ ] [correct the six HFSS/CST MCP evaluation findings while preserving live hub availability.](active/2026-08-10-hfss-cst-mcp-feedback-r1/status.md) — reproduce each finding and map it to the owning transport, bridge, or server schema boundary. — [work item](active/2026-08-10-hfss-cst-mcp-feedback-r1/status.md)
 
 ## Next actions
 
@@ -81,6 +80,7 @@ Canonical input digest: sha256:0078d5f5b52acb70e4b9bdc63022763416d480aa4d1fcde92
 - [x] [DELIVERED — PR #591 was merged into `master` and deployed as part of the completed open-PR wave.](archive/2026-08/2026-07-27-pr591-bot-findings/closure.md) — Darwin/BSD strict-process lifecycle behavior remains compile-verified rather than runtime-verified; no Windows or Linux runtime blocker remains. — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED and DEPLOYED in PR #594, squash commit `3d87718393b09b7770662df367653a5b09309a29`.](archive/2026-08/2026-08-01-fetch-mcp-dependency-compat/closure.md) — the deployed recovery build should be replaced by an ordinary `master` deployment after its other integrated PRs merge; no fetch blocker remains. — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED — PRs #583, #588, #589, #590, #591, #592, and #595 are merged; GitHub reports no open pull requests.](archive/2026-08/2026-08-08-finish-open-pr-bot-findings/closure.md) — the scheduled weekly refresh is intentionally Stopped; four unmanaged stdio MCP entries remain an operational advisory and do not represent hub downtime. — WI-LEGACY-READ-COMPAT
+- [x] [DELIVERED — the reproduced transport/session/schema defects are fixed, published, deployed, and verified on the live HFSS/CST endpoints.](archive/2026-08/2026-08-10-hfss-cst-mcp-feedback-r1/closure.md) — no real HFSS or CST solve was launched in this corrective cycle; vendor-runtime numerical acceptance remains a separate explicit-approval activity.
 - [x] [DELIVERED — PR #596 was merged, the canonical hub was upgraded, and the new HFSS and CST MCP servers are running and connected.](archive/2026-08/2026-08-10-hfss-cst-mcp-servers/closure.md) — HFSS exports the latest adaptive mesh pass; selecting an arbitrary historical pass remains fail-closed because AEDT does not expose a stable documented cache interface for it. Legacy ACIS projects may require a one-time vendor conversion before automated project construction.
 
 <!-- END GENERATED WORK-ITEMS STATUS -->

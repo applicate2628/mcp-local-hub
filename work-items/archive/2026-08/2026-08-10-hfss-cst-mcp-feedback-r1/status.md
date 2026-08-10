@@ -1,7 +1,7 @@
 ---
 template: staged
 orchestration: full-lead
-status: active
+status: completed
 started: 2026-08-10
 updated: 2026-08-10
 ---
@@ -13,20 +13,20 @@ Reopens: 2026-08-10-hfss-cst-mcp-servers
 ## Current state
 
 - **Task**: correct the five reproduced HFSS/CST MCP defects, preserve the refuted resource-error behavior, and keep the live hub available.
-- **Current step**: await explicit publication approval for the verified two-commit correction.
-- **Last result**: product commit `6d6517eca4e1f5219d20838c4dee318eee2ea375` and its HFSS/CST manifest pin are locally committed; staged publication scans were clean.
-- **Next action**: after approval, range-scan and push both commits, verify the hosted branch, rebuild/install the hub, restart only HFSS/CST, and repeat the safe live matrix.
+- **Current step**: closure and archive.
+- **Last result**: both commits are published at `2a311dd402e861c8c9468e7b4793dd68ce3b7fb6`; the canonical hub and complete daemon fleet are restored, and the safe live HFSS/CST matrix passes.
+- **Next action**: archive this terminal successor work-item.
 - **Scope boundary**: shared MCP Streamable HTTP transport only where required; electromagnetics package schemas and bridge resource propagation; no solver execution or unrelated daemon behavior.
 - **Owner**: main session Lead with analyst, backend-engineer, and QA stages.
 - **Integration owner**: main session Lead.
 - **Evidence gate**: all six findings independently reproduced before edit; focused and sibling regression tests after edit; explicit user approval before real solver jobs or publication.
 - **Primary task**: correct the five reproduced transport/session/schema defects from `MCP-FEEDBACK-2026-08-10.md`, preserve the refuted resource-error behavior, and avoid disrupting the live hub.
-- **Primary task status**: locally committed and verified; publication and live upgrade pending
+- **Primary task status**: delivered, deployed, and verified
 - **Interruption marker**: none
-- **Stage**: Publication approval gate
+- **Stage**: Closure and archive
 - **Main conv role**: Lead and integration owner; backend-engineer implementation accepted
 - **Last accepted artifact**: `design.md` and the implemented RED-to-GREEN owner corrections
-- **Open obligations before closeout**: reproduce all six findings; implement owner-level fixes; verify isolated and live-safe behavior; obtain approval before real solver jobs or publication.
+- **Open obligations before closeout**: lifecycle archive only; real solver acceptance remains separately approval-gated.
 - **Epic**: none
 - **Depends-on**: none
 - **Priority**: urgent
@@ -48,4 +48,5 @@ Reopens: 2026-08-10-hfss-cst-mcp-servers
 
 ## Next action
 
-After explicit approval, publish the two commits and perform the bounded live upgrade plus safe availability verification.
+Archive the terminal work-item and publish its lifecycle bookkeeping.
+Lifecycle-schema: work-items-physical-v1
