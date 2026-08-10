@@ -39,11 +39,46 @@ async def test_r1_solve_schema_is_closed_and_advertises_exact_actions(server, na
 @pytest.mark.asyncio
 async def test_r1_cst_schema_declares_two_positive_frequency_bounds() -> None:
     tool = await _tool(cst_module.mcp, "cst_solve")
-    branches = tool.inputSchema["properties"]["frequency_range_ghz"]["anyOf"]
-    array_schema = next(branch for branch in branches if branch.get("type") == "array")
-    assert array_schema["minItems"] == 2
-    assert array_schema["maxItems"] == 2
-    assert array_schema["items"]["exclusiveMinimum"] == 0
+    assert "start/preflight require an explicit frequency grid" in tool.description
+    schema = tool.inputSchema
+    frequency_range = schema["properties"]["frequency_range_ghz"]
+    frequency_samples = schema["properties"]["frequency_samples_ghz"]
+
+    assert frequency_range["type"] == "array"
+    assert "default" not in frequency_range
+    assert frequency_range["minItems"] == 2
+    assert frequency_range["maxItems"] == 2
+    assert frequency_range["items"]["exclusiveMinimum"] == 0
+
+    assert frequency_samples["type"] == "array"
+    assert "default" not in frequency_samples
+    assert frequency_samples["minItems"] == 1
+    assert frequency_samples["maxItems"] == 10000
+    assert frequency_samples["items"]["exclusiveMinimum"] == 0
+
+    [action_requirements] = schema["allOf"]
+    assert action_requirements["if"] == {
+        "properties": {"action": {"enum": ["status", "result", "cancel"]}},
+        "required": ["action"],
+    }
+    assert action_requirements["then"] == {
+        "properties": {
+            "job_id": {"title": "Job Id", "type": "string"},
+        },
+        "required": ["job_id"],
+    }
+    assert action_requirements["else"] == {
+        "properties": {
+            "project_path": {"title": "Project Path", "type": "string"},
+            "output_root": {"title": "Output Root", "type": "string"},
+        },
+        "required": [
+            "project_path",
+            "output_root",
+            "frequency_range_ghz",
+            "frequency_samples_ghz",
+        ],
+    }
 
 
 @pytest.mark.asyncio
@@ -129,3 +164,58 @@ def test_r1_cst_preflight_rejects_cross_field_mismatch_before_confirmation(tmp_p
             frequency_samples_ghz=[5.0, 20.0],
             confirm=False,
         )
+
+
+@pytest.mark.parametrize(
+    ("frequency_range_ghz", "frequency_samples_ghz", "message"),
+    [
+        (None, None, "frequency_range_ghz"),
+        (None, [1.0, 5.0, 20.0], "frequency_range_ghz"),
+        ([1.0, 20.0], None, "frequency_samples_ghz"),
+        ([1.0, 20.0], [1.0, 20.0], "must include adaptation_frequency_ghz"),
+    ],
+)
+def test_r1_cst_preflight_requires_complete_explicit_frequency_grid(
+    tmp_path,
+    monkeypatch,
+    frequency_range_ghz,
+    frequency_samples_ghz,
+    message,
+) -> None:
+    project = tmp_path / "model.cst"
+    project.write_bytes(b"fixture")
+
+    def forbidden_start(**_kwargs):
+        raise AssertionError("preflight submitted a job")
+
+    monkeypatch.setattr(cst_module._jobs, "start", forbidden_start)
+    with pytest.raises(ValueError, match=message):
+        cst_module.cst_solve(
+            action="preflight",
+            project_path=str(project),
+            output_root=str(tmp_path),
+            frequency_range_ghz=frequency_range_ghz,
+            frequency_samples_ghz=frequency_samples_ghz,
+            confirm=False,
+        )
+
+
+def test_r1_cst_job_actions_do_not_require_frequency_grid(monkeypatch) -> None:
+    seen: list[tuple[str, str | None]] = []
+
+    def route(_jobs, action, *, job_id):
+        seen.append((action, job_id))
+        return {"action": action, "job_id": job_id}
+
+    monkeypatch.setattr(cst_module, "solve_action", route)
+    for action in ("status", "result", "cancel"):
+        assert cst_module.cst_solve(action=action, job_id="qa-job") == {
+            "action": action,
+            "job_id": "qa-job",
+        }
+
+    assert seen == [
+        ("status", "qa-job"),
+        ("result", "qa-job"),
+        ("cancel", "qa-job"),
+    ]

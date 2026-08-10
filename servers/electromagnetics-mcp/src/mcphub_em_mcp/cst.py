@@ -30,7 +30,7 @@ from .jobs import JobContext, JobManager, solve_action, utc_now
 from .provenance import artifact_record, sha256_file, write_json
 from .safety import existing_output_root, existing_project_file, require_confirmation, require_windows
 from .slim import read_slim, write_surface_gmsh, write_volume_gmsh
-from .strict_fastmcp import strict_fastmcp
+from .strict_fastmcp import publish_action_requirements, strict_fastmcp
 
 mcp = strict_fastmcp(
     "mcphub-cst",
@@ -278,7 +278,7 @@ def cst_solve(
     license_poll_s: LicensePollSeconds = 30,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Use start, status, result, cancel, or preflight for one isolated CST solve job."""
+    """Use start, status, result, cancel, or preflight; start/preflight require an explicit frequency grid."""
     normalized_action = action.strip().lower()
     if normalized_action not in {"start", "preflight"}:
         routed = solve_action(_jobs, normalized_action, job_id=job_id)
@@ -357,6 +357,21 @@ def cst_solve(
         timeout_s=timeout_s,
         runner=_runner(project, settings, license_wait_timeout_s, license_poll_s),
     )
+
+
+publish_action_requirements(
+    mcp,
+    "cst_solve",
+    routed_actions=("status", "result", "cancel"),
+    routed_required=("job_id",),
+    execution_required=(
+        "project_path",
+        "output_root",
+        "frequency_range_ghz",
+        "frequency_samples_ghz",
+    ),
+    non_nullable_execution_fields=("frequency_range_ghz", "frequency_samples_ghz"),
+)
 
 
 @mcp.tool()

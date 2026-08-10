@@ -40,7 +40,12 @@ HFSS volume meshes are exported by an embedded, fail-closed reader for the valid
 
 AEDT 2025 R1 cannot directly open legacy projects whose geometry is still stored with the ACIS kernel. The server first runs the official batch-upgrade operation on the job-local copy and returns `hfss_project_kernel_migration_required` when an intermediate AEDT 2023 R1 through 2024 R2 conversion is required. The input project is never modified.
 
-`cst_solve` requires `frequency_range_ghz=[low, high]`; every sample interval must lie inside that global range. The exported result bundle includes the documented port-mode refinement progression from `1D Results\\Convergence\\Portmodes\\Progression` when CST produced it.
+For `cst_solve` actions `start` and `preflight`, both `frequency_range_ghz=[low, high]`
+and `frequency_samples_ghz=[...]` are required; the server never invents a default grid. Every
+sample must lie inside the global range, and the samples must include
+`adaptation_frequency_ghz`. The `status`, `result`, and `cancel` actions require only `job_id`.
+The exported result bundle includes the documented port-mode refinement progression from
+`1D Results\\Convergence\\Portmodes\\Progression` when CST produced it.
 
 ## Installation and development
 

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -16,3 +17,81 @@ def strict_fastmcp(name: str, **kwargs: Any) -> FastMCP:
     config["extra"] = "forbid"
     ArgModelBase.model_config = ConfigDict(**config)
     return FastMCP(name, **kwargs)
+
+
+def publish_action_requirements(
+    server: FastMCP,
+    tool_name: str,
+    *,
+    routed_actions: tuple[str, ...],
+    routed_required: tuple[str, ...],
+    execution_required: tuple[str, ...],
+    non_nullable_execution_fields: tuple[str, ...] = (),
+) -> None:
+    """Publish action-dependent required fields without changing the Python call model."""
+    tool = server._tool_manager.get_tool(tool_name)  # noqa: SLF001
+    if tool is None:
+        raise RuntimeError(f"cannot configure unknown tool: {tool_name}")
+
+    schema = deepcopy(tool.parameters)
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        raise RuntimeError(f"{tool_name} has no object properties")
+    if "allOf" in schema:
+        raise RuntimeError(f"{tool_name} already declares conditional requirements")
+
+    required_fields = {*routed_required, *execution_required}
+    missing_fields = sorted(required_fields.difference(properties))
+    if missing_fields:
+        raise RuntimeError(f"{tool_name} requirement names unknown fields: {missing_fields}")
+
+    action_schema = properties.get("action")
+    if not isinstance(action_schema, dict) or not set(routed_actions).issubset(action_schema.get("enum", [])):
+        raise RuntimeError(f"{tool_name} action schema does not contain every routed action")
+
+    def non_null_property(field_name: str) -> dict[str, Any]:
+        property_schema = properties.get(field_name)
+        if not isinstance(property_schema, dict):
+            raise RuntimeError(f"{tool_name}.{field_name} has no property schema")
+        branches = property_schema.get("anyOf")
+        if not isinstance(branches, list):
+            raise RuntimeError(f"{tool_name}.{field_name} is not an optional schema")
+        if not all(isinstance(branch, dict) for branch in branches):
+            raise RuntimeError(f"{tool_name}.{field_name} has a non-object schema branch")
+        non_null = [branch for branch in branches if branch.get("type") != "null"]
+        nulls = [branch for branch in branches if branch.get("type") == "null"]
+        if len(non_null) != 1 or len(nulls) != 1 or property_schema.get("default") is not None:
+            raise RuntimeError(f"{tool_name}.{field_name} has an unsupported optional schema shape")
+        replacement = deepcopy(non_null[0])
+        for metadata_key in ("description", "title"):
+            if metadata_key in property_schema:
+                replacement[metadata_key] = property_schema[metadata_key]
+        return replacement
+
+    for field_name in non_nullable_execution_fields:
+        replacement = non_null_property(field_name)
+        properties[field_name] = replacement
+
+    routed_properties = {field_name: non_null_property(field_name) for field_name in routed_required}
+    execution_properties = {
+        field_name: non_null_property(field_name)
+        for field_name in execution_required
+        if field_name not in non_nullable_execution_fields
+    }
+    schema["allOf"] = [
+        {
+            "if": {
+                "properties": {"action": {"enum": list(routed_actions)}},
+                "required": ["action"],
+            },
+            "then": {
+                "properties": routed_properties,
+                "required": list(routed_required),
+            },
+            "else": {
+                "properties": execution_properties,
+                "required": list(execution_required),
+            },
+        }
+    ]
+    tool.parameters = schema
