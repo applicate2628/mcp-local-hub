@@ -16,24 +16,26 @@ import (
 	"time"
 )
 
-func acquireSessionID(t *testing.T, baseURL string) string {
+func acquireSessionID(t *testing.T, h *StdioHost) string {
 	t.Helper()
-	req, _ := http.NewRequest("POST", baseURL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"ping"}`))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
+	sid, err := h.createSession("2025-11-25")
 	if err != nil {
-		t.Fatalf("acquire session id: %v", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusAccepted {
-		body, _ := io.ReadAll(resp.Body)
-		t.Fatalf("acquire session id: status=%d body=%s", resp.StatusCode, body)
-	}
-	sid := resp.Header.Get("Mcp-Session-Id")
-	if sid == "" {
-		t.Fatal("acquire session id: empty Mcp-Session-Id header")
+		t.Fatalf("create test session: %v", err)
 	}
 	return sid
+}
+
+func setSessionForNonInitialize(t *testing.T, req *http.Request, body, sid string) {
+	t.Helper()
+	var envelope struct {
+		Method string `json:"method"`
+	}
+	if err := json.Unmarshal([]byte(body), &envelope); err != nil {
+		t.Fatalf("decode test request: %v", err)
+	}
+	if envelope.Method != "initialize" {
+		req.Header.Set("Mcp-Session-Id", sid)
+	}
 }
 
 func TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE(t *testing.T) {
@@ -89,7 +91,7 @@ func TestStdioHostLoopbackGuardRejectsHostilePOSTAndSSE(t *testing.T) {
 				body = strings.NewReader(`{"jsonrpc":"2.0","method":"notifications/initialized"}`)
 			}
 			req := httptest.NewRequestWithContext(reqCtx, tc.method, "http://127.0.0.1/mcp", body)
-			req.Header.Set("Mcp-Session-Id", h.sessionID)
+			req.Header.Set("Mcp-Session-Id", "unused-hostile-session")
 			req.Header.Set("Content-Type", "application/json")
 			if tc.host != "" {
 				req.Host = tc.host
@@ -126,6 +128,7 @@ func TestStdioHostLoopbackGuardAllowsNoOriginPOST(t *testing.T) {
 
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","method":"ping"}`))
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Mcp-Session-Id", acquireSessionID(t, h))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST without Origin: %v", err)
@@ -134,9 +137,6 @@ func TestStdioHostLoopbackGuardAllowsNoOriginPOST(t *testing.T) {
 	if resp.StatusCode != http.StatusAccepted {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("POST without Origin status=%d want %d body=%s", resp.StatusCode, http.StatusAccepted, body)
-	}
-	if resp.Header.Get("Mcp-Session-Id") == "" {
-		t.Fatal("POST without Origin did not return Mcp-Session-Id")
 	}
 }
 
@@ -353,6 +353,7 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
+	sid := acquireSessionID(t, h)
 
 	// Two clients send requests with id=100 and id=200 concurrently.
 	// Each must receive back its own id, not the other client's.
@@ -361,6 +362,7 @@ func TestHostHTTPIDMultiplexing(t *testing.T) {
 		req, _ := http.NewRequest("POST", ts.URL+"/mcp", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
+		req.Header.Set("Mcp-Session-Id", sid)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Errorf("POST id=%d: %v", id, err)
@@ -568,12 +570,16 @@ func TestHostStopUnblocksPendingHandlers(t *testing.T) {
 
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
+	sid := acquireSessionID(t, h)
 
 	// Start a request that will hang waiting for subprocess response.
 	done := make(chan int, 1)
 	go func() {
-		resp, err := http.Post(ts.URL+"/mcp", "application/json",
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp",
 			strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Mcp-Session-Id", sid)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			done <- -1
 			return
@@ -636,7 +642,7 @@ func TestHostStopUnblocksSSE(t *testing.T) {
 		defer close(sseDone)
 		req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
 		req.Header.Set("Accept", "text/event-stream")
-		req.Header.Set("Mcp-Session-Id", acquireSessionID(t, ts.URL))
+		req.Header.Set("Mcp-Session-Id", acquireSessionID(t, h))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return
@@ -706,13 +712,17 @@ func TestStdioHost_ChildExitsUnexpectedly_UnblocksPendingRequest(t *testing.T) {
 
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
+	sid := acquireSessionID(t, h)
 
 	// Fire the request; it will write a line to the child (which then exits)
 	// and block waiting for a reply that never comes. The handler must
 	// observe childExited and return 502, not wait 30s for the timeout.
 	start := time.Now()
-	resp, err := http.Post(ts.URL+"/mcp", "application/json",
+	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp",
 		strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"test"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Mcp-Session-Id", sid)
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("POST: %v", err)
 	}
@@ -812,7 +822,7 @@ func TestStdioHost_SSE_ChildExitUnblocksStream(t *testing.T) {
 		defer close(sseDone)
 		req, _ := http.NewRequest("GET", ts.URL+"/mcp", nil)
 		req.Header.Set("Accept", "text/event-stream")
-		req.Header.Set("Mcp-Session-Id", acquireSessionID(t, ts.URL))
+		req.Header.Set("Mcp-Session-Id", acquireSessionID(t, h))
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return
@@ -849,7 +859,7 @@ func TestHostDELETETerminates(t *testing.T) {
 	defer ts.Close()
 
 	req, _ := http.NewRequest("DELETE", ts.URL+"/mcp", nil)
-	req.Header.Set("Mcp-Session-Id", acquireSessionID(t, ts.URL))
+	req.Header.Set("Mcp-Session-Id", acquireSessionID(t, h))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -880,8 +890,8 @@ func TestHostSSERequiresSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusUnauthorized {
-		t.Fatalf("GET /mcp without session id: got %d want %d", resp.StatusCode, http.StatusUnauthorized)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("GET /mcp without session id: got %d want %d", resp.StatusCode, http.StatusBadRequest)
 	}
 }
 

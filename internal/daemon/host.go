@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
@@ -129,7 +130,13 @@ type StdioHost struct {
 	sseMu      sync.Mutex
 	sseClients []chan []byte
 	sseActive  atomic.Int32
-	sessionID  string
+
+	// HTTP sessions are adapter-owned and intentionally independent from the
+	// one shared stdio subprocess session. Every successful HTTP initialize
+	// mints a distinct client token bound to the negotiated protocol version.
+	sessionMu      sync.Mutex
+	sessions       map[string]stdioHTTPSession
+	nextSessionSeq uint64
 
 	done        chan struct{}                   // closed by Stop() to unblock pending handlers
 	procExited  chan struct{}                   // closed by the watcher goroutine when cmd.Process.Wait() returns (Phase 1 — OS-exit detected, before pipe drain)
@@ -152,6 +159,22 @@ const maxMCPPostBodyBytes int64 = 1 << 20 // 1 MiB
 // handler returns 429; legitimate MCP usage rarely exceeds a handful of
 // concurrent requests per client, so 128 is a generous bound.
 const maxPendingRequests = 128
+
+// maxStdioHTTPSessions bounds abandoned HTTP clients. At the cap the oldest
+// initialize-created session is terminated; MCP explicitly permits servers to
+// terminate sessions at any time, and the evicted client receives 404 on reuse.
+const maxStdioHTTPSessions = 256
+
+type stdioHTTPSession struct {
+	protocolVersion string
+	sequence        uint64
+}
+
+var stdioHTTPSupportedProtocolVersions = map[string]bool{
+	"2025-11-25": true,
+	"2025-06-18": true,
+	"2025-03-26": true,
+}
 
 // ErrTooManyPending is the sentinel a SendRPC pending-cap refusal satisfies
 // via errors.Is. It is a THIRD identity class in the #492 error-shape model
@@ -216,19 +239,15 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
 		return nil, errors.New("HostConfig.Command is required")
 	}
-	sid, err := randomSessionID()
-	if err != nil {
-		return nil, fmt.Errorf("generate session id: %w", err)
-	}
 	return &StdioHost{
 		cfg:         cfg,
 		testStdout:  make(chan []byte, 16),
 		pending:     make(map[int64]chan json.RawMessage),
+		sessions:    make(map[string]stdioHTTPSession),
 		bridge:      NewProtocolBridge(),
 		done:        make(chan struct{}),
 		procExited:  make(chan struct{}),
 		childExited: make(chan struct{}),
-		sessionID:   sid,
 	}, nil
 }
 
@@ -895,13 +914,13 @@ func (h *StdioHost) HTTPHandler() http.Handler {
 		case http.MethodPost:
 			h.handlePOST(w, r)
 		case http.MethodDelete:
-			if !h.validSession(r) {
-				http.Error(w, "missing or invalid session id", http.StatusUnauthorized)
+			sid, ok := h.validateRequestSession(w, r)
+			if !ok {
 				return
 			}
-			// Session termination: subprocess stays alive (shared across clients),
-			// but we acknowledge the client's request. Nothing to clean up on our side
-			// since pending requests are per-request scoped.
+			h.deleteSession(sid)
+			// The subprocess stays alive because it is shared across HTTP
+			// sessions; only this adapter-owned session is terminated.
 			w.WriteHeader(http.StatusNoContent)
 		case http.MethodGet:
 			h.handleSSE(w, r)
@@ -925,7 +944,6 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, maxMCPPostBodyBytes)
 	defer r.Body.Close()
-	w.Header().Set("Mcp-Session-Id", h.sessionID)
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		var maxErr *http.MaxBytesError
@@ -950,6 +968,18 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	if m, ok := msg["method"]; ok {
 		_ = json.Unmarshal(m, &origMethod)
 	}
+	requestedProtocolVersion := initializeRequestProtocolVersion(msg)
+	if origMethod == "initialize" {
+		if _, ok := validateRequestProtocolVersion(w, r); !ok {
+			return
+		}
+		if r.Header.Get("Mcp-Session-Id") != "" {
+			http.Error(w, "initialize must not include a session id", http.StatusBadRequest)
+			return
+		}
+	} else if _, ok := h.validateRequestSession(w, r); !ok {
+		return
+	}
 
 	// Initialize-cache short-circuit. Stdio MCP servers expect `initialize`
 	// once per process lifetime; on a cache hit we replay the prior response
@@ -960,9 +990,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 			_ = json.Unmarshal(cached, &respMsg)
 			respMsg["id"] = origIDRaw
 			out, _ := json.Marshal(respMsg)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(out)
+			h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
 			return
 		}
 	}
@@ -1031,9 +1059,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		}
 		respMsg["id"] = origIDRaw
 		out, _ := json.Marshal(respMsg)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(out)
+		h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
 		return
 	default:
 	}
@@ -1061,9 +1087,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		}
 		respMsg["id"] = origIDRaw
 		out, _ := json.Marshal(respMsg)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write(out)
+		h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
 	case <-h.done:
 		// Codex CLI xhigh re-review on 479cbc3 (P2): a race-filled response
 		// must beat the failure verdict — re-check respCh non-blockingly
@@ -1079,9 +1103,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 			}
 			respMsg["id"] = origIDRaw
 			out, _ := json.Marshal(respMsg)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(out)
+			h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
 			return
 		default:
 		}
@@ -1103,9 +1125,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 			}
 			respMsg["id"] = origIDRaw
 			out, _ := json.Marshal(respMsg)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			_, _ = w.Write(out)
+			h.writeStdioJSONResponse(w, origMethod, requestedProtocolVersion, out)
 			return
 		default:
 		}
@@ -1117,13 +1137,159 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func initializeRequestProtocolVersion(msg map[string]json.RawMessage) string {
+	paramsRaw, ok := msg["params"]
+	if !ok {
+		return ""
+	}
+	var params struct {
+		ProtocolVersion string `json:"protocolVersion"`
+	}
+	if err := json.Unmarshal(paramsRaw, &params); err != nil {
+		return ""
+	}
+	return params.ProtocolVersion
+}
+
+func initializeResponseProtocolVersion(body []byte, requested string) (string, bool, error) {
+	var envelope struct {
+		Error  json.RawMessage `json:"error"`
+		Result *struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return "", false, fmt.Errorf("decode initialize response: %w", err)
+	}
+	if len(envelope.Error) > 0 && !bytes.Equal(bytes.TrimSpace(envelope.Error), []byte("null")) {
+		return "", false, nil
+	}
+	if envelope.Result == nil {
+		return "", false, errors.New("initialize response missing result")
+	}
+	version := envelope.Result.ProtocolVersion
+	if version == "" {
+		version = requested
+	}
+	if !stdioHTTPSupportedProtocolVersions[version] {
+		return "", false, fmt.Errorf("initialize negotiated unsupported protocol version %q", version)
+	}
+	return version, true, nil
+}
+
+func (h *StdioHost) writeStdioJSONResponse(
+	w http.ResponseWriter,
+	origMethod string,
+	requestedProtocolVersion string,
+	body []byte,
+) {
+	if origMethod == "initialize" {
+		version, success, err := initializeResponseProtocolVersion(body, requestedProtocolVersion)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadGateway)
+			return
+		}
+		if success {
+			sid, err := h.createSession(version)
+			if err != nil {
+				http.Error(w, "create MCP session: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Mcp-Session-Id", sid)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+func (h *StdioHost) createSession(protocolVersion string) (string, error) {
+	for attempt := 0; attempt < 4; attempt++ {
+		sid, err := randomSessionID()
+		if err != nil {
+			return "", err
+		}
+
+		h.sessionMu.Lock()
+		if h.sessions == nil {
+			h.sessions = make(map[string]stdioHTTPSession)
+		}
+		if _, exists := h.sessions[sid]; exists {
+			h.sessionMu.Unlock()
+			continue
+		}
+		if len(h.sessions) >= maxStdioHTTPSessions {
+			var oldestID string
+			var oldestSequence uint64
+			for candidateID, session := range h.sessions {
+				if oldestID == "" || session.sequence < oldestSequence {
+					oldestID = candidateID
+					oldestSequence = session.sequence
+				}
+			}
+			delete(h.sessions, oldestID)
+		}
+		h.nextSessionSeq++
+		h.sessions[sid] = stdioHTTPSession{
+			protocolVersion: protocolVersion,
+			sequence:        h.nextSessionSeq,
+		}
+		h.sessionMu.Unlock()
+		return sid, nil
+	}
+	return "", errors.New("session id collision limit exceeded")
+}
+
+func (h *StdioHost) lookupSession(sid string) (stdioHTTPSession, bool) {
+	h.sessionMu.Lock()
+	defer h.sessionMu.Unlock()
+	session, ok := h.sessions[sid]
+	return session, ok
+}
+
+func (h *StdioHost) deleteSession(sid string) {
+	h.sessionMu.Lock()
+	delete(h.sessions, sid)
+	h.sessionMu.Unlock()
+}
+
+func validateRequestProtocolVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
+	protocolVersion := r.Header.Get("MCP-Protocol-Version")
+	if protocolVersion != "" && !stdioHTTPSupportedProtocolVersions[protocolVersion] {
+		http.Error(w, "unsupported MCP-Protocol-Version", http.StatusBadRequest)
+		return "", false
+	}
+	return protocolVersion, true
+}
+
+func (h *StdioHost) validateRequestSession(w http.ResponseWriter, r *http.Request) (string, bool) {
+	protocolVersion, ok := validateRequestProtocolVersion(w, r)
+	if !ok {
+		return "", false
+	}
+	sid := r.Header.Get("Mcp-Session-Id")
+	if sid == "" {
+		http.Error(w, "missing session id", http.StatusBadRequest)
+		return "", false
+	}
+	session, ok := h.lookupSession(sid)
+	if !ok {
+		http.Error(w, "unknown session id", http.StatusNotFound)
+		return "", false
+	}
+	if protocolVersion != "" && protocolVersion != session.protocolVersion {
+		http.Error(w, "protocol version does not match session", http.StatusBadRequest)
+		return "", false
+	}
+	return sid, true
+}
+
 const maxSSESubscribers = 32
 
 // handleSSE keeps a scoped SSE stream open for the active session until the
 // client disconnects, host stops, or the child exits.
 func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
-	if !h.validSession(r) {
-		http.Error(w, "missing or invalid session id", http.StatusUnauthorized)
+	if _, ok := h.validateRequestSession(w, r); !ok {
 		return
 	}
 	if h.sseActive.Add(1) > maxSSESubscribers {
@@ -1141,7 +1307,6 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Mcp-Session-Id", h.sessionID)
 	_, _ = fmt.Fprint(w, ": keepalive\n\n")
 	flusher.Flush()
 
@@ -1175,10 +1340,6 @@ func (h *StdioHost) handleSSE(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		}
 	}
-}
-
-func (h *StdioHost) validSession(r *http.Request) bool {
-	return r.Header.Get("Mcp-Session-Id") == h.sessionID
 }
 
 func randomSessionID() (string, error) {

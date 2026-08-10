@@ -7,8 +7,6 @@ import time
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-
 from .aedt_batch import (
     CONFIGURE_SCRIPT,
     EXPORT_SCRIPT,
@@ -17,15 +15,25 @@ from .aedt_batch import (
     find_ansysedt,
     run_aedt_process,
 )
+from .contracts import (
+    ExclusiveUnitFloat,
+    HFSSBasisOrder,
+    LicensePollSeconds,
+    LicenseWaitSeconds,
+    PassCount,
+    PositiveTimeoutSeconds,
+    SolveAction,
+)
 from .hfss_mesh_vendor.extract_hfss_solver_mesh import extract_solver_mesh
 from .jobs import JobContext, JobManager, solve_action, utc_now
 from .provenance import artifact_record, sha256_file, write_json
 from .safety import existing_output_root, existing_project_file, require_confirmation, require_windows
+from .strict_fastmcp import strict_fastmcp
 
-mcp = FastMCP(
+mcp = strict_fastmcp(
     "mcphub-hfss",
     instructions=(
-        "Noninteractive HFSS jobs. hfss_solve owns start/status/result/cancel; "
+        "Noninteractive HFSS jobs. hfss_solve owns start/status/result/cancel/preflight; "
         "exporters consume one successful job_id and never solve again."
     ),
 )
@@ -240,32 +248,33 @@ def _runner(
 
 @mcp.tool()
 def hfss_solve(
-    action: str = "start",
+    action: SolveAction = "start",
     job_id: str | None = None,
     project_path: str | None = None,
     output_root: str | None = None,
     design: str | None = None,
     setup: str = "Setup1",
     sweep: str = "Sweep1",
-    basis_order: int = 1,
-    maximum_delta_s: float = 0.01,
-    maximum_passes: int = 10,
-    minimum_passes: int = 2,
-    minimum_converged_passes: int = 1,
+    basis_order: HFSSBasisOrder = 1,
+    maximum_delta_s: ExclusiveUnitFloat = 0.01,
+    maximum_passes: PassCount = 10,
+    minimum_passes: PassCount = 2,
+    minimum_converged_passes: PassCount = 1,
     do_material_lambda: bool = True,
     adaptation_frequency: str = "5GHz",
-    timeout_s: float = 21600,
-    license_wait_timeout_s: float = 0,
-    license_poll_s: float = 30,
+    timeout_s: PositiveTimeoutSeconds = 21600,
+    license_wait_timeout_s: LicenseWaitSeconds = 0,
+    license_poll_s: LicensePollSeconds = 30,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Start, inspect, retrieve, or cancel one isolated HFSS solve job."""
-    routed = solve_action(_jobs, action, job_id=job_id)
-    if routed is not None:
-        return routed
-    require_confirmation(confirm, "starting an HFSS solve")
+    """Use start, status, result, cancel, or preflight for one isolated HFSS solve job."""
+    normalized_action = action.strip().lower()
+    if normalized_action not in {"start", "preflight"}:
+        routed = solve_action(_jobs, normalized_action, job_id=job_id)
+        if routed is not None:
+            return routed
     if project_path is None or output_root is None:
-        raise ValueError("project_path and output_root are required for action=start")
+        raise ValueError(f"project_path and output_root are required for action={normalized_action}")
     project = existing_project_file(project_path, (".aedt",))
     root = existing_output_root(output_root)
     if basis_order not in {-1, 0, 1, 2}:
@@ -296,6 +305,15 @@ def hfss_solve(
         "do_material_lambda": do_material_lambda,
         "adaptation_frequency": adaptation_frequency,
     }
+    if normalized_action == "preflight":
+        return {
+            "valid": True,
+            "action": "preflight",
+            "solver": "hfss",
+            "project": {"name": project.name, "suffix": project.suffix.lower()},
+            "settings": settings,
+        }
+    require_confirmation(confirm, "starting an HFSS solve")
     return _jobs.start(
         project_path=project,
         output_root=root,

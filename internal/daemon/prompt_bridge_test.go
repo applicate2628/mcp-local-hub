@@ -282,9 +282,13 @@ for line in sys.stdin:
 
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
+	sid := acquireSessionID(t, h)
 
 	post := func(body string) map[string]any {
-		resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		setSessionForNonInitialize(t, req, body, sid)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}

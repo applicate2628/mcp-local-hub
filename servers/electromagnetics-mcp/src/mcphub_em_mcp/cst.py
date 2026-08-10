@@ -12,18 +12,30 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from mcp.server.fastmcp import FastMCP
-
+from .contracts import (
+    CSTTetOrder,
+    ExclusiveUnitFloat,
+    FrequencyRangeGHz,
+    FrequencySamplesGHz,
+    LicensePollSeconds,
+    LicenseWaitSeconds,
+    PassCount,
+    PortModeChecks,
+    PositiveFiniteFloat,
+    PositiveTimeoutSeconds,
+    SolveAction,
+)
 from .cst_results import export_result_tree
 from .jobs import JobContext, JobManager, solve_action, utc_now
 from .provenance import artifact_record, sha256_file, write_json
 from .safety import existing_output_root, existing_project_file, require_confirmation, require_windows
 from .slim import read_slim, write_surface_gmsh, write_volume_gmsh
+from .strict_fastmcp import strict_fastmcp
 
-mcp = FastMCP(
+mcp = strict_fastmcp(
     "mcphub-cst",
     instructions=(
-        "Noninteractive CST jobs. cst_solve owns start/status/result/cancel; "
+        "Noninteractive CST jobs. cst_solve owns start/status/result/cancel/preflight; "
         "exporters consume one successful job_id and never solve again."
     ),
 )
@@ -246,33 +258,34 @@ def _runner(
 
 @mcp.tool()
 def cst_solve(
-    action: str = "start",
+    action: SolveAction = "start",
     job_id: str | None = None,
     project_path: str | None = None,
     output_root: str | None = None,
-    propagation_constant_accuracy: float = 1e-5,
-    propagation_constant_checks: int = 2,
-    accuracy_tet: float = 1e-10,
-    order_tet: str = "First",
+    propagation_constant_accuracy: ExclusiveUnitFloat = 1e-5,
+    propagation_constant_checks: PortModeChecks = 2,
+    accuracy_tet: ExclusiveUnitFloat = 1e-10,
+    order_tet: CSTTetOrder = "First",
     port_mesh_matches_3d: bool = True,
-    maximum_passes: int = 12,
-    minimum_passes: int = 3,
-    maximum_delta_s: float = 0.005,
-    adaptation_frequency_ghz: float = 5.0,
-    frequency_range_ghz: list[float] | None = None,
-    frequency_samples_ghz: list[float] | None = None,
-    timeout_s: float = 21600,
-    license_wait_timeout_s: float = 0,
-    license_poll_s: float = 30,
+    maximum_passes: PassCount = 12,
+    minimum_passes: PassCount = 3,
+    maximum_delta_s: ExclusiveUnitFloat = 0.005,
+    adaptation_frequency_ghz: PositiveFiniteFloat = 5.0,
+    frequency_range_ghz: FrequencyRangeGHz | None = None,
+    frequency_samples_ghz: FrequencySamplesGHz | None = None,
+    timeout_s: PositiveTimeoutSeconds = 21600,
+    license_wait_timeout_s: LicenseWaitSeconds = 0,
+    license_poll_s: LicensePollSeconds = 30,
     confirm: bool = False,
 ) -> dict[str, Any]:
-    """Start, inspect, retrieve, or cancel one isolated CST solve job."""
-    routed = solve_action(_jobs, action, job_id=job_id)
-    if routed is not None:
-        return routed
-    require_confirmation(confirm, "starting a CST solve")
+    """Use start, status, result, cancel, or preflight for one isolated CST solve job."""
+    normalized_action = action.strip().lower()
+    if normalized_action not in {"start", "preflight"}:
+        routed = solve_action(_jobs, normalized_action, job_id=job_id)
+        if routed is not None:
+            return routed
     if project_path is None or output_root is None:
-        raise ValueError("project_path and output_root are required for action=start")
+        raise ValueError(f"project_path and output_root are required for action={normalized_action}")
     project = existing_project_file(project_path, (".cst",))
     root = existing_output_root(output_root)
     if not 0 < propagation_constant_accuracy < 1:
@@ -328,6 +341,15 @@ def cst_solve(
         "frequency_range_ghz": frequency_range,
         "frequency_samples_ghz": samples,
     }
+    if normalized_action == "preflight":
+        return {
+            "valid": True,
+            "action": "preflight",
+            "solver": "cst",
+            "project": {"name": project.name, "suffix": project.suffix.lower()},
+            "settings": settings,
+        }
+    require_confirmation(confirm, "starting a CST solve")
     return _jobs.start(
         project_path=project,
         output_root=root,

@@ -19,11 +19,33 @@ async def test_tool_inventory_is_exact_mvp(server, expected: set[str]) -> None:
 
 
 @pytest.mark.asyncio
-async def test_solve_start_requires_positive_confirmation_before_paths() -> None:
+async def test_solve_start_requires_positive_confirmation_after_validation(tmp_path) -> None:
+    hfss_project = tmp_path / "model.aedt"
+    hfss_project.write_bytes(b"fixture")
+    cst_project = tmp_path / "model.cst"
+    cst_project.write_bytes(b"fixture")
     with pytest.raises(ToolError, match="confirm=true"):
-        await hfss_mcp.call_tool("hfss_solve", {"action": "start", "confirm": False})
+        await hfss_mcp.call_tool(
+            "hfss_solve",
+            {
+                "action": "start",
+                "project_path": str(hfss_project),
+                "output_root": str(tmp_path),
+                "confirm": False,
+            },
+        )
     with pytest.raises(ToolError, match="confirm=true"):
-        await cst_mcp.call_tool("cst_solve", {"action": "start", "confirm": False})
+        await cst_mcp.call_tool(
+            "cst_solve",
+            {
+                "action": "start",
+                "project_path": str(cst_project),
+                "output_root": str(tmp_path),
+                "frequency_range_ghz": [1.0, 10.0],
+                "frequency_samples_ghz": [1.0, 5.0, 10.0],
+                "confirm": False,
+            },
+        )
 
 
 @pytest.mark.asyncio

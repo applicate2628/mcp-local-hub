@@ -6,7 +6,7 @@ Read this page for current delivery status. Make lifecycle changes through `scri
 Read-model: work-items-readme-v1
 Ordered sources: backlog|active|roadmaps|archive
 Canonical changes through: 2026-08-10T09:17:11Z
-Canonical input digest: sha256:3e9a64560afd9436cef655756bc7748835091165be4181f3a8f836fe99af4d15
+Canonical input digest: sha256:0078d5f5b52acb70e4b9bdc63022763416d480aa4d1fcde9243af07a0a69738e
 
 ## Current focus
 
@@ -15,6 +15,7 @@ Canonical input digest: sha256:3e9a64560afd9436cef655756bc7748835091165be4181f3a
 - [ ] [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) — [work item](active/2026-07-20-cli-first-run-ux/status.md)
 - [ ] [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) — investigation complete → design lanes dispatched — [work item](active/2026-07-20-supervisor-never-crash-reliability/status.md)
 - [ ] [2026-07-25-mcp-front-daemon](active/2026-07-25-mcp-front-daemon/status.md) — [work item](active/2026-07-25-mcp-front-daemon/status.md)
+- [ ] [correct the six HFSS/CST MCP evaluation findings while preserving live hub availability.](active/2026-08-10-hfss-cst-mcp-feedback-r1/status.md) — reproduce each finding and map it to the owning transport, bridge, or server schema boundary. — [work item](active/2026-08-10-hfss-cst-mcp-feedback-r1/status.md)
 
 ## Next actions
 

@@ -149,7 +149,6 @@ func TestProtocolBridge_TransformRequest_MissingURIReturnsError(t *testing.T) {
 	}
 }
 
-
 func TestProtocolBridge_TransformRequest_InvalidURISchemeReturnsError(t *testing.T) {
 	b := NewProtocolBridge()
 	b.CacheInitialize(json.RawMessage(`{"result":{"capabilities":{"resources":{}}}}`))
@@ -215,6 +214,15 @@ func TestReadResourceTool_MapResult_MalformedReturnsUnchanged(t *testing.T) {
 	out := synth.MapResult(in)
 	if string(out) != string(in) {
 		t.Errorf("expected passthrough on parse failure")
+	}
+}
+
+func TestReadResourceTool_MapResult_ErrorEnvelopeReturnsUnchangedR1(t *testing.T) {
+	synth := readResourceSyntheticTool()
+	in := json.RawMessage(`{"jsonrpc":"2.0","id":3,"error":{"code":-32002,"message":"Unknown resource"}}`)
+	out := synth.MapResult(in)
+	if string(out) != string(in) {
+		t.Fatalf("resource error envelope changed: got=%s want=%s", out, in)
 	}
 }
 
@@ -298,9 +306,13 @@ for line in sys.stdin:
 
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
+	sid := acquireSessionID(t, h)
 
 	post := func(body string) map[string]any {
-		resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		setSessionForNonInitialize(t, req, body, sid)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}
@@ -396,9 +408,13 @@ for line in sys.stdin:
 
 	ts := httptest.NewServer(h.HTTPHandler())
 	defer ts.Close()
+	sid := acquireSessionID(t, h)
 
 	post := func(body string) map[string]any {
-		resp, err := http.Post(ts.URL+"/mcp", "application/json", strings.NewReader(body))
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/mcp", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		setSessionForNonInitialize(t, req, body, sid)
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			t.Fatalf("POST: %v", err)
 		}
