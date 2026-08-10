@@ -181,6 +181,12 @@ func approveRemoteURL(raw string) (approvedRemoteURL, Reason) {
 	if hasQuery && queryCarriesValue(rawQuery) {
 		return approvedRemoteURL{}, ReasonRemoteURLQueryUnclassified
 	}
+	// Git interprets <transport>::<address> as remote-helper syntax and may
+	// execute an arbitrary git-remote-<transport> program from PATH. This is
+	// distinct from the approved URL transports and SCP-like host:path form.
+	if colon := strings.IndexByte(raw, ':'); colon >= 0 && colon+1 < len(raw) && raw[colon+1] == ':' {
+		return approvedRemoteURL{}, ReasonRemoteURLTransportUnapproved
+	}
 	if isRelativeLocalRemote(raw, parsed, parseErr) {
 		return approvedRemoteURL{}, ReasonRemoteURLRelative
 	}

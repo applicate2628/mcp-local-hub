@@ -40,3 +40,39 @@ func TestR23ExternalRemoteHelperSchemeStartsNoRemoteQuery(t *testing.T) {
 		t.Fatalf("status/reason=%s/%s, want unknown/%s", result.Status, result.Reason, ReasonRemoteURLTransportUnapproved)
 	}
 }
+
+func TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery(t *testing.T) {
+	for _, remote := range []string{"evil::attacker-controlled-address", "ext::sh -c exploit"} {
+		t.Run(remote, func(t *testing.T) {
+			approved, reason := approveRemoteURL(remote)
+			if reason != ReasonRemoteURLTransportUnapproved {
+				t.Fatalf("reason=%q, want %q", reason, ReasonRemoteURLTransportUnapproved)
+			}
+			if raw, ok := approved.transportArgument(); ok || raw != "" {
+				t.Fatalf("remote-helper syntax gained transport authority: raw=%q ok=%v", raw, ok)
+			}
+
+			dir := newPort(t, "remote-helper", `vcpkg_from_git(
+    OUT_SOURCE_PATH SOURCE_PATH
+    URL `+remote+`
+    REF 0123456789abcdef0123456789abcdef01234567
+    SHA512 0
+)`)
+			calls := 0
+			result := PinStatus(context.Background(), Args{PortDirs: []string{dir}}, Deps{
+				FS: DefaultFS(),
+				RemoteRefs: func(context.Context, approvedRemoteURL) (map[string]string, error) {
+					calls++
+					return nil, nil
+				},
+				Now: fixedNow(),
+			}).Ports[0]
+			if calls != 0 {
+				t.Fatalf("remote queries=%d, want 0", calls)
+			}
+			if result.Status != evidence.StatusUnknown || result.Reason != ReasonRemoteURLTransportUnapproved {
+				t.Fatalf("status/reason=%s/%s, want unknown/%s", result.Status, result.Reason, ReasonRemoteURLTransportUnapproved)
+			}
+		})
+	}
+}
