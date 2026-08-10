@@ -14,7 +14,7 @@ A fresh install lands on an empty GUI. Two affordances smooth the first run: pas
 
 ## go:embed manifests
 
-All 16 server manifests are baked into the binary via `//go:embed */manifest.yaml`. Fifteen are global install targets; `mcp-language-server` is workspace-scoped. Daemons load their config from the embedded FS, not from disk, so `~/.local/bin/mcphub.exe` works without a sibling `servers/` directory.
+All 18 server manifests are baked into the binary via `//go:embed */manifest.yaml`. Seventeen are global install targets; `mcp-language-server` is workspace-scoped. Daemons load their config from the embedded FS, not from disk, so `~/.local/bin/mcphub.exe` works without a sibling `servers/` directory.
 
 ## Dual-entry pattern
 
