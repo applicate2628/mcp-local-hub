@@ -1048,9 +1048,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	// reply is not dropped when the child exits immediately after writing it.
 	select {
 	case respBody := <-respCh:
-		if origMethod == "initialize" {
-			h.bridge.CacheInitialize(respBody)
-		}
+		h.cacheValidInitializeResponse(origMethod, requestedProtocolVersion, respBody)
 		respBody = h.bridge.TransformResponse(origMethod, action.Active, respBody)
 		var respMsg map[string]json.RawMessage
 		if err := json.Unmarshal(respBody, &respMsg); err != nil {
@@ -1069,9 +1067,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		// Cache initialize responses so subsequent clients can short-circuit.
 		// First responder wins; concurrent first-callers still get a correct
 		// answer (they each forwarded once before the cache existed).
-		if origMethod == "initialize" {
-			h.bridge.CacheInitialize(respBody)
-		}
+		h.cacheValidInitializeResponse(origMethod, requestedProtocolVersion, respBody)
 		// Bridge response transforms. Inside TransformResponse:
 		//   - if action.Active != nil (synthetic tool call), respBody is
 		//     reshaped via Active.MapResult (e.g. resources/read → tools/call)
@@ -1134,6 +1130,16 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "client canceled", http.StatusRequestTimeout)
 	case <-time.After(stdioToolResponseTimeout):
 		http.Error(w, "subprocess response timeout", http.StatusGatewayTimeout)
+	}
+}
+
+func (h *StdioHost) cacheValidInitializeResponse(method, requestedVersion string, body json.RawMessage) {
+	if method != "initialize" {
+		return
+	}
+	_, success, err := initializeResponseProtocolVersion(body, requestedVersion)
+	if err == nil && success {
+		h.bridge.CacheInitialize(body)
 	}
 }
 
