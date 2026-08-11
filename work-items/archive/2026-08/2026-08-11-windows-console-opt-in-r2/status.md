@@ -1,9 +1,9 @@
 ---
 template: full-delivery
 orchestration: full-lead
-status: active
+status: completed
 started: 2026-08-11
-updated: 2026-08-11 17:18
+updated: 2026-08-11 18:34
 ---
 
 Reopens: 2026-08-10-windows-console-opt-in
@@ -18,10 +18,10 @@ Depends-on: none
 - **Primary task**: finish and ship the working Windows hub with console creation disabled by default and enabled only by exact leading `--debug-console`
 - **Primary task status**: active successor of the parked delivery
 - **Admission source**: direct user instruction on 2026-08-11 to continue through deploy/live verification
-- **Stage**: Phase G — local commit complete; waiting for explicit push approval
+- **Stage**: terminal PASS — published, installed, restarted, and live-verified
 - **Main conv role**: orchestrating Lead
-- **Last accepted artifact**: `implementation-integration-final.md` — PASS; exact 105-path stage on current `origin/master`, publication-clean, SHA-256 `D3C40A5EC01F3E4F87A16B5DC9797BB829622E7F2D836D47A3AA7A6F6E93C082`
-- **Open obligations before closeout**: user-authorized push; install/restart; live no-visible-console verification
+- **Last accepted artifact**: `deployment-live.md` — PASS; installed commit `b87dc8dd`, 21/21 live samples over 646.906 seconds with zero visible windows, SHA-256 `8686302E0660FFA9D49D4B16807EAEC4AD0C68FC2108984A02B328AD49FAE249`
+- **Open obligations before closeout**: physical archive move and derived README reconciliation only
 - **Parallel PR follow-up**: #598 exact-head PASS and squash merge `d08ab398955d`; #600 exact-head PASS and squash merge `a95d5c7493d`; #599 exact-head PASS and squash merge `599bbd92fb63`; #597 closed as superseded; GitHub open PR count is 0; hub remains primary.
 - **Priority**: high
 
@@ -29,7 +29,7 @@ Depends-on: none
 
 | Agent | Role | Model/effort | Status | Launched |
 | --- | --- | --- | --- | --- |
-| none | — | — | integration gate terminal PASS | 2026-08-11 17:46 +03:00 |
+| none | — | — | delivery terminal PASS | 2026-08-11 18:34 +03:00 |
 
 ## Completed agents
 
@@ -47,6 +47,7 @@ Depends-on: none
 | console-linux-fix | backend-engineer | PASS — nine test-owner corrections; native WSL normal/race/common/vet/build and proportionate Windows/compile gates green | `implementation-linux-final.md` |
 | console-final-qa-r2 reverify | qa-engineer | PASS — causal RED, Linux normal/race/common/vet/build, Windows exact/normal/changed-race/vet, product-slice scanner green; macOS operator-parked | `qa-final-r2.md` |
 | console-final-integration | backend-engineer | PASS after one bounded EOF-only correction — remote-base drift overlap 0, exact 105-path stage, diff-check and publication scan green | `implementation-integration-final.md` |
+| console-live-deploy | platform-engineer + windows-gui-manual-testing | PASS — installed candidate-bound PE2 binary, recovered hub and MCP fleet, 21/21 live samples with zero visible windows | `deployment-live.md` |
 
 ## Operator policy decision
 
@@ -60,4 +61,5 @@ Depends-on: none
 
 ## Next action
 
-Native macOS is explicitly parked because no target exists. The accepted exact stage is committed locally. Await explicit publication approval for the hub push, then install/restart and live-verify no visible consoles.
+Lead has decided terminal delivery PASS. Lifecycle owner moves this completed item to `work-items/archive/2026-08/2026-08-11-windows-console-opt-in-r2/` and reconciles the derived README without disturbing unrelated active items.
+Lifecycle-schema: work-items-physical-v1

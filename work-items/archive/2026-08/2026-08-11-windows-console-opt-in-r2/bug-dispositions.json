@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "workItem": "2026-08-11-windows-console-opt-in-r2",
+  "closedAt": "2026-08-11T15:34:49Z",
+  "bugs": [
+    {
+      "id": "2026-08-11-codegraph-daemon-restarted-during-scratch-ab",
+      "action": "preserve-current",
+      "inputSha256": "fdafdf17f7811a91c94a4aa0ed43cdad8a223207c3a04b7185c20efb393fc02d",
+      "status": "open",
+      "reason": "The ignored-scratch watcher interaction remains an unverified diagnostic defect.",
+      "evidence": "closure.md records this lifecycle and diagnostic risk as still open."
+    },
+    {
+      "id": "2026-08-11-native-linux-release-gate-red",
+      "action": "terminalize",
+      "inputSha256": "3377fbab6747fc4d9dbd00b2258019426ae5b090898bf84933cc202665f95cb6",
+      "status": "fixed",
+      "resolution": "Corrected the nine Linux test owners and verified native WSL normal, race, common, vet, and build gates.",
+      "evidence": "qa-final-r2.md records causal RED and independent native WSL PASS evidence."
+    },
+    {
+      "id": "2026-08-11-native-macos-release-runner-unavailable",
+      "action": "preserve-current",
+      "inputSha256": "a739df04bdad57f02a12acd036145c957e26ce3398b76c085ce497e3a65fb30b",
+      "status": "open",
+      "reason": "The operator parked native macOS because no authorized target exists.",
+      "evidence": "closure.md records native macOS execution as an operator-parked residual risk."
+    }
+  ]
+}

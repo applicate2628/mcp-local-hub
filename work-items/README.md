@@ -5,8 +5,8 @@ Read this page for current delivery status. Make lifecycle changes through `scri
 <!-- BEGIN GENERATED WORK-ITEMS STATUS -->
 Read-model: work-items-readme-v1
 Ordered sources: backlog|active|roadmaps|archive
-Canonical changes through: 2026-08-10T10:45:07Z
-Canonical input digest: sha256:3a3c45ddab8c323388995682b2eef603fb5d022790d64daf0f74fe04257d2956
+Canonical changes through: 2026-08-11T15:34:49Z
+Canonical input digest: sha256:e2ddd252e2b794b9c692137c7a84b3de5d009d1ca92a41f4142b1fa112d9e64c
 
 ## Current focus
 
@@ -15,6 +15,7 @@ Canonical input digest: sha256:3a3c45ddab8c323388995682b2eef603fb5d022790d64daf0
 - [ ] [2026-07-20-cli-first-run-ux](active/2026-07-20-cli-first-run-ux/status.md) — [work item](active/2026-07-20-cli-first-run-ux/status.md)
 - [ ] [2026-07-20-supervisor-never-crash-reliability](active/2026-07-20-supervisor-never-crash-reliability/status.md) — investigation complete → design lanes dispatched — [work item](active/2026-07-20-supervisor-never-crash-reliability/status.md)
 - [ ] [2026-07-25-mcp-front-daemon](active/2026-07-25-mcp-front-daemon/status.md) — [work item](active/2026-07-25-mcp-front-daemon/status.md)
+- [ ] [make the published CST frequency defaults valid for preflight/start, or replace them with an explicit required contract, closing MCP-CST-DEFAULT-001 without launching a real solve](active/2026-08-10-cst-frequency-default-contract/status.md) — commit and deployment preparation — [work item](active/2026-08-10-cst-frequency-default-contract/status.md)
 
 ## Next actions
 
@@ -82,5 +83,6 @@ Canonical input digest: sha256:3a3c45ddab8c323388995682b2eef603fb5d022790d64daf0
 - [x] [DELIVERED — PRs #583, #588, #589, #590, #591, #592, and #595 are merged; GitHub reports no open pull requests.](archive/2026-08/2026-08-08-finish-open-pr-bot-findings/closure.md) — the scheduled weekly refresh is intentionally Stopped; four unmanaged stdio MCP entries remain an operational advisory and do not represent hub downtime. — WI-LEGACY-READ-COMPAT
 - [x] [DELIVERED — the reproduced transport/session/schema defects are fixed, published, deployed, and verified on the live HFSS/CST endpoints.](archive/2026-08/2026-08-10-hfss-cst-mcp-feedback-r1/closure.md) — no real HFSS or CST solve was launched in this corrective cycle; vendor-runtime numerical acceptance remains a separate explicit-approval activity.
 - [x] [DELIVERED — PR #596 was merged, the canonical hub was upgraded, and the new HFSS and CST MCP servers are running and connected.](archive/2026-08/2026-08-10-hfss-cst-mcp-servers/closure.md) — HFSS exports the latest adaptive mesh pass; selecting an arbitrary historical pass remains fail-closed because AEDT does not expose a stable documented cache interface for it. Legacy ACIS projects may require a one-time vendor conversion before automated project construction.
+- [x] [DELIVERED — published commit `b87dc8ddc30d4aba815790f6a5a8b88fb37884c1` is installed, the supervisor/GUI/configured MCP fleet recovered, and the default Windows launch contract produced no visible console during the full live observation.](archive/2026-08/2026-08-11-windows-console-opt-in-r2/closure.md) — native macOS execution is operator-parked because no target exists. The generic idle-server health probe may report HTTP 502 while the actual connected CodeGraph MCP remains healthy; the separate lifecycle/diagnostic bug records remain open. The canonical prior binary is retained by the upgrade owner for rollback.
 
 <!-- END GENERATED WORK-ITEMS STATUS -->

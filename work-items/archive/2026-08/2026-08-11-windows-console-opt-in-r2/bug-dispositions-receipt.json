@@ -1,0 +1,41 @@
+{
+  "bugs": [
+    {
+      "action": "preserve-current",
+      "afterSha256": "fdafdf17f7811a91c94a4aa0ed43cdad8a223207c3a04b7185c20efb393fc02d",
+      "beforeSha256": "fdafdf17f7811a91c94a4aa0ed43cdad8a223207c3a04b7185c20efb393fc02d",
+      "id": "2026-08-11-codegraph-daemon-restarted-during-scratch-ab",
+      "source": "bugs/2026-08-11-codegraph-daemon-restarted-during-scratch-ab.md",
+      "statusAfter": "open",
+      "statusBefore": "open",
+      "target": null
+    },
+    {
+      "action": "terminalize",
+      "afterSha256": "0e27330bac78374c7582ce783a444dbb928c91cb3faa10ba4ff3358e4b3ffc32",
+      "beforeSha256": "3377fbab6747fc4d9dbd00b2258019426ae5b090898bf84933cc202665f95cb6",
+      "id": "2026-08-11-native-linux-release-gate-red",
+      "source": "bugs/2026-08-11-native-linux-release-gate-red.md",
+      "statusAfter": "fixed",
+      "statusBefore": "open",
+      "target": "bugs/archive/2026-08/2026-08-11-native-linux-release-gate-red.md"
+    },
+    {
+      "action": "preserve-current",
+      "afterSha256": "a739df04bdad57f02a12acd036145c957e26ce3398b76c085ce497e3a65fb30b",
+      "beforeSha256": "a739df04bdad57f02a12acd036145c957e26ce3398b76c085ce497e3a65fb30b",
+      "id": "2026-08-11-native-macos-release-runner-unavailable",
+      "source": "bugs/2026-08-11-native-macos-release-runner-unavailable.md",
+      "statusAfter": "open",
+      "statusBefore": "open",
+      "target": null
+    }
+  ],
+  "closedAt": "2026-08-11T15:34:49Z",
+  "closureSha256": "e44ee86942429cbaddda22a40088f38574e2e1d0833d8f184c9a9b0bc2a14c1e",
+  "manifestSha256": "eb89c8eddc33b7ee4809c282e0ab021db435aa048a3d3ea6f22018992c54188e",
+  "owner": "mutate-work-item:close-item-bug-dispositions-v1",
+  "readmeSha256": "f4bce0f09040eb0a897d352330f121245bf795a78eb738389d20b4a7c1a4b09a",
+  "schemaVersion": 1,
+  "workItem": "2026-08-11-windows-console-opt-in-r2"
+}

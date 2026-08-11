@@ -37,3 +37,7 @@ The approved native-Linux correction changed exactly nine test files. Independen
 Canonical verdict and exact commands, counts, times, and receipts: `work-items/active/2026-08-11-windows-console-opt-in-r2/qa-final-r2.md`. Raw local evidence: `.scratch/windows-console-contract/qa-linux-reverify-20260811-1638/`.
 
 Resolved: 2026-08-11
+
+Terminal-at: 2026-08-11T15:34:49Z
+Resolution: Corrected the nine Linux test owners and verified native WSL normal, race, common, vet, and build gates.
+Evidence: qa-final-r2.md records causal RED and independent native WSL PASS evidence.
