@@ -4,8 +4,22 @@ from copy import deepcopy
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from mcp.server.fastmcp.exceptions import ToolError
+from mcp.server.fastmcp.tools.base import Tool
 from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase
-from pydantic import ConfigDict
+from pydantic import ConfigDict, ValidationError
+
+_FIXED_SAMPLER_VALIDATION_FAILURE = "cst_saved_field.invalid_request"
+
+
+class _FixedValidationTool(Tool):
+    async def run(self, arguments, context=None, convert_result=False):
+        try:
+            return await super().run(arguments, context, convert_result)
+        except ToolError as exc:
+            if isinstance(exc.__cause__, ValidationError):
+                raise ToolError(_FIXED_SAMPLER_VALIDATION_FAILURE) from exc.__cause__
+            raise
 
 
 def strict_fastmcp(name: str, **kwargs: Any) -> FastMCP:
@@ -17,6 +31,14 @@ def strict_fastmcp(name: str, **kwargs: Any) -> FastMCP:
     config["extra"] = "forbid"
     ArgModelBase.model_config = ConfigDict(**config)
     return FastMCP(name, **kwargs)
+
+
+def fix_tool_validation_error(server: FastMCP, tool_name: str) -> None:
+    """Map only one tool's Pydantic pre-entry failures to its fixed public ID."""
+    tool = server._tool_manager.get_tool(tool_name)  # noqa: SLF001
+    if tool is None:
+        raise RuntimeError(f"cannot configure unknown tool: {tool_name}")
+    tool.__class__ = _FixedValidationTool
 
 
 def publish_action_requirements(
