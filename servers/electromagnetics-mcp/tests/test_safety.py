@@ -41,6 +41,14 @@ def test_output_root_must_be_within_operator_configured_root(tmp_path: Path, mon
         existing_output_root(str(outside))
 
 
+def test_output_root_creates_fresh_operator_configured_root(tmp_path: Path, monkeypatch) -> None:
+    trusted = tmp_path / "fresh-trusted-root"
+    monkeypatch.setenv("MCPHUB_EM_OUTPUT_ROOT", str(trusted))
+
+    assert existing_output_root(str(trusted)) == trusted.resolve()
+    assert trusted.is_dir()
+
+
 @pytest.mark.parametrize("path", [r"\\server\share\jobs", "//server/share/jobs"])
 def test_output_root_rejects_unc_paths_on_every_platform(path: str) -> None:
     assert _windows_path_is_remote(path)

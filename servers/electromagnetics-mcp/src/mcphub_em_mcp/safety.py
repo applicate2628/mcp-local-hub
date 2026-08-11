@@ -78,12 +78,12 @@ def existing_output_root(raw_path: str) -> Path:
     path = Path(raw_path)
     if not path.is_absolute():
         raise ValueError("output_root must be absolute")
+    trusted = _trusted_output_root()
     resolved = path.resolve(strict=True)
     if not resolved.is_dir():
         raise ValueError("output_root must name an existing directory")
     if _windows_path_is_remote(str(resolved)):
         raise ValueError("output_root must be on a local filesystem")
-    trusted = _trusted_output_root()
     if not resolved.is_relative_to(trusted):
         raise ValueError(f"output_root must be within the trusted output root: {trusted}")
     return resolved
