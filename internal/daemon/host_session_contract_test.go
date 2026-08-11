@@ -148,6 +148,57 @@ for line in sys.stdin:
 	}
 }
 
+func TestStdioHostInvalidInitializeResponseDoesNotPoisonCache(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args: []string{"-u", "-c", `
+import json, sys
+seen = 0
+for line in sys.stdin:
+    msg = json.loads(line)
+    seen += 1
+    version = "2024-11-05" if seen == 1 else "2025-03-26"
+    result = {"protocolVersion":version, "capabilities":{}, "seen":seen}
+    sys.stdout.write(json.dumps({"jsonrpc":"2.0", "id":msg.get("id"), "result":result}) + "\n")
+    sys.stdout.flush()
+`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"cache-test","version":"1"}}}`
+	first := sessionContractRequest(t, ts.Client(), http.MethodPost, ts.URL, initBody, "", "")
+	if first.status != http.StatusBadGateway || first.header.Get("Mcp-Session-Id") != "" {
+		t.Fatalf("invalid initialize response status=%d session=%q, want 502 and no session; body=%s", first.status, first.header.Get("Mcp-Session-Id"), first.body)
+	}
+
+	second := sessionContractRequest(t, ts.Client(), http.MethodPost, ts.URL, initBody, "", "")
+	if second.status != http.StatusOK || second.header.Get("Mcp-Session-Id") == "" {
+		t.Fatalf("valid retry status=%d session=%q, want 200 and a session; body=%s", second.status, second.header.Get("Mcp-Session-Id"), second.body)
+	}
+	third := sessionContractRequest(t, ts.Client(), http.MethodPost, ts.URL, initBody, "", "")
+	var response struct {
+		Result struct {
+			Seen int `json:"seen"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(third.body, &response); err != nil {
+		t.Fatal(err)
+	}
+	if third.status != http.StatusOK || response.Result.Seen != 2 {
+		t.Fatalf("cached retry status=%d seen=%d, want 200 and seen=2; body=%s", third.status, response.Result.Seen, third.body)
+	}
+}
+
 func TestStdioHostSessionRegistryEvictsOldestAtBoundR1(t *testing.T) {
 	h, err := NewStdioHost(HostConfig{Command: echoSubprocCommand(), Args: echoSubprocArgs()})
 	if err != nil {
