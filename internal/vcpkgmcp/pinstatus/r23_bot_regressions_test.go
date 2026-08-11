@@ -2,6 +2,7 @@ package pinstatus
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"mcp-local-hub/internal/vcpkgmcp/evidence"
@@ -72,6 +73,60 @@ func TestRemoteHelperSyntaxIsRejectedBeforeRemoteQuery(t *testing.T) {
 			}
 			if result.Status != evidence.StatusUnknown || result.Reason != ReasonRemoteURLTransportUnapproved {
 				t.Fatalf("status/reason=%s/%s, want unknown/%s", result.Status, result.Reason, ReasonRemoteURLTransportUnapproved)
+			}
+		})
+	}
+}
+
+func TestRemoteHelperGuardPreservesNonHelperDoubleColonRemotes(t *testing.T) {
+	absoluteLocal := "/tmp/repo::mirror"
+	if filepath.Separator == '\\' {
+		absoluteLocal = `\\server\share\repo::mirror`
+	}
+
+	for _, remote := range []string{
+		absoluteLocal,
+		"[::1]:owner/repo",
+		"https://host/owner/repo::mirror",
+		"example.com:owner/repo::mirror",
+	} {
+		t.Run(remote, func(t *testing.T) {
+			approved, reason := approveRemoteURL(remote)
+			if reason != "" {
+				t.Fatalf("reason=%q, want admitted", reason)
+			}
+			if raw, ok := approved.transportArgument(); !ok || raw != remote {
+				t.Fatalf("transport argument=%q/%v, want %q/true", raw, ok, remote)
+			}
+		})
+	}
+}
+
+func TestRemoteHelperGuardMatchesGitLeadingTransportGrammar(t *testing.T) {
+	tests := []struct {
+		remote string
+		want   bool
+	}{
+		{remote: "evil::address", want: true},
+		{remote: "9evil::address", want: true},
+		{remote: "git+foo::address", want: true},
+		{remote: "git.foo::address", want: true},
+		{remote: "git-foo::address", want: true},
+		{remote: "::address", want: true},
+		{remote: ".evil::address", want: false},
+		{remote: "+evil::address", want: false},
+		{remote: "-evil::address", want: false},
+		{remote: "git_foo::address", want: false},
+		{remote: "/tmp/repo::mirror", want: false},
+		{remote: "[::1]:owner/repo", want: false},
+		{remote: "https://host/repo::mirror", want: false},
+		{remote: "example.com:owner/repo::mirror", want: false},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.remote, func(t *testing.T) {
+			if got := isGitRemoteHelperSyntax(tc.remote); got != tc.want {
+				t.Fatalf("isGitRemoteHelperSyntax(%q)=%v, want %v", tc.remote, got, tc.want)
 			}
 		})
 	}

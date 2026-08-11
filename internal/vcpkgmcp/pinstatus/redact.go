@@ -181,11 +181,13 @@ func approveRemoteURL(raw string) (approvedRemoteURL, Reason) {
 	if hasQuery && queryCarriesValue(rawQuery) {
 		return approvedRemoteURL{}, ReasonRemoteURLQueryUnclassified
 	}
-	// Git interprets <transport>::<address> as remote-helper syntax and may
-	// execute an arbitrary git-remote-<transport> program from PATH. This is
-	// distinct from the approved URL transports and SCP-like host:path form.
-	if colon := strings.IndexByte(raw, ':'); colon >= 0 && colon+1 < len(raw) && raw[colon+1] == ':' {
-		return approvedRemoteURL{}, ReasonRemoteURLTransportUnapproved
+	// Git interprets a leading <transport>::<address> as remote-helper syntax
+	// and may execute an arbitrary git-remote-<transport> program from PATH.
+	// Match Git's leading transport grammar so double colons in absolute paths,
+	// IPv6 hosts, and later URL/path components retain their established shape.
+	if isGitRemoteHelperSyntax(raw) {
+		var rejected approvedRemoteURL
+		return rejected, ReasonRemoteURLTransportUnapproved
 	}
 	if isRelativeLocalRemote(raw, parsed, parseErr) {
 		return approvedRemoteURL{}, ReasonRemoteURLRelative
@@ -199,6 +201,21 @@ func approveRemoteURL(raw string) (approvedRemoteURL, Reason) {
 		return approvedRemoteURL{}, ReasonPortfileUnparsable
 	}
 	return approvedRemoteURL{raw: raw, proof: remoteURLApprovalProof}, ""
+}
+
+func isGitRemoteHelperSyntax(raw string) bool {
+	transportEnd := 0
+	for transportEnd < len(raw) && isGitURLSchemeChar(transportEnd == 0, raw[transportEnd]) {
+		transportEnd++
+	}
+	return transportEnd+1 < len(raw) && raw[transportEnd] == ':' && raw[transportEnd+1] == ':'
+}
+
+func isGitURLSchemeChar(first bool, value byte) bool {
+	alphanumeric := value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9'
+	return alphanumeric || !first && (value == '+' || value == '-' || value == '.')
 }
 
 func approvedGitTransport(scheme string) bool {
