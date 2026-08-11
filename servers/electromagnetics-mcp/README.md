@@ -26,6 +26,11 @@ Each solver has one worker. Concurrent starts queue instead of racing for the sa
 ## Artifact contract
 
 - Inputs are never modified. Each job works on its own project copy.
+- Job copies are confined to the local, per-user hub state directory
+  (`%LOCALAPPDATA%\\mcp-local-hub\\electromagnetics-jobs` on Windows or the
+  equivalent XDG state directory). Operators may choose another trusted local
+  directory with `MCPHUB_EM_OUTPUT_ROOT`; requested output roots must be inside
+  it, and Windows network/UNC destinations are rejected.
 - Manifests contain the solver version, input and artifact SHA-256 hashes, complete settings, UTC timestamps, and a determinism declaration.
 - Manifest artifact paths are relative to the job directory. Absolute workstation paths are excluded from generated exports.
 - JSON, CSV, Gmsh, and HFSS network export requests use `%.17g` numeric precision.

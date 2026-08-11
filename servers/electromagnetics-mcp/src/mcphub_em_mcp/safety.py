@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ctypes
 import os
 from pathlib import Path
 from typing import Any
@@ -39,13 +40,52 @@ def output_project_file(raw_path: str, suffix: str, allow_overwrite: bool) -> Pa
     return resolved
 
 
+def _trusted_output_root() -> Path:
+    configured = os.environ.get("MCPHUB_EM_OUTPUT_ROOT")
+    if configured:
+        root = Path(configured)
+    elif os.name == "nt":
+        root = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        root /= "mcp-local-hub/electromagnetics-jobs"
+    else:
+        state_home = os.environ.get("XDG_STATE_HOME")
+        root = Path(state_home) if state_home else Path.home() / ".local/state"
+        root /= "mcp-local-hub/electromagnetics-jobs"
+    if not root.is_absolute():
+        raise ValueError("the trusted electromagnetics output root must be absolute")
+    if _windows_path_is_remote(str(root)):
+        raise ValueError("the trusted electromagnetics output root must be on a local filesystem")
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return root.resolve(strict=True)
+
+
+def _windows_path_is_remote(path: str) -> bool:
+    if path.startswith(("\\\\", "//")):
+        return True
+    if os.name != "nt":
+        return False
+    drive = Path(path).drive
+    if not drive:
+        return False
+    # DRIVE_REMOTE (4) also detects mapped network drives, which do not have a
+    # UNC spelling and therefore cannot be rejected with string checks alone.
+    return ctypes.windll.kernel32.GetDriveTypeW(f"{drive}\\") == 4
+
+
 def existing_output_root(raw_path: str) -> Path:
+    if _windows_path_is_remote(raw_path):
+        raise ValueError("output_root must be on a local filesystem")
     path = Path(raw_path)
     if not path.is_absolute():
         raise ValueError("output_root must be absolute")
+    trusted = _trusted_output_root()
     resolved = path.resolve(strict=True)
     if not resolved.is_dir():
         raise ValueError("output_root must name an existing directory")
+    if _windows_path_is_remote(str(resolved)):
+        raise ValueError("output_root must be on a local filesystem")
+    if not resolved.is_relative_to(trusted):
+        raise ValueError(f"output_root must be within the trusted output root: {trusted}")
     return resolved
 
 
