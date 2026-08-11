@@ -104,7 +104,7 @@ function main() {
     stdio: "inherit",
     // Do NOT shell-interpret; pass argv through verbatim.
     shell: false,
-    windowsHide: false,
+    windowsHide: true,
   });
 
   if (result.error) {

@@ -24,6 +24,7 @@ $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
 $outDir = "bin"
 $outFile = Join-Path $outDir "mcphub.exe"
+$admitFile = Join-Path $outDir "mcphub-pe-admit.exe"
 
 if (-not (Test-Path $outDir)) {
     New-Item -ItemType Directory -Path $outDir | Out-Null
@@ -39,10 +40,17 @@ Write-Host "==> Building $outFile (version=$version commit=$commit)"
 go build -trimpath -ldflags $ldflags -o $outFile ./cmd/mcphub
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+Write-Host "==> Building PE admission adapter $admitFile"
+go build -trimpath -ldflags "-H windowsgui" -o $admitFile ./cmd/mcphub-pe-admit
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+& $admitFile $outFile
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 if (Test-Path $outFile) {
     Write-Host "==> Metadata embedded:"
     (Get-Item $outFile).VersionInfo | Format-List FileVersion,ProductName,FileDescription,CompanyName,LegalCopyright,Comments
-    Write-Host "==> Done. Run './$outFile version' to print build info."
+    Write-Host "==> Done. PE subsystem admission passed. Run './$outFile version' to print build info."
 } else {
     Write-Error "$outFile missing after build — check Defender exclusions (see INSTALL.md)."
     exit 1

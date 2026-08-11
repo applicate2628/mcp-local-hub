@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 // supervisorRestartResponse reports each step's outcome so the
@@ -235,7 +236,7 @@ var killSupervisorPIDFn = killSupervisorPID
 // os.Process.Kill().
 func killSupervisorPID(pid int) error {
 	if runtime.GOOS == "windows" {
-		cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F")
+		cmd := newSupervisorTaskkillCmd(pid)
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("taskkill: %w (output: %s)", err, strings.TrimSpace(string(out)))
@@ -247,6 +248,12 @@ func killSupervisorPID(pid int) error {
 		return fmt.Errorf("find proc %d: %w", pid, err)
 	}
 	return proc.Kill()
+}
+
+func newSupervisorTaskkillCmd(pid int) *exec.Cmd {
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/F")
+	process.NoConsole(cmd)
+	return cmd
 }
 
 // supervisorKillTargetEligible is the three-part kill-target identity

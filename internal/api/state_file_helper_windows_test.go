@@ -28,10 +28,24 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
 )
+
+func assertHubMcpPersistedStrictWriteOutcome(t *testing.T, stateDir string, err error) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("persisted strict_mode=true must reject hub-mcp write under permissive state dir even when %s is unset", RequireSingleUserHomeEnv)
+	}
+	if !strings.Contains(err.Error(), "persisted supervisor-intent.json") {
+		t.Errorf("error must mention persisted strict-mode intent; got %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(stateDir, hubMcpEndpointFileLeaf)); !os.IsNotExist(statErr) {
+		t.Errorf("persisted strict-mode rejection leaked hub-mcp state file (stat err = %v)", statErr)
+	}
+}
 
 // broadenParentForStateFileTest builds a parent dir whose DACL grants
 // the current user GENERIC_ALL and Authenticated Users (S-1-5-11)

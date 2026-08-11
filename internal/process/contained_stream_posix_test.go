@@ -228,34 +228,36 @@ func waitForContainedPOSIXExit(t *testing.T, pid int) {
 }
 
 func TestRunContainedStreamPOSIX_CleanupTimeoutIsTyped(t *testing.T) {
-	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer testCancel()
-	child := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
-	started := make(chan struct{})
-	child.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
-		close(started)
-		return nil
-	}
-	child.terminateFn = func(uint32) error {
-		child.terminateOnce.Do(func() {
-			child.waitCh <- containedWaitResult{exitCode: 0, exited: true}
-		})
-		return ErrCleanupTimeout
-	}
-	h := &containedDependencyHarness{child: child}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() { done <- runHarness(ctx, h, time.Second, io.Discard, drainContainedReader) }()
-	receiveContainedTest(t, testCtx, started, "contained runner start")
-	cancel()
-	err := receiveContainedTest(t, testCtx, done, "contained runner completion")
-	if !errors.Is(err, ErrCleanupTimeout) {
-		t.Fatalf("err=%v, want ErrCleanupTimeout", err)
-	}
-	if child.terminateCalls.Load() != 1 || child.waitCalls.Load() != 1 {
-		t.Fatalf("terminate/wait=%d/%d, want exact-one", child.terminateCalls.Load(), child.waitCalls.Load())
-	}
+	runContainedSynctest(t, func(t *testing.T) {
+		testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer testCancel()
+		child := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
+		started := make(chan struct{})
+		child.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
+			close(started)
+			return nil
+		}
+		child.terminateFn = func(uint32) error {
+			child.terminateOnce.Do(func() {
+				child.waitCh <- containedWaitResult{exitCode: 0, exited: true}
+			})
+			return ErrCleanupTimeout
+		}
+		h := &containedDependencyHarness{child: child}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() { done <- runHarness(ctx, h, time.Second, io.Discard, drainContainedReader) }()
+		receiveContainedTest(t, testCtx, started, "contained runner start")
+		cancel()
+		err := receiveContainedTest(t, testCtx, done, "contained runner completion")
+		if !errors.Is(err, ErrCleanupTimeout) {
+			t.Fatalf("err=%v, want ErrCleanupTimeout", err)
+		}
+		if child.terminateCalls.Load() != 1 || child.waitCalls.Load() != 1 {
+			t.Fatalf("terminate/wait=%d/%d, want exact-one", child.terminateCalls.Load(), child.waitCalls.Load())
+		}
+	})
 }
 
 func TestPOSIXSettlementSlowZombieClassifierLeavesJoinReserve(t *testing.T) {
@@ -298,55 +300,57 @@ func TestPOSIXSettlementSlowZombieClassifierLeavesJoinReserve(t *testing.T) {
 }
 
 func TestRunContainedStreamPOSIX_ReadyCompletionsBeatJoinDeadline(t *testing.T) {
-	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer testCancel()
-	base := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
-	started := make(chan struct{})
-	base.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
-		close(started)
-		return nil
-	}
-	child := &deadlineScriptedContainedChild{scriptedContainedChild: base}
-	child.terminateByFn = func(deadline time.Time) error {
-		base.terminateOnce.Do(func() {
-			base.waitCh <- containedWaitResult{exitCode: 0, exited: true}
-		})
-		timer := time.NewTimer(max(time.Duration(0), time.Until(deadline)) + 5*time.Millisecond)
-		defer timer.Stop()
-		select {
-		case <-testCtx.Done():
-			return testCtx.Err()
-		case <-timer.C:
+	runContainedSynctest(t, func(t *testing.T) {
+		testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer testCancel()
+		base := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
+		started := make(chan struct{})
+		base.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
+			close(started)
 			return nil
 		}
-	}
-	h := &containedDependencyHarness{child: base}
-	deps := h.dependencies()
-	deps.newChild = func(*exec.Cmd) (containedChild, error) { return child, nil }
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- runContainedStreamWithDependencies(ctx, exec.Command("contained-test-helper"), ContainedStreamOptions{CleanupTimeout: 40 * time.Millisecond, Stderr: io.Discard}, drainContainedReader, deps)
-	}()
-	receiveContainedTest(t, testCtx, started, "ready-completion runner start")
-	cancel()
-	err := receiveContainedTest(t, testCtx, done, "ready-completion runner completion")
-	if !errors.Is(err, context.Canceled) || errors.Is(err, ErrCleanupTimeout) {
-		t.Fatalf("err=%v, want context.Canceled without cleanup timeout", err)
-	}
-	if base.terminateCalls.Load() != 1 || base.waitCalls.Load() != 1 {
-		t.Fatalf("terminate/wait=%d/%d, want exact-one", base.terminateCalls.Load(), base.waitCalls.Load())
-	}
-	if len(h.pipes) != 2 {
-		t.Fatalf("pipe count=%d, want stdout and stderr", len(h.pipes))
-	}
-	for index, pipe := range h.pipes {
-		pipe.mu.Lock()
-		readClosed, writeClosed := pipe.readClosed, pipe.writeClosed
-		pipe.mu.Unlock()
-		if !readClosed || !writeClosed {
-			t.Fatalf("pipe %d joined read/write=%v/%v", index, readClosed, writeClosed)
+		child := &deadlineScriptedContainedChild{scriptedContainedChild: base}
+		child.terminateByFn = func(deadline time.Time) error {
+			base.terminateOnce.Do(func() {
+				base.waitCh <- containedWaitResult{exitCode: 0, exited: true}
+			})
+			timer := time.NewTimer(max(time.Duration(0), time.Until(deadline)) + 5*time.Millisecond)
+			defer timer.Stop()
+			select {
+			case <-testCtx.Done():
+				return testCtx.Err()
+			case <-timer.C:
+				return nil
+			}
 		}
-	}
+		h := &containedDependencyHarness{child: base}
+		deps := h.dependencies()
+		deps.newChild = func(*exec.Cmd) (containedChild, error) { return child, nil }
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- runContainedStreamWithDependencies(ctx, exec.Command("contained-test-helper"), ContainedStreamOptions{CleanupTimeout: 40 * time.Millisecond, Stderr: io.Discard}, drainContainedReader, deps)
+		}()
+		receiveContainedTest(t, testCtx, started, "ready-completion runner start")
+		cancel()
+		err := receiveContainedTest(t, testCtx, done, "ready-completion runner completion")
+		if !errors.Is(err, context.Canceled) || errors.Is(err, ErrCleanupTimeout) {
+			t.Fatalf("err=%v, want context.Canceled without cleanup timeout", err)
+		}
+		if base.terminateCalls.Load() != 1 || base.waitCalls.Load() != 1 {
+			t.Fatalf("terminate/wait=%d/%d, want exact-one", base.terminateCalls.Load(), base.waitCalls.Load())
+		}
+		if len(h.pipes) != 2 {
+			t.Fatalf("pipe count=%d, want stdout and stderr", len(h.pipes))
+		}
+		for index, pipe := range h.pipes {
+			pipe.mu.Lock()
+			readClosed, writeClosed := pipe.readClosed, pipe.writeClosed
+			pipe.mu.Unlock()
+			if !readClosed || !writeClosed {
+				t.Fatalf("pipe %d joined read/write=%v/%v", index, readClosed, writeClosed)
+			}
+		}
+	})
 }

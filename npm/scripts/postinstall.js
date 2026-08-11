@@ -276,15 +276,39 @@ function canonicalize() {
     return;
   }
 
+  if (process.platform === "win32") {
+    let admitPath;
+    try {
+      admitPath = require.resolve(`${pkg}/bin/mcphub-pe-admit.exe`);
+    } catch {
+      notice(
+        `PE admission adapter is missing for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
+    }
+    const admission = spawnSync(admitPath, [binPath], {
+      stdio: "inherit",
+      shell: false,
+      windowsHide: true,
+    });
+    if (admission.error || admission.signal || admission.status !== 0) {
+      const detail = admission.error
+        ? admission.error.code || admission.error.message
+        : admission.signal
+          ? `signal ${admission.signal}`
+          : `exit ${admission.status}`;
+      notice(
+        `PE admission rejected the platform binary (${detail}); ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
+    }
+  }
+
   const result = spawnSync(binPath, ["canonicalize"], {
     stdio: "inherit",
     // Do NOT shell-interpret; pass argv through verbatim.
     shell: false,
     windowsHide: true,
-    // A one-shot canonicalize never needs the parent console; suppressing the
-    // attach also routes the windowsgui binary's output to the inherited stdio
-    // instead of a detached console device.
-    env: { ...process.env, MCPHUB_NO_CONSOLE_ATTACH: "1" },
   });
 
   if (result.error) {

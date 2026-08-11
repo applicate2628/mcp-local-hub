@@ -935,6 +935,8 @@ type fakeUpgradeDeps struct {
 
 	renameAsideErr    error
 	renameAsideCalled bool
+	retainedPrior     string
+	restoreErr        error
 
 	quiesceResult    api.IPCResponse
 	quiesceErr       error
@@ -953,10 +955,19 @@ type fakeUpgradeDeps struct {
 	startCalled bool
 }
 
-func (f *fakeUpgradeDeps) RenameAsideBinary(target, newSrc string) error {
+func (f *fakeUpgradeDeps) RenameAsideBinary(target, newSrc string) (string, error) {
 	f.calls = append(f.calls, "rename")
 	f.renameAsideCalled = true
-	return f.renameAsideErr
+	retained := f.retainedPrior
+	if retained == "" {
+		retained = target + ".old-test"
+	}
+	return retained, f.renameAsideErr
+}
+
+func (f *fakeUpgradeDeps) RestoreRetainedBinary(target, retainedPrior string) error {
+	f.calls = append(f.calls, "restore")
+	return f.restoreErr
 }
 
 func (f *fakeUpgradeDeps) QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {
@@ -1628,5 +1639,88 @@ func TestIsAlreadyExitedError(t *testing.T) {
 				t.Errorf("isAlreadyExitedError(%v) = %v; want %v", tc.err, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestInstallUpgrade_PostSwapFailureRestoresPrior(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		retainedPrior: "/fake/mcphub.old-exact",
+		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{
+			"drained": 1.0, "still_running": []any{},
+		}, Final: true},
+		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+	readyCalls := 0
+	var swept int
+	cleanupSweep := setSweepOldBinariesFnForTest(func(string, ...func(string, error)) error {
+		swept++
+		return nil
+	})
+	defer cleanupSweep()
+
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub",
+		NewBinary:  "/fake/mcphub.new",
+		PipePath:   "fake-pipe",
+		WaitSupervisorReady: func(context.Context, time.Duration) error {
+			readyCalls++
+			if readyCalls == 1 {
+				return errors.New("forced successor readiness failure")
+			}
+			return nil
+		},
+		Deps: mock,
+	})
+	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
+		t.Fatalf("error=%v, want successful automatic rollback report", err)
+	}
+	want := []string{"rename", "quiesce", "exit", "start", "force-kill", "restore", "start"}
+	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls=%v, want %v", mock.calls, want)
+	}
+	if readyCalls != 2 {
+		t.Fatalf("readiness calls=%d, want successor + restored prior", readyCalls)
+	}
+	if swept != 0 {
+		t.Fatalf("rollback must preserve retained artifacts; sweep calls=%d", swept)
+	}
+}
+
+func TestInstallUpgrade_SuccessCommitsRetainedBinary(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{
+			"drained": 1.0, "still_running": []any{},
+		}, Final: true},
+		exitResult: api.IPCResponse{ID: 2, OK: true, Result: "exit-acked"},
+	}
+	ready := false
+	var swept int
+	cleanupSweep := setSweepOldBinariesFnForTest(func(string, ...func(string, error)) error {
+		if !ready {
+			t.Fatal("retained binary swept before successor readiness")
+		}
+		swept++
+		return nil
+	})
+	defer cleanupSweep()
+
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub",
+		NewBinary:  "/fake/mcphub.new",
+		PipePath:   "fake-pipe",
+		WaitSupervisorReady: func(context.Context, time.Duration) error {
+			ready = true
+			return nil
+		},
+		Deps: mock,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swept != 1 {
+		t.Fatalf("sweep calls=%d, want exactly 1 after readiness", swept)
+	}
+	if strings.Contains(strings.Join(mock.calls, ","), "restore") {
+		t.Fatalf("successful upgrade unexpectedly restored prior: %v", mock.calls)
 	}
 }

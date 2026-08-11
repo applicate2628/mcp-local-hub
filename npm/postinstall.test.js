@@ -345,6 +345,143 @@ test("no global signal at all skips canonicalize", () => {
   });
 });
 
+function buildForcedWindowsFixture() {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "mcphub-postinstall-win-"));
+  const prefix = path.join(base, "prefix");
+  const globalRoot = path.join(prefix, "node_modules");
+  const pkgDir = path.join(globalRoot, SELF_NAME);
+  const home = path.join(base, "home");
+  fs.mkdirSync(home, { recursive: true });
+  materializePackage(pkgDir);
+  fs.mkdirSync(path.join(pkgDir, "bin"), { recursive: true });
+  fs.copyFileSync(path.join(__dirname, "bin", "cli.js"), path.join(pkgDir, "bin", "cli.js"));
+
+  const platformPkg = PACKAGE_BY_PLATFORM["win32-x64"];
+  const platformBin = path.join(pkgDir, "node_modules", ...platformPkg.split("/"), "bin");
+  fs.mkdirSync(platformBin, { recursive: true });
+  fs.writeFileSync(path.join(platformBin, "mcphub.exe"), "candidate fixture\n");
+  fs.writeFileSync(path.join(platformBin, "mcphub-pe-admit.exe"), "adapter fixture\n");
+
+  const tracePath = path.join(base, "spawn-trace.jsonl");
+  const preloadPath = path.join(base, "spawn-preload.cjs");
+  fs.writeFileSync(
+    preloadPath,
+    `Object.defineProperty(process, "platform", {value: "win32"});\n` +
+      `Object.defineProperty(process, "arch", {value: "x64"});\n` +
+      `const fs = require("node:fs");\n` +
+      `const path = require("node:path");\n` +
+      `const cp = require("node:child_process");\n` +
+      `cp.spawnSync = (file, args, opts) => {\n` +
+      `  fs.appendFileSync(process.env.MCPHUB_TEST_SPAWN_TRACE, JSON.stringify({file,args,stdio:opts.stdio,shell:opts.shell,windowsHide:opts.windowsHide,hasEnv:Object.prototype.hasOwnProperty.call(opts,"env")}) + "\\n");\n` +
+      `  const leaf = path.basename(file).toLowerCase();\n` +
+      `  const status = leaf === "mcphub-pe-admit.exe" ? Number(process.env.MCPHUB_TEST_ADMIT_STATUS || 0) : Number(process.env.MCPHUB_TEST_CANDIDATE_STATUS || 0);\n` +
+      `  return {status, signal:null, error:null};\n` +
+      `};\n`,
+  );
+  return { base, prefix, globalRoot, home, pkgDir, tracePath, preloadPath };
+}
+
+function forcedWindowsEnv(fixture, extra = {}) {
+  const env = { ...process.env, HOME: fixture.home, USERPROFILE: fixture.home };
+  delete env.npm_config_location;
+  env.npm_command = "install";
+  env.npm_config_global = "true";
+  env.npm_config_prefix = fixture.prefix;
+  env.MCPHUB_TEST_SPAWN_TRACE = fixture.tracePath;
+  env.NODE_OPTIONS = `--require=${fixture.preloadPath}`;
+  return { ...env, ...extra };
+}
+
+function readSpawnTrace(fixture) {
+  if (!fs.existsSync(fixture.tracePath)) return [];
+  return fs
+    .readFileSync(fixture.tracePath, "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+}
+
+test("Windows platform payload includes PE adapter", () => {
+  for (const target of ["win32-x64", "win32-arm64"]) {
+    const manifest = require(`./packages/${target}/package.json`);
+    assert.deepStrictEqual(
+      [...manifest.files].sort(),
+      ["bin/mcphub.exe", "bin/mcphub-pe-admit.exe", "README.md"].sort(),
+    );
+    assert.deepStrictEqual(manifest.bin, { mcphub: "bin/mcphub.exe" });
+  }
+});
+
+test("Non-Windows platform payload excludes PE adapter", () => {
+  for (const target of ["darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]) {
+    const manifest = require(`./packages/${target}/package.json`);
+    assert.strictEqual(manifest.files.some((p) => p.endsWith(".exe") || p.includes("mcphub-pe-admit")), false);
+  }
+});
+
+test("Postinstall resolves package-local PE adapter before canonicalize", () => {
+  const fixture = buildForcedWindowsFixture();
+  try {
+    const script = path.join(fixture.pkgDir, "scripts", "postinstall.js");
+    const rejected = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      cwd: fixture.pkgDir,
+      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_STATUS: "17" }),
+    });
+    assert.strictEqual(rejected.status, 0, rejected.stderr);
+    assert.match(rejected.stderr, /PE admission rejected.*left as-is/);
+    let trace = readSpawnTrace(fixture);
+    assert.strictEqual(trace.length, 1, `rejected trace=${JSON.stringify(trace)}`);
+    assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub-pe-admit.exe");
+    assert.strictEqual(path.basename(trace[0].args[0]).toLowerCase(), "mcphub.exe");
+    assert.strictEqual(trace[0].windowsHide, true);
+    assert.strictEqual(trace[0].shell, false);
+    assert.strictEqual(trace[0].hasEnv, false);
+
+    fs.rmSync(fixture.tracePath, { force: true });
+    const admitted = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      cwd: fixture.pkgDir,
+      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_STATUS: "0" }),
+    });
+    assert.strictEqual(admitted.status, 0, admitted.stderr);
+    trace = readSpawnTrace(fixture);
+    assert.strictEqual(trace.length, 2, `admitted trace=${JSON.stringify(trace)}`);
+    assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub-pe-admit.exe");
+    assert.strictEqual(path.basename(trace[1].file).toLowerCase(), "mcphub.exe");
+    assert.deepStrictEqual(trace[1].args, ["canonicalize"]);
+    assert.strictEqual(trace[1].windowsHide, true);
+    assert.strictEqual(trace[1].stdio, "inherit");
+    assert.strictEqual(trace[1].hasEnv, false);
+  } finally {
+    fs.rmSync(fixture.base, { recursive: true, force: true });
+  }
+});
+
+test("npm launcher preserves argv and inherited stdio without console policy", () => {
+  const fixture = buildForcedWindowsFixture();
+  try {
+    const argv = ["--debug-console", "status", "--", "x y", "--debug-console=false"];
+    const result = spawnSync(process.execPath, [path.join(fixture.pkgDir, "bin", "cli.js"), ...argv], {
+      encoding: "utf8",
+      cwd: fixture.pkgDir,
+      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_CANDIDATE_STATUS: "37" }),
+    });
+    assert.strictEqual(result.status, 37, result.stderr);
+    const trace = readSpawnTrace(fixture);
+    assert.strictEqual(trace.length, 1, JSON.stringify(trace));
+    assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub.exe");
+    assert.deepStrictEqual(trace[0].args, argv);
+    assert.strictEqual(trace[0].stdio, "inherit");
+    assert.strictEqual(trace[0].shell, false);
+    assert.strictEqual(trace[0].windowsHide, true);
+    assert.strictEqual(trace[0].hasEnv, false);
+  } finally {
+    fs.rmSync(fixture.base, { recursive: true, force: true });
+  }
+});
+
 // Gate 3 also backstops gate 2: `location=global` carried in an operator's
 // .npmrc during an ordinary local install must not authorize the write.
 test("`location=global` from config does not authorize an ordinary local install", () => {

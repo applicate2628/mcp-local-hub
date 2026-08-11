@@ -10,6 +10,7 @@ BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 OUT_DIR="bin"
 OUT_FILE="${OUT_DIR}/mcphub.exe"
+ADMIT_FILE="${OUT_DIR}/mcphub-pe-admit"
 
 mkdir -p "${OUT_DIR}"
 
@@ -21,10 +22,16 @@ LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.buildDate=$
 echo "==> Building ${OUT_FILE} (version=${VERSION} commit=${COMMIT})"
 go build -trimpath -ldflags "${LDFLAGS} -H windowsgui" -o "${OUT_FILE}" ./cmd/mcphub
 
+if [ "$(go env GOOS)" = "windows" ]; then
+  ADMIT_FILE="${ADMIT_FILE}.exe"
+  go build -trimpath -ldflags "-H windowsgui" -o "${ADMIT_FILE}" ./cmd/mcphub-pe-admit
+  "${ADMIT_FILE}" "${OUT_FILE}"
+fi
+
 if [ ! -f "${OUT_FILE}" ]; then
   echo "ERROR: ${OUT_FILE} missing after build — check Defender exclusions (see INSTALL.md)." >&2
   exit 1
 fi
 
-echo "==> Done. Run './${OUT_FILE} version' to print build info."
+echo "==> Done. Windows builds pass PE subsystem admission. Run './${OUT_FILE} version' to print build info."
 ls -la "${OUT_FILE}"

@@ -29,7 +29,7 @@
 //     `kill -KILL -<pgid>` (POSIX)
 //   - StartSupervisor   → `schtasks /Run \mcp-local-hub-supervisor`
 //     (Windows shim) or detached CreateProcess
-//     with DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
+//     with the platform's detached lifetime primitive and shared no-window policy
 //     (POSIX: launchctl kickstart / systemctl
 //     --user restart / mcphub supervise &)
 package cli
@@ -92,7 +92,8 @@ import (
 //     running; recovery is `mcphub supervise` from a shell, which is
 //     the same surface this method drives in detached mode.
 type UpgradeDeps interface {
-	RenameAsideBinary(target, newSrc string) error
+	RenameAsideBinary(target, newSrc string) (retainedPrior string, err error)
+	RestoreRetainedBinary(target, retainedPrior string) error
 	QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
 	ExitGraceful(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
 	ForceKillSupervisor(pipePath string) error
@@ -304,17 +305,13 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// swap. Going further would issue a graceful-exit against a
 	// supervisor that's actually still healthy, which is exactly
 	// the wrong behavior.
-	if err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary); err != nil {
+	retainedPrior, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
+	if err != nil {
 		return fmt.Errorf("rename-aside binary replacement failed: %w; "+
 			"the prior binary may have been restored via best-effort rollback; "+
 			"verify with `ls %s*` and inspect any `.old-<ts>` artifact, "+
 			"then re-run `mcphub install --upgrade` once the cause is resolved",
 			err, opts.BinaryPath)
-	}
-	if err := sweepOldBinariesFn(filepath.Dir(opts.BinaryPath), func(path string, err error) {
-		fmt.Fprintf(os.Stderr, "warn: old binary sweep remove %s failed: %v\n", path, err)
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warn: old binary sweep in %s failed: %v\n", filepath.Dir(opts.BinaryPath), err)
 	}
 
 	// Step 2-3: IPC quiesce-timers (drain transient maintenance-timer
@@ -426,9 +423,8 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// Windows: `schtasks /Run /TN \mcp-local-hub-supervisor` if the
 	// scheduled-task shim is installed; otherwise detached
 	// CreateProcess with DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
-	// plus the console-attach suppression marker (the new
-	// supervisor's stdin/stdout/stderr inherit nothing from this CLI
-	// process AND it never attaches a console of its own, so it
+	// plus the shared no-window child policy (the new supervisor's
+	// stdin/stdout/stderr inherit nothing from this CLI process, so it
 	// survives both the upgrade caller's exit and the closing of the
 	// terminal the upgrade was typed into). Surviving the caller's
 	// EXIT and surviving the caller's CONSOLE are different
@@ -447,18 +443,19 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// from a shell, which exercises the same per-OS surface in
 	// foreground mode (with diagnostics visible to the operator).
 	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
-		return fmt.Errorf("supervisor start failed after binary replacement + prior-supervisor exit: %w; "+
-			"the canonical binary at %s is the new image but no supervisor is running; "+
-			"run `mcphub supervise` from a shell to diagnose (or `mcphub supervise &` to background-start)",
-			err, opts.BinaryPath)
+		return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+			fmt.Errorf("supervisor start failed after binary replacement + prior-supervisor exit: %w", err))
 	}
 	if opts.WaitSupervisorReady != nil {
 		if err := opts.WaitSupervisorReady(ctx, handoffTimeout); err != nil {
-			return fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w; "+
-				"the binary was replaced and a detached successor was spawned, but status never became reachable; "+
-				"check `mcphub status` and supervisor-events.log, then run `mcphub supervise` from a shell to see startup diagnostics",
-				handoffTimeout, err)
+			return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+				fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w", handoffTimeout, err))
 		}
+	}
+	if err := sweepOldBinariesFn(filepath.Dir(opts.BinaryPath), func(path string, err error) {
+		fmt.Fprintf(os.Stderr, "warn: old binary sweep remove %s failed: %v\n", path, err)
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "warn: old binary sweep in %s failed: %v\n", filepath.Dir(opts.BinaryPath), err)
 	}
 
 	// Step 7: new supervisor reads intent + daemon-intent files on its own startup
@@ -466,6 +463,27 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// wires WaitSupervisorReady, the orchestrator observes this via IPC status
 	// before reporting success; operator-facing follow-up remains `mcphub status`.
 	return nil
+}
+
+func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior string, timeout time.Duration, trigger error) error {
+	if retainedPrior == "" {
+		return fmt.Errorf("%w; automatic rollback unavailable: rename-aside returned no retained prior binary", trigger)
+	}
+	if err := opts.Deps.ForceKillSupervisor(opts.PipePath); err != nil && !isAlreadyExitedError(err) {
+		return fmt.Errorf("%w; automatic rollback failed stopping successor: %v", trigger, err)
+	}
+	if err := opts.Deps.RestoreRetainedBinary(opts.BinaryPath, retainedPrior); err != nil {
+		return fmt.Errorf("%w; automatic rollback failed restoring retained prior binary %s: %v", trigger, retainedPrior, err)
+	}
+	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
+		return fmt.Errorf("%w; prior binary restored but prior supervisor restart failed: %v", trigger, err)
+	}
+	if opts.WaitSupervisorReady != nil {
+		if err := opts.WaitSupervisorReady(ctx, timeout); err != nil {
+			return fmt.Errorf("%w; prior binary restored and restarted but did not become ready: %v; run `mcphub supervise` from a shell to inspect startup diagnostics", trigger, err)
+		}
+	}
+	return fmt.Errorf("%w; automatic rollback restored %s and verified the prior supervisor ready", trigger, retainedPrior)
 }
 
 func effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, effectiveQuiesceTimeoutMs, effectiveExitTimeoutMs int) time.Duration {

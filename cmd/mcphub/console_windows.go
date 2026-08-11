@@ -3,10 +3,11 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"syscall"
 
-	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/cli"
 )
 
 // ATTACH_PARENT_PROCESS is the sentinel understood by AttachConsole.
@@ -15,50 +16,81 @@ const attachParentProcess = ^uint32(0) // (DWORD)-1
 var (
 	kernel32               = syscall.NewLazyDLL("kernel32.dll")
 	procAttachConsole      = kernel32.NewProc("AttachConsole")
+	procAllocConsole       = kernel32.NewProc("AllocConsole")
 	procSetConsoleOutputCP = kernel32.NewProc("SetConsoleOutputCP")
 	procSetConsoleCP       = kernel32.NewProc("SetConsoleCP")
 )
 
-// attachParentConsoleIfAvailable tries to attach this Windows-subsystem
-// process to its parent's console (cmd.exe, PowerShell, etc.). When the
-// parent has a console, stdin/stdout/stderr are rewired so plain fmt.Print
-// calls work. When there is no parent console (Scheduler, Explorer
-// double-click, detached spawn), this returns quietly.
-//
-// Inherited handles from a shell redirect (e.g. `mcphub.exe > out.txt`) or a
-// pipe (e.g. `mcphub.exe | tee`) must be preserved: Windows passes those to
-// the child even under the GUI subsystem, and rewiring os.Stdout to
-// CONOUT$ on top of a valid inherited handle would send output to the
-// attached (hidden) console instead of the redirected target. We only
-// reopen a standard stream when the Go runtime reports it invalid —
-// i.e. when the GUI subsystem zeroed it out and AttachConsole just
-// allocated a fresh console for us.
-//
-// Returns whether this process is a console CLIENT on return — the
-// property that decides whether a closing terminal can kill it, and
-// therefore whether the long-lived GUI path must release the console.
-// The answer is measured (process.HasConsole), not inferred from
-// AttachConsole's return value: the two are not the same question, and
-// only the measured one is safe to act on.
-//
-// A process spawned with the suppression marker set (a detached
-// background child — see process.SuppressConsoleAttachEnv) never
-// attaches at all, so it can never become a CTRL_CLOSE_EVENT target for
-// the console its parent happened to be holding at spawn time.
-func attachParentConsoleIfAvailable() bool {
-	if process.ConsoleAttachSuppressed() {
-		// Deliberately BEFORE the AttachConsole call and before the
-		// code-page calls: the whole point is that this process must
-		// never become a console client, not that it tidies up after
-		// becoming one. There is no console, so there is no code page
-		// to set and no CONOUT$ worth reopening.
-		return false
+const WindowsDebugConsoleUnavailableID = "E_WINDOWS_DEBUG_CONSOLE_UNAVAILABLE"
+
+type windowsConsoleAPI struct {
+	attachParent func() error
+	allocate     func() error
+	prepare      func()
+}
+
+type windowsDebugConsoleUnavailableError struct {
+	attachErr   error
+	allocateErr error
+}
+
+func (e *windowsDebugConsoleUnavailableError) Error() string {
+	return fmt.Sprintf("%s: attach parent: %v; allocate: %v", WindowsDebugConsoleUnavailableID, e.attachErr, e.allocateErr)
+}
+
+func (e *windowsDebugConsoleUnavailableError) FailureID() string {
+	return WindowsDebugConsoleUnavailableID
+}
+
+var productionWindowsConsoleAPI = windowsConsoleAPI{
+	attachParent: func() error {
+		ret, _, callErr := procAttachConsole.Call(uintptr(attachParentProcess))
+		if ret == 0 {
+			return callErr
+		}
+		return nil
+	},
+	allocate: func() error {
+		ret, _, callErr := procAllocConsole.Call()
+		if ret == 0 {
+			return callErr
+		}
+		return nil
+	},
+	prepare: prepareDebugConsole,
+}
+
+// applyWindowsConsolePolicy is the sole Windows console-state writer. Disabled
+// mode is a true no-op. Explicit mode attaches to the parent first and falls
+// back to allocating a console; failure is returned before Cobra executes.
+func applyWindowsConsolePolicy(policy cli.WindowsConsolePolicy) (bool, error) {
+	return applyWindowsConsolePolicyWithAPI(policy, productionWindowsConsoleAPI)
+}
+
+func applyWindowsConsolePolicyWithAPI(policy cli.WindowsConsolePolicy, api windowsConsoleAPI) (bool, error) {
+	if policy == cli.WindowsConsoleDisabled {
+		return false, nil
 	}
-	if ret, _, _ := procAttachConsole.Call(uintptr(attachParentProcess)); ret != 0 {
-		reopenIfInvalid("CONIN$", os.O_RDONLY, &os.Stdin)
-		reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stdout)
-		reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stderr)
+	if policy != cli.WindowsConsoleDebugExplicit {
+		return false, fmt.Errorf("invalid Windows console policy %d", policy)
 	}
+	attachErr := api.attachParent()
+	if attachErr == nil {
+		api.prepare()
+		return true, nil
+	}
+	allocateErr := api.allocate()
+	if allocateErr != nil {
+		return false, &windowsDebugConsoleUnavailableError{attachErr: attachErr, allocateErr: allocateErr}
+	}
+	api.prepare()
+	return true, nil
+}
+
+func prepareDebugConsole() {
+	reopenIfInvalid("CONIN$", os.O_RDONLY, &os.Stdin)
+	reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stdout)
+	reopenIfInvalid("CONOUT$", os.O_WRONLY, &os.Stderr)
 	// Go source is UTF-8; the default Windows console output code page is
 	// OEM (866 on ru_RU locales, 1251 for GUI). When UTF-8 bytes hit a
 	// non-UTF-8 console, multi-byte glyphs like ✓/✗/— render as gibberish
@@ -68,7 +100,6 @@ func attachParentConsoleIfAvailable() bool {
 	const cpUTF8 uintptr = 65001
 	_, _, _ = procSetConsoleOutputCP.Call(cpUTF8)
 	_, _, _ = procSetConsoleCP.Call(cpUTF8)
-	return process.HasConsole()
 }
 
 // reopenIfInvalid rewires *target to the named console device only when

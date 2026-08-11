@@ -12,7 +12,7 @@ import (
 	"golang.org/x/sys/windows"
 )
 
-func TestR35ContainedWindowsUsesNoWindowAndPreservesRedirectedStreams(t *testing.T) {
+func TestR35NoConsole(t *testing.T) {
 	flags := containedWindowsCreationFlags()
 	if flags&uint32(windows.CREATE_NO_WINDOW) == 0 {
 		t.Fatalf("creation flags=%#x, missing CREATE_NO_WINDOW", flags)

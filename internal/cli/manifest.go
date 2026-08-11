@@ -3,7 +3,6 @@ package cli
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -140,11 +139,7 @@ func newManifestEditCmd() *cobra.Command {
 				return err
 			}
 			tmp.Close()
-			editorCmd := exec.Command(editor, tmp.Name())
-			editorCmd.Stdin = os.Stdin
-			editorCmd.Stdout = os.Stdout
-			editorCmd.Stderr = os.Stderr
-			if err := editorCmd.Run(); err != nil {
+			if err := runEditorForFile(editor, tmp.Name(), os.Stdin, os.Stdout, os.Stderr); err != nil {
 				return fmt.Errorf("editor %s: %w", editor, err)
 			}
 			edited, err := os.ReadFile(tmp.Name())

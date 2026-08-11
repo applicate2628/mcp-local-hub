@@ -54,17 +54,17 @@ func TestResolveReleaseConsole(t *testing.T) {
 // TestSetConsoleAttachedRoundTrips covers the injection seam itself: the
 // value main() observes is the value the gui command later reads. A
 // default of false is the safe one — no console claimed, nothing released.
-func TestSetConsoleAttachedRoundTrips(t *testing.T) {
-	orig := ConsoleAttached()
-	t.Cleanup(func() { SetConsoleAttached(orig) })
+func TestSetDebugConsoleAcquiredRoundTrips(t *testing.T) {
+	orig := DebugConsoleAcquired()
+	t.Cleanup(func() { SetDebugConsoleAcquired(orig) })
 
-	SetConsoleAttached(false)
-	if ConsoleAttached() {
-		t.Fatal("ConsoleAttached() reported true after SetConsoleAttached(false)")
+	SetDebugConsoleAcquired(false)
+	if DebugConsoleAcquired() {
+		t.Fatal("DebugConsoleAcquired() reported true after SetDebugConsoleAcquired(false)")
 	}
-	SetConsoleAttached(true)
-	if !ConsoleAttached() {
-		t.Fatal("ConsoleAttached() reported false after SetConsoleAttached(true); " +
+	SetDebugConsoleAcquired(true)
+	if !DebugConsoleAcquired() {
+		t.Fatal("DebugConsoleAcquired() reported false after SetDebugConsoleAcquired(true); " +
 			"the injected console state is not reaching the gui command, so a " +
 			"terminal-launched GUI would never release its console")
 	}

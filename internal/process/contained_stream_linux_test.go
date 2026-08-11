@@ -207,28 +207,36 @@ func TestLinuxGroupSettlementHonorsClassifierDeadline(t *testing.T) {
 	}
 }
 
-func TestLinuxGroupSettlementDeadlineJoinsCloseFailure(t *testing.T) {
-	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer testCancel()
-	deadline := time.Now().Add(180 * time.Millisecond)
-	var budget posixSettlementBudget
-	var invocation linuxClassifierInvocation
-	done := make(chan error, 1)
-	go func() {
-		done <- settlePOSIXGroup(deadline, 42, func(int) error { return syscall.EPERM }, func(ctx context.Context, pgid int, actual posixSettlementBudget) (bool, error) {
+func TestPOSIXSettlementDeadlinePreservesJoinReserveOnClassifierFailure(t *testing.T) {
+	runContainedSynctest(t, func(t *testing.T) {
+		deadline := time.Now().Add(180 * time.Millisecond)
+		var budget posixSettlementBudget
+		err := settlePOSIXGroup(deadline, 42, func(int) error { return syscall.EPERM }, func(ctx context.Context, _ int, actual posixSettlementBudget) (bool, error) {
 			budget = actual
-			return runLinuxGroupClassifierWithFactory(ctx, pgid, actual, linuxClassifierTestFactory("close-deadline", &invocation))
+			<-ctx.Done()
+			return false, errors.Join(errLinuxProcCloseFailed, ctx.Err())
 		})
-	}()
-	err := receiveContainedTest(t, testCtx, done, "classifier close/deadline")
+		if !errors.Is(err, errLinuxProcCloseFailed) || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("err=%v, want close failure plus context deadline", err)
+		}
+		if errors.Is(err, errLinuxGroupSettlementBudgetExhausted) || !errors.Is(err, errLinuxGroupSettlementIndeterminate) {
+			t.Fatalf("err=%v, want indeterminate and not pure budget", err)
+		}
+		if remaining := time.Until(deadline); remaining < budget.joinReserve {
+			t.Fatalf("remaining=%v, want full join reserve %v", remaining, budget.joinReserve)
+		}
+	})
+}
+
+func TestLinuxClassifierDeadlineJoinsCloseFailure(t *testing.T) {
+	deadline := time.Now().Add(180 * time.Millisecond)
+	budget := newPOSIXSettlementBudget(time.Now(), deadline, true)
+	ctx, cancel := context.WithDeadline(context.Background(), budget.settlementDeadline)
+	defer cancel()
+	var invocation linuxClassifierInvocation
+	_, err := runLinuxGroupClassifierWithFactory(ctx, 42, budget, linuxClassifierTestFactory("close-deadline", &invocation))
 	if !errors.Is(err, errLinuxProcCloseFailed) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("err=%v, want close failure plus context deadline", err)
-	}
-	if errors.Is(err, errLinuxGroupSettlementBudgetExhausted) || !errors.Is(err, errLinuxGroupSettlementIndeterminate) {
-		t.Fatalf("err=%v, want indeterminate and not pure budget", err)
-	}
-	if remaining := time.Until(deadline); remaining < budget.joinReserve {
-		t.Fatalf("remaining=%v, want full join reserve %v", remaining, budget.joinReserve)
 	}
 	if invocation.cmd == nil || invocation.cmd.ProcessState == nil {
 		t.Fatalf("helper was not joined: %+v", invocation.cmd)
@@ -267,38 +275,40 @@ func TestLinuxGroupSettlementCompletedFailuresAreIndeterminate(t *testing.T) {
 }
 
 func TestRunContainedStreamPOSIX_LiveGroupStillTimesOut(t *testing.T) {
-	testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer testCancel()
-	base := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
-	started := make(chan struct{})
-	base.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
-		close(started)
-		return nil
-	}
-	child := &deadlineScriptedContainedChild{scriptedContainedChild: base}
-	child.terminateByFn = func(deadline time.Time) error {
-		err := settlePOSIXGroup(deadline, 42, func(int) error { return syscall.EPERM }, func(context.Context, int, posixSettlementBudget) (bool, error) {
-			return false, nil
-		})
-		base.terminateOnce.Do(func() { base.waitCh <- containedWaitResult{exitCode: 0, exited: true} })
-		return err
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	h := &containedDependencyHarness{child: base}
-	deps := h.dependencies()
-	deps.newChild = func(*exec.Cmd) (containedChild, error) { return child, nil }
-	done := make(chan error, 1)
-	go func() {
-		done <- runContainedStreamWithDependencies(ctx, exec.Command("contained-test-helper"), ContainedStreamOptions{CleanupTimeout: 120 * time.Millisecond, Stderr: io.Discard}, drainContainedReader, deps)
-	}()
-	receiveContainedTest(t, testCtx, started, "live-group runner start")
-	cancel()
-	if err := receiveContainedTest(t, testCtx, done, "live-group runner completion"); !errors.Is(err, ErrCleanupTimeout) || !errors.Is(err, errPOSIXGroupLiveTimeout) {
-		t.Fatalf("err=%v, want completed-live cleanup timeout", err)
-	}
-	if base.terminateCalls.Load() != 1 || base.waitCalls.Load() != 1 {
-		t.Fatalf("terminate/wait=%d/%d, want exact-one ownership", base.terminateCalls.Load(), base.waitCalls.Load())
-	}
+	runContainedSynctest(t, func(t *testing.T) {
+		testCtx, testCancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer testCancel()
+		base := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
+		started := make(chan struct{})
+		base.startFn = func(containedInputFile, containedWriteFile, containedWriteFile) error {
+			close(started)
+			return nil
+		}
+		child := &deadlineScriptedContainedChild{scriptedContainedChild: base}
+		child.terminateByFn = func(deadline time.Time) error {
+			err := settlePOSIXGroup(deadline, 42, func(int) error { return syscall.EPERM }, func(context.Context, int, posixSettlementBudget) (bool, error) {
+				return false, nil
+			})
+			base.terminateOnce.Do(func() { base.waitCh <- containedWaitResult{exitCode: 0, exited: true} })
+			return err
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		h := &containedDependencyHarness{child: base}
+		deps := h.dependencies()
+		deps.newChild = func(*exec.Cmd) (containedChild, error) { return child, nil }
+		done := make(chan error, 1)
+		go func() {
+			done <- runContainedStreamWithDependencies(ctx, exec.Command("contained-test-helper"), ContainedStreamOptions{CleanupTimeout: 120 * time.Millisecond, Stderr: io.Discard}, drainContainedReader, deps)
+		}()
+		receiveContainedTest(t, testCtx, started, "live-group runner start")
+		cancel()
+		if err := receiveContainedTest(t, testCtx, done, "live-group runner completion"); !errors.Is(err, ErrCleanupTimeout) || !errors.Is(err, errPOSIXGroupLiveTimeout) {
+			t.Fatalf("err=%v, want completed-live cleanup timeout", err)
+		}
+		if base.terminateCalls.Load() != 1 || base.waitCalls.Load() != 1 {
+			t.Fatalf("terminate/wait=%d/%d, want exact-one ownership", base.terminateCalls.Load(), base.waitCalls.Load())
+		}
+	})
 }
 
 func TestRunContainedStreamPOSIX_ZombieOnlyGroupDoesNotFalseTimeout(t *testing.T) {

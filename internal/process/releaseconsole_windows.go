@@ -47,11 +47,9 @@ func HasConsole() bool {
 // ReleaseParentConsole detaches this process from the console it is
 // attached to, if any.
 //
-// It is the runtime counterpart to cmd/mcphub's
-// attachParentConsoleIfAvailable: mcphub.exe ships as a Windows-SUBSYSTEM
-// binary (so an Explorer double-click flashes no black window) and calls
-// AttachConsole(ATTACH_PARENT_PROCESS) at startup so CLI output is visible
-// when the operator runs it from a terminal.
+// It is the runtime counterpart to cmd/mcphub's explicit debug-console
+// startup policy. Ordinary launches never acquire a console; only a process
+// that explicitly acquired one may route here.
 //
 // Attaching makes the process a CLIENT of that console. When the terminal
 // closes, the console delivers CTRL_CLOSE_EVENT to every attached client

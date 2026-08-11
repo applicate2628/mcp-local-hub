@@ -6,8 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -45,6 +49,73 @@ func (f *fakeDaemonRecoverer) Recover(_ context.Context, taskName string, confir
 		onTerminationCommitted()
 	}
 	return f.result, f.err
+}
+
+func TestDaemonRecoverHandlers_OwnBroadcasterLifecycle(t *testing.T) {
+	participants := []string{
+		"TestDaemonRecoverRouteCommittedFlagPreservesHTTPMatrix",
+		"TestDaemonRecoverRouteRequiresSameOriginPOST",
+		"TestDaemonRecoverRouteRequiresExplicitConfirmationBeforeInvocation",
+		"TestKnownRecoveryContractGoldenMatrix",
+		"TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields",
+		"TestDaemonRecoverRouteReleaseUnconfirmedIsAWarningOnSuccessNotAFailure",
+		"TestDaemonRecoverRouteDurableHandoffRaisesNoWarning",
+		"TestDaemonRecoverRouteRespawnFailureReportsCommittedTerminationWithoutProcessDetail",
+	}
+	wanted := make(map[string]struct{}, len(participants))
+	for _, name := range participants {
+		wanted[name] = struct{}{}
+	}
+	_, sourceFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve daemon-recovery test source")
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), sourceFile, nil, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seen := make(map[string]bool, len(participants))
+	for _, declaration := range parsed.Decls {
+		function, ok := declaration.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		if _, required := wanted[function.Name.Name]; !required {
+			continue
+		}
+		if seen[function.Name.Name] {
+			t.Fatalf("duplicate daemon-recovery lifecycle participant %s", function.Name.Name)
+		}
+		seen[function.Name.Name] = true
+		ownerCalls := 0
+		bypassCalls := 0
+		ast.Inspect(function.Body, func(node ast.Node) bool {
+			call, ok := node.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			callee, ok := call.Fun.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			switch callee.Name {
+			case "newEphemeralServer":
+				ownerCalls++
+			case "NewServer":
+				bypassCalls++
+			}
+			return true
+		})
+		if ownerCalls != 1 || bypassCalls != 0 {
+			t.Errorf("daemon-recovery lifecycle participant %s: owner_calls=%d bypass_calls=%d, want owner_calls=1 bypass_calls=0", function.Name.Name, ownerCalls, bypassCalls)
+		}
+	}
+	for _, name := range participants {
+		if !seen[name] {
+			t.Errorf("daemon-recovery lifecycle participant %s is missing", name)
+		}
+	}
 }
 
 func performDaemonRecoverRequest(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
@@ -245,7 +316,7 @@ func TestDaemonRecoverRouteCommittedFlagPreservesHTTPMatrix(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{Port: 9125})
+			s := newEphemeralServer(t, Config{Port: 9125})
 			fake := &fakeDaemonRecoverer{
 				result: daemonrecovery.Result{TerminationCommitted: true},
 				err:    tc.err,
@@ -271,7 +342,7 @@ func TestDaemonRecoverRouteCommittedFlagPreservesHTTPMatrix(t *testing.T) {
 }
 
 func TestDaemonRecoverRouteRequiresSameOriginPOST(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newEphemeralServer(t, Config{Port: 9125})
 	fake := &fakeDaemonRecoverer{}
 	s.daemonRecover = fake
 
@@ -298,7 +369,7 @@ func TestDaemonRecoverRouteRequiresExplicitConfirmationBeforeInvocation(t *testi
 		`{"task_name":"mcp-local-hub-memory-default","confirm":false}`,
 	} {
 		t.Run(body, func(t *testing.T) {
-			s := NewServer(Config{Port: 9125})
+			s := newEphemeralServer(t, Config{Port: 9125})
 			fake := &fakeDaemonRecoverer{}
 			s.daemonRecover = fake
 
@@ -401,7 +472,7 @@ func TestKnownRecoveryContractGoldenMatrix(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{Port: 9125})
+			s := newEphemeralServer(t, Config{Port: 9125})
 			fake := &fakeDaemonRecoverer{err: tc.err}
 			s.daemonRecover = fake
 
@@ -430,7 +501,7 @@ func TestKnownRecoveryContractGoldenMatrix(t *testing.T) {
 }
 
 func TestDaemonRecoverRouteSuccessReturnsOnlySafeAcceptedFields(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newEphemeralServer(t, Config{Port: 9125})
 	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
 		TaskName:             `\mcp-local-hub-memory-default`,
 		Reaped:               true,
@@ -537,7 +608,7 @@ func TestDaemonRecover_ReservePostRenameErrorRunsOnce(t *testing.T) {
 // supervisor and `mcphub install` for that whole time. That makes reporting it
 // on a 200 (rather than swallowing it) load-bearing, not cosmetic.
 func TestDaemonRecoverRouteReleaseUnconfirmedIsAWarningOnSuccessNotAFailure(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newEphemeralServer(t, Config{Port: 9125})
 	fake := &fakeDaemonRecoverer{result: daemonrecovery.Result{
 		TaskName:             `\mcp-local-hub-memory-default`,
 		Reaped:               true,
@@ -567,7 +638,7 @@ func TestDaemonRecoverRouteReleaseUnconfirmedIsAWarningOnSuccessNotAFailure(t *t
 // The complement: a clean handoff must NOT raise the warning, or the signal
 // becomes noise the operator learns to ignore.
 func TestDaemonRecoverRouteDurableHandoffRaisesNoWarning(t *testing.T) {
-	s := NewServer(Config{Port: 9125})
+	s := newEphemeralServer(t, Config{Port: 9125})
 	s.daemonRecover = &fakeDaemonRecoverer{result: daemonrecovery.Result{
 		TaskName:        `\mcp-local-hub-memory-default`,
 		PortOwnerCheck:  daemonrecovery.PortOwnerUnbound,
@@ -624,7 +695,7 @@ func TestDaemonRecoverRouteRespawnFailureReportsCommittedTerminationWithoutProce
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			s := NewServer(Config{Port: 9125})
+			s := newEphemeralServer(t, Config{Port: 9125})
 			s.daemonRecover = &fakeDaemonRecoverer{result: tc.result, err: tc.err}
 
 			rec := performDaemonRecoverRequest(t, s, `{"task_name":"mcp-local-hub-memory-default","confirm":true}`)

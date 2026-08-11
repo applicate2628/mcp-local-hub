@@ -18,6 +18,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/process"
 )
 
 // L2 — setup-time detection (and opt-in fix) of the OS TCP ephemeral (dynamic)
@@ -58,7 +59,8 @@ var queryEphemeralTCPRange = func() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := exec.CommandContext(ctx, netsh, "int", "ipv4", "show", "dynamicport", "tcp").CombinedOutput()
+	cmd := newNetshCommandContext(ctx, netsh, "int", "ipv4", "show", "dynamicport", "tcp")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("netsh int ipv4 show dynamicport tcp: %w: %s", err, strings.TrimSpace(string(out)))
 	}
@@ -226,12 +228,19 @@ var setEphemeralTCPRange = func(start, num int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	out, err := exec.CommandContext(ctx, netsh, "int", "ipv4", "set", "dynamicport", "tcp",
-		"start="+strconv.Itoa(start), "num="+strconv.Itoa(num)).CombinedOutput()
+	cmd := newNetshCommandContext(ctx, netsh, "int", "ipv4", "set", "dynamicport", "tcp",
+		"start="+strconv.Itoa(start), "num="+strconv.Itoa(num))
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return out, fmt.Errorf("netsh int ipv4 set dynamicport tcp start=%d num=%d: %w: %s", start, num, err, strings.TrimSpace(string(out)))
 	}
 	return out, nil
+}
+
+func newNetshCommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	process.NoConsole(cmd)
+	return cmd
 }
 
 // computeEphemeralRangeFix picks a new dynamic range that clears every mcphub

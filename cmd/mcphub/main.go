@@ -24,20 +24,22 @@ var (
 )
 
 func main() {
-	consoleAttached := attachParentConsoleIfAvailable()
+	args := os.Args
+	consolePolicy, args := cli.ResolveWindowsConsolePolicy(args)
+	debugConsoleAcquired, err := applyWindowsConsolePolicy(consolePolicy)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		os.Exit(1)
+	}
 	cli.SetBuildInfo(version, commit, buildDate)
-	// Parse-once-inject-down: whether this process is a console client is
-	// ambient process state that only main() can observe (the attach is
-	// main's first statement). Every downstream console-lifetime decision
-	// consumes THIS value instead of re-deriving console policy from an
-	// unrelated flag.
-	cli.SetConsoleAttached(consoleAttached)
+	cli.SetDebugConsoleAcquired(debugConsoleAcquired)
 
 	// A bare invocation (no subcommand) is the first-run entry point: route
 	// it to `gui` so `mcphub` starts the hub + GUI. See shouldAutoLaunchGUI.
-	if shouldAutoLaunchGUI() {
-		os.Args = cli.RouteInvocationArgs(os.Args)
+	if !autoLaunchGUIOptedOut() && shouldAutoLaunchGUIForArgs(args) {
+		args = cli.RouteInvocationArgs(args)
 	}
+	os.Args = args
 
 	if err := cli.NewRootCmd().Execute(); err != nil {
 		// PR #23 C1 stuck-instance recovery: propagate distinct exit

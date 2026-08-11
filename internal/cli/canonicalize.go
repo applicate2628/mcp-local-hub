@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/binaryadmission"
 )
 
 // newCanonicalizeCmdReal returns the hidden `mcphub canonicalize` command: a
@@ -92,6 +93,11 @@ func canonicalizeBinaryOnly(w io.Writer) error {
 //     so a repeated `npm install` of the SAME version does not churn a
 //     rename-aside `.old-<ts>` on every reinstall.
 func canonicalizeBinaryToTarget(w io.Writer, src, target string) error {
+	if runtime.GOOS == "windows" {
+		if err := binaryadmission.AdmitWindowsGUI(src); err != nil {
+			return fmt.Errorf("admit canonical candidate: %w", err)
+		}
+	}
 	if samePath(src, target) {
 		fmt.Fprintf(w, "✓ mcphub already canonical at %s (running binary is the target)\n", target)
 		return nil

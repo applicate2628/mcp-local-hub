@@ -308,14 +308,10 @@ function doInject() {
   }
 }
 
-// Capture `<binary> version` output. On Windows the shipped binary is linked
-// `-H windowsgui` and calls attachParentConsoleIfAvailable() at startup
-// (cmd/mcphub/main.go); it then writes to the *attached console device*, NOT
-// to an anonymous stdout pipe. So a piped capture (execFileSync default) comes
-// back EMPTY on Windows even though the text is visible on the terminal. A
-// real file handle, however, DOES receive the bytes. So we redirect the
-// child's stdout+stderr to a temp file and read it back — this works for both
-// the console-subsystem and the windowsgui-subsystem binary, on every OS.
+// Capture `<binary> version` output through real redirected file handles. The
+// Windows product is GUI-subsystem and ordinary launches never attach or
+// allocate a console, so preserving inherited redirected handles is the stable
+// machine-readable contract across all hosts.
 function captureVersionOutput(binPath) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "mcphub-ver-"));
   const outFile = path.join(tmp, "out.txt");

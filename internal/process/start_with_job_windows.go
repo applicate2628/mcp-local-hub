@@ -165,8 +165,7 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 	//     wide-char rather than ANSI. Setting this flag is harmless
 	//     when envPtr is NULL (the kernel inherits the parent's env
 	//     in both cases).
-	creationFlags := uint32(windows.EXTENDED_STARTUPINFO_PRESENT) |
-		uint32(windows.CREATE_UNICODE_ENVIRONMENT)
+	creationFlags := startWithJobCreationFlags()
 
 	var pi windows.ProcessInformation
 	// lpStartupInfo: take &si.StartupInfo (the embedded first field of StartupInfoEx).
@@ -229,6 +228,12 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 	runtime.KeepAlive(childHandles)
 
 	return int(pi.ProcessId), nil
+}
+
+func startWithJobCreationFlags() uint32 {
+	return uint32(windows.EXTENDED_STARTUPINFO_PRESENT) |
+		uint32(windows.CREATE_UNICODE_ENVIRONMENT) |
+		uint32(windows.CREATE_NO_WINDOW)
 }
 
 // prepareWindowsCommand is the single Windows command-line, working-directory,

@@ -28,16 +28,29 @@
 
 ## Build
 
-```bash
-cd <repo-root>
-bash build.sh   # Git Bash / WSL / Linux / macOS
-# or, on Windows native:
+```powershell
+Set-Location <repo-root>
 pwsh ./build.ps1
 ```
 
-Both scripts embed the current git commit, the build date, and a Windows version resource into the binary (see `mcphub.exe version`). A plain `go build -o mcphub.exe ./cmd/mcphub` also works for dev iteration but leaves version metadata as `dev/unknown`.
+`build.ps1` is the sole Windows product-binary route. It embeds the current git
+commit, build date, and Windows version resource, links `WINDOWS_GUI`, and runs
+the repository's bounded PE admission adapter. Plain `go build` is a compile
+check only; do not install or promote its output.
 
 On success: `bin/mcphub.exe` appears (~15 MB, includes Windows version resource metadata).
+
+Ordinary Windows launches never attach or allocate a console. For one process,
+opt in with exact first-argument placement:
+
+```text
+mcphub --debug-console [command ...]
+```
+
+There is no environment/config alias or implicit console mode. Redirected
+standard handles are preserved, background children remain console-free, and a
+GUI editor configured for manifest editing must itself be a GUI-subsystem
+executable.
 
 ## Setup (canonical install)
 

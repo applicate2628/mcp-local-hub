@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+	"mcp-local-hub/internal/binaryadmission"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/autostart"
@@ -138,6 +139,11 @@ func samePath(a, b string) bool {
 // first because os.Rename refuses to overwrite; if dst is locked by a
 // running process we surface a friendly hint.
 func copyExe(src, dst string) error {
+	if runtime.GOOS == "windows" {
+		if err := binaryadmission.AdmitWindowsGUI(src); err != nil {
+			return fmt.Errorf("admit Windows executable candidate: %w", err)
+		}
+	}
 	dir := filepath.Dir(dst)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create %s: %w", dir, err)

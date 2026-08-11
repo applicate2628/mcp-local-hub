@@ -869,8 +869,8 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 			"refusing to --upgrade from the canonical binary at %s "+
 				"(current executable %s resolves to the same file via path or symlink/junction/short-name alias): "+
 				"the running image cannot replace itself on Windows. "+
-				"Build a new binary (e.g. `go build ./cmd/mcphub`) and run "+
-				"`./mcphub install --upgrade` (or `.\\mcphub.exe install --upgrade`) "+
+				"Build a new Windows product binary with `pwsh ./build.ps1` and run "+
+				"`.\\bin\\mcphub.exe install --upgrade` "+
 				"from the build directory instead.",
 			target, curExe)
 	}
@@ -882,10 +882,8 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 				"refusing to --upgrade from a dev-build binary at %s: "+
 					"current executable was built without the build scripts' ldflags "+
 					"(version=%q, expected a semver like \"0.4.0\"). "+
-					"On Windows this binary is also CONSOLE-subsystem (no `-H windowsgui` "+
-					"linker flag), which would cause terminal flashes on every "+
-					"Scheduler-invoked daemon and prevent the tray icon from rendering. "+
-					"Recovery: rebuild via `bash build.sh` (or `pwsh build.ps1`), then "+
+					"Windows product binaries must also pass the PE subsystem admission gate. "+
+					"Recovery: rebuild via `pwsh ./build.ps1`, then "+
 					"run `./bin/mcphub.exe install --upgrade` from the build directory.",
 				curExe, version)
 		}

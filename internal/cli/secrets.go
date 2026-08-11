@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -403,11 +402,7 @@ func newSecretsEditCmd() *cobra.Command {
 			if editor == "" {
 				editor = "notepad" // Windows fallback
 			}
-			c := exec.Command(editor, tmpPath)
-			c.Stdin = os.Stdin
-			c.Stdout = os.Stdout
-			c.Stderr = os.Stderr
-			if err := c.Run(); err != nil {
+			if err := runEditorForFile(editor, tmpPath, os.Stdin, os.Stdout, os.Stderr); err != nil {
 				return fmt.Errorf("editor: %w", err)
 			}
 			// Read-back residual defense (fail closed): refuse to read

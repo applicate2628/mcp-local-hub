@@ -24,6 +24,7 @@
   },
   "files": [
     "bin/mcphub.exe",
+    "bin/mcphub-pe-admit.exe",
     "README.md"
   ],
   "engines": {

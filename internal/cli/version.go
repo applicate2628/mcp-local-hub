@@ -81,9 +81,9 @@ Go toolchain version, target platform, plus homepage / issue tracker
 / commercial licensing / license / author links.
 
 Values are baked in at build time via build.sh / build.ps1 (which
-injects ldflags). A bare 'go build ./cmd/mcphub' produces a binary
-that shows version=dev / commit=unknown / build-date=unknown — run
-the build scripts to get real values.
+injects ldflags). On Windows, only 'pwsh ./build.ps1' produces an
+installable product binary and runs PE subsystem admission; bare
+'go build' is a non-product compile check.
 
 Example:
   mcphub version

@@ -118,14 +118,18 @@ jobs:
             # respawns -> new console). build.sh already does this; the release
             # pipeline silently did not, so npm-installed Windows users got a
             # console-subsystem binary while build.sh deploys did not. mcphub is
-            # a GUI-subsystem binary by design and attaches to the parent console
-            # (attachParentConsoleIfAvailable) to show CLI output — see CLAUDE.md
-            # "CLI entry point + console lifetime". `-H windowsgui` is a linker
+            # a GUI-subsystem binary by design; ordinary launches preserve
+            # inherited redirected handles without attaching a console. `-H windowsgui` is a linker
             # flag and cross-compiles cleanly from the Linux runner; it is
             # meaningless on darwin/linux, so apply it to windows ONLY.
             local ld="$LD"
             if [ "$1" = "windows" ]; then ld="$LD -H windowsgui"; fi
             GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$ld" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
+            if [ "$1" = "windows" ]; then
+              GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "-s -w -H windowsgui" \
+                -o "npm/packages/$3/bin/mcphub-pe-admit.exe" ./cmd/mcphub-pe-admit
+              go run ./cmd/mcphub-pe-admit "npm/packages/$3/bin/$4"
+            fi
           }
           build windows amd64 win32-x64    mcphub.exe
           build windows arm64 win32-arm64  mcphub.exe
@@ -139,29 +143,8 @@ jobs:
       - name: Assert Windows binaries are GUI-subsystem (not console)
         shell: bash
         run: |
-          # A console-subsystem mcphub.exe makes Windows allocate a console
-          # window per process, so `mcphub gui` sprays 10+ consoles that respawn
-          # on close. This shipped once (npm binaries lacked `-H windowsgui`
-          # while build.sh deploys had it), silently, because nothing checked.
-          # Fail the release if either win32 target is not PE subsystem 2 (GUI).
-          python3 - <<'PY'
-          import struct, sys
-          def subsystem(path):
-              d = open(path, "rb").read()
-              e = struct.unpack_from("<I", d, 0x3C)[0]
-              assert d[e:e+4] == b"PE\x00\x00", f"{path}: not a PE file"
-              return struct.unpack_from("<H", d, e + 24 + 68)[0]
-          bad = []
-          for p in ("npm/packages/win32-x64/bin/mcphub.exe",
-                    "npm/packages/win32-arm64/bin/mcphub.exe"):
-              s = subsystem(p)
-              print(f"{p}: PE subsystem {s} ({'GUI' if s==2 else 'CONSOLE' if s==3 else '?'})")
-              if s != 2:
-                  bad.append(f"{p} is subsystem {s}, want 2 (GUI) — build must pass -H windowsgui")
-          if bad:
-              print("RELEASE BLOCKED:", *bad, sep="\n  ")
-              sys.exit(1)
-          PY
+          go run ./cmd/mcphub-pe-admit npm/packages/win32-x64/bin/mcphub.exe
+          go run ./cmd/mcphub-pe-admit npm/packages/win32-arm64/bin/mcphub.exe
 
       - name: Assert built binary version matches package.json
         shell: bash
@@ -169,6 +152,36 @@ jobs:
           # The runner is linux/amd64, so only the linux-x64 binary executes here;
           # all 6 share the same -X main.version ldflag, so one assertion covers all.
           node npm/sync-version.js --assert-binary npm/packages/linux-x64/bin/mcphub
+
+      - name: Verify staged npm package payloads
+        shell: bash
+        env:
+          PACK_EVIDENCE: ${{ runner.temp }}/mcphub-pack-evidence
+        run: |
+          mkdir -p "$PACK_EVIDENCE"
+          for d in win32-x64 win32-arm64 darwin-x64 darwin-arm64 linux-x64 linux-arm64; do
+            (cd "npm/packages/$d" && npm pack --dry-run --json) > "$PACK_EVIDENCE/$d.json"
+          done
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const root = process.env.PACK_EVIDENCE;
+          const targets = ['win32-x64','win32-arm64','darwin-x64','darwin-arm64','linux-x64','linux-arm64'];
+          for (const target of targets) {
+            const rows = JSON.parse(fs.readFileSync(path.join(root, `${target}.json`), 'utf8'));
+            if (!Array.isArray(rows) || rows.length !== 1) throw new Error(`${target}: expected one pack result`);
+            const files = rows[0].files.map((f) => f.path);
+            const count = (name) => files.filter((p) => p === name).length;
+            if (target.startsWith('win32-')) {
+              if (count('bin/mcphub.exe') !== 1 || count('bin/mcphub-pe-admit.exe') !== 1) {
+                throw new Error(`${target}: missing unique mcphub.exe/PE adapter payload: ${files.join(', ')}`);
+              }
+            } else if (count('bin/mcphub') !== 1 || files.some((p) => p.endsWith('.exe') || p.includes('mcphub-pe-admit'))) {
+              throw new Error(`${target}: non-Windows payload drift: ${files.join(', ')}`);
+            }
+            process.stdout.write(`${target}: ${files.join(', ')}\n`);
+          }
+          NODE
 
       - name: Publish platform packages, then the meta
         shell: bash

@@ -61,8 +61,8 @@ step — re-running when the canonical binary is already current is a no-op.
 What upgrade does:
   1. Self-replace guard. Refuses when run from the canonical path
      (the running image cannot replace itself on Windows). Build
-     a new binary (e.g., ` + "`go build ./cmd/mcphub`" + `) and run
-     ` + "`./mcphub upgrade`" + ` from the build directory.
+	     a new Windows product binary with ` + "`pwsh ./build.ps1`" + ` and run
+	     ` + "`./bin/mcphub.exe upgrade`" + ` from the build directory.
   2. StopAll. Kills every mcp-local-hub-* daemon by port and /Ends
      its scheduler task — releases the Windows file lock on the
      canonical path. Per-task stop failures are logged but non-fatal.
@@ -74,8 +74,8 @@ What upgrade does:
      canonical path so they pick up the new binary automatically.
 
 Examples:
-  go build ./cmd/mcphub                     # in a checkout
-  ./mcphub upgrade                          # apply this build to ~/.local/bin/
+	  pwsh ./build.ps1                           # in a checkout
+	  ./bin/mcphub.exe upgrade                  # apply this admitted build
 
   # Equivalent (older form):
   ./mcphub install --upgrade

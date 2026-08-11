@@ -5,8 +5,6 @@ package gui
 import (
 	"os/exec"
 	"syscall"
-
-	"mcp-local-hub/internal/process"
 )
 
 // applyDetachFlags sets POSIX-specific flags on cmd so the spawned
@@ -27,18 +25,8 @@ func applyDetachFlags(cmd *exec.Cmd) {
 }
 
 // configureDetachedSupervisor configures a spawn of `mcphub supervise`.
-//
-// The suppression marker is applied on POSIX too even though the attach it
-// suppresses is a Windows-only mechanism (POSIX main() has no
-// AttachConsole, and process.SuppressConsoleAttach is a plain env write
-// there). Setting it unconditionally keeps ONE answer to "is this child
-// attach-suppressed?" across platforms: a reader who opens either the
-// _windows or the _other file sees the same contract, instead of having to
-// know which platform's file carries the marker. It matches the
-// internal/cli supervisor configurator, which does the same.
 func configureDetachedSupervisor(cmd *exec.Cmd) {
 	applyDetachFlags(cmd)
-	process.SuppressConsoleAttach(cmd)
 }
 
 // configureDetachedGUI configures a spawn of a replacement GUI (RestartV3

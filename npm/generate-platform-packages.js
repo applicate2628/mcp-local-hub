@@ -91,7 +91,10 @@ function subPackageJson(meta, target) {
     os: [nodeOs],
     cpu: [nodeCpu],
     bin: { mcphub: `bin/${bin}` },
-    files: [`bin/${bin}`, "README.md"],
+    files:
+      nodeOs === "win32"
+        ? [`bin/${bin}`, "bin/mcphub-pe-admit.exe", "README.md"]
+        : [`bin/${bin}`, "README.md"],
     engines: meta.engines,
   };
 }

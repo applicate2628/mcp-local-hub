@@ -53,7 +53,7 @@ func NewRootCmd() *cobra.Command {
 		Long: `mcphub runs your MCP servers as shared local daemons instead of one
 process per client, and points every MCP client at them.
 
-Run "mcphub" with no arguments to start the hub and open the GUI.`,
+Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsConsoleStartupUsage(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}

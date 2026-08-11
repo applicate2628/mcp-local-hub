@@ -27,6 +27,27 @@ import (
 	"testing"
 )
 
+func assertHubMcpPersistedStrictWriteOutcome(t *testing.T, stateDir string, err error) {
+	t.Helper()
+	if err != nil {
+		t.Fatalf("POSIX state-dir owner must harden its directory before the strict write: %v", err)
+	}
+	info, statErr := os.Stat(stateDir)
+	if statErr != nil {
+		t.Fatalf("stat hardened state dir: %v", statErr)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("state-dir mode after write = %#o, want 0700", got)
+	}
+	output, statErr := os.Stat(filepath.Join(stateDir, hubMcpEndpointFileLeaf))
+	if statErr != nil {
+		t.Fatalf("stat hub-mcp state output: %v", statErr)
+	}
+	if got := output.Mode().Perm(); got != 0o600 {
+		t.Fatalf("hub-mcp state mode = %#o, want 0600", got)
+	}
+}
+
 // broadenParentForStateFileTest sets parent's mode to 0o755 (owner
 // rwx, group/world r-x). This is the canonical "broad read but no
 // write" shape that the strict parent-dir gate rejects while

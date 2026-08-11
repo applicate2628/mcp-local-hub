@@ -26,11 +26,11 @@ import (
 // Idempotent — re-calling adds the flag a second time which the
 // kernel ignores.
 //
-// CREATE_NO_WINDOW (0x08000000) is the right flag for child
-// processes that have no UI of their own; DETACHED_PROCESS does the
-// same console suppression but ALSO breaks stdio inheritance, which
-// would defect daemon's stdio-bridge transport. CREATE_NO_WINDOW
-// preserves stdio.
+// CREATE_NO_WINDOW suppresses a visible console window while preserving the
+// normal child environment and redirected stdio behavior. DETACHED_PROCESS is
+// deliberately not a common default: a target-Windows A/B probe showed that it
+// changes PowerShell/CIM local-time interpretation, breaking process-identity
+// timestamps by the host UTC offset.
 func NoConsole(cmd *exec.Cmd) {
 	if cmd == nil {
 		return

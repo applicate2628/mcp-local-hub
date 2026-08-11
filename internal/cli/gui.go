@@ -626,21 +626,12 @@ activates the first window and exits 0.`,
 			// flags live — the runtime below consumes this decision and
 			// never re-derives it.
 			//
-			// The real discriminator is whether a console exists to
-			// release, not whether the tray is on. Before this, the
-			// release was gated on `!noTray`, which silently overloaded a
-			// cosmetic flag into a process-lifetime policy: an operator
-			// who wanted "hub + GUI, no tray icon" also got terminal-
-			// coupled lifetime, and "tray on, keep my console" was
-			// inexpressible. --foreground now expresses that directly.
-			//
-			// --no-tray keeps implying --foreground deliberately: it is
-			// the documented dev workflow (`mcphub gui --no-browser
-			// --no-tray --port 9125`, CLAUDE.md) and the E2E fixtures,
-			// where Ctrl-C must keep working. Making it stop implying
-			// foreground would silently take the console away from
-			// exactly the runs that need it.
-			releaseConsole := resolveReleaseConsole(ConsoleAttached(), foreground, noTray)
+			// Console acquisition is immutable state injected from the
+			// exact startup prefix. These lifetime flags can retain an
+			// explicitly acquired debug console, but never acquire one.
+			// --no-tray keeps its existing foreground lifetime implication
+			// for the documented developer/E2E workflow.
+			releaseConsole := resolveReleaseConsole(DebugConsoleAcquired(), foreground, noTray)
 
 			handoff := os.Getenv(selfRestartHandoffEnv)
 			if isRestartV3ChildLaunch(gui.RestartV3Enabled(), handoff) {
@@ -726,8 +717,8 @@ activates the first window and exits 0.`,
 	}
 	c.Flags().IntVar(&port, "port", 0, "TCP port on 127.0.0.1 in [1024,65535] (0 = auto-pick from ephemeral)")
 	c.Flags().BoolVar(&noBrowser, "no-browser", false, "do not auto-launch a browser window")
-	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon (also implies --foreground: the GUI stays attached to the launching terminal and exits when that terminal closes)")
-	c.Flags().BoolVar(&foreground, "foreground", false, "keep the launching terminal's console: Ctrl-C works and the GUI exits when that terminal closes. Default is background — the GUI releases the console at startup and survives the terminal. Implied by --no-tray.")
+	c.Flags().BoolVar(&noTray, "no-tray", false, "do not show the system-tray icon (also implies --foreground lifetime behavior; does not enable a console)")
+	c.Flags().BoolVar(&foreground, "foreground", false, "retain foreground lifetime behavior; does not enable a console. Use the exact startup prefix for console diagnostics. Implied by --no-tray.")
 	c.Flags().BoolVar(&force, "force", false, "stuck-instance recovery: print the diagnostic (PRINT-ONLY; add --reveal to also open the lock folder in the file manager). Add --kill to terminate the recorded PID after a three-part identity gate.")
 	c.Flags().BoolVar(&kill, "kill", false, "with --force: kill the recorded PID (image/argv/start-time gate); SIGKILL/TerminateProcess. The kernel releases the flock as a side effect.")
 	c.Flags().BoolVar(&yes, "yes", false, "with --force --kill or --reset-port: skip the confirmation prompt (required in non-interactive shells).")
@@ -1325,11 +1316,10 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	}()
 
 	// Startup is complete: the listener is bound, the port has been
-	// reported, and the supervisor is up. From here `mcphub gui` is a
-	// long-lived BACKGROUND app, so release the parent console — otherwise
-	// the terminal it was launched from owns its lifetime and closing that
-	// terminal kills the GUI and its tray icon (CTRL_CLOSE_EVENT to every
-	// attached console client). See process.ReleaseParentConsole.
+	// reported, and the supervisor is up. A background GUI now releases only
+	// a debug console explicitly acquired by this process; ordinary launches
+	// never reach this path with console ownership. See
+	// process.ReleaseParentConsole.
 	//
 	// releaseConsole is resolved ONCE by newGuiCmdReal from the injected
 	// console state plus --foreground/--no-tray; this layer consumes the
@@ -1341,17 +1331,8 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 	//     later console-backed stdout/stderr writes. Diagnostics written
 	//     after this point survive via the durable sink engaged below, not
 	//     by luck.
-	//   - BEFORE the browser and tray spawns below. `mcphub tray` is the
-	//     same Windows-subsystem binary and attaches to ITS parent's
-	//     console at startup; releasing first means the tray has no console
-	//     to inherit, so it survives the terminal too. Releasing after the
-	//     tray spawn would leave the exact "tray disappears" symptom.
-	//
-	// The GUI-spawned SUPERVISOR above is NOT protected by this ordering —
-	// it is spawned before this point and, being the same binary, used to
-	// attach itself to the very console we are about to drop. Its immunity
-	// comes from configureSupervisorDetach marking the child
-	// attach-suppressed, which holds no matter where this release sits.
+	//   - BEFORE the browser and tray spawns below, keeping the release
+	//     boundary deterministic for the explicitly acquired debug console.
 	if releaseConsole {
 		releaseConsoleForBackgroundGUI(process.ReleaseParentConsole)
 	}

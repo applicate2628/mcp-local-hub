@@ -205,7 +205,11 @@ func writeEditorScript(t *testing.T, editedYAML string) string {
 // ImportYAML → audit-diff path.
 func runSecretsEdit(t *testing.T, editedYAML string) error {
 	t.Helper()
-	t.Setenv("EDITOR", writeEditorScript(t, editedYAML))
+	script := writeEditorScript(t, editedYAML)
+	editor := installEditorTestCommand(t, script, func(path string) error {
+		return os.WriteFile(path, []byte(editedYAML), 0o600)
+	})
+	t.Setenv("EDITOR", editor)
 	cmd := newSecretsCmdReal()
 	cmd.SetArgs([]string{"edit"})
 	cmd.SetOut(&strings.Builder{})
@@ -227,9 +231,9 @@ func TestCLISecretsEdit_EmitsPerKeyAuditEventsWithoutValues(t *testing.T) {
 	const oldChangedVal = "old-value-CHANGED"
 	const removedVal = "removed-value-GONE"
 	for k, v := range map[string]string{
-		"KEEP_KEY":    keepVal,
-		"CHANGE_KEY":  oldChangedVal,
-		"REMOVE_KEY":  removedVal,
+		"KEEP_KEY":   keepVal,
+		"CHANGE_KEY": oldChangedVal,
+		"REMOVE_KEY": removedVal,
 	} {
 		if err := runSecretsCmd(t, v, "set", k, "--from-stdin"); err != nil {
 			t.Fatalf("seed set %s: %v", k, err)
@@ -410,9 +414,22 @@ func TestCLISecretsEdit_AuditBaselineComputedUnderLock(t *testing.T) {
 	// exist when the export was taken — the editor script adds it concurrently.
 	// Pass the PARENT's resolved vault/key paths so the subprocess writes into
 	// THIS test's vault (not its own TestMain fence).
-	t.Setenv("EDITOR", writeConcurrentEditorScript(t,
-		"KEEP_KEY: keepval\n", "CONCURRENT_KEY", "raceval",
-		secrets.DefaultVaultPath(), secrets.DefaultKeyPath()))
+	const editedYAML = "KEEP_KEY: keepval\n"
+	vaultPath, keyPath := secrets.DefaultVaultPath(), secrets.DefaultKeyPath()
+	script := writeConcurrentEditorScript(t, editedYAML, "CONCURRENT_KEY", "raceval", vaultPath, keyPath)
+	editor := installEditorTestCommand(t, script, func(path string) error {
+		if err := secrets.WithVaultLock(vaultPath, func() error {
+			vault, err := secrets.OpenVault(keyPath, vaultPath)
+			if err != nil {
+				return err
+			}
+			return vault.Set("CONCURRENT_KEY", "raceval")
+		}); err != nil {
+			return err
+		}
+		return os.WriteFile(path, []byte(editedYAML), 0o600)
+	})
+	t.Setenv("EDITOR", editor)
 	cmd := newSecretsCmdReal()
 	cmd.SetArgs([]string{"edit"})
 	cmd.SetOut(&strings.Builder{})

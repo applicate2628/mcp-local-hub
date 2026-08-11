@@ -2,10 +2,13 @@ package cli
 
 import (
 	"bytes"
+	"encoding/binary"
 	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"mcp-local-hub/internal/binaryadmission"
 )
 
 // TestCanonicalizeBinaryToTarget exercises the pure core of the binary-only
@@ -31,6 +34,22 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		}
 		return b
 	}
+	writeGUIPEFile := func(p, tag string) []byte {
+		t.Helper()
+		// Keep this cross-platform test on the same minimal PE32+ GUI fixture
+		// shape as the binary-admission tests. The CLI admission helper itself
+		// is Windows-tagged, while this canonicalize test also runs on Linux.
+		content := make([]byte, 0x200)
+		copy(content, "MZ")
+		binary.LittleEndian.PutUint32(content[0x3c:0x40], 0x80)
+		copy(content[0x80:], "PE\x00\x00")
+		binary.LittleEndian.PutUint16(content[0x80+20:0x80+22], 0xf0)
+		binary.LittleEndian.PutUint16(content[0x80+24:0x80+26], 0x20b)
+		binary.LittleEndian.PutUint16(content[0x80+24+68:0x80+24+70], binaryadmission.WindowsGUISubsystem)
+		content = append(content, tag...)
+		writeFile(p, content)
+		return content
+	}
 	asides := func(dir string) []string {
 		t.Helper()
 		m1, _ := filepath.Glob(filepath.Join(dir, "mcphub.old-*"))
@@ -42,14 +61,14 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		dir := t.TempDir()
 		src := filepath.Join(dir, "src", "mcphub")
 		target := filepath.Join(dir, "bin", "mcphub")
-		writeFile(src, []byte("FRESH-v2"))
+		want := writeGUIPEFile(src, "FRESH-v2")
 
 		var w bytes.Buffer
 		if err := canonicalizeBinaryToTarget(&w, src, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
-		if got := readFile(target); !bytes.Equal(got, []byte("FRESH-v2")) {
-			t.Fatalf("target content = %q, want FRESH-v2", got)
+		if got := readFile(target); !bytes.Equal(got, want) {
+			t.Fatalf("target differs from admitted source: got %d bytes, want %d", len(got), len(want))
 		}
 	})
 
@@ -57,15 +76,15 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		dir := t.TempDir()
 		src := filepath.Join(dir, "src", "mcphub")
 		target := filepath.Join(dir, "bin", "mcphub")
-		writeFile(src, []byte("FRESH-v2-larger-content"))
-		writeFile(target, []byte("STALE-v1"))
+		want := writeGUIPEFile(src, "FRESH-v2-larger-content")
+		writeGUIPEFile(target, "STALE-v1")
 
 		var w bytes.Buffer
 		if err := canonicalizeBinaryToTarget(&w, src, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
-		if got := readFile(target); !bytes.Equal(got, []byte("FRESH-v2-larger-content")) {
-			t.Fatalf("target content = %q, want fresh", got)
+		if got := readFile(target); !bytes.Equal(got, want) {
+			t.Fatalf("target differs from admitted source: got %d bytes, want %d", len(got), len(want))
 		}
 		if runtime.GOOS == "windows" {
 			// The Windows lock-safe path renames the prior binary aside.
@@ -79,15 +98,15 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		dir := t.TempDir()
 		src := filepath.Join(dir, "src", "mcphub")
 		target := filepath.Join(dir, "bin", "mcphub")
-		writeFile(src, []byte("SAME-BYTES"))
-		writeFile(target, []byte("SAME-BYTES"))
+		want := writeGUIPEFile(src, "SAME-BYTES")
+		writeFile(target, want)
 
 		var w bytes.Buffer
 		if err := canonicalizeBinaryToTarget(&w, src, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
-		if got := readFile(target); !bytes.Equal(got, []byte("SAME-BYTES")) {
-			t.Fatalf("target content changed: %q", got)
+		if got := readFile(target); !bytes.Equal(got, want) {
+			t.Fatalf("target content changed: got %d bytes, want %d", len(got), len(want))
 		}
 		if got := asides(filepath.Dir(target)); len(got) != 0 {
 			t.Fatalf("identical content must not create an aside, got %v", got)
@@ -97,14 +116,14 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 	t.Run("running-is-canonical self-copy guard", func(t *testing.T) {
 		dir := t.TempDir()
 		target := filepath.Join(dir, "bin", "mcphub")
-		writeFile(target, []byte("RUNNING"))
+		want := writeGUIPEFile(target, "RUNNING")
 
 		var w bytes.Buffer
 		if err := canonicalizeBinaryToTarget(&w, target, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
-		if got := readFile(target); !bytes.Equal(got, []byte("RUNNING")) {
-			t.Fatalf("self-copy guard must not modify the target, got %q", got)
+		if got := readFile(target); !bytes.Equal(got, want) {
+			t.Fatalf("self-copy guard modified the target: got %d bytes, want %d", len(got), len(want))
 		}
 	})
 }

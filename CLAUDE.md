@@ -429,62 +429,24 @@ resurrect exactly the environment-dependence this removed.
 Opt out with **`MCPHUB_NO_AUTO_GUI=1`** — bare `mcphub` then prints help and
 exits 0. That is the lever for CI and piped callers.
 
-### `--foreground` and console lifetime
+### Windows console contract
 
-`mcphub gui` is a long-lived background app, so on Windows it **releases the
-parent console** after startup (`process.ReleaseParentConsole`). Without that,
-closing the terminal it was launched from sends `CTRL_CLOSE_EVENT` to every
-attached console client and kills the GUI plus its tray icon.
+Every ordinary Windows invocation is console-free. The only public opt-in is
+the exact startup prefix `mcphub --debug-console [command ...]`; it must occupy
+`argv[1]`, affects only that process, and is consumed before Cobra parsing.
+Later occurrences, `--debug-console=...`, config/environment aliases, and
+implicit `gui`, `--foreground`, `--no-tray`, `supervise`, or `restart` modes do
+not enable it. Redirected standard handles remain intact.
 
-- **`--foreground`** keeps the console attached: startup output keeps flowing,
-  Ctrl-C keeps working, and the GUI dies with its terminal. Use it for dev runs.
-- **`--no-tray` implies `--foreground`.** The documented frontend workflow
-  (`mcphub gui --no-browser --no-tray --port 9125`) and the E2E fixtures both
-  rely on keeping the console; taking it away silently would be a regression.
+Background child creation always applies the shared Windows no-console process
+attributes, even when the parent opted into a debug console. Child argv and
+environment never propagate console intent. A configured GUI editor is admitted
+as a GUI-subsystem executable before launch.
 
-The policy is resolved ONCE at the top (`resolveReleaseConsole(ConsoleAttached(),
-foreground, noTray)`) and passed down as a value — no lower layer re-derives it
-from a flag.
-
-Note the shell does **not** get its prompt back: `cmd /c mcphub gui` still blocks,
-because cmd waits on the process handle regardless of console attachment.
-Releasing the console fixes *survival*, not *prompt return*.
-
-### Detached spawns of the same binary must suppress the attach
-
-`mcphub` attaches to a parent console as the first statement of `main()`
-(`cmd/mcphub/console_windows.go`). `DETACHED_PROCESS |
-CREATE_NEW_PROCESS_GROUP` blocks console **inheritance at create** — it does NOT
-stop the child from explicitly attaching afterwards. A detached child of a
-console-holding parent therefore re-joins that console and dies with the
-terminal.
-
-Any code path that spawns `mcphub` as a long-lived background process MUST set
-**`MCPHUB_NO_CONSOLE_ATTACH=1`** via the single owner
-`process.SuppressConsoleAttach` — never by re-typing the env name. Interactive
-`mcphub supervise` typed in a terminal keeps its console (no env, no
-suppression).
-
-The marker **propagates to the whole subtree, and that is intended**: daemon
-child environments are composed from the supervisor's `os.Environ()`
-(`internal/daemon/host.go` `composeChildEnv`), so every managed daemon — and
-every third-party MCP server under it — inherits the variable. A managed daemon
-IS a detached background child and should never attach a console; for
-third-party children (`uvx`/`npx`/`python`/`node`) the variable is unrecognized
-and inert. Do not add it to an `UnsetEnv` or strip list "for cleanliness" —
-`TestComposeChildEnvPropagatesConsoleAttachSuppression` pins the inheritance.
-
-In `internal/gui` the choice is structural rather than a note to remember:
-`configureDetachedSupervisor` suppresses the attach and `configureDetachedGUI`
-does not, because the RestartV3 replacement **GUI** must keep the operator's
-terminal output under `--foreground`. Pick the constructor that matches what
-you are spawning.
-
-Verify a new spawn path with a probe, not by reading the flags: build a real
-`-H windowsgui` binary and have the console-owning parent call
-`GetConsoleProcessList` against the child PID. Reading `DETACHED_PROCESS` and
-concluding "it cannot have a console" is precisely the inspection-only reasoning
-that let this class survive in four separate call sites.
+Windows product binaries come only from `pwsh ./build.ps1` (or the equivalent
+release workflow). A host-neutral bounded PE reader admits subsystem 2 before
+build publication, setup, canonicalize, migration, or upgrade mutation. Plain
+`go build` remains a non-product compile check.
 
 ## GUI frontend (Phase 3B-II onward)
 

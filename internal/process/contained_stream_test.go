@@ -10,8 +10,14 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
+
+func runContainedSynctest(t *testing.T, test func(*testing.T)) {
+	t.Helper()
+	synctest.Test(t, test)
+}
 
 type memoryContainedPipe struct {
 	mu          sync.Mutex
@@ -449,37 +455,39 @@ func TestRunContainedStream_PrimaryPreservedWhenCleanupAlsoFails(t *testing.T) {
 }
 
 func TestRunContainedStream_SuccessStreamsBeforeExit(t *testing.T) {
-	allowExit := make(chan struct{})
-	child := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
-	child.startFn = func(_ containedInputFile, stdout, _ containedWriteFile) error {
-		_, err := stdout.Write([]byte("first chunk"))
-		return err
-	}
-	child.waitCh = make(chan containedWaitResult, 1)
-	go func() {
-		<-allowExit
-		child.waitCh <- containedWaitResult{exitCode: 0, exited: true}
-	}()
-	h := &containedDependencyHarness{child: child}
-	seen := make(chan struct{})
-	done := make(chan error, 1)
-	go func() {
-		done <- runHarness(context.Background(), h, time.Second, io.Discard, func(r io.Reader) error {
-			data, err := io.ReadAll(r)
-			if string(data) != "first chunk" {
-				return errors.New("unexpected streamed bytes")
-			}
-			close(seen)
+	runContainedSynctest(t, func(t *testing.T) {
+		allowExit := make(chan struct{})
+		child := &scriptedContainedChild{waitCh: make(chan containedWaitResult, 1)}
+		child.startFn = func(_ containedInputFile, stdout, _ containedWriteFile) error {
+			_, err := stdout.Write([]byte("first chunk"))
 			return err
-		})
-	}()
-	select {
-	case <-seen:
-	case <-time.After(time.Second):
-		t.Fatal("consumer did not observe stdout before child exit")
-	}
-	close(allowExit)
-	if err := <-done; err != nil {
-		t.Fatalf("RunContainedStream: %v", err)
-	}
+		}
+		child.waitCh = make(chan containedWaitResult, 1)
+		go func() {
+			<-allowExit
+			child.waitCh <- containedWaitResult{exitCode: 0, exited: true}
+		}()
+		h := &containedDependencyHarness{child: child}
+		seen := make(chan struct{})
+		done := make(chan error, 1)
+		go func() {
+			done <- runHarness(context.Background(), h, time.Second, io.Discard, func(r io.Reader) error {
+				data, err := io.ReadAll(r)
+				if string(data) != "first chunk" {
+					return errors.New("unexpected streamed bytes")
+				}
+				close(seen)
+				return err
+			})
+		}()
+		select {
+		case <-seen:
+		case <-time.After(time.Second):
+			t.Fatal("consumer did not observe stdout before child exit")
+		}
+		close(allowExit)
+		if err := <-done; err != nil {
+			t.Fatalf("RunContainedStream: %v", err)
+		}
+	})
 }

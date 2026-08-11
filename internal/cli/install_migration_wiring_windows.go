@@ -18,6 +18,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,6 +36,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
 
@@ -453,35 +455,24 @@ func portBindWaitForRelease(port int, timeout time.Duration) error {
 // closure) so the spawn CONFIGURATION can be asserted without starting a
 // supervisor.
 //
-// The creation flags block console INHERITANCE only. The child is this same
-// binary and its main() calls AttachConsole(ATTACH_PARENT_PROCESS), so without
-// the marker it re-attaches to whatever console the CLI holds — and `mcphub
-// install --upgrade` is normally TYPED AT A TERMINAL, so that console exists.
-// The operator then closes the window believing the upgrade finished,
-// CTRL_CLOSE_EVENT reaches the brand-new supervisor, and KILL_ON_JOB_CLOSE
-// reaps the fleet it just started. Measured with this site's exact flag set
-// (0x00000208): no marker -> the child appears in the parent's
-// GetConsoleProcessList; marker -> never.
-//
-// The marker also covers the degraded retries in
-// startSupervisorDetachedBreakaway, which rebuild through this same function.
-// That matters more than it looks: on a locked-down host those retries STRIP
-// creation flags, so the marker is the only protection that survives them —
-// measured at CreationFlags=0, where it still holds.
+// Process detachment preserves supervisor lifetime independently of the caller.
+// process.NoConsole adds the shared CREATE_NO_WINDOW child contract, and the
+// product's ordinary startup policy never attaches or allocates a console.
+// Every degraded retry rebuilds through this function and therefore reapplies
+// the same no-window contract without environment markers or argv propagation.
 func newInstallSupervisorCmd(exePath string, args []string) *exec.Cmd {
 	c := exec.Command(exePath, args...)
 	c.SysProcAttr = &windows.SysProcAttr{
 		CreationFlags: windows.DETACHED_PROCESS | windows.CREATE_NEW_PROCESS_GROUP,
 	}
-	process.SuppressConsoleAttach(c)
+	process.NoConsole(c)
 	return c
 }
 
 // installSupervisorCmdBuilder returns the builder the spawn path hands to
 // startSupervisorDetachedBreakaway. Package-level so a test can invoke the
 // builder REPEATEDLY and assert that each rebuild — not merely the first
-// attempt — carries the console-attach suppression, which is the property the
-// degraded ERROR_ACCESS_DENIED retries depend on.
+// attempt — carries the no-window child contract.
 func installSupervisorCmdBuilder(exePath string, strictMode bool) func() *exec.Cmd {
 	args := []string{"supervise"}
 	if strictMode {
@@ -494,11 +485,9 @@ func installSupervisorCmdBuilder(exePath string, strictMode bool) func() *exec.C
 // `<exe> supervise [--strict-mode]` as a detached background process via the
 // per-OS process-detachment primitive.
 //
-// Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so the new supervisor's
-// stdin/stdout/stderr inherit nothing from this CLI process, PLUS
-// process.SuppressConsoleAttach so it never acquires a console of its own.
-// Both halves are required and the creation flags alone are not enough — see
-// newInstallSupervisorCmd above for the measurement. The spawned supervisor
+// Windows: DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP provides lifetime and
+// signal isolation. The command builder independently applies the shared
+// no-window policy on every attempt. The spawned supervisor
 // survives the CLI's own exit AND the closing of the terminal the operator ran
 // `mcphub install --upgrade` in.
 func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
@@ -542,8 +531,50 @@ type v5UpgradeDeps struct {
 	pipePath          string
 }
 
-func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) error {
-	return api.RenameAsideReplace(target, newSrc)
+func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) (string, error) {
+	if err := binaryadmission.AdmitWindowsGUI(target); err != nil {
+		return "", fmt.Errorf("admit prior canonical binary: %w", err)
+	}
+	if err := binaryadmission.AdmitWindowsGUI(newSrc); err != nil {
+		return "", fmt.Errorf("admit staged successor binary: %w", err)
+	}
+	priorHash, err := hashFile(target)
+	if err != nil {
+		return "", fmt.Errorf("hash prior canonical binary: %w", err)
+	}
+	if err := api.RenameAsideReplace(target, newSrc); err != nil {
+		return "", err
+	}
+	retained, err := findRetainedPriorBinary(target, priorHash)
+	if err != nil {
+		return "", err
+	}
+	return retained, nil
+}
+
+func findRetainedPriorBinary(target string, priorHash []byte) (string, error) {
+	matches, err := filepath.Glob(target + ".old-*")
+	if err != nil {
+		return "", fmt.Errorf("enumerate retained prior binaries: %w", err)
+	}
+	retained := ""
+	for _, candidate := range matches {
+		h, hashErr := hashFile(candidate)
+		if hashErr == nil && bytes.Equal(h, priorHash) && candidate > retained {
+			retained = candidate
+		}
+	}
+	if retained == "" {
+		return "", fmt.Errorf("rename-aside completed but exact prior binary bytes were not retained for %s", target)
+	}
+	return retained, nil
+}
+
+func (d *v5UpgradeDeps) RestoreRetainedBinary(target, retainedPrior string) error {
+	if err := binaryadmission.AdmitWindowsGUI(retainedPrior); err != nil {
+		return fmt.Errorf("admit retained prior binary: %w", err)
+	}
+	return copyExe(retainedPrior, target)
 }
 
 func (d *v5UpgradeDeps) QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {

@@ -84,18 +84,33 @@ Antigravity's Cascade agent rejects loopback-HTTP MCP entries, so `mcp-local-hub
 The npm install above is the fastest path. To build from source instead — for
 dev iteration or to embed your own version metadata:
 
-```bash
-# 1. Build (embeds git commit + build date into the binary)
-bash build.sh        # Git Bash / WSL / Linux / macOS
-# or on Windows native:
+```powershell
+# 1. Build the admitted Windows product binary
 pwsh ./build.ps1
 
-# Plain `go build -o mcphub.exe ./cmd/mcphub` also works for dev
-# iteration but leaves version metadata as dev/unknown.
-
 # 2. Install to ~/.local/bin and register on user PATH (idempotent)
-./mcphub.exe setup
+.\bin\mcphub.exe setup
 ```
+
+`build.sh` remains the repository automation entry for supported non-Windows
+build environments. On Windows, `build.ps1` is the only product-binary route;
+plain `go build` is a compile check whose output is not installable or
+promotable.
+
+Windows product builds are linked as `WINDOWS_GUI` and are admitted by the
+same bounded PE checker used by setup, canonicalize, upgrade, and npm release.
+Ordinary invocations never attach or allocate a console. The sole opt-in is:
+
+```text
+mcphub --debug-console [command ...]
+```
+
+`--debug-console` must be the exact first argument. It affects only that
+`mcphub` process, preserves redirected standard input/output/error, and is not
+available through an environment variable, config key, subcommand flag, or
+implicit `gui`, `--foreground`, `--no-tray`, `supervise`, or `restart` mode.
+Background children remain console-free. GUI editor launches require a Windows
+GUI-subsystem executable.
 
 Whether you installed via npm or built from source, the rest is identical — use
 the CLI to install the servers you want shared and verify they connect:

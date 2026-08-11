@@ -26,19 +26,6 @@ import (
 // — defense-in-depth against a future supervisor-side regression that
 // drops the `-H windowsgui` linker flag.
 //
-// DETACHED_PROCESS IS NOT SUFFICIENT ON ITS OWN, and assuming it was is
-// what made the GUI-spawned supervisor die with its launching terminal.
-// The flag blocks console INHERITANCE at create time; it does not stop
-// the child from calling AttachConsole(ATTACH_PARENT_PROCESS) afterwards
-// — and the child here is the SAME binary, whose main() does exactly
-// that as its first statement. Measured externally against a real
-// `-H windowsgui` build: a detached child of a console-holding parent
-// appears in that parent's GetConsoleProcessList, i.e. it is a full
-// console client and a CTRL_CLOSE_EVENT target, and closing the terminal
-// then reaps every daemon under its Job Object. So the detach is
-// expressed as BOTH halves here, in one place, and neither half is
-// optional. See work-items/bugs/2026-07-20-gui-spawned-supervisor-console-client.md.
-//
 // This is also the respawn path: the manager's spawn seam resolves to
 // ensureSupervisorRunning, which builds every replacement supervisor cmd
 // through this same hook.
@@ -47,8 +34,7 @@ func configureSupervisorDetach(cmd *exec.Cmd) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.CreationFlags |= windowsDetachedProcess | windowsCreateNewProcessGroup
-	cmd.SysProcAttr.HideWindow = true
-	process.SuppressConsoleAttach(cmd)
+	process.NoConsole(cmd)
 }
 
 // Windows process creation flag constants. The standard library

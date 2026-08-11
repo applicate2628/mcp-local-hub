@@ -8,7 +8,10 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 )
 
-func TestDialSupervisorIPCReconcile_RoundtripWithFakeListener(t *testing.T) {
+// Keep the test identity short: Go folds it into t.TempDir(), which in turn
+// becomes the Unix-domain-socket path. The production path-length contract is
+// covered separately; this roundtrip fixture must stay below sun_path.
+func TestIPCReconcileRoundtrip(t *testing.T) {
 	tests := []struct {
 		name  string
 		apply bool

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/clients"
 )
 
 // TestMigrateReplacesStdioWithHTTPForOneClient verifies that a single-
@@ -312,11 +313,14 @@ func TestMigrateSetsRelayExePathForZed(t *testing.T) {
 	}
 	t.Cleanup(SetTestCanonicalMcphubPath(canonicalMcphub))
 
-	// Pre-create the zed config at the path zed resolves under the redirected
-	// APPDATA — %APPDATA%\Zed\settings.json, i.e. <tmp>/Zed/settings.json
-	// (defaultZedConfigPath, zed.go). Without this file, adapter.Exists()
-	// returns false and migrate skips zed quietly (no Applied, no Failed row).
-	zedConfigPath := filepath.Join(tmp, "Zed", "settings.json")
+	// Resolve through the adapter's single path owner. Windows uses
+	// %APPDATA%\Zed while POSIX uses $XDG_CONFIG_HOME/zed; duplicating the
+	// Windows spelling here made the native-Linux test seed a file the live
+	// adapter never observes.
+	zedConfigPath, err := clients.ConfigPathForName("zed")
+	if err != nil {
+		t.Fatalf("resolve zed config path: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Dir(zedConfigPath), 0o755); err != nil {
 		t.Fatalf("mkdir zed dir: %v", err)
 	}

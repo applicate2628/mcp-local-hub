@@ -67,7 +67,8 @@ func startDetachedSupervisorTolerant(build func() *exec.Cmd) (*exec.Cmd, error) 
 	// supervisor still spawns, just without detach / orphan-escape.
 	minimal := build()
 	if minimal.SysProcAttr != nil {
-		minimal.SysProcAttr.CreationFlags = 0
+		minimal.SysProcAttr.CreationFlags = windows.CREATE_NO_WINDOW
+		minimal.SysProcAttr.HideWindow = true
 	}
 	if e3 := minimal.Start(); e3 != nil {
 		return minimal, e3

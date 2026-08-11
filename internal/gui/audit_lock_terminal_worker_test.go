@@ -45,7 +45,7 @@ func (f *terminalTableRecoverer) Recover(_ context.Context, _ string, _ bool, ma
 	return f.result, f.err
 }
 
-func TestAuditLockTerminalWorkerTimeoutReapsBeforeReturn(t *testing.T) {
+func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t *testing.T) {
 	if os.Getenv("MCPHUB_AUDIT_LOCK_BLOCKING_HELPER") == "1" {
 		lock := flock.New(os.Getenv("MCPHUB_AUDIT_LOCK_HELPER_LOCK"))
 		locked, err := lock.TryLock()
@@ -60,7 +60,7 @@ func TestAuditLockTerminalWorkerTimeoutReapsBeforeReturn(t *testing.T) {
 	}
 	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
-	adapter.terminalizationBudget = 80 * time.Millisecond
+	adapter.terminalizationBudget = 5 * time.Second
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 991)
 	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\\timeout-worker`, confirm: true}
 	reservation, reserveErr := adapter.reserve(context.Background(), correlation, binding)
@@ -70,40 +70,60 @@ func TestAuditLockTerminalWorkerTimeoutReapsBeforeReturn(t *testing.T) {
 	entered := filepath.Join(t.TempDir(), "entered")
 	var childPID atomic.Int64
 	var receivedAllowance atomic.Int64
+	var postCancelWatchdogExpired atomic.Bool
 	adapter.terminalization = boundedTestAuditLockTerminalization(func(ctx context.Context, request auditLockTerminalWorkerRequest) (auditLockTerminalWorkerResult, error) {
 		receivedAllowance.Store(request.AllowanceMS)
-		cmd := exec.Command(os.Args[0], "-test.run=^TestAuditLockTerminalWorkerTimeoutReapsBeforeReturn$")
+		childCtx, cancelChild := context.WithCancel(ctx)
+		defer cancelChild()
+		cmd := exec.Command(os.Args[0], "-test.run=^TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn$")
 		cmd.Env = append(os.Environ(), "MCPHUB_AUDIT_LOCK_BLOCKING_HELPER=1", "MCPHUB_AUDIT_LOCK_HELPER_LOCK="+adapter.storePath+".lock", "MCPHUB_AUDIT_LOCK_HELPER_ENTERED="+entered)
-		_, err := process.RunStrictlyContained(ctx, process.StrictRunInvocation{Command: cmd, Input: []byte("{}"), InputLimit: 2, StdoutLimit: 1024, StderrLimit: 1024})
-		if cmd.Process != nil {
-			childPID.Store(int64(cmd.Process.Pid))
+		runDone := make(chan error, 1)
+		go func() {
+			_, err := process.RunStrictlyContained(childCtx, process.StrictRunInvocation{Command: cmd, Input: []byte("{}"), InputLimit: 2, StdoutLimit: 1024, StderrLimit: 1024})
+			runDone <- err
+		}()
+
+		watch := time.NewTicker(5 * time.Millisecond)
+		defer watch.Stop()
+		for {
+			if _, err := os.Stat(entered); err == nil {
+				break
+			} else if !errors.Is(err, os.ErrNotExist) {
+				cancelChild()
+				return auditLockTerminalWorkerResult{}, errors.Join(err, <-runDone)
+			}
+			select {
+			case err := <-runDone:
+				return auditLockTerminalWorkerResult{}, fmt.Errorf("contained helper exited before acquiring occurrence flock: %w", err)
+			case <-ctx.Done():
+				cancelChild()
+				return auditLockTerminalWorkerResult{}, errors.Join(ctx.Err(), <-runDone)
+			case <-watch.C:
+			}
 		}
-		return auditLockTerminalWorkerResult{}, err
+		if cmd.Process == nil {
+			cancelChild()
+			return auditLockTerminalWorkerResult{}, errors.Join(errors.New("contained helper marker appeared without a process"), <-runDone)
+		}
+		childPID.Store(int64(cmd.Process.Pid))
+		cancelChild()
+		watchdog := time.NewTimer(time.Second)
+		defer watchdog.Stop()
+		select {
+		case err := <-runDone:
+			return auditLockTerminalWorkerResult{}, err
+		case <-watchdog.C:
+			postCancelWatchdogExpired.Store(true)
+			_ = cmd.Process.Kill()
+			return auditLockTerminalWorkerResult{}, errors.Join(errors.New("contained helper did not reap within post-cancel watchdog"), <-runDone)
+		}
 	})
-	done := make(chan struct{})
-	var receipt auditLockReceiptDTO
-	var terminalErr *auditLockRouteError
-	go func() {
-		receipt, terminalErr = adapter.terminalize(reservation, auditLockOccurrenceCommittedSuccess, auditLockAuthorizationNone, successfulTerminalEvidence(binding.taskName, false))
-		close(done)
-	}()
-	deadline := time.Now().Add(time.Second)
-	for {
-		if _, err := os.Stat(entered); err == nil {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("contained helper never acquired occurrence flock")
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	select {
-	case <-done:
-	case <-time.After(time.Second):
-		t.Fatal("terminalize did not return after worker deadline")
-	}
+	receipt, terminalErr := adapter.terminalize(reservation, auditLockOccurrenceCommittedSuccess, auditLockAuthorizationNone, successfulTerminalEvidence(binding.taskName, false))
 	if terminalErr == nil || terminalErr.code != string(daemonRecoverErrorOutcomeUncertain) || receipt.Status != auditLockOccurrenceUncertain {
 		t.Fatalf("terminal result=%+v err=%v", receipt, terminalErr)
+	}
+	if postCancelWatchdogExpired.Load() {
+		t.Fatal("contained helper exceeded the post-cancel reap watchdog")
 	}
 	if got := receivedAllowance.Load(); got <= 0 || got > adapter.terminalizationBudget.Milliseconds() {
 		t.Fatalf("worker allowance_ms=%d, want positive remaining allowance <= %d", got, adapter.terminalizationBudget.Milliseconds())
@@ -122,6 +142,60 @@ func TestAuditLockTerminalWorkerTimeoutReapsBeforeReturn(t *testing.T) {
 	}
 	if err := probe.Unlock(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAuditLockTerminalizationDeadlineClassifiesWithoutProcessStartup(t *testing.T) {
+	events := newEphemeralBroadcaster(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	received := events.Subscribe(ctx)
+	adapter := newDirectTestAuditLockAdapterInStateDir(events, t.TempDir())
+	defer adapter.close()
+	adapter.terminalizationBudget = 250 * time.Millisecond
+	correlation := validAuditLockCorrelation(adapter.serverInstance, 992)
+	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\\deadline-worker`, confirm: true}
+	reservation, reserveErr := adapter.reserve(context.Background(), correlation, binding)
+	if reserveErr != nil {
+		t.Fatal(reserveErr)
+	}
+	var runnerEntered atomic.Bool
+	var runnerReturned atomic.Bool
+	adapter.terminalization = boundedTestAuditLockTerminalization(func(ctx context.Context, _ auditLockTerminalWorkerRequest) (auditLockTerminalWorkerResult, error) {
+		runnerEntered.Store(true)
+		<-ctx.Done()
+		runnerReturned.Store(true)
+		return auditLockTerminalWorkerResult{}, &process.StrictRunError{Kind: process.StrictRunTimeout, Cause: ctx.Err()}
+	})
+
+	receipt, terminalErr := adapter.terminalize(reservation, auditLockOccurrenceCommittedSuccess, auditLockAuthorizationNone, successfulTerminalEvidence(binding.taskName, false))
+	if terminalErr == nil || terminalErr.code != string(daemonRecoverErrorOutcomeUncertain) || receipt.Status != auditLockOccurrenceUncertain {
+		t.Fatalf("terminal result=%+v err=%v, want uncertain timeout", receipt, terminalErr)
+	}
+	if !runnerEntered.Load() || !runnerReturned.Load() {
+		t.Fatalf("in-process deadline runner lifecycle entered=%t returned=%t, want both true", runnerEntered.Load(), runnerReturned.Load())
+	}
+	terminalEvents := 0
+	for {
+		select {
+		case event := <-received:
+			if event.Type != "daemon-recovery-terminal-worker-failure" {
+				continue
+			}
+			terminalEvents++
+			if got, _ := event.Body["failure_id"].(string); got != string(auditLockTerminalWorkerFailureTimeout) {
+				t.Fatalf("failure event id=%q, want %q", got, auditLockTerminalWorkerFailureTimeout)
+			}
+		default:
+			if terminalEvents != 1 {
+				t.Fatalf("terminal failure event count=%d, want exactly 1", terminalEvents)
+			}
+			if !adapter.storeMu.TryLock() {
+				t.Fatal("storeMu remained held after deadline classification")
+			}
+			adapter.storeMu.Unlock()
+			return
+		}
 	}
 }
 

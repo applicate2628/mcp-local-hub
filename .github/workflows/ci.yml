@@ -130,7 +130,12 @@ jobs:
         run: |
           ext="$(go env GOEXE)"
           bin="mcphub-prod${ext}"
-          go build -o "${bin}" ./cmd/mcphub
+          ldflags=""
+          if [ "$(go env GOOS)" = "windows" ]; then ldflags="-H windowsgui"; fi
+          go build -ldflags "${ldflags}" -o "${bin}" ./cmd/mcphub
+          if [ "$(go env GOOS)" = "windows" ]; then
+            go run ./cmd/mcphub-pe-admit "${bin}"
+          fi
           if go tool nm "${bin}" | grep -q 'resolveKnownFolderWithEnvFallback'; then
             echo "FAIL: production binary contains the env-fallback symbol resolveKnownFolderWithEnvFallback (test-only state-path resolver leaked into a no-tag build)"
             exit 1

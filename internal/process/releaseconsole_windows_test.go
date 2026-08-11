@@ -84,7 +84,7 @@ func stdHandleProbesValid(h uintptr) bool {
 // AllocConsole would fail with ERROR_ACCESS_DENIED (a process may own only
 // one console), and the test would SKIP instead of FAIL — silently
 // downgrading a real regression to a green run.
-func TestReleaseParentConsole_DetachesAnAttachedConsole(t *testing.T) {
+func TestReleaseParentConsole(t *testing.T) {
 	if !hasConsole() {
 		if ret, _, err := procAllocConsole.Call(); ret == 0 {
 			t.Skipf("no console attached and AllocConsole unavailable in this "+
@@ -169,7 +169,9 @@ func TestReleaseParentConsole_StdErrHandleIsNotRecycledByALaterSpawn(t *testing.
 	// release and the tray spawn, each an opportunity for the kernel to
 	// reissue the freed handle value.
 	for i := 0; i < 3; i++ {
-		if err := exec.Command("cmd", "/c", "exit").Run(); err != nil {
+		helper := exec.Command("cmd", "/c", "exit")
+		NoConsole(helper)
+		if err := helper.Run(); err != nil {
 			t.Skipf("cannot spawn a helper process to exercise handle reuse: %v", err)
 		}
 	}
