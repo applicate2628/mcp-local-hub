@@ -532,9 +532,6 @@ type v5UpgradeDeps struct {
 }
 
 func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) (string, error) {
-	if err := binaryadmission.AdmitWindowsGUI(target); err != nil {
-		return "", fmt.Errorf("admit prior canonical binary: %w", err)
-	}
 	if err := binaryadmission.AdmitWindowsGUI(newSrc); err != nil {
 		return "", fmt.Errorf("admit staged successor binary: %w", err)
 	}

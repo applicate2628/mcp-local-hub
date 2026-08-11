@@ -165,3 +165,44 @@ func TestV5UpgradeDepsRetainedRollbackExactBytes(t *testing.T) {
 		t.Fatalf("rollback must preserve retained artifact: bytes=%d err=%v", len(stillRetained), err)
 	}
 }
+
+func TestV5UpgradeDepsReplacesConsoleSubsystemPrior(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "mcphub.exe")
+	priorFixture := writeAdmissionPEFixtureWithTag(t, 3, "PRIOR-CUI")
+	successorFixture := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "SUCCESSOR-GUI")
+	prior, err := os.ReadFile(priorFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := os.ReadFile(successorFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, prior, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(dir, "mcphub.exe.new")
+	if err := os.WriteFile(staged, successor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	retained, err := (&v5UpgradeDeps{}).RenameAsideBinary(target, staged)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotSuccessor, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(gotSuccessor, successor) {
+		t.Fatal("swap did not install GUI successor bytes")
+	}
+	retainedPrior, err := os.ReadFile(retained)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(retainedPrior, prior) {
+		t.Fatal("retained artifact differs from console-subsystem prior bytes")
+	}
+}
