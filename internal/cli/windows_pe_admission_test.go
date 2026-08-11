@@ -4,12 +4,16 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
 )
 
@@ -204,5 +208,127 @@ func TestV5UpgradeDepsReplacesConsoleSubsystemPrior(t *testing.T) {
 	}
 	if !bytes.Equal(retainedPrior, prior) {
 		t.Fatal("retained artifact differs from console-subsystem prior bytes")
+	}
+}
+
+type realBinaryUpgradeDeps struct {
+	*v5UpgradeDeps
+}
+
+func (*realBinaryUpgradeDeps) QuiesceTimers(context.Context, string, int) (api.IPCResponse, error) {
+	return api.IPCResponse{Result: map[string]any{"still_running": []any{}}}, nil
+}
+
+func (*realBinaryUpgradeDeps) ExitGraceful(context.Context, string, int) (api.IPCResponse, error) {
+	return api.IPCResponse{}, nil
+}
+
+func (*realBinaryUpgradeDeps) ForceKillSupervisor(string) error { return nil }
+func (*realBinaryUpgradeDeps) StartSupervisor(string) error     { return nil }
+
+func TestInstallUpgradeRestoresConsolePriorAfterSuccessorReadinessFailure(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "mcphub.exe")
+	priorFixture := writeAdmissionPEFixtureWithTag(t, 3, "PRIOR-CUI-EXACT")
+	successorFixture := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "SUCCESSOR-GUI")
+	prior, err := os.ReadFile(priorFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	successor, err := os.ReadFile(successorFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, prior, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(dir, "mcphub.exe.new")
+	if err := os.WriteFile(staged, successor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	readyCalls := 0
+	err = RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: target,
+		NewBinary:  staged,
+		PipePath:   "test-pipe",
+		WaitSupervisorReady: func(context.Context, time.Duration) error {
+			readyCalls++
+			if readyCalls == 1 {
+				return errors.New("forced successor readiness failure")
+			}
+			return nil
+		},
+		Deps: &realBinaryUpgradeDeps{v5UpgradeDeps: &v5UpgradeDeps{}},
+	})
+	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
+		t.Fatalf("error=%v, want successful automatic rollback report", err)
+	}
+	restored, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(restored, prior) {
+		t.Fatal("automatic rollback did not restore exact console-prior bytes")
+	}
+	retained, globErr := filepath.Glob(target + ".old-*")
+	if globErr != nil || len(retained) != 0 {
+		t.Fatalf("automatic rollback left retained artifacts: %v, err=%v", retained, globErr)
+	}
+	temps, globErr := filepath.Glob(target + ".*.tmp")
+	if globErr != nil || len(temps) != 0 {
+		t.Fatalf("automatic rollback left temp artifacts: %v, err=%v", temps, globErr)
+	}
+}
+
+func TestV5UpgradeDepsRejectsMalformedPriorBeforeSwap(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "mcphub.exe")
+	malformed := []byte("not-a-portable-executable")
+	if err := os.WriteFile(target, malformed, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	successorFixture := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "SUCCESSOR-GUI")
+	successor, err := os.ReadFile(successorFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staged := filepath.Join(dir, "mcphub.exe.new")
+	if err := os.WriteFile(staged, successor, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = (&v5UpgradeDeps{}).RenameAsideBinary(target, staged)
+	if err == nil || !strings.Contains(err.Error(), binaryadmission.WindowsPEFormatErrorID) {
+		t.Fatalf("error=%v, want %s", err, binaryadmission.WindowsPEFormatErrorID)
+	}
+	got, readErr := os.ReadFile(target)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if !bytes.Equal(got, malformed) {
+		t.Fatal("malformed prior rejection mutated canonical target")
+	}
+	if _, statErr := os.Stat(staged); statErr != nil {
+		t.Fatalf("malformed prior rejection consumed staged successor: %v", statErr)
+	}
+}
+
+func TestRollbackInstallUpgradeRefusesToDeleteCanonicalAlias(t *testing.T) {
+	target := filepath.Join(t.TempDir(), "mcphub.exe")
+	if err := os.WriteFile(target, []byte("canonical-prior"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	mock := &fakeUpgradeDeps{}
+	err := rollbackInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: target,
+		PipePath:   "fake-pipe",
+		Deps:       mock,
+	}, target, time.Second, errors.New("forced successor failure"))
+	if err == nil || !strings.Contains(err.Error(), "refusing retained-artifact cleanup") {
+		t.Fatalf("error=%v, want canonical-alias cleanup refusal", err)
+	}
+	if got, readErr := os.ReadFile(target); readErr != nil || string(got) != "canonical-prior" {
+		t.Fatalf("canonical path was deleted or changed: bytes=%q err=%v", got, readErr)
 	}
 }

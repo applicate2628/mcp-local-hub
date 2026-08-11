@@ -13,6 +13,7 @@ import (
 
 const (
 	WindowsGUISubsystem       uint16 = 2
+	WindowsCUISubsystem       uint16 = 3
 	WindowsPEFormatErrorID           = "E_WINDOWS_PE_FORMAT"
 	WindowsPESubsystemErrorID        = "E_WINDOWS_PE_SUBSYSTEM"
 
@@ -21,15 +22,19 @@ const (
 )
 
 type Error struct {
-	ID       string
-	Path     string
-	Expected uint16
-	Actual   uint16
-	Cause    error
+	ID          string
+	Path        string
+	Expected    uint16
+	ExpectedAny []uint16
+	Actual      uint16
+	Cause       error
 }
 
 func (e *Error) Error() string {
 	if e.ID == WindowsPESubsystemErrorID {
+		if len(e.ExpectedAny) > 0 {
+			return fmt.Sprintf("%s: %s: expected one of %v, actual %d", e.ID, e.Path, e.ExpectedAny, e.Actual)
+		}
 		return fmt.Sprintf("%s: %s: expected %d, actual %d", e.ID, e.Path, e.Expected, e.Actual)
 	}
 	return fmt.Sprintf("%s: %s: %v", e.ID, e.Path, e.Cause)
@@ -41,26 +46,54 @@ func (e *Error) FailureID() string { return e.ID }
 // AdmitWindowsGUI validates path without executing it and admits only a
 // regular PE32 or PE32+ image whose Subsystem is WINDOWS_GUI (2).
 func AdmitWindowsGUI(path string) error {
-	f, err := os.Open(path)
+	subsystem, err := readWindowsPESubsystemFile(path)
 	if err != nil {
-		return formatError(path, err)
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return formatError(path, err)
-	}
-	if !info.Mode().IsRegular() {
-		return formatError(path, fmt.Errorf("not a regular file"))
-	}
-	subsystem, err := ReadWindowsPESubsystem(f, info.Size())
-	if err != nil {
-		return formatError(path, err)
+		return err
 	}
 	if subsystem != WindowsGUISubsystem {
 		return &Error{ID: WindowsPESubsystemErrorID, Path: path, Expected: WindowsGUISubsystem, Actual: subsystem}
 	}
 	return nil
+}
+
+// AdmitWindowsUpgradePrior validates a retained canonical binary without
+// executing it. Historical product binaries may use either WINDOWS_GUI (2)
+// or WINDOWS_CUI (3); all other subsystem values and malformed PE images are
+// rejected.
+func AdmitWindowsUpgradePrior(path string) error {
+	subsystem, err := readWindowsPESubsystemFile(path)
+	if err != nil {
+		return err
+	}
+	if subsystem != WindowsGUISubsystem && subsystem != WindowsCUISubsystem {
+		return &Error{
+			ID:          WindowsPESubsystemErrorID,
+			Path:        path,
+			ExpectedAny: []uint16{WindowsGUISubsystem, WindowsCUISubsystem},
+			Actual:      subsystem,
+		}
+	}
+	return nil
+}
+
+func readWindowsPESubsystemFile(path string) (uint16, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, formatError(path, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return 0, formatError(path, err)
+	}
+	if !info.Mode().IsRegular() {
+		return 0, formatError(path, fmt.Errorf("not a regular file"))
+	}
+	subsystem, err := ReadWindowsPESubsystem(f, info.Size())
+	if err != nil {
+		return 0, formatError(path, err)
+	}
+	return subsystem, nil
 }
 
 func formatError(path string, err error) error {

@@ -532,6 +532,9 @@ type v5UpgradeDeps struct {
 }
 
 func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) (string, error) {
+	if err := binaryadmission.AdmitWindowsUpgradePrior(target); err != nil {
+		return "", fmt.Errorf("admit prior canonical binary: %w", err)
+	}
 	if err := binaryadmission.AdmitWindowsGUI(newSrc); err != nil {
 		return "", fmt.Errorf("admit staged successor binary: %w", err)
 	}
@@ -568,10 +571,7 @@ func findRetainedPriorBinary(target string, priorHash []byte) (string, error) {
 }
 
 func (d *v5UpgradeDeps) RestoreRetainedBinary(target, retainedPrior string) error {
-	if err := binaryadmission.AdmitWindowsGUI(retainedPrior); err != nil {
-		return fmt.Errorf("admit retained prior binary: %w", err)
-	}
-	return copyExe(retainedPrior, target)
+	return copyExeWithWindowsAdmission(retainedPrior, target, binaryadmission.AdmitWindowsUpgradePrior)
 }
 
 func (d *v5UpgradeDeps) QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error) {

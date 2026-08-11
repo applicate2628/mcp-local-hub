@@ -52,6 +52,22 @@ func TestWindowsPEAdmission(t *testing.T) {
 	}
 }
 
+func TestWindowsUpgradePriorAdmission(t *testing.T) {
+	for _, subsystem := range []uint16{WindowsGUISubsystem, WindowsCUISubsystem} {
+		path := writeWindowsPEFixture(t, 0x20b, subsystem, nil)
+		if err := AdmitWindowsUpgradePrior(path); err != nil {
+			t.Fatalf("AdmitWindowsUpgradePrior(subsystem=%d): %v", subsystem, err)
+		}
+	}
+
+	path := writeWindowsPEFixture(t, 0x20b, 9, nil)
+	err := AdmitWindowsUpgradePrior(path)
+	if err == nil || !strings.Contains(err.Error(), WindowsPESubsystemErrorID) ||
+		!strings.Contains(err.Error(), "expected one of [2 3], actual 9") {
+		t.Fatalf("unsupported subsystem error=%v, want %s with allowed/actual values", err, WindowsPESubsystemErrorID)
+	}
+}
+
 func TestWindowsPEMalformed(t *testing.T) {
 	base := writeWindowsPEFixture(t, 0x20b, WindowsGUISubsystem, nil)
 	valid, err := os.ReadFile(base)

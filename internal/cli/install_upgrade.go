@@ -483,6 +483,12 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 			return fmt.Errorf("%w; prior binary restored and restarted but did not become ready: %v; run `mcphub supervise` from a shell to inspect startup diagnostics", trigger, err)
 		}
 	}
+	if samePath(retainedPrior, opts.BinaryPath) {
+		return fmt.Errorf("%w; automatic rollback restored the prior supervisor and verified it ready, but refusing retained-artifact cleanup because %s aliases the canonical binary", trigger, retainedPrior)
+	}
+	if err := os.Remove(retainedPrior); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("%w; automatic rollback restored %s and verified the prior supervisor ready, but retained-artifact cleanup failed: %v", trigger, retainedPrior, err)
+	}
 	return fmt.Errorf("%w; automatic rollback restored %s and verified the prior supervisor ready", trigger, retainedPrior)
 }
 
