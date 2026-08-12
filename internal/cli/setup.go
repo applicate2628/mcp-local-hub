@@ -139,8 +139,15 @@ func samePath(a, b string) bool {
 // first because os.Rename refuses to overwrite; if dst is locked by a
 // running process we surface a friendly hint.
 func copyExe(src, dst string) error {
+	return copyExeWithWindowsAdmission(src, dst, binaryadmission.AdmitWindowsGUI)
+}
+
+func copyExeWithWindowsAdmission(src, dst string, admit func(string) error) error {
 	if runtime.GOOS == "windows" {
-		if err := binaryadmission.AdmitWindowsGUI(src); err != nil {
+		if admit == nil {
+			return errors.New("admit Windows executable candidate: nil admission policy")
+		}
+		if err := admit(src); err != nil {
 			return fmt.Errorf("admit Windows executable candidate: %w", err)
 		}
 	}
