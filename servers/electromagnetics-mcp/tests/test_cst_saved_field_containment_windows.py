@@ -17,6 +17,34 @@ def _containment():
     return __import__(name, fromlist=["*"])
 
 
+def _deadline(module):
+    from mcphub_em_mcp.cst_saved_field_broker_protocol import QpcDeadlineV1
+
+    frequency = module._default_qpc_frequency()
+    admitted = module._default_qpc_counter()
+    return QpcDeadlineV1(frequency, admitted, admitted + 60 * frequency)
+
+
+def _evidence(module):
+    identity = module.WorkerIdentityV1(
+        4242,
+        123456,
+        "S-1-5-80-333",
+        0,
+        os.path.abspath(sys.executable),
+        None,
+        3131,
+    )
+    return module.KernelContainmentEvidenceV1(
+        identity,
+        identity,
+        True,
+        ("stdin", "stdout", "stderr"),
+        module._SETTLEMENT_EVENTS,
+        0,
+    )
+
+
 def test_saved_field_createprocess_tuple() -> None:
     module = _containment()
     spec = module.build_create_process_spec(sys.executable)
@@ -136,8 +164,9 @@ class _Kernel:
         absolute_deadline: float,
         cleanup_deadline: float,
     ):
-        assert startup_deadline + 53.0 == response_deadline
-        assert response_deadline + 2.0 == absolute_deadline
+        assert startup_deadline <= absolute_deadline
+        assert response_deadline == absolute_deadline - 2.0
+        assert cleanup_deadline == absolute_deadline + 10.0
         self.trace.extend(["job_configured", "createprocess", "first_instruction_in_job"])
         assert spec.creation_flags & self.module.CREATE_NO_WINDOW
         proof = self.module.FirstInstructionProof(True, True, True, True, False, True)
@@ -156,6 +185,7 @@ class _Kernel:
                 handles_closed=self.settle,
                 residual_process=True,
                 timed_out=False,
+                containment_evidence=_evidence(self.module),
             )
         self.trace.extend(
             ["helper_signal", "exit_record", "process_handle_close", "query_active", "active_zero"]
@@ -170,6 +200,8 @@ class _Kernel:
             handles_closed=True,
             residual_process=False,
             timed_out=False,
+            first_instruction_proof=proof,
+            containment_evidence=_evidence(self.module),
         )
 
 
@@ -178,7 +210,7 @@ def test_saved_field_normal_residual_routes_termination() -> None:
     kernel = _Kernel(module, active_after_exit=1)
     invocation = module.WindowsContainedInvocation(kernel=kernel, executable=sys.executable)
     with pytest.raises(module.ContainmentFailure) as raised:
-        invocation.invoke(b"request", start=time.monotonic())
+        invocation.invoke(b"request", deadline=_deadline(module))
     assert raised.value.failure_id == "cst_saved_field.containment_residual_process"
     assert kernel.trace == [
         "job_configured",
@@ -199,7 +231,7 @@ def test_unproved_settlement_is_quarantine_worthy() -> None:
     kernel = _Kernel(module, active_after_exit=1, settle=False)
     invocation = module.WindowsContainedInvocation(kernel=kernel, executable=sys.executable)
     with pytest.raises(module.ContainmentFailure) as raised:
-        invocation.invoke(b"request", start=time.monotonic())
+        invocation.invoke(b"request", deadline=_deadline(module))
     assert raised.value.failure_id == "cst_saved_field.containment_settle_failed"
     assert raised.value.quarantine is True
     assert kernel.foreign_alive is True
@@ -220,12 +252,18 @@ class _ResultKernel:
         absolute_deadline,
         cleanup_deadline,
     ):
-        assert startup_deadline + 53.0 == response_deadline
-        assert response_deadline + 2.0 == absolute_deadline
+        assert startup_deadline <= absolute_deadline
+        assert response_deadline == absolute_deadline - 2.0
         assert cleanup_deadline - absolute_deadline == 10.0
-        startup_validator(_containment().FirstInstructionProof(True, True, True, True, False, True))
+        module = _containment()
+        proof = module.FirstInstructionProof(True, True, True, True, False, True)
+        startup_validator(proof)
         request_factory()
-        return self.result
+        return replace(
+            self.result,
+            first_instruction_proof=self.result.first_instruction_proof or proof,
+            containment_evidence=self.result.containment_evidence or _evidence(module),
+        )
 
 
 @pytest.mark.parametrize(
@@ -271,7 +309,7 @@ def test_saved_field_timeout_settlement(
         kernel=_ResultKernel(replace(baseline, **changes)), executable=sys.executable
     )
     with pytest.raises(module.ContainmentFailure) as raised:
-        invocation.invoke(b"request", start=time.monotonic())
+        invocation.invoke(b"request", deadline=_deadline(module))
     assert raised.value.failure_id == failure_id
     assert raised.value.quarantine is quarantine
     assert "CANARY" not in str(raised.value)
@@ -300,16 +338,27 @@ def test_saved_field_quarantine_all_routes() -> None:
         )
         with pytest.raises(module.ContainmentFailure):
             if route == "frame":
-                runner.invoke(b"request", revision="a" * 64, wait_seconds=0.0)
+                runner.invoke(
+                    b"request",
+                    deadline=_deadline(module),
+                    revision="a" * 64,
+                    wait_seconds=0.0,
+                )
             else:
                 runner.invoke_after_admission(
                     lambda _started: b"request",
+                    deadline=_deadline(module),
                     revision="a" * 64,
                     wait_seconds=0.0,
                 )
         assert gate.active_count == 0
         with pytest.raises(module.AdmissionFailure) as later:
-            runner.invoke(b"later", revision="a" * 64, wait_seconds=0.0)
+            runner.invoke(
+                b"later",
+                deadline=_deadline(module),
+                revision="a" * 64,
+                wait_seconds=0.0,
+            )
         assert later.value.failure_id == "cst_saved_field.containment_quarantined"
 
 

@@ -11,7 +11,16 @@ from pathlib import Path, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-POLICY_SCHEMA = "mcphub.cst.saved_field_authority.v2"
+POLICY_SCHEMA = "mcphub.cst.saved_field_authority.v1"
+MANIFEST_SCHEMA = "sha256-canonical-file-list-v2"
+EXACT_ENDPOINTS = (
+    r"\\.\pipe\mcp-local-hub-cst-saved-field-enrollment-v1",
+    r"\\.\pipe\mcp-local-hub-cst-saved-field-frontend-v1",
+    r"\\.\pipe\mcp-local-hub-cst-saved-field-v1",
+)
+ENDPOINT_DESCRIPTOR_V1 = MappingProxyType(
+    dict(zip(("enrollment", "frontend", "broker"), EXACT_ENDPOINTS, strict=True))
+)
 POLICY_FILE_MAX = 1_048_576
 POLICY_ENTRY_MAX = 128
 PATH_SCALAR_MAX = 4_096
@@ -47,7 +56,9 @@ class PolicyFailure(Exception):
 
 
 @dataclass(frozen=True, slots=True)
-class ObjectIdentityEvidence:
+class WindowsPathIdentityV1:
+    """Closed exact-handle Windows namespace and object identity proof."""
+
     canonical_path: str
     volume_serial: int
     file_id: str
@@ -61,7 +72,7 @@ class ObjectIdentityEvidence:
 @dataclass(slots=True)
 class HeldDirectoryCapability:
     path: Path
-    evidence: ObjectIdentityEvidence
+    evidence: WindowsPathIdentityV1
     restricted: bool
     handle: int
     _close_handle: Any
@@ -76,25 +87,25 @@ class HeldDirectoryCapability:
 
 
 class WindowsPathProvider(Protocol):
-    def prove(self, path: Path, *, kind: Literal["file", "directory"]) -> ObjectIdentityEvidence: ...
+    def prove(self, path: Path, *, kind: Literal["file", "directory"]) -> WindowsPathIdentityV1: ...
 
 
 class PolicyPlatform(Protocol):
     def read_verified_file(
         self, path: Path, *, maximum: int
-    ) -> tuple[ObjectIdentityEvidence, bytes, bool]: ...
+    ) -> tuple[WindowsPathIdentityV1, bytes, bool]: ...
 
-    def prove_file(self, path: Path) -> ObjectIdentityEvidence: ...
+    def prove_file(self, path: Path) -> WindowsPathIdentityV1: ...
 
-    def prove_directory(self, path: Path) -> ObjectIdentityEvidence: ...
+    def prove_directory(self, path: Path) -> WindowsPathIdentityV1: ...
 
-    def prove_restricted_directory(self, path: Path) -> tuple[ObjectIdentityEvidence, bool]: ...
+    def prove_restricted_directory(self, path: Path) -> tuple[WindowsPathIdentityV1, bool]: ...
 
     def hold_restricted_directory(self, path: Path) -> HeldDirectoryCapability: ...
 
     def revalidate_held_directory(
         self, held: HeldDirectoryCapability
-    ) -> tuple[ObjectIdentityEvidence, bool]: ...
+    ) -> tuple[WindowsPathIdentityV1, bool]: ...
 
     def create_restricted_child(
         self, held: HeldDirectoryCapability, name: str
@@ -114,10 +125,10 @@ class WindowsPolicyPlatform:
         if os.name != "nt":
             raise OSError("Windows policy proof is unavailable on this platform")
 
-    def prove_file(self, path: Path) -> ObjectIdentityEvidence:
+    def prove_file(self, path: Path) -> WindowsPathIdentityV1:
         return self._prove(path, kind="file")
 
-    def read_verified_file(self, path: Path, *, maximum: int) -> tuple[ObjectIdentityEvidence, bytes, bool]:
+    def read_verified_file(self, path: Path, *, maximum: int) -> tuple[WindowsPathIdentityV1, bytes, bool]:
         import ctypes
         from ctypes import wintypes
 
@@ -154,10 +165,10 @@ class WindowsPolicyPlatform:
             if not kernel32.CloseHandle(handle):
                 raise ctypes.WinError(ctypes.get_last_error())
 
-    def prove_directory(self, path: Path) -> ObjectIdentityEvidence:
+    def prove_directory(self, path: Path) -> WindowsPathIdentityV1:
         return self._prove(path, kind="directory")
 
-    def prove_restricted_directory(self, path: Path) -> tuple[ObjectIdentityEvidence, bool]:
+    def prove_restricted_directory(self, path: Path) -> tuple[WindowsPathIdentityV1, bool]:
         held = self.hold_restricted_directory(path)
         try:
             return held.evidence, held.restricted
@@ -238,7 +249,7 @@ class WindowsPolicyPlatform:
         _delete_tree_from_handle(held.handle)
         held.close()
 
-    def revalidate_held_directory(self, held: HeldDirectoryCapability) -> tuple[ObjectIdentityEvidence, bool]:
+    def revalidate_held_directory(self, held: HeldDirectoryCapability) -> tuple[WindowsPathIdentityV1, bool]:
         import ctypes
 
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
@@ -247,7 +258,7 @@ class WindowsPolicyPlatform:
             _owner_only_access_handle(held.handle),
         )
 
-    def _prove(self, path: Path, *, kind: Literal["file", "directory"]) -> ObjectIdentityEvidence:
+    def _prove(self, path: Path, *, kind: Literal["file", "directory"]) -> WindowsPathIdentityV1:
         import ctypes
         from ctypes import wintypes
 
@@ -456,7 +467,7 @@ def _delete_tree_from_handle(root_handle: int) -> None:
     _mark_native_delete(root_handle)
 
 
-def _evidence_from_handle(kernel32: Any, handle: int, raw: str, kind: str) -> ObjectIdentityEvidence:
+def _evidence_from_handle(kernel32: Any, handle: int, raw: str, kind: str) -> WindowsPathIdentityV1:
     import ctypes
     from ctypes import wintypes
 
@@ -527,7 +538,7 @@ def _evidence_from_handle(kernel32: Any, handle: int, raw: str, kind: str) -> Ob
         raise ctypes.WinError(ctypes.get_last_error())
     if not kernel32.GetShortPathNameW(raw, short_buffer, len(short_buffer)):
         raise ctypes.WinError(ctypes.get_last_error())
-    return ObjectIdentityEvidence(
+    return WindowsPathIdentityV1(
         canonical_path=canonical,
         volume_serial=int(file_id.VolumeSerialNumber),
         file_id=bytes(file_id.FileId).hex(),
@@ -811,7 +822,7 @@ def validate_windows_path_lexical(
     return components
 
 
-def _validate_evidence(raw: str, evidence: ObjectIdentityEvidence, *, role: str) -> None:
+def _validate_evidence(raw: str, evidence: WindowsPathIdentityV1, *, role: str) -> None:
     expected_streams = () if role == "root" else ("::$DATA",)
     if (
         evidence.canonical_path != raw
@@ -834,7 +845,7 @@ def prove_windows_path(
     provider: WindowsPathProvider,
     kind: Literal["file", "directory"],
     role: str,
-) -> ObjectIdentityEvidence:
+) -> WindowsPathIdentityV1:
     validate_windows_path_lexical(raw, absolute=True, role=role)
     try:
         evidence = provider.prove(Path(raw), kind=kind)
@@ -916,7 +927,15 @@ def _canonical_json(value: object) -> bytes:
 
 
 def canonical_disabled_policy(entries: list[dict[str, object]]) -> bytes:
-    return _canonical_json({"enabled": False, "entries": entries, "schema": POLICY_SCHEMA})
+    return _canonical_json(
+        {
+            "enabled": False,
+            "endpoints": dict(ENDPOINT_DESCRIPTOR_V1),
+            "entries": entries,
+            "manifest_schema": MANIFEST_SCHEMA,
+            "schema": POLICY_SCHEMA,
+        }
+    )
 
 
 def _require_exact_keys(value: Mapping[str, Any], expected: frozenset[str], stage: str) -> None:
@@ -1022,10 +1041,19 @@ def load_authority_snapshot(raw_path: str | None, platform: PolicyPlatform) -> P
         document = json.loads(raw.decode("utf-8"))
         if not isinstance(document, dict):
             raise PolicyFailure("cst_saved_field.policy_invalid", "policy_schema")
-        _require_exact_keys(document, frozenset({"schema", "enabled", "entries"}), "policy_schema")
+        _require_exact_keys(
+            document,
+            frozenset({"schema", "enabled", "endpoints", "entries", "manifest_schema"}),
+            "policy_schema",
+        )
         if _canonical_json(document) != raw:
             raise PolicyFailure("cst_saved_field.policy_invalid", "policy_canonical")
-        if document["schema"] != POLICY_SCHEMA or type(document["enabled"]) is not bool:
+        if (
+            document["schema"] != POLICY_SCHEMA
+            or type(document["enabled"]) is not bool
+            or document["endpoints"] != dict(ENDPOINT_DESCRIPTOR_V1)
+            or document["manifest_schema"] != MANIFEST_SCHEMA
+        ):
             raise PolicyFailure("cst_saved_field.policy_invalid", "policy_schema")
         values = document["entries"]
         if not isinstance(values, list) or len(values) > POLICY_ENTRY_MAX:

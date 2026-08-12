@@ -235,21 +235,40 @@ def test_saved_field_settlement_blocked_window() -> None:
 
 @pytest.mark.asyncio
 async def test_named_daemon_broker_worker_integration_has_one_return_route() -> None:
+    from io import BytesIO
+
     from mcphub_em_mcp import cst
     from mcphub_em_mcp.cst_saved_field_broker_client_windows import (
+        BrokerCancelReceiptV1,
         BrokerStartupProofV1,
-        WindowsBrokerClient,
+    )
+    from mcphub_em_mcp.cst_saved_field_broker_protocol import decode_one_frame, encode_frame
+    from mcphub_em_mcp.cst_saved_field_broker_service_windows import (
+        BrokerPeerIdentityV1,
+        BrokerRuntimeServiceV1,
+        ContainedWorkerBrokerApplicationV1,
     )
     from mcphub_em_mcp.cst_saved_field_broker_worker import BrokerWorkerApplication
-    from mcphub_em_mcp.cst_saved_field_broker_worker_protocol import WorkerSettlementV1
+    from mcphub_em_mcp.cst_saved_field_broker_worker_protocol import (
+        BROKER_WORKER_REQUEST_MAX,
+        BrokerWorkerRequestV1,
+        WorkerSettlementV1,
+    )
+    from mcphub_em_mcp.cst_saved_field_daemon_client_windows import WindowsDaemonClient
+    from mcphub_em_mcp.cst_saved_field_daemon_service_windows import WindowsCstDaemonService
+    from mcphub_em_mcp.cst_saved_field_frontend_protocol import (
+        DaemonResponseReceiptV1,
+        FrontendTransportReceiptV1,
+    )
     from mcphub_em_mcp.cst_saved_field_policy import (
         AuthorityEntry,
         AuthoritySnapshot,
         RootIdentityV1,
     )
     from mcphub_em_mcp.cst_saved_field_vendor_isolation_windows import (
-        InProcessBrokerTransport,
-        SavedFieldBrokerService,
+        BROKER_ACCOUNT,
+        BROKER_SERVICE,
+        VendorIsolationProofV1,
     )
     from mcphub_em_mcp.strict_fastmcp import strict_fastmcp
 
@@ -289,24 +308,125 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
         qpc_frequency=lambda: 100,
         qpc_counter=lambda: 11,
     )
-    broker = SavedFieldBrokerService(
-        policy_revision=snapshot.revision,
-        authorize=lambda request: trace.append("broker:authorize-policy-nonce"),
-        worker=worker,
+
+    class ContainedInvocation:
+        def invoke(self, request_frame, *, deadline):
+            trace.append("broker:worker-start")
+            request = BrokerWorkerRequestV1.from_wire(
+                decode_one_frame(BytesIO(request_frame), maximum=BROKER_WORKER_REQUEST_MAX)
+            )
+            assert request.deadline == deadline
+            response = worker(request)
+            trace.append("broker:worker-settled")
+            return encode_frame(response.to_wire())
+
+    application = ContainedWorkerBrokerApplicationV1(
+        invocation=ContainedInvocation(),  # type: ignore[arg-type]
+        vendor_isolation=VendorIsolationProofV1(
+            BROKER_SERVICE,
+            BROKER_ACCOUNT,
+            BROKER_ACCOUNT,
+            True,
+            True,
+            0,
+        ),
+    )
+    daemon_sid = "S-1-5-80-101"
+    daemon_image = r"C:\Program Files\mcp-local-hub\cst-daemon.exe"
+    peer = BrokerPeerIdentityV1(
+        101,
+        daemon_sid,
+        daemon_sid,
+        True,
+        True,
+        0,
+        True,
+        True,
+        daemon_image,
+    )
+    broker = BrokerRuntimeServiceV1(
+        snapshot=snapshot,
+        daemon_service_sid=daemon_sid,
+        daemon_image=daemon_image,
+        workspace_policy=object(),
+        application=application,
         qpc_frequency=lambda: 100,
-        qpc_counter=lambda: 10,
+        qpc_counter=iter((11, 12)).__next__,
         random_bytes=lambda count: b"n" * count,
-        trace=trace.append,
     )
-    transport = InProcessBrokerTransport(
-        broker,
-        BrokerStartupProofV1(True, True, True, True, True),
+
+    class BrokerTransport:
+        def startup_proof(self):
+            return BrokerStartupProofV1(True, True, True, True, True)
+
+        def challenge(self, deadline):
+            trace.append("broker:challenge")
+            return broker.issue_challenge(peer, deadline)
+
+        def exchange(self, request):
+            trace.append("broker:authorize-policy-nonce")
+            response = broker.exchange(peer, request)
+            trace.append("broker:response-settled")
+            return response
+
+        def cancel_and_settle(self, correlation_id, deadline):
+            del correlation_id, deadline
+            return BrokerCancelReceiptV1(True, True, True, 0)
+
+    transport = BrokerTransport()
+
+    class Enrollment:
+        def consume_frontend(self, correlation, capability, **proof):
+            trace.append("enrollment:capability-consumed")
+            return correlation == "7" * 32 and capability == b"c" * 32 and all(proof.values())
+
+        def shutdown(self):
+            trace.append("enrollment:shutdown")
+
+    daemon = WindowsCstDaemonService(
+        snapshot=snapshot,
+        enrollment=Enrollment(),
+        broker_transport=transport,
+        qpc_frequency=lambda: 100,
+        qpc_counter=iter((10, 13)).__next__,
+        broker_correlation=lambda: "6" * 32,
+        random_bytes=lambda count: b"d" * count,
+        event_sink=lambda receipt: trace.append(f"daemon:admission-{receipt.disposition}"),
     )
-    client = WindowsBrokerClient(
-        transport=transport,
+
+    class FrontendTransport:
+        def startup_proof(self, timeout):
+            return timeout == 5.0
+
+        def challenge(self, correlation, timeout):
+            assert timeout == 5.0
+            return daemon.issue_challenge(correlation)
+
+        def exchange(self, request, timeout):
+            assert timeout == 5.0
+
+            def write_response(result):
+                trace.append("daemon:response-write-flush-ack-close")
+                return DaemonResponseReceiptV1(result.correlation_id, True, True, True, True, True, True)
+
+            result, daemon_receipt = daemon.exchange(
+                request,
+                exact_capability_eof=True,
+                response_writer=write_response,
+            )
+            assert daemon_receipt.complete
+            trace.append("frontend:response-read-eof-close")
+            return result, FrontendTransportReceiptV1(result.correlation_id, True, True, True, True)
+
+        def cancel(self, correlation, timeout):
+            return timeout == 5.0 and daemon.challenge_state(correlation) != "ISSUED"
+
+    client = WindowsDaemonClient(
+        transport=FrontendTransport(),
+        capability=bytearray(b"c" * 32),
+        correlation=lambda: "7" * 32,
         qpc_frequency=lambda: 100,
         qpc_counter=lambda: 10,
-        correlation=lambda: "6" * 32,
     )
     server = strict_fastmcp("broker-integration")
     assert cst._compose_saved_field_tool(server, snapshot, client) is True
@@ -334,6 +454,7 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
     )
     assert result.isError is False and result.structuredContent is None and len(result.content) == 1
     assert trace == [
+        "enrollment:capability-consumed",
         "broker:challenge",
         "broker:authorize-policy-nonce",
         "broker:worker-start",
@@ -341,4 +462,7 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
         "worker:source-transfer-vendor-settlement",
         "broker:worker-settled",
         "broker:response-settled",
+        "daemon:response-write-flush-ack-close",
+        "daemon:admission-released",
+        "frontend:response-read-eof-close",
     ]

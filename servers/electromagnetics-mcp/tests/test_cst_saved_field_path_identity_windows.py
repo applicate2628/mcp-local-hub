@@ -113,7 +113,7 @@ def test_saved_field_local_nofollow_boundary() -> None:
             assert kind == "file"
             return self.evidence
 
-    good = module.ObjectIdentityEvidence(
+    good = module.WindowsPathIdentityV1(
         canonical_path="C:\\allowed\\project.cst",
         volume_serial=7,
         file_id="f" * 32,

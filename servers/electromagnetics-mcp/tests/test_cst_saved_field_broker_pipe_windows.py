@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 
-def _request(nonce: str):
+def _request(nonce: str, deadline=None):
     from mcphub_em_mcp.cst_saved_field_broker_protocol import (
         BrokerRequestV1,
         QpcDeadlineV1,
@@ -19,23 +19,21 @@ def _request(nonce: str):
         manifest_sha256="3" * 64,
         request_sha256=canonical_sha256(body),
         request=body,
-        deadline=QpcDeadlineV1(10_000_000, 100, 600_000_100),
+        deadline=deadline or QpcDeadlineV1(10_000_000, 100, 600_000_100),
     )
 
 
 def test_pipe_descriptor_is_single_local_remote_rejecting_and_narrow() -> None:
-    from mcphub_em_mcp.cst_saved_field_vendor_isolation_windows import (
-        PipeSecurityDescriptorV1,
-    )
+    from mcphub_em_mcp.cst_saved_field_broker_service_windows import build_broker_descriptor
 
-    descriptor = PipeSecurityDescriptorV1()
-    assert descriptor.pipe_name == r"\\.\pipe\mcp-local-hub-cst-saved-field-v1"
-    assert descriptor.first_instance and descriptor.overlapped and descriptor.reject_remote_clients
+    descriptor = build_broker_descriptor(broker_service_sid="S-1-5-80-333", daemon_service_sid="S-1-5-80-222")
+    assert descriptor.endpoint == r"\\.\pipe\mcp-local-hub-cst-saved-field-v1"
+    assert descriptor.first_instance and descriptor.overlapped and descriptor.remote_clients_rejected
     assert descriptor.instances == 1
-    assert "(D;;FA;;;AN)" in descriptor.dacl_sddl
-    assert "(D;;FA;;;NU)" in descriptor.dacl_sddl
-    assert "(A;;0x00100083;;;S-1-5-80-DAEMON)" in descriptor.dacl_sddl
-    assert descriptor.sacl_sddl == "S:(ML;;NW;;;HI)"
+    assert ("DENY", "S-1-5-7", 0x001F01FF, 0) in descriptor.aces
+    assert ("DENY", "S-1-5-2", 0x001F01FF, 0) in descriptor.aces
+    assert ("ALLOW", "S-1-5-80-222", 0x00100083, 0) in descriptor.aces
+    assert descriptor.sacl_integrity_sid == "S-1-16-12288"
 
 
 def test_impersonation_reverts_before_parse_and_unproved_revert_quarantines() -> None:
@@ -93,17 +91,19 @@ def test_impersonation_reverts_before_parse_and_unproved_revert_quarantines() ->
 
 
 def test_nonce_is_256_bit_one_use_and_expiry_is_monotonic() -> None:
-    from mcphub_em_mcp.cst_saved_field_broker_protocol import BrokerProtocolFailure
-    from mcphub_em_mcp.cst_saved_field_vendor_isolation_windows import NonceLedger
+    from mcphub_em_mcp.cst_saved_field_broker_protocol import BrokerProtocolFailure, QpcDeadlineV1
+    from mcphub_em_mcp.cst_saved_field_broker_service_windows import BrokerNonceLedgerV1
 
-    ledger = NonceLedger(random_bytes=lambda count: b"x" * count)
-    challenge = ledger.issue(qpc_frequency=100, issued_tick=1_000)
+    ledger = BrokerNonceLedgerV1(random_bytes=lambda count: b"x" * count)
+    deadline = QpcDeadlineV1(100, 1_000, 7_000)
+    challenge = ledger.issue(deadline, issued_tick=1_000)
     assert challenge.nonce == (b"x" * 32).hex()
-    request = _request(challenge.nonce)
+    request = _request(challenge.nonce, deadline)
     ledger.consume(request, current_tick=1_499, current_frequency=100)
     with pytest.raises(BrokerProtocolFailure):
         ledger.consume(request, current_tick=1_499, current_frequency=100)
 
-    challenge = ledger.issue(qpc_frequency=100, issued_tick=2_000)
+    deadline = QpcDeadlineV1(100, 2_000, 8_000)
+    challenge = ledger.issue(deadline, issued_tick=2_000)
     with pytest.raises(BrokerProtocolFailure):
-        ledger.consume(_request(challenge.nonce), current_tick=2_500, current_frequency=100)
+        ledger.consume(_request(challenge.nonce, deadline), current_tick=2_500, current_frequency=100)

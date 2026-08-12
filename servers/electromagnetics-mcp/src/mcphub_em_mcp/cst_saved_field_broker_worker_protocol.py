@@ -19,6 +19,7 @@ from .cst_saved_field_broker_protocol import (
 
 BROKER_WORKER_REQUEST_SCHEMA = "mcphub.cst.saved_field.broker_worker_request.v1"
 BROKER_WORKER_RESPONSE_SCHEMA = "mcphub.cst.saved_field.broker_worker_response.v1"
+BROKER_WORKER_PROTOCOL_V1 = "BrokerWorkerProtocolV1"
 BROKER_WORKER_REQUEST_MAX = 131_072
 BROKER_WORKER_RESPONSE_MAX = 1_114_112
 WORKER_STARTUP_PROOF_SCHEMA = "mcphub.cst.saved_field.worker_startup_proof.v1"

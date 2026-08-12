@@ -9,9 +9,12 @@ from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from typing import Any, BinaryIO, ClassVar
 
+from .cst_saved_field_port import AbsoluteInvocationBudget
+
 BROKER_CHALLENGE_SCHEMA = "mcphub.cst.saved_field.broker_challenge.v1"
 BROKER_REQUEST_SCHEMA = "mcphub.cst.saved_field.broker_request.v1"
 BROKER_RESPONSE_SCHEMA = "mcphub.cst.saved_field.broker_response.v1"
+BROKER_PROTOCOL_V1 = "BrokerProtocolV1"
 BROKER_FRAME_MAX = 1_114_112
 BROKER_REQUEST_MAX = 131_072
 PUBLIC_TEXT_MAX = 1_048_576
@@ -136,35 +139,22 @@ def _unique_pairs(pairs: list[tuple[str, object]]) -> dict[str, object]:
     return value
 
 
-@dataclass(frozen=True, slots=True)
-class QpcDeadlineV1:
-    qpc_frequency: int
-    admitted_tick: int
-    deadline_tick: int
-
-    def __post_init__(self) -> None:
-        if (
-            type(self.qpc_frequency) is not int
-            or type(self.admitted_tick) is not int
-            or type(self.deadline_tick) is not int
-            or self.qpc_frequency <= 0
-            or self.admitted_tick < 0
-            or self.deadline_tick != self.admitted_tick + 60 * self.qpc_frequency
-        ):
-            raise _fail()
-
-    def to_wire(self) -> dict[str, int]:
-        return asdict(self)
+class QpcDeadlineV1(AbsoluteInvocationBudget):
+    """Wire-compatible protocol name for the neutral absolute budget."""
 
     @classmethod
     def from_wire(cls, value: object) -> QpcDeadlineV1:
-        item = _closed(value, {"qpc_frequency", "admitted_tick", "deadline_tick"})
-        return cls(item["qpc_frequency"], item["admitted_tick"], item["deadline_tick"])
+        try:
+            parsed = AbsoluteInvocationBudget.from_wire(value)
+            return cls(parsed.qpc_frequency, parsed.admitted_tick, parsed.deadline_tick)
+        except ValueError as exc:
+            raise _fail() from exc
 
     def remaining(self, *, current_frequency: int, current_tick: int) -> float:
-        if current_frequency != self.qpc_frequency or type(current_tick) is not int:
-            raise _fail()
-        return max(0.0, (self.deadline_tick - current_tick) / self.qpc_frequency)
+        try:
+            return super().remaining(current_frequency=current_frequency, current_tick=current_tick)
+        except ValueError as exc:
+            raise _fail() from exc
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,7 +172,9 @@ class BrokerChallengeV1:
             or self.qpc_frequency <= 0
             or type(self.issued_tick) is not int
             or self.issued_tick < 0
-            or self.expires_tick != self.issued_tick + NONCE_LIFETIME_SECONDS * self.qpc_frequency
+            or type(self.expires_tick) is not int
+            or self.expires_tick <= self.issued_tick
+            or self.expires_tick > self.issued_tick + NONCE_LIFETIME_SECONDS * self.qpc_frequency
         ):
             raise _fail()
 

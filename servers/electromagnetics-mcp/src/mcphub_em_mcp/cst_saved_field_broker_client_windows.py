@@ -223,54 +223,78 @@ class WindowsBrokerClient:
         self.bind_revision(policy_revision)
         assert self._gate is not None
         lease = self._gate.acquire_and_seal(policy_revision, wait_seconds=1.0)
+        frequency = self._qpc_frequency()
+        admitted = self._qpc_counter()
+        deadline = QpcDeadlineV1(frequency, admitted, admitted + 60 * frequency)
         try:
-            lease.authorize_start()
-            if not self.startup_ready():
-                raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
-            frequency = self._qpc_frequency()
-            admitted = self._qpc_counter()
-            deadline = QpcDeadlineV1(frequency, admitted, admitted + 60 * frequency)
-            challenge = self._transport.challenge(deadline)
-            if (
-                challenge.qpc_frequency != deadline.qpc_frequency
-                or challenge.issued_tick != deadline.admitted_tick
-                or challenge.expires_tick > deadline.deadline_tick
-            ):
-                raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
-            value = dict(request)
-            serialized = repr(value).casefold()
-            if any(token in serialized for token in ("project_bundle", "root", "path", "handle", "bytes")):
-                raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
-            broker_request = BrokerRequestV1(
-                self._correlation(),
-                challenge.nonce,
-                policy_revision,
-                entry_id,
-                manifest_sha256,
-                canonical_sha256(value),
-                value,
-                deadline,
+            return self.invoke_admitted(
+                lease=lease,
+                policy_revision=policy_revision,
+                entry_id=entry_id,
+                manifest_sha256=manifest_sha256,
+                request=request,
+                deadline=deadline,
             )
-            try:
-                response = self._transport.exchange(broker_request)
-            except BaseException as exc:
-                receipt = self._transport.cancel_and_settle(broker_request.correlation_id, deadline)
-                if not receipt.complete:
-                    self._gate.quarantine_and_release(lease)
-                    raise BrokerProtocolFailure("cst_saved_field.containment_settle_failed") from exc
-                raise
-            try:
-                validated = validate_response(broker_request, response)
-            except BaseException:
-                self._gate.quarantine_and_release(lease)
-                raise
-            if self._qpc_frequency() != frequency or self._qpc_counter() >= deadline.deadline_tick:
-                self._gate.quarantine_and_release(lease)
-                raise BrokerProtocolFailure("cst_saved_field.deadline_exceeded")
-        except BaseException:
+        finally:
             self._gate.release(lease)
+
+    def invoke_admitted(
+        self,
+        *,
+        lease: AdmissionLease,
+        policy_revision: str,
+        entry_id: str,
+        manifest_sha256: str,
+        request: Mapping[str, object],
+        deadline: QpcDeadlineV1,
+    ) -> BrokerResponseV1:
+        """Exchange under the daemon-owned lease without releasing it."""
+
+        self.bind_revision(policy_revision)
+        assert self._gate is not None
+        if lease._gate is not self._gate or lease.revision != policy_revision:
+            raise AdmissionFailure("cst_saved_field.policy_revision_changed")
+        lease.authorize_start()
+        if not self.startup_ready():
+            raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+        challenge = self._transport.challenge(deadline)
+        if (
+            challenge.qpc_frequency != deadline.qpc_frequency
+            or challenge.issued_tick < deadline.admitted_tick
+            or challenge.issued_tick >= deadline.deadline_tick
+            or challenge.expires_tick > deadline.deadline_tick
+        ):
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        value = dict(request)
+        serialized = repr(value).casefold()
+        if any(token in serialized for token in ("project_bundle", "root", "path", "handle", "bytes")):
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        broker_request = BrokerRequestV1(
+            self._correlation(),
+            challenge.nonce,
+            policy_revision,
+            entry_id,
+            manifest_sha256,
+            canonical_sha256(value),
+            value,
+            deadline,
+        )
+        try:
+            response = self._transport.exchange(broker_request)
+        except BaseException as exc:
+            receipt = self._transport.cancel_and_settle(broker_request.correlation_id, deadline)
+            if not receipt.complete:
+                self._gate.quarantine_and_release(lease)
+                raise BrokerProtocolFailure("cst_saved_field.containment_settle_failed") from exc
             raise
-        self._gate.release(lease)
+        try:
+            validated = validate_response(broker_request, response)
+        except BaseException:
+            self._gate.quarantine_and_release(lease)
+            raise
+        if self._qpc_frequency() != deadline.qpc_frequency or self._qpc_counter() >= deadline.deadline_tick:
+            self._gate.quarantine_and_release(lease)
+            raise BrokerProtocolFailure("cst_saved_field.deadline_exceeded")
         return validated
 
 

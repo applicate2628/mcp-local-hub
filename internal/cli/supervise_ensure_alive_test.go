@@ -568,8 +568,10 @@ func TestEnsureAlive_HeadlessFleet_BootGraceSuppresses(t *testing.T) {
 		t.Fatalf("acquire supervisor lock: %v", err)
 	}
 	defer lk.Release()
-	// StartedAt defaults to "now" (AcquireSupervisorLock's own write) — well
-	// inside the 45s boot-grace window. No rewrite needed.
+	startedAt := time.Date(2026, 8, 12, 8, 0, 0, 0, time.UTC)
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, startedAt)
+	restoreNow := setEnsureAliveHeadlessFleetNowForTest(func() time.Time { return startedAt.Add(time.Second) })
+	defer restoreNow()
 
 	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) { return guiOwnerStateConfirmedDead, 5555, 9125 })
 	defer restoreGUI()

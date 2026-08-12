@@ -7,15 +7,13 @@ Result3D activation protocols.
 
 from __future__ import annotations
 
-import hashlib
 import math
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any, Literal
 
-from .cst_saved_field_policy import PolicyFailure, validate_windows_path_lexical
 from .cst_saved_field_port import (
     AcquisitionSettlement,
     AuthorizedVendorPathLease,
@@ -23,6 +21,7 @@ from .cst_saved_field_port import (
     OwnedSessionAcquisitionError,
     VendorFailure,
     VendorSampleBatch,
+    validate_vendor_relative_path,
 )
 
 _PUBLIC_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
@@ -160,8 +159,8 @@ def _validate_record(record: object) -> FieldFrameCandidate:
     ):
         raise _record_invalid("the vendor payload path is not a contained relative path")
     try:
-        validate_windows_path_lexical(payload_relative, absolute=False, role="vendor")
-    except PolicyFailure as exc:
+        validate_vendor_relative_path(payload_relative)
+    except ValueError as exc:
         raise _record_invalid("the vendor payload namespace is invalid") from exc
     sha256 = _required_text(record, "field_sha256", maximum=64)
     if len(sha256) != 64 or any(character not in "0123456789abcdefABCDEF" for character in sha256):
@@ -357,8 +356,8 @@ def _rollback_resource(resource: Any, stage: str) -> None:
 
 
 def open_owned_sampler_session(
-    create_owned: Callable[[Path], Any],
-    copied_project: Path,
+    create_owned: Callable[[object], Any],
+    copied_project: object,
     *,
     before_transfer: Callable[[OwnedSamplerSession], None] | None = None,
 ) -> tuple[OwnedSamplerSession, AcquisitionSettlement]:
@@ -422,47 +421,6 @@ def _require_metadata(value: object) -> Mapping[str, str]:
             "the time-dependence convention is not verified",
         )
     return value  # type: ignore[return-value]
-
-
-def _contained_activation_path(root: Path, name: str) -> Path:
-    path = root / name
-    if Path(name).name != name or name in {"", ".", ".."}:
-        raise VendorFailure(
-            "cst_saved_field.activation_failed",
-            "activation_prepare",
-            "activation path escaped the workspace",
-        )
-    return path
-
-
-def _hash_file(path: Path, *, check_deadline: Callable[[], None] = lambda: None) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        while True:
-            check_deadline()
-            block = handle.read(1024 * 1024)
-            check_deadline()
-            if not block:
-                break
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _copy_file(
-    source: Path,
-    destination: Path,
-    *,
-    check_deadline: Callable[[], None] = lambda: None,
-) -> None:
-    with source.open("rb") as reader, destination.open("xb") as writer:
-        while True:
-            check_deadline()
-            block = reader.read(1024 * 1024)
-            check_deadline()
-            if not block:
-                break
-            writer.write(block)
-            check_deadline()
 
 
 def activate_and_sample(

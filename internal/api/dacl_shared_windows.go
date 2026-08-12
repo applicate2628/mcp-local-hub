@@ -95,6 +95,27 @@ func BuildAllowlistSDDL(mode AllowlistMaskMode) (string, error) {
 	}
 }
 
+// BuildSupervisorPipeSDDL returns the supervisor pipe descriptor. Before the
+// optional CST daemon service is provisioned it is byte-for-byte the existing
+// owner/SYSTEM descriptor. Once the fixed service account resolves, the
+// descriptor adds only that numeric service SID and a High-integrity no-write-
+// up label; the status authorizer still performs independent token/SCM checks.
+func BuildSupervisorPipeSDDL() (string, error) {
+	userSIDStr, err := currentUserSIDString()
+	if err != nil {
+		return "", fmt.Errorf("current user SID: %w", err)
+	}
+	serviceSID, _, _, err := windows.LookupSID("", `NT SERVICE\McpLocalHubCstDaemon`)
+	if err != nil {
+		// Default-off compatibility: the service is intentionally absent before
+		// provisioning. The special opcode still fails closed at pre-dispatch.
+		return fmt.Sprintf("D:P(A;;GRGW;;;%s)(A;;GRGW;;;SY)", userSIDStr), nil
+	}
+	const pipeReadWriteSync = "0xC0100000"
+	return fmt.Sprintf("O:%sD:P(A;;%s;;;%s)(A;;%s;;;SY)(A;;%s;;;%s)S:(ML;;NW;;;HI)",
+		userSIDStr, pipeReadWriteSync, userSIDStr, pipeReadWriteSync, pipeReadWriteSync, serviceSID.String()), nil
+}
+
 // BuildAllowlistSD returns the file-form `*windows.SECURITY_DESCRIPTOR`
 // for file-create call sites. Equivalent to
 // `BuildAllowlistSDDL(AllowlistMaskFile)` followed by

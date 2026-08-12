@@ -40,16 +40,12 @@ from .cst_saved_field import (
     SavedFieldRequestV1,
     SavedFieldResultRequestV1,
 )
-from .cst_saved_field_broker_client_windows import (
-    UnavailableBrokerTransport,
-    WindowsBrokerClient,
-    windows_qpc_counter,
-    windows_qpc_frequency,
+from .cst_saved_field_daemon_client_windows import (
+    DaemonClientFailure,
+    WindowsDaemonClient,
+    inherited_daemon_client,
 )
-from .cst_saved_field_broker_protocol import (
-    SAFE_FAILURE_IDS,
-    BrokerProtocolFailure,
-)
+from .cst_saved_field_frontend_protocol import FRONTEND_SAFE_FAILURE_IDS
 from .cst_saved_field_policy import (
     AuthoritySnapshot,
     PolicyFailure,
@@ -500,7 +496,7 @@ SAVED_FIELD_RESPONSE_MAX = 1_048_576
 
 
 def _saved_field_error(failure_id: str) -> CallToolResult:
-    if failure_id not in SAFE_FAILURE_IDS:
+    if failure_id not in FRONTEND_SAFE_FAILURE_IDS:
         failure_id = "cst_saved_field.activation_failed"
     return CallToolResult(
         content=[TextContent(type="text", text=failure_id)],
@@ -549,25 +545,20 @@ def _unavailable_saved_field_invoker(_request: SavedFieldRequestV1, _descriptor:
     return _saved_field_error("cst_saved_field.cst_unavailable")
 
 
-def _broker_saved_field_invoker(client: WindowsBrokerClient) -> object:
-    class BrokerInvoker:
+def _daemon_saved_field_invoker(client: WindowsDaemonClient) -> object:
+    class DaemonInvoker:
         def invoke_authorized(
             self, request: SavedFieldRequestV1, snapshot: AuthoritySnapshot
         ) -> CallToolResult:
             descriptor = snapshot.authorize(request.project_bundle)
             body = request.model_dump(mode="json")
             del body["project_bundle"]
-            response = client.invoke(
-                policy_revision=descriptor.policy_revision,
-                entry_id=descriptor.entry_id,
-                manifest_sha256=descriptor.bundle_manifest_sha256,
-                request=body,
-            )
+            response = client.invoke(entry_id=descriptor.entry_id, request=body)
             if not response.ok or response.text is None:
                 return _saved_field_error(response.failure_id or "cst_saved_field.broker_protocol_invalid")
             return publish_saved_field_text(response.text)
 
-    return BrokerInvoker()
+    return DaemonInvoker()
 
 
 def _inline_sampler_schema(server: Any) -> None:
@@ -628,7 +619,7 @@ def _register_saved_field_tool(
             return _publish_saved_field_value(invoker(request, descriptor))
         except PolicyFailure as exc:
             return _saved_field_error(exc.failure_id)
-        except BrokerProtocolFailure as exc:
+        except DaemonClientFailure as exc:
             return _saved_field_error(exc.failure_id)
         except Exception:
             return _saved_field_error("cst_saved_field.activation_failed")
@@ -651,30 +642,28 @@ def _restart_authority_snapshot() -> AuthoritySnapshot | None:
 def _compose_saved_field_tool(
     server: Any,
     snapshot: AuthoritySnapshot | None,
-    broker_client: WindowsBrokerClient | None,
+    daemon_client: WindowsDaemonClient | None,
 ) -> bool:
     """Apply the restart-loaded default-off composition decision exactly once."""
 
-    if snapshot is None or broker_client is None or not broker_client.startup_ready():
+    if snapshot is None or daemon_client is None or not daemon_client.startup_ready():
         return False
-    broker_client.bind_revision(snapshot.revision)
     _register_saved_field_tool(
         server,
         snapshot,
-        _broker_saved_field_invoker(broker_client),
+        _daemon_saved_field_invoker(daemon_client),
     )
     return True
 
 
 _saved_field_authority = _restart_authority_snapshot()
 if _saved_field_authority is not None:
-    _saved_field_broker_client = WindowsBrokerClient(
-        transport=UnavailableBrokerTransport(),
-        qpc_frequency=windows_qpc_frequency,
-        qpc_counter=windows_qpc_counter,
+    _saved_field_daemon_client = inherited_daemon_client(
         correlation=lambda: secrets.token_hex(16),
+        qpc_frequency=lambda: 1_000_000_000,
+        qpc_counter=time.perf_counter_ns,
     )
-    _compose_saved_field_tool(mcp, _saved_field_authority, _saved_field_broker_client)
+    _compose_saved_field_tool(mcp, _saved_field_authority, _saved_field_daemon_client)
 
 
 def main() -> None:

@@ -8,40 +8,17 @@ the Service Control Manager or a named pipe.
 from __future__ import annotations
 
 import hmac
-import secrets
-import threading
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
-from .cst_saved_field_broker_client_windows import (
-    BrokerCancelReceiptV1,
-    BrokerStartupProofV1,
-)
-from .cst_saved_field_broker_protocol import (
-    BrokerChallengeV1,
-    BrokerProtocolFailure,
-    BrokerRequestV1,
-    BrokerResponseV1,
-    BrokerSettlementV1,
-    QpcDeadlineV1,
-)
-from .cst_saved_field_broker_worker_protocol import (
-    BrokerWorkerRequestV1,
-    BrokerWorkerResponseV1,
-    validate_worker_response,
-)
+from .cst_saved_field_broker_protocol import BrokerRequestV1
 from .cst_saved_field_port import SealedVendorOutput, VendorPathLeaseSettlement
 
 DAEMON_SERVICE = "McpLocalHubCstDaemon"
 BROKER_SERVICE = "McpLocalHubCstVendorBroker"
 DAEMON_ACCOUNT = rf"NT SERVICE\{DAEMON_SERVICE}"
 BROKER_ACCOUNT = rf"NT SERVICE\{BROKER_SERVICE}"
-PIPE_NAME = r"\\.\pipe\mcp-local-hub-cst-saved-field-v1"
-PIPE_DACL_SDDL = (
-    "D:P(A;;FA;;;SY)(A;;FA;;;S-1-5-80-BROKER)(A;;0x00100083;;;S-1-5-80-DAEMON)(D;;FA;;;AN)(D;;FA;;;NU)"
-)
-PIPE_SACL_SDDL = "S:(ML;;NW;;;HI)"
 
 
 class BrokerIsolationFailure(RuntimeError):
@@ -49,6 +26,27 @@ class BrokerIsolationFailure(RuntimeError):
         super().__init__(failure_id)
         self.failure_id = failure_id
         self.quarantine = quarantine
+
+
+@dataclass(frozen=True, slots=True)
+class VendorIsolationProofV1:
+    service_name: str
+    token_user: str
+    workspace_owner: str
+    protected_dacl: bool
+    daemon_access_denied: bool
+    session_id: int
+
+    @property
+    def complete(self) -> bool:
+        return (
+            self.service_name == BROKER_SERVICE
+            and self.token_user == BROKER_ACCOUNT
+            and self.workspace_owner == BROKER_ACCOUNT
+            and self.protected_dacl is True
+            and self.daemon_access_denied is True
+            and self.session_id == 0
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,18 +126,6 @@ def dry_run_rollback(contract: ServiceContract) -> ProvisioningReceipt:
 
 
 @dataclass(frozen=True, slots=True)
-class PipeSecurityDescriptorV1:
-    pipe_name: str = PIPE_NAME
-    access: int = 0x00000003 | 0x00080000
-    first_instance: bool = True
-    overlapped: bool = True
-    reject_remote_clients: bool = True
-    instances: int = 1
-    dacl_sddl: str = PIPE_DACL_SDDL
-    sacl_sddl: str = PIPE_SACL_SDDL
-
-
-@dataclass(frozen=True, slots=True)
 class PeerTokenProofV1:
     service_name: str
     service_account: str
@@ -206,142 +192,6 @@ class AuthenticatedPipeSession:
         return request
 
 
-class NonceLedger:
-    """One outstanding 256-bit challenge with consume-before-authorization semantics."""
-
-    def __init__(self, *, random_bytes: Callable[[int], bytes] = secrets.token_bytes) -> None:
-        self._random_bytes = random_bytes
-        self._lock = threading.Lock()
-        self._outstanding: dict[str, tuple[int, int, str | None]] = {}
-
-    def issue(self, *, qpc_frequency: int, issued_tick: int) -> BrokerChallengeV1:
-        nonce = self._random_bytes(32).hex()
-        challenge = BrokerChallengeV1(
-            nonce,
-            issued_tick,
-            issued_tick + 5 * qpc_frequency,
-            qpc_frequency,
-        )
-        with self._lock:
-            if self._outstanding:
-                raise BrokerIsolationFailure("cst_saved_field.broker_busy")
-            self._outstanding[nonce] = (challenge.expires_tick, qpc_frequency, None)
-        return challenge
-
-    def consume(self, request: BrokerRequestV1, *, current_tick: int, current_frequency: int) -> None:
-        with self._lock:
-            state = self._outstanding.pop(request.nonce, None)
-        if state is None:
-            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
-        expires, frequency, _ = state
-        if frequency != current_frequency or current_tick >= expires:
-            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
-
-
-class SavedFieldBrokerService:
-    """Credential-free broker core with nonce-before-policy authorization ordering."""
-
-    def __init__(
-        self,
-        *,
-        policy_revision: str,
-        authorize: Callable[[BrokerRequestV1], None],
-        worker: Callable[[BrokerWorkerRequestV1], BrokerWorkerResponseV1],
-        qpc_frequency: Callable[[], int],
-        qpc_counter: Callable[[], int],
-        random_bytes: Callable[[int], bytes] = secrets.token_bytes,
-        trace: Callable[[str], None] | None = None,
-    ) -> None:
-        self._policy_revision = policy_revision
-        self._authorize = authorize
-        self._worker = worker
-        self._qpc_frequency = qpc_frequency
-        self._qpc_counter = qpc_counter
-        self._nonces = NonceLedger(random_bytes=random_bytes)
-        self._trace = trace or (lambda _event: None)
-
-    def issue_challenge(self, deadline: QpcDeadlineV1) -> BrokerChallengeV1:
-        frequency = self._qpc_frequency()
-        tick = self._qpc_counter()
-        if frequency != deadline.qpc_frequency or tick != deadline.admitted_tick:
-            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
-        self._trace("broker:challenge")
-        return self._nonces.issue(qpc_frequency=frequency, issued_tick=tick)
-
-    def exchange(self, request: BrokerRequestV1) -> BrokerResponseV1:
-        frequency = self._qpc_frequency()
-        tick = self._qpc_counter()
-        self._nonces.consume(request, current_tick=tick, current_frequency=frequency)
-        if request.policy_revision != self._policy_revision or tick >= request.deadline.deadline_tick:
-            raise BrokerProtocolFailure("cst_saved_field.policy_revision_changed")
-        self._authorize(request)
-        self._trace("broker:worker-start")
-        worker_request = BrokerWorkerRequestV1(
-            request.correlation_id,
-            request.policy_revision,
-            request.entry_id,
-            request.manifest_sha256,
-            request.request_sha256,
-            request.request,
-            request.deadline,
-        )
-        worker_response = validate_worker_response(worker_request, self._worker(worker_request))
-        self._trace("broker:worker-settled")
-        worker_settlement = worker_response.settlement
-        settlement = BrokerSettlementV1(
-            worker_signaled=True,
-            worker_exit_recorded=True,
-            worker_reference_closed=True,
-            job_active_zero=True,
-            readers_joined=True,
-            handles_closed=worker_settlement.source_handles_closed,
-            pipe_closed=True,
-            workspace_settled=worker_settlement.workspace_settled,
-            session_settled=(
-                worker_settlement.session_settled
-                and worker_settlement.vendor_path_lease_settled
-                and worker_settlement.output_sealed
-            ),
-            source_unchanged=worker_settlement.source_unchanged,
-            owned_remaining=worker_settlement.owned_remaining,
-        )
-        if not settlement.complete:
-            raise BrokerIsolationFailure("cst_saved_field.containment_settle_failed", quarantine=True)
-        response = BrokerResponseV1(
-            request.correlation_id,
-            request.policy_revision,
-            request.request_sha256,
-            request.deadline,
-            worker_response.ok,
-            worker_response.text,
-            worker_response.failure_id,
-            settlement,
-        )
-        self._trace("broker:response-settled")
-        return response
-
-
-class InProcessBrokerTransport:
-    """Deterministic no-SCM transport used only by safe broker composition tests."""
-
-    def __init__(self, service: SavedFieldBrokerService, proof: BrokerStartupProofV1) -> None:
-        self._service = service
-        self._proof = proof
-
-    def startup_proof(self) -> BrokerStartupProofV1:
-        return self._proof
-
-    def challenge(self, deadline: QpcDeadlineV1) -> BrokerChallengeV1:
-        return self._service.issue_challenge(deadline)
-
-    def exchange(self, request: BrokerRequestV1) -> BrokerResponseV1:
-        return self._service.exchange(request)
-
-    def cancel_and_settle(self, correlation_id: str, deadline: QpcDeadlineV1) -> BrokerCancelReceiptV1:
-        del correlation_id, deadline
-        return BrokerCancelReceiptV1(True, True, True, 0)
-
-
 class VendorPathPlatform(Protocol):
     def hold_ancestor(
         self, relative: str, *, share_read: bool, share_write: bool, share_delete: bool
@@ -376,7 +226,9 @@ class VendorPathPlatform(Protocol):
 class IsolatedVendorPathLease:
     """Single owner for retained ancestors, read inputs, write targets, and seals."""
 
-    def __init__(self, platform: VendorPathPlatform) -> None:
+    def __init__(self, platform: VendorPathPlatform, *, proof: VendorIsolationProofV1) -> None:
+        if not proof.complete:
+            raise BrokerIsolationFailure("cst_saved_field.vendor_isolation_unavailable")
         self._platform = platform
         self._handles: list[int] = []
         self._received = 0

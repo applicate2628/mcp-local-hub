@@ -43,6 +43,11 @@ type HostConfig struct {
 	// subprocess output is dropped to io.Discard to avoid leaking
 	// upstream chatter into the parent's inherited stdio (issue #162).
 	LogPath string
+	// LaunchCapability is set only for the supervisor-tracked CST frontend.
+	// A nil value preserves every existing stdio launch. When enrollment is
+	// unavailable the child still starts without the locator so the existing six
+	// CST tools remain available while the optional sampler stays default-off.
+	LaunchCapability *LaunchCapabilityConfig
 }
 
 // composeChildEnv builds a subprocess environment: os.Environ() with every key
@@ -283,9 +288,11 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// like uvx/npx that fork-and-stay. See pdeathsig_linux.go.
 	process.SetParentDeathSignal(cmd)
 	cmd.Dir = h.cfg.WorkingDir
-	if len(h.cfg.Env) > 0 || len(h.cfg.UnsetEnv) > 0 {
-		cmd.Env = composeChildEnv(h.cfg.Env, h.cfg.UnsetEnv)
-	}
+	// The handle locator is a reserved control-plane key. Strip any ambient or
+	// manifest value now; only the launch owner below may append its exact decimal
+	// value after successful enrollment.
+	launchUnset := append(append([]string{}, h.cfg.UnsetEnv...), LaunchCapabilityHandleEnv)
+	cmd.Env = composeChildEnv(h.cfg.Env, launchUnset)
 
 	// Partial-init pipe cleanup: each successful *Pipe() call opens a pipe
 	// PAIR (2 fds). One end is returned to us (the parent end: stdin/stdout);
@@ -325,8 +332,41 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		closePipeChildEnd(cmd.Stdout) // child write end (stored on cmd.Stdout)
 		return fmt.Errorf("stderr pipe: %w", err)
 	}
+	var launchCapability *preparedLaunchCapability
+	if h.cfg.LaunchCapability != nil {
+		launchCapability, err = prepareLaunchCapability(ctx, *h.cfg.LaunchCapability, productionLaunchCapabilityOps())
+		if err != nil {
+			_ = stdin.Close()
+			_ = stdout.Close()
+			_ = stderr.Close()
+			closePipeChildEnd(cmd.Stdin)
+			closePipeChildEnd(cmd.Stdout)
+			closePipeChildEnd(cmd.Stderr)
+			return fmt.Errorf("prepare launch capability: %w", err)
+		}
+		if launchCapability != nil {
+			if err := launchCapability.apply(cmd); err != nil {
+				launchCapability.cancel()
+				_ = stdin.Close()
+				_ = stdout.Close()
+				_ = stderr.Close()
+				closePipeChildEnd(cmd.Stdin)
+				closePipeChildEnd(cmd.Stdout)
+				closePipeChildEnd(cmd.Stderr)
+				return fmt.Errorf("apply launch capability: %w", err)
+			}
+			cmd.Env = composeChildEnv(
+				mapWithOverride(h.cfg.Env, LaunchCapabilityHandleEnv, launchCapability.environmentValue()),
+				launchUnset,
+			)
+		}
+	}
 
-	if err := cmd.Start(); err != nil {
+	start := cmd.Start
+	if launchCapability != nil {
+		start = func() error { return launchCapability.start(cmd.Start) }
+	}
+	if err := start(); err != nil {
 		return fmt.Errorf("start subprocess: %w", err)
 	}
 	// Place subprocess into a Windows Job Object with KILL_ON_JOB_CLOSE
@@ -473,6 +513,9 @@ func (h *StdioHost) Start(ctx context.Context) error {
 	// drain plus an idempotent closeDescriptors on the parentIOPipes
 	// we already closed manually.
 	go func() {
+		if launchCapability != nil {
+			defer launchCapability.cancel()
+		}
 		state, _ := cmd.Process.Wait()
 		if state != nil {
 			h.exitState.Store(state)

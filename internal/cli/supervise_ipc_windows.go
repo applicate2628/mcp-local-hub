@@ -65,7 +65,7 @@ type SupervisorIPCListener struct {
 // (IPC frames are short JSON lines well under 1 KiB; the cap exists
 // only to bound kernel-pool consumption per connection).
 func NewSupervisorIPCListener(pipePath string, ownerOpt ...api.SupervisorLockOwner) (*SupervisorIPCListener, error) {
-	sddl, err := api.BuildAllowlistSDDL(api.AllowlistMaskPipe)
+	sddl, err := api.BuildSupervisorPipeSDDL()
 	if err != nil {
 		return nil, fmt.Errorf("build SDDL: %w", err)
 	}
@@ -127,7 +127,7 @@ func (l *SupervisorIPCListener) SecurityDescriptorSDDL() (string, error) {
 	}
 	handle := windows.Handle(fdConn.Fd())
 	sd, err := windows.GetSecurityInfo(handle, windows.SE_KERNEL_OBJECT,
-		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+		windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION|windows.LABEL_SECURITY_INFORMATION)
 	if err != nil {
 		return "", fmt.Errorf("GetSecurityInfo pipe handle: %w", err)
 	}

@@ -21,9 +21,14 @@ from typing import Literal
 
 from .cst_saved_field_policy import (
     HeldDirectoryCapability,
-    ObjectIdentityEvidence,
     PolicyPlatform,
+    WindowsPathIdentityV1,
     validate_windows_path_lexical,
+)
+from .cst_saved_field_port import (
+    AuthorizedVendorPathLease,
+    SealedVendorOutput,
+    VendorPathLeaseSettlement,
 )
 
 MANIFEST_SCHEMA = "sha256-canonical-file-list-v2"
@@ -418,6 +423,30 @@ class ManifestV2:
     rows: tuple[ManifestRowV2, ...]
     aggregate_sha256: str
 
+    def __post_init__(self) -> None:
+        paths = tuple(row.path for row in self.rows)
+        if (
+            self.schema != MANIFEST_SCHEMA
+            or type(self.rows) is not tuple
+            or paths != tuple(sorted(paths, key=lambda value: value.encode("utf-8")))
+            or len(paths) != len(set(paths))
+            or any(
+                not isinstance(row, ManifestRowV2)
+                or row.type != "regular"
+                or row.stream != "::$DATA"
+                or type(row.size) is not int
+                or row.size < 0
+                or len(row.sha256) != 64
+                or any(character not in "0123456789abcdef" for character in row.sha256)
+                or type(row.modified_ns) is not int
+                or row.modified_ns < 0
+                for row in self.rows
+            )
+            or len(self.aggregate_sha256) != 64
+            or self.aggregate_sha256 != _canonical_aggregate(self.rows)
+        ):
+            raise TransferFailure("cst_saved_field.authorized_copy_changed", "manifest")
+
 
 @dataclass(frozen=True, slots=True)
 class TransferBudget:
@@ -591,7 +620,7 @@ class TrustedWorkspacePolicy:
     """The sole factory for one disposable child beneath an injected root."""
 
     root: Path
-    identity: ObjectIdentityEvidence | None = None
+    identity: WindowsPathIdentityV1 | None = None
     platform: PolicyPlatform | None = None
     root_capability: HeldDirectoryCapability | object | None = None
 
@@ -725,13 +754,67 @@ def create_workspace_lease(path: Path, *, fail_stage: str | None = None) -> Work
         ) from exc
 
 
+class _SnapshotVendorPathLease:
+    """One non-copyable lease whose terminal receipt gates snapshot deletion."""
+
+    __slots__ = ("_inner", "_settlement")
+
+    def __init__(self, inner: AuthorizedVendorPathLease) -> None:
+        self._inner = inner
+        self._settlement: VendorPathLeaseSettlement | None = None
+
+    def __copy__(self):
+        raise TypeError("AuthorizedVendorPathLease is non-copyable")
+
+    def __deepcopy__(self, _memo):
+        raise TypeError("AuthorizedVendorPathLease is non-copyable")
+
+    @property
+    def settled(self) -> bool:
+        return self._settlement is not None and self._settlement.complete
+
+    def hold_ancestor(self, relative: str) -> str:
+        return self._inner.hold_ancestor(relative)
+
+    def hold_read_input(self, relative: str) -> str:
+        return self._inner.hold_read_input(relative)
+
+    def prepare_output(self, relative: str) -> str:
+        return self._inner.prepare_output(relative)
+
+    def seal_output(self, relative: str) -> SealedVendorOutput:
+        return self._inner.seal_output(relative)
+
+    def create_clean_input(
+        self, source_relative: str, destination_relative: str, expected_sha256: str
+    ) -> str:
+        return self._inner.create_clean_input(
+            source_relative,
+            destination_relative,
+            expected_sha256,
+        )
+
+    def revalidate_all(self) -> None:
+        self._inner.revalidate_all()
+
+    def settle(self) -> VendorPathLeaseSettlement:
+        if self._settlement is None or not self._settlement.complete:
+            self._settlement = self._inner.settle()
+        return self._settlement
+
+
+VendorLeaseFactory = Callable[[object], AuthorizedVendorPathLease]
+
+
 @dataclass(slots=True)
 class AuthorizedWorkspaceSnapshot:
     manifest: ManifestV2
-    path: Path
+    _path: Path
     _lease: WorkspaceLease
     capability: HeldDirectoryCapability | object | None = None
     budget: TransferBudget | None = None
+    _vendor_lease_factory: VendorLeaseFactory | None = None
+    _vendor_lease: _SnapshotVendorPathLease | None = None
     _settled: bool = False
 
     @property
@@ -740,70 +823,17 @@ class AuthorizedWorkspaceSnapshot:
 
     def settle(self) -> None:
         if not self._settled:
+            if self._vendor_lease is not None and not self._vendor_lease.settled:
+                raise TransferFailure("cst_saved_field.workspace_settle_failed", "vendor_lease")
             self._lease.settle()
             self._settled = True
 
-    def _owner(self) -> _RelativeFileOwner:
-        return _relative_file_owner(self.path, self.capability)
-
-    def path_for_vendor(self, relative: str) -> Path:
-        _validate_relative(relative, budget=self.budget or TransferBudget())
-        return self.path.joinpath(*PurePosixPath(relative).parts)
-
-    def ensure_directory(self, relative: str) -> Path:
-        _validate_relative(relative, budget=self.budget or TransferBudget())
-        with self._owner() as owner:
-            owner.ensure_parent(f"{relative}/.sentinel")
-        return self.path_for_vendor(relative)
-
-    def hash_file(self, relative: str, check_deadline: Callable[[], None]) -> str:
-        with self._owner() as owner:
-            descriptor = owner.open(relative)
-            try:
-                with os.fdopen(descriptor, "rb", closefd=False) as stream:
-                    return _sha256_handle(
-                        stream,
-                        self.budget or TransferBudget(absolute_deadline=None),
-                    )
-            finally:
-                os.close(descriptor)
-
-    def require_regular_file(self, relative: str, check_deadline: Callable[[], None]) -> None:
-        check_deadline()
-        with self._owner() as owner:
-            try:
-                descriptor = owner.open(relative)
-            except OSError as exc:
-                raise TransferFailure("cst_saved_field.authorized_copy_changed", "workspace_file") from exc
-            try:
-                info = os.fstat(descriptor)
-                if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                    raise TransferFailure("cst_saved_field.authorized_copy_changed", "workspace_file")
-            finally:
-                os.close(descriptor)
-        check_deadline()
-
-    def copy_file(self, source: str, destination: str, check_deadline: Callable[[], None]) -> None:
-        with self._owner() as owner:
-            owner.ensure_parent(destination)
-            source_fd = owner.open(source)
-            destination_fd = owner.open(destination, create=True)
-            try:
-                with (
-                    os.fdopen(source_fd, "rb", closefd=False) as reader,
-                    os.fdopen(destination_fd, "wb", closefd=False) as writer,
-                ):
-                    while True:
-                        check_deadline()
-                        block = reader.read(1024 * 1024)
-                        check_deadline()
-                        if not block:
-                            break
-                        writer.write(block)
-                        check_deadline()
-            finally:
-                os.close(destination_fd)
-                os.close(source_fd)
+    def create_vendor_path_lease(self) -> AuthorizedVendorPathLease:
+        if self._settled or self._vendor_lease is not None or self._vendor_lease_factory is None:
+            raise TransferFailure("cst_saved_field.vendor_isolation_unavailable", "vendor_lease")
+        inner = self._vendor_lease_factory(self.capability)
+        self._vendor_lease = _SnapshotVendorPathLease(inner)
+        return self._vendor_lease
 
 
 BoundaryHook = Callable[[str, str | None], None]
@@ -855,6 +885,7 @@ class AuthorizedBundleTransfer:
         *,
         workspace_lease: WorkspaceLease | None = None,
         source_capability: HeldDirectoryCapability | object | None = None,
+        vendor_lease_factory: VendorLeaseFactory | None = None,
         on_vendor_start: Callable[[AuthorizedWorkspaceSnapshot], None] | None = None,
     ) -> AuthorizedWorkspaceSnapshot:
         project = Path(project)
@@ -936,10 +967,11 @@ class AuthorizedBundleTransfer:
             self._verify_source(project, "pre_commit", source_capability)
             snapshot = AuthorizedWorkspaceSnapshot(
                 manifest=copied,
-                path=lease.path,
+                _path=lease.path,
                 _lease=lease,
                 capability=lease.capability,
                 budget=self._budget,
+                _vendor_lease_factory=vendor_lease_factory,
             )
             if on_vendor_start is not None:
                 on_vendor_start(snapshot)

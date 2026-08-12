@@ -2,9 +2,108 @@
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
+
+_VENDOR_RELATIVE_SCALAR_MAX = 1_024
+_VENDOR_RELATIVE_UTF8_MAX = 4_096
+_VENDOR_RELATIVE_DEPTH_MAX = 32
+_VENDOR_RESERVED = {
+    "CON",
+    "PRN",
+    "AUX",
+    "NUL",
+    "CLOCK$",
+    "CONIN$",
+    "CONOUT$",
+    *(f"COM{digit}" for digit in range(1, 10)),
+    *(f"LPT{digit}" for digit in range(1, 10)),
+}
+_VENDOR_SUPERSCRIPT_DIGITS = str.maketrans({"¹": "1", "²": "2", "³": "3"})
+_VENDOR_FORBIDDEN_COMPONENT = frozenset('<>:"/\\|?*')
+
+
+def validate_vendor_relative_path(raw: str) -> tuple[str, ...]:
+    """Validate the neutral relative namespace accepted by the vendor port."""
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or len(raw) > _VENDOR_RELATIVE_SCALAR_MAX
+        or len(raw.encode("utf-8")) > _VENDOR_RELATIVE_UTF8_MAX
+        or raw.startswith(("\\", "/"))
+        or ":" in raw
+        or "\\" in raw
+    ):
+        raise ValueError("invalid vendor relative path")
+    components = tuple(raw.split("/"))
+    if not components or len(components) > _VENDOR_RELATIVE_DEPTH_MAX:
+        raise ValueError("invalid vendor relative path")
+    for component in components:
+        if (
+            not component
+            or component in {".", ".."}
+            or component.endswith((".", " "))
+            or component != unicodedata.normalize("NFC", component)
+            or "~" in component
+            or any(character in _VENDOR_FORBIDDEN_COMPONENT or ord(character) < 32 for character in component)
+            or len(component.encode("utf-16-le")) // 2 > 255
+        ):
+            raise ValueError("invalid vendor relative path")
+        comparison_key = (
+            component.casefold().split(".", 1)[0].rstrip(". ").translate(_VENDOR_SUPERSCRIPT_DIGITS)
+        )
+        if comparison_key.upper() in _VENDOR_RESERVED:
+            raise ValueError("invalid vendor relative path")
+    return components
+
+
+@dataclass(frozen=True, slots=True)
+class AbsoluteInvocationBudget:
+    """One immutable 60-second QueryPerformanceCounter budget."""
+
+    qpc_frequency: int
+    admitted_tick: int
+    deadline_tick: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.qpc_frequency) is not int
+            or type(self.admitted_tick) is not int
+            or type(self.deadline_tick) is not int
+            or self.qpc_frequency <= 0
+            or self.admitted_tick < 0
+            or self.deadline_tick != self.admitted_tick + 60 * self.qpc_frequency
+        ):
+            raise ValueError("invalid absolute invocation budget")
+
+    def to_wire(self) -> dict[str, int]:
+        return {
+            "qpc_frequency": self.qpc_frequency,
+            "admitted_tick": self.admitted_tick,
+            "deadline_tick": self.deadline_tick,
+        }
+
+    @classmethod
+    def from_wire(cls, value: object) -> AbsoluteInvocationBudget:
+        if not isinstance(value, dict) or set(value) != {
+            "qpc_frequency",
+            "admitted_tick",
+            "deadline_tick",
+        }:
+            raise ValueError("invalid absolute invocation budget")
+        return cls(value["qpc_frequency"], value["admitted_tick"], value["deadline_tick"])
+
+    def remaining(self, *, current_frequency: int, current_tick: int) -> float:
+        if current_frequency != self.qpc_frequency or type(current_tick) is not int:
+            raise ValueError("invalid QueryPerformanceCounter observation")
+        return max(0.0, (self.deadline_tick - current_tick) / self.qpc_frequency)
+
+    def cleanup_deadline(self, *, termination_tick: int) -> int:
+        if type(termination_tick) is not int or termination_tick < 0:
+            raise ValueError("invalid termination tick")
+        return termination_tick + 10 * self.qpc_frequency
 
 
 @dataclass
@@ -45,7 +144,7 @@ class VendorPathLeaseSettlement:
     @property
     def complete(self) -> bool:
         return (
-            self.close_attempts == self.handles_received
+            self.close_attempts >= self.handles_received
             and self.close_succeeded
             and self.owned_remaining == 0
         )

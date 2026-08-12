@@ -3,6 +3,23 @@ from __future__ import annotations
 import pytest
 
 
+def _proof():
+    from mcphub_em_mcp.cst_saved_field_vendor_isolation_windows import (
+        BROKER_ACCOUNT,
+        BROKER_SERVICE,
+        VendorIsolationProofV1,
+    )
+
+    return VendorIsolationProofV1(
+        BROKER_SERVICE,
+        BROKER_ACCOUNT,
+        BROKER_ACCOUNT,
+        True,
+        True,
+        0,
+    )
+
+
 class _Platform:
     def __init__(self) -> None:
         self.calls: list[tuple[object, ...]] = []
@@ -43,7 +60,7 @@ def test_sr_c5_01_role_shares_output_seal_and_single_owner_settlement() -> None:
     from mcphub_em_mcp.cst_saved_field_vendor_isolation_windows import IsolatedVendorPathLease
 
     platform = _Platform()
-    lease = IsolatedVendorPathLease(platform)
+    lease = IsolatedVendorPathLease(platform, proof=_proof())
     assert lease.hold_ancestor("model/Result") == "opaque:ancestor:model/Result"
     assert lease.hold_read_input("model/Result/saved/e1.sct") == "opaque:read:model/Result/saved/e1.sct"
     assert lease.prepare_output("activation/vendor_generated.rex") == (
@@ -68,7 +85,7 @@ def test_sr_c5_01_leaf_or_ancestor_swap_fails_without_path_fallback() -> None:
     )
 
     platform = _Platform()
-    lease = IsolatedVendorPathLease(platform)
+    lease = IsolatedVendorPathLease(platform, proof=_proof())
     lease.hold_ancestor("model")
     lease.hold_read_input("model/input.sct")
     platform.swap = True

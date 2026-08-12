@@ -283,11 +283,12 @@ See also: install, logs, restart, status.`,
 				// Replaces the previous npx supergateway wrapper (bridge.go),
 				// removing the node/npm dependency from the runtime.
 				h, err := daemon.NewStdioHost(daemon.HostConfig{
-					Command:  cmdPath,
-					Args:     childArgs,
-					Env:      env,
-					UnsetEnv: unsetEnv,
-					LogPath:  logPath,
+					Command:          cmdPath,
+					Args:             childArgs,
+					Env:              env,
+					UnsetEnv:         unsetEnv,
+					LogPath:          logPath,
+					LaunchCapability: cstLaunchCapabilityConfig(server, daemonName),
 					// spec.Cwd is the manifest-declared per-daemon working
 					// directory (validated absolute at parse time; empty means
 					// inherit mcphub's own cwd). cmd.Dir is set from this in
@@ -405,6 +406,31 @@ See also: install, logs, restart, status.`,
 	// stuck/quarantined daemon, then force a respawn through the supervisor.
 	c.AddCommand(newDaemonRecoverCmd())
 	return c
+}
+
+// cstLaunchCapabilityConfig admits only the exact supervisor-tracked CST host.
+// The state row is non-authoritative input to enrollment: the SCM daemon still
+// binds this process and generation independently through supervisor status.
+func cstLaunchCapabilityConfig(server, daemonName string) *daemon.LaunchCapabilityConfig {
+	if runtime.GOOS != "windows" || server != api.SupervisorCstTaskV1 || daemonName != "default" {
+		return nil
+	}
+	stateDir, err := api.DaemonStateDirReadOnly()
+	if err != nil {
+		return nil
+	}
+	state, err := api.ReadSupervisorState(filepath.Join(stateDir, "supervisor-state.json"))
+	if err != nil || state == nil {
+		return nil
+	}
+	row, ok := state.Daemons[canonicalSupervisorTaskName(`mcp-local-hub-cst-default`)]
+	if !ok || row.CurrentPID != os.Getpid() || row.PIDGeneration <= 0 || row.StartedAt == "" {
+		return nil
+	}
+	return &daemon.LaunchCapabilityConfig{
+		Task: api.SupervisorCstTaskV1, Generation: row.PIDGeneration,
+		Enrollment: api.NewHubEnrollmentClientV1(),
+	}
 }
 
 func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, err error) error {

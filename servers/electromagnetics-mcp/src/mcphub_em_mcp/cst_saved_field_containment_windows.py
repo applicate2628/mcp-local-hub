@@ -16,6 +16,7 @@ from .cst_saved_field_broker_client_windows import (
     AdmissionFailure,  # noqa: F401 - compatibility surface for containment callers
     SamplerAdmissionGate,
 )
+from .cst_saved_field_broker_protocol import QpcDeadlineV1
 from .cst_saved_field_broker_worker_protocol import (
     JOB_PROCESS_MAX,
     WorkerStartupProofV1,
@@ -29,6 +30,21 @@ PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
 PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
 JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+
+_SETTLEMENT_EVENTS = (
+    "job_configured",
+    "attributes_bound",
+    "process_created",
+    "identity_bound",
+    "job_membership_verified",
+    "request_started",
+    "worker_signaled",
+    "exit_recorded",
+    "process_reference_closed",
+    "job_active_zero",
+    "readers_joined",
+    "handles_closed",
+)
 
 
 class ContainmentFailure(RuntimeError):
@@ -99,6 +115,210 @@ class ExecutableIdentity:
     file_id: str
     sha256: str
     version: str
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerIdentityV1:
+    """Kernel-read identity of the exact CreateProcessW process handle."""
+
+    pid: int
+    creation_time_100ns: int
+    token_user_sid: str
+    session_id: int
+    image_path: str
+    package_identity: str | None
+    parent_pid: int
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.pid) is not int
+            or self.pid <= 0
+            or type(self.creation_time_100ns) is not int
+            or self.creation_time_100ns <= 0
+            or not isinstance(self.token_user_sid, str)
+            or not self.token_user_sid.upper().startswith("S-")
+            or type(self.session_id) is not int
+            or self.session_id < 0
+            or not isinstance(self.image_path, str)
+            or not os.path.isabs(self.image_path)
+            or (self.package_identity is not None and not isinstance(self.package_identity, str))
+            or type(self.parent_pid) is not int
+            or self.parent_pid <= 0
+        ):
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+
+
+@dataclass(frozen=True, slots=True)
+class KernelContainmentEvidenceV1:
+    """Broker-owned, exact-handle containment and settlement observations."""
+
+    created_worker: WorkerIdentityV1
+    pre_request_worker: WorkerIdentityV1
+    job_member_before_request: bool
+    inherited_handle_roles: tuple[str, ...]
+    settlement_events: tuple[str, ...]
+    foreign_process_operations: int
+
+    def validate(self) -> None:
+        if (
+            self.created_worker != self.pre_request_worker
+            or self.job_member_before_request is not True
+            or self.inherited_handle_roles != ("stdin", "stdout", "stderr")
+            or self.settlement_events != _SETTLEMENT_EVENTS
+            or self.foreign_process_operations != 0
+        ):
+            raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
+
+
+def _default_qpc_frequency() -> int:
+    if os.name != "nt":
+        return 1_000_000_000
+    import ctypes
+
+    value = ctypes.c_int64()
+    if not ctypes.windll.kernel32.QueryPerformanceFrequency(ctypes.byref(value)) or value.value <= 0:
+        raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+    return int(value.value)
+
+
+def _default_qpc_counter() -> int:
+    if os.name != "nt":
+        return time.perf_counter_ns()
+    import ctypes
+
+    value = ctypes.c_int64()
+    if not ctypes.windll.kernel32.QueryPerformanceCounter(ctypes.byref(value)):
+        raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+    return int(value.value)
+
+
+def _read_windows_worker_identity(process_handle: int, pid: int) -> WorkerIdentityV1:
+    """Read only the exact process handle returned by CreateProcessW."""
+
+    if os.name != "nt":
+        raise OSError("Windows worker identity is unavailable on this platform")
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll")
+    advapi32.OpenProcessToken.argtypes = (
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    )
+    advapi32.OpenProcessToken.restype = wintypes.BOOL
+    advapi32.GetTokenInformation.argtypes = (
+        wintypes.HANDLE,
+        ctypes.c_int,
+        wintypes.LPVOID,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    )
+    advapi32.GetTokenInformation.restype = wintypes.BOOL
+    advapi32.ConvertSidToStringSidW.argtypes = (
+        wintypes.LPVOID,
+        ctypes.POINTER(wintypes.LPWSTR),
+    )
+    advapi32.ConvertSidToStringSidW.restype = wintypes.BOOL
+    kernel32.LocalFree.argtypes = (wintypes.HLOCAL,)
+    kernel32.LocalFree.restype = wintypes.HLOCAL
+    ntdll.NtQueryInformationProcess.restype = ctypes.c_long
+    handle = wintypes.HANDLE(process_handle)
+
+    class FileTime(ctypes.Structure):
+        _fields_ = [("low", wintypes.DWORD), ("high", wintypes.DWORD)]
+
+    creation, exit_time, kernel_time, user_time = FileTime(), FileTime(), FileTime(), FileTime()
+    if not kernel32.GetProcessTimes(
+        handle,
+        ctypes.byref(creation),
+        ctypes.byref(exit_time),
+        ctypes.byref(kernel_time),
+        ctypes.byref(user_time),
+    ):
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+    creation_time = (int(creation.high) << 32) | int(creation.low)
+
+    session = wintypes.DWORD()
+    if not kernel32.ProcessIdToSessionId(wintypes.DWORD(pid), ctypes.byref(session)):
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+
+    image = ctypes.create_unicode_buffer(32_768)
+    image_length = wintypes.DWORD(len(image))
+    if not kernel32.QueryFullProcessImageNameW(handle, 0, image, ctypes.byref(image_length)):
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+
+    class ProcessBasicInformation(ctypes.Structure):
+        _fields_ = [
+            ("reserved1", wintypes.LPVOID),
+            ("peb", wintypes.LPVOID),
+            ("reserved2_0", wintypes.LPVOID),
+            ("reserved2_1", wintypes.LPVOID),
+            ("unique_pid", ctypes.c_size_t),
+            ("parent_pid", ctypes.c_size_t),
+        ]
+
+    basic = ProcessBasicInformation()
+    returned = wintypes.ULONG()
+    status = ntdll.NtQueryInformationProcess(
+        handle,
+        0,
+        ctypes.byref(basic),
+        ctypes.sizeof(basic),
+        ctypes.byref(returned),
+    )
+    if status != 0 or int(basic.unique_pid) != pid:
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+
+    token = wintypes.HANDLE()
+    if not advapi32.OpenProcessToken(handle, 0x0008, ctypes.byref(token)):
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+    sid_text = wintypes.LPWSTR()
+    try:
+        required = wintypes.DWORD()
+        advapi32.GetTokenInformation(token, 1, None, 0, ctypes.byref(required))
+        if required.value == 0:
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        token_user = ctypes.create_string_buffer(required.value)
+        if not advapi32.GetTokenInformation(
+            token,
+            1,
+            token_user,
+            required.value,
+            ctypes.byref(required),
+        ):
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        sid_pointer = ctypes.cast(token_user, ctypes.POINTER(ctypes.c_void_p))[0]
+        if not advapi32.ConvertSidToStringSidW(sid_pointer, ctypes.byref(sid_text)):
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        user_sid = sid_text.value
+    finally:
+        if sid_text.value:
+            kernel32.LocalFree(ctypes.cast(sid_text, wintypes.HLOCAL))
+        kernel32.CloseHandle(token)
+
+    package_identity = None
+    package_length = wintypes.UINT()
+    package_result = kernel32.GetPackageFullName(handle, ctypes.byref(package_length), None)
+    if package_result == 122:
+        package_buffer = ctypes.create_unicode_buffer(package_length.value)
+        if kernel32.GetPackageFullName(handle, ctypes.byref(package_length), package_buffer) != 0:
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        package_identity = package_buffer.value
+    elif package_result != 15_700:
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+
+    return WorkerIdentityV1(
+        pid=pid,
+        creation_time_100ns=creation_time,
+        token_user_sid=user_sid,
+        session_id=int(session.value),
+        image_path=os.path.abspath(image.value),
+        package_identity=package_identity,
+        parent_pid=int(basic.parent_pid),
+    )
 
 
 class PinnedExecutable:
@@ -325,6 +545,7 @@ class KernelInvocationResult:
     exit_code: int = 0
     stderr_overflow: bool = False
     first_instruction_proof: FirstInstructionProof | None = None
+    containment_evidence: KernelContainmentEvidenceV1 | None = None
 
 
 class WindowsKernel(Protocol):
@@ -342,9 +563,20 @@ class WindowsKernel(Protocol):
 
 
 class WindowsContainedInvocation:
-    def __init__(self, *, kernel: WindowsKernel, executable: str) -> None:
+    def __init__(
+        self,
+        *,
+        kernel: WindowsKernel,
+        executable: str,
+        qpc_frequency: Callable[[], int] = _default_qpc_frequency,
+        qpc_counter: Callable[[], int] = _default_qpc_counter,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
         self._kernel = kernel
         self._executable = executable
+        self._qpc_frequency = qpc_frequency
+        self._qpc_counter = qpc_counter
+        self._monotonic = monotonic
 
     @staticmethod
     def _validate_startup(proof: FirstInstructionProof) -> None:
@@ -379,16 +611,26 @@ class WindowsContainedInvocation:
         if result.first_instruction_proof is None:
             raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
         cls._validate_startup(result.first_instruction_proof)
+        if result.containment_evidence is None:
+            raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
+        result.containment_evidence.validate()
         return result.response_frame
 
-    def invoke_after_startup(
-        self, request_factory: Callable[[], bytes], *, start: float | None = None
-    ) -> bytes:
-        started = time.monotonic() if start is None else start
-        absolute_deadline = started + 60.0
+    def invoke_after_startup(self, request_factory: Callable[[], bytes], *, deadline: QpcDeadlineV1) -> bytes:
+        frequency = self._qpc_frequency()
+        current_tick = self._qpc_counter()
+        try:
+            remaining = deadline.remaining(
+                current_frequency=frequency,
+                current_tick=current_tick,
+            )
+        except ValueError as exc:
+            raise ContainmentFailure("cst_saved_field.deadline_exceeded") from exc
+        started = self._monotonic()
+        absolute_deadline = started + remaining
 
         def check_deadline() -> None:
-            if time.monotonic() >= absolute_deadline:
+            if self._qpc_frequency() != frequency or self._qpc_counter() >= deadline.deadline_tick:
                 raise ContainmentFailure("cst_saved_field.deadline_exceeded")
 
         check_deadline()
@@ -402,17 +644,17 @@ class WindowsContainedInvocation:
                 spec,
                 request_factory,
                 startup_validator=self._validate_startup,
-                startup_deadline=started + 5.0,
-                response_deadline=started + 58.0,
+                startup_deadline=min(started + 5.0, absolute_deadline),
+                response_deadline=max(started, absolute_deadline - 2.0),
                 absolute_deadline=absolute_deadline,
-                cleanup_deadline=started + 70.0,
+                cleanup_deadline=absolute_deadline + 10.0,
             )
             executable.revalidate()
             check_deadline()
         return self._validate_result(result)
 
-    def invoke(self, request_frame: bytes, *, start: float | None = None) -> bytes:
-        return self.invoke_after_startup(lambda: request_frame, start=start)
+    def invoke(self, request_frame: bytes, *, deadline: QpcDeadlineV1) -> bytes:
+        return self.invoke_after_startup(lambda: request_frame, deadline=deadline)
 
 
 class ContainedSamplerRunner:
@@ -426,9 +668,9 @@ class ContainedSamplerRunner:
         self,
         request_frame: bytes,
         *,
+        deadline: QpcDeadlineV1,
         revision: str,
         wait_seconds: float,
-        start: float | None = None,
     ) -> bytes:
         lease = self._gate.acquire_and_seal(revision, wait_seconds=wait_seconds)
         try:
@@ -437,7 +679,7 @@ class ContainedSamplerRunner:
             self._gate.release(lease)
             raise
         try:
-            response = self._invocation.invoke(request_frame, start=start)
+            response = self._invocation.invoke(request_frame, deadline=deadline)
         except ContainmentFailure as exc:
             if exc.quarantine:
                 self._gate.quarantine_and_release(lease)
@@ -454,6 +696,7 @@ class ContainedSamplerRunner:
         self,
         request_factory,
         *,
+        deadline: QpcDeadlineV1,
         revision: str,
         wait_seconds: float,
         response_consumer=None,
@@ -462,7 +705,6 @@ class ContainedSamplerRunner:
         lease = self._gate.acquire_and_seal(revision, wait_seconds=wait_seconds)
         try:
             lease.authorize_start()
-            started = time.monotonic()
         except BaseException:
             self._gate.release(lease)
             raise
@@ -472,13 +714,13 @@ class ContainedSamplerRunner:
             def create_frame() -> bytes:
                 nonlocal factory_error
                 try:
-                    built = request_factory(started)
+                    built = request_factory(deadline)
                     return built[0] if isinstance(built, tuple) else built
                 except BaseException as exc:
                     factory_error = exc
                     raise
 
-            response = self._invocation.invoke_after_startup(create_frame, start=started)
+            response = self._invocation.invoke_after_startup(create_frame, deadline=deadline)
         except ContainmentFailure as exc:
             if exc.quarantine:
                 self._gate.quarantine_and_release(lease)
@@ -701,6 +943,9 @@ def _invoke_atomic_job_process(
     residual = False
     exit_code = wintypes.DWORD(0)
     exact_job = False
+    created_worker: WorkerIdentityV1 | None = None
+    pre_request_worker: WorkerIdentityV1 | None = None
+    settlement_events: list[str] = []
     worker_signaled = False
     process_closed = False
     active_zero = False
@@ -714,6 +959,7 @@ def _invoke_atomic_job_process(
             kernel32.SetInformationJobObject(handle_t(job), 9, ctypes.byref(limits), ctypes.sizeof(limits)),
             "SetInformationJobObject",
         )
+        settlement_events.append("job_configured")
 
         security = SecurityAttributes(ctypes.sizeof(SecurityAttributes), None, True)
         stdin_read, stdin_write = handle_t(), handle_t()
@@ -772,6 +1018,7 @@ def _invoke_atomic_job_process(
             ),
             "UpdateProcThreadAttribute(HANDLE_LIST)",
         )
+        settlement_events.append("attributes_bound")
         startup.StartupInfo.cb = ctypes.sizeof(StartupInfoExW)
         startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES
         startup.StartupInfo.hStdInput = stdin_read
@@ -793,14 +1040,32 @@ def _invoke_atomic_job_process(
             ),
             "CreateProcessW",
         )
+        settlement_events.append("process_created")
         ledger.own(int(process.hProcess))
         ledger.own(int(process.hThread))
+        created_worker = _read_windows_worker_identity(int(process.hProcess), int(process.dwProcessId))
+        broker_identity = _read_windows_worker_identity(
+            int(kernel32.GetCurrentProcess()),
+            os.getpid(),
+        )
+        if (
+            os.path.normcase(created_worker.image_path) != os.path.normcase(spec.application_name)
+            or created_worker.parent_pid != os.getpid()
+            or created_worker.token_user_sid != broker_identity.token_user_sid
+            or created_worker.session_id != broker_identity.session_id
+            or created_worker.package_identity != broker_identity.package_identity
+        ):
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        settlement_events.append("identity_bound")
         in_exact_job = wintypes.BOOL()
         checked(
             kernel32.IsProcessInJob(process.hProcess, handle_t(job), ctypes.byref(in_exact_job)),
             "IsProcessInJob",
         )
         exact_job = bool(in_exact_job.value)
+        if not exact_job:
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        settlement_events.append("job_membership_verified")
         ledger.close_one(int(process.hThread), close)
         for child_handle in child_ends:
             ledger.close_one(int(child_handle.value), close)
@@ -869,6 +1134,12 @@ def _invoke_atomic_job_process(
             raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
         if startup_validator is not None:
             startup_validator(first_instruction_proof)
+        pre_request_worker = _read_windows_worker_identity(
+            int(process.hProcess),
+            int(process.dwProcessId),
+        )
+        if pre_request_worker != created_worker:
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
         factory_values: list[bytes] = []
         factory_errors: list[BaseException] = []
 
@@ -878,6 +1149,7 @@ def _invoke_atomic_job_process(
             except BaseException as exc:
                 factory_errors.append(exc)
 
+        settlement_events.append("request_started")
         factory_worker = _BoundedIoWorker(build_request, cancel_sync)
         factory_worker.start()
         factory_joined = factory_worker.settle(absolute_deadline, cleanup_deadline)
@@ -926,14 +1198,19 @@ def _invoke_atomic_job_process(
         remaining_ms = max(0, int((response_deadline - time.monotonic()) * 1000))
         wait_result = kernel32.WaitForSingleObject(process.hProcess, remaining_ms)
         worker_signaled = wait_result == 0
+        if worker_signaled:
+            settlement_events.append("worker_signaled")
         timed_out = timed_out or not worker_signaled
         if timed_out:
             kernel32.TerminateJobObject(handle_t(job), 1)
             cleanup_ms = max(0, int((cleanup_deadline - time.monotonic()) * 1000))
             worker_signaled = kernel32.WaitForSingleObject(process.hProcess, cleanup_ms) == 0
         checked(kernel32.GetExitCodeProcess(process.hProcess, ctypes.byref(exit_code)), "GetExitCodeProcess")
+        if worker_signaled:
+            settlement_events.append("exit_recorded")
         ledger.close_one(int(process.hProcess), close)
         process_closed = True
+        settlement_events.append("process_reference_closed")
         accounting = BasicAccountingInformation()
         checked(
             kernel32.QueryInformationJobObject(
@@ -964,14 +1241,22 @@ def _invoke_atomic_job_process(
                     break
                 time.sleep(0.01)
         active_zero = accounting.ActiveProcesses == 0
+        if active_zero:
+            settlement_events.append("job_active_zero")
         reader_results = tuple(worker.settle(time.monotonic(), cleanup_deadline) for worker in reader_workers)
         readers_joined = writer_joined and all(reader_results)
+        if readers_joined:
+            settlement_events.append("readers_joined")
         if readers_joined:
             for parent_reader in (stdout_read, stderr_read):
                 ledger.close_one(int(parent_reader.value), close)
         if active_zero and readers_joined:
             ledger.close_one(int(job), close)
         handles_closed = not ledger.handles
+        if handles_closed:
+            settlement_events.append("handles_closed")
+        if created_worker is None or pre_request_worker is None:
+            raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
         return KernelInvocationResult(
             response_frame=bytes(stdout_data),
             worker_signaled=worker_signaled,
@@ -985,6 +1270,14 @@ def _invoke_atomic_job_process(
             exit_code=int(exit_code.value),
             stderr_overflow=len(stderr_data) > 65_536,
             first_instruction_proof=first_instruction_proof,
+            containment_evidence=KernelContainmentEvidenceV1(
+                created_worker=created_worker,
+                pre_request_worker=pre_request_worker,
+                job_member_before_request=exact_job,
+                inherited_handle_roles=spec.handle_list_roles,
+                settlement_events=tuple(settlement_events),
+                foreign_process_operations=0,
+            ),
         )
     finally:
         if startup.lpAttributeList:

@@ -23,7 +23,7 @@ class _Platform:
 
     def prove_file(self, path: Path):
         self.calls.append(("file", str(path)))
-        return self.module.ObjectIdentityEvidence(
+        return self.module.WindowsPathIdentityV1(
             canonical_path=str(path),
             volume_serial=11,
             file_id="1" * 32,
@@ -43,7 +43,7 @@ class _Platform:
 
     def prove_directory(self, path: Path):
         self.calls.append(("directory", str(path)))
-        return self.module.ObjectIdentityEvidence(
+        return self.module.WindowsPathIdentityV1(
             canonical_path=str(path),
             volume_serial=22,
             file_id="2" * 32,
@@ -79,12 +79,15 @@ def _entry() -> dict[str, object]:
 
 
 def _write_policy(path: Path, *, enabled: bool = True, entries: list[dict[str, object]] | None = None):
+    module = _policy()
     path.write_text(
         json.dumps(
             {
-                "schema": "mcphub.cst.saved_field_authority.v2",
+                "schema": "mcphub.cst.saved_field_authority.v1",
                 "enabled": enabled,
+                "endpoints": dict(module.ENDPOINT_DESCRIPTOR_V1),
                 "entries": entries if entries is not None else [_entry()],
+                "manifest_schema": "sha256-canonical-file-list-v2",
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -141,9 +144,11 @@ def test_authority_policy_closed_bounds_and_duplicates_fail_closed(tmp_path: Pat
     module = _policy()
     policy = tmp_path / "authority.json"
     base = {
-        "schema": "mcphub.cst.saved_field_authority.v2",
+        "schema": "mcphub.cst.saved_field_authority.v1",
         "enabled": True,
+        "endpoints": dict(module.ENDPOINT_DESCRIPTOR_V1),
         "entries": [_entry()],
+        "manifest_schema": "sha256-canonical-file-list-v2",
     }
     policy.write_text(json.dumps(mutation(base)), encoding="utf-8")
     result = module.load_authority_snapshot(str(policy), _Platform(module))
@@ -188,7 +193,9 @@ def test_operator_policy_generation_is_disabled_and_side_effect_free() -> None:
     assert isinstance(raw, bytes)
     document = json.loads(raw)
     assert document["enabled"] is False
-    assert document["schema"] == "mcphub.cst.saved_field_authority.v2"
+    assert document["schema"] == "mcphub.cst.saved_field_authority.v1"
+    assert document["manifest_schema"] == "sha256-canonical-file-list-v2"
+    assert document["endpoints"] == dict(module.ENDPOINT_DESCRIPTOR_V1)
     assert document["entries"] == [_entry()]
     assert b"restart" not in raw and b"daemon" not in raw
 
