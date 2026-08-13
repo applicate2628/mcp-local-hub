@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/daemonrecovery"
 )
@@ -284,6 +286,11 @@ func TestCLI_LegacyAlias_DoesNotShadowNonLegacyKey(t *testing.T) {
 // has no *testing.T: we snapshot the prior values and reinstate them before
 // os.Exit so a parent harness env is left untouched.
 func TestMain(m *testing.M) {
+	dispatch := classifyCLITestHelperDispatch(os.Args, os.Getenv)
+	if dispatch.invalid {
+		_, _ = os.Stderr.WriteString("internal/cli: invalid test helper dispatch\n")
+		os.Exit(3)
+	}
 	// Same-test-binary endpoint for the production hidden confirmation-marker
 	// command. The parent still uses the real current executable and strict
 	// process containment; this branch only replaces Cobra's ordinary main,
@@ -312,7 +319,7 @@ func TestMain(m *testing.M) {
 	// exits, never running the suite (so no recursion / full-suite re-run in the
 	// child). The sentinel is unset under a normal `go test` run, so this is a
 	// no-op there. Constants live in supervise_overlay_marker_spawn_test.go.
-	if os.Getenv(overlayMarkerHelperSentinelEnv) == "1" {
+	if dispatch.overlayDump {
 		dumpPath := os.Getenv(overlayMarkerHelperDumpPathEnv)
 		if dumpPath == "" {
 			// No dump path means the closure dropped the inherited parent env
@@ -330,7 +337,7 @@ func TestMain(m *testing.M) {
 	// sink file. Proving that requires an actual process death, which cannot
 	// be staged in-process. Short-circuits before m.Run() so the child never
 	// runs the suite. Body lives in supervisor_death_forensics_test.go.
-	if stateDir := os.Getenv(forensicsSinkChildEnv); stateDir != "" {
+	if stateDir := dispatch.forensicsStateDir; stateDir != "" {
 		runForensicsSinkCrashChild(stateDir)
 	}
 
@@ -358,11 +365,19 @@ func TestMain(m *testing.M) {
 	// on the descriptor's own fixed, deterministic argv shape rather than an
 	// opt-in env sentinel. Mirrors the same "exit immediately, never call
 	// m.Run()" shape as the two fast-paths above.
-	if len(os.Args) >= 2 && os.Args[1] == "route" {
-		os.Stderr.WriteString("internal/cli test binary invoked with argv[1]==\"route\" " +
-			"(the built-in route daemon's spawn argv) — exiting immediately instead of " +
+	if dispatch.productionArgv {
+		os.Stderr.WriteString("internal/cli test binary invoked with production child argv[1]==\"" + os.Args[1] + "\" " +
+			"— exiting immediately instead of " +
 			"recursively running the test suite\n")
 		os.Exit(0)
+	}
+
+	// Re-exec helper children deliberately terminate from inside their selected
+	// test (or are terminated by the parent). Run those selected tests before
+	// creating the package-owned state root: their process lifetime cannot reach
+	// TestMain's normal post-m.Run cleanup, and they do not need package state.
+	if dispatch.runSelectedTest {
+		os.Exit(m.Run())
 	}
 
 	// Package-wide safe default for reconcileSpawnFn (Increment 1b). Before
@@ -453,8 +468,85 @@ func TestMain(m *testing.M) {
 	restoreEnv()
 	restoreClientEnv()
 	restore()
-	_ = os.RemoveAll(tmp)
+	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {
+		if code == 0 {
+			code = 1
+		}
+		_, _ = os.Stderr.WriteString("internal/cli TestMain cleanup: " + cleanupErr.Error() + "\n")
+	}
 	os.Exit(code)
+}
+
+const cliProductionArgvHelperEnv = "MCPHUB_TEST_PRODUCTION_ARGV_HELPER"
+
+type cliTestHelperDispatch struct {
+	invalid           bool
+	overlayDump       bool
+	forensicsStateDir string
+	productionArgv    bool
+	runSelectedTest   bool
+}
+
+func classifyCLITestHelperDispatch(args []string, getenv func(string) string) cliTestHelperDispatch {
+	selector := ""
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "-test.run=") {
+			if selector != "" {
+				return cliTestHelperDispatch{invalid: true}
+			}
+			selector = strings.TrimPrefix(arg, "-test.run=")
+		}
+	}
+	type candidate struct{ active, valid bool }
+	exitCodeRaw := getenv("MCPHUB_TEST_CHILD_EXIT_CODE")
+	_, exitCodeErr := strconv.Atoi(exitCodeRaw)
+	productionArgvMarker := getenv(cliProductionArgvHelperEnv)
+	overlayActive := getenv(overlayMarkerHelperSentinelEnv) != ""
+	candidates := []candidate{
+		{exitCodeRaw != "", exitCodeErr == nil && (selector == "^TestFormatChildExit_LargeExitCodeShowsHex$" || selector == "^TestFormatChildExit_RealProcessShowsExitCode$")},
+		{getenv(staleExitHelperSentinelEnv) != "", getenv(staleExitHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(staleExitHelperReleaseEnv)) && selector == "^TestStaleExitReleaseHelper$"},
+		{getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") != "", getenv("MCPHUB_PRODUCTION_TERMINATE_HELPER") == "1" && (selector == "TestProductionTerminateFn_HelperSleep" || selector == "^TestProductionTerminateFn_HelperSleep$")},
+		{getenv("MCPHUB_PID_MATCH_HELPER") != "", getenv("MCPHUB_PID_MATCH_HELPER") == "1" && (selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestPidMatchesMcphub_HelperSleep$")},
+		{overlayActive, getenv(overlayMarkerHelperSentinelEnv) == "1" && filepath.IsAbs(getenv(overlayMarkerHelperDumpPathEnv)) && (selector == "^TestSpawnEnvDumpHelper$" || productionArgvMarker == "1" && validCLIOverlayProductionArgv(args))},
+		{getenv(forensicsSinkChildEnv) != "", filepath.IsAbs(getenv(forensicsSinkChildEnv)) && ((selector == "TestSupervisorStderrSink_CapturesRuntimePanic" && getenv(forensicsSinkChildModeEnv) == "") || (selector == "TestSupervisorStderrSink_CapturesMainGoroutinePanic" && getenv(forensicsSinkChildModeEnv) == "main"))},
+		{productionArgvMarker != "" && !overlayActive, productionArgvMarker == "1" && len(args) == 2 && args[1] == "supervise"},
+	}
+	active := 0
+	selected := -1
+	for i, candidate := range candidates {
+		if candidate.active {
+			active++
+			selected = i
+			if !candidate.valid {
+				return cliTestHelperDispatch{invalid: true}
+			}
+		}
+	}
+	if active > 1 {
+		return cliTestHelperDispatch{invalid: true}
+	}
+	if active == 0 {
+		if selector == "^TestProductionTerminateFn_HelperSleep$" || selector == "TestProductionTerminateFn_HelperSleep" || selector == "TestPidMatchesMcphub_HelperSleep" || selector == "^TestStaleExitReleaseHelper$" || selector == "^TestSpawnEnvDumpHelper$" || len(args) > 1 && (args[1] == "route" || args[1] == "supervise") {
+			return cliTestHelperDispatch{invalid: true}
+		}
+		return cliTestHelperDispatch{}
+	}
+	switch selected {
+	case 4:
+		return cliTestHelperDispatch{overlayDump: true}
+	case 5:
+		return cliTestHelperDispatch{forensicsStateDir: getenv(forensicsSinkChildEnv)}
+	case 6:
+		return cliTestHelperDispatch{productionArgv: true}
+	default:
+		return cliTestHelperDispatch{runSelectedTest: true}
+	}
+}
+
+func validCLIOverlayProductionArgv(args []string) bool {
+	return len(args) == 11 && args[1] == "daemon" && args[2] == "serena-proxy" &&
+		args[3] == "--server" && args[4] == "serena" && args[5] == "--workspace" && args[6] != "" &&
+		args[7] == "--port" && args[8] == "9121" && args[9] == "--task-name" && args[10] != ""
 }
 
 // setEnvWithRestore sets each key=value in the process environment and returns

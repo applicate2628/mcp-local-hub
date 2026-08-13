@@ -1,4 +1,4 @@
-# W7 Verification Rerun — Candidate Assembly Pending
+# W7 Full Regression and Immutable Candidate Verification
 
 Execution role: `$qa-engineer`
 
@@ -12,12 +12,33 @@ Accepted full-Go differential: `23D594C2E4F4FC1B8905DD2144EBAF8A08DB70631EA3D92A
 
 Superseded W7 verification: `05C62691BC8210ECF5B35CB8EC2C56DC782BEB382D175F6FAA3F242C463AAB3A` (`REVISE`)
 
+Candidate assembly receipt: `52964D89F42BCE1AE64012AE79478E9FE65A6FE54D14DE0AF21914CCC7B5B4FD`
+
 ## Receiving-side echo
 
 - Rerun the complete W7 verification after the accepted in-scope correction and differential.
 - Accept only the exact nine established clean-HEAD Go failure signatures; any drift, new failure, timeout or survivor is `REVISE`.
 - Do not edit source or tests, stage files, commit, push, install, register, or mutate Service Control Manager, CST, App Control, Hardware Security Module or virtual-disk state.
 - W7 ownership remains split exactly as the plan states: QA verifies first; `$backend-engineer` then assembles the immutable candidate under Lead supervision.
+
+## Immutable candidate binding
+
+| Field | Fresh binding evidence |
+|---|---|
+| Commit | `bab886092ae0a4148c05f1e057eeedd73731eedf`; current `HEAD` matched exactly |
+| Parent | `43fee019d46c69522ebe79be952d5f139bd4854f` |
+| Git tree | `1850fd616f6585b31727c725b37de236c09d527a`; `HEAD^{tree}` matched exactly |
+| Changed paths | 66; `git diff-tree` matched the assembly receipt |
+| Candidate content SHA-256 | `D8DA50B229BF8120A581B91531264103C00D5B6919122C07B85251782050108A`; independently recomputed over path-sorted `<path><TAB><blob-OID><LF>` rows |
+| Git index | empty, 0 paths |
+| Candidate drift before this binding record | 0 tracked changes among the 66 committed paths |
+| Post-commit receipt | `implementation-w7-candidate.md`, SHA-256 `52964D89F42BCE1AE64012AE79478E9FE65A6FE54D14DE0AF21914CCC7B5B4FD`; untracked and excluded from the self-referential candidate |
+
+The assembly commit contains exactly the admitted Go, Python, native, test and canonical evidence surface. The remaining tracked worktree changes were two previously classified unrelated-preserve paths; package scratch, Lead-owned status and other unrelated work-items remained outside the commit.
+
+All W0 inventory entries outside the now-committed candidate were rehashed after assembly: 42/42 equal, 0 changed, 0 missing. The earlier 44/44 verification count included two current-item records subsequently admitted into the candidate; no protected file changed.
+
+Cheap post-assembly binding checks passed: `git show --check`, `git diff --check`, the independent unsigned native verifier, executable SHA-256 `38D87C50F716E334F89628D4F35604534C3A35BDCF35F378F1D939137BAB89E3`, manifest SHA-256 `0F3CA53682F50A5777D8E2D081357D7FB1218BD3D64DF178335A5E7AE5CB3AF4`, and 66/66 manual explicit-path publication-safety scans. The manual scanner is non-authorizing; push still requires the later gate-owned range scan, human review and explicit user approval.
 
 ## Fresh CodeGraph and process preflight
 
@@ -72,7 +93,7 @@ These failures remain repository defects for their owning routing/CLI lanes; thi
 | Non-Windows behavior | PASS for Go compile-only coverage. Python import behavior is covered by the full 635-test suite; no alternate-OS runtime claim is made. |
 | Unrelated W0 preservation | PASS: exact rehash of the 44 `unrelated-preserve` inventory rows is 44/44 equal, 0 changed. |
 | Git/index safety | PASS for QA preservation: index remained exactly empty and HEAD remained `43fee019d46c69522ebe79be952d5f139bd4854f`. QA did not stage or commit. |
-| Publication safety | PASS only as a manual zero-staged-file QA check. It is non-authorizing and cannot replace candidate assembly, human review, the later fresh range scanner or explicit publication approval. |
+| Publication safety | PASS: the assembly receipt records clean staged scanning of all 66 paths and QA freshly repeated 66/66 explicit-path scans. These manual checks are non-authorizing and cannot replace human review, the later gate-owned range scanner or explicit publication approval. |
 | Process/resource cleanup | PASS. Post-run probes found no QA-owned Go test, native runtime or Python/uv survivor. One observed Python PID 33188 belonged to a foreign vcpkg-builds unittest outside this repository and was not touched. |
 
 ## Acceptance reconciliation
@@ -81,19 +102,17 @@ These failures remain repository defects for their owning routing/CLI lanes; thi
 |---|---|
 | W07-AC01 | `PASS:verification`. Python, Ruff, format, vet, native two-build/verifier, real Win32 integrations and Linux compile-only checks pass. Full Go has only the exact nine clean-HEAD baseline signatures accepted by the immutable differential. |
 | W07-AC02 | `PASS:verification`. Every W0-W6 named guard has accepted RED/GREEN evidence; the four prior W7 gaps now have fresh GREEN evidence. No null or missing result was treated as clean. |
-| W07-AC03 | `PASS` for unrelated-hash and diff-hygiene verification; **candidate assembly pending**. The index is intentionally empty because the plan assigns explicit-path staging to `$backend-engineer`, not QA. |
+| W07-AC03 | `PASS`. Commit `bab886092ae0a4148c05f1e057eeedd73731eedf` contains exactly 66 admitted paths; unrelated hashes match, diff hygiene is clean and the post-commit index is empty. |
 | W07-AC04 | `PASS:verification`. Current source has one endpoint owner and one worker-receipt route; full tests pass and no superseded fake settlement route is live. |
-| W07-AC05 | **Pending candidate assembly**. No immutable candidate commit exists yet; therefore no W8 candidate SHA is claimed. QA correctly performed no manifest-pin, registration, install, push or deployment mutation. |
+| W07-AC05 | `PASS`. One immutable local commit binds source, tests, native manifest and accepted input artifacts through tree `1850fd616f6585b31727c725b37de236c09d527a` and content SHA-256 `D8DA50B229BF8120A581B91531264103C00D5B6919122C07B85251782050108A`. No manifest-pin, registration, install, push or deployment mutation occurred. |
 
 ## Gate and handoff
 
-Gate: `PASS:verification; candidate assembly pending`
+Gate: `PASS`
 
 The technical findings recorded by `work-items/bugs/2026-08-13-cst-w7-candidate-regression-gate-fails.md` are closed by fresh evidence. The bug record remains physically current/open because QA may not mark it fixed or archive it without user approval and lifecycle-owner action.
 
-Next owner: `$backend-engineer` under Lead supervision must assemble the index from only the explicit admitted W0-W7 source, test, native-manifest and accepted-input artifact paths; exclude `servers/electromagnetics-mcp/.scratch/` and every `unrelated-preserve` path. After human review of the staged leak-check, create one immutable local candidate commit without push, registration, install or deployment. Then resume QA to bind this report to that exact commit SHA and re-probe index/HEAD drift before W8.
-
-W8 remains blocked until that immutable candidate commit exists. No working-tree hash or empty-index state is represented as an immutable candidate.
+W8 handoff: `$architecture-reviewer` must review exact commit `bab886092ae0a4148c05f1e057eeedd73731eedf`, tree `1850fd616f6585b31727c725b37de236c09d527a`, content SHA-256 `D8DA50B229BF8120A581B91531264103C00D5B6919122C07B85251782050108A`, plan SHA-256 `484883EDBAD02333162C61FAF78B99AA56C402FD64D5955F0E6B65BDDEC82E14`, and this terminal W7 artifact. Any candidate-path change invalidates W8 onward and returns to the owning W phase.
 
 ## Terms and Abbreviations
 

@@ -184,6 +184,15 @@ const (
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
+	dispatch := classifyGUITestHelperDispatch(os.Args, os.Getenv)
+	if dispatch.invalid {
+		_, _ = os.Stderr.WriteString("internal/gui: invalid test helper dispatch\n")
+		os.Exit(3)
+	}
+	if dispatch.blockingHelper {
+		m.Run()
+		os.Exit(0)
+	}
 	if len(os.Args) == 2 && os.Args[1] == "audit-lock-terminal-worker" {
 		err := RunAuditLockTerminalWorker(os.Stdin, os.Stdout)
 		if os.Getenv(auditLockTerminalWorkerStderrHelperEnv) == "1" {
@@ -257,8 +266,58 @@ func TestMain(m *testing.M) {
 	restoreEnv()
 	restoreClientEnv()
 	restoreState()
-	_ = os.RemoveAll(tmp)
+	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {
+		if code == 0 {
+			code = 1
+		}
+		_, _ = os.Stderr.WriteString("internal/gui TestMain cleanup: " + cleanupErr.Error() + "\n")
+	}
 	os.Exit(code)
+}
+
+type guiTestHelperDispatch struct{ invalid, blockingHelper bool }
+
+func classifyGUITestHelperDispatch(args []string, getenv func(string) string) guiTestHelperDispatch {
+	selector := ""
+	for _, arg := range args[1:] {
+		if strings.HasPrefix(arg, "-test.run=") {
+			if selector != "" {
+				return guiTestHelperDispatch{invalid: true}
+			}
+			selector = strings.TrimPrefix(arg, "-test.run=")
+		}
+	}
+	blocking := getenv("MCPHUB_AUDIT_LOCK_BLOCKING_HELPER")
+	r6 := getenv(auditLockR6ReceiverHelperEnv)
+	terminalWorker := len(args) == 2 && args[1] == "audit-lock-terminal-worker"
+	stderrHelper := getenv(auditLockTerminalWorkerStderrHelperEnv)
+	if terminalWorker {
+		if blocking != "" || r6 != "" || getenv(auditLockR6StateRootEnv) != "" || stderrHelper != "" && stderrHelper != "1" {
+			return guiTestHelperDispatch{invalid: true}
+		}
+		return guiTestHelperDispatch{}
+	}
+	if stderrHelper != "" {
+		return guiTestHelperDispatch{invalid: true}
+	}
+	if blocking != "" {
+		valid := blocking == "1" && selector == "^TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn$" && getenv("MCPHUB_AUDIT_LOCK_HELPER_LOCK") != "" && getenv("MCPHUB_AUDIT_LOCK_HELPER_ENTERED") != ""
+		if !valid || r6 != "" {
+			return guiTestHelperDispatch{invalid: true}
+		}
+		return guiTestHelperDispatch{blockingHelper: true}
+	}
+	if selector == "^TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn$" {
+		return guiTestHelperDispatch{invalid: true}
+	}
+	if r6 != "" {
+		if r6 != "1" || selector != "^TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun$" || !filepath.IsAbs(getenv(auditLockR6StateRootEnv)) {
+			return guiTestHelperDispatch{invalid: true}
+		}
+	} else if selector == "^TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun$" || getenv(auditLockR6StateRootEnv) != "" {
+		return guiTestHelperDispatch{invalid: true}
+	}
+	return guiTestHelperDispatch{}
 }
 
 // setEnvWithRestore sets each key=value in the process environment and returns

@@ -368,6 +368,7 @@ func TestProductionSpawnFn_SerenaProxyTrustedOverlayPathBeatsInheritedSpoof(t *t
 	dumpPath := filepath.Join(tmpHome, "child-env-dump.txt")
 	t.Setenv(overlayMarkerHelperSentinelEnv, "1")
 	t.Setenv(overlayMarkerHelperDumpPathEnv, dumpPath)
+	t.Setenv(cliProductionArgvHelperEnv, "1")
 
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
 	events, err := api.OpenSupervisorEventLog(eventsPath)
@@ -397,7 +398,7 @@ func TestProductionSpawnFn_SerenaProxyTrustedOverlayPathBeatsInheritedSpoof(t *t
 		Server:   "serena",
 		Daemon:   "deadbeef",
 		Command:  os.Args[0],
-		Args:     []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121", "--task-name", `\mcp-local-hub-serena-deadbeef`},
+		Args:     []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", "testdata/workspaces/alpha", "--port", "9121", "--task-name", `\mcp-local-hub-serena-deadbeef`},
 	}
 	if !isSerenaProxyDescriptor(descriptor) {
 		t.Fatalf("test fixture is not recognized as a serena-proxy descriptor; the trusted-channel append would not fire")

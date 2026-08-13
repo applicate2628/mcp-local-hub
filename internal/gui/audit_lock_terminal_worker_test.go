@@ -60,6 +60,7 @@ func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t 
 	}
 	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
+	stateRootsBefore := guiTestStateRoots(t)
 	adapter.terminalizationBudget = 5 * time.Second
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 991)
 	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\\timeout-worker`, confirm: true}
@@ -143,6 +144,24 @@ func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t 
 	if err := probe.Unlock(); err != nil {
 		t.Fatal(err)
 	}
+	for root := range guiTestStateRoots(t) {
+		if _, existed := stateRootsBefore[root]; !existed {
+			t.Fatalf("contained helper left package TestMain state root %s", root)
+		}
+	}
+}
+
+func guiTestStateRoots(t *testing.T) map[string]struct{} {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "mcphub-gui-test-state-*"))
+	if err != nil {
+		t.Fatalf("enumerate GUI TestMain roots: %v", err)
+	}
+	result := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		result[filepath.Clean(match)] = struct{}{}
+	}
+	return result
 }
 
 func TestAuditLockTerminalizationDeadlineClassifiesWithoutProcessStartup(t *testing.T) {

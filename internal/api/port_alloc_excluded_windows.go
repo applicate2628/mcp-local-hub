@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"mcp-local-hub/internal/process"
 )
 
 var (
@@ -15,13 +17,20 @@ var (
 	windowsExcludedTCPPortRangesCache []tcpPortRange
 	windowsExcludedTCPPortRangesErr   error
 	queryWindowsExcludedTCPPortRanges = func() ([]byte, error) {
-		out, err := exec.Command("netsh", "int", "ipv4", "show", "excludedportrange", "protocol=tcp").CombinedOutput()
+		cmd := newExcludedPortNetshCommand("netsh", "int", "ipv4", "show", "excludedportrange", "protocol=tcp")
+		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return out, fmt.Errorf("netsh int ipv4 show excludedportrange protocol=tcp: %w: %s", err, strings.TrimSpace(string(out)))
 		}
 		return out, nil
 	}
 )
+
+func newExcludedPortNetshCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	process.NoConsole(cmd)
+	return cmd
+}
 
 func osExcludedTCPPortRanges() ([]tcpPortRange, error) {
 	windowsExcludedTCPPortRangesOnce.Do(func() {

@@ -855,9 +855,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// so death semantics are unchanged; only attribution is added.
 	// TestSuperviseLongLivedGoroutinesAreGuarded enforces that every `go` in
 	// this file carries one.
+	eventLoopDone := make(chan struct{})
 	go func() {
 		defer guardSupervisorGoroutine(events, "event-loop-run", "")
+		defer close(eventLoopDone)
 		loop.Run(loopCtx)
+	}()
+	defer func() {
+		loopCancel()
+		<-eventLoopDone
 	}()
 
 	// reconcileReady mirrors the spec §"Migration step 14:
