@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import threading
 from dataclasses import replace
 
@@ -146,6 +145,16 @@ class _Runtime:
     def emit(self, event, fields):
         self.events.append((event, fields))
 
+    def worker_settlement(self):
+        from mcphub_em_mcp.cst_saved_field_broker_worker_protocol import WorkerSettlementV1
+
+        return WorkerSettlementV1(True, True, True, True, self.source_unchanged, True, 0)
+
+    def worker_capability_receipt(self, correlation_id):
+        from mcphub_em_mcp.cst_saved_field_broker_worker_protocol import WorkerCapabilityReceiptV1
+
+        return WorkerCapabilityReceiptV1(correlation_id, True, True, True, False)
+
 
 def test_saved_field_restart_replay() -> None:
     first_runtime = _Runtime()
@@ -240,19 +249,25 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
     from mcphub_em_mcp import cst
     from mcphub_em_mcp.cst_saved_field_broker_client_windows import (
         BrokerCancelReceiptV1,
+        BrokerExchangeReceiptV1,
         BrokerStartupProofV1,
     )
-    from mcphub_em_mcp.cst_saved_field_broker_protocol import decode_one_frame, encode_frame
+    from mcphub_em_mcp.cst_saved_field_broker_protocol import decode_one_frame
     from mcphub_em_mcp.cst_saved_field_broker_service_windows import (
         BrokerPeerIdentityV1,
         BrokerRuntimeServiceV1,
         ContainedWorkerBrokerApplicationV1,
     )
-    from mcphub_em_mcp.cst_saved_field_broker_worker import BrokerWorkerApplication
+    from mcphub_em_mcp.cst_saved_field_broker_worker import (
+        BrokerWorkerApplication,
+        SavedFieldWorkerTransactionV1,
+        run_worker,
+    )
     from mcphub_em_mcp.cst_saved_field_broker_worker_protocol import (
         BROKER_WORKER_REQUEST_MAX,
         BrokerWorkerRequestV1,
-        WorkerSettlementV1,
+        WorkerPreMainBootstrapV1,
+        WorkerPreMainReceiptV1,
     )
     from mcphub_em_mcp.cst_saved_field_daemon_client_windows import WindowsDaemonClient
     from mcphub_em_mcp.cst_saved_field_daemon_service_windows import WindowsCstDaemonService
@@ -288,37 +303,79 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
         {r"C:\approved\model.cst": entry},
     )
 
-    class Transaction:
-        def execute(self, request):
-            trace.append("worker:source-transfer-vendor-settlement")
-            assert "project_bundle" not in request.request
-            return (
-                json.dumps(
-                    {"schema": "mcphub.cst.saved_field_sample.v1", "points": []},
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                None,
-                WorkerSettlementV1(True, True, True, True, True, True, 0),
-            )
-
+    runtime = _Runtime()
     worker = BrokerWorkerApplication(
         authorize=lambda request: trace.append("worker:authorize-policy-entry"),
-        transaction=Transaction(),
+        transaction=SavedFieldWorkerTransactionV1(
+            project_bundle=r"C:\approved\model.cst",
+            application_port=runtime,
+        ),
         qpc_frequency=lambda: 100,
         qpc_counter=lambda: 11,
     )
 
     class ContainedInvocation:
-        def invoke(self, request_frame, *, deadline):
+        def invoke(self, request_frame, *, deadline, correlation_id, capabilities):
             trace.append("broker:worker-start")
+            assert correlation_id == "6" * 32
+            assert capabilities.source_root_handle == 41
             request = BrokerWorkerRequestV1.from_wire(
                 decode_one_frame(BytesIO(request_frame), maximum=BROKER_WORKER_REQUEST_MAX)
             )
             assert request.deadline == deadline
-            response = worker(request)
+            source_identity = {"volume_serial": 1, "file_id": "1" * 32}
+            workspace_identity = {"volume_serial": 2, "file_id": "2" * 32}
+            bootstrap = WorkerPreMainBootstrapV1(
+                correlation_id,
+                deadline,
+                capabilities.source_root_handle,
+                capabilities.workspace_root_handle,
+                capabilities.source_access_mask,
+                capabilities.workspace_access_mask,
+                source_identity,
+                workspace_identity,
+            )
+            pre_main_receipt = WorkerPreMainReceiptV1(
+                correlation_id,
+                deadline,
+                True,
+                True,
+                False,
+                capabilities.source_access_mask,
+                capabilities.workspace_access_mask,
+                source_identity,
+                workspace_identity,
+                bootstrap.checksum,
+            )
+            output = BytesIO()
+            assert (
+                run_worker(
+                    BytesIO(request_frame),
+                    output,
+                    worker,
+                    bootstrap=bootstrap,
+                    pre_main_receipt=pre_main_receipt,
+                )
+                == 0
+            )
+            trace.append("worker:source-transfer-vendor-settlement")
             trace.append("broker:worker-settled")
-            return encode_frame(response.to_wire())
+            return type(
+                "ContainedReceipt",
+                (),
+                {
+                    "response_frame": output.getvalue(),
+                    "complete": True,
+                    "application_available": True,
+                    "worker_signaled": True,
+                    "exit_recorded": True,
+                    "process_reference_closed": True,
+                    "active_job_zero": True,
+                    "readers_joined": True,
+                    "handles_closed": True,
+                    "pipe_closed": True,
+                },
+            )()
 
     application = ContainedWorkerBrokerApplicationV1(
         invocation=ContainedInvocation(),  # type: ignore[arg-type]
@@ -329,6 +386,25 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
             True,
             True,
             0,
+        ),
+        capability_opener=lambda *_args, **_kwargs: __import__(
+            "mcphub_em_mcp.cst_saved_field_containment_windows",
+            fromlist=["WorkerCapabilitySetV1"],
+        ).WorkerCapabilitySetV1(
+            41,
+            42,
+            0x00120089,
+            0x0012019F,
+            {"volume_serial": 1, "file_id": "1" * 32},
+            {"volume_serial": 2, "file_id": "2" * 32},
+            _owner=type(
+                "Owner",
+                (),
+                {
+                    "handles": {41, 42},
+                    "close_all": lambda self: self.handles.clear(),
+                },
+            )(),
         ),
     )
     daemon_sid = "S-1-5-80-101"
@@ -344,11 +420,35 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
         True,
         daemon_image,
     )
+
+    class Workspace:
+        capability = type(
+            "Capability",
+            (),
+            {
+                "restricted": True,
+                "path": r"C:\workspace",
+                "evidence": type(
+                    "Evidence",
+                    (),
+                    {"volume_serial": 2, "file_id": "2" * 32},
+                )(),
+            },
+        )()
+
+        def settle(self):
+            return None
+
+    class WorkspacePolicy:
+        def create_child(self, correlation_id):
+            assert correlation_id == "6" * 32
+            return Workspace()
+
     broker = BrokerRuntimeServiceV1(
         snapshot=snapshot,
         daemon_service_sid=daemon_sid,
         daemon_image=daemon_image,
-        workspace_policy=object(),
+        workspace_policy=WorkspacePolicy(),
         application=application,
         qpc_frequency=lambda: 100,
         qpc_counter=iter((11, 12)).__next__,
@@ -367,7 +467,7 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
             trace.append("broker:authorize-policy-nonce")
             response = broker.exchange(peer, request)
             trace.append("broker:response-settled")
-            return response
+            return response, BrokerExchangeReceiptV1(request.correlation_id, True, True, True, True, True)
 
         def cancel_and_settle(self, correlation_id, deadline):
             del correlation_id, deadline
@@ -430,29 +530,11 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
     )
     server = strict_fastmcp("broker-integration")
     assert cst._compose_saved_field_tool(server, snapshot, client) is True
-    result = await server.call_tool(
-        "cst_sample_saved_field",
-        {
-            "project_bundle": r"C:\approved\model.cst",
-            "expected_project_sha256": None,
-            "field": "E",
-            "result": {
-                "port": 1,
-                "mode": 1,
-                "frequency_hz": 3e9,
-                "frequency_tolerance_hz": 0.0,
-                "frame_selector": None,
-                "expected_field_sha256": None,
-                "expected_mesh_sha256": None,
-                "adaptive_pass": None,
-            },
-            "points": [{"id": "p1", "xyz": [0.0, 0.0, 0.0]}],
-            "coordinate_unit": "mm",
-            "allow_solve": False,
-            "max_points": 1,
-        },
+    result = await server.call_tool("cst_sample_saved_field", _request().model_dump(mode="json"))
+    assert result.isError is False and result.structuredContent is None and len(result.content) == 1, (
+        result,
+        trace,
     )
-    assert result.isError is False and result.structuredContent is None and len(result.content) == 1
     assert trace == [
         "enrollment:capability-consumed",
         "broker:challenge",
@@ -466,3 +548,4 @@ async def test_named_daemon_broker_worker_integration_has_one_return_route() -> 
         "daemon:admission-released",
         "frontend:response-read-eof-close",
     ]
+    assert runtime.trace == ["prepare", "open", "activate", "version", "settle"]

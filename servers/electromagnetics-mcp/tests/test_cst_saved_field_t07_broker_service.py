@@ -81,12 +81,16 @@ def _service(*, ticks=None, calls=None):
 
     observed = [] if calls is None else calls
     counter = iter(ticks or (105, 106)).__next__
+    workspace_policy = object()
     return BrokerRuntimeServiceV1(
         snapshot=_snapshot(),
         daemon_service_sid="S-1-5-80-222",
         daemon_image=r"C:\Program Files\mcp-local-hub\cst-daemon.exe",
-        workspace_policy=object(),
-        application=lambda request, workspace: (observed.append((request, workspace)), _response(request))[1],
+        workspace_policy=workspace_policy,
+        application=lambda request, entry, workspace: (
+            observed.append((request, entry, workspace)),
+            _response(request),
+        )[1],
         qpc_frequency=lambda: 100,
         qpc_counter=counter,
         random_bytes=lambda count: b"n" * count,
@@ -96,13 +100,17 @@ def _service(*, ticks=None, calls=None):
 def test_t07_red_challenge_allows_latency_and_preserves_original_triple() -> None:
     from mcphub_em_mcp.cst_saved_field_broker_protocol import QpcDeadlineV1
 
-    service = _service(ticks=(105, 106))
+    calls = []
+    service = _service(ticks=(105, 106), calls=calls)
     deadline = QpcDeadlineV1(100, 100, 6100)
     challenge = service.issue_challenge(_peer(), deadline)
     assert challenge.issued_tick == 105
     assert challenge.expires_tick == 605
     response = service.exchange(_peer(), _request(challenge))
     assert response.deadline is deadline or response.deadline == deadline
+    assert len(calls) == 1
+    assert calls[0][1].entry_id == "line10-e"
+    assert calls[0][2] is not None
     assert service.nonce_state(challenge.nonce) == "CONSUMED"
 
 

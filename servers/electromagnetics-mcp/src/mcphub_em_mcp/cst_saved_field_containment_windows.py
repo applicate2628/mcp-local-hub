@@ -8,7 +8,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
@@ -19,7 +19,13 @@ from .cst_saved_field_broker_client_windows import (
 from .cst_saved_field_broker_protocol import QpcDeadlineV1
 from .cst_saved_field_broker_worker_protocol import (
     JOB_PROCESS_MAX,
+    WORKER_HANDLE_ROLES,
+    WORKER_PRE_MAIN_FRAME_MAX,
+    WorkerPreMainBootstrapV1,
+    WorkerPreMainReceiptV1,
     WorkerStartupProofV1,
+    decode_pre_main_receipt_frame,
+    encode_pre_main_bootstrap_frame,
 )
 
 EXTENDED_STARTUPINFO_PRESENT = 0x00080000
@@ -30,6 +36,10 @@ PROC_THREAD_ATTRIBUTE_HANDLE_LIST = 0x00020002
 PROC_THREAD_ATTRIBUTE_JOB_LIST = 0x0002000D
 JOB_OBJECT_LIMIT_ACTIVE_PROCESS = 0x00000008
 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE = 0x00002000
+SOURCE_ROOT_ACCESS = 0x00120089
+WORKSPACE_ROOT_ACCESS = 0x0012019F
+SOURCE_ROOT_SHARE = 0x00000001
+WORKSPACE_ROOT_SHARE = 0x00000001 | 0x00000002
 
 _SETTLEMENT_EVENTS = (
     "job_configured",
@@ -37,6 +47,9 @@ _SETTLEMENT_EVENTS = (
     "process_created",
     "identity_bound",
     "job_membership_verified",
+    "capability_handles_revoked",
+    "bootstrap_written",
+    "pre_main_receipt_validated",
     "request_started",
     "worker_signaled",
     "exit_recorded",
@@ -45,6 +58,7 @@ _SETTLEMENT_EVENTS = (
     "readers_joined",
     "handles_closed",
 )
+_UNAVAILABLE_SETTLEMENT_EVENTS = tuple(event for event in _SETTLEMENT_EVENTS if event != "request_started")
 
 
 class ContainmentFailure(RuntimeError):
@@ -52,6 +66,43 @@ class ContainmentFailure(RuntimeError):
         super().__init__(failure_id)
         self.failure_id = failure_id
         self.quarantine = quarantine
+
+
+class WorkerInheritanceEpoch:
+    """Broker-wide owner for every interval containing inheritable handles."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._owner: int | None = None
+
+    def acquire(self) -> _WorkerInheritanceEpochLease:
+        owner = threading.get_ident()
+        if self._owner == owner:
+            raise ContainmentFailure("cst_saved_field.inheritance_epoch_reentered", quarantine=True)
+        self._lock.acquire()
+        self._owner = owner
+        return _WorkerInheritanceEpochLease(self, owner)
+
+    def _release(self, owner: int) -> None:
+        if self._owner != owner:
+            raise ContainmentFailure("cst_saved_field.inheritance_epoch_owner_invalid", quarantine=True)
+        self._owner = None
+        self._lock.release()
+
+
+@dataclass(slots=True)
+class _WorkerInheritanceEpochLease:
+    epoch: WorkerInheritanceEpoch
+    owner: int
+    released: bool = False
+
+    def release(self) -> None:
+        if not self.released:
+            self.epoch._release(self.owner)
+            self.released = True
+
+
+BROKER_WORKER_INHERITANCE_EPOCH = WorkerInheritanceEpoch()
 
 
 @dataclass(slots=True)
@@ -163,8 +214,8 @@ class KernelContainmentEvidenceV1:
         if (
             self.created_worker != self.pre_request_worker
             or self.job_member_before_request is not True
-            or self.inherited_handle_roles != ("stdin", "stdout", "stderr")
-            or self.settlement_events != _SETTLEMENT_EVENTS
+            or self.inherited_handle_roles != WORKER_HANDLE_ROLES
+            or self.settlement_events not in {_SETTLEMENT_EVENTS, _UNAVAILABLE_SETTLEMENT_EVENTS}
             or self.foreign_process_operations != 0
         ):
             raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
@@ -509,11 +560,11 @@ def build_create_process_spec(executable: str) -> CreateProcessSpec:
         raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
     return CreateProcessSpec(
         application_name=resolved,
-        command_line=f'"{resolved}" -I -s -E -m mcphub_em_mcp.cst_saved_field_broker_worker',
+        command_line=f'"{resolved}" --role=worker',
         current_directory=str(Path(resolved).parent),
         inherit_handles=True,
         startf_use_std_handles=True,
-        handle_list_roles=("stdin", "stdout", "stderr"),
+        handle_list_roles=WORKER_HANDLE_ROLES,
         attribute_roles=("job_list", "handle_list"),
         creation_flags=(EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW),
         shell=False,
@@ -532,6 +583,451 @@ FirstInstructionProof = WorkerStartupProofV1
 
 
 @dataclass(frozen=True, slots=True)
+class BrokerCapabilityReceiptV1:
+    correlation_id: str
+    source_access: int
+    source_share: int
+    workspace_access: int
+    workspace_share: int
+    source_identity: dict[str, object]
+    workspace_identity: dict[str, object]
+    source_granted_access: int
+    workspace_granted_access: int
+    originals_non_inheritable: bool
+    duplicates_inheritable: bool
+    duplicates_unprotected: bool
+    object_types: tuple[str, str]
+
+    @property
+    def complete(self) -> bool:
+        return (
+            bool(self.correlation_id)
+            and self.source_access == SOURCE_ROOT_ACCESS
+            and self.source_share == SOURCE_ROOT_SHARE
+            and self.workspace_access == WORKSPACE_ROOT_ACCESS
+            and self.workspace_share == WORKSPACE_ROOT_SHARE
+            and self.source_granted_access == SOURCE_ROOT_ACCESS
+            and self.workspace_granted_access == WORKSPACE_ROOT_ACCESS
+            and self.originals_non_inheritable is True
+            and self.duplicates_inheritable is True
+            and self.duplicates_unprotected is True
+            and self.object_types == ("Directory", "Directory")
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkerCapabilitySetV1:
+    """Two broker-owned directory handles transferred exactly once to a worker."""
+
+    source_root_handle: int
+    workspace_root_handle: int
+    source_access_mask: int
+    workspace_access_mask: int
+    source_root_identity: dict[str, object]
+    workspace_root_identity: dict[str, object]
+    _owner: _CapabilityHandleOwner | None = field(default=None, repr=False, compare=False)
+    receipt: BrokerCapabilityReceiptV1 | None = None
+    _original_owner: _CapabilityHandleOwner | None = field(default=None, repr=False, compare=False)
+    _epoch: _WorkerInheritanceEpochLease | None = field(default=None, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.source_root_handle) is not int
+            or type(self.workspace_root_handle) is not int
+            or self.source_root_handle <= 0
+            or self.workspace_root_handle <= 0
+            or self.source_root_handle == self.workspace_root_handle
+            or type(self.source_access_mask) is not int
+            or type(self.workspace_access_mask) is not int
+            or self.source_access_mask <= 0
+            or self.workspace_access_mask <= 0
+            or set(self.source_root_identity) != {"volume_serial", "file_id"}
+            or set(self.workspace_root_identity) != {"volume_serial", "file_id"}
+            or (self.receipt is not None and not self.receipt.complete)
+        ):
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+
+    def bootstrap(self, correlation_id: str, deadline: QpcDeadlineV1) -> WorkerPreMainBootstrapV1:
+        return WorkerPreMainBootstrapV1(
+            correlation_id,
+            deadline,
+            self.source_root_handle,
+            self.workspace_root_handle,
+            self.source_access_mask,
+            self.workspace_access_mask,
+            self.source_root_identity,
+            self.workspace_root_identity,
+        )
+
+    def revoke_parent_handles(self) -> None:
+        if self._owner is None:
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+        self._owner.close_all()
+        if self._epoch is None:
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+        self._epoch.release()
+
+    def settle(self) -> None:
+        failure: BaseException | None = None
+        for owner in (self._owner, self._original_owner):
+            if owner is None:
+                continue
+            try:
+                owner.close_all()
+            except BaseException as exc:
+                failure = failure or exc
+        if self._epoch is not None:
+            try:
+                self._epoch.release()
+            except BaseException as exc:
+                failure = failure or exc
+        if failure is not None:
+            raise ContainmentFailure(
+                "cst_saved_field.containment_settle_failed", quarantine=True
+            ) from failure
+
+    @property
+    def parent_handles_closed(self) -> bool:
+        return self._owner is not None and not self._owner.handles
+
+
+@dataclass(slots=True)
+class _CapabilityHandleOwner:
+    handles: set[int]
+    closer: Callable[[int], object]
+
+    def close_all(self) -> None:
+        failures: list[BaseException] = []
+        for handle in tuple(self.handles):
+            try:
+                if self.closer(handle) is False:
+                    raise OSError("capability handle close failed")
+            except BaseException as exc:
+                failures.append(exc)
+            else:
+                self.handles.remove(handle)
+        if failures:
+            raise ContainmentFailure(
+                "cst_saved_field.containment_settle_failed", quarantine=True
+            ) from failures[0]
+
+
+def duplicate_worker_capabilities(
+    source_capability: object,
+    workspace_capability: object,
+    *,
+    duplicator: Callable[[int, int], int] | None = None,
+    closer: Callable[[int], object] | None = None,
+) -> WorkerCapabilitySetV1:
+    """Create broker-owned inheritable duplicates and retain their sole close owner."""
+
+    source_handle = getattr(source_capability, "handle", None)
+    workspace_handle = getattr(workspace_capability, "handle", None)
+    source_evidence = getattr(source_capability, "evidence", None)
+    workspace_evidence = getattr(workspace_capability, "evidence", None)
+    if not all(
+        (
+            type(source_handle) is int,
+            type(workspace_handle) is int,
+            source_evidence is not None,
+            workspace_evidence is not None,
+        )
+    ):
+        raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+    if duplicator is None or closer is None:
+        if os.name != "nt":
+            raise OSError("Windows capability duplication is unavailable on this platform")
+        import ctypes
+        from ctypes import wintypes
+
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+        kernel32.DuplicateHandle.argtypes = (
+            wintypes.HANDLE,
+            wintypes.HANDLE,
+            wintypes.HANDLE,
+            ctypes.POINTER(wintypes.HANDLE),
+            wintypes.DWORD,
+            wintypes.BOOL,
+            wintypes.DWORD,
+        )
+        kernel32.DuplicateHandle.restype = wintypes.BOOL
+        current = kernel32.GetCurrentProcess()
+
+        def duplicate(raw: int, access: int) -> int:
+            duplicated = wintypes.HANDLE()
+            if not kernel32.DuplicateHandle(
+                current,
+                wintypes.HANDLE(raw),
+                current,
+                ctypes.byref(duplicated),
+                access,
+                True,
+                0,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            return int(duplicated.value)
+
+        def close(raw: int) -> bool:
+            return bool(kernel32.CloseHandle(wintypes.HANDLE(raw)))
+
+        duplicator, closer = duplicate, close
+    owner = _CapabilityHandleOwner(set(), closer)
+    try:
+        source_duplicate = duplicator(source_handle, 0x00120089)
+        owner.handles.add(source_duplicate)
+        workspace_duplicate = duplicator(workspace_handle, 0x0012019F)
+        owner.handles.add(workspace_duplicate)
+        return WorkerCapabilitySetV1(
+            source_duplicate,
+            workspace_duplicate,
+            0x00120089,
+            0x0012019F,
+            {
+                "volume_serial": source_evidence.volume_serial,
+                "file_id": source_evidence.file_id,
+            },
+            {
+                "volume_serial": workspace_evidence.volume_serial,
+                "file_id": workspace_evidence.file_id,
+            },
+            owner,
+        )
+    except BaseException:
+        owner.close_all()
+        raise
+
+
+def open_broker_worker_capabilities(
+    source_path: str | Path,
+    workspace_path: str | Path,
+    *,
+    correlation_id: str,
+    expected_source_identity: dict[str, object],
+    expected_workspace_identity: dict[str, object] | None = None,
+    epoch: WorkerInheritanceEpoch = BROKER_WORKER_INHERITANCE_EPOCH,
+) -> WorkerCapabilitySetV1:
+    """Open and duplicate the two exact broker root roles inside one epoch."""
+
+    if os.name != "nt" or not correlation_id:
+        raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+    import ctypes
+    from ctypes import wintypes
+
+    from .cst_saved_field_policy import _evidence_from_handle, _owner_only_access_handle
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    ntdll = ctypes.WinDLL("ntdll")
+    kernel32.CreateFileW.restype = wintypes.HANDLE
+    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel32.DuplicateHandle.argtypes = (
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.HANDLE),
+        wintypes.DWORD,
+        wintypes.BOOL,
+        wintypes.DWORD,
+    )
+    kernel32.DuplicateHandle.restype = wintypes.BOOL
+    ntdll.NtQueryObject.argtypes = (
+        wintypes.HANDLE,
+        wintypes.ULONG,
+        wintypes.LPVOID,
+        wintypes.ULONG,
+        ctypes.POINTER(wintypes.ULONG),
+    )
+    ntdll.NtQueryObject.restype = wintypes.LONG
+    invalid = ctypes.c_void_p(-1).value
+
+    class ObjectBasicInformation(ctypes.Structure):
+        _fields_ = [
+            ("Attributes", wintypes.ULONG),
+            ("GrantedAccess", wintypes.ULONG),
+            ("HandleCount", wintypes.ULONG),
+            ("PointerCount", wintypes.ULONG),
+            ("PagedPoolCharge", wintypes.ULONG),
+            ("NonPagedPoolCharge", wintypes.ULONG),
+            ("Reserved", wintypes.ULONG * 3),
+            ("NameInfoSize", wintypes.ULONG),
+            ("TypeInfoSize", wintypes.ULONG),
+            ("SecurityDescriptorSize", wintypes.ULONG),
+            ("CreationTime", ctypes.c_int64),
+        ]
+
+    class UnicodeString(ctypes.Structure):
+        _fields_ = [
+            ("Length", wintypes.USHORT),
+            ("MaximumLength", wintypes.USHORT),
+            ("Buffer", wintypes.LPWSTR),
+        ]
+
+    def object_type(raw: int) -> str:
+        required = wintypes.ULONG()
+        ntdll.NtQueryObject(wintypes.HANDLE(raw), 2, None, 0, ctypes.byref(required))
+        if required.value == 0:
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+        buffer = ctypes.create_string_buffer(required.value)
+        if ntdll.NtQueryObject(wintypes.HANDLE(raw), 2, buffer, len(buffer), ctypes.byref(required)) != 0:
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+        name = ctypes.cast(buffer, ctypes.POINTER(UnicodeString)).contents
+        if not name.Buffer or not name.Length:
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+        return ctypes.wstring_at(name.Buffer, name.Length // ctypes.sizeof(ctypes.c_wchar))
+
+    def close(raw: int) -> bool:
+        return bool(kernel32.CloseHandle(wintypes.HANDLE(raw)))
+
+    lease = epoch.acquire()
+    originals = _CapabilityHandleOwner(set(), close)
+    duplicates = _CapabilityHandleOwner(set(), close)
+    try:
+        observations: list[tuple[object, bool, int, str]] = []
+        for path, access, share, expected in (
+            (source_path, SOURCE_ROOT_ACCESS, SOURCE_ROOT_SHARE, expected_source_identity),
+            (
+                workspace_path,
+                WORKSPACE_ROOT_ACCESS,
+                WORKSPACE_ROOT_SHARE,
+                expected_workspace_identity,
+            ),
+        ):
+            canonical = os.path.abspath(os.fspath(path))
+            handle = kernel32.CreateFileW(
+                canonical,
+                access,
+                share,
+                None,
+                3,
+                0x02000000 | 0x00200000,
+                None,
+            )
+            if handle in {None, invalid}:
+                raise ctypes.WinError(ctypes.get_last_error())
+            raw = int(handle)
+            originals.handles.add(raw)
+            evidence = _evidence_from_handle(kernel32, raw, canonical, "directory")
+            restricted = _owner_only_access_handle(raw)
+            identity = {"volume_serial": evidence.volume_serial, "file_id": evidence.file_id}
+            canonical_key = os.path.normcase(os.path.abspath(canonical)).casefold()
+            final_key = os.path.normcase(os.path.abspath(evidence.canonical_path)).casefold()
+            if (
+                evidence.reparse
+                or not restricted
+                or (expected is not None and identity != expected)
+                or final_key != canonical_key
+            ):
+                raise ContainmentFailure("cst_saved_field.broker_unauthorized")
+            flags = wintypes.DWORD()
+            if not kernel32.GetHandleInformation(wintypes.HANDLE(raw), ctypes.byref(flags)):
+                raise ctypes.WinError(ctypes.get_last_error())
+            if flags.value & 1:
+                raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+            duplicate = wintypes.HANDLE()
+            if not kernel32.DuplicateHandle(
+                kernel32.GetCurrentProcess(),
+                wintypes.HANDLE(raw),
+                kernel32.GetCurrentProcess(),
+                ctypes.byref(duplicate),
+                access,
+                True,
+                0,
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            duplicate_raw = int(duplicate.value)
+            duplicates.handles.add(duplicate_raw)
+            basic = ObjectBasicInformation()
+            if (
+                ntdll.NtQueryObject(
+                    wintypes.HANDLE(duplicate_raw), 0, ctypes.byref(basic), ctypes.sizeof(basic), None
+                )
+                != 0
+            ):
+                raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+            duplicate_flags = wintypes.DWORD()
+            if not kernel32.GetHandleInformation(
+                wintypes.HANDLE(duplicate_raw), ctypes.byref(duplicate_flags)
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            duplicate_evidence = _evidence_from_handle(kernel32, duplicate_raw, canonical, "directory")
+            if (
+                basic.GrantedAccess != access
+                or duplicate_flags.value != 1
+                or duplicate_evidence.volume_serial != evidence.volume_serial
+                or duplicate_evidence.file_id != evidence.file_id
+            ):
+                raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+            observed_type = object_type(duplicate_raw)
+            if observed_type != "File":
+                raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+            observations.append((evidence, restricted, duplicate_raw, observed_type))
+        source, workspace = observations
+        receipt = BrokerCapabilityReceiptV1(
+            correlation_id,
+            SOURCE_ROOT_ACCESS,
+            SOURCE_ROOT_SHARE,
+            WORKSPACE_ROOT_ACCESS,
+            WORKSPACE_ROOT_SHARE,
+            {"volume_serial": source[0].volume_serial, "file_id": source[0].file_id},
+            {"volume_serial": workspace[0].volume_serial, "file_id": workspace[0].file_id},
+            SOURCE_ROOT_ACCESS,
+            WORKSPACE_ROOT_ACCESS,
+            True,
+            True,
+            True,
+            ("Directory", "Directory"),
+        )
+        if not receipt.complete:
+            raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
+        return WorkerCapabilitySetV1(
+            source[2],
+            workspace[2],
+            SOURCE_ROOT_ACCESS,
+            WORKSPACE_ROOT_ACCESS,
+            receipt.source_identity,
+            receipt.workspace_identity,
+            _owner=duplicates,
+            receipt=receipt,
+            _original_owner=originals,
+            _epoch=lease,
+        )
+    except BaseException:
+        failure: BaseException | None = None
+        for owner in (duplicates, originals):
+            try:
+                owner.close_all()
+            except BaseException as exc:
+                failure = failure or exc
+        try:
+            lease.release()
+        except BaseException as exc:
+            failure = failure or exc
+        if failure is not None:
+            raise ContainmentFailure(
+                "cst_saved_field.containment_settle_failed", quarantine=True
+            ) from failure
+        raise
+
+
+def validate_worker_pre_main(
+    bootstrap: WorkerPreMainBootstrapV1,
+    receipt: WorkerPreMainReceiptV1,
+    *,
+    inherited_handle_roles: tuple[str, ...],
+) -> WorkerPreMainReceiptV1:
+    """Validate native/broker observations without manufacturing receipt facts."""
+
+    if (
+        not isinstance(bootstrap, WorkerPreMainBootstrapV1)
+        or not isinstance(receipt, WorkerPreMainReceiptV1)
+        or inherited_handle_roles != WORKER_HANDLE_ROLES
+        or not receipt.validates(bootstrap)
+    ):
+        raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+    return receipt
+
+
+@dataclass(frozen=True, slots=True)
 class KernelInvocationResult:
     response_frame: bytes
     worker_signaled: bool
@@ -540,12 +1036,45 @@ class KernelInvocationResult:
     active_zero: bool
     readers_joined: bool
     handles_closed: bool
+    pipe_closed: bool
     residual_process: bool
     timed_out: bool
     exit_code: int = 0
     stderr_overflow: bool = False
     first_instruction_proof: FirstInstructionProof | None = None
     containment_evidence: KernelContainmentEvidenceV1 | None = None
+    pre_main_receipt: WorkerPreMainReceiptV1 | None = None
+    application_available: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class ContainedInvocationReceiptV1:
+    """Containment-owned response and causal kernel settlement evidence."""
+
+    response_frame: bytes
+    worker_signaled: bool
+    exit_recorded: bool
+    process_reference_closed: bool
+    active_job_zero: bool
+    readers_joined: bool
+    handles_closed: bool
+    pipe_closed: bool
+    pre_main_receipt: WorkerPreMainReceiptV1 | None = None
+    application_available: bool = True
+
+    @property
+    def complete(self) -> bool:
+        return (
+            type(self.response_frame) is bytes
+            and self.worker_signaled is True
+            and self.exit_recorded is True
+            and self.process_reference_closed is True
+            and self.active_job_zero is True
+            and self.readers_joined is True
+            and self.handles_closed is True
+            and self.pipe_closed is True
+            and isinstance(self.pre_main_receipt, WorkerPreMainReceiptV1)
+        )
 
 
 class WindowsKernel(Protocol):
@@ -554,6 +1083,8 @@ class WindowsKernel(Protocol):
         spec: CreateProcessSpec,
         request_frame: bytes | Callable[[], bytes],
         *,
+        bootstrap: WorkerPreMainBootstrapV1,
+        capabilities: WorkerCapabilitySetV1,
         startup_validator: Callable[[FirstInstructionProof], None] | None = None,
         startup_deadline: float,
         response_deadline: float,
@@ -591,7 +1122,12 @@ class WindowsContainedInvocation:
             raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
 
     @classmethod
-    def _validate_result(cls, result: KernelInvocationResult) -> bytes:
+    def _validate_result(
+        cls,
+        result: KernelInvocationResult,
+        *,
+        bootstrap: WorkerPreMainBootstrapV1,
+    ) -> ContainedInvocationReceiptV1:
         settled = (
             result.worker_signaled
             and result.exit_recorded
@@ -599,6 +1135,7 @@ class WindowsContainedInvocation:
             and result.active_zero
             and result.readers_joined
             and result.handles_closed
+            and result.pipe_closed
         )
         if not settled:
             raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
@@ -606,7 +1143,7 @@ class WindowsContainedInvocation:
             raise ContainmentFailure("cst_saved_field.containment_residual_process")
         if result.timed_out:
             raise ContainmentFailure("cst_saved_field.deadline_exceeded")
-        if result.stderr_overflow or result.exit_code != 0:
+        if result.stderr_overflow or result.exit_code not in {0, 78}:
             raise ContainmentFailure("cst_saved_field.broker_worker_protocol_invalid")
         if result.first_instruction_proof is None:
             raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
@@ -614,9 +1151,34 @@ class WindowsContainedInvocation:
         if result.containment_evidence is None:
             raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
         result.containment_evidence.validate()
-        return result.response_frame
+        validate_worker_pre_main(
+            bootstrap,
+            result.pre_main_receipt,
+            inherited_handle_roles=result.containment_evidence.inherited_handle_roles,
+        )
+        if result.application_available != (result.exit_code == 0):
+            raise ContainmentFailure("cst_saved_field.broker_worker_protocol_invalid", quarantine=True)
+        return ContainedInvocationReceiptV1(
+            response_frame=result.response_frame,
+            worker_signaled=result.worker_signaled,
+            exit_recorded=result.exit_recorded,
+            process_reference_closed=result.process_reference_closed,
+            active_job_zero=result.active_zero,
+            readers_joined=result.readers_joined,
+            handles_closed=result.handles_closed,
+            pipe_closed=result.pipe_closed,
+            pre_main_receipt=result.pre_main_receipt,
+            application_available=result.application_available,
+        )
 
-    def invoke_after_startup(self, request_factory: Callable[[], bytes], *, deadline: QpcDeadlineV1) -> bytes:
+    def invoke_after_startup(
+        self,
+        request_factory: Callable[[], bytes],
+        *,
+        deadline: QpcDeadlineV1,
+        correlation_id: str,
+        capabilities: WorkerCapabilitySetV1,
+    ) -> ContainedInvocationReceiptV1:
         frequency = self._qpc_frequency()
         current_tick = self._qpc_counter()
         try:
@@ -640,9 +1202,12 @@ class WindowsContainedInvocation:
             spec = validate_create_process_spec(
                 build_create_process_spec(identity.final_path), identity.final_path
             )
+            bootstrap = capabilities.bootstrap(correlation_id, deadline)
             result = self._kernel.invoke(
                 spec,
                 request_factory,
+                bootstrap=bootstrap,
+                capabilities=capabilities,
                 startup_validator=self._validate_startup,
                 startup_deadline=min(started + 5.0, absolute_deadline),
                 response_deadline=max(started, absolute_deadline - 2.0),
@@ -651,10 +1216,22 @@ class WindowsContainedInvocation:
             )
             executable.revalidate()
             check_deadline()
-        return self._validate_result(result)
+        return self._validate_result(result, bootstrap=bootstrap)
 
-    def invoke(self, request_frame: bytes, *, deadline: QpcDeadlineV1) -> bytes:
-        return self.invoke_after_startup(lambda: request_frame, deadline=deadline)
+    def invoke(
+        self,
+        request_frame: bytes,
+        *,
+        deadline: QpcDeadlineV1,
+        correlation_id: str,
+        capabilities: WorkerCapabilitySetV1,
+    ) -> ContainedInvocationReceiptV1:
+        return self.invoke_after_startup(
+            lambda: request_frame,
+            deadline=deadline,
+            correlation_id=correlation_id,
+            capabilities=capabilities,
+        )
 
 
 class ContainedSamplerRunner:
@@ -669,6 +1246,8 @@ class ContainedSamplerRunner:
         request_frame: bytes,
         *,
         deadline: QpcDeadlineV1,
+        correlation_id: str,
+        capabilities: WorkerCapabilitySetV1,
         revision: str,
         wait_seconds: float,
     ) -> bytes:
@@ -679,7 +1258,12 @@ class ContainedSamplerRunner:
             self._gate.release(lease)
             raise
         try:
-            response = self._invocation.invoke(request_frame, deadline=deadline)
+            response = self._invocation.invoke(
+                request_frame,
+                deadline=deadline,
+                correlation_id=correlation_id,
+                capabilities=capabilities,
+            )
         except ContainmentFailure as exc:
             if exc.quarantine:
                 self._gate.quarantine_and_release(lease)
@@ -690,13 +1274,15 @@ class ContainedSamplerRunner:
             self._gate.quarantine_and_release(lease)
             raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True) from exc
         self._gate.release(lease)
-        return response
+        return response.response_frame
 
     def invoke_after_admission(
         self,
         request_factory,
         *,
         deadline: QpcDeadlineV1,
+        correlation_id: str,
+        capabilities: WorkerCapabilitySetV1,
         revision: str,
         wait_seconds: float,
         response_consumer=None,
@@ -720,7 +1306,13 @@ class ContainedSamplerRunner:
                     factory_error = exc
                     raise
 
-            response = self._invocation.invoke_after_startup(create_frame, deadline=deadline)
+            receipt = self._invocation.invoke_after_startup(
+                create_frame,
+                deadline=deadline,
+                correlation_id=correlation_id,
+                capabilities=capabilities,
+            )
+            response = receipt.response_frame
         except ContainmentFailure as exc:
             if exc.quarantine:
                 self._gate.quarantine_and_release(lease)
@@ -768,6 +1360,8 @@ class CtypesWindowsKernel:
         spec: CreateProcessSpec,
         request_frame: bytes | Callable[[], bytes],
         *,
+        bootstrap: WorkerPreMainBootstrapV1,
+        capabilities: WorkerCapabilitySetV1,
         startup_validator: Callable[[FirstInstructionProof], None] | None = None,
         startup_deadline: float,
         response_deadline: float,
@@ -777,6 +1371,8 @@ class CtypesWindowsKernel:
         return _invoke_atomic_job_process(
             spec,
             request_frame,
+            bootstrap=bootstrap,
+            capabilities=capabilities,
             startup_validator=startup_validator,
             startup_deadline=startup_deadline,
             response_deadline=response_deadline,
@@ -789,6 +1385,8 @@ def _invoke_atomic_job_process(
     spec: CreateProcessSpec,
     request_frame: bytes | Callable[[], bytes],
     *,
+    bootstrap: WorkerPreMainBootstrapV1,
+    capabilities: WorkerCapabilitySetV1,
     startup_validator: Callable[[FirstInstructionProof], None] | None = None,
     startup_deadline: float,
     response_deadline: float,
@@ -928,6 +1526,8 @@ def _invoke_atomic_job_process(
         if handle and not kernel32.CloseHandle(handle_t(handle)):
             raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
 
+    if not isinstance(capabilities, WorkerCapabilitySetV1) or capabilities.parent_handles_closed:
+        raise ContainmentFailure("cst_saved_field.containment_configuration_invalid")
     job = kernel32.CreateJobObjectW(None, None)
     if not job:
         checked(0, "CreateJobObjectW")
@@ -947,6 +1547,7 @@ def _invoke_atomic_job_process(
     pre_request_worker: WorkerIdentityV1 | None = None
     settlement_events: list[str] = []
     worker_signaled = False
+    exit_recorded = False
     process_closed = False
     active_zero = False
     try:
@@ -1005,7 +1606,11 @@ def _invoke_atomic_job_process(
             ),
             "UpdateProcThreadAttribute(JOB_LIST)",
         )
-        handle_array = (handle_t * 3)(*child_ends)
+        capability_handles = (
+            handle_t(capabilities.source_root_handle),
+            handle_t(capabilities.workspace_root_handle),
+        )
+        handle_array = (handle_t * 5)(*child_ends, *capability_handles)
         checked(
             kernel32.UpdateProcThreadAttribute(
                 startup.lpAttributeList,
@@ -1040,6 +1645,10 @@ def _invoke_atomic_job_process(
             ),
             "CreateProcessW",
         )
+        for child_handle in child_ends:
+            ledger.close_one(int(child_handle.value), close)
+        capabilities.revoke_parent_handles()
+        settlement_events.append("capability_handles_revoked")
         settlement_events.append("process_created")
         ledger.own(int(process.hProcess))
         ledger.own(int(process.hThread))
@@ -1067,8 +1676,6 @@ def _invoke_atomic_job_process(
             raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
         settlement_events.append("job_membership_verified")
         ledger.close_one(int(process.hThread), close)
-        for child_handle in child_ends:
-            ledger.close_one(int(child_handle.value), close)
 
         def read_pipe(handle: handle_t, target: bytearray, maximum: int) -> None:
             buffer = ctypes.create_string_buffer(8192)
@@ -1140,6 +1747,48 @@ def _invoke_atomic_job_process(
         )
         if pre_request_worker != created_worker:
             raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        bootstrap_frame = encode_pre_main_bootstrap_frame(bootstrap)
+        bootstrap_buffer = ctypes.create_string_buffer(bootstrap_frame)
+        bootstrap_written = wintypes.DWORD()
+        checked(
+            kernel32.WriteFile(
+                stdin_write,
+                bootstrap_buffer,
+                len(bootstrap_frame),
+                ctypes.byref(bootstrap_written),
+                None,
+            ),
+            "WriteFile(worker bootstrap)",
+        )
+        if bootstrap_written.value != len(bootstrap_frame):
+            raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+        settlement_events.append("bootstrap_written")
+        pre_main_receipt = None
+        receipt_deadline = min(absolute_deadline, startup_deadline)
+        while time.monotonic() < receipt_deadline:
+            raw = bytes(stdout_data)
+            if len(raw) >= 4:
+                receipt_length = int.from_bytes(raw[:4], "big")
+                if receipt_length == 0 or receipt_length + 4 > WORKER_PRE_MAIN_FRAME_MAX:
+                    raise ContainmentFailure("cst_saved_field.containment_startup_invalid", quarantine=True)
+                if len(raw) >= receipt_length + 4:
+                    try:
+                        pre_main_receipt = decode_pre_main_receipt_frame(
+                            __import__("io").BytesIO(raw[: receipt_length + 4])
+                        )
+                    except BaseException as exc:
+                        raise ContainmentFailure(
+                            "cst_saved_field.containment_startup_invalid", quarantine=True
+                        ) from exc
+                    del stdout_data[: receipt_length + 4]
+                    break
+            time.sleep(0.005)
+        validate_worker_pre_main(
+            bootstrap,
+            pre_main_receipt,
+            inherited_handle_roles=spec.handle_list_roles,
+        )
+        settlement_events.append("pre_main_receipt_validated")
         factory_values: list[bytes] = []
         factory_errors: list[BaseException] = []
 
@@ -1149,24 +1798,8 @@ def _invoke_atomic_job_process(
             except BaseException as exc:
                 factory_errors.append(exc)
 
-        settlement_events.append("request_started")
-        factory_worker = _BoundedIoWorker(build_request, cancel_sync)
-        factory_worker.start()
-        factory_joined = factory_worker.settle(absolute_deadline, cleanup_deadline)
-        if factory_worker.cancelled:
-            kernel32.TerminateJobObject(handle_t(job), 1)
-        if not factory_joined:
-            raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
-        if factory_worker.cancelled:
-            raise ContainmentFailure("cst_saved_field.deadline_exceeded")
-        if factory_errors:
-            raise factory_errors[0]
-        if len(factory_values) != 1:
-            raise ContainmentFailure("cst_saved_field.broker_worker_protocol_invalid")
-        request_frame = factory_values[0]
-        if time.monotonic() >= absolute_deadline:
-            raise ContainmentFailure("cst_saved_field.deadline_exceeded")
-        request_buffer = ctypes.create_string_buffer(request_frame)
+        application_available = pre_main_receipt.python_initialized
+        writer_joined = True
         write_failures: list[str] = []
 
         def write_request() -> None:
@@ -1185,12 +1818,31 @@ def _invoke_atomic_job_process(
             except BaseException:
                 write_failures.append("write_exception")
 
-        writer = _BoundedIoWorker(write_request, cancel_sync)
-        writer.start()
-        writer_joined = writer.settle(absolute_deadline, cleanup_deadline)
-        if writer.cancelled or not writer_joined:
-            timed_out = True
-            kernel32.TerminateJobObject(handle_t(job), 1)
+        if application_available:
+            settlement_events.append("request_started")
+            factory_worker = _BoundedIoWorker(build_request, cancel_sync)
+            factory_worker.start()
+            factory_joined = factory_worker.settle(absolute_deadline, cleanup_deadline)
+            if factory_worker.cancelled:
+                kernel32.TerminateJobObject(handle_t(job), 1)
+            if not factory_joined:
+                raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True)
+            if factory_worker.cancelled:
+                raise ContainmentFailure("cst_saved_field.deadline_exceeded")
+            if factory_errors:
+                raise factory_errors[0]
+            if len(factory_values) != 1:
+                raise ContainmentFailure("cst_saved_field.broker_worker_protocol_invalid")
+            request_frame = factory_values[0]
+            if time.monotonic() >= absolute_deadline:
+                raise ContainmentFailure("cst_saved_field.deadline_exceeded")
+            request_buffer = ctypes.create_string_buffer(request_frame)
+            writer = _BoundedIoWorker(write_request, cancel_sync)
+            writer.start()
+            writer_joined = writer.settle(absolute_deadline, cleanup_deadline)
+            if writer.cancelled or not writer_joined:
+                timed_out = True
+                kernel32.TerminateJobObject(handle_t(job), 1)
         if int(stdin_write.value) in ledger.handles:
             ledger.close_one(int(stdin_write.value), close)
         if write_failures and not timed_out:
@@ -1206,8 +1858,8 @@ def _invoke_atomic_job_process(
             cleanup_ms = max(0, int((cleanup_deadline - time.monotonic()) * 1000))
             worker_signaled = kernel32.WaitForSingleObject(process.hProcess, cleanup_ms) == 0
         checked(kernel32.GetExitCodeProcess(process.hProcess, ctypes.byref(exit_code)), "GetExitCodeProcess")
-        if worker_signaled:
-            settlement_events.append("exit_recorded")
+        exit_recorded = True
+        settlement_events.append("exit_recorded")
         ledger.close_one(int(process.hProcess), close)
         process_closed = True
         settlement_events.append("process_reference_closed")
@@ -1253,6 +1905,15 @@ def _invoke_atomic_job_process(
         if active_zero and readers_joined:
             ledger.close_one(int(job), close)
         handles_closed = not ledger.handles
+        pipe_handles = {
+            int(stdin_read.value),
+            int(stdin_write.value),
+            int(stdout_read.value),
+            int(stdout_write.value),
+            int(stderr_read.value),
+            int(stderr_write.value),
+        }
+        pipe_closed = not any(handle in ledger.handles for handle in pipe_handles)
         if handles_closed:
             settlement_events.append("handles_closed")
         if created_worker is None or pre_request_worker is None:
@@ -1260,11 +1921,12 @@ def _invoke_atomic_job_process(
         return KernelInvocationResult(
             response_frame=bytes(stdout_data),
             worker_signaled=worker_signaled,
-            exit_recorded=worker_signaled,
+            exit_recorded=exit_recorded,
             process_reference_closed=process_closed,
             active_zero=active_zero,
             readers_joined=readers_joined,
             handles_closed=handles_closed,
+            pipe_closed=pipe_closed,
             residual_process=residual,
             timed_out=timed_out,
             exit_code=int(exit_code.value),
@@ -1278,12 +1940,19 @@ def _invoke_atomic_job_process(
                 settlement_events=tuple(settlement_events),
                 foreign_process_operations=0,
             ),
+            pre_main_receipt=pre_main_receipt,
+            application_available=application_available,
         )
     finally:
         if startup.lpAttributeList:
             kernel32.DeleteProcThreadAttributeList(startup.lpAttributeList)
         failures = ledger.settle(close)
-        if failures:
-            raise ContainmentFailure(
-                "cst_saved_field.containment_settle_failed", quarantine=True
-            ) from failures[0]
+        capability_failure: BaseException | None = None
+        try:
+            capabilities.settle()
+        except BaseException as exc:
+            capability_failure = exc
+        if failures or capability_failure is not None:
+            raise ContainmentFailure("cst_saved_field.containment_settle_failed", quarantine=True) from (
+                failures[0] if failures else capability_failure
+            )

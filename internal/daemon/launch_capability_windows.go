@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
 	"syscall"
 	"unsafe"
 
@@ -15,9 +18,8 @@ import (
 const bcryptUseSystemPreferredRNG = 0x00000002
 
 var (
-	bcryptDLL            = windows.NewLazySystemDLL("bcrypt.dll")
-	bcryptGenRandomProc  = bcryptDLL.NewProc("BCryptGenRandom")
-	secureZeroMemoryProc = windows.NewLazySystemDLL("ntdll.dll").NewProc("RtlSecureZeroMemory")
+	bcryptDLL           = windows.NewLazySystemDLL("bcrypt.dll")
+	bcryptGenRandomProc = bcryptDLL.NewProc("BCryptGenRandom")
 )
 
 type windowsLaunchCapabilityPipe struct {
@@ -42,7 +44,10 @@ func windowsCNGFill32(dst *[32]byte) error {
 
 func windowsSecureZero32(dst *[32]byte) {
 	if dst != nil {
-		secureZeroMemoryProc.Call(uintptr(unsafe.Pointer(&dst[0])), uintptr(len(dst)))
+		for i := range dst {
+			dst[i] = 0
+		}
+		runtime.KeepAlive(dst)
 	}
 }
 
@@ -107,9 +112,48 @@ func (p *windowsLaunchCapabilityPipe) apply(cmd *exec.Cmd) error {
 	if cmd.SysProcAttr == nil {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
+	if cmd.SysProcAttr.Token != 0 || cmd.SysProcAttr.ParentProcess != 0 ||
+		cmd.SysProcAttr.ProcessAttributes != nil || cmd.SysProcAttr.ThreadAttributes != nil ||
+		cmd.SysProcAttr.NoInheritHandles || len(cmd.SysProcAttr.AdditionalInheritedHandles) != 0 ||
+		cmd.SysProcAttr.CmdLine != "" || !cmd.SysProcAttr.HideWindow ||
+		cmd.SysProcAttr.CreationFlags != windows.CREATE_NO_WINDOW {
+		return fmt.Errorf("cst-direct-v1 rejects conflicting SysProcAttr")
+	}
 	cmd.SysProcAttr.NoInheritHandles = false
-	cmd.SysProcAttr.AdditionalInheritedHandles = append(cmd.SysProcAttr.AdditionalInheritedHandles, syscall.Handle(p.read.Fd()))
+	cmd.SysProcAttr.AdditionalInheritedHandles = []syscall.Handle{syscall.Handle(p.read.Fd())}
 	return nil
+}
+
+func openCstDirectIdentityFile(path string) (*os.File, error) {
+	if !canonicalAbsolutePath(path) {
+		return nil, fmt.Errorf("path is not canonical absolute")
+	}
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateFile(p, windows.GENERIC_READ, windows.FILE_SHARE_READ, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return nil, err
+	}
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(h, &info); err != nil || info.FileAttributes&(windows.FILE_ATTRIBUTE_DIRECTORY|windows.FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+		_ = windows.CloseHandle(h)
+		return nil, fmt.Errorf("identity path is not a regular non-reparse file")
+	}
+	finalBuf := make([]uint16, 32768)
+	n, err := windows.GetFinalPathNameByHandle(h, &finalBuf[0], uint32(len(finalBuf)), 0)
+	if err != nil || n == 0 || n >= uint32(len(finalBuf)) {
+		_ = windows.CloseHandle(h)
+		return nil, fmt.Errorf("resolve final identity path")
+	}
+	finalPath := windows.UTF16ToString(finalBuf[:n])
+	finalPath = strings.TrimPrefix(finalPath, `\\?\`)
+	if !strings.EqualFold(filepath.Clean(finalPath), filepath.Clean(path)) {
+		_ = windows.CloseHandle(h)
+		return nil, fmt.Errorf("identity path traverses an alias or reparse ancestor")
+	}
+	return os.NewFile(uintptr(h), path), nil
 }
 
 func (p *windowsLaunchCapabilityPipe) locator() uintptr {

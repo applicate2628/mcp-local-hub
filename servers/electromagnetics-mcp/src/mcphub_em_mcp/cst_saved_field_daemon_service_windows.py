@@ -15,6 +15,7 @@ from .cst_saved_field_broker_client_windows import (
     WindowsBrokerClient,
 )
 from .cst_saved_field_broker_protocol import BrokerProtocolFailure, QpcDeadlineV1
+from .cst_saved_field_endpoints import FRONTEND_ENDPOINT_V1
 from .cst_saved_field_frontend_protocol import (
     FRONTEND_SAFE_FAILURE_IDS,
     DaemonResponseReceiptV1,
@@ -32,6 +33,16 @@ from .cst_saved_field_port import AbsoluteInvocationBudget
 
 _HEX32 = re.compile(r"[0-9a-f]{32}\Z")
 ChallengeState = Literal["ISSUED", "CONSUMED", "CANCELLED"]
+CST_SAVED_FIELD_PRODUCTION_TOPOLOGY_V1 = {
+    "endpoints": ("enrollment", "frontend", "broker"),
+    "schemas": ("hub-enrollment-v1", "frontend-v1", "broker-v1", "broker-worker-v1"),
+}
+
+
+class WindowsNamedPipeDaemonTransport:
+    """SCM-owned frontend listener marker for the fixed policy endpoint."""
+
+    endpoint = FRONTEND_ENDPOINT_V1
 
 
 class DaemonServiceFailure(RuntimeError):
@@ -268,7 +279,7 @@ class WindowsCstDaemonService:
 
 
 def run_service(service: WindowsCstDaemonService, serve: Callable[[WindowsCstDaemonService], int]) -> int:
-    """SCM host seam; provisioning and real pipe handles are composed in T07/P18."""
+    """Run the provisioning-owned SCM listener around one daemon owner."""
 
     try:
         return serve(service)
@@ -276,5 +287,50 @@ def run_service(service: WindowsCstDaemonService, serve: Callable[[WindowsCstDae
         service.shutdown()
 
 
+@dataclass(frozen=True, slots=True)
+class DaemonServiceCompositionV1:
+    """Provisioning-supplied dependencies for the fixed daemon service root."""
+
+    raw_policy_path: str | None
+    policy_platform: PolicyPlatform
+    enrollment: HubEnrollmentServerV1
+    broker_transport: BrokerTransport
+    qpc_frequency: Callable[[], int]
+    qpc_counter: Callable[[], int]
+    broker_correlation: Callable[[], str]
+    random_bytes: Callable[[int], bytes]
+    event_sink: Callable[[AdmissionSettlementV1], object]
+    serve: Callable[[WindowsCstDaemonService], int]
+
+
+def compose_service(composition: DaemonServiceCompositionV1) -> WindowsCstDaemonService:
+    if not isinstance(composition, DaemonServiceCompositionV1):
+        raise DaemonServiceFailure("cst_saved_field.daemon_unavailable")
+    return WindowsCstDaemonService.from_policy(
+        raw_policy_path=composition.raw_policy_path,
+        policy_platform=composition.policy_platform,
+        enrollment=composition.enrollment,
+        broker_transport=composition.broker_transport,
+        qpc_frequency=composition.qpc_frequency,
+        qpc_counter=composition.qpc_counter,
+        broker_correlation=composition.broker_correlation,
+        random_bytes=composition.random_bytes,
+        event_sink=composition.event_sink,
+    )
+
+
+def compose_default_off_runtime() -> DaemonServiceCompositionV1 | None:
+    """Return no service unless the later provision owner supplies closed runtime state."""
+
+    return None
+
+
+def _run_composed_service(composition: DaemonServiceCompositionV1) -> int:
+    return run_service(compose_service(composition), composition.serve)
+
+
 def main() -> int:
-    raise DaemonServiceFailure("cst_saved_field.daemon_unavailable")
+    composition = compose_default_off_runtime()
+    if composition is None:
+        raise DaemonServiceFailure("cst_saved_field.daemon_unavailable")
+    return _run_composed_service(composition)

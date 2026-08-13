@@ -2,20 +2,24 @@
 
 from __future__ import annotations
 
-import os
-import sys
+import json
 from collections.abc import Callable
-from typing import BinaryIO, Protocol
+from dataclasses import dataclass
+from typing import BinaryIO, Protocol, cast
 
+from pydantic import ValidationError
+
+from .cst_saved_field import SavedFieldFailure, SavedFieldRequestV1, sample_saved_field
 from .cst_saved_field_broker_protocol import decode_one_frame, encode_frame
 from .cst_saved_field_broker_worker_protocol import (
     BROKER_WORKER_REQUEST_MAX,
     BROKER_WORKER_RESPONSE_MAX,
     BrokerWorkerRequestV1,
     BrokerWorkerResponseV1,
+    WorkerCapabilityReceiptV1,
+    WorkerPreMainBootstrapV1,
+    WorkerPreMainReceiptV1,
     WorkerSettlementV1,
-    WorkerStartupProofV1,
-    encode_startup_proof_frame,
 )
 
 WorkerApplication = Callable[[BrokerWorkerRequestV1], BrokerWorkerResponseV1]
@@ -24,7 +28,56 @@ WorkerApplication = Callable[[BrokerWorkerRequestV1], BrokerWorkerResponseV1]
 class WorkerTransactionPort(Protocol):
     def execute(
         self, request: BrokerWorkerRequestV1
-    ) -> tuple[str | None, str | None, WorkerSettlementV1]: ...
+    ) -> tuple[str | None, str | None, WorkerSettlementV1, WorkerCapabilityReceiptV1]: ...
+
+
+class SettledSavedFieldApplicationPort(Protocol):
+    """Provisioned application port with an authoritative worker-local receipt."""
+
+    def worker_settlement(self) -> WorkerSettlementV1: ...
+
+    def worker_capability_receipt(self, correlation_id: str) -> WorkerCapabilityReceiptV1: ...
+
+
+class SavedFieldWorkerTransactionV1:
+    """Own one application call and derive its worker response from settled state."""
+
+    def __init__(self, *, project_bundle: str, application_port: object) -> None:
+        if not isinstance(project_bundle, str) or not project_bundle or application_port is None:
+            raise RuntimeError("cst_saved_field.cst_unavailable")
+        self._project_bundle = project_bundle
+        self._application_port = application_port
+
+    def execute(
+        self, request: BrokerWorkerRequestV1
+    ) -> tuple[str | None, str | None, WorkerSettlementV1, WorkerCapabilityReceiptV1]:
+        body = {"project_bundle": self._project_bundle, **dict(request.request)}
+        text: str | None = None
+        failure_id: str | None = None
+        try:
+            application_request = SavedFieldRequestV1.model_validate(body)
+            value = sample_saved_field(application_request, cast(object, self._application_port))
+            text = json.dumps(
+                value,
+                ensure_ascii=False,
+                allow_nan=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+        except ValidationError:
+            failure_id = "cst_saved_field.invalid_request"
+        except SavedFieldFailure as exc:
+            failure_id = exc.failure_id
+        except Exception:
+            failure_id = "cst_saved_field.activation_failed"
+        settlement_owner = cast(SettledSavedFieldApplicationPort, self._application_port)
+        settlement = settlement_owner.worker_settlement()
+        if not isinstance(settlement, WorkerSettlementV1) or not settlement.complete:
+            raise RuntimeError("cst_saved_field.containment_settle_failed")
+        capability_receipt = settlement_owner.worker_capability_receipt(request.correlation_id)
+        if not isinstance(capability_receipt, WorkerCapabilityReceiptV1) or not capability_receipt.complete:
+            raise RuntimeError("cst_saved_field.containment_settle_failed")
+        return text, failure_id, settlement, capability_receipt
 
 
 class BrokerWorkerApplication:
@@ -54,7 +107,7 @@ class BrokerWorkerApplication:
         self._check_deadline(request)
         self._authorize(request)
         self._check_deadline(request)
-        text, failure_id, settlement = self._transaction.execute(request)
+        text, failure_id, settlement, capability_receipt = self._transaction.execute(request)
         self._check_deadline(request)
         if not settlement.complete:
             raise RuntimeError("cst_saved_field.containment_settle_failed")
@@ -68,176 +121,23 @@ class BrokerWorkerApplication:
             text,
             failure_id,
             settlement,
+            capability_receipt,
         )
-
-
-def _first_instruction_observation() -> dict[str, bool]:
-    if os.name != "nt":
-        return {
-            "exact_job": False,
-            "exactly_three_inherited_std_handles": False,
-            "no_console": False,
-            "breakaway_denied": False,
-            "breakaway_created": False,
-            "escaped_process_settled": False,
-        }
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.GetCurrentProcess.restype = wintypes.HANDLE
-    kernel32.IsProcessInJob.argtypes = (
-        wintypes.HANDLE,
-        wintypes.HANDLE,
-        ctypes.POINTER(wintypes.BOOL),
-    )
-    kernel32.IsProcessInJob.restype = wintypes.BOOL
-    kernel32.GetStdHandle.argtypes = (wintypes.DWORD,)
-    kernel32.GetStdHandle.restype = wintypes.HANDLE
-    kernel32.GetHandleInformation.argtypes = (
-        wintypes.HANDLE,
-        ctypes.POINTER(wintypes.DWORD),
-    )
-    kernel32.GetHandleInformation.restype = wintypes.BOOL
-    kernel32.GetConsoleWindow.restype = wintypes.HWND
-    current = kernel32.GetCurrentProcess()
-    in_job = wintypes.BOOL()
-    exact_job = bool(kernel32.IsProcessInJob(current, None, ctypes.byref(in_job))) and bool(in_job.value)
-    stdio = True
-    for identifier in (-10, -11, -12):
-        handle = kernel32.GetStdHandle(wintypes.DWORD(identifier))
-        flags = wintypes.DWORD()
-        if handle in (None, 0, -1) or not kernel32.GetHandleInformation(handle, ctypes.byref(flags)):
-            stdio = False
-            break
-        stdio = stdio and bool(flags.value & 1)
-    denied, created, settled = _breakaway_observation()
-    return {
-        "exact_job": exact_job,
-        "exactly_three_inherited_std_handles": stdio,
-        "no_console": not bool(kernel32.GetConsoleWindow()),
-        "breakaway_denied": denied,
-        "breakaway_created": created,
-        "escaped_process_settled": settled,
-    }
-
-
-def _breakaway_observation() -> tuple[bool, bool, bool]:
-    if os.name != "nt":
-        return False, False, False
-    import ctypes
-    from ctypes import wintypes
-
-    class StartupInfoW(ctypes.Structure):
-        _fields_ = [
-            ("cb", wintypes.DWORD),
-            ("lpReserved", wintypes.LPWSTR),
-            ("lpDesktop", wintypes.LPWSTR),
-            ("lpTitle", wintypes.LPWSTR),
-            ("dwX", wintypes.DWORD),
-            ("dwY", wintypes.DWORD),
-            ("dwXSize", wintypes.DWORD),
-            ("dwYSize", wintypes.DWORD),
-            ("dwXCountChars", wintypes.DWORD),
-            ("dwYCountChars", wintypes.DWORD),
-            ("dwFillAttribute", wintypes.DWORD),
-            ("dwFlags", wintypes.DWORD),
-            ("wShowWindow", wintypes.WORD),
-            ("cbReserved2", wintypes.WORD),
-            ("lpReserved2", ctypes.POINTER(ctypes.c_ubyte)),
-            ("hStdInput", wintypes.HANDLE),
-            ("hStdOutput", wintypes.HANDLE),
-            ("hStdError", wintypes.HANDLE),
-        ]
-
-    class ProcessInformation(ctypes.Structure):
-        _fields_ = [
-            ("hProcess", wintypes.HANDLE),
-            ("hThread", wintypes.HANDLE),
-            ("dwProcessId", wintypes.DWORD),
-            ("dwThreadId", wintypes.DWORD),
-        ]
-
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.CreateProcessW.argtypes = (
-        wintypes.LPCWSTR,
-        wintypes.LPWSTR,
-        wintypes.LPVOID,
-        wintypes.LPVOID,
-        wintypes.BOOL,
-        wintypes.DWORD,
-        wintypes.LPVOID,
-        wintypes.LPCWSTR,
-        ctypes.POINTER(StartupInfoW),
-        ctypes.POINTER(ProcessInformation),
-    )
-    kernel32.CreateProcessW.restype = wintypes.BOOL
-    startup = StartupInfoW(cb=ctypes.sizeof(StartupInfoW))
-    process = ProcessInformation()
-    executable = os.path.realpath(sys.executable)
-    command = ctypes.create_unicode_buffer(f'"{executable}" -I -s -E -c "pass"')
-    created = bool(
-        kernel32.CreateProcessW(
-            executable,
-            command,
-            None,
-            None,
-            False,
-            0x08000000 | 0x01000000,
-            None,
-            os.path.dirname(executable),
-            ctypes.byref(startup),
-            ctypes.byref(process),
-        )
-    )
-    if not created:
-        return ctypes.get_last_error() == 5, False, True
-    terminated = waited = exit_recorded = thread_closed = process_closed = False
-    try:
-        terminated = bool(kernel32.TerminateProcess(process.hProcess, 1))
-        waited = kernel32.WaitForSingleObject(process.hProcess, 5_000) == 0
-        exit_code = wintypes.DWORD()
-        exit_recorded = bool(kernel32.GetExitCodeProcess(process.hProcess, ctypes.byref(exit_code)))
-    finally:
-        thread_closed = bool(kernel32.CloseHandle(process.hThread))
-        process_closed = bool(kernel32.CloseHandle(process.hProcess))
-    return False, True, all((terminated, waited, exit_recorded, thread_closed, process_closed))
-
-
-def _unavailable(request: BrokerWorkerRequestV1) -> BrokerWorkerResponseV1:
-    return BrokerWorkerResponseV1(
-        request.correlation_id,
-        request.policy_revision,
-        request.request_sha256,
-        request.deadline,
-        False,
-        None,
-        "cst_saved_field.cst_unavailable",
-        WorkerSettlementV1(True, True, True, True, True, True, 0),
-    )
 
 
 def run_worker(
     source: BinaryIO,
     destination: BinaryIO,
-    application: WorkerApplication = _unavailable,
+    application: WorkerApplication,
     *,
-    diagnostics: BinaryIO | None = None,
-    startup_observation: dict[str, bool] | None = None,
+    bootstrap: WorkerPreMainBootstrapV1,
+    pre_main_receipt: WorkerPreMainReceiptV1,
 ) -> int:
-    observation = dict(startup_observation or _first_instruction_observation())
-    proof = WorkerStartupProofV1(
-        exact_job=observation.get("exact_job") is True,
-        exactly_three_inherited_std_handles=(observation.get("exactly_three_inherited_std_handles") is True),
-        no_console=observation.get("no_console") is True,
-        breakaway_denied=observation.get("breakaway_denied") is True,
-        breakaway_created=observation.get("breakaway_created") is True,
-        escaped_process_settled=observation.get("escaped_process_settled") is True,
-    )
-    if diagnostics is not None:
-        diagnostics.write(encode_startup_proof_frame(proof))
-        diagnostics.flush()
-    if not proof.complete:
+    if not isinstance(bootstrap, WorkerPreMainBootstrapV1) or not isinstance(
+        pre_main_receipt, WorkerPreMainReceiptV1
+    ):
+        return 78
+    if not pre_main_receipt.validates(bootstrap):
         return 78
     request = BrokerWorkerRequestV1.from_wire(decode_one_frame(source, maximum=BROKER_WORKER_REQUEST_MAX))
     response = application(request)
@@ -246,8 +146,54 @@ def run_worker(
     return 0
 
 
+@dataclass(frozen=True, slots=True)
+class WorkerCompositionV1:
+    """Broker-supplied owner dependencies for one contained worker."""
+
+    authorize: Callable[[BrokerWorkerRequestV1], None]
+    project_bundle: str
+    application_port: object
+    qpc_frequency: Callable[[], int]
+    qpc_counter: Callable[[], int]
+    source: BinaryIO
+    destination: BinaryIO
+    bootstrap: WorkerPreMainBootstrapV1
+    pre_main_receipt: WorkerPreMainReceiptV1
+
+
+def compose_application(composition: WorkerCompositionV1) -> BrokerWorkerApplication:
+    if not isinstance(composition, WorkerCompositionV1):
+        raise RuntimeError("cst_saved_field.cst_unavailable")
+    return BrokerWorkerApplication(
+        authorize=composition.authorize,
+        transaction=SavedFieldWorkerTransactionV1(
+            project_bundle=composition.project_bundle,
+            application_port=composition.application_port,
+        ),
+        qpc_frequency=composition.qpc_frequency,
+        qpc_counter=composition.qpc_counter,
+    )
+
+
+def compose_default_off_runtime() -> WorkerCompositionV1 | None:
+    return None
+
+
+def _run_composed_worker(composition: WorkerCompositionV1) -> int:
+    return run_worker(
+        composition.source,
+        composition.destination,
+        compose_application(composition),
+        bootstrap=composition.bootstrap,
+        pre_main_receipt=composition.pre_main_receipt,
+    )
+
+
 def main() -> int:
-    return run_worker(sys.stdin.buffer, sys.stdout.buffer, diagnostics=sys.stderr.buffer)
+    composition = compose_default_off_runtime()
+    if composition is None:
+        return 78
+    return _run_composed_worker(composition)
 
 
 if __name__ == "__main__":

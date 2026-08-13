@@ -6,18 +6,24 @@ import os
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
-from typing import Protocol
+from dataclasses import asdict, dataclass
+from io import BytesIO
+from typing import BinaryIO, Protocol
 
 from .cst_saved_field_broker_protocol import (
+    BROKER_FRAME_MAX,
+    BROKER_REQUEST_MAX,
     BrokerChallengeV1,
     BrokerProtocolFailure,
     BrokerRequestV1,
     BrokerResponseV1,
     QpcDeadlineV1,
     canonical_sha256,
+    decode_one_frame,
+    encode_frame,
     validate_response,
 )
+from .cst_saved_field_endpoints import BROKER_ENDPOINT_V1
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,6 +66,171 @@ class BrokerCancelReceiptV1:
             and self.pipe_closed
             and self.owned_remaining == 0
         )
+
+    def to_wire(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_wire(cls, value: object) -> BrokerCancelReceiptV1:
+        expected = {"worker_settled", "job_active_zero", "pipe_closed", "owned_remaining"}
+        if not isinstance(value, dict) or set(value) != expected:
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        return cls(**value)
+
+
+@dataclass(frozen=True, slots=True)
+class BrokerExchangeReceiptV1:
+    """Daemon-side observations only; contains no worker or broker settlement fact."""
+
+    correlation_id: str
+    response_frame_complete: bool
+    terminal_frame_complete: bool
+    flush_complete: bool
+    eof_or_cancel: bool
+    handle_closed: bool
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.correlation_id, str)
+            or len(self.correlation_id) != 32
+            or any(character not in "0123456789abcdef" for character in self.correlation_id)
+            or any(type(value) is not bool for value in tuple(asdict(self).values())[1:])
+        ):
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+
+    @property
+    def complete(self) -> bool:
+        return all(tuple(asdict(self).values())[1:])
+
+    def to_wire(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_wire(cls, value: object) -> BrokerExchangeReceiptV1:
+        expected = {
+            "correlation_id",
+            "response_frame_complete",
+            "terminal_frame_complete",
+            "flush_complete",
+            "eof_or_cancel",
+            "handle_closed",
+        }
+        if not isinstance(value, dict) or set(value) != expected:
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        return cls(**value)
+
+
+class WindowsNamedPipeBrokerTransport:
+    """Fixed local broker pipe; accepts no work without complete observed startup proof."""
+
+    endpoint = BROKER_ENDPOINT_V1
+
+    def __init__(
+        self,
+        *,
+        startup: BrokerStartupProofV1 | None = None,
+        connector: Callable[[str], BinaryIO] | None = None,
+    ) -> None:
+        self._startup = startup
+        self._connector = connector or _open_fixed_broker_pipe
+        self._channel: BinaryIO | None = None
+
+    @staticmethod
+    def _write(channel: BinaryIO, value: object) -> None:
+        frame = encode_frame(value, maximum=BROKER_REQUEST_MAX)
+        if channel.write(frame) != len(frame):
+            raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+
+    @staticmethod
+    def _read(channel: BinaryIO) -> dict[str, object]:
+        header = channel.read(4)
+        if len(header) != 4:
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        size = int.from_bytes(header, "big")
+        if size <= 0 or size > BROKER_FRAME_MAX:
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        payload = channel.read(size)
+        if len(payload) != size:
+            raise BrokerProtocolFailure("cst_saved_field.broker_protocol_invalid")
+        return decode_one_frame(BytesIO(header + payload), maximum=BROKER_FRAME_MAX)
+
+    def startup_proof(self) -> BrokerStartupProofV1:
+        proof = self._startup
+        if not isinstance(proof, BrokerStartupProofV1) or not proof.complete:
+            return BrokerStartupProofV1(False, False, False, False, False)
+        return proof
+
+    def challenge(self, deadline: QpcDeadlineV1) -> BrokerChallengeV1:
+        if not self.startup_proof().complete or self._channel is not None:
+            raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+        try:
+            channel = self._connector(self.endpoint)
+            self._write(channel, {"op": "challenge", "deadline": deadline.to_wire()})
+            channel.flush()
+            challenge = BrokerChallengeV1.from_wire(self._read(channel))
+            self._channel = channel
+            return challenge
+        except BrokerProtocolFailure:
+            raise
+        except Exception as exc:
+            raise BrokerProtocolFailure("cst_saved_field.broker_unavailable") from exc
+
+    def exchange(self, request: BrokerRequestV1) -> tuple[BrokerResponseV1, BrokerExchangeReceiptV1]:
+        channel = self._channel
+        if channel is None:
+            raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+        response_complete = terminal_complete = flushed = eof = closed = False
+        response: BrokerResponseV1 | None = None
+        try:
+            self._write(channel, {"op": "invoke", "request": request.to_wire()})
+            channel.flush()
+            flushed = True
+            response = BrokerResponseV1.from_wire(self._read(channel))
+            response_complete = True
+            terminal_complete = self._read(channel) == {
+                "op": "terminal",
+                "correlation_id": request.correlation_id,
+            }
+            self._write(channel, {"op": "ack", "correlation_id": request.correlation_id})
+            channel.flush()
+            eof = channel.read(1) == b""
+        finally:
+            try:
+                channel.close()
+                closed = True
+            finally:
+                self._channel = None
+        if response is None:
+            raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+        return response, BrokerExchangeReceiptV1(
+            request.correlation_id,
+            response_complete,
+            terminal_complete,
+            flushed,
+            eof,
+            closed,
+        )
+
+    def cancel_and_settle(self, correlation_id: str, deadline: QpcDeadlineV1) -> BrokerCancelReceiptV1:
+        del deadline
+        channel = self._channel
+        self._channel = None
+        if channel is None:
+            return BrokerCancelReceiptV1(False, False, False, 1)
+        try:
+            self._write(channel, {"op": "cancel", "correlation_id": correlation_id})
+            channel.flush()
+            return BrokerCancelReceiptV1.from_wire(self._read(channel))
+        except Exception:
+            return BrokerCancelReceiptV1(False, False, False, 1)
+        finally:
+            channel.close()
+
+
+def _open_fixed_broker_pipe(endpoint: str) -> BinaryIO:
+    if os.name != "nt" or endpoint != WindowsNamedPipeBrokerTransport.endpoint:
+        raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+    return open(endpoint, "r+b", buffering=0)
 
 
 class AdmissionFailure(BrokerProtocolFailure):
@@ -163,28 +334,9 @@ class BrokerTransport(Protocol):
 
     def challenge(self, deadline: QpcDeadlineV1) -> BrokerChallengeV1: ...
 
-    def exchange(self, request: BrokerRequestV1) -> BrokerResponseV1: ...
+    def exchange(self, request: BrokerRequestV1) -> tuple[BrokerResponseV1, BrokerExchangeReceiptV1]: ...
 
     def cancel_and_settle(self, correlation_id: str, deadline: QpcDeadlineV1) -> BrokerCancelReceiptV1: ...
-
-
-class UnavailableBrokerTransport:
-    """Fail-closed composition default until the fixed SCM broker proves ready."""
-
-    def startup_proof(self) -> BrokerStartupProofV1:
-        return BrokerStartupProofV1(False, False, False, False, False)
-
-    def challenge(self, deadline: QpcDeadlineV1) -> BrokerChallengeV1:
-        del deadline
-        raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
-
-    def exchange(self, request: BrokerRequestV1) -> BrokerResponseV1:
-        del request
-        raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
-
-    def cancel_and_settle(self, correlation_id: str, deadline: QpcDeadlineV1) -> BrokerCancelReceiptV1:
-        del correlation_id, deadline
-        return BrokerCancelReceiptV1(True, True, True, 0)
 
 
 class WindowsBrokerClient:
@@ -280,13 +432,20 @@ class WindowsBrokerClient:
             deadline,
         )
         try:
-            response = self._transport.exchange(broker_request)
+            response, transport_receipt = self._transport.exchange(broker_request)
         except BaseException as exc:
             receipt = self._transport.cancel_and_settle(broker_request.correlation_id, deadline)
             if not receipt.complete:
                 self._gate.quarantine_and_release(lease)
                 raise BrokerProtocolFailure("cst_saved_field.containment_settle_failed") from exc
             raise
+        if (
+            not isinstance(transport_receipt, BrokerExchangeReceiptV1)
+            or transport_receipt.correlation_id != broker_request.correlation_id
+            or not transport_receipt.complete
+        ):
+            self._gate.quarantine_and_release(lease)
+            raise BrokerProtocolFailure("cst_saved_field.containment_settle_failed")
         try:
             validated = validate_response(broker_request, response)
         except BaseException:

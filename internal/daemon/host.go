@@ -244,6 +244,12 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 	if cfg.Command == "" {
 		return nil, errors.New("HostConfig.Command is required")
 	}
+	if cfg.LaunchCapability != nil {
+		if cfg.LaunchCapability.DirectImage == nil || cfg.Command != cfg.LaunchCapability.DirectImage.ImagePath ||
+			len(cfg.Args) != 1 || cfg.Args[0] != "--role=frontend" {
+			return nil, errors.New("cst-direct-v1 launch must use the exact receipt image and frontend argv")
+		}
+	}
 	return &StdioHost{
 		cfg:         cfg,
 		testStdout:  make(chan []byte, 16),
@@ -347,6 +353,7 @@ func (h *StdioHost) Start(ctx context.Context) error {
 		if launchCapability != nil {
 			if err := launchCapability.apply(cmd); err != nil {
 				launchCapability.cancel()
+				_ = launchCapability.close()
 				_ = stdin.Close()
 				_ = stdout.Close()
 				_ = stderr.Close()

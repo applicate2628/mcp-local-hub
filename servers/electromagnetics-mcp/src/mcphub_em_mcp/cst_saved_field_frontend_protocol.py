@@ -247,6 +247,39 @@ class DaemonResponseReceiptV1:
     disconnect_complete: bool
     server_handle_closed: bool
 
+    def __post_init__(self) -> None:
+        if not _HEX32.fullmatch(self.correlation_id) or any(
+            type(value) is not bool
+            for value in (
+                self.response_frame_written,
+                self.terminal_frame_written,
+                self.flush_complete,
+                self.ack_received,
+                self.disconnect_complete,
+                self.server_handle_closed,
+            )
+        ):
+            raise _fail()
+
+    def to_wire(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_wire(cls, value: object) -> DaemonResponseReceiptV1:
+        item = _closed(
+            value,
+            {
+                "correlation_id",
+                "response_frame_written",
+                "terminal_frame_written",
+                "flush_complete",
+                "ack_received",
+                "disconnect_complete",
+                "server_handle_closed",
+            },
+        )
+        return cls(**item)
+
     @property
     def complete(self) -> bool:
         return bool(_HEX32.fullmatch(self.correlation_id)) and all(asdict(self).values())
@@ -259,6 +292,35 @@ class FrontendTransportReceiptV1:
     terminal_frame_complete: bool
     eof_or_cancel: bool
     client_handle_closed: bool
+
+    def __post_init__(self) -> None:
+        if not _HEX32.fullmatch(self.correlation_id) or any(
+            type(value) is not bool
+            for value in (
+                self.response_frame_complete,
+                self.terminal_frame_complete,
+                self.eof_or_cancel,
+                self.client_handle_closed,
+            )
+        ):
+            raise _fail()
+
+    def to_wire(self) -> dict[str, object]:
+        return asdict(self)
+
+    @classmethod
+    def from_wire(cls, value: object) -> FrontendTransportReceiptV1:
+        item = _closed(
+            value,
+            {
+                "correlation_id",
+                "response_frame_complete",
+                "terminal_frame_complete",
+                "eof_or_cancel",
+                "client_handle_closed",
+            },
+        )
+        return cls(**item)
 
     @property
     def complete(self) -> bool:

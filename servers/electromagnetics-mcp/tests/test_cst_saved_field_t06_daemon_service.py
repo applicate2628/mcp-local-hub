@@ -50,13 +50,14 @@ class _Transport:
         )
 
     def exchange(self, request):
+        from mcphub_em_mcp.cst_saved_field_broker_client_windows import BrokerExchangeReceiptV1
         from mcphub_em_mcp.cst_saved_field_broker_protocol import (
             BrokerResponseV1,
             BrokerSettlementV1,
         )
 
         self.request = request
-        return BrokerResponseV1(
+        response = BrokerResponseV1(
             request.correlation_id,
             request.policy_revision,
             request.request_sha256,
@@ -66,6 +67,7 @@ class _Transport:
             None,
             BrokerSettlementV1(*([True] * 10), 0),
         )
+        return response, BrokerExchangeReceiptV1(request.correlation_id, True, True, True, True, True)
 
     def cancel_and_settle(self, correlation_id, deadline):
         from mcphub_em_mcp.cst_saved_field_broker_client_windows import BrokerCancelReceiptV1

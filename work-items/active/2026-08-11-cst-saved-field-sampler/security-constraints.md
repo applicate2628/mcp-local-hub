@@ -1,144 +1,201 @@
-# Security Constraints Re-review — Supervisor-Bound Three-Endpoint Design
+# Security Constraints — Final signing, audit, policy, and runtime gate
 
-## Review identity and boundary
+Reviewed immutable inputs:
 
-| Item | Exact reviewed value |
-|---|---|
-| Execution role | `$security-engineer` |
-| Corrected design | `design.md`; SHA-256 `AFABC3C001169D5C571D7319EA2C751CDD228E46B335C9630C0516F6EBAE6DC9` |
-| Corrected proposed decision | `work-items/decisions/2026-08-12-cst-saved-field-authority-containment.md`; SHA-256 `FD81F4B2B5C14F8AAA66FC96533B8CDE4A7AF2B5738F146794D5BDC6C57212AD` |
-| Prior security constraints | This artifact before decision-only correction; SHA-256 `13CB198021AF207D10CF5A658EDFEA2D443DBA7CB87841228627083B3C9DCD64`; prior `PASS` was bound to the unchanged design and superseded decision hash |
-| Prior architecture review | Supplied immutable review SHA-256 `9891078475577FCEDC76ABC870DD71DE45814636F4421C2EABBE088DB515E5AF`; its recorded enrollment-lifecycle and stale-owner findings were rechecked directly against the current immutable design/decision |
-| Review scope | Decision-only closure of `AR-C6-DECISION-06`; regression check for all three descriptors, four protocol schemas, enrollment/frontend/broker lifecycles, split receipts, identities, entry authorization, QPC, broker-only source/output/containment, credentials and publication controls |
-| Prohibited and not performed | Source/test/plan/decision/Git/index mutation; build/test/runtime execution; live SCM/CST/hub/fleet/process/service action; publication |
+- design SHA-256 `7423D56DD33394336A06AB8C515D12F4496B4AC0533F2901BF5A0EE1436756ED`;
+- proposed decision SHA-256 `49DE418E1EB95E567C1B6AA18C36A124A9EC7075AE0183FD67B0D5072537177B`;
+- architecture-review PASS SHA-256 `0A64428AA74EA930A0630341C768B0001D45865263CB2D4336D8A16D59D053DC`;
+- prior security REVISE SHA-256 `9AA793CA9E9C772902622D6ABC5AF4CDD8C731EBA3CCF6C71DF02F9F40514E0D`.
 
-This is a security-design gate only. It does not attest that implementation,
-provisioning, installed CST behavior, or release evidence conforms.
+This is an independent security-design review. The architecture verdict was not treated as
+security evidence. This artifact authorizes no source or test change, planning, decision
+promotion, hardware security module (HSM) operation, signing, App Control mutation, virtual
+hard disk (VHDX) mutation, deployment, registration, publication, release, or target inference.
+
+## Current evidence
+
+- A fresh CodeGraph Model Context Protocol (MCP) exploration returned current on-disk source.
+  Its pending-index notice named only two unrelated files, neither in the queried CST launch
+  path. The production frontend owner remains
+  `HostConfig.LaunchCapability -> prepareLaunchCapability -> preparedLaunchCapability.apply/
+  start/cancel -> AdditionalInheritedHandles`. The separate broker owns worker creation. No
+  parallel frontend launch owner was used as a premise.
+- Entrust Security World Software 13.7.3 documents that `nshieldauditd` is YAML-configured;
+  absent `modules` fetches all available modules while `modules: []` fetches none; only one
+  client service should fetch a given HSM; a network 5c collector must be privileged; multiple
+  collectors split records; stopped-service backup is required for database consistency; and
+  `nshieldaudit ncore export --verify` re-verifies signatures instead of reporting only cached
+  status:
+  <https://nshielddocs.entrust.com/security-world-docs/v13.7.3/hsm-user-guide/hsm-mgmt/nshield-audit-log-service.html>.
+- Entrust documents that Transaction IDs are UTF-8 strings of at most 88 bytes, that the
+  environment route suits a self-contained process such as SignTool, and that linkage may not
+  survive commands implemented internally rather than directly forwarded:
+  <https://nshielddocs.entrust.com/security-world-docs/v13.7.3/api-ncore/transaction-ids.html>.
+- Entrust documents `Cmd_Sign` as conditionally producing `ObjectUse`, `ObjectNew` as the
+  object-identity origin, and `{runID,objid}` rather than `objid` alone as the stable join:
+  <https://nshielddocs.entrust.com/security-world-docs/v13.7.3/hsm-user-guide/hsm-mgmt/audit-logging.html>.
+- Entrust documents that a non-persistent Operator Card Set (OCS) keeps protected
+  keys usable while the last required card remains inserted; `K/N` states the threshold and
+  total, not a fresh authorization for each cryptographic operation. The card set becomes
+  unavailable only after the last required card is removed. Entrust's `slotinfo` contract makes
+  absence machine-observable: `Token=-`, `IC=0`; `R`, `D`, `a`, `t`, and `f` identify remote,
+  dynamic, associated-dynamic, timed-out, and failed-secure-channel slot states:
+  <https://nshielddocs.entrust.com/security-world-docs/security-manual/access-control.html>,
+  <https://nshielddocs.entrust.com/security-world-docs/utilities/slotinfo.html>.
+- Microsoft documents exact SignTool `/sha1`, `/fd`, `/p7`, `/p7ce`, and `/p7co` behavior;
+  `CryptMsgControl(CMSG_CTRL_VERIFY_SIGNATURE_EX)` is the explicit signature oracle; the chain
+  flags named by `online-v1` cover chain-excluding-root revocation and a cumulative retrieval
+  timeout; CiTool's supported policy mutations are pathname-based update/remove; and
+  `ATTACH_VIRTUAL_DISK_FLAG_READ_ONLY` requests a read-only attachment:
+  <https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/signtool>,
+  <https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-cryptmsgcontrol>,
+  <https://learn.microsoft.com/en-us/windows/win32/api/wincrypt/nf-wincrypt-certgetcertificatechain>,
+  <https://learn.microsoft.com/en-us/windows/security/application-security/application-control/app-control-for-business/operations/citool-commands>,
+  <https://learn.microsoft.com/en-us/windows/win32/api/virtdisk/ne-virtdisk-attach_virtual_disk_flag>.
+- Microsoft documents symmetric CreateFile sharing: an existing incompatible access/share
+  request makes a later open fail, and the share disposition remains active until the handle is
+  closed. This supports the retained-handle probes but does not turn a pathname consumer into a
+  handle consumer:
+  <https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew>.
 
 ## Threat model and trust boundaries
 
-| Boundary | Attacker position, reachable assets and entry points | Required control and disposition |
-|---|---|---|
-| MCP caller → frontend | Authenticated caller or prompt-injected content can choose `entry_id`, request fields and diagnostic-triggering values; assets are proprietary policy entries, CST capacity and agent context; entry point is the seventh MCP tool. | Closed bounded schema, non-authoritative selector, fixed operation, safe errors, bounded canonical result and no caller-controlled tool/policy/action dispatch. Daemon uniquely resolves `entry_id`; broker independently reauthorizes. Prompt/tool misuse is mediated by the fixed tool operation, policy allowlist and output validation. Satisfied (`design.md:18-20,631-686,1631`). |
-| Same-owner local process → enrollment endpoint | Insider or compromised same-user process can race the pipe, clone the installed hub, replay a digest or claim PID/generation; assets are pending child authority and downstream admission. | Runtime-numeric protected DACL/High SACL/readback limits connection; DACL identity is not authority. Daemon authenticates the enrollment peer against the independently queried exact CST task row. Enrollment challenge, correlation, five-second expiry and separate channel/capability ledgers stop replay. Satisfied (`design.md:392-445`; decision `215-254`). |
-| Daemon → supervisor status IPC | Compromised daemon or same-user pipe squatter can fabricate status or try supervisor control/other-target methods; assets are the enrollment trust root and all supervised tasks. | Client kernel-binds server PID/creation/token/session/canonical installed image to `SupervisorLockOwner`; server independently authenticates daemon service SID/token/session/integrity/image. Only pre-dispatch `GET_CURRENT_CST_TASK_IDENTITY_V1` with implicit `cst` is admitted; generic status/control/respawn/reconcile/exit/other target is denied. Numeric protected DACL, High SACL and exact ordered readback are mandatory. Satisfied (`design.md:401-426`; decision `218-233`). |
-| Hub spawn owner → frontend child | Compromised sibling or ambient channel can steal capability bytes or inherit handles; assets are the per-child bearer capability. | Exact CNG 32-byte generation, SHA-256 non-secret verifier, constant-time compare after peer authentication, exact stdio-plus-read-handle allowlist, non-inheritable write end, non-secret decimal locator only in environment, exact read+EOF, all-return close and `SecureZeroMemory`. Satisfied (`design.md:48-78`; decision `235-254`). |
-| Frontend → SCM daemon | Same-owner clone, stale child, PID reuse, captured request, reconnect, second frame, cancel or death can seek admission; assets are policy entry, broker authority and QPC budget. | Live PID/creation/image/package/parent/generation binds to the ENROLLED capability; fresh CNG frontend nonce, correlation/request hash and atomic consume precede admission. Replay and ambiguity do zero privileged work or quarantine. Satisfied (`design.md:447-473`). |
-| Daemon response → frontend | Either peer can falsely claim the other's later close or publish/release on partial settlement; assets are public result and later admission. | Daemon-local `DaemonResponseReceiptV1` alone gates release/quarantine after writes, flush, ACK, disconnect and local close. Frontend-local `FrontendTransportReceiptV1` alone gates publication after reads, EOF/cancel and local close. Neither asserts remote facts. Satisfied (`design.md:26-27,306,531-544,776-784`; decision `88-102`). |
-| SCM daemon → broker | Local insider, wrong service, stale PID, anonymous/network client or replay can seek source/worker authority; assets are source capability, protected workspace, worker and license. | Fixed local first-instance pipe, numeric SID descriptor readback, mutual SCM process/token/session/integrity/image proof, impersonation/revert, one-use CNG nonce, correlation/request/policy/manifest binding and unchanged QPC triple. Satisfied (`design.md:474-518`; decision `191-206,255-283`). |
-| Broker → source/workspace/worker/output | Compromised worker or namespace racer can swap inputs, forge output, break away, leave descendants or synthesize settlement; assets are proprietary bytes and host processes. | Broker alone reads `MCPHUB_EM_OUTPUT_ROOT`, injects trusted workspace policy, opens/copies stable policy-derived source capabilities, owns distinct-principal workspace and worker Job. Retained locks, writer-close/share-zero output seal, atomic no-console/no-breakaway launch, exact-handle escaped probe and kernel-only containment receipt fail closed. Satisfied (`design.md:308-341,791-1091,1314-1316,1575`). |
-| Credentials/capabilities → logs, frames and release | Insider, compromised dependency or CI pipeline can collect secrets or untrusted diagnostics; assets are service tokens, launch capability, license/source data and publication safety. | Service credentials remain SCM/LSA-owned; launch bytes exist only in zeroed local buffers and one inherited pipe. Allowlist-built frames/diagnostics/output exclude secrets, paths and raw payload. Cross-channel canaries and publication leak-check fail closed. No new dependency is introduced. Satisfied at design level (`design.md:374-389,1264-1304`). |
+| Boundary | Attacker position | Reachable assets | Required mediation |
+|---|---|---|---|
+| Policy authoring | Compromised dependency or continuous-integration pipeline | Runtime/module rows, AppID, PolicyID/BasePolicyID, options, unsigned CIP | Pinned ordinary-hash extractor; independent PE/version proof; deterministic XSD author; implementation-independent XML/CIP verifier; two-build reproducibility; disagreement is zero signing/deployment |
+| Signing station and HSM | Insider or compromised signing-station dependency | Non-exportable content key, OCS-loaded authorization window, signed supplemental authority | One isolated `CstPolicySigningOwner`; exact request display; global exclusive ceremony; exact key/cert/tool pins; one admitted Sign; immediate final-card removal and independently proved token/key unload; audit range excludes every other use of the content key |
+| Audit collector/export | Insider or compromised collector dependency | Request/key-use evidence, ESN/logID/index continuity, vendor-verification result | One privileged per-ESN collector; explicit config/service/database/binary identity; estate-wide sole-collector attestation; fresh held JSON `export --verify`; strict grammar/projection; continuous replay journal; no raw-KML or result-byte claim |
+| Signed artifact import | Insider or compromised removable-media path | Signed CIP bytes and deployment authority | Held no-follow input; exact request/receipt/artifact hashes; explicit single-signer signature/content/current-chain/online-revocation verification; copy into protected VHDX; read-only reattach; retained namespace through CiTool and settlement |
+| Machine policy lifecycle | Local administrator or external management authority | Complete active policy composition and unrelated applications | One policy-set owner/mutex/journal; complete authority-attributed inventory; selected-family union and other-base intersection proof; external-writer quiescence; CiTool-only mutation; reboot-observed commit/absence; sibling and unrelated canaries |
+| Runtime image admission | Compromised package DLL or malicious local file author | Frontend capability, worker roots, embedded Python, CST workspace | Native pre-main handle revocation; exact committed policy receipt; enforced per-app User Mode Code Integrity denial before first instruction; read-only VHDX and retained namespace/stream closure; closed loader/PyConfig; all-return settlement |
+| MCP and publication | Unauthenticated remote caller or malicious input author | Source identity, paths, capabilities/nonces, diagnostics, proprietary values | Caller selects no authority; fixed bounded request/result schemas; machine-neutral allowlist manifest; path and credential detectors fail closed; seventh tool default-off; existing six unchanged |
 
-## Prior-finding disposition
+## Finding disposition
 
-| Finding | Current disposition and evidence |
+The prior `SEC-C6-SIGN-08` is corrected at design level: one isolated
+`CstPolicySigningOwner` owns the non-exportable RSA-3072 key path, target Windows has no
+signing route, explicit `CryptMsgControl(CMSG_CTRL_VERIFY_SIGNATURE_EX)` authenticates one
+pinned signer and exact content, `online-v1` fails hard, and storage/use/leak/rotation owners
+are present. The collector/export/replay correction is also truthful: the pinned vendor tool
+alone re-verifies KML, while P18 validates the held output and correlates the request/key use.
+
+### SEC-C6-OCS-09 — corrected at design level
+
+The corrected design makes interval authority explicit. `CstPolicySigningOwner` owns the
+station-global lock and the only state machine from an unavailable key, through one terminal
+SignTool child, to final-card removal, all-local-slot `Token=-`/`IC=0` readback, key
+unavailability, continuous audit settlement, and handoff. The owner rejects remote, dynamic,
+associated-dynamic, timed-out and failed-secure-channel slot states; retains the lock through
+settlement; and allows no export, release, retry, shutdown, or success receipt before closure.
+
+The fresh vendor-verified interval begins at a pre-load `{ESN,logID,index}` anchor and ends only
+after unload proof. It admits exactly one request-Transaction-ID-equal successful Sign and its
+exact-key ObjectUse/ObjectNew join; every sibling, failed, differently tagged, untagged, or
+key-ambiguous use rejects. Every cancellation, timeout, crash, retained/reinserted/stuck card,
+provider leak, collector gap, restart, or rotation path remains cleanup-only, durably
+quarantined, and default-off. This closes the prior sibling-signature window without treating
+K-of-N as per-operation authentication or treating operator assertion/SignTool exit as an
+unload oracle. Implementation and installed-profile evidence remain mandatory.
+
+## Required constraints and abuse probes
+
+| Required constraint | Mandatory falsifying probe |
 |---|---|
-| `SEC-C6-D-01` — no exact multi-entry selector | Corrected: request carries non-authoritative unique `entry_id`; daemon resolves it; broker independently authorizes; no implicit default (`design.md:19,306-307,631-633`). |
-| `SEC-C6-D-02` — no exact hub-child/replay proof | Corrected by authenticated supervisor task row, per-child capability and frontend challenge ledgers (`design.md:401-473`). |
-| `SEC-C6-D-03` — missing frontend terminal receipt | Corrected by separate exact owner-local daemon/frontend receipts (`design.md:26-27,531-544`). |
-| `SEC-C6-D-04` — stale admission/QPC/broker ownership | Corrected: SCM daemon alone owns admission/QPC/broker client; frontend explicitly never does (`design.md:302-306,520-544`). |
-| `SEC-C6-D-05` — enrollment caller not authenticated | Corrected: supervisor server is kernel-bound to lock owner/installed identity and task row; enrollment peer is compared to that independent row (`design.md:401-418`). |
-| `SEC-C6-D-06` — impossible combined post-close receipt | Corrected by ACK-before-disconnect and independent local receipt gates with no remote-close claim (`design.md:531-544`). |
-| `SEC-C6-D-07` — cryptography/HANDLE_LIST mechanically open | Corrected by exact CNG/SHA-256/constant compare, four-handle allowlist, locator, EOF, close and zeroization contract (`design.md:48-78`). |
-| `SEC-C6-D-08` — supervisor oracle spoofable | Corrected by `GetNamedPipeServerProcessId` plus exact process creation/token/session/image/lock-owner equality before status (`design.md:401-406`). |
-| `SEC-C6-D-09` — supervisor DACL expansion granted generic control | Corrected by exact daemon authentication and pre-dispatch implicit-CST status-only opcode; all generic/control/other-target methods deny (`design.md:407-426`). |
-| `SEC-C6-D-10` — stale receipts/ledger/pipe count | Corrected: exactly three feature pipe endpoints, three channel receipts, explicit enrollment/frontend/broker ledgers, daemon-local release and frontend-local publication (`design.md:276,304-306,1300-1302,1636-1639`; decision `304-311`). |
-| `AR-C6-ENROLL-04` — ACK consumed authority too early | Corrected: channel nonce terminates independently; capability moves `ISSUED -> ENROLLED -> CONSUMED|CANCELLED`; fresh authenticated cancellation covers post-ACK failures (`design.md:428-445`; decision `243-254`). |
-| `AR-C6-RESIDUE-05` / output-root owner | Corrected: topology names pre-spawn enrollment plus application route, Claim 28/30 name three endpoints/receipts, and only SCM broker reads the output root (`design.md:7-12,520-544,1314,1575,1636-1638`). |
-| `AR-C6-DECISION-06` — decision omitted enrollment topology and full promotion coverage | Corrected without security regression: normative decision topology now names pre-spawn `StdioHost -> HubEnrollmentProtocolV1 -> SCM daemon` and the complete application route; lifecycle/restart/promotion name all three descriptors, all four protocol schemas, enrollment capability lifecycle, supervisor identity and owner-local daemon/frontend receipts (`decision:284-307,311-334,368-379`). |
+| The OCS-loaded interval admits exactly one request-bound key use and ends before handoff. | Second-process/thread/provider Sign; different/absent Transaction ID; card retained; unload/readback failure; extra ObjectUse; crash/timeout/rotation during loaded state; require no accepted artifact and zero CiTool. |
+| One per-ESN collector owns explicit configuration, service/database identity and fresh vendor verification. | Two/unprivileged collectors; absent/empty/catch-all modules; environment/config/database/exporter/output substitution; cached/text/malformed/overwrite export; require signing disabled. |
+| Audit replay is continuous, request-bound and key-bound without claiming result-byte attestation. | ESN/logID/index gap/reset/reorder/replay; `{runID,objid}` reuse; wrong/missing ObjectNew key hash; wrong Sign status/transaction; crash at prepared/completed boundaries; require no second CiTool call. |
+| Signature verification is explicit and independent of decode/content extraction. | Preserve embedded CIP while corrupting signature; alter signer count, DER/SPKI/OID/RSA/digest/attributes/chain/revocation; require zero import/deploy. |
+| `online-v1` is current-time, exact-chain, bounded and fail-hard. | Offline/unknown/stale/timeout/revoked/alternate chain, ambient cache conflict, missing distribution data, or `offline-v1`; require zero CiTool. |
+| Policy author and verifier are independent and only exact runtime/AppID/hash semantics survive. | Pin, hash, version-resource, AppID, scope, XML/XSD/CIP grammar, reference, option, signer and two-build mutations; require `policy_artifact_unavailable`. |
+| Signed-policy import retains exact media-to-VHDX bytes and namespace through the pathname consumer. | Media/leaf/ancestor/reparse/hard-link/alternate-stream/write/delete mutation; detach/remount/backing swap during engineered CiTool delay; incompatible coexistence means no reopen fallback. |
+| Complete App Control composition and all external writers stay closed through commit/absence. | Base/supplemental/audit/AllowAll/pending/external-policy mutation; Group Policy/MDM/CSP/WMI race; missing reboot or changed unrelated canary; sampler remains absent. |
+| Native runtime executes package code only after revocation and enforced exact-policy admission. | Direct/forwarded/indirect/native malicious TLS/DllMain/CPython/extension/callback loads; every unlisted image must be denied before its first-instruction canary. |
+| All returns preserve positive-enable/default-off and exact cleanup ownership. | Missing receipt/pin/detector/policy/VHDX/namespace/unload proof across fresh start, restart, rollback, cancel, timeout and crash; no uvx, wrapper, weaker policy, reopen, automatic retry, or path fallback; existing six A/B unchanged. |
 
-No remediable security-design finding remains in the exact reviewed inputs.
+## Secret and credential four boxes
 
-## Credential and capability four boxes
-
-| Secret or credential | Storage owner | Injection path | Log/serialization exclusion | Rotation/revocation owner |
+| Item | Storage owner | Injection/use path | Log and serialization exclusion | Rotation or revocation owner |
 |---|---|---|---|---|
-| Daemon/broker service identity | LSA/SCM; no password or application-readable secret | SCM creates exact session-0 virtual-service tokens; broker worker inherits broker token | Policy, argv, environment, frames, logs, diagnostics, dumps and MCP output exclude token/SID/password/license values | Elevated installer/operator stops exact services, proves processes/Jobs/pipes/workspaces/old ACLs/tokens absent, rotates pinned package or creates successor identity, then revalidates |
-| Per-child launch capability | StdioHost locked 32-byte buffer, one anonymous pipe, child buffer; daemon stores only non-secret SHA-256 verifier | Exact inherited read handle in child HANDLE_LIST; environment carries only non-secret decimal locator | Capability bytes excluded from environment, argv, manifest, intent, frames except authenticated proof request, logs, diagnostics, dumps and MCP output; canary scan fails closed | StdioHost and daemon enrollment owners consume/cancel one entry on child proof, failure, expiry, exit, shutdown or restart; close handles and zero buffers |
-| Frontend/broker challenge nonces | Restart-scoped bounded daemon/broker ledgers only | Generated by exact CNG call and returned only on authenticated local pipes | No raw nonce in public result/log/diagnostics; correlation-only bounded receipts | Respective ledger owner atomically consumes/cancels on every exit; ambiguity quarantines and restart clears only after full revalidation |
-
-## Required abuse-case verification
-
-| Abuse case | Required safe result |
-|---|---|
-| Same-owner supervisor-pipe squatter echoes lock hello/task row | Kernel server identity mismatch rejects before status/enrollment; zero admission/broker work. |
-| Daemon service token sends control, other-target or generic status opcode | Pre-dispatch denial with zero supervisor/task mutation; exact implicit-CST identity query alone succeeds. |
-| Enrollment replay, ACK loss, post-ACK child-create/write/read failure or fresh cancel | Channel nonce terminal; capability remains ENROLLED only when valid, then becomes exactly CONSUMED or CANCELLED; digest removed; handles/buffers settled. |
-| Capability short/zero/overlong read, sibling inheritance or environment/log canary | Child rejected; sibling has no handle; capability absent from ambient/public channels; quarantine on ambiguous cleanup. |
-| Frontend partial result, missing ACK, flush/EOF/local-close failure | Daemon release and frontend publication obey separate local gates; no remote/future close is asserted. |
-| Unknown/swapped/duplicate `entry_id`, replayed broker nonce or altered QPC triple | Zero source/worker/CST work; original deadline is never rebased. |
-| Source alias/swap/write, output writer still open, breakaway or broker death | Stable locks/output seal/Job containment fail closed; owned tree settles; foreign CST is untouched; later admission quarantines on missing proof. |
-| Prompt injection in caller/vendor strings | No policy, executable, service, source, cleanup or tool action is selected; bounded allowlisted output contains no raw injected diagnostic. |
+| Policy-signing private key | `CstPolicySigningOwner`; exact non-exportable RSA-3072 key inside pinned nShield HSM under non-persistent OCS; no target key/provider/endpoint/PFX/PEM | Exact pinned CNG KSP/certificate/key and one SignTool child for one displayed request; no key/PIN/password bytes in argv, environment, pipe, file, or target | Canary scans request/media/stdout/stderr/log/dump/journal/manifest/temp/publication; only public pins/hashes and strict vendor JSON projection may serialize | Owner removes the final required card, proves all-slot absence and key unload, settles the complete audit range before handoff, and requires old-key disable/destroy plus the same closed interval for rotation |
+| HSM audit authority | Device-protected KML; one privileged per-ESN `NShieldAuditCollectorOwner` owns explicit service/config/database | HSM produces native rows; pinned `nshieldaudit ... export --verify` owns KML/warrant verification; P18 only pins adapter/output and correlates strict rows | KML/private KNETI/database/raw segment/collector credential excluded from request, media, receipt, logs and publication; held verified JSON is public audit evidence | Collector owner finalizes/verifies old range, stops service for backup, preserves terminal identity, and admits only exact continuation or reviewed successor genesis |
+| Service identities | Local Security Authority and Service Control Manager; credential-free fixed service identities | Session-0 SCM tokens and fixed protected pipe descriptors only | No password/token/license value in policy, argv, environment, protocol, logs, dumps, manifests, MCP result | Provisioner stops exact services, proves processes/Jobs/pipes/handles absent, replaces pins, and revalidates |
+| Frontend capability and protocol nonces | Existing T02 native buffer/anonymous pipe and bounded daemon/broker ledgers | Exact fourth frontend handle; exact broker exchanges; environment carries only a decimal non-secret locator | Capability/nonces excluded from argv/env/manifest/log/dump/result; native/Python buffers zero on all returns | Enrollment/challenge/broker ledger owners atomically consume/cancel on success, failure, expiry, disconnect, exit, shutdown, restart |
+| Worker source/workspace capabilities | Broker original/duplicate handle tables, then native worker table | Exact five-handle inheritance epoch; two non-secret locators only in bounded native prelude | No path, token, policy, Python object or authority in argv/env/log/public output | Broker/native owners clear inheritance, close parent/child copies, settle Job/root, and quarantine ambiguity |
 
 ## Exact 18 S4 security claims
 
-1. `{ guarantee: Every invocation selects exactly one already-authorized policy entry without caller data creating authority and unknown swapped duplicate stale or ambiguous selection performs zero broker source worker or CST work; single-owner: SCM-daemon AuthoritySnapshot resolution followed by broker authorization; enforcement-probe: one-entry and two-entry valid swapped unknown duplicate mismatch stale-revision and zero-work matrix }`.
-2. `{ guarantee: Enrollment trusts only a kernel-authenticated current supervisor server bound to SupervisorLockOwner installed identity and its exact current CST task row while self-reported hello digest PID image generation and policy-owner SID grant nothing; single-owner: daemon supervisor-status authentication owner; enforcement-probe: genuine supervisor versus first-instance squatter stale owner PID reuse token session image owner-change fabricated-row and missing-lock matrix }`.
-3. `{ guarantee: Exact daemon service identity may invoke only bounded pre-dispatch GET_CURRENT_CST_TASK_IDENTITY_V1 with implicit cst and can invoke no control generic status other-target respawn reconcile or exit operation; single-owner: SupervisorCstIdentityAuthorizerV1; enforcement-probe: exact service-token opcode allowlist denial matrix plus before-after supervisor task-state equality }`.
-4. `{ guarantee: Enrollment supervisor frontend and broker pipe descriptors use runtime numeric SIDs protected DACL High-integrity SACL exact ordered ACE masks and post-create readback before accept or dispatch; single-owner: each endpoint descriptor owner at its process boundary; enforcement-probe: exact descriptor readback plus mutated owner control ACE order SID mask inheritance label anonymous network interactive and second-instance matrix }`.
-5. `{ guarantee: One CNG-generated 256-bit per-child capability reaches only that child through one inherited read-once anonymous-pipe handle while daemon retains only a non-secret SHA-256 verifier and every buffer handle and ledger entry settles on every exit; single-owner: StdioHost spawn owner followed by daemon capability-ledger owner; enforcement-probe: CNG digest constant-compare exact HANDLE_LIST sibling-read locator short-overlong read start-failure cancel timeout exit zeroization and leak-canary matrix }`.
-6. `{ guarantee: Enrollment channel nonce terminates independently while capability authority moves exactly ISSUED to ENROLLED to CONSUMED or CANCELLED and ACK loss post-ACK failure fresh cancel expiry exit shutdown restart duplicate and replay cannot strand or reuse authority; single-owner: HubEnrollmentProtocolV1 channel ledger followed by capability enrollment ledger; enforcement-probe: deterministic state-handle table for every transition and injected return }`.
-7. `{ guarantee: Every frontend request binds authenticated enrollment fresh CNG challenge correlation request hash restart generation entry and original deadline and consumes both enrollment and frontend nonce before admission; single-owner: SCM-daemon FrontendChallengeLedger and admission owner; enforcement-probe: clone stale child PID reuse replay reconnect trailing second-frame cancel timeout shutdown and frontend-exit matrix }`.
-8. `{ guarantee: SCM daemon alone owns frontend authentication entry resolution admission policy generation original QPC triple broker client daemon-local response receipt and quarantine while frontend owns existing-six compatibility client-local receipt and publication; single-owner: SCM-daemon composition followed by frontend publisher; enforcement-probe: whole-artifact dependency owner receipt handle and zero-direct-route graph }`.
-9. `{ guarantee: Broker pipe admits only current SCM daemon whose exact token service SID logon session integrity privileges image and SCM process pass mutual authentication impersonation and revert before work; single-owner: broker Windows pipe authentication owner; enforcement-probe: descriptor anonymous network foreign-service stale-PID token session integrity privilege image second-client impersonation and failed-revert matrix }`.
-10. `{ guarantee: Every broker request is CNG challenge correlation unchanged deadline policy entry manifest and request-hash bound with atomic one-use nonce consumption or cancellation on every exit; single-owner: BrokerProtocolV1 NonceLedger owner; enforcement-probe: issue cancel consume expiry replay policy hash framing disconnect timeout shutdown and service-stop matrix }`.
-11. `{ guarantee: Only broker opens policy-derived stable source capabilities reads ambient output root copies every complete manifest row directly into protected workspace and preserves no-follow locks until consumption; single-owner: SCM-broker TrustedWorkspacePolicy and AuthorizedBundleTransfer owner; enforcement-probe: ambient-reader dependency scan plus rename reparse hard-link stream short-name ancestor leaf swap and complete-manifest byte-continuity matrix }`.
-12. `{ guarantee: Every write-capable project or header stays in distinct broker-principal workspace and unknown output becomes input only after writer close share-zero seal identity recheck and hash on every return; single-owner: AuthorizedWorkspaceSnapshot and AuthorizedVendorPathLease owner; enforcement-probe: same-user writer lazy-read output-seal post-consumption hash and every-return matrix }`.
-13. `{ guarantee: Broker alone owns exact worker process thread Job stream watchdog and token handles and containment success uses only actual kernel signal exit reference-close active-zero reader handle residual timeout exit-code stderr and first-instruction facts without synthesized defaults; single-owner: WindowsContainedInvocation; enforcement-probe: creation transfer one-field-missing contradictory residual cancel crash breakaway and every-return matrix }`.
-14. `{ guarantee: Daemon and frontend each attest only local terminal facts with ACK before disconnect so daemon receipt alone gates release or quarantine and frontend receipt alone gates publication without remote or future close claims; single-owner: DaemonResponseReceiptV1 and FrontendTransportReceiptV1 owner-local boundaries; enforcement-probe: partial frame flush missing-ACK EOF cancel trailing correlation server-close client-close and event-order matrix }`.
-15. `{ guarantee: One unchanged integer QPC frequency admitted tick and deadline tick triple crosses daemon broker and worker with no rebase so worker response ends two seconds before original expiry publication ends at expiry and only cleanup gets ten seconds after termination; single-owner: SCM-daemon AbsoluteInvocationBudget owner; enforcement-probe: altered field frequency mismatch future expired transport delay queue delay every-stage block and post-expiry zero-work matrix }`.
-16. `{ guarantee: Existing six tools retain local cst.py paths and only seventh crosses one authenticated enrollment endpoint frontend endpoint broker endpoint and broker-owned worker with no alternate authority source workspace result or obsolete route; single-owner: cst.py compatibility owner followed by enrollment daemon and broker; enforcement-probe: exact six-tool regression three-feature-endpoint four-protocol three-receipt dependency scan and one-route trace }`.
-17. `{ guarantee: Installed CST runs as one fresh fixed broker-identity worker accepts retained input locks and share-zero output sealing keeps every descendant in exact Job rejects breakaway produces no console or hidden solve path and fails registration on incompatibility without fallback; single-owner: version-bound installed CST and broker admission record; enforcement-probe: disposable target Windows service-token pipe path-lock output-seal ResultTree descendant breakaway no-window hidden-call license COM and foreign-preservation trace }`. **TARGET-ONLY — NOT INFERRED OR VERIFIED BY THIS DESIGN REVIEW.**
-18. `{ guarantee: Credential-free fixed services exactly three protected feature pipes and per-child capability provision rotate revoke and roll back only under exact owners and incomplete stale wrong or replaced state leaves seventh tool unregistered with no credential verifier nonce token process Job workspace or authority reuse while existing six remain live; single-owner: service provisioner plus supervisor enrollment and restart-admission owners; enforcement-probe: credential-capability four boxes three-descriptor readback partial-provision reverse rollback rotation revocation old-resource absence and restart-revalidation matrix }`.
+`verified-design` means the immutable design supplies a coherent guarantee, one owner, and a
+falsifying probe. Target execution evidence is not inferred. The table contains exactly 18
+claim rows.
 
-Claims 1–18 each name one owner or one explicit sequential trust boundary and a
-falsifying probe. Claim 17 is deliberately target-only; prose, mocks and static review
-cannot promote it.
+| Claim | S4 verdict | Exact guarantee, single owner, and enforcement probe |
+|---:|---|---|
+| 1 | verified-design | `{ guarantee: caller data selects no authority and stale swapped duplicate unknown or ambiguous entry performs zero broker source worker or CST work; single-owner: daemon AuthoritySnapshot then broker reauthorization; enforcement-probe: entry and revision zero-work matrix }` |
+| 2 | verified-design | `{ guarantee: enrollment trusts only the kernel-authenticated current supervisor and exact CST task process; single-owner: daemon supervisor-status authenticator; enforcement-probe: squatter PID-reuse token session image and fabricated-row matrix }` |
+| 3 | verified-design | `{ guarantee: daemon identity receives only the closed CST identity operation and no generic control right; single-owner: SupervisorCstIdentityAuthorizerV1; enforcement-probe: opcode denial and supervisor-state equality }` |
+| 4 | verified-design | `{ guarantee: all three endpoints use exact runtime SIDs protected DACL High SACL ordered masks and readback; single-owner: each endpoint descriptor owner; enforcement-probe: owner ACE order mask label anonymous network and second-instance mutation }` |
+| 5 | verified-design | `{ guarantee: one capability reaches only the exact native frontend and is revoked closed and zeroed before package or Python code; single-owner: T02 launch owner then native frontend and enrollment ledger; enforcement-probe: exact-four direct-child pre-entry and all-return secret canaries }` |
+| 6 | verified-design | `{ guarantee: enrollment nonce and capability ledgers terminate independently without replay or stranded authority; single-owner: HubEnrollmentProtocolV1 ledgers; enforcement-probe: ACK-loss cancel expiry reconnect exit shutdown restart table }` |
+| 7 | verified-design | `{ guarantee: frontend request binds authenticated direct image capability challenge correlation hash generation entry and deadline before admission; single-owner: daemon frontend challenge/admission owner; enforcement-probe: clone replay package-load and request-forgery matrix }` |
+| 8 | verified-design | `{ guarantee: daemon alone owns admission and broker route while same-process cst.py owns compatibility and publication; single-owner: daemon composition then frontend publisher; enforcement-probe: dependency topology and no-direct-route graph }` |
+| 9 | verified-design | `{ guarantee: broker admits only the current SCM daemon after mutual token service session image impersonation and proved revert; single-owner: broker pipe authenticator; enforcement-probe: identity and failed-revert matrix }` |
+| 10 | verified-design | `{ guarantee: broker nonce correlation request policy manifest and QPC binding consumes or cancels atomically on all exits; single-owner: BrokerProtocolV1 NonceLedger; enforcement-probe: replay framing timeout disconnect shutdown table }` |
+| 11 | verified-design | `{ guarantee: broker alone creates least-right source and workspace capabilities and missing readback creates no child or path fallback; single-owner: broker capability owner; enforcement-probe: open duplicate access share reparse identity and unavailable-proof matrix }` |
+| 12 | verified-design | `{ guarantee: worker revokes five flags then admits only exact committed-policy package code and closed Python; single-owner: native pre-main then NativePackageLoadOwner; enforcement-probe: malicious dynamic-load denial before entry plus VHDX namespace and PyConfig matrix }` |
+| 13 | verified-design | `{ guarantee: no sibling or descendant receives or retains worker handles; single-owner: WorkerInheritanceEpoch then native worker and Job owner; enforcement-probe: concurrent child inherited and explicit duplication matrix }` |
+| 14 | verified-design | `{ guarantee: owner-local receipts prove exact lifecycle and cannot be forged or defaulted; single-owner: typed receipt owners and WindowsContainedInvocation; enforcement-probe: every-return missing contradictory and residual-state matrix }` |
+| 15 | verified-design | `{ guarantee: one unchanged QPC triple crosses all owners and only cleanup receives a post-termination budget; single-owner: daemon AbsoluteInvocationBudget; enforcement-probe: altered frequency tick deadline and every-stage delay matrix }` |
+| 16 | verified-design | `{ guarantee: existing six retain their contract and the seventh has exactly one protected policy loader process and protocol route; single-owner: direct profile T02 native package owner daemon and broker; enforcement-probe: A-B route residue dynamic-loader namespace and no-fallback graph }` |
+| 17 | not-verifiable (target-only) | `{ guarantee: installed CST under fixed broker identity accepts locked inputs sealed output exact Job no-breakaway no-console and preserves foreign CST; single-owner: installed CST and broker admission record; enforcement-probe: disposable-target principal DACL path-lock ResultTree descendant breakaway license COM hidden-call and foreign-preservation trace }` |
+| 18 | verified-design | `{ guarantee: dependencies services signing key policy artifact package identities capabilities ACLs and rollback rotate only under exact owners while incomplete state stays default-off; single-owner: provisioner CstPolicySigningOwner NShieldAuditCollectorOwner CstAppControlPolicySetOwner T02 enrollment broker and NativePackageLoadOwner; enforcement-probe: dependency provenance OCS-loaded interval second-sign final-card-removal all-slot key-unload continuous-audit exclusivity rotation policy composition rollback publication and restart matrix }` |
+
+Matrix total: exactly 18 claims; 17 `verified-design`; 1
+`not-verifiable (target-only)`. Architecture Claims 7 and 15 and security Claim 17 remain
+target-only and are not inferred.
 
 ## Residual empirical obligations
 
-- Verify the exact installed supervisor/enrollment/frontend/broker descriptor and mutual
-  process/token bindings, status-only opcode denial and ledger transitions on disposable
-  Windows services before registration.
-- Run clone/squatter/PID-reuse/replay/cancel/death/partial-frame/handle-leak abuse matrices
-  and prove all ledgers/resources terminal or quarantine.
-- Run target CST path-lock, output-seal, Job-descendant, breakaway, no-console, license,
-  Component Object Model and foreign-process traces. Claim 17 stays fail-closed until then.
-- Perform independent publication-safety leak scanning and the separate
-  `$security-reviewer` gate before any implementation or publication promotion.
+- Implementation must prove the exact OCS state machine, pinned `slotinfo` all-local-slot
+  absence, no sibling/provider key use, and the continuous pre-load-through-post-unload
+  vendor-verified audit interval on the admitted nShield profile.
+- Implementation still must prove parser independence, exact signed-envelope authenticity,
+  current online revocation, collector continuity/replay recovery, media-to-VHDX identity,
+  complete App Control composition, reboot commit/absence, malicious-load denial before first
+  instruction, namespace/stream continuity, and all-return settlement.
+- A disposable or reserved Windows/CST target must prove AppID/hash behavior, CiTool/VHDX
+  coexistence, external-writer quiescence, installed CST behavior, architecture Claims 7 and 15,
+  and security Claim 17. Metadata, command success, or an unengineered event log is insufficient.
+- No publication-safety exception is approved.
 
 ## Gate
 
-**PASS — ready for independent `$security-reviewer` design review.** The exact
-unchanged design and corrected proposed decision close every prior remediable security-design
-finding: supervisor status is kernel-bound to the lock owner and installed identity;
-daemon access is exact implicit-CST status-only; enrollment/supervisor/feature pipes have
-numeric protected descriptors and readback; enrollment uses separate channel and
-`ISSUED -> ENROLLED -> CONSUMED|CANCELLED` authority lifecycles; CNG, SHA-256,
-constant-time comparison, HANDLE_LIST, locator and zeroization are exact; daemon and
-frontend receipts remain owner-local; topology has exactly three feature endpoints; and
-broker alone owns source/output/worker containment. `AR-C6-DECISION-06` is closed: the
-decision now carries the enrollment topology, all three descriptors, all four schemas,
-both local receipt gates and the complete promotion coverage. Claim 17 remains target-only and is
-not inferred. This PASS authorizes only the next independent security-reviewer design
-gate; it does not authorize implementation, provisioning, registration, release,
-publication, deployment or live action.
+**PASS.** All 18 S4 claims now have coherent design-level controls, one named owner, and a
+falsifying probe; Claim 17 remains explicitly target-only. The prior OCS sibling-signature gap
+is closed by mandatory final-card removal, supported all-local-slot absence readback, proved key
+unavailability, and one continuous vendor-verified pre-load-through-post-unload range that
+rejects every sibling or ambiguous use. Collector/replay, exact signed-envelope verification,
+fail-hard online revocation, deterministic AppID/hash authoring and independent verification,
+complete App Control lifecycle, retained read-only-VHDX pathname handoff, native pre-main and
+dynamic-load controls, and all-return default-off settlement are coherent at design level.
+Ready only for an independent `security-reviewer` on these exact hashes. This verdict authorizes
+no implementation, signing, HSM ceremony, App Control/VHDX mutation, deployment, registration,
+publication, release, or target inference.
 
 ## Terms and Abbreviations
 
-- ACK: Acknowledgement frame.
-- CNG: Windows Cryptography API: Next Generation.
-- COM: Component Object Model.
-- CST: Computer Simulation Technology electromagnetic solver suite.
-- DACL: Discretionary access-control list.
-- EOF: End of file; transport-observed peer completion.
-- IPC: Inter-process communication.
-- Job: Windows Job Object controlling one owned process tree.
-- LSA: Local Security Authority.
-- MCP: Model Context Protocol.
-- PID: Process identifier; not sufficient authority by itself.
-- QPC: Windows Query Performance Counter.
-- SACL: System access-control list.
-- SCM: Windows Service Control Manager.
-- SHA-256: Secure Hash Algorithm with a 256-bit digest.
-- SID: Windows security identifier.
+- AppID — App Control per-application scope selector.
+- CIP — compiled Code Integrity policy.
+- CNG KSP — Cryptography Next Generation key storage provider.
+- CST — CST Studio Suite.
+- DACL / SACL — discretionary / system access control list.
+- HSM — hardware security module.
+- KML — nShield audit-log signing key.
+- MCP — Model Context Protocol.
+- OCS — nShield Operator Card Set.
+- P18 — provisioning and policy-lifecycle phase.
+- PKCS #7 — Public-Key Cryptography Standards signed-message format.
+- QPC — Query Performance Counter.
+- SCM — Service Control Manager.
+- SID — security identifier.
+- UMCI — User Mode Code Integrity.
+- VHDX — Hyper-V virtual hard-disk image format.

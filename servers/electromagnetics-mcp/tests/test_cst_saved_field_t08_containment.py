@@ -29,13 +29,16 @@ def _evidence(module):
         created_worker=identity,
         pre_request_worker=identity,
         job_member_before_request=True,
-        inherited_handle_roles=("stdin", "stdout", "stderr"),
+        inherited_handle_roles=module.WORKER_HANDLE_ROLES,
         settlement_events=(
             "job_configured",
             "attributes_bound",
             "process_created",
             "identity_bound",
             "job_membership_verified",
+            "capability_handles_revoked",
+            "bootstrap_written",
+            "pre_main_receipt_validated",
             "request_started",
             "worker_signaled",
             "exit_recorded",
@@ -45,6 +48,32 @@ def _evidence(module):
             "handles_closed",
         ),
         foreign_process_operations=0,
+    )
+
+
+def _capabilities(module):
+    return module.WorkerCapabilitySetV1(
+        101,
+        202,
+        0x120089,
+        0x12019F,
+        {"volume_serial": 11, "file_id": "source-id"},
+        {"volume_serial": 22, "file_id": "workspace-id"},
+    )
+
+
+def _receipt(module, bootstrap):
+    return module.WorkerPreMainReceiptV1(
+        bootstrap.correlation_id,
+        bootstrap.deadline,
+        True,
+        True,
+        False,
+        bootstrap.source_access_mask,
+        bootstrap.workspace_access_mask,
+        bootstrap.source_root_identity,
+        bootstrap.workspace_root_identity,
+        bootstrap.checksum,
     )
 
 
@@ -59,6 +88,8 @@ class _Kernel:
         spec,
         request_factory,
         *,
+        bootstrap,
+        capabilities,
         startup_validator,
         startup_deadline,
         response_deadline,
@@ -66,7 +97,7 @@ class _Kernel:
         cleanup_deadline,
     ):
         assert spec.attribute_roles == ("job_list", "handle_list")
-        assert spec.handle_list_roles == ("stdin", "stdout", "stderr")
+        assert spec.handle_list_roles == self.module.WORKER_HANDLE_ROLES
         self.deadlines = (
             startup_deadline,
             response_deadline,
@@ -75,7 +106,10 @@ class _Kernel:
         )
         startup_validator(_proof(self.module))
         request_factory()
-        return self.result
+        return replace(
+            self.result,
+            pre_main_receipt=_receipt(self.module, bootstrap),
+        )
 
 
 def test_t08_red_atomic_job_and_handle_list_precede_request_without_suspended_gap() -> None:
@@ -86,7 +120,7 @@ def test_t08_red_atomic_job_and_handle_list_precede_request_without_suspended_ga
         module.EXTENDED_STARTUPINFO_PRESENT | module.CREATE_UNICODE_ENVIRONMENT | module.CREATE_NO_WINDOW
     )
     assert spec.attribute_roles == ("job_list", "handle_list")
-    assert spec.handle_list_roles == ("stdin", "stdout", "stderr")
+    assert spec.handle_list_roles == module.WORKER_HANDLE_ROLES
     source = inspect.getsource(module._invoke_atomic_job_process)
     order = tuple(
         source.index(marker)
@@ -115,6 +149,7 @@ def test_t08_red_qpc_deadline_is_injected_unchanged_and_cleanup_is_separate() ->
         active_zero=True,
         readers_joined=True,
         handles_closed=True,
+        pipe_closed=True,
         residual_process=False,
         timed_out=False,
         first_instruction_proof=_proof(module),
@@ -129,7 +164,15 @@ def test_t08_red_qpc_deadline_is_injected_unchanged_and_cleanup_is_separate() ->
         monotonic=lambda: 50.0,
     )
     deadline = QpcDeadlineV1(10, 100, 700)
-    assert invocation.invoke(b"request", deadline=deadline) == b"ok"
+    assert (
+        invocation.invoke(
+            b"request",
+            deadline=deadline,
+            correlation_id="1" * 32,
+            capabilities=_capabilities(module),
+        ).response_frame
+        == b"ok"
+    )
     assert kernel.deadlines == (55.0, 107.0, 109.0, 119.0)
 
 
@@ -157,12 +200,16 @@ def test_t08_red_identity_membership_handles_foreign_and_settlement_fail_closed(
         active_zero=True,
         readers_joined=True,
         handles_closed=True,
+        pipe_closed=True,
         residual_process=False,
         timed_out=False,
         first_instruction_proof=_proof(module),
         containment_evidence=replace(evidence, **mutation),
     )
     with pytest.raises(module.ContainmentFailure) as raised:
-        module.WindowsContainedInvocation._validate_result(result)
+        capabilities = _capabilities(module)
+        bootstrap = capabilities.bootstrap("1" * 32, module.QpcDeadlineV1(10, 100, 700))
+        result = replace(result, pre_main_receipt=_receipt(module, bootstrap))
+        module.WindowsContainedInvocation._validate_result(result, bootstrap=bootstrap)
     assert raised.value.quarantine is True
     assert "CANARY" not in str(raised.value)

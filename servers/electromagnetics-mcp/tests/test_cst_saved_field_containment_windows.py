@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import importlib.util
-import io
 import os
 import sys
 import threading
@@ -39,9 +38,44 @@ def _evidence(module):
         identity,
         identity,
         True,
-        ("stdin", "stdout", "stderr"),
+        module.WORKER_HANDLE_ROLES,
         module._SETTLEMENT_EVENTS,
         0,
+    )
+
+
+def _capabilities(module):
+    return module.WorkerCapabilitySetV1(
+        101,
+        202,
+        0x120089,
+        0x12019F,
+        {"volume_serial": 11, "file_id": "source-id"},
+        {"volume_serial": 22, "file_id": "workspace-id"},
+    )
+
+
+def _receipt(module, bootstrap):
+    return module.WorkerPreMainReceiptV1(
+        bootstrap.correlation_id,
+        bootstrap.deadline,
+        True,
+        True,
+        False,
+        bootstrap.source_access_mask,
+        bootstrap.workspace_access_mask,
+        bootstrap.source_root_identity,
+        bootstrap.workspace_root_identity,
+        bootstrap.checksum,
+    )
+
+
+def _invoke(invocation, module, frame=b"request"):
+    return invocation.invoke(
+        frame,
+        deadline=_deadline(module),
+        correlation_id="1" * 32,
+        capabilities=_capabilities(module),
     )
 
 
@@ -50,11 +84,11 @@ def test_saved_field_createprocess_tuple() -> None:
     spec = module.build_create_process_spec(sys.executable)
     resolved = str(module.Path(sys.executable).resolve(strict=True))
     assert spec.application_name == resolved
-    assert spec.command_line == (f'"{resolved}" -I -s -E -m mcphub_em_mcp.cst_saved_field_broker_worker')
+    assert spec.command_line == f'"{resolved}" --role=worker'
     assert spec.current_directory == str(module.Path(resolved).parent)
     assert spec.inherit_handles is True
     assert spec.startf_use_std_handles is True
-    assert spec.handle_list_roles == ("stdin", "stdout", "stderr")
+    assert spec.handle_list_roles == module.WORKER_HANDLE_ROLES
     assert spec.attribute_roles == ("job_list", "handle_list")
     assert spec.creation_flags == (
         module.EXTENDED_STARTUPINFO_PRESENT | module.CREATE_UNICODE_ENVIRONMENT | module.CREATE_NO_WINDOW
@@ -158,6 +192,8 @@ class _Kernel:
         spec,
         request_frame,
         *,
+        bootstrap,
+        capabilities,
         startup_validator,
         startup_deadline: float,
         response_deadline: float,
@@ -183,9 +219,11 @@ class _Kernel:
                 active_zero=self.settle,
                 readers_joined=self.settle,
                 handles_closed=self.settle,
+                pipe_closed=self.settle,
                 residual_process=True,
                 timed_out=False,
                 containment_evidence=_evidence(self.module),
+                pre_main_receipt=_receipt(self.module, bootstrap),
             )
         self.trace.extend(
             ["helper_signal", "exit_record", "process_handle_close", "query_active", "active_zero"]
@@ -198,10 +236,12 @@ class _Kernel:
             active_zero=True,
             readers_joined=True,
             handles_closed=True,
+            pipe_closed=True,
             residual_process=False,
             timed_out=False,
             first_instruction_proof=proof,
             containment_evidence=_evidence(self.module),
+            pre_main_receipt=_receipt(self.module, bootstrap),
         )
 
 
@@ -210,7 +250,7 @@ def test_saved_field_normal_residual_routes_termination() -> None:
     kernel = _Kernel(module, active_after_exit=1)
     invocation = module.WindowsContainedInvocation(kernel=kernel, executable=sys.executable)
     with pytest.raises(module.ContainmentFailure) as raised:
-        invocation.invoke(b"request", deadline=_deadline(module))
+        _invoke(invocation, module)
     assert raised.value.failure_id == "cst_saved_field.containment_residual_process"
     assert kernel.trace == [
         "job_configured",
@@ -231,7 +271,7 @@ def test_unproved_settlement_is_quarantine_worthy() -> None:
     kernel = _Kernel(module, active_after_exit=1, settle=False)
     invocation = module.WindowsContainedInvocation(kernel=kernel, executable=sys.executable)
     with pytest.raises(module.ContainmentFailure) as raised:
-        invocation.invoke(b"request", deadline=_deadline(module))
+        _invoke(invocation, module)
     assert raised.value.failure_id == "cst_saved_field.containment_settle_failed"
     assert raised.value.quarantine is True
     assert kernel.foreign_alive is True
@@ -246,6 +286,8 @@ class _ResultKernel:
         _spec,
         request_factory,
         *,
+        bootstrap,
+        capabilities,
         startup_validator,
         startup_deadline,
         response_deadline,
@@ -263,6 +305,7 @@ class _ResultKernel:
             self.result,
             first_instruction_proof=self.result.first_instruction_proof or proof,
             containment_evidence=self.result.containment_evidence or _evidence(module),
+            pre_main_receipt=self.result.pre_main_receipt or _receipt(module, bootstrap),
         )
 
 
@@ -302,6 +345,7 @@ def test_saved_field_timeout_settlement(
         active_zero=True,
         readers_joined=True,
         handles_closed=True,
+        pipe_closed=True,
         residual_process=False,
         timed_out=False,
     )
@@ -309,7 +353,7 @@ def test_saved_field_timeout_settlement(
         kernel=_ResultKernel(replace(baseline, **changes)), executable=sys.executable
     )
     with pytest.raises(module.ContainmentFailure) as raised:
-        invocation.invoke(b"request", deadline=_deadline(module))
+        _invoke(invocation, module)
     assert raised.value.failure_id == failure_id
     assert raised.value.quarantine is quarantine
     assert "CANARY" not in str(raised.value)
@@ -325,6 +369,7 @@ def test_saved_field_quarantine_all_routes() -> None:
         active_zero=False,
         readers_joined=True,
         handles_closed=False,
+        pipe_closed=False,
         residual_process=True,
         timed_out=False,
     )
@@ -341,6 +386,8 @@ def test_saved_field_quarantine_all_routes() -> None:
                 runner.invoke(
                     b"request",
                     deadline=_deadline(module),
+                    correlation_id="1" * 32,
+                    capabilities=_capabilities(module),
                     revision="a" * 64,
                     wait_seconds=0.0,
                 )
@@ -348,6 +395,8 @@ def test_saved_field_quarantine_all_routes() -> None:
                 runner.invoke_after_admission(
                     lambda _started: b"request",
                     deadline=_deadline(module),
+                    correlation_id="1" * 32,
+                    capabilities=_capabilities(module),
                     revision="a" * 64,
                     wait_seconds=0.0,
                 )
@@ -356,6 +405,8 @@ def test_saved_field_quarantine_all_routes() -> None:
             runner.invoke(
                 b"later",
                 deadline=_deadline(module),
+                correlation_id="1" * 32,
+                capabilities=_capabilities(module),
                 revision="a" * 64,
                 wait_seconds=0.0,
             )
@@ -363,7 +414,7 @@ def test_saved_field_quarantine_all_routes() -> None:
 
 
 @pytest.mark.skipif(os.name != "nt", reason="safe synthetic Win32 containment probe")
-def test_saved_field_worker_reference_order() -> None:
+def test_saved_field_worker_reference_rejects_ordinary_python(tmp_path) -> None:
     module = _containment()
     from mcphub_em_mcp import cst_saved_field_broker_worker_protocol as protocol
     from mcphub_em_mcp.cst_saved_field_broker_protocol import QpcDeadlineV1, canonical_sha256
@@ -379,39 +430,66 @@ def test_saved_field_worker_reference_order() -> None:
         deadline=QpcDeadlineV1(10, 0, 600),
     )
     request_frame = protocol.encode_frame(request.to_wire(), maximum=protocol.BROKER_WORKER_REQUEST_MAX)
-    spec = module.build_create_process_spec(sys.executable)
-    started = time.monotonic()
-    result = module.CtypesWindowsKernel().invoke(
-        spec,
-        request_frame,
-        startup_deadline=started + 5.0,
-        response_deadline=started + 58.0,
-        absolute_deadline=started + 60.0,
-        cleanup_deadline=started + 70.0,
+    from mcphub_em_mcp.cst_saved_field_policy import WindowsPolicyPlatform
+
+    source_path = tmp_path / "source"
+    workspace_path = tmp_path / "workspace"
+    platform = WindowsPolicyPlatform()
+    root = platform.hold_restricted_directory(tmp_path)
+    source = platform.create_restricted_child(root, "source")
+    workspace = platform.create_restricted_child(root, "workspace")
+    source.close()
+    workspace.close()
+    root.close()
+    source_identity = platform.prove_directory(source_path)
+    workspace_identity = platform.prove_directory(workspace_path)
+    capabilities = module.open_broker_worker_capabilities(
+        source_path,
+        workspace_path,
+        correlation_id=request.correlation_id,
+        expected_source_identity={
+            "volume_serial": source_identity.volume_serial,
+            "file_id": source_identity.file_id,
+        },
+        expected_workspace_identity={
+            "volume_serial": workspace_identity.volume_serial,
+            "file_id": workspace_identity.file_id,
+        },
     )
-    proof = result.first_instruction_proof
-    assert proof is not None
-    assert proof.exact_job is True
-    assert proof.exactly_three_inherited_std_handles is True
-    assert proof.no_console is True
-    assert proof.escaped_process_settled is True
-    assert result.stderr_overflow is False
-    assert b"CANARY" not in result.response_frame
-    if proof.breakaway_created:
-        assert proof.breakaway_denied is False
-        with pytest.raises(module.ContainmentFailure) as raised:
-            module.WindowsContainedInvocation._validate_startup(proof)  # noqa: SLF001
-        assert raised.value.quarantine is True
-        assert result.exit_code == 78
-        assert result.response_frame == b""
-        return
-    assert proof.breakaway_denied is True
-    module.WindowsContainedInvocation._validate_startup(proof)  # noqa: SLF001
-    response = protocol.decode_one_frame(
-        io.BytesIO(result.response_frame), maximum=protocol.BROKER_WORKER_RESPONSE_MAX
-    )
-    assert response["failure_id"] == "cst_saved_field.cst_unavailable"
-    assert response["settlement"]["owned_remaining"] == 0
+    assert capabilities.receipt is not None
+    assert capabilities.receipt.complete is True
+    assert capabilities.receipt.correlation_id == request.correlation_id
+    assert capabilities.receipt.source_access == module.SOURCE_ROOT_ACCESS
+    assert capabilities.receipt.source_share == module.SOURCE_ROOT_SHARE
+    assert capabilities.receipt.workspace_access == module.WORKSPACE_ROOT_ACCESS
+    assert capabilities.receipt.workspace_share == module.WORKSPACE_ROOT_SHARE
+    try:
+        spec = module.build_create_process_spec(sys.executable)
+        started = time.monotonic()
+        with pytest.raises(module.ContainmentFailure, match="containment_startup_invalid"):
+            module.CtypesWindowsKernel().invoke(
+                spec,
+                request_frame,
+                bootstrap=capabilities.bootstrap("0" * 32, request.deadline),
+                capabilities=capabilities,
+                startup_deadline=started + 5.0,
+                response_deadline=started + 58.0,
+                absolute_deadline=started + 60.0,
+                cleanup_deadline=started + 70.0,
+            )
+    finally:
+        capabilities.settle()
+
+
+def test_worker_inheritance_epoch_is_non_reentrant_and_releases() -> None:
+    module = _containment()
+    epoch = module.WorkerInheritanceEpoch()
+    first = epoch.acquire()
+    with pytest.raises(module.ContainmentFailure, match="inheritance_epoch_reentered"):
+        epoch.acquire()
+    first.release()
+    second = epoch.acquire()
+    second.release()
 
 
 def test_saved_field_reader_cancellation() -> None:

@@ -1,0 +1,178 @@
+{
+  "schema": "mcphub.cst.native-runtime-manifest.v1",
+  "unsigned_builds_byte_identical": true,
+  "runtime_image_sha256": "38d87c50f716e334f89628d4f35604534c3a35bdcf35f378f1d939137bab89e3",
+  "source_sha256": "af793a2656e09c5f2646078938688d7a8f199194b69682724e7d3966498ea041",
+  "pre_revocation_disassembly_sha256": "3f12cecc9b9ecd4e36f9332bf91c0dd693bb72f2e077b393c1814f7023f6dd93",
+  "input_hashes": {
+    "source_sha256": "af793a2656e09c5f2646078938688d7a8f199194b69682724e7d3966498ea041",
+    "build_script_sha256": "1665763418959072200900619a95ceb1b1e7f3b5b6d3af72d9e3e15392a0462b",
+    "verifier_sha256": "1155a3bca6e704af99a385ad6b60799986730b6adc8a8f8d0e95aecd0d485daf",
+    "closure_builder_sha256": "d9085b98d09937ed376c21666c166e46ca570fcf50b94e382d286598c071d8fb"
+  },
+  "entry_symbol": "mcphub_cst_entry",
+  "direct_imports": [
+    "KERNEL32.dll"
+  ],
+  "pe": {
+    "bound_import": false,
+    "clr": false,
+    "delay_import": false,
+    "dependent_load_flags": 2048,
+    "direct_imports": [
+      "KERNEL32.dll"
+    ],
+    "entry_rva": 4096,
+    "entry_symbol": "mcphub_cst_entry",
+    "import_functions": [
+      "ExitProcess",
+      "GetCommandLineW",
+      "GetCurrentProcess",
+      "GetFileInformationByHandleEx",
+      "GetHandleInformation",
+      "GetStdHandle",
+      "IsProcessInJob",
+      "QueryPerformanceCounter",
+      "QueryPerformanceFrequency",
+      "ReadFile",
+      "SetHandleInformation",
+      "WriteFile"
+    ],
+    "machine": "AMD64",
+    "mitigations": [
+      "CETCOMPAT",
+      "HIGHENTROPYVA",
+      "DYNAMICBASE",
+      "NXCOMPAT"
+    ],
+    "relocations": true,
+    "sections": [
+      {
+        "characteristics": 1610612768,
+        "name": ".text",
+        "raw": 1024,
+        "raw_size": 5120,
+        "rva": 4096,
+        "vsize": 4892
+      },
+      {
+        "characteristics": 1073741888,
+        "name": ".rdata",
+        "raw": 6144,
+        "raw_size": 3072,
+        "rva": 12288,
+        "vsize": 2570
+      },
+      {
+        "characteristics": 3221225536,
+        "name": ".data",
+        "raw": 0,
+        "raw_size": 0,
+        "rva": 16384,
+        "vsize": 4113
+      },
+      {
+        "characteristics": 1073741888,
+        "name": ".pdata",
+        "raw": 9216,
+        "raw_size": 512,
+        "rva": 24576,
+        "vsize": 108
+      },
+      {
+        "characteristics": 1107296320,
+        "name": ".reloc",
+        "raw": 9728,
+        "raw_size": 512,
+        "rva": 28672,
+        "vsize": 12
+      }
+    ],
+    "sha256": "38d87c50f716e334f89628d4f35604534c3a35bdcf35f378f1d939137bab89e3",
+    "timestamp": 870296458,
+    "tls": false
+  },
+  "roles": {
+    "frontend": {
+      "inherited_handles": [
+        "stdin",
+        "stdout",
+        "stderr",
+        "capability-read"
+      ],
+      "revoked_before_package_code": true
+    },
+    "worker": {
+      "inherited_handles": [
+        "stdin",
+        "stdout",
+        "stderr",
+        "source-root",
+        "workspace-root"
+      ],
+      "revoked_before_package_code": true
+    }
+  },
+  "toolchain": {
+    "discovery": "vswhere-latest-complete-vc-x64 plus highest installed Windows SDK",
+    "msvc_tools_version": "14.51.36231",
+    "windows_sdk_version": "10.0.26100.0",
+    "compiler_version": "19.51.36252.0",
+    "linker_version": "14.51.36252.0",
+    "compiler_flags": [
+      "/nologo",
+      "/c",
+      "/TC",
+      "/O2",
+      "/Oi-",
+      "/GS-",
+      "/GR-",
+      "/Zl",
+      "/W4",
+      "/WX",
+      "/guard:cf",
+      "/DUNICODE",
+      "/D_UNICODE",
+      "/I<MSVC>/include",
+      "/I<WindowsSDK>/ucrt",
+      "/I<WindowsSDK>/shared",
+      "/I<WindowsSDK>/um"
+    ],
+    "linker_flags": [
+      "/NOLOGO",
+      "/NODEFAULTLIB",
+      "/ENTRY:mcphub_cst_entry",
+      "/SUBSYSTEM:WINDOWS",
+      "/MACHINE:X64",
+      "/MANIFEST:NO",
+      "/INCREMENTAL:NO",
+      "/OPT:REF",
+      "/OPT:ICF",
+      "/DYNAMICBASE",
+      "/HIGHENTROPYVA",
+      "/NXCOMPAT",
+      "/CETCOMPAT",
+      "/GUARD:CF",
+      "/DEPENDENTLOADFLAG:0x800",
+      "/BREPRO",
+      "/RELEASE"
+    ]
+  },
+  "package_load": {
+    "state": "default-off",
+    "required_receipt": "ProvisionedPackageIdentityV1",
+    "failure_id": "native_loader_invalid"
+  },
+  "package_load_closure": {
+    "schema": "mcphub.cst.package-load-closure.v1",
+    "state": "unprovisioned",
+    "resolver": "independent PE normal/delay import traversal",
+    "ordered_package_rows": [],
+    "target_os_rows": [],
+    "admission": "fail-closed until a complete exact package and target-OS closure is provisioned"
+  },
+  "signed_structure": {
+    "status": "target-unfulfilled",
+    "phase": "X1/X2"
+  }
+}

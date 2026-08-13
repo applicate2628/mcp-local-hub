@@ -6,13 +6,17 @@ import os
 import re
 import threading
 from collections.abc import Callable, Mapping
-from typing import Protocol
+from typing import BinaryIO, Protocol
 
 from .cst_saved_field_frontend_protocol import (
+    FRONTEND_FRAME_MAX,
+    FRONTEND_REQUEST_MAX,
     FrontendDaemonRequestV1,
     FrontendDaemonResultV1,
     FrontendTransportReceiptV1,
     canonical_sha256,
+    decode_frame,
+    encode_frame,
 )
 from .cst_saved_field_policy import EXACT_ENDPOINTS
 
@@ -44,33 +48,129 @@ class DaemonTransport(Protocol):
 
 
 class WindowsNamedPipeDaemonTransport:
-    """Fixed production descriptor; T06 composes the concrete overlapped channel."""
+    """Frontend owner for the fixed local daemon pipe and its observed receipt."""
 
-    def __init__(self, channel: DaemonTransport | None = None) -> None:
-        self._channel = channel
+    def __init__(self, connector: Callable[[str], BinaryIO] | None = None) -> None:
+        self._connector = connector or _open_fixed_frontend_pipe
+        self._channel: BinaryIO | None = None
+        self._correlation: str | None = None
+
+    @staticmethod
+    def _write(channel: BinaryIO, value: object) -> None:
+        raw = encode_frame(value, maximum=FRONTEND_REQUEST_MAX) + b"\n"
+        if channel.write(raw) != len(raw):
+            raise DaemonClientFailure("cst_saved_field.daemon_unavailable")
+
+    @staticmethod
+    def _read(channel: BinaryIO) -> dict[str, object]:
+        raw = channel.readline(FRONTEND_FRAME_MAX + 2)
+        if not raw.endswith(b"\n") or len(raw) > FRONTEND_FRAME_MAX + 1:
+            raise DaemonClientFailure("cst_saved_field.frontend_protocol_invalid")
+        return decode_frame(raw[:-1], maximum=FRONTEND_FRAME_MAX)
 
     def startup_proof(self, timeout: float) -> bool:
         return (
             timeout == FRONTEND_OPERATION_TIMEOUT_SECONDS
             and os.name == "nt"
-            and self._channel is not None
-            and self._channel.startup_proof(timeout)
+            and (self._connector is not _open_fixed_frontend_pipe or _fixed_pipe_ready(timeout))
         )
 
     def challenge(self, correlation: str, timeout: float) -> str:
-        if self._channel is None:
+        if timeout != FRONTEND_OPERATION_TIMEOUT_SECONDS or self._channel is not None:
             raise DaemonClientFailure("cst_saved_field.daemon_unavailable")
-        return self._channel.challenge(correlation, timeout)
+        try:
+            channel = self._connector(FRONTEND_ENDPOINT_V1)
+            self._write(channel, {"op": "challenge", "correlation_id": correlation})
+            channel.flush()
+            frame = self._read(channel)
+            if set(frame) != {"op", "correlation_id", "challenge_nonce"}:
+                raise DaemonClientFailure("cst_saved_field.frontend_protocol_invalid")
+            if frame["op"] != "challenge" or frame["correlation_id"] != correlation:
+                raise DaemonClientFailure("cst_saved_field.frontend_protocol_invalid")
+            challenge = frame["challenge_nonce"]
+            if not isinstance(challenge, str):
+                raise DaemonClientFailure("cst_saved_field.frontend_protocol_invalid")
+            self._channel = channel
+            self._correlation = correlation
+            return challenge
+        except DaemonClientFailure:
+            raise
+        except Exception as exc:
+            raise DaemonClientFailure("cst_saved_field.daemon_unavailable") from exc
 
     def exchange(
         self, request: FrontendDaemonRequestV1, timeout: float
     ) -> tuple[FrontendDaemonResultV1, FrontendTransportReceiptV1]:
-        if self._channel is None:
+        channel = self._channel
+        if channel is None or self._correlation != request.correlation_id:
             raise DaemonClientFailure("cst_saved_field.daemon_unavailable")
-        return self._channel.exchange(request, timeout)
+        response_complete = terminal_complete = eof = closed = False
+        result: FrontendDaemonResultV1 | None = None
+        try:
+            self._write(channel, {"op": "invoke", "request": request.to_wire()})
+            channel.flush()
+            result = FrontendDaemonResultV1.from_wire(self._read(channel))
+            response_complete = True
+            terminal = self._read(channel)
+            terminal_complete = terminal == {
+                "op": "terminal",
+                "correlation_id": request.correlation_id,
+            }
+            self._write(channel, {"op": "ack", "correlation_id": request.correlation_id})
+            channel.flush()
+            eof = channel.read(1) == b""
+        except DaemonClientFailure:
+            raise
+        except Exception as exc:
+            raise DaemonClientFailure("cst_saved_field.daemon_unavailable") from exc
+        finally:
+            try:
+                channel.close()
+                closed = True
+            finally:
+                self._channel = None
+                self._correlation = None
+        if result is None:
+            raise DaemonClientFailure("cst_saved_field.daemon_unavailable")
+        return result, FrontendTransportReceiptV1(
+            request.correlation_id,
+            response_complete,
+            terminal_complete,
+            eof,
+            closed,
+        )
 
     def cancel(self, correlation: str, timeout: float) -> bool:
-        return self._channel is not None and self._channel.cancel(correlation, timeout)
+        channel = self._channel
+        self._channel = None
+        self._correlation = None
+        if channel is None or timeout != FRONTEND_OPERATION_TIMEOUT_SECONDS:
+            return False
+        try:
+            self._write(channel, {"op": "cancel", "correlation_id": correlation})
+            channel.flush()
+            return self._read(channel) == {"op": "cancelled", "correlation_id": correlation}
+        except Exception:
+            return False
+        finally:
+            channel.close()
+
+
+def _open_fixed_frontend_pipe(endpoint: str) -> BinaryIO:
+    if os.name != "nt" or endpoint != FRONTEND_ENDPOINT_V1:
+        raise DaemonClientFailure("cst_saved_field.daemon_unavailable")
+    return open(endpoint, "r+b", buffering=0)
+
+
+def _fixed_pipe_ready(timeout: float) -> bool:
+    import ctypes
+
+    return bool(
+        ctypes.WinDLL("kernel32", use_last_error=True).WaitNamedPipeW(
+            FRONTEND_ENDPOINT_V1,
+            max(1, int(timeout * 1000)),
+        )
+    )
 
 
 def _production_open_handle(locator: str) -> int:

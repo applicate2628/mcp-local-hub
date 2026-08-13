@@ -11,16 +11,11 @@ from pathlib import Path, PureWindowsPath
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
+from .cst_saved_field_endpoints import ENDPOINT_DESCRIPTOR_V1
+from .cst_saved_field_endpoints import EXACT_ENDPOINTS as EXACT_ENDPOINTS
+
 POLICY_SCHEMA = "mcphub.cst.saved_field_authority.v1"
 MANIFEST_SCHEMA = "sha256-canonical-file-list-v2"
-EXACT_ENDPOINTS = (
-    r"\\.\pipe\mcp-local-hub-cst-saved-field-enrollment-v1",
-    r"\\.\pipe\mcp-local-hub-cst-saved-field-frontend-v1",
-    r"\\.\pipe\mcp-local-hub-cst-saved-field-v1",
-)
-ENDPOINT_DESCRIPTOR_V1 = MappingProxyType(
-    dict(zip(("enrollment", "frontend", "broker"), EXACT_ENDPOINTS, strict=True))
-)
 POLICY_FILE_MAX = 1_048_576
 POLICY_ENTRY_MAX = 128
 PATH_SCALAR_MAX = 4_096

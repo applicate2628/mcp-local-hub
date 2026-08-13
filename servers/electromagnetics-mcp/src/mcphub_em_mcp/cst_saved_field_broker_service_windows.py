@@ -27,7 +27,13 @@ from .cst_saved_field_broker_worker_protocol import (
     BrokerWorkerResponseV1,
     validate_worker_response,
 )
-from .cst_saved_field_containment_windows import WindowsContainedInvocation
+from .cst_saved_field_containment_windows import (
+    CtypesWindowsKernel,
+    WindowsContainedInvocation,
+    WindowsKernel,
+    WorkerCapabilitySetV1,
+    open_broker_worker_capabilities,
+)
 from .cst_saved_field_policy import (
     EXACT_ENDPOINTS,
     AuthorityEntry,
@@ -264,7 +270,12 @@ class BrokerNonceLedgerV1:
 
 
 class BrokerApplication(Protocol):
-    def __call__(self, request: BrokerRequestV1, workspace_policy: object) -> BrokerResponseV1: ...
+    def __call__(
+        self,
+        request: BrokerRequestV1,
+        entry: AuthorityEntry,
+        workspace_policy: object,
+    ) -> BrokerResponseV1: ...
 
 
 class ContainedWorkerBrokerApplicationV1:
@@ -275,12 +286,19 @@ class ContainedWorkerBrokerApplicationV1:
         *,
         invocation: WindowsContainedInvocation,
         vendor_isolation: VendorIsolationProofV1,
+        capability_opener: Callable[..., WorkerCapabilitySetV1] = open_broker_worker_capabilities,
     ) -> None:
         if not isinstance(vendor_isolation, VendorIsolationProofV1) or not vendor_isolation.complete:
             raise BrokerProtocolFailure("cst_saved_field.vendor_isolation_unavailable")
         self._invocation = invocation
+        self._capability_opener = capability_opener
 
-    def __call__(self, request: BrokerRequestV1, workspace_policy: object) -> BrokerResponseV1:
+    def __call__(
+        self,
+        request: BrokerRequestV1,
+        entry: AuthorityEntry,
+        workspace_policy: object,
+    ) -> BrokerResponseV1:
         # The policy remains broker-owned ambient authority; it is never serialized
         # to the worker.  Its lifetime is settled by BrokerRuntimeServiceV1.
         if workspace_policy is None:
@@ -294,25 +312,64 @@ class ContainedWorkerBrokerApplicationV1:
             request.request,
             request.deadline,
         )
-        response_frame = self._invocation.invoke(
-            encode_frame(worker_request.to_wire()),
-            deadline=request.deadline,
-        )
+        source = None
+        workspace = None
+        capabilities = None
+        try:
+            workspace = workspace_policy.create_child(request.correlation_id)
+            if getattr(workspace.capability, "restricted", None) is not True:
+                raise BrokerProtocolFailure("cst_saved_field.broker_unauthorized")
+            capabilities = self._capability_opener(
+                entry.root,
+                workspace.capability.path,
+                correlation_id=request.correlation_id,
+                expected_source_identity={
+                    "volume_serial": entry.root_identity.volume_serial,
+                    "file_id": entry.root_identity.file_id,
+                },
+                expected_workspace_identity={
+                    "volume_serial": workspace.capability.evidence.volume_serial,
+                    "file_id": workspace.capability.evidence.file_id,
+                },
+            )
+            containment = self._invocation.invoke(
+                encode_frame(worker_request.to_wire()),
+                deadline=request.deadline,
+                correlation_id=request.correlation_id,
+                capabilities=capabilities,
+            )
+        finally:
+            cleanup_error: BaseException | None = None
+            for owner in (capabilities, workspace, source):
+                if owner is None:
+                    continue
+                action = getattr(owner, "settle", None) or getattr(owner, "close", None)
+                try:
+                    action()
+                except BaseException as exc:
+                    if cleanup_error is None:
+                        cleanup_error = exc
+            if cleanup_error is not None:
+                raise BrokerProtocolFailure("cst_saved_field.containment_settle_failed") from cleanup_error
+        if not containment.complete:
+            raise BrokerProtocolFailure("cst_saved_field.containment_settle_failed")
+        if not containment.application_available:
+            raise BrokerProtocolFailure("cst_saved_field.cst_unavailable")
         worker_response = validate_worker_response(
             worker_request,
             BrokerWorkerResponseV1.from_wire(
-                decode_one_frame(BytesIO(response_frame), maximum=BROKER_WORKER_RESPONSE_MAX)
+                decode_one_frame(BytesIO(containment.response_frame), maximum=BROKER_WORKER_RESPONSE_MAX)
             ),
         )
         worker_settlement = worker_response.settlement
         settlement = BrokerSettlementV1(
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
-            True,
+            containment.worker_signaled,
+            containment.exit_recorded,
+            containment.process_reference_closed,
+            containment.active_job_zero,
+            containment.readers_joined,
+            containment.handles_closed,
+            containment.pipe_closed,
             worker_settlement.workspace_settled,
             worker_settlement.session_settled,
             worker_settlement.source_unchanged,
@@ -439,8 +496,8 @@ class BrokerRuntimeServiceV1:
         frequency = self._qpc_frequency()
         tick = self._qpc_counter()
         self._nonces.consume(request, current_tick=tick, current_frequency=frequency)
-        self._entry(request)
-        response = self._application(request, self._workspace_policy)
+        entry = self._entry(request)
+        response = self._application(request, entry, self._workspace_policy)
         return validate_response(request, response)
 
     def cancel(self, nonce: str) -> None:
@@ -470,5 +527,60 @@ def run_service(
         service.shutdown()
 
 
+@dataclass(frozen=True, slots=True)
+class BrokerServiceCompositionV1:
+    """Provisioning-supplied dependencies for the fixed broker service root."""
+
+    raw_policy_path: str | None
+    policy_platform: PolicyPlatform
+    environment: Mapping[str, str]
+    daemon_service_sid: str
+    daemon_image: str
+    worker_executable: str
+    vendor_isolation: VendorIsolationProofV1
+    qpc_frequency: Callable[[], int]
+    qpc_counter: Callable[[], int]
+    serve: Callable[[BrokerRuntimeServiceV1], int]
+    kernel: WindowsKernel | None = None
+    random_bytes: Callable[[int], bytes] = bcrypt_gen_random
+
+
+def compose_service(composition: BrokerServiceCompositionV1) -> BrokerRuntimeServiceV1:
+    if not isinstance(composition, BrokerServiceCompositionV1):
+        raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+    invocation = WindowsContainedInvocation(
+        kernel=composition.kernel or CtypesWindowsKernel(),
+        executable=composition.worker_executable,
+        qpc_frequency=composition.qpc_frequency,
+        qpc_counter=composition.qpc_counter,
+    )
+    application = ContainedWorkerBrokerApplicationV1(
+        invocation=invocation,
+        vendor_isolation=composition.vendor_isolation,
+    )
+    return BrokerRuntimeServiceV1.from_policy(
+        raw_policy_path=composition.raw_policy_path,
+        policy_platform=composition.policy_platform,
+        environment=composition.environment,
+        daemon_service_sid=composition.daemon_service_sid,
+        daemon_image=composition.daemon_image,
+        application=application,
+        qpc_frequency=composition.qpc_frequency,
+        qpc_counter=composition.qpc_counter,
+        random_bytes=composition.random_bytes,
+    )
+
+
+def compose_default_off_runtime() -> BrokerServiceCompositionV1 | None:
+    return None
+
+
+def _run_composed_service(composition: BrokerServiceCompositionV1) -> int:
+    return run_service(compose_service(composition), composition.serve)
+
+
 def main() -> int:
-    raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+    composition = compose_default_off_runtime()
+    if composition is None:
+        raise BrokerProtocolFailure("cst_saved_field.broker_unavailable")
+    return _run_composed_service(composition)
