@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -106,7 +107,7 @@ const (
 )
 
 func TestRetainedPIDFDAlive_LinuxChildHelper(_ *testing.T) {
-	if os.Getenv("MCPHUB_PIDFD_TEST_CHILD") != "1" {
+	if os.Getenv(pidfdTestChildEnv) != "1" {
 		return
 	}
 
@@ -120,7 +121,7 @@ func TestRetainedPIDFDAlive_LinuxChildHelper(_ *testing.T) {
 		_, _ = fmt.Fprintf(os.Stderr, "signal child readiness: %v\n", err)
 		os.Exit(2)
 	}
-	if os.Getenv("MCPHUB_PIDFD_TEST_CHILD_STALL") == "1" {
+	if os.Getenv(pidfdTestChildStallEnv) == "1" {
 		select {}
 	}
 	if _, err := io.ReadFull(release, make([]byte, 1)); err != nil {
@@ -158,9 +159,9 @@ func startPIDFDTestChild(t *testing.T, stalled bool) *pidfdTestChild {
 	ctx, cancel := context.WithTimeout(t.Context(), pidfdTestChildDeadline)
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRetainedPIDFDAlive_LinuxChildHelper$")
 	cmd.WaitDelay = pidfdTestWaitDelay
-	cmd.Env = append(os.Environ(), "MCPHUB_PIDFD_TEST_CHILD=1", "GORACE=atexit_sleep_ms=0")
+	cmd.Env = append(withoutGUITestHelperEnvironment(os.Environ(), runtime.GOOS), pidfdTestChildEnv+"=1", "GORACE=atexit_sleep_ms=0")
 	if stalled {
-		cmd.Env = append(cmd.Env, "MCPHUB_PIDFD_TEST_CHILD_STALL=1")
+		cmd.Env = append(cmd.Env, pidfdTestChildStallEnv+"=1")
 	}
 	cmd.Stderr = os.Stderr
 	cmd.ExtraFiles = []*os.File{readyWriter, releaseReader}
