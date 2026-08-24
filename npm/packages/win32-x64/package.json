@@ -1,6 +1,6 @@
 {
   "name": "@applicate2628/mcp-local-hub-win32-x64",
-  "version": "0.4.28",
+  "version": "0.4.29",
   "description": "mcphub binary for win32/x64 (Go windows/amd64) — GA (generally available). Platform sub-package of the \"mcp-local-hub\" meta package; not installed directly.",
   "license": "MPL-2.0",
   "author": "Dmitry Denisenko (@applicate2628)",
