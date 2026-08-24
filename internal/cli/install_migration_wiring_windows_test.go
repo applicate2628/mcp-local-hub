@@ -30,6 +30,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
 
@@ -98,8 +99,10 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
+	exe := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "UNREADABLE-INTENT")
+	target := filepath.Join(t.TempDir(), "mcphub.exe")
 
-	err := runV5UpgradeWindows(cmd)
+	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
 	if err == nil {
 		t.Fatal("runV5UpgradeWindows must return non-nil error when supervisor-intent.json is unreadable; got nil")
 	}

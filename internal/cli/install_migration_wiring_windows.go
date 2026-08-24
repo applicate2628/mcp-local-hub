@@ -58,6 +58,15 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve canonical target: %w", err)
 	}
+	return runV5UpgradeWindowsWithPaths(cmd, exe, target)
+}
+
+// runV5UpgradeWindowsWithPaths is the internal, hermetic entry point for the
+// upgrade sequence. Production resolves exe and target through the canonical
+// owners above; focused tests provide an admitted GUI PE and a temporary target
+// so they can reach post-staging failure paths without touching the running
+// test binary or the installed product.
+func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error {
 	staged, err := stageV5UpgradeBinary(exe, target)
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: stage binary beside canonical target: %w", err)
