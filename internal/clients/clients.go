@@ -340,6 +340,20 @@ type ScopedConfigWriterClient interface {
 	RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error
 }
 
+// CodexTransportClient is the narrow Codex-only seam used by adopt planning and
+// execution. ResolveTransportTarget is read-only; RelocateHTTPEntry is one
+// locked global-config transaction and never takes a project config path.
+type CodexTransportClient interface {
+	ResolveTransportTarget(CodexTransportTargetRequest) (CodexTransportTarget, error)
+	RelocateHTTPEntry(CodexHTTPRelocation) (CodexHTTPRelocationResult, error)
+	RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
+}
+
+func AsCodexTransportClient(client Client) (CodexTransportClient, bool) {
+	codex, ok := client.(CodexTransportClient)
+	return codex, ok
+}
+
 func AddEntryWithConfigWriter(client Client, entry MCPEntry, writer WriteConfigFileFunc) error {
 	if writer == nil {
 		return client.AddEntry(entry)

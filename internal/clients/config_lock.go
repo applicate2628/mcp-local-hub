@@ -557,6 +557,51 @@ func (l *lockingClient) AddEntryWithConfigWriter(entry MCPEntry, writer WriteCon
 	})
 }
 
+// ResolveTransportTarget is read-only and therefore does not acquire the
+// mutation lock. It forwards only when the concrete adapter owns the Codex
+// project-layer reader; other client adapters intentionally do not grow this
+// transport-specific surface.
+func (l *lockingClient) ResolveTransportTarget(req CodexTransportTargetRequest) (CodexTransportTarget, error) {
+	codex, ok := l.Client.(interface {
+		ResolveTransportTarget(CodexTransportTargetRequest) (CodexTransportTarget, error)
+	})
+	if !ok {
+		return CodexTransportTarget{}, fmt.Errorf("client %s does not support Codex transport inspection", l.Client.Name())
+	}
+	return codex.ResolveTransportTarget(req)
+}
+
+// RelocateHTTPEntry holds the single global config lock around the Codex
+// adapter's relocate/add/readback operation. The concrete body never nests a
+// config lock, so this remains one atomic transaction for the global TOML file.
+func (l *lockingClient) RelocateHTTPEntry(req CodexHTTPRelocation) (result CodexHTTPRelocationResult, err error) {
+	err = withConfigMutationLock(l.Client.ConfigPath(), func() error {
+		codex, ok := l.Client.(interface {
+			RelocateHTTPEntry(CodexHTTPRelocation) (CodexHTTPRelocationResult, error)
+		})
+		if !ok {
+			return fmt.Errorf("client %s does not support Codex HTTP relocation", l.Client.Name())
+		}
+		result, err = codex.RelocateHTTPEntry(req)
+		return err
+	})
+	return result, err
+}
+
+func (l *lockingClient) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (result CodexHTTPInverseResult, err error) {
+	err = withConfigMutationLock(l.Client.ConfigPath(), func() error {
+		codex, ok := l.Client.(interface {
+			RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
+		})
+		if !ok {
+			return fmt.Errorf("client %s does not support Codex HTTP inverse relocation", l.Client.Name())
+		}
+		result, err = codex.RestoreRelocatedHTTPEntry(req)
+		return err
+	})
+	return result, err
+}
+
 func (l *lockingClient) RemoveEntry(name string) error {
 	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
 		return l.Client.RemoveEntry(name)
