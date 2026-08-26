@@ -161,8 +161,8 @@ func TestRunInstallUpgrade_RefusesSelfReplace(t *testing.T) {
 	if !strings.Contains(err.Error(), canonical) {
 		t.Errorf("error message should name the canonical path; got %q", err.Error())
 	}
-	if !strings.Contains(err.Error(), "go build") {
-		t.Errorf("error message should hint at `go build` recovery; got %q", err.Error())
+	if !strings.Contains(err.Error(), "pwsh ./build.ps1") {
+		t.Errorf("error message should hint at `pwsh ./build.ps1` recovery; got %q", err.Error())
 	}
 	if stopCalled {
 		t.Errorf("StopAll must NOT be called when self-replace guard fires")
@@ -454,14 +454,15 @@ func TestRunInstallUpgrade_ExecutableLookupError(t *testing.T) {
 
 // TestRunInstallUpgrade_RefusesDevBuild pins the PR #188 A8 closure
 // (dev-build guard). A binary built without the build scripts'
-// ldflags shows version=="dev" and on Windows is CONSOLE-subsystem —
+// ldflags shows version=="dev" and cannot satisfy the Windows product
+// binary PE subsystem admission gate —
 // installing it would re-introduce the terminal-flash + tray-broken
 // regression caught in the 2026-05-15 smoke session. The guard runs
 // AFTER self-replace check (so a self-replace error wins) but
 // BEFORE StopAll (so daemons aren't stopped uselessly).
 //
-// Codex bot r5 P2 closure: scoped to Windows only. The CONSOLE-
-// subsystem regression is Windows-specific, and POSIX devs commonly
+// Codex bot r5 P2 closure: scoped to Windows only. The PE subsystem
+// admission gate is Windows-specific, and POSIX devs commonly
 // run untagged `go build` binaries. Test is gated on
 // runtime.GOOS == "windows"; on POSIX the same setup proceeds to
 // happy-path execution (TestRunInstallUpgrade_AllowsDevBuildOnPOSIX
@@ -489,8 +490,8 @@ func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
 	for _, want := range []string{
 		"refusing to --upgrade from a dev-build binary",
 		`version="dev"`,
-		"build.sh",
-		"CONSOLE-subsystem",
+		"pwsh ./build.ps1",
+		"PE subsystem admission gate",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error must contain %q for operator clarity; got %q", want, err.Error())
@@ -502,8 +503,8 @@ func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
 }
 
 // TestRunInstallUpgrade_AllowsDevBuildOnPOSIX pins codex bot r5 P2:
-// the dev-build guard is Windows-only because the CONSOLE-subsystem
-// regression doesn't exist on POSIX. A POSIX dev-build (version=="dev")
+// the dev-build guard is Windows-only because the PE subsystem admission
+// gate doesn't exist on POSIX. A POSIX dev-build (version=="dev")
 // must proceed through the normal flow.
 func TestRunInstallUpgrade_AllowsDevBuildOnPOSIX(t *testing.T) {
 	if runtime.GOOS == "windows" {
