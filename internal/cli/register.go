@@ -295,8 +295,59 @@ func finishUnregisterCommand(cmd *cobra.Command, report *api.UnregisterReport, l
 	return nil
 }
 
+type workspacesJSONRow struct {
+	api.WorkspaceEntry
+	WorkspaceProxyPort int                  `json:"workspace_proxy_port,omitempty"`
+	ClientEndpoint     string               `json:"client_endpoint,omitempty"`
+	EndpointMode       string               `json:"endpoint_mode,omitempty"`
+	ServiceState       api.ServiceStateV1   `json:"service_state,omitempty"`
+	ReadinessStage     api.ReadinessStageV1 `json:"readiness_stage,omitempty"`
+}
+
+func projectWorkspacesJSONRows(ctx context.Context, entries []api.WorkspaceEntry) ([]workspacesJSONRow, error) {
+	rows := make([]workspacesJSONRow, 0, len(entries))
+	hasSerena := false
+	for _, entry := range entries {
+		if entry.Language == api.SerenaLanguageSentinel && entry.Backend == api.SerenaServerName {
+			hasSerena = true
+			break
+		}
+	}
+	if !hasSerena {
+		for _, entry := range entries {
+			rows = append(rows, workspacesJSONRow{WorkspaceEntry: entry})
+		}
+		return rows, nil
+	}
+	projected, err := projectSerenaWorkspaceSnapshotForCLI(ctx, entries, api.SerenaWorkspaceProjectionModeSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	byTask := make(map[string]api.SerenaWorkspaceProjection, len(projected.Workspaces))
+	for _, projection := range projected.Workspaces {
+		byTask[projection.TaskName] = projection
+	}
+	for _, entry := range entries {
+		row := workspacesJSONRow{WorkspaceEntry: entry}
+		if entry.Language == api.SerenaLanguageSentinel {
+			projection, ok := byTask[entry.TaskName]
+			if !ok {
+				return nil, fmt.Errorf("SERENA_WORKSPACE_STATE_MISMATCH/status_missing: projection omitted task %q", entry.TaskName)
+			}
+			row.WorkspaceProxyPort = projection.WorkspaceProxyPort
+			row.ClientEndpoint = projection.ClientEndpoint
+			row.EndpointMode = projection.EndpointMode
+			row.ServiceState = projection.ServiceState
+			row.ReadinessStage = projection.ReadinessStage
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
 // newWorkspacesCmdReal: `mcphub workspaces [--json]`. Lists the registry.
-// Columns: WORKSPACE, LANG, PORT, BACKEND, LIFECYCLE, LAST_USED, PATH.
+// Columns: WORKSPACE, LANG, PORT, WORKSPACE_PROXY, BACKEND, LIFECYCLE,
+// LAST_USED, SERVICE, READINESS, CLIENT_ENDPOINT, PATH.
 // LAST_USED is a relative time (e.g. "5m ago") or "-" when the daemon has
 // not yet served a tools/call.
 func newWorkspacesCmdReal() *cobra.Command {
@@ -334,33 +385,41 @@ Lifecycle states:
 				}
 				return entries[i].Language < entries[j].Language
 			})
+			rows, projectionErr := projectWorkspacesJSONRows(cmd.Context(), entries)
+			if projectionErr != nil {
+				return projectionErr
+			}
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				if entries == nil {
-					entries = []api.WorkspaceEntry{}
+				if rows == nil {
+					rows = []workspacesJSONRow{}
 				}
-				return enc.Encode(entries)
+				return enc.Encode(rows)
 			}
-			return printWorkspacesTable(cmd, entries)
+			return printWorkspacesProjectionTable(cmd, rows)
 		},
 	}
 	c.Flags().BoolVar(&jsonOut, "json", false, "machine-readable JSON output")
 	return c
 }
 
-// printWorkspacesTable renders the table form of the registry. Extracted so
-// tests can exercise the exact column layout independent of the cobra
-// dispatch path.
-func printWorkspacesTable(cmd *cobra.Command, entries []api.WorkspaceEntry) error {
-	fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-12s %-6s %-20s %-11s %-10s %s\n",
-		"WORKSPACE", "LANG", "PORT", "BACKEND", "LIFECYCLE", "LAST_USED", "PATH")
-	for _, e := range entries {
-		fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-12s %-6d %-20s %-11s %-10s %s\n",
-			e.WorkspaceKey, e.Language, e.Port, e.Backend,
-			stateOrDash(e.Lifecycle),
-			relativeLastUsed(e.LastToolsCallAt),
-			e.WorkspacePath)
+func printWorkspacesProjectionTable(cmd *cobra.Command, rows []workspacesJSONRow) error {
+	fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-12s %-6s %-15s %-20s %-11s %-10s %-11s %-10s %-32s %s\n",
+		"WORKSPACE", "LANG", "PORT", "WORKSPACE_PROXY", "BACKEND", "LIFECYCLE", "LAST_USED", "SERVICE", "READINESS", "CLIENT_ENDPOINT", "PATH")
+	for _, row := range rows {
+		service := string(row.ServiceState)
+		stage := string(row.ReadinessStage)
+		endpoint := ""
+		proxy := row.Port
+		if row.Language == api.SerenaLanguageSentinel && row.Backend == api.SerenaServerName {
+			proxy = row.WorkspaceProxyPort
+			endpoint = row.ClientEndpoint
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-12s %-6d %-15d %-20s %-11s %-10s %-11s %-10s %-32s %s\n",
+			row.WorkspaceKey, row.Language, row.Port, proxy, row.Backend,
+			stateOrDash(row.Lifecycle), relativeLastUsed(row.LastToolsCallAt),
+			stateOrDash(service), stateOrDash(stage), endpoint, row.WorkspacePath)
 	}
 	return nil
 }

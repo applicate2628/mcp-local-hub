@@ -34,13 +34,80 @@ func TestPathShadowDiagnostic(t *testing.T) {
 		}
 	}
 
-	// Genuinely different binaries warn, naming BOTH locations.
-	warn := pathShadowDiagnostic(running, shadow)
-	if warn == "" {
-		t.Fatal("different binaries must warn")
+	if err := os.WriteFile(running, []byte("mcp-local-hub 0.4.29\ncommit: 32fab6d\n"), 0o755); err != nil {
+		t.Fatalf("write running binary fixture: %v", err)
 	}
-	if !strings.Contains(warn, filepath.Clean(shadow)) || !strings.Contains(warn, filepath.Clean(running)) {
-		t.Fatalf("warning must name both locations; got %q", warn)
+	if err := os.WriteFile(shadow, []byte("mcp-local-hub 0.4.29\ncommit: 32fab6d\n"), 0o755); err != nil {
+		t.Fatalf("write byte-identical alternate fixture: %v", err)
+	}
+
+	// Different locations carrying byte-identical binaries are informational,
+	// not a stale-PATH warning.
+	got := pathShadowDiagnostic(running, shadow)
+	if !strings.Contains(got, "equivalent alternate path") {
+		t.Fatalf("byte-identical alternate path must be informational; got %q", got)
+	}
+	if strings.Contains(got, "identity differs") || strings.Contains(got, "identity-unverified") {
+		t.Fatalf("byte-identical alternate path must not be a warning; got %q", got)
+	}
+}
+
+func TestPathShadowDiagnosticWarnsWhenSameVersionBytesDiffer(t *testing.T) {
+	dir := t.TempDir()
+	running := filepath.Join(dir, "running-mcphub.exe")
+	shadow := filepath.Join(dir, "shadow-mcphub.exe")
+	if err := os.WriteFile(running, []byte("mcp-local-hub 0.4.29\ncommit: 32fab6d\nbody=A\n"), 0o755); err != nil {
+		t.Fatalf("write running binary fixture: %v", err)
+	}
+	if err := os.WriteFile(shadow, []byte("mcp-local-hub 0.4.29\ncommit: 32fab6d\nbody=B\n"), 0o755); err != nil {
+		t.Fatalf("write same-version alternate fixture: %v", err)
+	}
+
+	got := pathShadowDiagnostic(running, shadow)
+	if !strings.Contains(got, "identity differs") {
+		t.Fatalf("same-version different bytes must warn about identity drift; got %q", got)
+	}
+	assertShadowReconciliationCommand(t, got)
+}
+
+func TestPathShadowDiagnosticWarnsWhenVersionOrCommitBytesDiffer(t *testing.T) {
+	dir := t.TempDir()
+	running := filepath.Join(dir, "running-mcphub.exe")
+	shadow := filepath.Join(dir, "shadow-mcphub.exe")
+	if err := os.WriteFile(running, []byte("mcp-local-hub 0.4.29\ncommit: 32fab6d\n"), 0o755); err != nil {
+		t.Fatalf("write running binary fixture: %v", err)
+	}
+	if err := os.WriteFile(shadow, []byte("mcp-local-hub 0.4.30\ncommit: deadbee\n"), 0o755); err != nil {
+		t.Fatalf("write different-version alternate fixture: %v", err)
+	}
+
+	got := pathShadowDiagnostic(running, shadow)
+	if !strings.Contains(got, "identity differs") {
+		t.Fatalf("different version or commit must warn about identity drift; got %q", got)
+	}
+	assertShadowReconciliationCommand(t, got)
+}
+
+func TestPathShadowDiagnosticWarnsWhenAlternateIdentityIsUnreadable(t *testing.T) {
+	dir := t.TempDir()
+	running := filepath.Join(dir, "running-mcphub.exe")
+	missingAlternate := filepath.Join(dir, "missing-mcphub.exe")
+	if err := os.WriteFile(running, []byte("mcp-local-hub 0.4.29\ncommit: 32fab6d\n"), 0o755); err != nil {
+		t.Fatalf("write running binary fixture: %v", err)
+	}
+
+	got := pathShadowDiagnostic(running, missingAlternate)
+	if !strings.Contains(got, "identity-unverified") {
+		t.Fatalf("unreadable alternate must warn that identity is unverified; got %q", got)
+	}
+	assertShadowReconciliationCommand(t, got)
+}
+
+func assertShadowReconciliationCommand(t *testing.T, diagnostic string) {
+	t.Helper()
+	const want = "mcphub setup"
+	if !strings.Contains(diagnostic, want) {
+		t.Fatalf("actionable diagnostic must contain %q; got %q", want, diagnostic)
 	}
 }
 
@@ -68,7 +135,7 @@ func TestPathShadowDiagnosticWarnsForCaseOnlyDistinctPOSIXPaths(t *testing.T) {
 	}
 
 	warn := pathShadowDiagnostic(running, shadow)
-	if warn == "" {
+	if !strings.Contains(warn, "identity differs") {
 		t.Fatalf("expected warning for distinct case-only paths %q and %q", running, shadow)
 	}
 	if !strings.Contains(warn, filepath.Clean(shadow)) || !strings.Contains(warn, filepath.Clean(running)) {

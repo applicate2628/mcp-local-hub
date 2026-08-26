@@ -100,6 +100,113 @@ func TestWorkspaces_GET_DedupesByKey_SortedByKeyThenLanguage(t *testing.T) {
 	}
 }
 
+func TestWorkspaces_GET_SerenaEntryUsesVerifiedClientEndpointNotWorkspaceProxy(t *testing.T) {
+	resetWorkspacesTestSeam(t)
+	workspacesTestSeam = func() (*api.Registry, error) {
+		reg := api.NewRegistry("/synthetic/path")
+		reg.Workspaces = []api.WorkspaceEntry{{
+			WorkspaceKey:  "project",
+			WorkspacePath: `C:\\work\\project`,
+			Language:      api.SerenaLanguageSentinel,
+			Backend:       api.SerenaServerName,
+			Port:          9150,
+			TaskName:      "serena-project",
+			Languages:     []string{"cpp"},
+		}}
+		return reg, nil
+	}
+	stubGUISerenaProjection(t, 9121, nil)
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", rr.Code, rr.Body.String())
+	}
+	var response workspacesResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Entries) != 1 {
+		t.Fatalf("entries = %+v, want one", response.Entries)
+	}
+	entry := response.Entries[0]
+	if entry.ClientEndpoint != "http://127.0.0.1:9121/serena/mcp" || entry.EndpointMode != api.SerenaEndpointModeGUICompat {
+		t.Fatalf("endpoint projection = %+v", entry)
+	}
+	if entry.WorkspaceProxyPort != 9150 || entry.Port != 9150 {
+		t.Fatalf("workspace proxy projection = %d/%d, want 9150", entry.WorkspaceProxyPort, entry.Port)
+	}
+}
+
+func TestWorkspaces_GET_SerenaEndpointFailureIsExplicit(t *testing.T) {
+	resetWorkspacesTestSeam(t)
+	workspacesTestSeam = func() (*api.Registry, error) {
+		reg := api.NewRegistry("/synthetic/path")
+		reg.Workspaces = []api.WorkspaceEntry{{
+			WorkspaceKey: "project", Language: api.SerenaLanguageSentinel,
+			Backend: api.SerenaServerName, Port: 9150,
+		}}
+		return reg, nil
+	}
+	stubGUISerenaProjection(t, 0, &api.SerenaClientEndpointUnreadyError{Stage: api.MCPFrontProbeStageInitializeHTTPStatus, Cause: errors.New("initialize returned 503")})
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	req := httptest.NewRequest("GET", "/api/workspaces", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+	s.mux.ServeHTTP(rr, req)
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503; body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), "SERENA_CLIENT_ENDPOINT_UNREADY") {
+		t.Fatalf("endpoint failure must be explicit: %s", rr.Body.String())
+	}
+}
+
+func TestWorkspaces_GET_SerenaProxyPortMismatchesReturnConflict(t *testing.T) {
+	for _, kind := range []string{"registry_intent", "intent_status"} {
+		t.Run(kind, func(t *testing.T) {
+			resetWorkspacesTestSeam(t)
+			workspacesTestSeam = func() (*api.Registry, error) {
+				reg := api.NewRegistry("/synthetic/path")
+				reg.Workspaces = []api.WorkspaceEntry{{WorkspaceKey: "project", WorkspacePath: `C:\\work\\project`, Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName, Port: 9150, TaskName: "serena-project"}}
+				return reg, nil
+			}
+			stubGUISerenaProjection(t, 0, &api.SerenaWorkspaceStateMismatchError{Kind: api.SerenaWorkspaceStateMismatchProxyPort})
+			s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+			req := httptest.NewRequest("GET", "/api/workspaces", nil)
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			rr := httptest.NewRecorder()
+			s.mux.ServeHTTP(rr, req)
+			if rr.Code != http.StatusConflict {
+				t.Fatalf("GUI status = %d, want 409: %s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "SERENA_WORKSPACE_STATE_MISMATCH") || !strings.Contains(rr.Body.String(), api.SerenaWorkspaceStateMismatchProxyPort) {
+				t.Fatalf("GUI mismatch body = %s", rr.Body.String())
+			}
+		})
+	}
+}
+
+func stubGUISerenaProjection(t *testing.T, routerPort int, returned error) {
+	t.Helper()
+	previous := projectSerenaWorkspaceSnapshotForGUI
+	projectSerenaWorkspaceSnapshotForGUI = func(_ context.Context, rows []api.WorkspaceEntry) (api.SerenaWorkspaceProjectionOutputV1, error) {
+		if returned != nil {
+			return api.SerenaWorkspaceProjectionOutputV1{}, returned
+		}
+		out := api.SerenaWorkspaceProjectionOutputV1{}
+		for _, row := range rows {
+			out.Workspaces = append(out.Workspaces, api.SerenaWorkspaceProjection{WorkspaceKey: row.WorkspaceKey, WorkspacePath: row.WorkspacePath, Language: row.Language, Backend: row.Backend, Port: row.Port, WorkspaceProxyPort: row.Port, TaskName: row.TaskName, Languages: append([]string(nil), row.Languages...), ClientEndpoint: api.SerenaRouterClientURL(routerPort), EndpointMode: api.SerenaEndpointModeGUICompat, ServiceState: api.ServiceStateRunning, ReadinessStage: api.ReadinessStageComplete, ReadinessSettled: true})
+		}
+		return out, nil
+	}
+	t.Cleanup(func() { projectSerenaWorkspaceSnapshotForGUI = previous })
+}
+
 func TestWorkspaces_NonGET_405(t *testing.T) {
 	resetWorkspacesTestSeam(t)
 	workspacesTestSeam = func() (*api.Registry, error) {
@@ -172,6 +279,18 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 	}
 	if entry["task_name"] != `\mcp-local-hub-lsp-project-go` {
 		t.Errorf("task_name = %#v, want snake_case task_name", entry["task_name"])
+	}
+	if entry["workspace_proxy_port"] != float64(9201) {
+		t.Errorf("workspace_proxy_port = %#v, want 9201", entry["workspace_proxy_port"])
+	}
+	// LSP registration has no Serena routing authority. The shared workspace
+	// DTO must nevertheless keep the expanded client fields explicit so GUI
+	// consumers never infer the internal proxy port is a client endpoint.
+	if endpoint, ok := entry["client_endpoint"]; !ok || endpoint != "" {
+		t.Errorf("client_endpoint = %#v present=%t, want explicit empty string", endpoint, ok)
+	}
+	if mode, ok := entry["endpoint_mode"]; !ok || mode != "" {
+		t.Errorf("endpoint_mode = %#v present=%t, want explicit empty string", mode, ok)
 	}
 	if _, exists := entry["TaskName"]; exists {
 		t.Fatalf("response entry leaked PascalCase TaskName key: %#v", entry)

@@ -15,9 +15,15 @@
 package api
 
 import (
+	"bytes"
+	"encoding/binary"
+	"encoding/xml"
+	"errors"
 	"fmt"
+	"io"
 	"os/user"
 	"strings"
+	"unicode/utf16"
 
 	"mcp-local-hub/internal/scheduler"
 )
@@ -83,6 +89,28 @@ func defaultCurrentWindowsUser() (string, error) {
 // constant so callers reference one literal.
 const LivenessTaskName = "\\mcp-local-hub-liveness"
 
+// LivenessTaskResult identifies the pre-state that an EnsureLivenessTask
+// receipt can restore. It is an internal transaction result, not a public CLI
+// state string.
+type LivenessTaskResult string
+
+const (
+	LivenessTaskUnchanged LivenessTaskResult = "unchanged"
+	LivenessTaskCreated   LivenessTaskResult = "created-from-absent"
+	LivenessTaskReplaced  LivenessTaskResult = "replaced-with-prior-xml"
+)
+
+// LivenessTaskReceipt is valid only for the setup transaction that received
+// it. The captured settled XML is a compare-before-restore fence: rollback
+// refuses to delete or overwrite a liveness task changed after settlement.
+type LivenessTaskReceipt struct {
+	Result     LivenessTaskResult
+	priorXML   []byte
+	settledXML []byte
+}
+
+var ErrLivenessTaskRollbackConflict = errors.New("api: liveness task rollback conflict")
+
 // InstallLivenessTask is the idempotent install of the supervisor-liveness
 // scheduled task: resolve the canonical mcphub.exe path + the current Windows
 // user, render the liveness XML via scheduler.BuildLivenessXML, encode it
@@ -97,23 +125,153 @@ const LivenessTaskName = "\\mcp-local-hub-liveness"
 // loud at the ImportXML call — the liveness task is a Windows-GA capability
 // in v0.6.
 func (a *API) InstallLivenessTask() error {
+	_, err := a.EnsureLivenessTask()
+	return err
+}
+
+// EnsureLivenessTask settles the API-owned liveness task and returns an exact
+// rollback receipt. The caller is responsible for proving the supervisor
+// target first; this owner never creates or mutates that separate resource.
+func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 	canonicalExe, err := canonicalMcphubPathFn()
 	if err != nil {
-		return err
+		return LivenessTaskReceipt{}, err
 	}
 	userName, err := currentWindowsUserFn()
 	if err != nil {
-		return err
+		return LivenessTaskReceipt{}, err
 	}
 	workingDir := livenessWorkingDir(canonicalExe)
-	xmlDoc := scheduler.BuildLivenessXML(canonicalExe, workingDir, userName)
-	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(xmlDoc)
+	sch, err := newScheduler()
+	if err != nil {
+		return LivenessTaskReceipt{}, err
+	}
+	prior, exportErr := sch.ExportXML(LivenessTaskName)
+	receipt := LivenessTaskReceipt{}
+	if exportErr != nil {
+		if !errors.Is(exportErr, scheduler.ErrTaskNotFound) {
+			return receipt, fmt.Errorf("snapshot liveness task: %w", exportErr)
+		}
+		receipt.Result = LivenessTaskCreated
+	} else {
+		receipt.Result = LivenessTaskReplaced
+		receipt.priorXML = append([]byte(nil), prior...)
+		if !livenessTaskReadable(prior) {
+			return receipt, fmt.Errorf("liveness task definition is corrupt")
+		}
+		if livenessTaskMatches(prior, canonicalExe, workingDir, userName) {
+			receipt.Result = LivenessTaskUnchanged
+			receipt.settledXML = append([]byte(nil), prior...)
+			return receipt, nil
+		}
+	}
+	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(canonicalExe, workingDir, userName))
+	if err := sch.ImportXML(LivenessTaskName, xmlBytes); err != nil {
+		return receipt, fmt.Errorf("import liveness task: %w", err)
+	}
+	settled, err := sch.ExportXML(LivenessTaskName)
+	if err != nil {
+		return receipt, fmt.Errorf("read back liveness task: %w", err)
+	}
+	receipt.settledXML = append([]byte(nil), settled...)
+	if !livenessTaskMatches(settled, canonicalExe, workingDir, userName) {
+		return receipt, fmt.Errorf("liveness task definition drifted after import")
+	}
+	return receipt, nil
+}
 
+// RestoreLivenessTask restores only the exact pre-state captured in receipt.
+func (a *API) RestoreLivenessTask(receipt LivenessTaskReceipt) error {
+	if receipt.Result == LivenessTaskUnchanged {
+		return nil
+	}
+	if len(receipt.settledXML) == 0 {
+		return fmt.Errorf("%w: receipt has no settled liveness XML", ErrLivenessTaskRollbackConflict)
+	}
 	sch, err := newScheduler()
 	if err != nil {
 		return err
 	}
-	return sch.ImportXML(LivenessTaskName, xmlBytes)
+	current, err := sch.ExportXML(LivenessTaskName)
+	if err != nil || !bytes.Equal(current, receipt.settledXML) {
+		return fmt.Errorf("%w: liveness task changed after settlement", ErrLivenessTaskRollbackConflict)
+	}
+	if receipt.Result == LivenessTaskCreated {
+		if err := sch.Delete(LivenessTaskName); err != nil {
+			return fmt.Errorf("delete created liveness task: %w", err)
+		}
+		return nil
+	}
+	if err := sch.ImportXML(LivenessTaskName, receipt.priorXML); err != nil {
+		return fmt.Errorf("restore liveness task XML: %w", err)
+	}
+	restored, err := sch.ExportXML(LivenessTaskName)
+	if err != nil || !bytes.Equal(restored, receipt.priorXML) {
+		return fmt.Errorf("%w: liveness XML readback differs from captured pre-state", ErrLivenessTaskRollbackConflict)
+	}
+	return nil
+}
+
+func livenessTaskMatches(xmlBlob []byte, canonicalExe, workingDir, userName string) bool {
+	task, ok := parseLivenessTaskXML(xmlBlob)
+	return ok && task.UserID == userName && task.Exec.Command == canonicalExe &&
+		task.Exec.WorkingDirectory == workingDir && task.Exec.Arguments == "supervise --ensure-alive" &&
+		strings.EqualFold(task.Enabled, "true")
+}
+
+type livenessTaskXML struct {
+	UserID string
+	Exec   struct {
+		Command          string `xml:"Command"`
+		Arguments        string `xml:"Arguments"`
+		WorkingDirectory string `xml:"WorkingDirectory"`
+	}
+	Enabled string
+}
+
+func livenessTaskReadable(xmlBlob []byte) bool {
+	_, ok := parseLivenessTaskXML(xmlBlob)
+	return ok
+}
+
+func parseLivenessTaskXML(xmlBlob []byte) (livenessTaskXML, bool) {
+	type execNode struct {
+		Command          string `xml:"Command"`
+		Arguments        string `xml:"Arguments"`
+		WorkingDirectory string `xml:"WorkingDirectory"`
+	}
+	type taskRoot struct {
+		UserID  string   `xml:"Principals>Principal>UserId"`
+		Exec    execNode `xml:"Actions>Exec"`
+		Enabled string   `xml:"Settings>Enabled"`
+	}
+	if len(xmlBlob) >= 2 && xmlBlob[0] == 0xff && xmlBlob[1] == 0xfe && (len(xmlBlob)-2)%2 == 0 {
+		units := make([]uint16, 0, (len(xmlBlob)-2)/2)
+		for i := 2; i < len(xmlBlob); i += 2 {
+			units = append(units, binary.LittleEndian.Uint16(xmlBlob[i:i+2]))
+		}
+		xmlBlob = []byte(string(utf16.Decode(units)))
+	}
+	decoder := xml.NewDecoder(bytes.NewReader(xmlBlob))
+	decoder.CharsetReader = func(_ string, reader io.Reader) (io.Reader, error) { return reader, nil }
+	var task taskRoot
+	if err := decoder.Decode(&task); err != nil {
+		return livenessTaskXML{}, false
+	}
+	if task.Exec.Command == "" || task.Exec.Arguments == "" || task.UserID == "" {
+		return livenessTaskXML{}, false
+	}
+	return livenessTaskXML{
+		UserID: task.UserID,
+		Exec: struct {
+			Command          string `xml:"Command"`
+			Arguments        string `xml:"Arguments"`
+			WorkingDirectory string `xml:"WorkingDirectory"`
+		}{
+			Command: task.Exec.Command, Arguments: task.Exec.Arguments, WorkingDirectory: task.Exec.WorkingDirectory,
+		},
+		Enabled: task.Enabled,
+	}, true
 }
 
 // UninstallLivenessTask is the idempotent removal of the supervisor-liveness

@@ -1,5 +1,14 @@
 # Serena (MCP server)
 
+Serena clients use the live-probed hub router endpoint
+`http://127.0.0.1:<router-port>/serena/mcp`. A workspace proxy port is internal
+to supervision and must never be configured as a client URL.
+
+Current Serena 1.7 project files use `language_servers`. Existing `languages`
+and singular `language` files remain compatible; migrate only those keys without
+replacing other settings with `mcphub workspace bootstrap <path>
+--migrate-serena-schema`.
+
 One unified daemon on `--context codex`, port 9121, serving every client —
 Claude Code, Codex CLI, Cursor, VS Code, Gemini CLI, Qwen CLI, and the
 Antigravity relay (post-2026-05-20 review replaced the old claude/codex

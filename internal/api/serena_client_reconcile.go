@@ -35,6 +35,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -61,6 +62,414 @@ const serenaEntryName = "serena"
 // ReconcileSerenaClientsToRouter builds (serena_client_reconcile.go routerURL).
 func SerenaRouterClientURL(guiPort int) string {
 	return fmt.Sprintf("http://127.0.0.1:%d%s", guiPort, SerenaRouterURLPath)
+}
+
+// SerenaClientEndpoint is the sole client-facing projection for the dynamic
+// Serena pool. WorkspaceEntry.Port is deliberately absent: that persisted port
+// belongs to the per-workspace proxy/upstream and must never be offered as an
+// MCP client URL.
+type SerenaClientEndpoint struct {
+	ClientEndpoint string `json:"client_endpoint"`
+	EndpointMode   string `json:"endpoint_mode"`
+	RouterPort     int    `json:"router_port"`
+	Ready          bool   `json:"ready"`
+	ReadinessStage string `json:"readiness_stage"`
+}
+
+const (
+	SerenaEndpointModeMCPFront   = "mcp-front"
+	SerenaEndpointModeGUICompat  = "gui-compat"
+	SerenaEndpointReadinessReady = "ready"
+)
+
+// SerenaClientEndpointUnreadyError preserves the routing target and exact
+// readiness substage for CLI and GUI callers. A formatted URL is never a
+// successful endpoint projection: the route must first pass the shared MCP
+// shape and initialize probes.
+type SerenaClientEndpointUnreadyError struct {
+	Target ClientRoutingTarget
+	Stage  MCPFrontProbeStage
+	Cause  error
+}
+
+func (e *SerenaClientEndpointUnreadyError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("SERENA_CLIENT_ENDPOINT_UNREADY: mode=%s port=%d stage=%s: %v", e.Target.Mode, e.Target.Port, e.Stage, e.Cause)
+}
+
+func (e *SerenaClientEndpointUnreadyError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// ResolveSerenaClientEndpoint resolves the current routing authority and
+// returns a client URL only after the existing bounded router lifecycle proof
+// succeeds. It intentionally reads the routing target from its existing owner;
+// it does not infer an endpoint from a workspace proxy port or GUI config.
+func (a *API) ResolveSerenaClientEndpoint(ctx context.Context) (SerenaClientEndpoint, error) {
+	target, err := a.ResolveClientRoutingTarget()
+	if err != nil {
+		return SerenaClientEndpoint{}, &SerenaClientEndpointUnreadyError{
+			Stage: MCPFrontProbeStageInput,
+			Cause: err,
+		}
+	}
+	return ResolveSerenaClientEndpointForTarget(ctx, target)
+}
+
+// ResolveSerenaClientEndpointForTarget is the target-pinned form used by
+// composition roots that already hold routing authority. It is also the test
+// seam for a hermetic local router; it makes no state, client, daemon, or
+// workspace mutation.
+func ResolveSerenaClientEndpointForTarget(ctx context.Context, target ClientRoutingTarget) (SerenaClientEndpoint, error) {
+	if err := ValidateClientRoutingTarget(target); err != nil {
+		return SerenaClientEndpoint{}, &SerenaClientEndpointUnreadyError{
+			Target: target,
+			Stage:  MCPFrontProbeStageInput,
+			Cause:  err,
+		}
+	}
+
+	mode := ""
+	switch target.Mode {
+	case MCPFrontRoutingTargetGUI:
+		mode = SerenaEndpointModeGUICompat
+	case MCPFrontRoutingTargetFront:
+		mode = SerenaEndpointModeMCPFront
+	default:
+		return SerenaClientEndpoint{}, &SerenaClientEndpointUnreadyError{
+			Target: target,
+			Stage:  MCPFrontProbeStageInput,
+			Cause:  &MCPFrontTargetInvalidError{Detail: fmt.Sprintf("unsupported Serena routing mode %q", target.Mode)},
+		}
+	}
+	if err := AssertSerenaRouterRouteLive(ctx, target.Port); err != nil {
+		return SerenaClientEndpoint{}, &SerenaClientEndpointUnreadyError{
+			Target: target,
+			Stage:  probeStageFromError(err),
+			Cause:  err,
+		}
+	}
+	return SerenaClientEndpoint{
+		ClientEndpoint: SerenaRouterClientURL(target.Port),
+		EndpointMode:   mode,
+		RouterPort:     target.Port,
+		Ready:          true,
+		ReadinessStage: SerenaEndpointReadinessReady,
+	}, nil
+}
+
+// SerenaWorkspaceProjection is the derived Serena-only read model shared by
+// CLI and GUI presenters. It retains the registry's legacy Port field for one
+// compatibility window while making its internal-only role explicit through
+// WorkspaceProxyPort. ClientEndpoint always comes from SerenaClientEndpoint,
+// never from the workspace proxy.
+type SerenaWorkspaceProjection struct {
+	WorkspaceKey       string              `json:"workspace_key"`
+	WorkspacePath      string              `json:"workspace_path"`
+	Language           string              `json:"language"`
+	Backend            string              `json:"backend"`
+	Port               int                 `json:"port"`
+	WorkspaceProxyPort int                 `json:"workspace_proxy_port"`
+	TaskName           string              `json:"task_name"`
+	ClientEntries      map[string]string   `json:"client_entries,omitempty"`
+	Lifecycle          string              `json:"lifecycle,omitempty"`
+	LastError          string              `json:"last_error,omitempty"`
+	Languages          []string            `json:"language_servers,omitempty"`
+	ClientEndpoint     string              `json:"client_endpoint"`
+	EndpointMode       string              `json:"endpoint_mode"`
+	ServiceState       ServiceStateV1      `json:"service_state"`
+	ReadinessStage     ReadinessStageV1    `json:"readiness_stage"`
+	ReadinessSettled   bool                `json:"readiness_settled"`
+	ReadinessFailure   *ReadinessFailureV1 `json:"readiness_failure,omitempty"`
+}
+
+// SerenaWorkspaceProjectionMode selects whether an aligned but not-yet-ready
+// workspace is returned for observation or rejected for a settled-only caller.
+type SerenaWorkspaceProjectionMode string
+
+const (
+	SerenaWorkspaceProjectionModeSnapshot       SerenaWorkspaceProjectionMode = "snapshot"
+	SerenaWorkspaceProjectionModeRequireSettled SerenaWorkspaceProjectionMode = "require_settled"
+)
+
+const (
+	SerenaWorkspaceStateMismatchProxyPort          = "proxy_port_mismatch"
+	SerenaWorkspaceStateMismatchIntentMissing      = "intent_missing"
+	SerenaWorkspaceStateMismatchStatusMissing      = "status_missing"
+	SerenaWorkspaceStateMismatchReadinessMissing   = "readiness_missing"
+	SerenaWorkspaceStateMismatchAuthorityDuplicate = "authority_duplicate"
+	SerenaWorkspaceStateMismatchTask               = "task_mismatch"
+	SerenaWorkspaceStateMismatchWorkspace          = "workspace_mismatch"
+	SerenaWorkspaceStateMismatchGeneration         = "generation_mismatch"
+)
+
+// SerenaWorkspaceStateMismatchError reports an authority contradiction without
+// exposing a workspace path, client identifier, or child-process error.
+type SerenaWorkspaceStateMismatchError struct {
+	Kind                      string
+	WorkspaceKey, TaskName    string
+	RegistryPort, IntentPort  int
+	StatusPort, ReadinessPort int
+}
+
+func (e *SerenaWorkspaceStateMismatchError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("SERENA_WORKSPACE_STATE_MISMATCH/%s: workspace=%q task=%q registry_port=%d intent_port=%d status_port=%d readiness_port=%d", e.Kind, e.WorkspaceKey, e.TaskName, e.RegistryPort, e.IntentPort, e.StatusPort, e.ReadinessPort)
+}
+
+// SerenaWorkspaceProxyUnreadyError is the settled-only result for an aligned
+// proxy that has not reached a running, complete, settled readiness state.
+type SerenaWorkspaceProxyUnreadyError struct {
+	WorkspaceKey string
+	TaskName     string
+	ServiceState ServiceStateV1
+	Stage        ReadinessStageV1
+	Settled      bool
+	Failure      *ReadinessFailureV1
+}
+
+func (e *SerenaWorkspaceProxyUnreadyError) Error() string {
+	if e == nil {
+		return ""
+	}
+	failureID := ""
+	if e.Failure != nil {
+		failureID = e.Failure.FailureID
+	}
+	return fmt.Sprintf("SERENA_WORKSPACE_PROXY_UNREADY: workspace=%q task=%q service_state=%s readiness_stage=%s settled=%t failure_id=%s", e.WorkspaceKey, e.TaskName, e.ServiceState, e.Stage, e.Settled, failureID)
+}
+
+// SerenaWorkspaceProjectionInputV1 is one already-held authority snapshot.
+// ProjectSerenaWorkspaceSnapshot is pure: it does not read registry/intent
+// files, dial supervisor IPC, or probe routing; acquisition stays with its API
+// composition owner so every workspace observes the same command snapshot.
+type SerenaWorkspaceProjectionInputV1 struct {
+	Mode             SerenaWorkspaceProjectionMode
+	RegistryRows     []WorkspaceEntry
+	SupervisorIntent SupervisorIntentFile
+	StatusRows       []DaemonStatus
+	Readiness        ReadinessSnapshotV1
+	Endpoint         SerenaClientEndpoint
+}
+
+// SerenaWorkspaceProjectionOutputV1 contains the task-sorted Serena rows and
+// a cloned, readiness-enriched status snapshot. A mismatch returns its zero
+// value so a presenter can never render a mixture of rejected and healthy rows.
+type SerenaWorkspaceProjectionOutputV1 struct {
+	Workspaces []SerenaWorkspaceProjection
+	StatusRows []DaemonStatus
+}
+
+// ProjectSerenaWorkspaceSnapshot is the single API-owned, batch authority join
+// for Serena workspace rows. It compares registry, supervisor intent, held IPC
+// status, the readiness reduction derived from that same status snapshot, and
+// the already-observed client routing endpoint. It deliberately performs no
+// acquisition or mutation.
+func ProjectSerenaWorkspaceSnapshot(in SerenaWorkspaceProjectionInputV1) (SerenaWorkspaceProjectionOutputV1, error) {
+	if in.Mode != SerenaWorkspaceProjectionModeSnapshot && in.Mode != SerenaWorkspaceProjectionModeRequireSettled {
+		return SerenaWorkspaceProjectionOutputV1{}, &SerenaWorkspaceStateMismatchError{Kind: "projection_mode_invalid"}
+	}
+
+	statusRows := cloneDaemonStatusRows(in.StatusRows)
+	intentByTask, intentDup := indexSerenaIntentByTask(in.SupervisorIntent.Daemons)
+	statusByTask, statusDup := indexDaemonStatusByTask(statusRows)
+	readinessByTask, readinessDup := indexReadinessByTask(in.Readiness.Daemons)
+	workspaces := make([]SerenaWorkspaceProjection, 0)
+
+	for _, entry := range in.RegistryRows {
+		if entry.Language != SerenaLanguageSentinel || entry.Backend != SerenaServerName {
+			continue
+		}
+		taskName := normalizeSerenaAuthorityTaskName(entry.TaskName)
+		mismatch := func(kind string, intent *SupervisorDaemon, status *DaemonStatus, readiness *DaemonReadinessV1) error {
+			err := &SerenaWorkspaceStateMismatchError{Kind: kind, WorkspaceKey: entry.WorkspaceKey, TaskName: taskName, RegistryPort: entry.Port}
+			if intent != nil {
+				err.IntentPort = intent.Port
+			}
+			if status != nil {
+				err.StatusPort = status.Port
+			}
+			if readiness != nil {
+				err.ReadinessPort = readiness.Port
+			}
+			return err
+		}
+		if taskName == "" || entry.Port <= 0 {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchTask, nil, nil, nil)
+		}
+		if intentDup[taskName] || statusDup[taskName] || readinessDup[taskName] {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchAuthorityDuplicate, nil, nil, nil)
+		}
+		intent, intentOK := intentByTask[taskName]
+		if !intentOK {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchIntentMissing, nil, nil, nil)
+		}
+		statusIndex, statusOK := statusByTask[taskName]
+		if !statusOK {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchStatusMissing, &intent, nil, nil)
+		}
+		status := &statusRows[statusIndex]
+		readiness, readinessOK := readinessByTask[taskName]
+		if !readinessOK {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchReadinessMissing, &intent, status, nil)
+		}
+		if normalizeSerenaAuthorityTaskName(intent.TaskName) != taskName || normalizeSerenaAuthorityTaskName(status.TaskName) != taskName || normalizeSerenaAuthorityTaskName(readiness.TaskName) != taskName {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchTask, &intent, status, &readiness)
+		}
+		if intent.Workspace != entry.WorkspacePath || status.Workspace != entry.WorkspaceKey {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchWorkspace, &intent, status, &readiness)
+		}
+		if intent.Port <= 0 || status.Port <= 0 || readiness.Port <= 0 || entry.Port != intent.Port || entry.Port != status.Port || entry.Port != readiness.Port {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchProxyPort, &intent, status, &readiness)
+		}
+		if status.ReadinessObservation == nil || status.ReadinessObservation.CurrentPIDGeneration == 0 || status.ReadinessObservation.ObservedPIDGeneration == 0 || readiness.PIDGeneration == 0 || status.ReadinessObservation.CurrentPIDGeneration != status.ReadinessObservation.ObservedPIDGeneration || status.ReadinessObservation.ObservedPIDGeneration != readiness.PIDGeneration {
+			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchGeneration, &intent, status, &readiness)
+		}
+
+		applyDaemonReadiness(status, readiness)
+		projection := projectSerenaWorkspaceAuthorityRow(entry, readiness)
+		if readiness.ServiceState != ServiceStateRunning || readiness.Stage != ReadinessStageComplete || !readiness.Settled {
+			if in.Mode == SerenaWorkspaceProjectionModeRequireSettled {
+				return SerenaWorkspaceProjectionOutputV1{}, &SerenaWorkspaceProxyUnreadyError{WorkspaceKey: entry.WorkspaceKey, TaskName: taskName, ServiceState: readiness.ServiceState, Stage: readiness.Stage, Settled: readiness.Settled, Failure: cloneReadinessFailure(readiness.Failure)}
+			}
+			workspaces = append(workspaces, projection)
+			continue
+		}
+
+		if !serenaClientEndpointMatchesRouter(in.Endpoint) || in.Endpoint.RouterPort == entry.Port {
+			if in.Mode == SerenaWorkspaceProjectionModeRequireSettled {
+				return SerenaWorkspaceProjectionOutputV1{}, &SerenaClientEndpointUnreadyError{Stage: serenaEndpointUnreadyStage(in.Endpoint), Cause: errors.New("routing observation is not ready")}
+			}
+			projection.ServiceState = ServiceStateDegraded
+			status.ServiceState = ServiceStateDegraded
+			workspaces = append(workspaces, projection)
+			continue
+		}
+		projection.ClientEndpoint = in.Endpoint.ClientEndpoint
+		projection.EndpointMode = in.Endpoint.EndpointMode
+		workspaces = append(workspaces, projection)
+	}
+
+	sort.SliceStable(workspaces, func(i, j int) bool { return workspaces[i].TaskName < workspaces[j].TaskName })
+	return SerenaWorkspaceProjectionOutputV1{Workspaces: workspaces, StatusRows: statusRows}, nil
+}
+
+func normalizeSerenaAuthorityTaskName(taskName string) string {
+	return strings.TrimPrefix(taskName, `\`)
+}
+
+func indexSerenaIntentByTask(rows []SupervisorDaemon) (map[string]SupervisorDaemon, map[string]bool) {
+	out, duplicate := make(map[string]SupervisorDaemon, len(rows)), map[string]bool{}
+	for _, row := range rows {
+		key := normalizeSerenaAuthorityTaskName(row.TaskName)
+		if _, exists := out[key]; exists {
+			duplicate[key] = true
+		}
+		out[key] = row
+	}
+	return out, duplicate
+}
+
+func indexDaemonStatusByTask(rows []DaemonStatus) (map[string]int, map[string]bool) {
+	out, duplicate := make(map[string]int, len(rows)), map[string]bool{}
+	for i := range rows {
+		key := normalizeSerenaAuthorityTaskName(rows[i].TaskName)
+		if _, exists := out[key]; exists {
+			duplicate[key] = true
+		}
+		out[key] = i
+	}
+	return out, duplicate
+}
+
+func indexReadinessByTask(rows []DaemonReadinessV1) (map[string]DaemonReadinessV1, map[string]bool) {
+	out, duplicate := make(map[string]DaemonReadinessV1, len(rows)), map[string]bool{}
+	for _, row := range rows {
+		key := normalizeSerenaAuthorityTaskName(row.TaskName)
+		if _, exists := out[key]; exists {
+			duplicate[key] = true
+		}
+		out[key] = row
+	}
+	return out, duplicate
+}
+
+func cloneDaemonStatusRows(in []DaemonStatus) []DaemonStatus {
+	out := make([]DaemonStatus, len(in))
+	copy(out, in)
+	for i := range out {
+		out[i].ReadinessFailure = cloneReadinessFailure(in[i].ReadinessFailure)
+		if in[i].ReadinessObservation != nil {
+			observation := *in[i].ReadinessObservation
+			observation.Failures = append([]ReadinessFailureV1(nil), in[i].ReadinessObservation.Failures...)
+			out[i].ReadinessObservation = &observation
+		}
+		if in[i].Health != nil {
+			health := *in[i].Health
+			out[i].Health = &health
+		}
+		if in[i].JobProtection != nil {
+			jobProtection := *in[i].JobProtection
+			out[i].JobProtection = &jobProtection
+		}
+	}
+	return out
+}
+
+func cloneReadinessFailure(in *ReadinessFailureV1) *ReadinessFailureV1 {
+	if in == nil {
+		return nil
+	}
+	out := *in
+	return &out
+}
+
+func applyDaemonReadiness(status *DaemonStatus, readiness DaemonReadinessV1) {
+	status.ServiceState = readiness.ServiceState
+	status.ReadinessStage = readiness.Stage
+	status.ReadinessSettled = readiness.Settled
+	status.ReadinessFailure = cloneReadinessFailure(readiness.Failure)
+}
+
+func projectSerenaWorkspaceAuthorityRow(entry WorkspaceEntry, readiness DaemonReadinessV1) SerenaWorkspaceProjection {
+	return SerenaWorkspaceProjection{
+		WorkspaceKey: entry.WorkspaceKey, WorkspacePath: entry.WorkspacePath,
+		Language: entry.Language, Backend: entry.Backend, Port: entry.Port,
+		WorkspaceProxyPort: entry.Port, TaskName: entry.TaskName,
+		ClientEntries: cloneSerenaClientEntries(entry.ClientEntries), Lifecycle: entry.Lifecycle,
+		LastError: entry.LastError, Languages: append([]string(nil), entry.Languages...),
+		ServiceState: readiness.ServiceState, ReadinessStage: readiness.Stage,
+		ReadinessSettled: readiness.Settled, ReadinessFailure: cloneReadinessFailure(readiness.Failure),
+	}
+}
+
+func serenaClientEndpointMatchesRouter(endpoint SerenaClientEndpoint) bool {
+	return endpoint.Ready && endpoint.RouterPort > 0 && endpoint.EndpointMode != "" && endpoint.ReadinessStage == SerenaEndpointReadinessReady && endpoint.ClientEndpoint == SerenaRouterClientURL(endpoint.RouterPort) && IsSerenaRouterURL(endpoint.ClientEndpoint)
+}
+
+func serenaEndpointUnreadyStage(endpoint SerenaClientEndpoint) MCPFrontProbeStage {
+	if endpoint.ReadinessStage != "" && endpoint.ReadinessStage != SerenaEndpointReadinessReady {
+		return MCPFrontProbeStage(endpoint.ReadinessStage)
+	}
+	return MCPFrontProbeStageInput
+}
+
+func cloneSerenaClientEntries(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for key, value := range in {
+		out[key] = value
+	}
+	return out
 }
 
 // IsSerenaRouterURL reports whether an endpoint is serena's /serena/mcp router

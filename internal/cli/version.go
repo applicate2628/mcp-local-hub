@@ -1,7 +1,9 @@
 package cli
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,13 +34,11 @@ func normalizeExePath(p string) (string, error) {
 }
 
 // pathShadowDiagnostic compares the running executable against the `mcphub`
-// the shell PATH resolves to. When they are DIFFERENT on-disk binaries (a
-// shadow — e.g. a stale npm-global `mcphub` ahead of a fresher dev deploy in
-// ~/.local/bin), it returns an operator warning naming both locations;
-// otherwise "". Pure + best-effort: any empty/unresolvable input yields ""
-// (never a false alarm). Paths are compared case-insensitively only on
-// Windows, where executable paths are case-insensitive; POSIX keeps exact
-// case so case-only distinct paths on case-sensitive filesystems still warn.
+// the shell PATH resolves to. Different paths with the same bytes are an
+// informational alternate path. Different or unreadable identities are an
+// operator warning. Paths are compared case-insensitively only on Windows,
+// where executable paths are case-insensitive; POSIX keeps exact case so
+// case-only distinct paths on case-sensitive filesystems still compare bytes.
 func pathShadowDiagnostic(runningExe, pathResolved string) string {
 	if runningExe == "" || pathResolved == "" {
 		return ""
@@ -51,9 +51,34 @@ func pathShadowDiagnostic(runningExe, pathResolved string) string {
 	if sameExePath(a, b) {
 		return ""
 	}
-	return fmt.Sprintf("the 'mcphub' on your PATH (%s) is NOT this running binary (%s); "+
-		"a fresh shell may run the shadowed one. Reconcile the two install locations, "+
-		"or invoke this binary by its full path.", b, a)
+	runningSHA256, errRunning := executableSHA256(a)
+	pathSHA256, errPath := executableSHA256(b)
+	if errRunning != nil || errPath != nil {
+		return fmt.Sprintf("identity-unverified: the 'mcphub' on your PATH (%s) cannot be verified against this running binary (%s); "+
+			"a fresh shell may run a different binary. Run: %s", b, a, shadowReconciliationCommand())
+	}
+	if runningSHA256 == pathSHA256 {
+		return fmt.Sprintf("equivalent alternate path: the 'mcphub' on your PATH (%s) is byte-identical to this running binary (%s).", b, a)
+	}
+	return fmt.Sprintf("binary identity differs: the 'mcphub' on your PATH (%s) is NOT this running binary (%s); "+
+		"a fresh shell may run the shadowed one. Run: %s", b, a, shadowReconciliationCommand())
+}
+
+func executableSHA256(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+}
+
+func shadowReconciliationCommand() string {
+	return "mcphub setup"
 }
 
 func sameExePath(a, b string) bool {
@@ -108,8 +133,12 @@ Example:
 				cmd.Printf("  running:    %s\n", runningExe)
 			}
 			if resolved, lerr := exec.LookPath("mcphub"); lerr == nil {
-				if warn := pathShadowDiagnostic(runningExe, resolved); warn != "" {
-					cmd.Printf("  ⚠ shadow:   %s\n", warn)
+				if diagnostic := pathShadowDiagnostic(runningExe, resolved); diagnostic != "" {
+					prefix := "⚠ shadow"
+					if strings.HasPrefix(diagnostic, "equivalent alternate path:") {
+						prefix = "ℹ shadow"
+					}
+					cmd.Printf("  %s:   %s\n", prefix, diagnostic)
 				}
 			}
 			cmd.Println()

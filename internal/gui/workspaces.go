@@ -19,6 +19,7 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -39,28 +40,49 @@ type workspacePair struct {
 // Lifecycle / LastError stay omitempty so an unused legacy entry
 // reads identically on the wire to a freshly-registered one.
 type workspaceEntryDTO struct {
-	WorkspaceKey  string            `json:"workspace_key"`
-	WorkspacePath string            `json:"workspace_path"`
-	Language      string            `json:"language"`
-	Backend       string            `json:"backend"`
-	Port          int               `json:"port"`
-	TaskName      string            `json:"task_name"`
-	ClientEntries map[string]string `json:"client_entries,omitempty"`
-	Lifecycle     string            `json:"lifecycle,omitempty"`
-	LastError     string            `json:"last_error,omitempty"`
+	WorkspaceKey       string            `json:"workspace_key"`
+	WorkspacePath      string            `json:"workspace_path"`
+	Language           string            `json:"language"`
+	Backend            string            `json:"backend"`
+	Port               int               `json:"port"`
+	WorkspaceProxyPort int               `json:"workspace_proxy_port"`
+	TaskName           string            `json:"task_name"`
+	ClientEntries      map[string]string `json:"client_entries,omitempty"`
+	Lifecycle          string            `json:"lifecycle,omitempty"`
+	LastError          string            `json:"last_error,omitempty"`
+	ClientEndpoint     string            `json:"client_endpoint"`
+	EndpointMode       string            `json:"endpoint_mode"`
+}
+
+func workspaceEntryDTOFromSerenaProjection(projection api.SerenaWorkspaceProjection) workspaceEntryDTO {
+	return workspaceEntryDTO{
+		WorkspaceKey:       projection.WorkspaceKey,
+		WorkspacePath:      projection.WorkspacePath,
+		Language:           projection.Language,
+		Backend:            projection.Backend,
+		Port:               projection.Port,
+		WorkspaceProxyPort: projection.WorkspaceProxyPort,
+		TaskName:           projection.TaskName,
+		ClientEntries:      projection.ClientEntries,
+		Lifecycle:          projection.Lifecycle,
+		LastError:          projection.LastError,
+		ClientEndpoint:     projection.ClientEndpoint,
+		EndpointMode:       projection.EndpointMode,
+	}
 }
 
 func workspaceEntryDTOFromAPI(ws api.WorkspaceEntry) workspaceEntryDTO {
 	return workspaceEntryDTO{
-		WorkspaceKey:  ws.WorkspaceKey,
-		WorkspacePath: ws.WorkspacePath,
-		Language:      ws.Language,
-		Backend:       ws.Backend,
-		Port:          ws.Port,
-		TaskName:      ws.TaskName,
-		ClientEntries: ws.ClientEntries,
-		Lifecycle:     ws.Lifecycle,
-		LastError:     ws.LastError,
+		WorkspaceKey:       ws.WorkspaceKey,
+		WorkspacePath:      ws.WorkspacePath,
+		Language:           ws.Language,
+		Backend:            ws.Backend,
+		Port:               ws.Port,
+		WorkspaceProxyPort: ws.Port,
+		TaskName:           ws.TaskName,
+		ClientEntries:      ws.ClientEntries,
+		Lifecycle:          ws.Lifecycle,
+		LastError:          ws.LastError,
 	}
 }
 
@@ -76,6 +98,12 @@ func registerWorkspacesRoutes(s *Server) {
 // workspacesTestSeam lets tests inject a synthetic registry without
 // touching disk. Production path is loadWorkspaceRegistryProd.
 var workspacesTestSeam func() (*api.Registry, error)
+
+// projectSerenaWorkspaceSnapshotForGUI obtains exactly one API-owned snapshot
+// per request. The handler only maps its derived rows to HTTP.
+var projectSerenaWorkspaceSnapshotForGUI = func(ctx context.Context, rows []api.WorkspaceEntry) (api.SerenaWorkspaceProjectionOutputV1, error) {
+	return api.NewAPI().ProjectSerenaWorkspaceSnapshotCurrent(ctx, rows, api.SerenaWorkspaceProjectionModeSnapshot)
+}
 
 func loadWorkspaceRegistryProd() (*api.Registry, error) {
 	if workspacesTestSeam != nil {
@@ -112,6 +140,28 @@ func (s *Server) workspacesHandler(w http.ResponseWriter, r *http.Request) {
 
 	seen := map[string]workspacePair{}
 	entries := make([]workspaceEntryDTO, 0, len(reg.Workspaces))
+	var serenaRows []api.WorkspaceEntry
+	for _, ws := range reg.Workspaces {
+		if ws.Language == api.SerenaLanguageSentinel && ws.Backend == api.SerenaServerName {
+			serenaRows = append(serenaRows, ws)
+		}
+	}
+	projections := map[string]api.SerenaWorkspaceProjection{}
+	if len(serenaRows) > 0 {
+		projected, projectionErr := projectSerenaWorkspaceSnapshotForGUI(r.Context(), serenaRows)
+		if projectionErr != nil {
+			var mismatch *api.SerenaWorkspaceStateMismatchError
+			if errors.As(projectionErr, &mismatch) {
+				writeAPIError(w, projectionErr, http.StatusConflict, "SERENA_WORKSPACE_STATE_MISMATCH")
+			} else {
+				writeAPIError(w, projectionErr, http.StatusServiceUnavailable, "SERENA_WORKSPACE_SNAPSHOT_UNAVAILABLE")
+			}
+			return
+		}
+		for _, projection := range projected.Workspaces {
+			projections[projection.TaskName] = projection
+		}
+	}
 	for _, ws := range reg.Workspaces {
 		if _, dup := seen[ws.WorkspaceKey]; !dup {
 			seen[ws.WorkspaceKey] = workspacePair{
@@ -119,7 +169,16 @@ func (s *Server) workspacesHandler(w http.ResponseWriter, r *http.Request) {
 				WorkspacePath: ws.WorkspacePath,
 			}
 		}
-		entries = append(entries, workspaceEntryDTOFromAPI(ws))
+		if ws.Language != api.SerenaLanguageSentinel || ws.Backend != api.SerenaServerName {
+			entries = append(entries, workspaceEntryDTOFromAPI(ws))
+			continue
+		}
+		projection, ok := projections[ws.TaskName]
+		if !ok {
+			writeAPIError(w, errors.New("SERENA_WORKSPACE_STATE_MISMATCH/status_missing: Serena projection omitted registry row"), http.StatusConflict, "SERENA_WORKSPACE_STATE_MISMATCH")
+			return
+		}
+		entries = append(entries, workspaceEntryDTOFromSerenaProjection(projection))
 	}
 
 	pairs := make([]workspacePair, 0, len(seen))

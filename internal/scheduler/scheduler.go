@@ -49,18 +49,33 @@ type WeeklyTrigger struct {
 
 // TaskStatus summarizes what the OS scheduler currently thinks of a task.
 type TaskStatus struct {
-	Name       string
-	State      string // "Ready", "Running", "Disabled", "Unknown"
-	LastResult int    // exit code of last run, or -1 if never run
-	NextRun    string // human-readable, backend-specific
-	Owner      string // backend-specific task owner/account, if available
+	Name         string
+	State        string // display-only compatibility projection
+	RuntimeState TaskRuntimeState
+	LastResult   int    // exit code of last run, or -1 if never run
+	NextRun      string // human-readable, backend-specific
+	Owner        string // backend-specific task owner/account, if available
 }
+
+type TaskRuntimeState uint8
+
+const (
+	TaskRuntimeUnknown TaskRuntimeState = iota
+	TaskRuntimeDisabled
+	TaskRuntimeQueued
+	TaskRuntimeReady
+	TaskRuntimeRunning
+)
 
 // ErrTaskNotFound is returned by ExportXML and other lookup APIs when
 // the named task does not exist. Separate sentinel so callers can
 // distinguish absent-but-expected tasks from schtasks communication
 // failures.
 var ErrTaskNotFound = errors.New("scheduler: task not found")
+var ErrTaskNotRunning = errors.New("scheduler: task not running")
+var ErrPermissionDenied = errors.New("scheduler: permission denied")
+var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
+var ErrUnavailable = errors.New("scheduler: unavailable")
 
 // ErrNotImplemented is returned by platform backends that compile but do not
 // yet provide a scheduler implementation. Callers that intentionally support

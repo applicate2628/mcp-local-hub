@@ -260,12 +260,9 @@ func TestWorkspacesCmd_EmptyRegistryPrintsHeader(t *testing.T) {
 	if err := c.Execute(); err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	out := buf.String()
-	// Required columns in header.
-	for _, want := range []string{"WORKSPACE", "LANG", "PORT", "BACKEND", "LIFECYCLE", "LAST_USED", "PATH"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("header missing column %q; got:\n%s", want, out)
-		}
+	const wantHeader = "WORKSPACE    LANG         PORT   WORKSPACE_PROXY BACKEND              LIFECYCLE   LAST_USED  SERVICE     READINESS  CLIENT_ENDPOINT                  PATH\n"
+	if got := buf.String(); got != wantHeader {
+		t.Errorf("table header = %q, want %q", got, wantHeader)
 	}
 }
 
@@ -293,6 +290,86 @@ func TestWorkspacesCmd_JSONOutput(t *testing.T) {
 	var arr []api.WorkspaceEntry
 	if err := json.Unmarshal([]byte(got), &arr); err != nil {
 		t.Errorf("JSON invalid: %v\noutput: %s", err, got)
+	}
+}
+
+func TestWorkspacesCmd_JSONSerenaProjectionMatchesClientEndpointContract(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("LOCALAPPDATA", dir)
+	t.Setenv("XDG_STATE_HOME", dir)
+	regPath, err := api.DefaultRegistryPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reg := api.NewRegistry(regPath)
+	reg.Put(api.WorkspaceEntry{
+		WorkspaceKey: "project", WorkspacePath: `C:\\work\\project`,
+		Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName,
+		Port: 9150, TaskName: "serena-project", Languages: []string{"cpp"},
+	})
+	if err := reg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	stubCLISerenaProjection(t, 9121, api.SerenaEndpointModeGUICompat, nil)
+
+	buf := &bytes.Buffer{}
+	c := newWorkspacesCmdReal()
+	c.SetOut(buf)
+	c.SetErr(buf)
+	c.SilenceUsage = true
+	c.SetArgs([]string{"--json"})
+	if err := c.Execute(); err != nil {
+		t.Fatalf("workspaces --json: %v", err)
+	}
+	var rows []map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &rows); err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v, want one", rows)
+	}
+	if got := rows[0]["client_endpoint"]; got != "http://127.0.0.1:9121/serena/mcp" {
+		t.Fatalf("client_endpoint = %#v", got)
+	}
+	if got := rows[0]["endpoint_mode"]; got != api.SerenaEndpointModeGUICompat {
+		t.Fatalf("endpoint_mode = %#v", got)
+	}
+	if got := rows[0]["workspace_proxy_port"]; got != float64(9150) {
+		t.Fatalf("workspace_proxy_port = %#v", got)
+	}
+}
+
+func TestWorkspacesCmd_JSONPropagatesProxyPortMismatches(t *testing.T) {
+	for _, kind := range []string{"registry_intent", "intent_status"} {
+		t.Run(kind, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("LOCALAPPDATA", dir)
+			t.Setenv("XDG_STATE_HOME", dir)
+			regPath, err := api.DefaultRegistryPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			reg := api.NewRegistry(regPath)
+			reg.Put(api.WorkspaceEntry{WorkspaceKey: "project", WorkspacePath: `C:\\work\\project`, Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName, Port: 9150, TaskName: "serena-project"})
+			if err := reg.Save(); err != nil {
+				t.Fatal(err)
+			}
+			stubCLISerenaProjection(t, 0, "", &api.SerenaWorkspaceStateMismatchError{Kind: api.SerenaWorkspaceStateMismatchProxyPort})
+			buf := &bytes.Buffer{}
+			cmd := newWorkspacesCmdReal()
+			cmd.SetOut(buf)
+			cmd.SetErr(buf)
+			cmd.SilenceUsage = true
+			cmd.SetArgs([]string{"--json"})
+			err = cmd.Execute()
+			var mismatch *api.SerenaWorkspaceStateMismatchError
+			if !errors.As(err, &mismatch) || mismatch.Kind != api.SerenaWorkspaceStateMismatchProxyPort {
+				t.Fatalf("plural workspaces error = %T (%v), want typed proxy_port_mismatch", err, err)
+			}
+			if bytes.Contains(buf.Bytes(), []byte("[")) {
+				t.Fatalf("plural workspaces emitted partial JSON: %s", buf.String())
+			}
+		})
 	}
 }
 
@@ -340,6 +417,10 @@ func TestWorkspacesCmd_PopulatedPrintsLifecycleColumn(t *testing.T) {
 		api.LifecycleConfigured,
 		api.LifecycleActive,
 		api.LifecycleMissing,
+		"9200",
+		"9201",
+		"9210",
+		"5m ago",
 		"python",
 		"typescript",
 		"go",

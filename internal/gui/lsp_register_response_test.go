@@ -53,7 +53,7 @@ func TestLSPRegisterResponseJSONExactKeys(t *testing.T) {
 			}
 			entries := decoded["entries"].([]any)
 			entry := entries[0].(map[string]any)
-			wantEntry := []string{"backend", "client_entries", "language", "last_error", "lifecycle", "port", "task_name", "workspace_key", "workspace_path"}
+			wantEntry := []string{"backend", "client_endpoint", "client_entries", "endpoint_mode", "language", "last_error", "lifecycle", "port", "task_name", "workspace_key", "workspace_path", "workspace_proxy_port"}
 			if got := sortedJSONKeys(entry); !slices.Equal(got, wantEntry) {
 				t.Fatalf("entry keys=%v want=%v", got, wantEntry)
 			}

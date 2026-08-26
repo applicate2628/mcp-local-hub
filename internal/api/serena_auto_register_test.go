@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -382,6 +383,39 @@ func TestAutoRegisterSerena_EmptyLanguages_ReturnsErrNoLanguages(t *testing.T) {
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
 		t.Errorf("registry has %d serena rows, want 0 (no-languages must never register)", len(rows))
+	}
+}
+
+func TestEmitWorkspaceAutoRegisteredEvent_CompatibilitySchemaWarnsWithMigration(t *testing.T) {
+	stateDir := t.TempDir()
+	restore := SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+	emitWorkspaceAutoRegisteredEvent("workspace with spaces", "project", 9150, []string{"cpp"}, SerenaProjectSchema{
+		Form:          SerenaProjectSchemaFormLanguages,
+		Compatibility: true,
+	})
+	data, err := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read compatibility event: %v", err)
+	}
+	for _, want := range []string{
+		`"severity":"warn"`,
+		`"event":"workspace-auto-registered"`,
+		`"schema_form":"languages"`,
+		`"schema_compatibility":true`,
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("compatibility event missing %s:\n%s", want, data)
+		}
+	}
+	var event struct {
+		Body map[string]any `json:"body"`
+	}
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	if got := event.Body["migration_command"]; got != `mcphub workspace bootstrap "workspace with spaces" --migrate-serena-schema` {
+		t.Fatalf("migration command = %#v", got)
 	}
 }
 

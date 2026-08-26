@@ -11,8 +11,6 @@ import (
 	"sync"
 	"time"
 
-	"gopkg.in/yaml.v3"
-
 	"mcp-local-hub/internal/config"
 )
 
@@ -98,10 +96,11 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	//    The marker is untrusted clone input (the GUI router reaches this from an
 	//    MCP tool-call path miss), so it flows through the single hardened reader
 	//    (regular-file-only, size-capped, TOCTOU-safe, ctx-cancellation-aware).
-	languages, err := readSerenaProjectYMLLanguages(ctx, root)
+	schema, err := readSerenaProjectSchemaForAutoRegister(ctx, root)
 	if err != nil {
 		return nil, err
 	}
+	languages := schema.Languages
 
 	// 2.5. TRUST GATE (area-5 security core). The .serena/project.yml marker
 	//      is the DoS bound (an attacker cannot register a path with no marker
@@ -703,7 +702,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		// The row + runtime intent are already committed. Emit the existing event
 		// exactly once and return the committed entry; readiness cannot turn a known
 		// release/start lifecycle failure into success.
-		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages, schema)
 		if registryReleaseFailed && !continuationFailed {
 			postCommitErr = fmt.Errorf("%w; %s; the registration and runtime intent remain committed and no rollback occurred", postCommitErr, continuationOutcome)
 		}
@@ -727,16 +726,16 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	}
 	if readinessTimeout <= 0 {
 		// The router's auto-register budget is already spent — do not block at all.
-		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages, schema)
 		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the auto-register deadline expired before the daemon on port %d became ready (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port)
 	}
 	if rdErr := autoRegisterReadinessFn(port, readinessTimeout); rdErr != nil {
-		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+		emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages, schema)
 		return nil, fmt.Errorf("serena auto-register: workspace %s registered and intent committed, but the per-workspace daemon on port %d was not ready in time: %w (the workspace IS registered; retry the call — the supervisor is bringing the daemon up)", root, port, rdErr)
 	}
 
 	// 13. Audit: emit the success event (best-effort; never fatal).
-	emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages)
+	emitWorkspaceAutoRegisteredEvent(canonical, key, port, newEntry.Languages, schema)
 
 	e := newEntry
 	return &e, nil
@@ -838,17 +837,6 @@ func resolveSerenaProjectRoot(p string) (string, error) {
 	}
 }
 
-// serenaProjectYMLForAutoRegister is the minimal shape consumed from
-// .serena/project.yml. Only the language(s) matter here; every other serena
-// field is left untouched on disk (auto-register never rewrites project.yml).
-// Replicated minimally from internal/cli/workspace_cmd.go:745's serenaProjectYml
-// (the api package cannot import cli). Both the modern plural `languages:` list
-// and Serena's legacy singular `language:` scalar are read (bot PR #253 P2).
-type serenaProjectYMLForAutoRegister struct {
-	Languages []string `yaml:"languages"`
-	Language  string   `yaml:"language"` // legacy singular form (`language: python`)
-}
-
 // readSerenaProjectYMLLanguages reads <root>/.serena/project.yml and returns its
 // declared languages. A missing/empty languages list → ErrNoLanguages (the
 // marker exists but no serena descriptor can be synthesized). A read or
@@ -860,34 +848,23 @@ type serenaProjectYMLForAutoRegister struct {
 // ReadUntrustedSerenaProjectYML: regular-file-only, 64 KiB size cap, TOCTOU-safe
 // open, ctx-cancellation honored before and after the read.
 func readSerenaProjectYMLLanguages(ctx context.Context, root string) ([]string, error) {
-	path := filepath.Join(root, ".serena", "project.yml")
-	data, err := ReadUntrustedSerenaProjectYML(ctx, path)
+	parsed, err := readSerenaProjectSchemaForAutoRegister(ctx, root)
 	if err != nil {
-		return nil, fmt.Errorf("serena auto-register: read %s: %w", path, err)
+		return nil, err
 	}
-	var doc serenaProjectYMLForAutoRegister
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("serena auto-register: parse %s: %w", path, err)
-	}
-	cleaned := make([]string, 0, len(doc.Languages))
-	for _, l := range doc.Languages {
-		if strings.TrimSpace(l) == "" {
-			continue
+	return parsed.Languages, nil
+}
+
+func readSerenaProjectSchemaForAutoRegister(ctx context.Context, root string) (SerenaProjectSchema, error) {
+	path := filepath.Join(root, ".serena", "project.yml")
+	parsed, err := ReadSerenaProjectSchema(ctx, path)
+	if err != nil {
+		if errors.Is(err, ErrSerenaProjectSchemaLanguagesMissing) {
+			return SerenaProjectSchema{}, fmt.Errorf("%w (%s)", ErrNoLanguages, path)
 		}
-		cleaned = append(cleaned, strings.TrimSpace(l))
+		return SerenaProjectSchema{}, fmt.Errorf("serena auto-register: read %s: %w", path, err)
 	}
-	// Legacy singular fallback (bot PR #253 P2): an older Serena project.yml uses
-	// `language: python` instead of the plural list. Auto-register exists to pick
-	// up ALREADY-created Serena projects on first use, so a valid legacy project
-	// must register, not 422. Only consult the scalar when the plural list yielded
-	// nothing (a project carrying both is governed by its plural list).
-	if len(cleaned) == 0 && strings.TrimSpace(doc.Language) != "" {
-		cleaned = append(cleaned, strings.TrimSpace(doc.Language))
-	}
-	if len(cleaned) == 0 {
-		return nil, fmt.Errorf("%w (%s)", ErrNoLanguages, path)
-	}
-	return cleaned, nil
+	return parsed, nil
 }
 
 // emitWorkspaceAutoRegisteredEvent writes a best-effort `workspace-auto-registered`
@@ -896,7 +873,7 @@ func readSerenaProjectYMLLanguages(ctx context.Context, root string) ([]string, 
 // (install_parsed_manifest.go): resolve the state dir, open the canonical
 // supervisor event log, emit, close. A failure to resolve/open/emit is silently
 // non-fatal — the audit is observability, not a gate.
-func emitWorkspaceAutoRegisteredEvent(workspacePath, key string, port int, languages []string) {
+func emitWorkspaceAutoRegisteredEvent(workspacePath, key string, port int, languages []string, schema SerenaProjectSchema) {
 	stateDir, sdErr := DaemonStateDir()
 	if sdErr != nil {
 		return
@@ -906,19 +883,27 @@ func emitWorkspaceAutoRegisteredEvent(workspacePath, key string, port int, langu
 		return
 	}
 	defer func() { _ = logger.Close() }()
+	severity := SupervisorEventSeverityInfo
+	body := map[string]any{
+		"path":                 workspacePath,
+		"workspace_key":        key,
+		"port":                 port,
+		"languages":            languages,
+		"schema_form":          schema.Form,
+		"schema_compatibility": schema.Compatibility,
+	}
+	if schema.Compatibility {
+		severity = SupervisorEventSeverityWarn
+		body["migration_command"] = fmt.Sprintf("mcphub workspace bootstrap \"%s\" --migrate-serena-schema", workspacePath)
+	}
 	_ = logger.Emit(SupervisorEvent{
 		SchemaVersion: SupervisorEventSchemaVersion,
 		TS:            time.Now().UTC().Format(time.RFC3339Nano),
-		Severity:      SupervisorEventSeverityInfo,
+		Severity:      severity,
 		Source:        "reconcile",
 		Event:         "workspace-auto-registered",
 		TaskName:      SerenaTaskNameForWorkspace(workspacePath),
-		Body: map[string]any{
-			"path":          workspacePath,
-			"workspace_key": key,
-			"port":          port,
-			"languages":     languages,
-		},
+		Body:          body,
 	})
 }
 
