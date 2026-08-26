@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures/hub";
+import { routePersistentSupervisorDown } from "../fixtures/lsp-helpers";
 
 test.describe("dashboard", () => {
   // v0.6 Workstream B (§3.1): the e2e fixture sets MCPHUB_E2E_SUPERVISOR=none
@@ -37,32 +38,22 @@ test.describe("dashboard", () => {
     // poll clear `degradedSince` and make the RED banner OSCILLATE; the
     // persistent 500 keeps the streak monotonic so the banner is stable once
     // the grace elapses (and the failing HTTP poll is a backstop if SSE is slow).
-    let statusCalls = 0;
-    await page.route("**/api/status", (r) => {
-      statusCalls += 1;
-      if (statusCalls === 1) {
-        r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-      } else {
-        r.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({
-            code: "STATUS_FAILED",
-            error: "supervisor unreachable — restart the hub",
-          }),
-        });
-      }
-    });
+    const supervisorDown = await routePersistentSupervisorDown(page);
+    const initialStatus = page.waitForResponse((response) => response.url().endsWith("/api/status"));
     await page.goto(`${hub.url}/#/dashboard`);
+    expect((await initialStatus).status()).toBe(200);
     await expect(page.locator("h1")).toHaveText("Dashboard");
+    await expect(page.locator(".dashboard-header")).toBeVisible();
+    await supervisorDown.emitPollerError();
 
     // The degraded banner names the operator action (the message comes from
     // api.ErrSupervisorDown, surfaced through the poller-error SSE event).
     const banner = page.locator('[data-testid="dashboard-error"]');
-    // ~20s grace bound + a fresh past-bound failing observation (grace recheck
-    // ≤5s backend latency / ≤8s abort ceiling, or the next ~5s poller-error SSE
-    // / 30s poll) + margin — comfortably inside 60s for a persistent outage.
-    await expect(banner).toBeVisible({ timeout: 60_000 });
+    // The fixture releases poller-error only after the initial 200 has rendered
+    // the normal Dashboard header, so the calm reconnecting state proves the
+    // fresh failure observation that starts the 20s grace window.
+    await expect(page.getByTestId("dashboard-reconnecting")).toBeVisible({ timeout: 5_000 });
+    await expect(banner).toBeVisible({ timeout: 24_000 });
     await expect(banner).toContainText("supervisor unreachable — restart the hub");
 
     // No daemon cards in the degraded state.

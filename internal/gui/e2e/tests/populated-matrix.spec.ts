@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { seededHubFor, expect } from "../fixtures/seeded-hub";
 import { test as baseTest } from "../fixtures/hub";
+import { routeScanFixture } from "../fixtures/lsp-helpers";
 
 // populated-matrix.spec.ts — closes work-items/bugs/2026-05-08-g3-populated-e2e-coverage.md.
 //
@@ -33,7 +34,7 @@ import { test as baseTest } from "../fixtures/hub";
 // pill + card render the real backend cannot reach here. The real-backend
 // redaction-banner path is noted as deferred at the bottom of this file.
 
-// --- Path 1: populated Servers matrix via a real on-disk seed -------------
+// --- Path 1: populated Servers matrix consumer wiring ---------------------
 
 // MANIFESTED_SEEDED matches a bundled manifest (servers/memory/manifest.yaml)
 // so its row lands in the MAIN matrix (table.servers-matrix). A row only
@@ -76,17 +77,36 @@ function seedCursorConfig(home: string): void {
 
 const seededTest = seededHubFor(seedCursorConfig);
 
-seededTest.describe("populated matrix — real on-disk seed (live /api/scan)", () => {
+const populatedScanResult = {
+  at: "2026-08-26T00:00:00Z",
+  entries: [
+    {
+      name: MANIFESTED_SEEDED,
+      manifest_exists: true,
+      can_migrate: true,
+      status: "can-migrate",
+      client_presence: { cursor: { transport: "stdio", endpoint: "" } },
+    },
+    {
+      name: THIRD_PARTY_SEEDED,
+      manifest_exists: false,
+      can_migrate: false,
+      status: "unknown",
+      client_presence: { cursor: { transport: "stdio", endpoint: "" } },
+    },
+  ],
+  client_config_presence: { cursor: "ok" },
+};
+
+seededTest.describe("populated matrix — documented /api/scan consumer shape", () => {
   seededTest("manifested seeded server renders a populated main-matrix row with a cursor cell", async ({ page, hub }) => {
-    // The real /api/status fails loud (500) without a supervisor under the
-    // e2e fixture, so the Servers screen would show its "Failed to load"
-    // banner instead of the matrix. Stub /api/status → [] (the same
-    // convention servers.spec.ts uses) to exercise the populated render
-    // driven by the REAL /api/scan. /api/scan is NOT mocked — it reads the
-    // seeded ~/.cursor/mcp.json off disk.
-    await page.route("**/api/status", (r) =>
+    // This test owns the Servers consumer rendering. The Go ScanFrom tests
+    // own the real client-config producer contract; route its documented
+    // wire shape here so supervisor availability is not an accidental gate.
+    await page.route("**/api/status", async (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
     );
+    await routeScanFixture(page, populatedScanResult);
     await page.goto(`${hub.url}/#/servers`);
     await page.waitForSelector("table.servers-matrix");
 
@@ -124,9 +144,10 @@ seededTest.describe("populated matrix — real on-disk seed (live /api/scan)", (
   });
 
   seededTest("non-manifested seeded server surfaces in the read-only Other MCP entries expander", async ({ page, hub }) => {
-    await page.route("**/api/status", (r) =>
+    await page.route("**/api/status", async (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
     );
+    await routeScanFixture(page, populatedScanResult);
     await page.goto(`${hub.url}/#/servers`);
     await page.waitForSelector("table.servers-matrix");
 

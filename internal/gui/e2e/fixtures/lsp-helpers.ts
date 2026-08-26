@@ -48,6 +48,101 @@ export const emptyScanResult = {
   entries: null,
 };
 
+// routeScanFixture is the narrow, opt-in scan-consumer seam for E2E screens
+// whose acceptance criteria are rendering or client-side interpretation of a
+// documented ScanResult wire shape. It deliberately routes only /api/scan;
+// callers that verify the backend scanner itself must use the API's Go tests
+// instead of this browser fixture.
+export async function routeScanFixture(
+  page: Page,
+  scan: unknown | (() => unknown) = emptyScanResult,
+): Promise<void> {
+  await page.route("**/api/scan", async (route) => {
+    const body = typeof scan === "function" ? scan() : scan;
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
+
+export interface PersistentSupervisorDownRoute {
+  emitPollerError(): Promise<void>;
+}
+
+// routePersistentSupervisorDown provides the Dashboard's observable outage
+// sequence without waiting on the real five-second poller cadence. It replaces
+// EventSource only in the document under test, so the test can emit the same
+// named event only after the initial successful status state has rendered.
+// Direct supervisor-down endpoint tests continue to exercise the real backend.
+export async function routePersistentSupervisorDown(
+  page: Page,
+): Promise<PersistentSupervisorDownRoute> {
+  let statusCalls = 0;
+  let statusShouldFail = false;
+  await page.addInitScript(() => {
+    type Listener = (event: MessageEvent) => void;
+    const listeners = new Map<string, Set<Listener>>();
+    class DashboardEventSource {
+      onopen: ((event: Event) => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+
+      constructor(_url: string) {
+        setTimeout(() => this.onopen?.(new Event("open")), 0);
+      }
+
+      addEventListener(type: string, listener: Listener) {
+        const typeListeners = listeners.get(type) ?? new Set<Listener>();
+        typeListeners.add(listener);
+        listeners.set(type, typeListeners);
+      }
+
+      removeEventListener(type: string, listener: Listener) {
+        listeners.get(type)?.delete(listener);
+      }
+
+      close() {}
+    }
+    Object.defineProperty(window, "EventSource", { value: DashboardEventSource });
+    (window as typeof window & { __e2eEmitPollerError?: () => void }).__e2eEmitPollerError = () => {
+      const event = new MessageEvent("poller-error", {
+        data: JSON.stringify({ err: "supervisor unreachable — restart the hub" }),
+      });
+      for (const listener of listeners.get("poller-error") ?? []) listener(event);
+    };
+  });
+  await page.route("**/api/status", async (route) => {
+    statusCalls += 1;
+    if (!statusShouldFail) {
+      await route.fulfill({ status: 200, contentType: "application/json", body: "[]" });
+      return;
+    }
+    await route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({
+        code: "STATUS_FAILED",
+        error: "supervisor unreachable — restart the hub",
+      }),
+    });
+  });
+  return {
+    async emitPollerError() {
+      if (statusCalls === 0) {
+        throw new Error("dashboard fixture: initial /api/status has not been requested");
+      }
+      statusShouldFail = true;
+      await page.evaluate(() => {
+        const emit = (window as typeof window & { __e2eEmitPollerError?: () => void })
+          .__e2eEmitPollerError;
+        if (!emit) throw new Error("dashboard fixture: EventSource control is unavailable");
+        emit();
+      });
+    },
+  };
+}
+
 // emptyWorkspaces is the body /api/workspaces returns when the
 // registry file is missing or empty. The selector renders its
 // placeholder; the LSP matrix renders 9 placeholder rows.
@@ -137,9 +232,7 @@ export async function routeStandardLspMocks(
   const scan = opts.scan ?? emptyScanResult;
   const status = opts.status ?? [];
   const workspaces = opts.workspaces ?? emptyWorkspaces;
-  await page.route("**/api/scan", (r) =>
-    r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(scan) }),
-  );
+  await routeScanFixture(page, scan);
   await page.route("**/api/status", (r) =>
     r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(status) }),
   );

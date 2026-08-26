@@ -39,6 +39,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/config"
 )
 
@@ -317,7 +318,7 @@ func TestGroups_PostCaseInsensitiveUpdatesInPlace(t *testing.T) {
 // must PRESERVE the group's project_path, not silently clear it. A brand-new
 // group (the create branch) stays UNBOUND (project_path == "").
 func TestGroups_PostPreservesProjectBindingOnUpdate(t *testing.T) {
-	const bound = "C:\\projects\\frontend"
+	bound := filepath.Join(t.TempDir(), "frontend")
 	g := &fakeGroupsAPI{
 		available: []string{"memory", "time"},
 		cfg: api.GroupsConfig{Version: 1, Groups: []api.Group{
@@ -792,9 +793,10 @@ func TestGroups_LiveRepublishCarriesGroupBinding(t *testing.T) {
 	// drives the REAL publishResolverSnapshotForHubBind seam, which walks the
 	// client registry. Its siblings stub the seam and never admit an adapter.
 	sandboxClientConfigHome(t)
-	stateDir := t.TempDir()
+	stateDir := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)
+	startReadySupervisorFixture(t, stateDir, nil)
 
 	// Reset the package-level resolver snapshot so this test's published
 	// snapshot is observed in isolation.

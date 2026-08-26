@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures/hub";
+import { emptyScanResult, routeScanFixture } from "../fixtures/lsp-helpers";
 
 test.describe("servers", () => {
   test("matrix renders headers with correct column set", async ({ page, hub }) => {
@@ -8,9 +9,10 @@ test.describe("servers", () => {
     // "Failed to load" banner instead of the matrix. This test verifies the
     // matrix STRUCTURE, so stub /api/status → [] (the same convention the
     // load-path tests below already use) to exercise the populated render.
-    await page.route("**/api/status", (r) =>
+    await page.route("**/api/status", async (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
     );
+    await routeScanFixture(page, emptyScanResult);
     await page.goto(`${hub.url}/#/servers`);
     await expect(page.locator("h1")).toHaveText("Servers");
     // The Servers screen now renders TWO `.servers-matrix` tables: the MCP
@@ -44,7 +46,7 @@ test.describe("servers", () => {
     // empty body rather than the supervisor-down fail-loud banner (the e2e
     // fixture has no supervisor; the real status path now 500s). See the
     // header-columns test above for the rationale.
-    await page.route("**/api/status", (r) =>
+    await page.route("**/api/status", async (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
     );
     // ALSO stub /api/scan → empty entries. The real scan's manifest-only
@@ -57,9 +59,7 @@ test.describe("servers", () => {
     // only honored by pinning the scan to empty — the same convention the
     // populated-matrix specs use to control the matrix rows. (manifest_source.go
     // embed FS; global-setup.ts wipes e2e/servers but specs repopulate it.)
-    await page.route("**/api/scan", (r) =>
-      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ entries: [] }) }),
-    );
+    await routeScanFixture(page, { entries: [] });
     await page.goto(`${hub.url}/#/servers`);
     // Scope to the MCP matrix — the LSP matrix (`.lsp-matrix`) shares the
     // `.servers-matrix` class and has its own rows, so an unscoped selector
@@ -74,9 +74,10 @@ test.describe("servers", () => {
     // Workstream B (§3.1): stub /api/status → [] so the matrix toolbar
     // (and its Apply button) renders instead of the supervisor-down
     // fail-loud banner under the no-supervisor e2e fixture.
-    await page.route("**/api/status", (r) =>
+    await page.route("**/api/status", async (r) =>
       r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) }),
     );
+    await routeScanFixture(page, emptyScanResult);
     await page.goto(`${hub.url}/#/servers`);
     const applyBtn = page.getByRole("button", { name: "Apply changes" });
     await expect(applyBtn).toBeVisible();

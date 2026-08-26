@@ -1,4 +1,5 @@
 import { test, expect } from "../fixtures/hub";
+import { routePersistentSupervisorDown } from "../fixtures/lsp-helpers";
 
 // dashboard-fail-loud.spec.ts — v0.6 Workstream B (§3.1).
 //
@@ -52,34 +53,21 @@ test.describe("dashboard — supervisor-down fail-loud (Workstream B §3.1)", ()
     // forever would let the 30s poll clear `degradedSince` and make the RED
     // banner OSCILLATE; the persistent 500 keeps the streak monotonic so the
     // banner is stable once the grace elapses (failing HTTP poll backstops SSE).
-    let statusCalls = 0;
-    await page.route("**/api/status", (r) => {
-      statusCalls += 1;
-      if (statusCalls === 1) {
-        r.fulfill({ status: 200, contentType: "application/json", body: "[]" });
-      } else {
-        r.fulfill({
-          status: 500,
-          contentType: "application/json",
-          body: JSON.stringify({
-            code: "STATUS_FAILED",
-            error: "supervisor unreachable — restart the hub",
-          }),
-        });
-      }
-    });
+    const supervisorDown = await routePersistentSupervisorDown(page);
+    const initialStatus = page.waitForResponse((response) => response.url().endsWith("/api/status"));
     await page.goto(`${hub.url}/#/dashboard`);
+    expect((await initialStatus).status()).toBe(200);
 
     // Heading still renders (the error branch keeps the shell intact).
     await expect(page.locator("h1")).toHaveText("Dashboard");
+    await expect(page.locator(".dashboard-header")).toBeVisible();
+    await supervisorDown.emitPollerError();
 
     // Explicit degraded banner naming the operator action — surfaced via the
     // backend `poller-error` SSE within one 5s poll cycle.
     const banner = page.locator('[data-testid="dashboard-error"]');
-    // ~20s grace bound + a fresh past-bound failing observation (grace recheck
-    // ≤5s backend latency / ≤8s abort ceiling, or the next ~5s poller-error SSE
-    // / 30s poll) + margin — comfortably inside 60s for a persistent outage.
-    await expect(banner).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId("dashboard-reconnecting")).toBeVisible({ timeout: 5_000 });
+    await expect(banner).toBeVisible({ timeout: 24_000 });
     await expect(banner).toContainText("supervisor unreachable — restart the hub");
 
     // NO daemon cards — the operator must NOT see Running daemons painted
