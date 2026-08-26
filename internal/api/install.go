@@ -122,6 +122,9 @@ type Plan struct {
 	// installs; a partial install targets one daemon and must leave others
 	// alone.
 	FullInstall bool
+	// supervisorIntentHashesBound is set only by an exact raw-manifest loader.
+	// Direct semantic plan construction carries no authority to invent a hash.
+	supervisorIntentHashesBound bool
 }
 
 type ScheduledTaskPlan struct {
@@ -183,6 +186,11 @@ type ClientUpdatePlan struct {
 	Headers    map[string]string // F-G5: token + instance id; empty for per-daemon
 	RelayURL   string            // optional direct relay target for relay-stdio clients
 	DaemonName string            // legacy; only meaningful for per-daemon entries
+
+	// codexAlreadyConfigured is an execution-only settled-repeat marker. It is
+	// deliberately unexported: the plan still carries the frozen EntryName on
+	// every public surface while apply skips a second global config mutation.
+	codexAlreadyConfigured bool
 }
 
 // InstallOpts controls an install invocation.
@@ -199,6 +207,10 @@ type InstallOpts struct {
 	GUIPort                int       // live GUI/router port injected by CLI/GUI; zero means unknown
 	RoutingTarget          *ClientRoutingTarget
 	SymlinkConsents        []ResolvedSymlinkConsent
+	// CodexProjectRoot and CodexWorkingDir are supplied by the composition root
+	// when an install must inspect applicable project config layers read-only.
+	CodexProjectRoot string
+	CodexWorkingDir  string
 }
 
 // InstallAllOpts controls a bulk install.
@@ -347,13 +359,17 @@ func (a *API) installWithFrozenPlan(ctx context.Context, opts InstallOpts, recei
 	if err != nil {
 		return err
 	}
+	bindPlanSupervisorIntentManifestHash(plan, ManifestHashContent(data))
 	return a.installFrozenPlanCore(ctx, m, plan, opts, authorityRequest, w, receipt)
 }
 
 // installFrozenPlanCore applies one already-frozen plan and returns its exact
-// mutation receipt to the caller. The relay executable identity is frozen
-// before any scheduler, intent, or client mutation.
+// mutation receipt to the caller. A committed client-config row is evidence of
+// its lower transaction only; it never promotes the wider install outcome.
 func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1)) (err error) {
+	// Freeze task and client identities from the exact plan before apply. The
+	// receiving port re-reads every client after commit; no post-write
+	// observation can become the expected identity.
 	frozen := frozenInstallMutationReceipt(plan, opts)
 	defer func() {
 		frozen.ClientConfigSettlements = append([]ClientConfigSettlementV1(nil), plan.clientConfigSettlements...)
@@ -430,7 +446,8 @@ func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 				continue
 			}
 		}
-		err := a.installUsingEmbedFirst(InstallOpts{
+		var receipt InstallMutationReceiptV1
+		err := a.installUsingEmbedFirstWithReceipt(InstallOpts{
 			Server:            name,
 			ClientsInclude:    opts.ClientsInclude,
 			IncludeAllClients: opts.IncludeAllClients,
@@ -438,8 +455,8 @@ func (a *API) InstallAllWithOpts(opts InstallAllOpts) []InstallResult {
 			Writer:            opts.Writer,
 			GUIPort:           opts.GUIPort,
 			RoutingTarget:     opts.RoutingTarget,
-		})
-		results = append(results, InstallResult{Server: name, Err: err})
+		}, func(frozen InstallMutationReceiptV1) { receipt = frozen })
+		results = append(results, InstallResult{Server: name, Err: err, ClientConfigSettlements: append([]ClientConfigSettlementV1(nil), receipt.ClientConfigSettlements...)})
 	}
 	if len(skipped) > 0 && opts.Writer != nil {
 		fmt.Fprintf(opts.Writer, "Skipped %d workspace-scoped manifest(s); use `mcphub register` instead: %v\n",
@@ -476,7 +493,8 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 				continue
 			}
 		}
-		err := a.installFromManifestDir(InstallOpts{
+		var receipt InstallMutationReceiptV1
+		err := a.installFromManifestDirWithReceipt(InstallOpts{
 			Server:            e.Name(),
 			ClientsInclude:    opts.ClientsInclude,
 			IncludeAllClients: opts.IncludeAllClients,
@@ -484,8 +502,8 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 			Writer:            opts.Writer,
 			GUIPort:           opts.GUIPort,
 			RoutingTarget:     opts.RoutingTarget,
-		}, opts.ManifestDir)
-		results = append(results, InstallResult{Server: e.Name(), Err: err})
+		}, opts.ManifestDir, func(frozen InstallMutationReceiptV1) { receipt = frozen })
+		results = append(results, InstallResult{Server: e.Name(), Err: err, ClientConfigSettlements: append([]ClientConfigSettlementV1(nil), receipt.ClientConfigSettlements...)})
 	}
 	if len(skipped) > 0 && opts.Writer != nil {
 		fmt.Fprintf(opts.Writer, "Skipped %d workspace-scoped manifest(s); use `mcphub register` instead: %v\n",
@@ -519,6 +537,10 @@ func EmbeddedDiskShadowWarning(server string) string {
 // via loadManifestYAMLEmbedFirst. Mirrors Install's audit-first +
 // intent-after wiring per Task 10 (plan §62 audit-first canonical).
 func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
+	return a.installUsingEmbedFirstWithReceipt(opts, nil)
+}
+
+func (a *API) installUsingEmbedFirstWithReceipt(opts InstallOpts, receipt func(InstallMutationReceiptV1)) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
@@ -551,7 +573,8 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
-	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
+	bindPlanSupervisorIntentManifestHash(plan, ManifestHashContent(data))
+	return a.installFrozenPlanCore(context.Background(), m, plan, opts, authorityRequest, w, receipt)
 }
 
 // installBuildPlanOpts is the SINGLE owner of "which BuildPlanOpts does an
@@ -576,6 +599,8 @@ func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
 		SkipClientConfigWrites: opts.SkipClientConfigWrites,
 		DefaultClientsOverride: a.resolveDefaultClientsOverride(opts),
 		GUIPort:                opts.GUIPort,
+		CodexProjectRoot:       opts.CodexProjectRoot,
+		CodexWorkingDir:        opts.CodexWorkingDir,
 	}
 }
 
@@ -584,6 +609,10 @@ func (a *API) installBuildPlanOpts(opts InstallOpts) BuildPlanOpts {
 // mutating global executable-path state. Mirrors Install's audit-first +
 // intent-after wiring per Task 10.
 func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error {
+	return a.installFromManifestDirWithReceipt(opts, manifestDir, nil)
+}
+
+func (a *API) installFromManifestDirWithReceipt(opts InstallOpts, manifestDir string, receipt func(InstallMutationReceiptV1)) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
@@ -612,7 +641,18 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 	if err != nil {
 		return err
 	}
-	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
+	bindPlanSupervisorIntentManifestHash(plan, ManifestHashContent(data))
+	return a.installFrozenPlanCore(context.Background(), m, plan, opts, authorityRequest, w, receipt)
+}
+
+func bindPlanSupervisorIntentManifestHash(plan *Plan, manifestHash string) {
+	if plan == nil {
+		return
+	}
+	for i := range plan.SupervisorIntent {
+		plan.SupervisorIntent[i].manifestHash = manifestHash
+	}
+	plan.supervisorIntentHashesBound = true
 }
 
 func (a *API) installPlanCoreWithRoutingTargetLease(
@@ -1882,6 +1922,12 @@ type BuildPlanOpts struct {
 	// HERMETIC field: BuildPlanWithOpts does NO disk read; callers/tests supply
 	// it. 0 means unknown.
 	GUIPort int
+
+	// CodexProjectRoot and CodexWorkingDir are the composition-root authority for
+	// read-only Codex project-layer discovery. They must be supplied together.
+	// Empty preserves the existing global-only install behavior.
+	CodexProjectRoot string
+	CodexWorkingDir  string
 }
 
 // BuildPlan translates a manifest into concrete intended actions using the
@@ -1910,7 +1956,11 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	// straight to the remote endpoint without going through the
 	// local hub.
 	if m.Transport == config.TransportRemoteHTTP {
-		return buildRemoteHTTPPlan(m, opts)
+		p, err := buildRemoteHTTPPlan(m, opts)
+		if err != nil {
+			return nil, err
+		}
+		return freezeCodexInstallTargetNames(p, opts)
 	}
 	if opts.DaemonFilter != "" {
 		if _, ok := findDaemon(m, opts.DaemonFilter); !ok {
@@ -1937,7 +1987,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		if opts.DaemonFilter != "" && d.Name != opts.DaemonFilter {
 			continue
 		}
-		name := "mcp-local-hub-" + m.Name + "-" + d.Name
+		name := supervisorTaskNameForManifestDaemon(m.Name, d.Name)
 		args := []string{"daemon", "--server", m.Name, "--daemon", d.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    name,
@@ -2029,7 +2079,131 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 			DaemonName: b.Daemon,
 		})
 	}
+	return freezeCodexInstallTargetNames(p, opts)
+}
+
+func supervisorTaskNameForManifestDaemon(manifestName, daemonName string) string {
+	return "mcp-local-hub-" + manifestName + "-" + daemonName
+}
+
+// freezeCodexInstallTargetNames is the sole generic-install owner of the
+// logical-to-physical Codex key projection. The adapter inspects the global and
+// explicitly bounded project layers read-only; the resolved entry name is then
+// frozen in ClientUpdatePlan for apply, readback, and CommandCoordinator
+// settlement. No non-Codex update is changed.
+func freezeCodexInstallTargetNames(p *Plan, opts BuildPlanOpts) (*Plan, error) {
+	if p == nil {
+		return nil, fmt.Errorf("install plan is nil")
+	}
+	hasCodexUpdate := false
+	for _, update := range p.ClientUpdates {
+		if update.Client == "codex-cli" {
+			hasCodexUpdate = true
+			break
+		}
+	}
+	if !hasCodexUpdate {
+		return p, nil
+	}
+	if (opts.CodexProjectRoot == "") != (opts.CodexWorkingDir == "") {
+		return nil, fmt.Errorf("%w: Codex project root and working directory must be supplied together", clients.ErrCodexLayerRootUnresolved)
+	}
+	if opts.CodexProjectRoot == "" {
+		return p, nil
+	}
+	codexClient := clients.AllClients()["codex-cli"]
+	adapter, ok := clients.AsCodexTransportClient(codexClient)
+	if !ok {
+		return nil, fmt.Errorf("CODEX_LAYER_ROOT_UNRESOLVED: Codex transport adapter is unavailable")
+	}
+	var desiredEntry clients.MCPEntry
+	for _, update := range p.ClientUpdates {
+		if update.Client == "codex-cli" {
+			desiredEntry = clients.MCPEntry{
+				Name:    p.Server + "-mcphub",
+				URL:     update.URL,
+				Headers: update.Headers,
+			}
+			break
+		}
+	}
+	target, err := adapter.ResolveTransportTarget(clients.CodexTransportTargetRequest{
+		LogicalEntryName: p.Server,
+		DesiredTransport: clients.CodexTransportHTTP,
+		DesiredEntry:     desiredEntry,
+		ProjectRoot:      opts.CodexProjectRoot,
+		WorkingDir:       opts.CodexWorkingDir,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if target.ExistingExactTarget {
+		settledEntry, settledErr := codexClient.GetEntry(target.TargetEntryName)
+		if settledErr != nil {
+			return nil, fmt.Errorf("read settled Codex target %q: %w", target.TargetEntryName, settledErr)
+		}
+		logicalEntry, logicalErr := codexClient.GetEntry(p.Server)
+		if logicalErr != nil {
+			return nil, fmt.Errorf("read logical Codex source %q: %w", p.Server, logicalErr)
+		}
+		if logicalEntry == nil && codexInstallTargetMatchesPlan(settledEntry, p.ClientUpdates) {
+			for i := range p.ClientUpdates {
+				if p.ClientUpdates[i].Client == "codex-cli" {
+					p.ClientUpdates[i].EntryName = target.TargetEntryName
+					p.ClientUpdates[i].codexAlreadyConfigured = true
+				}
+			}
+			return p, nil
+		}
+		return nil, fmt.Errorf("%w: exact Codex target %q is not an authorized settled repeat", clients.ErrCodexTargetNameConflict, target.TargetEntryName)
+	}
+	if target.TargetEntryName == p.Server && target.ProjectLayerPresent {
+		settledTargetName := p.Server + "-mcphub"
+		settledEntry, settledErr := codexClient.GetEntry(settledTargetName)
+		if settledErr != nil {
+			return nil, fmt.Errorf("read settled Codex target %q: %w", settledTargetName, settledErr)
+		}
+		logicalEntry, logicalErr := codexClient.GetEntry(p.Server)
+		if logicalErr != nil {
+			return nil, fmt.Errorf("read logical Codex source %q: %w", p.Server, logicalErr)
+		}
+		if logicalEntry == nil && codexInstallTargetMatchesPlan(settledEntry, p.ClientUpdates) {
+			for i := range p.ClientUpdates {
+				if p.ClientUpdates[i].Client == "codex-cli" {
+					p.ClientUpdates[i].EntryName = settledTargetName
+					p.ClientUpdates[i].codexAlreadyConfigured = true
+				}
+			}
+			return p, nil
+		}
+	}
+	for i := range p.ClientUpdates {
+		if p.ClientUpdates[i].Client == "codex-cli" {
+			p.ClientUpdates[i].EntryName = target.TargetEntryName
+		}
+	}
 	return p, nil
+}
+
+func codexInstallTargetMatchesPlan(entry *clients.MCPEntry, updates []ClientUpdatePlan) bool {
+	if entry == nil {
+		return false
+	}
+	for _, update := range updates {
+		if update.Client != "codex-cli" {
+			continue
+		}
+		if entry.URL != update.URL || len(entry.Headers) != len(update.Headers) {
+			return false
+		}
+		for key, value := range update.Headers {
+			if entry.Headers[key] != value {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func installClientPredicate(opts BuildPlanOpts) (func(string) bool, error) {
@@ -3179,6 +3353,10 @@ clientUpdates:
 		if client == nil {
 			return failAfterRollback(fmt.Errorf("unknown client %q in binding", u.Client))
 		}
+		if u.codexAlreadyConfigured {
+			fmt.Fprintf(w, "✓ %s logical %s → target %s (already configured)\n", u.Client, m.Name, u.EntryName)
+			continue
+		}
 		if !client.Exists() {
 			fmt.Fprintf(w, "\u26a0 Client %s not installed on this machine \u2014 skipping\n", u.Client)
 			continue
@@ -3198,7 +3376,8 @@ clientUpdates:
 		// while the adapter has already said its layered read is corrupt. So
 		// fail loud and run the rollback-so-far instead of proceeding from an
 		// untrusted read.
-		if _, err := client.GetEntry(m.Name); err != nil {
+		priorEntry, err := client.GetEntry(m.Name)
+		if err != nil {
 			return failAfterRollback(fmt.Errorf("snapshot prior entry for %s in %s: %w", m.Name, u.Client, err))
 		}
 
@@ -3220,6 +3399,59 @@ clientUpdates:
 		fmt.Fprintf(w, "  backup: %s\n", bak)
 		entry := installClientEntryV1(m.Name, u, canonical)
 		configWriter := symlinkConsentWriters[u.Client]
+		if isCodexAliasInstallUpdate(m.Name, u) {
+			codex, ok := clients.AsCodexTransportClient(client)
+			if !ok {
+				return failAfterRollback(fmt.Errorf("CODEX_LAYER_ROOT_UNRESOLVED: Codex transport adapter is unavailable"))
+			}
+			expectedSource, sourceErr := codexInstallSourceTransport(priorEntry)
+			if sourceErr != nil {
+				return failAfterRollback(sourceErr)
+			}
+			result, relocateErr := codex.RelocateHTTPEntry(clients.CodexHTTPRelocation{
+				SourceEntryName: m.Name,
+				TargetEntryName: u.EntryName,
+				Entry:           entry,
+				ExpectedSource:  expectedSource,
+				WriteConfig:     configWriter,
+			})
+			if relocateErr != nil {
+				return failAfterRollback(fmt.Errorf("relocate Codex entry %s to %s: %w", m.Name, u.EntryName, relocateErr))
+			}
+			if len(result.SourceSnapshot) == 0 {
+				return failAfterRollback(fmt.Errorf("CODEX_CLIENT_CONFIG_READBACK_FAILED: relocation of %s to %s produced no source snapshot", m.Name, u.EntryName))
+			}
+			sourceSnapshot := result.SourceSnapshot
+			targetName := u.EntryName
+			targetEntry := entry
+			rollback = append(rollback, func() {
+				_, restoreErr := codex.RestoreRelocatedHTTPEntry(clients.CodexHTTPInverseRelocation{
+					SourceEntryName: m.Name,
+					TargetEntryName: targetName,
+					Target:          targetEntry,
+					SourceSnapshot:  sourceSnapshot,
+					WriteConfig:     configWriter,
+				})
+				if restoreErr != nil {
+					rollbackClientRestoreFailures = append(rollbackClientRestoreFailures, u.Client)
+					fmt.Fprintf(w, "  rollback: restore Codex logical %s from target %s failed: %v\n", m.Name, targetName, restoreErr)
+					return
+				}
+				fmt.Fprintf(w, "  rollback: restored Codex logical %s from target %s\n", m.Name, targetName)
+			})
+			settlement, settlementErr := NewClientConfigSettlementOwnerV1().Accept(ClientConfigOperationInstall, result)
+			if settlement != (ClientConfigSettlementV1{}) {
+				p.clientConfigSettlements = append(p.clientConfigSettlements, settlement)
+			}
+			if settlementErr != nil {
+				// The client transaction is already committed. Do not compensate a
+				// possibly durable event append; return the retained row and fail
+				// the wider install without claiming success.
+				return settlementErr
+			}
+			fmt.Fprintf(w, "✓ %s logical %s → target %s\n", u.Client, m.Name, u.EntryName)
+			continue
+		}
 		// Compensating op registered BEFORE the AddEntry mutation (bug 2026-07-12):
 		// restore this entry's exact prior state from the timestamped backup taken
 		// immediately above. AddEntry -> SecureWriteClientConfig has post-rename error
@@ -3379,7 +3611,8 @@ func sameInstallPath(a, b string) bool {
 }
 
 // installClientEntryV1 owns the plan-update to adapter write-request mapping.
-// Binding expectations and the writer both consume this exact mapping.
+// The command receipt uses the same request before projecting it through the
+// adapter's GetEntry shape, so it cannot certify a hand-copied plan value.
 func installClientEntryV1(server string, update ClientUpdatePlan, relayExePath string) clients.MCPEntry {
 	entryName := update.EntryName
 	if entryName == "" {
@@ -3394,6 +3627,20 @@ func installClientEntryV1(server string, update ClientUpdatePlan, relayExePath s
 		RelayExePath: relayExePath,
 		RelayURL:     update.RelayURL,
 	}
+}
+
+func isCodexAliasInstallUpdate(logicalEntryName string, update ClientUpdatePlan) bool {
+	return update.Client == "codex-cli" && update.EntryName != "" && update.EntryName != logicalEntryName
+}
+
+func codexInstallSourceTransport(prior *clients.MCPEntry) (clients.CodexTransport, error) {
+	if prior == nil {
+		return clients.CodexTransportNone, fmt.Errorf("CODEX_LAYER_COLLISION_UNOWNED_GLOBAL: logical Codex source entry is absent")
+	}
+	if prior.URL != "" {
+		return clients.CodexTransportHTTP, nil
+	}
+	return clients.CodexTransportStdio, nil
 }
 
 // schedulerLister is the narrow scheduler subset pruneObsoleteServerTasks

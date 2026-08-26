@@ -21,6 +21,26 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+func TestLoadSerenaManifestForMigrateCarriesExactRawHash(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "serena")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := "name: serena\nkind: global\ntransport: stdio-bridge\ncommand: go\nbase_args: [version]\nenv: {}\ndaemons:\n  - name: default\n    port: 9484\nclient_bindings: []\n# exact-byte marker\n"
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", root)
+	_, got, err := loadSerenaManifestForMigrateFn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := api.ManifestHashContent([]byte(raw)); got != want {
+		t.Fatalf("hash=%q, want exact raw hash %q", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Test harness.
 //

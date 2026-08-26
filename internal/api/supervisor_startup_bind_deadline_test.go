@@ -20,7 +20,10 @@ func TestSupervisorDaemonsFromPlan_CopiesStartupBindDeadline(t *testing.T) {
 			{Name: "fast", Port: 9141}, // zero → default resolution downstream
 		},
 	}
-	rows := supervisorDaemonsFromPlan(m, "")
+	rows, err := supervisorDaemonsFromPlan(m, testSupervisorIntentPlan(m, ""), "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(rows) != 2 {
 		t.Fatalf("supervisorDaemonsFromPlan = %d rows, want 2", len(rows))
 	}

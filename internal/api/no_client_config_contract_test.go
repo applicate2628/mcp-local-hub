@@ -78,7 +78,7 @@ func TestNoClientPartialDaemonPreservesSiblingIntent(t *testing.T) {
 	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{priorAlpha, priorBeta}}); err != nil {
 		t.Fatalf("seed supervisor intent: %v", err)
 	}
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "alpha", &bytes.Buffer{})
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, "alpha"), "", intentPath, nil, "alpha", &bytes.Buffer{})
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(partial): %v", err)
 	}
@@ -144,7 +144,7 @@ func TestNoClientExecutionLeavesClientArtifactsUntouched(t *testing.T) {
 	intermediateCalls := 0
 	err = executeInstallTo(&bytes.Buffer{}, m, plan, 3, false, func() (func(), error) {
 		intermediateCalls++
-		merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "alpha", &bytes.Buffer{})
+		merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, "alpha"), "", intentPath, nil, "alpha", &bytes.Buffer{})
 		if err != nil {
 			return nil, err
 		}

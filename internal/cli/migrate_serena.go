@@ -160,16 +160,17 @@ func daemonNamed(daemons []config.DaemonSpec, name string) bool {
 // source-state detection AND as the catalog input to the in-memory builder.
 // Default: api.ManifestGet("serena") (honors the MCPHUB_MANIFEST_DIR_OVERRIDE
 // test seam → reads a seeded temp manifest with no embed leakage).
-var loadSerenaManifestForMigrateFn = func() (*config.ServerManifest, error) {
+var loadSerenaManifestForMigrateFn = func() (*config.ServerManifest, string, error) {
 	raw, err := api.NewAPI().ManifestGet(serenaMigrateServerName)
 	if err != nil {
-		return nil, fmt.Errorf("load serena manifest: %w", err)
+		return nil, "", fmt.Errorf("load serena manifest: %w", err)
 	}
+	manifestHash := api.ManifestHashContent([]byte(raw))
 	m, err := config.ParseManifest(strings.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("parse serena manifest: %w", err)
+		return nil, "", fmt.Errorf("parse serena manifest: %w", err)
 	}
-	return m, nil
+	return m, manifestHash, nil
 }
 
 // installParsedManifestFn is the package-level seam over
@@ -463,7 +464,7 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 	// 1. Load + parse the serena manifest; detect source state. The manifest
 	//    is READ ONLY — it is the catalog input to the in-memory builder and
 	//    the source-state classifier. It is never written.
-	src, err := loadSerenaManifestForMigrateFn()
+	src, manifestHash, err := loadSerenaManifestForMigrateFn()
 	if err != nil {
 		return err
 	}
@@ -1116,6 +1117,7 @@ func runMigrateSerenaDynamicPoolWithDeps(ctx context.Context, w io.Writer, deps 
 	//    only side effect is the per-workspace supervisor-intent fan-out driven by
 	//    opts.Workspaces (the finding-#2 re-read snapshot).
 	intentPath, ierr := installParsedManifestFn(ctx, api.NewAPI(), dynamicManifest, api.InstallParsedManifestOpts{
+		ManifestHash:         manifestHash,
 		Writer:               w,
 		Workspaces:           installWorkspaces,
 		SupervisorLockBypass: interlockBypass,

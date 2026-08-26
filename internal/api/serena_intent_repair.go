@@ -742,7 +742,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 	//    carries runtime_spec, so any running supervisor is provably this binary).
 	//    Materialize the missing daemon rows from the dynamic-pool manifest and
 	//    APPEND them — never replace the existing rows.
-	catalog, cerr := loadSerenaCatalogManifest()
+	catalog, manifestHash, cerr := loadSerenaCatalogManifest()
 	if cerr != nil {
 		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: load serena catalog manifest: %w", cerr))
 	}
@@ -763,9 +763,7 @@ func repairSerenaIntentFromRegistry(stateDir string, commit bool) (result Serena
 		return failedSerenaIntentRepairResult(fmt.Errorf("serena intent repair: intent carries a runtime_spec row but no daemon exposed a command to copy for the appended rows"))
 	}
 
-	// Materialize with manifestHash "" — mirrors the install fan-out
-	// (install_parsed_manifest.go calls BuildSupervisorDaemonsForSerena with "").
-	newDaemons := BuildSupervisorDaemonsForSerena(dyn, missing, "", mcphubPath)
+	newDaemons := BuildSupervisorDaemonsForSerena(dyn, missing, manifestHash, mcphubPath)
 	if len(newDaemons) == 0 {
 		// Every `missing` row is a valid serena row (filtered in step 4), so the
 		// fan-out must produce a descriptor for each. An empty result means a

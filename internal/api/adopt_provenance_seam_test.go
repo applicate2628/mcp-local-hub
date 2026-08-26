@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -210,8 +211,8 @@ args = ["version"]
 	})
 }
 
-// C5 — a promote-flip failure after Install success is NON-FATAL: adopt still
-// returns success and the row is left recoverable `adopting` with both hashes.
+// C5 — a promote-flip failure after Install leaves a recoverable `adopting`
+// row with both hashes but returns the typed provenance-receipt failure.
 func TestExecuteAdoptPromoteRecoverable(t *testing.T) {
 	entry := "mui-adopt-seam-c5"
 	setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-seam-c5]
@@ -227,8 +228,13 @@ args = ["version"]
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
-		t.Fatalf("ExecuteAdopt must still succeed despite a non-fatal promote failure: %v", err)
+	err = NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{})
+	if err == nil {
+		t.Fatal("ExecuteAdopt succeeded despite a failed provenance receipt")
+	}
+	var stageErr *AdoptStageError
+	if !errors.As(err, &stageErr) || stageErr.Stage != "provenance-receipt" {
+		t.Fatalf("ExecuteAdopt error = %v, want typed provenance-receipt stage", err)
 	}
 	rec, found, err := ReadAdoptProvenance(entry)
 	if err != nil || !found {

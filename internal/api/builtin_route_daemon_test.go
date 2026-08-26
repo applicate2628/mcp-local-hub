@@ -74,7 +74,7 @@ func TestBuiltinRouteDaemon_SurvivesUnrelatedServerInstallThenUninstall(t *testi
 			{Name: "alpha", Port: 19211},
 		},
 	}
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(install demo): %v", err)
 	}

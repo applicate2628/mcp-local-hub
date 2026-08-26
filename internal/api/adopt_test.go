@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -23,6 +24,9 @@ import (
 
 func setupAdoptTestEnv(t *testing.T, entryName, body string) (codexPath, manifestRoot, stateRoot string) {
 	t.Helper()
+	previousReadinessVerifier := adoptReadinessVerifierFn
+	adoptReadinessVerifierFn = func(*API, []string) error { return nil }
+	t.Cleanup(func() { adoptReadinessVerifierFn = previousReadinessVerifier })
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	t.Setenv("HOME", home)
@@ -65,9 +69,29 @@ func setupAdoptTestEnv(t *testing.T, entryName, body string) (codexPath, manifes
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(manifestRoot, entryName)) })
 
-	stateRoot = filepath.Join(root, "state")
+	// The lease owner verifies the state-root DACL before creating the
+	// provenance namespace. Use the package's owner-only fixture rather than a
+	// plain TempDir child, whose inherited Authenticated Users ACE is deliberately
+	// rejected by that production boundary on Windows.
+	stateRoot = hardenedTempDir(t)
 	t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+	bootstrapSecureAdoptLeaseNamespace(t)
 	return codexPath, manifestRoot, stateRoot
+}
+
+// bootstrapSecureAdoptLeaseNamespace gives legacy fixtures the exact
+// production-owned namespace creation path. They must not pre-create
+// adopt-provenance with os.MkdirAll, which would deliberately be refused by the
+// Windows DACL verifier.
+func bootstrapSecureAdoptLeaseNamespace(t *testing.T) {
+	t.Helper()
+	lease, acquired, err := tryAcquireAdoptManifestLease("fixture-namespace-bootstrap")
+	if err != nil || !acquired {
+		t.Fatalf("bootstrap secure adopt lease namespace: acquired=%v err=%v", acquired, err)
+	}
+	if err := lease.Unlock(); err != nil {
+		t.Fatalf("release secure adopt lease namespace bootstrap: %v", err)
+	}
 }
 
 func TestBuildAdoptPlanDryRunMutatesNothing(t *testing.T) {
@@ -196,6 +220,93 @@ args = ["version"]
 	}
 	if !strings.Contains(string(logBytes), `"source":"adopt"`) || !strings.Contains(string(logBytes), `"entry":"`+entry+`"`) {
 		t.Fatalf("adopt audit row missing from supervisor-events.log:\n%s", logBytes)
+	}
+}
+
+func TestExecuteAdoptRemovesManifestLeaseAfterVerifiedSuccess(t *testing.T) {
+	entry := "mui-adopt-lease-settlement"
+	_, _, _ = setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-lease-settlement]
+command = "go"
+args = ["version"]
+`)
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9324,
+		Clients:      []string{"codex-cli"},
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+
+	leasePath, err := adoptManifestLeasePath(entry)
+	if err != nil {
+		t.Fatalf("adoptManifestLeasePath: %v", err)
+	}
+	if _, err := os.Lstat(leasePath); !os.IsNotExist(err) {
+		t.Fatalf("successful adopt left per-manifest lease %q behind: %v", leasePath, err)
+	}
+}
+
+func TestExecuteAdoptExitZeroRequiresAllReceivers(t *testing.T) {
+	stages := []string{
+		"manifest-verify",
+		"intent-task-verify",
+		"daemon-readiness",
+		"client-verify",
+		"provenance-receipt",
+	}
+	for i, stage := range stages {
+		t.Run(stage, func(t *testing.T) {
+			entry := fmt.Sprintf("mui-adopt-receiver-%d", i)
+			_, _, stateRoot := setupAdoptTestEnv(t, entry, fmt.Sprintf(`[mcp_servers.%s]
+command = "go"
+args = ["version"]
+`, entry))
+			plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+				EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9325 + i, Clients: []string{"codex-cli"},
+			})
+			if err != nil {
+				t.Fatalf("BuildAdoptPlan: %v", err)
+			}
+			previous := adoptReceivingVerifierFn
+			adoptReceivingVerifierFn = func(_ *API, _ *AdoptPlan, _ *AdoptProvenanceRecord) error {
+				return newAdoptStageError(stage, "committed_unverified", fmt.Errorf("injected %s receiver failure", stage))
+			}
+			t.Cleanup(func() { adoptReceivingVerifierFn = previous })
+
+			var out bytes.Buffer
+			err = NewAPI().ExecuteAdopt(plan, &out)
+			if err == nil {
+				t.Fatalf("ExecuteAdopt succeeded with required receiver %q failed", stage)
+			}
+			var stageErr *AdoptStageError
+			if !errors.As(err, &stageErr) || stageErr.Stage != stage {
+				t.Fatalf("ExecuteAdopt error = %v, want typed %s stage", err, stage)
+			}
+			if strings.Contains(out.String(), "Adopted logical source") || strings.Contains(out.String(), "Already adopted logical source") {
+				t.Fatalf("success summary printed despite %s failure: %q", stage, out.String())
+			}
+			events, readErr := os.ReadFile(filepath.Join(stateRoot, SupervisorEventLogFileLeaf))
+			if readErr != nil && !os.IsNotExist(readErr) {
+				t.Fatalf("read supervisor event log: %v", readErr)
+			}
+			if bytes.Contains(events, []byte(`"event":"adopt-executed"`)) {
+				t.Fatalf("adopt-executed emitted despite %s failure: %s", stage, events)
+			}
+			lease, acquired, acquireErr := tryAcquireAdoptManifestLease(entry)
+			if acquireErr != nil || !acquired {
+				t.Fatalf("lease not settled after %s failure: acquired=%v err=%v", stage, acquired, acquireErr)
+			}
+			if releaseErr := lease.ReleaseAndRemove(); releaseErr != nil {
+				t.Fatalf("release verification lease after %s failure: %v", stage, releaseErr)
+			}
+		})
 	}
 }
 
@@ -1960,11 +2071,30 @@ args = ["version"]
 
 func TestBuildAdoptPlanRefusesDisabledSourceEntry(t *testing.T) {
 	entry := "mui-adopt-disabled-source"
-	setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-disabled-source]
+	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-disabled-source]
 command = "go"
 args = ["version"]
 disabled = true
 `)
+	configBefore, readErr := os.ReadFile(codexPath)
+	if readErr != nil {
+		t.Fatalf("snapshot source config: %v", readErr)
+	}
+	absentPaths := []string{
+		filepath.Join(manifestRoot, entry),
+		filepath.Join(stateRoot, supervisorIntentFileLeaf),
+		filepath.Join(stateRoot, adoptedEntriesFileLeaf),
+	}
+	leasePath, pathErr := adoptManifestLeasePath(entry)
+	if pathErr != nil {
+		t.Fatalf("derive lease path: %v", pathErr)
+	}
+	absentPaths = append(absentPaths, leasePath)
+	for _, path := range absentPaths {
+		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("precondition path %q exists: %v", path, statErr)
+		}
+	}
 
 	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
 		EntryName:    entry,
@@ -1977,6 +2107,18 @@ disabled = true
 	}
 	if !strings.Contains(err.Error(), "disabled") || !strings.Contains(err.Error(), "enable it first") {
 		t.Fatalf("disabled source error = %v, want enable-it-first guidance", err)
+	}
+	configAfter, readErr := os.ReadFile(codexPath)
+	if readErr != nil {
+		t.Fatalf("read source config after refusal: %v", readErr)
+	}
+	if !bytes.Equal(configAfter, configBefore) {
+		t.Fatalf("disabled-source refusal mutated config:\nwant %q\n got %q", configBefore, configAfter)
+	}
+	for _, path := range absentPaths {
+		if _, statErr := os.Lstat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("disabled-source refusal mutated absent path %q: %v", path, statErr)
+		}
 	}
 }
 

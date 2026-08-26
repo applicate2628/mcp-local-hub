@@ -475,4 +475,7 @@ type SupervisorIntentEntry struct {
 	WorkingDir                 string
 	Trigger                    string // human-readable; "At logon" or "Weekly Sun 03:00"
 	StartupBindDeadlineSeconds int
+	// manifestHash is the exact hash of the raw manifest bytes accepted by the
+	// install loader. It is execution-only and never appears in plan output.
+	manifestHash string
 }

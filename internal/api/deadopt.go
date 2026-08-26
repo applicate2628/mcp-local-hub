@@ -204,6 +204,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 			continue
 		}
 		clientPlan.OriginalState = clientRec.OriginalState
+		targetEntryName := adoptClientTargetEntryName(*rec, clientRec)
 
 		adapter, ok := allClients[clientName]
 		if !ok {
@@ -222,7 +223,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 
 		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
 		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
-			rec.SourceEntryName,
+			targetEntryName,
 			deAdoptLiveBindingMatcher(rec, clientName),
 			snapshotSubtree,
 		)
@@ -339,7 +340,7 @@ func (a *API) ExecuteDeAdoptWithOpts(server string, w io.Writer, opts ExecuteDeA
 // executeDeAdoptPlanWithOpts owns the lease-held E1..E7 executor body. Keeping
 // the immutable advisory plan explicit also lets tests deterministically prove
 // that E3 revalidates every client after a plan-to-lease state change.
-func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts ExecuteDeAdoptOpts) (*DeAdoptReport, error) {
+func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts ExecuteDeAdoptOpts) (report *DeAdoptReport, err error) {
 	if w == nil {
 		w = io.Discard
 	}
@@ -356,7 +357,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	// wait is invoked anywhere before the deferred unlock.
 	lease, leased, leaseErr := tryAcquireAdoptManifestLease(plan.ManifestName)
 	if leaseErr != nil {
-		return nil, fmt.Errorf("de-adopt: acquire per-manifest lease for %q failed", plan.ManifestName)
+		var failure *LeaseFailure
+		if errors.As(leaseErr, &failure) && failure.Retryable {
+			return nil, fmt.Errorf("de-adopt: concurrent operation for manifest %q; retry after it completes", plan.ManifestName)
+		}
+		return nil, newAdoptStageError("lease-acquire", "uncommitted", leaseErr)
 	}
 	if !leased {
 		return nil, fmt.Errorf("de-adopt: concurrent operation for manifest %q; retry after it completes", plan.ManifestName)
@@ -374,7 +379,14 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			emit()
 		}
 	}()
-	defer func() { _ = lease.Unlock() }()
+	defer func() {
+		if releaseErr := lease.Unlock(); releaseErr != nil {
+			emitAdoptLeaseFailed(plan.ManifestName, releaseErr)
+			err = errors.Join(err, newAdoptStageError("lease-release", "committed_unverified", releaseErr))
+			narration.Reset()
+			pendingEvents = nil
+		}
+	}()
 	w = &narration
 
 	// The plan's provenance row predates E1 and is advisory. Re-read it while
@@ -426,7 +438,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, fmt.Errorf("de-adopt: mark provenance for manifest %q de-adopting failed", plan.ManifestName)
 	}
 
-	report := &DeAdoptReport{}
+	report = &DeAdoptReport{}
 	resolvedClients := 0
 	allClients := clients.AllClients()
 
@@ -449,9 +461,10 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		}
 
 		match := deAdoptLiveBindingMatcher(rec, clientName)
+		targetEntryName := adoptClientTargetEntryName(*rec, clientRec)
 		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
 		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
-			rec.SourceEntryName,
+			targetEntryName,
 			match,
 			snapshotSubtree,
 		)
@@ -507,9 +520,27 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			fmt.Fprintf(w, "De-adopt client %q is already restored; skipping.\n", clientName)
 			continue
 		case DeAdoptClientRestorePending:
-			mutationErr = mutator.CASRestoreEntryFromBytes(rec.SourceEntryName, match, snapshot)
+			if clientName == "codex-cli" && targetEntryName != rec.SourceEntryName {
+				transport, supported := clients.AsCodexTransportClient(adapter)
+				sourceSnapshot, valid := snapshotSubtree.(map[string]any)
+				if !supported || !valid {
+					mutationErr = fmt.Errorf("Codex alias inverse transaction is unavailable")
+				} else {
+					_, mutationErr = transport.RestoreRelocatedHTTPEntry(clients.CodexHTTPInverseRelocation{
+						SourceEntryName: rec.SourceEntryName,
+						TargetEntryName: targetEntryName,
+						Target: clients.MCPEntry{
+							Name: targetEntryName,
+							URL:  fmt.Sprintf("http://127.0.0.1:%d%s", rec.Port, adoptDefaultURLPath),
+						},
+						SourceSnapshot: sourceSnapshot,
+					})
+				}
+			} else {
+				mutationErr = mutator.CASRestoreEntryFromBytes(targetEntryName, match, snapshot)
+			}
 		case DeAdoptClientRemovePending:
-			mutationErr = mutator.CASGuardedRemoveEntry(rec.SourceEntryName, match)
+			mutationErr = mutator.CASGuardedRemoveEntry(targetEntryName, match)
 		case DeAdoptClientFailed:
 			deAdoptFailClient(report, clientName, dispositionReason, w)
 			continue

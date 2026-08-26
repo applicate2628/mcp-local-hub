@@ -18,6 +18,26 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+func TestLoadSerenaCatalogManifestCarriesExactRawHash(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, SerenaServerName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := "name: serena\nkind: global\ntransport: stdio-bridge\ncommand: go\nbase_args: [version]\nenv: {}\ndaemons:\n  - name: default\n    port: 9484\nclient_bindings: []\n# auto-register exact-byte marker\n"
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", root)
+	_, got, err := loadSerenaCatalogManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := ManifestHashContent([]byte(raw)); got != want {
+		t.Fatalf("hash=%q, want exact raw hash %q", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Phase 5 Part B — AutoRegisterSerenaWorkspace unit tests.
 //
@@ -56,8 +76,8 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	t.Cleanup(restoreStateRoot)
 
 	prevCatalog := loadSerenaCatalogManifest
-	loadSerenaCatalogManifest = func() (*config.ServerManifest, error) {
-		return autoRegisterCatalogManifest(), nil
+	loadSerenaCatalogManifest = func() (*config.ServerManifest, string, error) {
+		return autoRegisterCatalogManifest(), strings.Repeat("b", 64), nil
 	}
 	t.Cleanup(func() { loadSerenaCatalogManifest = prevCatalog })
 

@@ -34,7 +34,10 @@ func TestCompanionInstallAdmission(t *testing.T) {
 
 	// The companion daemon still materializes a supervisor-intent row (kind is not
 	// workspace-scoped), so the supervisor spawns `mcphub daemon …` → RunProcess.
-	rows := supervisorDaemonsFromPlan(m, "")
+	rows, err := supervisorDaemonsFromPlan(m, testSupervisorIntentPlan(m, ""), "")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(rows) != 1 {
 		t.Fatalf("supervisorDaemonsFromPlan = %d rows, want 1 (companion must register to spawn)", len(rows))
 	}

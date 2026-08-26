@@ -243,7 +243,7 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 		return nil, fmt.Errorf("serena auto-register: aborted before registering %s: %w (the client session was terminated or the deadline expired)", root, cerr)
 	}
 
-	catalog, err := loadSerenaCatalogManifest()
+	catalog, manifestHash, err := loadSerenaCatalogManifest()
 	if err != nil {
 		return nil, fmt.Errorf("serena auto-register: load serena catalog manifest: %w", err)
 	}
@@ -588,8 +588,9 @@ func (a *API) AutoRegisterSerenaWorkspace(ctx context.Context, absPath string) (
 	// consumed it is gone (replaced by RequireWorkspaceKey, which guarantees presence
 	// PRE-commit), and the commit point below keys off rowSaved, not the path.
 	_, iErr := autoRegisterInstallParsedManifestFn(ctx, a, dyn, InstallParsedManifestOpts{
-		Writer:     io.Discard,
-		Workspaces: installWorkspaces,
+		Writer:       io.Discard,
+		Workspaces:   installWorkspaces,
+		ManifestHash: manifestHash,
 		// RequireWorkspaceKey makes the install FAIL PRE-COMMIT if its stale-row
 		// filter dropped our triggering workspace (its dir vanished between the Save
 		// above and the merge). This REPLACES the old post-commit fan-out verify (bot
@@ -965,16 +966,17 @@ func emitSerenaAutoRegisterDeferredOnInterlockEvent(workspacePath, key string) {
 // internal/cli/migrate_serena.go:162's loadSerenaManifestForMigrateFn (which the
 // api package cannot import — cli imports api, not the reverse). A package-level
 // var so tests can override the catalog source without seeding a manifest dir.
-var loadSerenaCatalogManifest = func() (*config.ServerManifest, error) {
+var loadSerenaCatalogManifest = func() (*config.ServerManifest, string, error) {
 	raw, err := NewAPI().ManifestGet(SerenaServerName)
 	if err != nil {
-		return nil, fmt.Errorf("load serena manifest: %w", err)
+		return nil, "", fmt.Errorf("load serena manifest: %w", err)
 	}
+	manifestHash := ManifestHashContent([]byte(raw))
 	m, err := config.ParseManifest(strings.NewReader(raw))
 	if err != nil {
-		return nil, fmt.Errorf("parse serena manifest: %w", err)
+		return nil, "", fmt.Errorf("parse serena manifest: %w", err)
 	}
-	return m, nil
+	return m, manifestHash, nil
 }
 
 // --- Test seams ------------------------------------------------------------

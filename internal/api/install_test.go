@@ -138,6 +138,142 @@ func TestBuildPlanWithOpts_SerenaRouterEntryNotRevertedToLegacyURL(t *testing.T)
 	}
 }
 
+func TestBuildPlanWithOpts_CodexCrossLayerCollisionFreezesAlias(t *testing.T) {
+	globalPath, err := clients.ConfigPathForName("codex-cli")
+	if err != nil {
+		t.Fatalf("resolve sandboxed Codex config path: %v", err)
+	}
+	globalBefore, err := os.ReadFile(globalPath)
+	globalExisted := err == nil
+	if err != nil && !os.IsNotExist(err) {
+		t.Fatalf("read sandboxed Codex config before fixture: %v", err)
+	}
+	t.Cleanup(func() {
+		if globalExisted {
+			if err := os.WriteFile(globalPath, globalBefore, 0o600); err != nil {
+				t.Errorf("restore sandboxed Codex config: %v", err)
+			}
+			return
+		}
+		if err := os.Remove(globalPath); err != nil && !os.IsNotExist(err) {
+			t.Errorf("remove sandboxed Codex fixture: %v", err)
+		}
+	})
+	if err := os.MkdirAll(filepath.Dir(globalPath), 0o700); err != nil {
+		t.Fatalf("create sandboxed Codex config parent: %v", err)
+	}
+	if err := os.WriteFile(globalPath, []byte("[mcp_servers.serena-latest]\nurl = \"http://127.0.0.1:9292/mcp\"\nenabled = false\n"), 0o600); err != nil {
+		t.Fatalf("write global HTTP fixture: %v", err)
+	}
+
+	projectRoot := t.TempDir()
+	workingDir := filepath.Join(projectRoot, "nested", "working")
+	projectPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatalf("create project Codex config parent: %v", err)
+	}
+	projectBytes := []byte("[mcp_servers.serena-latest]\ncommand = \"uvx\"\nargs = [\"serena\"]\nenabled = true\n")
+	if err := os.WriteFile(projectPath, projectBytes, 0o600); err != nil {
+		t.Fatalf("write project stdio fixture: %v", err)
+	}
+	if err := os.MkdirAll(workingDir, 0o700); err != nil {
+		t.Fatalf("create working directory: %v", err)
+	}
+
+	m := genericMultiDaemonManifest()
+	m.Name = "serena-latest"
+	m.ClientBindings = []config.ClientBinding{{Client: "codex-cli", Daemon: "codex", URLPath: "/mcp"}}
+	plan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		IncludeAllClients: true,
+		CodexProjectRoot:  projectRoot,
+		CodexWorkingDir:   workingDir,
+	})
+	if err != nil {
+		t.Fatalf("BuildPlanWithOpts: %v", err)
+	}
+	if len(plan.ClientUpdates) != 1 {
+		t.Fatalf("ClientUpdates = %+v, want one Codex update", plan.ClientUpdates)
+	}
+	if got := plan.ClientUpdates[0].EntryName; got != "serena-latest-mcphub" {
+		t.Fatalf("Codex target entry = %q, want frozen alias %q", got, "serena-latest-mcphub")
+	}
+	projectAfter, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config after plan: %v", err)
+	}
+	if !bytes.Equal(projectAfter, projectBytes) {
+		t.Fatalf("project config changed during planning:\nwant %q\n got %q", projectBytes, projectAfter)
+	}
+
+	var output bytes.Buffer
+	if err := executeInstallToWithSymlinkConsents(&output, m, plan, 0, false, nil, true, true, nil); err != nil {
+		t.Fatalf("execute frozen Codex plan: %v", err)
+	}
+	globalAfter, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatalf("read global config after apply: %v", err)
+	}
+	if bytes.Contains(globalAfter, []byte("[mcp_servers.serena-latest]")) {
+		t.Fatalf("old logical global table remains after alias relocation:\n%s", globalAfter)
+	}
+	if !bytes.Contains(globalAfter, []byte("[mcp_servers.serena-latest-mcphub]")) || bytes.Contains(globalAfter, []byte("command")) {
+		t.Fatalf("global alias is not a standalone HTTP table:\n%s", globalAfter)
+	}
+	projectAfterApply, err := os.ReadFile(projectPath)
+	if err != nil {
+		t.Fatalf("read project config after apply: %v", err)
+	}
+	if !bytes.Equal(projectAfterApply, projectBytes) {
+		t.Fatalf("project config changed during apply:\nwant %q\n got %q", projectBytes, projectAfterApply)
+	}
+
+	repeatPlan, err := BuildPlanWithOpts(m, BuildPlanOpts{
+		IncludeAllClients: true,
+		CodexProjectRoot:  projectRoot,
+		CodexWorkingDir:   workingDir,
+	})
+	if err != nil {
+		t.Fatalf("repeat BuildPlanWithOpts: %v", err)
+	}
+	if len(repeatPlan.ClientUpdates) != 1 || repeatPlan.ClientUpdates[0].EntryName != "serena-latest-mcphub" {
+		t.Fatalf("repeat plan did not retain frozen target: %+v", repeatPlan.ClientUpdates)
+	}
+	var repeatOutput bytes.Buffer
+	if err := executeInstallToWithSymlinkConsents(&repeatOutput, m, repeatPlan, 0, false, nil, true, true, nil); err != nil {
+		t.Fatalf("repeat execute frozen Codex plan: %v", err)
+	}
+	globalAfterRepeat, err := os.ReadFile(globalPath)
+	if err != nil {
+		t.Fatalf("read global config after repeat: %v", err)
+	}
+	if !bytes.Equal(globalAfterRepeat, globalAfter) {
+		t.Fatalf("repeat changed settled global config:\nwant %q\n got %q", globalAfter, globalAfterRepeat)
+	}
+	if !strings.Contains(repeatOutput.String(), "already configured") {
+		t.Fatalf("repeat result is not explicit: %q", repeatOutput.String())
+	}
+}
+
+func TestInstallClientEntryV1UsesFrozenTargetEntryName(t *testing.T) {
+	entry := installClientEntryV1("serena-latest", ClientUpdatePlan{
+		EntryName: "serena-latest-mcphub",
+		URL:       "http://127.0.0.1:9122/mcp",
+	}, `C:\\mcphub.exe`)
+	if got, want := entry.Name, "serena-latest-mcphub"; got != want {
+		t.Fatalf("MCPEntry.Name = %q, want frozen target %q", got, want)
+	}
+}
+
+func TestInstallBuildPlanOptsCarriesCodexProjectAuthority(t *testing.T) {
+	got := NewAPI().installBuildPlanOpts(InstallOpts{
+		CodexProjectRoot: `C:\\fixture-root`,
+		CodexWorkingDir:  `C:\\fixture-root\\nested`,
+	})
+	if got.CodexProjectRoot != `C:\\fixture-root` || got.CodexWorkingDir != `C:\\fixture-root\\nested` {
+		t.Fatalf("Codex project authority was not carried into BuildPlanOpts: %+v", got)
+	}
+}
+
 func TestExecuteInstallToPreservesPendingRollbackBackupsUntilRollback(t *testing.T) {
 	entry := "rollbackkeep"
 	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.rollbackkeep]

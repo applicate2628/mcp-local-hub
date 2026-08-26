@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io"
 	"reflect"
 	"strconv"
 	"strings"
@@ -8,6 +9,30 @@ import (
 
 	"mcp-local-hub/internal/config"
 )
+
+func TestSerenaOrPlanDaemonsCarriesManifestHash(t *testing.T) {
+	hash := strings.Repeat("d", 64)
+	workspace := t.TempDir()
+	dynamic := &config.ServerManifest{
+		Name: "serena", Kind: config.KindWorkspaceScoped, Transport: config.TransportNativeHTTP,
+		Command: "uvx", BaseArgs: []string{"serena"},
+		DaemonTemplate: &config.DaemonTemplate{Context: "codex", ExtraArgsTemplate: []string{"--project", config.WorkspacePathToken}},
+	}
+	rows, err := serenaOrPlanDaemons(dynamic, nil, hash, []WorkspaceEntry{{WorkspaceKey: "abc", WorkspacePath: workspace, Language: SerenaLanguageSentinel, Port: 9482}}, "", io.Discard)
+	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
+		t.Fatalf("dynamic rows=%#v err=%v, want exact hash %q", rows, err, hash)
+	}
+	if _, err := serenaOrPlanDaemons(dynamic, nil, "", []WorkspaceEntry{{WorkspaceKey: "abc", WorkspacePath: workspace, Language: SerenaLanguageSentinel, Port: 9482}}, "", io.Discard); err == nil {
+		t.Fatal("dynamic row with empty hash succeeded")
+	}
+
+	static := &config.ServerManifest{Name: "static", Kind: config.KindGlobal, Daemons: []config.DaemonSpec{{Name: "alpha", Port: 9483}}}
+	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-static-alpha", manifestHash: hash}}}
+	rows, err = serenaOrPlanDaemons(static, plan, "", nil, "", io.Discard)
+	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
+		t.Fatalf("static rows=%#v err=%v, want exact hash %q", rows, err, hash)
+	}
+}
 
 // TestSerenaTaskNameForWorkspace_Deterministic covers plan §D.2:
 // same canonical workspace path must always produce the same task

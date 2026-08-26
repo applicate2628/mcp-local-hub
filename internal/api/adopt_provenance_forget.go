@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -45,7 +46,7 @@ type ForgetAdoptProvenancePlan struct {
 // manifestName UNDER the per-manifest lease and reports what forget would remove.
 // Returns an error when neither a row nor a snapshot dir exists (nothing to forget), or
 // when the lease is held by a concurrent adopt / de-adopt / GC.
-func (a *API) BuildForgetAdoptProvenancePlan(manifestName string) (*ForgetAdoptProvenancePlan, error) {
+func (a *API) BuildForgetAdoptProvenancePlan(manifestName string) (plan *ForgetAdoptProvenancePlan, err error) {
 	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
 	if err != nil {
 		return nil, err
@@ -53,9 +54,15 @@ func (a *API) BuildForgetAdoptProvenancePlan(manifestName string) (*ForgetAdoptP
 	if !acquired {
 		return nil, errForgetLeaseBusy(manifestName)
 	}
-	defer func() { _ = lk.Unlock() }()
+	defer func() {
+		if releaseErr := lk.Unlock(); releaseErr != nil {
+			emitAdoptLeaseFailed(manifestName, releaseErr)
+			err = errors.Join(err, newAdoptStageError("lease-release", "uncommitted", releaseErr))
+			plan = nil
+		}
+	}()
 
-	plan, _, err := buildForgetPlanUnderLease(manifestName)
+	plan, _, err = buildForgetPlanUnderLease(manifestName)
 	return plan, err
 }
 
@@ -64,7 +71,7 @@ func (a *API) BuildForgetAdoptProvenancePlan(manifestName string) (*ForgetAdoptP
 // returns the plan it acted on. This is a DESTRUCTIVE operator escape: it discards
 // provenance bookkeeping only — it does NOT restore any client config and does NOT
 // touch routed vault keys (the operator cleans those manually once the row is gone).
-func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvenanceOpts) (*ForgetAdoptProvenancePlan, error) {
+func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvenanceOpts) (plan *ForgetAdoptProvenancePlan, err error) {
 	lk, acquired, err := tryAcquireAdoptManifestLease(manifestName)
 	if err != nil {
 		return nil, err
@@ -78,15 +85,24 @@ func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvena
 	// manifest report the lease busy). The deferred unlock is the safety net for early
 	// returns; leaseReleased makes it idempotent (mirrors de-adopt's defer-emit-after-unlock).
 	leaseReleased := false
-	releaseLease := func() {
+	releaseLease := func() error {
 		if !leaseReleased {
-			_ = lk.Unlock()
+			releaseErr := lk.Unlock()
 			leaseReleased = true
+			return releaseErr
 		}
+		return nil
 	}
-	defer releaseLease()
+	defer func() {
+		if releaseErr := releaseLease(); releaseErr != nil {
+			emitAdoptLeaseFailed(manifestName, releaseErr)
+			err = errors.Join(err, newAdoptStageError("lease-release", "committed_unverified", releaseErr))
+			plan = nil
+		}
+	}()
 
-	plan, rec, err := buildForgetPlanUnderLease(manifestName)
+	var rec *AdoptProvenanceRecord
+	plan, rec, err = buildForgetPlanUnderLease(manifestName)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +133,10 @@ func (a *API) ForgetAdoptProvenance(manifestName string, opts ForgetAdoptProvena
 		}
 	}
 
-	releaseLease() // lease is no longer needed; do NOT hold it across the event-log I/O
+	if releaseErr := releaseLease(); releaseErr != nil {
+		emitAdoptLeaseFailed(manifestName, releaseErr)
+		return nil, newAdoptStageError("lease-release", "committed_unverified", releaseErr)
+	}
 	emitAdoptProvenanceForgotten(manifestName, string(plan.RowState), len(plan.Clients), plan.HasSnapshotDir)
 	return plan, nil
 }
