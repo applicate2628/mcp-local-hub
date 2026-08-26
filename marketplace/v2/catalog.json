@@ -47,11 +47,13 @@
       "name": "Fetch MCP server",
       "summary": "Fetch arbitrary HTTP URLs and return content.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/fetch/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/644cbe65648f1d6c687b3b647683e1aaa4ed1eba/src/fetch/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-fetch==2026.6.4"
+        "--with",
+        "mcp==1.29.0",
+        "mcp-server-fetch@2026.8.18"
       ],
       "env": {},
       "categories": [
@@ -214,12 +216,12 @@
       "name": "Sequential Thinking MCP server",
       "summary": "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md",
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-sequential-thinking@2025.12.18"
+        "@modelcontextprotocol/server-sequential-thinking@2026.7.4"
       ],
       "env": {},
       "categories": [
@@ -233,12 +235,12 @@
       "name": "Serena MCP server",
       "summary": "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase. Launched via uvx from the upstream repo (pinned commit); requires Python + uv.",
       "homepage": "https://github.com/oraios/serena",
-      "readme_url": "https://raw.githubusercontent.com/oraios/serena/main/README.md",
+      "readme_url": "https://raw.githubusercontent.com/oraios/serena/949a27ef1e5fda1a6e7b561e777bcece345c6ffd/README.md",
       "transport": "native-http",
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b",
+        "git+https://github.com/oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
         "serena",
         "start-mcp-server",
         "--transport",

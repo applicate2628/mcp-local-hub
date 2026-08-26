@@ -1,0 +1,5 @@
+schema_version: 1
+upstream_repository: https://github.com/oraios/serena
+version: 1.7.0
+commit: 949a27ef1e5fda1a6e7b561e777bcece345c6ffd
+readme_path: README.md
