@@ -11,6 +11,13 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
+const (
+	livenessFixtureExe        = `%USERPROFILE%\.local\bin\mcphub.exe`
+	livenessFixtureWorkingDir = `%USERPROFILE%\.local\bin`
+	livenessPriorFixtureExe   = `%PREVIOUS_USERPROFILE%\.local\bin\mcphub.exe`
+	livenessPriorFixtureDir   = `%PREVIOUS_USERPROFILE%\.local\bin`
+)
+
 // installTestCanonicalMcphubPath overrides the canonical-mcphub-path resolver
 // (canonicalMcphubPathFn, liveness_task.go) for the duration of the test. These
 // two helpers were migrated here from the deleted watchdog_xml_validator_test.go
@@ -86,7 +93,7 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	if err := a.InstallLivenessTask(); err != nil {
@@ -106,8 +113,8 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 		"<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>",
 		"<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
 		"<Arguments>supervise --ensure-alive</Arguments>",
-		`<Command>C:\Users\test\.local\bin\mcphub.exe</Command>`,
-		`<WorkingDirectory>C:\Users\test\.local\bin</WorkingDirectory>`,
+		"<Command>" + livenessFixtureExe + "</Command>",
+		"<WorkingDirectory>" + livenessFixtureWorkingDir + "</WorkingDirectory>",
 		"<UserId>test</UserId>",
 	}
 	for _, w := range wantFragments {
@@ -126,7 +133,7 @@ func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
 	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	if err := a.InstallLivenessTask(); err != nil {
@@ -153,7 +160,7 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
 	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	if err := a.InstallLivenessTask(); err != nil {
@@ -175,7 +182,7 @@ func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
 	f := newLivenessTaskScheduler()
 	f.importErr = want
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	err := a.InstallLivenessTask()
@@ -191,10 +198,10 @@ func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement
 	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		`C:\Users\old\.local\bin\mcphub.exe`, `C:\Users\old\.local\bin`, "test"))
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
 	f.tasks[LivenessTaskName] = prior
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	receipt, err := a.EnsureLivenessTask()
@@ -249,8 +256,8 @@ func TestLivenessWorkingDir_OSIndependent(t *testing.T) {
 	}{
 		{
 			name: "windows-backslash-path",
-			exe:  `C:\Users\test\.local\bin\mcphub.exe`,
-			want: `C:\Users\test\.local\bin`,
+			exe:  livenessFixtureExe,
+			want: livenessFixtureWorkingDir,
 		},
 		{
 			name: "posix-forward-slash-path",

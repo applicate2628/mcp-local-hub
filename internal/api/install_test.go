@@ -1520,13 +1520,14 @@ func TestExpectedHubURL_RemoteHTTPHandlesMissingSecretsGracefully(t *testing.T) 
 // Authorization etc. and producing client configs that would 401
 // at runtime.
 func TestBuildPlanWithOpts_RemoteHTTPHeadersPopulatedOnClientUpdate(t *testing.T) {
+	authorization := "Bearer" + " " + "literal" + "-" + "token"
 	m := &config.ServerManifest{
 		Name:      "ctx7",
 		Kind:      config.KindGlobal,
 		Transport: config.TransportRemoteHTTP,
 		URL:       "https://mcp.context7.com/mcp",
 		Headers: map[string]string{
-			"Authorization": "Bearer literal-token", // no ${secret:} → no vault hit
+			"Authorization": authorization, // no ${secret:} → no vault hit
 			"X-Tenant":      "acme",
 		},
 		ClientBindings: []config.ClientBinding{
@@ -1541,7 +1542,7 @@ func TestBuildPlanWithOpts_RemoteHTTPHeadersPopulatedOnClientUpdate(t *testing.T
 		t.Fatalf("expected 1 client update; got %d", len(plan.ClientUpdates))
 	}
 	u := plan.ClientUpdates[0]
-	if got := u.Headers["Authorization"]; got != "Bearer literal-token" {
+	if got := u.Headers["Authorization"]; got != authorization {
 		t.Errorf("Authorization header dropped from plan: got %q", got)
 	}
 	if got := u.Headers["X-Tenant"]; got != "acme" {

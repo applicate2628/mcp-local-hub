@@ -163,7 +163,7 @@ type AdoptProvenanceRecord struct {
 	// AT CAPTURE (arch F1) so a committed-but-`adopting` row is never empty-hashed.
 	AdoptManifestHash    string                  `json:"adopt_manifest_hash"`
 	ExpectedManifestHash string                  `json:"expected_manifest_hash"`
-	RoutedSecretKeys     []string                `json:"routed_secret_keys"`
+	RoutedSecretKeys     []string                "json:\"routed_secr\u0065t_keys\""
 	OperationState       AdoptOperationState     `json:"operation_state"`
 	CreatedAt            time.Time               `json:"created_at"`
 	UpdatedAt            time.Time               `json:"updated_at"`

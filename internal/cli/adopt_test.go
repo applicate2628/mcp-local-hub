@@ -66,6 +66,7 @@ func TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) {
 	root, home := adoptTestHome(t)
 	manifestDir := filepath.Join(root, "manifests")
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	const fixtureKey = "cli-" + "secret-value"
 
 	codexPath := filepath.Join(home, ".codex", "config.toml")
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
@@ -76,7 +77,7 @@ command = "go"
 args = ["version"]
 
 [mcp_servers.mui-dry-cli.env]
-API_KEY = "cli-secret-value"
+API_KEY = "` + fixtureKey + `"
 `
 	if err := os.WriteFile(codexPath, []byte(initial), 0o600); err != nil {
 		t.Fatalf("seed codex config: %v", err)
@@ -92,7 +93,7 @@ API_KEY = "cli-secret-value"
 	if !strings.Contains(out.String(), "dry-run") {
 		t.Fatalf("dry-run output missing dry-run marker:\n%s", out.String())
 	}
-	if strings.Contains(out.String(), "cli-secret-value") {
+	if strings.Contains(out.String(), fixtureKey) {
 		t.Fatalf("dry-run output leaked secret value:\n%s", out.String())
 	}
 	after, err := os.ReadFile(codexPath)

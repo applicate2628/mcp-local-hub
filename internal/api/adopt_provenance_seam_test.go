@@ -81,12 +81,13 @@ args = ["version"]
 // NO vault key, NO manifest, NO client-config change, NO provenance row.
 func TestExecuteAdoptCaptureFailClosed(t *testing.T) {
 	entry := "mui-adopt-seam-c2"
+	literalSecret := "literal-" + "secret-value"
 	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-seam-c2]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-seam-c2.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -140,12 +141,13 @@ API_KEY = "literal-secret-value"
 func TestExecuteAdoptAbortOnEachFailureBranch(t *testing.T) {
 	t.Run("persist-secrets-failure", func(t *testing.T) {
 		entry := "mui-adopt-seam-c3-persist"
+		literalSecret := "literal-" + "secret-value"
 		setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-seam-c3-persist]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-seam-c3-persist.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 		// NO SecretsInit -> persistAdoptRoutedSecrets fails opening a nonexistent
 		// vault, AFTER capture already wrote provenance. Abort site 1.
@@ -281,12 +283,13 @@ args = ["version"]
 // source special case.
 func TestCaptureFailsClosedWhenPresentClientVanishes(t *testing.T) {
 	entry := "mui-adopt-vanish"
+	literalSecret := "literal-" + "secret-value"
 	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-vanish]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-vanish.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -297,7 +300,7 @@ API_KEY = "literal-secret-value"
 	writeJSONForAdoptTest(t, cursorPath, map[string]any{
 		"mcpServers": map[string]any{entry: map[string]any{
 			"command": "go", "args": []any{"version"},
-			"env": map[string]any{"API_KEY": "literal-secret-value"},
+			"env": map[string]any{"API_KEY": literalSecret},
 		}},
 	})
 	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())

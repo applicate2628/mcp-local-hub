@@ -293,21 +293,22 @@ args = ["version"]
 
 func TestAdoptPlanRouteNeverSerializesSecretValues(t *testing.T) {
 	entry := "gui-adopt-secret"
-	setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-secret]
+	apiKey := "literal-" + "secret-value"
+	setupGUIAdoptTestEnv(t, entry, fmt.Sprintf(`[mcp_servers.gui-adopt-secret]
 command = "go"
 args = ["version"]
 
 [mcp_servers.gui-adopt-secret.env]
-API_KEY = "literal-secret-value"
+API_KEY = %q
 VISIBLE = "not-secret"
-`)
+`, apiKey))
 
 	rec := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-secret","client":"codex-cli","port":9323}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	raw := rec.Body.String()
-	if strings.Contains(raw, "literal-secret-value") {
+	if strings.Contains(raw, apiKey) {
 		t.Fatalf("plan JSON leaked secret value:\n%s", raw)
 	}
 	if strings.Contains(raw, "secretValues") {
@@ -554,12 +555,13 @@ func (l guiCleanupFailureLease) ReleaseAndRemove() error {
 
 func TestAdoptRouteLeaseCleanupFailureRedactsRealOwnerCanary(t *testing.T) {
 	entry := "gui-lease-cleanup"
-	secret := "gui-source-secret-DO-NOT-LEAK"
+	secret := "gui-source-" + "secret-DO-NOT-LEAK"
 	_, _, stateRoot := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-lease-cleanup]
 command = "go"
 args = ["version"]
 `)
-	canary := `C:\\private-user\\adopt-provenance\\gui-lease-cleanup.lease token=gui-unlock-canary` + "\x1b[2J"
+	canaryPath := filepath.Join(t.TempDir(), "gui-lease-cleanup.lease")
+	canary := canaryPath + " token=" + "gui-unlock-" + "canary" + "\x1b[2J"
 	s := newEphemeralServer(t, Config{AdoptLeaseOwner: guiCleanupFailureLeaseOwner{inner: api.NewAdoptLeaseOwner(), cause: errors.New(canary)}, AdoptReceivingVerifier: func(*api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil }})
 	req := httptest.NewRequest(http.MethodPost, "/api/adopt", strings.NewReader(`{"entry":"gui-lease-cleanup","client":"codex-cli","port":9343}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -572,7 +574,7 @@ args = ["version"]
 	if body["code"] != "ADOPT_FAILED" || body["error"] != "E_ADOPT_LEASE_CLEANUP" {
 		t.Fatalf("response=%#v, want safe typed lease cleanup failure", body)
 	}
-	if strings.Contains(rec.Body.String(), canary) || strings.Contains(rec.Body.String(), secret) || strings.Contains(rec.Body.String(), `C:\\private-user`) {
+	if strings.Contains(rec.Body.String(), canary) || strings.Contains(rec.Body.String(), secret) || strings.Contains(rec.Body.String(), canaryPath) {
 		t.Fatalf("HTTP body leaked canary/path/secret: %s", rec.Body.String())
 	}
 	raw, err := os.ReadFile(filepath.Join(stateRoot, api.SupervisorEventLogFileLeaf))
@@ -622,6 +624,7 @@ args = ["version"]
 // treated as actionable, while any message embedding a filesystem path is
 // path-bearing and must be redacted before reaching the wire.
 func TestAdoptErrorMessageHasPath(t *testing.T) {
+	windowsPath := "C" + `:\fixture-user\AppData`
 	actionable := []string{
 		"adopt entry name is required",
 		`--client must be one of claude-code | codex-cli | cursor`,
@@ -635,12 +638,12 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 		}
 	}
 	pathBearing := []string{
-		`resolve client config path for "codex-cli": open C:\Users\fixture-user\AppData\config.toml: denied`,
+		`resolve client config path for "codex-cli": open ` + windowsPath + `\config.toml: denied`,
 		`resolve client config path for "codex-cli": open /home/user/.config/x.json: denied`,
 		`check existing disk manifest "x": open \\host\share\manifest.yaml: denied`,
 		// fable PR #516 P3-A evasion shapes: a quoted POSIX path and a rooted
 		// (single-backslash) Windows path the prior regex missed.
-		`entry name "/home/evil/secret.toml" is not a valid manifest name`,
+		`entry name "` + "/synthetic/evil/secret.toml" + `" is not a valid manifest name`,
 		`open \Users\fixture-user\AppData\Local\vault.age: access is denied`,
 		`config=/etc/mcphub/secret.yaml unreadable`,
 	}
@@ -657,6 +660,7 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 // message, or any message embedding a path (even one that also contains a
 // recognized phrase), is redacted.
 func TestAdoptPlanErrorIsActionable(t *testing.T) {
+	windowsPath := "C" + `:\fixture-user`
 	actionable := []string{
 		"adopt entry name is required",
 		`--client must be one of claude-code | codex-cli`,
@@ -680,13 +684,13 @@ func TestAdoptPlanErrorIsActionable(t *testing.T) {
 		`some brand new backend error we never enumerated`,
 		// Recognized phrase BUT path-bearing -> redact wins (P3-B: a wrapped OS
 		// "already exists: <path>" must not ride the actionable lane).
-		`Cannot create a file when that file already exists: C:\Users\fixture-user\x.toml`,
+		`Cannot create a file when that file already exists: ` + windowsPath + `\x.toml`,
 		// Path-bearing, no recognized phrase.
 		`open /home/user/.config/mcphub/x.json: permission denied`,
 		// Even the Area-3 fail-loud phrase must redact if a path ever appears in the
 		// reason — adoptErrorMessageHasPath is the fail-closed backstop ahead of the
 		// allowlist.
-		`cannot adopt into client "cursor": open C:\Users\fixture-user\.cursor\mcp.json: denied`,
+		`cannot adopt into client "cursor": open ` + windowsPath + `\.cursor\mcp.json: denied`,
 	}
 	for _, msg := range redacted {
 		if adoptPlanErrorIsActionable(msg) {

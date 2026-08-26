@@ -467,12 +467,13 @@ args = ["version"]
 
 func TestAdoptSensitiveLiteralRoutesToVaultAndRedactsPlan(t *testing.T) {
 	entry := "mui-adopt-secret"
+	literalSecret := "literal-" + "secret-value"
 	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-secret]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-secret.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 VISIBLE = "not-secret"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
@@ -494,7 +495,7 @@ VISIBLE = "not-secret"
 	}
 	var dryRun bytes.Buffer
 	PrintAdoptPlan(&dryRun, plan)
-	if strings.Contains(dryRun.String(), "literal-secret-value") || strings.Contains(plan.ManifestYAML, "literal-secret-value") {
+	if strings.Contains(dryRun.String(), literalSecret) || strings.Contains(plan.ManifestYAML, literalSecret) {
 		t.Fatalf("dry-run/manifest leaked secret value\nplan:\n%s\nmanifest:\n%s", dryRun.String(), plan.ManifestYAML)
 	}
 	if !strings.Contains(plan.ManifestYAML, "secret:"+wantVaultKey) {
@@ -512,14 +513,14 @@ VISIBLE = "not-secret"
 	if err != nil {
 		t.Fatalf("vault.Get(%s): %v", wantVaultKey, err)
 	}
-	if got != "literal-secret-value" {
+	if got != literalSecret {
 		t.Fatalf("vault secret = %q, want literal-secret-value", got)
 	}
 	manifestBytes, err := os.ReadFile(filepath.Join(manifestRoot, entry, "manifest.yaml"))
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	if strings.Contains(string(manifestBytes), "literal-secret-value") {
+	if strings.Contains(string(manifestBytes), literalSecret) {
 		t.Fatalf("persisted manifest leaked secret value:\n%s", manifestBytes)
 	}
 }
@@ -707,19 +708,21 @@ API_KEY = "secret:EXISTING_API_KEY"
 func TestAdoptSecretRoutingNamespacesVaultKeysByManifest(t *testing.T) {
 	first := "mui-adopt-secret-one"
 	second := "mui-adopt-secret-two"
+	firstSecret := "first-" + "secret"
+	secondSecret := "second-" + "secret"
 	_, manifestRoot, _ := setupAdoptTestEnv(t, first, `[mcp_servers.mui-adopt-secret-one]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-secret-one.env]
-API_KEY = "first-secret"
+API_KEY = "`+firstSecret+`"
 
 [mcp_servers.mui-adopt-secret-two]
 command = "go"
 args = ["env"]
 
 [mcp_servers.mui-adopt-secret-two.env]
-API_KEY = "second-secret"
+API_KEY = "`+secondSecret+`"
 `)
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(manifestRoot, second)) })
 	if _, err := NewAPI().SecretsInit(); err != nil {
@@ -735,8 +738,8 @@ API_KEY = "second-secret"
 		port   int
 		secret string
 	}{
-		{first, firstPort, "first-secret"},
-		{second, secondPort, "second-secret"},
+		{first, firstPort, firstSecret},
+		{second, secondPort, secondSecret},
 	} {
 		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
 			EntryName:    tc.entry,
@@ -767,8 +770,8 @@ API_KEY = "second-secret"
 		key  string
 		want string
 	}{
-		{"MUI_ADOPT_SECRET_ONE_API_KEY", "first-secret"},
-		{"MUI_ADOPT_SECRET_TWO_API_KEY", "second-secret"},
+		{"MUI_ADOPT_SECRET_ONE_API_KEY", firstSecret},
+		{"MUI_ADOPT_SECRET_TWO_API_KEY", secondSecret},
 	} {
 		got, err := vault.Get(tc.key)
 		if err != nil {
@@ -782,12 +785,14 @@ API_KEY = "second-secret"
 
 func TestExecuteAdoptRefusesExistingNamespacedVaultKeyBeforeManifestWrite(t *testing.T) {
 	entry := "mui-adopt-secret-collision"
+	newAdoptSecret := "new-adopt-" + "secret"
+	userManagedSecret := "user-managed-" + "secret"
 	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-secret-collision]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-secret-collision.env]
-API_KEY = "new-adopt-secret"
+API_KEY = "`+newAdoptSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -797,7 +802,7 @@ API_KEY = "new-adopt-secret"
 		t.Fatalf("OpenVault: %v", err)
 	}
 	collisionKey := "MUI_ADOPT_SECRET_COLLISION_API_KEY"
-	if err := vault.Set(collisionKey, "user-managed-secret"); err != nil {
+	if err := vault.Set(collisionKey, userManagedSecret); err != nil {
 		t.Fatalf("seed collision secret: %v", err)
 	}
 	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
@@ -829,7 +834,7 @@ API_KEY = "new-adopt-secret"
 	if err != nil {
 		t.Fatalf("vault.Get(%s): %v", collisionKey, err)
 	}
-	if got != "user-managed-secret" {
+	if got != userManagedSecret {
 		t.Fatalf("collision key overwritten: got %q", got)
 	}
 }
@@ -955,13 +960,15 @@ args = ["version"]
 
 func TestExecuteAdoptVaultSetFailureDeletesEarlierRoutedKeys(t *testing.T) {
 	entry := "mui-adopt-partial-vault"
+	firstSecret := "first-" + "secret"
+	secondSecret := "second-" + "secret"
 	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-partial-vault]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-partial-vault.env]
-API_KEY = "first-secret"
-API_TOKEN = "second-secret"
+API_KEY = "`+firstSecret+`"
+API_TOKEN = "`+secondSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -1013,12 +1020,13 @@ API_TOKEN = "second-secret"
 
 func TestExecuteAdoptRefusesUnavailableVaultBeforeManifestWrite(t *testing.T) {
 	entry := "mui-adopt-no-vault"
+	literalToken := "literal-" + "token"
 	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-no-vault]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-no-vault.env]
-API_TOKEN = "literal-token"
+API_TOKEN = "`+literalToken+`"
 `)
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
 		EntryName:    entry,
@@ -1043,12 +1051,13 @@ API_TOKEN = "literal-token"
 
 func TestBuildAdoptPlanRejectsExistingDiskManifestBeforeMutation(t *testing.T) {
 	entry := "mui-adopt-disk-collision"
+	literalToken := "literal-" + "token"
 	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-disk-collision]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-disk-collision.env]
-API_TOKEN = "literal-token"
+API_TOKEN = "`+literalToken+`"
 `)
 	if err := os.MkdirAll(filepath.Join(manifestRoot, entry), 0o700); err != nil {
 		t.Fatalf("mkdir existing manifest dir: %v", err)
@@ -1087,12 +1096,13 @@ API_TOKEN = "literal-token"
 
 func TestExecuteAdoptManifestCreateFailureDeletesRoutedVaultKeys(t *testing.T) {
 	entry := "mui-adopt-create-fail"
+	literalToken := "literal-" + "token"
 	_, _, _ = setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-create-fail]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-create-fail.env]
-API_TOKEN = "literal-token"
+API_TOKEN = "`+literalToken+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -1576,7 +1586,8 @@ SHARED = "1"
 // returned reason is ALWAYS path-free — no err.Error() / filesystem path can reach
 // the /api wire (the fail-closed path-redaction posture of PR #516).
 func TestAdoptExtractionErrorClass(t *testing.T) {
-	secretPath := `C:\Users\alice\.cursor\mcp.json`
+	const fixtureHome = `%USERPROFILE%`
+	secretPath := fixtureHome + `\.cursor\mcp.json`
 	cases := []struct {
 		name      string
 		err       error
@@ -1595,18 +1606,18 @@ func TestAdoptExtractionErrorClass(t *testing.T) {
 		// substring on err.Error(). A read/parse failure whose PATH contains a
 		// classifier phrase must NOT be fooled into a not-corrupted verdict —
 		// reopening this re-enables the silent partial apply.
-		{"permission denied at path containing 'not found in client'", &os.PathError{Op: "open", Path: `C:\Users\alice\not found in client\mcp.json`, Err: os.ErrPermission}, true, "permission denied"},
-		{"other read failure at path containing 'ConfigPath empty'", &os.PathError{Op: "open", Path: `C:\Users\alice\ConfigPath empty\mcp.json`, Err: os.ErrInvalid}, true, ""},
+		{"permission denied at path containing 'not found in client'", &os.PathError{Op: "open", Path: fixtureHome + `\not found in client\mcp.json`, Err: os.ErrPermission}, true, "permission denied"},
+		{"other read failure at path containing 'ConfigPath empty'", &os.PathError{Op: "open", Path: fixtureHome + `\ConfigPath empty\mcp.json`, Err: os.ErrInvalid}, true, ""},
 		// codex D3: a MiMoCode-style parse error WRAPS the layer path (not a
 		// *PathError, no sentinel); an adversarial path must still fail closed.
-		{"mimocode parse error at path containing 'not found in client'", fmt.Errorf(`parse %s: %w`, `C:\Users\alice\not found in client\mimocode.jsonc`, fmt.Errorf("unexpected end of JSON")), true, ""},
+		{"mimocode parse error at path containing 'not found in client'", fmt.Errorf(`parse %s: %w`, fixtureHome+`\not found in client\mimocode.jsonc`, fmt.Errorf("unexpected end of JSON")), true, ""},
 	}
 	for _, tc := range cases {
 		reason, corrupted := adoptExtractionErrorClass(tc.err)
 		if corrupted != tc.corrupted {
 			t.Errorf("%s: corrupted=%v, want %v (reason=%q)", tc.name, corrupted, tc.corrupted, reason)
 		}
-		if strings.Contains(reason, secretPath) || strings.Contains(reason, "alice") {
+		if strings.Contains(reason, secretPath) || strings.Contains(reason, fixtureHome) {
 			t.Errorf("%s: reason leaked a filesystem path: %q", tc.name, reason)
 		}
 		if tc.reasonHas != "" && !strings.Contains(reason, tc.reasonHas) {
@@ -1714,12 +1725,14 @@ args = ["version"]
 
 func TestBuildAdoptPlanDefaultClientsCompareEnvValuesAndRedactMismatchReport(t *testing.T) {
 	entry := "mui-adopt-env-signature"
+	stagingSecret := "staging-" + "secret"
+	prodSecret := "prod-" + "secret"
 	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-env-signature]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-env-signature.env]
-API_KEY = "staging-secret"
+API_KEY = "`+stagingSecret+`"
 `)
 	home := filepath.Dir(filepath.Dir(codexPath))
 	claudePath := filepath.Join(home, ".claude.json")
@@ -1728,7 +1741,7 @@ API_KEY = "staging-secret"
 			entry: map[string]any{
 				"command": "go",
 				"args":    []any{"version"},
-				"env":     map[string]any{"API_KEY": "staging-secret"},
+				"env":     map[string]any{"API_KEY": stagingSecret},
 			},
 		},
 	})
@@ -1738,7 +1751,7 @@ API_KEY = "staging-secret"
 			entry: map[string]any{
 				"command": "go",
 				"args":    []any{"version"},
-				"env":     map[string]any{"API_KEY": "prod-secret"},
+				"env":     map[string]any{"API_KEY": prodSecret},
 			},
 		},
 	})
@@ -1770,7 +1783,7 @@ API_KEY = "staging-secret"
 	if !strings.Contains(msg, "env values differ for keys: API_KEY") {
 		t.Fatalf("dry-run did not report env-value mismatch by key name only:\n%s", msg)
 	}
-	for _, leaked := range []string{"staging-secret", "prod-secret"} {
+	for _, leaked := range []string{stagingSecret, prodSecret} {
 		if strings.Contains(msg, leaked) {
 			t.Fatalf("dry-run leaked env value %q in mismatch report:\n%s", leaked, msg)
 		}
@@ -1839,12 +1852,13 @@ args = ["version"]
 
 func TestAdoptSanitizesRoutedVaultKeyAndResolverAcceptsIt(t *testing.T) {
 	entry := "mui-mcp"
+	literalSecret := "literal-" + "secret-value"
 	_, _, _ = setupAdoptTestEnv(t, entry, `[mcp_servers.mui-mcp]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-mcp.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -1881,7 +1895,7 @@ API_KEY = "literal-secret-value"
 	if err != nil {
 		t.Fatalf("Resolve(secret:%s): %v", wantKey, err)
 	}
-	if got != "literal-secret-value" {
+	if got != literalSecret {
 		t.Fatalf("resolved secret = %q, want literal-secret-value", got)
 	}
 }

@@ -589,7 +589,7 @@ func matchLanguageServerStdio(raw map[string]any) (cmd, language string, ok bool
 // servers the user may have named "clangd" / "fortran" / etc.
 //
 // Path separators are normalized via basenameAcrossSeparators so a
-// Windows-style absolute path like `C:\Users\u\.local\bin\mcp-
+// Windows-style absolute path like `C:\Users\<user>\.local\bin\mcp-
 // language-server.exe` matches on POSIX hosts too. Cross-environment
 // configs (e.g. WSL pointing at a shared Windows dotfile) and
 // regression tests on Linux CI both depend on that normalization

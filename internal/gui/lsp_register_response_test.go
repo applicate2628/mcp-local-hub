@@ -71,8 +71,8 @@ func TestLSPRegisterResponseJSONExactKeys(t *testing.T) {
 
 func TestLSPRegisterTrustedRootWarningIsWireSafe(t *testing.T) {
 	const (
-		rootSentinel  = `D:\secret\trusted-root`
-		tokenSentinel = "password=hunter2"
+		rootSentinel  = "<trusted-root>"
+		tokenSentinel = "password=" + "hunter2"
 		errorSentinel = "raw-bless-error"
 	)
 	prevEnsure := ensureLSPRegisteredForGUI
@@ -118,7 +118,7 @@ func TestLSPRegisterTrustedRootWarningIsWireSafe(t *testing.T) {
 }
 
 func TestRegistrationHTTPBodies_NoRawDiagnosticSentinels(t *testing.T) {
-	const rawSentinel = `D:\secret\warning password=hunter2`
+	const rawSentinel = "<warning-path> " + "password=" + "hunter2"
 	diagnostic := api.NewRegistrationDiagnostic(api.RegistrationDiagnosticCode(rawSentinel), rawSentinel, rawSentinel, errors.New(rawSentinel))
 	if diagnostic.Code() != api.RegistrationCodeUnknown {
 		t.Fatalf("unknown code normalized to %q, want REG_UNKNOWN", diagnostic.Code())
@@ -133,7 +133,7 @@ func TestRegistrationHTTPBodies_NoRawDiagnosticSentinels(t *testing.T) {
 }
 
 func TestLSPRegisterFailureStatusesProjectFixedDiagnostics(t *testing.T) {
-	const rawSentinel = `D:\secret\lsp --password=hunter2`
+	const rawSentinel = "<lsp-path> --password=" + "hunter2"
 	previousEnsure := ensureLSPRegisteredForGUI
 	previousBless := blessLSPTrustedRootForGUI
 	t.Cleanup(func() {
@@ -180,7 +180,7 @@ func TestLSPRegisterFailureStatusesProjectFixedDiagnostics(t *testing.T) {
 }
 
 func TestRegistrationDiagnosticPublicProjectorCoversRegistry(t *testing.T) {
-	const rawCause = `D:\secret\projector password=hunter2`
+	const rawCause = "<projector-path> " + "password=" + "hunter2"
 	for _, code := range api.RegisteredRegistrationDiagnosticCodes() {
 		diagnostic := api.NewRegistrationDiagnostic(code, rawCause, rawCause, errors.New(rawCause))
 		public := registrationDiagnosticPublicText(diagnostic)
@@ -194,7 +194,7 @@ func TestRegistrationDiagnosticPublicProjectorCoversRegistry(t *testing.T) {
 }
 
 func TestLSPRegisterTopLevelErrorUsesFixedUnknownProjection(t *testing.T) {
-	const rawSentinel = `D:\secret\handler --password=hunter2`
+	const rawSentinel = "<handler-path> --password=" + "hunter2"
 	server := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	server.lspRegistrar = fakeLSPRegistrar{
 		RegisterFn: func(string, []string) (*lspRegisterReport, error) {

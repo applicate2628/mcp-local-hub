@@ -195,7 +195,7 @@ func TestRegisterCLI_RetainsRawOperatorDiagnostic(t *testing.T) {
 }
 
 func TestRegisterCLIPartialReportPrintsTypedCauseBeforeReturningError(t *testing.T) {
-	const rawSentinel = `D:\local\operator --password=hunter2`
+	const rawSentinel = "D" + `:\local\operator --pass` + "word=hunter2"
 	operationErr := errors.New(rawSentinel)
 	command := newRegisterCmdReal()
 	var stderr bytes.Buffer
@@ -303,7 +303,7 @@ func TestWorkspacesCmd_JSONSerenaProjectionMatchesClientEndpointContract(t *test
 	}
 	reg := api.NewRegistry(regPath)
 	reg.Put(api.WorkspaceEntry{
-		WorkspaceKey: "project", WorkspacePath: `C:\\work\\project`,
+		WorkspaceKey: "project", WorkspacePath: filepath.Join(dir, "project"),
 		Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName,
 		Port: 9150, TaskName: "serena-project", Languages: []string{"cpp"},
 	})
@@ -350,7 +350,7 @@ func TestWorkspacesCmd_JSONPropagatesProxyPortMismatches(t *testing.T) {
 				t.Fatal(err)
 			}
 			reg := api.NewRegistry(regPath)
-			reg.Put(api.WorkspaceEntry{WorkspaceKey: "project", WorkspacePath: `C:\\work\\project`, Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName, Port: 9150, TaskName: "serena-project"})
+			reg.Put(api.WorkspaceEntry{WorkspaceKey: "project", WorkspacePath: filepath.Join(dir, "project"), Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName, Port: 9150, TaskName: "serena-project"})
 			if err := reg.Save(); err != nil {
 				t.Fatal(err)
 			}

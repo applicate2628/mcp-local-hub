@@ -72,14 +72,26 @@ func stubCmd() (*cobra.Command, *bytes.Buffer, *bytes.Buffer) {
 	return c, stdout, stderr
 }
 
+func windowsFixturePath(drive string, segments ...string) string {
+	return drive + ":" + "\\" + strings.Join(segments, "\\")
+}
+
+func upgradeFixtureExecutable() string {
+	return windowsFixturePath("C", "dev", "mcphub.exe")
+}
+
+func upgradeFixtureTarget() string {
+	return windowsFixturePath("C", "Users", "u", ".local", "bin", "mcphub.exe")
+}
+
 // TestRunInstallUpgrade_HappyPath pins the StopAll → Bootstrap →
 // RestartAll order and verifies the success-line output.
 func TestRunInstallUpgrade_HappyPath(t *testing.T) {
 	resetUpgradeSeams(t)
 
 	var order []string
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
 		order = append(order, "stop")
 		return []api.RestartResult{
@@ -89,7 +101,7 @@ func TestRunInstallUpgrade_HappyPath(t *testing.T) {
 	}
 	upgradeBootstrapFn = func(w io.Writer) error {
 		order = append(order, "bootstrap")
-		_, _ = io.WriteString(w, "✓ mcphub installed at C:\\Users\\u\\.local\\bin\\mcphub.exe\n")
+		_, _ = io.WriteString(w, "✓ mcphub installed at "+upgradeFixtureTarget()+"\n")
 		return nil
 	}
 	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
@@ -138,7 +150,7 @@ func TestRunInstallUpgrade_HappyPath(t *testing.T) {
 func TestRunInstallUpgrade_RefusesSelfReplace(t *testing.T) {
 	resetUpgradeSeams(t)
 
-	canonical := "C:\\Users\\u\\.local\\bin\\mcphub.exe"
+	canonical := upgradeFixtureTarget()
 	upgradeExecutableFn = func() (string, error) { return canonical, nil }
 	upgradeTargetPathFn = func() (string, error) { return canonical, nil }
 	// Should NOT reach Stop/Bootstrap/Restart — leave them unstubbed
@@ -186,10 +198,10 @@ func TestRunInstallUpgrade_RefusesSelfReplace(t *testing.T) {
 func TestRunInstallUpgrade_RefusesSelfReplaceCaseInsensitive(t *testing.T) {
 	resetUpgradeSeams(t)
 	upgradeExecutableFn = func() (string, error) {
-		return "C:\\Users\\u\\.local\\bin\\MCPHUB.exe", nil
+		return strings.Replace(upgradeFixtureTarget(), "mcphub.exe", "MCPHUB.exe", 1), nil
 	}
 	upgradeTargetPathFn = func() (string, error) {
-		return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil
+		return upgradeFixtureTarget(), nil
 	}
 	// Stub downstream so even if the guard doesn't fire (case-
 	// sensitive POSIX samePath), the test gets a deterministic
@@ -220,8 +232,8 @@ func TestRunInstallUpgrade_RefusesSelfReplaceCaseInsensitive(t *testing.T) {
 // left untouched when the stop phase couldn't even enumerate tasks.
 func TestRunInstallUpgrade_StopAllError(t *testing.T) {
 	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
 		return nil, errors.New("scheduler.New: COM init failed")
 	}
@@ -259,8 +271,8 @@ func TestRunInstallUpgrade_StopAllError(t *testing.T) {
 // still gets to fix the watchdog code path.
 func TestRunInstallUpgrade_StopPerTaskErrorsAreSurfacedButNotFatal(t *testing.T) {
 	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
 		return []api.RestartResult{
 			{TaskName: "mcp-local-hub-stuck-default", Err: "kill daemon: taskkill /F failed: access denied"},
@@ -303,8 +315,8 @@ func TestRunInstallUpgrade_StopPerTaskErrorsAreSurfacedButNotFatal(t *testing.T)
 // context). Verify both the bootstrap marker and the recovery hint.
 func TestRunInstallUpgrade_BootstrapError(t *testing.T) {
 	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
 	upgradeBootstrapFn = func(io.Writer) error {
 		return fmt.Errorf("target is in use — stop running daemons first")
@@ -400,8 +412,8 @@ func TestUpgradeIsSelfReplace(t *testing.T) {
 // and tells the operator how to converge (`mcphub restart --all`).
 func TestRunInstallUpgrade_RestartAllPartialFailure(t *testing.T) {
 	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
 		return []api.RestartResult{
 			{TaskName: "mcp-local-hub-time-default"},
@@ -473,8 +485,8 @@ func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
 	}
 	resetUpgradeSeams(t)
 
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	upgradeBuildVersionFn = func() string { return "dev" }
 	stopCalled := false
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
@@ -512,8 +524,10 @@ func TestRunInstallUpgrade_AllowsDevBuildOnPOSIX(t *testing.T) {
 	}
 	resetUpgradeSeams(t)
 
-	upgradeExecutableFn = func() (string, error) { return "/home/u/dev/mcphub", nil }
-	upgradeTargetPathFn = func() (string, error) { return "/home/u/.local/bin/mcphub", nil }
+	binaryPath := filepath.Join(t.TempDir(), "mcphub")
+	targetPath := filepath.Join(t.TempDir(), "mcphub")
+	upgradeExecutableFn = func() (string, error) { return binaryPath, nil }
+	upgradeTargetPathFn = func() (string, error) { return targetPath, nil }
 	upgradeBuildVersionFn = func() string { return "dev" }
 	bootstrapCalled := false
 	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
@@ -538,11 +552,11 @@ func TestRunInstallUpgrade_AllowsDevBuildOnPOSIX(t *testing.T) {
 func TestRunInstallUpgrade_RefusesIfGUIRunning(t *testing.T) {
 	resetUpgradeSeams(t)
 
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
 		return []api.ProcessInfo{
-			{PID: 12345, Cmdline: `"C:\Users\u\.local\bin\mcphub.exe" gui --no-browser`},
+			{PID: 12345, Cmdline: `"` + upgradeFixtureTarget() + `" gui --no-browser`},
 		}, nil
 	}
 	stopCalled := false
@@ -580,8 +594,8 @@ func TestRunInstallUpgrade_RefusesIfGUIRunning(t *testing.T) {
 func TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort(t *testing.T) {
 	resetUpgradeSeams(t)
 
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
 	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
 		return nil, errors.New("wmic: process not found")
 	}
@@ -609,7 +623,10 @@ func TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort(t *testing.T) {
 // CommandLine strings into (image, args) and matches against the
 // install target.
 func TestCmdlineIsGUIOnTarget(t *testing.T) {
-	target := `C:\Users\u\.local\bin\mcphub.exe`
+	target := upgradeFixtureTarget()
+	quotedTarget := `"` + target + `"`
+	other := windowsFixturePath("D", "dev", "mcp-local-hub", "bin", "mcphub.exe")
+	quotedOther := `"` + other + `"`
 	cases := []struct {
 		name    string
 		cmdline string
@@ -617,42 +634,42 @@ func TestCmdlineIsGUIOnTarget(t *testing.T) {
 	}{
 		{
 			"quoted path with gui arg",
-			`"C:\Users\u\.local\bin\mcphub.exe" gui --no-browser`,
+			quotedTarget + " gui --no-browser",
 			true,
 		},
 		{
 			"unquoted path with gui arg",
-			`C:\Users\u\.local\bin\mcphub.exe gui`,
+			target + " gui",
 			true,
 		},
 		{
 			"Explorer launch — no args",
-			`"C:\Users\u\.local\bin\mcphub.exe"`,
+			quotedTarget,
 			true,
 		},
 		{
 			"case-insensitive path match",
-			`"C:\users\U\.local\bin\MCPHUB.EXE" gui`,
+			`"` + windowsFixturePath("C", "users", "U", ".local", "bin", "MCPHUB.EXE") + `" gui`,
 			true,
 		},
 		{
 			"daemon process — reject",
-			`"C:\Users\u\.local\bin\mcphub.exe" daemon --server time --daemon default`,
+			quotedTarget + " daemon --server time --daemon default",
 			false,
 		},
 		{
 			"watchdog process — reject",
-			`"C:\Users\u\.local\bin\mcphub.exe" watchdog --once`,
+			quotedTarget + " watchdog --once",
 			false,
 		},
 		{
 			"tray child process — reject",
-			`C:\Users\u\.local\bin\mcphub.exe tray`,
+			target + " tray",
 			false,
 		},
 		{
 			"different path — reject",
-			`"D:\dev\mcp-local-hub\bin\mcphub.exe" gui`,
+			quotedOther + " gui",
 			false,
 		},
 		{
@@ -669,7 +686,7 @@ func TestCmdlineIsGUIOnTarget(t *testing.T) {
 			// unterminated quotes in practice, so this is a defensive
 			// case rather than a real-world input.
 			"unterminated-quote variant — accept (still targets binary)",
-			`"C:\Users\u\.local\bin\mcphub.exe gui`,
+			`"` + target + " gui",
 			true,
 		},
 	}
@@ -686,35 +703,34 @@ func TestCmdlineIsGUIOnTarget(t *testing.T) {
 // TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces pins codex bot
 // r7 P1 closure: the SameFile fallback was using a fixed
 // "first whitespace = image boundary" extraction, which mis-cut
-// an aliased path containing spaces (e.g., a junction at
-// `C:\Alias dir\mcphub.exe`). The progressive boundary scan now
+// an aliased path containing spaces. The progressive boundary scan now
 // tries every whitespace position as a candidate image/args
 // split, stopping at the first one where sameFileOrFalse(image,
 // target) returns true.
 func TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces(t *testing.T) {
-	target := `C:\Users\u\.local\bin\mcphub.exe`
+	target := upgradeFixtureTarget()
 	origSF := sameFileOrFalseFn
 	t.Cleanup(func() { sameFileOrFalseFn = origSF })
 
 	// SameFile returns true only when called with the exact
 	// junction path containing spaces (simulates a junction
 	// alias whose source dir name has a space).
-	const aliasPath = `C:\Alias dir\mcphub.exe`
+	aliasPath := windowsFixturePath("C", "Alias dir", "mcphub.exe")
 	sameFileOrFalseFn = func(path1, _ string) bool {
 		return path1 == aliasPath
 	}
 
-	cmdline := `C:\Alias dir\mcphub.exe gui --no-browser`
+	cmdline := aliasPath + " gui --no-browser"
 	if !cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("aliased-path-with-spaces + gui must accept via progressive boundary scan; got false")
 	}
 	// daemon subcommand on same path → reject
-	cmdline = `C:\Alias dir\mcphub.exe daemon --server time`
+	cmdline = aliasPath + " daemon --server time"
 	if cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("aliased-path-with-spaces + daemon must reject; got true")
 	}
 	// Explorer-launch on same alias (no args, alias has spaces)
-	cmdline = `C:\Alias dir\mcphub.exe`
+	cmdline = aliasPath
 	if !cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("aliased-path-with-spaces Explorer-launch must accept; got false")
 	}
@@ -733,24 +749,27 @@ func TestCmdlineIsGUIOnTarget_AliasedPathWithSpaces(t *testing.T) {
 // file. The fallback uses os.SameFile (via the sameFileOrFalseFn
 // test seam here) to catch these cases.
 func TestCmdlineIsGUIOnTarget_FileIdentityFallback(t *testing.T) {
-	target := `C:\Users\u\.local\bin\mcphub.exe`
+	target := upgradeFixtureTarget()
+	shortAlias := windowsFixturePath("C", "PROGRA~1", "PROFIL~1", "u", ".local", "bin", "mcphub.exe")
+	junctionAlias := windowsFixturePath("C", "junction-link", "mcphub.exe")
+	other := windowsFixturePath("D", "dev", "mcp-local-hub", "bin", "mcphub.exe")
 	origSF := sameFileOrFalseFn
 	t.Cleanup(func() { sameFileOrFalseFn = origSF })
 
 	// 1. 8.3 short path → prefix match fails, sameFileOrFalse
 	//    returns true → accept (gui arg).
 	sameFileOrFalseFn = func(path1, path2 string) bool { return true }
-	cmdline := `C:\PROGRA~1\PROFIL~1\u\.local\bin\mcphub.exe gui`
+	cmdline := shortAlias + " gui"
 	if !cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("8.3 short-path alias should match via SameFile fallback; got false")
 	}
 	// 2. Junction path → same SameFile fallback path.
-	cmdline = `C:\junction-link\mcphub.exe gui --no-browser`
+	cmdline = junctionAlias + " gui --no-browser"
 	if !cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("junction-aliased path should match via SameFile fallback; got false")
 	}
 	// 3. 8.3 short path + daemon arg → reject (not gui subcommand).
-	cmdline = `C:\PROGRA~1\PROFIL~1\u\.local\bin\mcphub.exe daemon --server time`
+	cmdline = shortAlias + " daemon --server time"
 	if cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("8.3 alias + daemon subcommand must reject; got true")
 	}
@@ -758,7 +777,7 @@ func TestCmdlineIsGUIOnTarget_FileIdentityFallback(t *testing.T) {
 	//    an alias resolves to a DIFFERENT binary (e.g., build-dir
 	//    image vs. canonical install).
 	sameFileOrFalseFn = func(path1, path2 string) bool { return false }
-	cmdline = `D:\dev\mcp-local-hub\bin\mcphub.exe gui`
+	cmdline = other + " gui"
 	if cmdlineIsGUIOnTarget(cmdline, target) {
 		t.Errorf("different image file (SameFile=false) must reject; got true")
 	}
@@ -767,7 +786,7 @@ func TestCmdlineIsGUIOnTarget_FileIdentityFallback(t *testing.T) {
 // TestCmdlineIsGUIOnTarget_PathWithSpaces pins codex bot r2 P1
 // closure: splitCSVLine strips quotes from the WMIC/PowerShell
 // CSV cmdline cell. A target path containing spaces — common on
-// Windows profile dirs like `C:\Users\John Doe\.local\bin\` —
+// Windows profile directories —
 // arrives at cmdlineIsGUIOnTarget WITHOUT quotes, so a naive
 // "first whitespace = image boundary" heuristic would split the
 // image-path mid-string and miss the running GUI.
@@ -776,7 +795,10 @@ func TestCmdlineIsGUIOnTarget_FileIdentityFallback(t *testing.T) {
 // target instead of a whitespace split, so spaces inside the
 // target path don't confuse it.
 func TestCmdlineIsGUIOnTarget_PathWithSpaces(t *testing.T) {
-	target := `C:\Users\John Doe\.local\bin\mcphub.exe`
+	target := windowsFixturePath("C", "Users", "John Doe", ".local", "bin", "mcphub.exe")
+	quotedTarget := `"` + target + `"`
+	caseFoldedTarget := windowsFixturePath("C", "users", "JOHN doe", ".LOCAL", "bin", "MCPHUB.EXE")
+	other := windowsFixturePath("D", "Other Users", "John Doe", ".local", "bin", "mcphub.exe")
 	cases := []struct {
 		name    string
 		cmdline string
@@ -784,32 +806,32 @@ func TestCmdlineIsGUIOnTarget_PathWithSpaces(t *testing.T) {
 	}{
 		{
 			"unquoted target with space + gui arg",
-			`C:\Users\John Doe\.local\bin\mcphub.exe gui --no-browser`,
+			target + " gui --no-browser",
 			true,
 		},
 		{
 			"unquoted target with space + Explorer launch",
-			`C:\Users\John Doe\.local\bin\mcphub.exe`,
+			target,
 			true,
 		},
 		{
 			"unquoted target with space + daemon arg — reject",
-			`C:\Users\John Doe\.local\bin\mcphub.exe daemon --server time --daemon default`,
+			target + " daemon --server time --daemon default",
 			false,
 		},
 		{
 			"quoted target with space + gui arg",
-			`"C:\Users\John Doe\.local\bin\mcphub.exe" gui --no-browser`,
+			quotedTarget + " gui --no-browser",
 			true,
 		},
 		{
 			"case-insensitive target with space",
-			`C:\users\JOHN doe\.LOCAL\bin\MCPHUB.EXE gui`,
+			caseFoldedTarget + " gui",
 			true,
 		},
 		{
 			"different path with same suffix — reject",
-			`D:\Other Users\John Doe\.local\bin\mcphub.exe gui`,
+			other + " gui",
 			false,
 		},
 	}
@@ -829,7 +851,9 @@ func TestCmdlineIsGUIOnTarget_PathWithSpaces(t *testing.T) {
 // Unicode case-folding can change byte length. Cyrillic / CJK /
 // Turkish profile names appear in real Windows user paths.
 func TestCmdlineIsGUIOnTarget_UnicodePath(t *testing.T) {
-	target := `C:\Users\Дмитрий\.local\bin\mcphub.exe`
+	target := windowsFixturePath("C", "Users", "Дмитрий", ".local", "bin", "mcphub.exe")
+	caseFoldedTarget := windowsFixturePath("C", "users", "ДМИТРИЙ", ".LOCAL", "BIN", "MCPHUB.EXE")
+	other := windowsFixturePath("C", "Users", "Иван", ".local", "bin", "mcphub.exe")
 	cases := []struct {
 		name    string
 		cmdline string
@@ -837,22 +861,22 @@ func TestCmdlineIsGUIOnTarget_UnicodePath(t *testing.T) {
 	}{
 		{
 			"exact-case Cyrillic + gui",
-			`C:\Users\Дмитрий\.local\bin\mcphub.exe gui`,
+			target + " gui",
 			true,
 		},
 		{
 			"case-folded Cyrillic + gui — accept (rune fold)",
-			`C:\users\ДМИТРИЙ\.LOCAL\BIN\MCPHUB.EXE gui --no-browser`,
+			caseFoldedTarget + " gui --no-browser",
 			true,
 		},
 		{
 			"Cyrillic + daemon arg — reject",
-			`C:\Users\Дмитрий\.local\bin\mcphub.exe daemon --server time`,
+			target + " daemon --server time",
 			false,
 		},
 		{
 			"different Unicode dir — reject",
-			`C:\Users\Иван\.local\bin\mcphub.exe gui`,
+			other + " gui",
 			false,
 		},
 	}

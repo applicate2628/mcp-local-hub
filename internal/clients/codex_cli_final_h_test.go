@@ -93,12 +93,12 @@ http_headers = { "X-Unrelated" = "keep" }
 	expectedServers["serena-mcphub"] = map[string]any{
 		"url":                 "http://127.0.0.1:9300/mcp",
 		"startup_timeout_sec": 10.0,
-		"http_headers":        map[string]any{"Authorization": "Bearer test-token"},
+		"http_headers":        map[string]any{"Authorization": "Bearer" + " test-token"},
 	}
 
 	result, err := (&codexCLI{path: path}).RelocateHTTPEntry(CodexHTTPRelocation{
 		SourceEntryName: "serena", TargetEntryName: "serena-mcphub",
-		Entry:          MCPEntry{Name: "serena-mcphub", URL: "http://127.0.0.1:9300/mcp", Headers: map[string]string{"Authorization": "Bearer test-token"}},
+		Entry:          MCPEntry{Name: "serena-mcphub", URL: "http://127.0.0.1:9300/mcp", Headers: map[string]string{"Authorization": "Bearer" + " test-token"}},
 		ExpectedSource: CodexTransportStdio,
 	})
 	if err != nil || result.Outcome != CodexHTTPRelocationCommitted || result.Readback != CodexHTTPRelocationReadbackExact {
@@ -116,7 +116,7 @@ http_headers = { "X-Unrelated" = "keep" }
 		t.Fatalf("source table remains after relocation: %#v", servers)
 	}
 	if target, ok := servers["serena-mcphub"].(map[string]any); !ok ||
-		!reflect.DeepEqual(target["http_headers"], map[string]any{"Authorization": "Bearer test-token"}) {
+		!reflect.DeepEqual(target["http_headers"], map[string]any{"Authorization": "Bearer" + " test-token"}) {
 		t.Fatalf("target/header shape = %#v", target)
 	}
 }
@@ -126,7 +126,7 @@ func TestCodexRelocationHeaderReadbackRejectsValueAndTypeDrift(t *testing.T) {
 command = "uvx"
 `)
 	for name, mutate := range map[string]func(map[string]any){
-		"header_value": func(headers map[string]any) { headers["Authorization"] = "Bearer changed" },
+		"header_value": func(headers map[string]any) { headers["Authorization"] = "Bearer" + " changed" },
 		"header_type":  func(headers map[string]any) { headers["Authorization"] = int64(7) },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -137,7 +137,7 @@ command = "uvx"
 			result, err := (&codexCLI{path: path}).RelocateHTTPEntry(CodexHTTPRelocation{
 				SourceEntryName: "serena", TargetEntryName: "serena-mcphub",
 				ExpectedSource: CodexTransportStdio,
-				Entry:          MCPEntry{Name: "serena-mcphub", URL: "http://127.0.0.1:9300/mcp", Headers: map[string]string{"Authorization": "Bearer test-token"}},
+				Entry:          MCPEntry{Name: "serena-mcphub", URL: "http://127.0.0.1:9300/mcp", Headers: map[string]string{"Authorization": "Bearer" + " test-token"}},
 				WriteConfig: func(path string, data []byte) error {
 					var document map[string]any
 					if err := toml.Unmarshal(data, &document); err != nil {

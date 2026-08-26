@@ -102,11 +102,12 @@ func TestWorkspaces_GET_DedupesByKey_SortedByKeyThenLanguage(t *testing.T) {
 
 func TestWorkspaces_GET_SerenaEntryUsesVerifiedClientEndpointNotWorkspaceProxy(t *testing.T) {
 	resetWorkspacesTestSeam(t)
+	workspacePath := t.TempDir()
 	workspacesTestSeam = func() (*api.Registry, error) {
 		reg := api.NewRegistry("/synthetic/path")
 		reg.Workspaces = []api.WorkspaceEntry{{
 			WorkspaceKey:  "project",
-			WorkspacePath: `C:\\work\\project`,
+			WorkspacePath: workspacePath,
 			Language:      api.SerenaLanguageSentinel,
 			Backend:       api.SerenaServerName,
 			Port:          9150,
@@ -170,9 +171,10 @@ func TestWorkspaces_GET_SerenaProxyPortMismatchesReturnConflict(t *testing.T) {
 	for _, kind := range []string{"registry_intent", "intent_status"} {
 		t.Run(kind, func(t *testing.T) {
 			resetWorkspacesTestSeam(t)
+			workspacePath := t.TempDir()
 			workspacesTestSeam = func() (*api.Registry, error) {
 				reg := api.NewRegistry("/synthetic/path")
-				reg.Workspaces = []api.WorkspaceEntry{{WorkspaceKey: "project", WorkspacePath: `C:\\work\\project`, Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName, Port: 9150, TaskName: "serena-project"}}
+				reg.Workspaces = []api.WorkspaceEntry{{WorkspaceKey: "project", WorkspacePath: workspacePath, Language: api.SerenaLanguageSentinel, Backend: api.SerenaServerName, Port: 9150, TaskName: "serena-project"}}
 				return reg, nil
 			}
 			stubGUISerenaProjection(t, 0, &api.SerenaWorkspaceStateMismatchError{Kind: api.SerenaWorkspaceStateMismatchProxyPort})
@@ -226,6 +228,7 @@ func TestWorkspaces_NonGET_405(t *testing.T) {
 func TestLSPRegister_POST_OK(t *testing.T) {
 	var gotWorkspace string
 	var gotLanguages []string
+	workspacePath := t.TempDir()
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.lspRegistrar = fakeLSPRegistrar{
 		RegisterFn: func(workspacePath string, languages []string) (*lspRegisterReport, error) {
@@ -249,7 +252,7 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 		},
 	}
 
-	body := bytes.NewBufferString(`{"workspace_path":"D:/dev/project","language":"go"}`)
+	body := bytes.NewBufferString(fmt.Sprintf(`{"workspace_path":%q,"language":"go"}`, workspacePath))
 	req := httptest.NewRequest("POST", "/api/lsp/register", body)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Content-Type", "application/json")
@@ -259,8 +262,8 @@ func TestLSPRegister_POST_OK(t *testing.T) {
 	if rr.Code != 200 {
 		t.Fatalf("got %d: %s", rr.Code, rr.Body.String())
 	}
-	if gotWorkspace != "D:/dev/project" {
-		t.Errorf("workspace_path = %q, want D:/dev/project", gotWorkspace)
+	if gotWorkspace != workspacePath {
+		t.Errorf("workspace_path = %q, want %q", gotWorkspace, workspacePath)
 	}
 	if len(gotLanguages) != 1 || gotLanguages[0] != "go" {
 		t.Errorf("languages = %+v, want [go]", gotLanguages)
@@ -313,6 +316,7 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 	}
 
 	var calls []string
+	workspacePath := t.TempDir()
 	ensureLSPRegisteredForGUI = func(ctx context.Context, workspaceKey, workspacePath, language string) (api.WorkspaceEntry, error) {
 		if ctx == nil {
 			t.Fatal("EnsureLSPRegistered context is nil")
@@ -332,7 +336,7 @@ func TestRealLSPRegistrar_UsesEnsureLSPRegistered(t *testing.T) {
 		}, nil
 	}
 
-	report, err := (realLSPRegistrar{}).RegisterLSP("D:/dev/project", []string{"go", "python"})
+	report, err := (realLSPRegistrar{}).RegisterLSP(workspacePath, []string{"go", "python"})
 	if err != nil {
 		t.Fatalf("RegisterLSP: %v", err)
 	}
@@ -381,7 +385,7 @@ func TestRealLSPRegistrar_DoesNotBlessWhenEveryLanguageFails(t *testing.T) {
 		return nil
 	}
 
-	report, err := (realLSPRegistrar{}).RegisterLSP("D:/dev/project", []string{"go"})
+	report, err := (realLSPRegistrar{}).RegisterLSP(t.TempDir(), []string{"go"})
 	if err != nil {
 		t.Fatalf("RegisterLSP: %v", err)
 	}
@@ -418,7 +422,7 @@ func TestRealLSPRegistrar_ReportsPartialBatchFailures(t *testing.T) {
 		}, nil
 	}
 
-	report, err := (realLSPRegistrar{}).RegisterLSP("D:/dev/project", []string{"go", "not-a-language"})
+	report, err := (realLSPRegistrar{}).RegisterLSP(t.TempDir(), []string{"go", "not-a-language"})
 	if err != nil {
 		t.Fatalf("RegisterLSP partial batch returned error: %v", err)
 	}
@@ -438,6 +442,7 @@ func TestRealLSPRegistrar_ReportsPartialBatchFailures(t *testing.T) {
 }
 
 func TestLSPRegister_POSTLanguagesReturnsPartialSuccessReport(t *testing.T) {
+	workspacePath := t.TempDir()
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.lspRegistrar = fakeLSPRegistrar{
 		RegisterFn: func(workspacePath string, languages []string) (*lspRegisterReport, error) {
@@ -463,7 +468,7 @@ func TestLSPRegister_POSTLanguagesReturnsPartialSuccessReport(t *testing.T) {
 		},
 	}
 
-	body := bytes.NewBufferString(`{"workspace_path":"D:/dev/project","languages":["go","not-a-language"]}`)
+	body := bytes.NewBufferString(fmt.Sprintf(`{"workspace_path":%q,"languages":["go","not-a-language"]}`, workspacePath))
 	req := httptest.NewRequest("POST", "/api/lsp/register", body)
 	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	req.Header.Set("Content-Type", "application/json")
@@ -489,6 +494,7 @@ func TestLSPRegister_POSTLanguagesReturnsPartialSuccessReport(t *testing.T) {
 }
 
 func TestLSPRegister_POST_RejectsCrossOrigin(t *testing.T) {
+	workspacePath := t.TempDir()
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.lspRegistrar = fakeLSPRegistrar{
 		RegisterFn: func(string, []string) (*lspRegisterReport, error) {
@@ -497,7 +503,7 @@ func TestLSPRegister_POST_RejectsCrossOrigin(t *testing.T) {
 		},
 	}
 
-	req := httptest.NewRequest("POST", "/api/lsp/register", bytes.NewBufferString(`{"workspace_path":"D:/dev/project","language":"go"}`))
+	req := httptest.NewRequest("POST", "/api/lsp/register", bytes.NewBufferString(fmt.Sprintf(`{"workspace_path":%q,"language":"go"}`, workspacePath)))
 	req.Header.Set("Origin", "https://example.test")
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
