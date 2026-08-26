@@ -30,6 +30,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"mcp-local-hub/internal/vcpkgmcp/lastfailure"
+	"mcp-local-hub/internal/vcpkgmcp/reversedepgraph"
 )
 
 // VcpkgServer holds the MCP server instance. All three increment-1 tools
@@ -39,11 +40,27 @@ import (
 // struct exists so the registration pattern matches godbolt/perftools and
 // has an obvious place to add shared state (e.g. a cache) later.
 type VcpkgServer struct {
-	server           *mcp.Server
-	lastFailureOnce  sync.Once
-	lastFailureSlots chan struct{}
-	lastFailureRun   func(context.Context, lastfailure.Args, lastfailure.Deps) lastfailure.Result
-	lastFailureDeps  func() lastfailure.Deps
+	server                    *mcp.Server
+	lastFailureOnce           sync.Once
+	lastFailureSlots          chan struct{}
+	lastFailureRun            func(context.Context, lastfailure.Args, lastfailure.Deps) lastfailure.Result
+	lastFailureDeps           func() lastfailure.Deps
+	reverseDependenciesOnce   sync.Once
+	reverseDependenciesSlots  chan struct{}
+	reverseDependenciesRun    func(context.Context, reversedepgraph.Args, reversedepgraph.Runner) reversedepgraph.Result
+	reverseDependenciesRunner reversedepgraph.Runner
+}
+
+func (vs *VcpkgServer) initReverseDependencies() {
+	vs.reverseDependenciesOnce.Do(func() {
+		vs.reverseDependenciesSlots = make(chan struct{}, 1)
+		if vs.reverseDependenciesRun == nil {
+			vs.reverseDependenciesRun = reversedepgraph.Analyze
+		}
+		if vs.reverseDependenciesRunner == nil {
+			vs.reverseDependenciesRunner = reversedepgraph.DefaultRunner()
+		}
+	})
 }
 
 func (vs *VcpkgServer) initLastFailure() {

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 
@@ -65,7 +67,7 @@ func setupGUIAdoptTestEnv(t *testing.T, entryName, codexBody string) (codexPath,
 	}
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
 
-	stateRoot = filepath.Join(root, "state")
+	stateRoot = apitest.HardenedTempDir(t)
 	t.Cleanup(api.SetDaemonStateRootForTest(stateRoot))
 	t.Cleanup(func() { _ = os.RemoveAll(filepath.Join(manifestRoot, entryName)) })
 	return codexPath, manifestRoot, stateRoot
@@ -91,12 +93,27 @@ func guiAdoptDefaultManifestDir(t *testing.T) string {
 
 func postAdoptTest(t *testing.T, path, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	if path == "/api/adopt" {
+		setupReadyGUIAdoptSupervisor(t)
+	}
 	s := newEphemeralServer(t, Config{})
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	s.mux.ServeHTTP(rec, req)
 	return rec
+}
+
+func setupReadyGUIAdoptSupervisor(t *testing.T) {
+	t.Helper()
+	stateRoot, err := api.DaemonStateDir()
+	if err != nil {
+		t.Fatalf("resolve test daemon state root: %v", err)
+	}
+	// ExecuteAdopt's receiving gate requires the post-write intent to be
+	// observed through supervisor IPC. Plan-only requests intentionally do not
+	// start this fixture: their no-mutation assertion includes absent intent.
+	startReadySupervisorFixture(t, stateRoot, nil)
 }
 
 func decodeAdoptJSON(t *testing.T, rec *httptest.ResponseRecorder) map[string]any {
@@ -195,8 +212,8 @@ args = ["version"]
 	if got := sideEffectsAfter.enableCalls - sideEffectsBefore.enableCalls; got != 0 {
 		t.Fatalf("autostart Enable calls delta = %d, want 0 for an enabled owner", got)
 	}
-	if got := sideEffectsAfter.startOwnerCalls - sideEffectsBefore.startOwnerCalls; got != 1 {
-		t.Fatalf("injected autostart owner start calls delta = %d, want 1 for unavailable-supervisor fallback", got)
+	if got := sideEffectsAfter.startOwnerCalls - sideEffectsBefore.startOwnerCalls; got != 0 {
+		t.Fatalf("injected autostart owner start calls delta = %d, want 0 with the ready supervisor fixture", got)
 	}
 	body := decodeAdoptJSON(t, rec)
 	if body["name"] != entry || body["port"] != float64(9322) {
@@ -243,23 +260,55 @@ args = ["version"]
 	}
 }
 
+func TestAdoptHandler_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
+	entry := "gui-global-only-codex"
+	codexPath, _, stateRoot := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-global-only-codex]
+command = "go"
+args = ["version"]
+`)
+	rec := postAdoptTest(t, "/api/adopt", `{"entry":"gui-global-only-codex","client":"codex-cli","port":9345}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status=%d, want 201; body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeAdoptJSON(t, rec)
+	if _, present := body["client_config_settlements"]; present {
+		t.Fatalf("global-only GUI response fabricated H field: %#v", body)
+	}
+	var root map[string]any
+	globalBytes, err := os.ReadFile(codexPath)
+	if err != nil || toml.Unmarshal(globalBytes, &root) != nil {
+		t.Fatalf("read/decode global config: %v", err)
+	}
+	servers := root["mcp_servers"].(map[string]any)
+	if _, ok := servers[entry].(map[string]any); !ok {
+		t.Fatalf("same-name global entry missing: %#v", servers)
+	}
+	if _, ok := servers[entry+"-mcphub"]; ok {
+		t.Fatalf("unexpected global alias: %#v", servers)
+	}
+	if raw, readErr := os.ReadFile(filepath.Join(stateRoot, api.SupervisorEventLogFileLeaf)); readErr == nil && bytes.Contains(raw, []byte(`"event":"client-config-settled"`)) {
+		t.Fatalf("global-only GUI emitted H event: %s", raw)
+	}
+}
+
 func TestAdoptPlanRouteNeverSerializesSecretValues(t *testing.T) {
 	entry := "gui-adopt-secret"
-	setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-secret]
+	apiKey := "literal-" + "secret-value"
+	setupGUIAdoptTestEnv(t, entry, fmt.Sprintf(`[mcp_servers.gui-adopt-secret]
 command = "go"
 args = ["version"]
 
 [mcp_servers.gui-adopt-secret.env]
-API_KEY = "literal-secret-value"
+API_KEY = %q
 VISIBLE = "not-secret"
-`)
+`, apiKey))
 
 	rec := postAdoptTest(t, "/api/adopt/plan", `{"entry":"gui-adopt-secret","client":"codex-cli","port":9323}`)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d, want 200; body=%s", rec.Code, rec.Body.String())
 	}
 	raw := rec.Body.String()
-	if strings.Contains(raw, "literal-secret-value") {
+	if strings.Contains(raw, apiKey) {
 		t.Fatalf("plan JSON leaked secret value:\n%s", raw)
 	}
 	if strings.Contains(raw, "secretValues") {
@@ -447,14 +496,15 @@ args = ["version"]
 
 func TestAdoptRouteExecuteFailureRedactsAbsolutePath(t *testing.T) {
 	entry := "gui-adopt-redact-path"
-	codexPath, _, _ := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-redact-path]
+	codexPath, _, stateRoot := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-adopt-redact-path]
 command = "go"
 args = ["version"]
 `)
 	leakyPath := filepath.Join(filepath.Dir(codexPath), "private-user-path", "config.toml")
+	canary := leakyPath + "?token=gui-lease-redaction-canary\x1b[2J" + strings.Repeat("x", 512)
 	orig := clients.WriteConfigFile
 	clients.WriteConfigFile = func(path string, contents []byte) error {
-		return fmt.Errorf("synthetic write failure at %s", leakyPath)
+		return fmt.Errorf("synthetic write failure at %s", canary)
 	}
 	t.Cleanup(func() { clients.WriteConfigFile = orig })
 
@@ -469,8 +519,73 @@ args = ["version"]
 	if body["error"] != "internal error" {
 		t.Fatalf("error=%#v, want redacted internal error", body["error"])
 	}
-	if strings.Contains(rec.Body.String(), leakyPath) {
-		t.Fatalf("execute error leaked absolute path %q in response: %s", leakyPath, rec.Body.String())
+	if strings.Contains(rec.Body.String(), canary) || strings.Contains(rec.Body.String(), leakyPath) {
+		t.Fatalf("execute error leaked canary/path in response: %s", rec.Body.String())
+	}
+	if logBytes, err := os.ReadFile(filepath.Join(stateRoot, api.SupervisorEventLogFileLeaf)); err == nil && strings.Contains(string(logBytes), canary) {
+		t.Fatalf("execute error leaked canary into event log: %s", logBytes)
+	}
+}
+
+type guiCleanupFailureLeaseOwner struct {
+	inner api.AdoptLeaseOwner
+	cause error
+}
+
+func (o guiCleanupFailureLeaseOwner) AcquireAdoptLease(manifest string) (api.AdoptLease, bool, error) {
+	lease, acquired, err := o.inner.AcquireAdoptLease(manifest)
+	if err != nil || !acquired {
+		return lease, acquired, err
+	}
+	return guiCleanupFailureLease{inner: lease, cause: o.cause}, true, nil
+}
+
+type guiCleanupFailureLease struct {
+	inner api.AdoptLease
+	cause error
+}
+
+func (l guiCleanupFailureLease) Unlock() error { return l.inner.Unlock() }
+func (l guiCleanupFailureLease) ReleaseAndRemove() error {
+	if err := l.inner.ReleaseAndRemove(); err != nil {
+		return err
+	}
+	return l.cause
+}
+
+func TestAdoptRouteLeaseCleanupFailureRedactsRealOwnerCanary(t *testing.T) {
+	entry := "gui-lease-cleanup"
+	secret := "gui-source-" + "secret-DO-NOT-LEAK"
+	_, _, stateRoot := setupGUIAdoptTestEnv(t, entry, `[mcp_servers.gui-lease-cleanup]
+command = "go"
+args = ["version"]
+`)
+	canaryPath := filepath.Join(t.TempDir(), "gui-lease-cleanup.lease")
+	canary := canaryPath + " token=" + "gui-unlock-" + "canary" + "\x1b[2J"
+	s := newEphemeralServer(t, Config{AdoptLeaseOwner: guiCleanupFailureLeaseOwner{inner: api.NewAdoptLeaseOwner(), cause: errors.New(canary)}, AdoptReceivingVerifier: func(*api.API, *api.AdoptPlan, *api.AdoptProvenanceRecord) error { return nil }})
+	req := httptest.NewRequest(http.MethodPost, "/api/adopt", strings.NewReader(`{"entry":"gui-lease-cleanup","client":"codex-cli","port":9343}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d, want 500; body=%s", rec.Code, rec.Body.String())
+	}
+	body := decodeAdoptJSON(t, rec)
+	if body["code"] != "ADOPT_FAILED" || body["error"] != "E_ADOPT_LEASE_CLEANUP" {
+		t.Fatalf("response=%#v, want safe typed lease cleanup failure", body)
+	}
+	if strings.Contains(rec.Body.String(), canary) || strings.Contains(rec.Body.String(), secret) || strings.Contains(rec.Body.String(), canaryPath) {
+		t.Fatalf("HTTP body leaked canary/path/secret: %s", rec.Body.String())
+	}
+	raw, err := os.ReadFile(filepath.Join(stateRoot, api.SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read supervisor event log: %v", err)
+	}
+	if !bytes.Contains(raw, []byte(`"event":"adopt-lease-failed"`)) || !bytes.Contains(raw, []byte(`"failure_id":"E_ADOPT_LEASE_CLEANUP"`)) {
+		t.Fatalf("missing safe lease failure event: %s", raw)
+	}
+	if bytes.Contains(raw, []byte(canary)) || bytes.Contains(raw, []byte(secret)) || bytes.Contains(raw, []byte(`"event":"adopt-executed"`)) {
+		t.Fatalf("event log leaked or committed after failed settlement: %s", raw)
 	}
 }
 
@@ -509,6 +624,7 @@ args = ["version"]
 // treated as actionable, while any message embedding a filesystem path is
 // path-bearing and must be redacted before reaching the wire.
 func TestAdoptErrorMessageHasPath(t *testing.T) {
+	windowsPath := "C" + `:\fixture-user\AppData`
 	actionable := []string{
 		"adopt entry name is required",
 		`--client must be one of claude-code | codex-cli | cursor`,
@@ -522,12 +638,12 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 		}
 	}
 	pathBearing := []string{
-		`resolve client config path for "codex-cli": open C:\Users\fixture-user\AppData\config.toml: denied`,
+		`resolve client config path for "codex-cli": open ` + windowsPath + `\config.toml: denied`,
 		`resolve client config path for "codex-cli": open /home/user/.config/x.json: denied`,
 		`check existing disk manifest "x": open \\host\share\manifest.yaml: denied`,
 		// fable PR #516 P3-A evasion shapes: a quoted POSIX path and a rooted
 		// (single-backslash) Windows path the prior regex missed.
-		`entry name "/home/evil/secret.toml" is not a valid manifest name`,
+		`entry name "` + "/synthetic/evil/secret.toml" + `" is not a valid manifest name`,
 		`open \Users\fixture-user\AppData\Local\vault.age: access is denied`,
 		`config=/etc/mcphub/secret.yaml unreadable`,
 	}
@@ -544,6 +660,7 @@ func TestAdoptErrorMessageHasPath(t *testing.T) {
 // message, or any message embedding a path (even one that also contains a
 // recognized phrase), is redacted.
 func TestAdoptPlanErrorIsActionable(t *testing.T) {
+	windowsPath := "C" + `:\fixture-user`
 	actionable := []string{
 		"adopt entry name is required",
 		`--client must be one of claude-code | codex-cli`,
@@ -567,13 +684,13 @@ func TestAdoptPlanErrorIsActionable(t *testing.T) {
 		`some brand new backend error we never enumerated`,
 		// Recognized phrase BUT path-bearing -> redact wins (P3-B: a wrapped OS
 		// "already exists: <path>" must not ride the actionable lane).
-		`Cannot create a file when that file already exists: C:\Users\fixture-user\x.toml`,
+		`Cannot create a file when that file already exists: ` + windowsPath + `\x.toml`,
 		// Path-bearing, no recognized phrase.
 		`open /home/user/.config/mcphub/x.json: permission denied`,
 		// Even the Area-3 fail-loud phrase must redact if a path ever appears in the
 		// reason — adoptErrorMessageHasPath is the fail-closed backstop ahead of the
 		// allowlist.
-		`cannot adopt into client "cursor": open C:\Users\fixture-user\.cursor\mcp.json: denied`,
+		`cannot adopt into client "cursor": open ` + windowsPath + `\.cursor\mcp.json: denied`,
 	}
 	for _, msg := range redacted {
 		if adoptPlanErrorIsActionable(msg) {
@@ -592,6 +709,7 @@ func TestAdoptRoutePublishesOperatorActionEvent(t *testing.T) {
 command = "go"
 args = ["version"]
 `)
+	setupReadyGUIAdoptSupervisor(t)
 	s := newEphemeralServer(t, Config{})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

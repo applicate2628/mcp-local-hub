@@ -855,9 +855,15 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// so death semantics are unchanged; only attribution is added.
 	// TestSuperviseLongLivedGoroutinesAreGuarded enforces that every `go` in
 	// this file carries one.
+	eventLoopDone := make(chan struct{})
 	go func() {
 		defer guardSupervisorGoroutine(events, "event-loop-run", "")
+		defer close(eventLoopDone)
 		loop.Run(loopCtx)
+	}()
+	defer func() {
+		loopCancel()
+		<-eventLoopDone
 	}()
 
 	// reconcileReady mirrors the spec §"Migration step 14:
@@ -2067,6 +2073,12 @@ func handleIPCConn(conn net.Conn, deps ipcDispatchDeps) {
 // `restart` and `reload` remain deferred to follow-up — they're
 // per-daemon operations and the spec defers them past this round.
 func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
+	// The fixed CST daemon service gets one status-only capability. Classify and
+	// authorize it before generic dispatch so that service identity can never use
+	// status/control/reconcile/exit or a future generic opcode.
+	if handled, response := dispatchSupervisorCstIdentity(conn, req, deps.runtimeTracker); handled {
+		return writeIPCFrame(conn, response)
+	}
 	// Version pinning: refuse requests carrying an explicit non-1
 	// envelope version. Zero (the JSON-omitted default) is treated as
 	// v1 for backward compatibility with clients that predate the
@@ -4248,6 +4260,10 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// instead of clearing the CURRENT child's tracking / driving an SM
 		// transition (P1a generation-stamped exit attribution).
 		spawnGen := tracker.MarkSpawned(d.TaskName, pid, startedAt)
+		go func(descriptor api.SupervisorDaemon, generation, childPID int, childStartedAt time.Time) {
+			defer guardSupervisorGoroutine(events, "daemon-readiness-observer", descriptor.TaskName)
+			observeSupervisorReadiness(tracker, events, descriptor, generation, childPID, childStartedAt)
+		}(d, spawnGen, pid, startedAt)
 		taskName := d.TaskName
 		spawnedPID := pid
 		// Emit daemon-spawned BEFORE starting the wait goroutine. A

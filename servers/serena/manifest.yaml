@@ -5,7 +5,7 @@ transport: native-http
 command: uvx
 base_args:
   - --from
-  - git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b
+  - git+https://github.com/oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd
   - serena
   - start-mcp-server
   - --transport
@@ -32,7 +32,7 @@ env:
 #      multi-language project.
 #
 #   2. Functional asymmetry: claude-code preset (claude-code.yml at
-#      pinned serena commit f0a3a279b7c48d28b9e7e4aea1ed9caed846906b)
+#      pinned serena commit 949a27ef1e5fda1a6e7b561e777bcece345c6ffd)
 #      has `single_project: true` AND EXCLUDES `search_for_pattern`.
 #      That means the 6 claude-family agents could not switch projects
 #      at all (activate_project tool not exposed) and lacked

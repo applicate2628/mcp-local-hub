@@ -1,11 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
 	"unicode/utf16"
+
+	"mcp-local-hub/internal/scheduler"
+)
+
+const (
+	livenessFixtureExe        = `%USERPROFILE%\.local\bin\mcphub.exe`
+	livenessFixtureWorkingDir = `%USERPROFILE%\.local\bin`
+	livenessPriorFixtureExe   = `%PREVIOUS_USERPROFILE%\.local\bin\mcphub.exe`
+	livenessPriorFixtureDir   = `%PREVIOUS_USERPROFILE%\.local\bin`
 )
 
 // installTestCanonicalMcphubPath overrides the canonical-mcphub-path resolver
@@ -19,6 +29,51 @@ func installTestCanonicalMcphubPath(t *testing.T, path string) {
 	canonicalMcphubPathFn = func() (string, error) { return path, nil }
 	t.Cleanup(func() { canonicalMcphubPathFn = orig })
 }
+
+type livenessTaskScheduler struct {
+	tasks     map[string][]byte
+	imports   []importXMLCall
+	deletes   []string
+	importErr error
+}
+
+func newLivenessTaskScheduler() *livenessTaskScheduler {
+	return &livenessTaskScheduler{tasks: map[string][]byte{}}
+}
+
+func (f *livenessTaskScheduler) Create(scheduler.TaskSpec) error { return errNotImplementedForTest }
+func (f *livenessTaskScheduler) Run(string) error                { return errNotImplementedForTest }
+func (f *livenessTaskScheduler) Stop(string) error               { return errNotImplementedForTest }
+func (f *livenessTaskScheduler) Status(string) (scheduler.TaskStatus, error) {
+	return scheduler.TaskStatus{}, errNotImplementedForTest
+}
+func (f *livenessTaskScheduler) List(string) ([]scheduler.TaskStatus, error) {
+	return nil, errNotImplementedForTest
+}
+func (f *livenessTaskScheduler) ExportXML(name string) ([]byte, error) {
+	xml, ok := f.tasks[name]
+	if !ok {
+		return nil, scheduler.ErrTaskNotFound
+	}
+	return append([]byte(nil), xml...), nil
+}
+func (f *livenessTaskScheduler) ImportXML(name string, xml []byte) error {
+	f.imports = append(f.imports, importXMLCall{name: name, xml: append([]byte(nil), xml...)})
+	if f.importErr != nil {
+		return f.importErr
+	}
+	f.tasks[name] = append([]byte(nil), xml...)
+	return nil
+}
+func (f *livenessTaskScheduler) Delete(name string) error {
+	f.deletes = append(f.deletes, name)
+	delete(f.tasks, name)
+	return nil
+}
+func (f *livenessTaskScheduler) importCalls() []importXMLCall {
+	return append([]importXMLCall(nil), f.imports...)
+}
+func (f *livenessTaskScheduler) calls() []string { return append([]string(nil), f.deletes...) }
 
 // installTestCurrentWindowsUser overrides the current-user resolver
 // (currentWindowsUserFn, liveness_task.go) for the duration of the test.
@@ -36,9 +91,9 @@ func installTestCurrentWindowsUser(t *testing.T, name string) {
 // the apiSurfacesFakeScheduler + seam helpers from api_surfaces_test.go.
 func TestInstallLivenessTask_HappyPath(t *testing.T) {
 	a := NewAPI()
-	f := &apiSurfacesFakeScheduler{}
+	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	if err := a.InstallLivenessTask(); err != nil {
@@ -58,8 +113,8 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 		"<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>",
 		"<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
 		"<Arguments>supervise --ensure-alive</Arguments>",
-		`<Command>C:\Users\test\.local\bin\mcphub.exe</Command>`,
-		`<WorkingDirectory>C:\Users\test\.local\bin</WorkingDirectory>`,
+		"<Command>" + livenessFixtureExe + "</Command>",
+		"<WorkingDirectory>" + livenessFixtureWorkingDir + "</WorkingDirectory>",
 		"<UserId>test</UserId>",
 	}
 	for _, w := range wantFragments {
@@ -76,9 +131,9 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 
 func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
 	a := NewAPI()
-	f := &apiSurfacesFakeScheduler{}
+	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	if err := a.InstallLivenessTask(); err != nil {
@@ -100,13 +155,12 @@ func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
 	}
 }
 
-// TestInstallLivenessTask_Idempotent asserts running install twice is safe
-// (ImportXML overwrites via schtasks /Create /XML /F on Windows).
+// TestInstallLivenessTask_Idempotent asserts a verified second run is a no-op.
 func TestInstallLivenessTask_Idempotent(t *testing.T) {
 	a := NewAPI()
-	f := &apiSurfacesFakeScheduler{}
+	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	if err := a.InstallLivenessTask(); err != nil {
@@ -115,8 +169,8 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
 	if err := a.InstallLivenessTask(); err != nil {
 		t.Fatalf("second InstallLivenessTask (idempotent): %v", err)
 	}
-	if got := len(f.importCalls()); got != 2 {
-		t.Errorf("expected 2 ImportXML calls, got %d", got)
+	if got := len(f.importCalls()); got != 1 {
+		t.Errorf("expected one initial ImportXML call, got %d", got)
 	}
 }
 
@@ -125,9 +179,10 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
 func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
 	a := NewAPI()
 	want := errors.New("simulated schtasks failure")
-	f := &apiSurfacesFakeScheduler{importXMLErr: want}
+	f := newLivenessTaskScheduler()
+	f.importErr = want
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, `C:\Users\test\.local\bin\mcphub.exe`)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
 	installTestCurrentWindowsUser(t, "test")
 
 	err := a.InstallLivenessTask()
@@ -136,6 +191,44 @@ func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
 	}
 	if !errors.Is(err, want) {
 		t.Errorf("InstallLivenessTask: want errors.Is(err, want); got %v", err)
+	}
+}
+
+func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement(t *testing.T) {
+	a := NewAPI()
+	f := newLivenessTaskScheduler()
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+	f.tasks[LivenessTaskName] = prior
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
+	installTestCurrentWindowsUser(t, "test")
+
+	receipt, err := a.EnsureLivenessTask()
+	if err != nil {
+		t.Fatalf("EnsureLivenessTask: %v", err)
+	}
+	if receipt.Result != LivenessTaskReplaced {
+		t.Fatalf("receipt result = %q, want %q", receipt.Result, LivenessTaskReplaced)
+	}
+	if err := a.RestoreLivenessTask(receipt); err != nil {
+		t.Fatalf("RestoreLivenessTask: %v", err)
+	}
+	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+		t.Fatalf("SchedulerRollbackExactXML: restored XML = %q, want %q", got, prior)
+	}
+
+	receipt, err = a.EnsureLivenessTask()
+	if err != nil {
+		t.Fatalf("EnsureLivenessTask second: %v", err)
+	}
+	f.tasks[LivenessTaskName] = []byte("<Task>foreign</Task>")
+	err = a.RestoreLivenessTask(receipt)
+	if !errors.Is(err, ErrLivenessTaskRollbackConflict) {
+		t.Fatalf("RestoreLivenessTask err = %v, want conflict", err)
+	}
+	if len(f.deletes) != 0 {
+		t.Fatalf("foreign liveness task must not be deleted: %v", f.deletes)
 	}
 }
 
@@ -163,8 +256,8 @@ func TestLivenessWorkingDir_OSIndependent(t *testing.T) {
 	}{
 		{
 			name: "windows-backslash-path",
-			exe:  `C:\Users\test\.local\bin\mcphub.exe`,
-			want: `C:\Users\test\.local\bin`,
+			exe:  livenessFixtureExe,
+			want: livenessFixtureWorkingDir,
 		},
 		{
 			name: "posix-forward-slash-path",
@@ -205,7 +298,7 @@ func decodeUTF16LEBOMForTest(t *testing.T, b []byte) string {
 // deletes the LivenessTaskName via the scheduler factory seam.
 func TestUninstallLivenessTask_DeletesByName(t *testing.T) {
 	a := NewAPI()
-	f := &apiSurfacesFakeScheduler{}
+	f := newLivenessTaskScheduler()
 	installTestScheduler(t, f)
 
 	if err := a.UninstallLivenessTask(); err != nil {

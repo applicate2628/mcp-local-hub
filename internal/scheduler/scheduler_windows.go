@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -225,18 +226,11 @@ func (w *windowsScheduler) Create(spec TaskSpec) error {
 }
 
 func (w *windowsScheduler) Delete(name string) error {
-	cmd := exec.Command(w.schtasksPath, "/Delete", "/TN", name, "/F")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		// If the task does not exist, schtasks returns exit 1 with "ERROR: The system cannot find the file specified."
-		// Treat that as success (idempotent delete).
-		if strings.Contains(string(out), "cannot find") || strings.Contains(string(out), "does not exist") {
-			return nil
-		}
-		return fmt.Errorf("schtasks /Delete: %w: %s", err, string(out))
+	_, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "delete", Name: name})
+	if errors.Is(err, ErrTaskNotFound) {
+		return nil
 	}
-	return nil
+	return err
 }
 
 // ExportXML dumps the full Task Scheduler XML for a task via
@@ -244,16 +238,14 @@ func (w *windowsScheduler) Delete(name string) error {
 // ErrTaskNotFound so callers can distinguish a missing task from other
 // failures) when the task does not exist.
 func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
-	cmd := exec.Command(w.schtasksPath, "/Query", "/TN", name, "/XML")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
+	response, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "export", Name: name})
 	if err != nil {
-		if strings.Contains(string(out), "cannot find") || strings.Contains(string(out), "does not exist") {
-			return nil, ErrTaskNotFound
-		}
-		return nil, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
+		return nil, err
 	}
-	return out, nil
+	if response.Task == nil || response.Task.XML == "" {
+		return nil, fmt.Errorf("%w: empty task XML", ErrTaskCorrupt)
+	}
+	return []byte(response.Task.XML), nil
 }
 
 // ImportXML re-creates a task from raw Task Scheduler XML via
@@ -292,17 +284,11 @@ func (w *windowsScheduler) Run(name string) error {
 }
 
 func (w *windowsScheduler) Stop(name string) error {
-	cmd := exec.Command(w.schtasksPath, "/End", "/TN", name)
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		// "ERROR: There is no running instance of the task." → nil
-		if strings.Contains(string(out), "no running instance") {
-			return nil
-		}
-		return fmt.Errorf("schtasks /End: %w: %s", err, string(out))
+	_, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "stop", Name: name})
+	if errors.Is(err, ErrTaskNotFound) || errors.Is(err, ErrTaskNotRunning) {
+		return nil
 	}
-	return nil
+	return err
 }
 
 // statusQueryTimeout bounds the per-task `schtasks /Query`. Measured at ~177ms
@@ -313,21 +299,14 @@ func (w *windowsScheduler) Stop(name string) error {
 const statusQueryTimeout = 15 * time.Second
 
 func (w *windowsScheduler) Status(name string) (TaskStatus, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), statusQueryTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, w.schtasksPath, "/Query", "/TN", name, "/V", "/FO", "LIST")
-	// Bound the gap between "child killed" and "Wait returns" — a grandchild
-	// holding the output pipe would otherwise keep CombinedOutput blocked.
-	cmd.WaitDelay = 2 * time.Second
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
+	response, err := schedulerCOM(context.Background(), schedulerCOMRequest{Operation: "status", Name: name})
 	if err != nil {
-		if ctx.Err() != nil {
-			return TaskStatus{}, fmt.Errorf("schtasks /Query %q: %w", name, ctx.Err())
-		}
-		return TaskStatus{}, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
+		return TaskStatus{}, err
 	}
-	return parseTaskQueryOutput(string(out), name), nil
+	if response.Task == nil {
+		return TaskStatus{}, fmt.Errorf("%w: missing status task", ErrTaskCorrupt)
+	}
+	return taskStatusFromCOM(*response.Task)
 }
 
 func (w *windowsScheduler) List(prefix string) ([]TaskStatus, error) {
@@ -338,47 +317,21 @@ func (w *windowsScheduler) ListContext(ctx context.Context, prefix string) ([]Ta
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	cmd := exec.CommandContext(ctx, w.schtasksPath, "/Query", "/V", "/FO", "LIST")
-	process.NoConsole(cmd)
-	out, err := cmd.CombinedOutput()
+	response, err := schedulerCOM(ctx, schedulerCOMRequest{Operation: "list", Prefix: prefix})
 	if err != nil {
-		if ctx.Err() != nil {
-			return nil, fmt.Errorf("schtasks /Query: %w", ctx.Err())
-		}
-		return nil, fmt.Errorf("schtasks /Query: %w: %s", err, string(out))
+		return nil, err
 	}
-	// Split into records separated by blank lines; each record has "TaskName:" line.
-	records := strings.Split(string(out), "\r\n\r\n")
-	var results []TaskStatus
-	for _, r := range records {
-		status := parseTaskQueryOutput(r, "")
-		if status.Name != "" &&
-			strings.HasPrefix(strings.TrimPrefix(status.Name, "\\"), prefix) &&
-			sameWindowsUser(status.Owner, w.username) {
+	results := make([]TaskStatus, 0, len(response.Tasks))
+	for _, task := range response.Tasks {
+		status, statusErr := taskStatusFromCOM(task)
+		if statusErr != nil {
+			return nil, statusErr
+		}
+		if sameWindowsUser(status.Owner, w.username) {
 			results = append(results, status)
 		}
 	}
 	return results, nil
-}
-
-// parseTaskQueryOutput extracts key fields from schtasks /Query /V /FO LIST output.
-func parseTaskQueryOutput(out string, nameHint string) TaskStatus {
-	status := TaskStatus{Name: nameHint, LastResult: -1}
-	for line := range strings.SplitSeq(out, "\r\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "TaskName:") {
-			status.Name = strings.TrimSpace(strings.TrimPrefix(line, "TaskName:"))
-		} else if strings.HasPrefix(line, "Status:") {
-			status.State = strings.TrimSpace(strings.TrimPrefix(line, "Status:"))
-		} else if strings.HasPrefix(line, "Last Result:") {
-			fmt.Sscanf(strings.TrimPrefix(line, "Last Result:"), " %d", &status.LastResult)
-		} else if strings.HasPrefix(line, "Next Run Time:") {
-			status.NextRun = strings.TrimSpace(strings.TrimPrefix(line, "Next Run Time:"))
-		} else if strings.HasPrefix(line, "Run As User:") {
-			status.Owner = strings.TrimSpace(strings.TrimPrefix(line, "Run As User:"))
-		}
-	}
-	return status
 }
 
 // sameWindowsUser compares a Task Scheduler "Run As User" value against the

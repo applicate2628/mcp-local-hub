@@ -29,13 +29,15 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/pinstatus"
 	"mcp-local-hub/internal/vcpkgmcp/portresolution"
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
+	"mcp-local-hub/internal/vcpkgmcp/reversedepgraph"
 )
 
 type registeredVcpkgToolFixture struct {
-	name       string
-	wantReason string
-	under      func() publicresult.Projectable
-	over       func() publicresult.Projectable
+	name         string
+	wantReason   string
+	wantMCPError bool
+	under        func() publicresult.Projectable
+	over         func() publicresult.Projectable
 }
 
 func TestPR591_RootReasonVocabularyMatchesOwnersAndCanonicalREADME(t *testing.T) {
@@ -189,14 +191,14 @@ func TestPinStatusLiveDescriptionsHaveNoReasonLiteralShadowOwner(t *testing.T) {
 }
 
 func TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer(t *testing.T) {
-	const secret = "serializer-repo-secret"
+	const redactionValue = "fixture-redaction-marker-one"
 	result, err := jsonResult(pinstatus.Result{
 		Status: "ok",
 		Ports: []pinstatus.PortResult{{
 			Remote: pinstatus.Remote{
 				Kind: pinstatus.RemoteGitHub,
-				Repo: "group/token=" + secret,
-				URL:  "https://github.com/group/token=" + secret + ".git",
+				Repo: "group/token=" + redactionValue,
+				URL:  "https://github.com/group/token=" + redactionValue + ".git",
 			},
 		}},
 	})
@@ -210,7 +212,7 @@ func TestPinStatusJSONResultRedactsRemoteMetadataAtActualSerializer(t *testing.T
 	if !ok {
 		t.Fatalf("jsonResult content = %T, want *mcp.TextContent", result.Content[0])
 	}
-	if strings.Contains(text.Text, secret) {
+	if strings.Contains(text.Text, redactionValue) {
 		t.Fatalf("actual vcpkg serializer leaked remote metadata secret: %s", text.Text)
 	}
 	if !strings.Contains(text.Text, "REDACTED") {
@@ -235,16 +237,16 @@ func TestPinStatusJSONResultRedactsRepoOnlyEvidenceAtActualSerializer(t *testing
 }
 
 func TestPinStatusJSONResultRedactsIndependentEvidenceCommandAtActualSerializer(t *testing.T) {
-	const secret = "actual-serializer-command-secret"
+	const redactionValue = "fixture-redaction-marker-two"
 	result, err := jsonResult(pinstatus.Result{Status: "unknown", Ports: []pinstatus.PortResult{{
 		Remote:   pinstatus.Remote{Kind: pinstatus.RemoteGitHub, URL: "https://host/safe/repo.git"},
-		Evidence: evidence.Evidence{Commands: []string{"git ls-remote https://user:" + secret + "@host/repo.git"}},
+		Evidence: evidence.Evidence{Commands: []string{"git ls-remote https://user:" + redactionValue + "@host/repo.git"}},
 	}}})
 	if err != nil {
 		t.Fatalf("jsonResult: %v", err)
 	}
 	text, ok := result.Content[0].(*mcp.TextContent)
-	if !ok || strings.Contains(text.Text, secret) || !strings.Contains(text.Text, "REDACTED") {
+	if !ok || strings.Contains(text.Text, redactionValue) || !strings.Contains(text.Text, "REDACTED") {
 		t.Fatalf("actual serializer leaked independent evidence command: %#v", result)
 	}
 }
@@ -297,6 +299,18 @@ var registeredVcpkgToolFixtures = []registeredVcpkgToolFixture{
 		under:      func() publicresult.Projectable { return portresolution.Result{} },
 		over: func() publicresult.Projectable {
 			return portresolution.Result{AllCandidates: oversizedPortResolutionCandidates()}
+		},
+	},
+	{
+		name:         "vcpkg_reverse_dependencies",
+		wantMCPError: true,
+		under:        func() publicresult.Projectable { return reversedepgraph.Result{} },
+		over: func() publicresult.Projectable {
+			result := reversedepgraph.Result{}
+			for index := 0; index < 5000; index++ {
+				result.Transitive = append(result.Transitive, reversedepgraph.Dependent{Node: reversedepgraph.Node{Name: fmt.Sprintf("port-%04d", index), Role: reversedepgraph.RoleTarget, Triplet: "x64-windows"}, Distance: index + 1})
+			}
+			return result
 		},
 	},
 	{
@@ -576,7 +590,7 @@ func TestRegisterTools(t *testing.T) {
 	}
 
 	for _, tc := range registeredVcpkgToolFixtures {
-		if tc.wantReason == "" {
+		if tc.wantReason == "" && !tc.wantMCPError {
 			continue
 		}
 		t.Run(tc.name+"_invalid_input", func(t *testing.T) {
@@ -594,6 +608,12 @@ func TestRegisterTools(t *testing.T) {
 			// tri-state verdict, never as an MCP protocol error (see
 			// helpers.go errResult). So the refusal has to be read out of the
 			// body, which is also the only place a regression would show.
+			if tc.wantMCPError {
+				if !result.IsError {
+					t.Fatalf("%s empty arguments did not produce the strict MCP invalid-argument result: %#v", tc.name, result)
+				}
+				return
+			}
 			if result.IsError {
 				t.Fatalf("empty arguments produced an MCP protocol error; the contract is a normal result carrying "+
 					"unknown/failed(<reason>): %#v", result)
@@ -1150,8 +1170,8 @@ func inspectRegisteredVcpkgTools(sources []vcpkgProductionSource, fixtures []reg
 	if err != nil {
 		return err
 	}
-	if len(registrations) != 7 {
-		return fmt.Errorf("registration_count: got %d want 7", len(registrations))
+	if len(registrations) != 8 {
+		return fmt.Errorf("registration_count: got %d want 8", len(registrations))
 	}
 	registrationNames := map[string]struct{}{}
 	for _, registration := range registrations {

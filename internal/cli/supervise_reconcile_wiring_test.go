@@ -512,6 +512,75 @@ func TestRunSupervise_ReconcileReadyBeforeSpawnCompletes(t *testing.T) {
 	t.Fatal("reconcile-ready was not emitted while startup spawn was blocked")
 }
 
+// TestRunSupervise_ExitWaitsForOwnedReconcileDispatch pins the lifecycle
+// boundary: runSupervise owns the event-loop dispatch of startup reconcile, so
+// graceful exit cannot return while that dispatch can still write state or
+// retain process handles.
+func TestRunSupervise_ExitWaitsForOwnedReconcileDispatch(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	defer setBuiltinRouteSeedingDisabledForTest()()
+
+	intent := &api.SupervisorIntentFile{
+		Version:   1,
+		UpdatedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: reconcileWiringTestTaskName,
+			Server:   "memory",
+			Daemon:   "default",
+			Command:  "fake-noop-for-test",
+			Args:     []string{"--noop"},
+			Port:     9121,
+		}},
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(tmpHome, "supervisor-intent.json"), intent); err != nil {
+		t.Fatalf("seed supervisor-intent.json: %v", err)
+	}
+
+	spawnEntered := make(chan struct{})
+	releaseSpawn := make(chan struct{})
+	cleanupSpawn := setReconcileSpawnFnForTest(func(api.SupervisorDaemon) error {
+		close(spawnEntered)
+		<-releaseSpawn
+		return nil
+	})
+	defer cleanupSpawn()
+
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	select {
+	case <-spawnEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("startup reconcile did not reach spawn before timeout")
+	}
+	exitCh <- struct{}{}
+
+	select {
+	case err := <-done:
+		close(releaseSpawn)
+		t.Fatalf("supervise returned before owned startup reconcile settled: %v", err)
+	case <-time.After(100 * time.Millisecond):
+		// Expected deterministic window: the startup reconcile still owns work.
+	}
+
+	close(releaseSpawn)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err after startup reconcile settled: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervise did not return after startup reconcile settled")
+	}
+}
+
 func TestLoadSupervisorCurrentRunning_SkipsDeadPID(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	pid := exitedProcessPID(t)
@@ -898,7 +967,7 @@ func serenaProxyArgs(taskName string, port int) []string {
 	return []string{
 		"daemon", "serena-proxy",
 		"--server", "serena",
-		"--workspace", `C:\work\alpha`,
+		"--workspace", "testdata/workspaces/alpha",
 		"--port", strconv.Itoa(port),
 		"--task-name", taskName,
 	}
@@ -1067,7 +1136,7 @@ func TestReconcile_ExcludesOrphanedLSPProxyFromDesiredSet(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
-			lspProxyDaemonForTest(orphanTask, `C:\work\alpha`, "python", 9200),
+			lspProxyDaemonForTest(orphanTask, "testdata/workspaces/alpha", "python", 9200),
 		},
 	}
 
@@ -1112,7 +1181,7 @@ func TestReconcile_SpawnsBackedLSPProxy(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
-			lspProxyDaemonForTest(backedTask, `C:\work\alpha`, "python", 9200),
+			lspProxyDaemonForTest(backedTask, "testdata/workspaces/alpha", "python", 9200),
 		},
 	}
 
@@ -1144,7 +1213,7 @@ func TestReconcile_OrphanedLSPProxy_NilPredicateSpawns(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
-			lspProxyDaemonForTest(lspTask, `C:\work\alpha`, "python", 9200),
+			lspProxyDaemonForTest(lspTask, "testdata/workspaces/alpha", "python", 9200),
 		},
 	}
 
@@ -1179,7 +1248,7 @@ func TestReconcile_RunningOrphanedLSPProxy_HonorsStop(t *testing.T) {
 	intent := &api.SupervisorIntentFile{
 		Version: 1,
 		Daemons: []api.SupervisorDaemon{
-			lspProxyDaemonForTest(lspTask, `C:\work\alpha`, "python", 9200),
+			lspProxyDaemonForTest(lspTask, "testdata/workspaces/alpha", "python", 9200),
 		},
 	}
 	now := time.Now().UTC()
@@ -1290,10 +1359,10 @@ func TestReconcile_SpecBearingSerenaProxy_StaysInDesiredSet(t *testing.T) {
 				RuntimeSpec: &api.DaemonRuntimeSpec{
 					SpecVersion:   api.DaemonRuntimeSpecVersion,
 					ChildCommand:  "uvx",
-					ChildArgs:     []string{"serena", "--project", `C:\work\alpha`, "--context", "codex-placeholder"},
+					ChildArgs:     []string{"serena", "--project", "testdata/workspaces/alpha", "--context", "codex-placeholder"},
 					UpstreamPort:  19121,
 					ExternalPort:  9121,
-					WorkspacePath: `C:\work\alpha`,
+					WorkspacePath: "testdata/workspaces/alpha",
 				},
 			},
 		},

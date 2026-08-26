@@ -30,6 +30,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
 
@@ -98,8 +99,10 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
+	exe := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "UNREADABLE-INTENT")
+	target := filepath.Join(t.TempDir(), "mcphub.exe")
 
-	err := runV5UpgradeWindows(cmd)
+	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
 	if err == nil {
 		t.Fatal("runV5UpgradeWindows must return non-nil error when supervisor-intent.json is unreadable; got nil")
 	}
@@ -262,8 +265,8 @@ func mustParseUnix(rfc3339 string) int64 {
 // creation-time precedence + install-dir path).
 func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 	const pid = 4242
-	const installDir = `C:\Users\dev\.local\bin`
-	const exeUnderInstall = `C:\Users\dev\.local\bin\mcphub.exe`
+	const installDir = `C:\fixture-root\dev\.local\bin`
+	const exeUnderInstall = `C:\fixture-root\dev\.local\bin\mcphub.exe`
 	cases := []struct {
 		name      string
 		ident     process.ProcessIdentity
@@ -275,7 +278,7 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 		{
 			name: "live mcphub supervisor (exe)",
 			ident: process.ProcessIdentity{
-				Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
+				Basename: "mcphub.exe", CommandLine: `C:\fixture-root\dev\.local\bin\mcphub.exe supervise --strict-mode`,
 				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
 			},
 			startedAt: liveSupervisorStartedAt,
@@ -284,8 +287,8 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 		{
 			name: "live mcphub supervisor (no .exe basename)",
 			ident: process.ProcessIdentity{
-				Basename: "mcphub", CommandLine: `C:\Users\dev\.local\bin\mcphub supervise`,
-				ExecutablePath: `C:\Users\dev\.local\bin\mcphub`, CreationDateUnix: liveSupervisorCreatedUnix,
+				Basename: "mcphub", CommandLine: `C:\fixture-root\dev\.local\bin\mcphub supervise`,
+				ExecutablePath: `C:\fixture-root\dev\.local\bin\mcphub`, CreationDateUnix: liveSupervisorCreatedUnix,
 			},
 			startedAt: liveSupervisorStartedAt,
 			want:      true,
@@ -342,7 +345,7 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 			// is a reuse and must fail the creation-time precedence gate.
 			name: "reused PID created after the sidecar StartedAt",
 			ident: process.ProcessIdentity{
-				Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+				Basename: "mcphub.exe", CommandLine: `C:\fixture-root\dev\.local\bin\mcphub.exe supervise`,
 				ExecutablePath: exeUnderInstall, CreationDateUnix: reusedCreatedUnix,
 			},
 			startedAt: liveSupervisorStartedAt,
@@ -364,7 +367,7 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 			// defense → fail closed (no-op).
 			name: "empty sidecar StartedAt fails closed",
 			ident: process.ProcessIdentity{
-				Basename: "mcphub.exe", CommandLine: `C:\Users\dev\.local\bin\mcphub.exe supervise`,
+				Basename: "mcphub.exe", CommandLine: `C:\fixture-root\dev\.local\bin\mcphub.exe supervise`,
 				ExecutablePath: exeUnderInstall, CreationDateUnix: liveSupervisorCreatedUnix,
 			},
 			startedAt: "",
@@ -425,13 +428,13 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
 	const (
 		pid        = 4242
-		installDir = `C:\Users\dev\.local\bin`
-		exe        = `C:\Users\dev\.local\bin\mcphub.exe`
+		installDir = `C:\fixture-root\dev\.local\bin`
+		exe        = `C:\fixture-root\dev\.local\bin\mcphub.exe`
 	)
 	// An identity that passes Gates 1-4 cleanly, so only Gate 5 decides.
 	liveIdent := process.ProcessIdentity{
 		Basename:         "mcphub.exe",
-		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
+		CommandLine:      `C:\fixture-root\dev\.local\bin\mcphub.exe supervise --strict-mode`,
 		ExecutablePath:   exe,
 		CreationDateUnix: liveSupervisorCreatedUnix,
 	}
@@ -500,7 +503,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testin
 		Basename:    "node.exe",
 		CommandLine: `C:\Program Files\nodejs\node.exe server.js`,
 	}, nil)
-	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	swapSupervisorReapInstallDirForTest(t, `C:\fixture-root\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
@@ -524,11 +527,11 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{
 		Basename:         "mcphub.exe",
-		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise --strict-mode`,
-		ExecutablePath:   `C:\Users\dev\.local\bin\mcphub.exe`,
+		CommandLine:      `C:\fixture-root\dev\.local\bin\mcphub.exe supervise --strict-mode`,
+		ExecutablePath:   `C:\fixture-root\dev\.local\bin\mcphub.exe`,
 		CreationDateUnix: liveSupervisorCreatedUnix,
 	}, nil)
-	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	swapSupervisorReapInstallDirForTest(t, `C:\fixture-root\dev\.local\bin`)
 	// Gate 5 (owner SID): same-user supervisor → pass, without opening a real
 	// token for the fake PID 4242.
 	swapReapOwnerSIDForTest(t, true, nil)
@@ -555,11 +558,11 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testin
 	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{
 		Basename:         "mcphub.exe",
-		CommandLine:      `C:\Users\dev\.local\bin\mcphub.exe supervise`,
-		ExecutablePath:   `C:\Users\dev\.local\bin\mcphub.exe`,
+		CommandLine:      `C:\fixture-root\dev\.local\bin\mcphub.exe supervise`,
+		ExecutablePath:   `C:\fixture-root\dev\.local\bin\mcphub.exe`,
 		CreationDateUnix: reusedCreatedUnix,
 	}, nil)
-	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	swapSupervisorReapInstallDirForTest(t, `C:\fixture-root\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
@@ -584,7 +587,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_TransientProbeError_Propagates(t *tes
 	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
 	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{}, errors.New("simulated transient WMI stall"))
-	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	swapSupervisorReapInstallDirForTest(t, `C:\fixture-root\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
@@ -608,7 +611,7 @@ func TestV5UpgradeDeps_ForceKillSupervisor_NotFoundIsBenign(t *testing.T) {
 	body := `{"pid":4242,"started_at":"` + liveSupervisorStartedAt + `"}`
 	writeStateSidecarBytes(t, ownerPath, []byte(body))
 	swapProcessLookupForTest(t, process.ProcessIdentity{}, process.ErrProcessNotFound)
-	swapSupervisorReapInstallDirForTest(t, `C:\Users\dev\.local\bin`)
+	swapSupervisorReapInstallDirForTest(t, `C:\fixture-root\dev\.local\bin`)
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}

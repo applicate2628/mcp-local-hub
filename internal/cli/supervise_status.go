@@ -360,6 +360,9 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 			"started_at":     daemonRuntimeStartedAt(runtimeState.StartedAt),
 			"is_maintenance": isSupervisorMaintenanceTask(taskName),
 		}
+		if observation := api.EncodeReadinessObservationV1(runtimeState.ReadinessObservation); observation != nil {
+			row["readiness_observation"] = observation
+		}
 		if stalePID != 0 {
 			row["stale_pid"] = stalePID
 		}

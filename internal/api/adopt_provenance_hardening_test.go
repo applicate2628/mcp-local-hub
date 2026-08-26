@@ -91,7 +91,9 @@ func TestAdoptLeaseSuffixManifestRefusedFailClosed(t *testing.T) {
 // mkdir/write side effect). A non-".lease" name still resolves (suffix-scoped guard,
 // not a blanket refusal).
 func TestAdoptSnapshotAndLeasePathsRejectLeaseSuffix(t *testing.T) {
-	_, _, stateRoot := setupAdoptTestEnv(t, "unused", "[mcp_servers]\n")
+	statePathsHelper(t)
+	stateRoot := hardenedTempDir(t)
+	daemonStateRootOverride = stateRoot
 
 	if _, err := adoptSnapshotDir("x.lease"); err == nil {
 		t.Errorf("adoptSnapshotDir(\"x.lease\") must error on the reserved suffix")

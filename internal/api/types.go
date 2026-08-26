@@ -27,12 +27,23 @@ type DaemonStatus struct {
 	// so `mcphub status --json` keeps the raw task_name available for ops.
 	DisplayName string `json:"display_name,omitempty"`
 	State       string `json:"state"` // "Running" | "Ready" | "Failed" | "Stopped"
-	Port        int    `json:"port"`
-	LastResult  int32  `json:"last_result"`
-	NextRun     string `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
-	PID         int    `json:"pid,omitempty"`
-	RAMBytes    uint64 `json:"ram_bytes,omitempty"`
-	UptimeSec   int64  `json:"uptime_sec,omitempty"`
+	// ReadinessObservation is the supervisor-owned, generation-stamped input
+	// carried across IPC. It is intentionally not emitted by public status JSON:
+	// API.AssessReadiness is the sole reducer that projects it into the fields
+	// below.
+	ReadinessObservation *DaemonReadinessObservationV1 `json:"-"`
+	// ServiceState is the operational MCP service fact. State remains the
+	// independently-labelled scheduler/process fact for compatibility.
+	ServiceState     ServiceStateV1      `json:"service_state,omitempty"`
+	ReadinessStage   ReadinessStageV1    `json:"readiness_stage,omitempty"`
+	ReadinessSettled bool                `json:"readiness_settled,omitempty"`
+	ReadinessFailure *ReadinessFailureV1 `json:"readiness_failure,omitempty"`
+	Port             int                 `json:"port"`
+	LastResult       int32               `json:"last_result"`
+	NextRun          string              `json:"next_run"` // backend-specific text (e.g. "Sunday, April 19, 2026 3:00:00 AM" on Windows; "N/A" when no trigger)
+	PID              int                 `json:"pid,omitempty"`
+	RAMBytes         uint64              `json:"ram_bytes,omitempty"`
+	UptimeSec        int64               `json:"uptime_sec,omitempty"`
 	// OrphanPID is the Windows post-create orphan PID when the
 	// supervisor's best-effort kill failed during spawn. Operator-
 	// visible via `mcphub status --json` and the GUI Dashboard for
@@ -140,6 +151,9 @@ type DaemonStatus struct {
 	// source of truth; future maintenance tasks only need to update the
 	// Go predicate.
 	IsMaintenance bool `json:"is_maintenance,omitempty"`
+	// MCPReadiness preserves the existing typed initialize/tools-list result.
+	// It is orthogonal to State and is never by itself a service success.
+	MCPReadiness MCPReadinessResult `json:"mcp_readiness,omitempty"`
 }
 
 // HealthProbe records the outcome of an MCP protocol smoke test against
@@ -157,10 +171,11 @@ type DaemonStatus struct {
 // LifecycleFailed) tells the caller the backend side; the CLI layer
 // composes that into a combined human-readable cell.
 type HealthProbe struct {
-	OK        bool   `json:"ok"`
-	ToolCount int    `json:"tool_count,omitempty"`
-	Err       string `json:"err,omitempty"`
-	Source    string `json:"source,omitempty"` // "proxy-synthetic" for workspace-scoped rows; RouteFrontHealthSource for the built-in route front daemon; "" otherwise
+	OK        bool               `json:"ok"`
+	ToolCount int                `json:"tool_count,omitempty"`
+	Err       string             `json:"err,omitempty"`
+	Source    string             `json:"source,omitempty"` // "proxy-synthetic" for workspace-scoped rows; RouteFrontHealthSource for the built-in route front daemon; "" otherwise
+	Readiness MCPReadinessResult `json:"mcp_readiness,omitempty"`
 }
 
 // ScanEntry is one row in the unified "across all clients" view.
@@ -188,8 +203,12 @@ type ScanEntry struct {
 	// is "via-hub" only when its URL port matches one of these. Empty/
 	// absent when no manifest exists (so any loopback entry is unmanaged
 	// for this server). Mirrored as TS ScanEntry.daemon_ports.
-	DaemonPorts  []int `json:"daemon_ports,omitempty"`
-	ProcessCount int   `json:"process_count,omitempty"`
+	DaemonPorts          []int                     `json:"daemon_ports,omitempty"`
+	ProcessCount         int                       `json:"process_count,omitempty"`
+	Classification       ReadinessClassificationV1 `json:"classification,omitempty"`
+	MaterializationState MaterializationStateV1    `json:"materialization_state,omitempty"`
+	BindingState         BindingStateV1            `json:"binding_state,omitempty"`
+	Readiness            *ReadinessSnapshotV1      `json:"readiness,omitempty"`
 
 	// ProjectEnabled is the per-project-GUI Phase 2b claude-code .mcp.json
 	// (Project-scope) APPROVAL reconciliation result for THIS server: true =
@@ -450,9 +469,13 @@ type BackupInfo struct {
 //
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type SupervisorIntentEntry struct {
-	Name       string
-	Command    string
-	Args       []string
-	WorkingDir string
-	Trigger    string // human-readable; "At logon" or "Weekly Sun 03:00"
+	Name                       string
+	Command                    string
+	Args                       []string
+	WorkingDir                 string
+	Trigger                    string // human-readable; "At logon" or "Weekly Sun 03:00"
+	StartupBindDeadlineSeconds int
+	// manifestHash is the exact hash of the raw manifest bytes accepted by the
+	// install loader. It is execution-only and never appears in plan output.
+	manifestHash string
 }

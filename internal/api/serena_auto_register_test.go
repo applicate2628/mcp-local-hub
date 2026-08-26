@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,26 @@ import (
 	"github.com/gofrs/flock"
 	"mcp-local-hub/internal/config"
 )
+
+func TestLoadSerenaCatalogManifestCarriesExactRawHash(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, SerenaServerName)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw := "name: serena\nkind: global\ntransport: stdio-bridge\ncommand: go\nbase_args: [version]\nenv: {}\ndaemons:\n  - name: default\n    port: 9484\nclient_bindings: []\n# auto-register exact-byte marker\n"
+	if err := os.WriteFile(filepath.Join(dir, "manifest.yaml"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", root)
+	_, got, err := loadSerenaCatalogManifest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := ManifestHashContent([]byte(raw)); got != want {
+		t.Fatalf("hash=%q, want exact raw hash %q", got, want)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Phase 5 Part B — AutoRegisterSerenaWorkspace unit tests.
@@ -56,8 +77,8 @@ func autoRegisterTestEnv(t *testing.T) (regPath string) {
 	t.Cleanup(restoreStateRoot)
 
 	prevCatalog := loadSerenaCatalogManifest
-	loadSerenaCatalogManifest = func() (*config.ServerManifest, error) {
-		return autoRegisterCatalogManifest(), nil
+	loadSerenaCatalogManifest = func() (*config.ServerManifest, string, error) {
+		return autoRegisterCatalogManifest(), strings.Repeat("b", 64), nil
 	}
 	t.Cleanup(func() { loadSerenaCatalogManifest = prevCatalog })
 
@@ -362,6 +383,39 @@ func TestAutoRegisterSerena_EmptyLanguages_ReturnsErrNoLanguages(t *testing.T) {
 	}
 	if rows := loadRegSerenaRows(t, regPath); len(rows) != 0 {
 		t.Errorf("registry has %d serena rows, want 0 (no-languages must never register)", len(rows))
+	}
+}
+
+func TestEmitWorkspaceAutoRegisteredEvent_CompatibilitySchemaWarnsWithMigration(t *testing.T) {
+	stateDir := t.TempDir()
+	restore := SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restore)
+	emitWorkspaceAutoRegisteredEvent("workspace with spaces", "project", 9150, []string{"cpp"}, SerenaProjectSchema{
+		Form:          SerenaProjectSchemaFormLanguages,
+		Compatibility: true,
+	})
+	data, err := os.ReadFile(filepath.Join(stateDir, SupervisorEventLogFileLeaf))
+	if err != nil {
+		t.Fatalf("read compatibility event: %v", err)
+	}
+	for _, want := range []string{
+		`"severity":"warn"`,
+		`"event":"workspace-auto-registered"`,
+		`"schema_form":"languages"`,
+		`"schema_compatibility":true`,
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Fatalf("compatibility event missing %s:\n%s", want, data)
+		}
+	}
+	var event struct {
+		Body map[string]any `json:"body"`
+	}
+	if err := json.Unmarshal(data, &event); err != nil {
+		t.Fatal(err)
+	}
+	if got := event.Body["migration_command"]; got != `mcphub workspace bootstrap "workspace with spaces" --migrate-serena-schema` {
+		t.Fatalf("migration command = %#v", got)
 	}
 }
 

@@ -662,6 +662,345 @@ func TestDefaultRouterReadinessPing_RequiresSerenaRouterSignature(t *testing.T) 
 	}
 }
 
+func TestResolveSerenaClientEndpointForTarget_UsesLiveRouterAuthority(t *testing.T) {
+	router := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != SerenaRouterURLPath {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodHead:
+			w.Header().Set("Allow", "POST, DELETE")
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		case http.MethodPost:
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Mcp-Session-Id", "endpoint-projection-test")
+			_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2024-11-05","serverInfo":{"name":"serena"},"capabilities":{}}}`))
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	defer router.Close()
+	port := router.Listener.Addr().(*net.TCPAddr).Port
+
+	for _, tc := range []struct {
+		name   string
+		target ClientRoutingTarget
+		mode   string
+	}{
+		{
+			name:   "gui compatibility",
+			target: ClientRoutingTarget{Mode: MCPFrontRoutingTargetGUI, Port: port},
+			mode:   "gui-compat",
+		},
+		{
+			name:   "mcp front",
+			target: ClientRoutingTarget{Mode: MCPFrontRoutingTargetFront, Port: port, Generation: 7},
+			mode:   "mcp-front",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			endpoint, err := ResolveSerenaClientEndpointForTarget(context.Background(), tc.target)
+			if err != nil {
+				t.Fatalf("resolve endpoint: %v", err)
+			}
+			if endpoint.ClientEndpoint != SerenaRouterClientURL(port) {
+				t.Fatalf("client endpoint = %q, want %q", endpoint.ClientEndpoint, SerenaRouterClientURL(port))
+			}
+			if endpoint.EndpointMode != tc.mode {
+				t.Fatalf("endpoint mode = %q, want %q", endpoint.EndpointMode, tc.mode)
+			}
+			if !endpoint.Ready || endpoint.ReadinessStage != "ready" {
+				t.Fatalf("endpoint readiness = ready:%v stage:%q, want ready:true stage:ready", endpoint.Ready, endpoint.ReadinessStage)
+			}
+		})
+	}
+}
+
+func TestResolveSerenaClientEndpointForTarget_FailsWithTypedReadinessStage(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ResolveSerenaClientEndpointForTarget(context.Background(), ClientRoutingTarget{
+		Mode: MCPFrontRoutingTargetGUI,
+		Port: port,
+	})
+	if err == nil {
+		t.Fatal("dead router port must fail closed")
+	}
+	var unready *SerenaClientEndpointUnreadyError
+	if !errors.As(err, &unready) {
+		t.Fatalf("error type = %T (%v), want *SerenaClientEndpointUnreadyError", err, err)
+	}
+	if unready.Stage != MCPFrontProbeStageShapeTransport {
+		t.Fatalf("unready stage = %q, want %q", unready.Stage, MCPFrontProbeStageShapeTransport)
+	}
+}
+
+// TestSerenaAuthorityJoin_LegacyEntryProjectorAbsent prevents reintroducing a
+// weaker two-input projector. ProjectSerenaWorkspaceSnapshot is the sole
+// projection owner because it joins all authority rows from one snapshot.
+func TestSerenaAuthorityJoin_LegacyEntryProjectorAbsent(t *testing.T) {
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "serena_client_reconcile.go", nil, 0)
+	if err != nil {
+		t.Fatalf("parse reconcile source: %v", err)
+	}
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "ProjectSerenaWorkspaceEntry" {
+			t.Fatal("legacy two-input projector must remain absent; use ProjectSerenaWorkspaceSnapshot")
+		}
+	}
+}
+
+func serenaAuthorityJoinHealthyInput() SerenaWorkspaceProjectionInputV1 {
+	const (
+		workspaceKey  = "project-key"
+		workspacePath = "/workspace/project"
+		taskName      = `\mcp-local-hub-serena-project-key`
+		proxyPort     = 9150
+		routerPort    = 9121
+		generation    = 7
+	)
+	return SerenaWorkspaceProjectionInputV1{
+		Mode: SerenaWorkspaceProjectionModeSnapshot,
+		RegistryRows: []WorkspaceEntry{{
+			WorkspaceKey: workspaceKey, WorkspacePath: workspacePath,
+			Language: SerenaLanguageSentinel, Backend: SerenaServerName,
+			Port: proxyPort, TaskName: taskName, Languages: []string{"cpp"},
+		}},
+		SupervisorIntent: SupervisorIntentFile{Daemons: []SupervisorDaemon{{
+			TaskName: taskName, Server: SerenaServerName, Workspace: workspacePath, Port: proxyPort,
+		}}},
+		StatusRows: []DaemonStatus{{
+			TaskName: strings.TrimPrefix(taskName, `\`), Server: SerenaServerName, Backend: SerenaServerName, Workspace: workspaceKey,
+			Port: proxyPort, State: "Running",
+			ReadinessObservation: &DaemonReadinessObservationV1{
+				TaskName: strings.TrimPrefix(taskName, `\`), Port: proxyPort,
+				CurrentPIDGeneration: generation, ObservedPIDGeneration: generation,
+			},
+		}},
+		Readiness: ReadinessSnapshotV1{Settled: true, Daemons: []DaemonReadinessV1{{
+			TaskName: taskName, Port: proxyPort, PIDGeneration: generation,
+			ServiceState: ServiceStateRunning, Stage: ReadinessStageComplete, Settled: true,
+		}}},
+		Endpoint: SerenaClientEndpoint{
+			ClientEndpoint: SerenaRouterClientURL(routerPort), EndpointMode: SerenaEndpointModeMCPFront,
+			RouterPort: routerPort, Ready: true, ReadinessStage: SerenaEndpointReadinessReady,
+		},
+	}
+}
+
+func TestSerenaAuthorityJoin_RegistryIntentProxyPortMismatch(t *testing.T) {
+	in := serenaAuthorityJoinHealthyInput()
+	in.SupervisorIntent.Daemons[0].Port = 9151
+	out, err := ProjectSerenaWorkspaceSnapshot(in)
+	if err == nil {
+		t.Fatal("registry/intent port mismatch must fail closed")
+	}
+	var mismatch *SerenaWorkspaceStateMismatchError
+	if !errors.As(err, &mismatch) {
+		t.Fatalf("error type = %T (%v), want *SerenaWorkspaceStateMismatchError", err, err)
+	}
+	if mismatch.Kind != SerenaWorkspaceStateMismatchProxyPort {
+		t.Fatalf("mismatch kind = %q, want %q", mismatch.Kind, SerenaWorkspaceStateMismatchProxyPort)
+	}
+	if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+		t.Fatalf("contradictory authorities returned partial output: %+v", out)
+	}
+}
+
+func TestSerenaAuthorityJoin_IntentStatusProxyPortMismatch(t *testing.T) {
+	in := serenaAuthorityJoinHealthyInput()
+	in.StatusRows[0].Port = 9151
+	in.StatusRows[0].ReadinessObservation.Port = 9151
+	in.Readiness.Daemons[0].Port = 9151
+	for _, mode := range []SerenaWorkspaceProjectionMode{
+		SerenaWorkspaceProjectionModeSnapshot,
+		SerenaWorkspaceProjectionModeRequireSettled,
+	} {
+		in.Mode = mode
+		out, err := ProjectSerenaWorkspaceSnapshot(in)
+		var mismatch *SerenaWorkspaceStateMismatchError
+		if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchProxyPort {
+			t.Fatalf("mode %q: error = %T (%v), want typed proxy port mismatch", mode, err, err)
+		}
+		if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+			t.Fatalf("mode %q: mismatch returned partial output: %+v", mode, out)
+		}
+	}
+}
+
+func TestSerenaAuthorityJoin_AlignedProxyUnready(t *testing.T) {
+	in := serenaAuthorityJoinHealthyInput()
+	in.StatusRows[0].State = "Starting"
+	in.Readiness.Settled = false
+	in.Readiness.Daemons[0].ServiceState = ServiceStateStarting
+	in.Readiness.Daemons[0].Stage = ReadinessStageUpstreamListener
+	in.Readiness.Daemons[0].Settled = false
+
+	out, err := ProjectSerenaWorkspaceSnapshot(in)
+	if err != nil {
+		t.Fatalf("snapshot must retain aligned unready row: %v", err)
+	}
+	if len(out.Workspaces) != 1 || out.Workspaces[0].ClientEndpoint != "" {
+		t.Fatalf("snapshot workspace = %+v, want one endpoint-suppressed row", out.Workspaces)
+	}
+	if out.Workspaces[0].ServiceState != ServiceStateStarting || out.Workspaces[0].ReadinessStage != ReadinessStageUpstreamListener || out.Workspaces[0].ReadinessSettled {
+		t.Fatalf("snapshot readiness = %+v, want Starting/upstream_listener/unsettled", out.Workspaces[0])
+	}
+
+	in.Mode = SerenaWorkspaceProjectionModeRequireSettled
+	out, err = ProjectSerenaWorkspaceSnapshot(in)
+	var unready *SerenaWorkspaceProxyUnreadyError
+	if !errors.As(err, &unready) {
+		t.Fatalf("require-settled error = %T (%v), want *SerenaWorkspaceProxyUnreadyError", err, err)
+	}
+	if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+		t.Fatalf("require-settled unready returned partial output: %+v", out)
+	}
+}
+
+func TestSerenaAuthorityJoin_ClientRouteUnready(t *testing.T) {
+	in := serenaAuthorityJoinHealthyInput()
+	in.Endpoint = SerenaClientEndpoint{RouterPort: 9121, ReadinessStage: "initialize"}
+
+	out, err := ProjectSerenaWorkspaceSnapshot(in)
+	if err != nil {
+		t.Fatalf("snapshot must retain aligned route-unready row: %v", err)
+	}
+	if len(out.Workspaces) != 1 || out.Workspaces[0].ClientEndpoint != "" || out.Workspaces[0].ServiceState != ServiceStateDegraded {
+		t.Fatalf("snapshot route-unready projection = %+v", out.Workspaces)
+	}
+
+	in.Mode = SerenaWorkspaceProjectionModeRequireSettled
+	out, err = ProjectSerenaWorkspaceSnapshot(in)
+	var unready *SerenaClientEndpointUnreadyError
+	if !errors.As(err, &unready) {
+		t.Fatalf("require-settled error = %T (%v), want *SerenaClientEndpointUnreadyError", err, err)
+	}
+	if unready.Stage != MCPFrontProbeStage("initialize") {
+		t.Fatalf("route-unready stage = %q, want initialize", unready.Stage)
+	}
+	if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+		t.Fatalf("route-unready returned partial output: %+v", out)
+	}
+}
+
+func TestSerenaAuthorityJoin_HealthyProjectsOnlyRouterEndpoint(t *testing.T) {
+	out, err := ProjectSerenaWorkspaceSnapshot(serenaAuthorityJoinHealthyInput())
+	if err != nil {
+		t.Fatalf("healthy authority join: %v", err)
+	}
+	if len(out.Workspaces) != 1 || len(out.StatusRows) != 1 {
+		t.Fatalf("healthy output cardinality = workspaces:%d status:%d", len(out.Workspaces), len(out.StatusRows))
+	}
+	if got := out.Workspaces[0].ClientEndpoint; got != SerenaRouterClientURL(9121) {
+		t.Fatalf("client endpoint = %q, want router URL", got)
+	}
+	if got := out.Workspaces[0].WorkspaceProxyPort; got != 9150 {
+		t.Fatalf("workspace proxy port = %d, want 9150", got)
+	}
+}
+
+func TestStatusInternal_SerenaProjectionReusesHeldStatusSnapshot(t *testing.T) {
+	in := serenaAuthorityJoinHealthyInput()
+	stateDir := t.TempDir()
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	previousRegistryPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = previousRegistryPath })
+	registry := NewRegistry(registryPath)
+	registry.Workspaces = append([]WorkspaceEntry(nil), in.RegistryRows...)
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &in.SupervisorIntent); err != nil {
+		t.Fatal(err)
+	}
+	dials := 0
+	previousDial := statusInternalDialFn
+	statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) {
+		dials++
+		return cloneDaemonStatusRows(in.StatusRows), nil
+	}
+	t.Cleanup(func() { statusInternalDialFn = previousDial })
+	previousEndpoint := serenaWorkspaceProjectionEndpointFn
+	serenaWorkspaceProjectionEndpointFn = func(*API, context.Context) (SerenaClientEndpoint, error) { return in.Endpoint, nil }
+	t.Cleanup(func() { serenaWorkspaceProjectionEndpointFn = previousEndpoint })
+
+	rows, err := NewAPI().statusInternal(context.Background())
+	if err != nil {
+		t.Fatalf("statusInternal: %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("status IPC dials = %d, want one held snapshot", dials)
+	}
+	if len(rows) != 1 || rows[0].Port != 9150 {
+		t.Fatalf("status projection = %+v, want one projected Serena row on port 9150", rows)
+	}
+}
+
+func TestStatusInternal_SerenaProjectionPropagatesProxyPortMismatches(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*SerenaWorkspaceProjectionInputV1)
+	}{
+		{"registry_intent", func(in *SerenaWorkspaceProjectionInputV1) { in.SupervisorIntent.Daemons[0].Port = 9151 }},
+		{"intent_status", func(in *SerenaWorkspaceProjectionInputV1) {
+			in.StatusRows[0].Port = 9151
+			in.StatusRows[0].ReadinessObservation.Port = 9151
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := serenaAuthorityJoinHealthyInput()
+			tc.mutate(&in)
+			stateDir := t.TempDir()
+			t.Cleanup(SetDaemonStateRootForTest(stateDir))
+			registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+			previousRegistryPath := defaultRegistryPathFn
+			defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+			t.Cleanup(func() { defaultRegistryPathFn = previousRegistryPath })
+			registry := NewRegistry(registryPath)
+			registry.Workspaces = append([]WorkspaceEntry(nil), in.RegistryRows...)
+			if err := registry.Save(); err != nil {
+				t.Fatal(err)
+			}
+			intentPath, err := DefaultSupervisorIntentPath()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := WriteSupervisorIntent(intentPath, &in.SupervisorIntent); err != nil {
+				t.Fatal(err)
+			}
+			previousDial := statusInternalDialFn
+			statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) { return cloneDaemonStatusRows(in.StatusRows), nil }
+			t.Cleanup(func() { statusInternalDialFn = previousDial })
+			previousEndpoint := serenaWorkspaceProjectionEndpointFn
+			serenaWorkspaceProjectionEndpointFn = func(*API, context.Context) (SerenaClientEndpoint, error) { return in.Endpoint, nil }
+			t.Cleanup(func() { serenaWorkspaceProjectionEndpointFn = previousEndpoint })
+
+			_, err = NewAPI().statusInternal(context.Background())
+			var mismatch *SerenaWorkspaceStateMismatchError
+			if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchProxyPort {
+				t.Fatalf("status error = %T (%v), want typed proxy_port_mismatch", err, err)
+			}
+		})
+	}
+}
+
 // TestSerenaClientReconcile_RewritesToRouterURL_PerClient exercises the REAL
 // client adapter shapes (claude-code/codex-cli/cursor/vscode/gemini-cli/
 // qwen-cli) via clients.AllClients() over a hermetic HOME, asserting each

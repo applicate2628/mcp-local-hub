@@ -282,12 +282,20 @@ See also: install, logs, restart, status.`,
 				// a subprocess and exposes it on HTTP via the in-process host.
 				// Replaces the previous npx supergateway wrapper (bridge.go),
 				// removing the node/npm dependency from the runtime.
+				launchCapability := cstLaunchCapabilityConfig(server, daemonName)
+				if launchCapability != nil {
+					// The capability-bearing route has no wrapper fallback: its exact
+					// provision receipt owns both the direct image and fixed role argv.
+					cmdPath = launchCapability.DirectImage.ImagePath
+					childArgs = append([]string{}, launchCapability.DirectImage.FrontendArgs...)
+				}
 				h, err := daemon.NewStdioHost(daemon.HostConfig{
-					Command:  cmdPath,
-					Args:     childArgs,
-					Env:      env,
-					UnsetEnv: unsetEnv,
-					LogPath:  logPath,
+					Command:          cmdPath,
+					Args:             childArgs,
+					Env:              env,
+					UnsetEnv:         unsetEnv,
+					LogPath:          logPath,
+					LaunchCapability: launchCapability,
 					// spec.Cwd is the manifest-declared per-daemon working
 					// directory (validated absolute at parse time; empty means
 					// inherit mcphub's own cwd). cmd.Dir is set from this in
@@ -405,6 +413,41 @@ See also: install, logs, restart, status.`,
 	// stuck/quarantined daemon, then force a respawn through the supervisor.
 	c.AddCommand(newDaemonRecoverCmd())
 	return c
+}
+
+// cstLaunchCapabilityConfig admits only the exact supervisor-tracked CST host.
+// The state row is non-authoritative input to enrollment: the SCM daemon still
+// binds this process and generation independently through supervisor status.
+var parseCstDirectImageReceiptV1 = daemon.ParseCstDirectImageReceiptV1
+
+func cstLaunchCapabilityConfig(server, daemonName string) *daemon.LaunchCapabilityConfig {
+	if runtime.GOOS != "windows" || server != api.SupervisorCstTaskV1 || daemonName != "default" {
+		return nil
+	}
+	stateDir, err := api.DaemonStateDirReadOnly()
+	if err != nil {
+		return nil
+	}
+	receiptRaw, err := api.ReadStateFileInodeAnchored(filepath.Join(stateDir, "cst-direct-image-receipt-v1.json"))
+	if err != nil {
+		return nil
+	}
+	directImage, err := parseCstDirectImageReceiptV1(receiptRaw)
+	if err != nil {
+		return nil
+	}
+	state, err := api.ReadSupervisorState(filepath.Join(stateDir, "supervisor-state.json"))
+	if err != nil || state == nil {
+		return nil
+	}
+	row, ok := state.Daemons[canonicalSupervisorTaskName(`mcp-local-hub-cst-default`)]
+	if !ok || row.CurrentPID != os.Getpid() || row.PIDGeneration <= 0 || row.StartedAt == "" {
+		return nil
+	}
+	return &daemon.LaunchCapabilityConfig{
+		Task: api.SupervisorCstTaskV1, Generation: row.PIDGeneration,
+		Enrollment: api.NewHubEnrollmentClientV1(), DirectImage: directImage,
+	}
 }
 
 func daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath string, err error) error {

@@ -3,6 +3,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,35 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
+
+var installAllWithOpts = func(opts api.InstallAllOpts) []api.InstallResult {
+	return api.NewAPI().InstallAllWithOpts(opts)
+}
+
+// renderCommandSettlement emits the canonical command-settlement-v1 payload.
+// It is colocated with the admitted install consumer so this transfer does not
+// pull in the unadmitted restart consumer or its source file.
+func renderCommandSettlement(w io.Writer, settlement api.CommandSettlementV1) error {
+	raw, err := json.Marshal(settlement)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(w, string(raw))
+	return err
+}
+
+func renderClientConfigSettlementRows(w io.Writer, rows []api.ClientConfigSettlementV1) error {
+	for _, row := range rows {
+		raw, err := json.Marshal(row)
+		if err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintln(w, string(raw)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 // newInstallCmdReal is the concrete cobra.Command wired by root.go's stub
 // newInstallCmd. It is a thin wrapper over api.Install — all behavior lives
@@ -271,12 +301,11 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				if server != "" || daemonFilter != "" {
 					return fmt.Errorf("--all is mutually exclusive with --server/--daemon")
 				}
-				a := api.NewAPI()
 				include, err := parseInstallClientsFlag(clientsFlag, allClients)
 				if err != nil {
 					return err
 				}
-				results := a.InstallAllWithOpts(api.InstallAllOpts{
+				results := installAllWithOpts(api.InstallAllOpts{
 					ClientsInclude:    include,
 					IncludeAllClients: allClients,
 					DryRun:            dryRun,
@@ -285,6 +314,9 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				failed := 0
 				for _, r := range results {
 					if r.Err != nil {
+						if err := renderClientConfigSettlementRows(cmd.OutOrStderr(), r.ClientConfigSettlements); err != nil {
+							return err
+						}
 						failed++
 						fmt.Fprintf(cmd.OutOrStderr(), "\u2717 %s: %v\n", r.Server, r.Err)
 					} else {
@@ -326,8 +358,7 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			if blocked := renderReadinessReport(cmd.OutOrStdout(), rep); blocked {
 				return fmt.Errorf("%s is not ready to install — fix the blocker(s) above (or run `mcphub install --server %s --check` to re-print them)", server, server)
 			}
-			a := api.NewAPI()
-			return a.Install(api.InstallOpts{
+			settlement, installErr := api.NewCommandCoordinator(api.NewAPI()).Install(cmd.Context(), api.InstallOpts{
 				Server:                 server,
 				DaemonFilter:           daemonFilter,
 				ClientsInclude:         include,
@@ -337,6 +368,10 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				Writer:                 cmd.OutOrStdout(),
 				GUIPort:                resolveInstallGUIPort(),
 			})
+			if renderErr := renderCommandSettlement(cmd.OutOrStdout(), settlement); renderErr != nil {
+				return renderErr
+			}
+			return installErr
 		},
 	}
 	c.Flags().StringVar(&server, "server", "", "server name (matches servers/<name>/manifest.yaml)")

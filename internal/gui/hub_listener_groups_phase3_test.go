@@ -33,6 +33,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/api/apitest"
 )
 
 // seedManifestDir writes a minimal manifest carrying a client_bindings
@@ -93,6 +94,10 @@ func resetResolverSnapshot(t *testing.T) {
 func TestGroupsPhase3_PublishSeamPopulatesSnapshotFromManifests(t *testing.T) {
 	seedManifestDir(t)
 	resetResolverSnapshot(t)
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	startReadySupervisorFixture(t, stateDir, nil)
 
 	a := api.NewAPI()
 	if err := publishResolverSnapshotForHubBind(context.Background(), a); err != nil {

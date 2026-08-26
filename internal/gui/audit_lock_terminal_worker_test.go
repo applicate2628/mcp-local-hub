@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -46,13 +47,13 @@ func (f *terminalTableRecoverer) Recover(_ context.Context, _ string, _ bool, ma
 }
 
 func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t *testing.T) {
-	if os.Getenv("MCPHUB_AUDIT_LOCK_BLOCKING_HELPER") == "1" {
-		lock := flock.New(os.Getenv("MCPHUB_AUDIT_LOCK_HELPER_LOCK"))
+	if os.Getenv(auditLockBlockingHelperEnv) == "1" {
+		lock := flock.New(os.Getenv(auditLockHelperLockEnv))
 		locked, err := lock.TryLock()
 		if err != nil || !locked {
 			os.Exit(2)
 		}
-		if err := os.WriteFile(os.Getenv("MCPHUB_AUDIT_LOCK_HELPER_ENTERED"), []byte("entered"), 0o600); err != nil {
+		if err := os.WriteFile(os.Getenv(auditLockHelperEnteredEnv), []byte("entered"), 0o600); err != nil {
 			os.Exit(3)
 		}
 		time.Sleep(time.Hour)
@@ -60,6 +61,7 @@ func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t 
 	}
 	adapter := newDirectTestAuditLockAdapterInStateDir(nil, t.TempDir())
 	defer adapter.close()
+	stateRootsBefore := guiTestStateRoots(t)
 	adapter.terminalizationBudget = 5 * time.Second
 	correlation := validAuditLockCorrelation(adapter.serverInstance, 991)
 	binding := auditLockOccurrenceBinding{serverInstance: adapter.serverInstance, taskName: `\\timeout-worker`, confirm: true}
@@ -76,7 +78,7 @@ func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t 
 		childCtx, cancelChild := context.WithCancel(ctx)
 		defer cancelChild()
 		cmd := exec.Command(os.Args[0], "-test.run=^TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn$")
-		cmd.Env = append(os.Environ(), "MCPHUB_AUDIT_LOCK_BLOCKING_HELPER=1", "MCPHUB_AUDIT_LOCK_HELPER_LOCK="+adapter.storePath+".lock", "MCPHUB_AUDIT_LOCK_HELPER_ENTERED="+entered)
+		cmd.Env = append(withoutGUITestHelperEnvironment(os.Environ(), runtime.GOOS), auditLockBlockingHelperEnv+"=1", auditLockHelperLockEnv+"="+adapter.storePath+".lock", auditLockHelperEnteredEnv+"="+entered)
 		runDone := make(chan error, 1)
 		go func() {
 			_, err := process.RunStrictlyContained(childCtx, process.StrictRunInvocation{Command: cmd, Input: []byte("{}"), InputLimit: 2, StdoutLimit: 1024, StderrLimit: 1024})
@@ -143,6 +145,24 @@ func TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn(t 
 	if err := probe.Unlock(); err != nil {
 		t.Fatal(err)
 	}
+	for root := range guiTestStateRoots(t) {
+		if _, existed := stateRootsBefore[root]; !existed {
+			t.Fatalf("contained helper left package TestMain state root %s", root)
+		}
+	}
+}
+
+func guiTestStateRoots(t *testing.T) map[string]struct{} {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), "mcphub-gui-test-state-*"))
+	if err != nil {
+		t.Fatalf("enumerate GUI TestMain roots: %v", err)
+	}
+	result := make(map[string]struct{}, len(matches))
+	for _, match := range matches {
+		result[filepath.Clean(match)] = struct{}{}
+	}
+	return result
 }
 
 func TestAuditLockTerminalizationDeadlineClassifiesWithoutProcessStartup(t *testing.T) {
@@ -476,7 +496,8 @@ const (
 
 func TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun(t *testing.T) {
 	if os.Getenv(auditLockR6ReceiverHelperEnv) == "1" {
-		runAuditLockR6ReceiverScenario(t, os.Getenv(auditLockR6StateRootEnv))
+		stateRoot := consumeAuditLockR6ReceiverEnvironment(t)
+		runAuditLockR6ReceiverScenario(t, stateRoot)
 		return
 	}
 	stateRoot := t.TempDir()
@@ -484,7 +505,7 @@ func TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun(t *testing
 		t.Skip("real receiver harness requires -tags=test_state_path_env to isolate the hidden child")
 	}
 	cmd := exec.Command(os.Args[0], "-test.run=^TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun$")
-	cmd.Env = append(withoutAuditLockTestEnv(os.Environ(), auditLockR6ReceiverHelperEnv, auditLockR6StateRootEnv, auditLockTerminalWorkerStderrHelperEnv),
+	cmd.Env = append(withoutGUITestHelperEnvironment(os.Environ(), runtime.GOOS),
 		auditLockR6ReceiverHelperEnv+"=1", auditLockR6StateRootEnv+"="+stateRoot)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -497,6 +518,36 @@ func TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun(t *testing
 		}
 	}
 	assertAuditLockMarkerAbsentFromStateRoot(t, stateRoot)
+}
+
+func consumeAuditLockR6ReceiverEnvironment(t *testing.T) string {
+	t.Helper()
+	stateRoot, stateSet := os.LookupEnv(auditLockR6StateRootEnv)
+	receiver, receiverSet := os.LookupEnv(auditLockR6ReceiverHelperEnv)
+	if !stateSet || !receiverSet || receiver != "1" {
+		t.Fatal("R6 receiver framing was not validated before test entry")
+	}
+	t.Cleanup(func() {
+		if err := os.Setenv(auditLockR6ReceiverHelperEnv, receiver); err != nil {
+			t.Errorf("restore R6 receiver marker: %v", err)
+		}
+		if err := os.Setenv(auditLockR6StateRootEnv, stateRoot); err != nil {
+			t.Errorf("restore R6 state root marker: %v", err)
+		}
+	})
+	if err := os.Unsetenv(auditLockR6ReceiverHelperEnv); err != nil {
+		t.Fatalf("consume R6 receiver marker: %v", err)
+	}
+	if err := os.Unsetenv(auditLockR6StateRootEnv); err != nil {
+		t.Fatalf("consume R6 state root marker: %v", err)
+	}
+	if _, present := os.LookupEnv(auditLockR6ReceiverHelperEnv); present {
+		t.Fatal("R6 receiver marker remained after consumption")
+	}
+	if _, present := os.LookupEnv(auditLockR6StateRootEnv); present {
+		t.Fatal("R6 state root marker remained after consumption")
+	}
+	return stateRoot
 }
 
 func auditLockR6CrossProcessStateOverrideAvailable(t *testing.T, stateRoot string) bool {
@@ -701,25 +752,4 @@ func assertAuditLockMarkerAbsentFromStateRoot(t *testing.T, stateRoot string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-}
-
-func withoutAuditLockTestEnv(environment []string, keys ...string) []string {
-	prefixes := make([]string, len(keys))
-	for index, key := range keys {
-		prefixes[index] = key + "="
-	}
-	filtered := make([]string, 0, len(environment))
-	for _, entry := range environment {
-		excluded := false
-		for _, prefix := range prefixes {
-			if strings.HasPrefix(entry, prefix) {
-				excluded = true
-				break
-			}
-		}
-		if !excluded {
-			filtered = append(filtered, entry)
-		}
-	}
-	return filtered
 }

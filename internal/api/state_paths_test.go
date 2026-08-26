@@ -75,6 +75,7 @@ func isolateStateDir(t *testing.T) string {
 	// write gate are unaffected — only the intent-read root is hardened here.
 	dir := hardenedTempDir(t)
 	daemonStateRootOverride = dir
+	bootstrapSecureAdoptLeaseNamespace(t)
 	return dir
 }
 

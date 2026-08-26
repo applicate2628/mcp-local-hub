@@ -20,7 +20,6 @@ import (
 const flockImportPath = "github.com/gofrs/flock"
 
 var reviewedRawFlockOwners = map[string]int{
-	"internal/api/adopted_entries.go:func:tryAcquireAdoptManifestLease":                              1,
 	"internal/api/adopted_entries.go:func:withAdoptedEntriesLock":                                    1,
 	"internal/api/daemon_env_overlay/write.go:func:WriteOverlay":                                     1,
 	"internal/api/daemon_intent.go:func:readDaemonIntentPathWithTimeout":                             1,

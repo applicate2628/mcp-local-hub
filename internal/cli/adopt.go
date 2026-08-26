@@ -11,6 +11,14 @@ import (
 )
 
 func newAdoptCmdReal() *cobra.Command {
+	return newAdoptCmdWithDeps(api.NewAPI, nil, nil)
+}
+
+// newAdoptCmdWithDeps keeps the CLI as a thin composition layer: the default
+// real command supplies no owner and ExecuteAdoptWithOpts binds the production
+// lease owner. Alternate in-process compositions can supply an owner while
+// still exercising the same Cobra command and API transaction.
+func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner, receivingVerifier api.AdoptReceivingVerifier) *cobra.Command {
 	var clientFlag string
 	var nameFlag string
 	var clientsFlag string
@@ -30,7 +38,7 @@ func newAdoptCmdReal() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			a := api.NewAPI()
+			a := newAPI()
 			plan, err := a.BuildAdoptPlan(api.AdoptOpts{
 				EntryName:    args[0],
 				Client:       clientFlag,
@@ -45,7 +53,7 @@ func newAdoptCmdReal() *cobra.Command {
 				api.PrintAdoptPlan(cmd.OutOrStdout(), plan)
 				return nil
 			}
-			return a.ExecuteAdopt(plan, cmd.OutOrStdout())
+			return a.ExecuteAdoptWithOpts(plan, cmd.OutOrStdout(), api.ExecuteAdoptOpts{LeaseOwner: leaseOwner, ReceivingVerifier: receivingVerifier})
 		},
 	}
 	cmd.Flags().StringVar(&clientFlag, "client", "", "source client ("+strings.Join(api.AdoptSupportedClients(), " | ")+")")

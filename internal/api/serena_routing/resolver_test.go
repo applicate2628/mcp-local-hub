@@ -1,9 +1,11 @@
 package serena_routing
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -20,17 +22,69 @@ func TestRefreshCapturesEntriesBeforeRegistryRelease(t *testing.T) {
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	src, err := os.ReadFile(filepath.Join(filepath.Dir(testFile), "resolver.go"))
+	parsed, err := parser.ParseFile(token.NewFileSet(), filepath.Join(filepath.Dir(testFile), "resolver.go"), nil, 0)
 	if err != nil {
-		t.Fatalf("ReadFile resolver.go: %v", err)
+		t.Fatalf("ParseFile resolver.go: %v", err)
 	}
-	capture := bytes.Index(src, []byte("entries = r.reg.SerenaEntries()"))
-	release := bytes.Index(src, []byte("releaseErr := unlock()"))
-	if capture < 0 || release < 0 {
-		t.Fatalf("refresh ordering anchors missing: capture=%d release=%d", capture, release)
+	var refresh *ast.FuncDecl
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "refresh" {
+			refresh = fn
+			break
+		}
 	}
-	if capture > release {
-		t.Fatal("refresh releases the registry lock before capturing Serena entries")
+	if refresh == nil {
+		t.Fatal("resolver refresh function missing")
+	}
+
+	var capture, deferredRelease token.Pos
+	ast.Inspect(refresh.Body, func(node ast.Node) bool {
+		switch node := node.(type) {
+		case *ast.AssignStmt:
+			if node.Tok != token.DEFINE || len(node.Lhs) != 1 || len(node.Rhs) != 1 {
+				return true
+			}
+			name, ok := node.Lhs[0].(*ast.Ident)
+			if !ok {
+				return true
+			}
+			call, ok := node.Rhs[0].(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			method, ok := call.Fun.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			receiver, ok := method.X.(*ast.SelectorExpr)
+			if !ok {
+				return true
+			}
+			registry, ok := receiver.X.(*ast.Ident)
+			if ok && name.Name == "entries" && method.Sel.Name == "SerenaEntries" && receiver.Sel.Name == "reg" && registry.Name == "r" {
+				capture = node.Pos()
+			}
+		case *ast.DeferStmt:
+			ast.Inspect(node.Call, func(candidate ast.Node) bool {
+				call, ok := candidate.(*ast.CallExpr)
+				if !ok {
+					return true
+				}
+				callee, ok := call.Fun.(*ast.Ident)
+				if ok && callee.Name == "unlock" {
+					deferredRelease = node.Pos()
+				}
+				return true
+			})
+		}
+		return true
+	})
+	if !capture.IsValid() || !deferredRelease.IsValid() {
+		t.Fatalf("refresh ordering anchors missing: capture=%d deferredRelease=%d", capture, deferredRelease)
+	}
+	if capture <= deferredRelease {
+		t.Fatal("refresh must register the registry-release defer before capturing Serena entries")
 	}
 }
 

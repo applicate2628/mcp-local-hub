@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -142,6 +143,12 @@ var testInstallAutostartFixture = &guiTestAutostartFixture{}
 const (
 	auditLockTerminalWorkerStderrHelperEnv = "MCPHUB_AUDIT_LOCK_TEST_STDERR_HELPER"
 	auditLockTerminalWorkerStderrMarker    = "audit-lock-test-private-stderr"
+	auditLockBlockingHelperEnv             = "MCPHUB_AUDIT_LOCK_BLOCKING_HELPER"
+	auditLockHelperLockEnv                 = "MCPHUB_AUDIT_LOCK_HELPER_LOCK"
+	auditLockHelperEnteredEnv              = "MCPHUB_AUDIT_LOCK_HELPER_ENTERED"
+	pidfdTestChildEnv                      = "MCPHUB_PIDFD_TEST_CHILD"
+	pidfdTestChildStallEnv                 = "MCPHUB_PIDFD_TEST_CHILD_STALL"
+	auditLockTerminalWorkerArg             = "audit-lock-terminal-worker"
 )
 
 // TestMain fences the WHOLE internal/gui test binary off the operator's real
@@ -184,7 +191,15 @@ const (
 // os.Exit-safety: defers do NOT run after os.Exit, so cleanup is performed
 // explicitly after capturing m.Run()'s exit code.
 func TestMain(m *testing.M) {
-	if len(os.Args) == 2 && os.Args[1] == "audit-lock-terminal-worker" {
+	dispatch := classifyGUITestHelperDispatch(os.Args, os.Environ(), runtime.GOOS)
+	if dispatch.role == guiTestRoleInvalid {
+		_, _ = os.Stderr.WriteString("internal/gui: invalid test helper dispatch: " + string(dispatch.reason) + "\n")
+		os.Exit(3)
+	}
+	switch dispatch.role {
+	case guiTestRoleR6ReceiverChild, guiTestRoleBlockingHelperChild, guiTestRolePIDFDLinuxChild:
+		os.Exit(m.Run())
+	case guiTestRoleAuditTerminalWorkerChild:
 		err := RunAuditLockTerminalWorker(os.Stdin, os.Stdout)
 		if os.Getenv(auditLockTerminalWorkerStderrHelperEnv) == "1" {
 			_, _ = os.Stderr.WriteString(strings.Repeat(auditLockTerminalWorkerStderrMarker, auditLockTerminalWorkerStderrMaxBytes/len(auditLockTerminalWorkerStderrMarker)+1))
@@ -257,8 +272,255 @@ func TestMain(m *testing.M) {
 	restoreEnv()
 	restoreClientEnv()
 	restoreState()
-	_ = os.RemoveAll(tmp)
+	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {
+		if code == 0 {
+			code = 1
+		}
+		_, _ = os.Stderr.WriteString("internal/gui TestMain cleanup: " + cleanupErr.Error() + "\n")
+	}
 	os.Exit(code)
+}
+
+type guiTestProcessRole uint8
+
+const (
+	guiTestRoleInvalid guiTestProcessRole = iota
+	guiTestRoleNormalParent
+	guiTestRoleR6ReceiverChild
+	guiTestRoleAuditTerminalWorkerChild
+	guiTestRoleBlockingHelperChild
+	guiTestRolePIDFDLinuxChild
+)
+
+type guiTestDispatchFailure string
+
+const (
+	guiTestFailureDuplicateSelector      guiTestDispatchFailure = "GUI_TEST_HELPER_DUPLICATE_SELECTOR"
+	guiTestFailureInvalidSelectorGrammar guiTestDispatchFailure = "GUI_TEST_HELPER_INVALID_SELECTOR_GRAMMAR"
+	guiTestFailureSelectorOnly           guiTestDispatchFailure = "GUI_TEST_HELPER_SELECTOR_ONLY"
+	guiTestFailurePartialFrame           guiTestDispatchFailure = "GUI_TEST_HELPER_PARTIAL_FRAME"
+	guiTestFailureUnknownValue           guiTestDispatchFailure = "GUI_TEST_HELPER_UNKNOWN_VALUE"
+	guiTestFailureConflict               guiTestDispatchFailure = "GUI_TEST_HELPER_CONFLICT"
+	guiTestFailureWrongArgv              guiTestDispatchFailure = "GUI_TEST_HELPER_WRONG_ARGV"
+	guiTestFailureInvalidPath            guiTestDispatchFailure = "GUI_TEST_HELPER_INVALID_PATH"
+	guiTestFailureDuplicateEnvKey        guiTestDispatchFailure = "GUI_TEST_HELPER_DUPLICATE_ENV_KEY"
+	guiTestFailurePIDFDFrameInvalid      guiTestDispatchFailure = "GUI_TEST_HELPER_PIDFD_FRAME_INVALID"
+)
+
+type guiTestHelperDispatch struct {
+	role   guiTestProcessRole
+	reason guiTestDispatchFailure
+}
+
+type guiTestSelector struct {
+	present bool
+	value   string
+}
+
+var guiTestHelperEnvironmentKeys = [...]string{
+	auditLockBlockingHelperEnv,
+	auditLockHelperLockEnv,
+	auditLockHelperEnteredEnv,
+	auditLockR6ReceiverHelperEnv,
+	auditLockR6StateRootEnv,
+	auditLockTerminalWorkerStderrHelperEnv,
+	pidfdTestChildEnv,
+	pidfdTestChildStallEnv,
+}
+
+const (
+	guiTestR6Selector       = "^TestAuditLockTerminalWorker_RealHTTPEventPersistenceAndSecondRun$"
+	guiTestBlockingSelector = "^TestAuditLockTerminalWorkerCancellationAfterAcquisitionReapsBeforeReturn$"
+	guiTestPIDFDSelector    = "^TestRetainedPIDFDAlive_LinuxChildHelper$"
+)
+
+func invalidGUITestDispatch(reason guiTestDispatchFailure) guiTestHelperDispatch {
+	return guiTestHelperDispatch{role: guiTestRoleInvalid, reason: reason}
+}
+
+func parseGUITestSelector(args []string) (guiTestSelector, guiTestDispatchFailure) {
+	var result guiTestSelector
+	for index := 1; index < len(args); index++ {
+		arg := args[index]
+		if arg == "--" || !strings.HasPrefix(arg, "-") {
+			break
+		}
+		var value string
+		matched := false
+		switch {
+		case strings.HasPrefix(arg, "-test.run="):
+			value, matched = strings.TrimPrefix(arg, "-test.run="), true
+		case strings.HasPrefix(arg, "--test.run="):
+			value, matched = strings.TrimPrefix(arg, "--test.run="), true
+		case arg == "-test.run" || arg == "--test.run":
+			if index+1 >= len(args) {
+				return guiTestSelector{}, guiTestFailureInvalidSelectorGrammar
+			}
+			index++
+			value, matched = args[index], true
+		case strings.HasPrefix(arg, "-test.run") || strings.HasPrefix(arg, "--test.run"):
+			return guiTestSelector{}, guiTestFailureInvalidSelectorGrammar
+		}
+		if !matched {
+			continue
+		}
+		if result.present {
+			return guiTestSelector{}, guiTestFailureDuplicateSelector
+		}
+		result = guiTestSelector{present: true, value: value}
+	}
+	return result, ""
+}
+
+func guiTestEnvironmentIdentity(key, goos string) string {
+	if goos == "windows" {
+		return strings.ToLower(key)
+	}
+	return key
+}
+
+func guiTestHelperEnvironment(environment []string, goos string) (map[string]string, guiTestDispatchFailure) {
+	canonical := make(map[string]string, len(guiTestHelperEnvironmentKeys))
+	for _, key := range guiTestHelperEnvironmentKeys {
+		canonical[guiTestEnvironmentIdentity(key, goos)] = key
+	}
+	values := make(map[string]string, len(guiTestHelperEnvironmentKeys))
+	for _, entry := range environment {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		owner, recognized := canonical[guiTestEnvironmentIdentity(key, goos)]
+		if !recognized {
+			continue
+		}
+		if _, duplicate := values[owner]; duplicate {
+			return nil, guiTestFailureDuplicateEnvKey
+		}
+		values[owner] = value
+	}
+	return values, ""
+}
+
+func classifyGUITestHelperDispatch(args, environment []string, goos string) guiTestHelperDispatch {
+	selector, reason := parseGUITestSelector(args)
+	if reason != "" {
+		return invalidGUITestDispatch(reason)
+	}
+	values, reason := guiTestHelperEnvironment(environment, goos)
+	if reason != "" {
+		return invalidGUITestDispatch(reason)
+	}
+	for _, marker := range []string{auditLockBlockingHelperEnv, auditLockR6ReceiverHelperEnv, auditLockTerminalWorkerStderrHelperEnv, pidfdTestChildEnv, pidfdTestChildStallEnv} {
+		if value, present := values[marker]; present && value != "1" {
+			return invalidGUITestDispatch(guiTestFailureUnknownValue)
+		}
+	}
+	blocking := hasAnyGUITestHelperValue(values, auditLockBlockingHelperEnv, auditLockHelperLockEnv, auditLockHelperEnteredEnv)
+	r6 := hasAnyGUITestHelperValue(values, auditLockR6ReceiverHelperEnv, auditLockR6StateRootEnv)
+	terminalFault := hasAnyGUITestHelperValue(values, auditLockTerminalWorkerStderrHelperEnv)
+	pidfd := hasAnyGUITestHelperValue(values, pidfdTestChildEnv, pidfdTestChildStallEnv)
+	families := 0
+	for _, active := range []bool{blocking, r6, terminalFault, pidfd} {
+		if active {
+			families++
+		}
+	}
+	if families > 1 {
+		return invalidGUITestDispatch(guiTestFailureConflict)
+	}
+	if blocking && !hasAllGUITestHelperValues(values, auditLockBlockingHelperEnv, auditLockHelperLockEnv, auditLockHelperEnteredEnv) {
+		return invalidGUITestDispatch(guiTestFailurePartialFrame)
+	}
+	if r6 && !hasAllGUITestHelperValues(values, auditLockR6ReceiverHelperEnv, auditLockR6StateRootEnv) {
+		return invalidGUITestDispatch(guiTestFailurePartialFrame)
+	}
+	if pidfd && values[pidfdTestChildEnv] != "1" {
+		return invalidGUITestDispatch(guiTestFailurePIDFDFrameInvalid)
+	}
+	terminalArgv := len(args) == 2 && args[1] == auditLockTerminalWorkerArg
+	for _, arg := range args[1:] {
+		if arg == auditLockTerminalWorkerArg && !terminalArgv {
+			return invalidGUITestDispatch(guiTestFailureWrongArgv)
+		}
+	}
+	if terminalArgv {
+		if selector.present || blocking || r6 || pidfd {
+			return invalidGUITestDispatch(guiTestFailureWrongArgv)
+		}
+		return guiTestHelperDispatch{role: guiTestRoleAuditTerminalWorkerChild}
+	}
+	if terminalFault {
+		return invalidGUITestDispatch(guiTestFailureWrongArgv)
+	}
+	if blocking {
+		if !validGUITestHelperPath(values[auditLockHelperLockEnv]) || !validGUITestHelperPath(values[auditLockHelperEnteredEnv]) {
+			return invalidGUITestDispatch(guiTestFailureInvalidPath)
+		}
+		if !selector.present || selector.value != guiTestBlockingSelector {
+			return invalidGUITestDispatch(guiTestFailureConflict)
+		}
+		return guiTestHelperDispatch{role: guiTestRoleBlockingHelperChild}
+	}
+	if r6 {
+		if !validGUITestHelperPath(values[auditLockR6StateRootEnv]) {
+			return invalidGUITestDispatch(guiTestFailureInvalidPath)
+		}
+		if !selector.present || selector.value != guiTestR6Selector {
+			return invalidGUITestDispatch(guiTestFailureConflict)
+		}
+		return guiTestHelperDispatch{role: guiTestRoleR6ReceiverChild}
+	}
+	if pidfd {
+		if goos != "linux" || values[pidfdTestChildEnv] != "1" || !selector.present || selector.value != guiTestPIDFDSelector {
+			return invalidGUITestDispatch(guiTestFailurePIDFDFrameInvalid)
+		}
+		return guiTestHelperDispatch{role: guiTestRolePIDFDLinuxChild}
+	}
+	if selector.present && (selector.value == guiTestBlockingSelector || selector.value == guiTestPIDFDSelector) {
+		return invalidGUITestDispatch(guiTestFailureSelectorOnly)
+	}
+	return guiTestHelperDispatch{role: guiTestRoleNormalParent}
+}
+
+func hasAnyGUITestHelperValue(values map[string]string, keys ...string) bool {
+	for _, key := range keys {
+		if _, present := values[key]; present {
+			return true
+		}
+	}
+	return false
+}
+
+func hasAllGUITestHelperValues(values map[string]string, keys ...string) bool {
+	for _, key := range keys {
+		if _, present := values[key]; !present {
+			return false
+		}
+	}
+	return true
+}
+
+func validGUITestHelperPath(path string) bool {
+	return path != "" && filepath.IsAbs(path) && filepath.Clean(path) == path
+}
+
+func withoutGUITestHelperEnvironment(environment []string, goos string) []string {
+	identities := make(map[string]struct{}, len(guiTestHelperEnvironmentKeys))
+	for _, key := range guiTestHelperEnvironmentKeys {
+		identities[guiTestEnvironmentIdentity(key, goos)] = struct{}{}
+	}
+	result := make([]string, 0, len(environment))
+	for _, entry := range environment {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, helper := identities[guiTestEnvironmentIdentity(key, goos)]; helper {
+				continue
+			}
+		}
+		result = append(result, entry)
+	}
+	return result
 }
 
 // setEnvWithRestore sets each key=value in the process environment and returns

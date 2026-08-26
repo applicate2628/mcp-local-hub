@@ -196,8 +196,9 @@ type supervisorIPCStatusDaemon struct {
 	// surface this feature exists for (the GUI telling a non-technical operator
 	// the mcphub binary is missing), and it would fail silently rather than
 	// loudly. Empty on the happy path.
-	SpawnHoldReason string `json:"spawn_hold_reason,omitempty"`
-	SpawnHoldPath   string `json:"spawn_hold_path,omitempty"`
+	SpawnHoldReason      string                      `json:"spawn_hold_reason,omitempty"`
+	SpawnHoldPath        string                      `json:"spawn_hold_path,omitempty"`
+	ReadinessObservation *ReadinessObservationWireV1 `json:"readiness_observation,omitempty"`
 }
 
 func validateSupervisorIPCHello(conn net.Conn, expected SupervisorLockOwner) error {
@@ -311,8 +312,9 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			// RAMBytes is carried straight through from the supervisor's
 			// live per-pid lookup (the wire field). Zero means "unknown" —
 			// the GUI Dashboard omits the RAM row in that case.
-			RAMBytes:      d.RAMBytes,
-			IsMaintenance: d.IsMaintenance,
+			RAMBytes:             d.RAMBytes,
+			IsMaintenance:        d.IsMaintenance,
+			ReadinessObservation: d.ReadinessObservation.Decode(),
 		})
 	}
 	return rows, nil

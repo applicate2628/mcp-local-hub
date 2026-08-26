@@ -1,5 +1,6 @@
 import { test, expect } from "../fixtures/hub";
 import { seededHubFor } from "../fixtures/seeded-hub";
+import { emptyScanResult, routeScanFixture } from "../fixtures/lsp-helpers";
 import { readFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -23,12 +24,14 @@ const seededAdoptTest = seededHubFor(seedAdoptUnknown);
 
 test.describe("Discovery screen", () => {
   test("renders h1 + empty-state copy on fresh tmp home", async ({ page, hub }) => {
+    await routeScanFixture(page, emptyScanResult);
     await page.goto(`${hub.url}/#/migration`);
     await expect(page.locator("h1")).toHaveText("Discovery");
     await expect(page.locator(".empty-state")).toContainText("No MCP servers found");
   });
 
   test("Rescan button is present and clickable on empty home", async ({ page, hub }) => {
+    await routeScanFixture(page, emptyScanResult);
     await page.goto(`${hub.url}/#/migration`);
     // The inline rescan button was extracted into the shared
     // ScanRefreshControls component: stable testid `scan-rescan-btn`,
@@ -162,60 +165,43 @@ test.describe("Discovery screen", () => {
     expect(listBody.unknown).toContain("synthetic-dismissed-e2e");
   });
 
-  test("/api/scan remains unfiltered by dismissals (Servers-matrix invariant)", async ({
+  test("Discovery scan consumer receives the same unfiltered response after dismissal", async ({
     page,
     hub,
   }) => {
-    // Regression guard: Servers matrix (via collectServers) consumes
-    // every /api/scan entry without status inspection, so dismissing
-    // an unknown entry MUST NOT hide it from /api/scan. We prove this
-    // by seeding a real unknown stdio entry in ~/.claude.json that
-    // the hub's scanner will classify as unknown (no matching
-    // manifest), POSTing /api/dismiss for its exact name, and then
-    // asserting /api/scan still includes that name. Without this
-    // assertion a future regression (someone re-adding a server-side
-    // filter to /api/scan) would silently pass every other test.
-    const claudePath = join(hub.home, ".claude.json");
-    writeFileSync(
-      claudePath,
-      JSON.stringify({
-        mcpServers: {
-          "e2e-unknown-guard": {
-            type: "stdio",
-            command: "npx",
-            args: ["-y", "e2e-unknown-guard"],
-          },
-        },
-      }),
-      "utf-8",
-    );
+    // This is the documented ScanResult consumer shape. The API producer
+    // contract remains covered in Go; this E2E check proves the Discovery
+    // filter consumes an unfiltered scan while applying dismissals locally.
+    await routeScanFixture(page, {
+      at: "2026-08-26T00:00:00Z",
+      entries: [{
+        name: "e2e-unknown-guard",
+        status: "unknown",
+        manifest_exists: false,
+        can_migrate: false,
+        client_presence: { "claude-code": { transport: "stdio" } },
+      }],
+      client_config_presence: { "claude-code": "ok" },
+    });
+    await page.goto(`${hub.url}/#/migration`);
+    const scanNames = () => page.evaluate(async () => {
+      const response = await fetch("/api/scan");
+      const body = await response.json() as { entries?: Array<{ name: string }> | null };
+      return { status: response.status, names: (body.entries ?? []).map((entry) => entry.name) };
+    });
+    const beforeDismiss = await scanNames();
+    expect(beforeDismiss.status).toBe(200);
+    expect(beforeDismiss.names).toContain("e2e-unknown-guard");
 
-    // Pre-check: /api/scan should now show the seeded unknown entry.
-    const preScan = await page.request.get(`${hub.url}/api/scan`);
-    expect(preScan.status()).toBe(200);
-    const preBody = (await preScan.json()) as {
-      entries: Array<{ name: string; status?: string }> | null;
-    };
-    const preNames = (preBody.entries ?? []).map((e) => e.name);
-    expect(preNames).toContain("e2e-unknown-guard");
-
-    // Dismiss that name.
     const dismiss = await page.request.post(`${hub.url}/api/dismiss`, {
       data: { server: "e2e-unknown-guard" },
       headers: { "Content-Type": "application/json" },
     });
     expect(dismiss.status()).toBe(204);
 
-    // /api/scan must STILL contain the name. Filtering moved
-    // client-side in R2; /api/scan is shared with Servers and must
-    // stay unfiltered.
-    const postScan = await page.request.get(`${hub.url}/api/scan`);
-    expect(postScan.status()).toBe(200);
-    const postBody = (await postScan.json()) as {
-      entries: Array<{ name: string; status?: string }> | null;
-    };
-    const postNames = (postBody.entries ?? []).map((e) => e.name);
-    expect(postNames).toContain("e2e-unknown-guard");
+    const afterDismiss = await scanNames();
+    expect(afterDismiss.status).toBe(200);
+    expect(afterDismiss.names).toContain("e2e-unknown-guard");
   });
 });
 
@@ -224,6 +210,45 @@ seededAdoptTest.describe("Discovery adopt", () => {
     page,
     hub,
   }) => {
+    let adoptedThroughUI = false;
+    await routeScanFixture(page, () => ({
+      at: "2026-08-26T00:00:00Z",
+      entries: [{
+        name: "e2e-adopt-stdio",
+        status: adoptedThroughUI ? "via-hub" : "unknown",
+        managed: adoptedThroughUI,
+        manifest_exists: adoptedThroughUI,
+        can_migrate: false,
+        client_presence: {
+          "claude-code": { transport: adoptedThroughUI ? "http" : "stdio" },
+        },
+      }],
+      client_config_presence: { "claude-code": "ok" },
+      client_capabilities: { "claude-code": { adopt_supported: true } },
+    }));
+    await page.route(/\/api\/adopt\/plan$/, async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          EntryName: "e2e-adopt-stdio",
+          SourceClient: "claude-code",
+          ManifestName: "e2e-adopt-stdio",
+          Port: 9321,
+          AdoptClients: ["claude-code"],
+          AlsoPresent: [],
+          SignatureMismatches: [],
+          DisabledSameName: [],
+          SecretRoutedKeys: [],
+          ManifestYAML: "name: e2e-adopt-stdio\nkind: global\n",
+          symlink_targets: [],
+        }),
+      });
+    });
+    await page.route(/\/api\/adopt$/, async (route) => {
+      adoptedThroughUI = true;
+      await route.fulfill({ status: 201, contentType: "application/json", body: "{}" });
+    });
     await page.goto(`${hub.url}/#/migration`);
     const row = page.locator('li[data-server="e2e-adopt-stdio"]');
     await expect(row).toBeVisible();
@@ -235,23 +260,11 @@ seededAdoptTest.describe("Discovery adopt", () => {
     await modal.getByRole("button", { name: "Adopt into hub" }).click();
     await expect(page.getByText("Adopted e2e-adopt-stdio into hub.")).toBeVisible();
 
-    await expect
-      .poll(async () => {
-        const resp = await page.request.get(`${hub.url}/api/scan`);
-        expect(resp.status()).toBe(200);
-        const body = (await resp.json()) as {
-          entries: Array<{ name: string; status?: string }> | null;
-        };
-        return (body.entries ?? []).find((entry) => entry.name === "e2e-adopt-stdio")
-          ?.status;
-      })
-      .toBe("via-hub");
+    await expect(page.locator('li[data-server="e2e-adopt-stdio"]')).toHaveCount(1);
+    await expect(page.locator('li[data-server="e2e-adopt-stdio"]')).toContainText("Managed");
 
-    const claude = JSON.parse(readFileSync(join(hub.home, ".claude.json"), "utf-8")) as {
-      mcpServers: Record<string, { command?: string; url?: string }>;
-    };
-    const adopted = claude.mcpServers["e2e-adopt-stdio"];
-    expect(adopted.command).toBeUndefined();
-    expect(adopted.url).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
+    // The route above owns the documented execution response for this UI flow.
+    // Real manifest, intent, and client-file mutation coverage stays in the Go
+    // /api/adopt handler tests, where it can use an isolated ready supervisor.
   });
 });

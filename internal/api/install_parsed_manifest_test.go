@@ -20,6 +20,50 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
+const testExactManifestHash = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+
+func bindTestPlanManifestHash(plan *Plan) *Plan {
+	bindPlanSupervisorIntentManifestHash(plan, testExactManifestHash)
+	return plan
+}
+
+func testSupervisorIntentPlan(m *config.ServerManifest, daemonFilter string) *Plan {
+	plan := &Plan{supervisorIntentHashesBound: true}
+	for _, daemon := range m.Daemons {
+		if daemonFilter != "" && daemon.Name != daemonFilter {
+			continue
+		}
+		plan.SupervisorIntent = append(plan.SupervisorIntent, SupervisorIntentEntry{
+			Name:         "mcp-local-hub-" + m.Name + "-" + daemon.Name,
+			manifestHash: strings.Repeat("a", 64),
+		})
+	}
+	return plan
+}
+
+func TestSupervisorDaemonsFromPlanCarriesManifestHash(t *testing.T) {
+	hash := strings.Repeat("c", 64)
+	m := &config.ServerManifest{
+		Name: "hash-static", Kind: config.KindGlobal,
+		Daemons: []config.DaemonSpec{{Name: "alpha", Port: 9481}},
+	}
+	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-hash-static-alpha", manifestHash: hash}}}
+	rows, err := supervisorDaemonsFromPlan(m, plan, "")
+	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
+		t.Fatalf("rows=%#v err=%v, want exact hash %q", rows, err, hash)
+	}
+	if _, err := supervisorDaemonsFromPlan(m, &Plan{supervisorIntentHashesBound: true}, ""); err == nil {
+		t.Fatal("missing descriptor/hash succeeded")
+	}
+	duplicate := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{
+		{Name: "mcp-local-hub-hash-static-alpha", manifestHash: hash},
+		{Name: "mcp-local-hub-hash-static-alpha", manifestHash: hash},
+	}}
+	if _, err := supervisorDaemonsFromPlan(m, duplicate, ""); err == nil {
+		t.Fatal("ambiguous duplicate descriptor succeeded")
+	}
+}
+
 // fakeScheduler (register_test.go) implements the 5 install-relevant
 // scheduler methods but not the full scheduler.Scheduler interface. The
 // install pipeline routes through newScheduler() (the schedulerFactoryFn
@@ -414,8 +458,9 @@ func TestInstallParsedManifest_NoSchedulerOnNoWork(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	})
 	if err != nil {
 		t.Fatalf("workspace-scoped install must not require a working scheduler, got: %v", err)
@@ -450,8 +495,9 @@ func TestInstallParsedManifest_DefersDaemonSpawn(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
@@ -553,8 +599,9 @@ func TestInstallParsedManifest_FansOutPerWorkspaceDaemons(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	gotPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest(workspaces): %v", err)
@@ -692,8 +739,9 @@ func TestInstallParsedManifest_FanOut_AuditsWorkspaceTasks(t *testing.T) {
 		a := NewAPI()
 		var buf bytes.Buffer
 		if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-			Writer:     &buf,
-			Workspaces: workspaces,
+			ManifestHash: testExactManifestHash,
+			Writer:       &buf,
+			Workspaces:   workspaces,
 		}); err != nil {
 			t.Fatalf("InstallParsedManifest(fan-out): %v", err)
 		}
@@ -937,8 +985,9 @@ func TestInstallParsedManifest_PreservesPriorMaintenanceTimers(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	}); err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}
@@ -1141,8 +1190,9 @@ func TestInstallParsedManifest_ConcurrentInstalls_PreserveSiblingRows(t *testing
 			defer wg.Done()
 			var buf bytes.Buffer
 			_, err := a.InstallParsedManifest(context.Background(), mm, InstallParsedManifestOpts{
-				Writer:     &buf,
-				Workspaces: wsByServer[mm.Name],
+				ManifestHash: testExactManifestHash,
+				Writer:       &buf,
+				Workspaces:   wsByServer[mm.Name],
 			})
 			errs[idx] = err
 		}(i, m)
@@ -1203,8 +1253,9 @@ func TestInstallParsedManifest_WorkspaceScoped_SkipsPrune(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	if _, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	}); err != nil {
 		t.Fatalf("InstallParsedManifest(workspace-scoped): %v", err)
 	}
@@ -1262,8 +1313,9 @@ func TestInstallParsedManifest_FiltersStaleWorkspaceRows(t *testing.T) {
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	})
 	if err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
@@ -1522,8 +1574,9 @@ func TestInstallParsedManifest_RefusesSpecBearingWriteWhileSupervisorRunning(t *
 	a := NewAPI()
 	var buf bytes.Buffer
 	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	})
 	if err == nil {
 		t.Fatal("expected §7.1 refuse error while a supervisor is running, got nil")
@@ -1631,6 +1684,7 @@ func TestInstallParsedManifest_SpecBearingWrite_BypassedWhenCallerHoldsMatchingL
 	a := NewAPI()
 	var buf bytes.Buffer
 	intentPath, err := a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: lk.AllowSpecBearingWriteBypass(),
@@ -1686,8 +1740,9 @@ func TestInstallParsedManifest_SpecBearingWrite_StillRefusesWithoutToken(t *test
 	var buf bytes.Buffer
 	// Zero-value SupervisorLockBypass (omitted) — exactly the 14 existing sites.
 	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     &buf,
-		Workspaces: workspaces,
+		ManifestHash: testExactManifestHash,
+		Writer:       &buf,
+		Workspaces:   workspaces,
 	})
 	if err == nil {
 		t.Fatal("expected §7.1 refuse with a zero-value bypass token while a supervisor is running, got nil")
@@ -1743,6 +1798,7 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockPathMismatc
 	a := NewAPI()
 	var buf bytes.Buffer
 	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: otherLk.AllowSpecBearingWriteBypass(),
@@ -1796,6 +1852,7 @@ func TestInstallParsedManifest_SpecBearingWrite_RefusesWhenBypassLockAlreadyRele
 	a := NewAPI()
 	var buf bytes.Buffer
 	_, err = a.InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
+		ManifestHash:         testExactManifestHash,
 		Writer:               &buf,
 		Workspaces:           workspaces,
 		SupervisorLockBypass: token, // stale: minted then released
@@ -1843,7 +1900,7 @@ func TestInstallPlanCore_GlobalFreshInstall_WritesSupervisorIntent_NoSchedulerTa
 
 	a := NewAPI()
 	var buf bytes.Buffer
-	if err := a.installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+	if err := a.installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(global fresh install): %v", err)
 	}
 
@@ -1887,7 +1944,7 @@ func TestInstallPlanCore_GlobalDryRunPrintsSupervisorMutationPlan(t *testing.T) 
 	}
 
 	var buf bytes.Buffer
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", true, &buf); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", true, &buf); err != nil {
 		t.Fatalf("installPlanCore(global dry-run): %v", err)
 	}
 	out := buf.String()
@@ -1928,7 +1985,7 @@ func TestInstallPlanCore_GlobalDryRunDoesNotCreateMissingStateDir(t *testing.T) 
 	}
 
 	var buf bytes.Buffer
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", true, &buf); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", true, &buf); err != nil {
 		t.Fatalf("installPlanCore(global dry-run): %v", err)
 	}
 	if _, statErr := os.Stat(stateDir); !os.IsNotExist(statErr) {
@@ -1971,7 +2028,7 @@ func TestInstallPlanCore_GlobalDryRunCorruptIntentStillPrintsPlan(t *testing.T) 
 	}
 
 	var buf bytes.Buffer
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", true, &buf); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", true, &buf); err != nil {
 		t.Fatalf("installPlanCore(global dry-run) over corrupt intent must still succeed: %v", err)
 	}
 	after, err := os.ReadFile(intentPath)
@@ -2033,7 +2090,7 @@ func TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner(t *testing.T)
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
 
@@ -2074,7 +2131,7 @@ func TestInstallPlanCore_GlobalInstall_AutostartEnableUsesCanonicalMcphubPath(t 
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
 
@@ -2108,7 +2165,7 @@ func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T
 	if err != nil {
 		t.Fatalf("BuildPlan: %v", err)
 	}
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
 
@@ -2250,7 +2307,7 @@ func TestInstallPlanCore_GlobalFilteredInstall_ReplacesOnlySelectedDaemon(t *tes
 
 	a := NewAPI()
 	var buf bytes.Buffer
-	if err := a.installPlanCore(context.Background(), m, plan, "alpha", false, &buf); err != nil {
+	if err := a.installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "alpha", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(filtered global install): %v", err)
 	}
 
@@ -2388,7 +2445,7 @@ func TestInstallPlanCore_GlobalFullReinstall_KillsRemovedSupervisorDaemon(t *tes
 		t.Fatalf("plan SupervisorIntent rows = %d, want 2 (alpha daemon + weekly refresh)", got)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(full reinstall): %v", err)
 	}
 
@@ -2473,7 +2530,7 @@ func TestBuildMergedSupervisorIntentWrite_NormalizesRetainedRedundantLegacyStopW
 	}
 	defer func() { _ = lock.Unlock() }()
 
-	desired, prior, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	desired, prior, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent: %v", err)
 	}
@@ -2520,7 +2577,7 @@ func TestInstallPlanCore_GlobalFreshInstall_NoPerDaemonSchedulerTaskCreated(t *t
 
 	a := NewAPI()
 	var buf bytes.Buffer
-	if err := a.installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+	if err := a.installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(global fresh install): %v", err)
 	}
 
@@ -2821,7 +2878,7 @@ func TestBuildMergedSupervisorIntent_PreservesStopsSubBlock(t *testing.T) {
 			{Name: "alpha", Port: 9992},
 		},
 	}
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent: %v", err)
 	}
@@ -2881,7 +2938,7 @@ func TestInstallPlanCore_GlobalFilteredInstall_BlankDaemonRowNotDuplicated(t *te
 
 	a := NewAPI()
 	var buf bytes.Buffer
-	if err := a.installPlanCore(context.Background(), m, plan, "alpha", false, &buf); err != nil {
+	if err := a.installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "alpha", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(filtered global install): %v", err)
 	}
 
@@ -2966,7 +3023,7 @@ func TestBuildMergedSupervisorIntent_FilteredInstall_PreservesSiblingStop(t *tes
 	}
 
 	m := globalTwoDaemonManifest() // alpha (9211) + beta (9212)
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "alpha", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, "alpha"), "", intentPath, nil, "alpha", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(filtered alpha): %v", err)
 	}
@@ -3039,7 +3096,7 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerRowNotDuplicated(t *
 	}
 
 	m := globalTwoDaemonManifest() // demo: alpha (9211) + beta (9212)
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
 	}
@@ -3108,7 +3165,7 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerHyphenatedDaemonRowN
 			{Name: "alpha-beta", Port: 33013},
 		},
 	}
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
 	}
@@ -3207,7 +3264,7 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerPrefixSiblingPreserv
 			{Name: "alpha", Port: 33123},
 		},
 	}
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
 	}
@@ -3278,7 +3335,7 @@ func TestBuildMergedSupervisorIntent_FullInstall_BlankServerStaleRowReclaimedWhe
 			{Name: "alpha", Port: 33123},
 		},
 	}
-	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, intentPath, nil, "", io.Discard)
+	merged, _, _, err := NewAPI().buildMergedSupervisorIntent(m, testSupervisorIntentPlan(m, ""), "", intentPath, nil, "", io.Discard)
 	if err != nil {
 		t.Fatalf("buildMergedSupervisorIntent(full install): %v", err)
 	}

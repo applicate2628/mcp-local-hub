@@ -162,8 +162,33 @@ func withStateDir(t *testing.T) string {
 		return serenaRegisterSettledResult{Settled: true, RegistryRowPresent: true, Port: port}, nil
 	}
 	t.Cleanup(func() { serenaRegisterSettledCheckFn = origIntentCheck })
+	stubCLISerenaProjection(t, 9125, api.SerenaEndpointModeGUICompat, nil)
 
 	return dir
+}
+
+func stubCLISerenaProjection(t *testing.T, routerPort int, mode string, returned error) {
+	t.Helper()
+	previous := projectSerenaWorkspaceSnapshotForCLI
+	projectSerenaWorkspaceSnapshotForCLI = func(_ context.Context, rows []api.WorkspaceEntry, projectionMode api.SerenaWorkspaceProjectionMode) (api.SerenaWorkspaceProjectionOutputV1, error) {
+		if returned != nil {
+			return api.SerenaWorkspaceProjectionOutputV1{}, returned
+		}
+		out := api.SerenaWorkspaceProjectionOutputV1{}
+		for _, row := range rows {
+			if row.Language != api.SerenaLanguageSentinel || row.Backend != api.SerenaServerName {
+				continue
+			}
+			out.Workspaces = append(out.Workspaces, api.SerenaWorkspaceProjection{
+				WorkspaceKey: row.WorkspaceKey, WorkspacePath: row.WorkspacePath, Language: row.Language, Backend: row.Backend,
+				Port: row.Port, WorkspaceProxyPort: row.Port, TaskName: row.TaskName, Languages: append([]string(nil), row.Languages...),
+				ClientEndpoint: api.SerenaRouterClientURL(routerPort), EndpointMode: mode,
+				ServiceState: api.ServiceStateRunning, ReadinessStage: api.ReadinessStageComplete, ReadinessSettled: true,
+			})
+		}
+		return out, nil
+	}
+	t.Cleanup(func() { projectSerenaWorkspaceSnapshotForCLI = previous })
 }
 
 func readySerenaRegisterResponse(target api.ReconcileTarget, response api.ReconcileResponse) api.ReconcileResponse {
@@ -293,6 +318,76 @@ func TestWorkspaceRegister_AllocatesPortFromPool(t *testing.T) {
 		t.Errorf("expected ports {9121, 9122}; got %v", seen)
 	}
 	_ = stateDir
+}
+
+func TestWorkspaceRegister_PrintsVerifiedClientEndpointAndInternalProxy(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+	stubCLISerenaProjection(t, 9471, api.SerenaEndpointModeMCPFront, nil)
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err != nil {
+		t.Fatalf("register: %v\noutput: %s", err, out)
+	}
+	for _, want := range []string{
+		"client_endpoint: http://127.0.0.1:9471/serena/mcp",
+		"endpoint_mode: mcp-front",
+		"workspace_proxy: http://127.0.0.1:9121/mcp (internal; do not configure clients)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("register output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestWorkspaceRegister_UnreadyClientEndpointRetainsRegistrationAndSuppressesSuccess(t *testing.T) {
+	withSerenaManifest(t, 9121, 9123)
+	withStateDir(t)
+	stubCLISerenaProjection(t, 0, "", &api.SerenaClientEndpointUnreadyError{Target: api.ClientRoutingTarget{Mode: api.MCPFrontRoutingTargetGUI, Port: 9472}, Stage: api.MCPFrontProbeStageInitializeHTTPStatus, Cause: errors.New("initialize returned 503")})
+	ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+
+	out, err := runWorkspaceCmd(t, "register", ws)
+	if err == nil {
+		t.Fatalf("unready endpoint must fail closed; output: %s", out)
+	}
+	var unready *api.SerenaClientEndpointUnreadyError
+	if !errors.As(err, &unready) {
+		t.Fatalf("error type = %T (%v), want SerenaClientEndpointUnreadyError", err, err)
+	}
+	if unready.Stage != api.MCPFrontProbeStageInitializeHTTPStatus {
+		t.Fatalf("readiness stage = %q, want %q", unready.Stage, api.MCPFrontProbeStageInitializeHTTPStatus)
+	}
+	if strings.Contains(out, "Registered serena workspace") {
+		t.Fatalf("success summary must be suppressed when endpoint is unready:\n%s", out)
+	}
+	regPath, _ := api.DefaultRegistryPath()
+	reg := api.NewRegistry(regPath)
+	if loadErr := reg.Load(); loadErr != nil {
+		t.Fatalf("load retained registry: %v", loadErr)
+	}
+	if _, ok := reg.GetSerena(api.WorkspaceKey(ws)); !ok {
+		t.Fatal("registration must remain retained when endpoint readiness fails")
+	}
+}
+
+func TestWorkspaceRegister_PropagatesProxyPortMismatches(t *testing.T) {
+	for _, kind := range []string{"registry_intent", "intent_status"} {
+		t.Run(kind, func(t *testing.T) {
+			withSerenaManifest(t, 9121, 9123)
+			withStateDir(t)
+			stubCLISerenaProjection(t, 0, "", &api.SerenaWorkspaceStateMismatchError{Kind: api.SerenaWorkspaceStateMismatchProxyPort})
+			ws := makeWorkspaceDir(t, t.TempDir(), []string{"python"})
+			out, err := runWorkspaceCmd(t, "register", ws)
+			var mismatch *api.SerenaWorkspaceStateMismatchError
+			if !errors.As(err, &mismatch) || mismatch.Kind != api.SerenaWorkspaceStateMismatchProxyPort {
+				t.Fatalf("register error = %T (%v), want typed proxy_port_mismatch", err, err)
+			}
+			if strings.Contains(out, "Registered serena workspace") {
+				t.Fatalf("register emitted partial success: %s", out)
+			}
+		})
+	}
 }
 
 func TestWorkspaceRegister_RejectsExistingPath(t *testing.T) {
@@ -1253,7 +1348,7 @@ func TestWorkspaceList_TabularOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v\noutput: %s", err, out)
 	}
-	for _, want := range []string{"WORKSPACE", "LANGUAGES", "DEFAULT", "PORT", "LAST_SPAWN"} {
+	for _, want := range []string{"WORKSPACE", "LANGUAGE_SERVERS", "DEFAULT", "WORKSPACE_PROXY", "LAST_SPAWN"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("header missing column %q; output:\n%s", want, out)
 		}
@@ -1304,6 +1399,27 @@ func TestWorkspaceList_TabularOutput(t *testing.T) {
 	}
 }
 
+func TestPrintWorkspaceProjectionTable_UsesExistingLastSpawnFormat(t *testing.T) {
+	spawned := time.Date(2026, time.August, 25, 12, 0, 0, 0, time.FixedZone("UTC+3", 3*60*60))
+	var output bytes.Buffer
+	err := printWorkspaceProjectionTable(&output, []workspaceListJSONRow{{
+		WorkspaceEntry: api.WorkspaceEntry{
+			WorkspacePath:      "project",
+			Languages:          []string{"cpp"},
+			LastMaterializedAt: spawned,
+		},
+		WorkspaceProxyPort: 9150,
+		ClientEndpoint:     "http://127.0.0.1:9121/serena/mcp",
+		EndpointMode:       api.SerenaEndpointModeGUICompat,
+	}})
+	if err != nil {
+		t.Fatalf("print projection table: %v", err)
+	}
+	if !strings.Contains(output.String(), "2026-08-25") {
+		t.Fatalf("last spawn must use the existing UTC date formatter:\n%s", output.String())
+	}
+}
+
 func TestWorkspaceList_TabularOutputPreservesDefaultMarkerForLongPath(t *testing.T) {
 	const leaf = "alpha-default-leaf"
 	longPath := longWorkspacePathForTable(t, leaf)
@@ -1347,6 +1463,7 @@ func workspacePrefixForTable(p string) string {
 
 func TestWorkspaceList_JSONOutput(t *testing.T) {
 	wsA, wsB := seedSerenaListFixture(t)
+	stubCLISerenaProjection(t, 9121, api.SerenaEndpointModeGUICompat, nil)
 	out, err := runWorkspaceCmd(t, "list", "--json")
 	if err != nil {
 		t.Fatalf("list --json: %v\noutput: %s", err, out)
@@ -1386,6 +1503,31 @@ func TestWorkspaceList_JSONOutput(t *testing.T) {
 	}
 	if rA.Port == 0 || rB.Port == 0 || rA.Port == rB.Port {
 		t.Errorf("ports should be distinct non-zero; A=%d B=%d", rA.Port, rB.Port)
+	}
+	if rA.WorkspaceProxyPort != rA.Port || rB.WorkspaceProxyPort != rB.Port {
+		t.Errorf("workspace_proxy_port must retain the legacy port value: A=%d/%d B=%d/%d", rA.WorkspaceProxyPort, rA.Port, rB.WorkspaceProxyPort, rB.Port)
+	}
+	for _, row := range []workspaceListJSONRow{rA, rB} {
+		if row.ClientEndpoint != "http://127.0.0.1:9121/serena/mcp" || row.EndpointMode != api.SerenaEndpointModeGUICompat {
+			t.Errorf("client endpoint projection = %q/%q, want router endpoint/gui-compat", row.ClientEndpoint, row.EndpointMode)
+		}
+	}
+}
+
+func TestWorkspaceList_PropagatesProxyPortMismatches(t *testing.T) {
+	for _, kind := range []string{"registry_intent", "intent_status"} {
+		t.Run(kind, func(t *testing.T) {
+			seedSerenaListFixture(t)
+			stubCLISerenaProjection(t, 0, "", &api.SerenaWorkspaceStateMismatchError{Kind: api.SerenaWorkspaceStateMismatchProxyPort})
+			out, err := runWorkspaceCmd(t, "list", "--json")
+			var mismatch *api.SerenaWorkspaceStateMismatchError
+			if !errors.As(err, &mismatch) || mismatch.Kind != api.SerenaWorkspaceStateMismatchProxyPort {
+				t.Fatalf("workspace list error = %T (%v), want typed proxy_port_mismatch", err, err)
+			}
+			if strings.Contains(out, "[") {
+				t.Fatalf("workspace list emitted partial JSON: %s", out)
+			}
+		})
 	}
 }
 
@@ -1497,12 +1639,8 @@ func touch(t *testing.T, path string) {
 // returns the languages list (sorted).
 func readBootstrappedLanguages(t *testing.T, root string) []string {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(root, ".serena", "project.yml"))
+	doc, err := api.ReadSerenaProjectSchema(context.Background(), filepath.Join(root, ".serena", "project.yml"))
 	if err != nil {
-		t.Fatalf("read project.yml: %v", err)
-	}
-	var doc serenaProjectYml
-	if err := yamlUnmarshalForTest(data, &doc); err != nil {
 		t.Fatalf("parse: %v", err)
 	}
 	out := append([]string(nil), doc.Languages...)

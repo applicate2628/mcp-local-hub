@@ -429,7 +429,7 @@ func TestInstallPlanCore_GlobalFreshInstall_NudgesSupervisorReconcile(t *testing
 		t.Fatalf("BuildPlan: %v", err)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(global fresh install): %v", err)
 	}
 
@@ -471,7 +471,7 @@ func TestInstallPlanCore_GlobalFreshInstall_EmitsDaemonInstalledEvents(t *testin
 		t.Fatalf("BuildPlan: %v", err)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(global fresh install): %v", err)
 	}
 
@@ -544,7 +544,7 @@ func TestInstallPlanCore_FilteredGlobalInstall_EmitsOnlySelectedDaemonInstalled(
 		t.Fatalf("filtered plan SupervisorIntent rows = %d, want 1", got)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "alpha", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "alpha", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(filtered alpha): %v", err)
 	}
 
@@ -591,7 +591,7 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartFailurePrintsHint(
 	}
 
 	var buf bytes.Buffer
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(no supervisor): %v should be non-fatal", err)
 	}
 	if out := buf.String(); !strings.Contains(out, "no running supervisor") {
@@ -645,7 +645,7 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_StartsAutostartOwnerNow
 	}
 
 	var buf bytes.Buffer
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(no supervisor): %v should be non-fatal", err)
 	}
 	if probeCalls != 1 {
@@ -698,7 +698,7 @@ func TestInstallPlanCore_GlobalFreshInstall_NoSupervisor_RunningProbeSkipsStart(
 	}
 
 	var buf bytes.Buffer
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, &buf); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, &buf); err != nil {
 		t.Fatalf("installPlanCore(no supervisor): %v should be non-fatal", err)
 	}
 	out := buf.String()
@@ -745,7 +745,7 @@ func TestInstallPlanCore_GlobalInstallDeletesThisServersLegacyTasks(t *testing.T
 		t.Fatalf("BuildPlan: %v", err)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(global install): %v", err)
 	}
 
@@ -821,7 +821,7 @@ func TestInstallPlanCore_GlobalDaemonlessFullInstallDropsStaleSupervisorRows(t *
 		t.Fatalf("remote-http plan SupervisorIntent = %+v, want none", plan.SupervisorIntent)
 	}
 
-	if err := NewAPI().installPlanCore(context.Background(), m, plan, "", false, io.Discard); err != nil {
+	if err := NewAPI().installPlanCore(context.Background(), m, bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
 		t.Fatalf("installPlanCore(daemonless full install): %v", err)
 	}
 

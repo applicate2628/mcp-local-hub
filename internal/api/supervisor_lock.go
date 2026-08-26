@@ -87,10 +87,17 @@ func AcquireSupervisorLock(path string) (*SupervisorLock, error) {
 		return nil, fmt.Errorf("supervisor.lock held by live PID %d", owner.PID)
 	}
 
-	// Write owner sidecar.
+	// Write owner sidecar. Prefer the kernel creation time so security-sensitive
+	// named-pipe clients can bind the sidecar to the exact PID generation instead
+	// of a nearby wall-clock sample. The fallback preserves non-Windows preview
+	// compatibility where the platform probe is unavailable.
+	startedAt := time.Now().UTC()
+	if kernelStart, ok := process.ProcessStartTime(os.Getpid()); ok {
+		startedAt = kernelStart.UTC()
+	}
 	owner := SupervisorLockOwner{
 		PID:       os.Getpid(),
-		StartedAt: time.Now().UTC().Format(time.RFC3339Nano),
+		StartedAt: startedAt.Format(time.RFC3339Nano),
 	}
 	if err := WriteStateFileAtomic(path+".owner.json", owner); err != nil {
 		_ = lk.Unlock()

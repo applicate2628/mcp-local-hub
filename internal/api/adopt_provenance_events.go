@@ -17,6 +17,7 @@
 package api
 
 import (
+	"errors"
 	"path/filepath"
 	"time"
 )
@@ -70,6 +71,23 @@ func emitAdoptProvenanceEvent(severity, event string, body map[string]any) {
 		Source:        adoptProvenanceEventSource,
 		Event:         event,
 		Body:          body,
+	})
+}
+
+// emitAdoptLeaseFailed records the redacted public projection of a terminal
+// lease-owner error. LeaseFailure intentionally retains its cause only in-process;
+// this event must never serialize that cause because it can contain a path, control
+// text, or another confidential owner detail.
+func emitAdoptLeaseFailed(manifestName string, err error) {
+	var failure *LeaseFailure
+	if !errors.As(err, &failure) || failure == nil {
+		return
+	}
+	emitAdoptProvenanceEvent(SupervisorEventSeverityError, "adopt-lease-failed", map[string]any{
+		"manifest":          manifestName,
+		"failure_id":        failure.FailureID,
+		"retryable":         failure.Retryable,
+		"recovery_required": failure.RecoveryRequired,
 	})
 }
 

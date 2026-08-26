@@ -1,6 +1,7 @@
 package api
 
 import (
+	"io"
 	"reflect"
 	"strconv"
 	"strings"
@@ -9,11 +10,41 @@ import (
 	"mcp-local-hub/internal/config"
 )
 
+const fixtureWorkspaceRoot = `%SystemDrive%\work`
+
+func fixtureWorkspacePath(name string) string {
+	return fixtureWorkspaceRoot + `\` + name
+}
+
+func TestSerenaOrPlanDaemonsCarriesManifestHash(t *testing.T) {
+	hash := strings.Repeat("d", 64)
+	workspace := t.TempDir()
+	dynamic := &config.ServerManifest{
+		Name: "serena", Kind: config.KindWorkspaceScoped, Transport: config.TransportNativeHTTP,
+		Command: "uvx", BaseArgs: []string{"serena"},
+		DaemonTemplate: &config.DaemonTemplate{Context: "codex", ExtraArgsTemplate: []string{"--project", config.WorkspacePathToken}},
+	}
+	rows, err := serenaOrPlanDaemons(dynamic, nil, hash, []WorkspaceEntry{{WorkspaceKey: "abc", WorkspacePath: workspace, Language: SerenaLanguageSentinel, Port: 9482}}, "", io.Discard)
+	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
+		t.Fatalf("dynamic rows=%#v err=%v, want exact hash %q", rows, err, hash)
+	}
+	if _, err := serenaOrPlanDaemons(dynamic, nil, "", []WorkspaceEntry{{WorkspaceKey: "abc", WorkspacePath: workspace, Language: SerenaLanguageSentinel, Port: 9482}}, "", io.Discard); err == nil {
+		t.Fatal("dynamic row with empty hash succeeded")
+	}
+
+	static := &config.ServerManifest{Name: "static", Kind: config.KindGlobal, Daemons: []config.DaemonSpec{{Name: "alpha", Port: 9483}}}
+	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-static-alpha", manifestHash: hash}}}
+	rows, err = serenaOrPlanDaemons(static, plan, "", nil, "", io.Discard)
+	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
+		t.Fatalf("static rows=%#v err=%v, want exact hash %q", rows, err, hash)
+	}
+}
+
 // TestSerenaTaskNameForWorkspace_Deterministic covers plan §D.2:
 // same canonical workspace path must always produce the same task
 // name. Same hash, same prefix, same byte sequence.
 func TestSerenaTaskNameForWorkspace_Deterministic(t *testing.T) {
-	const ws = "C:/work/alpha"
+	ws := fixtureWorkspacePath("alpha")
 	first := SerenaTaskNameForWorkspace(ws)
 	second := SerenaTaskNameForWorkspace(ws)
 	if first != second {
@@ -25,7 +56,7 @@ func TestSerenaTaskNameForWorkspace_Deterministic(t *testing.T) {
 // name shape: leading backslash + literal serena prefix + 8-hex-chars
 // hash. Total byte length is len(prefix) + 8.
 func TestSerenaTaskNameForWorkspace_CanonicalForm(t *testing.T) {
-	const ws = "C:/work/alpha"
+	ws := fixtureWorkspacePath("alpha")
 	got := SerenaTaskNameForWorkspace(ws)
 	if !strings.HasPrefix(got, SerenaTaskNamePrefix) {
 		t.Fatalf("missing canonical prefix: got=%q want prefix=%q", got, SerenaTaskNamePrefix)
@@ -76,11 +107,11 @@ func TestSerenaTaskNameForWorkspace_NoCollisionFor100Workspaces(t *testing.T) {
 // so the hash inputs vary across drive letter, path depth, name
 // prefix, and trailing segment.
 func genTestWorkspacePath(i int) string {
-	prefixes := []string{"C:/work", "D:/projects", "/home/user/code", "/srv/repos"}
+	prefixes := []string{fixtureWorkspaceRoot, `%SECONDARY_WORKSPACE_ROOT%\projects`, "/home/user/code", "/srv/repos"}
 	suffixes := []string{"alpha", "beta", "gamma", "delta", "epsilon"}
 	prefix := prefixes[i%len(prefixes)]
 	suffix := suffixes[i%len(suffixes)]
-	return prefix + "/" + suffix + "-" + intToHex(i)
+	return prefix + `\` + suffix + "-" + intToHex(i)
 }
 
 // intToHex stringifies i as 4-byte lowercase hex with leading zeros.
@@ -183,7 +214,7 @@ func TestIsSerenaTaskName_NonSerenaTaskName(t *testing.T) {
 // BuildSupervisorDaemonsForSerena across the unit tests. Production
 // callers (D.3 / install_intent) resolve via canonicalMcphubPath();
 // tests just need a non-empty stable string to assert against.
-const testMcphubBinary = `C:\test\bin\mcphub.exe`
+const testMcphubBinary = `%MCPHUB_TEST_BIN%\mcphub.exe`
 
 // fixtureSerenaManifest returns a minimal *config.ServerManifest
 // matching what Phase D.3 migration would write into
@@ -221,22 +252,22 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 	m := fixtureSerenaManifest()
 	workspaces := []WorkspaceEntry{
 		{
-			WorkspaceKey:  WorkspaceKey("C:/work/alpha"),
-			WorkspacePath: "C:/work/alpha",
+			WorkspaceKey:  WorkspaceKey(fixtureWorkspacePath("alpha")),
+			WorkspacePath: fixtureWorkspacePath("alpha"),
 			Language:      SerenaLanguageSentinel,
 			Backend:       "serena",
 			Port:          9121,
 		},
 		{
-			WorkspaceKey:  WorkspaceKey("C:/work/beta"),
-			WorkspacePath: "C:/work/beta",
+			WorkspaceKey:  WorkspaceKey(fixtureWorkspacePath("beta")),
+			WorkspacePath: fixtureWorkspacePath("beta"),
 			Language:      SerenaLanguageSentinel,
 			Backend:       "serena",
 			Port:          9122,
 		},
 		{
-			WorkspaceKey:  WorkspaceKey("C:/work/gamma"),
-			WorkspacePath: "C:/work/gamma",
+			WorkspaceKey:  WorkspaceKey(fixtureWorkspacePath("gamma")),
+			WorkspacePath: fixtureWorkspacePath("gamma"),
 			Language:      SerenaLanguageSentinel,
 			Backend:       "serena",
 			Port:          9123,
@@ -315,8 +346,8 @@ func TestBuildSupervisorIntent_FansOutPerSerenaWorkspace(t *testing.T) {
 func TestBuildSupervisorIntent_EnvClonedNotAliased(t *testing.T) {
 	m := fixtureSerenaManifest()
 	ws := WorkspaceEntry{
-		WorkspaceKey:  WorkspaceKey("C:/work/alpha"),
-		WorkspacePath: "C:/work/alpha",
+		WorkspaceKey:  WorkspaceKey(fixtureWorkspacePath("alpha")),
+		WorkspacePath: fixtureWorkspacePath("alpha"),
 		Language:      SerenaLanguageSentinel,
 		Port:          9121,
 	}
@@ -360,7 +391,7 @@ func TestBuildSupervisorIntent_LegacyDaemonsListStillWorks(t *testing.T) {
 		},
 	}
 	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{{
-		WorkspacePath: "C:/work/alpha",
+		WorkspacePath: fixtureWorkspacePath("alpha"),
 		Language:      SerenaLanguageSentinel,
 		Port:          9121,
 	}}, "", testMcphubBinary)
@@ -379,7 +410,7 @@ func TestBuildSupervisorIntent_RejectsContextInTemplate(t *testing.T) {
 	m := fixtureSerenaManifest()
 	m.DaemonTemplate.ExtraArgsTemplate = append([]string{"--context", "codex"}, m.DaemonTemplate.ExtraArgsTemplate...)
 	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{{
-		WorkspacePath: "C:/work/alpha",
+		WorkspacePath: fixtureWorkspacePath("alpha"),
 		Language:      SerenaLanguageSentinel,
 		Port:          9121,
 	}}, "", testMcphubBinary)
@@ -394,8 +425,8 @@ func TestBuildSupervisorIntent_RejectsContextInTemplate(t *testing.T) {
 func TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor(t *testing.T) {
 	m := fixtureSerenaManifest()
 	beforeAdd := []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
-		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("beta"), Language: SerenaLanguageSentinel, Port: 9122},
 	}
 	got := BuildSupervisorDaemonsForSerena(m, beforeAdd, "", testMcphubBinary)
 	if len(got) != 2 {
@@ -403,7 +434,7 @@ func TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor(t *testing.T) {
 	}
 
 	afterAdd := append(beforeAdd, WorkspaceEntry{
-		WorkspacePath: "C:/work/gamma",
+		WorkspacePath: fixtureWorkspacePath("gamma"),
 		Language:      SerenaLanguageSentinel,
 		Port:          9123,
 	})
@@ -411,7 +442,7 @@ func TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor(t *testing.T) {
 	if len(got) != 3 {
 		t.Fatalf("after-add: got %d descriptors; want 3", len(got))
 	}
-	want := SerenaTaskNameForWorkspace("C:/work/gamma")
+	want := SerenaTaskNameForWorkspace(fixtureWorkspacePath("gamma"))
 	if got[2].TaskName != want {
 		t.Errorf("after-add[2].TaskName: got=%q want=%q", got[2].TaskName, want)
 	}
@@ -424,9 +455,9 @@ func TestBuildSupervisorIntent_AddingWorkspaceAddsDescriptor(t *testing.T) {
 func TestBuildSupervisorIntent_RemovingWorkspaceRemovesDescriptor(t *testing.T) {
 	m := fixtureSerenaManifest()
 	beforeRemove := []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
-		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
-		{WorkspacePath: "C:/work/gamma", Language: SerenaLanguageSentinel, Port: 9123},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("beta"), Language: SerenaLanguageSentinel, Port: 9122},
+		{WorkspacePath: fixtureWorkspacePath("gamma"), Language: SerenaLanguageSentinel, Port: 9123},
 	}
 	got := BuildSupervisorDaemonsForSerena(m, beforeRemove, "", testMcphubBinary)
 	if len(got) != 3 {
@@ -441,7 +472,7 @@ func TestBuildSupervisorIntent_RemovingWorkspaceRemovesDescriptor(t *testing.T) 
 	if len(got) != 2 {
 		t.Fatalf("after-remove: got %d descriptors; want 2", len(got))
 	}
-	betaTaskName := SerenaTaskNameForWorkspace("C:/work/beta")
+	betaTaskName := SerenaTaskNameForWorkspace(fixtureWorkspacePath("beta"))
 	for _, d := range got {
 		if d.TaskName == betaTaskName {
 			t.Fatalf("after-remove still contains beta task name %q", betaTaskName)
@@ -458,7 +489,7 @@ func TestBuildSupervisorIntent_RejectsKindGlobal(t *testing.T) {
 	m := fixtureSerenaManifest()
 	m.Kind = config.KindGlobal
 	got := BuildSupervisorDaemonsForSerena(m, []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
 	}, "", testMcphubBinary)
 	if got != nil {
 		t.Fatalf("kind=global must be rejected by fan-out; got=%#v", got)
@@ -470,7 +501,7 @@ func TestBuildSupervisorIntent_RejectsKindGlobal(t *testing.T) {
 // fan-out must not panic.
 func TestBuildSupervisorIntent_NilManifestReturnsNil(t *testing.T) {
 	got := BuildSupervisorDaemonsForSerena(nil, []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
 	}, "", testMcphubBinary)
 	if got != nil {
 		t.Fatalf("nil manifest must yield nil; got=%#v", got)
@@ -484,9 +515,9 @@ func TestBuildSupervisorIntent_NilManifestReturnsNil(t *testing.T) {
 func TestBuildSupervisorIntent_SkipsNonSentinelRows(t *testing.T) {
 	m := fixtureSerenaManifest()
 	workspaces := []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
-		{WorkspacePath: "C:/work/alpha", Language: "go", Port: 9201},
-		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: "go", Port: 9201},
+		{WorkspacePath: fixtureWorkspacePath("beta"), Language: SerenaLanguageSentinel, Port: 9122},
 	}
 	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 2 {
@@ -501,9 +532,9 @@ func TestBuildSupervisorIntent_SkipsNonSentinelRows(t *testing.T) {
 func TestBuildSupervisorIntent_SkipsRowsWithEmptyWorkspacePath(t *testing.T) {
 	m := fixtureSerenaManifest()
 	workspaces := []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
 		{WorkspacePath: "", Language: SerenaLanguageSentinel, Port: 9122},
-		{WorkspacePath: "C:/work/gamma", Language: SerenaLanguageSentinel, Port: 9123},
+		{WorkspacePath: fixtureWorkspacePath("gamma"), Language: SerenaLanguageSentinel, Port: 9123},
 	}
 	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 2 {
@@ -517,7 +548,7 @@ func TestBuildSupervisorIntent_SkipsRowsWithEmptyWorkspacePath(t *testing.T) {
 // modulo the canonicalIntentTaskKey prepend. This protects against a
 // future refactor where the two diverge silently.
 func TestBuildSupervisorIntent_TaskNameMatchesRegisteredEntry(t *testing.T) {
-	const ws = "C:/work/alpha"
+	ws := fixtureWorkspacePath("alpha")
 	canonical := SerenaTaskNameForWorkspace(ws)
 	bare := canonicalIntentTaskKey("mcp-local-hub-serena-" + WorkspaceKey(ws))
 	if canonical != bare {
@@ -532,7 +563,7 @@ func TestBuildSupervisorIntent_TaskNameMatchesRegisteredEntry(t *testing.T) {
 // string; it does NOT normalize separators.
 func TestBuildSupervisorIntent_WindowsBackslashPath(t *testing.T) {
 	m := fixtureSerenaManifest()
-	const backslashPath = `C:\Users\dev\repos\alpha`
+	const backslashPath = `%USERPROFILE%\repos\alpha`
 	workspaces := []WorkspaceEntry{
 		{WorkspacePath: backslashPath, Language: SerenaLanguageSentinel, Port: 9121},
 	}
@@ -558,7 +589,7 @@ func TestBuildSupervisorIntent_WindowsBackslashPath(t *testing.T) {
 // --workspace argv token and the Workspace field.
 func TestBuildSupervisorIntent_UnicodePath(t *testing.T) {
 	m := fixtureSerenaManifest()
-	const unicodePath = "C:/work/проект-альфа"
+	unicodePath := fixtureWorkspacePath("проект-альфа")
 	workspaces := []WorkspaceEntry{
 		{WorkspacePath: unicodePath, Language: SerenaLanguageSentinel, Port: 9121},
 	}
@@ -584,8 +615,8 @@ func TestBuildSupervisorIntent_NilManifestEnvProducesNilDescriptorEnv(t *testing
 	m := fixtureSerenaManifest()
 	m.Env = nil
 	workspaces := []WorkspaceEntry{
-		{WorkspacePath: "C:/work/alpha", Language: SerenaLanguageSentinel, Port: 9121},
-		{WorkspacePath: "C:/work/beta", Language: SerenaLanguageSentinel, Port: 9122},
+		{WorkspacePath: fixtureWorkspacePath("alpha"), Language: SerenaLanguageSentinel, Port: 9121},
+		{WorkspacePath: fixtureWorkspacePath("beta"), Language: SerenaLanguageSentinel, Port: 9122},
 	}
 	got := BuildSupervisorDaemonsForSerena(m, workspaces, "", testMcphubBinary)
 	if len(got) != 2 {

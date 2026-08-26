@@ -18,6 +18,7 @@ import (
 	"mcp-local-hub/internal/vcpkgmcp/pinstatus"
 	"mcp-local-hub/internal/vcpkgmcp/portresolution"
 	"mcp-local-hub/internal/vcpkgmcp/publicresult"
+	"mcp-local-hub/internal/vcpkgmcp/reversedepgraph"
 )
 
 const resultProjectionDescription = " Every successful result is bounded to 256 KiB; aggregate-heavy results are admitted before full JSON materialization, and an oversized complete result retains its package-owned causal core with result_projection explicit omissions."
@@ -346,6 +347,60 @@ func registerTools(vs *VcpkgServer) error {
 	}
 
 	if err := registerProjectableTool(vs, &mcp.Tool{
+		Name: "vcpkg_reverse_dependencies",
+		Description: "Compute direct and transitive dependents of one selected port from resolved plans produced by the exact supplied vcpkg executable. " +
+			"The tool enumerates a complete bounded local port universe, uses declared metadata only as a conservative scheduling superset, runs depend-info in both DGML and list formats with all writable roots redirected to scratch, requires the formats to agree, and inverts only those vcpkg-produced edges. " +
+			"The explicit configuration includes target/host triplets, ordered overlay ports/triplets, classic or local-manifest mode, and candidate-defaults feature semantics. Remote registries, builds, installs, downloads, caller-supplied graph edges, arbitrary switches, shell commands, and inherited vcpkg/proxy/credential environments are refused. " +
+			"Every incomplete universe, child failure, format mismatch, provenance hole, resource limit, timeout, cancellation, input drift, or cleanup failure returns unknown(reason); an empty ok graph is authoritative only when coverage.complete=true." + resultProjectionDescription,
+		InputSchema: map[string]any{
+			"type":     "object",
+			"required": []string{"port", "vcpkg_root", "triplet", "host_triplet", "scratch_root"},
+			"properties": map[string]any{
+				"port": map[string]any{
+					"type": "string", "maxLength": 255, "pattern": `^[a-z0-9]+(?:-[a-z0-9]+)*$`,
+					"description": "Required legal lowercase vcpkg port name whose reverse dependents are selected.",
+				},
+				"vcpkg_root": map[string]any{
+					"type": "string", "minLength": 1, "maxLength": 32768,
+					"description": "Required absolute vcpkg root containing the exact vcpkg executable to run.",
+				},
+				"triplet": map[string]any{
+					"type": "string", "maxLength": 255, "pattern": `^[a-z0-9][a-z0-9_.-]*$`,
+					"description": "Required explicit target triplet; no ambient default is used.",
+				},
+				"host_triplet": map[string]any{
+					"type": "string", "maxLength": 255, "pattern": `^[a-z0-9][a-z0-9_.-]*$`,
+					"description": "Required explicit host triplet; no ambient default is used.",
+				},
+				"overlay_ports": map[string]any{
+					"type": "array", "maxItems": reversedepgraph.MaxOverlayRoots,
+					"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 32768},
+					"description": "Optional absolute overlay-port roots in precedence order.",
+				},
+				"overlay_triplets": map[string]any{
+					"type": "array", "maxItems": reversedepgraph.MaxOverlayRoots,
+					"items":       map[string]any{"type": "string", "minLength": 1, "maxLength": 32768},
+					"description": "Optional absolute overlay-triplet roots in precedence order.",
+				},
+				"manifest_root": map[string]any{
+					"type": "string", "minLength": 1, "maxLength": 32768,
+					"description": "Optional absolute local manifest root. Omit for explicit --classic mode.",
+				},
+				"scratch_root": map[string]any{
+					"type": "string", "minLength": 1, "maxLength": 32768,
+					"description": "Required absolute writable base outside every input root; one unique child is created and removed per call.",
+				},
+				"timeout_ms": map[string]any{
+					"type": "integer", "minimum": reversedepgraph.MinTimeoutMS, "maximum": reversedepgraph.MaxTimeoutMS, "default": reversedepgraph.DefaultTimeoutMS,
+					"description": "Whole-request deadline in milliseconds, including the global request-slot wait.",
+				},
+			},
+		},
+	}, vs.reverseDependenciesTool); err != nil {
+		return err
+	}
+
+	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name:        "vcpkg_pin_status",
 		Description: pinStatusToolDescription(),
 		InputSchema: map[string]any{
@@ -567,6 +622,32 @@ func (vs *VcpkgServer) portResolutionTool(ctx context.Context, req *mcp.CallTool
 	}
 	res := portresolution.ResolvePortContext(ctx, args, portresolution.DefaultDeps())
 	return projectableToolOutcome{result: res}
+}
+
+func (vs *VcpkgServer) reverseDependenciesTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {
+	var args reversedepgraph.Args
+	if len(req.Params.Arguments) > 0 {
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return projectableToolOutcome{invalidArgument: err}
+		}
+	}
+	if err := reversedepgraph.ValidateArgs(ctx, args); err != nil {
+		return projectableToolOutcome{invalidArgument: err}
+	}
+	vs.initReverseDependencies()
+	requestContext, cancel := context.WithTimeout(ctx, args.Timeout())
+	defer cancel()
+	select {
+	case vs.reverseDependenciesSlots <- struct{}{}:
+		defer func() { <-vs.reverseDependenciesSlots }()
+	case <-requestContext.Done():
+		if requestContext.Err() == context.Canceled {
+			return projectableToolOutcome{result: reversedepgraph.UnknownResult(args, reversedepgraph.ReasonRequestCancelled, &reversedepgraph.Failure{ID: reversedepgraph.FailureCancelled, Reason: reversedepgraph.ReasonRequestCancelled, Stage: "request_slot", Detail: "caller cancelled while waiting for request slot"})}
+		}
+		return projectableToolOutcome{result: reversedepgraph.UnknownResult(args, reversedepgraph.ReasonResourceBusy, &reversedepgraph.Failure{ID: reversedepgraph.FailureResourceBusy, Reason: reversedepgraph.ReasonResourceBusy, Stage: "request_slot", Detail: "request slot unavailable before deadline"})}
+	}
+	result := vs.reverseDependenciesRun(requestContext, args, vs.reverseDependenciesRunner)
+	return projectableToolOutcome{result: result}
 }
 
 func (vs *VcpkgServer) pinStatusTool(ctx context.Context, req *mcp.CallToolRequest) projectableToolOutcome {

@@ -5,12 +5,16 @@ import json
 import math
 import os
 import re
+import secrets
 import shutil
 import sys
 import time
+from collections.abc import Callable
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
+
+from mcp.types import CallToolResult, TextContent
 
 from .contracts import (
     CSTTetOrder,
@@ -26,11 +30,33 @@ from .contracts import (
     SolveAction,
 )
 from .cst_results import export_result_tree
+from .cst_saved_field import (
+    AllowSolveFalse,
+    CoordinateUnit,
+    MaxPoints,
+    OptionalSha256,
+    SavedFieldKind,
+    SavedFieldPoints,
+    SavedFieldRequestV1,
+    SavedFieldResultRequestV1,
+)
+from .cst_saved_field_daemon_client_windows import (
+    DaemonClientFailure,
+    WindowsDaemonClient,
+    inherited_daemon_client,
+)
+from .cst_saved_field_frontend_protocol import FRONTEND_SAFE_FAILURE_IDS
+from .cst_saved_field_policy import (
+    AuthoritySnapshot,
+    PolicyFailure,
+    WindowsPolicyPlatform,
+    load_authority_snapshot,
+)
 from .jobs import JobContext, JobManager, solve_action, utc_now
 from .provenance import artifact_record, sha256_file, write_json
 from .safety import existing_output_root, existing_project_file, require_confirmation, require_windows
 from .slim import read_slim, write_surface_gmsh, write_volume_gmsh
-from .strict_fastmcp import publish_action_requirements, strict_fastmcp
+from .strict_fastmcp import fix_tool_validation_error, publish_action_requirements, strict_fastmcp
 
 mcp = strict_fastmcp(
     "mcphub-cst",
@@ -464,6 +490,180 @@ def cst_export_results(job_id: str) -> dict[str, Any]:
         "artifacts": artifacts,
         "manifest": artifact_record(manifest_path, record.output_dir, media_type="application/json"),
     }
+
+
+SAVED_FIELD_RESPONSE_MAX = 1_048_576
+
+
+def _saved_field_error(failure_id: str) -> CallToolResult:
+    if failure_id not in FRONTEND_SAFE_FAILURE_IDS:
+        failure_id = "cst_saved_field.activation_failed"
+    return CallToolResult(
+        content=[TextContent(type="text", text=failure_id)],
+        structuredContent=None,
+        isError=True,
+    )
+
+
+def publish_saved_field_text(text: str) -> CallToolResult:
+    if len(text.encode("utf-8")) > SAVED_FIELD_RESPONSE_MAX:
+        return _saved_field_error("cst_saved_field.response_too_large")
+    return CallToolResult(
+        content=[TextContent(type="text", text=text)],
+        structuredContent=None,
+        isError=False,
+    )
+
+
+def _publish_saved_field_value(value: object) -> CallToolResult:
+    if isinstance(value, CallToolResult):
+        if value.structuredContent is not None or len(value.content) != 1:
+            return _saved_field_error("cst_saved_field.broker_protocol_invalid")
+        content = value.content[0]
+        if not isinstance(content, TextContent):
+            return _saved_field_error("cst_saved_field.broker_protocol_invalid")
+        return publish_saved_field_text(content.text)
+    if isinstance(value, str):
+        return publish_saved_field_text(value)
+    try:
+        text = json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    except (TypeError, ValueError):
+        return _saved_field_error("cst_saved_field.broker_protocol_invalid")
+    return publish_saved_field_text(text)
+
+
+SavedFieldInvoker = Callable[[SavedFieldRequestV1, object], object]
+
+
+def _unavailable_saved_field_invoker(_request: SavedFieldRequestV1, _descriptor: object) -> CallToolResult:
+    return _saved_field_error("cst_saved_field.cst_unavailable")
+
+
+def _daemon_saved_field_invoker(client: WindowsDaemonClient) -> object:
+    class DaemonInvoker:
+        def invoke_authorized(
+            self, request: SavedFieldRequestV1, snapshot: AuthoritySnapshot
+        ) -> CallToolResult:
+            descriptor = snapshot.authorize(request.project_bundle)
+            body = request.model_dump(mode="json")
+            del body["project_bundle"]
+            response = client.invoke(entry_id=descriptor.entry_id, request=body)
+            if not response.ok or response.text is None:
+                return _saved_field_error(response.failure_id or "cst_saved_field.broker_protocol_invalid")
+            return publish_saved_field_text(response.text)
+
+    return DaemonInvoker()
+
+
+def _inline_sampler_schema(server: Any) -> None:
+    tool = server._tool_manager.get_tool("cst_sample_saved_field")  # noqa: SLF001
+    if tool is None:
+        raise RuntimeError("sampler registration failed")
+    schema = tool.parameters
+    definitions = schema.get("$defs", {})
+
+    def dereference(value: object) -> object:
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str) and reference.startswith("#/$defs/"):
+                return dereference(definitions[reference.rsplit("/", 1)[1]])
+            return {key: dereference(item) for key, item in value.items() if key != "$defs"}
+        if isinstance(value, list):
+            return [dereference(item) for item in value]
+        return value
+
+    tool.parameters = dereference(schema)  # type: ignore[assignment]
+
+
+def _register_saved_field_tool(
+    server: Any,
+    snapshot: AuthoritySnapshot,
+    invoker: SavedFieldInvoker | object,
+) -> None:
+    if server._tool_manager.get_tool("cst_sample_saved_field") is not None:  # noqa: SLF001
+        raise RuntimeError("saved-field tool is already registered")
+
+    @server.tool(name="cst_sample_saved_field")
+    def cst_sample_saved_field(
+        project_bundle: str,
+        expected_project_sha256: OptionalSha256,
+        field: SavedFieldKind,
+        result: SavedFieldResultRequestV1,
+        points: SavedFieldPoints,
+        coordinate_unit: CoordinateUnit,
+        allow_solve: AllowSolveFalse = False,
+        max_points: MaxPoints = 256,
+    ) -> CallToolResult:
+        """Sample one retained CST field on an authorized disposable copy without solving."""
+        request = SavedFieldRequestV1(
+            project_bundle=project_bundle,
+            expected_project_sha256=expected_project_sha256,
+            field=field,
+            result=result,
+            points=points,
+            coordinate_unit=coordinate_unit,
+            allow_solve=allow_solve,
+            max_points=max_points,
+        )
+        try:
+            invoke_authorized = getattr(invoker, "invoke_authorized", None)
+            if callable(invoke_authorized):
+                return _publish_saved_field_value(invoke_authorized(request, snapshot))
+            descriptor = snapshot.authorize(request.project_bundle)
+            return _publish_saved_field_value(invoker(request, descriptor))
+        except PolicyFailure as exc:
+            return _saved_field_error(exc.failure_id)
+        except DaemonClientFailure as exc:
+            return _saved_field_error(exc.failure_id)
+        except Exception:
+            return _saved_field_error("cst_saved_field.activation_failed")
+
+    fix_tool_validation_error(server, "cst_sample_saved_field")
+    _inline_sampler_schema(server)
+
+
+def _restart_authority_snapshot() -> AuthoritySnapshot | None:
+    raw_path = os.environ.get("MCPHUB_EM_CST_SAVED_FIELD_POLICY")
+    if not raw_path:
+        return None
+    try:
+        result = load_authority_snapshot(raw_path, WindowsPolicyPlatform())
+    except (OSError, PolicyFailure):
+        return None
+    return result.snapshot if result.enabled else None
+
+
+def _compose_saved_field_tool(
+    server: Any,
+    snapshot: AuthoritySnapshot | None,
+    daemon_client: WindowsDaemonClient | None,
+) -> bool:
+    """Apply the restart-loaded default-off composition decision exactly once."""
+
+    if snapshot is None or daemon_client is None or not daemon_client.startup_ready():
+        return False
+    _register_saved_field_tool(
+        server,
+        snapshot,
+        _daemon_saved_field_invoker(daemon_client),
+    )
+    return True
+
+
+_saved_field_authority = _restart_authority_snapshot()
+if _saved_field_authority is not None:
+    _saved_field_daemon_client = inherited_daemon_client(
+        correlation=lambda: secrets.token_hex(16),
+        qpc_frequency=lambda: 1_000_000_000,
+        qpc_counter=time.perf_counter_ns,
+    )
+    _compose_saved_field_tool(mcp, _saved_field_authority, _saved_field_daemon_client)
 
 
 def main() -> None:

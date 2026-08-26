@@ -113,6 +113,9 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 			updated, _ := ev.Body[reapScanIntentBodyKey].(*api.SupervisorIntentFile)
 			stops, _ := ev.Body[reapScanStopsBodyKey].(*api.DaemonIntentFile)
 			ctrl.handleReapScan(prev, updated, stops)
+			if doneCh, ok := ev.Body[reapScanDoneBodyKey].(chan struct{}); ok && doneCh != nil {
+				close(doneCh)
+			}
 			return
 		case evReapFollowup:
 			generation, _ := ev.Body[reapFollowupGenerationBodyKey].(int)

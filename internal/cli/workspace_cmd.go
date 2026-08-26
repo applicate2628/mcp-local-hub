@@ -20,6 +20,7 @@ package cli
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -210,7 +211,7 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	if languagesFlag != "" {
 		languages = splitAndTrim(languagesFlag, ",")
 	} else {
-		langs, err := readSerenaProjectLanguages(canonical)
+		parsed, err := readSerenaProjectSchema(canonical)
 		if err != nil {
 			if os.IsNotExist(err) {
 				return fmt.Errorf(".serena/project.yml not found in %s — "+
@@ -219,7 +220,10 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 			}
 			return fmt.Errorf("read .serena/project.yml: %w", err)
 		}
-		languages = langs
+		languages = parsed.Languages
+		if parsed.Compatibility {
+			fmt.Fprintf(cmd.ErrOrStderr(), "warning [SERENA_PROJECT_SCHEMA_COMPAT]: %s uses `%s`; Serena 1.7.0 accepts it for compatibility, but current generated schema uses `language_servers`.\n  migrate without replacing other project settings: mcphub workspace bootstrap \"%s\" --migrate-serena-schema\n", canonical, parsed.Form, canonical)
+		}
 	}
 	if len(languages) == 0 {
 		return fmt.Errorf("no languages resolved for workspace %s "+
@@ -463,6 +467,28 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 			reconcileErr, settlementErr, checkErr, reconcileResp.SerenaRepairOutcome, reconcileResp.SerenaRepairError, markerCompensation))
 	}
 
+	// Re-read the settled registry row, then render only the API-owned batch
+	// projection. This intentionally replaces the older endpoint-only check:
+	// a successful reconcile is not authority to compare registry, intent,
+	// status, readiness, or routing values in this presenter.
+	freshRegistry := api.NewRegistry(regPath)
+	if loadErr := freshRegistry.Load(); loadErr != nil {
+		return errors.Join(releaseErr, loadErr)
+	}
+	freshEntry, present := freshRegistry.GetSerena(wsKey)
+	if !present {
+		return errors.Join(releaseErr, fmt.Errorf("SERENA_WORKSPACE_STATE_MISMATCH/intent_missing: settled workspace %s disappeared before projection", wsKey))
+	}
+	endpointCtx, endpointCancel := context.WithTimeout(cmd.Context(), api.DefaultTargetedReconcileTimeout)
+	defer endpointCancel()
+	projected, endpointErr := projectSerenaWorkspaceSnapshotForCLI(endpointCtx, []api.WorkspaceEntry{freshEntry}, api.SerenaWorkspaceProjectionModeRequireSettled)
+	if endpointErr != nil || len(projected.Workspaces) != 1 {
+		return errors.Join(releaseErr, fmt.Errorf(
+			"SERENA_CLIENT_ENDPOINT_UNREADY: workspace %s (key %s) remains registered (workspace proxy port %d, task %s), but the client endpoint was not ready: %w\n  next step: confirm the supervisor/router is healthy, then run `mcphub reconcile --apply` and retry `mcphub workspace register %q`",
+			canonical, wsKey, settled.Port, freshEntry.TaskName, endpointErr, canonical))
+	}
+	projection := projected.Workspaces[0]
+
 	// A --default result is a terminal snapshot, not a promise derived from the
 	// successful step-6a write. Another set-default may have won while reconcile
 	// and the persisted-generation check ran. Re-read through the marker owner
@@ -481,8 +507,8 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 	// only true when they do), but settled.Port is the value the check itself
 	// verified, so it is the honest one to print.
 	fmt.Fprintf(cmd.OutOrStdout(),
-		"Registered serena workspace %s (key %s)\n  port: %d\n  task: %s\n  languages: %s\n",
-		canonical, wsKey, settled.Port, entry.TaskName, strings.Join(languages, ", "))
+		"Registered serena workspace %s (key %s)\n  client_endpoint: %s\n  endpoint_mode: %s\n  workspace_proxy: http://127.0.0.1:%d/mcp (internal; do not configure clients)\n  task: %s\n  language_servers: %s\n",
+		canonical, wsKey, projection.ClientEndpoint, projection.EndpointMode, projection.WorkspaceProxyPort, projection.TaskName, strings.Join(projection.Languages, ", "))
 	switch defaultProjection {
 	case workspaceRegisterDefaultConfirmed:
 		fmt.Fprintln(cmd.OutOrStdout(), "  default: yes")
@@ -507,6 +533,13 @@ func runWorkspaceRegister(cmd *cobra.Command, rawPath string, setDefault bool, l
 // before returning its canned response — see
 // TestWorkspaceRegisterSerena_LiveSupervisorMaterializesBeforeSuccess.
 var serenaRegisterReconcileFn = api.DialSupervisorIPCReconcileTarget
+
+// projectSerenaWorkspaceSnapshotForCLI is the single CLI adapter to the API
+// authority projection. It owns no readiness or endpoint policy; all CLI
+// surfaces render the returned batch and never compare its inputs locally.
+var projectSerenaWorkspaceSnapshotForCLI = func(ctx context.Context, rows []api.WorkspaceEntry, mode api.SerenaWorkspaceProjectionMode) (api.SerenaWorkspaceProjectionOutputV1, error) {
+	return api.NewAPI().ProjectSerenaWorkspaceSnapshotCurrent(ctx, rows, mode)
+}
 
 type workspaceRegisterTargetSettlementError struct {
 	State  api.ReconcileTargetSettlementState
@@ -1186,7 +1219,39 @@ lands, the column reads "-" for freshly-registered workspaces.
 // It embeds the full WorkspaceEntry verbatim plus a synthesized "default" flag.
 type workspaceListJSONRow struct {
 	api.WorkspaceEntry
-	Default bool `json:"default"`
+	Default            bool   `json:"default"`
+	WorkspaceProxyPort int    `json:"workspace_proxy_port"`
+	ClientEndpoint     string `json:"client_endpoint"`
+	EndpointMode       string `json:"endpoint_mode"`
+}
+
+func projectWorkspaceListRows(ctx context.Context, entries []api.WorkspaceEntry, defaultPath string) ([]workspaceListJSONRow, error) {
+	if len(entries) == 0 {
+		return []workspaceListJSONRow{}, nil
+	}
+	projected, err := projectSerenaWorkspaceSnapshotForCLI(ctx, entries, api.SerenaWorkspaceProjectionModeSnapshot)
+	if err != nil {
+		return nil, err
+	}
+	byTask := make(map[string]api.SerenaWorkspaceProjection, len(projected.Workspaces))
+	for _, row := range projected.Workspaces {
+		byTask[row.TaskName] = row
+	}
+	rows := make([]workspaceListJSONRow, 0, len(entries))
+	for _, entry := range entries {
+		projection, ok := byTask[entry.TaskName]
+		if !ok {
+			return nil, fmt.Errorf("SERENA_WORKSPACE_STATE_MISMATCH/status_missing: projection omitted task %q", entry.TaskName)
+		}
+		rows = append(rows, workspaceListJSONRow{
+			WorkspaceEntry:     entry,
+			Default:            entry.WorkspacePath == defaultPath,
+			WorkspaceProxyPort: projection.WorkspaceProxyPort,
+			ClientEndpoint:     projection.ClientEndpoint,
+			EndpointMode:       projection.EndpointMode,
+		})
+	}
+	return rows, nil
 }
 
 func runWorkspaceList(cmd *cobra.Command, jsonOut bool) (err error) {
@@ -1210,19 +1275,38 @@ func runWorkspaceList(cmd *cobra.Command, jsonOut bool) (err error) {
 		return entries[i].WorkspacePath < entries[j].WorkspacePath
 	})
 
+	rows, projectionErr := projectWorkspaceListRows(cmd.Context(), entries, defaultPath)
+	if projectionErr != nil {
+		return fmt.Errorf("SERENA_CLIENT_ENDPOINT_UNREADY: project workspace list: %w", projectionErr)
+	}
 	if jsonOut {
-		rows := make([]workspaceListJSONRow, 0, len(entries))
-		for _, e := range entries {
-			rows = append(rows, workspaceListJSONRow{
-				WorkspaceEntry: e,
-				Default:        e.WorkspacePath == defaultPath,
-			})
-		}
 		enc := json.NewEncoder(cmd.OutOrStdout())
 		enc.SetIndent("", "  ")
 		return enc.Encode(rows)
 	}
-	return printWorkspaceTable(cmd.OutOrStdout(), entries, defaultPath)
+	return printWorkspaceProjectionTable(cmd.OutOrStdout(), rows)
+}
+
+func printWorkspaceProjectionTable(w io.Writer, rows []workspaceListJSONRow) error {
+	fmt.Fprintf(w, "%-*s %-30s %-7s %-15s %-32s %-12s %-12s\n",
+		workspaceTablePathWidth,
+		"WORKSPACE", "LANGUAGE_SERVERS", "DEFAULT", "WORKSPACE_PROXY", "CLIENT_ENDPOINT", "ENDPOINT_MODE", "LAST_SPAWN")
+	for _, row := range rows {
+		def := ""
+		if row.Default {
+			def = "*"
+		}
+		fmt.Fprintf(w, "%-*s %-30s %-7s %-15d %-32s %-12s %-12s\n",
+			workspaceTablePathWidth,
+			truncateWorkspacePath(row.WorkspacePath, workspaceTablePathWidth),
+			strings.Join(row.Languages, ","),
+			def,
+			row.WorkspaceProxyPort,
+			row.ClientEndpoint,
+			row.EndpointMode,
+			formatLastSpawn(row.LastMaterializedAt))
+	}
+	return nil
 }
 
 // workspaceTablePathWidth is the column width for the WORKSPACE column
@@ -1236,7 +1320,7 @@ const workspaceTablePathWidth = 80
 func printWorkspaceTable(w io.Writer, entries []api.WorkspaceEntry, defaultPath string) error {
 	fmt.Fprintf(w, "%-*s %-30s %-7s %-6s %-12s\n",
 		workspaceTablePathWidth,
-		"WORKSPACE", "LANGUAGES", "DEFAULT", "PORT", "LAST_SPAWN")
+		"WORKSPACE", "LANGUAGE_SERVERS", "DEFAULT", "WORKSPACE_PROXY", "LAST_SPAWN")
 	for _, e := range entries {
 		def := ""
 		if e.WorkspacePath == defaultPath {
@@ -1331,7 +1415,7 @@ func runWorkspaceSetDefault(cmd *cobra.Command, rawPath string) (err error) {
 // newWorkspaceBootstrapCmd builds `mcphub workspace bootstrap <path>
 // [--force]` per Phase B.3.
 func newWorkspaceBootstrapCmd() *cobra.Command {
-	var force bool
+	var force, migrateSchema bool
 	c := &cobra.Command{
 		Use:   "bootstrap <path>",
 		Short: "Initialize .serena/project.yml from a file-extension survey",
@@ -1356,19 +1440,39 @@ command refuses to clobber.
 `,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWorkspaceBootstrap(cmd, args[0], force)
+			return runWorkspaceBootstrapWithMigration(cmd, args[0], force, migrateSchema)
 		},
 	}
 	c.Flags().BoolVar(&force, "force", false, "overwrite an existing .serena/project.yml")
+	c.Flags().BoolVar(&migrateSchema, "migrate-serena-schema", false, "migrate only Serena compatibility keys to language_servers without replacing other settings")
 	return c
 }
 
 func runWorkspaceBootstrap(cmd *cobra.Command, rawPath string, force bool) error {
+	return runWorkspaceBootstrapWithMigration(cmd, rawPath, force, false)
+}
+
+func runWorkspaceBootstrapWithMigration(cmd *cobra.Command, rawPath string, force, migrateSchema bool) error {
 	canonical, err := api.CanonicalWorkspacePath(rawPath)
 	if err != nil {
 		return err
 	}
 	projectYmlPath := filepath.Join(canonical, ".serena", "project.yml")
+	if migrateSchema {
+		if force {
+			return fmt.Errorf("--force and --migrate-serena-schema cannot be combined")
+		}
+		receipt, err := migrateSerenaProjectSchema(projectYmlPath, filepath.Base(canonical))
+		if err != nil {
+			return err
+		}
+		if !receipt.Changed {
+			fmt.Fprintf(cmd.OutOrStdout(), "SERENA_PROJECT_SCHEMA_ALREADY_CURRENT %s\n", projectYmlPath)
+			return nil
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "SERENA_PROJECT_SCHEMA_MIGRATED %s\n  backup: %s\n  preimage_sha256: %x\n  postimage_sha256: %x\n", projectYmlPath, receipt.BackupPath, receipt.Preimage, receipt.Postimage)
+		return nil
+	}
 	if !force {
 		if _, err := os.Stat(projectYmlPath); err == nil {
 			return fmt.Errorf("%s already exists; pass --force to overwrite", projectYmlPath)
@@ -1382,25 +1486,23 @@ func runWorkspaceBootstrap(cmd *cobra.Command, rawPath string, force bool) error
 	sort.Strings(mcphubLanguages)
 	languages := projectSerenaLanguages(mcphubLanguages, cmd.ErrOrStderr())
 
-	// Write .serena/project.yml. Use a stable schema matching upstream
-	// serena's expectations (languages, read_only, excluded_dirs).
+	// Generate only the current Serena v1.7 schema. Compatibility forms are
+	// accepted by the shared parser but are never emitted by the hub.
 	doc := map[string]any{
-		"languages":     languages,
-		"read_only":     false,
-		"excluded_dirs": []string{"node_modules", "target", "dist", ".git"},
+		"project_name":     filepath.Base(canonical),
+		"language_servers": languages,
+		"read_only":        false,
+		"ignored_paths":    []string{"node_modules/**", "target/**", "dist/**", ".git/**"},
 	}
 	body, err := yaml.Marshal(doc)
 	if err != nil {
 		return fmt.Errorf("marshal project.yml: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(projectYmlPath), 0o700); err != nil {
-		return fmt.Errorf("mkdir .serena: %w", err)
-	}
-	if err := os.WriteFile(projectYmlPath, body, 0o600); err != nil {
+	if err := api.WriteStateFileBytesAtomic(projectYmlPath, body); err != nil {
 		return fmt.Errorf("write project.yml: %w", err)
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n  languages: %s\n",
+	fmt.Fprintf(cmd.OutOrStdout(), "Wrote %s\n  language_servers: %s\n",
 		projectYmlPath, strings.Join(languages, ", "))
 	return nil
 }
@@ -1602,14 +1704,15 @@ func readGitignoreDirs(path string) map[string]bool {
 // .serena/project.yml read helper for `workspace register`
 // ------------------------------------------------------------------
 
-// serenaProjectYml is the minimal struct we need from .serena/project.yml.
-// We only consume the languages list; other serena fields are preserved
-// verbatim on disk (we never rewrite project.yml from register).
-type serenaProjectYml struct {
-	Languages []string `yaml:"languages"`
+func readSerenaProjectLanguages(canonical string) ([]string, error) {
+	parsed, err := readSerenaProjectSchema(canonical)
+	if err != nil {
+		return nil, err
+	}
+	return parsed.Languages, nil
 }
 
-func readSerenaProjectLanguages(canonical string) ([]string, error) {
+func readSerenaProjectSchema(canonical string) (api.SerenaProjectSchema, error) {
 	path := filepath.Join(canonical, ".serena", "project.yml")
 	// The marker is untrusted clone input — read it through the SAME single
 	// hardened reader the auto-register path uses (api.ReadUntrustedSerenaProjectYML:
@@ -1617,15 +1720,148 @@ func readSerenaProjectLanguages(canonical string) ([]string, error) {
 	// synchronous CLI command with no cancellation source, so a background ctx
 	// is correct. The reader returns the bare not-found error (unwrapped), so the
 	// caller's os.IsNotExist(err) "run bootstrap first" branch keeps working.
-	data, err := api.ReadUntrustedSerenaProjectYML(context.Background(), path)
+	return api.ReadSerenaProjectSchema(context.Background(), path)
+}
+
+type serenaSchemaMigrationReceipt struct {
+	Changed             bool
+	BackupPath          string
+	Preimage, Postimage [sha256.Size]byte
+}
+
+var (
+	writeSerenaProjectSchemaBytesAtomic = api.WriteStateFileBytesAtomic
+	readSerenaProjectSchemaForMigration = api.ReadSerenaProjectSchema
+)
+
+func migrateSerenaProjectSchema(path, projectName string) (serenaSchemaMigrationReceipt, error) {
+	before, err := api.ReadUntrustedSerenaProjectYML(context.Background(), path)
 	if err != nil {
-		return nil, err
+		return serenaSchemaMigrationReceipt{}, err
 	}
-	var doc serenaProjectYml
-	if err := yaml.Unmarshal(data, &doc); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
+	parsed, err := readSerenaProjectSchemaForMigration(context.Background(), path)
+	if err != nil {
+		return serenaSchemaMigrationReceipt{}, err
 	}
-	return doc.Languages, nil
+	receipt := serenaSchemaMigrationReceipt{Preimage: sha256.Sum256(before)}
+	if parsed.Form == api.SerenaProjectSchemaFormLanguageServers {
+		return receipt, nil
+	}
+	var document yaml.Node
+	if err := yaml.Unmarshal(before, &document); err != nil || len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+		return serenaSchemaMigrationReceipt{}, fmt.Errorf("%w: project YAML document is not a mapping", api.ErrSerenaProjectSchemaParseFailed)
+	}
+	mapping := document.Content[0]
+	compatibilityKey := "languages"
+	if parsed.Form == api.SerenaProjectSchemaFormLanguage {
+		compatibilityKey = "language"
+	}
+	setSerenaYAMLMappingFromCompatibilityKey(mapping, "language_servers", languageSequenceNode(parsed.Languages), compatibilityKey)
+	removeSerenaYAMLMapping(mapping, "languages")
+	removeSerenaYAMLMapping(mapping, "language")
+	if excluded, ok := getSerenaYAMLMapping(mapping, "excluded_dirs"); ok {
+		if _, hasIgnored := getSerenaYAMLMapping(mapping, "ignored_paths"); !hasIgnored {
+			setSerenaYAMLMapping(mapping, "ignored_paths", ignoredPathNode(excluded))
+		}
+		removeSerenaYAMLMapping(mapping, "excluded_dirs")
+	}
+	if _, hasName := getSerenaYAMLMapping(mapping, "project_name"); !hasName && strings.TrimSpace(projectName) != "" {
+		setSerenaYAMLMapping(mapping, "project_name", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: projectName})
+	}
+	after, err := yaml.Marshal(&document)
+	if err != nil {
+		return serenaSchemaMigrationReceipt{}, fmt.Errorf("marshal migrated project.yml: %w", err)
+	}
+	receipt.BackupPath = path + ".pre-serena-schema.bak"
+	if err := writeSerenaProjectSchemaBytesAtomic(receipt.BackupPath, before); err != nil {
+		return serenaSchemaMigrationReceipt{}, fmt.Errorf("write migration backup: %w", err)
+	}
+	if err := writeSerenaProjectSchemaBytesAtomic(path, after); err != nil {
+		return serenaSchemaMigrationReceipt{}, fmt.Errorf("write migrated project.yml: %w", err)
+	}
+	receipt.Changed = true
+	receipt.Postimage = sha256.Sum256(after)
+	if _, err := readSerenaProjectSchemaForMigration(context.Background(), path); err != nil {
+		return receipt, fmt.Errorf("read back migrated project.yml after committed replacement: %w", err)
+	}
+	return receipt, nil
+}
+
+func getSerenaYAMLMapping(mapping *yaml.Node, key string) (*yaml.Node, bool) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1], true
+		}
+	}
+	return nil, false
+}
+
+func setSerenaYAMLMapping(mapping *yaml.Node, key string, value *yaml.Node) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content[i+1] = value
+			return
+		}
+	}
+	mapping.Content = append(mapping.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
+}
+
+// setSerenaYAMLMappingFromCompatibilityKey carries comments attached to the
+// retired compatibility key onto the canonical replacement. In YAML a comment
+// immediately before `languages:` belongs to that key node, so removing the
+// key without this transfer silently erases an operator's unrelated note.
+func setSerenaYAMLMappingFromCompatibilityKey(mapping *yaml.Node, key string, value *yaml.Node, compatibilityKey string) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content[i+1] = value
+			return
+		}
+	}
+	newKey := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value != compatibilityKey {
+			continue
+		}
+		newKey.HeadComment = mapping.Content[i].HeadComment
+		newKey.LineComment = mapping.Content[i].LineComment
+		newKey.FootComment = mapping.Content[i].FootComment
+		value.HeadComment = mapping.Content[i+1].HeadComment
+		value.LineComment = mapping.Content[i+1].LineComment
+		value.FootComment = mapping.Content[i+1].FootComment
+		break
+	}
+	mapping.Content = append(mapping.Content, newKey, value)
+}
+
+func removeSerenaYAMLMapping(mapping *yaml.Node, key string) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content = append(mapping.Content[:i], mapping.Content[i+2:]...)
+			return
+		}
+	}
+}
+
+func languageSequenceNode(values []string) *yaml.Node {
+	node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, value := range values {
+		node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
+	}
+	return node
+}
+
+func ignoredPathNode(excluded *yaml.Node) *yaml.Node {
+	node := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	if excluded == nil || excluded.Kind != yaml.SequenceNode {
+		return node
+	}
+	for _, item := range excluded.Content {
+		if item.Kind == yaml.ScalarNode && strings.TrimSpace(item.Value) != "" {
+			value := strings.TrimSuffix(strings.TrimSpace(item.Value), "/") + "/**"
+			node.Content = append(node.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
+		}
+	}
+	return node
 }
 
 // ------------------------------------------------------------------

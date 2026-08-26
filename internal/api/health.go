@@ -13,6 +13,7 @@ import (
 
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/mcpcompat/readinesswire"
 )
 
 // SupervisorIPCStatusFn is the v0.5.0 Phase 12 status-seam pivot. When
@@ -928,8 +929,9 @@ func (a *API) initializeCapabilitySession(d DaemonStatus) (sessionID string, cap
 	// on this path anyway (bot PR #495 P2; the old init likewise closed without
 	// reading on >= 400).
 	if resp.StatusCode >= 400 {
+		failure := readinesswire.DecodeFailureResponse(resp.StatusCode, resp.Header.Get("Content-Type"), resp.Body)
 		_ = resp.Body.Close()
-		return "", nil, false, fmt.Errorf("initialize: HTTP %d", resp.StatusCode)
+		return "", nil, false, &MCPReadinessError{Result: readinessFromFailure(failure)}
 	}
 	raw, readErr := readCapabilityProbeBody(resp)
 	_ = resp.Body.Close()

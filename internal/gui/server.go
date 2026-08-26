@@ -30,6 +30,12 @@ type Config struct {
 	// Port to bind on 127.0.0.1. Zero lets the OS pick one from the
 	// ephemeral range; the chosen port is reported via Server.Port().
 	Port int
+	// AdoptLeaseOwner is an in-process adoption dependency. Nil keeps the API's
+	// production owner; it is not populated from a request, config file, or env.
+	AdoptLeaseOwner api.AdoptLeaseOwner
+	// AdoptReceivingVerifier is an in-process post-commit dependency. Nil keeps
+	// the production receiver verifier; it is not populated from user input.
+	AdoptReceivingVerifier api.AdoptReceivingVerifier
 	// Version is surfaced by /api/ping so the GUI's About screen and the
 	// second-instance probe can confirm identity across releases.
 	Version string
@@ -83,10 +89,16 @@ func (r realScanner) Scan() (*api.ScanResult, error) {
 	if r.guiPort != nil {
 		guiPort = r.guiPort()
 	}
-	return api.NewAPI().ScanFrom(api.ScanOpts{
-		ConfigPaths: api.DefaultScanConfigPaths(),
-		ManifestDir: "",
-		GUIPort:     guiPort,
+	a := api.NewAPI()
+	readinessRows, err := a.Status()
+	if err != nil {
+		return nil, err
+	}
+	return a.ScanFrom(api.ScanOpts{
+		ConfigPaths:   api.DefaultScanConfigPaths(),
+		ManifestDir:   "",
+		GUIPort:       guiPort,
+		ReadinessRows: readinessRows,
 	})
 }
 
@@ -653,25 +665,27 @@ type Server struct {
 	// caching machinery. Other handlers still use the per-request
 	// api.NewAPI() pattern (out of scope for this task; can adopt later
 	// if their workloads benefit).
-	api                   *api.API
-	onActivateWindow      func() error
-	scanner               scanner
-	status                statusProvider
-	health                healthBackend
-	migrator              migrator
-	demigrater            demigrater
-	dismisser             dismisser
-	manifestCreator       manifestCreator
-	manifestValidator     manifestValidator
-	manifestGetter        manifestGetter
-	manifestPresence      manifestPresence
-	manifestEditor        manifestEditor
-	manifestLister        manifestLister
-	manifestDeleter       manifestDeleter
-	catalogLister         catalogLister
-	catalogManifestGetter catalogManifestGetter
-	marketplaceLister     marketplaceLister
-	marketplaceRefresher  marketplaceRefresher
+	api                    *api.API
+	adoptLeaseOwner        api.AdoptLeaseOwner
+	adoptReceivingVerifier api.AdoptReceivingVerifier
+	onActivateWindow       func() error
+	scanner                scanner
+	status                 statusProvider
+	health                 healthBackend
+	migrator               migrator
+	demigrater             demigrater
+	dismisser              dismisser
+	manifestCreator        manifestCreator
+	manifestValidator      manifestValidator
+	manifestGetter         manifestGetter
+	manifestPresence       manifestPresence
+	manifestEditor         manifestEditor
+	manifestLister         manifestLister
+	manifestDeleter        manifestDeleter
+	catalogLister          catalogLister
+	catalogManifestGetter  catalogManifestGetter
+	marketplaceLister      marketplaceLister
+	marketplaceRefresher   marketplaceRefresher
 	// Marketplace one-click install (POST /api/marketplace/install) seams —
 	// all behind interfaces so handler tests inject fakes and never touch the
 	// live fleet / live client configs.
@@ -943,6 +957,8 @@ func NewServer(cfg Config) *Server {
 	// THIS instance. Other handlers continue to use api.NewAPI() per
 	// request — out of scope for this task.
 	s.api = api.NewAPI()
+	s.adoptLeaseOwner = cfg.AdoptLeaseOwner
+	s.adoptReceivingVerifier = cfg.AdoptReceivingVerifier
 	s.scanner = realScanner{guiPort: s.Port}
 	s.status = realStatusProvider{}
 	s.health = realHealthBackend{api: s.api}

@@ -41,6 +41,131 @@ import (
 	"mcp-local-hub/internal/api/apitest"
 )
 
+func TestObserveSupervisorReadiness_DeterministicCurrentGeneration(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	task := `\mcp-local-hub-memory-default`
+	started := time.Date(2026, 8, 26, 9, 0, 0, 0, time.UTC)
+	generation := tracker.MarkSpawned(task, 4321, started)
+	now := started
+	inspectCalls, waitCalls, probeCalls := 0, 0, 0
+
+	observeSupervisorReadinessWithDeps(
+		tracker,
+		nil,
+		api.SupervisorDaemon{TaskName: task, Server: "memory", Daemon: "default", Port: 9304, StartupBindDeadlineSeconds: 5},
+		generation,
+		4321,
+		started,
+		supervisorReadinessObserverDeps{
+			now: func() time.Time { return now },
+			wait: func(delay time.Duration) {
+				waitCalls++
+				now = now.Add(delay)
+			},
+			inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
+				inspectCalls++
+				return inspectCalls >= 2, inspectCalls >= 2
+			},
+			probe: func(port int) api.MCPReadinessResult {
+				probeCalls++
+				if port != 9304 {
+					t.Fatalf("probe port = %d, want 9304", port)
+				}
+				return api.MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessReady}
+			},
+		},
+	)
+
+	entry, ok := tracker.Get(task)
+	if !ok || entry.ReadinessObservation == nil {
+		t.Fatalf("tracker entry = %#v, want readiness observation", entry)
+	}
+	observation := entry.ReadinessObservation
+	if !observation.ListenerReady || !observation.MCPInitializeReady || !observation.MCPToolsListReady {
+		t.Fatalf("observation = %#v, want settled MCP readiness", observation)
+	}
+	if inspectCalls != 2 || waitCalls != 1 || probeCalls != 1 {
+		t.Fatalf("calls inspect=%d wait=%d probe=%d, want 2/1/1", inspectCalls, waitCalls, probeCalls)
+	}
+}
+
+func TestObserveSupervisorReadiness_BlockedProbeCannotSettleExitedSameGeneration(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	task := `\mcp-local-hub-memory-default`
+	started := time.Date(2026, 8, 26, 9, 30, 0, 0, time.UTC)
+	generation := tracker.MarkSpawned(task, 4321, started)
+	stateDir := apitest.HardenedTempDir(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{
+		Version: 1,
+		Daemons: []api.SupervisorDaemon{{
+			TaskName: task, Server: "memory", Daemon: "default", Port: 9304,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	probeEntered := make(chan struct{})
+	probeRelease := make(chan struct{})
+	observerDone := make(chan struct{})
+	go func() {
+		defer close(observerDone)
+		observeSupervisorReadinessWithDeps(
+			tracker,
+			nil,
+			api.SupervisorDaemon{TaskName: task, Server: "memory", Daemon: "default", Port: 9304, StartupBindDeadlineSeconds: 5},
+			generation,
+			4321,
+			started,
+			supervisorReadinessObserverDeps{
+				now:  func() time.Time { return started },
+				wait: func(time.Duration) {},
+				inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
+					return true, true
+				},
+				probe: func(int) api.MCPReadinessResult {
+					close(probeEntered)
+					<-probeRelease
+					return api.MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessReady}
+				},
+			},
+		)
+	}()
+	<-probeEntered
+	if !tracker.MarkExitedIfCurrent(task, generation) {
+		t.Fatal("same-generation exit was rejected")
+	}
+	close(probeRelease)
+	select {
+	case <-observerDone:
+	case <-time.After(time.Second):
+		t.Fatal("blocked readiness observer did not return after release")
+	}
+
+	entry, ok := tracker.Get(task)
+	if !ok || entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 || entry.ReadinessObservation != nil {
+		t.Fatalf("post-exit entry = %#v, want idle with no readiness observation", entry)
+	}
+	rows, err := supervisorStatusDaemons(stateDir, tracker, nil)
+	if err != nil {
+		t.Fatalf("supervisorStatusDaemons: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("status rows = %#v, want one", rows)
+	}
+	if _, exists := rows[0]["readiness_observation"]; exists {
+		t.Fatalf("exited same-generation status leaked readiness: %#v", rows[0])
+	}
+	stale := api.DaemonReadinessObservationV1{
+		TaskName: task, Server: "memory", Daemon: "default", Port: 9304, PID: 4321,
+		ProcessState: "Running", CurrentPIDGeneration: uint64(generation), ObservedPIDGeneration: uint64(generation),
+		IntentPresent: true, IntentRunnable: true, WrapperStarted: true, ListenerReady: true,
+		MCPInitializeReady: true, MCPToolsListReady: true, Policy: api.ReadinessPolicyMCPUpstream,
+	}
+	if accepted, event := tracker.MarkReadinessObservationWithSettlement(stale); accepted || event != nil {
+		t.Fatalf("same-generation exited settlement accepted=%v event=%#v", accepted, event)
+	}
+}
+
 // TestSuperviseCommand_FailsClosedWhenIntentCollapseCannotMergeLegacyStops verifies that
 // startup aborts when E2 collapse fails before active legacy stops are durable
 // in supervisor-intent.json's sub-block.

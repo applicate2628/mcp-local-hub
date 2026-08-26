@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -80,12 +81,13 @@ args = ["version"]
 // NO vault key, NO manifest, NO client-config change, NO provenance row.
 func TestExecuteAdoptCaptureFailClosed(t *testing.T) {
 	entry := "mui-adopt-seam-c2"
+	literalSecret := "literal-" + "secret-value"
 	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-seam-c2]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-seam-c2.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -139,12 +141,13 @@ API_KEY = "literal-secret-value"
 func TestExecuteAdoptAbortOnEachFailureBranch(t *testing.T) {
 	t.Run("persist-secrets-failure", func(t *testing.T) {
 		entry := "mui-adopt-seam-c3-persist"
+		literalSecret := "literal-" + "secret-value"
 		setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-seam-c3-persist]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-seam-c3-persist.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 		// NO SecretsInit -> persistAdoptRoutedSecrets fails opening a nonexistent
 		// vault, AFTER capture already wrote provenance. Abort site 1.
@@ -210,8 +213,8 @@ args = ["version"]
 	})
 }
 
-// C5 — a promote-flip failure after Install success is NON-FATAL: adopt still
-// returns success and the row is left recoverable `adopting` with both hashes.
+// C5 — a promote-flip failure after Install leaves a recoverable `adopting`
+// row with both hashes but returns the typed provenance-receipt failure.
 func TestExecuteAdoptPromoteRecoverable(t *testing.T) {
 	entry := "mui-adopt-seam-c5"
 	setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-seam-c5]
@@ -227,8 +230,13 @@ args = ["version"]
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err != nil {
-		t.Fatalf("ExecuteAdopt must still succeed despite a non-fatal promote failure: %v", err)
+	err = NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{})
+	if err == nil {
+		t.Fatal("ExecuteAdopt succeeded despite a failed provenance receipt")
+	}
+	var stageErr *AdoptStageError
+	if !errors.As(err, &stageErr) || stageErr.Stage != "provenance-receipt" {
+		t.Fatalf("ExecuteAdopt error = %v, want typed provenance-receipt stage", err)
 	}
 	rec, found, err := ReadAdoptProvenance(entry)
 	if err != nil || !found {
@@ -275,12 +283,13 @@ args = ["version"]
 // source special case.
 func TestCaptureFailsClosedWhenPresentClientVanishes(t *testing.T) {
 	entry := "mui-adopt-vanish"
+	literalSecret := "literal-" + "secret-value"
 	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-vanish]
 command = "go"
 args = ["version"]
 
 [mcp_servers.mui-adopt-vanish.env]
-API_KEY = "literal-secret-value"
+API_KEY = "`+literalSecret+`"
 `)
 	if _, err := NewAPI().SecretsInit(); err != nil {
 		t.Fatalf("SecretsInit: %v", err)
@@ -291,7 +300,7 @@ API_KEY = "literal-secret-value"
 	writeJSONForAdoptTest(t, cursorPath, map[string]any{
 		"mcpServers": map[string]any{entry: map[string]any{
 			"command": "go", "args": []any{"version"},
-			"env": map[string]any{"API_KEY": "literal-secret-value"},
+			"env": map[string]any{"API_KEY": literalSecret},
 		}},
 	})
 	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())

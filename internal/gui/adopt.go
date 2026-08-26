@@ -93,9 +93,12 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var narration bytes.Buffer
-	if err := api.NewAPI().ExecuteAdoptWithOpts(plan, &narration, api.ExecuteAdoptOpts{
-		SymlinkConsents: adoptResolvedSymlinkConsents(targets),
-	}); err != nil {
+	err = api.NewAPI().ExecuteAdoptWithOpts(plan, &narration, api.ExecuteAdoptOpts{
+		SymlinkConsents:   adoptResolvedSymlinkConsents(targets),
+		LeaseOwner:        s.adoptLeaseOwner,
+		ReceivingVerifier: s.adoptReceivingVerifier,
+	})
+	if err != nil {
 		if out := strings.TrimSpace(narration.String()); out != "" {
 			log.Printf("/api/adopt execution output before failure:\n%s", out)
 		}
@@ -247,6 +250,13 @@ func adoptExecuteErrorStatus(err error) (int, string) {
 }
 
 func writeAdoptExecuteError(w http.ResponseWriter, err error, status int, code string) {
+	// The public lease cleanup identifier is already redacted and actionable.
+	// Preserve it for the local GUI while every wrapped owner cause stays out of
+	// the wire body and renderer.
+	if err.Error() == "E_ADOPT_LEASE_CLEANUP" {
+		writeJSON(w, status, map[string]string{"error": "E_ADOPT_LEASE_CLEANUP", "code": code})
+		return
+	}
 	// SYMLINK_CONSENT_REQUIRED deliberately names the resolved symlink target —
 	// the operator already sees resolved_path in the plan, so surfacing it here
 	// is consistent, not a leak.

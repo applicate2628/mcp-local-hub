@@ -62,6 +62,9 @@ type InstallParsedManifestOpts struct {
 	// / E.2 auto-register).
 	Workspaces []WorkspaceEntry
 	DryRun     bool
+	// ManifestHash is the exact ManifestHashContent of the raw manifest bytes
+	// loaded by the caller before parsing or semantic projection.
+	ManifestHash string
 	// RequireWorkspaceKey, when non-empty, makes the install FAIL PRE-COMMIT
 	// (before the supervisor-intent write) if the merged intent does not carry a
 	// serena per-workspace daemon row for this key — i.e. buildMergedSupervisorIntent's
@@ -319,7 +322,7 @@ func (a *API) InstallParsedManifest(ctx context.Context, m *config.ServerManifes
 	// installs the full set (no per-daemon filter), so pass "" — and serena's
 	// manifest has weekly_refresh=false, so mergeServerWeeklyRefreshTimer's
 	// materialization condition never fires here (prior timers carry verbatim).
-	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, opts.Workspaces, "", w)
+	desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, nil, opts.ManifestHash, intentPath, opts.Workspaces, "", w)
 	if err != nil {
 		return "", err
 	}
@@ -646,7 +649,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			// threaded so a global manifest's weekly_refresh materializes a
 			// server-weekly-refresh MaintenanceTimer on a FULL install (the Phase F
 			// successor to the deleted per-server scheduler task at install.go:1230).
-			desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, intentPath, nil, daemonFilter, w)
+			desiredIntent, priorIntent, priorExisted, err := a.buildMergedSupervisorIntent(m, plan, "", intentPath, nil, daemonFilter, w)
 			if err != nil {
 				return err
 			}
@@ -825,12 +828,16 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 		return fmt.Errorf("resolve state dir: %w", err)
 	}
 	intentPath := joinStateFilePath(stateDir, supervisorIntentFileLeaf)
-	desiredIntent, priorIntent, priorExisted, mergeErr := a.buildMergedSupervisorIntent(m, intentPath, nil, daemonFilter, io.Discard)
+	desiredIntent, priorIntent, priorExisted, mergeErr := a.buildMergedSupervisorIntent(m, plan, "", intentPath, nil, daemonFilter, io.Discard)
 	var priorDiffUnavailable string
 	if mergeErr != nil {
+		fallbackRows, rowErr := supervisorDaemonsFromPlan(m, plan, daemonFilter)
+		if rowErr != nil {
+			return rowErr
+		}
 		desiredIntent = &SupervisorIntentFile{
 			Version:           1,
-			Daemons:           supervisorDaemonsFromPlan(m, daemonFilter),
+			Daemons:           fallbackRows,
 			MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, nil),
 		}
 		priorDiffUnavailable = fmt.Sprintf("unable to read prior supervisor intent at %s: %v", intentPath, mergeErr)
@@ -845,7 +852,10 @@ func (a *API) printSupervisorGlobalInstallDryRun(m *config.ServerManifest, plan 
 	legacyTasks, legacyErr := legacySchedulerTasksForSupervisorInstallDryRun(m, daemonFilter)
 
 	fmt.Fprintf(w, "Install plan for server %q (dry-run):\n\n", plan.Server)
-	daemonRows := supervisorDaemonsFromPlan(m, daemonFilter)
+	daemonRows, rowErr := supervisorDaemonsFromPlan(m, plan, daemonFilter)
+	if rowErr != nil {
+		return rowErr
+	}
 	fmt.Fprintf(w, "  Supervisor intent rows to write (%d):\n", len(daemonRows))
 	for _, d := range daemonRows {
 		fmt.Fprintf(w, "    \u2022 %s  [port %d]\n        %s %v\n", strings.TrimPrefix(d.TaskName, `\`), d.Port, d.Command, d.Args)
@@ -1535,7 +1545,7 @@ const supervisorStateFileLeaf = "supervisor-state.json"
 // server-weekly-refresh timer is replaced, mirroring the Daemons replace-by-
 // server logic above for full installs. Filtered installs replace only the
 // selected daemon row and preserve this server's other daemon rows verbatim.
-func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
+func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, plan *Plan, dynamicManifestHash, intentPath string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) (merged, prior *SupervisorIntentFile, priorExisted bool, err error) {
 	prior, existed, err := readSupervisorIntentForMerge(intentPath)
 	if err != nil {
 		return nil, nil, false, err
@@ -1585,7 +1595,11 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, intentPath s
 		}
 		kept = append(kept, d)
 	}
-	kept = append(kept, serenaOrPlanDaemons(m, workspaces, daemonFilter, w)...)
+	fresh, err := serenaOrPlanDaemons(m, plan, dynamicManifestHash, workspaces, daemonFilter, w)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	kept = append(kept, fresh...)
 
 	merged = &SupervisorIntentFile{
 		Version:           1,
@@ -2254,7 +2268,7 @@ func fanOutAuditTaskNames(m *config.ServerManifest, desired *SupervisorIntentFil
 // m.Kind == KindWorkspaceScoped, and len(workspaces) > 0 (returning nil
 // otherwise), so a non-workspace-scoped manifest or an empty workspaces
 // snapshot deterministically takes the plan-derived branch here.
-func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) []SupervisorDaemon {
+func serenaOrPlanDaemons(m *config.ServerManifest, plan *Plan, dynamicManifestHash string, workspaces []WorkspaceEntry, daemonFilter string, w io.Writer) ([]SupervisorDaemon, error) {
 	if m.DaemonTemplate != nil && len(workspaces) > 0 {
 		// FIX 3 — drop stale workspace rows (path no longer exists on disk)
 		// BEFORE the fan-out. BuildSupervisorDaemonsForSerena's contract
@@ -2275,16 +2289,14 @@ func serenaOrPlanDaemons(m *config.ServerManifest, workspaces []WorkspaceEntry, 
 		if perr != nil {
 			mcphubPath = mcphubShortName
 		}
-		// ManifestHash is left empty here: this slice does not compute a
-		// content hash for the parsed manifest, and the field is
-		// diagnostic provenance only (the supervisor spawns from the
-		// self-sufficient argv, not the hash). A later slice may thread a
-		// real hash through.
-		if serena := BuildSupervisorDaemonsForSerena(m, live, "", mcphubPath); serena != nil {
-			return serena
+		if len(live) > 0 && dynamicManifestHash == "" {
+			return nil, fmt.Errorf("install intent: exact manifest hash is required for %d workspace daemon row(s)", len(live))
+		}
+		if serena := BuildSupervisorDaemonsForSerena(m, live, dynamicManifestHash, mcphubPath); serena != nil {
+			return serena, nil
 		}
 	}
-	return supervisorDaemonsFromPlan(m, daemonFilter)
+	return supervisorDaemonsFromPlan(m, plan, daemonFilter)
 }
 
 // workspacePathStale reports whether a workspace path is stale (deleted /
@@ -2538,9 +2550,9 @@ func emitDaemonInstalledEvents(server string, rows []SupervisorDaemon) {
 // the D.2 helper, out of this slice's scope) so this returns nil for them.
 // daemonFilter limits the materialized rows for partial installs; empty means
 // all manifest daemons.
-func supervisorDaemonsFromPlan(m *config.ServerManifest, daemonFilter string) []SupervisorDaemon {
+func supervisorDaemonsFromPlan(m *config.ServerManifest, plan *Plan, daemonFilter string) ([]SupervisorDaemon, error) {
 	if m.Kind == config.KindWorkspaceScoped {
-		return nil
+		return nil, nil
 	}
 	canonical, err := canonicalMcphubPath()
 	if err != nil {
@@ -2555,21 +2567,38 @@ func supervisorDaemonsFromPlan(m *config.ServerManifest, daemonFilter string) []
 		if daemonFilter != "" && d.Name != daemonFilter {
 			continue
 		}
-		bare := "mcp-local-hub-" + m.Name + "-" + d.Name
+		bare := supervisorTaskNameForManifestDaemon(m.Name, d.Name)
+		if plan == nil || !plan.supervisorIntentHashesBound {
+			return nil, fmt.Errorf("install intent: task %q has no exact raw-manifest hash binding", bare)
+		}
+		manifestHash := ""
+		matches := 0
+		if plan != nil {
+			for _, descriptor := range plan.SupervisorIntent {
+				if descriptor.Name == bare {
+					matches++
+					manifestHash = descriptor.manifestHash
+				}
+			}
+		}
+		if matches != 1 || manifestHash == "" {
+			return nil, fmt.Errorf("install intent: task %q requires exactly one plan descriptor with a nonempty exact manifest hash (matches=%d)", bare, matches)
+		}
 		out = append(out, SupervisorDaemon{
-			TaskName: canonicalIntentTaskKey(bare),
-			Server:   m.Name,
-			Daemon:   d.Name,
-			Command:  canonical,
-			Args:     []string{"daemon", "--server", m.Name, "--daemon", d.Name},
-			Env:      cloneStringMap(m.Env),
-			Port:     d.Port,
+			TaskName:     canonicalIntentTaskKey(bare),
+			Server:       m.Name,
+			Daemon:       d.Name,
+			Command:      canonical,
+			Args:         []string{"daemon", "--server", m.Name, "--daemon", d.Name},
+			Env:          cloneStringMap(m.Env),
+			Port:         d.Port,
+			ManifestHash: manifestHash,
 			// P1b: carry the manifest-declared first-bind deadline into the
 			// descriptor the liveness sweep reads (0 = default resolution).
 			StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
 		})
 	}
-	return out
+	return out, nil
 }
 
 // readSupervisorIntentForMerge reads + parses the intent file. A missing

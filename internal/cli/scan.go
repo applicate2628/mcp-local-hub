@@ -109,6 +109,10 @@ Examples:
 See also: migrate, manifest list, install.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
+			readinessRows, err := a.StatusContext(cmd.Context())
+			if err != nil {
+				return err
+			}
 			result, err := a.ScanFrom(api.ScanOpts{
 				// §9.2 drift-prevention: the per-client config-path set is
 				// DERIVED from the canonical registry
@@ -122,6 +126,7 @@ See also: migrate, manifest list, install.`,
 				ConfigPaths:      api.DefaultScanConfigPaths(),
 				ManifestDir:      scanManifestDir(),
 				WithProcessCount: withProcs,
+				ReadinessRows:    readinessRows,
 			})
 			if err != nil {
 				return err

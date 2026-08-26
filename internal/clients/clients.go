@@ -340,6 +340,20 @@ type ScopedConfigWriterClient interface {
 	RestoreEntryFromBackupForRollbackWithConfigWriter(backupPath, name string, writer WriteConfigFileFunc) error
 }
 
+// CodexTransportClient is the narrow Codex-only seam used by adopt planning and
+// execution. ResolveTransportTarget is read-only; RelocateHTTPEntry is one
+// locked global-config transaction and never takes a project config path.
+type CodexTransportClient interface {
+	ResolveTransportTarget(CodexTransportTargetRequest) (CodexTransportTarget, error)
+	RelocateHTTPEntry(CodexHTTPRelocation) (CodexHTTPRelocationResult, error)
+	RestoreRelocatedHTTPEntry(CodexHTTPInverseRelocation) (CodexHTTPInverseResult, error)
+}
+
+func AsCodexTransportClient(client Client) (CodexTransportClient, bool) {
+	codex, ok := client.(CodexTransportClient)
+	return codex, ok
+}
+
 func AddEntryWithConfigWriter(client Client, entry MCPEntry, writer WriteConfigFileFunc) error {
 	if writer == nil {
 		return client.AddEntry(entry)
@@ -575,7 +589,7 @@ func matchLanguageServerStdio(raw map[string]any) (cmd, language string, ok bool
 // servers the user may have named "clangd" / "fortran" / etc.
 //
 // Path separators are normalized via basenameAcrossSeparators so a
-// Windows-style absolute path like `C:\Users\u\.local\bin\mcp-
+// Windows-style absolute path like `C:\Users\<user>\.local\bin\mcp-
 // language-server.exe` matches on POSIX hosts too. Cross-environment
 // configs (e.g. WSL pointing at a shared Windows dotfile) and
 // regression tests on Linux CI both depend on that normalization

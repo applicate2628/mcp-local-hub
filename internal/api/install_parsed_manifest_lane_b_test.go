@@ -190,8 +190,9 @@ func TestInstallParsedManifest_KillsDroppedWorkspaceRowAfterNudgeOnly(t *testing
 	}))
 
 	if _, err := NewAPI().InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     io.Discard,
-		Workspaces: []WorkspaceEntry{keepEntry},
+		ManifestHash: testExactManifestHash,
+		Writer:       io.Discard,
+		Workspaces:   []WorkspaceEntry{keepEntry},
 	}); err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}
@@ -411,8 +412,9 @@ func TestInstallParsedManifest_PrunesStopsForDroppedWorkspaceRows(t *testing.T) 
 	}))
 
 	if _, err := NewAPI().InstallParsedManifest(context.Background(), m, InstallParsedManifestOpts{
-		Writer:     io.Discard,
-		Workspaces: []WorkspaceEntry{keepEntry},
+		ManifestHash: testExactManifestHash,
+		Writer:       io.Discard,
+		Workspaces:   []WorkspaceEntry{keepEntry},
 	}); err != nil {
 		t.Fatalf("InstallParsedManifest: %v", err)
 	}

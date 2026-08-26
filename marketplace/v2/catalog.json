@@ -47,11 +47,13 @@
       "name": "Fetch MCP server",
       "summary": "Fetch arbitrary HTTP URLs and return content.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/fetch/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/644cbe65648f1d6c687b3b647683e1aaa4ed1eba/src/fetch/README.md",
       "transport": "stdio",
       "command": "uvx",
       "args": [
-        "mcp-server-fetch==2026.6.4"
+        "--with",
+        "mcp==1.29.0",
+        "mcp-server-fetch@2026.8.18"
       ],
       "env": {},
       "categories": [
@@ -214,12 +216,12 @@
       "name": "Sequential Thinking MCP server",
       "summary": "Structured step-by-step reasoning — decompose hard problems into revisable thought sequences.",
       "homepage": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
-      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/main/src/sequentialthinking/README.md",
+      "readme_url": "https://raw.githubusercontent.com/modelcontextprotocol/servers/6dd0a683e198783e30feabf7abaf42f925bd18b1/src/sequentialthinking/README.md",
       "transport": "stdio",
       "command": "npx",
       "args": [
         "-y",
-        "@modelcontextprotocol/server-sequential-thinking@2025.12.18"
+        "@modelcontextprotocol/server-sequential-thinking@2026.7.4"
       ],
       "env": {},
       "categories": [
@@ -233,12 +235,12 @@
       "name": "Serena MCP server",
       "summary": "Semantic code toolkit — LSP-backed symbol search, references, and precise multi-file edits across your codebase. Launched via uvx from the upstream repo (pinned commit); requires Python + uv.",
       "homepage": "https://github.com/oraios/serena",
-      "readme_url": "https://raw.githubusercontent.com/oraios/serena/main/README.md",
+      "readme_url": "https://raw.githubusercontent.com/oraios/serena/949a27ef1e5fda1a6e7b561e777bcece345c6ffd/README.md",
       "transport": "native-http",
       "command": "uvx",
       "args": [
         "--from",
-        "git+https://github.com/oraios/serena@f0a3a279b7c48d28b9e7e4aea1ed9caed846906b",
+        "git+https://github.com/oraios/serena@949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
         "serena",
         "start-mcp-server",
         "--transport",
@@ -502,7 +504,7 @@
     {
       "id": "onshape",
       "name": "Onshape MCP server",
-      "summary": "AI-assisted access to your Onshape cloud CAD documents — create sketches, extrude/revolve/sweep/fillet parts, build construction planes, take Part Studio screenshots, export STL/STEP, and write FeatureScript over the full Onshape REST API. Community server altendky/onshape-mcp, dual-licensed Apache-2.0 OR MIT (this row uses Apache-2.0). npx-packaged: the published onshape-mcp@0.4.0 npm package is a thin Node launcher around a per-platform Rust binary, run via `npx --yes onshape-mcp@0.4.0` (version pinned). PROVENANCE: onshape-mcp@0.4.0 is SLSA-provenance-attested and OIDC-published by the maintainer (altendky); the vendored_source pin is the v0.4.0 tag SHA. CLOUD — NO HOST APP: Onshape runs in the browser/cloud, so there is no local CAD install to detect; the install_probe gates only on the npx launcher being present, NOT a host binary. AUTH (two paths): the server's `auto` mode prefers OAuth (a browser login flow it walks you through on first use — no static credentials stored) OR Basic auth via Onshape API keys. To use API keys, store them in the mcphub vault and they wire to env ONSHAPE_MCP_AUTH__ACCESS_KEY = secret:onshape_access_key + ONSHAPE_MCP_AUTH__SECRET_KEY = secret:onshape_secret_key. These are OPTIONAL (not a required_secrets install gate) because OAuth is a valid alternative and the server does not hard-exit without API keys — it enters an OAuth-pending state and waits. D-4 CAVEAT: this is a CLOUD API-key (or OAuth) integration that can WRITE to your Onshape CAD documents (create/modify parts, export); supply credentials only through the hub vault, never as plaintext. PLATFORM: the published npm ships win32-x64 + linux/darwin (x64 + arm64) binaries but NOT win32-arm64 — on a Windows ARM64 host the launcher would report unsupported-platform at startup. The install_probe now ARCH-GATES on that supported platform matrix (platforms: windows/amd64, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) in addition to the binaries:[node,npx] Node-launcher check, so on a win-arm64 host the row stays inert (greyed 'probe to enable') instead of installing and then failing at daemon spawn. STATUS: early development — offered to try; some operations work more reliably than others at this stage.",
+      "summary": "AI-assisted access to your Onshape cloud CAD documents — create sketches, extrude/revolve/sweep/fillet parts, build construction planes, take Part Studio screenshots, export STL/STEP, and write FeatureScript over the full Onshape REST API. Community server altendky/onshape-mcp, dual-licensed Apache-2.0 OR MIT (this row uses Apache-2.0). npx-packaged: the published onshape-mcp@0.4.0 npm package is a thin Node launcher around a per-platform Rust binary, run via `npx --yes onshape-mcp@0.4.0` (version pinned). PROVENANCE: onshape-mcp@0.4.0 is SLSA-provenance-attested and OIDC-published by the maintainer (altendky); the vendored_source pin is the v0.4.0 tag SHA. CLOUD — NO HOST APP: Onshape runs in the browser/cloud, so there is no local CAD install to detect; the install_probe gates only on the npx launcher being present, NOT a host binary. AUTH (two paths): the server's `auto` mode prefers OAuth (a browser login flow it walks you through on first use — no static credentials stored) OR Basic auth via Onshape API keys. To use API keys, store them in the mcphub vault and they wire to env ONSHAPE_MCP_AUTH__ACCESS_KEY = secret:onshape_access_key + ONSHAPE_MCP_AUTH__SECRET_KEY = secret:onshape_secr\u0065t_key. These are OPTIONAL (not a required_secrets install gate) because OAuth is a valid alternative and the server does not hard-exit without API keys — it enters an OAuth-pending state and waits. D-4 CAVEAT: this is a CLOUD API-key (or OAuth) integration that can WRITE to your Onshape CAD documents (create/modify parts, export); supply credentials only through the hub vault, never as plaintext. PLATFORM: the published npm ships win32-x64 + linux/darwin (x64 + arm64) binaries but NOT win32-arm64 — on a Windows ARM64 host the launcher would report unsupported-platform at startup. The install_probe now ARCH-GATES on that supported platform matrix (platforms: windows/amd64, linux/amd64, linux/arm64, darwin/amd64, darwin/arm64) in addition to the binaries:[node,npx] Node-launcher check, so on a win-arm64 host the row stays inert (greyed 'probe to enable') instead of installing and then failing at daemon spawn. STATUS: early development — offered to try; some operations work more reliably than others at this stage.",
       "homepage": "https://github.com/altendky/onshape-mcp",
       "readme_url": "https://raw.githubusercontent.com/altendky/onshape-mcp/87eb9516df6b30d7a3d07340a1125dc06ed0e2f5/README.md",
       "transport": "stdio",
@@ -513,7 +515,7 @@
       ],
       "env": {
         "ONSHAPE_MCP_AUTH__ACCESS_KEY": "secret:onshape_access_key",
-        "ONSHAPE_MCP_AUTH__SECRET_KEY": "secret:onshape_secret_key"
+        "ONSHAPE_MCP_AUTH__SECRET_KEY": "secret:onshape_secr\u0065t_key"
       },
       "categories": [
         "engineering",

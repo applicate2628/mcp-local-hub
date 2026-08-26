@@ -5,12 +5,40 @@ Two operator-owned Model Context Protocol (MCP) servers for noninteractive local
 - `mcphub-hfss-mcp` uses the installed Ansys Electronics Desktop batch/script interface with a private, non-graphical process.
 - `mcphub-cst-mcp` uses the installed CST Studio Suite external-Python API with a private hidden Design Environment.
 
-They expose exactly six MVP tools:
+The default catalogue contains six MVP tools. An owner-provisioned, restart-loaded
+policy can add one restricted CST saved-field sampler:
 
 | Server | Tools |
 |---|---|
 | HFSS | `hfss_solve`, `hfss_export_mesh`, `hfss_export_sparams` |
-| CST | `cst_solve`, `cst_export_mesh`, `cst_export_results` |
+| CST, policy absent/invalid/disabled | `cst_solve`, `cst_export_mesh`, `cst_export_results` |
+| CST, valid enabled policy after restart | The three tools above plus `cst_sample_saved_field` |
+
+## Restricted CST saved-field sampler
+
+`cst_sample_saved_field` is default-off. The only enablement input is
+`MCPHUB_EM_CST_SAVED_FIELD_POLICY`, which must name an absolute, local,
+owner-restricted canonical policy file using schema
+`mcphub.cst.saved_field_authority.v1`. Create a replacement file completely,
+atomically replace the prior policy, and restart the CST daemon. Missing,
+disabled, invalid, unsupported, remotely stored, aliased, or broadly accessible
+policy files leave the live CST catalogue at three tools. Revocation likewise
+requires an atomic disabled-policy replacement and daemon restart; there is no
+request flag, hub route, or client-side shortcut that enables the sampler.
+
+Each enabled entry pins the project, mesh, and complete manifest-v2 bundle by
+SHA-256 and Windows file identity. Calls are accepted only for the exact lexical
+project entry. A helper copies the complete bounded inventory from stable handles
+into one disposable workspace, proves exact destination equality, and gives CST
+only committed workspace paths. Source paths never reach a write-capable CST API.
+
+The call is synchronous, no-solve, and non-preemptible after admission. One active
+call and one bounded waiter are permitted. The absolute budget is 60 seconds;
+after termination begins, up to 10 additional seconds are cleanup-only. Failed
+containment settlement quarantines the sampler until a clean restart and policy
+revalidation. The helper and descendants run without a visible console. Responses
+contain one redacted text item capped at 1,048,576 UTF-8 bytes; protocol bytes,
+stderr, paths, command lines, and proprietary values are never returned.
 
 ## Job model
 

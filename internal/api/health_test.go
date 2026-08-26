@@ -13,6 +13,12 @@ import (
 
 func TestHealthSnapshot_DefaultExcludesProbesAndCapabilities(t *testing.T) {
 	a := NewAPI()
+	originalStatusFn := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatusFn }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{}, nil
+	}
+
 	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
 	if err != nil {
 		t.Fatalf("HealthSnapshot: %v", err)
@@ -30,7 +36,16 @@ func TestHealthSnapshot_DefaultExcludesProbesAndCapabilities(t *testing.T) {
 
 func TestHealthSnapshot_JSONOmitsNilSections(t *testing.T) {
 	a := NewAPI()
-	snap, _ := a.HealthSnapshot(context.Background(), HealthOpts{})
+	originalStatusFn := a.HealthStatusFn
+	defer func() { a.HealthStatusFn = originalStatusFn }()
+	a.HealthStatusFn = func(opts StatusOpts) ([]DaemonStatus, error) {
+		return []DaemonStatus{}, nil
+	}
+
+	snap, err := a.HealthSnapshot(context.Background(), HealthOpts{})
+	if err != nil {
+		t.Fatalf("HealthSnapshot: %v", err)
+	}
 	b, err := json.Marshal(snap)
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)

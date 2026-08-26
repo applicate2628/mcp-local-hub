@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -122,8 +123,11 @@ args = ["version"]
 	}
 	if err := NewAPI().ExecuteAdopt(plan, ioDiscardForAdoptTest{}); err == nil {
 		t.Fatal("second same-manifest adopt succeeded; want fail-closed on the lease")
-	} else if !strings.Contains(err.Error(), "concurrent adopt") {
-		t.Errorf("error should name the concurrent-adopt refusal: %v", err)
+	} else {
+		var stage *AdoptStageError
+		if !errors.As(err, &stage) || stage.Stage != "lease-acquire" {
+			t.Errorf("error should preserve the typed lease-acquire refusal: %v", err)
+		}
 	}
 	if _, found, _ := ReadAdoptProvenance(entry); !found {
 		t.Errorf("first adopt's LIVE row was reaped by the second (lease must protect it)")
