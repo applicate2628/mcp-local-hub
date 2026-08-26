@@ -83,10 +83,16 @@ func (r realScanner) Scan() (*api.ScanResult, error) {
 	if r.guiPort != nil {
 		guiPort = r.guiPort()
 	}
-	return api.NewAPI().ScanFrom(api.ScanOpts{
-		ConfigPaths: api.DefaultScanConfigPaths(),
-		ManifestDir: "",
-		GUIPort:     guiPort,
+	a := api.NewAPI()
+	readinessRows, err := a.Status()
+	if err != nil {
+		return nil, err
+	}
+	return a.ScanFrom(api.ScanOpts{
+		ConfigPaths:   api.DefaultScanConfigPaths(),
+		ManifestDir:   "",
+		GUIPort:       guiPort,
+		ReadinessRows: readinessRows,
 	})
 }
 

@@ -71,6 +71,9 @@ type ScanOpts struct {
 	ManifestDir      string
 	WithProcessCount bool // populate ScanEntry.ProcessCount via wmic
 	GUIPort          int  // live GUI/hub listener port; zero means unknown/CLI
+	// ReadinessRows is the one supervisor IPC snapshot supplied by the caller.
+	// Scan never performs a second process or MCP observation.
+	ReadinessRows []DaemonStatus
 }
 
 // legacyNamedConfigPathSet maps the back-compat named ScanOpts fields to
@@ -694,6 +697,10 @@ var perSessionServers = map[string]bool{
 	"playwright": true,
 }
 
+func canMigrateServer(name string) bool {
+	return !perSessionServers[name]
+}
+
 // ScanFrom builds a unified cross-client view. Exposed (rather than Scan) so
 // tests can pass arbitrary paths.
 //
@@ -802,7 +809,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	for name, e := range entries {
 		e.Name = name
 		e.ManifestExists = manifestNames[name]
-		e.CanMigrate = e.ManifestExists && !perSessionServers[name]
+		e.CanMigrate = e.ManifestExists && canMigrateServer(name)
 		// Port-aware via-hub: a loopback-http entry is only "via-hub" when
 		// its URL port matches one of THIS server's manifest daemon ports.
 		// Load the set once per row and expose it on the entry so the
@@ -832,7 +839,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		e := &ScanEntry{
 			Name:           name,
 			ManifestExists: true,
-			CanMigrate:     !perSessionServers[name],
+			CanMigrate:     canMigrateServer(name),
 			ClientPresence: map[string]ClientEntry{},
 		}
 		e.DaemonPorts = manifestCache.daemonPorts(name)
@@ -865,6 +872,11 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 	}
 	for _, e := range entries {
 		out.Entries = append(out.Entries, *e)
+	}
+	if opts.ReadinessRows != nil {
+		if err := a.applyReadinessToScanEntries(out.Entries, opts.ReadinessRows); err != nil {
+			return nil, err
+		}
 	}
 	if opts.WithProcessCount {
 		// One process-snapshot shared across every entry. Previously
@@ -2246,13 +2258,18 @@ func (a *API) Scan() (*ScanResult, error) {
 	if _, err := os.UserHomeDir(); err != nil {
 		return nil, err
 	}
+	rows, err := a.Status()
+	if err != nil {
+		return nil, err
+	}
 	return a.ScanFrom(ScanOpts{
 		ConfigPaths: DefaultScanConfigPaths(),
 		// Empty ManifestDir → ScanFrom uses the embed-first resolution
 		// path. The on-disk defaultManifestDir stays available as a
 		// secondary source for dev-checkout scenarios where a freshly-
 		// added manifest hasn't been compiled into the binary yet.
-		ManifestDir: "",
+		ManifestDir:   "",
+		ReadinessRows: rows,
 	})
 }
 

@@ -352,6 +352,24 @@ func printWorkspaceScopedTable(cmd *cobra.Command, rows []api.DaemonStatus, prob
 	return nil
 }
 
+// renderMCPReadinessCell renders the typed, bounded readiness projection. It
+// never infers readiness from the legacy process State or arbitrary prose.
+func renderMCPReadinessCell(result api.MCPReadinessResult) string {
+	switch result.State {
+	case api.MCPReadinessReady:
+		return fmt.Sprintf("READY %d", result.ToolCount)
+	case api.MCPReadinessUnready:
+		if result.FailureID == "" {
+			return "UNREADY"
+		}
+		return "UNREADY " + result.FailureID
+	case api.MCPReadinessNotApplicable:
+		return "N/A"
+	default:
+		return "NOT CHECKED"
+	}
+}
+
 // renderHealthCell formats a DaemonStatus.Health probe outcome. For
 // workspace-scoped rows (Source=="proxy-synthetic") the cell annotates
 // whether the probe only confirmed the synthetic handshake or also

@@ -21,6 +21,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/mcpcompat/readinesswire"
 	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 	"mcp-local-hub/internal/secrets"
@@ -61,6 +62,11 @@ var mcphubShortName = func() string {
 // in defer.
 var testCanonicalMcphubPathOverride string
 
+// canonicalInstallRelayPathFn resolves the existing single-binary relay path.
+// The plan freezes its result before mutation so later ambient changes cannot
+// make the expected and written client entries disagree.
+var canonicalInstallRelayPathFn = canonicalMcphubPath
+
 func canonicalMcphubPath() (string, error) {
 	if testCanonicalMcphubPathOverride != "" {
 		return testCanonicalMcphubPathOverride, nil
@@ -99,10 +105,17 @@ func ensureCanonicalMcphubPresent() (string, error) {
 // Spec §"Q12 CLI/GUI status seam" + plan §2611-2644.
 type Plan struct {
 	Server           string
+	CanMigrate       bool
 	SchedulerTasks   []ScheduledTaskPlan     // DEPRECATED: kept for v0.5.x backward compat; replaced by SupervisorIntent in v0.6+.
 	SupervisorIntent []SupervisorIntentEntry // v0.5.0 Phase 12 — authoritative for new supervisor-intent.json consumers.
 	ClientUpdates    []ClientUpdatePlan
-	Notices          []string
+	// installRelayExePath is resolved once before mutation. It is an
+	// execution-only value shared by binding expectations and client writers.
+	installRelayExePath string
+	// clientConfigSettlements is populated only by a lower locked writer after
+	// exact readback. It is never a planning prediction or wire field.
+	clientConfigSettlements []ClientConfigSettlementV1
+	Notices                 []string
 	// FullInstall is true when BuildPlan was called with an empty daemonFilter
 	// — i.e. the plan covers the whole manifest. Only a full install can
 	// safely reconcile (prune) obsolete sibling scheduler tasks from prior
@@ -201,8 +214,10 @@ type InstallAllOpts struct {
 
 // InstallResult is one row in an InstallAll report.
 type InstallResult struct {
-	Server string
-	Err    error
+	Server                  string
+	Err                     error
+	Settlement              CommandSettlementV1
+	ClientConfigSettlements []ClientConfigSettlementV1
 }
 
 func installOptsMayWriteClients(opts InstallOpts) bool {
@@ -279,6 +294,13 @@ func refuseWorkspaceScopedInstall(m *config.ServerManifest, w io.Writer) error {
 // failures there are logged + tolerated because the install already
 // happened.
 func (a *API) Install(opts InstallOpts) error {
+	return a.installWithFrozenPlan(context.Background(), opts, nil)
+}
+
+// installWithFrozenPlan is the private mutation core shared by the legacy API
+// wrapper and the command adapter. The optional receipt callback observes the
+// one plan instance that is subsequently applied; it must not re-plan.
+func (a *API) installWithFrozenPlan(ctx context.Context, opts InstallOpts, receipt func(InstallMutationReceiptV1)) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
@@ -325,11 +347,57 @@ func (a *API) Install(opts InstallOpts) error {
 	if err != nil {
 		return err
 	}
+	return a.installFrozenPlanCore(ctx, m, plan, opts, authorityRequest, w, receipt)
+}
+
+// installFrozenPlanCore applies one already-frozen plan and returns its exact
+// mutation receipt to the caller. The relay executable identity is frozen
+// before any scheduler, intent, or client mutation.
+func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1)) (err error) {
+	frozen := frozenInstallMutationReceipt(plan, opts)
+	defer func() {
+		frozen.ClientConfigSettlements = append([]ClientConfigSettlementV1(nil), plan.clientConfigSettlements...)
+		if !opts.DryRun && err == nil {
+			frozen.Committed = true
+		}
+		if receipt != nil {
+			receipt(frozen)
+		}
+	}()
+	if receipt != nil && len(plan.ClientUpdates) > 0 {
+		if err := freezeInstallRelayExePath(plan); err != nil {
+			return err
+		}
+		expectations, expectationErr := freezeInstallBindingExpectations(plan, m.Name, plan.installRelayExePath)
+		if expectationErr != nil {
+			return expectationErr
+		}
+		frozen.bindingExpectations = expectations
+		frozen.RequireBindings = len(expectations) > 0
+	}
 	// 4. Dry-run + audit-first + execute via the shared core. v0.6 Phase F:
 	// global daemons spawn from supervisor-intent.json (installPlanCore writes
 	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
 	// rather than from per-daemon scheduler tasks.
-	return a.installPlanCoreWithRoutingTargetLease(context.Background(), m, plan, opts, authorityRequest, w)
+	return a.installPlanCoreWithRoutingTargetLease(ctx, m, plan, opts, authorityRequest, w)
+}
+
+func freezeInstallRelayExePath(plan *Plan) error {
+	if plan == nil {
+		return fmt.Errorf("freeze install relay path: nil plan")
+	}
+	if plan.installRelayExePath != "" {
+		return nil
+	}
+	path, err := canonicalInstallRelayPathFn()
+	if err != nil {
+		return fmt.Errorf("resolve install relay executable: %w", err)
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("resolve install relay executable: empty path")
+	}
+	plan.installRelayExePath = path
+	return nil
 }
 
 // InstallAll is the production entry point for bulk install. Reads
@@ -661,16 +729,42 @@ func (a *API) Status() ([]DaemonStatus, error) {
 // scan). See the Status() doc comment for the full rationale and why no
 // nil-seam fallback applies on this path.
 func (a *API) statusInternal(ctx context.Context) ([]DaemonStatus, error) {
+	rows, readiness, err := a.statusReadinessSnapshot(ctx)
+	if err != nil {
+		return nil, err
+	}
+	regPath, regErr := DefaultRegistryPath()
+	if regErr != nil {
+		return nil, regErr
+	}
+	reg := NewRegistry(regPath)
+	if regErr := reg.Load(); regErr != nil {
+		return nil, regErr
+	}
+	projection, projectionErr := a.ProjectSerenaWorkspaceSnapshotHeld(ctx, reg.Workspaces, SerenaWorkspaceProjectionModeSnapshot, rows, readiness)
+	if projectionErr != nil {
+		return nil, projectionErr
+	}
+	return projection.StatusRows, nil
+}
+
+// statusReadinessSnapshot performs the sole supervisor IPC observation for a
+// status command and reduces readiness from that exact row set.
+func (a *API) statusReadinessSnapshot(ctx context.Context) ([]DaemonStatus, ReadinessSnapshotV1, error) {
 	ipcCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	rows, err := statusInternalDialFn(ipcCtx)
 	if err == nil {
-		return rows, nil
+		readiness, readinessErr := a.AssessReadinessFromStatusRows(ctx, rows, nil, false, time.Now().UTC())
+		if err := statusReadinessError(readinessErr); err != nil {
+			return nil, ReadinessSnapshotV1{}, err
+		}
+		return rows, readiness, nil
 	}
 	if errors.Is(err, ErrSupervisorIPCUnavailable) {
-		return nil, ErrSupervisorDown
+		return nil, ReadinessSnapshotV1{}, ErrSupervisorDown
 	}
-	return nil, err
+	return nil, ReadinessSnapshotV1{}, err
 }
 
 // StatusWithHealth is the pre-M5 shim kept for backwards compatibility. New
@@ -1298,27 +1392,29 @@ func singleHealthProbe(port int) (probe *HealthProbe) {
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	resp, err := client.Do(req)
 	if err != nil {
-		return &HealthProbe{Err: "initialize: " + err.Error()}
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.Failure{FailureID: readinesswire.FailureReadinessHostUnavailable, Stage: readinesswire.StageHost}))
 	}
 	sessionID := resp.Header.Get("Mcp-Session-Id")
-	_ = resp.Body.Close()
 	if resp.StatusCode >= 400 {
-		return &HealthProbe{Err: fmt.Sprintf("initialize: HTTP %d", resp.StatusCode)}
+		failure := readinesswire.DecodeFailureResponse(resp.StatusCode, resp.Header.Get("Content-Type"), resp.Body)
+		_ = resp.Body.Close()
+		return healthProbeFromReadiness(readinessFromFailure(failure))
 	}
+	_ = resp.Body.Close()
 	if sessionID != "" {
 		defer func() {
 			if err := cleanupHealthProbeSession(client, url, sessionID); err != nil {
-				cleanupErr := "MCP_HEALTH_SESSION_CLEANUP_FAILED: " + err.Error()
+				cleanup := MCPReadinessResult{
+					SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready,
+					Stage:     MCPReadinessStageSessionCleanup,
+					FailureID: MCPReadinessFailureSessionCleanup,
+				}
+				cleanup.Detail = closedReadinessDetail(cleanup)
 				if probe == nil {
-					probe = &HealthProbe{Err: cleanupErr}
+					probe = healthProbeFromReadiness(cleanup)
 					return
 				}
-				probe.OK = false
-				if probe.Err == "" {
-					probe.Err = cleanupErr
-				} else {
-					probe.Err += "; " + cleanupErr
-				}
+				probe = healthProbeFromReadiness(withSecondaryReadinessFailure(probe.Readiness, cleanup))
 			}
 		}()
 	}
@@ -1332,15 +1428,18 @@ func singleHealthProbe(port int) (probe *HealthProbe) {
 	}
 	resp2, err := client.Do(req2)
 	if err != nil {
-		return &HealthProbe{Err: "tools/list: " + err.Error()}
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.Failure{FailureID: readinesswire.FailureReadinessHostUnavailable, Stage: readinesswire.StageToolsList}))
 	}
 	defer resp2.Body.Close()
+	if resp2.StatusCode >= 400 {
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.DecodeFailureResponse(resp2.StatusCode, resp2.Header.Get("Content-Type"), resp2.Body)))
+	}
 	raw, err := io.ReadAll(io.LimitReader(resp2.Body, maxHealthProbeResponseBytes+1))
 	if err != nil {
-		return &HealthProbe{Err: "tools/list: read: " + err.Error()}
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.Failure{FailureID: readinesswire.FailureChildResponseInvalid, Stage: readinesswire.StageToolsList}))
 	}
 	if len(raw) > maxHealthProbeResponseBytes {
-		return &HealthProbe{Err: fmt.Sprintf("tools/list: response too large (> %d bytes)", maxHealthProbeResponseBytes)}
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.Failure{FailureID: readinesswire.FailureChildResponseInvalid, Stage: readinesswire.StageToolsList}))
 	}
 	// SSE-or-JSON: extractSSEPayload (sse.go) pulls the JSON envelope out
 	// of a text/event-stream frame and returns the body unchanged when it
@@ -1354,12 +1453,12 @@ func singleHealthProbe(port int) (probe *HealthProbe) {
 		} `json:"result"`
 	}
 	if err := json.Unmarshal(payload, &parsed); err != nil {
-		return &HealthProbe{Err: "tools/list: parse: " + err.Error()}
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.Failure{FailureID: readinesswire.FailureChildResponseInvalid, Stage: readinesswire.StageToolsList}))
 	}
 	if len(parsed.Error) > 0 {
-		return &HealthProbe{Err: "tools/list: " + string(parsed.Error)}
+		return healthProbeFromReadiness(readinessFromFailure(readinesswire.Failure{FailureID: readinesswire.FailureChildResponseInvalid, Stage: readinesswire.StageToolsList}))
 	}
-	return &HealthProbe{OK: true, ToolCount: len(parsed.Result.Tools)}
+	return healthProbeFromReadiness(MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessReady, Stage: MCPReadinessStageToolsList, ToolCount: len(parsed.Result.Tools)})
 }
 
 // Uninstall removes all scheduler tasks and client entries for a server.
@@ -1829,7 +1928,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		return nil, err
 	}
 	workDir := filepath.Dir(canonicalPath)
-	p := &Plan{Server: m.Name, FullInstall: opts.DaemonFilter == ""}
+	p := &Plan{Server: m.Name, CanMigrate: canMigrateServer(m.Name), FullInstall: opts.DaemonFilter == ""}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).
 	// SupervisorIntent mirrors SchedulerTasks during the v0.5.x transition
 	// (plan §2611-2644). Both fields stay in sync until the supervisor pivot
@@ -1852,6 +1951,9 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 			Args:       args,
 			WorkingDir: workDir,
 			Trigger:    "At logon",
+			StartupBindDeadlineSeconds: EffectiveStartupBindDeadlineSeconds(SupervisorDaemon{
+				Server: m.Name, Daemon: d.Name, Args: args, StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
+			}),
 		})
 	}
 	// Weekly refresh restarts the whole server, so it only makes sense for full installs.
@@ -2916,9 +3018,13 @@ func executeInstallToWithSymlinkConsents(w io.Writer, m *config.ServerManifest, 
 	// inherited a stale cwd that no longer existed (e.g. R:\Temp\build
 	// from a throwaway install run). ~/.local/bin is guaranteed to
 	// exist (canonicalMcphubPath just confirmed it) and doesn't rot.
-	canonical, err := canonicalMcphubPath()
-	if err != nil {
-		return err
+	canonical := p.installRelayExePath
+	if canonical == "" {
+		var err error
+		canonical, err = canonicalMcphubPath()
+		if err != nil {
+			return err
+		}
 	}
 	workDir := filepath.Dir(canonical)
 
@@ -3112,15 +3218,7 @@ clientUpdates:
 			installBackupPaths = append(installBackupPaths, bak)
 		}
 		fmt.Fprintf(w, "  backup: %s\n", bak)
-		entry := clients.MCPEntry{
-			Name:         m.Name,
-			URL:          u.URL,
-			Headers:      u.Headers,
-			RelayServer:  m.Name,
-			RelayDaemon:  u.DaemonName,
-			RelayExePath: canonical,
-			RelayURL:     u.RelayURL,
-		}
+		entry := installClientEntryV1(m.Name, u, canonical)
 		configWriter := symlinkConsentWriters[u.Client]
 		// Compensating op registered BEFORE the AddEntry mutation (bug 2026-07-12):
 		// restore this entry's exact prior state from the timestamped backup taken
@@ -3278,6 +3376,24 @@ func sameInstallPath(a, b string) bool {
 		return strings.EqualFold(cleanA, cleanB)
 	}
 	return cleanA == cleanB
+}
+
+// installClientEntryV1 owns the plan-update to adapter write-request mapping.
+// Binding expectations and the writer both consume this exact mapping.
+func installClientEntryV1(server string, update ClientUpdatePlan, relayExePath string) clients.MCPEntry {
+	entryName := update.EntryName
+	if entryName == "" {
+		entryName = server
+	}
+	return clients.MCPEntry{
+		Name:         entryName,
+		URL:          update.URL,
+		Headers:      update.Headers,
+		RelayServer:  server,
+		RelayDaemon:  update.DaemonName,
+		RelayExePath: relayExePath,
+		RelayURL:     update.RelayURL,
+	}
 }
 
 // schedulerLister is the narrow scheduler subset pruneObsoleteServerTasks
@@ -3562,7 +3678,13 @@ func taskMatchesServerDaemonGate(normalized, server, daemonFilter string, instal
 // to opts.Writer (or os.Stderr by default) and never propagate — the
 // restart already happened.
 func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
-	results, supervisorHandled, err := restartSupervisorOwnedDaemons(context.Background(), server, daemonFilter)
+	return a.restartWithFrozenDispatch(context.Background(), server, daemonFilter)
+}
+
+// restartWithFrozenDispatch is the receiver-free private mutation core used by
+// both the legacy wrapper and the command adapter.
+func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilter string) ([]RestartResult, error) {
+	results, supervisorHandled, err := restartSupervisorOwnedDaemons(ctx, server, daemonFilter)
 	if err != nil {
 		return nil, err
 	}
@@ -3799,7 +3921,13 @@ func isHubDaemonSchedulerTaskName(taskName string) bool {
 // stale daemon they wanted to replace. We have to kill the daemon
 // process by port first.
 func (a *API) RestartAll() ([]RestartResult, error) {
-	results, supervisorHandled, err := restartSupervisorOwnedDaemons(context.Background(), "", "")
+	return a.restartAllWithFrozenDispatch(context.Background())
+}
+
+// restartAllWithFrozenDispatch is the bulk form of the same private mutation
+// core. It intentionally does not depend on the readiness receiver.
+func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult, error) {
+	results, supervisorHandled, err := restartSupervisorOwnedDaemons(ctx, "", "")
 	if err != nil {
 		return nil, err
 	}

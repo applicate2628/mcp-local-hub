@@ -84,6 +84,9 @@ type DaemonRuntimeEntry struct {
 	// first create-process pass where nothing is absent.
 	SpawnHoldReason string `json:",omitempty"`
 	SpawnHoldPath   string `json:",omitempty"`
+	// ReadinessObservation is the supervisor's single-writer,
+	// current-generation evidence. API owns reduction/classification.
+	ReadinessObservation *api.DaemonReadinessObservationV1 `json:",omitempty"`
 }
 
 type DaemonRuntimeTracker struct {
@@ -97,15 +100,24 @@ type DaemonRuntimeTracker struct {
 	// precedent), so it is counted here, not in `failures`. In-memory only,
 	// resets on cold restart — pre-restart reallocations are not relevant to
 	// runtime respawn decisions, exactly like `failures`.
-	reallocations       map[string][]time.Time
-	ownershipGeneration atomic.Uint64
+	reallocations        map[string][]time.Time
+	readinessSettlements map[string]daemonReadinessSettlementTuple
+	ownershipGeneration  atomic.Uint64
+}
+
+type daemonReadinessSettlementTuple struct {
+	Generation   uint64
+	ServiceState string
+	Stage        string
+	FailureID    string
 }
 
 func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
 	return &DaemonRuntimeTracker{
-		entries:       map[string]DaemonRuntimeEntry{},
-		failures:      map[string][]time.Time{},
-		reallocations: map[string][]time.Time{},
+		entries:              map[string]DaemonRuntimeEntry{},
+		failures:             map[string][]time.Time{},
+		reallocations:        map[string][]time.Time{},
+		readinessSettlements: map[string]daemonReadinessSettlementTuple{},
 	}
 }
 
@@ -411,9 +423,77 @@ func (t *DaemonRuntimeTracker) MarkSpawned(taskName string, pid int, startedAt t
 	entry.StartedAt = startedAt.UTC()
 	entry.PIDGeneration++
 	entry.LastError = ""
+	entry.ReadinessObservation = nil
 	clearOrphanPIDLocked(&entry)
 	t.entries[taskName] = entry
 	return entry.PIDGeneration
+}
+
+// MarkReadinessObservation records an observation only for the current PID
+// generation, preventing a late probe from promoting a replacement child.
+func (t *DaemonRuntimeTracker) MarkReadinessObservation(observation api.DaemonReadinessObservationV1) bool {
+	accepted, _ := t.MarkReadinessObservationWithSettlement(observation)
+	return accepted
+}
+
+// MarkReadinessObservationWithSettlement is the sole current-generation
+// readiness writer and returns at most one allowlisted terminal event per
+// distinct terminal tuple.
+func (t *DaemonRuntimeTracker) MarkReadinessObservationWithSettlement(observation api.DaemonReadinessObservationV1) (bool, *api.SupervisorEvent) {
+	if t == nil || observation.TaskName == "" {
+		return false, nil
+	}
+	taskName := canonicalSupervisorTaskName(observation.TaskName)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	entry, ok := t.entries[taskName]
+	if !ok || observation.ObservedPIDGeneration == 0 ||
+		int(observation.ObservedPIDGeneration) != entry.PIDGeneration ||
+		observation.CurrentPIDGeneration != observation.ObservedPIDGeneration ||
+		observation.PID <= 0 ||
+		entry.CurrentPID != observation.PID ||
+		entry.State != daemonRuntimeStateRunning {
+		return false, nil
+	}
+	observation.TaskName = taskName
+	observation.Failures = append([]api.ReadinessFailureV1(nil), observation.Failures...)
+	entry.ReadinessObservation = &observation
+	t.entries[taskName] = entry
+
+	snapshot := api.ReduceReadinessV1(api.ReadinessRequest{
+		Mode: api.ReadinessModeAwaitSettled, Observations: []api.DaemonReadinessObservationV1{observation},
+	})
+	if len(snapshot.Daemons) != 1 || !snapshot.Daemons[0].Settled {
+		return true, nil
+	}
+	daemon := snapshot.Daemons[0]
+	failureID := ""
+	if daemon.Failure != nil {
+		failureID = daemon.Failure.FailureID
+	}
+	tuple := daemonReadinessSettlementTuple{
+		Generation: observation.ObservedPIDGeneration, ServiceState: string(daemon.ServiceState),
+		Stage: string(daemon.Stage), FailureID: failureID,
+	}
+	if t.readinessSettlements == nil {
+		t.readinessSettlements = map[string]daemonReadinessSettlementTuple{}
+	}
+	if t.readinessSettlements[taskName] == tuple {
+		return true, nil
+	}
+	t.readinessSettlements[taskName] = tuple
+	severity := api.SupervisorEventSeverityInfo
+	if failureID != "" {
+		severity = api.SupervisorEventSeverityWarn
+	}
+	return true, &api.SupervisorEvent{
+		Severity: severity, Source: "readiness", Event: "daemon-readiness-settled-v1", TaskName: taskName,
+		Body: map[string]any{
+			"schema_version": "daemon-readiness-settled-v1", "task_name": taskName,
+			"pid_generation": tuple.Generation, "service_state": tuple.ServiceState,
+			"stage": tuple.Stage, "failure_id": tuple.FailureID,
+		},
+	}
 }
 
 func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
@@ -431,6 +511,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailed(taskName string, err error) {
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
+	entry.ReadinessObservation = nil
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -476,6 +557,7 @@ func (t *DaemonRuntimeTracker) MarkSpawnFailedPreservePID(taskName string, err e
 	entry.OrphanPID = orphanPID
 	entry.StartedAt = time.Time{}
 	entry.LastError = errorString(err)
+	entry.ReadinessObservation = nil
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
 	t.entries[taskName] = entry
@@ -493,6 +575,7 @@ func (t *DaemonRuntimeTracker) MarkExited(taskName string) {
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
+	entry.ReadinessObservation = nil
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -527,6 +610,7 @@ func (t *DaemonRuntimeTracker) MarkExitedIfCurrent(taskName string, pidGeneratio
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
 	entry.LastError = ""
+	entry.ReadinessObservation = nil
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -558,6 +642,7 @@ func (t *DaemonRuntimeTracker) MarkBackoff(taskName string) {
 	entry.State = daemonRuntimeStateBackoff
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
+	entry.ReadinessObservation = nil
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	t.entries[taskName] = entry
@@ -588,6 +673,7 @@ func (t *DaemonRuntimeTracker) MarkQuarantined(taskName string) {
 	entry.State = daemonRuntimeStateQuarantine
 	t.setCurrentPIDLocked(&entry, 0)
 	entry.StartedAt = time.Time{}
+	entry.ReadinessObservation = nil
 	clearOrphanPIDLocked(&entry)
 	clearJobProtectionLocked(&entry)
 	clearSpawnHoldLocked(&entry)
@@ -610,6 +696,9 @@ func (t *DaemonRuntimeTracker) Remove(taskName string) {
 	}
 	if t.reallocations != nil {
 		delete(t.reallocations, taskName)
+	}
+	if t.readinessSettlements != nil {
+		delete(t.readinessSettlements, taskName)
 	}
 }
 

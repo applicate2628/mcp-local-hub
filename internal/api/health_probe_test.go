@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -9,6 +10,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/mcpcompat/readinesswire"
 )
 
 type healthProbeRoundTripper func(*http.Request) (*http.Response, error)
@@ -67,11 +70,8 @@ func TestSingleHealthProbe_OK(t *testing.T) {
 	}
 }
 
-// TestSingleHealthProbe_ErrorFromServer verifies the probe reports
-// the MCP server's error verbatim when tools/list returns a JSON-RPC
-// error. This is the scenario the audit flagged: daemon alive, MCP
-// server up, but backend (e.g. gdb binary) missing — the server
-// responds to tools/list with an error and we want that visible.
+// TestSingleHealthProbe_ErrorFromServer verifies the probe projects a closed
+// failure id and does not expose an arbitrary child error body.
 func TestSingleHealthProbe_ErrorFromServer(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodDelete {
@@ -100,8 +100,8 @@ func TestSingleHealthProbe_ErrorFromServer(t *testing.T) {
 	if h.OK {
 		t.Errorf("expected OK=false, got %+v", h)
 	}
-	if !strings.Contains(h.Err, "gdb not on PATH") {
-		t.Errorf("expected err to include upstream message: %q", h.Err)
+	if h.Readiness.FailureID != "MCP_COMPAT_CHILD_RESPONSE_INVALID" || strings.Contains(h.Err, "gdb not on PATH") {
+		t.Errorf("expected closed redacted failure: %+v", h)
 	}
 }
 
@@ -151,51 +151,51 @@ func TestSingleHealthProbe_OversizedResponse(t *testing.T) {
 	if h.OK {
 		t.Fatalf("expected OK=false for oversized response, got %+v", h)
 	}
-	if !strings.Contains(h.Err, "response too large") {
-		t.Fatalf("expected oversized-response error, got %q", h.Err)
+	if h.Readiness.FailureID != "MCP_COMPAT_CHILD_RESPONSE_INVALID" || strings.Contains(h.Err, strings.Repeat("x", 16)) {
+		t.Fatalf("expected closed oversized-response failure, got %+v", h)
 	}
 }
 
 func TestSingleHealthProbe_SessionCleanup_AllPostInitializeReturns(t *testing.T) {
 	cases := []struct {
-		name    string
-		list    func() (*http.Response, error)
-		wantErr string
+		name          string
+		list          func() (*http.Response, error)
+		wantFailureID string
 	}{
 		{
 			name: "tools list transport failure",
 			list: func() (*http.Response, error) {
 				return nil, errors.New("synthetic tools transport failure")
 			},
-			wantErr: "synthetic tools transport failure",
+			wantFailureID: "MCP_READINESS_HOST_UNAVAILABLE",
 		},
 		{
 			name: "tools list body read failure",
 			list: func() (*http.Response, error) {
 				return healthProbeResponse(http.StatusOK, failingHealthProbeBody{err: errors.New("synthetic body read failure")}), nil
 			},
-			wantErr: "tools/list: read: synthetic body read failure",
+			wantFailureID: "MCP_COMPAT_CHILD_RESPONSE_INVALID",
 		},
 		{
 			name: "tools list oversized response",
 			list: func() (*http.Response, error) {
 				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(strings.Repeat("x", maxHealthProbeResponseBytes+1)))), nil
 			},
-			wantErr: "response too large",
+			wantFailureID: "MCP_COMPAT_CHILD_RESPONSE_INVALID",
 		},
 		{
 			name: "tools list parse failure",
 			list: func() (*http.Response, error) {
 				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader("not-json"))), nil
 			},
-			wantErr: "tools/list: parse:",
+			wantFailureID: "MCP_COMPAT_CHILD_RESPONSE_INVALID",
 		},
 		{
 			name: "tools list JSON RPC failure",
 			list: func() (*http.Response, error) {
 				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","error":{"code":-32000,"message":"synthetic rpc failure"}}`))), nil
 			},
-			wantErr: "synthetic rpc failure",
+			wantFailureID: "MCP_COMPAT_CHILD_RESPONSE_INVALID",
 		},
 		{
 			name: "successful tools list",
@@ -240,12 +240,12 @@ func TestSingleHealthProbe_SessionCleanup_AllPostInitializeReturns(t *testing.T)
 			if len(deleteSessions) != 1 || deleteSessions[0] != "issued-session" {
 				t.Fatalf("DELETE sessions = %q, want exactly issued-session", deleteSessions)
 			}
-			if tc.wantErr == "" {
+			if tc.wantFailureID == "" {
 				if !h.OK || h.ToolCount != 1 {
 					t.Fatalf("successful probe = %+v", h)
 				}
-			} else if h.OK || !strings.Contains(h.Err, tc.wantErr) {
-				t.Fatalf("failed probe = %+v, want error containing %q", h, tc.wantErr)
+			} else if h.OK || h.Readiness.FailureID != tc.wantFailureID {
+				t.Fatalf("failed probe = %+v, want failure id %q", h, tc.wantFailureID)
 			}
 		})
 	}
@@ -260,13 +260,15 @@ func TestSingleHealthProbe_SessionCleanupFailureIsVisibleAndPreservesPrimary(t *
 		cleanupCode     int
 		cleanupDrainErr error
 		cleanupCloseErr error
-		wantPrimary     string
-		wantCleanup     string
+		wantFailureID   string
+		wantStage       string
+		wantSecondary   bool
+		forbiddenRaw    []string
 	}{
-		{name: "cleanup failure after successful probe", listBody: `{"jsonrpc":"2.0","result":{"tools":[]}}`, cleanupCode: http.StatusBadGateway},
-		{name: "cleanup failure retains tools list failure", listBody: `{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary tools failure"}}`, cleanupCode: http.StatusBadGateway, wantPrimary: "primary tools failure"},
-		{name: "drain failure after successful probe", listBody: `{"jsonrpc":"2.0","result":{"tools":[]}}`, cleanupCode: http.StatusNoContent, cleanupDrainErr: drainFailure, wantCleanup: drainFailure.Error()},
-		{name: "close failure retains tools list failure first", listBody: `{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary tools failure"}}`, cleanupCode: http.StatusNoContent, cleanupCloseErr: closeFailure, wantPrimary: "primary tools failure", wantCleanup: closeFailure.Error()},
+		{name: "cleanup failure after successful probe", listBody: `{"jsonrpc":"2.0","result":{"tools":[]}}`, cleanupCode: http.StatusBadGateway, wantFailureID: "MCP_HEALTH_SESSION_CLEANUP_FAILED", wantStage: MCPReadinessStageSessionCleanup},
+		{name: "cleanup failure preserves tools list primary", listBody: `{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary tools failure"}}`, cleanupCode: http.StatusBadGateway, wantFailureID: readinesswire.FailureChildResponseInvalid, wantStage: MCPReadinessStageToolsList, wantSecondary: true, forbiddenRaw: []string{"primary tools failure"}},
+		{name: "drain failure after successful probe", listBody: `{"jsonrpc":"2.0","result":{"tools":[]}}`, cleanupCode: http.StatusNoContent, cleanupDrainErr: drainFailure, wantFailureID: "MCP_HEALTH_SESSION_CLEANUP_FAILED", wantStage: MCPReadinessStageSessionCleanup, forbiddenRaw: []string{drainFailure.Error()}},
+		{name: "close failure preserves tools list primary", listBody: `{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary tools failure"}}`, cleanupCode: http.StatusNoContent, cleanupCloseErr: closeFailure, wantFailureID: readinesswire.FailureChildResponseInvalid, wantStage: MCPReadinessStageToolsList, wantSecondary: true, forbiddenRaw: []string{"primary tools failure", closeFailure.Error()}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			previous := healthProbeHTTPClient
@@ -294,15 +296,173 @@ func TestSingleHealthProbe_SessionCleanupFailureIsVisibleAndPreservesPrimary(t *
 				})}
 			}
 			h := singleHealthProbe(1)
-			if h == nil || h.OK || !strings.Contains(h.Err, "MCP_HEALTH_SESSION_CLEANUP_FAILED") {
-				t.Fatalf("cleanup failure probe = %+v", h)
+			if h == nil || h.OK || h.Readiness.FailureID != tc.wantFailureID || h.Readiness.Stage != tc.wantStage {
+				t.Fatalf("primary readiness = %+v, want failure=%q stage=%q", h, tc.wantFailureID, tc.wantStage)
 			}
-			if tc.wantCleanup != "" && !strings.Contains(h.Err, tc.wantCleanup) {
-				t.Fatalf("cleanup cause %q is not visible: %q", tc.wantCleanup, h.Err)
+			if tc.wantSecondary {
+				if h.Readiness.SecondaryFailureID != "MCP_HEALTH_SESSION_CLEANUP_FAILED" || h.Readiness.SecondaryStage != MCPReadinessStageSessionCleanup {
+					t.Fatalf("secondary cleanup evidence = %+v", h.Readiness)
+				}
+			} else if h.Readiness.SecondaryFailureID != "" || h.Readiness.SecondaryStage != "" {
+				t.Fatalf("unexpected secondary failure on cleanup-primary result: %+v", h.Readiness)
 			}
-			if tc.wantPrimary != "" {
-				if !strings.Contains(h.Err, tc.wantPrimary) || strings.Index(h.Err, tc.wantPrimary) > strings.Index(h.Err, "MCP_HEALTH_SESSION_CLEANUP_FAILED") {
-					t.Fatalf("primary failure was not retained first: %q", h.Err)
+			for _, forbidden := range tc.forbiddenRaw {
+				if strings.Contains(h.Err, forbidden) {
+					t.Fatalf("raw cause %q leaked: %q", forbidden, h.Err)
+				}
+			}
+		})
+	}
+}
+
+// TestSingleHealthProbe_SessionCleanupFailureSettlesAllPostInitializeReturns
+// catches a cleanup regression that overwrites a forward failure or leaks a
+// raw probe cause after the session-owning initialize response succeeds.
+func TestSingleHealthProbe_SessionCleanupFailureSettlesAllPostInitializeReturns(t *testing.T) {
+	cleanupResponse := func() (*http.Response, error) {
+		return healthProbeResponse(http.StatusBadGateway, io.NopCloser(strings.NewReader("cleanup response sentinel"))), nil
+	}
+	for _, tc := range []struct {
+		name          string
+		list          func() (*http.Response, error)
+		cleanup       func() (*http.Response, error)
+		want          MCPReadinessResult
+		wantSecondary bool
+		forbiddenRaw  []string
+	}{
+		{
+			name: "transport", list: func() (*http.Response, error) { return nil, errors.New("primary transport sentinel") }, cleanup: cleanupResponse,
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureReadinessHostUnavailable, Detail: "MCP_READINESS_HOST_UNAVAILABLE at tools_list"},
+			wantSecondary: true, forbiddenRaw: []string{"primary transport sentinel"},
+		},
+		{
+			name: "HTTP", list: func() (*http.Response, error) {
+				body, err := readinesswire.EncodeFailure(readinesswire.Failure{FailureID: readinesswire.FailureBackingProtocolUnsupported, Stage: readinesswire.StageInitialize, HTTPStatus: http.StatusBadGateway, RequestedProtocol: "2025-03-26", NegotiatedProtocol: "2024-11-05", SupportedFloor: "2025-03-26"})
+				if err != nil {
+					return nil, err
+				}
+				resp := healthProbeResponse(http.StatusBadGateway, io.NopCloser(strings.NewReader(string(body))))
+				resp.Header.Set("Content-Type", readinesswire.MediaTypeV1)
+				return resp, nil
+			}, cleanup: cleanupResponse,
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageInitialize, FailureID: readinesswire.FailureBackingProtocolUnsupported, HTTPStatus: http.StatusBadGateway, RequestedProtocol: "2025-03-26", NegotiatedProtocol: "2024-11-05", SupportedFloor: "2025-03-26", Detail: "MCP_BACKING_PROTOCOL_UNSUPPORTED at initialize (HTTP 502; requested 2025-03-26; negotiated 2024-11-05)"},
+			wantSecondary: true,
+		},
+		{
+			name: "body read", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, failingHealthProbeBody{err: errors.New("primary body read sentinel")}), nil
+			}, cleanup: cleanupResponse,
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureChildResponseInvalid, Detail: "MCP_COMPAT_CHILD_RESPONSE_INVALID at tools_list"},
+			wantSecondary: true, forbiddenRaw: []string{"primary body read sentinel"},
+		},
+		{
+			name: "oversized", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(strings.Repeat("primary oversize sentinel", maxHealthProbeResponseBytes/24+1)))), nil
+			}, cleanup: cleanupResponse,
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureChildResponseInvalid, Detail: "MCP_COMPAT_CHILD_RESPONSE_INVALID at tools_list"},
+			wantSecondary: true, forbiddenRaw: []string{"primary oversize sentinel"},
+		},
+		{
+			name: "JSON parse", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader("primary parse sentinel"))), nil
+			}, cleanup: cleanupResponse,
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureChildResponseInvalid, Detail: "MCP_COMPAT_CHILD_RESPONSE_INVALID at tools_list"},
+			wantSecondary: true, forbiddenRaw: []string{"primary parse sentinel"},
+		},
+		{
+			name: "JSON RPC error", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary RPC sentinel"}}`))), nil
+			}, cleanup: cleanupResponse,
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureChildResponseInvalid, Detail: "MCP_COMPAT_CHILD_RESPONSE_INVALID at tools_list"},
+			wantSecondary: true, forbiddenRaw: []string{"primary RPC sentinel"},
+		},
+		{
+			name: "valid tools result", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","result":{"tools":[{}]}}`))), nil
+			}, cleanup: cleanupResponse,
+			want: MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageSessionCleanup, FailureID: MCPReadinessFailureSessionCleanup, Detail: "MCP_HEALTH_SESSION_CLEANUP_FAILED at session_cleanup"},
+		},
+		{
+			name: "cleanup transport", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","result":{"tools":[]}}`))), nil
+			}, cleanup: func() (*http.Response, error) { return nil, errors.New("cleanup transport sentinel") },
+			want:         MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageSessionCleanup, FailureID: MCPReadinessFailureSessionCleanup, Detail: "MCP_HEALTH_SESSION_CLEANUP_FAILED at session_cleanup"},
+			forbiddenRaw: []string{"cleanup transport sentinel"},
+		},
+		{
+			name: "cleanup drain", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","result":{"tools":[]}}`))), nil
+			}, cleanup: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusNoContent, &failingCleanupBody{drainErr: errors.New("cleanup drain sentinel")}), nil
+			},
+			want:         MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageSessionCleanup, FailureID: MCPReadinessFailureSessionCleanup, Detail: "MCP_HEALTH_SESSION_CLEANUP_FAILED at session_cleanup"},
+			forbiddenRaw: []string{"cleanup drain sentinel"},
+		},
+		{
+			name: "cleanup close preserves forward primary", list: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","error":{"code":-32000,"message":"primary close sentinel"}}`))), nil
+			}, cleanup: func() (*http.Response, error) {
+				return healthProbeResponse(http.StatusNoContent, &failingCleanupBody{closeErr: errors.New("cleanup close sentinel")}), nil
+			},
+			want:          MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: MCPReadinessUnready, Stage: MCPReadinessStageToolsList, FailureID: readinesswire.FailureChildResponseInvalid, Detail: "MCP_COMPAT_CHILD_RESPONSE_INVALID at tools_list"},
+			wantSecondary: true,
+			forbiddenRaw:  []string{"primary close sentinel", "cleanup close sentinel"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			previous := healthProbeHTTPClient
+			t.Cleanup(func() { healthProbeHTTPClient = previous })
+			deleteCalls := 0
+			healthProbeHTTPClient = func() *http.Client {
+				return &http.Client{Transport: healthProbeRoundTripper(func(req *http.Request) (*http.Response, error) {
+					switch req.Method {
+					case http.MethodPost:
+						body, _ := io.ReadAll(req.Body)
+						if strings.Contains(string(body), `"initialize"`) {
+							resp := healthProbeResponse(http.StatusOK, io.NopCloser(strings.NewReader(`{"jsonrpc":"2.0","result":{}}`)))
+							resp.Header.Set("Mcp-Session-Id", "issued-session")
+							return resp, nil
+						}
+						return tc.list()
+					case http.MethodDelete:
+						deleteCalls++
+						if got := req.Header.Get("Mcp-Session-Id"); got != "issued-session" {
+							return nil, errors.New("cleanup session sentinel")
+						}
+						return tc.cleanup()
+					default:
+						return nil, fmt.Errorf("unexpected method %s", req.Method)
+					}
+				})}
+			}
+
+			got := singleHealthProbe(1)
+			if got == nil || got.OK {
+				t.Fatalf("probe = %#v, want unready", got)
+			}
+			primary := got.Readiness
+			primary.SecondaryStage = ""
+			primary.SecondaryFailureID = ""
+			if primary != tc.want {
+				t.Fatalf("primary readiness = %#v, want %#v", primary, tc.want)
+			}
+			if deleteCalls != 1 {
+				t.Fatalf("DELETE calls = %d, want 1", deleteCalls)
+			}
+			if tc.wantSecondary {
+				if got.Readiness.SecondaryStage != MCPReadinessStageSessionCleanup || got.Readiness.SecondaryFailureID != MCPReadinessFailureSessionCleanup {
+					t.Fatalf("secondary = %#v", got.Readiness)
+				}
+			} else if got.Readiness.SecondaryStage != "" || got.Readiness.SecondaryFailureID != "" {
+				t.Fatalf("cleanup-primary result has secondary = %#v", got.Readiness)
+			}
+			encoded, err := json.Marshal(got)
+			if err != nil {
+				t.Fatalf("marshal health probe: %v", err)
+			}
+			for _, raw := range append(tc.forbiddenRaw, "issued-session", "cleanup response sentinel", "cleanup session sentinel") {
+				if strings.Contains(got.Err, raw) || strings.Contains(got.Readiness.Detail, raw) || strings.Contains(string(encoded), raw) {
+					t.Fatalf("raw %q leaked in probe=%#v json=%s", raw, got, encoded)
 				}
 			}
 		})

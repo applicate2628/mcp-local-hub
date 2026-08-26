@@ -4260,6 +4260,10 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// instead of clearing the CURRENT child's tracking / driving an SM
 		// transition (P1a generation-stamped exit attribution).
 		spawnGen := tracker.MarkSpawned(d.TaskName, pid, startedAt)
+		go func(descriptor api.SupervisorDaemon, generation, childPID int, childStartedAt time.Time) {
+			defer guardSupervisorGoroutine(events, "daemon-readiness-observer", descriptor.TaskName)
+			observeSupervisorReadiness(tracker, events, descriptor, generation, childPID, childStartedAt)
+		}(d, spawnGen, pid, startedAt)
 		taskName := d.TaskName
 		spawnedPID := pid
 		// Emit daemon-spawned BEFORE starting the wait goroutine. A
