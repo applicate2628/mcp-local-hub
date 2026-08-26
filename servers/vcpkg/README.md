@@ -1,8 +1,9 @@
 # vcpkg — build-failure triage and port analysis
 
-Read-only diagnostics for a vcpkg tree: what failed, which port definition won, whether a pin is
-current, which patches apply, and how CMake files include each other. **No build is ever started by
-this server** — a live build invocation is explicitly out of scope.
+Read-only diagnostics for a vcpkg tree: what failed, which port definition won, which resolved ports
+depend on a selected port, whether a pin is current, which patches apply, and how CMake files include
+each other. **No build or install is ever started by this server** — a live build invocation is
+explicitly out of scope.
 
 Runs embedded in the mcphub binary (`mcphub vcpkg`, `transport: stdio-bridge`), so there is no venv,
 no npm package, and no second executable to keep updated. Port **9138**.
@@ -44,6 +45,7 @@ see a definite verdict you can disprove in ten seconds, that is a bug worth repo
 |---|---|
 | `vcpkg_last_failure` | What failed in the last build — first real diagnostic, the failing phase, the reproducible command, and every log path it read. Handles nested builds (vcpkg → make → NMAKE → cmake → clang-cl/lld-link), where the real error sits thousands of lines under content-free wrapper noise. |
 | `vcpkg_port_resolution` | Which port definition actually wins across your overlay chain and the builtin registry, and why. |
+| `vcpkg_reverse_dependencies` | Which resolved default-feature candidate plans directly or transitively depend on one selected port, including target/host/other-triplet identity, feature sets, cycles, and overlay provenance. Edges come only from the exact supplied vcpkg executable's `depend-info` output. |
 | `vcpkg_pin_status` | Whether a pinned ref is current. Reports `current` or an honest `unknown` — never a fabricated "behind". Expands `${VERSION}` / `${PORT}` from `vcpkg.json` so the common `"v${VERSION}"` idiom resolves. |
 | `vcpkg_patches_apply` | Which declared patches apply for a triplet, from static analysis of the portfile's guards. Resolves patch paths rather than assuming they are port-dir-relative. |
 | `vcpkg_cmake_trace` | Reads an existing CMake trace. Bounded — it will not materialize an arbitrarily large trace. |
@@ -68,6 +70,41 @@ parameters. Discovery order when you do not pass a root:
 5. machine-layout heuristics — **reported as candidates, never selected**.
 
 There are no hardcoded machine paths. A path that appears in a test fixture is test data.
+
+## Reverse dependencies are resolved, bounded, and complete-or-unknown
+
+`vcpkg_reverse_dependencies` requires `port`, absolute `vcpkg_root`, explicit target and host
+triplets, and an absolute `scratch_root` outside every input. Ordered `overlay_ports` and
+`overlay_triplets` are optional. Omitting `manifest_root` selects classic mode; supplying an absolute
+manifest root admits only builtin and local filesystem registries. Remote Git, HTTP, artifact, or
+otherwise unmaterialized registries return `unknown(network_disabled_registry)` before a child
+starts.
+
+The tool discovers the bounded port universe itself. Declared dependencies from every feature body
+are used only as a conservative scheduling superset; they never become public graph edges. Each
+potential candidate is resolved as a top-level package with its default features by the exact
+supplied vcpkg executable. The tool runs `depend-info` once as DGML and once as depth-labelled list
+output, requires their node/edge sets to agree, then inverts only those resolved edges. Target, host,
+other-triplet, and feature-qualified configurations remain distinct. Direct means one inverted edge;
+transitive means finite nonzero reverse reachability. Strongly connected components retain cycles
+without looping, and the selected port is excluded from dependent lists.
+
+Negative answers are authoritative only when `coverage.complete=true`: the universe, every potential
+plan, both output formats, overlay provenance, graph bounds, and the final input digest must all
+settle. Canonically sorted candidate specs are resolved in deterministic batches of at most 64; the
+4,096-port universe therefore needs at most 128 DGML/list child invocations instead of one pair per
+candidate. One failed or inconsistent batch still makes the whole negative claim `unknown` while
+retaining confirmed positive rows. Optional, non-default feature matrices are intentionally outside
+the `candidate-defaults` policy.
+
+Only `version`, help, and `depend-info` can cross the process boundary. The executable path and argv
+are explicit; no shell or caller command string is accepted. Metrics, asset sources, binary sources,
+proxy variables, and ambient `VCPKG_*` variables are not inherited. All buildtrees, installed,
+downloads, packages, temporary, home, and application-data writes are redirected below one unique
+scratch child. Cancellation or timeout terminates the entire child process tree, waits/reaps it, and
+settles scratch cleanup before the MCP result returns. The network boundary is configuration-enforced,
+not an operating-system network namespace, and is reported as
+`configuration_disabled_not_kernel_isolated`.
 
 Patch analysis admits the complete triplet-root chain before touching the filesystem. More than the
 published overlay maximum returns `failed(too_many_overlay_triplet_roots)`. Every nonblank relative
@@ -190,3 +227,9 @@ a client-side property, not a fault here.
 `2026-07-26-vcpkg-mcp-must-follow-the-in-hub-server-pattern.md` (why this is in the hub binary rather
 than a standalone executable — including a retraction of an earlier claim that the implementation
 already satisfied the no-guessing rule; it did not, and the gap is recorded there).
+
+## Terms and Abbreviations
+
+- `DGML`: Directed Graph Markup Language, the XML graph format emitted by vcpkg.
+- `MCP`: Model Context Protocol, the request/result protocol exposed by the server.
+- `SCC`: Strongly connected component, the finite representation used for dependency cycles.

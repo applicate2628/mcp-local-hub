@@ -482,7 +482,7 @@ func TestMCPFrontReview_RollbackRefusesARecordWhosePinnedInputIsGone(t *testing.
 
 	missingPin := filepath.Join(mcpFrontReconcilePinDir(reportPath), "claude-code", "gone.json")
 	record := newV3RollbackRecordWithPin(t, 9137, "claude-code", mcpFrontSerenaPin{
-		Client: "claude-code", Origin: "rolling", Path: missingPin, SHA256: "deadbeef",
+		Client: "claude-code", Origin: "rolling", Path: missingPin, SHA256: strings.Repeat("0", 64),
 	})
 	if werr := api.WriteStateFileAtomic(reportPath, record); werr != nil {
 		t.Fatalf("seed record: %v", werr)
@@ -492,8 +492,8 @@ func TestMCPFrontReview_RollbackRefusesARecordWhosePinnedInputIsGone(t *testing.
 	if err == nil {
 		t.Fatalf("rollback must refuse when a pinned pre-reconcile backup is unreadable")
 	}
-	if !strings.Contains(err.Error(), "unreadable") {
-		t.Fatalf("the refusal must name the unreadable pin; got %v", err)
+	if !strings.Contains(err.Error(), "serena-pin-open-unsafe") {
+		t.Fatalf("the refusal must name the typed unsafe-open diagnostic; got %v", err)
 	}
 	after, _ := os.ReadFile(cfgPath)
 	if string(after) != string(before) {
@@ -527,18 +527,24 @@ func TestMCPFrontReview_RollbackKeepsTheRecordWhileAnyRowIsPending(t *testing.T)
 		Present: true, URL: api.LSPRouterURL(9137, "go"),
 	}
 	rowKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", entryName)
+	row := mcpFrontReconcileRow{
+		Surface: mcpFrontSurfaceLSP, Client: "claude-code", Language: "go", EntryName: entryName,
+		Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
+		Applied: &mcpFrontAppliedReceipt{
+			Generation: 1, Port: 9137, PostState: mcpFrontLSPState(applied),
+		},
+	}
 	if werr := api.WriteStateFileAtomic(reportPath, mcpFrontReconcileReport{
 		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true, Generation: 1,
 		Rows: map[string]mcpFrontReconcileRow{
-			rowKey: {
-				Surface: mcpFrontSurfaceLSP, Client: "claude-code", Language: "go", EntryName: entryName,
-				Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
-				Applied: &mcpFrontAppliedReceipt{
-					Generation: 1, Port: 9137, PostState: mcpFrontLSPState(applied),
-				},
+			rowKey: row,
+		},
+		ActivePlan: &mcpFrontReconcilePlan{
+			Generation: 1, Port: 9137, Rows: []string{rowKey},
+			Operations: []mcpFrontReconcilePlanOp{
+				mcpFrontPlanOperationForRow(rowKey, row, "add", mcpFrontLSPState(baseline), mcpFrontLSPState(applied)),
 			},
 		},
-		ActivePlan: &mcpFrontReconcilePlan{Generation: 1, Port: 9137},
 	}); werr != nil {
 		t.Fatalf("seed record: %v", werr)
 	}
@@ -578,19 +584,29 @@ func TestMCPFrontReview_RollbackFailsWhenTheRecordCannotBeRetired(t *testing.T) 
 	baseline := api.LSPRouterEntrySnapshot{
 		Client: "claude-code", Language: "go", EntryName: entryName,
 	}
+	intended := api.LSPRouterEntrySnapshot{
+		Client: "claude-code", Language: "go", EntryName: entryName,
+		Present: true, URL: api.LSPRouterURL(9137, "go"),
+	}
 	rowKey := mcpFrontReconcileRowKey(mcpFrontSurfaceLSP, "claude-code", "go", entryName)
+	row := mcpFrontReconcileRow{
+		Surface: mcpFrontSurfaceLSP, Client: "claude-code", Language: "go", EntryName: entryName,
+		Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
+		Disposition: &mcpFrontRollbackDisposition{
+			State: mcpFrontDispositionBaselineOnly, Reason: "no-effective-applied-receipt",
+		},
+	}
 	if werr := api.WriteStateFileAtomic(reportPath, mcpFrontReconcileReport{
 		Version: mcpFrontReconcileReportVersion, SnapshotComplete: true, Generation: 1,
 		Rows: map[string]mcpFrontReconcileRow{
-			rowKey: {
-				Surface: mcpFrontSurfaceLSP, Client: "claude-code", Language: "go", EntryName: entryName,
-				Baseline: mcpFrontLSPState(baseline), BaselineSet: true,
-				Disposition: &mcpFrontRollbackDisposition{
-					State: mcpFrontDispositionBaselineOnly, Reason: "no-effective-applied-receipt",
-				},
+			rowKey: row,
+		},
+		ActivePlan: &mcpFrontReconcilePlan{
+			Generation: 1, Port: 9137, Rows: []string{rowKey},
+			Operations: []mcpFrontReconcilePlanOp{
+				mcpFrontPlanOperationForRow(rowKey, row, "add", mcpFrontLSPState(baseline), mcpFrontLSPState(intended)),
 			},
 		},
-		ActivePlan: &mcpFrontReconcilePlan{Generation: 1, Port: 9137},
 	}); werr != nil {
 		t.Fatalf("seed record: %v", werr)
 	}

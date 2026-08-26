@@ -1,5 +1,5 @@
 name: vcpkg
-description: "vcpkg/CMake diagnostics — build-failure triage, overlay-port resolution, pin status, patch order, CMake trace reading."
+description: "vcpkg/CMake diagnostics — build-failure triage, overlay-port resolution, resolved reverse dependencies, pin status, patch order, CMake trace reading."
 kind: global
 transport: stdio-bridge
 command: mcphub
@@ -10,10 +10,13 @@ env: {}
 
 # vcpkg/CMake diagnostic MCP server: read-only tools for vcpkg build-failure
 # triage (vcpkg_last_failure), overlay-port precedence (vcpkg_port_resolution),
-# pin auditing against upstream remotes (vcpkg_pin_status), static patch-apply
+# resolved selected-port reverse dependents (vcpkg_reverse_dependencies), pin
+# auditing against upstream remotes (vcpkg_pin_status), static patch-apply
 # ordering (vcpkg_patches_apply), CMake trace reading (vcpkg_cmake_trace), CMake
 # include-graph resolution (cmake_include_graph), and root discovery
-# (vcpkg_discover_root). No build is ever started by this server; a live build
+# (vcpkg_discover_root). Reverse dependency resolution invokes only vcpkg
+# version/help/depend-info with build/install/download/package roots redirected
+# to caller-authorized scratch; no build or install is started. A live build
 # invocation is explicitly out of scope. Build/install roots and overlay chains
 # are always taken as explicit tool parameters (or VCPKG_ROOT / manifest /
 # labelled-heuristic discovery reported back to the caller) — never guessed

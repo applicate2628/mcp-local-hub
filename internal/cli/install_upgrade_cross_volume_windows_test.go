@@ -3,17 +3,25 @@
 package cli
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"mcp-local-hub/internal/binaryadmission"
 )
 
 func TestStageV5UpgradeBinary_StagesBesideCanonicalTarget(t *testing.T) {
 	sourceDir := t.TempDir()
 	targetDir := t.TempDir()
+	sourceFixture := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "CROSS-VOLUME-STAGING")
 	source := filepath.Join(sourceDir, "mcphub.exe")
 	target := filepath.Join(targetDir, "mcphub.exe")
-	if err := os.WriteFile(source, []byte("new-binary"), 0o700); err != nil {
+	want, err := os.ReadFile(sourceFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(source, want, 0o700); err != nil {
 		t.Fatal(err)
 	}
 
@@ -32,7 +40,7 @@ func TestStageV5UpgradeBinary_StagesBesideCanonicalTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read staged binary: %v", err)
 	}
-	if got, want := string(raw), "new-binary"; got != want {
-		t.Fatalf("staged content = %q, want %q", got, want)
+	if !bytes.Equal(raw, want) {
+		t.Fatalf("staged content differs from the admitted source fixture")
 	}
 }
