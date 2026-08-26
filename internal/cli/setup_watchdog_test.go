@@ -56,6 +56,7 @@ type setupImportXMLCall struct {
 
 type setupFakeScheduler struct {
 	mu             sync.Mutex
+	tasks          map[string][]byte
 	deleteCalls    []string
 	importXMLCalls []setupImportXMLCall
 	order          []string
@@ -68,6 +69,7 @@ func (f *setupFakeScheduler) Create(scheduler.TaskSpec) error { return errNotImp
 func (f *setupFakeScheduler) Delete(name string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	delete(f.tasks, name)
 	f.deleteCalls = append(f.deleteCalls, name)
 	f.order = append(f.order, "delete:"+name)
 	return nil
@@ -87,8 +89,14 @@ func (f *setupFakeScheduler) List(prefix string) ([]scheduler.TaskStatus, error)
 	copy(out, f.listResult)
 	return out, nil
 }
-func (f *setupFakeScheduler) ExportXML(string) ([]byte, error) {
-	return nil, errNotImplementedForSetupTest
+func (f *setupFakeScheduler) ExportXML(name string) ([]byte, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	xml, ok := f.tasks[name]
+	if !ok {
+		return nil, scheduler.ErrTaskNotFound
+	}
+	return append([]byte(nil), xml...), nil
 }
 func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
 	f.mu.Lock()
@@ -97,7 +105,11 @@ func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
 	copy(cp, xml)
 	f.importXMLCalls = append(f.importXMLCalls, setupImportXMLCall{name: name, xml: cp})
 	f.order = append(f.order, "import:"+name)
-	return f.importXMLErr
+	if f.importXMLErr != nil {
+		return f.importXMLErr
+	}
+	f.tasks[name] = cp
+	return nil
 }
 func (f *setupFakeScheduler) deletes() []string {
 	f.mu.Lock()
@@ -151,7 +163,7 @@ func setupWatchdogTestHelper(t *testing.T) (string, *setupFakeScheduler) {
 	restore := api.SetDaemonStateRootForTest(root)
 	t.Cleanup(restore)
 
-	fakeSch := &setupFakeScheduler{}
+	fakeSch := &setupFakeScheduler{tasks: make(map[string][]byte)}
 	restoreSch := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
 		return fakeSch, nil
 	})
@@ -298,7 +310,7 @@ func TestSetup_InstallsLivenessBeforeRemovingLegacyWatchdog(t *testing.T) {
 }
 
 // TestSetup_RunsTwice_Idempotent asserts re-running setup does not error and
-// the liveness ImportXML is issued each run (never the watchdog).
+// the settled liveness task is verified without a second ImportXML call.
 func TestSetup_RunsTwice_Idempotent(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
 
@@ -309,8 +321,8 @@ func TestSetup_RunsTwice_Idempotent(t *testing.T) {
 	if err := runSetupWatchdog(out, false); err != nil {
 		t.Fatalf("second runSetupWatchdog: %v", err)
 	}
-	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 2 {
-		t.Errorf("liveness ImportXML calls = %d after two runs, want 2", got)
+	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 1 {
+		t.Errorf("liveness ImportXML calls = %d after two runs, want 1", got)
 	}
 	if got := fakeSch.importXMLByName(api.LegacyWatchdogTaskName); got != 0 {
 		t.Errorf("watchdog ImportXML calls = %d, want 0 across both runs", got)

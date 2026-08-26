@@ -7,6 +7,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -658,6 +659,13 @@ func TestReconcileIPC_RegularGlobalDaemonDispatchedThroughSM(t *testing.T) {
 		}
 		if body.AppliedCount != 1 {
 			t.Fatalf("AppliedCount = %d, want 1 (regular daemon spawn is dispatched through the SM)", body.AppliedCount)
+		}
+		eventLog, err := os.ReadFile(filepath.Join(fx.deps.stateDir, "supervisor-events.log"))
+		if err != nil {
+			t.Fatalf("read supervisor event log: %v", err)
+		}
+		if strings.Contains(string(eventLog), "reconcile-apply-cache-barrier-timeout") {
+			t.Fatal("healthy reconcile fixture emitted cache-barrier timeout instead of completing the reap-scan barrier")
 		}
 		select {
 		case ev := <-fx.postedCh:
