@@ -96,7 +96,7 @@ func TestReverseDependenciesReceivingSideWire(t *testing.T) {
 	})
 	ctx := context.Background()
 	server := mcp.NewServer(&mcp.Implementation{Name: "reverse-dependencies-wire", Version: "test"}, nil)
-	vs := &VcpkgServer{server: server, reverseDependenciesRunner: runner}
+	vs := &VcpkgServer{server: server, reverseDependenciesRunner: runner, trustedVcpkgRoot: root}
 	if err := registerTools(vs); err != nil {
 		t.Fatal(err)
 	}
@@ -139,6 +139,31 @@ func TestReverseDependenciesReceivingSideWire(t *testing.T) {
 	}
 }
 
+func TestReverseDependenciesRejectsCallerSelectedExecutableRoot(t *testing.T) {
+	trusted, attacker, scratch := t.TempDir(), t.TempDir(), t.TempDir()
+	called := false
+	vs := &VcpkgServer{
+		trustedVcpkgRoot: trusted,
+		reverseDependenciesRunner: reversedepgraph.RunnerFunc(func(context.Context, reversedepgraph.Command) reversedepgraph.RunOutput {
+			called = true
+			return reversedepgraph.RunOutput{}
+		}),
+	}
+	arguments, err := json.Marshal(map[string]any{
+		"port": "zlib", "vcpkg_root": attacker, "triplet": "x64-windows", "host_triplet": "x64-windows", "scratch_root": scratch,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	outcome := vs.reverseDependenciesTool(context.Background(), &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Arguments: arguments}})
+	if outcome.invalidArgument == nil {
+		t.Fatal("caller-selected executable root was accepted")
+	}
+	if called {
+		t.Fatal("runner was reached for a caller-selected executable root")
+	}
+}
+
 func writeServerPortFixture(t *testing.T, dir, name, dependencies string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -156,7 +181,8 @@ func writeServerPortFixture(t *testing.T, dir, name, dependencies string) {
 func TestConcurrentReverseDependencyRequestLimitOne(t *testing.T) {
 	entered := make(chan struct{})
 	release := make(chan struct{})
-	vs := &VcpkgServer{reverseDependenciesRun: func(_ context.Context, args reversedepgraph.Args, _ reversedepgraph.Runner) reversedepgraph.Result {
+	root, scratch := t.TempDir(), t.TempDir()
+	vs := &VcpkgServer{trustedVcpkgRoot: root, reverseDependenciesRun: func(_ context.Context, args reversedepgraph.Args, _ reversedepgraph.Runner) reversedepgraph.Result {
 		close(entered)
 		<-release
 		result := reversedepgraph.NewResult(args)
@@ -164,7 +190,6 @@ func TestConcurrentReverseDependencyRequestLimitOne(t *testing.T) {
 		result.Coverage.Complete = true
 		return result
 	}}
-	root, scratch := t.TempDir(), t.TempDir()
 	arguments, err := json.Marshal(reversedepgraph.Args{Port: "zlib", VcpkgRoot: root, Triplet: "x64-windows", HostTriplet: "x64-windows", ScratchRoot: scratch, TimeoutMS: 1000})
 	if err != nil {
 		t.Fatal(err)
