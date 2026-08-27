@@ -58,11 +58,12 @@ GitHub-hosted CI для обычной разработки, PR и merge не и
 
 ### 3.1. Минимальный PR gate
 
-До появления versioned `scripts/verify-local.*` используется явный fail-fast запуск, который сохраняет результаты в `.reports/` и не маскирует exit code через `tee`:
+До появления versioned `scripts/verify-local.*` используется явный fail-fast запуск. Он проверяет именно committed PR range относительно актуальной целевой ветки, сохраняет evidence в `.reports/` и не маскирует exit code через `tee`:
 
 ```bash
 set -euo pipefail
 mkdir -p .reports
+
 git rev-parse HEAD > .reports/exact-head.txt
 git status --porcelain=v1 > .reports/worktree-status.txt
 if [ -s .reports/worktree-status.txt ]; then
@@ -71,11 +72,18 @@ if [ -s .reports/worktree-status.txt ]; then
   exit 1
 fi
 
-git diff --check 2>&1 | tee .reports/git-diff-check.txt
+verify_base_ref="${VERIFY_BASE_REF:-origin/master}"
+git rev-parse --verify "${verify_base_ref}^{commit}" > .reports/base-ref-head.txt
+merge_base="$(git merge-base "$verify_base_ref" HEAD)"
+printf '%s\n' "$merge_base" > .reports/base-merge-base.txt
+
+git diff --check "$merge_base" HEAD 2>&1 | tee .reports/git-committed-diff-check.txt
 go build ./... 2>&1 | tee .reports/go-build.txt
 go vet ./... 2>&1 | tee .reports/go-vet.txt
 go test -count=1 -timeout 5m ./... 2>&1 | tee .reports/go-test.txt
 ```
+
+`VERIFY_BASE_REF` обязан указывать на актуальный target branch PR. Проверка намеренно использует `git diff --check <merge-base> HEAD`, а не форму без commit, которая после clean-worktree check видит только пустую рабочую разницу и не проверяет уже зафиксированные whitespace defects.
 
 После A2 перед build/vet/test обязательно выполняется полный архитектурный ratchet с двумя отчётами:
 
@@ -108,7 +116,9 @@ PowerShell-эквивалент обязан сохранять те же лог
 Каждый script сохраняет в `.reports/`:
 
 - exact commit;
+- target ref и merge base;
 - clean-tree verdict;
+- committed-diff check;
 - command;
 - exit code;
 - tool versions;
