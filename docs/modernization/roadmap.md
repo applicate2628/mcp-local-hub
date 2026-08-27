@@ -40,8 +40,8 @@
 
 - `PR-11C-01` может начаться после `PR-11A-06`;
 - extraction `PR-11C-02` дополнительно ждёт `PR-11B-07`;
-- install lane WP-11D ждёт characterization `PR-11A-03`;
-- WP-11E начинает подготовку после WP-11A, но routing lane ждёт `PR-11A-04` и WP-02.
+- install lane WP-11D ждёт завершения `PR-11A-06` и characterization `PR-11A-03`;
+- WP-11E начинает подготовку после WP-11A, но implementation lanes ждут завершения `PR-11A-06`; routing lane дополнительно ждёт `PR-11A-04` и WP-02.
 
 <a id="dependency-graph"></a>
 ## 3. Граф рабочих пакетов
@@ -59,6 +59,8 @@ graph TD
     B7[PR-11B-07] --> C1[WP-11C extraction]
     A3[PR-11A-03] --> D1[WP-11D install lane]
     A4[PR-11A-04] --> E1[WP-11E characterization gate]
+    A6[PR-11A-06] --> D1
+    A6 --> E1
     W2[WP-02] --> E1
     C1 --> W8[WP-08]
     D1 --> W3[WP-03]
@@ -105,10 +107,12 @@ graph TD
 |---|---|---|
 | 0 | WP-00 subset, WP-01 P0 revalidation | внутренний security hotfix |
 | 1 | WP-02, WP-11A, начало WP-11B, release foundation | публичная beta |
-| 2 | WP-03, WP-05, WP-06, WP-08, WP-11C, WP-11D | multi-project beta |
+| 2 | WP-03, WP-06, WP-08, WP-11C, WP-11D | multi-project beta |
 | 3 | WP-04, WP-11E | protocol beta |
-| 4 | WP-07, остальной WP-09, WP-10 | release candidate; canonical status/docs готовы до removal gates |
+| 4 | WP-05, WP-07, остальной WP-09, WP-10 | release candidate; canonical status/docs готовы до removal gates |
 | 5 | WP-11F, финальный security/architecture review | stable 1.0 |
+
+Волны являются последовательными release envelopes: пакет из более поздней волны не начинается до exit criteria всех своих `start_after`, даже если они перечислены в предыдущей волне.
 
 Номера версий не являются контрактом. Состав волны корректируется после exact-master revalidation.
 
@@ -141,12 +145,12 @@ PR готов к merge только когда одновременно выпо
 | <a id="pr-11d-01"></a>`PR-11D-01` | `WP-11D` | `refactor/wp11d-registry-snapshot-view` | Общий RegistrySnapshotView с monotonic publish | `PR-11A-06` | — | `planned` |
 | <a id="pr-11d-02"></a>`PR-11D-02` | `WP-11D` | `refactor/wp11d-serena-registry-view` | Миграция существующей Serena projection/resolver | `PR-11D-01` | — | `planned` |
 | <a id="pr-11d-03"></a>`PR-11D-03` | `WP-11D` | `refactor/wp11d-lsp-registry-view` | Миграция LSP resolver | `PR-11D-01` | — | `planned` |
-| <a id="pr-11d-04"></a>`PR-11D-04` | `WP-11D` | `refactor/wp11d-install-plan` | Pure InstallPlan extraction с сохранением settlement contracts | `PR-11A-03` | — | `planned` |
+| <a id="pr-11d-04"></a>`PR-11D-04` | `WP-11D` | `refactor/wp11d-install-plan` | Pure InstallPlan extraction с сохранением settlement contracts | `PR-11A-03`, `PR-11A-06` | — | `planned` |
 | <a id="pr-11d-05"></a>`PR-11D-05` | `WP-11D` | `refactor/wp11d-install-transaction` | Executor и transaction journal | `PR-11D-04` | — | `planned` |
 | <a id="pr-11d-06"></a>`PR-11D-06` | `WP-11D` | `refactor/wp11d-remove-duplicates` | Удаление duplicate reload/client/process helpers | `PR-11D-02`, `PR-11D-03`, `PR-11D-05` | — | `planned` |
-| <a id="pr-11e-01"></a>`PR-11E-01` | `WP-11E` | `refactor/wp11e-mcp-session-routing` | Разделение protocol/session/routing существующего route daemon | `PR-11A-04` | WP-02 | `planned` |
+| <a id="pr-11e-01"></a>`PR-11E-01` | `WP-11E` | `refactor/wp11e-mcp-session-routing` | Разделение protocol/session/routing существующего route daemon | `PR-11A-04`, `PR-11A-06` | WP-02 | `planned` |
 | <a id="pr-11e-02"></a>`PR-11E-02` | `WP-11E` | `refactor/wp11e-mcp-dispatch-recovery` | Разделение fanout/dispatch/recovery | `PR-11E-01` | — | `planned` |
-| <a id="pr-11e-03"></a>`PR-11E-03` | `WP-11E` | `refactor/wp11e-lazy-state-machine` | Typed LazyProxy state/event reducer | `PR-11A-04` | — | `planned` |
+| <a id="pr-11e-03"></a>`PR-11E-03` | `WP-11E` | `refactor/wp11e-lazy-state-machine` | Typed LazyProxy state/event reducer | `PR-11A-04`, `PR-11A-06` | — | `planned` |
 | <a id="pr-11e-04"></a>`PR-11E-04` | `WP-11E` | `refactor/wp11e-timeout-lifecycle` | Централизация timeout и lifecycle policy | `PR-11E-02`, `PR-11E-03` | WP-08 | `planned` |
 | <a id="pr-11e-05"></a>`PR-11E-05` | `WP-11E` | `refactor/wp11e-docs-comments` | Вынос embedded Markdown и исторических комментариев | `PR-11E-04` | WP-10 | `planned` |
 | <a id="pr-11f-01"></a>`PR-11F-01` | `WP-11F` | `refactor/wp11f-remove-facades` | Удаление оставшихся compatibility facades | `PR-11B-08`, `PR-11C-05`, `PR-11D-06`, `PR-11E-05` | — | `planned` |

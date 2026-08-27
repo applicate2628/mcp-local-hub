@@ -9,6 +9,7 @@
 4. [Порядок чтения](#reading-order)
 5. [Состав пакета](#contents)
 6. [Правила обновления](#update-rules)
+7. [Нумерованные источники](#references)
 
 <a id="purpose"></a>
 ## 1. Назначение
@@ -94,7 +95,7 @@ deltas/
 - [`acceptance-tests.yaml`](acceptance-tests.yaml) — полные формулировки AT;
 - [`decisions.md`](decisions.md) — решения D-001—D-017;
 - [`glossary.md`](glossary.md) — термины;
-- [`audits/2026-08-12-audit-register.md`](audits/2026-08-12-audit-register.md) — нормативный реестр 36 findings для clean-clone delta-review;
+- [`audits/2026-08-12-audit-register.md`](audits/2026-08-12-audit-register.md) — самодостаточный реестр 36 findings для clean-clone delta-review;
 - [`deltas/`](deltas/) — переоценка актуального дерева и веток;
 - [`adr/`](adr/) — принятые решения, включая [`ADR-0006`](adr/0006-invariant-history-separation.md) о разделении текущего инварианта и истории.
 
@@ -109,5 +110,17 @@ deltas/
 6. После каждого существенного merge выполняется branch/master delta-review.
 7. Все ссылки, YAML, PR/WP gates и формулировки требований проверяются локально; GitHub Actions не запускается.
 8. Машинный PR-граф считается полным только при явных `deps` и `wp_gates`; неявное наследование запрещено.
+
+<a id="references"></a>
+## 7. Нумерованные источники
+
+<a id="ref-1"></a>
+1. [`mcp-local-hub` — самодостаточный реестр аудита `R-01—R-36`](audits/2026-08-12-audit-register.md); исходный снимок кода — [`c0527c1`](https://github.com/applicate2628/mcp-local-hub/commit/c0527c1232180dd37cd92da5a328bdcdadae1969).
+<a id="ref-2"></a>
+2. [`mcp-local-hub` — снимок `master` при канонизации `83b49f4`](https://github.com/applicate2628/mcp-local-hub/commit/83b49f4d616e97613e70070bfbc62e7958c01fc4).
+<a id="ref-3"></a>
+3. [Pull Request №602: ядро `archcheck`](https://github.com/applicate2628/mcp-local-hub/pull/602), reviewed HEAD `0235deb95af170598d6572e9af5f35ab5532bc9d`.
+<a id="ref-4"></a>
+4. [Model Context Protocol — официальная спецификация](https://modelcontextprotocol.io/specification/).
 
 [Вернуться к началу](#top)

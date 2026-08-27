@@ -1,7 +1,9 @@
 schema_version: 1
 metadata:
-  source: audits/2026-08-12-full-audit-v1.2.md
+  audit_register: audits/2026-08-12-audit-register.md
+  source_audit_sha256: 5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4
   count: 20
+  note: Формулировки нормативны в этом файле; audit_line адресует полный неизменяемый аудит, идентифицированный SHA-256.
 acceptance_tests:
 - id: AT-001
   test: dependency graph

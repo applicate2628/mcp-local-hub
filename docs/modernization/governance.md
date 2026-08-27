@@ -50,6 +50,7 @@
 
 Пример: `fix/auto-reaper-client-direct` не возвращается как готовое решение. Его PR закрыт без merge, а review показал фундаментальный разрыв между config-present и config-absent detection. Сохраняется только `DELTA-003`.
 
+<a id="local-verification"></a>
 <a id="local-gates"></a>
 ## 3. Локальные gates
 
@@ -64,6 +65,11 @@ set -euo pipefail
 mkdir -p .reports
 git rev-parse HEAD > .reports/exact-head.txt
 git status --porcelain=v1 > .reports/worktree-status.txt
+if [ -s .reports/worktree-status.txt ]; then
+  cat .reports/worktree-status.txt >&2
+  echo "worktree must be clean before verification" >&2
+  exit 1
+fi
 
 git diff --check 2>&1 | tee .reports/git-diff-check.txt
 go build ./... 2>&1 | tee .reports/go-build.txt
