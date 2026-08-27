@@ -28,7 +28,7 @@
 
 | Предмет | Канонический источник | Правило |
 |---|---|---|
-| Исторические findings `R-01—R-36` | [`audits/2026-08-12-audit-register.md`](audits/2026-08-12-audit-register.md) | Самодостаточный реестр всех 36 findings; SHA-256 `328fa4aac0b4343f252a4e7783b639b982d6d25cbfe8406c3019243ea49e6518`. Полный длинный отчёт закреплён исходным SHA-256 `5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4`. |
+| Исторические findings `R-01—R-36` | [`audits/2026-08-12-audit-register.md`](audits/2026-08-12-audit-register.md) | Самодостаточный реестр всех 36 findings; SHA-256 `7b060ef8874b4716340f5e3f80141fccdf5f1ac620b11cb8bee33790cf760bee`. Полный длинный отчёт закреплён исходным SHA-256 `5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4`. |
 | Формулировки 236 требований | [`requirements.yaml`](requirements.yaml) | Извлечены из аудита; ID и формулировка доступны без внешнего файла. |
 | 20 архитектурных приёмочных тестов | [`acceptance-tests.yaml`](acceptance-tests.yaml) | Содержит test/expected и строку источника. |
 | Изменения после аудита | [`deltas/2026-08-27-master-83b49f4.md`](deltas/2026-08-27-master-83b49f4.md) | Не закрывают finding автоматически; требуют revalidation на exact `master`. |
