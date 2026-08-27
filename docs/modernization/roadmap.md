@@ -4,31 +4,47 @@
 ## Оглавление
 
 1. [Масштаб программы](#scale)
-2. [Граф зависимостей](#dependency-graph)
-3. [Рабочие пакеты](#work-packages)
-4. [Релизные волны](#release-waves)
-5. [Архитектурный PR registry](#pr-registry)
-6. [Правила детализации WP-00—WP-10](#jit-planning)
-7. [Конечная граница](#final-boundary)
+2. [Семантика зависимостей](#dependency-semantics)
+3. [Граф рабочих пакетов](#dependency-graph)
+4. [Рабочие пакеты](#work-packages)
+5. [Релизные волны](#release-waves)
+6. [Архитектурный PR registry](#pr-registry)
+7. [Правила delta/JIT-планирования](#jit-planning)
+8. [Конечная граница](#final-boundary)
 
 <a id="scale"></a>
 ## 1. Масштаб программы
 
-На текущем уровне планирования определены:
+Определены:
 
-- **17 рабочих пакетов:** `WP-00—WP-10` и `WP-11A—WP-11F`;
-- **36 findings:** `R-01—R-36`;
-- **236 нормативных требований**;
-- **20 архитектурных приёмочных тестов:** `AT-001—AT-020`;
-- **16 решений:** `D-001—D-016`;
-- **272 управляемых идентификатора** требований, тестов и решений суммарно;
-- **34 архитектурных PR** для `WP-11A—WP-11F`;
-- **6 релизных волн**.
+- 17 рабочих пакетов: `WP-00—WP-10` и `WP-11A—WP-11F`;
+- 36 неизменяемых audit findings `R-01—R-36`;
+- 7 post-audit delta entries;
+- 236 требований с полными формулировками;
+- 20 архитектурных приёмочных тестов;
+- 17 решений `D-001—D-017`;
+- 34 архитектурных PR для `WP-11A—WP-11F`.
 
-Точное число PR всей программы намеренно не фиксируется до delta-review соответствующего рабочего пакета. Пункты разных WP имеют разный масштаб; искусственное равенство «одна строка roadmap = один PR» запрещено.
+Число PR для всей программы не фиксируется до delta-review конкретного WP.
+
+<a id="dependency-semantics"></a>
+## 2. Семантика зависимостей
+
+Нужно различать:
+
+- **start_after** — минимальное условие, после которого можно открыть первую ветку WP;
+- **lane gate** — дополнительное условие только для конкретной части WP;
+- **merge dependency** — exact PR, без которого следующий PR не сливается.
+
+Это устраняет ложные утверждения вида «весь WP-11C зависит от всего WP-11B». Например:
+
+- `PR-11C-01` может начаться после `PR-11A-06`;
+- extraction `PR-11C-02` дополнительно ждёт `PR-11B-07`;
+- install lane WP-11D ждёт characterization `PR-11A-03`;
+- WP-11E начинает подготовку после WP-11A, но routing lane ждёт `PR-11A-04` и WP-02.
 
 <a id="dependency-graph"></a>
-## 2. Граф зависимостей
+## 3. Граф рабочих пакетов
 
 <a id="figure-1"></a>
 ```mermaid
@@ -36,142 +52,140 @@ graph TD
     W0[WP-00] --> W1[WP-01]
     W0 --> A[WP-11A]
     W0 --> W9[WP-09 foundation]
-    A --> B[WP-11B]
-    A --> D[WP-11D]
-    A --> E[WP-11E]
-    B --> C[WP-11C]
-    W1 --> C
-    D --> W3[WP-03]
-    D --> W7[WP-07]
-    E --> W4[WP-04]
-    E --> W5[WP-05]
-    C --> W8[WP-08]
-    W6[WP-06] --> W7
+    A --> B[WP-11B start]
+    A --> C0[WP-11C in-package split]
+    A --> D0[WP-11D registry lane]
+    A --> E0[WP-11E preparation]
+    B7[PR-11B-07] --> C1[WP-11C extraction]
+    A3[PR-11A-03] --> D1[WP-11D install lane]
+    A4[PR-11A-04] --> E1[WP-11E characterization gate]
+    W2[WP-02] --> E1
+    C1 --> W8[WP-08]
+    D1 --> W3[WP-03]
+    E1 --> W4[WP-04]
+    E1 --> W5[WP-05]
+    W6[WP-06] --> W7[WP-07]
     W9 --> W10[WP-10]
     B --> F[WP-11F]
-    C --> F
-    D --> F
-    E --> F
+    C1 --> F
+    D1 --> F
+    E1 --> F
     W10 --> F
 ```
 
-**Рисунок 1 — ориентированный ациклический граф основных зависимостей.**
-
-`WP-11D` и `WP-11E` могут идти параллельно с частью `WP-11B`. `WP-11C` начинается после instance-owned supervisor dependencies (`PR-11B-07`), а не обязательно после полного B8. `WP-11F` является общей точкой удаления временных путей.
+**Рисунок 1 — минимальные start gates и дополнительные lane gates.**
 
 <a id="work-packages"></a>
-## 3. Рабочие пакеты
+## 4. Рабочие пакеты
 
-| ID | Название | Зависит от | Критерий выхода |
-|---|---|---|---|
-| <a id="wp-00"></a>`WP-00` | Базовая воспроизводимость и тестовая изоляция | — | Одна локальная команда доказывает состояние репозитория; тесты не затрагивают реальные конфигурации. |
-| <a id="wp-01"></a>`WP-01` | Единая входная безопасность и framing | `WP-00` | Все локальные входы используют одну политику admission; сообщения ограничены и типизированы. |
-| <a id="wp-02"></a>`WP-02` | Correlation router и cancellation | `WP-00`, `WP-11A` | Внешние и внутренние идентификаторы сопоставляются однозначно; отмена достигает backend. |
-| <a id="wp-03"></a>`WP-03` | Sharing policy и Serena project pool | `WP-02`, `WP-11D` | Проекты изолированы; маршрутизация и лимиты экземпляров формализованы. |
-| <a id="wp-04"></a>`WP-04` | Разделение legacy и modern MCP | `WP-02`, `WP-11E` | Каждая рекламируемая версия имеет отдельный адаптер и conformance evidence. |
-| <a id="wp-05"></a>`WP-05` | Точность capabilities, списков и caching | `WP-02`, `WP-04`, `WP-11E` | Capabilities и route map публикуются из одного согласованного snapshot. |
-| <a id="wp-06"></a>`WP-06` | Единый audit writer | `WP-00` | Запись, синхронизация, unlock и health имеют одного владельца и типизированный результат. |
-| <a id="wp-07"></a>`WP-07` | Crash-safe adoption/de-adoption | `WP-06`, `WP-11D` | Каждая транзакция завершается commit, rollback или recovery-required с однозначным resume. |
-| <a id="wp-08"></a>`WP-08` | Platform lifecycle | `WP-00`, `WP-01`, `WP-11C` | Деревья процессов, deadlines и platform containment проверены на заявленных платформах. |
-| <a id="wp-09"></a>`WP-09` | Release и supply chain | `WP-00` | Локальная release verification, immutable pins, SBOM, licenses и trusted publishing связаны с релизом. |
-| <a id="wp-10"></a>`WP-10` | Документация и управление состоянием проекта | `WP-09` | Один реестр состояния; версии, capabilities и документация синхронизированы. |
-| <a id="wp-11a"></a>`WP-11A` | Architecture guardrails и инвентаризация | `WP-00` | Новый архитектурный долг блокируется; поведение зафиксировано; workers классифицированы. |
-| <a id="wp-11b"></a>`WP-11B` | Корень композиции и внедрение зависимостей | `WP-11A` | Production service graph создаётся только в internal/app; global test seams удалены. |
-| <a id="wp-11c"></a>`WP-11C` | Supervisor и child-process extraction | `WP-11A`, `WP-11B`, `WP-01` | CLI становится thin adapter; один process-tree owner обслуживает transports. |
-| <a id="wp-11d"></a>`WP-11D` | Registry view и install architecture | `WP-11A` | Reload concurrency реализована один раз; planning отделён от effects и transaction journal. |
-| <a id="wp-11e"></a>`WP-11E` | MCP и LazyProxy decomposition | `WP-11A`, `WP-02` | Session, routing, dispatch и recovery разделены; LazyProxy имеет явную state machine. |
-| <a id="wp-11f"></a>`WP-11F` | Удаление временных путей и hard enforcement | `WP-11B`, `WP-11C`, `WP-11D`, `WP-11E`, `WP-10` | Нет двух production owners; allowlist закрыт; dead code и историческая структура тестов очищены. |
+| ID | Название | Может начаться после | Дополнительные lane gates | Критерий выхода | Planning status |
+|---|---|---|---|---|---|
+| <a id="wp-00"></a>`WP-00` | Базовая воспроизводимость и тестовая изоляция | — | — | Одна локальная команда доказывает состояние; тесты не затрагивают реальные конфигурации. | `revalidate-after-PR604` |
+| <a id="wp-01"></a>`WP-01` | Единая входная безопасность и framing | `WP-00` | — | Все local ingress используют одну admission/framing policy. | `security-revalidation` |
+| <a id="wp-02"></a>`WP-02` | Correlation router и cancellation | `WP-00`, `WP-11A` | — | ID/cancellation/session ownership однозначен. | `planned` |
+| <a id="wp-03"></a>`WP-03` | Sharing policy и Serena project pool | `WP-02`, `WP-11D` | DELTA-002 revalidation | Проекты изолированы; existing Serena projection revalidated and reused. | `current-master-delta` |
+| <a id="wp-04"></a>`WP-04` | Разделение legacy и modern MCP | `WP-02`, `WP-11E` | `DELTA-006` | Каждая рекламируемая MCP epoch имеет отдельный tested adapter. | `open-delta` |
+| <a id="wp-05"></a>`WP-05` | Точность capabilities, списков и caching | `WP-02`, `WP-04`, `WP-11E` | — | Capabilities и route map публикуются из согласованного snapshot. | `planned` |
+| <a id="wp-06"></a>`WP-06` | Единый audit writer | `WP-00` | `D-010` | Audit append/sync/unlock/health имеют одного owner. | `planned` |
+| <a id="wp-07"></a>`WP-07` | Crash-safe adoption/de-adoption | `WP-06`, `WP-11D` | `DELTA-003` | Transaction завершается commit, rollback или recovery-required. | `current-master-delta` |
+| <a id="wp-08"></a>`WP-08` | Platform lifecycle | `WP-00`, `WP-01` | `PR-11C-03`<br>`DELTA-004`<br>`DELTA-005` | Process trees, deadlines, durable output и platform containment доказаны. | `open-deltas` |
+| <a id="wp-09"></a>`WP-09` | Release и supply chain | `WP-00` | DELTA-002 descriptor-owner review | Pins, descriptors, SBOM, licenses и release verification связаны. | `foundation-present` |
+| <a id="wp-10"></a>`WP-10` | Документация и управление состоянием проекта | `WP-09` | `D-005` | Один status owner; docs/version/capability matrices синхронизированы. | `planned` |
+| <a id="wp-11a"></a>`WP-11A` | Architecture guardrails и инвентаризация | `WP-00` | — | Новый Go architectural debt блокируется; behavior и Go workers инвентаризованы. | `A1-in-PR` |
+| <a id="wp-11b"></a>`WP-11B` | Корень композиции и внедрение зависимостей | `WP-11A` | `PR-11A-06` | Service graph создаётся только в internal/app; global test seams удалены. | `planned` |
+| <a id="wp-11c"></a>`WP-11C` | Supervisor и child-process extraction | `WP-11A` | PR-11B-07 для extraction<br>WP-01 до transport migration | CLI thin; один child-process owner; route/stdio/http lifecycle сохранён. | `current-route-contract` |
+| <a id="wp-11d"></a>`WP-11D` | Registry view и install architecture | `WP-11A` | PR-11A-03 для install lane<br>PR-11A-06 для registry inventory | Reload concurrency реализована один раз; planning отделён от effects. | `current-master-delta` |
+| <a id="wp-11e"></a>`WP-11E` | MCP и LazyProxy decomposition | `WP-11A` | `PR-11A-04`<br>WP-02 для routing/cancellation lane | Session/routing/dispatch/recovery разделены; LazyProxy state explicit. | `current-route-contract` |
+| <a id="wp-11f"></a>`WP-11F` | Удаление временных путей и hard enforcement | `WP-11B`, `WP-11C`, `WP-11D`, `WP-11E`, `WP-10` | `PR-11F-01..04` | Facades/allowlists/dead code удалены; tests сгруппированы по контрактам. | `planned` |
 
 <a id="release-waves"></a>
-## 4. Релизные волны
-
-<a id="figure-2"></a>
-```mermaid
-graph LR
-    V0[Wave 0<br/>Baseline + P0] --> V1[Wave 1<br/>Core correctness + guardrails]
-    V1 --> V2[Wave 2<br/>Isolation + lifecycle + install]
-    V2 --> V3[Wave 3<br/>Modern MCP + decomposition]
-    V3 --> V4[Wave 4<br/>Recovery + release + enforcement]
-    V4 --> V5[Wave 5<br/>1.0 documentation and final gates]
-```
-
-**Рисунок 2 — рекомендуемые релизные волны; номера версий являются ориентиром, а не контрактом.**
+## 5. Релизные волны
 
 | Волна | Основной состав | Допуск |
 |---|---|---|
-| 0 | `WP-00` subset, `WP-01` P0 | внутренний security hotfix |
-| 1 | `WP-02`, `WP-11A`, начало `WP-11B`, pin/release foundation | публичная beta |
-| 2 | `WP-03`, `WP-05`, `WP-06`, `WP-08`, `WP-11C`, `WP-11D` | multi-project beta |
-| 3 | `WP-04`, `WP-11E` | protocol beta |
-| 4 | `WP-07`, остальной `WP-09`, `WP-11F` | release candidate |
-| 5 | `WP-10`, финальный security/architecture review | stable 1.0 |
+| 0 | WP-00 subset, WP-01 P0 revalidation | внутренний security hotfix |
+| 1 | WP-02, WP-11A, начало WP-11B, release foundation | публичная beta |
+| 2 | WP-03, WP-05, WP-06, WP-08, WP-11C, WP-11D | multi-project beta |
+| 3 | WP-04, WP-11E | protocol beta |
+| 4 | WP-07, остальной WP-09, WP-10 | release candidate; canonical status/docs готовы до removal gates |
+| 5 | WP-11F, финальный security/architecture review | stable 1.0 |
+
+Номера версий не являются контрактом. Состав волны корректируется после exact-master revalidation.
 
 <a id="pr-registry"></a>
-## 5. Архитектурный PR registry
+## 6. Архитектурный PR registry
 
-| ID | WP | Ветка | Результат | Зависит от | Planning status |
-|---|---|---|---|---|---|
-| <a id="pr-11a-01"></a>`PR-11A-01` / `A1` | `WP-11A` | `arch/wp11a-archcheck-core` | Детерминированное ядро archcheck | — | implemented-in-pr |
-| <a id="pr-11a-02"></a>`PR-11A-02` / `A2` | `WP-11A` | `arch/wp11a-repository-ratchet` | Production policy, owners, baseline, workers и локальный ratchet | `PR-11A-01` | planned |
-| <a id="pr-11a-03"></a>`PR-11A-03` / `A3` | `WP-11A` | `test/wp11a-supervisor-install-contracts` | Supervisor/install characterization и общий golden helper | `PR-11A-02` | planned |
-| <a id="pr-11a-04"></a>`PR-11A-04` / `A4` | `WP-11A` | `test/wp11a-mcp-lazy-contracts` | MCP aggregator/LazyProxy characterization | `PR-11A-02` | planned |
-| <a id="pr-11a-05"></a>`PR-11A-05` / `A5` | `WP-11A` | `test/wp11a-critical-worker-contracts` | Критические worker contracts | `PR-11A-02` | planned |
-| <a id="pr-11a-06"></a>`PR-11A-06` / `A6` | `WP-11A` | `arch/wp11a-complete-worker-inventory` | Полный workers.yaml и zero-unclassified gate | `PR-11A-03`, `PR-11A-04`, `PR-11A-05` | planned |
-| <a id="pr-11b-01"></a>`PR-11B-01` / `B1` | `WP-11B` | `refactor/wp11b-composition-root` | Production composition root internal/app | `PR-11A-06` | planned |
-| <a id="pr-11b-02"></a>`PR-11B-02` / `B2` | `WP-11B` | `refactor/wp11b-cli-readonly-deps` | Shared API для read-only CLI | `PR-11B-01` | planned |
-| <a id="pr-11b-03"></a>`PR-11B-03` / `B3` | `WP-11B` | `refactor/wp11b-cli-mutation-deps` | Shared API для mutating CLI | `PR-11B-02` | planned |
-| <a id="pr-11b-04"></a>`PR-11B-04` / `B4` | `WP-11B` | `refactor/wp11b-gui-services` | Process-scoped GUI Services | `PR-11B-03` | planned |
-| <a id="pr-11b-05"></a>`PR-11B-05` / `B5` | `WP-11B` | `refactor/wp11b-gui-route-wiring` | GUI и route daemon через shared services | `PR-11B-04` | planned |
-| <a id="pr-11b-06"></a>`PR-11B-06` / `B6` | `WP-11B` | `refactor/wp11b-testkit` | Общий process test harness | `PR-11B-05` | planned |
-| <a id="pr-11b-07"></a>`PR-11B-07` / `B7` | `WP-11B` | `refactor/wp11b-supervisor-deps` | Instance-owned supervisor dependencies | `PR-11B-06` | planned |
-| <a id="pr-11b-08"></a>`PR-11B-08` / `B8` | `WP-11B` | `refactor/wp11b-remove-facades` | Удаление compatibility facades и production test hooks | `PR-11B-07` | planned |
-| <a id="pr-11c-01"></a>`PR-11C-01` | `WP-11C` | `refactor/wp11c-supervise-inpackage-split` | Механическое разделение supervise.go внутри internal/cli | `PR-11A-06` | planned |
-| <a id="pr-11c-02"></a>`PR-11C-02` | `WP-11C` | `refactor/wp11c-supervisor-core` | Извлечение internal/supervisor с compatibility facade | `PR-11C-01`, `PR-11B-07` | planned |
-| <a id="pr-11c-03"></a>`PR-11C-03` | `WP-11C` | `refactor/wp11c-childprocess-core` | Общий internal/childprocess | `PR-11C-02`, `WP-01` | planned |
-| <a id="pr-11c-04"></a>`PR-11C-04` | `WP-11C` | `refactor/wp11c-stdio-host-runner` | Миграция StdioHost на childprocess runner | `PR-11C-03` | planned |
-| <a id="pr-11c-05"></a>`PR-11C-05` | `WP-11C` | `refactor/wp11c-http-host-runner` | Миграция HTTPHost и удаление duplicate lifecycle owners | `PR-11C-04` | planned |
-| <a id="pr-11d-01"></a>`PR-11D-01` | `WP-11D` | `refactor/wp11d-registry-snapshot-view` | Общий RegistrySnapshotView | `PR-11A-06` | planned |
-| <a id="pr-11d-02"></a>`PR-11D-02` | `WP-11D` | `refactor/wp11d-serena-registry-view` | Миграция Serena resolver | `PR-11D-01` | planned |
-| <a id="pr-11d-03"></a>`PR-11D-03` | `WP-11D` | `refactor/wp11d-lsp-registry-view` | Миграция LSP resolver | `PR-11D-01` | planned |
-| <a id="pr-11d-04"></a>`PR-11D-04` | `WP-11D` | `refactor/wp11d-install-plan` | Pure InstallPlan extraction | `PR-11A-03` | planned |
-| <a id="pr-11d-05"></a>`PR-11D-05` | `WP-11D` | `refactor/wp11d-install-transaction` | Executor и transaction journal | `PR-11D-04` | planned |
-| <a id="pr-11d-06"></a>`PR-11D-06` | `WP-11D` | `refactor/wp11d-remove-duplicates` | Удаление duplicate reload/client/process helpers | `PR-11D-02`, `PR-11D-03`, `PR-11D-05` | planned |
-| <a id="pr-11e-01"></a>`PR-11E-01` | `WP-11E` | `refactor/wp11e-mcp-session-routing` | Разделение protocol/session/routing | `PR-11A-04`, `WP-02` | planned |
-| <a id="pr-11e-02"></a>`PR-11E-02` | `WP-11E` | `refactor/wp11e-mcp-dispatch-recovery` | Разделение fanout/dispatch/recovery | `PR-11E-01` | planned |
-| <a id="pr-11e-03"></a>`PR-11E-03` | `WP-11E` | `refactor/wp11e-lazy-state-machine` | Typed LazyProxy state/event reducer | `PR-11A-04` | planned |
-| <a id="pr-11e-04"></a>`PR-11E-04` | `WP-11E` | `refactor/wp11e-timeout-lifecycle` | Централизация timeout и lifecycle policy | `PR-11E-02`, `PR-11E-03`, `WP-08` | planned |
-| <a id="pr-11e-05"></a>`PR-11E-05` | `WP-11E` | `refactor/wp11e-docs-comments` | Вынос embedded Markdown и исторических комментариев | `PR-11E-04`, `WP-10` | planned |
-| <a id="pr-11f-01"></a>`PR-11F-01` | `WP-11F` | `refactor/wp11f-remove-facades` | Удаление оставшихся compatibility facades | `PR-11B-08`, `PR-11C-05`, `PR-11D-06`, `PR-11E-05` | planned |
-| <a id="pr-11f-02"></a>`PR-11F-02` | `WP-11F` | `refactor/wp11f-hard-gates` | Закрытие allowlist и включение hard gates | `PR-11F-01` | planned |
-| <a id="pr-11f-03"></a>`PR-11F-03` | `WP-11F` | `refactor/wp11f-contract-tests` | Перегруппировка тестов по устойчивым контрактам | `PR-11F-01` | planned |
-| <a id="pr-11f-04"></a>`PR-11F-04` | `WP-11F` | `refactor/wp11f-final-audit` | Независимый architecture review и dead-code sweep | `PR-11F-02`, `PR-11F-03` | planned |
+PR готов к merge только когда одновременно выполнены его `Merge dependencies` и все `WP gates`. Поле `WP gates` обязательно дублируется в `architecture_prs.*.wp_gates` файла [`traceability.yaml`](traceability.yaml); неявное наследование зависимостей запрещено.
 
-`implemented-in-pr` означает, что реализация существует в отдельном PR; review, merge и локальный полный gate подтверждаются отдельно в GitHub.
+| ID | WP | Ветка | Результат | Merge dependencies | WP gates | Planning status |
+|---|---|---|---|---|---|---|
+| <a id="pr-11a-01"></a>`PR-11A-01` / `A1` | `WP-11A` | `arch/wp11a-archcheck-core` | Детерминированное ядро archcheck | — | — | `implemented-in-pr` |
+| <a id="pr-11a-02"></a>`PR-11A-02` / `A2` | `WP-11A` | `arch/wp11a-repository-ratchet` | Production policy, owners, baseline, Go workers и локальный ratchet | `PR-11A-01` | — | `planned` |
+| <a id="pr-11a-03"></a>`PR-11A-03` / `A3` | `WP-11A` | `test/wp11a-supervisor-install-contracts` | Supervisor/install characterization и общий golden helper | `PR-11A-02` | — | `planned` |
+| <a id="pr-11a-04"></a>`PR-11A-04` / `A4` | `WP-11A` | `test/wp11a-mcp-lazy-contracts` | MCP aggregator/LazyProxy characterization | `PR-11A-02` | — | `planned` |
+| <a id="pr-11a-05"></a>`PR-11A-05` / `A5` | `WP-11A` | `test/wp11a-critical-worker-contracts` | Критические Go worker contracts | `PR-11A-02` | — | `planned` |
+| <a id="pr-11a-06"></a>`PR-11A-06` / `A6` | `WP-11A` | `arch/wp11a-complete-worker-inventory` | Полный Go workers.yaml и zero-unclassified gate | `PR-11A-03`, `PR-11A-04`, `PR-11A-05` | — | `planned` |
+| <a id="pr-11b-01"></a>`PR-11B-01` / `B1` | `WP-11B` | `refactor/wp11b-composition-root` | Production composition root internal/app | `PR-11A-06` | — | `planned` |
+| <a id="pr-11b-02"></a>`PR-11B-02` / `B2` | `WP-11B` | `refactor/wp11b-cli-readonly-deps` | Shared API для read-only CLI | `PR-11B-01` | — | `planned` |
+| <a id="pr-11b-03"></a>`PR-11B-03` / `B3` | `WP-11B` | `refactor/wp11b-cli-mutation-deps` | Shared API для mutating CLI | `PR-11B-02` | — | `planned` |
+| <a id="pr-11b-04"></a>`PR-11B-04` / `B4` | `WP-11B` | `refactor/wp11b-gui-services` | Process-scoped GUI Services | `PR-11B-03` | — | `planned` |
+| <a id="pr-11b-05"></a>`PR-11B-05` / `B5` | `WP-11B` | `refactor/wp11b-gui-route-wiring` | Перевод существующих GUI и mcphub route на shared service graph | `PR-11B-04` | — | `planned` |
+| <a id="pr-11b-06"></a>`PR-11B-06` / `B6` | `WP-11B` | `refactor/wp11b-testkit` | Общий process test harness | `PR-11B-05` | — | `planned` |
+| <a id="pr-11b-07"></a>`PR-11B-07` / `B7` | `WP-11B` | `refactor/wp11b-supervisor-deps` | Instance-owned supervisor dependencies | `PR-11B-06` | — | `planned` |
+| <a id="pr-11b-08"></a>`PR-11B-08` / `B8` | `WP-11B` | `refactor/wp11b-remove-facades` | Удаление compatibility facades и production test hooks | `PR-11B-07` | — | `planned` |
+| <a id="pr-11c-01"></a>`PR-11C-01` | `WP-11C` | `refactor/wp11c-supervise-inpackage-split` | Механическое разделение supervise.go внутри internal/cli | `PR-11A-06` | — | `planned` |
+| <a id="pr-11c-02"></a>`PR-11C-02` | `WP-11C` | `refactor/wp11c-supervisor-core` | Извлечение internal/supervisor с compatibility facade | `PR-11C-01`, `PR-11B-07` | — | `planned` |
+| <a id="pr-11c-03"></a>`PR-11C-03` | `WP-11C` | `refactor/wp11c-childprocess-core` | Общий internal/childprocess и межъязыковой lifecycle contract | `PR-11C-02` | WP-01 | `planned` |
+| <a id="pr-11c-04"></a>`PR-11C-04` | `WP-11C` | `refactor/wp11c-stdio-host-runner` | Миграция StdioHost на childprocess runner | `PR-11C-03` | — | `planned` |
+| <a id="pr-11c-05"></a>`PR-11C-05` | `WP-11C` | `refactor/wp11c-http-host-runner` | Миграция HTTPHost и удаление duplicate lifecycle owners | `PR-11C-04` | — | `planned` |
+| <a id="pr-11d-01"></a>`PR-11D-01` | `WP-11D` | `refactor/wp11d-registry-snapshot-view` | Общий RegistrySnapshotView с monotonic publish | `PR-11A-06` | — | `planned` |
+| <a id="pr-11d-02"></a>`PR-11D-02` | `WP-11D` | `refactor/wp11d-serena-registry-view` | Миграция существующей Serena projection/resolver | `PR-11D-01` | — | `planned` |
+| <a id="pr-11d-03"></a>`PR-11D-03` | `WP-11D` | `refactor/wp11d-lsp-registry-view` | Миграция LSP resolver | `PR-11D-01` | — | `planned` |
+| <a id="pr-11d-04"></a>`PR-11D-04` | `WP-11D` | `refactor/wp11d-install-plan` | Pure InstallPlan extraction с сохранением settlement contracts | `PR-11A-03` | — | `planned` |
+| <a id="pr-11d-05"></a>`PR-11D-05` | `WP-11D` | `refactor/wp11d-install-transaction` | Executor и transaction journal | `PR-11D-04` | — | `planned` |
+| <a id="pr-11d-06"></a>`PR-11D-06` | `WP-11D` | `refactor/wp11d-remove-duplicates` | Удаление duplicate reload/client/process helpers | `PR-11D-02`, `PR-11D-03`, `PR-11D-05` | — | `planned` |
+| <a id="pr-11e-01"></a>`PR-11E-01` | `WP-11E` | `refactor/wp11e-mcp-session-routing` | Разделение protocol/session/routing существующего route daemon | `PR-11A-04` | WP-02 | `planned` |
+| <a id="pr-11e-02"></a>`PR-11E-02` | `WP-11E` | `refactor/wp11e-mcp-dispatch-recovery` | Разделение fanout/dispatch/recovery | `PR-11E-01` | — | `planned` |
+| <a id="pr-11e-03"></a>`PR-11E-03` | `WP-11E` | `refactor/wp11e-lazy-state-machine` | Typed LazyProxy state/event reducer | `PR-11A-04` | — | `planned` |
+| <a id="pr-11e-04"></a>`PR-11E-04` | `WP-11E` | `refactor/wp11e-timeout-lifecycle` | Централизация timeout и lifecycle policy | `PR-11E-02`, `PR-11E-03` | WP-08 | `planned` |
+| <a id="pr-11e-05"></a>`PR-11E-05` | `WP-11E` | `refactor/wp11e-docs-comments` | Вынос embedded Markdown и исторических комментариев | `PR-11E-04` | WP-10 | `planned` |
+| <a id="pr-11f-01"></a>`PR-11F-01` | `WP-11F` | `refactor/wp11f-remove-facades` | Удаление оставшихся compatibility facades | `PR-11B-08`, `PR-11C-05`, `PR-11D-06`, `PR-11E-05` | — | `planned` |
+| <a id="pr-11f-02"></a>`PR-11F-02` | `WP-11F` | `refactor/wp11f-hard-gates` | Закрытие allowlist и включение hard gates | `PR-11F-01` | — | `planned` |
+| <a id="pr-11f-03"></a>`PR-11F-03` | `WP-11F` | `refactor/wp11f-contract-tests` | Перегруппировка тестов по устойчивым контрактам, включая codex_round* | `PR-11F-01` | — | `planned` |
+| <a id="pr-11f-04"></a>`PR-11F-04` | `WP-11F` | `refactor/wp11f-final-audit` | Независимый architecture review и dead-code sweep | `PR-11F-02`, `PR-11F-03` | — | `planned` |
+
+`implemented-in-pr` означает только наличие реализации в отдельном PR. Review PASS, локальный full gate и merge status являются разными состояниями.
 
 <a id="jit-planning"></a>
-## 6. Правила детализации WP-00—WP-10
+## 7. Правила delta/JIT-планирования
 
-Для каждого пакета перед первым implementation PR выполняется:
+Перед первым implementation PR каждого WP:
 
-1. delta-review актуального `master` против finding snapshot;
-2. подтверждение или закрытие связанных R-*;
-3. выбор решений D-* с наступившим сроком;
-4. characterization/falsifier tests;
-5. PR decomposition по одному архитектурному или поведенческому инварианту;
-6. обновление [`traceability.yaml`](traceability.yaml).
+1. зафиксировать exact `master` SHA;
+2. сравнить его с audit snapshot;
+3. учесть все слитые hotfix/release PR;
+4. проверить открытые PR exact HEAD;
+5. закрытые/unmerged ветки рассматривать только как evidence;
+6. revalidate связанные `R-*`;
+7. зарегистрировать новые факты как `DELTA-*`;
+8. выполнить characterization/falsifier tests;
+9. определить PR decomposition по одному инварианту;
+10. обновить `traceability.yaml`.
 
-Таким образом roadmap остаётся полным на уровне результатов и зависимостей, но не закрепляет устаревающие file-by-file предположения на месяцы вперёд.
+PR №604 изменил 351 файл и более 53 тысяч добавленных строк, поэтому A2 обязан выполнить свежий inventory. Старые владельцы, пути и числа из аудита не переносятся автоматически.
 
 <a id="final-boundary"></a>
-## 7. Конечная граница
+## 8. Конечная граница
 
-Программа завершена, когда одновременно:
+Программа завершена, когда:
 
-- все заявленные work packages имеют выполненные exit criteria;
-- GitHub не содержит открытых P0/P1;
-- архитектурный и release gates воспроизводимы локально;
+- все WP прошли exit criteria;
+- нет открытых P0/P1;
+- все `R-*` и `DELTA-*` имеют доказанный outcome;
+- локальные architecture/release gates воспроизводимы;
 - один production owner существует для каждого инварианта;
-- временные facades и allowlists удалены либо формально приняты как P3 risk с expiry;
-- stable release matrix и документация соответствуют фактическому продукту.
+- Go workers и cross-language processes полностью классифицированы;
+- временные facades и allowlists удалены либо допустимый P3 имеет owner+expiry;
+- stable platform matrix и документация соответствуют продукту.
 
 [Вернуться к началу](#top)

@@ -1,460 +1,205 @@
-schema_version: 1
+schema_version: 2
 metadata:
   date: '2026-08-27'
   audit_sha: c0527c1232180dd37cd92da5a328bdcdadae1969
-  audit_artifact_sha256: 5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4
+  source_audit_sha256: 5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4
+  audit_register:
+    path: audits/2026-08-12-audit-register.md
+    sha256: 328fa4aac0b4343f252a4e7783b639b982d6d25cbfe8406c3019243ea49e6518
+  requirements_path: requirements.yaml
+  acceptance_tests_path: acceptance-tests.yaml
+  delta_path: deltas/2026-08-27-master-83b49f4.md
   master_snapshot: 83b49f4d616e97613e70070bfbc62e7958c01fc4
-  a1_pr: 602
-  a1_head: 0235deb95af170598d6572e9af5f35ab5532bc9d
-  live_status: https://github.com/applicate2628/mcp-local-hub/pulls
-  counts: {findings: 36, requirements: 236, acceptance_tests: 20, decisions: 16, work_packages: 17, architecture_prs: 34}
+  counts:
+    findings: 36
+    post_audit_deltas: 7
+    requirements: 236
+    acceptance_tests: 20
+    decisions: 17
+    work_packages: 17
+    architecture_prs: 34
+  dependency_rule: A PR is ready only when every deps PR is merged and every wp_gates package has met its exit criterion; no implicit inheritance.
 work_packages:
-  WP-00: []
-  WP-01: [WP-00]
-  WP-02: [WP-00, WP-11A]
-  WP-03: [WP-02, WP-11D]
-  WP-04: [WP-02, WP-11E]
-  WP-05: [WP-02, WP-04, WP-11E]
-  WP-06: [WP-00]
-  WP-07: [WP-06, WP-11D]
-  WP-08: [WP-00, WP-01, WP-11C]
-  WP-09: [WP-00]
-  WP-10: [WP-09]
-  WP-11A: [WP-00]
-  WP-11B: [WP-11A]
-  WP-11C: [WP-11A, WP-11B, WP-01]
-  WP-11D: [WP-11A]
-  WP-11E: [WP-11A, WP-02]
-  WP-11F: [WP-11B, WP-11C, WP-11D, WP-11E, WP-10]
+  WP-00:
+    title: Базовая воспроизводимость и тестовая изоляция
+    start_after: []
+    lane_gates: []
+  WP-01:
+    title: Единая входная безопасность и framing
+    start_after: [WP-00]
+    lane_gates: []
+  WP-02:
+    title: Correlation router и cancellation
+    start_after: [WP-00, WP-11A]
+    lane_gates: []
+  WP-03:
+    title: Sharing policy и Serena project pool
+    start_after: [WP-02, WP-11D]
+    lane_gates: [DELTA-002 revalidation]
+  WP-04:
+    title: Разделение legacy и modern MCP
+    start_after: [WP-02, WP-11E]
+    lane_gates: [DELTA-006]
+  WP-05:
+    title: Точность capabilities, списков и caching
+    start_after: [WP-02, WP-04, WP-11E]
+    lane_gates: []
+  WP-06:
+    title: Единый audit writer
+    start_after: [WP-00]
+    lane_gates: [D-010]
+  WP-07:
+    title: Crash-safe adoption/de-adoption
+    start_after: [WP-06, WP-11D]
+    lane_gates: [DELTA-003]
+  WP-08:
+    title: Platform lifecycle
+    start_after: [WP-00, WP-01]
+    lane_gates: [PR-11C-03, DELTA-004, DELTA-005]
+  WP-09:
+    title: Release и supply chain
+    start_after: [WP-00]
+    lane_gates: [DELTA-002 descriptor-owner review]
+  WP-10:
+    title: Документация и управление состоянием проекта
+    start_after: [WP-09]
+    lane_gates: [D-005]
+  WP-11A:
+    title: Architecture guardrails и инвентаризация
+    start_after: [WP-00]
+    lane_gates: []
+  WP-11B:
+    title: Корень композиции и внедрение зависимостей
+    start_after: [WP-11A]
+    lane_gates: [PR-11A-06]
+  WP-11C:
+    title: Supervisor и child-process extraction
+    start_after: [WP-11A]
+    lane_gates: [PR-11B-07 для extraction, WP-01 до transport migration]
+  WP-11D:
+    title: Registry view и install architecture
+    start_after: [WP-11A]
+    lane_gates: [PR-11A-03 для install lane, PR-11A-06 для registry inventory]
+  WP-11E:
+    title: MCP и LazyProxy decomposition
+    start_after: [WP-11A]
+    lane_gates: [PR-11A-04, WP-02 для routing/cancellation lane]
+  WP-11F:
+    title: Удаление временных путей и hard enforcement
+    start_after: [WP-11B, WP-11C, WP-11D, WP-11E, WP-10]
+    lane_gates: [PR-11F-01..04]
 architecture_prs:
-  PR-11A-01:
-    wp: WP-11A
-    deps: []
-    state: implemented-in-pr
-  PR-11A-02:
-    wp: WP-11A
-    deps: [PR-11A-01]
-    state: planned
-  PR-11A-03:
-    wp: WP-11A
-    deps: [PR-11A-02]
-    state: planned
-  PR-11A-04:
-    wp: WP-11A
-    deps: [PR-11A-02]
-    state: planned
-  PR-11A-05:
-    wp: WP-11A
-    deps: [PR-11A-02]
-    state: planned
-  PR-11A-06:
-    wp: WP-11A
-    deps: [PR-11A-03, PR-11A-04, PR-11A-05]
-    state: planned
-  PR-11B-01:
-    wp: WP-11B
-    deps: [PR-11A-06]
-    state: planned
-  PR-11B-02:
-    wp: WP-11B
-    deps: [PR-11B-01]
-    state: planned
-  PR-11B-03:
-    wp: WP-11B
-    deps: [PR-11B-02]
-    state: planned
-  PR-11B-04:
-    wp: WP-11B
-    deps: [PR-11B-03]
-    state: planned
-  PR-11B-05:
-    wp: WP-11B
-    deps: [PR-11B-04]
-    state: planned
-  PR-11B-06:
-    wp: WP-11B
-    deps: [PR-11B-05]
-    state: planned
-  PR-11B-07:
-    wp: WP-11B
-    deps: [PR-11B-06]
-    state: planned
-  PR-11B-08:
-    wp: WP-11B
-    deps: [PR-11B-07]
-    state: planned
-  PR-11C-01:
-    wp: WP-11C
-    deps: [PR-11A-06]
-    state: planned
-  PR-11C-02:
-    wp: WP-11C
-    deps: [PR-11C-01, PR-11B-07]
-    state: planned
-  PR-11C-03:
-    wp: WP-11C
-    deps: [PR-11C-02]
-    state: planned
-  PR-11C-04:
-    wp: WP-11C
-    deps: [PR-11C-03]
-    state: planned
-  PR-11C-05:
-    wp: WP-11C
-    deps: [PR-11C-04]
-    state: planned
-  PR-11D-01:
-    wp: WP-11D
-    deps: [PR-11A-06]
-    state: planned
-  PR-11D-02:
-    wp: WP-11D
-    deps: [PR-11D-01]
-    state: planned
-  PR-11D-03:
-    wp: WP-11D
-    deps: [PR-11D-01]
-    state: planned
-  PR-11D-04:
-    wp: WP-11D
-    deps: [PR-11A-03]
-    state: planned
-  PR-11D-05:
-    wp: WP-11D
-    deps: [PR-11D-04]
-    state: planned
-  PR-11D-06:
-    wp: WP-11D
-    deps: [PR-11D-02, PR-11D-03, PR-11D-05]
-    state: planned
-  PR-11E-01:
-    wp: WP-11E
-    deps: [PR-11A-04]
-    state: planned
-  PR-11E-02:
-    wp: WP-11E
-    deps: [PR-11E-01]
-    state: planned
-  PR-11E-03:
-    wp: WP-11E
-    deps: [PR-11A-04]
-    state: planned
-  PR-11E-04:
-    wp: WP-11E
-    deps: [PR-11E-02, PR-11E-03]
-    state: planned
-  PR-11E-05:
-    wp: WP-11E
-    deps: [PR-11E-04]
-    state: planned
-  PR-11F-01:
-    wp: WP-11F
-    deps: [PR-11B-08, PR-11C-05, PR-11D-06, PR-11E-05]
-    state: planned
-  PR-11F-02:
-    wp: WP-11F
-    deps: [PR-11F-01]
-    state: planned
-  PR-11F-03:
-    wp: WP-11F
-    deps: [PR-11F-01]
-    state: planned
-  PR-11F-04:
-    wp: WP-11F
-    deps: [PR-11F-02, PR-11F-03]
-    state: planned
+  PR-11A-01: {wp: WP-11A, deps: [], wp_gates: [], state: implemented-in-pr}
+  PR-11A-02: {wp: WP-11A, deps: [PR-11A-01], wp_gates: [], state: planned}
+  PR-11A-03: {wp: WP-11A, deps: [PR-11A-02], wp_gates: [], state: planned}
+  PR-11A-04: {wp: WP-11A, deps: [PR-11A-02], wp_gates: [], state: planned}
+  PR-11A-05: {wp: WP-11A, deps: [PR-11A-02], wp_gates: [], state: planned}
+  PR-11A-06: {wp: WP-11A, deps: [PR-11A-03, PR-11A-04, PR-11A-05], wp_gates: [], state: planned}
+  PR-11B-01: {wp: WP-11B, deps: [PR-11A-06], wp_gates: [], state: planned}
+  PR-11B-02: {wp: WP-11B, deps: [PR-11B-01], wp_gates: [], state: planned}
+  PR-11B-03: {wp: WP-11B, deps: [PR-11B-02], wp_gates: [], state: planned}
+  PR-11B-04: {wp: WP-11B, deps: [PR-11B-03], wp_gates: [], state: planned}
+  PR-11B-05: {wp: WP-11B, deps: [PR-11B-04], wp_gates: [], state: planned}
+  PR-11B-06: {wp: WP-11B, deps: [PR-11B-05], wp_gates: [], state: planned}
+  PR-11B-07: {wp: WP-11B, deps: [PR-11B-06], wp_gates: [], state: planned}
+  PR-11B-08: {wp: WP-11B, deps: [PR-11B-07], wp_gates: [], state: planned}
+  PR-11C-01: {wp: WP-11C, deps: [PR-11A-06], wp_gates: [], state: planned}
+  PR-11C-02: {wp: WP-11C, deps: [PR-11C-01, PR-11B-07], wp_gates: [], state: planned}
+  PR-11C-03: {wp: WP-11C, deps: [PR-11C-02], wp_gates: [WP-01], state: planned}
+  PR-11C-04: {wp: WP-11C, deps: [PR-11C-03], wp_gates: [], state: planned}
+  PR-11C-05: {wp: WP-11C, deps: [PR-11C-04], wp_gates: [], state: planned}
+  PR-11D-01: {wp: WP-11D, deps: [PR-11A-06], wp_gates: [], state: planned}
+  PR-11D-02: {wp: WP-11D, deps: [PR-11D-01], wp_gates: [], state: planned}
+  PR-11D-03: {wp: WP-11D, deps: [PR-11D-01], wp_gates: [], state: planned}
+  PR-11D-04: {wp: WP-11D, deps: [PR-11A-03], wp_gates: [], state: planned}
+  PR-11D-05: {wp: WP-11D, deps: [PR-11D-04], wp_gates: [], state: planned}
+  PR-11D-06: {wp: WP-11D, deps: [PR-11D-02, PR-11D-03, PR-11D-05], wp_gates: [], state: planned}
+  PR-11E-01: {wp: WP-11E, deps: [PR-11A-04], wp_gates: [WP-02], state: planned}
+  PR-11E-02: {wp: WP-11E, deps: [PR-11E-01], wp_gates: [], state: planned}
+  PR-11E-03: {wp: WP-11E, deps: [PR-11A-04], wp_gates: [], state: planned}
+  PR-11E-04: {wp: WP-11E, deps: [PR-11E-02, PR-11E-03], wp_gates: [WP-08], state: planned}
+  PR-11E-05: {wp: WP-11E, deps: [PR-11E-04], wp_gates: [WP-10], state: planned}
+  PR-11F-01: {wp: WP-11F, deps: [PR-11B-08, PR-11C-05, PR-11D-06, PR-11E-05], wp_gates: [], state: planned}
+  PR-11F-02: {wp: WP-11F, deps: [PR-11F-01], wp_gates: [], state: planned}
+  PR-11F-03: {wp: WP-11F, deps: [PR-11F-01], wp_gates: [], state: planned}
+  PR-11F-04: {wp: WP-11F, deps: [PR-11F-02, PR-11F-03], wp_gates: [], state: planned}
 findings:
-  R-01:
-    priority: P0
-    primary: [WP-01]
-    supporting: [WP-00]
-  R-02:
-    priority: P1
-    primary: [WP-02]
-    supporting: [WP-04]
-  R-03:
-    priority: P1
-    primary: [WP-01]
-    supporting: [WP-08]
-  R-04:
-    priority: P1
-    primary: [WP-02]
-    supporting: [WP-04]
-  R-05:
-    priority: P1
-    primary: [WP-02]
-    supporting: [WP-03, WP-04]
-  R-06:
-    priority: P1
-    primary: [WP-04]
-    supporting: [WP-02]
-  R-07:
-    priority: P1
-    primary: [WP-09]
-    supporting: [WP-10]
-  R-08:
-    priority: P1
-    primary: [WP-09]
-    supporting: [WP-00]
-  R-09:
-    priority: P2
-    primary: [WP-04]
-    supporting: []
-  R-10:
-    priority: P2
-    primary: [WP-08]
-    supporting: [WP-09]
-  R-11:
-    priority: P1
-    primary: [WP-03]
-    supporting: [WP-02]
-  R-12:
-    priority: P1
-    primary: [WP-01]
-    supporting: []
-  R-13:
-    priority: P2
-    primary: [WP-00, WP-09]
-    supporting: [WP-10]
-  R-14:
-    priority: P3
-    primary: [WP-08]
-    supporting: [WP-00]
-  R-15:
-    priority: P2
-    primary: [WP-06]
-    supporting: [WP-07]
-  R-16:
-    priority: P3
-    primary: [WP-07]
-    supporting: [WP-06]
-  R-17:
-    priority: P1
-    primary: [WP-00]
-    supporting: [WP-09]
-  R-18:
-    priority: P1
-    primary: [WP-00]
-    supporting: [WP-08]
-  R-19:
-    priority: P2
-    primary: [WP-01]
-    supporting: [WP-00]
-  R-20:
-    priority: P2
-    primary: [WP-09]
-    supporting: [WP-00]
-  R-21:
-    priority: P2
-    primary: [WP-09]
-    supporting: [WP-10]
-  R-22:
-    priority: P2
-    primary: [WP-10]
-    supporting: [WP-09]
-  R-23:
-    priority: P2
-    primary: [WP-10]
-    supporting: [WP-00]
-  R-24:
-    priority: P3
-    primary: [WP-11A]
-    supporting: [WP-10]
-  R-25:
-    priority: P3
-    primary: [WP-01]
-    supporting: [WP-02]
-  R-26:
-    priority: P2
-    primary: [WP-09]
-    supporting: []
-  R-27:
-    priority: P2
-    primary: [WP-11C]
-    supporting: [WP-08]
-  R-28:
-    priority: P2
-    primary: [WP-11B]
-    supporting: [WP-10]
-  R-29:
-    priority: P2
-    primary: [WP-11D]
-    supporting: [WP-07]
-  R-30:
-    priority: P2
-    primary: [WP-11E]
-    supporting: [WP-02, WP-04]
-  R-31:
-    priority: P2
-    primary: [WP-11B]
-    supporting: [WP-00]
-  R-32:
-    priority: P3
-    primary: [WP-11D]
-    supporting: [WP-03]
-  R-33:
-    priority: P2
-    primary: [WP-11C]
-    supporting: [WP-01, WP-08]
-  R-34:
-    priority: P2
-    primary: [WP-11E]
-    supporting: [WP-05, WP-08]
-  R-35:
-    priority: P3
-    primary: [WP-11E]
-    supporting: [WP-10]
-  R-36:
-    priority: P3
-    primary: [WP-11A, WP-11F]
-    supporting: [WP-00]
+  R-01: {priority: P0, primary: [WP-01], supporting: [WP-00]}
+  R-02: {priority: P1, primary: [WP-02], supporting: [WP-04]}
+  R-03: {priority: P1, primary: [WP-01], supporting: [WP-08]}
+  R-04: {priority: P1, primary: [WP-02], supporting: [WP-04]}
+  R-05: {priority: P1, primary: [WP-02], supporting: [WP-03, WP-04]}
+  R-06: {priority: P1, primary: [WP-04], supporting: [WP-02]}
+  R-07: {priority: P1, primary: [WP-09], supporting: [WP-10]}
+  R-08: {priority: P1, primary: [WP-09], supporting: [WP-00]}
+  R-09: {priority: P2, primary: [WP-04], supporting: []}
+  R-10: {priority: P2, primary: [WP-08], supporting: [WP-09]}
+  R-11: {priority: P1, primary: [WP-03], supporting: [WP-02]}
+  R-12: {priority: P1, primary: [WP-01], supporting: []}
+  R-13: {priority: P2, primary: [WP-00, WP-09], supporting: [WP-10]}
+  R-14: {priority: P3, primary: [WP-08], supporting: [WP-00]}
+  R-15: {priority: P2, primary: [WP-06], supporting: [WP-07]}
+  R-16: {priority: P3, primary: [WP-07], supporting: [WP-06]}
+  R-17: {priority: P1, primary: [WP-00], supporting: [WP-09]}
+  R-18: {priority: P1, primary: [WP-00], supporting: [WP-08]}
+  R-19: {priority: P2, primary: [WP-01], supporting: [WP-00]}
+  R-20: {priority: P2, primary: [WP-09], supporting: [WP-00]}
+  R-21: {priority: P2, primary: [WP-09], supporting: [WP-10]}
+  R-22: {priority: P2, primary: [WP-10], supporting: [WP-09]}
+  R-23: {priority: P2, primary: [WP-10], supporting: [WP-00]}
+  R-24: {priority: P3, primary: [WP-11A], supporting: [WP-10]}
+  R-25: {priority: P3, primary: [WP-01], supporting: [WP-02]}
+  R-26: {priority: P2, primary: [WP-09], supporting: []}
+  R-27: {priority: P2, primary: [WP-11C], supporting: [WP-08]}
+  R-28: {priority: P2, primary: [WP-11B], supporting: [WP-10]}
+  R-29: {priority: P2, primary: [WP-11D], supporting: [WP-07]}
+  R-30: {priority: P2, primary: [WP-11E], supporting: [WP-02, WP-04]}
+  R-31: {priority: P2, primary: [WP-11B], supporting: [WP-00]}
+  R-32: {priority: P3, primary: [WP-11D], supporting: [WP-03]}
+  R-33: {priority: P2, primary: [WP-11C], supporting: [WP-01, WP-08]}
+  R-34: {priority: P2, primary: [WP-11E], supporting: [WP-05, WP-08]}
+  R-35: {priority: P3, primary: [WP-11E], supporting: [WP-10]}
+  R-36: {priority: P3, primary: [WP-11A, WP-11F], supporting: [WP-00]}
 finding_requirements:
   R-01: [SEC-001, SEC-002, SEC-003, SEC-004, SEC-005, SEC-010]
-  R-25: [SEC-001, SEC-008, SEC-009]
-  R-12: [SEC-005, SEC-006, SEC-007]
-  R-03: [SEC-006, MCP-005, MCP-006, SUP-005]
-  R-13: [SEC-009, SECRET-001, SECRET-002, SECRET-003, SECRET-004, SECRET-005]
-  R-06: [MCP-001, MCP-002, MCP-004]
-  R-09: [MCP-002, MCP-015]
   R-02: [MCP-003]
+  R-03: [SEC-006, MCP-005, MCP-006, SUP-005]
   R-04: [MCP-008, MCP-013, MCP-014]
   R-05: [MCP-009, MCP-011, MCP-012, SHARE-001, SHARE-002, SHARE-004]
-  R-11: [SHARE-001, SHARE-003, SHARE-005, SHARE-008]
+  R-06: [MCP-001, MCP-002, MCP-004]
+  R-07: [SUPPLY-001, OBS-007]
+  R-08: [SUPPLY-006, SUPPLY-009, SUPPLY-010, REL-010]
+  R-09: [MCP-002, MCP-015]
   R-10: [SUP-001, SUP-008, SUP-009, SUP-010]
+  R-11: [SHARE-001, SHARE-003, SHARE-005, SHARE-008]
+  R-12: [SEC-005, SEC-006, SEC-007]
+  R-13: [SEC-009, SECRET-001, SECRET-002, SECRET-003, SECRET-004, SECRET-005]
   R-14: [SUP-003]
+  R-15: [STATE-008, OBS-001, OBS-004]
   R-16: [STATE-001, STATE-002, STATE-003, STATE-004, STATE-005, STATE-006, STATE-008]
-  R-15: [STATE-008]
-  R-17: [STATE-010, CLIENT-001, CLIENT-002]
+  R-17: [STATE-010, CLIENT-001, CLIENT-002, REL-010]
+  R-18: [ARCH-018, LT-001, LT-006, REL-002]
+  R-19: [SEC-006, REL-003, MCP-006]
+  R-20: [REL-010, SUPPLY-002, MAINT-003, PT-001, PT-002, PT-003, PT-004]
+  R-21: [SUPPLY-001, SUPPLY-002, SUPPLY-003, SUPPLY-004, SUPPLY-005, SUPPLY-006, SUPPLY-007, SUPPLY-008, SUPPLY-009, SUPPLY-010]
+  R-22: [MAINT-006, MAINT-007, COMPAT-001, COMPAT-003]
+  R-23: [MAINT-006, MAINT-007, K-008, K-015]
+  R-24: [ARCH-020, ARCH-021, ARCH-022, ARCH-029]
+  R-25: [SEC-001, SEC-008, SEC-009]
+  R-26: [SUPPLY-005, SUPPLY-006, SUPPLY-010]
   R-27: [ARCH-001, ARCH-003, ARCH-006, ARCH-019, ARCH-021, ARCH-025, ARCH-028, ARCH-030]
-  R-34: [ARCH-001, ARCH-013, ARCH-014, ARCH-018, ARCH-019, ARCH-025, ARCH-028, ARCH-030]
   R-28: [ARCH-002, ARCH-004, ARCH-005, ARCH-026, ARCH-027]
-  R-31: [ARCH-002, ARCH-015, ARCH-016, ARCH-017, ARCH-018, ARCH-029]
   R-29: [ARCH-007, ARCH-008, ARCH-009]
   R-30: [ARCH-010, ARCH-026, ARCH-027]
-  R-33: [ARCH-011]
+  R-31: [ARCH-002, ARCH-015, ARCH-016, ARCH-017, ARCH-018, ARCH-029]
   R-32: [ARCH-012]
-  R-18: [ARCH-018]
-  R-24: [ARCH-020, ARCH-021, ARCH-022, ARCH-029]
-  R-36: [ARCH-021, ARCH-024, ARCH-029]
+  R-33: [ARCH-011]
+  R-34: [ARCH-001, ARCH-013, ARCH-014, ARCH-018, ARCH-019, ARCH-025, ARCH-028, ARCH-030]
   R-35: [ARCH-022, ARCH-023]
-requirement_groups:
-  ARCH:
-    ids: [ARCH-001, ARCH-002, ARCH-003, ARCH-004, ARCH-005, ARCH-006, ARCH-007, ARCH-008, ARCH-009, ARCH-010, ARCH-011, ARCH-012, ARCH-013, ARCH-014, ARCH-015, ARCH-016, ARCH-017, ARCH-018, ARCH-019, ARCH-020, ARCH-021, ARCH-022,
-      ARCH-023, ARCH-024, ARCH-025, ARCH-026, ARCH-027, ARCH-028, ARCH-029, ARCH-030]
-    wp: [WP-11A, WP-11B, WP-11C, WP-11D, WP-11E, WP-11F]
-  CLIENT:
-    ids: [CLIENT-001, CLIENT-002, CLIENT-003, CLIENT-004, CLIENT-005, CLIENT-006, CLIENT-007, CLIENT-008]
-    wp: [WP-00, WP-03]
-  COMPAT:
-    ids: [COMPAT-001, COMPAT-002, COMPAT-003, COMPAT-004, COMPAT-005, COMPAT-006]
-    wp: [WP-04, WP-09, WP-10]
-  K:
-    ids: [K-001, K-002, K-003, K-004, K-005, K-006, K-007, K-008, K-009, K-010, K-011, K-012, K-013, K-014, K-015]
-    wp: [WP-00, WP-09, WP-10]
-  LT:
-    ids: [LT-001, LT-002, LT-003, LT-004, LT-005, LT-006, LT-007, LT-008, LT-009, LT-010, LT-011, LT-012, LT-013, LT-014, LT-015]
-    wp: [WP-00, WP-08]
-  MAINT:
-    ids: [MAINT-001, MAINT-002, MAINT-003, MAINT-004, MAINT-005, MAINT-006, MAINT-007, MAINT-008]
-    wp: [WP-10, WP-11F]
-  MCP:
-    ids: [MCP-001, MCP-002, MCP-003, MCP-004, MCP-005, MCP-006, MCP-007, MCP-008, MCP-009, MCP-010, MCP-011, MCP-012, MCP-013, MCP-014, MCP-015]
-    wp: [WP-02, WP-04, WP-05]
-  OBS:
-    ids: [OBS-001, OBS-002, OBS-003, OBS-004, OBS-005, OBS-006, OBS-007, OBS-008, OBS-009, OBS-010]
-    wp: [WP-06, WP-10]
-  PERF:
-    ids: [PERF-001, PERF-002, PERF-003, PERF-004, PERF-005, PERF-006, PERF-007, PERF-008]
-    wp: [WP-05, WP-08]
-  PT:
-    ids: [PT-001, PT-002, PT-003, PT-004, PT-005, PT-006, PT-007, PT-008, PT-009, PT-010, PT-011, PT-012, PT-013, PT-014, PT-015, PT-016, PT-017, PT-018, PT-019, PT-020, PT-021, PT-022, PT-023, PT-024, PT-025]
-    wp: [WP-00, WP-08, WP-09]
-  REL:
-    ids: [REL-001, REL-002, REL-003, REL-004, REL-005, REL-006, REL-007, REL-008, REL-009, REL-010]
-    wp: [WP-09]
-  SEC:
-    ids: [SEC-001, SEC-002, SEC-003, SEC-004, SEC-005, SEC-006, SEC-007, SEC-008, SEC-009, SEC-010, SEC-011, SEC-012]
-    wp: [WP-01]
-  SECRET:
-    ids: [SECRET-001, SECRET-002, SECRET-003, SECRET-004, SECRET-005, SECRET-006, SECRET-007, SECRET-008]
-    wp: [WP-00, WP-09]
-  SHARE:
-    ids: [SHARE-001, SHARE-002, SHARE-003, SHARE-004, SHARE-005, SHARE-006, SHARE-007, SHARE-008]
-    wp: [WP-02, WP-03]
-  ST:
-    ids: [ST-001, ST-002, ST-003, ST-004, ST-005, ST-006, ST-007, ST-008, ST-009, ST-010, ST-011, ST-012, ST-013, ST-014, ST-015, ST-016, ST-017, ST-018, ST-019, ST-020]
-    wp: [WP-00]
-  STATE:
-    ids: [STATE-001, STATE-002, STATE-003, STATE-004, STATE-005, STATE-006, STATE-007, STATE-008, STATE-009, STATE-010]
-    wp: [WP-06, WP-07]
-  SUP:
-    ids: [SUP-001, SUP-002, SUP-003, SUP-004, SUP-005, SUP-006, SUP-007, SUP-008, SUP-009, SUP-010]
-    wp: [WP-08, WP-11C]
-  SUPPLY:
-    ids: [SUPPLY-001, SUPPLY-002, SUPPLY-003, SUPPLY-004, SUPPLY-005, SUPPLY-006, SUPPLY-007, SUPPLY-008, SUPPLY-009, SUPPLY-010]
-    wp: [WP-09]
-  UX:
-    ids: [UX-001, UX-002, UX-003, UX-004, UX-005, UX-006, UX-007, UX-008]
-    wp: [WP-07, WP-10]
-acceptance_tests:
-  AT-001:
-    name: dependency graph
-    wp: [WP-11A]
-  AT-002:
-    name: composition root scan
-    wp: [WP-11B]
-  AT-003:
-    name: CLI ownership
-    wp: [WP-11C]
-  AT-004:
-    name: API construction
-    wp: [WP-11B]
-  AT-005:
-    name: mutable globals scan
-    wp: [WP-11A]
-  AT-006:
-    name: production test hooks
-    wp: [WP-11B, WP-11F]
-  AT-007:
-    name: goroutine ownership
-    wp: [WP-11A]
-  AT-008:
-    name: file budget
-    wp: [WP-11A, WP-11F]
-  AT-009:
-    name: comment policy
-    wp: [WP-11E, WP-11F]
-  AT-010:
-    name: embedded docs
-    wp: [WP-11E]
-  AT-011:
-    name: one invariant/owner
-    wp: [WP-11F]
-  AT-012:
-    name: supervisor characterization
-    wp: [WP-11A, WP-11C]
-  AT-013:
-    name: install planner purity
-    wp: [WP-11D]
-  AT-014:
-    name: InstallPlan equivalence
-    wp: [WP-11D]
-  AT-015:
-    name: registry view contract
-    wp: [WP-11D]
-  AT-016:
-    name: childprocess contract
-    wp: [WP-11C]
-  AT-017:
-    name: LazyProxy transitions
-    wp: [WP-11E]
-  AT-018:
-    name: timeout policy
-    wp: [WP-11E]
-  AT-019:
-    name: test naming/layout
-    wp: [WP-11F]
-  AT-020:
-    name: architecture report
-    wp: [WP-11A]
-decisions: [D-001, D-002, D-003, D-004, D-005, D-006, D-007, D-008, D-009, D-010, D-011, D-012, D-013, D-014, D-015, D-016]
+  R-36: [ARCH-021, ARCH-024, ARCH-029]
+registries:
+  requirements: requirements.yaml
+  acceptance_tests: acceptance-tests.yaml
+  decisions: decisions.md
+  roadmap: roadmap.md
+  post_audit_deltas: deltas/2026-08-27-master-83b49f4.md
