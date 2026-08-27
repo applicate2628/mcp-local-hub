@@ -362,7 +362,7 @@ func registerTools(vs *VcpkgServer) error {
 				},
 				"vcpkg_root": map[string]any{
 					"type": "string", "minLength": 1, "maxLength": 32768,
-					"description": "Required absolute vcpkg root containing the exact vcpkg executable to run.",
+					"description": "Required absolute vcpkg root; it must match the daemon operator's trusted VCPKG_ROOT containing the executable to run.",
 				},
 				"triplet": map[string]any{
 					"type": "string", "maxLength": 255, "pattern": `^[a-z0-9][a-z0-9_.-]*$`,
@@ -635,6 +635,9 @@ func (vs *VcpkgServer) reverseDependenciesTool(ctx context.Context, req *mcp.Cal
 		return projectableToolOutcome{invalidArgument: err}
 	}
 	vs.initReverseDependencies()
+	if err := reversedepgraph.ValidateTrustedRoot(args.VcpkgRoot, vs.trustedVcpkgRoot); err != nil {
+		return projectableToolOutcome{invalidArgument: err}
+	}
 	requestContext, cancel := context.WithTimeout(ctx, args.Timeout())
 	defer cancel()
 	select {

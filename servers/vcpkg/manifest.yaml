@@ -14,7 +14,9 @@ env: {}
 # auditing against upstream remotes (vcpkg_pin_status), static patch-apply
 # ordering (vcpkg_patches_apply), CMake trace reading (vcpkg_cmake_trace), CMake
 # include-graph resolution (cmake_include_graph), and root discovery
-# (vcpkg_discover_root). Reverse dependency resolution invokes only vcpkg
+# (vcpkg_discover_root). Reverse dependency resolution requires the requested
+# root to match the operator-controlled VCPKG_ROOT inherited by the daemon,
+# then invokes only vcpkg
 # version/help/depend-info with build/install/download/package roots redirected
 # to caller-authorized scratch; no build or install is started. A live build
 # invocation is explicitly out of scope. Build/install roots and overlay chains

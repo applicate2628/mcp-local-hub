@@ -25,6 +25,7 @@ package vcpkgserver
 import (
 	"context"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -49,6 +50,7 @@ type VcpkgServer struct {
 	reverseDependenciesSlots  chan struct{}
 	reverseDependenciesRun    func(context.Context, reversedepgraph.Args, reversedepgraph.Runner) reversedepgraph.Result
 	reverseDependenciesRunner reversedepgraph.Runner
+	trustedVcpkgRoot          string
 }
 
 func (vs *VcpkgServer) initReverseDependencies() {
@@ -59,6 +61,9 @@ func (vs *VcpkgServer) initReverseDependencies() {
 		}
 		if vs.reverseDependenciesRunner == nil {
 			vs.reverseDependenciesRunner = reversedepgraph.DefaultRunner()
+		}
+		if vs.trustedVcpkgRoot == "" {
+			vs.trustedVcpkgRoot = os.Getenv("VCPKG_ROOT")
 		}
 	})
 }

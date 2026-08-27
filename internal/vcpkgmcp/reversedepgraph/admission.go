@@ -78,6 +78,20 @@ func ValidateArgs(ctx context.Context, args Args) error {
 	return nil
 }
 
+// ValidateTrustedRoot ensures subprocess authority comes from daemon
+// configuration, not from the MCP request. VCPKG_ROOT is captured from the
+// daemon environment by the server and is therefore an operator-controlled
+// trust decision.
+func ValidateTrustedRoot(requested, trusted string) error {
+	if trusted == "" || !filepath.IsAbs(trusted) {
+		return fmt.Errorf("vcpkg execution is disabled: daemon VCPKG_ROOT is not an absolute trusted root")
+	}
+	if canonicalForComparison(requested) != canonicalForComparison(trusted) {
+		return fmt.Errorf("vcpkg_root must match the daemon's trusted VCPKG_ROOT")
+	}
+	return nil
+}
+
 func pathsOverlap(left, right string) bool {
 	left = canonicalForComparison(left)
 	right = canonicalForComparison(right)
