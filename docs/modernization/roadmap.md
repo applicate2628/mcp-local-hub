@@ -19,7 +19,7 @@
 
 - 17 рабочих пакетов: `WP-00—WP-10` и `WP-11A—WP-11F`;
 - 36 неизменяемых audit findings `R-01—R-36`;
-- 7 post-audit delta entries;
+- 7 post-audit delta entries `DELTA-001—DELTA-007`;
 - 236 требований с полными формулировками;
 - 20 архитектурных приёмочных тестов;
 - 17 решений `D-001—D-017`;
@@ -33,8 +33,12 @@
 Нужно различать:
 
 - **start_after** — минимальное условие, после которого можно открыть первую ветку WP;
+- **decision gate** — решение `D-*`, обязательное до начала или конкретной части WP;
+- **delta gate** — post-audit факт `DELTA-*`, требующий явно указанной revalidation;
 - **lane gate** — дополнительное условие только для конкретной части WP;
 - **merge dependency** — exact PR, без которого следующий PR не сливается.
+
+Машинные поля `decision_gates`, `delta_gates`, `pr_gates`, `deps` и `wp_gates` файла [`traceability.yaml`](traceability.yaml) нормативны. Неявное наследование запрещено.
 
 Это устраняет ложные утверждения вида «весь WP-11C зависит от всего WP-11B». Например:
 
@@ -50,54 +54,65 @@
 ```mermaid
 graph TD
     W0[WP-00] --> W1[WP-01]
+    W0 --> W2[WP-02]
+    W0 --> W6[WP-06]
+    W0 --> W8[WP-08]
+    W0 --> W9[WP-09]
     W0 --> A[WP-11A]
-    W0 --> W9[WP-09 foundation]
-    A --> B[WP-11B start]
-    A --> C0[WP-11C in-package split]
-    A --> D0[WP-11D registry lane]
-    A --> E0[WP-11E preparation]
-    B7[PR-11B-07] --> C1[WP-11C extraction]
-    A3[PR-11A-03] --> D1[WP-11D install lane]
-    A4[PR-11A-04] --> E1[WP-11E characterization gate]
-    A6[PR-11A-06] --> D1
-    A6 --> E1
-    W2[WP-02] --> E1
-    C1 --> W8[WP-08]
-    D1 --> W3[WP-03]
-    E1 --> W4[WP-04]
-    E1 --> W5[WP-05]
-    W6[WP-06] --> W7[WP-07]
+    A --> W2
+    A --> B[WP-11B]
+    A --> C[WP-11C]
+    A --> D[WP-11D]
+    A --> E[WP-11E]
+    W2 --> W3[WP-03]
+    D --> W3
+    W2 --> W4[WP-04]
+    E --> W4
+    W2 --> W5[WP-05]
+    W4 --> W5
+    E --> W5
+    W6 --> W7[WP-07]
+    D --> W7
+    W1 --> W8
     W9 --> W10[WP-10]
     B --> F[WP-11F]
-    C1 --> F
-    D1 --> F
-    E1 --> F
+    C --> F
+    D --> F
+    E --> F
     W10 --> F
+    A6[PR-11A-06] -.-> B
+    A6 -.-> C
+    A6 -.-> D
+    A6 -.-> E
+    B7[PR-11B-07] -.-> C
+    A3[PR-11A-03] -.-> D
+    A4[PR-11A-04] -.-> E
+    C3[PR-11C-03] -.-> W8
 ```
 
-**Рисунок 1 — минимальные start gates и дополнительные lane gates.**
+**Рисунок 1 — полные `start_after` связи и дополнительные PR lane gates.**
 
 <a id="work-packages"></a>
 ## 4. Рабочие пакеты
 
-| ID | Название | Может начаться после | Дополнительные lane gates | Критерий выхода | Planning status |
+| ID | Название | Может начаться после | Дополнительные decision/delta/PR gates | Критерий выхода | Planning status |
 |---|---|---|---|---|---|
-| <a id="wp-00"></a>`WP-00` | Базовая воспроизводимость и тестовая изоляция | — | — | Одна локальная команда доказывает состояние; тесты не затрагивают реальные конфигурации. | `revalidate-after-PR604` |
-| <a id="wp-01"></a>`WP-01` | Единая входная безопасность и framing | `WP-00` | — | Все local ingress используют одну admission/framing policy. | `security-revalidation` |
-| <a id="wp-02"></a>`WP-02` | Correlation router и cancellation | `WP-00`, `WP-11A` | — | ID/cancellation/session ownership однозначен. | `planned` |
-| <a id="wp-03"></a>`WP-03` | Sharing policy и Serena project pool | `WP-02`, `WP-11D` | DELTA-002 revalidation | Проекты изолированы; existing Serena projection revalidated and reused. | `current-master-delta` |
-| <a id="wp-04"></a>`WP-04` | Разделение legacy и modern MCP | `WP-02`, `WP-11E` | `DELTA-006` | Каждая рекламируемая MCP epoch имеет отдельный tested adapter. | `open-delta` |
-| <a id="wp-05"></a>`WP-05` | Точность capabilities, списков и caching | `WP-02`, `WP-04`, `WP-11E` | — | Capabilities и route map публикуются из согласованного snapshot. | `planned` |
+| <a id="wp-00"></a>`WP-00` | Базовая воспроизводимость и тестовая изоляция | — | `DELTA-002` | Одна локальная команда доказывает состояние; тесты не затрагивают реальные конфигурации. | `revalidate-after-PR604` |
+| <a id="wp-01"></a>`WP-01` | Единая входная безопасность и framing | `WP-00` | `D-001`, `D-004`, `D-009` | Все local ingress используют одну admission/framing policy. | `security-revalidation` |
+| <a id="wp-02"></a>`WP-02` | Correlation router и cancellation | `WP-00`, `WP-11A` | `D-008`, `DELTA-001` | ID/cancellation/session ownership однозначен. | `planned` |
+| <a id="wp-03"></a>`WP-03` | Sharing policy и Serena project pool | `WP-02`, `WP-11D` | `D-003`, `DELTA-002` | Проекты изолированы; existing Serena projection revalidated and reused. | `current-master-delta` |
+| <a id="wp-04"></a>`WP-04` | Разделение legacy и modern MCP | `WP-02`, `WP-11E` | `D-002`, `DELTA-006` | Каждая рекламируемая MCP epoch имеет отдельный tested adapter. | `open-delta` |
+| <a id="wp-05"></a>`WP-05` | Точность capabilities, списков и caching | `WP-02`, `WP-04`, `WP-11E` | `DELTA-007` | Capabilities и route map публикуются из согласованного snapshot. | `planned` |
 | <a id="wp-06"></a>`WP-06` | Единый audit writer | `WP-00` | `D-010` | Audit append/sync/unlock/health имеют одного owner. | `planned` |
-| <a id="wp-07"></a>`WP-07` | Crash-safe adoption/de-adoption | `WP-06`, `WP-11D` | `DELTA-003` | Transaction завершается commit, rollback или recovery-required. | `current-master-delta` |
-| <a id="wp-08"></a>`WP-08` | Platform lifecycle | `WP-00`, `WP-01` | `PR-11C-03`<br>`DELTA-004`<br>`DELTA-005` | Process trees, deadlines, durable output и platform containment доказаны. | `open-deltas` |
-| <a id="wp-09"></a>`WP-09` | Release и supply chain | `WP-00` | DELTA-002 descriptor-owner review | Pins, descriptors, SBOM, licenses и release verification связаны. | `foundation-present` |
-| <a id="wp-10"></a>`WP-10` | Документация и управление состоянием проекта | `WP-09` | `D-005` | Один status owner; docs/version/capability matrices синхронизированы. | `planned` |
-| <a id="wp-11a"></a>`WP-11A` | Architecture guardrails и инвентаризация | `WP-00` | — | Новый Go architectural debt блокируется; behavior и Go workers инвентаризованы. | `A1-in-PR` |
-| <a id="wp-11b"></a>`WP-11B` | Корень композиции и внедрение зависимостей | `WP-11A` | `PR-11A-06` | Service graph создаётся только в internal/app; global test seams удалены. | `planned` |
-| <a id="wp-11c"></a>`WP-11C` | Supervisor и child-process extraction | `WP-11A` | PR-11B-07 для extraction<br>WP-01 до transport migration | CLI thin; один child-process owner; route/stdio/http lifecycle сохранён. | `current-route-contract` |
-| <a id="wp-11d"></a>`WP-11D` | Registry view и install architecture | `WP-11A` | PR-11A-03 для install lane<br>PR-11A-06 для registry inventory | Reload concurrency реализована один раз; planning отделён от effects. | `current-master-delta` |
-| <a id="wp-11e"></a>`WP-11E` | MCP и LazyProxy decomposition | `WP-11A` | `PR-11A-04`<br>WP-02 для routing/cancellation lane | Session/routing/dispatch/recovery разделены; LazyProxy state explicit. | `current-route-contract` |
+| <a id="wp-07"></a>`WP-07` | Crash-safe adoption/de-adoption | `WP-06`, `WP-11D` | `D-017`, `DELTA-002`, `DELTA-003` | Transaction завершается commit, rollback или recovery-required. | `current-master-delta` |
+| <a id="wp-08"></a>`WP-08` | Platform lifecycle | `WP-00`, `WP-01` | `D-006`, `D-017`, `PR-11C-03`, `DELTA-004`, `DELTA-005`, `DELTA-006` | Process trees, deadlines, durable output и platform containment доказаны. | `open-deltas` |
+| <a id="wp-09"></a>`WP-09` | Release и supply chain | `WP-00` | `D-006`, `D-007`, `DELTA-002` | Pins, descriptors, SBOM, licenses и release verification связаны. | `foundation-present` |
+| <a id="wp-10"></a>`WP-10` | Документация и управление состоянием проекта | `WP-09` | `D-005`, `DELTA-002`, `DELTA-006` | Один status owner; docs/version/capability matrices синхронизированы. | `planned` |
+| <a id="wp-11a"></a>`WP-11A` | Architecture guardrails и инвентаризация | `WP-00` | `D-011`, `D-013`, `D-014`, `DELTA-002`, `DELTA-004` | Новый Go architectural debt блокируется; behavior и Go workers инвентаризованы. | `A1-in-PR` |
+| <a id="wp-11b"></a>`WP-11B` | Корень композиции и внедрение зависимостей | `WP-11A` | `D-012`, `D-016`, `PR-11A-06`, `DELTA-001` | Service graph создаётся только в internal/app; global test seams удалены. | `planned` |
+| <a id="wp-11c"></a>`WP-11C` | Supervisor и child-process extraction | `WP-11A` | `PR-11B-07`, `DELTA-001`, `DELTA-004`, `DELTA-005`; `WP-01` до transport migration | CLI thin; один child-process owner; route/stdio/http lifecycle сохранён. | `current-route-contract` |
+| <a id="wp-11d"></a>`WP-11D` | Registry view и install architecture | `WP-11A` | `PR-11A-03`, `PR-11A-06`, `DELTA-002` | Reload concurrency реализована один раз; planning отделён от effects. | `current-master-delta` |
+| <a id="wp-11e"></a>`WP-11E` | MCP и LazyProxy decomposition | `WP-11A` | `D-015`, `PR-11A-04`, `PR-11A-06`, `WP-02`, `DELTA-001`, `DELTA-006` | Session/routing/dispatch/recovery разделены; LazyProxy state explicit. | `current-route-contract` |
 | <a id="wp-11f"></a>`WP-11F` | Удаление временных путей и hard enforcement | `WP-11B`, `WP-11C`, `WP-11D`, `WP-11E`, `WP-10` | `PR-11F-01..04` | Facades/allowlists/dead code удалены; tests сгруппированы по контрактам. | `planned` |
 
 <a id="release-waves"></a>
