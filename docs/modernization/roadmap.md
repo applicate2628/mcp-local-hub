@@ -33,19 +33,21 @@
 Нужно различать:
 
 - **start_after** — минимальное условие, после которого можно открыть первую ветку WP;
-- **decision gate** — решение `D-*`, обязательное до начала или конкретной части WP;
+- **decision gate** — решение `D-*`, обязательное до начала всего WP;
+- **lane decision gate** — решение `D-*`, обязательное только до именованной части уже начатого WP;
 - **delta gate** — post-audit факт `DELTA-*`, требующий явно указанной revalidation;
-- **lane gate** — дополнительное условие только для конкретной части WP;
+- **PR gate** — exact PR, обязательный для конкретной части WP;
 - **merge dependency** — exact PR, без которого следующий PR не сливается.
 
-Машинные поля `decision_gates`, `delta_gates`, `pr_gates`, `deps` и `wp_gates` файла [`traceability.yaml`](traceability.yaml) нормативны. Неявное наследование запрещено.
+Машинные поля `decision_gates`, `lane_decision_gates`, `delta_gates`, `pr_gates`, `deps` и `wp_gates` файла [`traceability.yaml`](traceability.yaml) нормативны. Неявное наследование запрещено.
 
 Это устраняет ложные утверждения вида «весь WP-11C зависит от всего WP-11B». Например:
 
 - `PR-11C-01` может начаться после `PR-11A-06`;
 - extraction `PR-11C-02` дополнительно ждёт `PR-11B-07`;
 - install lane WP-11D ждёт завершения `PR-11A-06` и characterization `PR-11A-03`;
-- WP-11E начинает подготовку после WP-11A, но implementation lanes ждут завершения `PR-11A-06`; routing lane дополнительно ждёт `PR-11A-04` и WP-02.
+- WP-11E начинает подготовку после WP-11A, но implementation lanes ждут завершения `PR-11A-06`; routing lane дополнительно ждёт `PR-11A-04` и WP-02;
+- release foundation WP-09 может начаться после WP-00, но его именованная `release-candidate` lane дополнительно ждёт решения `D-006`.
 
 <a id="dependency-graph"></a>
 ## 3. Граф рабочих пакетов
@@ -105,8 +107,8 @@ graph TD
 | <a id="wp-05"></a>`WP-05` | Точность capabilities, списков и caching | `WP-02`, `WP-04`, `WP-11E` | `DELTA-007` | Capabilities и route map публикуются из согласованного snapshot. | `planned` |
 | <a id="wp-06"></a>`WP-06` | Единый audit writer | `WP-00` | `D-010` | Audit append/sync/unlock/health имеют одного owner. | `planned` |
 | <a id="wp-07"></a>`WP-07` | Crash-safe adoption/de-adoption | `WP-06`, `WP-11D` | `D-017`, `DELTA-002`, `DELTA-003` | Transaction завершается commit, rollback или recovery-required. | `current-master-delta` |
-| <a id="wp-08"></a>`WP-08` | Platform lifecycle | `WP-00`, `WP-01` | `D-006`, `D-017`, `PR-11C-03`, `DELTA-004`, `DELTA-005`, `DELTA-006` | Process trees, deadlines, durable output и platform containment доказаны. | `open-deltas` |
-| <a id="wp-09"></a>`WP-09` | Release и supply chain | `WP-00` | `D-006`, `D-007`, `DELTA-002` | Pins, descriptors, SBOM, licenses и release verification связаны. | `foundation-present` |
+| <a id="wp-08"></a>`WP-08` | Platform lifecycle | `WP-00`, `WP-01` | `D-006`, `D-017`, `PR-11C-03`, `DELTA-003`, `DELTA-004`, `DELTA-005`, `DELTA-006` | Process trees, deadlines, durable output и platform containment доказаны. | `open-deltas` |
+| <a id="wp-09"></a>`WP-09` | Release и supply chain | `WP-00` | `D-007`; `D-006` перед lane `release-candidate`; `DELTA-002` | Pins, descriptors, SBOM, licenses и release verification связаны. | `foundation-present` |
 | <a id="wp-10"></a>`WP-10` | Документация и управление состоянием проекта | `WP-09` | `D-005`, `DELTA-002`, `DELTA-006` | Один status owner; docs/version/capability matrices синхронизированы. | `planned` |
 | <a id="wp-11a"></a>`WP-11A` | Architecture guardrails и инвентаризация | `WP-00` | `D-011`, `D-013`, `D-014`, `DELTA-002`, `DELTA-004` | Новый Go architectural debt блокируется; behavior и Go workers инвентаризованы. | `A1-in-PR` |
 | <a id="wp-11b"></a>`WP-11B` | Корень композиции и внедрение зависимостей | `WP-11A` | `D-012`, `D-016`, `PR-11A-06`, `DELTA-001` | Service graph создаётся только в internal/app; global test seams удалены. | `planned` |

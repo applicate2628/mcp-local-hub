@@ -1,8 +1,8 @@
 <a id="top"></a>
 # Реестр исторического аудита `mcp-local-hub`
 
-**Снимок исходного кода:** [`c0527c1232180dd37cd92da5a328bdcdadae1969`](https://github.com/applicate2628/mcp-local-hub/commit/c0527c1232180dd37cd92da5a328bdcdadae1969)  
-**Дата аудита:** 2026-08-12  
+**Снимок исходного кода:** [`c0527c1232180dd37cd92da5a328bdcdadae1969`](https://github.com/applicate2628/mcp-local-hub/commit/c0527c1232180dd37cd92da5a328bdcdadae1969)<br>
+**Дата аудита:** 2026-08-12<br>
 **Назначение:** самодостаточная нормативная копия всех 36 findings для delta-review из чистого clone.
 
 Полные формулировки 236 требований находятся в [`../requirements.yaml`](../requirements.yaml), а 20 архитектурных приёмочных тестов — в [`../acceptance-tests.yaml`](../acceptance-tests.yaml). Полный длинный отчёт был зафиксирован отдельно с SHA-256 `5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4`; настоящий реестр содержит нормативные идентификаторы, формулировки, приоритеты, владельцев и исходные строки, необходимые для воспроизводимого delta-review.

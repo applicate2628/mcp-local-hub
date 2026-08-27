@@ -1,7 +1,7 @@
 <a id="top"></a>
 # ADR-0002: Единственный composition root в internal/app
 
-**Статус:** accepted  
+**Статус:** accepted<br>
 **Дата:** 2026-08-27
 
 ## Оглавление

@@ -1,4 +1,4 @@
-schema_version: 4
+schema_version: 5
 metadata:
   date: '2026-08-27'
   audit_sha: c0527c1232180dd37cd92da5a328bdcdadae1969
@@ -26,6 +26,7 @@ metadata:
   requirement_ownership_rule: Every requirement ID occurs in exactly one requirement_groups entry; that entry's wp list is its exact work-package ownership.
   acceptance_ownership_rule: Every AT-* has an explicit non-empty wp list in acceptance_tests.
   decision_gate_rule: A work package cannot start until every ID in decision_gates is accepted or explicitly superseded by a replacement decision.
+  lane_decision_gate_rule: A named lane cannot start until every matching lane_decision_gates entry is accepted or explicitly superseded; lane gates do not block unrelated earlier work in the same package.
   delta_gate_rule: Every DELTA-* is structured with work-package ownership and required checks; prose-only delta gates are invalid.
   dependency_rule: A PR is ready only when all deps are merged and all wp_gates have reached their exit criteria; implicit inheritance is forbidden.
 source_of_truth:
@@ -38,30 +39,30 @@ source_of_truth:
   live_status: GitHub PR/issues
   architecture_debt_after_A2: architecture/baseline.yaml and architecture/workers.yaml
 work_packages:
-  WP-00: {title: 'Базовая воспроизводимость и тестовая изоляция', start_after: [], decision_gates: [], delta_gates: [DELTA-002], pr_gates: []}
-  WP-01: {title: 'Единая входная безопасность и framing', start_after: [WP-00], decision_gates: [D-001, D-004, D-009], delta_gates: [], pr_gates: []}
-  WP-02: {title: 'Correlation router и cancellation', start_after: [WP-00, WP-11A], decision_gates: [D-008], delta_gates: [DELTA-001], pr_gates: []}
-  WP-03: {title: 'Sharing policy и Serena project pool', start_after: [WP-02, WP-11D], decision_gates: [D-003], delta_gates: [DELTA-002], pr_gates: []}
-  WP-04: {title: 'Разделение legacy и modern MCP', start_after: [WP-02, WP-11E], decision_gates: [D-002], delta_gates: [DELTA-006], pr_gates: []}
-  WP-05: {title: 'Точность capabilities, списков и caching', start_after: [WP-02, WP-04, WP-11E], decision_gates: [], delta_gates: [DELTA-007], pr_gates: []}
-  WP-06: {title: 'Единый audit writer', start_after: [WP-00], decision_gates: [D-010], delta_gates: [], pr_gates: []}
-  WP-07: {title: 'Crash-safe adoption/de-adoption', start_after: [WP-06, WP-11D], decision_gates: [D-017], delta_gates: [DELTA-002, DELTA-003], pr_gates: []}
-  WP-08: {title: 'Platform lifecycle', start_after: [WP-00, WP-01], decision_gates: [D-006, D-017], delta_gates: [DELTA-004, DELTA-005, DELTA-006], pr_gates: [PR-11C-03]}
-  WP-09: {title: 'Release и supply chain', start_after: [WP-00], decision_gates: [D-006, D-007], delta_gates: [DELTA-002], pr_gates: []}
-  WP-10: {title: 'Документация и управление состоянием проекта', start_after: [WP-09], decision_gates: [D-005], delta_gates: [DELTA-002, DELTA-006], pr_gates: []}
-  WP-11A: {title: 'Architecture guardrails и инвентаризация', start_after: [WP-00], decision_gates: [D-011, D-013, D-014], delta_gates: [DELTA-002, DELTA-004], pr_gates: []}
-  WP-11B: {title: 'Корень композиции и внедрение зависимостей', start_after: [WP-11A], decision_gates: [D-012, D-016], delta_gates: [DELTA-001], pr_gates: [PR-11A-06]}
-  WP-11C: {title: 'Supervisor и child-process extraction', start_after: [WP-11A], decision_gates: [], delta_gates: [DELTA-001, DELTA-004, DELTA-005], pr_gates: [PR-11B-07]}
-  WP-11D: {title: 'Registry view и install architecture', start_after: [WP-11A], decision_gates: [], delta_gates: [DELTA-002], pr_gates: [PR-11A-03, PR-11A-06]}
-  WP-11E: {title: 'MCP и LazyProxy decomposition', start_after: [WP-11A], decision_gates: [D-015], delta_gates: [DELTA-001, DELTA-006], pr_gates: [PR-11A-04, PR-11A-06]}
-  WP-11F: {title: 'Удаление временных путей и hard enforcement', start_after: [WP-11B, WP-11C, WP-11D, WP-11E, WP-10], decision_gates: [], delta_gates: [], pr_gates: []}
+  WP-00: {title: 'Базовая воспроизводимость и тестовая изоляция', start_after: [], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-002], pr_gates: []}
+  WP-01: {title: 'Единая входная безопасность и framing', start_after: [WP-00], decision_gates: [D-001, D-004, D-009], lane_decision_gates: [], delta_gates: [], pr_gates: []}
+  WP-02: {title: 'Correlation router и cancellation', start_after: [WP-00, WP-11A], decision_gates: [D-008], lane_decision_gates: [], delta_gates: [DELTA-001], pr_gates: []}
+  WP-03: {title: 'Sharing policy и Serena project pool', start_after: [WP-02, WP-11D], decision_gates: [D-003], lane_decision_gates: [], delta_gates: [DELTA-002], pr_gates: []}
+  WP-04: {title: 'Разделение legacy и modern MCP', start_after: [WP-02, WP-11E], decision_gates: [D-002], lane_decision_gates: [], delta_gates: [DELTA-006], pr_gates: []}
+  WP-05: {title: 'Точность capabilities, списков и caching', start_after: [WP-02, WP-04, WP-11E], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-007], pr_gates: []}
+  WP-06: {title: 'Единый audit writer', start_after: [WP-00], decision_gates: [D-010], lane_decision_gates: [], delta_gates: [], pr_gates: []}
+  WP-07: {title: 'Crash-safe adoption/de-adoption', start_after: [WP-06, WP-11D], decision_gates: [D-017], lane_decision_gates: [], delta_gates: [DELTA-002, DELTA-003], pr_gates: []}
+  WP-08: {title: 'Platform lifecycle', start_after: [WP-00, WP-01], decision_gates: [D-006, D-017], lane_decision_gates: [], delta_gates: [DELTA-003, DELTA-004, DELTA-005, DELTA-006], pr_gates: [PR-11C-03]}
+  WP-09: {title: 'Release и supply chain', start_after: [WP-00], decision_gates: [D-007], lane_decision_gates: [{decision: D-006, lane: release-candidate}], delta_gates: [DELTA-002], pr_gates: []}
+  WP-10: {title: 'Документация и управление состоянием проекта', start_after: [WP-09], decision_gates: [D-005], lane_decision_gates: [], delta_gates: [DELTA-002, DELTA-006], pr_gates: []}
+  WP-11A: {title: 'Architecture guardrails и инвентаризация', start_after: [WP-00], decision_gates: [D-011, D-013, D-014], lane_decision_gates: [], delta_gates: [DELTA-002, DELTA-004], pr_gates: []}
+  WP-11B: {title: 'Корень композиции и внедрение зависимостей', start_after: [WP-11A], decision_gates: [D-012, D-016], lane_decision_gates: [], delta_gates: [DELTA-001], pr_gates: [PR-11A-06]}
+  WP-11C: {title: 'Supervisor и child-process extraction', start_after: [WP-11A], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-001, DELTA-004, DELTA-005], pr_gates: [PR-11B-07]}
+  WP-11D: {title: 'Registry view и install architecture', start_after: [WP-11A], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-002], pr_gates: [PR-11A-03, PR-11A-06]}
+  WP-11E: {title: 'MCP и LazyProxy decomposition', start_after: [WP-11A], decision_gates: [D-015], lane_decision_gates: [], delta_gates: [DELTA-001, DELTA-006], pr_gates: [PR-11A-04, PR-11A-06]}
+  WP-11F: {title: 'Удаление временных путей и hard enforcement', start_after: [WP-11B, WP-11C, WP-11D, WP-11E, WP-10], decision_gates: [], lane_decision_gates: [], delta_gates: [], pr_gates: []}
 decisions:
   D-001: {status: proposed, before_wp: [WP-01], trigger: before-start}
   D-002: {status: proposed, before_wp: [WP-04], trigger: before-start}
   D-003: {status: proposed, before_wp: [WP-03], trigger: before-start}
   D-004: {status: proposed, before_wp: [WP-01], trigger: before-start}
   D-005: {status: proposed, before_wp: [WP-10], trigger: immediate}
-  D-006: {status: proposed, before_wp: [WP-08, WP-09], trigger: before-release-candidate}
+  D-006: {status: proposed, before_wp: [WP-08], before_lanes: [{wp: WP-09, lane: release-candidate}], trigger: before-start-or-lane}
   D-007: {status: proposed, before_wp: [WP-09], trigger: before-start}
   D-008: {status: proposed, before_wp: [WP-02], trigger: before-start}
   D-009: {status: proposed, before_wp: [WP-01], trigger: before-start}
