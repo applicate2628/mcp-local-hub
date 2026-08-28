@@ -22,7 +22,7 @@ metadata:
   source_audit_sha256: 5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4
   audit_register:
     path: audits/2026-08-12-audit-register.md
-    sha256: 328fa4aac0b4343f252a4e7783b639b982d6d25cbfe8406c3019243ea49e6518
+    sha256: 7b060ef8874b4716340f5e3f80141fccdf5f1ac620b11cb8bee33790cf760bee
   requirement_ownership_rule: Every requirement ID occurs in exactly one requirement_groups entry; that entry's wp list is its exact work-package ownership.
   acceptance_ownership_rule: Every AT-* has an explicit non-empty wp list in acceptance_tests.
   decision_gate_rule: A work package cannot start until every ID in decision_gates is accepted or explicitly superseded by a replacement decision.
