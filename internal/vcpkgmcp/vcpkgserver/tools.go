@@ -348,7 +348,7 @@ func registerTools(vs *VcpkgServer) error {
 
 	if err := registerProjectableTool(vs, &mcp.Tool{
 		Name: "vcpkg_reverse_dependencies",
-		Description: "Compute direct and transitive dependents of one selected port from resolved plans produced by the exact supplied vcpkg executable. " +
+		Description: "Compute direct and transitive dependents of one selected port from resolved plans produced only by the executable in the daemon operator's canonical VCPKG_ROOT; request vcpkg_root is matching confirmation only and never supplies or selects execution authority. " +
 			"The tool enumerates a complete bounded local port universe, uses declared metadata only as a conservative scheduling superset, runs depend-info in both DGML and list formats with all writable roots redirected to scratch, requires the formats to agree, and inverts only those vcpkg-produced edges. " +
 			"The explicit configuration includes target/host triplets, ordered overlay ports/triplets, classic or local-manifest mode, and candidate-defaults feature semantics. Remote registries, builds, installs, downloads, caller-supplied graph edges, arbitrary switches, shell commands, and inherited vcpkg/proxy/credential environments are refused. " +
 			"Every incomplete universe, child failure, format mismatch, provenance hole, resource limit, timeout, cancellation, input drift, or cleanup failure returns unknown(reason); an empty ok graph is authoritative only when coverage.complete=true." + resultProjectionDescription,
@@ -362,7 +362,7 @@ func registerTools(vs *VcpkgServer) error {
 				},
 				"vcpkg_root": map[string]any{
 					"type": "string", "minLength": 1, "maxLength": 32768,
-					"description": "Required absolute vcpkg root; it must match the daemon operator's trusted VCPKG_ROOT containing the executable to run.",
+					"description": "Required absolute confirmation of the daemon operator's trusted VCPKG_ROOT. The daemon's canonical VCPKG_ROOT is the sole execution authority.",
 				},
 				"triplet": map[string]any{
 					"type": "string", "maxLength": 255, "pattern": `^[a-z0-9][a-z0-9_.-]*$`,
@@ -631,11 +631,13 @@ func (vs *VcpkgServer) reverseDependenciesTool(ctx context.Context, req *mcp.Cal
 			return projectableToolOutcome{invalidArgument: err}
 		}
 	}
-	if err := reversedepgraph.ValidateArgs(ctx, args); err != nil {
+	vs.initReverseDependencies()
+	trustedRoot, err := reversedepgraph.BindTrustedRoot(args.VcpkgRoot, vs.trustedVcpkgRoot)
+	if err != nil {
 		return projectableToolOutcome{invalidArgument: err}
 	}
-	vs.initReverseDependencies()
-	if err := reversedepgraph.ValidateTrustedRoot(args.VcpkgRoot, vs.trustedVcpkgRoot); err != nil {
+	args.VcpkgRoot = trustedRoot
+	if err := reversedepgraph.ValidateArgs(ctx, args); err != nil {
 		return projectableToolOutcome{invalidArgument: err}
 	}
 	requestContext, cancel := context.WithTimeout(ctx, args.Timeout())

@@ -3,11 +3,13 @@ package reversedepgraph
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
 
+	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/vcpkgmcp/portname"
 )
 
@@ -78,18 +80,36 @@ func ValidateArgs(ctx context.Context, args Args) error {
 	return nil
 }
 
-// ValidateTrustedRoot ensures subprocess authority comes from daemon
-// configuration, not from the MCP request. VCPKG_ROOT is captured from the
-// daemon environment by the server and is therefore an operator-controlled
-// trust decision.
-func ValidateTrustedRoot(requested, trusted string) error {
+// BindTrustedRoot verifies that the request confirms the operator-controlled
+// VCPKG_ROOT and returns only the strictly resolved operator-owned path for
+// downstream execution and evidence. The request spelling is never retained.
+func BindTrustedRoot(requested, trusted string) (string, error) {
+	if requested == "" || !filepath.IsAbs(requested) {
+		return "", fmt.Errorf("vcpkg_root must be an absolute confirmation of the daemon's trusted VCPKG_ROOT")
+	}
 	if trusted == "" || !filepath.IsAbs(trusted) {
-		return fmt.Errorf("vcpkg execution is disabled: daemon VCPKG_ROOT is not an absolute trusted root")
+		return "", fmt.Errorf("vcpkg execution is disabled: daemon VCPKG_ROOT is not an absolute trusted root")
 	}
-	if canonicalForComparison(requested) != canonicalForComparison(trusted) {
-		return fmt.Errorf("vcpkg_root must match the daemon's trusted VCPKG_ROOT")
+	canonicalTrusted, err := process.CanonicalizePathStrict(trusted)
+	if err != nil {
+		return "", fmt.Errorf("vcpkg execution is disabled: daemon VCPKG_ROOT cannot be resolved: %w", err)
 	}
-	return nil
+	trustedInfo, err := os.Stat(canonicalTrusted)
+	if err != nil || !trustedInfo.IsDir() {
+		return "", fmt.Errorf("vcpkg execution is disabled: daemon VCPKG_ROOT is not an existing directory")
+	}
+	canonicalRequested, err := process.CanonicalizePathStrict(requested)
+	if err != nil {
+		return "", fmt.Errorf("vcpkg_root cannot be resolved: %w", err)
+	}
+	requestedInfo, err := os.Stat(canonicalRequested)
+	if err != nil || !requestedInfo.IsDir() {
+		return "", fmt.Errorf("vcpkg_root is not an existing directory")
+	}
+	if !os.SameFile(requestedInfo, trustedInfo) {
+		return "", fmt.Errorf("vcpkg_root must match the daemon's trusted VCPKG_ROOT")
+	}
+	return canonicalTrusted, nil
 }
 
 func pathsOverlap(left, right string) bool {
