@@ -45,14 +45,21 @@ see a definite verdict you can disprove in ten seconds, that is a bug worth repo
 |---|---|
 | `vcpkg_last_failure` | What failed in the last build — first real diagnostic, the failing phase, the reproducible command, and every log path it read. Handles nested builds (vcpkg → make → NMAKE → cmake → clang-cl/lld-link), where the real error sits thousands of lines under content-free wrapper noise. |
 | `vcpkg_port_resolution` | Which port definition actually wins across your overlay chain and the builtin registry, and why. |
-| `vcpkg_reverse_dependencies` | Which resolved default-feature candidate plans directly or transitively depend on one selected port, including target/host/other-triplet identity, feature sets, cycles, and overlay provenance. Edges come only from the exact supplied vcpkg executable's `depend-info` output. |
+| `vcpkg_reverse_dependencies` | Which resolved default-feature candidate plans directly or transitively depend on one selected port, including target/host/other-triplet identity, feature sets, cycles, and overlay provenance. Edges come only from the daemon operator's canonical `VCPKG_ROOT` executable's `depend-info` output. |
 | `vcpkg_pin_status` | Whether a pinned ref is current. Reports `current` or an honest `unknown` — never a fabricated "behind". Expands `${VERSION}` / `${PORT}` from `vcpkg.json` so the common `"v${VERSION}"` idiom resolves. |
 | `vcpkg_patches_apply` | Which declared patches apply for a triplet, from static analysis of the portfile's guards. Resolves patch paths rather than assuming they are port-dir-relative. |
 | `vcpkg_cmake_trace` | Reads an existing CMake trace. Bounded — it will not materialize an arbitrarily large trace. |
 | `cmake_include_graph` | Which CMake files include which, resolved statically, with dangling, allowed OPTIONAL absence, and unresolved edges distinguished. |
 | `vcpkg_discover_root` | Where the vcpkg root is, and by which rule it was decided. |
 
-## Roots and overlays come from you, never from guessing
+## Roots and overlays: request inputs, with one execution authority
+
+For `vcpkg_reverse_dependencies`, the daemon's operator-controlled `VCPKG_ROOT`
+is the sole execution authority. The required request `vcpkg_root` is only an
+absolute matching confirmation of that directory; it never selects an
+executable, evidence path, or `--vcpkg-root` argument. The daemon strictly
+resolves both paths, confirms they are the same existing directory, and runs
+only from its canonical `VCPKG_ROOT` path.
 
 Build and install roots and the overlay chain are taken from vcpkg's own keys —
 `--x-buildtrees-root`, `--x-install-root`, `--overlay-ports`, `--overlay-triplets` — passed as tool
@@ -73,8 +80,9 @@ There are no hardcoded machine paths. A path that appears in a test fixture is t
 
 ## Reverse dependencies are resolved, bounded, and complete-or-unknown
 
-`vcpkg_reverse_dependencies` requires `port`, absolute `vcpkg_root`, explicit target and host
-triplets, and an absolute `scratch_root` outside every input. Ordered `overlay_ports` and
+`vcpkg_reverse_dependencies` requires `port`, an absolute `vcpkg_root` confirmation of the daemon's
+operator-controlled `VCPKG_ROOT`, explicit target and host triplets, and an absolute `scratch_root`
+outside every input. Ordered `overlay_ports` and
 `overlay_triplets` are optional. Omitting `manifest_root` selects classic mode; supplying an absolute
 manifest root admits only builtin and local filesystem registries. Remote Git, HTTP, artifact, or
 otherwise unmaterialized registries return `unknown(network_disabled_registry)` before a child
@@ -82,8 +90,10 @@ starts.
 
 The tool discovers the bounded port universe itself. Declared dependencies from every feature body
 are used only as a conservative scheduling superset; they never become public graph edges. Each
-potential candidate is resolved as a top-level package with its default features by the exact
-supplied vcpkg executable. The tool runs `depend-info` once as DGML and once as depth-labelled list
+potential candidate is resolved as a top-level package with its default features by the daemon
+operator's canonical `VCPKG_ROOT` executable. Its plans and outputs therefore come only from that
+operator-owned root; request `vcpkg_root` is matching confirmation only and never supplies or selects
+execution authority. The tool runs `depend-info` once as DGML and once as depth-labelled list
 output, requires their node/edge sets to agree, then inverts only those resolved edges. Target, host,
 other-triplet, and feature-qualified configurations remain distinct. Direct means one inverted edge;
 transitive means finite nonzero reverse reachability. Strongly connected components retain cycles
