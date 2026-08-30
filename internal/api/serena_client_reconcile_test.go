@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"go/ast"
 	"go/parser"
@@ -798,6 +799,91 @@ func serenaAuthorityJoinHealthyInput() SerenaWorkspaceProjectionInputV1 {
 	}
 }
 
+func legacySerenaAuthorityJoinInput(t *testing.T) SerenaWorkspaceProjectionInputV1 {
+	t.Helper()
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"mcp-local-hub-serena-project-key","server":"serena","daemon":"project-key","workspace":"/workspace/project","port":9150,"state":"Running","current_pid":4242}]}`)
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decode legacy supervisor status: %v", err)
+	}
+	if len(rows) != 1 || rows[0].ReadinessObservation != nil {
+		t.Fatalf("legacy status rows = %+v, want one row with absent readiness observation", rows)
+	}
+	readiness, err := NewAPI().AssessReadinessFromStatusRowsWithOptions(context.Background(), rows, nil, ReadinessStatusRowsOptionsV1{})
+	if err != nil {
+		t.Fatalf("reduce legacy supervisor status readiness: %v", err)
+	}
+	in := serenaAuthorityJoinHealthyInput()
+	in.StatusRows = rows
+	in.Readiness = readiness
+	return in
+}
+
+func TestSerenaAuthorityJoin_LegacyAbsentObservationSnapshotRetainsUnready(t *testing.T) {
+	in := legacySerenaAuthorityJoinInput(t)
+	out, err := ProjectSerenaWorkspaceSnapshot(in)
+	if err != nil {
+		t.Fatalf("legacy snapshot: %v", err)
+	}
+	if len(out.Workspaces) != 1 || len(out.StatusRows) != 1 {
+		t.Fatalf("legacy snapshot cardinality = workspaces:%d status:%d, want 1:1", len(out.Workspaces), len(out.StatusRows))
+	}
+	workspace := out.Workspaces[0]
+	if workspace.ServiceState != ServiceStateStarting || workspace.ReadinessStage != ReadinessStageWrapperStart || workspace.ReadinessSettled || workspace.ClientEndpoint != "" {
+		t.Fatalf("legacy workspace = %+v, want Starting/wrapper_start/unsettled without endpoint", workspace)
+	}
+	status := out.StatusRows[0]
+	if status.ServiceState != ServiceStateStarting || status.ReadinessStage != ReadinessStageWrapperStart || status.ReadinessSettled || status.ReadinessObservation != nil {
+		t.Fatalf("legacy status = %+v, want Starting/wrapper_start/unsettled with absent observation preserved", status)
+	}
+}
+
+func TestSerenaAuthorityJoin_LegacyAbsentObservationRequireSettledFailsGeneration(t *testing.T) {
+	in := legacySerenaAuthorityJoinInput(t)
+	in.Mode = SerenaWorkspaceProjectionModeRequireSettled
+	out, err := ProjectSerenaWorkspaceSnapshot(in)
+	var mismatch *SerenaWorkspaceStateMismatchError
+	if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchGeneration {
+		t.Fatalf("error = %T (%v), want typed generation_mismatch", err, err)
+	}
+	if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+		t.Fatalf("strict legacy mismatch returned partial output: %+v", out)
+	}
+}
+
+func TestSerenaAuthorityJoin_PresentInvalidGenerationFailsBothModes(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*SerenaWorkspaceProjectionInputV1)
+	}{
+		{"zero", func(in *SerenaWorkspaceProjectionInputV1) {
+			in.StatusRows[0].ReadinessObservation.CurrentPIDGeneration = 0
+			in.StatusRows[0].ReadinessObservation.ObservedPIDGeneration = 0
+			in.Readiness.Daemons[0].PIDGeneration = 0
+		}},
+		{"unequal", func(in *SerenaWorkspaceProjectionInputV1) {
+			in.StatusRows[0].ReadinessObservation.ObservedPIDGeneration = 8
+			in.Readiness.Daemons[0].PIDGeneration = 8
+		}},
+	} {
+		for _, mode := range []SerenaWorkspaceProjectionMode{SerenaWorkspaceProjectionModeSnapshot, SerenaWorkspaceProjectionModeRequireSettled} {
+			t.Run(tc.name+"/"+string(mode), func(t *testing.T) {
+				in := serenaAuthorityJoinHealthyInput()
+				in.Mode = mode
+				tc.mutate(&in)
+				out, err := ProjectSerenaWorkspaceSnapshot(in)
+				var mismatch *SerenaWorkspaceStateMismatchError
+				if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchGeneration {
+					t.Fatalf("error = %T (%v), want typed generation_mismatch", err, err)
+				}
+				if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+					t.Fatalf("generation mismatch returned partial output: %+v", out)
+				}
+			})
+		}
+	}
+}
+
 func TestSerenaAuthorityJoin_RegistryIntentProxyPortMismatch(t *testing.T) {
 	in := serenaAuthorityJoinHealthyInput()
 	in.SupervisorIntent.Daemons[0].Port = 9151
@@ -970,6 +1056,83 @@ func TestStatusInternal_SerenaProjectionReusesHeldStatusSnapshot(t *testing.T) {
 	}
 	if len(rows) != 1 || rows[0].Port != 9150 {
 		t.Fatalf("status projection = %+v, want one projected Serena row on port 9150", rows)
+	}
+}
+
+func TestStatusInternal_LegacySerenaWireReturnsUnreadyRow(t *testing.T) {
+	in := legacySerenaAuthorityJoinInput(t)
+	stateDir := t.TempDir()
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	registryPath := filepath.Join(t.TempDir(), "workspaces.yaml")
+	previousRegistryPath := defaultRegistryPathFn
+	defaultRegistryPathFn = func() (string, error) { return registryPath, nil }
+	t.Cleanup(func() { defaultRegistryPathFn = previousRegistryPath })
+	registry := NewRegistry(registryPath)
+	registry.Workspaces = append([]WorkspaceEntry(nil), in.RegistryRows...)
+	if err := registry.Save(); err != nil {
+		t.Fatal(err)
+	}
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &in.SupervisorIntent); err != nil {
+		t.Fatal(err)
+	}
+	dials := 0
+	previousDial := statusInternalDialFn
+	statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) {
+		dials++
+		return cloneDaemonStatusRows(in.StatusRows), nil
+	}
+	t.Cleanup(func() { statusInternalDialFn = previousDial })
+	previousEndpoint := serenaWorkspaceProjectionEndpointFn
+	serenaWorkspaceProjectionEndpointFn = func(*API, context.Context) (SerenaClientEndpoint, error) { return in.Endpoint, nil }
+	t.Cleanup(func() { serenaWorkspaceProjectionEndpointFn = previousEndpoint })
+
+	rows, err := NewAPI().statusInternal(context.Background())
+	if err != nil {
+		t.Fatalf("statusInternal legacy wire: %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("status IPC dials = %d, want one held snapshot", dials)
+	}
+	if len(rows) != 1 || rows[0].ServiceState != ServiceStateStarting || rows[0].ReadinessStage != ReadinessStageWrapperStart || rows[0].ReadinessSettled || rows[0].ReadinessObservation != nil {
+		t.Fatalf("legacy status rows = %+v, want one Starting/wrapper_start/unsettled row", rows)
+	}
+}
+
+func TestProjectSerenaWorkspaceSnapshotCurrent_LegacyWireReturnsUnreadyWorkspace(t *testing.T) {
+	in := legacySerenaAuthorityJoinInput(t)
+	stateDir := t.TempDir()
+	t.Cleanup(SetDaemonStateRootForTest(stateDir))
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &in.SupervisorIntent); err != nil {
+		t.Fatal(err)
+	}
+	dials := 0
+	previousDial := statusInternalDialFn
+	statusInternalDialFn = func(context.Context) ([]DaemonStatus, error) {
+		dials++
+		return cloneDaemonStatusRows(in.StatusRows), nil
+	}
+	t.Cleanup(func() { statusInternalDialFn = previousDial })
+	previousEndpoint := serenaWorkspaceProjectionEndpointFn
+	serenaWorkspaceProjectionEndpointFn = func(*API, context.Context) (SerenaClientEndpoint, error) { return in.Endpoint, nil }
+	t.Cleanup(func() { serenaWorkspaceProjectionEndpointFn = previousEndpoint })
+
+	out, err := NewAPI().ProjectSerenaWorkspaceSnapshotCurrent(context.Background(), in.RegistryRows, SerenaWorkspaceProjectionModeSnapshot)
+	if err != nil {
+		t.Fatalf("current legacy workspace snapshot: %v", err)
+	}
+	if dials != 1 {
+		t.Fatalf("status IPC dials = %d, want one held snapshot", dials)
+	}
+	if len(out.Workspaces) != 1 || len(out.StatusRows) != 1 || out.Workspaces[0].ServiceState != ServiceStateStarting || out.Workspaces[0].ReadinessStage != ReadinessStageWrapperStart || out.Workspaces[0].ClientEndpoint != "" {
+		t.Fatalf("legacy workspace projection = %+v / %+v, want one endpoint-suppressed Starting/wrapper_start row", out.Workspaces, out.StatusRows)
 	}
 }
 

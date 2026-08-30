@@ -337,7 +337,12 @@ func ProjectSerenaWorkspaceSnapshot(in SerenaWorkspaceProjectionInputV1) (Serena
 		if intent.Port <= 0 || status.Port <= 0 || readiness.Port <= 0 || entry.Port != intent.Port || entry.Port != status.Port || entry.Port != readiness.Port {
 			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchProxyPort, &intent, status, &readiness)
 		}
-		if status.ReadinessObservation == nil || status.ReadinessObservation.CurrentPIDGeneration == 0 || status.ReadinessObservation.ObservedPIDGeneration == 0 || readiness.PIDGeneration == 0 || status.ReadinessObservation.CurrentPIDGeneration != status.ReadinessObservation.ObservedPIDGeneration || status.ReadinessObservation.ObservedPIDGeneration != readiness.PIDGeneration {
+		if status.ReadinessObservation == nil {
+			legacySnapshotUnready := in.Mode == SerenaWorkspaceProjectionModeSnapshot && readiness.PIDGeneration == 0 && readiness.ServiceState == ServiceStateStarting && readiness.Stage == ReadinessStageWrapperStart && !readiness.Settled
+			if !legacySnapshotUnready {
+				return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchGeneration, &intent, status, &readiness)
+			}
+		} else if status.ReadinessObservation.CurrentPIDGeneration == 0 || status.ReadinessObservation.ObservedPIDGeneration == 0 || readiness.PIDGeneration == 0 || status.ReadinessObservation.CurrentPIDGeneration != status.ReadinessObservation.ObservedPIDGeneration || status.ReadinessObservation.ObservedPIDGeneration != readiness.PIDGeneration {
 			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchGeneration, &intent, status, &readiness)
 		}
 
