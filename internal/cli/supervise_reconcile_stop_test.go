@@ -5,6 +5,8 @@ package cli
 // Sibling of supervise_reconcile_ipc_test.go; uses the same fixture.
 
 import (
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,42 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/scheduler"
 )
+
+func TestReconcileIPC_WrappedSchedulerUnavailableAppliesStoppedIntent(t *testing.T) {
+	taskName := `\mcp-local-hub-time-default`
+	fx := newReconcileTestFixture(t, supervisorOwnedTimeIntentForReconcileTest(taskName))
+	seedStoppedDaemonIntentForReconcileTest(t, fx.deps.stateDir, taskName)
+	fx.ctrl.smStates.Store(taskName, api.StRunning)
+
+	uninstall := setReconcileSchedulerListFnForTest(func(context.Context) ([]scheduler.TaskStatus, error) {
+		return nil, fmt.Errorf("scheduler.List: %w: bridge execution: scheduler: unavailable: protocol", scheduler.ErrUnavailable)
+	})
+	defer uninstall()
+
+	conn := newFakeIPCConn()
+	req := api.IPCRequest{ID: 104, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	if err := handleReconcile(conn, req, fx.deps); err != nil {
+		t.Fatalf("handleReconcile: %v", err)
+	}
+	resp, body := decodeReconcileResponse(t, conn)
+	if resp.Error != nil {
+		t.Fatalf("wrapped scheduler unavailable must use the schedulerless branch, got %+v", resp.Error)
+	}
+	if len(body.Drift) != 1 || body.Drift[0].Action != api.ReconcileActionPostEvIntentUpdate {
+		t.Fatalf("drift = %+v, want one post_ev_intent_update row", body.Drift)
+	}
+	if body.AppliedCount != 1 {
+		t.Fatalf("AppliedCount = %d, want 1", body.AppliedCount)
+	}
+	select {
+	case ev := <-fx.postedCh:
+		if ev.Kind != api.EvIntentUpdate || ev.TaskName != taskName {
+			t.Fatalf("posted event = %+v, want EvIntentUpdate for %s", ev, taskName)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("expected EvIntentUpdate for schedulerless stopped-intent row")
+	}
+}
 
 // TestClassifyDriftAction_TerminateDirectionSupervisorOwned covers the
 // classifier matrix under the no-legacy ownership model (spec §0.2): EVERY

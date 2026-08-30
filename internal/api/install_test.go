@@ -637,6 +637,13 @@ func TestSchedulerUnavailableErrorRequiresTypedSentinel(t *testing.T) {
 	if !SchedulerUnavailableError(fmt.Errorf("scheduler.New: %w", scheduler.ErrNotImplemented)) {
 		t.Fatal("wrapped scheduler.ErrNotImplemented was not treated as unavailable")
 	}
+	wrappedUnavailable := fmt.Errorf("scheduler.List: %w: bridge execution: scheduler: unavailable: protocol", scheduler.ErrUnavailable)
+	if !SchedulerUnavailableError(wrappedUnavailable) {
+		t.Fatalf("wrapped scheduler.ErrUnavailable was not treated as unavailable: %v", wrappedUnavailable)
+	}
+	if sameText := errors.New(wrappedUnavailable.Error()); SchedulerUnavailableError(sameText) {
+		t.Fatalf("string-only scheduler error with unavailable text was treated as unavailable: %v", sameText)
+	}
 }
 
 func preparePreflightBinaryChecks(t *testing.T) {

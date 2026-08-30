@@ -1109,7 +1109,7 @@ func schedulerUnavailableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, scheduler.ErrNotImplemented)
+	return errors.Is(err, scheduler.ErrNotImplemented) || errors.Is(err, scheduler.ErrUnavailable)
 }
 
 func SchedulerUnavailableError(err error) bool {
