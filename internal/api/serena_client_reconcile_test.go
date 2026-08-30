@@ -780,7 +780,7 @@ func serenaAuthorityJoinHealthyInput() SerenaWorkspaceProjectionInputV1 {
 			TaskName: taskName, Server: SerenaServerName, Workspace: workspacePath, Port: proxyPort,
 		}}},
 		StatusRows: []DaemonStatus{{
-			TaskName: strings.TrimPrefix(taskName, `\`), Server: SerenaServerName, Backend: SerenaServerName, Workspace: workspaceKey,
+			TaskName: strings.TrimPrefix(taskName, `\`), Server: SerenaServerName, Backend: SerenaServerName, Workspace: workspacePath,
 			Port: proxyPort, State: "Running",
 			ReadinessObservation: &DaemonReadinessObservationV1{
 				TaskName: strings.TrimPrefix(taskName, `\`), Port: proxyPort,
@@ -834,6 +834,26 @@ func TestSerenaAuthorityJoin_IntentStatusProxyPortMismatch(t *testing.T) {
 		}
 		if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
 			t.Fatalf("mode %q: mismatch returned partial output: %+v", mode, out)
+		}
+	}
+}
+
+func TestSerenaAuthorityJoin_WorkspaceMismatchNamesPathOperands(t *testing.T) {
+	in := serenaAuthorityJoinHealthyInput()
+	in.StatusRows[0].Workspace = "/workspace/status-other"
+
+	_, err := ProjectSerenaWorkspaceSnapshot(in)
+	var mismatch *SerenaWorkspaceStateMismatchError
+	if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchWorkspace {
+		t.Fatalf("error = %T (%v), want typed workspace_mismatch", err, err)
+	}
+	for _, want := range []string{
+		`registry_workspace_path="/workspace/project"`,
+		`intent_workspace="/workspace/project"`,
+		`status_workspace="/workspace/status-other"`,
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
 		}
 	}
 }

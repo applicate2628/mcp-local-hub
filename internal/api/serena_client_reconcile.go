@@ -208,20 +208,26 @@ const (
 	SerenaWorkspaceStateMismatchGeneration         = "generation_mismatch"
 )
 
-// SerenaWorkspaceStateMismatchError reports an authority contradiction without
-// exposing a workspace path, client identifier, or child-process error.
+// SerenaWorkspaceStateMismatchError reports an authority contradiction. A
+// workspace mismatch includes the three compared canonical path operands so an
+// operator can identify the disagreeing authority without another state read.
 type SerenaWorkspaceStateMismatchError struct {
-	Kind                      string
-	WorkspaceKey, TaskName    string
-	RegistryPort, IntentPort  int
-	StatusPort, ReadinessPort int
+	Kind                                                string
+	WorkspaceKey, TaskName                              string
+	RegistryWorkspacePath, IntentWorkspace              string
+	StatusWorkspace                                     string
+	RegistryPort, IntentPort, StatusPort, ReadinessPort int
 }
 
 func (e *SerenaWorkspaceStateMismatchError) Error() string {
 	if e == nil {
 		return ""
 	}
-	return fmt.Sprintf("SERENA_WORKSPACE_STATE_MISMATCH/%s: workspace=%q task=%q registry_port=%d intent_port=%d status_port=%d readiness_port=%d", e.Kind, e.WorkspaceKey, e.TaskName, e.RegistryPort, e.IntentPort, e.StatusPort, e.ReadinessPort)
+	prefix := fmt.Sprintf("SERENA_WORKSPACE_STATE_MISMATCH/%s: workspace=%q task=%q", e.Kind, e.WorkspaceKey, e.TaskName)
+	if e.Kind == SerenaWorkspaceStateMismatchWorkspace {
+		prefix += fmt.Sprintf(" registry_workspace_path=%q intent_workspace=%q status_workspace=%q", e.RegistryWorkspacePath, e.IntentWorkspace, e.StatusWorkspace)
+	}
+	return fmt.Sprintf("%s registry_port=%d intent_port=%d status_port=%d readiness_port=%d", prefix, e.RegistryPort, e.IntentPort, e.StatusPort, e.ReadinessPort)
 }
 
 // SerenaWorkspaceProxyUnreadyError is the settled-only result for an aligned
@@ -289,11 +295,13 @@ func ProjectSerenaWorkspaceSnapshot(in SerenaWorkspaceProjectionInputV1) (Serena
 		}
 		taskName := normalizeSerenaAuthorityTaskName(entry.TaskName)
 		mismatch := func(kind string, intent *SupervisorDaemon, status *DaemonStatus, readiness *DaemonReadinessV1) error {
-			err := &SerenaWorkspaceStateMismatchError{Kind: kind, WorkspaceKey: entry.WorkspaceKey, TaskName: taskName, RegistryPort: entry.Port}
+			err := &SerenaWorkspaceStateMismatchError{Kind: kind, WorkspaceKey: entry.WorkspaceKey, TaskName: taskName, RegistryWorkspacePath: entry.WorkspacePath, RegistryPort: entry.Port}
 			if intent != nil {
+				err.IntentWorkspace = intent.Workspace
 				err.IntentPort = intent.Port
 			}
 			if status != nil {
+				err.StatusWorkspace = status.Workspace
 				err.StatusPort = status.Port
 			}
 			if readiness != nil {
@@ -323,7 +331,7 @@ func ProjectSerenaWorkspaceSnapshot(in SerenaWorkspaceProjectionInputV1) (Serena
 		if normalizeSerenaAuthorityTaskName(intent.TaskName) != taskName || normalizeSerenaAuthorityTaskName(status.TaskName) != taskName || normalizeSerenaAuthorityTaskName(readiness.TaskName) != taskName {
 			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchTask, &intent, status, &readiness)
 		}
-		if intent.Workspace != entry.WorkspacePath || status.Workspace != entry.WorkspaceKey {
+		if intent.Workspace != entry.WorkspacePath || status.Workspace != entry.WorkspacePath {
 			return SerenaWorkspaceProjectionOutputV1{}, mismatch(SerenaWorkspaceStateMismatchWorkspace, &intent, status, &readiness)
 		}
 		if intent.Port <= 0 || status.Port <= 0 || readiness.Port <= 0 || entry.Port != intent.Port || entry.Port != status.Port || entry.Port != readiness.Port {
