@@ -144,7 +144,7 @@ func encodedJSONStringBytes(value string) int {
 		r, size := utf8.DecodeRuneInString(value[i:])
 		switch {
 		case r == utf8.RuneError && size == 1:
-			encoded += 6
+			encoded += utf8.RuneLen(r)
 		case r == '\u2028' || r == '\u2029':
 			encoded += 6
 		default:
