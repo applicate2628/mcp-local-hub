@@ -89,6 +89,139 @@ func TestObserveSupervisorReadiness_DeterministicCurrentGeneration(t *testing.T)
 	}
 }
 
+func TestObserveSupervisorReadiness_RouteFrontUsesRouteAwareProbe(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	started := time.Date(2026, 8, 31, 10, 0, 0, 0, time.UTC)
+	d := api.SupervisorDaemon{
+		TaskName: api.BuiltinRouteTaskName, Server: api.BuiltinRouteServer, Daemon: api.BuiltinRouteDaemonName,
+		Port: 9317, StartupBindDeadlineSeconds: 5,
+	}
+	generation := tracker.MarkSpawned(d.TaskName, 4321, started)
+	genericProbeCalls, routeProbeCalls := 0, 0
+
+	observeSupervisorReadinessWithDeps(tracker, nil, d, generation, 4321, started, supervisorReadinessObserverDeps{
+		now:  func() time.Time { return started },
+		wait: func(time.Duration) { t.Fatal("ready route front must not wait") },
+		inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) {
+			return true, true
+		},
+		probe: func(int) api.MCPReadinessResult {
+			genericProbeCalls++
+			return api.MCPReadinessResult{State: api.MCPReadinessUnready}
+		},
+		routeProbe: func(ctx context.Context, port int) error {
+			routeProbeCalls++
+			if port != d.Port {
+				t.Fatalf("route probe port = %d, want %d", port, d.Port)
+			}
+			return nil
+		},
+	})
+
+	if genericProbeCalls != 0 || routeProbeCalls != 1 {
+		t.Fatalf("probe calls generic=%d route=%d, want 0/1", genericProbeCalls, routeProbeCalls)
+	}
+	entry, ok := tracker.Get(d.TaskName)
+	if !ok || entry.ReadinessObservation == nil {
+		t.Fatalf("route-front tracker entry = %#v, want readiness observation", entry)
+	}
+	observation := entry.ReadinessObservation
+	if !observation.ListenerReady || !observation.MCPInitializeReady || !observation.MCPToolsListReady {
+		t.Fatalf("route-front observation = %#v, want fully settled MCP readiness", observation)
+	}
+	snapshot := api.ReduceReadinessV1(api.ReadinessRequest{Observations: []api.DaemonReadinessObservationV1{*observation}})
+	if len(snapshot.Daemons) != 1 || snapshot.Daemons[0].ServiceState != api.ServiceStateRunning || snapshot.Daemons[0].Stage != api.ReadinessStageComplete {
+		t.Fatalf("route-front readiness = %#v, want Running/complete", snapshot.Daemons)
+	}
+}
+
+func TestObserveSupervisorReadiness_RouteFrontPreservesTypedRouteFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		route api.MCPFrontRouteStage
+	}{
+		{name: "serena", route: api.MCPFrontRouteStageSerena},
+		{name: "lsp", route: api.MCPFrontRouteStageLSP},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := NewDaemonRuntimeTracker()
+			started := time.Date(2026, 8, 31, 10, 5, 0, 0, time.UTC)
+			d := api.SupervisorDaemon{TaskName: api.BuiltinRouteTaskName, Server: api.BuiltinRouteServer, Daemon: api.BuiltinRouteDaemonName, Port: 9317}
+			generation := tracker.MarkSpawned(d.TaskName, 4321, started)
+			eventPath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-events.log")
+			events, err := api.OpenSupervisorEventLog(eventPath)
+			if err != nil {
+				t.Fatalf("OpenSupervisorEventLog: %v", err)
+			}
+			defer events.Close()
+			routeErr := &api.MCPFrontRoutesLiveError{
+				Code: api.MCPFrontRouteNotReadyCode, Stage: tc.route, ProbeStage: api.MCPFrontProbeStageInitializeHTTPStatus,
+				Cause: errors.New("route target unavailable"),
+			}
+
+			observeSupervisorReadinessWithDeps(tracker, events, d, generation, 4321, started, supervisorReadinessObserverDeps{
+				now:     func() time.Time { return started },
+				wait:    func(time.Duration) { t.Fatal("bound route front must not wait") },
+				inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) { return true, true },
+				probe: func(int) api.MCPReadinessResult {
+					t.Fatal("route front must not use generic /mcp probe")
+					return api.MCPReadinessResult{}
+				},
+				routeProbe: func(context.Context, int) error { return routeErr },
+			})
+
+			entry, ok := tracker.Get(d.TaskName)
+			if !ok || entry.ReadinessObservation == nil || len(entry.ReadinessObservation.Failures) != 1 {
+				t.Fatalf("route-front tracker entry = %#v, want one failure observation", entry)
+			}
+			failure := entry.ReadinessObservation.Failures[0]
+			if failure.Stage != api.ReadinessStageMCPInitialize || failure.FailureID != api.MCPFrontRouteNotReadyCode {
+				t.Fatalf("route-front failure = %#v, want mcp_initialize/%s", failure, api.MCPFrontRouteNotReadyCode)
+			}
+			raw, err := os.ReadFile(eventPath)
+			if err != nil {
+				t.Fatalf("read route-front diagnostic: %v", err)
+			}
+			var diagnostic *api.SupervisorEvent
+			for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+				var candidate api.SupervisorEvent
+				if err := json.Unmarshal([]byte(line), &candidate); err != nil {
+					t.Fatalf("decode supervisor event: %v", err)
+				}
+				if candidate.Event == "route-front-readiness-failed-v1" {
+					diagnostic = &candidate
+					break
+				}
+			}
+			if diagnostic == nil || diagnostic.Body["route"] != string(tc.route) || diagnostic.Body["probe_stage"] != string(api.MCPFrontProbeStageInitializeHTTPStatus) {
+				t.Fatalf("route-front causal diagnostic = %#v, want route=%q probe_stage=%q", diagnostic, tc.route, api.MCPFrontProbeStageInitializeHTTPStatus)
+			}
+		})
+	}
+}
+
+func TestObserveSupervisorReadiness_OrdinaryDaemonKeepsGenericProbe(t *testing.T) {
+	tracker := NewDaemonRuntimeTracker()
+	started := time.Date(2026, 8, 31, 10, 10, 0, 0, time.UTC)
+	d := api.SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default", Port: 9304}
+	generation := tracker.MarkSpawned(d.TaskName, 4321, started)
+	genericProbeCalls, routeProbeCalls := 0, 0
+
+	observeSupervisorReadinessWithDeps(tracker, nil, d, generation, 4321, started, supervisorReadinessObserverDeps{
+		now:     func() time.Time { return started },
+		wait:    func(time.Duration) { t.Fatal("ready ordinary daemon must not wait") },
+		inspect: func(api.SupervisorDaemon, DaemonRuntimeEntry, time.Time) (bool, bool) { return true, true },
+		probe: func(int) api.MCPReadinessResult {
+			genericProbeCalls++
+			return api.MCPReadinessResult{SchemaVersion: "mcp-readiness-v1", State: api.MCPReadinessReady}
+		},
+		routeProbe: func(context.Context, int) error { routeProbeCalls++; return nil },
+	})
+	if genericProbeCalls != 1 || routeProbeCalls != 0 {
+		t.Fatalf("probe calls generic=%d route=%d, want 1/0", genericProbeCalls, routeProbeCalls)
+	}
+}
+
 func TestObserveSupervisorReadiness_BlockedProbeCannotSettleExitedSameGeneration(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	task := `\mcp-local-hub-memory-default`
