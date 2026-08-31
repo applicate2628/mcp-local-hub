@@ -1,25 +1,9 @@
-// Package cli — Task 8.2 `mcphub install --upgrade` IPC handoff
-// orchestration (v0.5.0 supervisor architecture).
-//
-// Spec §"Cold-restart upgrade flow (detail)" + §"Upgrade sequence".
-//
-// This file owns the new v0.5.0 cold-restart upgrade flow that
-// coordinates rename-aside binary replacement (Task 8.1), supervisor
-// IPC `quiesce-timers` + `exit{graceful}` (Tasks 5.2 / future), force-
-// kill fallback, and per-OS supervisor start. It is intentionally
-// distinct from the LEGACY `runInstallUpgrade` in install.go: the
-// legacy flow drives Scheduler-backed daemons directly via StopAll /
-// Bootstrap / RestartAll; the v0.5.0 flow targets a long-lived
-// supervisor process that owns daemons as children under a Job
-// Object (Windows) / process group + PR_SET_PDEATHSIG (Linux) /
-// kqueue (macOS) lifecycle primitive.
-//
-// Scope of Task 8.2: ORCHESTRATOR ONLY. The dependency-injection
-// surface (`UpgradeDeps`) lets tests inject fakes for every external
-// side effect — file rename, IPC connect, force-kill spawn, per-OS
-// supervisor start — so the sequencing contract is exercised
-// deterministically without needing a real supervisor on disk.
-// Production wiring of UpgradeDeps lands in later integration tasks:
+// Package cli owns the single admitted `mcphub upgrade` transaction.
+// It stages and admits the candidate, quiesces and reaps the managed
+// supervisor, proves lock/port release, promotes by rename-aside, binds
+// successor readiness to process and binary identity, and writes the durable
+// receipt. Unsupported machine/platform states fail closed before mutation.
+// UpgradeDeps keeps every external side effect deterministic in tests:
 //
 //   - RenameAsideBinary → api.RenameAsideReplace (Task 8.1, shipped)
 //   - QuiesceTimers     → IPC client `quiesce-timers` (Task 5.2 pipe +

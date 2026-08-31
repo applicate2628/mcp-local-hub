@@ -434,15 +434,9 @@ func TestInstallCmd_UpgradeMutexErrors(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Task 8.2: v0.5.0 supervisor IPC handoff orchestration tests.
+// Managed upgrade transaction tests.
 //
-// These tests exercise RunInstallUpgrade (install_upgrade.go) — the new
-// orchestrator that drives the rename-aside + IPC quiesce + IPC exit +
-// force-kill fallback + per-OS supervisor start sequence per spec
-// §"Upgrade sequence". The legacy runInstallUpgrade above remains in
-// place for the v0.4.x Scheduler-backed flow; the two coexist until
-// v0.5.0 ships and the supervisor architecture replaces Scheduler
-// orchestration end-to-end.
+// RunInstallUpgrade is the sole mutation owner for upgrade.
 //
 // Every external side effect goes through the UpgradeDeps interface so
 // tests inject fakes for RenameAsideBinary / QuiesceTimers /
@@ -455,10 +449,8 @@ func TestInstallCmd_UpgradeMutexErrors(t *testing.T) {
 // set the result fields they care about, and assert on the *Called
 // booleans after running RunInstallUpgrade.
 //
-// Pattern parallels the upgrade*Fn package-level seams used by the
-// legacy runInstallUpgrade above, but routed through an explicit
-// interface so the new orchestrator stays pure (no globals to reset
-// across test runs).
+// The explicit interface keeps the orchestrator free of process-global test
+// mutation seams.
 type fakeUpgradeDeps struct {
 	calls []string
 

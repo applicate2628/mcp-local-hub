@@ -22,17 +22,7 @@ import (
 //   - legacy scheduler, fresh, or unsupported platform state → stable
 //     actionable refusal before any file/process mutation.
 //
-// bot r33 P2 closure on PR #288: BEFORE this, the alias called
-// `runInstallUpgrade` directly — the LEGACY binary-copy body — so on
-// a live v0.5+ host with daemon rows it bypassed the dispatcher and
-// ran the stop/copy/restart path instead of the supervisor
-// rename-aside / IPC handoff, which could leave the running supervisor
-// on the old binary or holding the target lock. Routing through
-// dispatchUpgrade fixes the divergence so both documented entry points
-// behave identically. Self-replace guard, dev-build guard,
-// upgrade-specific recovery hints, and the GUI-lock preflight all
-// carry over identically because every sink reuses
-// runInstallUpgradePreflightGuards.
+// Both spellings share admission, preflight, rollback, readiness, and receipt.
 //
 // Why an alias instead of a flag rename:
 //
@@ -46,7 +36,7 @@ import (
 func newUpgradeCmdReal() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade",
-		Short: "Replace the canonical mcphub binary with the currently-running build (alias for `install --upgrade`)",
+		Short: "Transactionally apply an admitted build to the canonical mcphub binary (alias for `install --upgrade`)",
 		Long: `Apply an admitted mcphub product build through the managed supervisor
 upgrade transaction. A daemon-bearing supervisor intent must already exist.
 
@@ -80,21 +70,12 @@ platform states fail closed without mutation and print the required setup or
 package-workflow recovery.
 
 Limitations:
-  - The GUI/tray process is NOT auto-stopped by upgrade (gap tracked
-    as bug-bash A8 for v0.4.1). If your GUI is running it will hold a
-    file lock on the canonical .exe and Bootstrap will fail with
-    "Access is denied". Workaround: close the tray icon (or kill the
-    mcphub gui process) before running upgrade. After upgrade,
-    restart the GUI manually.
+  - The GUI/tray process is not auto-stopped. A running GUI that owns the
+    canonical image lock is rejected by preflight before fleet mutation;
+    close it and rerun upgrade.
 See also: install, setup, restart, stop.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// bot r33 P2 closure on PR #288: route the top-level
-			// `mcphub upgrade` alias through the SAME machine-state
-			// dispatcher the `install --upgrade` flag uses, NOT the
-			// legacy runInstallUpgrade body directly. The alias has none
-			// of install's flags (--server/--daemon/--all/...), so it
-			// needs no mutual-exclusivity guard before the call;
-			// dispatchUpgrade does not read those flags off cmd.
+			// The alias owns no flags; the shared dispatcher owns all policy.
 			return dispatchUpgrade(cmd)
 		},
 	}

@@ -96,7 +96,7 @@ Examples:
   mcphub install --server serena --dry-run     # preview actions, change nothing
   mcphub install --server fetch --no-client-config # materialize daemon only
   mcphub install --all                         # install every shipped manifest
-  mcphub install --upgrade                     # stop daemons, copy this binary, restart
+  mcphub install --upgrade                     # admitted transactional upgrade + durable receipt
 
 Prerequisites:
   - First-time users: run 'mcphub setup' once to canonicalize the binary
@@ -159,25 +159,13 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 			// `mcphub setup` failed loudly with "target is in use"
 			// when daemons were still up.
 			if upgrade {
-				// Bot r1 P2 closure on PR #181: --dry-run with --upgrade
-				// would silently violate the dry-run contract ("print
-				// planned actions without making changes") because
-				// runInstallUpgrade ignores the flag and goes through
-				// real Stop/Bootstrap/Restart. Reject the combo rather
-				// than implementing a half-baked preview; the upgrade
-				// flow is short enough that the operator can run
-				// `mcphub stop --all && mcphub status` for a preview.
+				// Upgrade has no dry-run contract: admission, shutdown, promotion,
+				// readiness, rollback, and receipt are one indivisible transaction.
 				if server != "" || daemonFilter != "" || all || strings.TrimSpace(clientsFlag) != "" || allClients || noClientConfig || reconcileHubMode || reconcileMCPFront || dryRun {
 					return fmt.Errorf("--upgrade is mutually exclusive with --server/--daemon/--all/--clients/--all-clients/--no-client-config/--reconcile-hub-mode/--reconcile-mcp-front/--dry-run")
 				}
-				// v0.6 Phase F: the v0.4.x→v0.5.0 forward-migration engine and
-				// the `--rollback-to-legacy` demotion path are deleted (there
-				// is no v0.4.x scheduler model to migrate from or roll back to
-				// anymore). --upgrade now routes between just two sinks based
-				// on machine state: the v0.5.x→v0.5.x cold-restart upgrade
-				// (supervisor-intent.json present — rename-aside + IPC handoff)
-				// and the fresh-install binary-copy fallback (no state on
-				// disk). Decision tree in dispatchUpgrade.
+				// dispatchUpgrade admits exactly the managed supervisor transaction;
+				// fresh, legacy-scheduler, and unsupported-platform states fail closed.
 				return dispatchUpgrade(cmd)
 			}
 			if noClientConfig {
@@ -927,8 +915,8 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 		return "", "", fmt.Errorf(
 			"refusing to --upgrade with a running mcphub GUI on the target path %s "+
 				"(PIDs: %s). The GUI process holds the binary file lock; "+
-				"Bootstrap would fail with `target in use` and leave the "+
-				"daemon fleet down (StopAll runs before Bootstrap). "+
+				"the transactional promotion cannot proceed while that lock is held. "+
+				"This preflight runs before fleet or canonical mutation. "+
 				"Recovery: stop the GUI (tray menu → Quit, or "+
 				"`Stop-Process -Id <PID> -Force` in PowerShell), then "+
 				"rerun `./mcphub install --upgrade`",
@@ -937,52 +925,6 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 	return curExe, target, nil
 }
 
-// runInstallUpgrade is the entry point behind `mcphub install --upgrade`.
-//
-// Flow:
-//
-//  1. Self-replace guard. Refuse if os.Executable() == canonical target
-//     path (~/.local/bin/mcphub.exe). Running --upgrade FROM the
-//     canonical binary would be a no-op at best (samePath in Bootstrap
-//     skips the copy) and a confusing rename-failure at worst on Windows
-//     (the running image cannot replace itself). The dual-binary
-//     trampoline that lifts this restriction is bug #1, deferred.
-//
-//  2. StopAll. Kill every running mcp-local-hub-* daemon by port and
-//     /End its scheduler task. This is what releases the Windows file
-//     lock on ~/.local/bin/mcphub.exe so step 3 can replace it.
-//     Scheduler task XML stays put — `sch.Stop` does not delete; the
-//     task is just paused. Per-task stop failures are logged but do
-//     NOT abort the upgrade; rare cases (Stuck Force-killed daemon
-//     etc.) still need the binary copy to succeed.
-//
-//  3. Copy-only bootstrap. Copies the currently-running binary
-//     (os.Executable()) to ~/.local/bin/mcphub.exe via tempfile +
-//     atomic rename. Reuses the existing `mcphub setup` copy helper
-//     but SKIPS PATH registration (bot r2 P1 closure on PR #181):
-//     `Bootstrap` does both copy AND `ensureOnPath`, and a HKCU PATH
-//     write hiccup during upgrade would propagate up, skip RestartAll,
-//     and leave the daemon fleet down. PATH is a one-time setup
-//     concern handled by `mcphub setup`, not upgrade.
-//
-//  4. RestartAll. /Run every paused task. The new tasks read XML that
-//     references ~/.local/bin/mcphub.exe by absolute path, so they
-//     pick up the NEW binary automatically.
-//
-// (Historical note: pre-v0.6 the watchdog scheduled task ran every 5
-// min and could interleave with this upgrade window, re-locking the
-// canonical path from the OLD binary. The v0.6 redesign deleted the
-// watchdog engine, so that interleaving race is gone; the supervisor
-// owns daemon revival and the liveness task owns owner-relaunch.)
-//
-// Partial restart failure. If Bootstrap succeeds but RestartAll
-// reports per-task failures, the operator is in a state where the
-// binary is fresh but some daemons are down. RunE returns the
-// aggregate error so the caller sees the failure; recovery is
-// `mcphub restart --all` (idempotent). No rollback to the old
-// binary — keeping a backup and reverting would add complexity
-// and a new persistence surface; the operator explicitly opted into
-// --upgrade, so they accept manual convergence in this rare case.
 // findRunningGUIsOnTargetFn is the production seam for
 // findRunningGUIsOnTarget; tests stub it to return a fixed slice
 // instead of probing the live OS. nil = use real wmic-backed
@@ -997,7 +939,7 @@ var upgradeBuildVersionFn func() string
 
 // upgradeBuildVersion routes through the test seam if set, else
 // returns the buildinfo-store version. Centralized here so the guard
-// in runInstallUpgrade has a single call site to mock.
+// in the upgrade preflight has a single call site to mock.
 func upgradeBuildVersion() string {
 	if upgradeBuildVersionFn != nil {
 		return upgradeBuildVersionFn()
@@ -1382,12 +1324,8 @@ func hasSupervisorIntent() (bool, error) {
 	if info.IsDir() {
 		// Corrupt state-dir: a directory named supervisor-intent.json.
 		// Round-4 fix (codex-r4-a/c-p1): the prior silent (false, nil)
-		// branch let the dispatcher fall through to legacy
-		// runInstallUpgrade even though os.Stat reports the path
-		// exists — the round-3 unreadable-intent guard inside
-		// runV5UpgradeWindows then never fires. Surface a non-nil
-		// error so the routing dispatcher fails closed and the
-		// operator sees the corruption shape.
+		// A directory cannot be a daemon-bearing intent. Fail closed before
+		// routing into the sole managed upgrade transaction.
 		return false, fmt.Errorf("hasSupervisorIntent: %s is a directory (corrupt state-dir; rename/delete and re-run)", path)
 	}
 	if !info.Mode().IsRegular() {

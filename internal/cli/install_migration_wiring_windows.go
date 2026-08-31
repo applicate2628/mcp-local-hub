@@ -3,11 +3,9 @@
 // Package cli — Windows-only production wiring for the `mcphub install
 // --upgrade` cold-restart flow (v0.5.x → v0.5.x rename-aside + IPC handoff).
 //
-// The cross-platform install.go declares the v5UpgradeFn routing seam as a
-// nil-by-default function pointer. This file fills it in with the real Windows
-// implementation via an init() hook so POSIX builds compile a no-op (falling
-// back to the legacy runInstallUpgrade body) and Windows builds gain the full
-// cold-restart upgrade surface.
+// The cross-platform dispatcher has one optional managed-transaction adapter.
+// This file installs the Windows implementation; unsupported platforms keep it
+// nil and fail closed before mutation.
 //
 // v0.6 Phase F NOTE: the v0.4.x→v0.5.0 forward-migration engine and the
 // `mcphub install --rollback-to-legacy` demotion path were deleted in Phase F
