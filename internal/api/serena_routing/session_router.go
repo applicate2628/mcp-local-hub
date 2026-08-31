@@ -96,6 +96,32 @@ func (s *SessionRouter) BindSession(sessionID string, ws *api.WorkspaceEntry) {
 	}
 }
 
+// UpdateSessionGenerationIfCurrent replaces a legacy generation in an existing
+// sticky binding only when the binding still names the exact workspace that was
+// observed before the supervisor receipt. It never creates a binding: a DELETE
+// or expiry that won the race leaves the session absent, so this helper cannot
+// resurrect a revoked client session.
+func (s *SessionRouter) UpdateSessionGenerationIfCurrent(sessionID string, expected, updated *api.WorkspaceEntry) bool {
+	if sessionID == "" || expected == nil || updated == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	b, ok := s.sessions[sessionID]
+	if !ok || b == nil || b.workspace == nil || !sameWorkspaceIdentity(*b.workspace, *expected) {
+		return false
+	}
+	copy := *updated
+	b.workspace = &copy
+	b.lastSeen = s.clock()
+	return true
+}
+
+func sameWorkspaceIdentity(a, b api.WorkspaceEntry) bool {
+	return a.WorkspaceKey == b.WorkspaceKey && a.WorkspacePath == b.WorkspacePath &&
+		a.TaskName == b.TaskName && a.Port == b.Port && a.RegisteredAt.Equal(b.RegisteredAt)
+}
+
 // LookupSession returns the workspace currently bound to sessionID,
 // or nil if no binding exists. The returned pointer is a fresh
 // value-copy of the stored entry so concurrent BindSession /

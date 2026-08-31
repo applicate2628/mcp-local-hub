@@ -48,7 +48,8 @@ func parseSerenaActivityCommitRequest(raw map[string]any) (api.SerenaActivityCom
 }
 
 func validateSerenaActivityCommitRequestForSupervisor(request api.SerenaActivityCommitRequestV1) error {
-	if request.ProtocolVersion != 1 || request.WorkspaceKey == "" || request.WorkspacePath == "" || request.TaskName == "" || request.ExpectedPort <= 0 || request.RegisteredAt.IsZero() || request.ActivityAt.IsZero() {
+	if request.ProtocolVersion != 1 || request.WorkspaceKey == "" || request.WorkspacePath == "" || request.TaskName == "" || request.ExpectedPort <= 0 || request.ActivityAt.IsZero() ||
+		(request.LegacyGenerationUnspecified && !request.RegisteredAt.IsZero()) || (!request.LegacyGenerationUnspecified && request.RegisteredAt.IsZero()) {
 		return fmt.Errorf("invalid commit_serena_activity request")
 	}
 	return nil

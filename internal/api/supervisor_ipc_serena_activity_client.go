@@ -96,14 +96,22 @@ func decodeSerenaActivityCommitResponse(req IPCRequest, request SerenaActivityCo
 		return SerenaActivityCommitReceiptV1{}, fmt.Errorf("%w: invalid receipt", ErrSerenaActivityCommitUnsupported)
 	}
 	if receipt.WorkspaceKey != request.WorkspaceKey || receipt.TaskName != request.TaskName ||
-		!receipt.RegisteredAt.Equal(request.RegisteredAt) || !receipt.ActivityAt.Equal(request.ActivityAt) {
+		!receipt.ActivityAt.Equal(request.ActivityAt) {
 		return SerenaActivityCommitReceiptV1{}, fmt.Errorf("%w: receipt does not echo requested generation", ErrSerenaActivityCommitUnsupported)
+	}
+	if request.LegacyGenerationUnspecified {
+		if !receipt.LegacyGenerationRepaired || receipt.RegisteredAt.IsZero() {
+			return SerenaActivityCommitReceiptV1{}, fmt.Errorf("%w: legacy generation repair receipt missing", ErrSerenaActivityCommitUnsupported)
+		}
+	} else if receipt.LegacyGenerationRepaired || !receipt.RegisteredAt.Equal(request.RegisteredAt) {
+		return SerenaActivityCommitReceiptV1{}, fmt.Errorf("%w: receipt generation mismatch", ErrSerenaActivityCommitUnsupported)
 	}
 	return receipt, nil
 }
 
 func validateSerenaActivityCommitRequest(request SerenaActivityCommitRequestV1) error {
-	if request.ProtocolVersion != 1 || request.WorkspaceKey == "" || request.WorkspacePath == "" || request.TaskName == "" || request.ExpectedPort <= 0 || request.RegisteredAt.IsZero() || request.ActivityAt.IsZero() {
+	if request.ProtocolVersion != 1 || request.WorkspaceKey == "" || request.WorkspacePath == "" || request.TaskName == "" || request.ExpectedPort <= 0 || request.ActivityAt.IsZero() ||
+		(request.LegacyGenerationUnspecified && !request.RegisteredAt.IsZero()) || (!request.LegacyGenerationUnspecified && request.RegisteredAt.IsZero()) {
 		return errors.New("supervisor IPC commit_serena_activity: invalid request")
 	}
 	return nil

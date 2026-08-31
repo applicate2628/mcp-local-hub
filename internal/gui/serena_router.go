@@ -40,6 +40,7 @@ type workspaceResolver interface {
 // sessionRouter is the narrow interface for sticky session binding.
 type sessionRouter interface {
 	BindSession(sessionID string, ws *api.WorkspaceEntry)
+	UpdateSessionGenerationIfCurrent(sessionID string, expected, updated *api.WorkspaceEntry) bool
 	LookupSession(sessionID string) *api.WorkspaceEntry
 	UnbindSession(sessionID string)
 }
@@ -1195,14 +1196,15 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			if deps.CommitSerenaActivityFn != nil {
 				activityAt := time.Now().UTC()
 				commitCtx, commitCancel := context.WithTimeout(r.Context(), 5*time.Second)
-				_, commitErr := deps.CommitSerenaActivityFn(commitCtx, api.SerenaActivityCommitRequestV1{
-					ProtocolVersion: 1,
-					WorkspaceKey:    ws.WorkspaceKey,
-					WorkspacePath:   ws.WorkspacePath,
-					TaskName:        ws.TaskName,
-					ExpectedPort:    ws.Port,
-					RegisteredAt:    ws.RegisteredAt,
-					ActivityAt:      activityAt,
+				commitReceipt, commitErr := deps.CommitSerenaActivityFn(commitCtx, api.SerenaActivityCommitRequestV1{
+					ProtocolVersion:             1,
+					WorkspaceKey:                ws.WorkspaceKey,
+					WorkspacePath:               ws.WorkspacePath,
+					TaskName:                    ws.TaskName,
+					ExpectedPort:                ws.Port,
+					RegisteredAt:                ws.RegisteredAt,
+					LegacyGenerationUnspecified: ws.RegisteredAt.IsZero(),
+					ActivityAt:                  activityAt,
 				})
 				commitCancel()
 				if commitErr != nil {
@@ -1215,6 +1217,24 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 					writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
 						"serena activity commit failed; request not forwarded: "+commitErr.Error(), nil)
 					return
+				}
+				if ws.RegisteredAt.IsZero() {
+					if commitReceipt.RegisteredAt.IsZero() || !commitReceipt.LegacyGenerationRepaired {
+						writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+							"serena activity commit returned no repaired legacy generation; request not forwarded", nil)
+						return
+					}
+					prior := ws
+					updated := *ws
+					updated.RegisteredAt = commitReceipt.RegisteredAt
+					ws = &updated
+					if sessionID != "" && deps.Sessions != nil {
+						// Compare-and-update never creates a binding. If DELETE or a
+						// workspace switch won the race, it returns false and leaves
+						// the revocation intact; the existing post-upstream bind guard
+						// remains the only owner of new bindings.
+						_ = deps.Sessions.UpdateSessionGenerationIfCurrent(sessionID, prior, ws)
+					}
 				}
 			}
 
@@ -2310,8 +2330,29 @@ func (s *InMemorySessionRouter) BindSession(sessionID string, ws *api.WorkspaceE
 		return
 	}
 	s.mu.Lock()
-	s.sessions[sessionID] = ws
+	copy := *ws
+	s.sessions[sessionID] = &copy
 	s.mu.Unlock()
+}
+
+func (s *InMemorySessionRouter) UpdateSessionGenerationIfCurrent(sessionID string, expected, updated *api.WorkspaceEntry) bool {
+	if sessionID == "" || expected == nil || updated == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.sessions[sessionID]
+	if !ok || current == nil || !sameInMemoryWorkspaceIdentity(current, expected) {
+		return false
+	}
+	copy := *updated
+	s.sessions[sessionID] = &copy
+	return true
+}
+
+func sameInMemoryWorkspaceIdentity(a, b *api.WorkspaceEntry) bool {
+	return a != nil && b != nil && a.WorkspaceKey == b.WorkspaceKey && a.WorkspacePath == b.WorkspacePath &&
+		a.TaskName == b.TaskName && a.Port == b.Port && a.RegisteredAt.Equal(b.RegisteredAt)
 }
 
 func (s *InMemorySessionRouter) LookupSession(sessionID string) *api.WorkspaceEntry {
@@ -2321,7 +2362,11 @@ func (s *InMemorySessionRouter) LookupSession(sessionID string) *api.WorkspaceEn
 	s.mu.RLock()
 	ws := s.sessions[sessionID]
 	s.mu.RUnlock()
-	return ws
+	if ws == nil {
+		return nil
+	}
+	copy := *ws
+	return &copy
 }
 
 func (s *InMemorySessionRouter) UnbindSession(sessionID string) {

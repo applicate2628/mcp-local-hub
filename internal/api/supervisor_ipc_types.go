@@ -49,7 +49,11 @@ type SerenaActivityCommitRequestV1 struct {
 	TaskName        string    `json:"task_name"`
 	ExpectedPort    int       `json:"expected_port"`
 	RegisteredAt    time.Time `json:"registered_at"`
-	ActivityAt      time.Time `json:"activity_at"`
+	// LegacyGenerationUnspecified is true only for a legacy registry row whose
+	// RegisteredAt was absent. The router never synthesizes a generation: the
+	// supervisor allocates and persists it atomically before returning a receipt.
+	LegacyGenerationUnspecified bool      `json:"legacy_generation_unspecified,omitempty"`
+	ActivityAt                  time.Time `json:"activity_at"`
 }
 
 // SerenaActivityCommitReceiptV1 is returned only after the supervisor has
@@ -61,8 +65,12 @@ type SerenaActivityCommitReceiptV1 struct {
 	WorkspaceKey    string    `json:"workspace_key"`
 	TaskName        string    `json:"task_name"`
 	RegisteredAt    time.Time `json:"registered_at"`
-	ActivityAt      time.Time `json:"activity_at"`
-	State           string    `json:"state"`
+	// LegacyGenerationRepaired confirms that this receipt durably repaired a
+	// zero legacy RegisteredAt. New routers reject an absent flag rather than
+	// treating an old supervisor's partial response as a valid generation.
+	LegacyGenerationRepaired bool      `json:"legacy_generation_repaired,omitempty"`
+	ActivityAt               time.Time `json:"activity_at"`
+	State                    string    `json:"state"`
 }
 
 // StopBatchTargetV1 identifies one canonical supervisor daemon and the port

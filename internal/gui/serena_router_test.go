@@ -588,6 +588,44 @@ func TestSerenaRouter_ActivityCommitPrecedesToolCallAndFailureBlocksForward(t *t
 	}
 }
 
+func TestSerenaRouter_LegacyGenerationIsRepairedBySupervisorReceipt(t *testing.T) {
+	legacy := &api.WorkspaceEntry{
+		WorkspaceKey: "legacy-activity", WorkspacePath: "/proj/legacy-activity", Port: 9222,
+		TaskName: `\mcp-local-hub-serena-legacy-activity`, Backend: api.SerenaServerName,
+		Language: api.SerenaLanguageSentinel,
+	}
+	repairedAt := time.Date(2026, 8, 31, 15, 0, 0, 0, time.UTC)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	t.Cleanup(ts.Close)
+	sessions := NewInMemorySessionRouter()
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{legacy}},
+		Sessions:      sessions,
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		CommitSerenaActivityFn: func(_ context.Context, request api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error) {
+			if !request.LegacyGenerationUnspecified || !request.RegisteredAt.IsZero() {
+				t.Fatalf("legacy request = %+v, want explicit unspecified generation", request)
+			}
+			return api.SerenaActivityCommitReceiptV1{
+				ProtocolVersion: 1, WorkspaceKey: request.WorkspaceKey, TaskName: request.TaskName,
+				RegisteredAt: repairedAt, ActivityAt: request.ActivityAt, LegacyGenerationRepaired: true, State: "committed",
+			}, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/legacy-activity/x"}), map[string]string{"Mcp-Session-Id": "legacy-activity-session"})
+	if rr.Code != http.StatusOK {
+		t.Fatalf("legacy activity response=%d body=%s", rr.Code, rr.Body.String())
+	}
+	got := sessions.LookupSession("legacy-activity-session")
+	if got == nil || !got.RegisteredAt.Equal(repairedAt) {
+		t.Fatalf("sticky binding did not adopt supervisor generation: %+v", got)
+	}
+}
+
 // ---------------------------------------------------------------------
 // Test 2: TestSerenaRouter_WorkspaceNotFound_Returns503
 // ---------------------------------------------------------------------

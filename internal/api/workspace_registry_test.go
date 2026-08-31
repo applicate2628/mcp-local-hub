@@ -489,6 +489,57 @@ func TestRegistry_CommitSerenaActivity_RevalidatesTargetUnderRegistryLock(t *tes
 	})
 }
 
+func TestRegistry_CommitSerenaActivity_RepairsLegacyGenerationWithSupervisorClock(t *testing.T) {
+	stateDir := t.TempDir()
+	registryPath := filepath.Join(stateDir, "workspaces.yaml")
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	entry := WorkspaceEntry{
+		WorkspaceKey: "legacy-serena", WorkspacePath: "/workspace/legacy", Language: SerenaLanguageSentinel,
+		Backend: SerenaServerName, TaskName: `\mcp-local-hub-serena-legacy`, Port: 9341,
+	}
+	registry := NewRegistry(registryPath)
+	registry.Put(entry)
+	if err := registry.Save(); err != nil {
+		t.Fatalf("seed legacy registry: %v", err)
+	}
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{TaskName: entry.TaskName, Workspace: entry.WorkspacePath, Port: entry.Port}}}); err != nil {
+		t.Fatalf("seed intent: %v", err)
+	}
+	repairedAt := time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC)
+	registry.serenaActivityCommitNowFn = func() time.Time { return repairedAt }
+	request := SerenaActivityCommitRequestV1{
+		ProtocolVersion: 1, WorkspaceKey: entry.WorkspaceKey, WorkspacePath: entry.WorkspacePath,
+		TaskName: entry.TaskName, ExpectedPort: entry.Port, LegacyGenerationUnspecified: true,
+		ActivityAt: repairedAt.Add(time.Minute),
+	}
+	receipt, err := registry.CommitSerenaActivity(intentPath, request)
+	if err != nil {
+		t.Fatalf("commit legacy activity: %v", err)
+	}
+	if !receipt.LegacyGenerationRepaired || !receipt.RegisteredAt.Equal(repairedAt) {
+		t.Fatalf("legacy receipt = %+v, want repaired generation %v", receipt, repairedAt)
+	}
+	reloaded := NewRegistry(registryPath)
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("reload repaired registry: %v", err)
+	}
+	got, ok := reloaded.Get(entry.WorkspaceKey, SerenaLanguageSentinel)
+	if !ok || !got.RegisteredAt.Equal(repairedAt) || !got.LastToolsCallAt.Equal(request.ActivityAt) {
+		t.Fatalf("persisted legacy repair = %+v", got)
+	}
+	if _, err := reloaded.CommitSerenaActivity(intentPath, request); !errors.Is(err, ErrSerenaActivityTargetStale) {
+		t.Fatalf("second legacy request error = %v, want ErrSerenaActivityTargetStale", err)
+	}
+	next := request
+	next.LegacyGenerationUnspecified = false
+	next.RegisteredAt = repairedAt
+	next.ActivityAt = request.ActivityAt.Add(time.Minute)
+	receipt, err = reloaded.CommitSerenaActivity(intentPath, next)
+	if err != nil || receipt.LegacyGenerationRepaired || !receipt.RegisteredAt.Equal(repairedAt) {
+		t.Fatalf("post-repair normal commit receipt=%+v err=%v", receipt, err)
+	}
+}
+
 // TestRegistry_PutLifecycleNoOpOnMissingEntry guards against ghost-row
 // resurrection: after Unregister removes a (workspace_key, language) row,
 // a still-running proxy process MAY emit a late lifecycle write.

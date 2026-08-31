@@ -12,7 +12,7 @@ import (
 func newWorkspaceFixture(port int) *api.WorkspaceEntry {
 	return &api.WorkspaceEntry{
 		WorkspaceKey:  "0123abcd",
-		WorkspacePath: "D:/dev/fixture",
+		WorkspacePath: "C:/fixture",
 		Language:      api.SerenaLanguageSentinel,
 		Backend:       "serena",
 		Port:          port,
@@ -203,6 +203,28 @@ func TestSessionRouter_BindOverwritesExistingBinding(t *testing.T) {
 	}
 	if got.Port != 9999 {
 		t.Errorf("Port = %d, want 9999 (rebind must overwrite)", got.Port)
+	}
+}
+
+func TestSessionRouter_UpdateSessionGenerationIfCurrent_DoesNotResurrectUnboundSession(t *testing.T) {
+	r := NewSessionRouter()
+	legacy := newWorkspaceFixture(9301)
+	legacy.RegisteredAt = time.Time{}
+	updated := *legacy
+	updated.RegisteredAt = time.Date(2026, 8, 31, 14, 0, 0, 0, time.UTC)
+	r.BindSession("sess-generation", legacy)
+	if !r.UpdateSessionGenerationIfCurrent("sess-generation", legacy, &updated) {
+		t.Fatal("expected matching legacy binding to update")
+	}
+	if got := r.LookupSession("sess-generation"); got == nil || !got.RegisteredAt.Equal(updated.RegisteredAt) {
+		t.Fatalf("updated binding = %+v", got)
+	}
+	r.UnbindSession("sess-generation")
+	if r.UpdateSessionGenerationIfCurrent("sess-generation", &updated, legacy) {
+		t.Fatal("update must not recreate a session DELETE already removed")
+	}
+	if got := r.LookupSession("sess-generation"); got != nil {
+		t.Fatalf("unbound session resurrected: %+v", got)
 	}
 }
 

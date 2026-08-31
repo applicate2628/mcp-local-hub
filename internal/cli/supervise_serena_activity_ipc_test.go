@@ -77,6 +77,45 @@ func TestCommitSerenaActivity_ValidatesGenerationAndIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestCommitSerenaActivity_LegacyGenerationIsSupervisorRepaired(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	entry := api.WorkspaceEntry{
+		WorkspaceKey: "legacy-ipc", WorkspacePath: "/work/legacy-ipc", Language: api.SerenaLanguageSentinel,
+		Backend: api.SerenaServerName, TaskName: `\mcp-local-hub-serena-legacy-ipc`, Port: 9322,
+	}
+	registry := api.NewRegistry(filepath.Join(stateDir, "workspaces.yaml"))
+	registry.Put(entry)
+	if err := registry.Save(); err != nil {
+		t.Fatalf("seed legacy registry: %v", err)
+	}
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{{TaskName: entry.TaskName, Workspace: entry.WorkspacePath, Port: entry.Port}}}); err != nil {
+		t.Fatalf("seed legacy intent: %v", err)
+	}
+	request := api.SerenaActivityCommitRequestV1{
+		ProtocolVersion: 1, WorkspaceKey: entry.WorkspaceKey, WorkspacePath: entry.WorkspacePath,
+		TaskName: entry.TaskName, ExpectedPort: entry.Port, LegacyGenerationUnspecified: true, ActivityAt: time.Now().UTC(),
+	}
+	response := dispatchSerenaActivityRequest(t, stateDir, request)
+	if !response.OK || response.Error != nil {
+		t.Fatalf("legacy response = %+v", response)
+	}
+	var receipt api.SerenaActivityCommitReceiptV1
+	if err := json.Unmarshal(response.Result.(json.RawMessage), &receipt); err != nil {
+		t.Fatalf("decode legacy receipt: %v", err)
+	}
+	if !receipt.LegacyGenerationRepaired || receipt.RegisteredAt.IsZero() {
+		t.Fatalf("legacy receipt = %+v, want supervisor-owned generation", receipt)
+	}
+	reloaded := api.NewRegistry(filepath.Join(stateDir, "workspaces.yaml"))
+	if err := reloaded.Load(); err != nil {
+		t.Fatalf("reload legacy registry: %v", err)
+	}
+	got, _ := reloaded.Get(entry.WorkspaceKey, api.SerenaLanguageSentinel)
+	if !got.RegisteredAt.Equal(receipt.RegisteredAt) || !got.LastToolsCallAt.Equal(request.ActivityAt) {
+		t.Fatalf("legacy persisted row = %+v, receipt=%+v", got, receipt)
+	}
+}
+
 func dispatchSerenaActivityRequest(t *testing.T, stateDir string, request api.SerenaActivityCommitRequestV1) api.IPCResponse {
 	t.Helper()
 	server, client := net.Pipe()

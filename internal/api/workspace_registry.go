@@ -130,6 +130,9 @@ type Registry struct {
 	// afterSerenaActivityIntentReadBeforeSaveFn is an internal deterministic
 	// test hook for the intent-to-registry-save window. Production leaves it nil.
 	afterSerenaActivityIntentReadBeforeSaveFn func()
+	// serenaActivityCommitNowFn supplies the supervisor-owned clock for legacy
+	// generation repair. Production leaves it nil and uses time.Now.
+	serenaActivityCommitNowFn func() time.Time
 }
 
 // SetAuditSink overrides the diagnostic sink Load() uses for the shared
@@ -737,6 +740,17 @@ func (r *Registry) CommitSerenaActivity(intentPath string, request SerenaActivit
 	if !serenaActivityIntentMatches(intent, request) {
 		return SerenaActivityCommitReceiptV1{}, ErrSerenaActivityTargetStale
 	}
+	legacyGenerationRepaired := entry.RegisteredAt.IsZero()
+	if legacyGenerationRepaired {
+		now := time.Now().UTC()
+		if r.serenaActivityCommitNowFn != nil {
+			now = r.serenaActivityCommitNowFn().UTC()
+		}
+		if now.IsZero() {
+			return SerenaActivityCommitReceiptV1{}, errors.New("supervisor activity clock returned zero generation")
+		}
+		entry.RegisteredAt = now
+	}
 	state := "committed"
 	if !entry.LastToolsCallAt.IsZero() && !entry.LastToolsCallAt.Before(request.ActivityAt) {
 		state = "already_committed"
@@ -755,25 +769,29 @@ func (r *Registry) CommitSerenaActivity(intentPath string, request SerenaActivit
 			return SerenaActivityCommitReceiptV1{}, ErrSerenaActivityTargetStale
 		}
 		entry.LastToolsCallAt = request.ActivityAt.UTC()
+	}
+	if legacyGenerationRepaired || state == "committed" {
 		r.Put(entry)
 		if err := r.Save(); err != nil {
 			return SerenaActivityCommitReceiptV1{}, err
 		}
 	}
 	return SerenaActivityCommitReceiptV1{
-		ProtocolVersion: 1,
-		WorkspaceKey:    request.WorkspaceKey,
-		TaskName:        request.TaskName,
-		RegisteredAt:    request.RegisteredAt.UTC(),
-		ActivityAt:      request.ActivityAt.UTC(),
-		State:           state,
+		ProtocolVersion:          1,
+		WorkspaceKey:             request.WorkspaceKey,
+		TaskName:                 request.TaskName,
+		RegisteredAt:             entry.RegisteredAt.UTC(),
+		LegacyGenerationRepaired: legacyGenerationRepaired,
+		ActivityAt:               request.ActivityAt.UTC(),
+		State:                    state,
 	}, nil
 }
 
 func serenaActivityTargetMatches(entry WorkspaceEntry, request SerenaActivityCommitRequestV1) bool {
 	return entry.Language == SerenaLanguageSentinel && entry.Backend == SerenaServerName &&
 		entry.WorkspaceKey == request.WorkspaceKey && entry.WorkspacePath == request.WorkspacePath &&
-		entry.TaskName == request.TaskName && entry.Port == request.ExpectedPort && entry.RegisteredAt.Equal(request.RegisteredAt)
+		entry.TaskName == request.TaskName && entry.Port == request.ExpectedPort &&
+		((request.LegacyGenerationUnspecified && entry.RegisteredAt.IsZero()) || (!request.LegacyGenerationUnspecified && entry.RegisteredAt.Equal(request.RegisteredAt)))
 }
 
 func serenaActivityIntentMatches(intent *SupervisorIntentFile, request SerenaActivityCommitRequestV1) bool {
