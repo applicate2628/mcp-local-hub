@@ -37,6 +37,13 @@ type workspaceResolver interface {
 	ResolveByPath(path string) (*api.WorkspaceEntry, error)
 }
 
+// defaultWorkspaceResolver is deliberately optional. Existing resolver test
+// seams and older router wiring retain their path-only contract; only the
+// production Serena resolver opts into marker-backed first-call routing.
+type defaultWorkspaceResolver interface {
+	ResolveDefaultWorkspace() (*api.WorkspaceEntry, error)
+}
+
 // sessionRouter is the narrow interface for sticky session binding.
 type sessionRouter interface {
 	BindSession(sessionID string, ws *api.WorkspaceEntry)
@@ -232,6 +239,7 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
+	resolver.SetAuditSink(api.LogHubMcpEvent)
 	wakeAPI := api.NewAPI()
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: resolver,
@@ -279,6 +287,7 @@ func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResol
 	if s == nil || resolver == nil || sessions == nil {
 		return
 	}
+	resolver.SetAuditSink(routeReadOnlySink)
 	wakeAPI := api.NewAPI()
 	s.SetSerenaRouterDeps(&serenaRouterDeps{
 		Resolver: resolver,
@@ -488,6 +497,20 @@ func writeWorkspaceNotFound(w http.ResponseWriter, resolvedPath string, missingS
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(http.StatusServiceUnavailable)
 	_ = json.NewEncoder(w).Encode(body)
+}
+
+func writeDefaultWorkspaceResolutionError(w http.ResponseWriter, id json.RawMessage, err error) {
+	code := "UNAVAILABLE"
+	message := "default Serena workspace is unavailable; verify workspace state and retry"
+	switch {
+	case errors.Is(err, serena_routing.ErrDefaultWorkspaceNotConfigured):
+		code = "NOT_CONFIGURED"
+		message = "default Serena workspace is not configured; run `mcphub workspace register <path> --default`, then retry"
+	case errors.Is(err, serena_routing.ErrDefaultWorkspaceStale):
+		code = "STALE"
+		message = "default Serena workspace is stale; select a current default with `mcphub workspace register <path> --default`, then retry"
+	}
+	writeJSONRPCErrorStatus(w, id, http.StatusServiceUnavailable, serenaDefaultWorkspaceCode, message, map[string]any{"code": code})
 }
 
 func writeRequiredFieldError(w http.ResponseWriter, field string) {
@@ -736,6 +759,7 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 	var ws *api.WorkspaceEntry
 	bindSessionAfterUpstream := false
 	workspaceResolvedByPath := false
+	workspaceResolvedByDefault := false
 	if hasPath {
 		resolved, resolveErr := deps.Resolver.ResolveByPath(pathArg)
 		if resolveErr != nil {
@@ -800,7 +824,8 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		//     today's sticky-routing behavior (route via the sticky binding below).
 		//   - routerSessionLive: today's behavior (route via sticky; the version
 		//     gate + post-gate touch below still run for the known router session).
-		if _, state := s.serenaRouterSessions.peekVersionState(sessionID); state == routerSessionExpired {
+		sessionVersion, sessionState := s.serenaRouterSessions.peekVersionState(sessionID)
+		if sessionState == routerSessionExpired {
 			s.coordinateExpiredRouterSessionUnbind(sessionID, deps.Sessions)
 			writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
 				"session terminated", nil)
@@ -808,8 +833,34 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 		}
 		ws = deps.Sessions.LookupSession(sessionID)
 		if ws == nil {
-			writeWorkspaceNotFound(w, "", true)
-			return
+			// Only a live session minted by this router may use the operator's
+			// default. Missing/legacy and expired sessions retain their existing
+			// behavior; a default must never become a broad pathless bypass.
+			if sessionState != routerSessionLive {
+				writeWorkspaceNotFound(w, "", true)
+				return
+			}
+			if clientProtocolVersion := r.Header.Get("MCP-Protocol-Version"); clientProtocolVersion != "" && clientProtocolVersion != sessionVersion {
+				writeJSONRPCErrorStatus(w, tb.ID, http.StatusBadRequest, jsonrpcInvalidRequest,
+					"protocol-version mismatch", nil)
+				return
+			}
+			defaultResolver, ok := deps.Resolver.(defaultWorkspaceResolver)
+			if !ok {
+				writeDefaultWorkspaceResolutionError(w, tb.ID, serena_routing.ErrDefaultWorkspaceUnavailable)
+				return
+			}
+			resolvedDefault, defaultErr := defaultResolver.ResolveDefaultWorkspace()
+			if defaultErr != nil || resolvedDefault == nil {
+				if defaultErr == nil {
+					defaultErr = serena_routing.ErrDefaultWorkspaceUnavailable
+				}
+				writeDefaultWorkspaceResolutionError(w, tb.ID, defaultErr)
+				return
+			}
+			ws = resolvedDefault
+			workspaceResolvedByDefault = true
+			bindSessionAfterUpstream = true
 		}
 	}
 
@@ -1386,6 +1437,11 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 					}
 				} else {
 					deps.Sessions.BindSession(sessionID, ws)
+					if workspaceResolvedByDefault {
+						_ = auditFn("info", "serena-default-workspace-bound", map[string]any{
+							"workspace_key": ws.WorkspaceKey,
+						})
+					}
 				}
 			}
 

@@ -19,3 +19,12 @@ var ErrWorkspaceNotFound = errors.New("serena_routing: workspace not found")
 // relative path. Empty strings, malformed UNC roots, and unresolvable
 // shapes flow through this sentinel rather than as opaque OS errors.
 var ErrInvalidPath = errors.New("serena_routing: invalid path")
+
+// Default-workspace resolution is deliberately distinct from path routing:
+// the marker is operator-selected state, never an invitation to choose an
+// arbitrary registered workspace or auto-register a new one.
+var (
+	ErrDefaultWorkspaceNotConfigured = errors.New("serena_routing: default workspace not configured")
+	ErrDefaultWorkspaceStale         = errors.New("serena_routing: default workspace stale")
+	ErrDefaultWorkspaceUnavailable   = errors.New("serena_routing: default workspace unavailable")
+)

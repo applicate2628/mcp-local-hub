@@ -47,6 +47,7 @@ type WorkspaceResolver struct {
 	lastMtime time.Time
 	loaded    bool                 // true after first successful Load, even with zero serena rows
 	cached    []api.WorkspaceEntry // snapshot of reg.SerenaEntries()
+	auditFn   func(level, event string, fields map[string]any) error
 
 	// refreshMu serializes the reload-and-publish critical section across
 	// concurrent refresh() calls (A2 fix, architecture-adversarial-
@@ -133,6 +134,30 @@ func NewDefaultWorkspaceResolver(reg *api.Registry) (*WorkspaceResolver, error) 
 		return nil, fmt.Errorf("serena_routing: default registry path: %w", err)
 	}
 	return NewWorkspaceResolver(reg, p), nil
+}
+
+// SetAuditSink supplies the optional operator diagnostic route for default
+// marker reads. The GUI and standalone route daemon intentionally choose
+// different sinks because they own different state files.
+func (r *WorkspaceResolver) SetAuditSink(auditFn func(level, event string, fields map[string]any) error) {
+	if r == nil {
+		return
+	}
+	r.mu.Lock()
+	r.auditFn = auditFn
+	r.mu.Unlock()
+}
+
+func (r *WorkspaceResolver) auditDefaultWorkspace(level, event string, fields map[string]any) {
+	if r == nil {
+		return
+	}
+	r.mu.RLock()
+	auditFn := r.auditFn
+	r.mu.RUnlock()
+	if auditFn != nil {
+		_ = auditFn(level, event, fields)
+	}
 }
 
 // snapshot returns the current view of serena workspaces, refreshing
@@ -290,6 +315,39 @@ func (r *WorkspaceResolver) ListWorkspaces() []*api.WorkspaceEntry {
 		out[i] = &e
 	}
 	return out
+}
+
+// ResolveDefaultWorkspace returns the operator-selected default Serena row.
+// It reads the existing marker only, refreshes the current Serena snapshot,
+// and matches the marker's canonical path exactly. It never auto-registers,
+// selects an arbitrary row, or rewrites the marker.
+func (r *WorkspaceResolver) ResolveDefaultWorkspace() (*api.WorkspaceEntry, error) {
+	if r == nil || r.reg == nil || r.registryPath == "" {
+		r.auditDefaultWorkspace("warn", "serena-default-workspace-unavailable", map[string]any{"reason": "resolver_unwired"})
+		return nil, ErrDefaultWorkspaceUnavailable
+	}
+
+	markedPath, err := api.ReadDefaultWorkspace(filepath.Dir(r.registryPath))
+	if err != nil {
+		r.auditDefaultWorkspace("warn", "serena-default-workspace-unavailable", map[string]any{"reason": "marker_read_failed"})
+		return nil, fmt.Errorf("%w: marker read", ErrDefaultWorkspaceUnavailable)
+	}
+	if markedPath == "" {
+		return nil, ErrDefaultWorkspaceNotConfigured
+	}
+	canonical, err := api.CanonicalWorkspacePath(markedPath)
+	if err != nil {
+		r.auditDefaultWorkspace("info", "serena-default-workspace-stale", map[string]any{"reason": "marker_path_not_current"})
+		return nil, ErrDefaultWorkspaceStale
+	}
+	for _, entry := range r.snapshot() {
+		if entry.WorkspacePath == canonical {
+			out := entry
+			return &out, nil
+		}
+	}
+	r.auditDefaultWorkspace("info", "serena-default-workspace-stale", map[string]any{"reason": "registration_missing"})
+	return nil, ErrDefaultWorkspaceStale
 }
 
 // ResolveByPath maps an inbound MCP tool argument path to a registered

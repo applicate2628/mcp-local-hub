@@ -406,6 +406,76 @@ func TestResolveByPath_EmptyPath_ReturnsErrInvalidPath(t *testing.T) {
 	}
 }
 
+// TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow catches a
+// first-call regression where the router would select an arbitrary workspace,
+// or trust a marker that no longer corresponds to a live Serena registration.
+func TestResolveDefaultWorkspace_UsesOnlyTheCurrentCanonicalSerenaRow(t *testing.T) {
+	root := t.TempDir()
+	alpha := makeWorkspace(t, root, "Alpha")
+	beta := makeWorkspace(t, root, "Beta")
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{
+		{WorkspaceKey: api.WorkspaceKey(alpha), WorkspacePath: alpha, Backend: "serena", Port: 9301},
+		{WorkspaceKey: api.WorkspaceKey(beta), WorkspacePath: beta, Backend: "serena", Port: 9302},
+	})
+	if err := api.WriteDefaultWorkspace(root, beta); err != nil {
+		t.Fatalf("write default marker: %v", err)
+	}
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	got, err := resolver.ResolveDefaultWorkspace()
+	if err != nil {
+		t.Fatalf("ResolveDefaultWorkspace: %v", err)
+	}
+	if got == nil || got.WorkspaceKey != api.WorkspaceKey(beta) || got.Port != 9302 {
+		t.Fatalf("default = %+v, want Beta port 9302", got)
+	}
+
+	if err := api.WriteDefaultWorkspace(root, filepath.Join(root, "unregistered")); err != nil {
+		t.Fatalf("write stale default marker: %v", err)
+	}
+	_, err = resolver.ResolveDefaultWorkspace()
+	if !errors.Is(err, ErrDefaultWorkspaceStale) {
+		t.Fatalf("stale marker error = %v, want ErrDefaultWorkspaceStale", err)
+	}
+}
+
+func TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker(t *testing.T) {
+	root := t.TempDir()
+	workspace := makeWorkspace(t, root, "Only")
+	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{{
+		WorkspaceKey: api.WorkspaceKey(workspace), WorkspacePath: workspace, Backend: "serena", Port: 9301,
+	}})
+	reg := api.NewRegistry(regPath)
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	resolver := NewWorkspaceResolver(reg, regPath)
+
+	if _, err := resolver.ResolveDefaultWorkspace(); !errors.Is(err, ErrDefaultWorkspaceNotConfigured) {
+		t.Fatalf("absent marker error = %v, want ErrDefaultWorkspaceNotConfigured", err)
+	}
+	if err := api.WriteDefaultWorkspace(root, ""); err != nil {
+		t.Fatalf("write empty marker: %v", err)
+	}
+	if _, err := resolver.ResolveDefaultWorkspace(); !errors.Is(err, ErrDefaultWorkspaceNotConfigured) {
+		t.Fatalf("empty marker error = %v, want ErrDefaultWorkspaceNotConfigured", err)
+	}
+	marker := filepath.Join(root, api.DefaultWorkspaceFilename)
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("remove marker: %v", err)
+	}
+	if err := os.Mkdir(marker, 0o700); err != nil {
+		t.Fatalf("replace marker with directory: %v", err)
+	}
+	if _, err := resolver.ResolveDefaultWorkspace(); !errors.Is(err, ErrDefaultWorkspaceUnavailable) {
+		t.Fatalf("unreadable marker error = %v, want ErrDefaultWorkspaceUnavailable", err)
+	}
+}
+
 // TestResolveByPath_RejectsUNCPath_OnWindows verifies that the
 // resolver rejects every two-leading-separator permutation (UNC
 // share root) before any filesystem probe. The rejection is

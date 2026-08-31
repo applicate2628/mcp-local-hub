@@ -314,3 +314,49 @@ func TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedS
 		t.Fatalf("hub-mcp.log exists at %s after a request via the restricted route wiring — the route daemon must never write the GUI-owned shared event log", hubLog)
 	}
 }
+
+// A marker-read failure is a pathless first-call failure that must use the
+// route-owned stderr audit sink, never the GUI-owned hub-mcp.log sink.
+func TestSetSerenaRouterReadOnly_DefaultMarkerFailureDoesNotWriteSharedLog(t *testing.T) {
+	resetSerenaRouterTestSeam(t)
+	serenaRouterTestSeam = nil
+
+	stateDir := apitest.HardenedTempDir(t)
+	restoreState := api.SetDaemonStateRootForTest(stateDir)
+	t.Cleanup(restoreState)
+	root := apitest.HardenedDir(t, filepath.Join(t.TempDir(), "hardened-root"))
+	regPath := filepath.Join(root, "workspaces.yaml")
+	reg := api.NewRegistry(regPath)
+	if err := reg.Save(); err != nil {
+		t.Fatalf("save registry: %v", err)
+	}
+	if err := reg.Load(); err != nil {
+		t.Fatalf("load registry: %v", err)
+	}
+	if err := api.WriteDefaultWorkspace(root, root); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+	marker := filepath.Join(root, api.DefaultWorkspaceFilename)
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("remove marker: %v", err)
+	}
+	if err := os.Mkdir(marker, 0o700); err != nil {
+		t.Fatalf("replace marker with directory: %v", err)
+	}
+
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
+	s.SetSerenaRouterReadOnly(serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath), serena_routing.NewSessionRouter())
+	sid := mintRouterSession(t, s, "2025-11-25")
+	before := snapshotTree(t, stateDir)
+	rr := postSerena(t, s, buildToolCallBody(t, "get_current_config", map[string]any{}), map[string]string{"Mcp-Session-Id": sid})
+	if rr.Code != http.StatusServiceUnavailable || !strings.Contains(rr.Body.String(), `"code":"UNAVAILABLE"`) {
+		t.Fatalf("default marker failure = %d %s, want path-free unavailable 503", rr.Code, rr.Body.String())
+	}
+	after := snapshotTree(t, stateDir)
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("route default-marker failure changed shared state: before=%v after=%v", before, after)
+	}
+	if _, err := os.Stat(filepath.Join(stateDir, "hub-mcp.log")); err == nil {
+		t.Fatal("route default-marker failure wrote hub-mcp.log")
+	}
+}

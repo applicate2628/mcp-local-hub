@@ -155,6 +155,9 @@ const (
 	// accompanying error `data` carries `code:"NEEDS_TRUST"` + the sanitized
 	// candidate path so a client/UI can offer one-click trust.
 	serenaRootNotTrustedCode = -32002
+	// serenaDefaultWorkspaceCode identifies a pathless tools/call whose
+	// router-minted session has no sticky workspace and cannot use its default.
+	serenaDefaultWorkspaceCode = -32003
 )
 
 // workspaceLister is the OPTIONAL capability the router uses to pick a
