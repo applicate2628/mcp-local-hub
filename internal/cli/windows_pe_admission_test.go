@@ -15,7 +15,60 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/buildinfo"
 )
+
+func TestAdmitV5UpgradeCandidateRejectsPlaceholderBuildInfoBeforeMutation(t *testing.T) {
+	path := writeAdmissionPEFixture(t, binaryadmission.WindowsGUISubsystem, false)
+	oldV, oldC, oldD := buildinfo.Get()
+	t.Cleanup(func() { buildinfo.Set(oldV, oldC, oldD) })
+	for _, tc := range []struct{ name, version, commit, date, field string }{
+		{name: "dev version", version: "dev", commit: "abc", date: "2026-08-31T19:00:00Z", field: "version"},
+		{name: "unknown commit", version: "0.4.34", commit: "unknown", date: "2026-08-31T19:00:00Z", field: "commit"},
+		{name: "unknown build date", version: "0.4.34", commit: "abc", date: "unknown", field: "build_date"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buildinfo.Set(tc.version, tc.commit, tc.date)
+			_, err := admitV5UpgradeCandidate(path)
+			if err == nil || !strings.Contains(err.Error(), tc.field+" is placeholder") {
+				t.Fatalf("error = %v, want %s placeholder refusal", err, tc.field)
+			}
+		})
+	}
+}
+
+func TestAdmitAndReadBackV5UpgradeCandidate(t *testing.T) {
+	path := writeAdmissionPEFixture(t, binaryadmission.WindowsGUISubsystem, false)
+	oldV, oldC, oldD := buildinfo.Get()
+	buildinfo.Set("0.4.34", "0123456789abcdef", "2026-08-31T19:00:00Z")
+	t.Cleanup(func() { buildinfo.Set(oldV, oldC, oldD) })
+
+	candidate, err := admitV5UpgradeCandidate(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if candidate.Admission != UpgradeAdmissionLocalProduct || candidate.Version != "0.4.34" || len(candidate.SHA256) != 64 {
+		t.Fatalf("candidate = %+v", candidate)
+	}
+	if err := verifyV5UpgradeCanonical(path, candidate); err != nil {
+		t.Fatalf("matching readback: %v", err)
+	}
+	if err := os.WriteFile(path, append(mustReadFile(t, path), 'x'), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyV5UpgradeCanonical(path, candidate); err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") {
+		t.Fatalf("mutated readback error = %v", err)
+	}
+}
+
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
 
 func writeAdmissionPEFixture(t *testing.T, subsystem uint16, malformed bool) string {
 	t.Helper()

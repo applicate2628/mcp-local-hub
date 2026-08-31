@@ -20,6 +20,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/process"
 )
 
@@ -124,6 +126,12 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 		VerifyPortsUnbound:         verifyPortsUnboundForUpgrade,
 		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
 		WaitSupervisorReady:        deps.WaitSupervisorReady,
+		AdmitStaged:                admitV5UpgradeCandidate,
+		AdmitPrior:                 binaryadmission.AdmitWindowsUpgradePrior,
+		VerifyCanonical:            verifyV5UpgradeCanonical,
+		WriteReceipt: func(receipt UpgradeReceiptV1) error {
+			return api.WriteStateFileAtomic(filepath.Join(stateDir, UpgradeReceiptSchemaV1+".json"), receipt)
+		},
 		WithRollbackStopSettlementFence: func(ctx context.Context, critical func() error) error {
 			return api.WithEmptyStopSettlementFence(ctx, filepath.Join(stateDir, "supervisor-state.json"), critical)
 		},
@@ -131,6 +139,48 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 		return fmt.Errorf("v0.5 upgrade: %w", err)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "v0.5 upgrade complete.")
+	return nil
+}
+
+func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
+	if err := binaryadmission.AdmitWindowsGUI(path); err != nil {
+		return UpgradeCandidateV1{}, fmt.Errorf("admit Windows product PE: %w", err)
+	}
+	version, commit, buildDate := buildinfo.Get()
+	for _, field := range []struct{ name, value string }{
+		{name: "version", value: version},
+		{name: "commit", value: commit},
+		{name: "build_date", value: buildDate},
+	} {
+		trimmed := strings.TrimSpace(field.value)
+		if trimmed == "" || strings.EqualFold(trimmed, "dev") || strings.EqualFold(trimmed, "unknown") {
+			return UpgradeCandidateV1{}, fmt.Errorf("admit local product build: %s is placeholder %q", field.name, field.value)
+		}
+	}
+	hash, err := hashFile(path)
+	if err != nil {
+		return UpgradeCandidateV1{}, fmt.Errorf("hash staged product binary: %w", err)
+	}
+	return UpgradeCandidateV1{
+		Admission: UpgradeAdmissionLocalProduct,
+		Version:   version,
+		Commit:    commit,
+		BuildDate: buildDate,
+		SHA256:    hex.EncodeToString(hash),
+	}, nil
+}
+
+func verifyV5UpgradeCanonical(path string, candidate UpgradeCandidateV1) error {
+	if err := binaryadmission.AdmitWindowsGUI(path); err != nil {
+		return fmt.Errorf("re-admit promoted Windows product PE: %w", err)
+	}
+	hash, err := hashFile(path)
+	if err != nil {
+		return fmt.Errorf("hash promoted canonical binary: %w", err)
+	}
+	if got := hex.EncodeToString(hash); got != candidate.SHA256 {
+		return fmt.Errorf("canonical SHA-256 mismatch: got %s want %s", got, candidate.SHA256)
+	}
 	return nil
 }
 

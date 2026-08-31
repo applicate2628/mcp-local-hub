@@ -1197,6 +1197,217 @@ func TestInstallUpgrade_HappyPath(t *testing.T) {
 	}
 }
 
+func TestInstallUpgrade_TransactionOrderAndDurableReceipt(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{ID: 2, OK: true, Final: true},
+	}
+	candidate := UpgradeCandidateV1{
+		Admission: UpgradeAdmissionLocalProduct,
+		Version:   "0.4.34",
+		Commit:    "0123456789abcdef",
+		BuildDate: "2026-08-31T19:00:00Z",
+		SHA256:    strings.Repeat("a", 64),
+	}
+	order := make([]string, 0)
+	admitCalls := 0
+	var gotReceipt UpgradeReceiptV1
+	cleanupSweep := setSweepOldBinariesFnForTest(func(string, ...func(string, error)) error {
+		order = append(order, "sweep")
+		return nil
+	})
+	defer cleanupSweep()
+
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub",
+		NewBinary:  "/fake/mcphub.new",
+		PipePath:   "fake-pipe",
+		AdmitStaged: func(string) (UpgradeCandidateV1, error) {
+			admitCalls++
+			order = append(order, fmt.Sprintf("admit-%d", admitCalls))
+			return candidate, nil
+		},
+		AdmitPrior: func(string) error {
+			order = append(order, "admit-prior")
+			return nil
+		},
+		WaitSupervisorLockReleased: func(context.Context, time.Duration) error {
+			order = append(order, "lock-released")
+			return nil
+		},
+		ExpectedPorts: []int{9123},
+		VerifyPortsUnbound: func([]int, time.Duration) error {
+			order = append(order, "ports-released")
+			return nil
+		},
+		WaitSupervisorReady: func(context.Context, time.Duration) error {
+			order = append(order, "ready")
+			return nil
+		},
+		VerifyCanonical: func(string, UpgradeCandidateV1) error {
+			order = append(order, "readback")
+			return nil
+		},
+		WriteReceipt: func(receipt UpgradeReceiptV1) error {
+			order = append(order, "receipt")
+			gotReceipt = receipt
+			return nil
+		},
+		Now:  func() time.Time { return time.Date(2026, 8, 31, 19, 30, 0, 0, time.UTC) },
+		Deps: &orderedUpgradeDeps{delegate: mock, order: &order},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{"admit-1", "admit-prior", "quiesce", "exit", "lock-released", "ports-released", "admit-2", "rename", "start", "ready", "readback", "receipt", "sweep"}
+	if got := strings.Join(order, ","); got != strings.Join(wantOrder, ",") {
+		t.Fatalf("transaction order = %v, want %v", order, wantOrder)
+	}
+	if gotReceipt.Schema != UpgradeReceiptSchemaV1 || gotReceipt.Admission != UpgradeAdmissionLocalProduct ||
+		gotReceipt.Version != candidate.Version || gotReceipt.Commit != candidate.Commit ||
+		gotReceipt.BuildDate != candidate.BuildDate || gotReceipt.SHA256 != candidate.SHA256 ||
+		gotReceipt.InstalledAt != "2026-08-31T19:30:00Z" {
+		t.Fatalf("receipt = %+v", gotReceipt)
+	}
+}
+
+type orderedUpgradeDeps struct {
+	delegate UpgradeDeps
+	order    *[]string
+}
+
+func (d *orderedUpgradeDeps) RenameAsideBinary(target, newSrc string) (string, error) {
+	*d.order = append(*d.order, "rename")
+	return d.delegate.RenameAsideBinary(target, newSrc)
+}
+func (d *orderedUpgradeDeps) RestoreRetainedBinary(target, prior string) error {
+	*d.order = append(*d.order, "restore")
+	return d.delegate.RestoreRetainedBinary(target, prior)
+}
+func (d *orderedUpgradeDeps) QuiesceTimers(ctx context.Context, pipe string, timeout int) (api.IPCResponse, error) {
+	*d.order = append(*d.order, "quiesce")
+	return d.delegate.QuiesceTimers(ctx, pipe, timeout)
+}
+func (d *orderedUpgradeDeps) ExitGraceful(ctx context.Context, pipe string, timeout int) (api.IPCResponse, error) {
+	*d.order = append(*d.order, "exit")
+	return d.delegate.ExitGraceful(ctx, pipe, timeout)
+}
+func (d *orderedUpgradeDeps) ForceKillSupervisor(pipe string) error {
+	*d.order = append(*d.order, "force-kill")
+	return d.delegate.ForceKillSupervisor(pipe)
+}
+func (d *orderedUpgradeDeps) StartSupervisor(path string) error {
+	*d.order = append(*d.order, "start")
+	return d.delegate.StartSupervisor(path)
+}
+
+func TestInstallUpgrade_ChangedStagedCandidateRecoversPriorWithoutPromotion(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{Final: true},
+	}
+	first := UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: "0.4.34", Commit: "abc", BuildDate: "date", SHA256: strings.Repeat("a", 64)}
+	second := first
+	second.SHA256 = strings.Repeat("b", 64)
+	calls := 0
+	readyCalls := 0
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: mock,
+		AdmitStaged: func(string) (UpgradeCandidateV1, error) {
+			calls++
+			if calls == 1 {
+				return first, nil
+			}
+			return second, nil
+		},
+		WaitSupervisorReady: func(context.Context, time.Duration) error { readyCalls++; return nil },
+	})
+	if err == nil || !strings.Contains(err.Error(), "identity changed") || !strings.Contains(err.Error(), "prior supervisor recovery completed") {
+		t.Fatalf("error = %v", err)
+	}
+	if mock.renameAsideCalled {
+		t.Fatal("changed staged candidate was promoted")
+	}
+	if !mock.startCalled || readyCalls != 1 {
+		t.Fatalf("prior recovery start=%v readiness=%d", mock.startCalled, readyCalls)
+	}
+}
+
+func TestInstallUpgrade_PriorAdmissionFailsBeforeFleetMutation(t *testing.T) {
+	mock := &fakeUpgradeDeps{}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", Deps: mock,
+		AdmitStaged: func(string) (UpgradeCandidateV1, error) {
+			return UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: "0.4.34", Commit: "abc", BuildDate: "date", SHA256: strings.Repeat("a", 64)}, nil
+		},
+		AdmitPrior: func(string) error { return errors.New("prior PE malformed") },
+	})
+	if err == nil || !strings.Contains(err.Error(), "pre-mutation prior canonical admission failed") {
+		t.Fatalf("error = %v", err)
+	}
+	if len(mock.calls) != 0 {
+		t.Fatalf("fleet/canonical mutation occurred after prior admission failure: %v", mock.calls)
+	}
+}
+
+func TestInstallUpgrade_LockReleaseFailureReapsAndRecoversUnpromotedPrior(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{Final: true},
+	}
+	lockCalls := 0
+	readyCalls := 0
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: mock,
+		WaitSupervisorLockReleased: func(context.Context, time.Duration) error {
+			lockCalls++
+			if lockCalls == 1 {
+				return errors.New("still held")
+			}
+			return nil
+		},
+		WaitSupervisorReady:             func(context.Context, time.Duration) error { readyCalls++; return nil },
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error { return critical() },
+	})
+	if err == nil || !strings.Contains(err.Error(), "prior supervisor recovery completed") {
+		t.Fatalf("error = %v", err)
+	}
+	if mock.renameAsideCalled {
+		t.Fatal("canonical binary promoted before lock release proof")
+	}
+	if !mock.forceKillCalled || !mock.startCalled || lockCalls != 2 || readyCalls != 1 {
+		t.Fatalf("calls=%v lock=%d ready=%d", mock.calls, lockCalls, readyCalls)
+	}
+}
+
+func TestInstallUpgrade_ReceiptFailureRollsBackExactPrior(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		retainedPrior: "/fake/mcphub.old-exact",
+		quiesceResult: api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{Final: true},
+	}
+	readyCalls := 0
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: mock,
+		AdmitStaged: func(string) (UpgradeCandidateV1, error) {
+			return UpgradeCandidateV1{Admission: UpgradeAdmissionLocalProduct, Version: "0.4.34", Commit: "abc", BuildDate: "date", SHA256: strings.Repeat("a", 64)}, nil
+		},
+		VerifyCanonical: func(string, UpgradeCandidateV1) error { return nil },
+		WriteReceipt:    func(UpgradeReceiptV1) error { return errors.New("disk full") },
+		WaitSupervisorReady: func(context.Context, time.Duration) error {
+			readyCalls++
+			return nil
+		},
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error { return critical() },
+	})
+	if err == nil || !strings.Contains(err.Error(), "persist upgrade-receipt-v1 failed") || !strings.Contains(err.Error(), "automatic rollback restored") {
+		t.Fatalf("error = %v", err)
+	}
+	if readyCalls != 2 || !strings.Contains(strings.Join(mock.calls, ","), "restore") {
+		t.Fatalf("calls=%v readiness=%d", mock.calls, readyCalls)
+	}
+}
+
 // TestInstallUpgrade_ExitTimeoutFallsBackToForceKill pins the spec
 // §"Fallback if step 4 IPC fails" path. ExitGraceful returns a
 // timeout error → orchestrator invokes ForceKillSupervisor before
@@ -1225,33 +1436,29 @@ func TestInstallUpgrade_ExitTimeoutFallsBackToForceKill(t *testing.T) {
 	}
 }
 
-// TestInstallUpgrade_RenameAsideFailureAborts pins that a rename-aside
-// failure aborts the orchestrator BEFORE issuing any IPC traffic. The
-// binary swap is the load-bearing first step; if it fails, the prior
-// supervisor is still healthy and we must NOT send it a graceful-exit.
-func TestInstallUpgrade_RenameAsideFailureAborts(t *testing.T) {
+// TestInstallUpgrade_RenameAsideFailureRecoversPrior pins the post-quiesce
+// promotion boundary: a failed swap leaves the prior canonical bytes in place,
+// so the orchestrator restarts and verifies the prior supervisor.
+func TestInstallUpgrade_RenameAsideFailureRecoversPrior(t *testing.T) {
 	mock := &fakeUpgradeDeps{
 		renameAsideErr: errors.New("locked"),
 	}
 	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
 		BinaryPath: "/fake/mcphub",
 		NewBinary:  "/fake/mcphub.new",
-		Deps:       mock,
+		WaitSupervisorReady: func(context.Context, time.Duration) error {
+			return nil
+		},
+		Deps: mock,
 	})
-	if err == nil {
-		t.Fatal("expected error on rename-aside failure")
+	if err == nil || !strings.Contains(err.Error(), "prior supervisor recovery completed") {
+		t.Fatalf("expected recovered-prior error on rename-aside failure, got %v", err)
 	}
-	if mock.quiesceCalled {
-		t.Fatal("quiesce should not be called when rename fails")
-	}
-	if mock.exitCalled {
-		t.Fatal("exit should not be called when rename fails")
+	if !mock.quiesceCalled || !mock.exitCalled || !mock.startCalled {
+		t.Fatalf("calls=%v, want quiesce + exit + rename + prior start", mock.calls)
 	}
 	if mock.forceKillCalled {
 		t.Fatal("force-kill should not be called when rename fails")
-	}
-	if mock.startCalled {
-		t.Fatal("start should not be called when rename fails")
 	}
 }
 
@@ -1660,7 +1867,7 @@ func TestRunInstallUpgrade_CleanGracefulPathVerifiesHandoff(t *testing.T) {
 	if mock.forceKillCalled {
 		t.Fatal("force-kill must not run on clean quiesce + clean graceful exit")
 	}
-	want := []string{"rename", "quiesce", "exit", "wait-lock", "verify-ports", "start", "wait-ready"}
+	want := []string{"quiesce", "exit", "wait-lock", "verify-ports", "rename", "start", "wait-ready"}
 	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("call order = %v, want %v", mock.calls, want)
 	}
@@ -1845,7 +2052,7 @@ func TestInstallUpgrade_PostSwapFailureRestoresPrior(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
 		t.Fatalf("error=%v, want successful automatic rollback report", err)
 	}
-	want := []string{"rename", "quiesce", "exit", "start", "force-kill", "restore", "start"}
+	want := []string{"quiesce", "exit", "rename", "start", "force-kill", "restore", "start"}
 	if strings.Join(mock.calls, ",") != strings.Join(want, ",") {
 		t.Fatalf("calls=%v, want %v", mock.calls, want)
 	}

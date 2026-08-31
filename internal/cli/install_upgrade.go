@@ -59,38 +59,26 @@ import (
 //
 // Method contracts:
 //
-//   - RenameAsideBinary: replace `target` with `newSrc` via the
-//     platform's rename-aside two-step (Windows) or atomic rename
-//     (POSIX). Failure aborts the entire upgrade — no IPC traffic
-//     and no force-kill must follow.
+//   - RenameAsideBinary: promote the already-admitted staged successor only
+//     after the prior supervisor lock and daemon ports are proven released.
 //
 //   - QuiesceTimers: send IPC `quiesce-timers` and wait for the FINAL
 //     frame (two-frame response per spec §"Wire format"; immediate
 //     `{accepted: true}` then final `{drained, still_running}`).
-//     Failure is non-fatal — the supervisor will force-kill any
-//     surviving transients during its own exit path, so an outage
-//     here does NOT block the rest of the flow.
+//     Failure routes the transaction through force-kill before release proof.
 //
 //   - ExitGraceful: send IPC `exit{graceful: true, timeout_ms: N}`
 //     and wait for the response. A non-nil error here triggers the
-//     force-kill fallback; a successful exit response continues to
-//     the supervisor-start step without force-kill.
+//     force-kill fallback; a successful response continues to release proof.
 //
 //   - ForceKillSupervisor: terminate the prior supervisor PID + its
 //     children (taskkill /F /T on Windows; kill -KILL -<pgid> on
-//     POSIX). Called only when ExitGraceful failed. Best-effort: a
-//     subsequent failure here is logged via the orchestrator but does
-//     NOT abort the upgrade — the supervisor's Job Object / process
-//     group will reap children when the kernel cleans up, and the
-//     follow-on StartSupervisor will detect any lingering port
-//     contention through its own bind.
+//     POSIX). Called when graceful exit or quiesce is unproven and during
+//     post-promotion rollback. Non-benign failure aborts promotion/rollback.
 //
 //   - StartSupervisor: explicitly start the new supervisor via the
-//     per-OS path (see file-level docstring). Failure here aborts
-//     the orchestrator with a wrapped error — the operator is in a
-//     state where the binary has been replaced but no supervisor is
-//     running; recovery is `mcphub supervise` from a shell, which is
-//     the same surface this method drives in detached mode.
+//     per-OS path. Before promotion it recovers the untouched prior binary;
+//     after promotion it starts the successor or restored retained prior.
 type UpgradeDeps interface {
 	RenameAsideBinary(target, newSrc string) (retainedPrior string, err error)
 	RestoreRetainedBinary(target, retainedPrior string) error
@@ -98,6 +86,34 @@ type UpgradeDeps interface {
 	ExitGraceful(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
 	ForceKillSupervisor(pipePath string) error
 	StartSupervisor(binaryPath string) error
+}
+
+const (
+	UpgradeReceiptSchemaV1       = "upgrade-receipt-v1"
+	UpgradeAdmissionLocalProduct = "local-product-build"
+)
+
+// UpgradeCandidateV1 is the immutable identity admitted for one upgrade.
+// Build metadata describes the running product build whose exact bytes were
+// staged; SHA256 binds those bytes across both admission passes and readback.
+type UpgradeCandidateV1 struct {
+	Admission string `json:"admission"`
+	Version   string `json:"version"`
+	Commit    string `json:"commit"`
+	BuildDate string `json:"build_date"`
+	SHA256    string `json:"sha256"`
+}
+
+// UpgradeReceiptV1 is written atomically only after the successor is ready and
+// the canonical file has been re-read and matched to the admitted candidate.
+type UpgradeReceiptV1 struct {
+	Schema      string `json:"schema"`
+	Admission   string `json:"admission"`
+	Version     string `json:"version"`
+	Commit      string `json:"commit"`
+	BuildDate   string `json:"build_date"`
+	SHA256      string `json:"sha256"`
+	InstalledAt string `json:"installed_at"`
 }
 
 // UpgradeOpts is the input bundle to RunInstallUpgrade.
@@ -195,7 +211,20 @@ type UpgradeOpts struct {
 	// rollback: separating a read from the destructive operation would allow a
 	// pending stop receipt to appear between them.
 	WithRollbackStopSettlementFence func(ctx context.Context, critical func() error) error
-	Deps                            UpgradeDeps
+	// AdmitStaged validates the staged PE, non-placeholder build metadata, and
+	// SHA-256. It is invoked before any fleet mutation and again after the prior
+	// supervisor releases its lock and ports. Both results must be identical.
+	AdmitStaged func(path string) (UpgradeCandidateV1, error)
+	// AdmitPrior validates the rollback source before the prior fleet is touched.
+	AdmitPrior func(path string) error
+	// VerifyCanonical re-reads the promoted canonical file and proves its PE and
+	// SHA-256 still match the admitted staged candidate.
+	VerifyCanonical func(path string, candidate UpgradeCandidateV1) error
+	// WriteReceipt is the final blocking step. Production wires it to the API's
+	// atomic state-file writer; failure triggers exact retained-prior rollback.
+	WriteReceipt func(receipt UpgradeReceiptV1) error
+	Now          func() time.Time
+	Deps         UpgradeDeps
 }
 
 // Default IPC timeouts per spec §"Upgrade sequence". Exported as
@@ -231,54 +260,19 @@ const (
 	defaultSupervisorLockReleaseTimeout = time.Duration(defaultQuiesceTimeoutMs+defaultExitTimeoutMs) * time.Millisecond
 )
 
-// RunInstallUpgrade orchestrates the v0.5.0 cold-restart upgrade
-// sequence per spec §"Upgrade sequence":
+// RunInstallUpgrade owns one cold-restart transaction:
 //
-//  1. Replace binary atomically via rename-aside (Task 8.1).
-//  2. Connect to supervisor IPC; client reads `supervisor.lock` for
-//     expected `{pid, start_time}` FIRST (handled inside the
-//     QuiesceTimers / ExitGraceful method implementations).
-//  3. Issue IPC `quiesce-timers` (drains transients up to 30s,
-//     two-frame response per spec §"Wire format").
-//  4. Issue IPC `exit{graceful: true, timeout_ms: 5000}`.
-//  5. Supervisor terminates remaining transients + daemon children,
-//     exits 0. (Implicit — driven by step 4's IPC response.)
-//  6. `mcphub install` explicitly starts new supervisor (per-OS).
-//  7. New supervisor reads intent + reconcile → respawns daemons.
-//     (Implicit — happens inside the started supervisor process.)
+//  1. Admit the staged PE, build metadata, and SHA-256 before mutation.
+//  2. Quiesce/exit (or force-kill) the prior supervisor.
+//  3. Prove supervisor.lock and every expected daemon port are released.
+//  4. Re-admit the unchanged staged candidate, then promote via rename-aside.
+//  5. Start and verify the successor, re-read canonical bytes, and atomically
+//     write upgrade-receipt-v1 as the final blocking step.
 //
-// Return contract:
-//
-//   - Returns nil on success, including the force-kill fallback path
-//     (step 4 failure → step 4a force-kill → step 6 start). The
-//     supervisor restart at step 6 is the load-bearing convergence
-//     event; if it succeeds, the upgrade has effectively completed
-//     even if the prior supervisor exited un-gracefully.
-//
-//   - Returns non-nil on:
-//
-//   - Step 1 failure (rename-aside): the binary is in an
-//     indeterminate state; no IPC traffic and no force-kill
-//     should follow because the IPC peer is the still-running
-//     OLD supervisor and our intent was to replace it. The
-//     caller's recovery is to re-run --upgrade after diagnosing
-//     the rename failure (locked file, missing permissions, etc.)
-//     OR to manually restore the .old-<ts> aside file.
-//
-//   - Step 6 failure (start supervisor): the binary HAS been
-//     replaced and the prior supervisor has exited (gracefully
-//     or via force-kill), but the new supervisor failed to
-//     start. The caller's recovery is `mcphub supervise` from a
-//     shell — the same surface StartSupervisor drives, just
-//     in foreground mode for diagnostics.
-//
-// Non-fatal failures: QuiesceTimers errors are intentionally swallowed
-// because the supervisor's own exit path will force-kill any
-// surviving transients during step 5; an IPC outage during drain is
-// preferable to aborting the whole upgrade after the binary has
-// already been replaced. The orchestrator could not return at this
-// point even if it wanted to — the rename-aside is committed, so
-// step 6 must run to bring up the new supervisor.
+// Any pre-promotion candidate/promotion failure restarts the untouched prior
+// canonical binary. Any post-promotion start/readiness/readback/receipt failure
+// restores the exact retained prior binary and verifies prior readiness. Nil is
+// returned only after every configured completion proof succeeds.
 //
 // Concurrency: this function is single-threaded by design. The
 // orchestrator does NOT spawn goroutines; every step blocks the
@@ -299,28 +293,25 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	if opts.ExitTimeoutMs == 0 {
 		opts.ExitTimeoutMs = defaultExitTimeoutMs
 	}
-
-	// Step 1: Atomic binary replacement via rename-aside.
-	//
-	// Failure here aborts the entire flow: the binary is in an
-	// indeterminate state (rename may have partially completed on
-	// Windows step 1 of 2, though the helper's best-effort rollback
-	// should have restored it), and we MUST NOT proceed to IPC
-	// traffic because the supervisor we'd be talking to is the
-	// PRIOR supervisor whose binary we just tried (and failed) to
-	// swap. Going further would issue a graceful-exit against a
-	// supervisor that's actually still healthy, which is exactly
-	// the wrong behavior.
-	retainedPrior, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
-	if err != nil {
-		return fmt.Errorf("rename-aside binary replacement failed: %w; "+
-			"the prior binary may have been restored via best-effort rollback; "+
-			"verify with `ls %s*` and inspect any `.old-<ts>` artifact, "+
-			"then re-run `mcphub install --upgrade` once the cause is resolved",
-			err, opts.BinaryPath)
+	if opts.Deps == nil {
+		return errors.New("upgrade dependencies are required")
 	}
 
-	// Step 2-3: IPC quiesce-timers (drain transient maintenance-timer
+	var admitted UpgradeCandidateV1
+	if opts.AdmitStaged != nil {
+		var err error
+		admitted, err = opts.AdmitStaged(opts.NewBinary)
+		if err != nil {
+			return fmt.Errorf("pre-mutation staged candidate admission failed: %w", err)
+		}
+	}
+	if opts.AdmitPrior != nil {
+		if err := opts.AdmitPrior(opts.BinaryPath); err != nil {
+			return fmt.Errorf("pre-mutation prior canonical admission failed: %w", err)
+		}
+	}
+
+	// Stop phase: IPC quiesce-timers (drain transient maintenance-timer
 	// PIDs from supervisor-state.transient_pids).
 	//
 	// Per spec §"Wire format" the supervisor returns two frames: an
@@ -404,10 +395,8 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	handoffTimeout := effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, opts.QuiesceTimeoutMs, opts.ExitTimeoutMs)
 	if opts.WaitSupervisorLockReleased != nil {
 		if err := opts.WaitSupervisorLockReleased(ctx, handoffTimeout); err != nil {
-			return fmt.Errorf("prior supervisor did not release supervisor.lock within %s after upgrade exit request: %w; "+
-				"the old supervisor may still be shutting down and will block the successor from acquiring supervisor.lock; "+
-				"wait briefly, inspect supervisor-events.log, then run `mcphub supervise` from a shell if no supervisor is running",
-				handoffTimeout, err)
+			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout,
+				fmt.Errorf("prior supervisor did not release supervisor.lock within %s after upgrade exit request: %w", handoffTimeout, err))
 		}
 	}
 
@@ -417,11 +406,32 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// path has the same zombie-listener race as the force path.
 	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
 		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-			return fmt.Errorf("port-unbound verification failed after prior-supervisor exit: %w; "+
-				"one or more daemon ports are still bound; "+
-				"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running `mcphub install --upgrade`",
-				err)
+			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout,
+				fmt.Errorf("port-unbound verification failed after prior-supervisor exit: %w", err))
 		}
+	}
+
+	// Re-admit after the old fleet has released every lock and expected port.
+	// This closes the stage-to-promotion mutation window without touching the
+	// still-canonical prior binary.
+	if opts.AdmitStaged != nil {
+		rechecked, err := opts.AdmitStaged(opts.NewBinary)
+		if err != nil {
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout,
+				fmt.Errorf("post-quiesce staged candidate admission failed: %w", err))
+		}
+		if rechecked != admitted {
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout,
+				fmt.Errorf("staged candidate identity changed between admission passes: before=%+v after=%+v", admitted, rechecked))
+		}
+	}
+
+	// Promotion occurs only after candidate admission and complete old-fleet
+	// release have both been proven.
+	retainedPrior, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
+	if err != nil {
+		return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout,
+			fmt.Errorf("rename-aside binary replacement failed: %w", err))
 	}
 
 	// Step 6: Explicit per-OS supervisor start.
@@ -458,6 +468,31 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 				fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w", handoffTimeout, err))
 		}
 	}
+	if opts.VerifyCanonical != nil {
+		if err := opts.VerifyCanonical(opts.BinaryPath, admitted); err != nil {
+			return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+				fmt.Errorf("promoted canonical binary readback failed: %w", err))
+		}
+	}
+	if opts.WriteReceipt != nil {
+		now := time.Now
+		if opts.Now != nil {
+			now = opts.Now
+		}
+		receipt := UpgradeReceiptV1{
+			Schema:      UpgradeReceiptSchemaV1,
+			Admission:   admitted.Admission,
+			Version:     admitted.Version,
+			Commit:      admitted.Commit,
+			BuildDate:   admitted.BuildDate,
+			SHA256:      admitted.SHA256,
+			InstalledAt: now().UTC().Format(time.RFC3339Nano),
+		}
+		if err := opts.WriteReceipt(receipt); err != nil {
+			return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+				fmt.Errorf("persist %s failed: %w", UpgradeReceiptSchemaV1, err))
+		}
+	}
 	if err := sweepOldBinariesFn(filepath.Dir(opts.BinaryPath), func(path string, err error) {
 		fmt.Fprintf(os.Stderr, "warn: old binary sweep remove %s failed: %v\n", path, err)
 	}); err != nil {
@@ -469,6 +504,43 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// wires WaitSupervisorReady, the orchestrator observes this via IPC status
 	// before reporting success; operator-facing follow-up remains `mcphub status`.
 	return nil
+}
+
+func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, trigger error) error {
+	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
+		return fmt.Errorf("%w; canonical prior binary was not promoted but prior supervisor recovery start failed: %v", trigger, err)
+	}
+	if opts.WaitSupervisorReady != nil {
+		if err := opts.WaitSupervisorReady(ctx, timeout); err != nil {
+			return fmt.Errorf("%w; canonical prior binary was not promoted and recovery start returned, but prior supervisor did not become ready: %v", trigger, err)
+		}
+	}
+	return fmt.Errorf("%w; canonical prior binary was not promoted and prior supervisor recovery completed", trigger)
+}
+
+func recoverUnpromotedAfterReleaseFailure(ctx context.Context, opts UpgradeOpts, timeout time.Duration, trigger error) error {
+	if opts.WithRollbackStopSettlementFence == nil {
+		return fmt.Errorf("%w; canonical prior binary was not promoted, but recovery force-kill was refused because the stop-settlement fence is unavailable", trigger)
+	}
+	if err := opts.WithRollbackStopSettlementFence(ctx, func() error {
+		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil && !isAlreadyExitedError(killErr) {
+			return fmt.Errorf("force-kill prior supervisor: %w", killErr)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("%w; canonical prior binary was not promoted, but recovery could not reap the prior supervisor: %v", trigger, err)
+	}
+	if opts.WaitSupervisorLockReleased != nil {
+		if err := opts.WaitSupervisorLockReleased(ctx, timeout); err != nil {
+			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery force-killed the prior supervisor, but supervisor.lock remained held: %v", trigger, err)
+		}
+	}
+	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery force-killed the prior supervisor, but expected ports remained bound: %v", trigger, err)
+		}
+	}
+	return recoverUnpromotedUpgrade(ctx, opts, timeout, trigger)
 }
 
 func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior string, timeout time.Duration, trigger error) error {
