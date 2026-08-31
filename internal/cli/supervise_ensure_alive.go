@@ -1697,6 +1697,37 @@ func probeGUIServingWithinTimeout(port int) bool {
 // supervisor-events.log (Task Scheduler discards stdout). Returns nil on EVERY
 // branch — this is a best-effort recovery tick (exit 0), not a gate.
 func runEnsureAlive(stateDir string, out io.Writer) error {
+	return runEnsureAliveContext(context.Background(), stateDir, out)
+}
+
+func runEnsureAliveContext(ctx context.Context, stateDir string, out io.Writer) error {
+	fence, acquired, fenceErr := api.TryAcquireUpgradeFence(ctx, stateDir)
+	if fenceErr != nil {
+		fmt.Fprintf(out, "ensure-alive: liveness-upgrade-fence-unverifiable; no action: %v\n", fenceErr)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"liveness-upgrade-fence-unverifiable",
+			"upgrade transaction exclusion could not be verified; suppressing liveness recovery",
+			map[string]any{"error": fenceErr.Error()})
+		return nil
+	}
+	if !acquired {
+		fmt.Fprintln(out, "ensure-alive: liveness-suppressed-upgrade-in-progress; no action")
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
+			"liveness-suppressed-upgrade-in-progress",
+			"an upgrade transaction holds the liveness exclusion fence; suppressing recovery this tick",
+			nil)
+		return nil
+	}
+	defer func() {
+		if err := fence.Release(); err != nil {
+			fmt.Fprintf(out, "ensure-alive: liveness-upgrade-fence-release-unconfirmed; future ticks will fail closed: %v\n", err)
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"liveness-upgrade-fence-release-unconfirmed",
+				"liveness tick completed but release of the upgrade exclusion fence could not be confirmed; future ticks fail closed in this process",
+				map[string]any{"error": err.Error()})
+		}
+	}()
+
 	ownerMode, ownerModeErr := resolveEnsureAliveOwnerMode(stateDir)
 	if ownerModeErr != nil {
 		fmt.Fprintf(out, "ensure-alive: persisted owner mode is unverifiable; no action: %v\n", ownerModeErr)
@@ -1907,7 +1938,7 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 // `test_state_path_env` build-tag gate), so calling it directly here would
 // resolve a DIFFERENT dir than the supervisor's actual lock under any
 // override — the lone divergence this fix removes.
-func runEnsureAliveFromState() error {
+func runEnsureAliveFromState(ctx context.Context) error {
 	stateDir, err := stateDirFunc()
 	if err != nil {
 		// Cannot resolve the state dir → cannot probe. Fail closed (no
@@ -1919,5 +1950,5 @@ func runEnsureAliveFromState() error {
 		fmt.Fprintf(os.Stderr, "ensure-alive: resolve state dir failed; no action: %v\n", err)
 		return nil
 	}
-	return runEnsureAlive(stateDir, os.Stdout)
+	return runEnsureAliveContext(ctx, stateDir, os.Stdout)
 }

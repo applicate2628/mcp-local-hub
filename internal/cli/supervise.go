@@ -365,7 +365,7 @@ running (or liveness is undeterminable) it is a no-op. Always exits 0.
 			// supervisor). It resolves the state dir, probes liveness, and
 			// relaunches the owner only when no live lock holder exists.
 			if ensureAlive {
-				return runEnsureAliveFromState()
+				return runEnsureAliveFromState(cmd.Context())
 			}
 			return runSupervise(cmd.Context(), noIPC, strictMode, strictJobProtection)
 		},

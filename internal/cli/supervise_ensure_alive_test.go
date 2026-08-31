@@ -447,9 +447,9 @@ func TestEnsureAlive_FreeLock_LiveGUIOwner_StandaloneRelaunchFails(t *testing.T)
 }
 
 // TestEnsureAlive_ProbeError_NoRelaunch covers the fail-closed guard-precondition:
-// when the liveness probe itself cannot run (a state dir under a nonexistent
-// parent chain, so the flock file cannot be opened), liveness is UNDETERMINABLE
-// → the action must NOT relaunch (undeterminable != dead). This is the
+// when the outer upgrade-exclusion fence cannot be verified (a state dir under
+// a nonexistent parent chain, so its flock file cannot be opened), liveness is
+// UNDETERMINABLE → the action must NOT relaunch (undeterminable != dead). This is the
 // inverted-polarity guard: relaunching on an undeterminable probe could stack a
 // second owner against a live-but-unprobeable supervisor.
 func TestEnsureAlive_ProbeError_NoRelaunch(t *testing.T) {
@@ -476,8 +476,8 @@ func TestEnsureAlive_ProbeError_NoRelaunch(t *testing.T) {
 	if got := atomic.LoadInt32(&relaunches); got != 0 {
 		t.Errorf("relaunch seam called %d times on a PROBE ERROR; want 0 (fail-closed: undeterminable != dead)", got)
 	}
-	if !strings.Contains(out.String(), "undeterminable") {
-		t.Errorf("output should report the undeterminable no-op; got %q", out.String())
+	if !strings.Contains(out.String(), "liveness-upgrade-fence-unverifiable") {
+		t.Errorf("output should report the stable fence-unverifiable no-op; got %q", out.String())
 	}
 }
 
@@ -2695,6 +2695,39 @@ func TestEnsureAliveGUIRecovery_PreAcquisitionUnknownDoesNotSuppressRelaunch(t *
 	}
 }
 
+func TestEnsureAliveUpgradeFenceBusySuppressesBeforeOwnerReadsAndRelaunch(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	holder, err := api.AcquireUpgradeFence(context.Background(), stateDir)
+	if err != nil {
+		t.Fatalf("acquire upgrade fence: %v", err)
+	}
+	t.Cleanup(func() { _ = holder.Release() })
+
+	var relaunches atomic.Int32
+	restoreOwner := setLivenessRelaunchFnForTest(func() error {
+		relaunches.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreOwner)
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error {
+		relaunches.Add(1)
+		return nil
+	})
+	t.Cleanup(restoreStandalone)
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if got := relaunches.Load(); got != 0 {
+		t.Fatalf("relaunch calls while upgrade fence held = %d, want 0", got)
+	}
+	if !strings.Contains(out.String(), "liveness-suppressed-upgrade-in-progress") {
+		t.Fatalf("output = %q, want stable suppression id", out.String())
+	}
+	assertSupervisorEvent(t, stateDir, "liveness-suppressed-upgrade-in-progress")
+}
+
 func TestEnsureAliveGUIRecovery_UnknownAuditCannotBlockSupervisorDecision(t *testing.T) {
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 	stateDir := ensureAliveTestStateDir(t)
@@ -2824,9 +2857,10 @@ func TestEnsureAliveGUIRecovery_ConcurrentTicksUseProductionFlockExclusion(t *te
 	}
 
 	secondDone := make(chan struct{})
+	secondOut := &bytes.Buffer{}
 	go func() {
 		defer close(secondDone)
-		_ = runEnsureAlive(stateDir, &bytes.Buffer{})
+		_ = runEnsureAlive(stateDir, secondOut)
 	}()
 	select {
 	case <-secondDone:
@@ -2847,8 +2881,11 @@ func TestEnsureAliveGUIRecovery_ConcurrentTicksUseProductionFlockExclusion(t *te
 	if gotRecord.Phase != gui.HandoffPhaseInterrupted || gotRecord.Sequence != 3 {
 		t.Fatalf("terminal marker = phase %q sequence %d, want interrupted/3", gotRecord.Phase, gotRecord.Sequence)
 	}
-	if probeCalls.Load() != 2 || freeResults.Load() != 1 || heldResults.Load() != 1 {
-		t.Fatalf("production owner-probe results: calls=%d free=%d held=%d, want 2/1/1", probeCalls.Load(), freeResults.Load(), heldResults.Load())
+	if probeCalls.Load() != 1 || freeResults.Load() != 1 || heldResults.Load() != 0 {
+		t.Fatalf("production owner-probe results: calls=%d free=%d held=%d, want 1/1/0 because the outer upgrade fence suppresses the second tick before owner reads", probeCalls.Load(), freeResults.Load(), heldResults.Load())
+	}
+	if !strings.Contains(secondOut.String(), "liveness-suppressed-upgrade-in-progress") {
+		t.Fatalf("second tick output = %q, want outer-fence suppression", secondOut.String())
 	}
 	if guiAutostartCalls.Load() != 0 || standaloneCalls.Load() != 0 {
 		t.Fatalf("ensure-alive GUI recovery spawned via relaunch seams: autostart=%d standalone=%d, want 0/0", guiAutostartCalls.Load(), standaloneCalls.Load())

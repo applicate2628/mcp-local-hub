@@ -44,6 +44,8 @@ func init() {
 	v5UpgradeFn = runV5UpgradeWindows
 }
 
+var runInstallUpgradeWindowsFn = RunInstallUpgrade
+
 // runV5UpgradeWindows wires cli.RunInstallUpgrade with the production
 // rename-aside + IPC + supervisor-spawn callbacks. The caller already verified
 // supervisor-intent.json is present (the routing branch's discriminator), so
@@ -66,7 +68,26 @@ func runV5UpgradeWindows(cmd *cobra.Command) error {
 // owners above; focused tests provide an admitted GUI PE and a temporary target
 // so they can reach post-staging failure paths without touching the running
 // test binary or the installed product.
-func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error {
+func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retErr error) {
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
+	}
+	ctx := cmd.Context()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	fence, err := api.AcquireUpgradeFence(ctx, stateDir)
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: acquire upgrade transaction fence: %w", err)
+	}
+	fenceReleased := false
+	defer func() {
+		if !fenceReleased {
+			api.ReleaseAndJoin(&retErr, fence.Release, "release upgrade transaction fence")
+		}
+	}()
+
 	staged, err := stageV5UpgradeBinary(exe, target)
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: stage binary beside canonical target: %w", err)
@@ -74,10 +95,6 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 	// RenameAsideReplace consumes staged on success. Remove it on every earlier
 	// or failed return so a stale candidate cannot survive into a later upgrade.
 	defer os.Remove(staged)
-	stateDir, err := api.DaemonStateDir()
-	if err != nil {
-		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
-	}
 	deps := buildV5UpgradeDeps(target, stateDir)
 
 	// Resolve expected daemon ports from supervisor-intent.json so the
@@ -115,7 +132,7 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 		}
 	}
 
-	if err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+	if err := runInstallUpgradeWindowsFn(ctx, UpgradeOpts{
 		BinaryPath:                 target,
 		NewBinary:                  staged,
 		PipePath:                   deps.pipePath,
@@ -137,6 +154,11 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 	}); err != nil {
 		return fmt.Errorf("v0.5 upgrade: %w", err)
 	}
+	if err := fence.Release(); err != nil {
+		fenceReleased = true
+		return fmt.Errorf("v0.5 upgrade: release upgrade transaction fence: %w", err)
+	}
+	fenceReleased = true
 	fmt.Fprintln(cmd.OutOrStdout(), "v0.5 upgrade complete.")
 	return nil
 }

@@ -294,6 +294,79 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	}
 }
 
+func TestRunV5UpgradeWindows_ExistingLivenessTickBlocksBeforeStaging(t *testing.T) {
+	stateDir := withTempStateDir(t)
+	holder, err := api.AcquireUpgradeFence(context.Background(), stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = holder.Release() })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	cmd := &cobra.Command{}
+	cmd.SetContext(ctx)
+	target := filepath.Join(t.TempDir(), "mcphub.exe")
+	err = runV5UpgradeWindowsWithPaths(cmd, filepath.Join(t.TempDir(), "does-not-exist.exe"), target)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("upgrade behind held liveness fence error = %v, want context.Canceled", err)
+	}
+	if _, statErr := os.Stat(target + ".new"); !os.IsNotExist(statErr) {
+		t.Fatalf("staged candidate exists before fence acquisition: stat=%v", statErr)
+	}
+}
+
+func TestRunV5UpgradeWindows_HoldsFenceAcrossPrePromotionAndRollbackBarrier(t *testing.T) {
+	stateDir := withTempStateDir(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
+
+	originalRun := runInstallUpgradeWindowsFn
+	t.Cleanup(func() { runInstallUpgradeWindowsFn = originalRun })
+	var relaunches int
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error { relaunches++; return nil })
+	t.Cleanup(restoreRelaunch)
+	restoreStandalone := setStandaloneRelaunchFnForTest(func() error { relaunches++; return nil })
+	t.Cleanup(restoreStandalone)
+
+	phaseOutputs := make([]string, 0, 2)
+	runInstallUpgradeWindowsFn = func(context.Context, UpgradeOpts) error {
+		for _, phase := range []string{"pre-promotion", "rollback-kill-restore"} {
+			out := &strings.Builder{}
+			if err := runEnsureAlive(stateDir, out); err != nil {
+				t.Fatalf("ensure-alive during %s: %v", phase, err)
+			}
+			phaseOutputs = append(phaseOutputs, out.String())
+		}
+		return errors.New("synthetic post-rollback transaction failure")
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	exe := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "FENCE-HOLD")
+	target := filepath.Join(t.TempDir(), "mcphub.exe")
+	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
+	if err == nil || !strings.Contains(err.Error(), "synthetic post-rollback") {
+		t.Fatalf("upgrade error = %v", err)
+	}
+	for i, output := range phaseOutputs {
+		if !strings.Contains(output, "liveness-suppressed-upgrade-in-progress") {
+			t.Fatalf("phase %d output = %q, want upgrade suppression", i, output)
+		}
+	}
+	if relaunches != 0 {
+		t.Fatalf("liveness relaunches during transaction = %d, want 0", relaunches)
+	}
+	lease, acquired, acquireErr := api.TryAcquireUpgradeFence(context.Background(), stateDir)
+	if acquireErr != nil || !acquired {
+		t.Fatalf("fence after failed transaction = acquired=%v err=%v", acquired, acquireErr)
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatalf("release reacquired fence: %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // codex round-4 Lane C P1: v5UpgradeDeps.ForceKillSupervisor error
 // propagation. The historical implementation swallowed every
