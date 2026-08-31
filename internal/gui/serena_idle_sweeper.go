@@ -117,47 +117,6 @@ func (s *Server) recordSerenaActivity(wsKey string, now time.Time) {
 	s.serenaActivityMu.Unlock()
 }
 
-// serenaActivityPersistDebounce bounds how often maybePersistSerenaActivity writes the
-// @serena row's LastToolsCallAt to the registry — at most one write per window
-// per workspace, mirroring the LSP lazy proxy's debounce.
-const serenaActivityPersistDebounce = 5 * time.Second
-
-// maybePersistSerenaActivity debounce-writes wsKey's @serena registry row
-// LastToolsCallAt after a request reaches the daemon. A silent no-op if the row
-// was already unregistered (the registry write fails closed on a missing row).
-//
-// ReadOnlyRouterMode short-circuits BEFORE any debounce bookkeeping or
-// registry I/O (bot/architect finding F1, Increment-1 review): this is the
-// ONE registry-write call site the serena router's happy path reaches
-// (serena_router.go's deferred restampSerenaForwardOnExit, on every
-// successful forwarded tool-call) independent of whichever AutoRegisterFn/
-// WakeIdleFn a caller wires, so gating it here — not just at the deps level —
-// is what makes the standalone `mcphub route` front daemon's "READ-ONLY on
-// the registry + supervisor-intent" constraint actually hold on every code
-// path, not merely the ones this file's author happened to enumerate.
-func (s *Server) maybePersistSerenaActivity(wsKey string, now time.Time) {
-	if s == nil || s.cfg.ReadOnlyRouterMode {
-		return
-	}
-	s.serenaPersistMu.Lock()
-	if s.serenaLastPersist == nil {
-		s.serenaLastPersist = make(map[string]time.Time)
-	}
-	due := now.Sub(s.serenaLastPersist[wsKey]) >= serenaActivityPersistDebounce
-	if due {
-		s.serenaLastPersist[wsKey] = now
-	}
-	s.serenaPersistMu.Unlock()
-	if !due {
-		return
-	}
-	regPath, err := api.DefaultRegistryPath()
-	if err != nil {
-		return
-	}
-	_ = api.NewRegistry(regPath).PutLastToolsCallAt(wsKey, api.SerenaLanguageSentinel, now.UTC())
-}
-
 // lastSerenaActivity returns wsKey's recorded last-activity time and whether
 // any activity has been recorded for it. Used by the sweeper.
 func (s *Server) lastSerenaActivity(wsKey string) (time.Time, bool) {

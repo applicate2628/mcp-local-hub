@@ -20,7 +20,8 @@
 //     general supervisor-intent write authority and never wires
 //     api.SetSerenaAutoRegisterCutoverPrimitives; supervisor reap+install+start
 //     cutover remains exclusively GUI-owned. AutoRegisterFn stays nil, and
-//     ReadOnlyRouterMode blocks registry activity persistence.
+//     Serena activity is published through the supervisor IPC; the route
+//     process has no direct registry writer or fallback write path.
 //
 //     The sole supervisor-intent capability reachable here is the existing
 //     request-scoped Serena idle wake. Before a Serena request forwards,
@@ -240,10 +241,9 @@ type routeSessionStores struct {
 
 func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionStores, error) {
 	s := gui.NewServer(gui.Config{
-		Port:               port,
-		Version:            versionString(),
-		PID:                os.Getpid(),
-		ReadOnlyRouterMode: true,
+		Port:    port,
+		Version: versionString(),
+		PID:     os.Getpid(),
 	})
 	stores := &routeSessionStores{}
 
@@ -371,10 +371,9 @@ func runRoute(ctx context.Context, cmd *cobra.Command, port int) error {
 	//   - gui.Server.Start / ContinueWithGUIListener / composeGuiServerRestartV3:
 	//     this process serves RouteHandler() on its own bare listener instead.
 	//   - a NON-nil AutoRegisterFn on either router, any generic supervisor-intent
-	//     writer, and registry activity writes from maybePersistSerenaActivity.
-	//     Serena's WakeIdleFn is the sole narrow exception: it is bound only to
-	//     WakeIdleSerenaDaemon's IntentReasonIdle compare-and-clear. See the file
-	//     header and SetSerenaRouterReadOnly contract.
+	//     writer, and any direct registry writer. Serena activity travels only
+	//     through the generation-validating supervisor IPC command. WakeIdleFn is
+	//     the sole narrow intent exception: IntentReasonIdle compare-and-clear.
 
 	httpSrv := newRouteHTTPServer(s.RouteHandler())
 	errCh := make(chan error, 1)

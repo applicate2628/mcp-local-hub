@@ -86,7 +86,7 @@ func TestSetSerenaRouterReadOnly_UnregisteredWorkspace_Returns503WithNoRegistryM
 
 	// Port 9125 matches postSerena's hardcoded Origin header (every other
 	// serena_router_test.go case uses the same port for the same reason).
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 
 	body := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile})
@@ -135,7 +135,7 @@ func TestSetSerenaRouterReadOnly_WiresIdleWakeWithoutAutoRegister(t *testing.T) 
 	}
 	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath)
 	sessions := serena_routing.NewSessionRouter()
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 
 	deps := s.serenaRouterDepsProd()
@@ -144,6 +144,9 @@ func TestSetSerenaRouterReadOnly_WiresIdleWakeWithoutAutoRegister(t *testing.T) 
 	}
 	if deps.AutoRegisterFn != nil {
 		t.Fatal("read-only router must not wire auto-register")
+	}
+	if deps.CommitSerenaActivityFn == nil {
+		t.Fatal("read-only router must publish durable activity through supervisor IPC, never a direct registry writer")
 	}
 	if deps.AuditFn == nil {
 		t.Fatal("read-only router must retain its non-shared-state audit sink")
@@ -196,7 +199,7 @@ func TestSetSerenaRouterReadOnly_OperatorStopReturns503WithoutForward(t *testing
 		t.Fatalf("seed operator stop: %v", err)
 	}
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterReadOnly(serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath), serena_routing.NewSessionRouter())
 	rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": toolFile}), nil)
 	if rr.Code != http.StatusServiceUnavailable {
@@ -284,7 +287,7 @@ func TestSetSerenaRouterReadOnly_RegisteredWorkspaceUnreachableBackend_NoSharedS
 	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, regPath)
 	sessions := serena_routing.NewSessionRouter()
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterReadOnly(resolver, sessions)
 
 	before := snapshotTree(t, stateDir)

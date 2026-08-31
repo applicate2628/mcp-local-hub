@@ -2171,6 +2171,8 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		// transitions WITHOUT a supervisor cold-restart. See
 		// supervise_reconcile_ipc.go for the handler body.
 		return handleReconcile(conn, req, deps)
+	case "commit_serena_activity":
+		return handleCommitSerenaActivity(conn, req, deps)
 	case "restart", "reload":
 		// Legacy alias surface preserved for v0.4.x clients. Task 4.1
 		// adds the canonical `respawn` verb above; restart/reload still

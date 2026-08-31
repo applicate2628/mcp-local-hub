@@ -1,5 +1,7 @@
 package api
 
+import "time"
+
 // Phase A.3 (plan v10 §A.3, 2026-05-20) — IPC types for the
 // `mcphub reconcile` operator command. These shapes are NEW v9/v10
 // declarations layered on top of the existing IPCRequest / IPCResponse
@@ -33,6 +35,34 @@ type ReconcileArgs struct {
 	// same-order settlement per target, or refuses the request.  Its absence
 	// preserves the legacy reconcile contract.
 	StopBatch *StopBatchCommandV1 `json:"stop_batch,omitempty"`
+}
+
+// SerenaActivityCommitRequestV1 is the versioned, supervisor-owned request to
+// persist a successful Serena tools/call.  The router supplies the exact
+// registry generation and runtime descriptor it resolved; the supervisor
+// validates all of them before it mutates LastToolsCallAt.  This prevents a
+// late route request from stamping a replacement workspace row.
+type SerenaActivityCommitRequestV1 struct {
+	ProtocolVersion int       `json:"protocol_version"`
+	WorkspaceKey    string    `json:"workspace_key"`
+	WorkspacePath   string    `json:"workspace_path"`
+	TaskName        string    `json:"task_name"`
+	ExpectedPort    int       `json:"expected_port"`
+	RegisteredAt    time.Time `json:"registered_at"`
+	ActivityAt      time.Time `json:"activity_at"`
+}
+
+// SerenaActivityCommitReceiptV1 is returned only after the supervisor has
+// verified the requested generation and durably observed the activity stamp.
+// State is "committed" for a new write and "already_committed" for a retry
+// whose timestamp is already durable, making a retry deterministic.
+type SerenaActivityCommitReceiptV1 struct {
+	ProtocolVersion int       `json:"protocol_version"`
+	WorkspaceKey    string    `json:"workspace_key"`
+	TaskName        string    `json:"task_name"`
+	RegisteredAt    time.Time `json:"registered_at"`
+	ActivityAt      time.Time `json:"activity_at"`
+	State           string    `json:"state"`
 }
 
 // StopBatchTargetV1 identifies one canonical supervisor daemon and the port

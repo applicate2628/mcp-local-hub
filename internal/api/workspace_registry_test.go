@@ -333,6 +333,162 @@ func TestRegistry_PutLastToolsCallAtPreservesLifecycleAndLastError(t *testing.T)
 	}
 }
 
+func TestRegistry_CommitSerenaActivity_RevalidatesTargetUnderRegistryLock(t *testing.T) {
+	registeredAt := time.Date(2026, 8, 31, 13, 0, 0, 0, time.UTC)
+	activityAt := registeredAt.Add(time.Minute)
+	seed := func(t *testing.T) (string, string, *Registry, WorkspaceEntry, SerenaActivityCommitRequestV1) {
+		t.Helper()
+		stateDir := t.TempDir()
+		registryPath := filepath.Join(stateDir, "workspaces.yaml")
+		intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+		entry := WorkspaceEntry{
+			WorkspaceKey: "atomic-serena", WorkspacePath: "/workspace/atomic", Language: SerenaLanguageSentinel,
+			Backend: SerenaServerName, TaskName: `\mcp-local-hub-serena-atomic`, Port: 9331, RegisteredAt: registeredAt,
+		}
+		registry := NewRegistry(registryPath)
+		registry.Put(entry)
+		if err := registry.Save(); err != nil {
+			t.Fatalf("seed registry: %v", err)
+		}
+		if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{TaskName: entry.TaskName, Workspace: entry.WorkspacePath, Port: entry.Port}}}); err != nil {
+			t.Fatalf("seed intent: %v", err)
+		}
+		request := SerenaActivityCommitRequestV1{ProtocolVersion: 1, WorkspaceKey: entry.WorkspaceKey, WorkspacePath: entry.WorkspacePath, TaskName: entry.TaskName, ExpectedPort: entry.Port, RegisteredAt: entry.RegisteredAt, ActivityAt: activityAt}
+		return registryPath, intentPath, registry, entry, request
+	}
+
+	t.Run("replacement between caller observation and registry lock is stale", func(t *testing.T) {
+		registryPath, intentPath, registry, entry, request := seed(t)
+		replacementAt := entry.RegisteredAt.Add(time.Second)
+		registry.beforeSerenaActivityCommitLockFn = func() {
+			replacement := NewRegistry(registryPath)
+			if err := replacement.Load(); err != nil {
+				t.Fatalf("load replacement registry: %v", err)
+			}
+			current, ok := replacement.Get(entry.WorkspaceKey, SerenaLanguageSentinel)
+			if !ok {
+				t.Fatal("seeded entry missing")
+			}
+			current.RegisteredAt = replacementAt
+			current.LastToolsCallAt = time.Time{}
+			replacement.Put(current)
+			if err := replacement.Save(); err != nil {
+				t.Fatalf("replace workspace generation: %v", err)
+			}
+		}
+		_, err := registry.CommitSerenaActivity(intentPath, request)
+		if !errors.Is(err, ErrSerenaActivityTargetStale) {
+			t.Fatalf("commit error = %v, want ErrSerenaActivityTargetStale", err)
+		}
+		reloaded := NewRegistry(registryPath)
+		if err := reloaded.Load(); err != nil {
+			t.Fatalf("reload replacement registry: %v", err)
+		}
+		got, _ := reloaded.Get(entry.WorkspaceKey, SerenaLanguageSentinel)
+		if !got.RegisteredAt.Equal(replacementAt) || !got.LastToolsCallAt.IsZero() {
+			t.Fatalf("replacement row changed by stale commit: %+v", got)
+		}
+	})
+
+	t.Run("intent mutation before lock is stale and leaves registry untouched", func(t *testing.T) {
+		registryPath, intentPath, registry, entry, request := seed(t)
+		registry.beforeSerenaActivityCommitLockFn = func() {
+			if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{TaskName: entry.TaskName, Workspace: "/workspace/replaced", Port: entry.Port}}}); err != nil {
+				t.Fatalf("replace supervisor intent: %v", err)
+			}
+		}
+		_, err := registry.CommitSerenaActivity(intentPath, request)
+		if !errors.Is(err, ErrSerenaActivityTargetStale) {
+			t.Fatalf("commit error = %v, want ErrSerenaActivityTargetStale", err)
+		}
+		reloaded := NewRegistry(registryPath)
+		if err := reloaded.Load(); err != nil {
+			t.Fatalf("reload registry: %v", err)
+		}
+		got, _ := reloaded.Get(entry.WorkspaceKey, SerenaLanguageSentinel)
+		if !got.LastToolsCallAt.IsZero() {
+			t.Fatalf("intent-stale commit wrote timestamp %v", got.LastToolsCallAt)
+		}
+	})
+
+	t.Run("intent mutation after read before save is stale", func(t *testing.T) {
+		registryPath, intentPath, registry, entry, request := seed(t)
+		registry.afterSerenaActivityIntentReadBeforeSaveFn = func() {
+			// The normal writer cannot acquire the held intent lock. This
+			// lock-free writer simulates a damaged/bypassing writer exactly in
+			// the former read-to-save window; CommitSerenaActivity must reject
+			// before it saves the registry timestamp.
+			if err := writeSupervisorIntentLockHeld(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{TaskName: entry.TaskName, Workspace: "/workspace/replaced-after-read", Port: entry.Port}}}); err != nil {
+				t.Fatalf("replace supervisor intent after read: %v", err)
+			}
+		}
+		_, err := registry.CommitSerenaActivity(intentPath, request)
+		if !errors.Is(err, ErrSerenaActivityTargetStale) {
+			t.Fatalf("commit error = %v, want ErrSerenaActivityTargetStale", err)
+		}
+		reloaded := NewRegistry(registryPath)
+		if err := reloaded.Load(); err != nil {
+			t.Fatalf("reload registry: %v", err)
+		}
+		got, _ := reloaded.Get(entry.WorkspaceKey, SerenaLanguageSentinel)
+		if !got.LastToolsCallAt.IsZero() {
+			t.Fatalf("post-read stale commit wrote timestamp %v", got.LastToolsCallAt)
+		}
+	})
+
+	t.Run("uses registry then intent lock order without deadlock", func(t *testing.T) {
+		_, intentPath, registry, _, request := seed(t)
+		intentRelease, err := lockSupervisorIntent(intentPath)
+		if err != nil {
+			t.Fatalf("hold supervisor-intent lock: %v", err)
+		}
+		defer func() { _ = intentRelease() }()
+		registryLocked := make(chan struct{})
+		registry.afterSerenaActivityRegistryLockFn = func() { close(registryLocked) }
+		commitDone := make(chan error, 1)
+		go func() { _, err := registry.CommitSerenaActivity(intentPath, request); commitDone <- err }()
+		select {
+		case <-registryLocked:
+		case <-time.After(time.Second):
+			t.Fatal("commit did not acquire registry lock before intent lock")
+		}
+		probe := NewRegistry(registry.path)
+		probeDone := make(chan error, 1)
+		go func() {
+			release, err := probe.Lock()
+			if err == nil {
+				err = release()
+			}
+			probeDone <- err
+		}()
+		select {
+		case err := <-probeDone:
+			t.Fatalf("registry lock was not held while intent lock awaited: %v", err)
+		case <-time.After(30 * time.Millisecond):
+		}
+		if err := intentRelease(); err != nil {
+			t.Fatalf("release supervisor-intent lock: %v", err)
+		}
+		intentRelease = func() error { return nil }
+		select {
+		case err := <-commitDone:
+			if err != nil {
+				t.Fatalf("commit after intent release: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("commit deadlocked after intent lock release")
+		}
+		select {
+		case err := <-probeDone:
+			if err != nil {
+				t.Fatalf("probe registry lock: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("registry probe remained blocked after commit")
+		}
+	})
+}
+
 // TestRegistry_PutLifecycleNoOpOnMissingEntry guards against ghost-row
 // resurrection: after Unregister removes a (workspace_key, language) row,
 // a still-running proxy process MAY emit a late lifecycle write.

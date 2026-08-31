@@ -1542,7 +1542,7 @@ func TestSetLSPRouterReadOnly_WiresRouteReadOnlySinkAsAuditFn(t *testing.T) {
 		t.Fatalf("Save empty registry: %v", err)
 	}
 
-	s := NewServer(Config{Port: 9125, Version: "test", PID: 1, ReadOnlyRouterMode: true})
+	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	resolver := lsp_routing.NewReadOnlyWorkspaceResolver(reg, regPath, nil)
 	sessions := lsp_routing.NewSessionRouter()
 	s.SetLSPRouterReadOnly(resolver, sessions, nil)

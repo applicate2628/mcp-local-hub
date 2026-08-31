@@ -121,6 +121,15 @@ type Registry struct {
 	// today's default: LogHubMcpEvent, the shared hub-mcp.log. Purely
 	// additive — see SetAuditSink.
 	auditSink func(level, event string, fields map[string]any) error
+	// beforeSerenaActivityCommitLockFn is an internal deterministic test hook
+	// for the pre-lock replacement race. Production leaves it nil.
+	beforeSerenaActivityCommitLockFn func()
+	// afterSerenaActivityRegistryLockFn exposes the established lock-order
+	// checkpoint to the lock-order regression test. Production leaves it nil.
+	afterSerenaActivityRegistryLockFn func()
+	// afterSerenaActivityIntentReadBeforeSaveFn is an internal deterministic
+	// test hook for the intent-to-registry-save window. Production leaves it nil.
+	afterSerenaActivityIntentReadBeforeSaveFn func()
 }
 
 // SetAuditSink overrides the diagnostic sink Load() uses for the shared
@@ -679,6 +688,104 @@ func (r *Registry) PutLastToolsCallAt(workspaceKey, language string, toolsCallAt
 	e.LastToolsCallAt = toolsCallAt.UTC()
 	r.Put(e)
 	return r.Save()
+}
+
+// ErrSerenaActivityTargetStale means the workspace generation or its matching
+// supervisor descriptor changed before a route-originated activity commit could
+// acquire the registry lock. The caller must not forward as that activity no
+// longer belongs to the resolved daemon generation.
+var ErrSerenaActivityTargetStale = errors.New("serena activity target stale")
+
+// CommitSerenaActivity performs the complete Serena activity decision under
+// two locks in the established registry-then-supervisor-intent order: reload,
+// validate the exact workspace generation and its matching descriptor, perform
+// a monotonic timestamp update, then save and return a deterministic receipt.
+// It intentionally does not reuse PutLastToolsCallAt after a separate precheck:
+// that split would let a replacement row with the same key receive a stale
+// activity timestamp.
+func (r *Registry) CommitSerenaActivity(intentPath string, request SerenaActivityCommitRequestV1) (receipt SerenaActivityCommitReceiptV1, err error) {
+	if err := validateSerenaActivityCommitRequest(request); err != nil {
+		return SerenaActivityCommitReceiptV1{}, err
+	}
+	if r.beforeSerenaActivityCommitLockFn != nil {
+		r.beforeSerenaActivityCommitLockFn()
+	}
+	release, err := r.Lock()
+	if err != nil {
+		return SerenaActivityCommitReceiptV1{}, err
+	}
+	defer ReleaseAndJoin(&err, release, "commit serena activity: release registry lock")
+	if r.afterSerenaActivityRegistryLockFn != nil {
+		r.afterSerenaActivityRegistryLockFn()
+	}
+	intentRelease, err := lockSupervisorIntent(intentPath)
+	if err != nil {
+		return SerenaActivityCommitReceiptV1{}, fmt.Errorf("lock supervisor intent: %w", err)
+	}
+	defer releaseSupervisorIntentAndJoin(&err, intentRelease, "commit serena activity: release supervisor-intent lock")
+	if err := r.Load(); err != nil {
+		return SerenaActivityCommitReceiptV1{}, err
+	}
+	entry, ok := r.Get(request.WorkspaceKey, SerenaLanguageSentinel)
+	if !ok || !serenaActivityTargetMatches(entry, request) {
+		return SerenaActivityCommitReceiptV1{}, ErrSerenaActivityTargetStale
+	}
+	intent, readErr := ReadSupervisorIntent(intentPath)
+	if readErr != nil {
+		return SerenaActivityCommitReceiptV1{}, fmt.Errorf("read supervisor intent: %w", readErr)
+	}
+	if !serenaActivityIntentMatches(intent, request) {
+		return SerenaActivityCommitReceiptV1{}, ErrSerenaActivityTargetStale
+	}
+	state := "committed"
+	if !entry.LastToolsCallAt.IsZero() && !entry.LastToolsCallAt.Before(request.ActivityAt) {
+		state = "already_committed"
+	} else {
+		if r.afterSerenaActivityIntentReadBeforeSaveFn != nil {
+			r.afterSerenaActivityIntentReadBeforeSaveFn()
+		}
+		// The held intent lock excludes normal writers. Re-read before the
+		// registry save as a fail-closed guard for a damaged/bypassing writer
+		// observed by the deterministic test seam; never compensate after save.
+		intent, readErr = ReadSupervisorIntent(intentPath)
+		if readErr != nil {
+			return SerenaActivityCommitReceiptV1{}, fmt.Errorf("re-read supervisor intent: %w", readErr)
+		}
+		if !serenaActivityIntentMatches(intent, request) {
+			return SerenaActivityCommitReceiptV1{}, ErrSerenaActivityTargetStale
+		}
+		entry.LastToolsCallAt = request.ActivityAt.UTC()
+		r.Put(entry)
+		if err := r.Save(); err != nil {
+			return SerenaActivityCommitReceiptV1{}, err
+		}
+	}
+	return SerenaActivityCommitReceiptV1{
+		ProtocolVersion: 1,
+		WorkspaceKey:    request.WorkspaceKey,
+		TaskName:        request.TaskName,
+		RegisteredAt:    request.RegisteredAt.UTC(),
+		ActivityAt:      request.ActivityAt.UTC(),
+		State:           state,
+	}, nil
+}
+
+func serenaActivityTargetMatches(entry WorkspaceEntry, request SerenaActivityCommitRequestV1) bool {
+	return entry.Language == SerenaLanguageSentinel && entry.Backend == SerenaServerName &&
+		entry.WorkspaceKey == request.WorkspaceKey && entry.WorkspacePath == request.WorkspacePath &&
+		entry.TaskName == request.TaskName && entry.Port == request.ExpectedPort && entry.RegisteredAt.Equal(request.RegisteredAt)
+}
+
+func serenaActivityIntentMatches(intent *SupervisorIntentFile, request SerenaActivityCommitRequestV1) bool {
+	if intent == nil {
+		return false
+	}
+	for _, daemon := range intent.Daemons {
+		if daemon.TaskName == request.TaskName && daemon.Workspace == request.WorkspacePath && daemon.Port == request.ExpectedPort {
+			return true
+		}
+	}
+	return false
 }
 
 // PutLifecycleWithTimestamps is the richer variant used by the proxy at

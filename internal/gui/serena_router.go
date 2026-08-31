@@ -75,6 +75,11 @@ type serenaRouterDeps struct {
 	// → 503, client retries). A nil WakeIdleFn disables idle-wake (back-compat
 	// for partially-wired routing); the forward proceeds unchanged.
 	WakeIdleFn func(ctx context.Context, taskName string, port int, who string) error
+
+	// CommitSerenaActivityFn publishes the resolved activity fact to the
+	// supervisor. The supervisor validates the workspace generation and owns
+	// the durable LastToolsCallAt update; route and GUI hold no writer here.
+	CommitSerenaActivityFn func(context.Context, api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error)
 }
 
 // serenaRouterTestSeam lets tests inject a fully-mocked deps bundle.
@@ -243,6 +248,7 @@ func (s *Server) SetSerenaRouterProduction(resolver *serena_routing.WorkspaceRes
 		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
 			return wakeAPI.WakeIdleSerenaDaemon(ctx, taskName, port, who)
 		},
+		CommitSerenaActivityFn: api.DialSupervisorIPCCommitSerenaActivity,
 	})
 }
 
@@ -280,6 +286,7 @@ func (s *Server) SetSerenaRouterReadOnly(resolver *serena_routing.WorkspaceResol
 		WakeIdleFn: func(ctx context.Context, taskName string, port int, who string) error {
 			return wakeAPI.WakeIdleSerenaDaemonWithAuditSink(ctx, taskName, port, who, routeReadOnlySink)
 		},
+		CommitSerenaActivityFn: api.DialSupervisorIPCCommitSerenaActivity,
 		//
 		// AuditFn (P1-1 fix, adversarial cross-family review): every other
 		// caller leaves this nil so serenaRouterHandler's own default falls
@@ -924,7 +931,6 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			restampSerenaForwardOnExit := false
-			upstreamReached := false
 			defer func() {
 				if restampSerenaForwardOnExit {
 					// ORDER MATTERS: re-stamp activity BEFORE dropping the in-flight
@@ -935,13 +941,8 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 					// (focused re-review P3, both lenses).
 					now := time.Now()
 					s.recordSerenaActivity(ws.WorkspaceKey, now)
-					// Only make the activity restart-durable after the HTTP request reached
-					// the daemon. Wake refusals, request-build failures, and transport errors
-					// must not refresh durable idle-prune state or imply healthy daemon
-					// activity in status views.
-					if upstreamReached {
-						s.maybePersistSerenaActivity(ws.WorkspaceKey, now)
-					}
+					// The durable timestamp was committed before the upstream request;
+					// route and GUI no longer write the registry directly.
 				}
 			}()
 
@@ -1187,6 +1188,36 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			// seconds ago).
 			restampSerenaForwardOnExit = true
 
+			// Persist through the supervisor before the upstream tools/call. A
+			// mixed-version supervisor that lacks this IPC verb is an explicit
+			// availability failure; silently forwarding would hide activity across
+			// GUI restart and reintroduce a second registry writer.
+			if deps.CommitSerenaActivityFn != nil {
+				activityAt := time.Now().UTC()
+				commitCtx, commitCancel := context.WithTimeout(r.Context(), 5*time.Second)
+				_, commitErr := deps.CommitSerenaActivityFn(commitCtx, api.SerenaActivityCommitRequestV1{
+					ProtocolVersion: 1,
+					WorkspaceKey:    ws.WorkspaceKey,
+					WorkspacePath:   ws.WorkspacePath,
+					TaskName:        ws.TaskName,
+					ExpectedPort:    ws.Port,
+					RegisteredAt:    ws.RegisteredAt,
+					ActivityAt:      activityAt,
+				})
+				commitCancel()
+				if commitErr != nil {
+					_ = auditFn("warn", "serena-activity-commit-failed", map[string]any{
+						"workspace_key": ws.WorkspaceKey,
+						"task_name":     ws.TaskName,
+						"port":          ws.Port,
+						"err":           commitErr.Error(),
+					})
+					writeJSONRPCErrorStatus(w, tb.ID, http.StatusServiceUnavailable, jsonrpcInternalError,
+						"serena activity commit failed; request not forwarded: "+commitErr.Error(), nil)
+					return
+				}
+			}
+
 			upstreamReq, ureqErr := http.NewRequestWithContext(r.Context(), http.MethodPost, upstreamURL, bytes.NewReader(body))
 			if ureqErr != nil {
 				http.Error(w, "build upstream request: "+ureqErr.Error(), http.StatusInternalServerError)
@@ -1239,9 +1270,6 @@ func (s *Server) serenaRouterHandler(w http.ResponseWriter, r *http.Request) {
 			}
 
 			upstreamResp, doErr := httpClient.Do(upstreamReq)
-			if doErr == nil {
-				upstreamReached = true
-			}
 			if doErr != nil {
 				if isTimeoutErr(doErr) {
 					_ = auditFn("warn", "serena-upstream-timeout", map[string]any{

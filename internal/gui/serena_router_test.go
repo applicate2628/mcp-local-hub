@@ -528,6 +528,66 @@ func TestSerenaRouter_BindAfterSuccess(t *testing.T) {
 	}
 }
 
+func TestSerenaRouter_ActivityCommitPrecedesToolCallAndFailureBlocksForward(t *testing.T) {
+	registeredAt := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	ws := &api.WorkspaceEntry{
+		WorkspaceKey: "activity", WorkspacePath: "/proj/activity", Port: 9221,
+		TaskName: `\mcp-local-hub-serena-activity`, Backend: api.SerenaServerName,
+		Language: api.SerenaLanguageSentinel, RegisteredAt: registeredAt,
+	}
+	var committed atomic.Bool
+	var toolForwarded atomic.Bool
+	var rejectForward atomic.Bool
+	var blockedForward atomic.Bool
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		if bytes.Contains(body, []byte(`"find_symbol"`)) {
+			toolForwarded.Store(true)
+			if rejectForward.Load() {
+				blockedForward.Store(true)
+			}
+			if !committed.Load() {
+				t.Error("tools/call reached upstream before supervisor activity receipt")
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","id":1,"result":{}}`))
+	}))
+	t.Cleanup(ts.Close)
+	deps := &serenaRouterDeps{
+		Resolver:      &stubResolver{entries: []*api.WorkspaceEntry{ws}},
+		Sessions:      NewInMemorySessionRouter(),
+		UpstreamURLFn: func(*api.WorkspaceEntry) string { return ts.URL },
+		CommitSerenaActivityFn: func(_ context.Context, request api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error) {
+			if request.WorkspaceKey != ws.WorkspaceKey || request.WorkspacePath != ws.WorkspacePath || request.TaskName != ws.TaskName || request.ExpectedPort != ws.Port || !request.RegisteredAt.Equal(registeredAt) || request.ActivityAt.IsZero() {
+				t.Fatalf("commit request = %+v", request)
+			}
+			committed.Store(true)
+			return api.SerenaActivityCommitReceiptV1{ProtocolVersion: 1, State: "committed"}, nil
+		},
+	}
+	s := newSerenaTestServer(t, deps)
+	rr := postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/activity/x"}), nil)
+	if rr.Code != http.StatusOK || !toolForwarded.Load() || !committed.Load() {
+		t.Fatalf("commit-before-forward response=%d committed=%v forwarded=%v body=%s", rr.Code, committed.Load(), toolForwarded.Load(), rr.Body.String())
+	}
+
+	rejectForward.Store(true)
+	deps.CommitSerenaActivityFn = func(context.Context, api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error) {
+		return api.SerenaActivityCommitReceiptV1{}, api.ErrSerenaActivityCommitUnsupported
+	}
+	deps.UpstreamURLFn = func(*api.WorkspaceEntry) string {
+		return ts.URL
+	}
+	// Fresh server ensures the request cannot reuse a daemon session from the
+	// successful branch above.
+	s = newSerenaTestServer(t, deps)
+	rr = postSerena(t, s, buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": "/proj/activity/x"}), nil)
+	if rr.Code != http.StatusServiceUnavailable || blockedForward.Load() || !strings.Contains(rr.Body.String(), "activity commit failed") {
+		t.Fatalf("unsupported supervisor response=%d forwarded=%v body=%s", rr.Code, blockedForward.Load(), rr.Body.String())
+	}
+}
+
 // ---------------------------------------------------------------------
 // Test 2: TestSerenaRouter_WorkspaceNotFound_Returns503
 // ---------------------------------------------------------------------
@@ -2135,7 +2195,7 @@ func TestSanitizeRefusalPath_StripsControlBytes(t *testing.T) {
 		{"a\x7fb", "a?b"}, // DEL → ?
 		{"a‮b", "a?b"},    // RLO bidi → ?
 		{"a\x9bb", "a?b"}, // raw C1 byte (invalid UTF-8) → ?
-		{"D:\\dev\\Proj", "D:\\dev\\Proj"},
+		{"C:\\fixture\\Proj", "C:\\fixture\\Proj"},
 	}
 	for _, c := range cases {
 		if got := sanitizeRefusalPath(c.in); got != c.want {

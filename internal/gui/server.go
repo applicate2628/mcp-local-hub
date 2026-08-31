@@ -55,23 +55,6 @@ type Config struct {
 	// terminalization allowance added to the post-commit recovery bound. Zero
 	// uses the audit-lock adapter's production lock budget.
 	RecoverySettlementTerminalizationBudget time.Duration
-	// ReadOnlyRouterMode marks this Server instance as forbidden from ever
-	// writing the registry or supervisor-intent from router request-handling
-	// paths — the invariant the standalone `mcphub route` front daemon
-	// (internal/cli/route.go) needs so a second, GUI-independent process
-	// serving /serena/mcp + /lsp/<language>/mcp can never split-brain-write
-	// alongside the GUI (the decision record's non-negotiable "READ-ONLY on
-	// the registry + supervisor-intent" constraint —
-	// work-items/decisions/2026-07-25-mcp-data-plane-off-gui-onto-supervised-
-	// front-daemon.md). Consulted at the specific persist site
-	// (maybePersistSerenaActivity, internal/gui/serena_idle_sweeper.go) that
-	// writes on the router's happy path independent of which AutoRegisterFn/
-	// WakeIdleFn a caller wires — a construction-time flag rather than a
-	// per-deps toggle, so it holds even if a future caller mis-wires
-	// SetSerenaRouterProduction on a Server meant to stay read-only. False
-	// (the zero value) for every existing caller (the GUI itself), so this is
-	// purely additive and changes no existing behavior.
-	ReadOnlyRouterMode bool
 }
 
 // scanner is the narrow interface that the /api/scan handler needs.
@@ -873,16 +856,6 @@ type Server struct {
 	// pruned when a daemon is idle-stopped so it does not accumulate stale keys.
 	serenaActivityMu   sync.Mutex
 	serenaLastActivity map[string]time.Time
-
-	// serenaPersistMu guards serenaLastPersist: WorkspaceKey -> the last time we
-	// DEBOUNCE-WROTE the @serena row's LastToolsCallAt to the registry. The
-	// in-memory serenaLastActivity above is wiped on a GUI restart; persisting a
-	// debounced copy to the registry (Phase 3) gives the idle-prune sweeper a
-	// durable serena activity signal so a restart does not falsely read a serena
-	// workspace as idle. Mirrors the LSP lazy proxy's debounced LastToolsCallAt
-	// write (internal/daemon/lazy_proxy.go).
-	serenaPersistMu   sync.Mutex
-	serenaLastPersist map[string]time.Time
 
 	// guiProcessStart is the wall time this GUI process started (set once in
 	// NewServer). The idle sweeper's never-called fallback caps a daemon's
