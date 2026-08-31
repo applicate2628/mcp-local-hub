@@ -52,33 +52,47 @@ const renameAsideTimestampLayout = "20060102T150405Z"
 //     pipeline at e.g. `<install-dir>/mcphub.exe.new`).
 //   - target may be the running executable; Windows allows the rename
 //     because the image was opened with FILE_SHARE_DELETE.
-func RenameAsideReplace(target, newSrc string) error {
+type RenameAsideResult struct {
+	Promoted       bool
+	PriorCanonical bool
+	RetainedPrior  string
+}
+
+func RenameAsideReplaceWithResult(target, newSrc string) (RenameAsideResult, error) {
 	ts := time.Now().UTC().Format(renameAsideTimestampLayout)
 	oldPath := target + ".old-" + ts
 
 	targetW, err := windows.UTF16PtrFromString(target)
 	if err != nil {
-		return fmt.Errorf("utf16 target: %w", err)
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 target: %w", err)
 	}
 	oldW, err := windows.UTF16PtrFromString(oldPath)
 	if err != nil {
-		return fmt.Errorf("utf16 old: %w", err)
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 old: %w", err)
 	}
 	newSrcW, err := windows.UTF16PtrFromString(newSrc)
 	if err != nil {
-		return fmt.Errorf("utf16 newSrc: %w", err)
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 newSrc: %w", err)
 	}
 
 	// Step 1: move running binary out of the way.
 	if err := windows.MoveFileEx(targetW, oldW, windows.MOVEFILE_REPLACE_EXISTING); err != nil {
-		return fmt.Errorf("MoveFileEx target→old (%s → %s): %w", target, oldPath, err)
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx target→old (%s → %s): %w", target, oldPath, err)
 	}
 	// Step 2: move new binary into place.
 	if err := windows.MoveFileEx(newSrcW, targetW, 0); err != nil {
 		// Best-effort rollback: restore the old binary to the target slot
 		// so the caller is not left with no binary on disk.
-		_ = windows.MoveFileEx(oldW, targetW, windows.MOVEFILE_REPLACE_EXISTING)
-		return fmt.Errorf("MoveFileEx newSrc→target (%s → %s): %w", newSrc, target, err)
+		rollbackErr := windows.MoveFileEx(oldW, targetW, windows.MOVEFILE_REPLACE_EXISTING)
+		if rollbackErr != nil {
+			return RenameAsideResult{RetainedPrior: oldPath}, fmt.Errorf("MoveFileEx newSrc→target (%s → %s): %w; restoring retained prior %s failed: %v", newSrc, target, err, oldPath, rollbackErr)
+		}
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx newSrc→target (%s → %s): %w", newSrc, target, err)
 	}
-	return nil
+	return RenameAsideResult{Promoted: true, RetainedPrior: oldPath}, nil
+}
+
+func RenameAsideReplace(target, newSrc string) error {
+	_, err := RenameAsideReplaceWithResult(target, newSrc)
+	return err
 }

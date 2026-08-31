@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -130,12 +129,7 @@ func TestUpgradeCmd_AliasAndFlagShareDispatcher(t *testing.T) {
 	}
 }
 
-// TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow pins that on a
-// fresh-install host (no supervisor-intent.json, no legacy scheduler tasks),
-// the alias's dispatchUpgrade routing falls through to the legacy
-// runInstallUpgrade body and runs StopAll → Bootstrap → RestartAll, identical
-// to `install --upgrade`. Uses fakes so no real daemons are touched.
-func TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow(t *testing.T) {
+func TestUpgradeCmd_FreshHostAliasFailsClosedWithoutMutation(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
@@ -149,21 +143,14 @@ func TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow(t *testing.T) {
 	})
 	t.Cleanup(restoreScheduler)
 
-	upgradeExecutableFn = func() (string, error) { return "C:\\dev\\mcphub.exe", nil }
-	upgradeTargetPathFn = func() (string, error) { return "C:\\Users\\u\\.local\\bin\\mcphub.exe", nil }
-	var order []string
+	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
+	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
+	mutated := false
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		order = append(order, "stop")
-		return []api.RestartResult{{TaskName: "demo"}}, nil
+		mutated = true
+		return nil, nil
 	}
-	upgradeBootstrapFn = func(w io.Writer) error {
-		order = append(order, "bootstrap")
-		return nil
-	}
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		order = append(order, "restart")
-		return []api.RestartResult{{TaskName: "demo"}}, nil
-	}
+	upgradeBootstrapFn = func(io.Writer) error { mutated = true; return nil }
 
 	rootCmd := NewRootCmd()
 	rootCmd.SetArgs([]string{"upgrade"})
@@ -172,19 +159,11 @@ func TestUpgradeCmd_HappyPath_AliasReachesSameWorkflow(t *testing.T) {
 	rootCmd.SilenceUsage = true
 	rootCmd.SilenceErrors = true
 
-	if err := rootCmd.Execute(); err != nil {
-		t.Fatalf("upgrade alias: %v", err)
+	err := rootCmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), upgradeRequiresManagedSupervisorID) {
+		t.Fatalf("upgrade alias error = %v", err)
 	}
-	want := []string{"stop", "bootstrap", "restart"}
-	if len(order) != len(want) {
-		t.Fatalf("order = %v, want %v", order, want)
-	}
-	for i, step := range want {
-		if order[i] != step {
-			t.Errorf("order[%d] = %q, want %q", i, order[i], step)
-		}
+	if mutated {
+		t.Fatal("fresh-host alias mutated before fail-closed result")
 	}
 }
-
-// Suppress unused-import linter when running narrow subset.
-var _ = errors.New

@@ -396,10 +396,10 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+
 			"(restores serena entries from their captured backups; removes/restores LSP router entries).")
 	c.Flags().BoolVar(&upgrade, "upgrade", false,
-		"upgrade the canonical mcphub binary at ~/.local/bin/mcphub.exe to the currently-running build: "+
-			"stop every mcp-local-hub-* daemon, copy this binary over the canonical path, "+
-			"then restart every daemon from the new binary. Refuses when run from the canonical "+
-			"path (run from your build directory, e.g. './mcphub install --upgrade' after 'go build').")
+		"apply the currently-running admitted product build through the managed supervisor transaction: "+
+			"stage/admit, release the prior fleet, promote, identity-bind readiness, verify SHA-256, and write upgrade-receipt-v1. "+
+			"Requires daemon-bearing supervisor intent and refuses fresh/legacy/unwired states before mutation. "+
+			"Run from a build.ps1 product binary, never from the canonical path.")
 	c.Flags().BoolVar(&check, "check", false,
 		"print the readiness report for --server (missing dependencies/launchers as blockers, "+
 			"unset optional secrets as advisories) and exit WITHOUT installing or mutating anything")
@@ -883,7 +883,7 @@ var (
 	upgradeBootstrapFn              func(io.Writer) error
 	upgradeRestartAllFn             func() ([]api.RestartResult, error)
 	upgradeRestartTasksFn           func([]string) ([]api.RestartResult, error)
-	upgradeRestartSupervisorTasksFn func([]string) ([]api.RestartResult, []string, error)
+	upgradeRestartSupervisorTasksFn func([]string) ([]api.RestartResult, []string, []string, error)
 	upgradeInstallServerFn          func(server string, w io.Writer) error
 	// upgradeExecutableFn / upgradeTargetPathFn carry the canonical-
 	// path comparison for the self-replace guard. Tests inject any
@@ -1423,7 +1423,7 @@ func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
 	return results, nil
 }
 
-func upgradeRestartSupervisorTasks(taskNames []string) ([]api.RestartResult, []string, error) {
+func upgradeRestartSupervisorTasks(taskNames []string) ([]api.RestartResult, []string, []string, error) {
 	if upgradeRestartSupervisorTasksFn != nil {
 		return upgradeRestartSupervisorTasksFn(taskNames)
 	}
@@ -1451,18 +1451,25 @@ func settleUpgradeStopPhase(results []api.RestartResult, stopErr error) error {
 		return nil
 	}
 
-	supervisorResults, handled, supervisorErr := upgradeRestartSupervisorTasks(stopped)
+	supervisorResults, handled, unresolved, supervisorErr := upgradeRestartSupervisorTasks(stopped)
 	handledSet := make(map[string]struct{}, len(handled))
 	for _, name := range handled {
 		handledSet[strings.TrimPrefix(strings.TrimSpace(name), `\`)] = struct{}{}
 	}
+	unresolvedSet := make(map[string]struct{}, len(unresolved))
+	for _, name := range unresolved {
+		unresolvedSet[strings.TrimPrefix(strings.TrimSpace(name), `\`)] = struct{}{}
+	}
 	legacyStopped := make([]string, 0, len(stopped))
-	if supervisorErr == nil {
-		for _, name := range stopped {
-			if _, ok := handledSet[strings.TrimPrefix(name, `\`)]; !ok {
-				legacyStopped = append(legacyStopped, name)
-			}
+	for _, name := range stopped {
+		key := strings.TrimPrefix(name, `\`)
+		if _, ok := handledSet[key]; ok {
+			continue
 		}
+		if _, ok := unresolvedSet[key]; ok {
+			continue
+		}
+		legacyStopped = append(legacyStopped, name)
 	}
 	recoveryResults := append([]api.RestartResult(nil), supervisorResults...)
 	legacyResults, recoveryErr := upgradeRestartTasks(legacyStopped)
@@ -1485,6 +1492,9 @@ func settleUpgradeStopPhase(results []api.RestartResult, stopErr error) error {
 	}
 	if supervisorErr != nil {
 		parts = append(parts, "supervisor recovery classification error: "+supervisorErr.Error())
+	}
+	if len(unresolved) > 0 {
+		parts = append(parts, "unresolved recovery ownership: "+strings.Join(unresolved, ", "))
 	}
 	if len(recoveryFailures) > 0 {
 		parts = append(parts, "recovery task failures: "+strings.Join(recoveryFailures, "; "))
@@ -1536,19 +1546,16 @@ func upgradeInstallServer(server string, w io.Writer) error {
 //
 // Phase F deleted the v0.4.x→v0.5.0 forward-migration engine and the
 // `--rollback-to-legacy` demotion path (no v0.4.x scheduler model survives to
-// migrate from or roll back to). --upgrade now routes between just two sinks
-// based on machine state:
+// migrate from or roll back to). --upgrade has one mutating owner:
 //
 //   1. v0.5.x present (supervisor-intent.json on disk) → cli.RunInstallUpgrade,
 //      which drives the rename-aside + IPC handoff per spec §"Upgrade sequence".
-//   2. Fresh install (no supervisor-intent.json) → the legacy
-//      runInstallUpgrade body so the first-time binary-copy + restart still
-//      works from a build directory.
+//   2. Fresh / legacy-scheduler / unwired-platform states fail closed before
+//      mutation with an actionable setup/package-workflow error.
 //
 // Production deps wiring lives in install_migration_wiring_windows.go
 // (Windows-only) — the rename-aside / IPC / supervisor-spawn surfaces are all
-// Windows-specific. POSIX builds leave v5UpgradeFn nil and fall back to the
-// legacy runInstallUpgrade body.
+// Windows-specific. POSIX builds leave v5UpgradeFn nil and fail closed.
 // ---------------------------------------------------------------------------
 
 // upgradeDispatcher is the function-pointer seam tests inject to override the
@@ -1556,6 +1563,12 @@ func upgradeInstallServer(server string, w io.Writer) error {
 // it in setup and clear it in teardown to keep production logic out of their
 // assertion path.
 var upgradeDispatcher func(cmd *cobra.Command) error
+
+const (
+	upgradeRequiresManagedSupervisorID  = "UPGRADE_TRANSACTION_REQUIRES_MANAGED_SUPERVISOR"
+	upgradeLegacySchedulerUnsupportedID = "UPGRADE_TRANSACTION_LEGACY_SCHEDULER_UNSUPPORTED"
+	upgradePlatformUnsupportedID        = "UPGRADE_TRANSACTION_PLATFORM_UNSUPPORTED"
+)
 
 // dispatchUpgrade routes the --upgrade command per the machine-state decision
 // tree above. The upgradeDispatcher seam lets tests stub it without driving
@@ -1644,11 +1657,10 @@ func hasSupervisorIntent() (bool, error) {
 
 // dispatchUpgradeReal implements the production routing branch. It asks
 // api.DaemonStateDir + os.Stat about supervisor-intent.json, then dispatches
-// to one of three sinks:
+// to one mutating sink or a no-mutation refusal:
 //
 //   - cli.RunInstallUpgrade (v0.5.x → v0.5.x cold-restart upgrade)
-//   - binary-copy + per-server install materialization (v0.4 scheduler-only)
-//   - runInstallUpgrade legacy body (fresh install)
+//   - stable refusal for legacy scheduler, fresh, or unsupported platforms
 //
 // Any state-probe failure short-circuits with the wrapped error so the
 // operator sees the real cause instead of a confused fallback.
@@ -1665,17 +1677,11 @@ func dispatchUpgradeReal(cmd *cobra.Command) error {
 		return fmt.Errorf("upgrade routing: probe legacy scheduler tasks: %w", err)
 	}
 	if len(legacyProbe.legacyTasks) > 0 {
-		if len(legacyProbe.servers) == 0 {
-			return fmt.Errorf(
-				"legacy v0.4 scheduler daemon tasks exist but none match a shipped manifest; refusing to silently restart the deleted legacy task model. "+
-					"Run `mcphub setup`, then `mcphub install --server <server>` for each installed server. Legacy tasks: %s",
-				strings.Join(legacyProbe.legacyTasks, ", "))
-		}
-		return runLegacySchedulerUpgradeMigration(cmd, legacyProbe)
+		return fmt.Errorf("%s: legacy scheduler tasks cannot use the admitted managed upgrade transaction; no files or processes were changed. Run `mcphub setup`, then `mcphub install --server <server>` for each installed server before retrying upgrade. Legacy tasks: %s",
+			upgradeLegacySchedulerUnsupportedID, strings.Join(legacyProbe.legacyTasks, ", "))
 	}
-	// Fresh install: no supervisor state on disk. Fall through to the legacy
-	// runInstallUpgrade body so first-time copy + restart still works.
-	return runInstallUpgrade(cmd)
+	return fmt.Errorf("%s: no daemon-bearing supervisor intent exists, so upgrade has no managed rollback/readiness owner; no files or processes were changed. Run `mcphub setup` for a fresh install, then install at least one server before using `mcphub upgrade`",
+		upgradeRequiresManagedSupervisorID)
 }
 
 type legacyUpgradeProbe struct {
@@ -1864,11 +1870,8 @@ func runLegacySchedulerUpgradeMigration(cmd *cobra.Command, probe legacyUpgradeP
 // install_migration_wiring_windows.go.
 func runV5UpgradeReal(cmd *cobra.Command) error {
 	if v5UpgradeFn == nil {
-		// POSIX or unwired production path. The cold-restart upgrade flow
-		// targets a Windows supervisor; POSIX builds reach this branch only
-		// via misuse and the legacy runInstallUpgrade is the closest safe
-		// fallback.
-		return runInstallUpgrade(cmd)
+		return fmt.Errorf("%s: this platform has no admitted upgrade transaction with durable receipt and exact rollback; no files or processes were changed. Install the new binary through the platform package/setup workflow instead",
+			upgradePlatformUnsupportedID)
 	}
 	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
 		return err

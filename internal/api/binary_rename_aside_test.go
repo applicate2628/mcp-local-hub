@@ -29,8 +29,12 @@ func TestRenameAside_TwoStepReplace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := RenameAsideReplace(target, newSrc); err != nil {
+	result, err := RenameAsideReplaceWithResult(target, newSrc)
+	if err != nil {
 		t.Fatalf("rename-aside: %v", err)
+	}
+	if !result.Promoted || result.PriorCanonical || result.RetainedPrior == "" {
+		t.Fatalf("promotion result = %+v", result)
 	}
 	got, err := os.ReadFile(target)
 	if err != nil {
@@ -45,6 +49,9 @@ func TestRenameAside_TwoStepReplace(t *testing.T) {
 	}
 	if len(matches) != 1 {
 		t.Fatalf("expected one .old-<ts> file, got %d: %v", len(matches), matches)
+	}
+	if matches[0] != result.RetainedPrior {
+		t.Fatalf("retained prior result = %q, actual = %q", result.RetainedPrior, matches[0])
 	}
 	// The aside should hold the original "old-binary" bytes.
 	asideBytes, err := os.ReadFile(matches[0])

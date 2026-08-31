@@ -201,14 +201,14 @@ func TestV5UpgradeDepsRetainedRollbackExactBytes(t *testing.T) {
 	if !bytes.Equal(gotSuccessor, successor) {
 		t.Fatal("swap did not install successor bytes")
 	}
-	retainedBytes, err := os.ReadFile(retained)
+	retainedBytes, err := os.ReadFile(retained.RetainedPrior)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(retainedBytes, prior) {
 		t.Fatal("retained artifact differs from exact prior bytes")
 	}
-	if err := deps.RestoreRetainedBinary(target, retained); err != nil {
+	if err := deps.RestoreRetainedBinary(target, retained.RetainedPrior); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := os.ReadFile(target)
@@ -218,7 +218,7 @@ func TestV5UpgradeDepsRetainedRollbackExactBytes(t *testing.T) {
 	if !bytes.Equal(restored, prior) {
 		t.Fatal("restored canonical binary differs from exact prior bytes")
 	}
-	if stillRetained, err := os.ReadFile(retained); err != nil || !bytes.Equal(stillRetained, prior) {
+	if stillRetained, err := os.ReadFile(retained.RetainedPrior); err != nil || !bytes.Equal(stillRetained, prior) {
 		t.Fatalf("rollback must preserve retained artifact: bytes=%d err=%v", len(stillRetained), err)
 	}
 }
@@ -255,7 +255,7 @@ func TestV5UpgradeDepsReplacesConsoleSubsystemPrior(t *testing.T) {
 	if !bytes.Equal(gotSuccessor, successor) {
 		t.Fatal("swap did not install GUI successor bytes")
 	}
-	retainedPrior, err := os.ReadFile(retained)
+	retainedPrior, err := os.ReadFile(retained.RetainedPrior)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,7 +308,7 @@ func TestInstallUpgradeRestoresConsolePriorAfterSuccessorReadinessFailure(t *tes
 		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
 			return critical()
 		},
-		WaitSupervisorReady: func(context.Context, time.Duration) error {
+		WaitSupervisorReady: func(context.Context, time.Duration, string, UpgradeCandidateV1) error {
 			readyCalls++
 			if readyCalls == 1 {
 				return errors.New("forced successor readiness failure")
@@ -383,7 +383,7 @@ func TestRollbackInstallUpgradeRefusesToDeleteCanonicalAlias(t *testing.T) {
 		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
 			return critical()
 		},
-	}, target, time.Second, errors.New("forced successor failure"))
+	}, target, "", time.Second, errors.New("forced successor failure"))
 	if err == nil || !strings.Contains(err.Error(), "refusing retained-artifact cleanup") {
 		t.Fatalf("error=%v, want canonical-alias cleanup refusal", err)
 	}

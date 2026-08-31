@@ -127,7 +127,8 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
 		WaitSupervisorReady:        deps.WaitSupervisorReady,
 		AdmitStaged:                admitV5UpgradeCandidate,
-		AdmitPrior:                 binaryadmission.AdmitWindowsUpgradePrior,
+		AdmitPrior:                 admitV5UpgradePrior,
+		VerifyPrior:                verifyV5UpgradePrior,
 		VerifyCanonical:            verifyV5UpgradeCanonical,
 		WriteReceipt: func(receipt UpgradeReceiptV1) error {
 			return api.WriteStateFileAtomic(filepath.Join(stateDir, UpgradeReceiptSchemaV1+".json"), receipt)
@@ -180,6 +181,31 @@ func verifyV5UpgradeCanonical(path string, candidate UpgradeCandidateV1) error {
 	}
 	if got := hex.EncodeToString(hash); got != candidate.SHA256 {
 		return fmt.Errorf("canonical SHA-256 mismatch: got %s want %s", got, candidate.SHA256)
+	}
+	return nil
+}
+
+func admitV5UpgradePrior(path string) (string, error) {
+	if err := binaryadmission.AdmitWindowsUpgradePrior(path); err != nil {
+		return "", err
+	}
+	hash, err := hashFile(path)
+	if err != nil {
+		return "", fmt.Errorf("hash prior canonical binary: %w", err)
+	}
+	return hex.EncodeToString(hash), nil
+}
+
+func verifyV5UpgradePrior(path, expectedSHA256 string) error {
+	if err := binaryadmission.AdmitWindowsUpgradePrior(path); err != nil {
+		return err
+	}
+	hash, err := hashFile(path)
+	if err != nil {
+		return err
+	}
+	if got := hex.EncodeToString(hash); got != expectedSHA256 {
+		return fmt.Errorf("prior SHA-256 mismatch: got %s want %s", got, expectedSHA256)
 	}
 	return nil
 }
@@ -593,43 +619,29 @@ type v5UpgradeDeps struct {
 	pipePath          string
 }
 
-func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) (string, error) {
+func (d *v5UpgradeDeps) RenameAsideBinary(target, newSrc string) (api.RenameAsideResult, error) {
 	if err := binaryadmission.AdmitWindowsUpgradePrior(target); err != nil {
-		return "", fmt.Errorf("admit prior canonical binary: %w", err)
+		return api.RenameAsideResult{}, fmt.Errorf("admit prior canonical binary: %w", err)
 	}
 	if err := binaryadmission.AdmitWindowsGUI(newSrc); err != nil {
-		return "", fmt.Errorf("admit staged successor binary: %w", err)
+		return api.RenameAsideResult{}, fmt.Errorf("admit staged successor binary: %w", err)
 	}
 	priorHash, err := hashFile(target)
 	if err != nil {
-		return "", fmt.Errorf("hash prior canonical binary: %w", err)
+		return api.RenameAsideResult{}, fmt.Errorf("hash prior canonical binary: %w", err)
 	}
-	if err := api.RenameAsideReplace(target, newSrc); err != nil {
-		return "", err
-	}
-	retained, err := findRetainedPriorBinary(target, priorHash)
+	result, err := api.RenameAsideReplaceWithResult(target, newSrc)
 	if err != nil {
-		return "", err
+		return result, err
 	}
-	return retained, nil
-}
-
-func findRetainedPriorBinary(target string, priorHash []byte) (string, error) {
-	matches, err := filepath.Glob(target + ".old-*")
+	retainedHash, err := hashFile(result.RetainedPrior)
 	if err != nil {
-		return "", fmt.Errorf("enumerate retained prior binaries: %w", err)
+		return result, fmt.Errorf("hash exact retained prior %s after promotion: %w", result.RetainedPrior, err)
 	}
-	retained := ""
-	for _, candidate := range matches {
-		h, hashErr := hashFile(candidate)
-		if hashErr == nil && bytes.Equal(h, priorHash) && candidate > retained {
-			retained = candidate
-		}
+	if !bytes.Equal(retainedHash, priorHash) {
+		return result, fmt.Errorf("exact retained prior SHA-256 mismatch after promotion")
 	}
-	if retained == "" {
-		return "", fmt.Errorf("rename-aside completed but exact prior binary bytes were not retained for %s", target)
-	}
-	return retained, nil
+	return result, nil
 }
 
 func (d *v5UpgradeDeps) RestoreRetainedBinary(target, retainedPrior string) error {
@@ -720,7 +732,7 @@ func (d *v5UpgradeDeps) WaitSupervisorLockReleased(ctx context.Context, timeout 
 	}
 }
 
-func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Duration) error {
+func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Duration, binaryPath string, candidate UpgradeCandidateV1) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -728,7 +740,7 @@ func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Du
 	defer cancel()
 	var lastErr error
 	for {
-		ready, err := probeReconcileReadyOnce(d.pipePath)
+		ready, err := d.probeUpgradeReadyOnce(binaryPath, candidate)
 		if err == nil && ready {
 			return nil
 		}
@@ -742,6 +754,40 @@ func (d *v5UpgradeDeps) WaitSupervisorReady(ctx context.Context, timeout time.Du
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
+}
+
+func (d *v5UpgradeDeps) probeUpgradeReadyOnce(binaryPath string, candidate UpgradeCandidateV1) (bool, error) {
+	owner, err := api.ReadSupervisorLockOwner(d.supervisorLockDir)
+	if err != nil {
+		return false, fmt.Errorf("read successor supervisor lock owner: %w", err)
+	}
+	if owner.PID <= 0 {
+		return false, fmt.Errorf("successor supervisor lock owner has invalid PID %d", owner.PID)
+	}
+	identity, err := processLookupIdentityFn(owner.PID)
+	if err != nil {
+		return false, fmt.Errorf("probe successor process identity: %w", err)
+	}
+	if supervisorCommandLineSubcommand(identity.CommandLine) != "supervise" {
+		return false, fmt.Errorf("successor PID %d is not a supervise process", owner.PID)
+	}
+	ownerStartedUnix, ok := parseSidecarStartedAtUnix(owner.StartedAt)
+	if !ok || identity.CreationDateUnix == 0 || identity.CreationDateUnix > ownerStartedUnix {
+		return false, fmt.Errorf("successor PID %d creation identity does not match lock generation", owner.PID)
+	}
+	if !samePath(identity.ExecutablePath, binaryPath) {
+		return false, fmt.Errorf("successor PID %d executable %s does not match canonical %s", owner.PID, identity.ExecutablePath, binaryPath)
+	}
+	if candidate.SHA256 != "" {
+		hash, err := hashFile(identity.ExecutablePath)
+		if err != nil {
+			return false, fmt.Errorf("hash successor executable identity: %w", err)
+		}
+		if got := hex.EncodeToString(hash); got != candidate.SHA256 {
+			return false, fmt.Errorf("successor executable SHA-256 mismatch: got %s want %s", got, candidate.SHA256)
+		}
+	}
+	return probeReconcileReadyOnceWithOwner(d.pipePath, &owner)
 }
 
 // sendIPCWithResponse is the response-returning IPC sender used by
@@ -822,6 +868,10 @@ func waitReconcileReadyViaIPC(pipePath string) func(timeout time.Duration) error
 // state. The caller's poll loop tolerates non-nil errors during the
 // supervisor's startup window.
 func probeReconcileReadyOnce(pipePath string) (bool, error) {
+	return probeReconcileReadyOnceWithOwner(pipePath, nil)
+}
+
+func probeReconcileReadyOnceWithOwner(pipePath string, expectedOwner *api.SupervisorLockOwner) (bool, error) {
 	conn, err := winio.DialPipe(pipePath, durPtr(2*time.Second))
 	if err != nil {
 		return false, fmt.Errorf("DialPipe: %w", err)
@@ -829,9 +879,14 @@ func probeReconcileReadyOnce(pipePath string) (bool, error) {
 	defer conn.Close()
 	_ = conn.SetDeadline(time.Now().Add(2 * time.Second))
 
-	// Read hello frame first (1 line of JSON terminated by \n).
-	if err := skipHelloFrame(conn); err != nil {
-		return false, fmt.Errorf("hello: %w", err)
+	var helloErr error
+	if expectedOwner != nil {
+		helloErr = verifyHelloFrame(conn, *expectedOwner)
+	} else {
+		helloErr = skipHelloFrame(conn)
+	}
+	if helloErr != nil {
+		return false, fmt.Errorf("hello: %w", helloErr)
 	}
 	// Send status request.
 	req := api.IPCRequest{ID: 1, Cmd: "status"}

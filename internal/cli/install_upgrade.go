@@ -80,7 +80,7 @@ import (
 //     per-OS path. Before promotion it recovers the untouched prior binary;
 //     after promotion it starts the successor or restored retained prior.
 type UpgradeDeps interface {
-	RenameAsideBinary(target, newSrc string) (retainedPrior string, err error)
+	RenameAsideBinary(target, newSrc string) (api.RenameAsideResult, error)
 	RestoreRetainedBinary(target, retainedPrior string) error
 	QuiesceTimers(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
 	ExitGraceful(ctx context.Context, pipePath string, timeoutMs int) (api.IPCResponse, error)
@@ -204,7 +204,7 @@ type UpgradeOpts struct {
 	// WaitSupervisorReady blocks until the successor supervisor has acquired the
 	// lock and answers IPC status. Nil preserves non-production tests and legacy
 	// callers that cannot probe a successor.
-	WaitSupervisorReady func(ctx context.Context, timeout time.Duration) error
+	WaitSupervisorReady func(ctx context.Context, timeout time.Duration, binaryPath string, candidate UpgradeCandidateV1) error
 	// WithRollbackStopSettlementFence is wired only by managed upgrade callers.
 	// Automatic rollback runs its successor force-kill inside this callback while
 	// the canonical supervisor-state flock is held. A nil callback refuses
@@ -216,7 +216,8 @@ type UpgradeOpts struct {
 	// supervisor releases its lock and ports. Both results must be identical.
 	AdmitStaged func(path string) (UpgradeCandidateV1, error)
 	// AdmitPrior validates the rollback source before the prior fleet is touched.
-	AdmitPrior func(path string) error
+	AdmitPrior  func(path string) (sha256 string, err error)
+	VerifyPrior func(path, expectedSHA256 string) error
 	// VerifyCanonical re-reads the promoted canonical file and proves its PE and
 	// SHA-256 still match the admitted staged candidate.
 	VerifyCanonical func(path string, candidate UpgradeCandidateV1) error
@@ -305,9 +306,15 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 			return fmt.Errorf("pre-mutation staged candidate admission failed: %w", err)
 		}
 	}
+	priorSHA256 := ""
 	if opts.AdmitPrior != nil {
-		if err := opts.AdmitPrior(opts.BinaryPath); err != nil {
+		var err error
+		priorSHA256, err = opts.AdmitPrior(opts.BinaryPath)
+		if err != nil {
 			return fmt.Errorf("pre-mutation prior canonical admission failed: %w", err)
+		}
+		if priorSHA256 == "" {
+			return errors.New("pre-mutation prior canonical admission returned an empty SHA-256")
 		}
 	}
 
@@ -395,7 +402,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	handoffTimeout := effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, opts.QuiesceTimeoutMs, opts.ExitTimeoutMs)
 	if opts.WaitSupervisorLockReleased != nil {
 		if err := opts.WaitSupervisorLockReleased(ctx, handoffTimeout); err != nil {
-			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout,
+			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("prior supervisor did not release supervisor.lock within %s after upgrade exit request: %w", handoffTimeout, err))
 		}
 	}
@@ -406,7 +413,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// path has the same zombie-listener race as the force path.
 	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
 		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout,
+			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("port-unbound verification failed after prior-supervisor exit: %w", err))
 		}
 	}
@@ -417,22 +424,39 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	if opts.AdmitStaged != nil {
 		rechecked, err := opts.AdmitStaged(opts.NewBinary)
 		if err != nil {
-			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout,
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("post-quiesce staged candidate admission failed: %w", err))
 		}
 		if rechecked != admitted {
-			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout,
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("staged candidate identity changed between admission passes: before=%+v after=%+v", admitted, rechecked))
 		}
 	}
 
 	// Promotion occurs only after candidate admission and complete old-fleet
 	// release have both been proven.
-	retainedPrior, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
+	promotion, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
 	if err != nil {
-		return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout,
-			fmt.Errorf("rename-aside binary replacement failed: %w", err))
+		if promotion.Promoted {
+			return rollbackInstallUpgrade(ctx, opts, promotion.RetainedPrior, priorSHA256, handoffTimeout,
+				fmt.Errorf("rename-aside promoted the successor but post-promotion verification failed: %w", err))
+		}
+		if !promotion.PriorCanonical && promotion.RetainedPrior != "" {
+			return recoverRetainedPriorBeforePromotion(ctx, opts, promotion.RetainedPrior, priorSHA256, handoffTimeout,
+				fmt.Errorf("rename-aside did not promote the successor and could not restore the retained prior: %w", err))
+		}
+		return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
+			fmt.Errorf("rename-aside binary replacement failed before promotion: %w", err))
 	}
+	if !promotion.Promoted || promotion.RetainedPrior == "" {
+		if !promotion.PriorCanonical && promotion.RetainedPrior != "" {
+			return recoverRetainedPriorBeforePromotion(ctx, opts, promotion.RetainedPrior, priorSHA256, handoffTimeout,
+				fmt.Errorf("rename-aside returned a retained prior without a promoted successor"))
+		}
+		return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
+			fmt.Errorf("rename-aside returned invalid promotion result: promoted=%v retained_prior=%q", promotion.Promoted, promotion.RetainedPrior))
+	}
+	retainedPrior := promotion.RetainedPrior
 
 	// Step 6: Explicit per-OS supervisor start.
 	//
@@ -459,18 +483,18 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// from a shell, which exercises the same per-OS surface in
 	// foreground mode (with diagnostics visible to the operator).
 	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
-		return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+		return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
 			fmt.Errorf("supervisor start failed after binary replacement + prior-supervisor exit: %w", err))
 	}
 	if opts.WaitSupervisorReady != nil {
-		if err := opts.WaitSupervisorReady(ctx, handoffTimeout); err != nil {
-			return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+		if err := opts.WaitSupervisorReady(ctx, handoffTimeout, opts.BinaryPath, admitted); err != nil {
+			return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
 				fmt.Errorf("supervisor successor did not become IPC-ready within %s after upgrade start: %w", handoffTimeout, err))
 		}
 	}
 	if opts.VerifyCanonical != nil {
 		if err := opts.VerifyCanonical(opts.BinaryPath, admitted); err != nil {
-			return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+			return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
 				fmt.Errorf("promoted canonical binary readback failed: %w", err))
 		}
 	}
@@ -489,7 +513,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 			InstalledAt: now().UTC().Format(time.RFC3339Nano),
 		}
 		if err := opts.WriteReceipt(receipt); err != nil {
-			return rollbackInstallUpgrade(ctx, opts, retainedPrior, handoffTimeout,
+			return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
 				fmt.Errorf("persist %s failed: %w", UpgradeReceiptSchemaV1, err))
 		}
 	}
@@ -506,19 +530,37 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	return nil
 }
 
-func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, trigger error) error {
+func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, priorSHA256 string, trigger error) error {
 	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
 		return fmt.Errorf("%w; canonical prior binary was not promoted but prior supervisor recovery start failed: %v", trigger, err)
 	}
 	if opts.WaitSupervisorReady != nil {
-		if err := opts.WaitSupervisorReady(ctx, timeout); err != nil {
+		priorCandidate := UpgradeCandidateV1{Admission: "retained-prior", SHA256: priorSHA256}
+		if err := opts.WaitSupervisorReady(ctx, timeout, opts.BinaryPath, priorCandidate); err != nil {
 			return fmt.Errorf("%w; canonical prior binary was not promoted and recovery start returned, but prior supervisor did not become ready: %v", trigger, err)
 		}
 	}
 	return fmt.Errorf("%w; canonical prior binary was not promoted and prior supervisor recovery completed", trigger)
 }
 
-func recoverUnpromotedAfterReleaseFailure(ctx context.Context, opts UpgradeOpts, timeout time.Duration, trigger error) error {
+func recoverRetainedPriorBeforePromotion(ctx context.Context, opts UpgradeOpts, retainedPrior, priorSHA256 string, timeout time.Duration, trigger error) error {
+	if opts.VerifyPrior != nil {
+		if err := opts.VerifyPrior(retainedPrior, priorSHA256); err != nil {
+			return fmt.Errorf("%w; retained prior verification failed before recovery: %v", trigger, err)
+		}
+	}
+	if err := opts.Deps.RestoreRetainedBinary(opts.BinaryPath, retainedPrior); err != nil {
+		return fmt.Errorf("%w; restoring retained prior before promotion failed: %v", trigger, err)
+	}
+	if opts.VerifyPrior != nil {
+		if err := opts.VerifyPrior(opts.BinaryPath, priorSHA256); err != nil {
+			return fmt.Errorf("%w; restored prior canonical readback failed: %v", trigger, err)
+		}
+	}
+	return recoverUnpromotedUpgrade(ctx, opts, timeout, priorSHA256, trigger)
+}
+
+func recoverUnpromotedAfterReleaseFailure(ctx context.Context, opts UpgradeOpts, timeout time.Duration, priorSHA256 string, trigger error) error {
 	if opts.WithRollbackStopSettlementFence == nil {
 		return fmt.Errorf("%w; canonical prior binary was not promoted, but recovery force-kill was refused because the stop-settlement fence is unavailable", trigger)
 	}
@@ -540,10 +582,10 @@ func recoverUnpromotedAfterReleaseFailure(ctx context.Context, opts UpgradeOpts,
 			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery force-killed the prior supervisor, but expected ports remained bound: %v", trigger, err)
 		}
 	}
-	return recoverUnpromotedUpgrade(ctx, opts, timeout, trigger)
+	return recoverUnpromotedUpgrade(ctx, opts, timeout, priorSHA256, trigger)
 }
 
-func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior string, timeout time.Duration, trigger error) error {
+func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior, priorSHA256 string, timeout time.Duration, trigger error) error {
 	if retainedPrior == "" {
 		return fmt.Errorf("%w; automatic rollback unavailable: rename-aside returned no retained prior binary", trigger)
 	}
@@ -558,14 +600,35 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 	}); err != nil {
 		return fmt.Errorf("%w; automatic rollback refused before force-kill: %v", trigger, err)
 	}
+	if opts.WaitSupervisorLockReleased != nil {
+		if err := opts.WaitSupervisorLockReleased(ctx, timeout); err != nil {
+			return fmt.Errorf("%w; automatic rollback killed the successor but supervisor.lock remained held: %v", trigger, err)
+		}
+	}
+	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+			return fmt.Errorf("%w; automatic rollback killed the successor but expected ports remained bound: %v", trigger, err)
+		}
+	}
+	if opts.VerifyPrior != nil {
+		if err := opts.VerifyPrior(retainedPrior, priorSHA256); err != nil {
+			return fmt.Errorf("%w; automatic rollback retained-prior SHA-256 verification failed: %v", trigger, err)
+		}
+	}
 	if err := opts.Deps.RestoreRetainedBinary(opts.BinaryPath, retainedPrior); err != nil {
 		return fmt.Errorf("%w; automatic rollback failed restoring retained prior binary %s: %v", trigger, retainedPrior, err)
+	}
+	if opts.VerifyPrior != nil {
+		if err := opts.VerifyPrior(opts.BinaryPath, priorSHA256); err != nil {
+			return fmt.Errorf("%w; automatic rollback restored prior bytes but canonical SHA-256 readback failed: %v", trigger, err)
+		}
 	}
 	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
 		return fmt.Errorf("%w; prior binary restored but prior supervisor restart failed: %v", trigger, err)
 	}
 	if opts.WaitSupervisorReady != nil {
-		if err := opts.WaitSupervisorReady(ctx, timeout); err != nil {
+		priorCandidate := UpgradeCandidateV1{Admission: "retained-prior", SHA256: priorSHA256}
+		if err := opts.WaitSupervisorReady(ctx, timeout, opts.BinaryPath, priorCandidate); err != nil {
 			return fmt.Errorf("%w; prior binary restored and restarted but did not become ready: %v; run `mcphub supervise` from a shell to inspect startup diagnostics", trigger, err)
 		}
 	}

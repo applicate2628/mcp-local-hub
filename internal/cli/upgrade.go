@@ -15,18 +15,12 @@ import (
 // The alias routes through the SAME `dispatchUpgrade` entry the
 // `mcphub install --upgrade` flag uses (install.go), so the two entry
 // points produce identical behavior. dispatchUpgrade is the
-// machine-state dispatcher that picks the right sink based on what is
-// on disk:
+// machine-state dispatcher with one mutating sink:
 //
 //   - v0.5.x host (supervisor-intent.json with ≥1 daemon row) →
-//     the rename-aside + IPC-handoff cold-restart upgrade.
-//   - v0.4 scheduler-only host (legacy scheduler daemon tasks, no
-//     supervisor intent) → the legacy-scheduler upgrade migration.
-//   - fresh install (no supervisor state on disk) → the legacy
-//     binary-copy body (stop every mcp-local-hub-* daemon, copy the
-//     running binary over ~/.local/bin/mcphub.exe bootstrap copy-only
-//     skipping PATH registration per bot r2 P1 on PR #181, restart
-//     daemons).
+//     the admitted, receipt-backed cold-restart transaction.
+//   - legacy scheduler, fresh, or unsupported platform state → stable
+//     actionable refusal before any file/process mutation.
 //
 // bot r33 P2 closure on PR #288: BEFORE this, the alias called
 // `runInstallUpgrade` directly — the LEGACY binary-copy body — so on
@@ -53,25 +47,22 @@ func newUpgradeCmdReal() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade",
 		Short: "Replace the canonical mcphub binary with the currently-running build (alias for `install --upgrade`)",
-		Long: `Stop every mcp-local-hub-* daemon, copy the currently-running mcphub
-binary over the canonical path at ~/.local/bin/mcphub.exe, then restart
-every daemon from the new binary. The operation is idempotent on the copy
-step — re-running when the canonical binary is already current is a no-op.
+		Long: `Apply an admitted mcphub product build through the managed supervisor
+upgrade transaction. A daemon-bearing supervisor intent must already exist.
 
 What upgrade does:
   1. Self-replace guard. Refuses when run from the canonical path
      (the running image cannot replace itself on Windows). Build
 	     a new Windows product binary with ` + "`pwsh ./build.ps1`" + ` and run
 	     ` + "`./bin/mcphub.exe upgrade`" + ` from the build directory.
-  2. StopAll. Kills every mcp-local-hub-* daemon by port and /Ends
-     its scheduler task — releases the Windows file lock on the
-     canonical path. Per-task stop failures are logged but non-fatal.
-  3. Copy-only bootstrap. Tempfile + atomic rename of os.Executable()
-     to the canonical path. PATH registration is intentionally
-     skipped (that's ` + "`mcphub setup`" + `'s job) so a HKCU PATH write
-     hiccup mid-upgrade doesn't leave the fleet down.
-  4. RestartAll. /Run every paused task. New tasks reference the
-     canonical path so they pick up the new binary automatically.
+  2. Stage and admit the Windows GUI PE, non-placeholder build metadata,
+     and SHA-256 before touching the running fleet.
+  3. Quiesce and exit/reap the prior supervisor; prove its lock and every
+     expected daemon port are released; re-admit the unchanged candidate.
+  4. Promote once through rename-aside, start and identity-bind the successor,
+     verify canonical bytes, then atomically write upgrade-receipt-v1.
+  5. Any post-promotion failure restores the exact retained prior bytes,
+     verifies their SHA-256, and proves the prior supervisor ready.
 
 Examples:
 	  pwsh ./build.ps1                           # in a checkout
@@ -84,9 +75,9 @@ This subcommand is a discoverability alias for ` + "`install --upgrade`" + `
 introduced in bug-bash A7. Both forms route through the same
 machine-state dispatcher (dispatchUpgrade), so they run the same code
 path: a v0.5+ host takes the supervisor rename-aside + IPC-handoff
-cold-restart, a v0.4 scheduler-only host takes the legacy-scheduler
-upgrade migration, and a fresh install falls back to the
-binary-copy + restart body described above.
+cold-restart transaction. Legacy-scheduler, fresh-install, and unsupported
+platform states fail closed without mutation and print the required setup or
+package-workflow recovery.
 
 Limitations:
   - The GUI/tray process is NOT auto-stopped by upgrade (gap tracked
@@ -95,12 +86,7 @@ Limitations:
     "Access is denied". Workaround: close the tray icon (or kill the
     mcphub gui process) before running upgrade. After upgrade,
     restart the GUI manually.
-  - Watchdog tick (5-min cadence) running concurrent with upgrade
-    is rare (~1s upgrade window) but theoretically can revive a
-    daemon mid-copy and re-lock the binary. If it happens, you'll
-    see a "target in use" error and can re-run upgrade.
-
-See also: install, setup, restart, stop, watchdog.`,
+See also: install, setup, restart, stop.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			// bot r33 P2 closure on PR #288: route the top-level
 			// `mcphub upgrade` alias through the SAME machine-state

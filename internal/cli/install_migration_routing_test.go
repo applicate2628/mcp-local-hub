@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -81,8 +80,8 @@ func TestDispatchUpgradeReal_RoutesToV5UpgradeWhenIntentPresent(t *testing.T) {
 	// A bare `{}` / stops-only file routes as "no v0.5 supervisor" now.
 	seedDaemonBearingIntent(t, stateDir)
 
-	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
-	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
+	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
 	var v5Invoked bool
 	v5UpgradeFn = func(cmd *cobra.Command) error {
 		v5Invoked = true
@@ -142,8 +141,8 @@ func TestDispatchUpgradeReal_SupervisorPathRunsUpgradeGuardsBeforeV5(t *testing.
 	// guard fires before the v5 upgrade body.
 	seedDaemonBearingIntent(t, stateDir)
 
-	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
-	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
+	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
 	upgradeBuildVersionFn = func() string { return "dev" }
 	var v5Invoked bool
 	v5UpgradeFn = func(cmd *cobra.Command) error {
@@ -166,16 +165,7 @@ func TestDispatchUpgradeReal_SupervisorPathRunsUpgradeGuardsBeforeV5(t *testing.
 	}
 }
 
-// TestDispatchUpgradeReal_FreshInstallFallsBackToLegacyUpgrade pins the
-// fresh-install branch: no supervisor-intent.json on disk → the legacy
-// runInstallUpgrade body (binary-copy fallback), NOT the v5 cold-restart path.
-//
-// The assertion routes through the runInstallUpgrade entry seam
-// (upgradeExecutableFn): a sentinel error returned there proves the legacy body
-// was entered (it resolves the current executable first). The full
-// runInstallUpgrade happy-path is covered by install_upgrade_test.go; here we
-// only pin the ROUTING decision.
-func TestDispatchUpgradeReal_FreshInstallFallsBackToLegacyUpgrade(t *testing.T) {
+func TestDispatchUpgradeReal_FreshInstallFailsClosedBeforeMutation(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
@@ -192,10 +182,9 @@ func TestDispatchUpgradeReal_FreshInstallFallsBackToLegacyUpgrade(t *testing.T) 
 		v5Invoked = true
 		return nil
 	}
-	// Sentinel marks that the legacy runInstallUpgrade body was entered
-	// (it calls upgradeExecutableFn first via resolveUpgradeSelfPaths).
-	sentinel := errors.New("legacy-upgrade-body-reached")
-	upgradeExecutableFn = func() (string, error) { return "", sentinel }
+	mutated := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) { mutated = true; return nil, nil }
+	upgradeBootstrapFn = func(io.Writer) error { mutated = true; return nil }
 
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
@@ -204,12 +193,31 @@ func TestDispatchUpgradeReal_FreshInstallFallsBackToLegacyUpgrade(t *testing.T) 
 	if v5Invoked {
 		t.Fatal("fresh install (no supervisor-intent.json) must NOT route to the v5 cold-restart path")
 	}
-	if !errors.Is(err, sentinel) {
-		t.Fatalf("fresh install must fall through to the legacy runInstallUpgrade body (sentinel from its first seam); got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "UPGRADE_TRANSACTION_REQUIRES_MANAGED_SUPERVISOR") {
+		t.Fatalf("fresh install error = %v", err)
+	}
+	if mutated {
+		t.Fatal("fresh-install upgrade mutated before fail-closed result")
 	}
 }
 
-func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksMigratesToSupervisorInstall(t *testing.T) {
+func TestRunV5UpgradeReal_UnwiredPlatformFailsClosedBeforeMutation(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
+	resetUpgradeSeams(t)
+	mutated := false
+	upgradeStopAllFn = func() ([]api.RestartResult, error) { mutated = true; return nil, nil }
+	upgradeBootstrapFn = func(io.Writer) error { mutated = true; return nil }
+	v5UpgradeFn = nil
+	err := runV5UpgradeReal(&cobra.Command{})
+	if err == nil || !strings.Contains(err.Error(), upgradePlatformUnsupportedID) {
+		t.Fatalf("error = %v", err)
+	}
+	if mutated {
+		t.Fatal("unwired platform upgrade mutated before fail-closed result")
+	}
+}
+
+func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksFailClosedBeforeMutation(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
@@ -223,8 +231,8 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksMigratesToSupervisorIns
 	t.Cleanup(restoreScheduler)
 	// No supervisor-intent.json seeded, but legacy daemon-shaped scheduler task exists.
 
-	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
-	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
+	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
 	var stopped bool
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {
 		stopped = true
@@ -249,25 +257,20 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksMigratesToSupervisorIns
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
-	if err := dispatchUpgradeReal(cmd); err != nil {
-		t.Fatalf("dispatchUpgradeReal: %v", err)
+	err := dispatchUpgradeReal(cmd)
+	if err == nil || !strings.Contains(err.Error(), "UPGRADE_TRANSACTION_LEGACY_SCHEDULER_UNSUPPORTED") {
+		t.Fatalf("dispatchUpgradeReal error = %v", err)
 	}
-	if !stopped || !bootstrapped {
-		t.Fatalf("legacy migration did not run binary-swap prerequisites: stopped=%v bootstrapped=%v", stopped, bootstrapped)
-	}
-	if restarted {
-		t.Fatalf("legacy v0.4 tasks were silently restarted instead of materializing supervisor intent")
-	}
-	if len(installed) != 1 || installed[0] != "memory" {
-		t.Fatalf("materialized installs = %v, want [memory]", installed)
+	if stopped || bootstrapped || restarted || len(installed) != 0 {
+		t.Fatalf("legacy fail-closed path mutated: stopped=%v bootstrapped=%v restarted=%v installed=%v", stopped, bootstrapped, restarted, installed)
 	}
 }
 
 func TestRunLegacySchedulerUpgradeMigration_RestartsUnmatchedLegacyTasksAfterBinaryCopy(t *testing.T) {
 	resetUpgradeSeams(t)
 
-	upgradeExecutableFn = func() (string, error) { return `C:\dev\mcphub.exe`, nil }
-	upgradeTargetPathFn = func() (string, error) { return `C:\Users\u\.local\bin\mcphub.exe`, nil }
+	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
+	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
 
 	var order []string
 	upgradeStopAllFn = func() ([]api.RestartResult, error) {

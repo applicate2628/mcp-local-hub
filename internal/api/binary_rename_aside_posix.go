@@ -35,17 +35,31 @@ const renameAsideTimestampLayout = "20060102T150405Z"
 //
 // On step-2 failure the function attempts a best-effort rollback so
 // the prior binary path is restored.
-func RenameAsideReplace(target, newSrc string) error {
+type RenameAsideResult struct {
+	Promoted       bool
+	PriorCanonical bool
+	RetainedPrior  string
+}
+
+func RenameAsideReplaceWithResult(target, newSrc string) (RenameAsideResult, error) {
 	ts := time.Now().UTC().Format(renameAsideTimestampLayout)
 	oldPath := target + ".old-" + ts
 
 	if err := os.Rename(target, oldPath); err != nil {
-		return fmt.Errorf("rename target→old (%s → %s): %w", target, oldPath, err)
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("rename target→old (%s → %s): %w", target, oldPath, err)
 	}
 	if err := os.Rename(newSrc, target); err != nil {
 		// Rollback best-effort.
-		_ = os.Rename(oldPath, target)
-		return fmt.Errorf("rename newSrc→target (%s → %s): %w", newSrc, target, err)
+		rollbackErr := os.Rename(oldPath, target)
+		if rollbackErr != nil {
+			return RenameAsideResult{RetainedPrior: oldPath}, fmt.Errorf("rename newSrc→target (%s → %s): %w; restoring retained prior %s failed: %v", newSrc, target, err, oldPath, rollbackErr)
+		}
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("rename newSrc→target (%s → %s): %w", newSrc, target, err)
 	}
-	return nil
+	return RenameAsideResult{Promoted: true, RetainedPrior: oldPath}, nil
+}
+
+func RenameAsideReplace(target, newSrc string) error {
+	_, err := RenameAsideReplaceWithResult(target, newSrc)
+	return err
 }

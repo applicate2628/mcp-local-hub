@@ -20,6 +20,7 @@ package cli
 import (
 	"errors"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,42 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
+
+func TestUpgradeReadinessRejectsWrongLiveExecutableBeforePipeAcceptance(t *testing.T) {
+	dir := t.TempDir()
+	lockPath := filepath.Join(dir, "supervisor.lock")
+	owner := api.SupervisorLockOwner{PID: 4242, StartedAt: "2026-08-31T19:00:00Z"}
+	if err := api.WriteStateFileAtomic(lockPath+".owner.json", owner); err != nil {
+		t.Fatal(err)
+	}
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		ExecutablePath:   `C:\other\mcphub.exe`,
+		Basename:         "mcphub.exe",
+		CommandLine:      `"C:\other\mcphub.exe" supervise`,
+		CreationDateUnix: time.Date(2026, 8, 31, 18, 59, 59, 0, time.UTC).Unix(),
+	}, nil)
+	d := &v5UpgradeDeps{supervisorLockDir: lockPath, pipePath: `\\.\pipe\must-not-dial`}
+	ready, err := d.probeUpgradeReadyOnce(`C:\canonical\mcphub.exe`, UpgradeCandidateV1{SHA256: strings.Repeat("a", 64)})
+	if err == nil || !strings.Contains(err.Error(), "does not match canonical") {
+		t.Fatalf("ready=%v error=%v", ready, err)
+	}
+	if ready {
+		t.Fatal("wrong live executable was accepted as upgrade successor")
+	}
+}
+
+func TestUpgradeReadinessRejectsWrongHelloGeneration(t *testing.T) {
+	client, server := net.Pipe()
+	defer client.Close()
+	defer server.Close()
+	go func() {
+		_, _ = io.WriteString(server, `{"hello":{"pid":9999,"started_at":"2026-08-31T19:00:00Z"}}`+"\n")
+	}()
+	err := verifyHelloFrame(client, api.SupervisorLockOwner{PID: 4242, StartedAt: "2026-08-31T19:00:00Z"})
+	if err == nil || !strings.Contains(err.Error(), "hello mismatch") {
+		t.Fatalf("error = %v", err)
+	}
+}
 
 // withNoopSchedulerEnv pins MCPHUB_E2E_SCHEDULER=none for the test
 // scope so scheduler.New() returns a noopScheduler instead of dialing
