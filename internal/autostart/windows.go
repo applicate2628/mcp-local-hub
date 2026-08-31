@@ -174,6 +174,9 @@ func (w *windowsBackend) Disable() error {
 // rather than flipping to StateDrifted on best-effort failure.
 func (w *windowsBackend) Status(opts Options) (State, error) {
 	snapshot, err := w.statusSnapshot(opts, false)
+	if errors.Is(err, scheduler.ErrUnavailable) {
+		return snapshot.State, ErrStatusObservationUnavailable
+	}
 	return snapshot.State, err
 }
 

@@ -72,6 +72,26 @@ func TestAutostartStatusPrintsState(t *testing.T) {
 	}
 }
 
+func TestAutostartStatusSchedulerUnavailableIsExplicitAndSuccessful(t *testing.T) {
+	fb := &fakeBackend{statusErr: autostart.ErrStatusObservationUnavailable}
+	withFakeBackend(t, fb)
+
+	cmd := newAutostartCmd()
+	var stdout, stderr bytes.Buffer
+	cmd.SetOut(&stdout)
+	cmd.SetErr(&stderr)
+	cmd.SetArgs([]string{"status"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if got := stdout.String(); got != "unavailable\n" {
+		t.Fatalf("stdout = %q, want unavailable state", got)
+	}
+	if got := stderr.String(); got != "AUTOSTART_SCHEDULER_UNAVAILABLE\n" {
+		t.Fatalf("stderr = %q, want stable scheduler diagnostic", got)
+	}
+}
+
 func TestAutostartStatusStrictModeFlagThreaded(t *testing.T) {
 	fb := &fakeBackend{statusReturn: autostart.StateDrifted}
 	withFakeBackend(t, fb)

@@ -42,10 +42,17 @@ package autostart
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 )
+
+// ErrStatusObservationUnavailable reports that autostart state could not be
+// observed because the Windows Task Scheduler bridge was temporarily
+// unavailable. It is an observation outcome, not a lifecycle State: callers
+// must not mistake it for an absent or disabled autostart shim.
+var ErrStatusObservationUnavailable = errors.New("autostart status observation unavailable")
 
 // WindowsTaskName is the Task Scheduler entry the Windows autostart
 // shim installs (`\mcp-local-hub-supervisor`). Exported (capital) so

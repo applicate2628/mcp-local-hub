@@ -98,12 +98,14 @@ See also: restart, stop, logs, scheduler upgrade.`,
 			//     so the cobra command's ctx (Ctrl+C / shutdown)
 			//     propagates into the supervisor IPC dial.
 			var rows []api.DaemonStatus
+			var schedulerObservation api.SchedulerObservation
 			var err error
 			if probeHealth || forceMaterialize || workspaceScoped {
-				rows, err = a.StatusWithOpts(api.StatusOpts{
+				detailed, detailedErr := a.StatusWithOptsDetailed(api.StatusOpts{
 					ProbeHealth:      probeHealth,
 					ForceMaterialize: forceMaterialize,
 				})
+				rows, schedulerObservation, err = detailed.Rows, detailed.Observation, detailedErr
 			} else {
 				rows, err = a.StatusContext(cmd.Context())
 			}
@@ -116,7 +118,11 @@ See also: restart, stop, logs, scheduler upgrade.`,
 			if jsonOut {
 				enc := json.NewEncoder(cmd.OutOrStdout())
 				enc.SetIndent("", "  ")
-				return enc.Encode(rows)
+				if err := enc.Encode(rows); err != nil {
+					return err
+				}
+				writeStatusSchedulerObservationWarning(cmd, schedulerObservation, true)
+				return nil
 			}
 			var printErr error
 			if workspaceScoped {
@@ -127,6 +133,7 @@ See also: restart, stop, logs, scheduler upgrade.`,
 			if printErr != nil {
 				return printErr
 			}
+			writeStatusSchedulerObservationWarning(cmd, schedulerObservation, false)
 			warnUnmanagedStdioFromScan(cmd, a)
 			return nil
 		},
@@ -138,6 +145,17 @@ See also: restart, stop, logs, scheduler upgrade.`,
 	c.Flags().BoolVar(&forceMaterialize, "force-materialize", false,
 		"for workspace-scoped daemons with --health: send a real tools/call to probe the heavy backend (triggers materialization). Default --health stays at proxy-alive only.")
 	return c
+}
+
+func writeStatusSchedulerObservationWarning(cmd *cobra.Command, observation api.SchedulerObservation, jsonOut bool) {
+	if observation != api.SchedulerObservationUnavailable {
+		return
+	}
+	if jsonOut {
+		fmt.Fprintln(cmd.ErrOrStderr(), `{"code":"STATUS_SCHEDULER_UNAVAILABLE"}`)
+		return
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), "STATUS_SCHEDULER_UNAVAILABLE")
 }
 
 // filterWorkspaceScoped returns only rows whose TaskName matches the

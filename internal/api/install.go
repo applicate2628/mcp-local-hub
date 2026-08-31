@@ -831,6 +831,26 @@ type StatusOpts struct {
 	ForceMaterialize bool
 }
 
+// SchedulerObservation describes whether StatusWithOptsDetailed obtained a
+// scheduler task snapshot. It is deliberately separate from daemon rows: a
+// supervisor-intent or registry row remains useful when the legacy scheduler
+// bridge is temporarily unavailable.
+type SchedulerObservation string
+
+const (
+	SchedulerObservationObserved    SchedulerObservation = "observed"
+	SchedulerObservationUnsupported SchedulerObservation = "unsupported"
+	SchedulerObservationUnavailable SchedulerObservation = "unavailable"
+)
+
+// StatusWithOptsResult is the detailed form of StatusWithOpts. The legacy
+// StatusWithOpts wrapper continues to return rows alone so its callers and
+// JSON output keep their existing shape.
+type StatusWithOptsResult struct {
+	Rows        []DaemonStatus
+	Observation SchedulerObservation
+}
+
 // ErrForceMaterializeRequiresHealth enforces the documented `--health`
 // prerequisite for `--force-materialize`. Callers should surface this
 // verbatim to the end user.
@@ -848,12 +868,25 @@ var ErrForceMaterializeRequiresHealth = errors.New("--force-materialize requires
 // round-trips — acceptable for an interactive command but wasteful for
 // repeated polling.
 func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
-	if opts.ForceMaterialize && !opts.ProbeHealth {
-		return nil, ErrForceMaterializeRequiresHealth
-	}
-	tasks, err := statusSchedulerTasks()
+	detailed, err := a.StatusWithOptsDetailed(opts)
 	if err != nil {
 		return nil, err
+	}
+	return detailed.Rows, nil
+}
+
+// StatusWithOptsDetailed is StatusWithOpts plus the bounded scheduler
+// observation outcome. Only typed scheduler.ErrUnavailable is treated as a
+// transient unavailable observation; all other operational failures remain
+// fail-loud. scheduler.ErrNotImplemented remains the established unsupported
+// schedulerless mode.
+func (a *API) StatusWithOptsDetailed(opts StatusOpts) (StatusWithOptsResult, error) {
+	if opts.ForceMaterialize && !opts.ProbeHealth {
+		return StatusWithOptsResult{}, ErrForceMaterializeRequiresHealth
+	}
+	tasks, observation, err := statusSchedulerTasksDetailed()
+	if err != nil {
+		return StatusWithOptsResult{}, err
 	}
 	result := make([]DaemonStatus, 0, len(tasks))
 	for _, t := range tasks {
@@ -939,7 +972,7 @@ func (a *API) StatusWithOpts(opts StatusOpts) ([]DaemonStatus, error) {
 	if opts.ForceMaterialize {
 		forceMaterializeWorkspaceScoped(result, regPath)
 	}
-	return result, nil
+	return StatusWithOptsResult{Rows: result, Observation: observation}, nil
 }
 
 // enrichStatusWithSpawnHolds fills SpawnHoldReason/SpawnHoldPath on rows built
@@ -1087,22 +1120,28 @@ var restartSchedulerFactory = scheduler.New
 // touching the OS scheduler (spec §4 Phase A.1).
 var stopSchedulerFactory = scheduler.New
 
-func statusSchedulerTasks() ([]scheduler.TaskStatus, error) {
+func statusSchedulerTasksDetailed() ([]scheduler.TaskStatus, SchedulerObservation, error) {
 	sch, err := statusSchedulerFactory()
 	if err != nil {
-		if schedulerUnavailableError(err) {
-			return nil, nil
+		if errors.Is(err, scheduler.ErrNotImplemented) {
+			return nil, SchedulerObservationUnsupported, nil
 		}
-		return nil, err
+		if errors.Is(err, scheduler.ErrUnavailable) {
+			return nil, SchedulerObservationUnavailable, nil
+		}
+		return nil, "", err
 	}
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
-		if schedulerUnavailableError(err) {
-			return nil, nil
+		if errors.Is(err, scheduler.ErrNotImplemented) {
+			return nil, SchedulerObservationUnsupported, nil
 		}
-		return nil, err
+		if errors.Is(err, scheduler.ErrUnavailable) {
+			return nil, SchedulerObservationUnavailable, nil
+		}
+		return nil, "", err
 	}
-	return tasks, nil
+	return tasks, SchedulerObservationObserved, nil
 }
 
 func schedulerUnavailableError(err error) bool {

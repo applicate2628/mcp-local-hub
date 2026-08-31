@@ -174,6 +174,27 @@ func TestStatusCLI_ForceMaterializeRequiresHealth(t *testing.T) {
 	}
 }
 
+func TestWriteStatusSchedulerObservationWarningKeepsJSONStdoutContract(t *testing.T) {
+	c := newStatusCmdReal()
+	var stdout, stderr bytes.Buffer
+	c.SetOut(&stdout)
+	c.SetErr(&stderr)
+
+	writeStatusSchedulerObservationWarning(c, api.SchedulerObservationUnavailable, true)
+	if got := stdout.String(); got != "" {
+		t.Fatalf("warning wrote to stdout %q; JSON stdout must remain rows only", got)
+	}
+	if got := stderr.String(); got != "{\"code\":\"STATUS_SCHEDULER_UNAVAILABLE\"}\n" {
+		t.Fatalf("JSON stderr = %q, want compact stable diagnostic", got)
+	}
+
+	stderr.Reset()
+	writeStatusSchedulerObservationWarning(c, api.SchedulerObservationUnavailable, false)
+	if got := stderr.String(); got != "STATUS_SCHEDULER_UNAVAILABLE\n" {
+		t.Fatalf("human stderr = %q, want stable scheduler diagnostic", got)
+	}
+}
+
 func TestStatusCLI_WarnsForUnmanagedStdioScanEntries(t *testing.T) {
 	restoreStatus := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
 		return []api.DaemonStatus{
