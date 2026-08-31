@@ -285,12 +285,11 @@ Antigravity's Cascade agent silently drops any `mcp_config.json` entry pointing 
 
 Cascade spawns `mcphub.exe relay` as a normal stdio subprocess. The relay translates JSON-RPC between stdin/stdout and the shared HTTP daemon on port 9121. No extra Serena process per Antigravity session — it shares the same `claude` context daemon as Claude Code, Cursor, VS Code, Gemini CLI, and Qwen CLI.
 
-**After install, restart Antigravity** for Cascade to pick up the new entry:
-```powershell
-Get-Process -Name Antigravity | Stop-Process -Force
-Start-Sleep 3
-Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
-```
+**After install, restart Antigravity gracefully** for Cascade to pick up the
+new entry: use the application's Exit/Quit action, confirm its window and tray
+icon close, then launch it normally. If the application is unresponsive, inspect
+its executable path and command line in Task Manager and terminate only the
+single verified Antigravity UI PID; never kill every matching process by name.
 
 The relay path remains the deterministic canonical `~/.local/bin/mcphub.exe`. Use `setup` to establish it on a fresh host; use the admitted managed `mcphub upgrade` transaction for subsequent binary changes. Client entries keep the same path and need no rewrite.
 
@@ -666,7 +665,11 @@ Losing `.age-key` means the vault is unreadable — there is no recovery path. K
 ### `port 9121 already in use`
 
 Preflight caught another listener on the port Serena wants. Either:
-- Another Serena instance is already running (from a previous manual stdio setup) — kill it: `Get-Process -Name python | Where-Object { $_.Path -like '*uvx*' } | Stop-Process`
+- Another managed Serena instance is running: use `mcphub stop --server serena`
+  or the matching uninstall/restart lifecycle command. For an unmanaged stale
+  listener, resolve the port's owning PID, inspect that PID's executable path,
+  command line, parent, and Serena workspace, then terminate only that exact
+  verified PID. Never stop every Python/uvx process by name.
 - A different local service is using 9121 — change the port in `servers/serena/manifest.yaml` and re-install
 
 ### `command "uvx" not found on PATH`
@@ -685,12 +688,11 @@ If the error mentions a specific XML element (`(N,M):ElementName:`), it's a sche
 
 ### Antigravity's `RefreshMcpServers: loading already in progress` loop
 
-Unrelated to mcp-local-hub — this is a third-party bug in `mcp-language-server` (returns exit 1 on graceful shutdown, blocking Antigravity's refresh cycle). Full kill + restart usually clears it:
-```powershell
-Get-Process -Name Antigravity | Stop-Process -Force
-Start-Sleep 3
-Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
-```
+This is an Antigravity refresh failure, not a reason to kill every matching
+process. Close Antigravity through its Exit/Quit action and relaunch it normally.
+If it cannot close, verify the exact UI PID by executable path and command line,
+then terminate only that PID; preserve relay, MCP daemon, and unrelated editor
+processes.
 
 ### Logs
 

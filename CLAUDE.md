@@ -63,23 +63,16 @@ Observed signature: 3 daemons killed within a 16 ms spread, then
 ~29 daemon respawns. 8 of 9 supervisor starts in a 42-hour window had no
 `supervisor-exit` row at all.
 
-Use the identity-gated sweep instead — it kills ONLY binaries outside the
-installed path (test builds live in the repo, a worktree, or a temp dir):
+Preview test-leftover evidence first:
 
 ```powershell
-$installed = Join-Path $env:USERPROFILE '.local\bin\mcphub.exe'
-Get-CimInstance Win32_Process -Filter "Name='mcphub.exe'" |
-  Where-Object { $_.ExecutablePath -and $_.ExecutablePath -ne $installed } |
-  ForEach-Object {
-    Write-Host "killing test binary PID $($_.ProcessId): $($_.ExecutablePath)"
-    Stop-Process -Id $_.ProcessId -Force
-  }
+mcphub cleanup test-leftovers --json
 ```
 
-Inspect before killing whenever the list is not obviously test-only. If a
-leftover process IS at the installed path, it belongs to the live fleet —
-leave it alone and find out why the test spawned it (that is a test-isolation
-defect, tracked as the state-dir leak channel in the same work-item).
+For each candidate, verify its exact PID, executable path, command line, parent
+liveness, build metadata, and test state root. Terminate only the individually
+verified test PID. If a process is at the installed path or its ownership is
+ambiguous, leave it alone and treat that as a test-isolation defect.
 
 KOSYAK examples: `feedback_clean_test_processes.md`,
 `feedback_kosyak_mcphub_sweep_kills_running_daemons.md`.
@@ -1173,8 +1166,8 @@ Object allocation failed on the supervisor's last spawn attempt for
 that daemon. The supervisor proceeded via the documented non-fatal
 fallback (ADR #239 Step 1): plain `cmd.Start` without
 `StartWithJob`, so the daemon's descendant tree no longer has
-`KILL_ON_JOB_CLOSE` orphan-protection. If the supervisor crashes
-(`taskkill /F mcphub.exe`, OS reboot, OOM kill), this daemon's
+`KILL_ON_JOB_CLOSE` orphan-protection. If the supervisor is forcibly terminated,
+or the host reboots or exhausts memory, this daemon's
 sub-processes (e.g. `uvx` → `python`, `npx` → `node` wrappers) may
 survive as orphans and continue holding TCP ports — `mcphub`
 respawn will then hit port-in-use until manual cleanup.
@@ -1220,9 +1213,10 @@ warning badge.
 - *Single-user solo-dev host (not corp-managed)*: investigate which
   of causes 2-4 applies. The fallback is rare on solo-dev hosts;
   the most likely cause is handle exhaustion from a transient
-  leak. Restart the supervisor (`mcphub supervise` → Ctrl+C →
-  restart, or `taskkill /F /IM mcphub.exe && start mcphub supervise`)
-  to retry Job allocation on the next spawn. If the badge clears
+  leak. Use `mcphub restart --all` to request fresh managed spawns and retry Job
+  allocation without killing the supervisor. If the supervisor is unavailable,
+  inspect `mcphub autostart status` and run `mcphub supervise --ensure-alive` so
+  the documented liveness owner performs the relaunch. If the badge clears
   after restart, the underlying leak was transient. If it persists
   across restarts, file a bug with the supervisor-events.log
   `per-spawn-job-create-failed` entries attached.
