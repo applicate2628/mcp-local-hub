@@ -28,6 +28,7 @@ func resetUpgradeSeams(t *testing.T) {
 	origBoot := upgradeBootstrapFn
 	origRestart := upgradeRestartAllFn
 	origRestartTasks := upgradeRestartTasksFn
+	origRestartSupervisorTasks := upgradeRestartSupervisorTasksFn
 	origInstall := upgradeInstallServerFn
 	origExec := upgradeExecutableFn
 	origTarget := upgradeTargetPathFn
@@ -38,6 +39,7 @@ func resetUpgradeSeams(t *testing.T) {
 		upgradeBootstrapFn = origBoot
 		upgradeRestartAllFn = origRestart
 		upgradeRestartTasksFn = origRestartTasks
+		upgradeRestartSupervisorTasksFn = origRestartSupervisorTasks
 		upgradeInstallServerFn = origInstall
 		upgradeExecutableFn = origExec
 		upgradeTargetPathFn = origTarget
@@ -48,6 +50,7 @@ func resetUpgradeSeams(t *testing.T) {
 	upgradeBootstrapFn = nil
 	upgradeRestartAllFn = nil
 	upgradeRestartTasksFn = nil
+	upgradeRestartSupervisorTasksFn = nil
 	upgradeInstallServerFn = nil
 	upgradeExecutableFn = nil
 	upgradeTargetPathFn = nil
@@ -264,12 +267,11 @@ func TestRunInstallUpgrade_StopAllError(t *testing.T) {
 	}
 }
 
-// TestRunInstallUpgrade_StopPerTaskErrorsAreSurfacedButNotFatal
-// pins the "stop failures log to stderr but don't abort" branch.
-// Individual daemon stop failure (e.g., taskkill on a stuck Force-
-// killed daemon) shouldn't block the binary upgrade; the operator
-// still gets to fix the watchdog code path.
-func TestRunInstallUpgrade_StopPerTaskErrorsAreSurfacedButNotFatal(t *testing.T) {
+// TestRunInstallUpgrade_StopPerTaskErrorAbortsBeforeCopyAndRecoversStoppedTasks
+// pins the upgrade transaction boundary: a task that failed to stop may still
+// hold the canonical PE or its daemon port, so copy/promotion is forbidden.
+// Tasks that did stop are restarted before the command returns the failure.
+func TestRunInstallUpgrade_StopPerTaskErrorAbortsBeforeCopyAndRecoversStoppedTasks(t *testing.T) {
 	resetUpgradeSeams(t)
 	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
 	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
@@ -279,17 +281,18 @@ func TestRunInstallUpgrade_StopPerTaskErrorsAreSurfacedButNotFatal(t *testing.T)
 			{TaskName: "mcp-local-hub-time-default"},
 		}, nil
 	}
-	upgradeBootstrapFn = func(io.Writer) error { return nil }
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-stuck-default"},
-			{TaskName: "mcp-local-hub-time-default"},
-		}, nil
+	bootstrapCalled := false
+	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
+	var recovered []string
+	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
+		recovered = append([]string(nil), tasks...)
+		return []api.RestartResult{{TaskName: "mcp-local-hub-time-default"}}, nil
 	}
 
 	cmd, stdout, stderr := stubCmd()
-	if err := runInstallUpgrade(cmd); err != nil {
-		t.Fatalf("partial stop failures should not abort upgrade; got %v", err)
+	err := runInstallUpgrade(cmd)
+	if err == nil || !strings.Contains(err.Error(), "refusing binary promotion") {
+		t.Fatalf("partial stop failure error = %v, want promotion refusal", err)
 	}
 	stderrStr := stderr.String()
 	if !strings.Contains(stderrStr, "⚠ stop mcp-local-hub-stuck-default") {
@@ -301,6 +304,85 @@ func TestRunInstallUpgrade_StopPerTaskErrorsAreSurfacedButNotFatal(t *testing.T)
 	stdoutStr := stdout.String()
 	if !strings.Contains(stdoutStr, "✓ stopped mcp-local-hub-time-default") {
 		t.Errorf("stdout should still report the successful stop; got %q", stdoutStr)
+	}
+	if bootstrapCalled {
+		t.Fatal("binary copy ran after an unproven task stop")
+	}
+	if got, want := strings.Join(recovered, ","), "mcp-local-hub-time-default"; got != want {
+		t.Fatalf("recovered tasks = %q, want %q", got, want)
+	}
+}
+
+func TestLegacySchedulerUpgrade_StopPerTaskErrorAbortsBeforeCopyAndRecoversStoppedTasks(t *testing.T) {
+	resetUpgradeSeams(t)
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		return []api.RestartResult{
+			{TaskName: "mcp-local-hub-stuck-default", Err: "access denied"},
+			{TaskName: "mcp-local-hub-time-default"},
+		}, nil
+	}
+	bootstrapCalled := false
+	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
+	var recovered []string
+	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
+		recovered = append([]string(nil), tasks...)
+		return []api.RestartResult{{TaskName: "mcp-local-hub-time-default"}}, nil
+	}
+
+	cmd, _, _ := stubCmd()
+	err := runLegacySchedulerUpgradeMigration(cmd, legacyUpgradeProbe{
+		servers:     []string{"time"},
+		legacyTasks: []string{"mcp-local-hub-stuck-default", "mcp-local-hub-time-default"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "refusing binary promotion") {
+		t.Fatalf("partial stop failure error = %v, want promotion refusal", err)
+	}
+	if bootstrapCalled {
+		t.Fatal("binary copy ran after an unproven legacy task stop")
+	}
+	if got, want := strings.Join(recovered, ","), "mcp-local-hub-time-default"; got != want {
+		t.Fatalf("recovered tasks = %q, want %q", got, want)
+	}
+}
+
+func TestRunInstallUpgrade_MixedPartialStopRecoversSupervisorOwnerWithoutSchedulerRun(t *testing.T) {
+	resetUpgradeSeams(t)
+	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
+	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
+	upgradeStopAllFn = func() ([]api.RestartResult, error) {
+		return []api.RestartResult{
+			{TaskName: `\mcp-local-hub-time-default`},
+			{TaskName: `\mcp-local-hub-legacy-default`, Err: "access denied"},
+		}, nil
+	}
+	bootstrapCalled := false
+	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
+	supervisorRecoveryCalled := false
+	upgradeRestartSupervisorTasksFn = func(tasks []string) ([]api.RestartResult, []string, error) {
+		supervisorRecoveryCalled = true
+		return []api.RestartResult{{TaskName: `\mcp-local-hub-time-default`}}, []string{`\mcp-local-hub-time-default`}, nil
+	}
+	var schedulerRecovery []string
+	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
+		schedulerRecovery = append([]string(nil), tasks...)
+		return nil, nil
+	}
+
+	cmd, _, _ := stubCmd()
+	err := runInstallUpgrade(cmd)
+	if err == nil || !strings.Contains(err.Error(), "access denied") {
+		t.Fatalf("mixed partial stop error = %v, want original task failure", err)
+	}
+	if bootstrapCalled {
+		t.Fatal("binary copy ran after a mixed partial stop")
+	}
+	if !supervisorRecoveryCalled {
+		t.Fatal("supervisor-owned successful stop was not recovered through supervisor owner")
+	}
+	if len(schedulerRecovery) != 0 {
+		t.Fatalf("scheduler recovery received supervisor-owned task(s): %v", schedulerRecovery)
 	}
 }
 

@@ -879,11 +879,12 @@ func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
 // nil → fall through to the real implementations (a.StopAll, Bootstrap,
 // a.RestartAll). Tests assign fakes inside the test setup.
 var (
-	upgradeStopAllFn       func() ([]api.RestartResult, error)
-	upgradeBootstrapFn     func(io.Writer) error
-	upgradeRestartAllFn    func() ([]api.RestartResult, error)
-	upgradeRestartTasksFn  func([]string) ([]api.RestartResult, error)
-	upgradeInstallServerFn func(server string, w io.Writer) error
+	upgradeStopAllFn                func() ([]api.RestartResult, error)
+	upgradeBootstrapFn              func(io.Writer) error
+	upgradeRestartAllFn             func() ([]api.RestartResult, error)
+	upgradeRestartTasksFn           func([]string) ([]api.RestartResult, error)
+	upgradeRestartSupervisorTasksFn func([]string) ([]api.RestartResult, []string, error)
+	upgradeInstallServerFn          func(server string, w io.Writer) error
 	// upgradeExecutableFn / upgradeTargetPathFn carry the canonical-
 	// path comparison for the self-replace guard. Tests inject any
 	// path pair to drive the refusal branch without filesystem state.
@@ -1006,15 +1007,15 @@ func runInstallUpgrade(cmd *cobra.Command) error {
 	// 2. Stop all daemons (release the binary lock).
 	fmt.Fprintln(out, "Stopping running daemons...")
 	stopResults, err := upgradeStopAll(a)
-	if err != nil {
-		return fmt.Errorf("stop all: %w", err)
-	}
 	for _, r := range stopResults {
 		if r.Err != "" {
 			fmt.Fprintf(errOut, "⚠ stop %s: %s\n", r.TaskName, r.Err)
 		} else {
 			fmt.Fprintf(out, "✓ stopped %s\n", r.TaskName)
 		}
+	}
+	if stopErr := settleUpgradeStopPhase(stopResults, err); stopErr != nil {
+		return fmt.Errorf("stop all: %w", stopErr)
 	}
 
 	// 3. Copy the new binary into the canonical path.
@@ -1422,6 +1423,75 @@ func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
 	return results, nil
 }
 
+func upgradeRestartSupervisorTasks(taskNames []string) ([]api.RestartResult, []string, error) {
+	if upgradeRestartSupervisorTasksFn != nil {
+		return upgradeRestartSupervisorTasksFn(taskNames)
+	}
+	return api.NewAPI().RestartSupervisorOwnedTasksExact(context.Background(), taskNames)
+}
+
+// settleUpgradeStopPhase makes the scheduler-backed upgrade routes fail closed
+// before binary promotion. A per-task stop error means the canonical PE lock or
+// daemon port is still owned, so copying a successor would create a mixed fleet.
+// Tasks proven stopped are restarted before the original stop failure returns.
+func settleUpgradeStopPhase(results []api.RestartResult, stopErr error) error {
+	failed := make([]string, 0)
+	stopped := make([]string, 0, len(results))
+	for _, result := range results {
+		name := strings.TrimSpace(result.TaskName)
+		if result.Err != "" {
+			failed = append(failed, fmt.Sprintf("%s: %s", name, result.Err))
+			continue
+		}
+		if name != "" {
+			stopped = append(stopped, name)
+		}
+	}
+	if stopErr == nil && len(failed) == 0 {
+		return nil
+	}
+
+	supervisorResults, handled, supervisorErr := upgradeRestartSupervisorTasks(stopped)
+	handledSet := make(map[string]struct{}, len(handled))
+	for _, name := range handled {
+		handledSet[strings.TrimPrefix(strings.TrimSpace(name), `\`)] = struct{}{}
+	}
+	legacyStopped := make([]string, 0, len(stopped))
+	if supervisorErr == nil {
+		for _, name := range stopped {
+			if _, ok := handledSet[strings.TrimPrefix(name, `\`)]; !ok {
+				legacyStopped = append(legacyStopped, name)
+			}
+		}
+	}
+	recoveryResults := append([]api.RestartResult(nil), supervisorResults...)
+	legacyResults, recoveryErr := upgradeRestartTasks(legacyStopped)
+	recoveryResults = append(recoveryResults, legacyResults...)
+	recoveryFailures := make([]string, 0)
+	for _, result := range recoveryResults {
+		if result.Err != "" {
+			recoveryFailures = append(recoveryFailures, fmt.Sprintf("%s: %s", result.TaskName, result.Err))
+		}
+	}
+	parts := []string{"refusing binary promotion because one or more scheduler tasks did not stop"}
+	if stopErr != nil {
+		parts = append(parts, "stop error: "+stopErr.Error())
+	}
+	if len(failed) > 0 {
+		parts = append(parts, "task failures: "+strings.Join(failed, "; "))
+	}
+	if recoveryErr != nil {
+		parts = append(parts, "recovery restart error: "+recoveryErr.Error())
+	}
+	if supervisorErr != nil {
+		parts = append(parts, "supervisor recovery classification error: "+supervisorErr.Error())
+	}
+	if len(recoveryFailures) > 0 {
+		parts = append(parts, "recovery task failures: "+strings.Join(recoveryFailures, "; "))
+	}
+	return errors.New(strings.Join(parts, "; "))
+}
+
 // upgradeServerInstallFn is a narrow test seam ONE level below
 // upgradeInstallServerFn: it intercepts the api.InstallOpts the production
 // upgradeInstallServer body constructs, so a test can assert the call site
@@ -1732,15 +1802,15 @@ func runLegacySchedulerUpgradeMigration(cmd *cobra.Command, probe legacyUpgradeP
 	// supervisor intent.
 	fmt.Fprintln(out, "Stopping legacy scheduler daemons...")
 	stopResults, err := upgradeStopAll(a)
-	if err != nil {
-		return fmt.Errorf("stop legacy scheduler daemons: %w", err)
-	}
 	for _, r := range stopResults {
 		if r.Err != "" {
 			fmt.Fprintf(errOut, "⚠ stop %s: %s\n", r.TaskName, r.Err)
 		} else {
 			fmt.Fprintf(out, "✓ stopped %s\n", r.TaskName)
 		}
+	}
+	if stopErr := settleUpgradeStopPhase(stopResults, err); stopErr != nil {
+		return fmt.Errorf("stop legacy scheduler daemons: %w", stopErr)
 	}
 
 	fmt.Fprintln(out, "Copying new binary...")
