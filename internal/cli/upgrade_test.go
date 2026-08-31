@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"strings"
 	"testing"
 
@@ -37,17 +36,7 @@ func TestUpgradeCmd_Registered(t *testing.T) {
 	}
 }
 
-// TestUpgradeCmd_RoutesThroughDispatchUpgrade is the FIX 1 (bot r33 P2,
-// PR #288) falsifying regression. The top-level `mcphub upgrade` alias MUST
-// route through the SAME machine-state dispatcher (dispatchUpgrade) the
-// `install --upgrade` flag uses — NOT call the legacy runInstallUpgrade body
-// directly.
-//
-// Pre-fix the alias's RunE was `return runInstallUpgrade(cmd)`, which bypasses
-// the dispatcher: on a v0.5+ host with daemon rows it ran the legacy
-// stop/copy/restart path instead of the supervisor rename-aside + IPC handoff.
-// With the seam injected, a pre-fix alias would never fire upgradeDispatcher;
-// this assertion catches that divergence.
+// The top-level alias and install flag share the one upgrade dispatcher.
 func TestUpgradeCmd_RoutesThroughDispatchUpgrade(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
@@ -145,13 +134,6 @@ func TestUpgradeCmd_FreshHostAliasFailsClosedWithoutMutation(t *testing.T) {
 
 	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
 	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
-	mutated := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		mutated = true
-		return nil, nil
-	}
-	upgradeBootstrapFn = func(io.Writer) error { mutated = true; return nil }
-
 	rootCmd := NewRootCmd()
 	rootCmd.SetArgs([]string{"upgrade"})
 	rootCmd.SetOut(&bytes.Buffer{})
@@ -162,8 +144,5 @@ func TestUpgradeCmd_FreshHostAliasFailsClosedWithoutMutation(t *testing.T) {
 	err := rootCmd.Execute()
 	if err == nil || !strings.Contains(err.Error(), upgradeRequiresManagedSupervisorID) {
 		t.Fatalf("upgrade alias error = %v", err)
-	}
-	if mutated {
-		t.Fatal("fresh-host alias mutated before fail-closed result")
 	}
 }

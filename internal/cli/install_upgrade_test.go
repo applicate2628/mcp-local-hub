@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,34 +23,16 @@ import (
 // test scope.
 func resetUpgradeSeams(t *testing.T) {
 	t.Helper()
-	origStop := upgradeStopAllFn
-	origBoot := upgradeBootstrapFn
-	origRestart := upgradeRestartAllFn
-	origRestartTasks := upgradeRestartTasksFn
-	origRestartSupervisorTasks := upgradeRestartSupervisorTasksFn
-	origInstall := upgradeInstallServerFn
 	origExec := upgradeExecutableFn
 	origTarget := upgradeTargetPathFn
 	origFindGUI := findRunningGUIsOnTargetFn
 	origVersion := upgradeBuildVersionFn
 	t.Cleanup(func() {
-		upgradeStopAllFn = origStop
-		upgradeBootstrapFn = origBoot
-		upgradeRestartAllFn = origRestart
-		upgradeRestartTasksFn = origRestartTasks
-		upgradeRestartSupervisorTasksFn = origRestartSupervisorTasks
-		upgradeInstallServerFn = origInstall
 		upgradeExecutableFn = origExec
 		upgradeTargetPathFn = origTarget
 		findRunningGUIsOnTargetFn = origFindGUI
 		upgradeBuildVersionFn = origVersion
 	})
-	upgradeStopAllFn = nil
-	upgradeBootstrapFn = nil
-	upgradeRestartAllFn = nil
-	upgradeRestartTasksFn = nil
-	upgradeRestartSupervisorTasksFn = nil
-	upgradeInstallServerFn = nil
 	upgradeExecutableFn = nil
 	upgradeTargetPathFn = nil
 	// Default the dev-build guard seam to a valid semver so existing
@@ -79,391 +60,8 @@ func windowsFixturePath(drive string, segments ...string) string {
 	return drive + ":" + "\\" + strings.Join(segments, "\\")
 }
 
-func upgradeFixtureExecutable() string {
-	return windowsFixturePath("C", "dev", "mcphub.exe")
-}
-
 func upgradeFixtureTarget() string {
 	return windowsFixturePath("C", "Users", "u", ".local", "bin", "mcphub.exe")
-}
-
-// TestRunInstallUpgrade_HappyPath pins the StopAll → Bootstrap →
-// RestartAll order and verifies the success-line output.
-func TestRunInstallUpgrade_HappyPath(t *testing.T) {
-	resetUpgradeSeams(t)
-
-	var order []string
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		order = append(order, "stop")
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-time-default"},
-			{TaskName: "mcp-local-hub-godbolt-default"},
-		}, nil
-	}
-	upgradeBootstrapFn = func(w io.Writer) error {
-		order = append(order, "bootstrap")
-		_, _ = io.WriteString(w, "✓ mcphub installed at "+upgradeFixtureTarget()+"\n")
-		return nil
-	}
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		order = append(order, "restart")
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-time-default"},
-			{TaskName: "mcp-local-hub-godbolt-default"},
-		}, nil
-	}
-
-	cmd, stdout, stderr := stubCmd()
-	if err := runInstallUpgrade(cmd); err != nil {
-		t.Fatalf("runInstallUpgrade: unexpected error %v (stderr=%q)", err, stderr.String())
-	}
-	wantOrder := []string{"stop", "bootstrap", "restart"}
-	if len(order) != len(wantOrder) {
-		t.Fatalf("order = %v, want %v", order, wantOrder)
-	}
-	for i, step := range wantOrder {
-		if order[i] != step {
-			t.Errorf("order[%d] = %q, want %q", i, order[i], step)
-		}
-	}
-	out := stdout.String()
-	for _, want := range []string{
-		"Stopping running daemons",
-		"✓ stopped mcp-local-hub-time-default",
-		"✓ stopped mcp-local-hub-godbolt-default",
-		"Copying new binary",
-		"Restarting daemons",
-		"✓ restarted mcp-local-hub-time-default",
-		"✓ restarted mcp-local-hub-godbolt-default",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("stdout missing %q\nfull stdout:\n%s", want, out)
-		}
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr should be empty on happy path; got %q", stderr.String())
-	}
-}
-
-// TestRunInstallUpgrade_RefusesSelfReplace pins the canonical-path
-// guard. Running --upgrade from the canonical binary must refuse
-// loudly with an actionable hint, NOT proceed and silently no-op.
-func TestRunInstallUpgrade_RefusesSelfReplace(t *testing.T) {
-	resetUpgradeSeams(t)
-
-	canonical := upgradeFixtureTarget()
-	upgradeExecutableFn = func() (string, error) { return canonical, nil }
-	upgradeTargetPathFn = func() (string, error) { return canonical, nil }
-	// Should NOT reach Stop/Bootstrap/Restart — leave them unstubbed
-	// (production nil → would call real APIs, which would mutate
-	// state if reached).
-	stopCalled := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		stopCalled = true
-		return nil, nil
-	}
-
-	cmd, stdout, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil {
-		t.Fatal("runInstallUpgrade: want error on self-replace, got nil")
-	}
-	if !strings.Contains(err.Error(), "refusing to --upgrade from the canonical binary") {
-		t.Errorf("error message missing self-replace marker; got %q", err.Error())
-	}
-	if !strings.Contains(err.Error(), canonical) {
-		t.Errorf("error message should name the canonical path; got %q", err.Error())
-	}
-	if !strings.Contains(err.Error(), "pwsh ./build.ps1") {
-		t.Errorf("error message should hint at `pwsh ./build.ps1` recovery; got %q", err.Error())
-	}
-	if stopCalled {
-		t.Errorf("StopAll must NOT be called when self-replace guard fires")
-	}
-	if stdout.Len() != 0 {
-		t.Errorf("stdout should be empty on self-replace refusal; got %q", stdout.String())
-	}
-}
-
-// TestRunInstallUpgrade_RefusesSelfReplaceCaseInsensitive pins that
-// the samePath helper's Windows case-insensitive semantics are
-// preserved through the guard — running upgrade with a path differing
-// only in casing must still trip the guard.
-//
-// Bot r1 P1 closure on PR #181: stub the downstream Stop/Bootstrap/
-// Restart calls so this test deterministically validates the Windows
-// case-insensitive branch on every platform, instead of accidentally
-// invoking the platform scheduler stub on Linux/macOS (where samePath
-// is case-sensitive and the guard does NOT fire) and failing with
-// "scheduler not implemented".
-func TestRunInstallUpgrade_RefusesSelfReplaceCaseInsensitive(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) {
-		return strings.Replace(upgradeFixtureTarget(), "mcphub.exe", "MCPHUB.exe", 1), nil
-	}
-	upgradeTargetPathFn = func() (string, error) {
-		return upgradeFixtureTarget(), nil
-	}
-	// Stub downstream so even if the guard doesn't fire (case-
-	// sensitive POSIX samePath), the test gets a deterministic
-	// success-path no-op rather than a platform-specific scheduler
-	// error.
-	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
-	upgradeBootstrapFn = func(io.Writer) error { return nil }
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	// Windows: guard fires → wrapped refusal error.
-	// POSIX: guard does NOT fire (case-sensitive samePath) → stubs
-	// produce a clean nil return.
-	// EITHER outcome is acceptable; what we forbid is the previous
-	// failure mode where the guard didn't fire AND production
-	// downstream code ran and returned a platform stub error.
-	if err == nil {
-		return // POSIX path: guard correctly did NOT fire
-	}
-	if !strings.Contains(err.Error(), "refusing to --upgrade from the canonical binary") {
-		t.Errorf("error neither nil nor the guard refusal; downstream stubs leaked through? got %q", err.Error())
-	}
-}
-
-// TestRunInstallUpgrade_StopAllError surfaces the error verbatim
-// and does NOT proceed to Bootstrap/Restart. The binary must be
-// left untouched when the stop phase couldn't even enumerate tasks.
-func TestRunInstallUpgrade_StopAllError(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		return nil, errors.New("scheduler.New: COM init failed")
-	}
-	bootstrapCalled := false
-	upgradeBootstrapFn = func(io.Writer) error {
-		bootstrapCalled = true
-		return nil
-	}
-	restartCalled := false
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		restartCalled = true
-		return nil, nil
-	}
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil || !strings.Contains(err.Error(), "stop all:") {
-		t.Errorf("want wrapped stop error, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "COM init failed") {
-		t.Errorf("error should preserve underlying message; got %v", err)
-	}
-	if bootstrapCalled {
-		t.Errorf("Bootstrap must NOT be called after StopAll error")
-	}
-	if restartCalled {
-		t.Errorf("RestartAll must NOT be called after StopAll error")
-	}
-}
-
-// TestRunInstallUpgrade_StopPerTaskErrorAbortsBeforeCopyAndRecoversStoppedTasks
-// pins the upgrade transaction boundary: a task that failed to stop may still
-// hold the canonical PE or its daemon port, so copy/promotion is forbidden.
-// Tasks that did stop are restarted before the command returns the failure.
-func TestRunInstallUpgrade_StopPerTaskErrorAbortsBeforeCopyAndRecoversStoppedTasks(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-stuck-default", Err: "kill daemon: taskkill /F failed: access denied"},
-			{TaskName: "mcp-local-hub-time-default"},
-		}, nil
-	}
-	bootstrapCalled := false
-	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
-	var recovered []string
-	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
-		recovered = append([]string(nil), tasks...)
-		return []api.RestartResult{{TaskName: "mcp-local-hub-time-default"}}, nil
-	}
-
-	cmd, stdout, stderr := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil || !strings.Contains(err.Error(), "refusing binary promotion") {
-		t.Fatalf("partial stop failure error = %v, want promotion refusal", err)
-	}
-	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "⚠ stop mcp-local-hub-stuck-default") {
-		t.Errorf("stderr should surface stop failure; got %q", stderrStr)
-	}
-	if !strings.Contains(stderrStr, "access denied") {
-		t.Errorf("stderr should preserve underlying error; got %q", stderrStr)
-	}
-	stdoutStr := stdout.String()
-	if !strings.Contains(stdoutStr, "✓ stopped mcp-local-hub-time-default") {
-		t.Errorf("stdout should still report the successful stop; got %q", stdoutStr)
-	}
-	if bootstrapCalled {
-		t.Fatal("binary copy ran after an unproven task stop")
-	}
-	if got, want := strings.Join(recovered, ","), "mcp-local-hub-time-default"; got != want {
-		t.Fatalf("recovered tasks = %q, want %q", got, want)
-	}
-}
-
-func TestLegacySchedulerUpgrade_StopPerTaskErrorAbortsBeforeCopyAndRecoversStoppedTasks(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-stuck-default", Err: "access denied"},
-			{TaskName: "mcp-local-hub-time-default"},
-		}, nil
-	}
-	bootstrapCalled := false
-	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
-	var recovered []string
-	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
-		recovered = append([]string(nil), tasks...)
-		return []api.RestartResult{{TaskName: "mcp-local-hub-time-default"}}, nil
-	}
-
-	cmd, _, _ := stubCmd()
-	err := runLegacySchedulerUpgradeMigration(cmd, legacyUpgradeProbe{
-		servers:     []string{"time"},
-		legacyTasks: []string{"mcp-local-hub-stuck-default", "mcp-local-hub-time-default"},
-	})
-	if err == nil || !strings.Contains(err.Error(), "refusing binary promotion") {
-		t.Fatalf("partial stop failure error = %v, want promotion refusal", err)
-	}
-	if bootstrapCalled {
-		t.Fatal("binary copy ran after an unproven legacy task stop")
-	}
-	if got, want := strings.Join(recovered, ","), "mcp-local-hub-time-default"; got != want {
-		t.Fatalf("recovered tasks = %q, want %q", got, want)
-	}
-}
-
-func TestRunInstallUpgrade_MixedPartialStopRecoversSupervisorOwnerWithoutSchedulerRun(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: `\mcp-local-hub-time-default`},
-			{TaskName: `\mcp-local-hub-legacy-default`, Err: "access denied"},
-		}, nil
-	}
-	bootstrapCalled := false
-	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
-	supervisorRecoveryCalled := false
-	upgradeRestartSupervisorTasksFn = func(tasks []string) ([]api.RestartResult, []string, []string, error) {
-		supervisorRecoveryCalled = true
-		return []api.RestartResult{{TaskName: `\mcp-local-hub-time-default`}}, []string{`\mcp-local-hub-time-default`}, nil, nil
-	}
-	var schedulerRecovery []string
-	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
-		schedulerRecovery = append([]string(nil), tasks...)
-		return nil, nil
-	}
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil || !strings.Contains(err.Error(), "access denied") {
-		t.Fatalf("mixed partial stop error = %v, want original task failure", err)
-	}
-	if bootstrapCalled {
-		t.Fatal("binary copy ran after a mixed partial stop")
-	}
-	if !supervisorRecoveryCalled {
-		t.Fatal("supervisor-owned successful stop was not recovered through supervisor owner")
-	}
-	if len(schedulerRecovery) != 0 {
-		t.Fatalf("scheduler recovery received supervisor-owned task(s): %v", schedulerRecovery)
-	}
-}
-
-func TestRunInstallUpgrade_PartialClassificationStillRecoversKnownOwners(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: `\mcp-local-hub-time-default`},
-			{TaskName: `\mcp-local-hub-legacy-default`},
-			{TaskName: `\mcp-local-hub-unknown-default`},
-			{TaskName: `\mcp-local-hub-failed-default`, Err: "access denied"},
-		}, nil
-	}
-	upgradeRestartSupervisorTasksFn = func([]string) ([]api.RestartResult, []string, []string, error) {
-		return []api.RestartResult{{TaskName: `\mcp-local-hub-time-default`}},
-			[]string{`\mcp-local-hub-time-default`},
-			[]string{`\mcp-local-hub-unknown-default`}, errors.New("one ownership row unreadable")
-	}
-	var schedulerRecovery []string
-	upgradeRestartTasksFn = func(tasks []string) ([]api.RestartResult, error) {
-		schedulerRecovery = append([]string(nil), tasks...)
-		return []api.RestartResult{{TaskName: `\mcp-local-hub-legacy-default`}}, nil
-	}
-	bootstrapCalled := false
-	upgradeBootstrapFn = func(io.Writer) error { bootstrapCalled = true; return nil }
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil || !strings.Contains(err.Error(), "unresolved recovery ownership") || !strings.Contains(err.Error(), "mcp-local-hub-unknown-default") {
-		t.Fatalf("error = %v", err)
-	}
-	if bootstrapCalled {
-		t.Fatal("promotion continued after partial ownership classification")
-	}
-	if got, want := strings.Join(schedulerRecovery, ","), `\mcp-local-hub-legacy-default`; got != want {
-		t.Fatalf("scheduler recovery = %q, want known legacy %q", got, want)
-	}
-}
-
-// TestRunInstallUpgrade_BootstrapError surfaces the wrapped error
-// and skips RestartAll. After a Bootstrap failure the binary is in
-// an undefined state (either old or partial-temp) — restarting
-// daemons would lock in whichever transient state landed; bail.
-//
-// Bot r3 P2 closure on PR #181: the error must carry upgrade-
-// specific recovery guidance (NOT the underlying copyExe hint of
-// "re-run setup", which would not restart daemons in --upgrade
-// context). Verify both the bootstrap marker and the recovery hint.
-func TestRunInstallUpgrade_BootstrapError(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
-	upgradeBootstrapFn = func(io.Writer) error {
-		return fmt.Errorf("target is in use — stop running daemons first")
-	}
-	restartCalled := false
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		restartCalled = true
-		return nil, nil
-	}
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil || !strings.Contains(err.Error(), "bootstrap (binary copy) failed") {
-		t.Errorf("want wrapped bootstrap error, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "target is in use") {
-		t.Errorf("error should preserve underlying message; got %v", err)
-	}
-	if !strings.Contains(err.Error(), "mcphub install --upgrade") {
-		t.Errorf("error should hint at re-running --upgrade; got %v", err)
-	}
-	if !strings.Contains(err.Error(), "mcphub restart --all") {
-		t.Errorf("error should hint at restart --all; got %v", err)
-	}
-	if restartCalled {
-		t.Errorf("RestartAll must NOT run after Bootstrap failure")
-	}
 }
 
 // TestUpgradeIsSelfReplace pins the self-replace identity check
@@ -528,220 +126,6 @@ func TestUpgradeIsSelfReplace(t *testing.T) {
 	})
 }
 
-// TestRunInstallUpgrade_RestartAllPartialFailure reports the count
-// and tells the operator how to converge (`mcphub restart --all`).
-func TestRunInstallUpgrade_RestartAllPartialFailure(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-time-default"},
-			{TaskName: "mcp-local-hub-godbolt-default"},
-		}, nil
-	}
-	upgradeBootstrapFn = func(io.Writer) error { return nil }
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		return []api.RestartResult{
-			{TaskName: "mcp-local-hub-time-default"},
-			{TaskName: "mcp-local-hub-godbolt-default", Err: "schtasks /Run: ERROR_FILE_NOT_FOUND"},
-		}, nil
-	}
-
-	cmd, _, stderr := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil {
-		t.Fatal("partial restart failure should propagate as error")
-	}
-	if !strings.Contains(err.Error(), "1 daemon(s) failed to restart") {
-		t.Errorf("error should name the failure count; got %v", err)
-	}
-	if !strings.Contains(err.Error(), "mcphub restart --all") {
-		t.Errorf("error should hint at the recovery command; got %v", err)
-	}
-	stderrStr := stderr.String()
-	if !strings.Contains(stderrStr, "✗ restart mcp-local-hub-godbolt-default") {
-		t.Errorf("stderr should surface per-task restart failure; got %q", stderrStr)
-	}
-	if !strings.Contains(stderrStr, "ERROR_FILE_NOT_FOUND") {
-		t.Errorf("stderr should preserve underlying error; got %q", stderrStr)
-	}
-}
-
-// TestRunInstallUpgrade_ExecutableLookupError surfaces the wrapped
-// error rather than papering over it (production rare but possible
-// on hostile filesystems).
-func TestRunInstallUpgrade_ExecutableLookupError(t *testing.T) {
-	resetUpgradeSeams(t)
-	upgradeExecutableFn = func() (string, error) { return "", errors.New("/proc/self/exe: no such file or directory") }
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil || !strings.Contains(err.Error(), "resolve self-replace guard paths:") {
-		t.Errorf("want wrapped self-resolution error, got %v", err)
-	}
-	if !strings.Contains(err.Error(), "/proc/self/exe") {
-		t.Errorf("error should preserve underlying message; got %v", err)
-	}
-}
-
-// TestRunInstallUpgrade_RefusesDevBuild pins the PR #188 A8 closure
-// (dev-build guard). A binary built without the build scripts'
-// ldflags shows version=="dev" and cannot satisfy the Windows product
-// binary PE subsystem admission gate —
-// installing it would re-introduce the terminal-flash + tray-broken
-// regression caught in the 2026-05-15 smoke session. The guard runs
-// AFTER self-replace check (so a self-replace error wins) but
-// BEFORE StopAll (so daemons aren't stopped uselessly).
-//
-// Codex bot r5 P2 closure: scoped to Windows only. The PE subsystem
-// admission gate is Windows-specific, and POSIX devs commonly
-// run untagged `go build` binaries. Test is gated on
-// runtime.GOOS == "windows"; on POSIX the same setup proceeds to
-// happy-path execution (TestRunInstallUpgrade_AllowsDevBuildOnPOSIX
-// pins that path).
-func TestRunInstallUpgrade_RefusesDevBuild(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("dev-build refusal is Windows-only; see TestRunInstallUpgrade_AllowsDevBuildOnPOSIX for the POSIX path")
-	}
-	resetUpgradeSeams(t)
-
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	upgradeBuildVersionFn = func() string { return "dev" }
-	stopCalled := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		stopCalled = true
-		return nil, nil
-	}
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil {
-		t.Fatal("want dev-build refusal, got nil")
-	}
-	for _, want := range []string{
-		"refusing to --upgrade from a dev-build binary",
-		`version="dev"`,
-		"pwsh ./build.ps1",
-		"PE subsystem admission gate",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error must contain %q for operator clarity; got %q", want, err.Error())
-		}
-	}
-	if stopCalled {
-		t.Errorf("StopAll must NOT be called when dev-build guard fires; would stop daemons for no reason")
-	}
-}
-
-// TestRunInstallUpgrade_AllowsDevBuildOnPOSIX pins codex bot r5 P2:
-// the dev-build guard is Windows-only because the PE subsystem admission
-// gate doesn't exist on POSIX. A POSIX dev-build (version=="dev")
-// must proceed through the normal flow.
-func TestRunInstallUpgrade_AllowsDevBuildOnPOSIX(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX-only: Windows path is exercised by TestRunInstallUpgrade_RefusesDevBuild")
-	}
-	resetUpgradeSeams(t)
-
-	binaryPath := filepath.Join(t.TempDir(), "mcphub")
-	targetPath := filepath.Join(t.TempDir(), "mcphub")
-	upgradeExecutableFn = func() (string, error) { return binaryPath, nil }
-	upgradeTargetPathFn = func() (string, error) { return targetPath, nil }
-	upgradeBuildVersionFn = func() string { return "dev" }
-	bootstrapCalled := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) { return nil, nil }
-	upgradeBootstrapFn = func(w io.Writer) error { bootstrapCalled = true; return nil }
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
-
-	cmd, _, _ := stubCmd()
-	if err := runInstallUpgrade(cmd); err != nil {
-		t.Fatalf("POSIX dev-build should proceed: %v", err)
-	}
-	if !bootstrapCalled {
-		t.Errorf("Bootstrap should run on POSIX dev-build path")
-	}
-}
-
-// TestRunInstallUpgrade_RefusesIfGUIRunning pins the running-GUI
-// guard: if a `mcphub.exe gui` process is found whose image path
-// equals the install target, --upgrade refuses BEFORE StopAll runs.
-// This prevents the 2026-05-15 footgun where StopAll succeeded but
-// Bootstrap then failed with "target in use", leaving the daemon
-// fleet down.
-func TestRunInstallUpgrade_RefusesIfGUIRunning(t *testing.T) {
-	resetUpgradeSeams(t)
-
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
-		return []api.ProcessInfo{
-			{PID: 12345, Cmdline: `"` + upgradeFixtureTarget() + `" gui --no-browser`},
-		}, nil
-	}
-	stopCalled := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		stopCalled = true
-		return nil, nil
-	}
-
-	cmd, _, _ := stubCmd()
-	err := runInstallUpgrade(cmd)
-	if err == nil {
-		t.Fatal("want running-GUI refusal, got nil")
-	}
-	for _, want := range []string{
-		"refusing to --upgrade with a running mcphub GUI",
-		"12345",
-		"Stop-Process",
-		"tray menu",
-	} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error must contain %q; got %q", want, err.Error())
-		}
-	}
-	if stopCalled {
-		t.Errorf("StopAll must NOT be called when GUI is running; would leave daemons down on Bootstrap failure")
-	}
-}
-
-// TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort pins that a
-// wmic failure during GUI detection does NOT abort the upgrade —
-// the detection is informational, and Bootstrap itself will still
-// catch a real "target in use" if the GUI is actually running. A
-// wmic outage on a hardened CI/locked-down host should not block
-// the upgrade flow.
-func TestRunInstallUpgrade_GUIDetectionErrorIsBestEffort(t *testing.T) {
-	resetUpgradeSeams(t)
-
-	upgradeExecutableFn = func() (string, error) { return upgradeFixtureExecutable(), nil }
-	upgradeTargetPathFn = func() (string, error) { return upgradeFixtureTarget(), nil }
-	findRunningGUIsOnTargetFn = func(target string) ([]api.ProcessInfo, error) {
-		return nil, errors.New("wmic: process not found")
-	}
-	stopCalled := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		stopCalled = true
-		return nil, nil
-	}
-	upgradeBootstrapFn = func(w io.Writer) error { return nil }
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) { return nil, nil }
-
-	cmd, _, stderr := stubCmd()
-	if err := runInstallUpgrade(cmd); err != nil {
-		t.Fatalf("upgrade should proceed despite GUI detection error: %v", err)
-	}
-	if !stopCalled {
-		t.Errorf("StopAll should still run when GUI detection fails (best-effort)")
-	}
-	if !strings.Contains(stderr.String(), "GUI detection failed") {
-		t.Errorf("stderr should warn about GUI detection failure; got %q", stderr.String())
-	}
-}
-
-// TestCmdlineIsGUIOnTarget pins the helper that parses wmic
-// CommandLine strings into (image, args) and matches against the
-// install target.
 func TestCmdlineIsGUIOnTarget(t *testing.T) {
 	target := upgradeFixtureTarget()
 	quotedTarget := `"` + target + `"`
@@ -1392,6 +776,35 @@ func TestInstallUpgrade_PriorAdmissionFailsBeforeFleetMutation(t *testing.T) {
 	}
 }
 
+func TestInstallUpgrade_PriorDriftBeforePromotionRefusesRenameAndRecoversReadiness(t *testing.T) {
+	mock := &fakeUpgradeDeps{
+		quiesceResult: api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:    api.IPCResponse{Final: true},
+	}
+	priorSHA := strings.Repeat("p", 64)
+	readyCalls := 0
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: mock,
+		AdmitPrior: func(string) (string, error) { return priorSHA, nil },
+		VerifyPrior: func(string, string) error {
+			return errors.New("prior SHA drift")
+		},
+		WaitSupervisorReady: func(context.Context, time.Duration, string, UpgradeCandidateV1) error {
+			readyCalls++
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "prior canonical drifted") || !strings.Contains(err.Error(), "prior supervisor recovery completed") {
+		t.Fatalf("error = %v", err)
+	}
+	if mock.renameAsideCalled {
+		t.Fatal("prior drift reached rename promotion")
+	}
+	if !mock.startCalled || readyCalls != 1 {
+		t.Fatalf("prior recovery start=%v readiness=%d", mock.startCalled, readyCalls)
+	}
+}
+
 func TestInstallUpgrade_LockReleaseFailureReapsAndRecoversUnpromotedPrior(t *testing.T) {
 	mock := &fakeUpgradeDeps{
 		quiesceResult: api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
@@ -1477,6 +890,24 @@ func TestInstallUpgrade_PostPromotionErrorUsesRollbackNotUnpromotedRecovery(t *t
 	}
 	if readyCalls != 1 {
 		t.Fatalf("prior readiness calls = %d, want 1", readyCalls)
+	}
+}
+
+func TestInstallUpgrade_PromotedWithoutRetainedPriorNeverStartsSuccessor(t *testing.T) {
+	promotion := api.RenameAsideResult{Promoted: true}
+	mock := &fakeUpgradeDeps{
+		promotionResult: &promotion,
+		quiesceResult:   api.IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true},
+		exitResult:      api.IPCResponse{Final: true},
+	}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath: "/fake/mcphub", NewBinary: "/fake/mcphub.new", PipePath: "fake-pipe", Deps: mock,
+	})
+	if err == nil || !strings.Contains(err.Error(), "successor promoted but retained prior path is missing") {
+		t.Fatalf("error = %v", err)
+	}
+	if mock.startCalled || strings.Contains(strings.Join(mock.calls, ","), "restore") {
+		t.Fatalf("promoted-without-retained path attempted unsafe recovery: %v", mock.calls)
 	}
 }
 

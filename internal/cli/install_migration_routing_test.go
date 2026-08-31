@@ -2,7 +2,6 @@ package cli
 
 import (
 	"bytes"
-	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -182,10 +181,6 @@ func TestDispatchUpgradeReal_FreshInstallFailsClosedBeforeMutation(t *testing.T)
 		v5Invoked = true
 		return nil
 	}
-	mutated := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) { mutated = true; return nil, nil }
-	upgradeBootstrapFn = func(io.Writer) error { mutated = true; return nil }
-
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
@@ -196,24 +191,15 @@ func TestDispatchUpgradeReal_FreshInstallFailsClosedBeforeMutation(t *testing.T)
 	if err == nil || !strings.Contains(err.Error(), "UPGRADE_TRANSACTION_REQUIRES_MANAGED_SUPERVISOR") {
 		t.Fatalf("fresh install error = %v", err)
 	}
-	if mutated {
-		t.Fatal("fresh-install upgrade mutated before fail-closed result")
-	}
 }
 
 func TestRunV5UpgradeReal_UnwiredPlatformFailsClosedBeforeMutation(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
-	mutated := false
-	upgradeStopAllFn = func() ([]api.RestartResult, error) { mutated = true; return nil, nil }
-	upgradeBootstrapFn = func(io.Writer) error { mutated = true; return nil }
 	v5UpgradeFn = nil
 	err := runV5UpgradeReal(&cobra.Command{})
 	if err == nil || !strings.Contains(err.Error(), upgradePlatformUnsupportedID) {
 		t.Fatalf("error = %v", err)
-	}
-	if mutated {
-		t.Fatal("unwired platform upgrade mutated before fail-closed result")
 	}
 }
 
@@ -223,37 +209,17 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksFailClosedBeforeMutatio
 
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
+	fakeScheduler := &upgradeRoutingFakeScheduler{
+		tasks: []scheduler.TaskStatus{{Name: `\mcp-local-hub-memory-default`, State: "Running"}},
+	}
 	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {
-		return &upgradeRoutingFakeScheduler{
-			tasks: []scheduler.TaskStatus{{Name: `\mcp-local-hub-memory-default`, State: "Running"}},
-		}, nil
+		return fakeScheduler, nil
 	})
 	t.Cleanup(restoreScheduler)
 	// No supervisor-intent.json seeded, but legacy daemon-shaped scheduler task exists.
 
 	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
 	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
-	var stopped bool
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		stopped = true
-		return []api.RestartResult{{TaskName: `\mcp-local-hub-memory-default`}}, nil
-	}
-	var bootstrapped bool
-	upgradeBootstrapFn = func(io.Writer) error {
-		bootstrapped = true
-		return nil
-	}
-	var restarted bool
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		restarted = true
-		return nil, nil
-	}
-	var installed []string
-	upgradeInstallServerFn = func(server string, w io.Writer) error {
-		installed = append(installed, server)
-		return nil
-	}
-
 	cmd := &cobra.Command{}
 	cmd.SetOut(&bytes.Buffer{})
 	cmd.SetErr(&bytes.Buffer{})
@@ -261,81 +227,11 @@ func TestDispatchUpgradeReal_NoIntentLegacySchedulerTasksFailClosedBeforeMutatio
 	if err == nil || !strings.Contains(err.Error(), "UPGRADE_TRANSACTION_LEGACY_SCHEDULER_UNSUPPORTED") {
 		t.Fatalf("dispatchUpgradeReal error = %v", err)
 	}
-	if stopped || bootstrapped || restarted || len(installed) != 0 {
-		t.Fatalf("legacy fail-closed path mutated: stopped=%v bootstrapped=%v restarted=%v installed=%v", stopped, bootstrapped, restarted, installed)
+	if fakeScheduler.mutationCalls != 0 {
+		t.Fatalf("legacy fail-closed path made %d scheduler mutation calls", fakeScheduler.mutationCalls)
 	}
 }
 
-func TestRunLegacySchedulerUpgradeMigration_RestartsUnmatchedLegacyTasksAfterBinaryCopy(t *testing.T) {
-	resetUpgradeSeams(t)
-
-	upgradeExecutableFn = func() (string, error) { return windowsFixturePath("X", "fixture", "candidate.exe"), nil }
-	upgradeTargetPathFn = func() (string, error) { return windowsFixturePath("X", "fixture", "canonical.exe"), nil }
-
-	var order []string
-	upgradeStopAllFn = func() ([]api.RestartResult, error) {
-		order = append(order, "stop-all")
-		return []api.RestartResult{
-			{TaskName: `\mcp-local-hub-memory-default`},
-			{TaskName: `\mcp-local-hub-lsp-abcd1234-python`},
-		}, nil
-	}
-	upgradeBootstrapFn = func(io.Writer) error {
-		order = append(order, "bootstrap")
-		return nil
-	}
-	upgradeRestartAllFn = func() ([]api.RestartResult, error) {
-		t.Fatal("legacy migration must not call RestartAll; matched legacy tasks are migrated into supervisor intent")
-		return nil, nil
-	}
-	var restarted []string
-	upgradeRestartTasksFn = func(taskNames []string) ([]api.RestartResult, error) {
-		order = append(order, "restart-unmatched")
-		restarted = append(restarted, taskNames...)
-		return []api.RestartResult{{TaskName: taskNames[0]}}, nil
-	}
-	var installed []string
-	upgradeInstallServerFn = func(server string, w io.Writer) error {
-		order = append(order, "install:"+server)
-		installed = append(installed, server)
-		return nil
-	}
-
-	cmd := &cobra.Command{}
-	stdout := &bytes.Buffer{}
-	stderr := &bytes.Buffer{}
-	cmd.SetOut(stdout)
-	cmd.SetErr(stderr)
-	err := runLegacySchedulerUpgradeMigration(cmd, legacyUpgradeProbe{
-		servers:     []string{"memory"},
-		legacyTasks: []string{`mcp-local-hub-lsp-abcd1234-python`, `mcp-local-hub-memory-default`},
-		unmatched:   []string{`mcp-local-hub-lsp-abcd1234-python`},
-	})
-	if err != nil {
-		t.Fatalf("runLegacySchedulerUpgradeMigration: %v", err)
-	}
-	wantOrder := []string{"stop-all", "bootstrap", "restart-unmatched", "install:memory"}
-	if len(order) != len(wantOrder) {
-		t.Fatalf("order = %v, want %v", order, wantOrder)
-	}
-	for i := range wantOrder {
-		if order[i] != wantOrder[i] {
-			t.Fatalf("order = %v, want %v", order, wantOrder)
-		}
-	}
-	if len(restarted) != 1 || restarted[0] != `mcp-local-hub-lsp-abcd1234-python` {
-		t.Fatalf("restarted unmatched tasks = %v, want [mcp-local-hub-lsp-abcd1234-python]", restarted)
-	}
-	if len(installed) != 1 || installed[0] != "memory" {
-		t.Fatalf("installed servers = %v, want [memory]", installed)
-	}
-	if !strings.Contains(stderr.String(), "legacy scheduler tasks without matching shipped manifests were left for manual review") {
-		t.Fatalf("stderr missing unmatched warning; got %q", stderr.String())
-	}
-}
-
-// TestHasSupervisorIntent_AbsentReturnsFalseNoError pins the absent-file
-// contract under the deterministic state-dir override seam.
 func TestHasSupervisorIntent_AbsentReturnsFalseNoError(t *testing.T) {
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
@@ -380,7 +276,7 @@ func TestHasSupervisorIntent_DaemonBearingReturnsTrue(t *testing.T) {
 // silently dropping the existing legacy scheduler tasks.
 //
 // Pre-fix this returned true (mere regular-file presence) → the dispatcher
-// took the v5 path and skipped probeLegacySchedulerUpgradeServers.
+// took the v5 path and skipped probeLegacySchedulerUpgradeTasks.
 func TestHasSupervisorIntent_StopsOnlyReturnsFalse(t *testing.T) {
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
@@ -467,13 +363,14 @@ func TestHasSupervisorIntent_UnreadableReturnsError(t *testing.T) {
 }
 
 type upgradeRoutingFakeScheduler struct {
-	tasks []scheduler.TaskStatus
+	tasks         []scheduler.TaskStatus
+	mutationCalls int
 }
 
-func (f *upgradeRoutingFakeScheduler) Create(scheduler.TaskSpec) error { return nil }
-func (f *upgradeRoutingFakeScheduler) Delete(string) error             { return nil }
-func (f *upgradeRoutingFakeScheduler) Run(string) error                { return nil }
-func (f *upgradeRoutingFakeScheduler) Stop(string) error               { return nil }
+func (f *upgradeRoutingFakeScheduler) Create(scheduler.TaskSpec) error { f.mutationCalls++; return nil }
+func (f *upgradeRoutingFakeScheduler) Delete(string) error             { f.mutationCalls++; return nil }
+func (f *upgradeRoutingFakeScheduler) Run(string) error                { f.mutationCalls++; return nil }
+func (f *upgradeRoutingFakeScheduler) Stop(string) error               { f.mutationCalls++; return nil }
 func (f *upgradeRoutingFakeScheduler) Status(string) (scheduler.TaskStatus, error) {
 	return scheduler.TaskStatus{}, scheduler.ErrTaskNotFound
 }
@@ -490,7 +387,7 @@ func (f *upgradeRoutingFakeScheduler) List(prefix string) ([]scheduler.TaskStatu
 func (f *upgradeRoutingFakeScheduler) ExportXML(string) ([]byte, error) {
 	return nil, scheduler.ErrTaskNotFound
 }
-func (f *upgradeRoutingFakeScheduler) ImportXML(string, []byte) error { return nil }
+func (f *upgradeRoutingFakeScheduler) ImportXML(string, []byte) error { f.mutationCalls++; return nil }
 
 // TestHasSupervisorIntent_DirectoryReturnsError pins the round-4 fix:
 // a directory named supervisor-intent.json under the state-dir is a

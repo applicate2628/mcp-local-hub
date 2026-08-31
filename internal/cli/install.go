@@ -21,7 +21,6 @@ import (
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/gui"
-	"mcp-local-hub/internal/scheduler"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -873,18 +872,7 @@ func maybeBootstrapInteractively(w io.Writer, in *os.File) error {
 // `mcphub install --upgrade` — bug-bash A7 minimal closure (#4).
 // ---------------------------------------------------------------------------
 
-// upgradeStopAllFn, upgradeBootstrapFn, and upgradeRestartAllFn are
-// test seams that let install_upgrade_test.go drive the orchestration
-// without spawning real daemons or touching the filesystem. Production
-// nil → fall through to the real implementations (a.StopAll, Bootstrap,
-// a.RestartAll). Tests assign fakes inside the test setup.
 var (
-	upgradeStopAllFn                func() ([]api.RestartResult, error)
-	upgradeBootstrapFn              func(io.Writer) error
-	upgradeRestartAllFn             func() ([]api.RestartResult, error)
-	upgradeRestartTasksFn           func([]string) ([]api.RestartResult, error)
-	upgradeRestartSupervisorTasksFn func([]string) ([]api.RestartResult, []string, []string, error)
-	upgradeInstallServerFn          func(server string, w io.Writer) error
 	// upgradeExecutableFn / upgradeTargetPathFn carry the canonical-
 	// path comparison for the self-replace guard. Tests inject any
 	// path pair to drive the refusal branch without filesystem state.
@@ -995,73 +983,6 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 // binary — keeping a backup and reverting would add complexity
 // and a new persistence surface; the operator explicitly opted into
 // --upgrade, so they accept manual convergence in this rare case.
-func runInstallUpgrade(cmd *cobra.Command) error {
-	a := api.NewAPI()
-	out := cmd.OutOrStdout()
-	errOut := cmd.ErrOrStderr()
-
-	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
-		return err
-	}
-
-	// 2. Stop all daemons (release the binary lock).
-	fmt.Fprintln(out, "Stopping running daemons...")
-	stopResults, err := upgradeStopAll(a)
-	for _, r := range stopResults {
-		if r.Err != "" {
-			fmt.Fprintf(errOut, "⚠ stop %s: %s\n", r.TaskName, r.Err)
-		} else {
-			fmt.Fprintf(out, "✓ stopped %s\n", r.TaskName)
-		}
-	}
-	if stopErr := settleUpgradeStopPhase(stopResults, err); stopErr != nil {
-		return fmt.Errorf("stop all: %w", stopErr)
-	}
-
-	// 3. Copy the new binary into the canonical path.
-	//
-	// Bot r3 P2 closure on PR #181: on copyExe failure (e.g., a
-	// stuck daemon still holding the file lock after StopAll
-	// reported success), the underlying error message hints at
-	// `mcphub setup` for recovery. That's wrong in --upgrade
-	// context: daemons are already stopped here, and `mcphub setup`
-	// does NOT restart them. Wrap with upgrade-specific recovery:
-	// re-run --upgrade (idempotent on the copy step, no harm if the
-	// binary is already current) OR run `mcphub restart --all` to
-	// converge if the binary is OK but daemons are still down.
-	fmt.Fprintln(out, "Copying new binary...")
-	if err := upgradeBootstrap(out); err != nil {
-		return fmt.Errorf(
-			"bootstrap (binary copy) failed after daemons were stopped: %w; "+
-				"recovery: re-run `mcphub install --upgrade` (idempotent), "+
-				"or `mcphub restart --all` to restart daemons without copying",
-			err)
-	}
-
-	// 4. Restart every paused task from the new binary.
-	fmt.Fprintln(out, "Restarting daemons...")
-	restartResults, err := upgradeRestartAll(a)
-	if err != nil {
-		return fmt.Errorf("restart all: %w", err)
-	}
-	failed := 0
-	for _, r := range restartResults {
-		if r.Err != "" {
-			failed++
-			fmt.Fprintf(errOut, "✗ restart %s: %s\n", r.TaskName, r.Err)
-		} else {
-			fmt.Fprintf(out, "✓ restarted %s\n", r.TaskName)
-		}
-	}
-	if failed > 0 {
-		return fmt.Errorf(
-			"%d daemon(s) failed to restart after upgrade; binary is updated, "+
-				"run `mcphub restart --all` to converge",
-			failed)
-	}
-	return nil
-}
-
 // findRunningGUIsOnTargetFn is the production seam for
 // findRunningGUIsOnTarget; tests stub it to return a fixed slice
 // instead of probing the live OS. nil = use real wmic-backed
@@ -1335,27 +1256,6 @@ func resolveUpgradeSelfPaths() (curExe, target string, err error) {
 	return curExe, target, nil
 }
 
-// upgradeStopAll routes through the upgradeStopAllFn seam if set,
-// otherwise a.StopAll. Kept as a thin wrapper so tests can replace
-// either side independently.
-func upgradeStopAll(a *api.API) ([]api.RestartResult, error) {
-	if upgradeStopAllFn != nil {
-		return upgradeStopAllFn()
-	}
-	return a.StopAll()
-}
-
-// upgradeBootstrap routes through upgradeBootstrapFn if set, otherwise
-// the copy-only helper (bot r2 P1 closure on PR #181: skip ensureOnPath
-// so a HKCU PATH write hiccup doesn't take down the daemon fleet during
-// upgrade). PATH registration stays in `mcphub setup`'s purview.
-func upgradeBootstrap(w io.Writer) error {
-	if upgradeBootstrapFn != nil {
-		return upgradeBootstrapFn(w)
-	}
-	return bootstrapCopyOnly(w)
-}
-
 // upgradeIsSelfReplace reports whether curExe and target reference the
 // same underlying file by either:
 //
@@ -1388,157 +1288,18 @@ func upgradeIsSelfReplace(curExe, target string) bool {
 	return os.SameFile(curInfo, targetInfo)
 }
 
-// upgradeRestartAll routes through the upgradeRestartAllFn seam if
-// set, otherwise a.RestartAll.
-func upgradeRestartAll(a *api.API) ([]api.RestartResult, error) {
-	if upgradeRestartAllFn != nil {
-		return upgradeRestartAllFn()
-	}
-	return a.RestartAll()
-}
-
-func upgradeRestartTasks(taskNames []string) ([]api.RestartResult, error) {
-	if upgradeRestartTasksFn != nil {
-		return upgradeRestartTasksFn(taskNames)
-	}
-	if len(taskNames) == 0 {
-		return nil, nil
-	}
-	sch, err := scheduler.New()
-	if err != nil {
-		return nil, err
-	}
-	results := make([]api.RestartResult, 0, len(taskNames))
-	for _, taskName := range taskNames {
-		name := strings.TrimSpace(taskName)
-		if name == "" {
-			continue
-		}
-		if err := sch.Run(name); err != nil {
-			results = append(results, api.RestartResult{TaskName: name, Err: err.Error()})
-			continue
-		}
-		results = append(results, api.RestartResult{TaskName: name})
-	}
-	return results, nil
-}
-
-func upgradeRestartSupervisorTasks(taskNames []string) ([]api.RestartResult, []string, []string, error) {
-	if upgradeRestartSupervisorTasksFn != nil {
-		return upgradeRestartSupervisorTasksFn(taskNames)
-	}
-	return api.NewAPI().RestartSupervisorOwnedTasksExact(context.Background(), taskNames)
-}
-
-// settleUpgradeStopPhase makes the scheduler-backed upgrade routes fail closed
-// before binary promotion. A per-task stop error means the canonical PE lock or
-// daemon port is still owned, so copying a successor would create a mixed fleet.
-// Tasks proven stopped are restarted before the original stop failure returns.
-func settleUpgradeStopPhase(results []api.RestartResult, stopErr error) error {
-	failed := make([]string, 0)
-	stopped := make([]string, 0, len(results))
-	for _, result := range results {
-		name := strings.TrimSpace(result.TaskName)
-		if result.Err != "" {
-			failed = append(failed, fmt.Sprintf("%s: %s", name, result.Err))
-			continue
-		}
-		if name != "" {
-			stopped = append(stopped, name)
-		}
-	}
-	if stopErr == nil && len(failed) == 0 {
-		return nil
-	}
-
-	supervisorResults, handled, unresolved, supervisorErr := upgradeRestartSupervisorTasks(stopped)
-	handledSet := make(map[string]struct{}, len(handled))
-	for _, name := range handled {
-		handledSet[strings.TrimPrefix(strings.TrimSpace(name), `\`)] = struct{}{}
-	}
-	unresolvedSet := make(map[string]struct{}, len(unresolved))
-	for _, name := range unresolved {
-		unresolvedSet[strings.TrimPrefix(strings.TrimSpace(name), `\`)] = struct{}{}
-	}
-	legacyStopped := make([]string, 0, len(stopped))
-	for _, name := range stopped {
-		key := strings.TrimPrefix(name, `\`)
-		if _, ok := handledSet[key]; ok {
-			continue
-		}
-		if _, ok := unresolvedSet[key]; ok {
-			continue
-		}
-		legacyStopped = append(legacyStopped, name)
-	}
-	recoveryResults := append([]api.RestartResult(nil), supervisorResults...)
-	legacyResults, recoveryErr := upgradeRestartTasks(legacyStopped)
-	recoveryResults = append(recoveryResults, legacyResults...)
-	recoveryFailures := make([]string, 0)
-	for _, result := range recoveryResults {
-		if result.Err != "" {
-			recoveryFailures = append(recoveryFailures, fmt.Sprintf("%s: %s", result.TaskName, result.Err))
-		}
-	}
-	parts := []string{"refusing binary promotion because one or more scheduler tasks did not stop"}
-	if stopErr != nil {
-		parts = append(parts, "stop error: "+stopErr.Error())
-	}
-	if len(failed) > 0 {
-		parts = append(parts, "task failures: "+strings.Join(failed, "; "))
-	}
-	if recoveryErr != nil {
-		parts = append(parts, "recovery restart error: "+recoveryErr.Error())
-	}
-	if supervisorErr != nil {
-		parts = append(parts, "supervisor recovery classification error: "+supervisorErr.Error())
-	}
-	if len(unresolved) > 0 {
-		parts = append(parts, "unresolved recovery ownership: "+strings.Join(unresolved, ", "))
-	}
-	if len(recoveryFailures) > 0 {
-		parts = append(parts, "recovery task failures: "+strings.Join(recoveryFailures, "; "))
-	}
-	return errors.New(strings.Join(parts, "; "))
-}
-
-// upgradeServerInstallFn is a narrow test seam ONE level below
-// upgradeInstallServerFn: it intercepts the api.InstallOpts the production
-// upgradeInstallServer body constructs, so a test can assert the call site
-// passes the typed no-client-write policy without driving a real install.
-// nil → the real api.NewAPI().Install.
-var upgradeServerInstallFn func(api.InstallOpts) error
-
 func resolveInstallGUIPort() int {
-	// NoCreate: this runs at InstallOpts construction (before the dry-run gate),
-	// so it must not create the per-user GUI dir as a side effect of a dry-run.
 	pidportPath, err := gui.PidportPathNoCreate()
 	if err != nil {
 		return 0
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 750*time.Millisecond)
 	defer cancel()
-	v := gui.Probe(ctx, pidportPath)
-	if v.Class != gui.VerdictHealthy || v.Port <= 0 {
+	verdict := gui.Probe(ctx, pidportPath)
+	if verdict.Class != gui.VerdictHealthy || verdict.Port <= 0 {
 		return 0
 	}
-	return v.Port
-}
-
-func upgradeInstallServer(server string, w io.Writer) error {
-	if upgradeInstallServerFn != nil {
-		return upgradeInstallServerFn(server, w)
-	}
-	opts := api.InstallOpts{
-		Server:                 server,
-		SkipClientConfigWrites: true,
-		Writer:                 w,
-		GUIPort:                resolveInstallGUIPort(),
-	}
-	if upgradeServerInstallFn != nil {
-		return upgradeServerInstallFn(opts)
-	}
-	return api.NewAPI().Install(opts)
+	return verdict.Port
 }
 
 // ---------------------------------------------------------------------------
@@ -1672,7 +1433,7 @@ func dispatchUpgradeReal(cmd *cobra.Command) error {
 	if supervisorPresent {
 		return runV5UpgradeReal(cmd)
 	}
-	legacyProbe, err := probeLegacySchedulerUpgradeServers(api.NewAPI())
+	legacyProbe, err := probeLegacySchedulerUpgradeTasks(api.NewAPI())
 	if err != nil {
 		return fmt.Errorf("upgrade routing: probe legacy scheduler tasks: %w", err)
 	}
@@ -1685,12 +1446,10 @@ func dispatchUpgradeReal(cmd *cobra.Command) error {
 }
 
 type legacyUpgradeProbe struct {
-	servers     []string
 	legacyTasks []string
-	unmatched   []string
 }
 
-func probeLegacySchedulerUpgradeServers(a *api.API) (legacyUpgradeProbe, error) {
+func probeLegacySchedulerUpgradeTasks(a *api.API) (legacyUpgradeProbe, error) {
 	tasks, err := a.ListManagedTasks()
 	if err != nil {
 		if api.SchedulerUnavailableError(err) {
@@ -1698,64 +1457,15 @@ func probeLegacySchedulerUpgradeServers(a *api.API) (legacyUpgradeProbe, error) 
 		}
 		return legacyUpgradeProbe{}, err
 	}
-
-	scheduledTasks := make(map[string]bool, len(tasks))
 	legacyTasks := make([]string, 0, len(tasks))
 	for _, task := range tasks {
 		name := strings.TrimPrefix(task.Name, "\\")
-		if !legacyUpgradeTaskLooksDaemon(name) {
-			continue
+		if legacyUpgradeTaskLooksDaemon(name) {
+			legacyTasks = append(legacyTasks, name)
 		}
-		scheduledTasks[name] = true
-		legacyTasks = append(legacyTasks, name)
 	}
 	sort.Strings(legacyTasks)
-	if len(legacyTasks) == 0 {
-		return legacyUpgradeProbe{}, nil
-	}
-
-	manifestNames, err := a.ManifestList()
-	if err != nil {
-		return legacyUpgradeProbe{}, err
-	}
-	servers := map[string]struct{}{}
-	matchedTasks := map[string]struct{}{}
-	const prefix = "mcp-local-hub-"
-	for _, name := range manifestNames {
-		raw, err := a.ManifestGet(name)
-		if err != nil {
-			return legacyUpgradeProbe{}, fmt.Errorf("read manifest %s: %w", name, err)
-		}
-		m, err := config.ParseManifest(strings.NewReader(raw))
-		if err != nil {
-			return legacyUpgradeProbe{}, fmt.Errorf("parse manifest %s: %w", name, err)
-		}
-		if m == nil || m.Kind != config.KindGlobal {
-			continue
-		}
-		for _, d := range m.Daemons {
-			taskName := prefix + m.Name + "-" + d.Name
-			if scheduledTasks[taskName] {
-				servers[m.Name] = struct{}{}
-				matchedTasks[taskName] = struct{}{}
-			}
-		}
-	}
-
-	out := legacyUpgradeProbe{
-		servers:     make([]string, 0, len(servers)),
-		legacyTasks: legacyTasks,
-	}
-	for server := range servers {
-		out.servers = append(out.servers, server)
-	}
-	sort.Strings(out.servers)
-	for _, taskName := range legacyTasks {
-		if _, ok := matchedTasks[taskName]; !ok {
-			out.unmatched = append(out.unmatched, taskName)
-		}
-	}
-	return out, nil
+	return legacyUpgradeProbe{legacyTasks: legacyTasks}, nil
 }
 
 func legacyUpgradeTaskLooksDaemon(name string) bool {
@@ -1788,81 +1498,6 @@ func legacyUpgradeTaskLooksDaemon(name string) bool {
 		return false
 	}
 	return strings.Contains(rest, "-")
-}
-
-func runLegacySchedulerUpgradeMigration(cmd *cobra.Command, probe legacyUpgradeProbe) error {
-	a := api.NewAPI()
-	out := cmd.OutOrStdout()
-	errOut := cmd.ErrOrStderr()
-
-	if _, _, err := runInstallUpgradePreflightGuards(cmd); err != nil {
-		return err
-	}
-
-	// Lock-safety verdict for the v0.4 scheduler migration route: this path
-	// still uses upgradeBootstrap's plain copy-only helper, not the v0.5
-	// rename-aside handoff. Any running legacy daemon can hold the canonical
-	// binary lock on Windows, including unmatched custom/workspace tasks. Stop
-	// the whole legacy scheduler fleet for the copy, then explicitly re-run the
-	// unmatched task names so only matched shipped manifests are absorbed into
-	// supervisor intent.
-	fmt.Fprintln(out, "Stopping legacy scheduler daemons...")
-	stopResults, err := upgradeStopAll(a)
-	for _, r := range stopResults {
-		if r.Err != "" {
-			fmt.Fprintf(errOut, "⚠ stop %s: %s\n", r.TaskName, r.Err)
-		} else {
-			fmt.Fprintf(out, "✓ stopped %s\n", r.TaskName)
-		}
-	}
-	if stopErr := settleUpgradeStopPhase(stopResults, err); stopErr != nil {
-		return fmt.Errorf("stop legacy scheduler daemons: %w", stopErr)
-	}
-
-	fmt.Fprintln(out, "Copying new binary...")
-	if err := upgradeBootstrap(out); err != nil {
-		return fmt.Errorf(
-			"bootstrap (binary copy) failed after legacy daemons were stopped: %w; "+
-				"recovery: re-run `mcphub install --upgrade` (idempotent), "+
-				"or run `mcphub setup` then `mcphub install --server <server>` for each legacy server",
-			err)
-	}
-
-	if len(probe.unmatched) > 0 {
-		fmt.Fprintln(out, "Restarting unmatched legacy scheduler daemons...")
-		restartResults, err := upgradeRestartTasks(probe.unmatched)
-		if err != nil {
-			return fmt.Errorf("restart unmatched legacy scheduler daemons after binary copy: %w", err)
-		}
-		var failed []string
-		for _, r := range restartResults {
-			if r.Err != "" {
-				failed = append(failed, r.TaskName)
-				fmt.Fprintf(errOut, "✗ restart unmatched %s: %s\n", r.TaskName, r.Err)
-			} else {
-				fmt.Fprintf(out, "✓ restarted unmatched %s\n", r.TaskName)
-			}
-		}
-		if len(failed) > 0 {
-			return fmt.Errorf(
-				"%d unmatched legacy scheduler task(s) failed to restart after binary copy (%s); "+
-					"recovery: run `schtasks /Run /TN <task>` for each failed task, then rerun `mcphub install --upgrade` if migrated servers are still missing",
-				len(failed), strings.Join(failed, ", "))
-		}
-		fmt.Fprintf(errOut,
-			"⚠ legacy scheduler tasks without matching shipped manifests were left for manual review: %s\n",
-			strings.Join(probe.unmatched, ", "))
-	}
-	fmt.Fprintln(out, "Materializing supervisor intent for legacy servers...")
-	for _, server := range probe.servers {
-		if err := upgradeInstallServer(server, out); err != nil {
-			return fmt.Errorf(
-				"install migrated server %s: %w; recovery: run `mcphub setup`, then `mcphub install --server %s`",
-				server, err, server)
-		}
-		fmt.Fprintf(out, "✓ installed %s into supervisor intent\n", server)
-	}
-	return nil
 }
 
 // runV5UpgradeReal wires the rename-aside + IPC handoff path through

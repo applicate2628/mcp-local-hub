@@ -183,37 +183,6 @@ func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter str
 	return restartSupervisorTargets(ctx, targets), true, nil
 }
 
-// RestartSupervisorOwnedTasksExact restores only the named supervisor-owned
-// tasks. Upgrade rollback uses this exact-name surface because StopAll results
-// can mix supervisor rows with legacy scheduler rows; server/daemon parsing is
-// not safe for arbitrary hyphenated task identities.
-func (a *API) RestartSupervisorOwnedTasksExact(ctx context.Context, taskNames []string) (results []RestartResult, handled, unresolved []string, err error) {
-	intent, err := loadSupervisorOwnedIntent()
-	if err != nil {
-		return nil, nil, append([]string(nil), taskNames...), err
-	}
-	if intent == nil || len(taskNames) == 0 {
-		return nil, nil, nil, nil
-	}
-	wanted := make(map[string]struct{}, len(taskNames))
-	for _, name := range taskNames {
-		if key := canonicalIntentTaskKey(name); key != `\` {
-			wanted[key] = struct{}{}
-		}
-	}
-	targets := make([]SupervisorDaemon, 0, len(wanted))
-	for _, daemon := range intent.Daemons {
-		key := canonicalIntentTaskKey(daemon.TaskName)
-		if _, ok := wanted[key]; !ok || isSupervisorRestartMaintenanceTask(key) {
-			continue
-		}
-		daemon.TaskName = normalizeSupervisorRestartTaskName(daemon.TaskName)
-		targets = append(targets, daemon)
-		handled = append(handled, daemon.TaskName)
-	}
-	return restartSupervisorTargets(ctx, targets), handled, nil, nil
-}
-
 func restartSupervisorTargets(ctx context.Context, targets []SupervisorDaemon) []RestartResult {
 	results := make([]RestartResult, 0, len(targets))
 	for _, d := range targets {

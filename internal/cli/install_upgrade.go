@@ -432,10 +432,19 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 				fmt.Errorf("staged candidate identity changed between admission passes: before=%+v after=%+v", admitted, rechecked))
 		}
 	}
+	if opts.VerifyPrior != nil {
+		if err := opts.VerifyPrior(opts.BinaryPath, priorSHA256); err != nil {
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
+				fmt.Errorf("prior canonical drifted after fleet release and before promotion: %w", err))
+		}
+	}
 
 	// Promotion occurs only after candidate admission and complete old-fleet
 	// release have both been proven.
 	promotion, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
+	if promotion.Promoted && promotion.RetainedPrior == "" {
+		return fmt.Errorf("post-promotion failure: rename-aside reports successor promoted but retained prior path is missing; refusing to start the successor because exact rollback is unavailable")
+	}
 	if err != nil {
 		if promotion.Promoted {
 			return rollbackInstallUpgrade(ctx, opts, promotion.RetainedPrior, priorSHA256, handoffTimeout,
@@ -448,7 +457,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 		return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256,
 			fmt.Errorf("rename-aside binary replacement failed before promotion: %w", err))
 	}
-	if !promotion.Promoted || promotion.RetainedPrior == "" {
+	if !promotion.Promoted {
 		if !promotion.PriorCanonical && promotion.RetainedPrior != "" {
 			return recoverRetainedPriorBeforePromotion(ctx, opts, promotion.RetainedPrior, priorSHA256, handoffTimeout,
 				fmt.Errorf("rename-aside returned a retained prior without a promoted successor"))
