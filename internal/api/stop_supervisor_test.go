@@ -389,6 +389,153 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 	}
 }
 
+// TestStopSupervisorHandledToleratesTypedSchedulerUnavailable pins the N1
+// contract: once a supervisor stop batch durably settles the requested row,
+// a typed legacy-scheduler outage cannot replace that committed result or
+// trigger the legacy kill path. The four subtests cover Stop/StopAll at both
+// factory and List fallback boundaries.
+func TestStopSupervisorHandledToleratesTypedSchedulerUnavailable(t *testing.T) {
+	typedUnavailable := fmt.Errorf("scheduler bridge: %w: protocol", scheduler.ErrUnavailable)
+
+	for _, tc := range []struct {
+		name    string
+		stop    func(*API) ([]RestartResult, error)
+		factory func() (func() (scheduler.Scheduler, error), *restartAllFakeScheduler)
+	}{
+		{
+			name: "targeted_factory",
+			stop: func(a *API) ([]RestartResult, error) { return a.Stop("time", "") },
+			factory: func() (func() (scheduler.Scheduler, error), *restartAllFakeScheduler) {
+				return func() (scheduler.Scheduler, error) { return nil, typedUnavailable }, nil
+			},
+		},
+		{
+			name: "targeted_list",
+			stop: func(a *API) ([]RestartResult, error) { return a.Stop("time", "") },
+			factory: func() (func() (scheduler.Scheduler, error), *restartAllFakeScheduler) {
+				legacyScheduler := &restartAllFakeScheduler{listErr: typedUnavailable}
+				return func() (scheduler.Scheduler, error) { return legacyScheduler, nil }, legacyScheduler
+			},
+		},
+		{
+			name: "all_factory",
+			stop: func(a *API) ([]RestartResult, error) { return a.StopAll() },
+			factory: func() (func() (scheduler.Scheduler, error), *restartAllFakeScheduler) {
+				return func() (scheduler.Scheduler, error) { return nil, typedUnavailable }, nil
+			},
+		},
+		{
+			name: "all_list",
+			stop: func(a *API) ([]RestartResult, error) { return a.StopAll() },
+			factory: func() (func() (scheduler.Scheduler, error), *restartAllFakeScheduler) {
+				legacyScheduler := &restartAllFakeScheduler{listErr: typedUnavailable}
+				return func() (scheduler.Scheduler, error) { return legacyScheduler, nil }, legacyScheduler
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kills, _ := stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
+			restoreBatch := setSupervisorStopBatchHookForTest(func(_ context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+				return stopBatchResultForTest(command, []StoppedSettlement{{
+					TaskName: stopSupervisorTestTask,
+					State:    StoppedSettlementStopped,
+					Reason:   StoppedSettlementReasonStopped,
+				}}), nil
+			})
+			t.Cleanup(restoreBatch)
+			previousFactory := stopSchedulerFactory
+			factory, legacyScheduler := tc.factory()
+			stopSchedulerFactory = factory
+			t.Cleanup(func() { stopSchedulerFactory = previousFactory })
+
+			results, err := tc.stop(NewAPI())
+			if err != nil {
+				t.Fatalf("stop: %v", err)
+			}
+			if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" || results[0].Code != "" {
+				t.Fatalf("results = %+v, want preserved durable supervisor success", results)
+			}
+			if got := atomic.LoadInt32(kills); got != 0 {
+				t.Fatalf("killByPortFn calls = %d, want 0 after accepted supervisor result", got)
+			}
+			if legacyScheduler != nil && len(legacyScheduler.stopNames) != 0 {
+				t.Fatalf("scheduler Stop calls = %v, want none after accepted supervisor result", legacyScheduler.stopNames)
+			}
+		})
+	}
+}
+
+// TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback
+// guards both limits of the stop-scoped tolerance: textual lookalikes are not
+// scheduler.ErrUnavailable, and a real typed outage remains fatal if the
+// supervisor did not settle a target first.
+func TestStopSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback(t *testing.T) {
+	typedUnavailable := fmt.Errorf("scheduler bridge: %w: protocol", scheduler.ErrUnavailable)
+
+	for _, tc := range []struct {
+		name       string
+		seedIntent bool
+		err        error
+		stop       func(*API) ([]RestartResult, error)
+	}{
+		{
+			name:       "targeted_untyped_same_text",
+			seedIntent: true,
+			err:        errors.New(typedUnavailable.Error()),
+			stop:       func(a *API) ([]RestartResult, error) { return a.Stop("time", "") },
+		},
+		{
+			name:       "all_untyped_same_text",
+			seedIntent: true,
+			err:        errors.New(typedUnavailable.Error()),
+			stop:       func(a *API) ([]RestartResult, error) { return a.StopAll() },
+		},
+		{
+			name: "targeted_no_supervisor_result",
+			err:  typedUnavailable,
+			stop: func(a *API) ([]RestartResult, error) { return a.Stop("time", "") },
+		},
+		{
+			name: "all_no_supervisor_result",
+			err:  typedUnavailable,
+			stop: func(a *API) ([]RestartResult, error) { return a.StopAll() },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var intent *SupervisorIntentFile
+			if tc.seedIntent {
+				intent = stopSupervisorTestIntent()
+			}
+			stopSupervisorTestSetup(t, intent, nil)
+			if tc.seedIntent {
+				restoreBatch := setSupervisorStopBatchHookForTest(func(_ context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+					return stopBatchResultForTest(command, []StoppedSettlement{{
+						TaskName: stopSupervisorTestTask,
+						State:    StoppedSettlementStopped,
+						Reason:   StoppedSettlementReasonStopped,
+					}}), nil
+				})
+				t.Cleanup(restoreBatch)
+			}
+			previousFactory := stopSchedulerFactory
+			stopSchedulerFactory = func() (scheduler.Scheduler, error) { return nil, tc.err }
+			t.Cleanup(func() { stopSchedulerFactory = previousFactory })
+
+			results, err := tc.stop(NewAPI())
+			if err == nil {
+				t.Fatalf("stop results = %+v, want scheduler error", results)
+			}
+			if errors.Is(tc.err, scheduler.ErrUnavailable) {
+				if !errors.Is(err, scheduler.ErrUnavailable) {
+					t.Fatalf("stop error = %v, want typed scheduler.ErrUnavailable", err)
+				}
+			} else if !errors.Is(err, tc.err) {
+				t.Fatalf("stop error = %v, want original untyped scheduler error %v", err, tc.err)
+			}
+		})
+	}
+}
+
 // A transport-level reconcile success is not a completed stop. The supervisor
 // must return controller-owned terminal settlement for every selected target;
 // otherwise the caller must fail loud instead of publishing Stopped while an

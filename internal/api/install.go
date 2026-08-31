@@ -1132,6 +1132,14 @@ func restartSchedulerUnavailableError(err error) bool {
 	return schedulerUnavailableError(err) || errors.Is(err, scheduler.ErrUnavailable)
 }
 
+// stopSchedulerUnavailableError accepts a transient scheduler bridge failure
+// only after Stop has already durably settled the requested daemon through the
+// supervisor. The supervisor result is then the authoritative outcome; callers
+// without that result must continue to fail loudly.
+func stopSchedulerUnavailableError(err error) bool {
+	return schedulerUnavailableError(err) || errors.Is(err, scheduler.ErrUnavailable)
+}
+
 // forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped
 // entry (non-empty Language), sends a real no-op tools/call via the
 // forceMaterializeProbe hook. The proxy will drive the backend through
@@ -3837,7 +3845,7 @@ func (a *API) stopSupervisorAwareKill(server, daemonFilter string) ([]RestartRes
 		// Mixed install where the supervisor handled every owned row and
 		// the host has no usable scheduler (POSIX beta) — mirror
 		// Restart's tolerance.
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && stopSchedulerUnavailableError(err) {
 			return supResults, nil
 		}
 		return nil, err
@@ -4310,14 +4318,14 @@ func (a *API) StopAll() ([]RestartResult, error) {
 	handledTasks := schedulerBlockedRestartTaskNames(supResults)
 	sch, err := stopSchedulerFactory()
 	if err != nil {
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && stopSchedulerUnavailableError(err) {
 			return supResults, nil
 		}
 		return nil, err
 	}
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && stopSchedulerUnavailableError(err) {
 			return supResults, nil
 		}
 		return nil, err
