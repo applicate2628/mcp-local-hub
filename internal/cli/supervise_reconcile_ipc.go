@@ -312,7 +312,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		return writeReconcileTimeoutFrame(conn, req, schedErr)
 	}
 	if schedErr != nil {
-		if api.SchedulerUnavailableError(schedErr) {
+		if api.ReconcileSchedulerUnavailableError(schedErr) {
 			schedTasks = nil
 		} else {
 			return writeIPCFrame(conn, api.IPCResponse{

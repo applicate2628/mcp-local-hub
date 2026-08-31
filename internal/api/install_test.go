@@ -638,11 +638,17 @@ func TestSchedulerUnavailableErrorRequiresTypedSentinel(t *testing.T) {
 		t.Fatal("wrapped scheduler.ErrNotImplemented was not treated as unavailable")
 	}
 	wrappedUnavailable := fmt.Errorf("scheduler.List: %w: bridge execution: scheduler: unavailable: protocol", scheduler.ErrUnavailable)
-	if !SchedulerUnavailableError(wrappedUnavailable) {
-		t.Fatalf("wrapped scheduler.ErrUnavailable was not treated as unavailable: %v", wrappedUnavailable)
+	if SchedulerUnavailableError(wrappedUnavailable) {
+		t.Fatalf("operational scheduler.ErrUnavailable was treated as scheduler absence: %v", wrappedUnavailable)
+	}
+	if !ReconcileSchedulerUnavailableError(wrappedUnavailable) {
+		t.Fatalf("wrapped scheduler.ErrUnavailable was not tolerated for reconciliation: %v", wrappedUnavailable)
 	}
 	if sameText := errors.New(wrappedUnavailable.Error()); SchedulerUnavailableError(sameText) {
 		t.Fatalf("string-only scheduler error with unavailable text was treated as unavailable: %v", sameText)
+	}
+	if sameText := errors.New(wrappedUnavailable.Error()); ReconcileSchedulerUnavailableError(sameText) {
+		t.Fatalf("string-only scheduler error with unavailable text was tolerated for reconciliation: %v", sameText)
 	}
 }
 
