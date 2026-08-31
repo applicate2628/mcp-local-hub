@@ -300,7 +300,8 @@ See also: install, logs, restart, status.`,
 					// directory (validated absolute at parse time; empty means
 					// inherit mcphub's own cwd). cmd.Dir is set from this in
 					// the host's Start().
-					WorkingDir: spec.Cwd,
+					WorkingDir:                      spec.Cwd,
+					MCPProtocolCompatibilityProfile: spec.MCPProtocolCompatibilityProfile,
 				})
 				if err != nil {
 					return fmt.Errorf("NewStdioHost: %w", err)

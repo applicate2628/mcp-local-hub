@@ -16,6 +16,7 @@ import (
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/mcpcompat"
 )
 
 var adoptSupportedClients = []string{
@@ -50,20 +51,24 @@ type AdoptOpts struct {
 	// together; an empty pair preserves the global-only adopt behavior.
 	CodexProjectRoot string
 	CodexWorkingDir  string
+	// MCPProtocolCompatibilityProfile is an explicit opt-in for the generated
+	// stdio-bridge daemon. Empty preserves strict current protocol behavior.
+	MCPProtocolCompatibilityProfile string
 }
 
 // AdoptPlan is the side-effect-free preview returned by BuildAdoptPlan.
 type AdoptPlan struct {
-	EntryName           string
-	SourceClient        string
-	ManifestName        string
-	Port                int
-	AdoptClients        []string
-	AlsoPresent         []string
-	SignatureMismatches []AdoptClientSignatureMismatch
-	DisabledSameName    []AdoptClientDisabled
-	SecretRoutedKeys    []string
-	ManifestYAML        string
+	EntryName                       string
+	SourceClient                    string
+	ManifestName                    string
+	Port                            int
+	AdoptClients                    []string
+	AlsoPresent                     []string
+	SignatureMismatches             []AdoptClientSignatureMismatch
+	DisabledSameName                []AdoptClientDisabled
+	SecretRoutedKeys                []string
+	MCPProtocolCompatibilityProfile string
+	ManifestYAML                    string
 	// TargetEntryNames freezes the physical client-config key for each selected
 	// client. Values equal EntryName unless a Codex project layer contributes an
 	// opposite transport under the logical source name.
@@ -111,7 +116,8 @@ type ExecuteAdoptOpts struct {
 // client-config transaction. A later outer gate failure preserves these rows
 // for recovery but never turns them into an adopt success.
 type AdoptExecutionResultV1 struct {
-	ClientConfigSettlements []ClientConfigSettlementV1 `json:"client_config_settlements,omitempty"`
+	ClientConfigSettlements         []ClientConfigSettlementV1 `json:"client_config_settlements,omitempty"`
+	MCPProtocolCompatibilityProfile string                     `json:"mcp_protocol_compatibility_profile,omitempty"`
 }
 
 const codexGlobalWriteTargetDisplay = "codex global config"
@@ -336,6 +342,10 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	if embeddedManifestNamesContains(manifestName) {
 		return nil, fmt.Errorf("manifest %q collides with a shipped (built-in) server; adopt refuses to shadow shipped manifests", manifestName)
 	}
+	compatibilityProfile := strings.TrimSpace(opts.MCPProtocolCompatibilityProfile)
+	if _, err := mcpcompat.ResolveProtocolCompatibilityProfile(compatibilityProfile); err != nil {
+		return nil, fmt.Errorf("adopt MCP protocol compatibility profile: %w", err)
+	}
 	if exists, err := manifestExistsIn(defaultManifestDir(), manifestName); err != nil {
 		return nil, fmt.Errorf("adopt: check existing disk manifest %q: %w", manifestName, err)
 	} else if exists {
@@ -353,17 +363,18 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 				targets[client.Client] = adoptClientTargetEntryName(*rec, client)
 			}
 			return &AdoptPlan{
-				EntryName:                entryName,
-				SourceClient:             sourceClient,
-				ManifestName:             manifestName,
-				Port:                     rec.Port,
-				AdoptClients:             append([]string(nil), rec.AdoptClients...),
-				ManifestYAML:             string(manifestBytes),
-				TargetEntryNames:         targets,
-				alreadyAdopted:           true,
-				requestedPort:            opts.Port,
-				requestedClients:         requestedClients,
-				requestedClientsExplicit: len(opts.Clients) > 0,
+				EntryName:                       entryName,
+				SourceClient:                    sourceClient,
+				ManifestName:                    manifestName,
+				Port:                            rec.Port,
+				AdoptClients:                    append([]string(nil), rec.AdoptClients...),
+				MCPProtocolCompatibilityProfile: rec.MCPProtocolCompatibilityProfile,
+				ManifestYAML:                    string(manifestBytes),
+				TargetEntryNames:                targets,
+				alreadyAdopted:                  true,
+				requestedPort:                   opts.Port,
+				requestedClients:                requestedClients,
+				requestedClientsExplicit:        len(opts.Clients) > 0,
 			}, nil
 		}
 		return nil, fmt.Errorf("adopt refuses to create manifest %q because a disk manifest already exists; remove or rename the existing manifest before re-running adopt", manifestName)
@@ -412,7 +423,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, err
 	}
 	alsoPresent := clientsOutsideSelection(clientScan.Matching, adoptClients)
-	manifestYAML := renderStdioBridgeManifestYAML(manifestName, entry.Command, entry.Args, env, port, adoptClientBindings(adoptClients))
+	manifestYAML := renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(manifestName, entry.Command, entry.Args, env, port, adoptClientBindings(adoptClients), compatibilityProfile)
 	if _, err := a.ManifestValidateMode(manifestYAML, ValidateModeStrict); err != nil {
 		return nil, fmt.Errorf("entry name %q is not a valid manifest name: %w; adopt with a valid --name is not supported in v1", manifestName, err)
 	}
@@ -445,20 +456,21 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 	}
 
 	return &AdoptPlan{
-		EntryName:           entryName,
-		SourceClient:        sourceClient,
-		ManifestName:        manifestName,
-		Port:                port,
-		AdoptClients:        adoptClients,
-		AlsoPresent:         alsoPresent,
-		SignatureMismatches: clientScan.Mismatched,
-		DisabledSameName:    clientScan.Disabled,
-		SecretRoutedKeys:    routedKeys,
-		ManifestYAML:        manifestYAML,
-		TargetEntryNames:    targetEntryNames,
-		presentAtBuild:      append([]string(nil), clientScan.Matching...),
-		secretValues:        secretValues,
-		codexTarget:         codexTarget,
+		EntryName:                       entryName,
+		SourceClient:                    sourceClient,
+		ManifestName:                    manifestName,
+		Port:                            port,
+		AdoptClients:                    adoptClients,
+		AlsoPresent:                     alsoPresent,
+		SignatureMismatches:             clientScan.Mismatched,
+		DisabledSameName:                clientScan.Disabled,
+		SecretRoutedKeys:                routedKeys,
+		MCPProtocolCompatibilityProfile: compatibilityProfile,
+		ManifestYAML:                    manifestYAML,
+		TargetEntryNames:                targetEntryNames,
+		presentAtBuild:                  append([]string(nil), clientScan.Matching...),
+		secretValues:                    secretValues,
+		codexTarget:                     codexTarget,
 	}, nil
 }
 
@@ -510,6 +522,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	}
 	if w == nil {
 		w = io.Discard
+	}
+	if opts.result != nil {
+		opts.result.MCPProtocolCompatibilityProfile = plan.MCPProtocolCompatibilityProfile
 	}
 	// Step 0a — best-effort reap of stale CROSS-manifest `adopting` orphans (a
 	// prior adopt that hard-crashed between capture and promote/abort left an
@@ -730,6 +745,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	} else {
 		fmt.Fprintf(w, "Adopted logical source %q from %s as manifest %q on port %d.\n", plan.EntryName, plan.SourceClient, plan.ManifestName, plan.Port)
 	}
+	if plan.MCPProtocolCompatibilityProfile != "" {
+		fmt.Fprintf(w, "  MCP protocol compatibility profile: %s\n", plan.MCPProtocolCompatibilityProfile)
+	}
 	for _, client := range plan.AdoptClients {
 		fmt.Fprintf(w, "  %s: logical source %s -> target %s\n", client, plan.EntryName, plan.targetEntryName(client))
 	}
@@ -776,6 +794,9 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 	fmt.Fprintf(w, "  manifest: %s\n", plan.ManifestName)
 	fmt.Fprintf(w, "  port: %d\n", plan.Port)
 	fmt.Fprintf(w, "  clients: %s\n", strings.Join(plan.AdoptClients, ","))
+	if plan.MCPProtocolCompatibilityProfile != "" {
+		fmt.Fprintf(w, "  MCP protocol compatibility profile: %s\n", plan.MCPProtocolCompatibilityProfile)
+	}
 	for _, client := range plan.AdoptClients {
 		target := plan.targetEntryName(client)
 		fmt.Fprintf(w, "  client %s: logical source: %s; target alias: %s\n", client, plan.EntryName, target)

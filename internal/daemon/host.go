@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mcp-local-hub/internal/mcpcompat"
 	"mcp-local-hub/internal/mcpcompat/readinesswire"
 	"mcp-local-hub/internal/process"
 )
@@ -49,6 +50,9 @@ type HostConfig struct {
 	// unavailable the child still starts without the locator so the existing six
 	// CST tools remain available while the optional sampler stays default-off.
 	LaunchCapability *LaunchCapabilityConfig
+	// MCPProtocolCompatibilityProfile is resolved exactly once by NewStdioHost.
+	// It is sourced from the selected daemon manifest field by the CLI layer.
+	MCPProtocolCompatibilityProfile string
 }
 
 // composeChildEnv builds a subprocess environment: os.Environ() with every key
@@ -97,7 +101,8 @@ func envKeyNorm(k string) string {
 // StdioHost hosts a long-lived stdio subprocess and (in later tasks) exposes
 // an HTTP endpoint that multiplexes concurrent MCP clients onto it.
 type StdioHost struct {
-	cfg HostConfig
+	cfg                   HostConfig
+	protocolCompatibility mcpcompat.ProtocolCompatibilityPolicy
 
 	cmd        *exec.Cmd
 	stdin      io.WriteCloser
@@ -176,12 +181,6 @@ type stdioHTTPSession struct {
 	sequence        uint64
 }
 
-var stdioHTTPSupportedProtocolVersions = map[string]bool{
-	"2025-11-25": true,
-	"2025-06-18": true,
-	"2025-03-26": true,
-}
-
 // ErrTooManyPending is the sentinel a SendRPC pending-cap refusal satisfies
 // via errors.Is. It is a THIRD identity class in the #492 error-shape model
 // (context-shaped ⇔ delivered; other io errors ⇔ backend failure ⇒ teardown):
@@ -251,15 +250,20 @@ func NewStdioHost(cfg HostConfig) (*StdioHost, error) {
 			return nil, errors.New("cst-direct-v1 launch must use the exact receipt image and frontend argv")
 		}
 	}
+	protocolCompatibility, err := mcpcompat.ResolveProtocolCompatibilityProfile(cfg.MCPProtocolCompatibilityProfile)
+	if err != nil {
+		return nil, fmt.Errorf("HostConfig.MCPProtocolCompatibilityProfile: %w", err)
+	}
 	return &StdioHost{
-		cfg:         cfg,
-		testStdout:  make(chan []byte, 16),
-		pending:     make(map[int64]chan json.RawMessage),
-		sessions:    make(map[string]stdioHTTPSession),
-		bridge:      NewProtocolBridge(),
-		done:        make(chan struct{}),
-		procExited:  make(chan struct{}),
-		childExited: make(chan struct{}),
+		cfg:                   cfg,
+		protocolCompatibility: protocolCompatibility,
+		testStdout:            make(chan []byte, 16),
+		pending:               make(map[int64]chan json.RawMessage),
+		sessions:              make(map[string]stdioHTTPSession),
+		bridge:                NewProtocolBridge(),
+		done:                  make(chan struct{}),
+		procExited:            make(chan struct{}),
+		childExited:           make(chan struct{}),
 	}, nil
 }
 
@@ -1021,7 +1025,7 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 	}
 	requestedProtocolVersion := initializeRequestProtocolVersion(msg)
 	if origMethod == "initialize" {
-		if _, ok := validateRequestProtocolVersion(w, r); !ok {
+		if _, ok := h.validateRequestProtocolVersion(w, r); !ok {
 			return
 		}
 		if r.Header.Get("Mcp-Session-Id") != "" {
@@ -1188,7 +1192,7 @@ func (h *StdioHost) cacheValidInitializeResponse(method, requestedVersion string
 	if method != "initialize" {
 		return
 	}
-	_, success, err := initializeResponseProtocolVersion(body, requestedVersion)
+	_, success, err := h.initializeResponseProtocolVersion(body, requestedVersion)
 	if err == nil && success {
 		h.bridge.CacheInitialize(body)
 	}
@@ -1208,7 +1212,7 @@ func initializeRequestProtocolVersion(msg map[string]json.RawMessage) string {
 	return params.ProtocolVersion
 }
 
-func initializeResponseProtocolVersion(body []byte, requested string) (string, bool, error) {
+func (h *StdioHost) initializeResponseProtocolVersion(body []byte, requested string) (string, bool, error) {
 	var envelope struct {
 		Error  json.RawMessage `json:"error"`
 		Result *struct {
@@ -1228,7 +1232,7 @@ func initializeResponseProtocolVersion(body []byte, requested string) (string, b
 	if version == "" {
 		version = requested
 	}
-	if !stdioHTTPSupportedProtocolVersions[version] {
+	if !h.protocolCompatibility.Supports(version) {
 		return "", false, &unsupportedStdioProtocolError{negotiated: version}
 	}
 	return version, true, nil
@@ -1254,7 +1258,7 @@ func (h *StdioHost) writeStdioJSONResponse(
 	body []byte,
 ) {
 	if origMethod == "initialize" {
-		version, success, err := initializeResponseProtocolVersion(body, requestedProtocolVersion)
+		version, success, err := h.initializeResponseProtocolVersion(body, requestedProtocolVersion)
 		if err != nil {
 			var unsupported *unsupportedStdioProtocolError
 			if errors.As(err, &unsupported) {
@@ -1336,9 +1340,9 @@ func (h *StdioHost) deleteSession(sid string) {
 	h.sessionMu.Unlock()
 }
 
-func validateRequestProtocolVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
+func (h *StdioHost) validateRequestProtocolVersion(w http.ResponseWriter, r *http.Request) (string, bool) {
 	protocolVersion := r.Header.Get("MCP-Protocol-Version")
-	if protocolVersion != "" && !stdioHTTPSupportedProtocolVersions[protocolVersion] {
+	if protocolVersion != "" && !h.protocolCompatibility.Supports(protocolVersion) {
 		http.Error(w, "unsupported MCP-Protocol-Version", http.StatusBadRequest)
 		return "", false
 	}
@@ -1346,7 +1350,7 @@ func validateRequestProtocolVersion(w http.ResponseWriter, r *http.Request) (str
 }
 
 func (h *StdioHost) validateRequestSession(w http.ResponseWriter, r *http.Request) (string, bool) {
-	protocolVersion, ok := validateRequestProtocolVersion(w, r)
+	protocolVersion, ok := h.validateRequestProtocolVersion(w, r)
 	if !ok {
 		return "", false
 	}

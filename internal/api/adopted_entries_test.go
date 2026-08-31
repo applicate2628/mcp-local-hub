@@ -17,17 +17,18 @@ import (
 // UTC times) so round-trip comparisons are deterministic.
 func sampleAdoptRecord() AdoptProvenanceRecord {
 	return AdoptProvenanceRecord{
-		ManifestName:         "context7",
-		SourceClient:         "codex-cli",
-		SourceEntryName:      "context7",
-		Port:                 9137,
-		AdoptClients:         []string{"codex-cli", "claude-code"},
-		AdoptManifestHash:    "aaaa1111",
-		ExpectedManifestHash: "aaaa1111",
-		RoutedSecretKeys:     []string{"CONTEXT7_API_KEY"},
-		OperationState:       AdoptOperationStateAdopted,
-		CreatedAt:            time.Unix(1720008000, 0).UTC(),
-		UpdatedAt:            time.Unix(1720008001, 0).UTC(),
+		ManifestName:                    "context7",
+		SourceClient:                    "codex-cli",
+		SourceEntryName:                 "context7",
+		Port:                            9137,
+		MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05",
+		AdoptClients:                    []string{"codex-cli", "claude-code"},
+		AdoptManifestHash:               "aaaa1111",
+		ExpectedManifestHash:            "aaaa1111",
+		RoutedSecretKeys:                []string{"CONTEXT7_API_KEY"},
+		OperationState:                  AdoptOperationStateAdopted,
+		CreatedAt:                       time.Unix(1720008000, 0).UTC(),
+		UpdatedAt:                       time.Unix(1720008001, 0).UTC(),
 		Clients: []AdoptClientProvenance{
 			{
 				Client:         "codex-cli",
@@ -51,6 +52,7 @@ func assertAdoptRecordEqual(t *testing.T, got, want AdoptProvenanceRecord) {
 		got.SourceClient != want.SourceClient ||
 		got.SourceEntryName != want.SourceEntryName ||
 		got.Port != want.Port ||
+		got.MCPProtocolCompatibilityProfile != want.MCPProtocolCompatibilityProfile ||
 		got.AdoptManifestHash != want.AdoptManifestHash ||
 		got.ExpectedManifestHash != want.ExpectedManifestHash ||
 		got.OperationState != want.OperationState {
@@ -127,6 +129,20 @@ func TestAdoptedEntriesMissingFileEmpty(t *testing.T) {
 	}
 	if len(m.Records) != 0 {
 		t.Errorf("records = %d, want 0 on missing file", len(m.Records))
+	}
+}
+
+func TestAdoptedEntriesLegacyRecordWithoutCompatibilityProfileRemainsStrict(t *testing.T) {
+	isolateStateDir(t)
+	if err := writeHubMcpStateFile(adoptedEntriesFileLeaf, []byte(`{"version":1,"records":[{"manifest_name":"legacy","source_client":"codex-cli","source_entry_name":"legacy","port":9137,"adopt_clients":["codex-cli"],"operation_state":"adopted","created_at":"2026-09-01T00:00:00Z","updated_at":"2026-09-01T00:00:00Z","clients":[]}]}`)); err != nil {
+		t.Fatal(err)
+	}
+	store, err := readAdoptedEntries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := store.Records[0].MCPProtocolCompatibilityProfile; got != "" {
+		t.Fatalf("legacy record compatibility profile = %q, want strict zero value", got)
 	}
 }
 

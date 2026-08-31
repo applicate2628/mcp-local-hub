@@ -152,11 +152,12 @@ type AdoptClientProvenance struct {
 // (No expected_hub_shape — DROPPED per arch F3; de-adopt recomputes the expected
 // hub shape via the existing liveEntryMatchesManifestBinding owner.)
 type AdoptProvenanceRecord struct {
-	ManifestName    string   `json:"manifest_name"`
-	SourceClient    string   `json:"source_client"`
-	SourceEntryName string   `json:"source_entry_name"`
-	Port            int      `json:"port"`
-	AdoptClients    []string `json:"adopt_clients"`
+	ManifestName                    string   `json:"manifest_name"`
+	SourceClient                    string   `json:"source_client"`
+	SourceEntryName                 string   `json:"source_entry_name"`
+	Port                            int      `json:"port"`
+	MCPProtocolCompatibilityProfile string   `json:"mcp_protocol_compatibility_profile,omitempty"`
+	AdoptClients                    []string `json:"adopt_clients"`
 	// AdoptManifestHash is the immutable sha256 of the adopt-generated manifest
 	// bytes (plan.ManifestYAML). ExpectedManifestHash starts equal to it; de-adopt
 	// updates ExpectedManifestHash after a subset binding edit. BOTH are populated
@@ -628,18 +629,19 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			}
 		}
 		kept = append(kept, AdoptProvenanceRecord{
-			ManifestName:         plan.ManifestName,
-			SourceClient:         plan.SourceClient,
-			SourceEntryName:      plan.EntryName,
-			Port:                 plan.Port,
-			AdoptClients:         append([]string(nil), plan.AdoptClients...),
-			AdoptManifestHash:    hash,
-			ExpectedManifestHash: hash,
-			RoutedSecretKeys:     append([]string(nil), plan.SecretRoutedKeys...),
-			OperationState:       AdoptOperationStateAdopting,
-			CreatedAt:            now,
-			UpdatedAt:            now,
-			Clients:              nil, // ANCHOR: no snapshots pinned yet (row-first)
+			ManifestName:                    plan.ManifestName,
+			SourceClient:                    plan.SourceClient,
+			SourceEntryName:                 plan.EntryName,
+			Port:                            plan.Port,
+			MCPProtocolCompatibilityProfile: plan.MCPProtocolCompatibilityProfile,
+			AdoptClients:                    append([]string(nil), plan.AdoptClients...),
+			AdoptManifestHash:               hash,
+			ExpectedManifestHash:            hash,
+			RoutedSecretKeys:                append([]string(nil), plan.SecretRoutedKeys...),
+			OperationState:                  AdoptOperationStateAdopting,
+			CreatedAt:                       now,
+			UpdatedAt:                       now,
+			Clients:                         nil, // ANCHOR: no snapshots pinned yet (row-first)
 		})
 		store.Records = kept
 		return writeAdoptedEntries(store)

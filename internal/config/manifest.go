@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"mcp-local-hub/internal/mcpcompat"
 	"mcp-local-hub/internal/secrets"
 	"mcp-local-hub/internal/urlredact"
 
@@ -264,6 +265,11 @@ type DaemonSpec struct {
 	// negative value or one above 600 (the cap that bounds wedged-child
 	// detection latency).
 	StartupBindDeadlineSeconds int `yaml:"startup_bind_deadline_seconds,omitempty" json:"startup_bind_deadline_seconds,omitempty"`
+
+	// MCPProtocolCompatibilityProfile is an opt-in, daemon-scoped compatibility
+	// policy for the stdio HTTP adapter. Empty preserves the strict current
+	// protocol allowlist; profiles are never global or inferred from server name.
+	MCPProtocolCompatibilityProfile string `yaml:"mcp_protocol_compatibility_profile,omitempty" json:"mcp_protocol_compatibility_profile,omitempty"`
 }
 
 // DaemonTemplate describes a per-workspace daemon spawn template for the
@@ -1165,6 +1171,9 @@ func (m *ServerManifest) Validate() error {
 	if m.Transport != TransportNativeHTTP && m.Transport != TransportStdioBridge && m.Transport != TransportRemoteHTTP && m.Transport != TransportProcess {
 		return fmt.Errorf("manifest %s: transport must be %q, %q, %q, or %q (got %q)", m.Name, TransportNativeHTTP, TransportStdioBridge, TransportRemoteHTTP, TransportProcess, m.Transport)
 	}
+	if err := m.validateDaemonMCPProtocolCompatibilityProfiles(); err != nil {
+		return err
+	}
 
 	// D-2 + D-3 schema/cross-field gates (Tier-0). Placed here — AFTER the
 	// kind/transport enum checks and BEFORE the companion early-return below — so
@@ -1405,6 +1414,22 @@ func (m *ServerManifest) Validate() error {
 			if l.LspCommand == "" {
 				return fmt.Errorf("manifest %s: languages[%d].lsp_command is required", m.Name, i)
 			}
+		}
+	}
+	return nil
+}
+
+func (m *ServerManifest) validateDaemonMCPProtocolCompatibilityProfiles() error {
+	for i := range m.Daemons {
+		profile := m.Daemons[i].MCPProtocolCompatibilityProfile
+		if profile == "" {
+			continue
+		}
+		if m.Transport != TransportStdioBridge {
+			return fmt.Errorf("manifest %s: daemons[%d].mcp_protocol_compatibility_profile is only valid with transport=stdio-bridge (got transport=%q)", m.Name, i, m.Transport)
+		}
+		if _, err := mcpcompat.ResolveProtocolCompatibilityProfile(profile); err != nil {
+			return fmt.Errorf("manifest %s: daemons[%d].mcp_protocol_compatibility_profile: %w", m.Name, i, err)
 		}
 	}
 	return nil

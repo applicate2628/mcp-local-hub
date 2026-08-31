@@ -22,6 +22,7 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 	var clientFlag string
 	var nameFlag string
 	var clientsFlag string
+	var compatibilityProfileFlag string
 	var portFlag int
 	var yes bool
 	cmd := &cobra.Command{
@@ -40,11 +41,12 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 			}
 			a := newAPI()
 			plan, err := a.BuildAdoptPlan(api.AdoptOpts{
-				EntryName:    args[0],
-				Client:       clientFlag,
-				ManifestName: nameFlag,
-				Port:         portFlag,
-				Clients:      include,
+				EntryName:                       args[0],
+				Client:                          clientFlag,
+				ManifestName:                    nameFlag,
+				Port:                            portFlag,
+				Clients:                         include,
+				MCPProtocolCompatibilityProfile: compatibilityProfileFlag,
 			})
 			if err != nil {
 				return err
@@ -60,6 +62,7 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 	cmd.Flags().StringVar(&nameFlag, "name", "", "manifest name (default: entry name; v1 requires it to match)")
 	cmd.Flags().IntVar(&portFlag, "port", 0, "hub daemon port (default: first free 9300-9399)")
 	cmd.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated clients to repoint (default: every same-name direct entry found)")
+	cmd.Flags().StringVar(&compatibilityProfileFlag, "mcp-protocol-compatibility-profile", "", "optional stdio MCP protocol compatibility profile")
 	cmd.Flags().BoolVar(&yes, "yes", false, "execute the adopt plan; without this the command is a dry-run")
 	return cmd
 }

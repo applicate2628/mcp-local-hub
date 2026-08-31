@@ -2695,6 +2695,14 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 }
 
 func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any) string {
+	return renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd, args, env, port, bindings, "")
+}
+
+func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any, compatibilityProfile string) string {
+	daemon := map[string]any{"name": "default", "port": port}
+	if compatibilityProfile != "" {
+		daemon["mcp_protocol_compatibility_profile"] = compatibilityProfile
+	}
 	doc := struct {
 		Name           string            `yaml:"name"`
 		Kind           string            `yaml:"kind"`
@@ -2713,7 +2721,7 @@ func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[stri
 		BaseArgs:  args,
 		Env:       env,
 		Daemons: []map[string]any{
-			{"name": "default", "port": port},
+			daemon,
 		},
 		ClientBindings: bindings,
 		WeeklyRefresh:  false,
