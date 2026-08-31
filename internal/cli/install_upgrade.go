@@ -5,17 +5,13 @@
 // receipt. Unsupported machine/platform states fail closed before mutation.
 // UpgradeDeps keeps every external side effect deterministic in tests:
 //
-//   - RenameAsideBinary → api.RenameAsideReplace (Task 8.1, shipped)
-//   - QuiesceTimers     → IPC client `quiesce-timers` (Task 5.2 pipe +
-//     future client-side helper)
+//   - RenameAsideBinary → api.RenameAsideReplaceWithResult
+//   - QuiesceTimers     → IPC client `quiesce-timers`
 //   - ExitGraceful      → IPC client `exit{graceful: true, ...}`
-//   - ForceKillSupervisor → `taskkill /F /T /PID` (Windows) /
-//     `kill -KILL -<pgid>` (POSIX)
-//   - StartSupervisor   → `schtasks /Run \mcp-local-hub-supervisor`
-//     (Windows shim) or detached CreateProcess
-//     with the platform's detached lifetime primitive and shared no-window policy
-//     (POSIX: launchctl kickstart / systemctl
-//     --user restart / mcphub supervise &)
+//   - ForceKillSupervisor → identity-gated `taskkill /F /T /PID` on Windows
+//   - StartSupervisor   → spawnSupervisorDetached with no-window policy
+//
+// Unsupported platforms provide no adapter and fail closed in dispatch.
 package cli
 
 import (
@@ -451,30 +447,25 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	}
 	retainedPrior := promotion.RetainedPrior
 
-	// Step 6: Explicit per-OS supervisor start.
+	// Step 6: Start the admitted successor through the wired platform adapter.
 	//
-	// Windows: `schtasks /Run /TN \mcp-local-hub-supervisor` if the
-	// scheduled-task shim is installed; otherwise detached
-	// CreateProcess with DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP
-	// plus the shared no-window child policy (the new supervisor's
+	// Windows always uses spawnSupervisorDetached: detached CreateProcess with
+	// CREATE_BREAKAWAY_FROM_JOB when admitted by the parent job, a flagless
+	// detached retry otherwise, and the shared no-window child policy. The new
+	// supervisor's
 	// stdin/stdout/stderr inherit nothing from this CLI process, so it
 	// survives both the upgrade caller's exit and the closing of the
-	// terminal the upgrade was typed into). Surviving the caller's
+	// terminal the upgrade was typed into. Surviving the caller's
 	// EXIT and surviving the caller's CONSOLE are different
-	// properties; the creation flags deliver only the first. See
+	// properties; detached lifetime plus the no-window policy provide both. See
 	// spawnSupervisorDetached in install_migration_wiring_windows.go,
 	// which is the Deps.StartSupervisor implementation this calls.
-	// Linux managed: `systemctl --user restart mcphub-supervisor.service`.
-	// Linux unmanaged: `mcphub supervise &` (detached background).
-	// macOS managed: `launchctl kickstart -k gui/<uid>/com.applicate2628.mcphub-supervisor`.
-	// macOS unmanaged: `mcphub supervise &` (detached background).
+	// Other platforms currently have no UpgradeDeps adapter; their dispatcher
+	// fails closed before entering this transaction.
 	//
-	// Failure here aborts with an error because the operator is now
-	// in a state where the binary has been replaced and the prior
-	// supervisor is dead, but no supervisor is running. Recovery
-	// path is documented in the error message: `mcphub supervise`
-	// from a shell, which exercises the same per-OS surface in
-	// foreground mode (with diagnostics visible to the operator).
+	// Failure triggers exact retained-prior rollback. The command returns the
+	// successor-start cause plus rollback proof or the precise rollback stage
+	// that could not be completed.
 	if err := opts.Deps.StartSupervisor(opts.BinaryPath); err != nil {
 		return rollbackInstallUpgrade(ctx, opts, retainedPrior, priorSHA256, handoffTimeout,
 			fmt.Errorf("supervisor start failed after binary replacement + prior-supervisor exit: %w", err))
