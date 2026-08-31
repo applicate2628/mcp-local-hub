@@ -320,6 +320,69 @@ func TestStrictModeEnable_AtomicTwoResource(t *testing.T) {
 	}
 }
 
+func TestAutostartOwnerMode_AtomicTwoResource(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+
+	if err := RunAutostartOwnerMode(api.OwnerModeSupervise, false, tmp.Deps()); err != nil {
+		t.Fatalf("set supervise owner mode: %v", err)
+	}
+	intent, err := api.ReadSupervisorIntent(tmp.IntentPath())
+	if err != nil {
+		t.Fatalf("read intent: %v", err)
+	}
+	if got := intent.EffectiveOwnerMode(); got != api.OwnerModeSupervise {
+		t.Fatalf("intent owner mode=%q, want supervise", got)
+	}
+	if len(tmp.backend.enableCalls) != 1 || tmp.backend.enableCalls[0].OwnerMode != autostart.OwnerModeSupervise {
+		t.Fatalf("autostart Enable options=%+v, want supervise owner", tmp.backend.enableCalls)
+	}
+}
+
+func TestAutostartOwnerMode_RevertsIntentOnTaskWriteFailure(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.MakeShimWriteFail()
+
+	err := RunAutostartOwnerMode(api.OwnerModeSupervise, false, tmp.Deps())
+	if err == nil {
+		t.Fatal("expected task write failure")
+	}
+	intent, readErr := api.ReadSupervisorIntent(tmp.IntentPath())
+	if readErr != nil {
+		t.Fatalf("read intent: %v", readErr)
+	}
+	if got := intent.EffectiveOwnerMode(); got != api.OwnerModeGUI {
+		t.Fatalf("owner mode after task failure=%q, want reverted gui", got)
+	}
+}
+
+func TestAutostartOwnerMode_RecoveryReplaysPersistedOwnerPolicy(t *testing.T) {
+	tmp := setupSupervisorFixture(t)
+	tmp.MakeShimWriteFail()
+	tmp.MakeRevertWriteFail()
+	if code := exitCodeFromError(RunAutostartOwnerMode(api.OwnerModeSupervise, false, tmp.Deps())); code != ExitStrictModeRevertFailed {
+		t.Fatalf("owner-mode failed mutation exit=%d, want %d", code, ExitStrictModeRevertFailed)
+	}
+	bc := tmp.ReadBreadcrumb()
+	if got := bc.IntendedOwnerMode; got != api.OwnerModeSupervise {
+		t.Fatalf("breadcrumb intended owner=%q, want supervise", got)
+	}
+	// Recovery is a new invocation after the transient task failure clears.
+	tmp.backend.failEnable = false
+	if err := RunStrictModeRecover(tmp.Deps()); err != nil {
+		t.Fatalf("recover owner mode: %v", err)
+	}
+	intent, err := api.ReadSupervisorIntent(tmp.IntentPath())
+	if err != nil {
+		t.Fatalf("read recovered intent: %v", err)
+	}
+	if got := intent.EffectiveOwnerMode(); got != api.OwnerModeSupervise {
+		t.Fatalf("recovered owner mode=%q, want supervise", got)
+	}
+	if last := tmp.backend.enableCalls[len(tmp.backend.enableCalls)-1]; last.OwnerMode != autostart.OwnerModeSupervise {
+		t.Fatalf("recovery task options=%+v, want supervise owner", last)
+	}
+}
+
 // TestStrictModeEnable_CleanSuccessEmitsSupervisorEvent covers the
 // deep-review round-2 P4 finding: the clean-success branch of
 // runStrictModeUnderLocks previously returned nil with NO

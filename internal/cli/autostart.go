@@ -36,7 +36,8 @@ func newAutostartCmd() *cobra.Command {
 		Short: "Manage supervisor autostart at logon",
 		Long: `mcphub autostart installs (or removes) an OS-native shim that
 re-runs ` + "`mcphub gui [--strict-mode]`" + ` whenever the current user
-signs in.
+signs in by default, or ` + "`mcphub supervise [--strict-mode]`" + ` when the
+persisted Windows owner mode is supervise.
 
   - Windows: Task Scheduler entry  \mcp-local-hub-supervisor
   - Linux:   systemd-user unit     ~/.config/systemd/user/mcphub-supervisor.service
@@ -61,25 +62,30 @@ write today; re-run ` + "`mcphub autostart enable`" + ` to reconcile.`,
 // `mcphub supervise` run.
 func newAutostartEnableCmd() *cobra.Command {
 	var strictMode bool
+	var ownerMode string
 	cmd := &cobra.Command{
 		Use:   "enable",
 		Short: "Install or replace the autostart shim",
 		Long: `Installs (or replaces) the autostart shim for the current OS. The
-shim re-runs ` + "`mcphub gui [--strict-mode]`" + ` at each user logon.
+shim re-runs the persisted owner at each user logon: GUI by default, or
+supervise when ` + "`--owner-mode supervise`" + ` is selected.
 
 Idempotent — re-running with the same flags is safe and re-writes the
-on-disk shim verbatim. Re-running with different flags overwrites the
-prior shim so a stale ` + "`--strict-mode`" + ` flag never lingers.`,
+intent plus canonical shim as one recoverable transaction. Without explicit
+flags, the persisted owner and strict policy are preserved.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			b, err := autostartBackendFactoryFn()
-			if err != nil {
-				return fmt.Errorf("autostart backend: %w", err)
-			}
-			return b.Enable(autostart.Options{StrictMode: strictMode})
+			return enableAutostartForPlatform(
+				autostart.OwnerMode(ownerMode),
+				cmd.Flags().Changed("owner-mode"),
+				strictMode,
+				cmd.Flags().Changed("strict-mode"),
+			)
 		},
 	}
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false,
 		"pass --strict-mode through to the supervisor process the shim launches")
+	cmd.Flags().StringVar(&ownerMode, "owner-mode", "gui",
+		"Windows owner mode: gui or supervise (persists atomically with the canonical task)")
 	return cmd
 }
 
@@ -112,12 +118,12 @@ stopped, disable still succeeds.`,
 // can grep for "absent" / "enabled-running" / "enabled-stopped" /
 // "drifted" / "stale-residue".
 //
-// --strict-mode threads through Options.StrictMode for drift
-// detection: when the on-disk shim has --strict-mode but the operator
-// asks `mcphub autostart status` without it, that IS drift (and vice
-// versa).
+// Status resolves the persisted owner + strict policy before drift detection;
+// this prevents a plain status call from treating a valid supervise owner as
+// a GUI-shaped drift. --strict-mode remains an explicit comparison override.
 func newAutostartStatusCmd() *cobra.Command {
 	var strictMode bool
+	var details bool
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Print the current autostart shim state",
@@ -138,7 +144,11 @@ Pass --strict-mode to check drift against the strict-mode shim shape.`,
 			if err != nil {
 				return fmt.Errorf("autostart backend: %w", err)
 			}
-			state, err := b.Status(autostart.Options{StrictMode: strictMode})
+			opts, policyDetails, err := autostartStatusOptionsForPlatform(strictMode, cmd.Flags().Changed("strict-mode"))
+			if err != nil {
+				return fmt.Errorf("autostart status policy: %w", err)
+			}
+			state, err := b.Status(opts)
 			if err != nil {
 				if errors.Is(err, autostart.ErrStatusObservationUnavailable) {
 					fmt.Fprintln(cmd.OutOrStdout(), "unavailable")
@@ -148,10 +158,15 @@ Pass --strict-mode to check drift against the strict-mode shim shape.`,
 				return fmt.Errorf("autostart status: %w", err)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), state.String())
+			if details && policyDetails {
+				fmt.Fprintf(cmd.OutOrStdout(), "owner-mode=%s\nstrict-mode=%t\n", opts.OwnerMode, opts.StrictMode)
+			}
 			return nil
 		},
 	}
 	cmd.Flags().BoolVar(&strictMode, "strict-mode", false,
 		"check drift against the strict-mode shim shape")
+	cmd.Flags().BoolVar(&details, "details", false,
+		"print the persisted owner and strict policy after the stable state token")
 	return cmd
 }

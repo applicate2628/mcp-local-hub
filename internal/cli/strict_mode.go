@@ -119,6 +119,13 @@ type strictModeBreadcrumb struct {
 	// strict_mode flag.
 	ActualShimState bool `json:"actual_shim_state"`
 
+	// Owner-mode fields extend the same recoverable two-resource mutation to
+	// the Windows GUI/supervise owner selection. Omitted legacy breadcrumbs
+	// describe the historical GUI topology.
+	IntendedOwnerMode     api.OwnerMode `json:"intended_owner_mode,omitempty"`
+	ActualIntentOwnerMode api.OwnerMode `json:"actual_intent_owner_mode,omitempty"`
+	ActualShimOwnerMode   api.OwnerMode `json:"actual_shim_owner_mode,omitempty"`
+
 	// Step1Error is the error from step 4 (intent write) if it
 	// failed. Empty string when step 4 succeeded (the typical
 	// breadcrumb-writing path).
@@ -312,7 +319,28 @@ func RunStrictMode(args []string, deps StrictModeDeps) error {
 	}
 	defer locks.Release()
 
-	return runStrictModeUnderLocks(desired, deps)
+	return runAutostartPolicyUnderLocks(desired, "", deps)
+}
+
+// RunAutostartOwnerMode changes the persisted Windows owner and its canonical
+// task argv through the same locked, breadcrumb-backed transaction strict mode
+// uses. strictMode is supplied by the public autostart command so both task
+// policy dimensions always converge together.
+func RunAutostartOwnerMode(ownerMode api.OwnerMode, strictMode bool, deps StrictModeDeps) error {
+	if !ownerMode.Valid() {
+		return fmt.Errorf("invalid owner mode %q", ownerMode)
+	}
+	if _, err := os.Stat(deps.BreadcrumbPath); err == nil {
+		return fmt.Errorf("autostart owner mode: prior mutation incomplete; run `mcphub strict-mode --recover` first (breadcrumb at %s)", deps.BreadcrumbPath)
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("autostart owner mode: stat breadcrumb: %w", err)
+	}
+	locks, err := acquireStrictModeStateLocks(deps.StateDir)
+	if err != nil {
+		return &forceExitError{code: ExitStrictModeBusy}
+	}
+	defer locks.Release()
+	return runAutostartPolicyUnderLocks(strictMode, ownerMode, deps)
 }
 
 // acquireStrictModeStateLocks acquires the universal state-dir locks for a
@@ -380,19 +408,27 @@ func strictModeShimDriftFingerprint(snapshot autostart.StatusSnapshot) strictMod
 	}
 }
 
-// runStrictModeUnderLocks performs the two-resource mutation with the
-// locks already held. Extracted so RunStrictMode and the test seam can
-// share the body without duplicating the lock + breadcrumb scaffolding.
-func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
+// runAutostartPolicyUnderLocks performs the two-resource mutation with the
+// locks already held. Strict mode and owner mode share one durable recovery
+// record rather than maintaining parallel rollback protocols.
+func runAutostartPolicyUnderLocks(desired bool, desiredOwnerMode api.OwnerMode, deps StrictModeDeps) error {
 	// Read current intent so we know the original value to revert to
 	// on failure. Missing file is treated as default StrictMode=false.
 	var originalStrict bool
+	originalOwnerMode := api.OwnerModeGUI
 	original, err := readStrictModeIntentSnapshot(deps)
 	if err != nil {
 		return fmt.Errorf("strict-mode: read intent: %w", err)
 	}
 	if original != nil {
 		originalStrict = original.StrictMode
+		originalOwnerMode = original.EffectiveOwnerMode()
+	}
+	if desiredOwnerMode == "" {
+		desiredOwnerMode = originalOwnerMode
+	}
+	if !desiredOwnerMode.Valid() {
+		return fmt.Errorf("invalid owner mode %q", desiredOwnerMode)
 	}
 
 	// If already in desired state on BOTH surfaces, this is a no-op,
@@ -406,7 +442,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// value still carries liveness-only noise (enabled-running vs
 	// enabled-stopped), so the revert branch compares the drift fingerprint
 	// derived from this baseline instead of raw State equality.
-	shimSnapshot, snapshotErr := deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict})
+	shimSnapshot, snapshotErr := deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict, OwnerMode: originalOwnerMode})
 	shimSnapshotFingerprint := strictModeShimDriftFingerprint(shimSnapshot)
 
 	// Forward-progress breadcrumb for the SIGKILL/power-loss window
@@ -421,18 +457,21 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// rolls forward — both branches drive intent + shim consistently and
 	// so overwrite whatever partial state the crash left.
 	inProgressBC := strictModeBreadcrumb{
-		Intended:          desired,
-		ActualIntentState: originalStrict,
-		ActualShimState:   originalStrict,
-		TS:                time.Now().UTC().Format(time.RFC3339Nano),
-		Phase:             strictModeBreadcrumbPhaseInProgress,
+		Intended:              desired,
+		ActualIntentState:     originalStrict,
+		ActualShimState:       originalStrict,
+		TS:                    time.Now().UTC().Format(time.RFC3339Nano),
+		Phase:                 strictModeBreadcrumbPhaseInProgress,
+		IntendedOwnerMode:     desiredOwnerMode,
+		ActualIntentOwnerMode: originalOwnerMode,
+		ActualShimOwnerMode:   originalOwnerMode,
 	}
 	if err := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &inProgressBC); err != nil {
 		return fmt.Errorf("strict-mode: write in-progress breadcrumb: %w", err)
 	}
 
 	// Step 1: write intent with new strict_mode value.
-	if err := writeStrictModeIntent(deps, desired); err != nil {
+	if err := writeAutostartPolicyIntent(deps, desired, desiredOwnerMode); err != nil {
 		if strictModeAppliedIntentError(deps, err) {
 			// The durable intent write succeeded but its lock leaf is poisoned.
 			// Keep the in-progress breadcrumb; a same-process re-read/rewrite would
@@ -446,7 +485,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		// leave intent already changed while the shim has not been updated. In
 		// that ambiguous/changed case, keep the in-progress breadcrumb so
 		// `strict-mode --recover` can reconcile any drift.
-		if current, readErr := readStrictModeIntentSnapshot(deps); readErr == nil && current.StrictMode == originalStrict {
+		if current, readErr := readStrictModeIntentSnapshot(deps); readErr == nil && current.StrictMode == originalStrict && current.EffectiveOwnerMode() == originalOwnerMode {
 			if rmErr := os.Remove(deps.BreadcrumbPath); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 				return fmt.Errorf("strict-mode: step 1 (intent write): %w (cleanup in-progress breadcrumb failed: %v)", err, rmErr)
 			}
@@ -455,9 +494,9 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	}
 
 	// Step 2: install/update shim with new strict_mode flag.
-	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: desired}); err != nil {
+	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: desired, OwnerMode: desiredOwnerMode}); err != nil {
 		// Revert step 1.
-		if revertErr := writeStrictModeIntent(deps, originalStrict); revertErr != nil {
+		if revertErr := writeAutostartPolicyIntent(deps, originalStrict, originalOwnerMode); revertErr != nil {
 			// Both writes failed — overwrite the in-progress breadcrumb with
 			// the torn shape + exit 10. The Phase reverts to torn ("") so the
 			// --recover surface treats it as the handled both-failed case.
@@ -469,14 +508,17 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 				actualIntentState = originalStrict
 			}
 			bc := strictModeBreadcrumb{
-				Intended:          desired,
-				ActualIntentState: actualIntentState,
-				ActualShimState:   originalStrict, // step 2 failed, so shim stays at original
-				Step1Error:        "",
-				Step2Error:        err.Error(),
-				RevertError:       revertErr.Error(),
-				TS:                time.Now().UTC().Format(time.RFC3339Nano),
-				Phase:             strictModeBreadcrumbPhaseTorn,
+				Intended:              desired,
+				ActualIntentState:     actualIntentState,
+				ActualShimState:       originalStrict, // step 2 failed, so shim stays at original
+				Step1Error:            "",
+				Step2Error:            err.Error(),
+				RevertError:           revertErr.Error(),
+				TS:                    time.Now().UTC().Format(time.RFC3339Nano),
+				Phase:                 strictModeBreadcrumbPhaseTorn,
+				IntendedOwnerMode:     desiredOwnerMode,
+				ActualIntentOwnerMode: originalOwnerMode,
+				ActualShimOwnerMode:   originalOwnerMode,
 			}
 			if writeBCErr := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); writeBCErr != nil {
 				// Truly catastrophic — can't even write the breadcrumb.
@@ -514,7 +556,7 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		var reprobe autostart.StatusSnapshot
 		var reprobeErr error
 		if snapshotErr == nil {
-			reprobe, reprobeErr = deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict})
+			reprobe, reprobeErr = deps.AutostartBackend.StatusSnapshot(autostart.Options{StrictMode: originalStrict, OwnerMode: originalOwnerMode})
 			if reprobeErr == nil && strictModeShimDriftFingerprint(reprobe) == shimSnapshotFingerprint {
 				shimProvenUnchanged = true
 			}
@@ -543,14 +585,17 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 		shimDetail := fmt.Sprintf("shim state could not be proven unchanged after failed Enable (snapshot=%v snapshotFingerprint=%v snapshotErr=%v reprobe=%v reprobeFingerprint=%v reprobeErr=%v)",
 			shimSnapshot, shimSnapshotFingerprint, snapshotErr, reprobe, strictModeShimDriftFingerprint(reprobe), reprobeErr)
 		bc := strictModeBreadcrumb{
-			Intended:          desired,
-			ActualIntentState: originalStrict, // revert succeeded, so intent IS back at original
-			ActualShimState:   originalStrict, // best-effort: target the shim should hold; recover re-Enables regardless
-			Step1Error:        "",
-			Step2Error:        err.Error() + "; " + shimDetail,
-			RevertError:       "",
-			TS:                time.Now().UTC().Format(time.RFC3339Nano),
-			Phase:             strictModeBreadcrumbPhaseTorn,
+			Intended:              desired,
+			ActualIntentState:     originalStrict, // revert succeeded, so intent IS back at original
+			ActualShimState:       originalStrict, // best-effort: target the shim should hold; recover re-Enables regardless
+			Step1Error:            "",
+			Step2Error:            err.Error() + "; " + shimDetail,
+			RevertError:           "",
+			TS:                    time.Now().UTC().Format(time.RFC3339Nano),
+			Phase:                 strictModeBreadcrumbPhaseTorn,
+			IntendedOwnerMode:     desiredOwnerMode,
+			ActualIntentOwnerMode: originalOwnerMode,
+			ActualShimOwnerMode:   originalOwnerMode,
 		}
 		if writeBCErr := writeStrictModeBreadcrumb(deps.BreadcrumbPath, &bc); writeBCErr != nil {
 			// Cannot even overwrite the breadcrumb — the in-progress marker
@@ -600,7 +645,9 @@ func runStrictModeUnderLocks(desired bool, deps StrictModeDeps) error {
 	// the sole audit row is not silently dropped the way TryEmit would) but
 	// gives up after a short budget instead of blocking forever. RunStrictMode's
 	// deferred locks.Release() runs after this returns.
-	emitStrictModeChangedEvent(deps.StateDir, originalStrict, desired)
+	if originalStrict != desired {
+		emitStrictModeChangedEvent(deps.StateDir, originalStrict, desired)
+	}
 	return nil
 }
 
@@ -689,9 +736,9 @@ func readStrictModeIntentSnapshot(deps StrictModeDeps) (*api.SupervisorIntentFil
 	return snapshot, nil
 }
 
-func writeStrictModeIntent(deps StrictModeDeps, strict bool) error {
+func writeAutostartPolicyIntent(deps StrictModeDeps, strict bool, ownerMode api.OwnerMode) error {
 	return mutateStrictModeIntent(deps, func(file *api.SupervisorIntentFile) (bool, error) {
-		next := supervisorIntentWithStrictMode(file, strict)
+		next := supervisorIntentWithAutostartPolicy(file, strict, ownerMode)
 		*file = *next
 		return true, nil
 	})
@@ -707,12 +754,13 @@ func mutateStrictModeIntent(deps StrictModeDeps, callback func(*api.SupervisorIn
 	})
 }
 
-func supervisorIntentWithStrictMode(existing *api.SupervisorIntentFile, strict bool) *api.SupervisorIntentFile {
+func supervisorIntentWithAutostartPolicy(existing *api.SupervisorIntentFile, strict bool, ownerMode api.OwnerMode) *api.SupervisorIntentFile {
 	if existing == nil {
 		return &api.SupervisorIntentFile{
 			Version:    1,
 			UpdatedAt:  time.Now().UTC().Format(time.RFC3339Nano),
 			StrictMode: strict,
+			OwnerMode:  ownerMode,
 		}
 	}
 	next := *existing
@@ -720,6 +768,7 @@ func supervisorIntentWithStrictMode(existing *api.SupervisorIntentFile, strict b
 		next.Version = 1
 	}
 	next.StrictMode = strict
+	next.OwnerMode = ownerMode
 	return &next
 }
 
@@ -770,6 +819,27 @@ func readStrictModeRecoverChoiceStdin() (string, error) {
 	return strings.TrimSpace(strings.ToUpper(line)), nil
 }
 
+func (b strictModeBreadcrumb) intendedOwnerMode() api.OwnerMode {
+	if b.IntendedOwnerMode == "" {
+		return api.OwnerModeGUI
+	}
+	return b.IntendedOwnerMode
+}
+
+func (b strictModeBreadcrumb) actualIntentOwnerMode() api.OwnerMode {
+	if b.ActualIntentOwnerMode == "" {
+		return api.OwnerModeGUI
+	}
+	return b.ActualIntentOwnerMode
+}
+
+func (b strictModeBreadcrumb) actualShimOwnerMode() api.OwnerMode {
+	if b.ActualShimOwnerMode == "" {
+		return api.OwnerModeGUI
+	}
+	return b.ActualShimOwnerMode
+}
+
 // RunStrictModeRecover is the testable entry point for `mcphub
 // strict-mode --recover`. Reads the breadcrumb, prompts the operator
 // with two exhaustive branches, atomically reconciles, and deletes
@@ -810,6 +880,9 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 			"  intended:            %v\n"+
 			"  actual_intent_state: %v\n"+
 			"  actual_shim_state:   %v\n"+
+			"  intended_owner_mode: %s\n"+
+			"  actual_intent_owner_mode: %s\n"+
+			"  actual_shim_owner_mode: %s\n"+
 			"  step2_error:         %s\n"+
 			"  revert_error:        %s\n"+
 			"\n"+
@@ -818,11 +891,13 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 			"  (B) drive both intent + shim to actual_intent_state (%v)\n"+
 			"Branch [A/B]: ",
 		bc.Intended, bc.ActualIntentState, bc.ActualShimState,
+		bc.intendedOwnerMode(), bc.actualIntentOwnerMode(), bc.actualShimOwnerMode(),
 		bc.Step2Error, bc.RevertError, bc.Intended, bc.ActualIntentState)
 	if deps.PromptOperator == nil {
 		deps.PromptOperator = readStrictModeRecoverChoiceStdin
 	}
 	var target bool
+	var targetOwnerMode api.OwnerMode
 	for attempt := 0; attempt < 3; attempt++ {
 		choice, err := deps.PromptOperator()
 		if err != nil {
@@ -832,8 +907,10 @@ func RunStrictModeRecover(deps StrictModeDeps) error {
 		switch choice {
 		case "A":
 			target = bc.Intended
+			targetOwnerMode = bc.intendedOwnerMode()
 		case "B":
 			target = bc.ActualIntentState
+			targetOwnerMode = bc.actualIntentOwnerMode()
 		default:
 			fmt.Fprintf(stdoutOrDefault(deps), "invalid choice %q — type A or B: ", choice)
 			continue
@@ -847,7 +924,7 @@ reconcile:
 	// Atomic two-resource reconcile, same pipeline as RunStrictMode but
 	// without the breadcrumb-refusal pre-check (we're recovering FROM a
 	// breadcrumb, so it MUST exist).
-	settlement := reconcileBothResources(target, deps)
+	settlement := reconcileBothResources(target, targetOwnerMode, deps)
 	if !settlement.converged {
 		// Re-assert breadcrumb on failure with refreshed TS, so the
 		// operator can retry --recover.
@@ -855,6 +932,7 @@ reconcile:
 		if strictModeAppliedIntentError(deps, settlement.err) {
 			// The target intent is durable even though release is poisoned.
 			newBC.ActualIntentState = target
+			newBC.ActualIntentOwnerMode = targetOwnerMode
 		}
 		newBC.TS = time.Now().UTC().Format(time.RFC3339Nano)
 		newBC.RevertError = fmt.Sprintf("recover failed: %v", settlement.err)
@@ -870,7 +948,7 @@ reconcile:
 		// actual == intended" and the operator can delete it by hand.
 		fmt.Fprintf(stderrOrDefault(deps), "strict-mode --recover: cleanup breadcrumb: %v\n", err)
 	}
-	fmt.Fprintf(stdoutOrDefault(deps), "strict-mode --recover: reconciled to %v\n", target)
+	fmt.Fprintf(stdoutOrDefault(deps), "strict-mode --recover: reconciled to strict-mode=%v owner-mode=%s\n", target, targetOwnerMode)
 	return settlement.err
 }
 
@@ -881,17 +959,21 @@ type strictModeSettlement struct {
 
 // reconcileBothResources drives intent + shim to target in one
 // transactional unit. Used by --recover; mirrors the step 4 + step 5
-// sequence of runStrictModeUnderLocks but without revert (recover is
+// sequence of runAutostartPolicyUnderLocks but without revert (recover is
 // the revert path, so a failure here is terminal).
-func reconcileBothResources(target bool, deps StrictModeDeps) strictModeSettlement {
+func reconcileBothResources(target bool, targetOwnerMode api.OwnerMode, deps StrictModeDeps) strictModeSettlement {
 	var result strictModeSettlement
-	if err := writeStrictModeIntent(deps, target); err != nil {
+	if !targetOwnerMode.Valid() {
+		result.err = fmt.Errorf("invalid recovery owner mode %q", targetOwnerMode)
+		return result
+	}
+	if err := writeAutostartPolicyIntent(deps, target, targetOwnerMode); err != nil {
 		result.err = fmt.Errorf("intent write: %w", err)
 		if !strictModeAppliedIntentError(deps, err) {
 			return result
 		}
 	}
-	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: target}); err != nil {
+	if err := deps.AutostartBackend.Enable(autostart.Options{StrictMode: target, OwnerMode: targetOwnerMode}); err != nil {
 		result.err = errors.Join(result.err, fmt.Errorf("shim enable: %w", err))
 		return result
 	}
