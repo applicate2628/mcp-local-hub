@@ -70,13 +70,13 @@ Idempotent — running it again when the binary is already at the target and the
 
 If you skip this step, `mcphub install` will detect that `mcphub.exe` isn't on PATH and either prompt to bootstrap (interactive shells) or fail with a pointer back to `mcphub setup` (CI, pipes).
 
-Moving or rebuilding the binary later: run `setup` again from the new location. It copies the new binary over `~/.local/bin/mcphub.exe`, so existing scheduler tasks — which point at that absolute path — keep working without any rewrite. If you need to migrate tasks that still reference an old absolute path (e.g. dev checkout tasks created before setup), run `mcphub scheduler upgrade` once.
+For a routine move or rebuild on an existing supervised installation, build an admitted product binary and run that candidate's `mcphub upgrade`. The managed transaction stages and admits it, releases the prior fleet, promotes once, verifies successor identity/canonical bytes, and writes a durable receipt. Fresh hosts and legacy scheduler-only hosts fail closed: run `mcphub setup`, establish/migrate supervised daemon state, then use `mcphub upgrade`. `mcphub scheduler upgrade` is advanced repair for surviving infrastructure-task command paths, not the routine binary-upgrade workflow.
 
 ### Installed via npm? The canonical binary is refreshed automatically
 
-`~/.local/bin` sits *earlier* on `PATH` than the npm global bin by design (the scheduler tasks and `install --upgrade` all point at `~/.local/bin`). So a bare `mcphub` always runs the `~/.local/bin` copy — npm is only the delivery vehicle. To keep that copy fresh, `npm install -g mcp-local-hub@<newer>` runs a **copy-only** postinstall (`scripts/postinstall.js`) that asks the freshly-installed platform binary to canonicalize itself into `~/.local/bin` via `mcphub canonicalize` (binary copy only — no PATH edits, no scheduled tasks, no download, no fleet restart). It is lock-safe on Windows (rename-aside if the running fleet holds the file) and fully fail-safe (a copy failure never breaks `npm install`; it prints a one-line notice pointing here). This hook runs **on a GLOBAL install only** — it detects `npm install -g` via the `npm_config_global` environment variable npm sets for lifecycle scripts, and prints a one-line skip notice (no `~/.local/bin` mutation) for a local install or a transitive install where `mcp-local-hub` is merely a dependency of some other package.
+`~/.local/bin` sits *earlier* on `PATH` than the npm global bin by design, so a bare `mcphub` resolves the canonical copy. On a GLOBAL npm install, `scripts/postinstall.js` asks the platform package binary to run the copy-only `mcphub canonicalize` delivery step (no PATH edits, task changes, fleet restart, readiness proof, or durable upgrade receipt). Canonicalize is therefore **not upgrade success**; it proves only that bytes were delivered to the canonical path. A managed supervised installation reaches upgrade success only through `mcphub upgrade` and its readiness/readback/receipt contract. Local/transitive installs skip canonicalization.
 
-If you installed with `npm install --ignore-scripts`, the postinstall is skipped — run `mcphub setup` (or `mcphub canonicalize`) once to refresh `~/.local/bin` manually.
+If you installed with `npm install --ignore-scripts`, the delivery hook is skipped. Use `mcphub setup` for first installation; on an established supervised installation, run the admitted platform candidate's `mcphub upgrade`. Running `canonicalize` manually refreshes bytes only and must not be reported as a completed upgrade.
 
 ## First install
 
@@ -292,7 +292,7 @@ Start-Sleep 3
 Start-Process "$env:LOCALAPPDATA\Programs\Antigravity\Antigravity.exe"
 ```
 
-The relay binary path is the canonical `~/.local/bin/mcphub.exe` that `mcphub setup` installs. Moving, rebuilding, or upgrading the binary only requires re-running `mcphub setup` — scheduler tasks and Antigravity client entries keep pointing at the same deterministic path.
+The relay path remains the deterministic canonical `~/.local/bin/mcphub.exe`. Use `setup` to establish it on a fresh host; use the admitted managed `mcphub upgrade` transaction for subsequent binary changes. Client entries keep the same path and need no rewrite.
 
 ## Manifest resolution model
 
@@ -602,16 +602,13 @@ Backups are named `<config>.bak-mcp-local-hub-YYYYMMDD-HHMMSS` and live next to 
 
 ### Install-time atomicity
 
-`install --server X` applies its side effects in order: create scheduler tasks → backup each client config → add the MCP entry → kick off the scheduler task. If any step after the first fails, the installer compensates in reverse: scheduler tasks it just created are deleted, and MCP entries it just added are removed (backups are preserved untouched so you can restore them manually via `rollback` if you need to undo an earlier install of a DIFFERENT server).
+`install --server X` freezes a mutation plan, persists supervisor-owned daemon intent, backs up and updates selected client entries, and asks the supervisor to reconcile the new target. Receipt-backed compensation removes only side effects committed by that invocation; backups remain available for explicit client-config rollback.
 
-This is best-effort atomicity: two concurrent `install` invocations can still step on each other, and a crash between compensating ops leaves partial state. For a deterministic recovery from such a state, run `uninstall --server X` then `install --server X` again.
+The command fails loudly when mutation settlement or readiness cannot be proven. Inspect `mcphub status`; if the target remains partial, run `uninstall --server X` and then repeat the install.
 
-`uninstall` does not kill already-running Serena Python processes (Task Scheduler deletes the task metadata, not live children). If a daemon is still bound to 9121/9122 after uninstall:
-```powershell
-Stop-Process -Name python -Force -ErrorAction SilentlyContinue
-# or specifically:
-Get-Process | Where-Object { $_.Path -like '*uvx*' } | Stop-Process -Force
-```
+`uninstall` settles the supervisor-owned target before removing its ownership
+state. If a port remains bound, inspect `mcphub status` and exact process
+identity before cleanup; never kill Python or Node processes by broad name.
 
 ## Secrets
 

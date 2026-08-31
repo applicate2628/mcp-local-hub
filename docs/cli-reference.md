@@ -12,15 +12,16 @@ For install / per-client behaviour / troubleshooting see
 |---|---|
 | `mcphub setup` | Install binary to `~/.local/bin` and register on user PATH (idempotent) |
 | `mcphub setup --trusted-root <abs-path>` | Same as `setup`, plus bless one or more ABSOLUTE workspace paths as LSP trusted roots (repeatable; idempotent) so the GUI LSP router auto-registers language servers under them without a manual GUI bless |
-| `mcphub install --server <name>` | Create scheduler tasks, write default client configs, start daemons |
+| `mcphub upgrade` / `mcphub install --upgrade` | Apply an admitted product build through the managed supervisor transaction. Requires daemon-bearing supervisor state; fresh, legacy-scheduler, and unsupported-platform states fail closed before mutation. Success requires successor identity/readiness, canonical SHA readback, and durable `upgrade-receipt-v1.json`; failures restore and prove the exact prior when rollback evidence is available. |
+| `mcphub install --server <name>` | Persist supervisor-owned daemon intent, write default client configs, and reconcile/start the managed daemon |
 | `mcphub install --server <name> --clients <ids>` | Install only the named client bindings |
 | `mcphub install --server <name> --all-clients` | Install every client binding declared by the manifest |
 | `mcphub install --all` | Bulk install every manifest under `servers/` into default clients |
 | `mcphub install --server <n> --dry-run` | Print plan without applying |
-| `mcphub uninstall --server <name>` | Remove scheduler tasks + client entries (backups retained) |
-| `mcphub status` | Show state of every `mcp-local-hub-*` task (Running / Scheduled / Stopped) with PID, RAM, uptime, next-run |
-| `mcphub restart --server <n>` / `--all` | Stop + re-launch one or all daemons |
-| `mcphub stop --server <n>` / `--all` | Stop daemons without uninstalling |
+| `mcphub uninstall --server <name>` | Remove managed daemon intent and client entries (backups retained) |
+| `mcphub status` | Read the supervisor-owned fleet view with lifecycle state, PID, RAM, uptime, and health details |
+| `mcphub restart --server <n>` / `--all` | Request supervisor-owned restart/reconcile for one or all daemons |
+| `mcphub stop --server <n>` / `--all` | Persist stopped intent and settle the selected managed daemons |
 | `mcphub version` | Print version, commit, build metadata |
 
 ## Discovery & migration
@@ -38,8 +39,8 @@ For install / per-client behaviour / troubleshooting see
 |---|---|---|
 | `mcphub migrate-legacy [--dry-run\|--yes\|--json]` | Detect + migrate disabled mcp-language-server entries into managed registry | Scan every installed MCP client config (Codex + Claude Code) for |
 | | | disabled entries whose command is mcp-language-server. For each unique |
-| | | workspace, emit one 'mcphub register' — which allocates ports, creates |
-| | | scheduler tasks, and writes new client entries for ALL manifest |
+| | | workspace, emit one 'mcphub register' — which allocates ports, persists |
+| | | managed supervisor intent, and writes new client entries for ALL manifest |
 | | | languages — and THEN delete the original disabled entries. |
 | | | Lazy-mode note: one 'register' call covers every manifest language at |
 | | | once, so migration dedupes the detected rows by workspace and emits |
@@ -122,21 +123,21 @@ typed exit codes that the main binary preserves from command code.
 | `mcphub cleanup aggressive --client <name> --confirm-aggressive-token <token>` | Kill the previewed live-rooted candidates (token-bound to that exact set) |
 | `mcphub cleanup aggressive --root-pid <pid>` | Same, scoped to descendants of an explicit process id |
 
-## Scheduler & secrets
+## Advanced scheduler repair & secrets
 
 | Command | What it does |
 |---|---|
-| `mcphub scheduler upgrade` | Rewrite every task's `<Command>` to the current canonical `mcphub.exe` path |
+| `mcphub scheduler upgrade` | Advanced repair only: rewrite surviving scheduler infrastructure-task `<Command>` values to the canonical binary. It is not the routine binary-upgrade workflow; use `mcphub upgrade`. |
 | `mcphub scheduler weekly-refresh set "SUN 03:00"` | Install a hub-wide weekly `restart --all` task |
 | `mcphub scheduler weekly-refresh disable` | Remove the hub-wide weekly task |
 | `mcphub secrets {init,set,get,list,delete,edit,migrate}` | Age-encrypted vault for API keys |
 | `mcphub settings {get,set,list}` | GUI preference registry for Phase 3B/3B-II surfaces |
 
-## Transport shims (Hidden; called by scheduler, not by humans)
+## Transport shims (Hidden; called by the supervisor/infrastructure, not by humans)
 
 | Command | What it does |
 |---|---|
-| `mcphub daemon --server <n> --daemon <d>` | Invoked by the scheduler; exec real server with tee'd logs |
+| `mcphub daemon --server <n> --daemon <d>` | Invoked by the managed supervisor; exec real server with tee'd logs |
 | `mcphub relay --server <n> --daemon <d>` | Stdio↔HTTP bridge (for clients that reject loopback-HTTP) |
 | `mcphub relay --url <url>` | Direct relay to an arbitrary Streamable HTTP endpoint |
 | `mcphub godbolt` | Embedded godbolt MCP server (also ships as `./cmd/godbolt` standalone) |

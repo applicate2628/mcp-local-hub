@@ -755,8 +755,8 @@ mcphub autostart enable                # Per-OS shim install (Windows: Task Sche
 mcphub autostart disable               # systemd user service; macOS managed: LaunchAgent; unmanaged Linux/macOS: none)
 mcphub autostart status                # Per-backend probe semantics
 
-mcphub install --upgrade               # Cold-restart upgrade flow (see "Cold-restart upgrade flow" below).
-                                       # This is a binary-replacement + IPC-handoff flow, NOT a migration.
+mcphub upgrade                         # Admitted managed upgrade transaction (alias: install --upgrade).
+                                       # Requires daemon-bearing supervisor state; unsupported states fail before mutation.
 ```
 
 > **v0.6 Phase F removed the v0.4.x→v0.5.0 forward-migration engine.** The
@@ -764,8 +764,9 @@ mcphub install --upgrade               # Cold-restart upgrade flow (see "Cold-re
 > --rollback-to-legacy` (the legacy-demotion path), the
 > `mcphub install --upgrade --reset-failure-windows` flag, and the
 > `migration-journal-<UTC-ts>/` per-install journal. The remaining
-> `mcphub install --upgrade` is the **cold-restart binary-replacement**
-> flow (rename-aside + IPC handoff), which never wrote a migration journal
+> `mcphub upgrade` is the **admitted managed binary transaction**
+> (staging/admission + fleet-release proof + rename-aside + readiness/readback
+> + durable receipt), which never wrote a migration journal
 > and is unaffected. The `migration.lock` flock SURVIVES — it was migrated
 > out of the deleted package into `internal/api/state_dir_locks.go` and is
 > now the GENERIC universal-lock-order primitive (basename preserved for
@@ -788,8 +789,8 @@ and the named abort codes `MIGRATION_PORT_LOOKUP_INCONSISTENT`,
 `ROLLBACK_ORPHAN_DAEMONS_REMAIN`, `SUPERVISOR_REFUSING_ROLLBACK_IN_PROGRESS`
 are gone with the forward-migration engine. The old `8 INSTALL_BUSY`
 (migration.lock held by another `mcphub install`) no longer fires either —
-`mcphub install --upgrade` is the cold-restart binary swap, not a
-migration. Codes 9 / 10 below survive (strict-mode + the generic
+`mcphub upgrade` is the managed receipt-backed transaction, not a migration.
+Codes 9 / 10 below survive (strict-mode + the generic
 `migration.lock` primitive in `state_dir_locks.go`):
 
 ```text
@@ -1022,7 +1023,7 @@ service-host scenarios). A post-`ListenPipe` smoke test asserts the
 effective pipe DACL via `GetSecurityInfo` on the listener handle and
 is a required merge gate.
 
-### Cold-restart upgrade flow
+### Managed upgrade transaction
 
 **Windows binary replacement (rename-aside).** The atomic-rename
 trick used elsewhere on POSIX is not available for a live `.exe` on
@@ -1042,33 +1043,38 @@ required because supervisor runs as same user that wrote the file.
 
 POSIX uses atomic `rename(2)`.
 
-**IPC quiesce + exit sequence.**
+**Transaction sequence.**
 
-1. Replace binary atomically (per above).
-2. Connect to supervisor IPC; client reads `supervisor.lock` for
-   expected `{pid, start_time}` FIRST.
-3. Issue IPC `quiesce-timers{timeout_ms: 30000}` — drains
+1. Stage the candidate beside the canonical binary. Admit the Windows GUI PE,
+   non-placeholder build metadata, candidate SHA-256, and exact prior SHA-256
+   before fleet or canonical mutation.
+2. Connect to supervisor IPC using the current `supervisor.lock` identity.
+   Issue `quiesce-timers{timeout_ms: 30000}` — drains
    maintenance-timer transients on a **separate goroutine** (does
    not block the FIFO event loop). Two-frame response: immediate
    `{accepted: true}`, then `{drained, still_running, final: true}`.
-4. Issue IPC `exit{graceful: true, timeout_ms: 5000}`. Supervisor
+3. Issue IPC `exit{graceful: true, timeout_ms: 5000}`. Supervisor
    posts `request-graceful-exit` events into FIFO for each running
    daemon, waits for all to reach `idle`, then exits 0.
-5. **Force-kill fallback on IPC timeout:** `taskkill /F /T /PID
+4. **Force-kill fallback on IPC timeout:** `taskkill /F /T /PID
    <supervisor>` (the `/T` ensures any non-Job-Object transients in
    `transient_pids` die alongside the supervisor); POSIX `kill -KILL
-   -<pgid>` (process-group kill, not single-PID). After force-kill,
-   verify each expected daemon port is unbound via
-   `lookupProcessIdentity`; if any port still bound after a bounded
-   retry (10 s), abort with `ROLLBACK_ORPHAN_DAEMONS_REMAIN` plus
-   manual cleanup guidance.
-6. `mcphub install` explicitly starts the new supervisor (Windows:
+   -<pgid>` (process-group kill, not single-PID).
+5. Prove the prior supervisor lock and every expected daemon port released.
+   Re-admit the unchanged candidate and re-verify the canonical prior SHA,
+   then promote by rename-aside. Any `Promoted=true` result is post-promotion.
+6. The upgrade transaction starts the successor (Windows:
    `schtasks /Run /TN \mcp-local-hub-supervisor` if shim installed,
    else detached `windows.CreateProcess` with `DETACHED_PROCESS |
    CREATE_NEW_PROCESS_GROUP`; Linux managed: `systemctl --user
    restart mcphub-supervisor.service`; etc.).
-7. New supervisor reads intent + daemon-intent → reconcile →
-   respawns daemons.
+7. Bind readiness to the lock owner, hello generation, live process executable
+   identity, and admitted successor SHA. Re-read canonical bytes, then atomically
+   write `upgrade-receipt-v1.json`; only then may the command exit 0.
+8. On any post-promotion failure, fenced-kill the successor, repeat lock/port
+   release proof, verify the retained prior SHA, restore and re-read canonical
+   prior bytes, then start and identity-bind prior readiness. Missing exact
+   retained-prior evidence fails visibly and never starts the successor.
 
 Note: the `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP` flag combo
 makes the new Windows supervisor unable to receive `CTRL_C_EVENT`

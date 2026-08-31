@@ -28,8 +28,7 @@ available.
 | `mcphub strict-mode --recover` | Reconciles after a `STRICT_MODE_REVERT_FAILED` (exit 10) breadcrumb. Prompts operator to drive both intent + shim either to the `intended` value or to `actual_intent_state`. |
 | `mcphub daemon recover <task>` | Identity-gates termination of a verified-own disowned port holder, then requests a forced respawn. Exit 7 means termination committed and respawn was attempted (or accepted, as separately reported), but the recovery audit row or its durable handoff could not be preserved. |
 | `mcphub autostart enable` / `disable` / `status` | Per-OS autostart shim. Windows: Task Scheduler `LogonTrigger`. Linux managed: systemd user service. Linux unmanaged + macOS: per-OS user-space shim. |
-| `mcphub install --upgrade` | Cold-restart upgrade flow. Rename-aside binary replacement (Windows `MoveFileExW`) + atomic rename (POSIX). Issues IPC `quiesce-timers` then `exit{graceful}`; force-kills supervisor with `taskkill /F /T /PID` on timeout; explicitly starts new supervisor. |
-| `mcphub install --rollback-to-legacy` | Reverses migration. Translates supervisor-state quarantined entries to `daemon-intent.json` `chronic-failure`; uninstalls supervisor shim; re-registers every v0.4.x `legacy-tasks/<task>.xml` via `schtasks /Create /XML /F`; runs each task and waits up to 60s for the expected port to bind. Unbound ports captured in `rollback-warnings.json`; rollback exits 0 with warnings. |
+| `mcphub upgrade` / `mcphub install --upgrade` | One admitted managed transaction: stage and admit candidate PE/build metadata/SHA, release the prior supervisor lock and daemon ports, re-admit candidate and prior, promote by rename-aside, identity-bind successor readiness, verify canonical bytes, and atomically write `upgrade-receipt-v1.json`. Any post-promotion failure restores the exact retained prior and proves prior readiness. |
 
 ## State files
 
@@ -38,17 +37,16 @@ All under `<state-dir>` (per-user `%LOCALAPPDATA%\mcp-local-hub\` on Windows;
 
 ```text
 <state-dir>/
-  supervisor-intent.json              # NEW: daemon descriptors + maintenance timers + strict_mode (canonical)
-  supervisor-state.json               # NEW: per-daemon runtime state, restart_history (30-min sliding window), transient_pids, maintenance_fired_at
-  supervisor-events.log               # NEW: JSONL audit trail (envelope: schema_version, ts, severity, source, event, task_name, body); 16 KB per-entry cap; 10 MB rotation → .log.1
+  supervisor-intent.json              # daemon descriptors + maintenance timers + strict_mode (canonical)
+  supervisor-state.json               # per-daemon runtime state, restart_history, transient_pids, maintenance state
+  supervisor-events.log               # JSONL audit trail; bounded entry size and rotation
   supervisor-events.log.pending/      # process-exit-safe pending audit rows: <64-lowercase-hex-SHA-256>.jsonl, one normalized record per file, maximum 16 KiB + 1 newline byte
   daemon-recovery-occurrences.json    # compact GUI recovery receipts: exact canonical task + correlation + status/commit evidence and store generation; maximum 64 records
   daemon-recovery-occurrences.json.lock # cross-process serializer for reserve, terminalize, replay, and acknowledgement
-  supervisor.lock                     # NEW: supervisor singleton lock + sidecar with {pid, start_time}
-  migration-journal-<UTC-ts>/         # NEW: per-install migration journal (retain 5 newest after `committed`)
-  daemon-intent.json                  # preserved exactly (byte-symmetric for rollback)
-  managed-entries.json                # preserved exactly
-  watchdog-state.json                 # preserved unchanged (v0.4.x watchdog diagnostics)
+  supervisor.lock                     # supervisor singleton lock + sidecar with {pid, start_time}
+  upgrade-receipt-v1.json             # last successful admitted upgrade identity and canonical SHA
+  daemon-intent.json                  # daemon policy/restart intent consumed by reconcile
+  managed-entries.json                # managed client-entry ownership state
 ```
 
 Every supervisor-event write checks at most 64 final pending files after it
@@ -108,37 +106,21 @@ for that task, while a different eligible task may proceed through the same
 backend reservation checks. There is no Dashboard-wide recovery veto; the
 durable backend task binding remains authoritative.
 
-## Migration from v0.4.x
+## Managed binary upgrade
 
-`mcphub install --upgrade` runs a two-phase journaled migration on Windows
-v0.4.x hosts:
+Upgrade mutates only a daemon-bearing managed supervisor installation. Fresh
+hosts, legacy scheduler-only hosts, and platforms without the transaction
+adapter fail closed before file or process mutation with setup/migration or
+package-workflow guidance. There is no upgrade-time scheduler migration or
+demotion command.
 
-1. Enumerates every `mcp-local-hub-*` Task Scheduler task via
-   `scheduler.EnumerateAllMcphubTasks()` (regardless of Run As).
-2. Renders a canonical-template-snapshot via a v0.4.x-pinned template
-   renderer (`internal/migration/v04x_template_defaults.go`) and classifies
-   each task's XML as default-match, known-deviation, or hard-deviation.
-   Hard deviations abort unless `--discard-scheduler-customizations` is set.
-3. Resolves each daemon's PID via `lookupProcessIdentity(port)` (PowerShell
-   `Get-CimInstance Win32_Process` with `wmic.exe` fallback for pre-24H2
-   hosts), then 4-gate ownership check (image basename, CommandLine, start
-   time pre-migration.lock, ExecutablePath under install-dir).
-4. `taskkill /F /T /PID` each ownership-verified daemon, drops the
-   `pre-os-mutating` marker on first kill.
-5. Unregisters each legacy task, installs the supervisor autostart shim,
-   explicitly starts the supervisor, waits for reconcile-ready via IPC
-   `status` within 30s. On timeout: auto-rollback.
-
-Migration is journaled at every state transition (`prepared` →
-`pre-os-mutating` → `os-mutating-complete` → `committed`). The journal
-retains forward-progress for crash-resume and rollback evidence.
-
-`mcphub install --rollback-to-legacy` reverses migration from any
-`committed` or `pre-os-mutating` marker by re-registering preserved
-`legacy-tasks/<task>.xml` and translating supervisor quarantined entries
-back to `daemon-intent.json` `chronic-failure`. Token-mismatch pre-flight
-catches "rollback caller token is less privileged than supervisor process"
-early (exit 13).
+The transaction order is: stage candidate → admit PE/build metadata/SHA and
+prior SHA → quiesce/exit or fenced force-kill → prove supervisor lock and all
+expected ports released → re-admit candidate and prior → promote by
+rename-aside → start and identity-bind the successor → canonical SHA readback →
+atomic durable receipt. Rollback performs fenced successor kill, repeats
+lock/port release proof, verifies the exact retained prior SHA, restores and
+re-verifies canonical prior bytes, then starts and proves prior readiness.
 
 ## Per-OS behavior matrix
 

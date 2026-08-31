@@ -64,12 +64,14 @@ Examples:
   mcphub status --health --force-materialize    # probe LSP backends
 
 Troubleshooting:
-  - All tasks showing Stopped? The mcphub binary may have moved.
-    'mcphub setup' + 'mcphub scheduler upgrade' fixes that in one pass.
-  - Some tasks Stopped, others Running? Restart the Stopped ones:
-    'mcphub restart --server <name>'.
+  - All managed daemons Stopped? Check 'mcphub autostart status', then use
+    'mcphub restart --all' to reconcile the current supervisor-owned fleet.
+  - Applying a rebuilt binary? Run the admitted candidate's 'mcphub upgrade';
+    success requires successor readiness, canonical readback, and a durable receipt.
+  - No managed daemon state yet? Run 'mcphub setup', then install or migrate at
+    least one server before using upgrade.
 
-See also: restart, stop, logs, scheduler upgrade.`,
+See also: restart, stop, logs, autostart, upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			a := api.NewAPI()
 			// Default `mcphub status` (no --health / --force-materialize
