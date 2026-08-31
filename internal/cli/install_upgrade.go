@@ -189,7 +189,13 @@ type UpgradeOpts struct {
 	// lock and answers IPC status. Nil preserves non-production tests and legacy
 	// callers that cannot probe a successor.
 	WaitSupervisorReady func(ctx context.Context, timeout time.Duration) error
-	Deps                UpgradeDeps
+	// WithRollbackStopSettlementFence is wired only by managed upgrade callers.
+	// Automatic rollback runs its successor force-kill inside this callback while
+	// the canonical supervisor-state flock is held. A nil callback refuses
+	// rollback: separating a read from the destructive operation would allow a
+	// pending stop receipt to appear between them.
+	WithRollbackStopSettlementFence func(ctx context.Context, critical func() error) error
+	Deps                            UpgradeDeps
 }
 
 // Default IPC timeouts per spec §"Upgrade sequence". Exported as
@@ -469,8 +475,16 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 	if retainedPrior == "" {
 		return fmt.Errorf("%w; automatic rollback unavailable: rename-aside returned no retained prior binary", trigger)
 	}
-	if err := opts.Deps.ForceKillSupervisor(opts.PipePath); err != nil && !isAlreadyExitedError(err) {
-		return fmt.Errorf("%w; automatic rollback failed stopping successor: %v", trigger, err)
+	if opts.WithRollbackStopSettlementFence == nil {
+		return fmt.Errorf("%w; automatic rollback refused before force-kill: stop-settlement fence unavailable", trigger)
+	}
+	if err := opts.WithRollbackStopSettlementFence(ctx, func() error {
+		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil && !isAlreadyExitedError(killErr) {
+			return fmt.Errorf("force-kill successor: %w", killErr)
+		}
+		return nil
+	}); err != nil {
+		return fmt.Errorf("%w; automatic rollback refused before force-kill: %v", trigger, err)
 	}
 	if err := opts.Deps.RestoreRetainedBinary(opts.BinaryPath, retainedPrior); err != nil {
 		return fmt.Errorf("%w; automatic rollback failed restoring retained prior binary %s: %v", trigger, retainedPrior, err)

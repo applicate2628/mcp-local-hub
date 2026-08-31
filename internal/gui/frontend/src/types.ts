@@ -2,6 +2,21 @@
 // structural flags (is_maintenance, is_workspace_scoped) MUST be read
 // from these fields — do NOT re-derive from task_name in TS, or the
 // filters drift from the canonical Go predicates.
+export interface StopSettlementDiagnostic {
+  version: number;
+  task_name: string;
+  epoch: number;
+  owned_pid: number;
+  started_at: string;
+  pid_generation: number;
+  revision: number;
+  phase: string;
+  failure?: string;
+  // Observation only: the process currently holding the expected port.  This
+  // does not assert hub ownership and must never authorize a kill in the UI.
+  observed_port_owner_pid?: number;
+}
+
 export interface DaemonStatus {
   server: string;
   daemon: string;
@@ -56,6 +71,9 @@ export interface DaemonStatus {
   // operator reinstalls.
   spawn_hold_reason?: string;
   spawn_hold_path?: string;
+  // Present while a controller-owned stop transaction is not terminal.  The
+  // poller's explicit null delta clears it after commit-last removal.
+  stop_settlement?: StopSettlementDiagnostic | null;
   // Process uptime in seconds, derived server-side from the supervisor's
   // started_at (api.supervisorIPCUptimeSec). Mirrors DaemonStatus.UptimeSec
   // (`json:"uptime_sec,omitempty"`). 0/absent for a just-spawned or

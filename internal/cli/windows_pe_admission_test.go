@@ -252,6 +252,9 @@ func TestInstallUpgradeRestoresConsolePriorAfterSuccessorReadinessFailure(t *tes
 		BinaryPath: target,
 		NewBinary:  staged,
 		PipePath:   "test-pipe",
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
+			return critical()
+		},
 		WaitSupervisorReady: func(context.Context, time.Duration) error {
 			readyCalls++
 			if readyCalls == 1 {
@@ -324,6 +327,9 @@ func TestRollbackInstallUpgradeRefusesToDeleteCanonicalAlias(t *testing.T) {
 		BinaryPath: target,
 		PipePath:   "fake-pipe",
 		Deps:       mock,
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
+			return critical()
+		},
 	}, target, time.Second, errors.New("forced successor failure"))
 	if err == nil || !strings.Contains(err.Error(), "refusing retained-artifact cleanup") {
 		t.Fatalf("error=%v, want canonical-alias cleanup refusal", err)

@@ -50,6 +50,49 @@ func TestSupervisorState_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestSupervisorState_StopSettlementReceiptRoundTrip pins the durable fence
+// between a requested stop and any later re-registration of the same task.
+// The receipt is intentionally additive: an older binary may ignore it, but a
+// current supervisor must not silently lose it while rewriting runtime rows.
+func TestSupervisorState_StopSettlementReceiptRoundTrip(t *testing.T) {
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-state.json")
+	const taskName = `\mcp-local-hub-time-default`
+	want := &SupervisorStateFile{
+		Version:             1,
+		StopSettlementEpoch: 41,
+		Daemons: map[string]SupervisorDaemonState{
+			taskName: {State: "running", CurrentPID: 4812, PIDGeneration: 7, StartedAt: "2026-08-31T12:00:00Z"},
+		},
+		StopSettlements: map[string]StopSettlementReceiptV1{
+			taskName: {
+				Version:       1,
+				BatchID:       "state-roundtrip",
+				TaskName:      taskName,
+				Epoch:         41,
+				PID:           4812,
+				StartedAt:     "2026-08-31T12:00:00Z",
+				PIDGeneration: 7,
+				Phase:         StopSettlementPhaseStopRequested,
+			},
+		},
+	}
+	if err := WriteSupervisorState(path, want); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadSupervisorState(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.StopSettlementEpoch != want.StopSettlementEpoch {
+		t.Fatalf("stop settlement epoch = %d, want %d", got.StopSettlementEpoch, want.StopSettlementEpoch)
+	}
+	receipt, ok := got.StopSettlements[taskName]
+	if !ok || receipt != want.StopSettlements[taskName] {
+		t.Fatalf("stop settlement receipt = %+v, want %+v", receipt, want.StopSettlements[taskName])
+	}
+}
+
 func TestMutateSupervisorStateReadsUnderStateFileFlock(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-state.json")

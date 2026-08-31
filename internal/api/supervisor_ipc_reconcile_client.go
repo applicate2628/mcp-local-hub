@@ -13,8 +13,36 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 )
+
+// validateStopBatchEcho rejects an older/enqueue-only supervisor response and
+// any response that is not for this exact ordered transaction.  Success is
+// impossible without one same-order settlement per target.
+func validateStopBatchEcho(command StopBatchCommandV1, result *StopBatchResultV1) error {
+	if result == nil {
+		return errors.New("supervisor stop_batch capability unsupported: response missing stop_batch")
+	}
+	if command.ProtocolVersion != 1 || result.ProtocolVersion != command.ProtocolVersion || result.BatchID != command.BatchID {
+		return errors.New("supervisor stop_batch response does not echo protocol_version and batch_id")
+	}
+	if !reflect.DeepEqual(result.Targets, command.Targets) {
+		return errors.New("supervisor stop_batch response targets do not exactly echo request order")
+	}
+	if result.IntentGeneration != command.IntentGeneration || !reflect.DeepEqual(result.SupervisorIntent, command.SupervisorIntent) || !reflect.DeepEqual(result.UnifiedStops, command.UnifiedStops) {
+		return errors.New("supervisor stop_batch response does not exactly echo authoritative intent snapshot")
+	}
+	if len(result.Settlements) != len(command.Targets) {
+		return errors.New("supervisor stop_batch response settlement count does not match request")
+	}
+	for i, target := range command.Targets {
+		if result.Settlements[i].TaskName != target.TaskName {
+			return fmt.Errorf("supervisor stop_batch response settlement %d does not match target order", i)
+		}
+	}
+	return nil
+}
 
 // DefaultReconcileTimeout is the operator-facing default deadline for
 // `mcphub reconcile`. Plan §A.3 acceptance criterion: "returns within
@@ -48,7 +76,7 @@ const DefaultTargetedReconcileTimeout = time.Duration(serenaStartupBindDeadlineS
 //   - wire / handshake / version / decode errors propagated verbatim
 //     so operators see the precise failure cause in stderr.
 func DialSupervisorIPCReconcile(ctx context.Context, apply bool) (ReconcileResponse, error) {
-	return dialSupervisorIPCReconcile(ctx, apply, nil)
+	return dialSupervisorIPCReconcile(ctx, apply, nil, nil)
 }
 
 // DialSupervisorIPCReconcileTarget requests controller-owned settlement for
@@ -56,10 +84,26 @@ func DialSupervisorIPCReconcile(ctx context.Context, apply bool) (ReconcileRespo
 // entry point deliberately omits the additive target and retains its original
 // wire shape.
 func DialSupervisorIPCReconcileTarget(ctx context.Context, apply bool, target ReconcileTarget) (ReconcileResponse, error) {
-	return dialSupervisorIPCReconcile(ctx, apply, &target)
+	return dialSupervisorIPCReconcile(ctx, apply, &target, nil)
 }
 
-func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *ReconcileTarget) (ReconcileResponse, error) {
+// DialSupervisorIPCStopBatch runs the versioned terminal-stop transaction and
+// refuses any supervisor that cannot echo the exact command and settlements.
+func DialSupervisorIPCStopBatch(ctx context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+	if command.ProtocolVersion != 1 || command.BatchID == "" || len(command.Targets) == 0 || command.IntentGeneration == 0 || command.SupervisorIntent == nil || command.UnifiedStops == nil {
+		return StopBatchResultV1{}, errors.New("supervisor stop_batch: invalid v1 command")
+	}
+	response, err := dialSupervisorIPCReconcile(ctx, true, nil, &command)
+	if err != nil {
+		return StopBatchResultV1{}, err
+	}
+	if err := validateStopBatchEcho(command, response.StopBatch); err != nil {
+		return StopBatchResultV1{}, err
+	}
+	return *response.StopBatch, nil
+}
+
+func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *ReconcileTarget, stopBatch *StopBatchCommandV1) (ReconcileResponse, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -76,17 +120,21 @@ func dialSupervisorIPCReconcile(ctx context.Context, apply bool, target *Reconci
 	if err != nil {
 		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: resolve state dir: %w", err)
 	}
-	return dialSupervisorIPCReconcileFromStateDirWithTarget(ctx, stateDir, apply, target)
+	return dialSupervisorIPCReconcileFromStateDirWithTargets(ctx, stateDir, apply, target, stopBatch)
 }
 
 // dialSupervisorIPCReconcileFromStateDir is the state-dir-injected
 // inner helper so tests can target a temp directory. Production
 // callers go through DialSupervisorIPCReconcile.
 func dialSupervisorIPCReconcileFromStateDir(ctx context.Context, stateDir string, apply bool) (ReconcileResponse, error) {
-	return dialSupervisorIPCReconcileFromStateDirWithTarget(ctx, stateDir, apply, nil)
+	return dialSupervisorIPCReconcileFromStateDirWithTargets(ctx, stateDir, apply, nil, nil)
 }
 
 func dialSupervisorIPCReconcileFromStateDirWithTarget(ctx context.Context, stateDir string, apply bool, target *ReconcileTarget) (ReconcileResponse, error) {
+	return dialSupervisorIPCReconcileFromStateDirWithTargets(ctx, stateDir, apply, target, nil)
+}
+
+func dialSupervisorIPCReconcileFromStateDirWithTargets(ctx context.Context, stateDir string, apply bool, target *ReconcileTarget, stopBatch *StopBatchCommandV1) (ReconcileResponse, error) {
 	lockPath := filepath.Join(stateDir, "supervisor.lock")
 	owner, err := ReadSupervisorLockOwner(lockPath)
 	if err != nil {
@@ -117,6 +165,9 @@ func dialSupervisorIPCReconcileFromStateDirWithTarget(ctx context.Context, state
 	}
 	if target != nil {
 		args["settle_target"] = *target
+	}
+	if stopBatch != nil {
+		args["stop_batch"] = *stopBatch
 	}
 	req := IPCRequest{
 		Version: 1,

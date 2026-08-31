@@ -36,7 +36,7 @@ func TestDialSupervisorIPCStatus_HappyPath(t *testing.T) {
 						"task_name":      `\mcp-local-hub-memory-default`,
 						"server":         "memory",
 						"daemon":         "default",
-						"workspace":      `D:\work\default`,
+						"workspace":      `<workspace-default>`,
 						"port":           9101,
 						"state":          "Running",
 						"current_pid":    4321,
@@ -59,7 +59,7 @@ func TestDialSupervisorIPCStatus_HappyPath(t *testing.T) {
 	if got.TaskName != `\mcp-local-hub-memory-default` || got.Server != "memory" || got.Daemon != "default" {
 		t.Fatalf("row identity = %+v, want memory/default task", got)
 	}
-	if got.Workspace != `D:\work\default` || got.Port != 9101 || got.State != "Running" || got.PID != 4321 {
+	if got.Workspace != `<workspace-default>` || got.Port != 9101 || got.State != "Running" || got.PID != 4321 {
 		t.Fatalf("row fields = %+v, want workspace/port/state/pid from IPC payload", got)
 	}
 }
@@ -238,6 +238,21 @@ func TestDecodeSupervisorIPCStatusResult_PreservesStalePID(t *testing.T) {
 	}
 	if rows[0].StalePID != 22036 {
 		t.Fatalf("StalePID = %d, want 22036 round-tripped", rows[0].StalePID)
+	}
+}
+
+func TestDecodeSupervisorIPCStatusResult_PreservesStopSettlementDiagnostic(t *testing.T) {
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Stopping","current_pid":4812,"stop_settlement":{"version":1,"task_name":"\\mcp-local-hub-memory-default","epoch":41,"owned_pid":4812,"started_at":"2026-08-31T12:00:00Z","pid_generation":7,"revision":2,"phase":"exit_observed","observed_port_owner_pid":4812}}]}`)
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 || rows[0].State != "Stopping" || rows[0].StopSettlement == nil {
+		t.Fatalf("decoded rows = %+v, want Stopping with diagnostic", rows)
+	}
+	diagnostic := rows[0].StopSettlement
+	if diagnostic.Epoch != 41 || diagnostic.OwnedPID != 4812 || diagnostic.PIDGeneration != 7 || diagnostic.ObservedPortOwnerPID != 4812 {
+		t.Fatalf("diagnostic = %+v, want exact IPC receipt projection", diagnostic)
 	}
 }
 

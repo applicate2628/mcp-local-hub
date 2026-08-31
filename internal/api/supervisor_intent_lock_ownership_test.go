@@ -45,6 +45,7 @@ var reviewedRawFlockOwners = map[string]int{
 	"internal/api/supervisor_lock.go:func:AcquireSupervisorLockQuiet":                                1,
 	"internal/api/supervisor_lock.go:func:SupervisorRunningUnderStateDir/func-lit#1":                 1,
 	"internal/api/supervisor_state.go:func:MutateSupervisorStateIfChangedContext":                    1,
+	"internal/api/supervisor_state.go:func:WithEmptyStopSettlementFence":                              1,
 }
 
 var reviewedAppliedReleaseClassifierOwners = map[string]int{

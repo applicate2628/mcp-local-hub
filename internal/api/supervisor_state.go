@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,165 @@ type SupervisorStateFile struct {
 	Daemons            map[string]SupervisorDaemonState `json:"daemons"`
 	TransientPIDs      []TransientPID                   `json:"transient_pids,omitempty"`
 	MaintenanceFiredAt map[string]string                `json:"maintenance_fired_at,omitempty"`
+	// StopSettlementEpoch is a fleet-wide, monotonically increasing fence for
+	// durable stop transactions. It is deliberately separate from a daemon's
+	// PIDGeneration: a task can be stopped repeatedly without spawning a new
+	// generation, and each stop must still have a unique durable identity.
+	StopSettlementEpoch uint64 `json:"stop_settlement_epoch,omitempty"`
+	// StopSettlementMapGeneration and StopSettlementDigest bind the complete
+	// durable receipt map. A restart treats a malformed or mismatched pair as
+	// unavailable lifecycle state, never as permission to spawn over it.
+	StopSettlementMapGeneration uint64 `json:"stop_settlement_map_generation,omitempty"`
+	StopSettlementDigest        string `json:"stop_settlement_digest,omitempty"`
+	// StopSettlements retains only non-terminal stop receipts. A successful
+	// settlement removes its exact receipt as the final durable commit; a
+	// failed/incomplete settlement remains present across supervisor restart and
+	// blocks a new spawn until the controller settles that same generation.
+	StopSettlements map[string]StopSettlementReceiptV1 `json:"stop_settlements,omitempty"`
+}
+
+// StopSettlementPhase is the durable stage of one exact daemon-stop attempt.
+// It is diagnostic and recovery state, never a substitute for the runtime
+// identity checks performed by the supervisor controller.
+type StopSettlementPhase string
+
+const (
+	// StopRequested is durable before the controller receives the one batch
+	// command.  There is deliberately no enqueue-only phase: a FIFO post is not
+	// terminal lifecycle evidence.
+	StopSettlementPhaseStopRequested StopSettlementPhase = "stop_requested"
+	StopSettlementPhaseExitObserved  StopSettlementPhase = "exit_observed"
+	StopSettlementPhasePortReleased  StopSettlementPhase = "port_released"
+	StopSettlementPhaseFailed        StopSettlementPhase = "failed"
+)
+
+// StopSettlementFailureClass is the closed machine-readable reason for a
+// failed durable stop settlement. FailureDetail is deliberately separate so
+// retry policy never parses human/debug text.
+type StopSettlementFailureClass string
+
+const (
+	StopSettlementFailureProcessAlive       StopSettlementFailureClass = "process_alive"
+	StopSettlementFailureListenerAlive      StopSettlementFailureClass = "listener_alive"
+	StopSettlementFailureIdentityUnverified StopSettlementFailureClass = "identity_unverified"
+	StopSettlementFailureSettlementTimeout  StopSettlementFailureClass = "settlement_timeout"
+	StopSettlementFailureSettlementCanceled StopSettlementFailureClass = "settlement_cancelled"
+	StopSettlementFailureRuntimeReplaced    StopSettlementFailureClass = "runtime_generation_replaced"
+	StopSettlementFailureTerminationFailed  StopSettlementFailureClass = "termination_failed"
+	StopSettlementFailurePersistence        StopSettlementFailureClass = "persistence_failed"
+)
+
+func (c StopSettlementFailureClass) Valid() bool {
+	switch c {
+	case StopSettlementFailureProcessAlive,
+		StopSettlementFailureListenerAlive,
+		StopSettlementFailureIdentityUnverified,
+		StopSettlementFailureSettlementTimeout,
+		StopSettlementFailureSettlementCanceled,
+		StopSettlementFailureRuntimeReplaced,
+		StopSettlementFailureTerminationFailed,
+		StopSettlementFailurePersistence:
+		return true
+	default:
+		return false
+	}
+}
+
+// StopSettlementReceiptV1 is the immutable identity token and mutable durable
+// progress record for a stop transaction. TaskName, Epoch, PID, StartedAt and
+// PIDGeneration are the token and must be compared as one unit before any
+// transition or removal. Revision changes on each durable transition so a
+// stale async completion cannot commit over a newer receipt.
+type StopSettlementReceiptV1 struct {
+	Version       int                        `json:"version"`
+	BatchID       string                     `json:"batch_id"`
+	TaskName      string                     `json:"task_name"`
+	Epoch         uint64                     `json:"epoch"`
+	PID           int                        `json:"pid"`
+	StartedAt     string                     `json:"started_at"`
+	PIDGeneration int                        `json:"pid_generation"`
+	BatchIndex    int                        `json:"batch_index"`
+	Mode          string                     `json:"mode"`
+	Port          int                        `json:"port"`
+	Revision      uint64                     `json:"revision"`
+	Attempt       uint64                     `json:"attempt"`
+	Phase         StopSettlementPhase        `json:"phase"`
+	FailureClass  StopSettlementFailureClass `json:"failure_class,omitempty"`
+	FailureDetail string                     `json:"failure_detail,omitempty"`
+	ResumePhase   StopSettlementPhase        `json:"resume_phase,omitempty"`
+	OperationID   string                     `json:"operation_id"`
+}
+
+// StopSettlementMapDigest returns a stable digest over the full receipt map
+// and its generation. encoding/json orders map keys deterministically, so the
+// same durable map yields the same digest across restart.
+func StopSettlementMapDigest(epoch, generation uint64, rows map[string]StopSettlementReceiptV1) (string, error) {
+	payload, err := json.Marshal(struct {
+		Epoch      uint64                             `json:"epoch"`
+		Generation uint64                             `json:"generation"`
+		Rows       map[string]StopSettlementReceiptV1 `json:"rows"`
+	}{Epoch: epoch, Generation: generation, Rows: rows})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// StopSettlementReceiptDigest is the canonical compare-and-swap identity for a
+// receipt revision. It intentionally covers every semantic field rather than
+// relying on a hand-maintained subset: stale writers must not overwrite a
+// newer attempt, phase, failure classification/detail, resume point, or
+// operation identity that happens to retain the same revision number.
+func StopSettlementReceiptDigest(receipt StopSettlementReceiptV1) (string, error) {
+	payload, err := json.Marshal(struct {
+		Version       int                        `json:"version"`
+		BatchID       string                     `json:"batch_id"`
+		TaskName      string                     `json:"task_name"`
+		Epoch         uint64                     `json:"epoch"`
+		PID           int                        `json:"pid"`
+		StartedAt     string                     `json:"started_at"`
+		PIDGeneration int                        `json:"pid_generation"`
+		BatchIndex    int                        `json:"batch_index"`
+		Mode          string                     `json:"mode"`
+		Port          int                        `json:"port"`
+		Revision      uint64                     `json:"revision"`
+		Attempt       uint64                     `json:"attempt"`
+		Phase         StopSettlementPhase        `json:"phase"`
+		FailureClass  StopSettlementFailureClass `json:"failure_class"`
+		FailureDetail string                     `json:"failure_detail"`
+		ResumePhase   StopSettlementPhase        `json:"resume_phase"`
+		OperationID   string                     `json:"operation_id"`
+	}{
+		Version: receipt.Version, BatchID: receipt.BatchID, TaskName: receipt.TaskName,
+		Epoch: receipt.Epoch, PID: receipt.PID, StartedAt: receipt.StartedAt,
+		PIDGeneration: receipt.PIDGeneration, BatchIndex: receipt.BatchIndex,
+		Mode: receipt.Mode, Port: receipt.Port, Revision: receipt.Revision,
+		Attempt: receipt.Attempt, Phase: receipt.Phase, FailureClass: receipt.FailureClass,
+		FailureDetail: receipt.FailureDetail, ResumePhase: receipt.ResumePhase,
+		OperationID: receipt.OperationID,
+	})
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(payload)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+// StopSettlementDiagnosticV1 is the public, diagnostic-only projection of a
+// non-terminal stop receipt. It carries the owner identity and an optional
+// observed listener owner; it never authorizes a process operation.
+type StopSettlementDiagnosticV1 struct {
+	Version              int                 `json:"version"`
+	TaskName             string              `json:"task_name"`
+	Epoch                uint64              `json:"epoch"`
+	OwnedPID             int                 `json:"owned_pid"`
+	StartedAt            string              `json:"started_at"`
+	PIDGeneration        int                 `json:"pid_generation"`
+	Revision             uint64              `json:"revision"`
+	Phase                StopSettlementPhase `json:"phase"`
+	Failure              string              `json:"failure,omitempty"`
+	ObservedPortOwnerPID int                 `json:"observed_port_owner_pid,omitempty"`
 }
 
 // SupervisorDaemonState is per-daemon Hybrid C state.
@@ -148,6 +309,88 @@ func ReadSupervisorState(path string) (*SupervisorStateFile, error) {
 	return &f, nil
 }
 
+// WithEmptyStopSettlementFence executes critical while the canonical
+// supervisor-state flock is held, but only when the durable stop-settlement
+// map is proven empty. It is deliberately read-only: rollback must neither
+// repair a malformed receipt tuple nor rewrite a virgin state as a side effect
+// of deciding whether a destructive successor kill is safe.
+//
+// An all-zero receipt tuple is the only virgin form. Once any receipt-map
+// field is established, epoch and generation must both be positive and digest
+// must be the lowercase SHA-256 of the canonical complete receipt map.
+func WithEmptyStopSettlementFence(ctx context.Context, path string, critical func() error) (err error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty supervisor state path")
+	}
+	if critical == nil {
+		return fmt.Errorf("nil stop-settlement fence critical callback")
+	}
+
+	lockPath := path + ".lock"
+	lk := flock.New(lockPath)
+	if err := lockFlockContext(ctx, lk, lockPath, "supervisor-state"); err != nil {
+		return err
+	}
+	defer func() {
+		if unlockErr := lk.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("unlock supervisor-state fence %s: %w", lockPath, unlockErr))
+		}
+	}()
+
+	file, err := ReadSupervisorState(path)
+	if err != nil {
+		return fmt.Errorf("read supervisor state under stop-settlement fence: %w", err)
+	}
+	if file == nil {
+		return fmt.Errorf("read supervisor state under stop-settlement fence: nil state")
+	}
+	if file.Version != 1 {
+		return fmt.Errorf("unsupported supervisor state version %d under stop-settlement fence", file.Version)
+	}
+	rows := file.StopSettlements
+	if rows == nil {
+		// Canonicalize only the in-memory comparison input. The fence is a
+		// read-only admission check and must not materialize this map on disk.
+		rows = map[string]StopSettlementReceiptV1{}
+	}
+	if err := validateEmptyStopSettlementFence(file, rows); err != nil {
+		return err
+	}
+	return critical()
+}
+
+func validateEmptyStopSettlementFence(file *SupervisorStateFile, rows map[string]StopSettlementReceiptV1) error {
+	virgin := file.StopSettlementEpoch == 0 &&
+		file.StopSettlementMapGeneration == 0 &&
+		file.StopSettlementDigest == ""
+	if !virgin {
+		if file.StopSettlementEpoch == 0 || file.StopSettlementMapGeneration == 0 {
+			return fmt.Errorf("invalid stop-settlement fence tuple: established epoch and generation must both be positive")
+		}
+		if len(file.StopSettlementDigest) != sha256.Size*2 || file.StopSettlementDigest != strings.ToLower(file.StopSettlementDigest) {
+			return fmt.Errorf("invalid stop-settlement fence digest shape")
+		}
+		decoded, decodeErr := hex.DecodeString(file.StopSettlementDigest)
+		if decodeErr != nil || len(decoded) != sha256.Size {
+			return fmt.Errorf("invalid stop-settlement fence digest encoding")
+		}
+		want, digestErr := StopSettlementMapDigest(file.StopSettlementEpoch, file.StopSettlementMapGeneration, rows)
+		if digestErr != nil {
+			return fmt.Errorf("digest stop-settlement fence rows: %w", digestErr)
+		}
+		if file.StopSettlementDigest != want {
+			return fmt.Errorf("invalid stop-settlement fence digest")
+		}
+	}
+	if len(rows) != 0 {
+		return fmt.Errorf("pending stop settlement remains durable")
+	}
+	return nil
+}
+
 // WriteSupervisorState goes through WriteStateFileAtomic (Task 1.1).
 func WriteSupervisorState(path string, f *SupervisorStateFile) error {
 	return WriteStateFileAtomic(path, f)
@@ -259,5 +502,8 @@ func normalizeSupervisorStateForMutation(file *SupervisorStateFile) {
 	}
 	if file.Daemons == nil {
 		file.Daemons = map[string]SupervisorDaemonState{}
+	}
+	if file.StopSettlements == nil {
+		file.StopSettlements = map[string]StopSettlementReceiptV1{}
 	}
 }

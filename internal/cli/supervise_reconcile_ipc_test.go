@@ -142,6 +142,8 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 		eventLoop:           loop,
 		events:              events,
 		daemonIntent:        newDaemonIntentCache(),
+		tracker:             NewDaemonRuntimeTracker(),
+		statePath:           filepath.Join(tmpHome, "supervisor-state.json"),
 		ctx:                 ctx,
 		failureWindow:       respawnFailureWindow,
 		quarantineThreshold: respawnQuarantineThreshold,
@@ -151,7 +153,7 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 	deps := ipcDispatchDeps{
 		stateDir:           tmpHome,
 		events:             events,
-		runtimeTracker:     NewDaemonRuntimeTracker(),
+		runtimeTracker:     ctrl.tracker,
 		reconcileReady:     &reconcileReady,
 		controllerProvider: func() *supervisorController { return ctrl },
 	}

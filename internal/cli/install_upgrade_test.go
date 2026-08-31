@@ -1021,6 +1021,64 @@ func (f *fakeUpgradeDeps) StartSupervisor(binaryPath string) error {
 	return f.startErr
 }
 
+func TestRollbackInstallUpgradeRefusesPendingStopSettlementBeforeForceKill(t *testing.T) {
+	mock := &fakeUpgradeDeps{}
+	err := rollbackInstallUpgrade(context.Background(), UpgradeOpts{
+		Deps: mock,
+		WithRollbackStopSettlementFence: func(ctx context.Context, critical func() error) error {
+			return errors.New("pending stop settlement remains durable")
+		},
+	}, "prior.exe", time.Second, errors.New("successor readiness failed"))
+	if err == nil || !strings.Contains(err.Error(), "pending stop settlement") {
+		t.Fatalf("rollback error = %v, want pending settlement refusal", err)
+	}
+	if mock.forceKillCalled || mock.startCalled || len(mock.calls) != 0 {
+		t.Fatalf("rollback performed side effects before receipt preflight: %+v", mock.calls)
+	}
+}
+
+// TestRollbackInstallUpgradeRequiresStopSettlementFence catches the unsafe
+// legacy fallback: a rollback caller without the state-path-bound fence must
+// never force-kill a successor merely because it cannot inspect receipts.
+func TestRollbackInstallUpgradeRequiresStopSettlementFence(t *testing.T) {
+	mock := &fakeUpgradeDeps{}
+	err := rollbackInstallUpgrade(context.Background(), UpgradeOpts{Deps: mock}, "prior.exe", time.Second, errors.New("successor readiness failed"))
+	if err == nil || !strings.Contains(err.Error(), "stop-settlement fence") {
+		t.Fatalf("rollback error = %v, want missing fence refusal", err)
+	}
+	if mock.forceKillCalled || mock.startCalled || len(mock.calls) != 0 {
+		t.Fatalf("rollback performed side effects without fence: %+v", mock.calls)
+	}
+}
+
+// TestRollbackInstallUpgradeForceKillsOnlyInsideStopSettlementFence catches a
+// future split of check and kill into separate lock epochs. The fencer owns the
+// callback boundary; the force kill must run only from that callback.
+func TestRollbackInstallUpgradeForceKillsOnlyInsideStopSettlementFence(t *testing.T) {
+	mock := &fakeUpgradeDeps{}
+	fenceCalled := false
+	inFence := false
+	mock.forceKillErr = errors.New("ERROR: The process \"12345\" not found.")
+	err := rollbackInstallUpgrade(context.Background(), UpgradeOpts{
+		Deps: mock,
+		WithRollbackStopSettlementFence: func(ctx context.Context, critical func() error) error {
+			fenceCalled = true
+			inFence = true
+			defer func() { inFence = false }()
+			return critical()
+		},
+	}, "prior.exe", time.Second, errors.New("successor readiness failed"))
+	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
+		t.Fatalf("rollback result = %v, want restored-prior diagnostic", err)
+	}
+	if !fenceCalled || !mock.forceKillCalled {
+		t.Fatalf("fence=%v forceKill=%v, want both", fenceCalled, mock.forceKillCalled)
+	}
+	if inFence {
+		t.Fatal("fence did not return after force-kill callback")
+	}
+}
+
 // TestInstallUpgrade_HappyPath pins the canonical sequence:
 // rename-aside → quiesce → exit{graceful} → start. Every step runs
 // exactly once with a clean response; no force-kill fallback fires.
@@ -1592,6 +1650,9 @@ func TestRunInstallUpgrade_CleanGracefulNeverReadySuccessorFails(t *testing.T) {
 		BinaryPath: "/fake/mcphub",
 		NewBinary:  "/fake/mcphub.new",
 		PipePath:   "fake-pipe",
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
+			return critical()
+		},
 		WaitSupervisorLockReleased: func(ctx context.Context, timeout time.Duration) error {
 			return nil
 		},
@@ -1687,6 +1748,9 @@ func TestInstallUpgrade_PostSwapFailureRestoresPrior(t *testing.T) {
 		BinaryPath: "/fake/mcphub",
 		NewBinary:  "/fake/mcphub.new",
 		PipePath:   "fake-pipe",
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
+			return critical()
+		},
 		WaitSupervisorReady: func(context.Context, time.Duration) error {
 			readyCalls++
 			if readyCalls == 1 {

@@ -9,15 +9,11 @@ import (
 	"time"
 )
 
-func TestStopSupervisorManualReviewDriftReturnsError(t *testing.T) {
+func TestStopSupervisorStopBatchRefusalReturnsError(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
 
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		return ReconcileResponse{
-			Drift: []DriftEntry{
-				{TaskName: stopSupervisorTestTask, Action: ReconcileActionNeedsManualReview},
-			},
-		}, nil
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, fmt.Errorf("stop_batch manual review required")
 	})
 	defer restore()
 
@@ -26,20 +22,20 @@ func TestStopSupervisorManualReviewDriftReturnsError(t *testing.T) {
 		t.Fatalf("Stop: %v", err)
 	}
 	if got := atomic.LoadInt32(kills); got != 0 {
-		t.Fatalf("legacy killByPortFn calls = %d, want 0 (manual-review row must be surfaced, not killed)", got)
+		t.Fatalf("legacy killByPortFn calls = %d, want 0 (stop_batch refusal must be surfaced, not killed)", got)
 	}
 	if len(fake.stopNames) != 0 {
-		t.Fatalf("scheduler Stop calls = %v, want none for supervisor-handled manual-review target", fake.stopNames)
+		t.Fatalf("scheduler Stop calls = %v, want none for supervisor-handled stop_batch target", fake.stopNames)
 	}
 	if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask {
 		t.Fatalf("results = %+v, want one row for %s", results, stopSupervisorTestTask)
 	}
 	if results[0].Err == "" {
-		t.Fatalf("manual-review drift returned empty Err row: %+v", results[0])
+		t.Fatalf("stop_batch refusal returned empty Err row: %+v", results[0])
 	}
-	for _, want := range []string{"manual review", "stop not applied", "supervisor-events.log", "mcphub status"} {
+	for _, want := range []string{"manual review", "stop_batch"} {
 		if !strings.Contains(results[0].Err, want) {
-			t.Fatalf("manual-review error = %q, want substring %q", results[0].Err, want)
+			t.Fatalf("stop_batch error = %q, want substring %q", results[0].Err, want)
 		}
 	}
 }
@@ -47,8 +43,8 @@ func TestStopSupervisorManualReviewDriftReturnsError(t *testing.T) {
 func TestStopSupervisorIPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
 
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, fmt.Errorf("supervisor IPC stop_batch: dial: %w", ErrSupervisorIPCUnavailable)
 	})
 	defer restore()
 
@@ -89,8 +85,8 @@ func TestStopSupervisorIPCUnavailableLiveOwnerReturnsRetryableErrorWithoutKill(t
 func TestStopSupervisorIPCUnavailableNoOwnerKeepsDescriptorKillFallback(t *testing.T) {
 	stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
 
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, fmt.Errorf("supervisor IPC stop_batch: dial: %w", ErrSupervisorIPCUnavailable)
 	})
 	defer restore()
 

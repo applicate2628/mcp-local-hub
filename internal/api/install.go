@@ -1109,11 +1109,19 @@ func schedulerUnavailableError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return errors.Is(err, scheduler.ErrNotImplemented) || errors.Is(err, scheduler.ErrUnavailable)
+	return errors.Is(err, scheduler.ErrNotImplemented)
 }
 
 func SchedulerUnavailableError(err error) bool {
 	return schedulerUnavailableError(err)
+}
+
+// ReconcileSchedulerUnavailableError additionally accepts transient scheduler
+// bridge unavailability. Reconciliation can safely continue from supervisor
+// intent without a scheduler snapshot; inventory-dependent operations must
+// continue to fail loudly on ErrUnavailable.
+func ReconcileSchedulerUnavailableError(err error) bool {
+	return schedulerUnavailableError(err) || errors.Is(err, scheduler.ErrUnavailable)
 }
 
 // forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped

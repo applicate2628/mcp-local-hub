@@ -13,6 +13,22 @@ import (
 	"mcp-local-hub/internal/process"
 )
 
+func beginStopSettlementForTest(t *testing.T, tracker *DaemonRuntimeTracker, statePath, taskName string) api.StopSettlementReceiptV1 {
+	t.Helper()
+	receipts, err := tracker.BeginStopSettlementBatch(statePath, api.StopBatchCommandV1{
+		ProtocolVersion: 1,
+		BatchID:         "test-stop-batch",
+		Targets:         []api.StopBatchTargetV1{{TaskName: taskName, ExpectedPort: 1}},
+	}, map[string]int{taskName: 1})
+	if err != nil {
+		t.Fatalf("begin stop batch: %v", err)
+	}
+	if len(receipts) != 1 {
+		t.Fatalf("stop batch receipts = %+v, want one", receipts)
+	}
+	return receipts[0]
+}
+
 func TestDaemonRuntimeTracker_LifecycleTransitions(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	taskName := `mcp-local-hub-memory-default`
@@ -210,6 +226,308 @@ func TestDaemonRuntimeTracker_PersistAndHydrate(t *testing.T) {
 	}
 	if entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
 		t.Fatalf("hydrated serena entry = %+v, want idle pid=0", entry)
+	}
+}
+
+func TestDaemonRuntimeTracker_BeginStopSettlementPersistsExactReceiptBeforeReturning(t *testing.T) {
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-state.json")
+	const taskName = `\mcp-local-hub-time-default`
+	startedAt := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 4812, startedAt)
+
+	receipt := beginStopSettlementForTest(t, tracker, statePath, taskName)
+	if receipt.Version != 1 || receipt.BatchID != "test-stop-batch" || receipt.TaskName != taskName || receipt.Epoch != 1 || receipt.PID != 4812 || receipt.StartedAt != startedAt.Format(time.RFC3339Nano) || receipt.PIDGeneration != 1 || receipt.Revision != 1 || receipt.Phase != api.StopSettlementPhaseStopRequested {
+		t.Fatalf("receipt = %+v, want exact stop-requested generation", receipt)
+	}
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted receipt: %v", err)
+	}
+	if persisted.StopSettlementEpoch != receipt.Epoch || persisted.StopSettlements[taskName] != receipt {
+		t.Fatalf("persisted receipt = epoch %d rows %+v, want epoch %d receipt %+v", persisted.StopSettlementEpoch, persisted.StopSettlements, receipt.Epoch, receipt)
+	}
+
+	hydrated := NewDaemonRuntimeTracker()
+	hydrated.HydrateFromState(persisted)
+	got, ok := hydrated.StopSettlementReceipt(taskName)
+	if !ok || got != receipt {
+		t.Fatalf("hydrated receipt = %+v present=%v, want %+v", got, ok, receipt)
+	}
+}
+
+func TestDaemonRuntimeTracker_InvalidHydratedReceiptFencesLifecycleAndSurvivesPersist(t *testing.T) {
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-state.json")
+	const taskName = `\mcp-local-hub-time-default`
+	invalid := api.StopSettlementReceiptV1{
+		Version: 1, BatchID: "interrupted", TaskName: taskName, Epoch: 7, PID: 4812,
+		StartedAt: "2026-08-31T12:00:00Z", PIDGeneration: 3, Revision: 1,
+		Phase: api.StopSettlementPhase("unknown_future_phase"),
+	}
+	if err := api.WriteSupervisorState(statePath, &api.SupervisorStateFile{
+		Version:         1,
+		Daemons:         map[string]api.SupervisorDaemonState{taskName: {State: "idle"}},
+		StopSettlements: map[string]api.StopSettlementReceiptV1{taskName: invalid},
+	}); err != nil {
+		t.Fatalf("seed invalid receipt: %v", err)
+	}
+	tracker, err := loadDaemonRuntimeTrackerFromStatePath(statePath)
+	if err != nil {
+		t.Fatalf("hydrate tracker: %v", err)
+	}
+	if err := tracker.StopSettlementIntegrityError(); err == nil {
+		t.Fatal("invalid durable receipt did not fence lifecycle")
+	}
+	if err := tracker.PersistTo(statePath); err != nil {
+		t.Fatalf("persist tracker: %v", err)
+	}
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted state: %v", err)
+	}
+	if got, ok := persisted.StopSettlements[taskName]; !ok || got != invalid {
+		t.Fatalf("disk-only invalid receipt = %+v present=%v, want preserved %+v", got, ok, invalid)
+	}
+}
+
+func TestDaemonRuntimeTracker_BeginStopSettlementBatchIsAtomic(t *testing.T) {
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-state.json")
+	const first = `\mcp-local-hub-time-default`
+	const second = `\mcp-local-hub-fetch-default`
+	started := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(first, 4812, started)
+	tracker.MarkSpawned(second, 4813, started)
+	command := api.StopBatchCommandV1{
+		ProtocolVersion: 1,
+		BatchID:         "batch-atomic",
+		Targets: []api.StopBatchTargetV1{
+			{TaskName: first, ExpectedPort: 9128},
+			{TaskName: second, ExpectedPort: 9129},
+		},
+	}
+
+	if _, err := tracker.BeginStopSettlementBatch(statePath, command, map[string]int{first: 9128}); err == nil {
+		t.Fatal("partial descriptor snapshot admitted a batch")
+	}
+	if _, pending := tracker.StopSettlementReceipt(first); pending {
+		t.Fatal("failed batch mutated first in-memory receipt")
+	}
+	if _, err := os.Stat(statePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("failed batch state file = %v, want absent", err)
+	}
+
+	receipts, err := tracker.BeginStopSettlementBatch(statePath, command, map[string]int{first: 9128, second: 9129})
+	if err != nil {
+		t.Fatalf("begin atomic stop batch: %v", err)
+	}
+	if len(receipts) != 2 || receipts[0].TaskName != first || receipts[1].TaskName != second || receipts[0].Phase != api.StopSettlementPhaseStopRequested || receipts[1].Phase != api.StopSettlementPhaseStopRequested {
+		t.Fatalf("batch receipts = %+v, want ordered stop_requested rows", receipts)
+	}
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read atomic state: %v", err)
+	}
+	if len(persisted.StopSettlements) != 2 || persisted.StopSettlements[first] != receipts[0] || persisted.StopSettlements[second] != receipts[1] {
+		t.Fatalf("durable receipts = %+v, want exact batch snapshot %+v", persisted.StopSettlements, receipts)
+	}
+}
+
+func TestDaemonRuntimeTracker_StopSettlementRejectsStaleTransitionAndRemovesCommitLast(t *testing.T) {
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-state.json")
+	const taskName = `\mcp-local-hub-time-default`
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 4812, time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC))
+	prepared := beginStopSettlementForTest(t, tracker, statePath, taskName)
+	if _, err := tracker.AdvanceStopSettlement(statePath, prepared, api.StopSettlementPhaseExitObserved, "", ""); err != nil {
+		t.Fatalf("advance: %v", err)
+	}
+	if _, err := tracker.AdvanceStopSettlement(statePath, prepared, api.StopSettlementPhaseFailed, api.StopSettlementFailurePersistence, "stale completion"); err == nil {
+		t.Fatal("stale receipt transition succeeded")
+	}
+	if err := tracker.RemoveStopSettlement(statePath, prepared); err == nil {
+		t.Fatal("prepared receipt removed before port-release commit")
+	}
+	exited, ok := tracker.StopSettlementReceipt(taskName)
+	if !ok || exited.Revision != prepared.Revision+1 || exited.Phase != api.StopSettlementPhaseExitObserved {
+		t.Fatalf("receipt after stale transition = %+v present=%v", exited, ok)
+	}
+	released, err := tracker.AdvanceStopSettlement(statePath, exited, api.StopSettlementPhasePortReleased, "", "")
+	if err != nil {
+		t.Fatalf("record port released: %v", err)
+	}
+	if err := tracker.RemoveStopSettlement(statePath, released); err != nil {
+		t.Fatalf("remove after port release: %v", err)
+	}
+	if _, ok := tracker.StopSettlementReceipt(taskName); ok {
+		t.Fatal("receipt remained in tracker after durable removal")
+	}
+	persisted, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read persisted removal: %v", err)
+	}
+	if _, ok := persisted.StopSettlements[taskName]; ok {
+		t.Fatalf("receipt remained durable after removal: %+v", persisted.StopSettlements[taskName])
+	}
+	if persisted.StopSettlementEpoch != prepared.Epoch {
+		t.Fatalf("epoch regressed on removal: %d want %d", persisted.StopSettlementEpoch, prepared.Epoch)
+	}
+}
+
+func TestDaemonRuntimeTracker_StopSettlementTransitionTableAndDigestFence(t *testing.T) {
+	statePath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-state.json")
+	const taskName = `\mcp-local-hub-time-default`
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 4812, time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC))
+	receipt := beginStopSettlementForTest(t, tracker, statePath, taskName)
+	if receipt.Mode != "stop" || receipt.Port != 1 || receipt.Attempt != 1 || receipt.OperationID != receipt.BatchID {
+		t.Fatalf("receipt identity = %+v, want mode/port/attempt/operation", receipt)
+	}
+	if _, err := tracker.AdvanceStopSettlement(statePath, receipt, api.StopSettlementPhasePortReleased, "", ""); err == nil {
+		t.Fatal("illegal stop_requested -> port_released transition succeeded")
+	}
+	failed, err := tracker.AdvanceStopSettlement(statePath, receipt, api.StopSettlementPhaseFailed, api.StopSettlementFailureListenerAlive, "listener remains bound")
+	if err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+	if failed.ResumePhase != api.StopSettlementPhaseStopRequested || failed.FailureClass != api.StopSettlementFailureListenerAlive {
+		t.Fatalf("failed receipt = %+v, want resume at stop_requested", failed)
+	}
+	resumed, err := tracker.AdvanceStopSettlement(statePath, failed, api.StopSettlementPhaseStopRequested, "", "")
+	if err != nil {
+		t.Fatalf("resume at recorded phase: %v", err)
+	}
+	if resumed.Attempt != 2 || resumed.Revision != failed.Revision+1 || resumed.FailureClass != "" || resumed.ResumePhase != "" {
+		t.Fatalf("resumed receipt = %+v, want attempt+1 and cleared failure", resumed)
+	}
+	if _, err := tracker.AdvanceStopSettlement(statePath, failed, api.StopSettlementPhaseStopRequested, "", ""); err == nil {
+		t.Fatal("stale failed receipt resumed after newer revision")
+	}
+	state, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read state: %v", err)
+	}
+	if state.StopSettlementMapGeneration == 0 || state.StopSettlementDigest == "" {
+		t.Fatalf("state lacks receipt map integrity metadata: %+v", state)
+	}
+	if want, err := api.StopSettlementMapDigest(state.StopSettlementEpoch, state.StopSettlementMapGeneration, state.StopSettlements); err != nil || want != state.StopSettlementDigest {
+		t.Fatalf("receipt map digest got=%q want=%q err=%v", state.StopSettlementDigest, want, err)
+	}
+	state.StopSettlementDigest = "bad"
+	tracker.HydrateFromState(state)
+	if err := tracker.StopSettlementIntegrityError(); err == nil {
+		t.Fatal("digest mismatch did not fence lifecycle")
+	}
+}
+
+func TestStopSettlementRevisionComparisonIncludesAllSemanticFields(t *testing.T) {
+	base := api.StopSettlementReceiptV1{
+		Version:       1,
+		BatchID:       "batch-a",
+		TaskName:      `\mcp-local-hub-time-default`,
+		Epoch:         1,
+		PID:           4812,
+		StartedAt:     "2026-08-31T12:00:00Z",
+		PIDGeneration: 2,
+		BatchIndex:    0,
+		Mode:          "stop",
+		Port:          9128,
+		Revision:      3,
+		Attempt:       2,
+		Phase:         api.StopSettlementPhaseFailed,
+		FailureDetail: "listener remains bound",
+		FailureClass:  api.StopSettlementFailureListenerAlive,
+		ResumePhase:   api.StopSettlementPhaseExitObserved,
+		OperationID:   "op-a",
+	}
+	if !sameStopSettlementRevision(base, base) {
+		t.Fatal("identical receipt did not match")
+	}
+	mutations := []struct {
+		name string
+		edit func(*api.StopSettlementReceiptV1)
+	}{
+		{"attempt", func(v *api.StopSettlementReceiptV1) { v.Attempt++ }},
+		{"failure_class", func(v *api.StopSettlementReceiptV1) { v.FailureClass = api.StopSettlementFailureProcessAlive }},
+		{"resume_phase", func(v *api.StopSettlementReceiptV1) { v.ResumePhase = api.StopSettlementPhaseStopRequested }},
+		{"failure_detail", func(v *api.StopSettlementReceiptV1) { v.FailureDetail = "another detail" }},
+		{"operation_id", func(v *api.StopSettlementReceiptV1) { v.OperationID = "op-b" }},
+	}
+	for _, tc := range mutations {
+		t.Run(tc.name, func(t *testing.T) {
+			got := base
+			tc.edit(&got)
+			if sameStopSettlementRevision(base, got) {
+				t.Fatalf("CAS comparison accepted changed %s: base=%+v changed=%+v", tc.name, base, got)
+			}
+		})
+	}
+}
+
+func TestStopSettlementFailureClassIsClosedAndFailureDetailIsNonSemanticText(t *testing.T) {
+	receipt := api.StopSettlementReceiptV1{
+		Version:       1,
+		BatchID:       "batch-a",
+		TaskName:      `\mcp-local-hub-time-default`,
+		Epoch:         1,
+		PID:           4812,
+		StartedAt:     "2026-08-31T12:00:00Z",
+		PIDGeneration: 2,
+		BatchIndex:    0,
+		Mode:          "stop",
+		Port:          9128,
+		Revision:      3,
+		Attempt:       2,
+		Phase:         api.StopSettlementPhaseFailed,
+		FailureClass:  api.StopSettlementFailureListenerAlive,
+		FailureDetail: "port 9128 remains bound by pid 4812",
+		ResumePhase:   api.StopSettlementPhaseExitObserved,
+		OperationID:   "op-a",
+	}
+	if !validStopSettlementReceipt(receipt) {
+		t.Fatalf("known typed failure receipt rejected: %+v", receipt)
+	}
+	receipt.FailureClass = api.StopSettlementFailureClass("text-derived")
+	if validStopSettlementReceipt(receipt) {
+		t.Fatalf("unknown failure class accepted: %+v", receipt)
+	}
+}
+
+func TestPortFenceReceiptValidatorMatrix(t *testing.T) {
+	base := api.StopSettlementReceiptV1{Version: 1, BatchID: "batch", TaskName: `\mcp-local-hub-time-default`, Epoch: 1, PID: 0, StartedAt: "", PIDGeneration: 0, BatchIndex: 0, Mode: "port_fence", Port: 9128, Revision: 1, Attempt: 1, Phase: api.StopSettlementPhaseExitObserved, OperationID: "batch"}
+	if !validStopSettlementReceipt(base) {
+		t.Fatalf("valid port fence rejected: %+v", base)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*api.StopSettlementReceiptV1)
+	}{
+		{"stop_requested", func(v *api.StopSettlementReceiptV1) { v.Phase = api.StopSettlementPhaseStopRequested }},
+		{"negative_generation", func(v *api.StopSettlementReceiptV1) { v.PIDGeneration = -1 }},
+		{"pid", func(v *api.StopSettlementReceiptV1) { v.PID = 1 }},
+		{"started", func(v *api.StopSettlementReceiptV1) { v.StartedAt = "2026-08-31T12:00:00Z" }},
+		{"bad_failed_resume", func(v *api.StopSettlementReceiptV1) {
+			v.Phase = api.StopSettlementPhaseFailed
+			v.FailureClass = api.StopSettlementFailureListenerAlive
+			v.FailureDetail = "bound"
+			v.ResumePhase = api.StopSettlementPhaseStopRequested
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := base
+			tc.edit(&got)
+			if validStopSettlementReceipt(got) {
+				t.Fatalf("invalid port fence accepted: %+v", got)
+			}
+		})
+	}
+	failed := base
+	failed.Phase = api.StopSettlementPhaseFailed
+	failed.FailureClass = api.StopSettlementFailureListenerAlive
+	failed.FailureDetail = "bound"
+	failed.ResumePhase = api.StopSettlementPhaseExitObserved
+	if !validStopSettlementReceipt(failed) {
+		t.Fatalf("failed port fence rejected: %+v", failed)
 	}
 }
 

@@ -38,9 +38,14 @@ import (
 //     resolution lands in the temp tree.
 func ensureAliveTestStateDir(t *testing.T) string {
 	t.Helper()
-	previousSupervisorOwnerVerify := ensureAliveSupervisorOwnerVerifyFn
-	ensureAliveSupervisorOwnerVerifyFn = func(string, int) error { return nil }
-	t.Cleanup(func() { ensureAliveSupervisorOwnerVerifyFn = previousSupervisorOwnerVerify })
+	previousSupervisorOwnerClassify := ensureAliveSupervisorOwnerClassifyFn
+	ensureAliveSupervisorOwnerClassifyFn = func(_ context.Context, _ string, pid int) ensureAliveSupervisorOwnerVerification {
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerCurrentPathVerified, owner: api.SupervisorLockOwner{PID: pid}}
+	}
+	t.Cleanup(func() { ensureAliveSupervisorOwnerClassifyFn = previousSupervisorOwnerClassify })
+	previousReadiness := ensureAliveGUIRecoveryReadinessFn
+	ensureAliveGUIRecoveryReadinessFn = func(context.Context, int) error { return nil }
+	t.Cleanup(func() { ensureAliveGUIRecoveryReadinessFn = previousReadiness })
 	stateDir := apitest.HardenedTempDir(t)
 	restore := api.SetDaemonStateRootForTest(stateDir)
 	t.Cleanup(restore)
@@ -113,7 +118,9 @@ func TestEnsureAlive_QuietMigrationLockWithStaleOwnerDefersGUIRelaunch(t *testin
 		t.Fatalf("acquire quiet migration lock: %v", err)
 	}
 	defer quiet.Release()
-	ensureAliveSupervisorOwnerVerifyFn = verifyEnsureAliveSupervisorOwner
+	ensureAliveSupervisorOwnerClassifyFn = func(context.Context, string, int) ensureAliveSupervisorOwnerVerification {
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerUnverified, err: errors.New("quiet migration lock holder")}
+	}
 
 	var relaunches int32
 	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
@@ -550,6 +557,64 @@ func TestEnsureAlive_HeadlessFleet_RelaunchesGUI(t *testing.T) {
 	assertSupervisorEvent(t, stateDir, "gui-headless-fleet-detected")
 	assertSupervisorEvent(t, stateDir, "liveness-relaunched-gui-headless-fleet")
 	assertSupervisorEventBody(t, stateDir, "liveness-relaunched-gui-headless-fleet", `"serving_probe_ok":true`)
+}
+
+func TestEnsureAlive_HeadlessFleet_AlternatePathVerifiedRecovers(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+
+	// Atomic replacement leaves this process mapped from the old executable
+	// path. The pipe/sidecar proof is the admission; path drift is diagnostic.
+	ensureAliveSupervisorOwnerClassifyFn = func(_ context.Context, _ string, pid int) ensureAliveSupervisorOwnerVerification {
+		return ensureAliveSupervisorOwnerVerification{
+			class: ensureAliveSupervisorOwnerAlternatePathVerified,
+			owner: api.SupervisorLockOwner{PID: pid, StartedAt: time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)},
+			image: `C:\\Users\\test\\bin\\mcphub.exe.old`,
+		}
+	}
+	noLiveGUIOwner(t)
+	var relaunches int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreRelaunch()
+	restoreServing := setGUIServingProbeFnForTest(func(port int) bool { return port == 9125 })
+	defer restoreServing()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("alternate verified owner must recover: %v; output=%q", err, out.String())
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Fatalf("relaunches=%d, want 1", got)
+	}
+	assertSupervisorEventBody(t, stateDir, "liveness-relaunched-gui-headless-fleet", `"owner_class":"alternate_path_verified"`)
+}
+
+func TestEnsureAlive_HeadlessFleet_SchedulerFailureReturnsError(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	rewriteEnsureAliveSupervisorLockOwnerStartedAt(t, stateDir, time.Now().Add(-2*time.Minute))
+	noLiveGUIOwner(t)
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error { return errors.New("scheduler unavailable") })
+	defer restoreRelaunch()
+
+	out := &bytes.Buffer{}
+	err = runEnsureAlive(stateDir, out)
+	if err == nil || !strings.Contains(err.Error(), "scheduler stage") {
+		t.Fatalf("scheduler failure error=%v, want typed scheduler-stage failure", err)
+	}
+	assertSupervisorEvent(t, stateDir, "liveness-gui-headless-relaunch-failed")
 }
 
 // TestEnsureAlive_HeadlessFleet_BootGraceSuppresses covers the boot-grace

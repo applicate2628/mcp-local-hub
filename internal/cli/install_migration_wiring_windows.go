@@ -124,6 +124,9 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 		VerifyPortsUnbound:         verifyPortsUnboundForUpgrade,
 		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
 		WaitSupervisorReady:        deps.WaitSupervisorReady,
+		WithRollbackStopSettlementFence: func(ctx context.Context, critical func() error) error {
+			return api.WithEmptyStopSettlementFence(ctx, filepath.Join(stateDir, "supervisor-state.json"), critical)
+		},
 	}); err != nil {
 		return fmt.Errorf("v0.5 upgrade: %w", err)
 	}

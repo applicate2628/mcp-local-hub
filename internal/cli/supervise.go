@@ -194,6 +194,7 @@ var (
 	productionQueryPIDStateFn            = process.QueryPIDState
 	productionVerifyPIDIdentityFn        = process.VerifyPIDIdentity
 	productionTerminatePIDWithIdentityFn = process.TerminatePIDWithIdentity
+	productionHoldPIDForTerminationFn    = process.HoldPIDForTermination
 	currentRunningVerifyPIDIdentityFn    = process.VerifyPIDIdentity
 	currentRunningIsPIDAliveFn           = process.IsPidAlive
 	closeDaemonJobAfterWaitFn            = func(job *process.Job) error { return job.Close() }
@@ -488,6 +489,10 @@ type ipcDispatchDeps struct {
 	// ordering (deps + accept goroutine launch BEFORE controller exists)
 	// without changing the deps struct lifetime.
 	controllerProvider func() *supervisorController
+	// allowDirectRespawnForTest exists only for isolated handler fixtures that do
+	// not construct a controller. Production leaves it false: every respawn is
+	// controller-routed or returns a retryable not-ready response.
+	allowDirectRespawnForTest bool
 }
 
 // emitSerenaIntentRepairOutcome records the result of a
@@ -1164,15 +1169,13 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx.Done(), oneAPIInj, strictJobProtection)
 	}
 	terminateFn := reconcileTerminateFn
+	var terminateOutcomeFn terminationOutcomeFunc
 	if terminateFn == nil {
-		terminateFn = makeProductionTerminateFnWithStatePath(events, runningPIDs, runtimeTracker, statePath)
+		terminateOutcomeFn = makeProductionTerminationOutcomeFn(events, runningPIDs, runtimeTracker, statePath)
+		terminateFn = func(d api.SupervisorDaemon) error {
+			return terminateOutcomeFn(d, terminationExpectedTupleForTask(runtimeTracker, d.TaskName)).legacyError()
+		}
 	}
-
-	// Wire the late-bound respawn closures now that spawnFn/terminateFn
-	// exist. The IPC accept loop above (in the !noIPC branch) already
-	// holds the respawnLate pointer via deps; the Set() makes Get()
-	// return non-nil for subsequent `respawn` IPC requests.
-	respawnLate.Set(spawnFn, terminateFn)
 
 	// Phase A.2: build the supervisorController from existing
 	// primitives (event loop, tracker, graceful flag) plus fresh
@@ -1196,6 +1199,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		daemonIntent:        newDaemonIntentCache(),
 		spawn:               spawnFn,
 		terminate:           terminateFn,
+		terminateOutcome:    terminateOutcomeFn,
 		statePath:           statePath,
 		ctx:                 loopCtx,
 		targetRegistryPath:  api.DefaultRegistryPath,
@@ -1230,7 +1234,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	ctrl.daemonIntent.Refresh(unifiedStops)
 	hydrateControllerRunningStates(ctrl, currentRunning)
 	loop.RegisterHandler(ctrl.handleLoopEvent)
-
+	// A crashed supervisor can restart with non-terminal receipts already on
+	// disk. Recover them once under a bounded context after hydration and FIFO
+	// registration; the recovery owner decides whether to advance, observe, or
+	// require operator action and never starts a replacement child directly.
+	go func() {
+		defer guardSupervisorGoroutine(events, "stop-settlement-startup-recovery", "")
+		recoveryCtx, cancel := context.WithTimeout(loopCtx, api.DefaultTargetedReconcileTimeout)
+		defer cancel()
+		ctrl.enqueuePendingStopSettlementRecovery(recoveryCtx)
+	}()
 	// Crash-event bridge: the production spawn fn posts crashEvent
 	// onto crashCh from its cmd.Wait goroutine. The Phase A.2
 	// controller wants EvChildExit on the formal event loop so the
@@ -1337,6 +1350,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			ctrl.runQuarantineParoleMonitor(loopCtx)
 		}()
 	}
+	// Publish only after the controller, its caches/handler, and all production
+	// safety workers are wired. The already-running IPC acceptor otherwise sees
+	// an intentionally unavailable respawn token.
+	respawnLate.Set(spawnFn, terminateFn)
 
 	// IntentWatcher: poll <state-dir>/{supervisor,daemon}-intent.json
 	// for mtime changes. On change, re-read both files, refresh the
@@ -2982,171 +2999,6 @@ func loadSupervisorCurrentRunning(stateDir string) (map[string]bool, map[string]
 	return result, pids, nil
 }
 
-// makeProductionTerminateFn returns the TerminateFunc the Reconciler
-// invokes for each daemon that is running but currently stopped by
-// daemon-intent.json. The Reconciler carries only the daemon descriptor,
-// so startup reconcile threads in the PID snapshot captured from
-// supervisor-state.json.
-func makeProductionTerminateFn(events *api.SupervisorEventLog, runningPIDs map[string]runningProcessIdentity, tracker *DaemonRuntimeTracker) TerminateFunc {
-	return makeProductionTerminateFnWithStatePath(events, runningPIDs, tracker, "")
-}
-
-func makeProductionTerminateFnWithStatePath(events *api.SupervisorEventLog, runningPIDs map[string]runningProcessIdentity, tracker *DaemonRuntimeTracker, statePath string) TerminateFunc {
-	return func(d api.SupervisorDaemon) error {
-		target := runningPIDs[d.TaskName]
-		pid := target.PID
-		// Live tracker lookup overrides the startup runningPIDs snapshot
-		// (closes bot PR#222 P1-5: daemons spawned AFTER supervisor cold
-		// restart never appear in runningPIDs — that map is loaded once
-		// from supervisor-state.json at startup. Only the tracker holds
-		// the live PID for these later spawns. Without this lookup, the
-		// new A.2 controller's terminate calls returned "no running PID
-		// recorded" and silently skipped killing the child, leaving SM
-		// transitions to proceed (StExiting → StIdle on phantom child-exit)
-		// while the process was still alive — duplicate-process / port
-		// collision risk).
-		//
-		// runningPIDs remains the fallback for cold-restart-recovery
-		// terminates: daemons that were running BEFORE the cold restart
-		// but never re-spawned after still have only the startup snapshot.
-		if entry, ok := tracker.Get(d.TaskName); ok && entry.CurrentPID > 0 {
-			pid = entry.CurrentPID
-			target.PID = entry.CurrentPID
-			if !entry.StartedAt.IsZero() {
-				target.StartedAt = entry.StartedAt.UTC().Format(time.RFC3339Nano)
-			}
-		}
-		if pid <= 0 {
-			// No live PID recorded — the process is already gone (nothing to kill).
-			// Wrap with errTerminateTargetGone so the orphan reap classifies this as
-			// confirmed-dead and clears its bookkeeping instead of retrying forever
-			// against a non-existent PID (Codex pr302 r3 finding F, case a).
-			err := fmt.Errorf("%w: no running PID recorded for task %q", errTerminateTargetGone, d.TaskName)
-			emitDaemonTerminateFailed(events, d, pid, err)
-			return err
-		}
-		state, stateErr := productionQueryPIDStateFn(pid)
-		if stateErr != nil {
-			err := fmt.Errorf("query PID %d state: %w", pid, stateErr)
-			emitDaemonTerminateFailed(events, d, pid, err)
-			return err
-		}
-		if state == process.PIDStateDead {
-			emitDaemonTerminateAlreadyExited(events, d, pid)
-			tracker.MarkExited(d.TaskName)
-			_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
-			return nil
-		}
-		// Identity proof for the terminate path: the target daemon runs from
-		// its CONFIGURED command (d.Command — the exact exe the supervisor
-		// exec'd), which may differ from the supervisor's own binary. Verify
-		// (and later terminate) against the daemon's exe, NOT the supervisor's
-		// canonicalMcphubPath(); otherwise a dev-build supervisor cannot verify
-		// — and therefore cannot kill — release-path daemons, worsening the
-		// orphan/port-fight (bug
-		// 2026-06-09-supervisor-loses-current-pid-false-quarantine.md). This
-		// single proof is threaded through verify → terminate → finish below.
-		proof := process.PIDIdentityProof{
-			PID:            pid,
-			ExecutablePath: daemonExpectedIdentityExe(d.Command),
-			StartedAt:      target.StartedAt,
-		}
-		if err := productionVerifyPIDIdentityFn(proof); err != nil {
-			if errors.Is(err, process.ErrProcessAlreadyExited) {
-				emitDaemonTerminateAlreadyExited(events, d, pid)
-				tracker.MarkExited(d.TaskName)
-				_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
-				return nil
-			}
-			if !errors.Is(err, process.ErrProcessIdentityMismatch) {
-				emitDaemonTerminateFailed(events, d, pid, err)
-				return err
-			}
-			_ = events.Emit(api.SupervisorEvent{
-				Severity: api.SupervisorEventSeverityWarn,
-				Source:   "lifecycle",
-				Event:    "daemon-terminate-aborted-pid-reuse",
-				TaskName: d.TaskName,
-				Body: map[string]any{
-					"pid":    pid,
-					"reason": err.Error(),
-				},
-			})
-			return nil
-		}
-
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: api.SupervisorEventSeverityInfo,
-			Source:   "lifecycle",
-			Event:    "daemon-terminate-requested",
-			TaskName: d.TaskName,
-			Body: map[string]any{
-				"pid": pid,
-			},
-		})
-
-		if err := productionTerminatePIDWithIdentityFn(proof); err != nil {
-			if errors.Is(err, process.ErrProcessAlreadyExited) {
-				emitDaemonTerminateAlreadyExited(events, d, pid)
-				tracker.MarkExited(d.TaskName)
-				_ = persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName)
-				return nil
-			}
-			if errors.Is(err, process.ErrProcessIdentityMismatch) {
-				_ = events.Emit(api.SupervisorEvent{
-					Severity: api.SupervisorEventSeverityWarn,
-					Source:   "lifecycle",
-					Event:    "daemon-terminate-aborted-pid-reuse",
-					TaskName: d.TaskName,
-					Body: map[string]any{
-						"pid":    pid,
-						"reason": err.Error(),
-					},
-				})
-				return nil
-			}
-			emitDaemonTerminateFailed(events, d, pid, err)
-			return err
-		}
-		if err := finishProductionTerminate(proof, d, events); err != nil {
-			// #2316 (pr302 r4 correction of r3 finding F): finishProductionTerminate is
-			// NOT pure post-kill bookkeeping on POSIX. After SIGTERM it WAITS for the
-			// grace period and, if the process is STILL ALIVE, escalates to SIGKILL —
-			// returning an error ONLY when it could NOT confirm death: an escalation
-			// abort (identity verify failed → it refused to SIGKILL an unverifiable PID)
-			// or a SIGKILL send failure. In BOTH cases the targeted process MAY STILL BE
-			// ALIVE. The r3 code wrapped EVERY such error as errTerminateTargetGone,
-			// which made the orphan reap classify a still-alive daemon as confirmed-dead
-			// and clear the tracker/SM — losing the PID for a daemon that ignored SIGTERM
-			// or could not be escalated. So these errors must propagate as REAL terminate
-			// failures (→ reapTerminateFailed → preserve state + retry on the next tick).
-			// (On Windows finishProductionTerminate is a no-op returning nil, so this
-			// branch never fires there — the Job-Object close reaps the tree.)
-			emitDaemonTerminateFailed(events, d, pid, err)
-			return err
-		}
-
-		tracker.MarkTerminated(d.TaskName)
-		_ = events.Emit(api.SupervisorEvent{
-			Severity: api.SupervisorEventSeverityInfo,
-			Source:   "lifecycle",
-			Event:    "daemon-terminated",
-			TaskName: d.TaskName,
-			Body: map[string]any{
-				"pid": pid,
-			},
-		})
-		if err := persistDaemonRuntimeTracker(events, tracker, statePath, d.TaskName); err != nil {
-			// The process IS dead (MarkTerminated ran); only the supervisor-state.json
-			// persist failed. Wrap as gone so the reap classifies it confirmed-dead
-			// and clears bookkeeping — the orphan is reaped, only the disk write
-			// errored (Codex pr302 r3 finding F, case b).
-			return fmt.Errorf("%w: post-terminate persist failed: %v", errTerminateTargetGone, err)
-		}
-		return nil
-	}
-}
-
 func emitDaemonTerminateAlreadyExited(events *api.SupervisorEventLog, d api.SupervisorDaemon, pid int) {
 	_ = events.Emit(api.SupervisorEvent{
 		Severity: api.SupervisorEventSeverityInfo,
@@ -3705,8 +3557,11 @@ type crashEvent struct {
 	// a late cmd.Wait exit of a superseded child must not drive an SM
 	// transition against the CURRENT child.
 	PIDGeneration int
-	ExitCode      int
-	WaitErr       error
+	// StartedAt completes the exact runtime identity tuple at the controller
+	// boundary. PID and generation alone are insufficient across PID reuse.
+	StartedAt time.Time
+	ExitCode  int
+	WaitErr   error
 }
 
 // makeProductionSpawnFnWithStatePath constructs the production spawn
@@ -4427,7 +4282,7 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			// send (the historical behavior when no shutdown signal exists).
 			if crashCh != nil {
 				select {
-				case crashCh <- crashEvent{Daemon: d, PID: spawnedPID, PIDGeneration: spawnGen, ExitCode: exitCode, WaitErr: waitErr}:
+				case crashCh <- crashEvent{Daemon: d, PID: spawnedPID, PIDGeneration: spawnGen, StartedAt: startedAt, ExitCode: exitCode, WaitErr: waitErr}:
 				case <-crashShutdown:
 					// Supervisor is shutting down; the bridge has stopped
 					// draining crashCh. Abandon the send so this wait

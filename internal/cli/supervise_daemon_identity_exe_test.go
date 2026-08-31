@@ -269,30 +269,24 @@ func TestProductionTerminateFn_IdentityProofUsesDaemonCommand(t *testing.T) {
 	tracker.MarkSpawned(taskName, 4242, time.Unix(1700000000, 0).UTC())
 
 	prevQuery := productionQueryPIDStateFn
-	prevVerify := productionVerifyPIDIdentityFn
-	prevTerminate := productionTerminatePIDWithIdentityFn
+	prevHold := productionHoldPIDForTerminationFn
 	productionQueryPIDStateFn = func(pid int) (process.PIDState, error) {
 		return process.PIDStateAlive, nil
 	}
 	var sawVerifyExe, sawTerminateExe string
-	productionVerifyPIDIdentityFn = func(proof process.PIDIdentityProof) error {
-		sawVerifyExe = proof.ExecutablePath
-		if proof.ExecutablePath != wantExe {
-			t.Fatalf("VerifyPIDIdentity ExecutablePath = %q, want daemon command %q (NOT supervisor path %q)",
-				proof.ExecutablePath, wantExe, canonicalMcphubPath())
-		}
-		return nil
-	}
-	productionTerminatePIDWithIdentityFn = func(proof process.PIDIdentityProof) error {
-		sawTerminateExe = proof.ExecutablePath
-		// Short-circuit the kill cleanly: already-exited returns success
-		// without invoking finishProductionTerminate.
-		return process.ErrProcessAlreadyExited
+	productionHoldPIDForTerminationFn = func(pid int) (process.HeldPIDGeneration, error) {
+		return &fakeHeldPIDGeneration{pid: pid, verifyFn: func(proof process.PIDIdentityProof) error {
+			sawVerifyExe = proof.ExecutablePath
+			sawTerminateExe = proof.ExecutablePath
+			if proof.ExecutablePath != wantExe {
+				t.Fatalf("held VerifyIdentity ExecutablePath = %q, want daemon command %q (NOT supervisor path %q)", proof.ExecutablePath, wantExe, canonicalMcphubPath())
+			}
+			return nil
+		}, terminate: func() (bool, error) { return false, process.ErrProcessAlreadyExited }}, nil
 	}
 	t.Cleanup(func() {
 		productionQueryPIDStateFn = prevQuery
-		productionVerifyPIDIdentityFn = prevVerify
-		productionTerminatePIDWithIdentityFn = prevTerminate
+		productionHoldPIDForTerminationFn = prevHold
 	})
 
 	terminateFn := makeProductionTerminateFnWithStatePath(events, map[string]runningProcessIdentity{

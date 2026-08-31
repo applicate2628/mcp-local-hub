@@ -123,6 +123,7 @@ func TestMain(m *testing.M) {
 	// Tests needing a specific response override + restore to this default.
 	prevRegisterReconcile := registerSupervisorReconcileFn
 	prevReconcileApply := supervisorReconcileApplyFn
+	prevStopBatch := supervisorStopBatchFn
 	prevRestartRespawn := supervisorRestartRespawnFn
 	prevStatusInternalDial := statusInternalDialFn
 	prevSupervisorIPCStatus := supervisorIPCStatusFn
@@ -131,6 +132,9 @@ func TestMain(m *testing.M) {
 	}
 	supervisorReconcileApplyFn = func(context.Context, bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
+	}
+	supervisorStopBatchFn = func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, ErrSupervisorIPCUnavailable
 	}
 	// NOTE: respawn returns a POPULATED result with a nil error — matching
 	// DialSupervisorIPCRespawn's own no-owner-sidecar contract
@@ -239,6 +243,7 @@ func TestMain(m *testing.M) {
 	lookupProcessBatch = prevLookupProcessBatch
 	registerSupervisorReconcileFn = prevRegisterReconcile
 	supervisorReconcileApplyFn = prevReconcileApply
+	supervisorStopBatchFn = prevStopBatch
 	supervisorRestartRespawnFn = prevRestartRespawn
 	statusInternalDialFn = prevStatusInternalDial
 	supervisorIPCStatusFn = prevSupervisorIPCStatus

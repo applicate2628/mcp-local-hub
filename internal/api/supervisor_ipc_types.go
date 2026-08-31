@@ -28,6 +28,72 @@ package api
 type ReconcileArgs struct {
 	Apply        bool             `json:"apply"` // dry-run when false; trigger SM transitions when true
 	SettleTarget *ReconcileTarget `json:"settle_target,omitempty"`
+	// StopBatch is the versioned terminal-stop transaction.  When supplied it
+	// is authoritative: the supervisor either echoes the exact command and one
+	// same-order settlement per target, or refuses the request.  Its absence
+	// preserves the legacy reconcile contract.
+	StopBatch *StopBatchCommandV1 `json:"stop_batch,omitempty"`
+}
+
+// StopBatchTargetV1 identifies one canonical supervisor daemon and the port
+// whose release is required before its terminal stop can be acknowledged.
+// Targets are ordered; the response must echo this exact sequence.
+type StopBatchTargetV1 struct {
+	TaskName     string `json:"task_name"`
+	ExpectedPort int    `json:"expected_port"`
+}
+
+// StopBatchCommandV1 is posted once to the controller FIFO.  Version and
+// BatchID prevent a newer caller from silently treating an older enqueue-only
+// supervisor as a settled stop.
+type StopBatchCommandV1 struct {
+	ProtocolVersion  int                   `json:"protocol_version"`
+	BatchID          string                `json:"batch_id"`
+	Targets          []StopBatchTargetV1   `json:"targets"`
+	IntentGeneration uint64                `json:"intent_generation"`
+	SupervisorIntent *SupervisorIntentFile `json:"supervisor_intent"`
+	UnifiedStops     *DaemonIntentFile     `json:"unified_stops"`
+}
+
+// StopBatchResultV1 is the mandatory echo for StopBatchCommandV1.  The
+// settlements are in exactly the command target order.
+type StopBatchResultV1 struct {
+	ProtocolVersion  int                   `json:"protocol_version"`
+	BatchID          string                `json:"batch_id"`
+	Targets          []StopBatchTargetV1   `json:"targets"`
+	IntentGeneration uint64                `json:"intent_generation"`
+	SupervisorIntent *SupervisorIntentFile `json:"supervisor_intent"`
+	UnifiedStops     *DaemonIntentFile     `json:"unified_stops"`
+	Settlements      []StoppedSettlement   `json:"settlements"`
+}
+
+type StoppedSettlementState string
+
+const (
+	StoppedSettlementStopped    StoppedSettlementState = "stopped"
+	StoppedSettlementIncomplete StoppedSettlementState = "incomplete"
+	StoppedSettlementFailed     StoppedSettlementState = "failed"
+)
+
+const (
+	StoppedSettlementReasonStopped             = "stopped"
+	StoppedSettlementReasonSettlementTimeout   = "settlement_timeout"
+	StoppedSettlementReasonSettlementCancelled = "settlement_cancelled"
+	StoppedSettlementReasonProcessAlive        = "process_alive"
+	StoppedSettlementReasonListenerAlive       = "listener_alive"
+	StoppedSettlementReasonIdentityUnverified  = "identity_unverified"
+)
+
+// ReconcileStoppedSettlement is controller-owned terminal evidence for one
+// requested stop target. Stopped is authoritative only for the echoed target;
+// incomplete and failed retain a stable reason and causal detail.
+type StoppedSettlement struct {
+	TaskName      string                 `json:"task_name"`
+	State         StoppedSettlementState `json:"state"`
+	Reason        string                 `json:"reason"`
+	CurrentPID    int                    `json:"current_pid,omitempty"`
+	PIDGeneration int                    `json:"pid_generation,omitempty"`
+	Error         string                 `json:"error,omitempty"`
 }
 
 // ReconcileTarget identifies one exact persisted workspace generation whose
@@ -144,6 +210,10 @@ type ReconcileResponse struct {
 	// TargetSettlement is emitted only for an explicitly requested
 	// SettleTarget. Its absence therefore preserves the old wire shape.
 	TargetSettlement *ReconcileTargetSettlement `json:"target_settlement,omitempty"`
+
+	// StopBatch is present exactly when ReconcileArgs.StopBatch was supplied.
+	// Missing or non-echoing fields are a capability refusal at the caller.
+	StopBatch *StopBatchResultV1 `json:"stop_batch,omitempty"`
 }
 
 // DriftEntry describes one (task_name, drift_class) pair the reconcile

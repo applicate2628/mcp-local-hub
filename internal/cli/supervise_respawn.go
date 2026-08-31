@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -66,6 +67,7 @@ const (
 	ipcErrorRespawnNotReady          = "RESPAWN_NOT_READY"
 	ipcErrorRespawnTerminateFailed   = "RESPAWN_TERMINATE_FAILED"
 	ipcErrorRespawnRefusedIntentStop = api.RespawnRefusedIntentStoppedCode
+	ipcErrorRespawnStopSettlement    = "RESPAWN_STOP_SETTLEMENT_INCOMPLETE"
 )
 
 // errIdleRespawnRefusedIntentStopped is the typed sentinel the controller
@@ -132,6 +134,17 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	}
 	force, _ := req.Args["force"].(bool)
 	taskName := daemon_env_overlay.NormalizeOverlayKey(taskNameRaw)
+	// The readiness token is acquired before touching provider/cache/tracker
+	// state. Until the supervisor has published its fully wired controller and
+	// safety path, respawn is unavailable rather than partially routed.
+	spawnFn, terminateFn := deps.respawnLate.Get()
+	if spawnFn == nil || terminateFn == nil {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID:    req.ID,
+			Error: &api.IPCErr{Code: ipcErrorRespawnNotReady, Message: "supervisor still starting; respawn not yet wired", Retryable: true},
+			Final: true,
+		})
+	}
 
 	// Resolve the daemon descriptor. Prefer the controller's live intent
 	// cache (refreshed by IntentWatcher on supervisor-intent.json mtime
@@ -180,6 +193,21 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 			Error: &api.IPCErr{Code: ipcErrorUnknownTask, Message: "task_name not in supervisor-intent.json: " + taskNameRaw},
 			Final: true,
 		})
+	}
+	if !deps.allowDirectRespawnForTest && (ctrl == nil || ctrl.eventLoop == nil) {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID:    req.ID,
+			Error: &api.IPCErr{Code: ipcErrorRespawnNotReady, Message: "supervisor controller is not ready; retry respawn", Retryable: true},
+			Final: true,
+		})
+	}
+	// Operator retry is a recovery trigger, not a direct spawn bypass.  Resolve
+	// any exact pending stop receipt before deciding whether this request may
+	// create a replacement process.
+	if ctrl != nil {
+		recoveryCtx, cancel := context.WithTimeout(baseReconcileContext(deps), api.DefaultTargetedReconcileTimeout)
+		ctrl.enqueuePendingStopSettlementRecovery(recoveryCtx)
+		cancel()
 	}
 
 	// bot PR #246 r2 P2-1: a legacy nil-RuntimeSpec serena-proxy descriptor
@@ -247,17 +275,34 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
-	spawnFn, terminateFn := deps.respawnLate.Get()
-	if spawnFn == nil || terminateFn == nil {
-		return writeIPCFrame(conn, api.IPCResponse{
-			ID: req.ID,
-			Error: &api.IPCErr{
-				Code:      ipcErrorRespawnNotReady,
-				Message:   "supervisor still starting; respawn not yet wired",
-				Retryable: true,
-			},
-			Final: true,
-		})
+	// An idle controller row is not enough to authorize a new spawn. A prior
+	// crash or lost-child defect can leave CurrentPID cleared while the old
+	// supervisor-owned root still owns its listener. Before the idle respawn
+	// path posts a spawn, require the same controller-owned stop settlement the
+	// CLI stop path consumes: FIFO processing complete, no tracked child, and
+	// the exact listener free. Running/exiting restarts stay on their existing
+	// controller terminate->child-exit->spawn path below.
+	if !shouldTerminate && ctrl != nil && ctrl.eventLoop != nil {
+		if port, portOK := api.EffectiveDaemonPort(*desc); portOK && port > 0 {
+			settleCtx, cancel := context.WithTimeout(baseReconcileContext(deps), 5*time.Second)
+			settlements := ctrl.settleStopBatchTargets(settleCtx, []api.StopBatchTargetV1{{TaskName: taskName, ExpectedPort: port}})
+			cancel()
+			settlement := api.StoppedSettlement{TaskName: taskName, State: api.StoppedSettlementIncomplete, Reason: api.StoppedSettlementReasonIdentityUnverified, Error: "stop settlement result missing"}
+			if len(settlements) == 1 {
+				settlement = settlements[0]
+			}
+			if settlement.State != api.StoppedSettlementStopped || settlement.Reason != api.StoppedSettlementReasonStopped {
+				return writeIPCFrame(conn, api.IPCResponse{
+					ID: req.ID,
+					Error: &api.IPCErr{
+						Code:      ipcErrorRespawnStopSettlement,
+						Message:   fmt.Sprintf("respawn blocked until prior stop settles: %s: %s", settlement.Reason, settlement.Error),
+						Retryable: settlement.State == api.StoppedSettlementIncomplete,
+					},
+					Final: true,
+				})
+			}
+		}
 	}
 
 	const gracefulTimeoutMs = 5000
@@ -333,9 +378,20 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
-	// Legacy / no-controller path (unit-test fixtures construct deps
-	// WITHOUT a controllerProvider, and the cold-restart pre-controller
-	// window has ctrl==nil): direct terminate+spawn of the running daemon.
+	// Isolated unit fixtures may exercise the historical direct closure seam,
+	// but a production request must have been returned through the controller
+	// branches above. This keeps c.spawn as the only production create-process
+	// owner and c.terminateOutcome/c.terminate as the only production stop
+	// owner.
+	if !deps.allowDirectRespawnForTest {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID:    req.ID,
+			Error: &api.IPCErr{Code: ipcErrorRespawnNotReady, Message: "controller cannot accept this respawn state yet; retry", Retryable: true},
+			Final: true,
+		})
+	}
+
+	// Test-only direct closure seam.
 	//
 	// Graceful terminate. terminateFn marks the runtime tracker entry
 	// as exited and (for production wiring) signals the child process.

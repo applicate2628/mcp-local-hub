@@ -198,6 +198,7 @@ type supervisorIPCStatusDaemon struct {
 	// loudly. Empty on the happy path.
 	SpawnHoldReason      string                      `json:"spawn_hold_reason,omitempty"`
 	SpawnHoldPath        string                      `json:"spawn_hold_path,omitempty"`
+	StopSettlement       *StopSettlementDiagnosticV1 `json:"stop_settlement,omitempty"`
 	ReadinessObservation *ReadinessObservationWireV1 `json:"readiness_observation,omitempty"`
 }
 
@@ -298,6 +299,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			// the remedy instead of showing an unexplained non-running daemon.
 			SpawnHoldReason: d.SpawnHoldReason,
 			SpawnHoldPath:   d.SpawnHoldPath,
+			StopSettlement:  d.StopSettlement,
 			Workspace:       d.Workspace,
 			// UptimeSec is derived HERE from the supervisor's started_at
 			// (the wire carries started_at, not a precomputed uptime_sec).

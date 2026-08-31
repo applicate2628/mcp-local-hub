@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"mcp-local-hub/internal/api/apitest"
@@ -214,5 +215,77 @@ func TestReconcileResponseSerenaRepairOutcomeWireCompatibility(t *testing.T) {
 	}
 	if len(currentConsumer.SerenaRepairRecovered) != 0 {
 		t.Fatalf("old producer recoveries = %+v, want empty additive field", currentConsumer.SerenaRepairRecovered)
+	}
+}
+
+func TestStopBatchV1WireRoundTripRequiresExactEcho(t *testing.T) {
+	batch := StopBatchCommandV1{
+		ProtocolVersion: 1,
+		BatchID:         "batch-20260831-01",
+		Targets: []StopBatchTargetV1{
+			{TaskName: `\\mcp-local-hub-time-default`, ExpectedPort: 9132},
+			{TaskName: `\\mcp-local-hub-fetch-default`, ExpectedPort: 9133},
+		},
+	}
+	encoded, err := json.Marshal(ReconcileArgs{Apply: true, StopBatch: &batch})
+	if err != nil {
+		t.Fatalf("marshal stop batch: %v", err)
+	}
+	var decoded ReconcileArgs
+	if err := json.Unmarshal(encoded, &decoded); err != nil {
+		t.Fatalf("unmarshal stop batch: %v", err)
+	}
+	if decoded.StopBatch == nil || decoded.StopBatch.ProtocolVersion != 1 || decoded.StopBatch.BatchID != batch.BatchID {
+		t.Fatalf("decoded stop batch = %+v, want exact v1 batch", decoded.StopBatch)
+	}
+	if !reflect.DeepEqual(decoded.StopBatch.Targets, batch.Targets) {
+		t.Fatalf("decoded targets = %+v, want ordered %+v", decoded.StopBatch.Targets, batch.Targets)
+	}
+
+	result := StopBatchResultV1{
+		ProtocolVersion: 1,
+		BatchID:         batch.BatchID,
+		Targets:         batch.Targets,
+		Settlements: []StoppedSettlement{
+			{TaskName: batch.Targets[0].TaskName, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+			{TaskName: batch.Targets[1].TaskName, State: StoppedSettlementFailed, Reason: StoppedSettlementReasonListenerAlive},
+		},
+	}
+	responseBytes, err := json.Marshal(ReconcileResponse{StopBatch: &result})
+	if err != nil {
+		t.Fatalf("marshal stop batch response: %v", err)
+	}
+	var response ReconcileResponse
+	if err := json.Unmarshal(responseBytes, &response); err != nil {
+		t.Fatalf("unmarshal stop batch response: %v", err)
+	}
+	if response.StopBatch == nil || response.StopBatch.ProtocolVersion != batch.ProtocolVersion || response.StopBatch.BatchID != batch.BatchID || !reflect.DeepEqual(response.StopBatch.Targets, batch.Targets) || !reflect.DeepEqual(response.StopBatch.Settlements, result.Settlements) {
+		t.Fatalf("stop batch response = %+v, want exact echo %+v", response.StopBatch, result)
+	}
+}
+
+func TestValidateStopBatchEchoRejectsMissingOrReorderedReply(t *testing.T) {
+	command := StopBatchCommandV1{
+		ProtocolVersion: 1,
+		BatchID:         "batch-echo",
+		Targets: []StopBatchTargetV1{
+			{TaskName: `\\mcp-local-hub-time-default`, ExpectedPort: 9132},
+			{TaskName: `\\mcp-local-hub-fetch-default`, ExpectedPort: 9133},
+		},
+	}
+	if err := validateStopBatchEcho(command, nil); err == nil {
+		t.Fatal("missing stop_batch reply accepted")
+	}
+	reordered := &StopBatchResultV1{
+		ProtocolVersion: 1,
+		BatchID:         command.BatchID,
+		Targets:         []StopBatchTargetV1{command.Targets[1], command.Targets[0]},
+		Settlements: []StoppedSettlement{
+			{TaskName: command.Targets[1].TaskName, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+			{TaskName: command.Targets[0].TaskName, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+		},
+	}
+	if err := validateStopBatchEcho(command, reordered); err == nil {
+		t.Fatal("reordered stop_batch reply accepted")
 	}
 }

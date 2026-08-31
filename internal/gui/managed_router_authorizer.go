@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime"
@@ -52,6 +53,11 @@ type managedRouterPing struct {
 	Version string `json:"version"`
 }
 
+type managedRouterVersion struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+}
+
 // NewManagedRouterAuthorizer constructs the only production verifier for
 // destructive direct-LSP replacement cleanup. The returned closure performs
 // read-only pidport, socket-owner, process-generation, and strict /api/ping
@@ -76,6 +82,58 @@ func NewManagedRouterAuthorizer(pidportPath, currentExecutable, expectedVersion 
 			ping:       strictManagedRouterPing,
 		},
 	)
+}
+
+// VerifyManagedRouterGeneration is the recovery-grade GUI verifier. It reuses
+// NewManagedRouterAuthorizer as the sole owner of pidport, socket, retained
+// PID, executable, argv, strict-ping, and generation-revalidation checks, then
+// binds that retained generation to /api/version's exact version and commit.
+func VerifyManagedRouterGeneration(ctx context.Context, pidportPath, currentExecutable, expectedVersion, expectedCommit string, candidatePort int) error {
+	return verifyManagedRouterGeneration(ctx, candidatePort, expectedVersion, expectedCommit,
+		NewManagedRouterAuthorizer(pidportPath, currentExecutable, expectedVersion), strictManagedRouterVersion)
+}
+
+func verifyManagedRouterGeneration(ctx context.Context, candidatePort int, expectedVersion, expectedCommit string, authorize api.ManagedRouterAuthorizer, probeVersion func(context.Context, int) (managedRouterVersion, error)) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.TrimSpace(expectedVersion) == "" || strings.EqualFold(strings.TrimSpace(expectedVersion), "dev") || strings.EqualFold(strings.TrimSpace(expectedVersion), "unknown") {
+		return fmt.Errorf("managed router generation: expected version is uninformative")
+	}
+	if strings.TrimSpace(expectedCommit) == "" || strings.EqualFold(strings.TrimSpace(expectedCommit), "unknown") {
+		return fmt.Errorf("managed router generation: expected commit is uninformative")
+	}
+	if authorize == nil || probeVersion == nil {
+		return fmt.Errorf("managed router generation: verifier dependency unavailable")
+	}
+	auth := authorize(ctx, candidatePort)
+	if auth.Lease == nil {
+		return fmt.Errorf("managed router generation: authorization refused: %s", auth.FailureClass)
+	}
+	finish := func(primary error) error {
+		closeErr := auth.Lease.Close()
+		if primary != nil && closeErr != nil {
+			return errors.Join(primary, fmt.Errorf("managed router generation: release retained identity: %w", closeErr))
+		}
+		if primary != nil {
+			return primary
+		}
+		if closeErr != nil {
+			return fmt.Errorf("managed router generation: release retained identity: %w", closeErr)
+		}
+		return nil
+	}
+	version, err := probeVersion(ctx, candidatePort)
+	if err != nil {
+		return finish(fmt.Errorf("managed router generation: version readback: %w", err))
+	}
+	if version.Version != expectedVersion || version.Commit != expectedCommit {
+		return finish(fmt.Errorf("managed router generation: version or commit mismatch"))
+	}
+	if failure := auth.Lease.Revalidate(ctx); failure != "" {
+		return finish(fmt.Errorf("managed router generation: final generation revalidation: %s", failure))
+	}
+	return finish(nil)
 }
 
 func newManagedRouterAuthorizerWithDeps(
@@ -387,4 +445,46 @@ func strictManagedRouterPing(ctx context.Context, port int) (managedRouterPing, 
 		return managedRouterPing{}, api.ManagedRouterFailurePingMalformed
 	}
 	return ping, ""
+}
+
+func strictManagedRouterVersion(ctx context.Context, port int) (managedRouterVersion, error) {
+	if port <= 0 || port > 65535 {
+		return managedRouterVersion{}, fmt.Errorf("invalid GUI port %d", port)
+	}
+	requestCtx, cancel := context.WithTimeout(ctx, managedRouterPingTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(requestCtx, http.MethodGet, "http://127.0.0.1:"+strconv.Itoa(port)+"/api/version", nil)
+	if err != nil {
+		return managedRouterVersion{}, err
+	}
+	client := &http.Client{Timeout: managedRouterPingTimeout, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := client.Do(req)
+	if err != nil {
+		return managedRouterVersion{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return managedRouterVersion{}, fmt.Errorf("unexpected HTTP status %d", resp.StatusCode)
+	}
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if err != nil || !strings.EqualFold(mediaType, "application/json") {
+		return managedRouterVersion{}, fmt.Errorf("unexpected content type")
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, managedRouterPingBodyMax+1))
+	if err != nil || len(body) > managedRouterPingBodyMax {
+		return managedRouterVersion{}, fmt.Errorf("invalid response body")
+	}
+	var value managedRouterVersion
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	if err := decoder.Decode(&value); err != nil {
+		return managedRouterVersion{}, fmt.Errorf("decode response: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return managedRouterVersion{}, fmt.Errorf("trailing response data")
+	}
+	if strings.TrimSpace(value.Version) == "" || strings.TrimSpace(value.Commit) == "" {
+		return managedRouterVersion{}, fmt.Errorf("response version or commit missing")
+	}
+	return value, nil
 }

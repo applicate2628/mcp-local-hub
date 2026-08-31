@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -90,9 +91,10 @@ type DaemonRuntimeEntry struct {
 }
 
 type DaemonRuntimeTracker struct {
-	mu       sync.RWMutex
-	entries  map[string]DaemonRuntimeEntry
-	failures map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
+	mu        sync.RWMutex
+	persistMu sync.Mutex
+	entries   map[string]DaemonRuntimeEntry
+	failures  map[string][]time.Time // per-task crash timestamps (sliding window, not persisted)
 	// reallocations is the per-task sliding window of ephemeral-collision port
 	// REALLOCATIONS (the L1 self-heal). It is SEPARATE from `failures` on
 	// purpose: a within-cap bind-refused reallocation must NOT fuel the crash /
@@ -102,7 +104,17 @@ type DaemonRuntimeTracker struct {
 	// runtime respawn decisions, exactly like `failures`.
 	reallocations        map[string][]time.Time
 	readinessSettlements map[string]daemonReadinessSettlementTuple
-	ownershipGeneration  atomic.Uint64
+	// stopSettlementEpoch and stopSettlements are the durable stop fence. They
+	// are protected by mu, while persistMu serializes the staged read/modify/
+	// write protocol without ever holding mu across state-file I/O.
+	stopSettlementEpoch uint64
+	stopSettlements     map[string]api.StopSettlementReceiptV1
+	// stopSettlementIntegrityErr is set only while startup hydration found a
+	// durable receipt that this binary cannot safely interpret. It is a fleet
+	// wide fail-closed fence: dropping an unknown receipt would let a spawn or
+	// another lifecycle transaction overwrite evidence of a still-live daemon.
+	stopSettlementIntegrityErr string
+	ownershipGeneration        atomic.Uint64
 }
 
 type daemonReadinessSettlementTuple struct {
@@ -118,6 +130,7 @@ func NewDaemonRuntimeTracker() *DaemonRuntimeTracker {
 		failures:             map[string][]time.Time{},
 		reallocations:        map[string][]time.Time{},
 		readinessSettlements: map[string]daemonReadinessSettlementTuple{},
+		stopSettlements:      map[string]api.StopSettlementReceiptV1{},
 	}
 }
 
@@ -726,12 +739,412 @@ func (t *DaemonRuntimeTracker) Snapshot() map[string]DaemonRuntimeEntry {
 	return out
 }
 
+// StopSettlementReceipt returns the non-terminal durable stop receipt for the
+// task. Receipt absence is deliberately not interpreted as a successful stop:
+// callers must prove their own terminal state (exact exit and listener free).
+func (t *DaemonRuntimeTracker) StopSettlementReceipt(taskName string) (api.StopSettlementReceiptV1, bool) {
+	if t == nil {
+		return api.StopSettlementReceiptV1{}, false
+	}
+	taskName = canonicalSupervisorTaskName(taskName)
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	receipt, ok := t.stopSettlements[taskName]
+	return receipt, ok
+}
+
+// PendingStopSettlements returns a stable snapshot ordered by batch then
+// target index. It is read-only; recovery remains controller-owned.
+func (t *DaemonRuntimeTracker) PendingStopSettlements() []api.StopSettlementReceiptV1 {
+	if t == nil {
+		return nil
+	}
+	t.mu.RLock()
+	rows := make([]api.StopSettlementReceiptV1, 0, len(t.stopSettlements))
+	for _, receipt := range t.stopSettlements {
+		rows = append(rows, receipt)
+	}
+	t.mu.RUnlock()
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].BatchID != rows[j].BatchID {
+			return rows[i].BatchID < rows[j].BatchID
+		}
+		if rows[i].BatchIndex != rows[j].BatchIndex {
+			return rows[i].BatchIndex < rows[j].BatchIndex
+		}
+		return rows[i].TaskName < rows[j].TaskName
+	})
+	return rows
+}
+
+// BeginStopSettlementBatch durably admits a complete v1 stop command as one
+// atomic state-file mutation.  It does not alter the in-memory mirror or post
+// a controller event until every canonical descriptor, port and running
+// generation validates.  Callers must post exactly one command only after
+// this method returns its ordered receipts.
+func (t *DaemonRuntimeTracker) BeginStopSettlementBatch(path string, command api.StopBatchCommandV1, descriptorPorts map[string]int) ([]api.StopSettlementReceiptV1, error) {
+	if t == nil {
+		return nil, fmt.Errorf("nil daemon runtime tracker")
+	}
+	if strings.TrimSpace(path) == "" {
+		return nil, fmt.Errorf("empty supervisor state path")
+	}
+	if command.ProtocolVersion != 1 || strings.TrimSpace(command.BatchID) == "" || len(command.Targets) == 0 {
+		return nil, fmt.Errorf("invalid stop batch v1")
+	}
+	t.persistMu.Lock()
+	defer t.persistMu.Unlock()
+
+	// Validate the full batch under one snapshot.  Do not build a partial list:
+	// an invalid Nth target must leave every preceding task untouched.
+	targets := make([]string, len(command.Targets))
+	entries := make([]DaemonRuntimeEntry, len(command.Targets))
+	seen := make(map[string]struct{}, len(command.Targets))
+	t.mu.RLock()
+	if t.stopSettlementIntegrityErr != "" {
+		err := t.stopSettlementIntegrityErr
+		t.mu.RUnlock()
+		return nil, fmt.Errorf("stop settlement recovery required: %s", err)
+	}
+	knownEpoch := t.stopSettlementEpoch
+	for i, target := range command.Targets {
+		taskName := canonicalSupervisorTaskName(target.TaskName)
+		if target.TaskName != taskName || target.ExpectedPort <= 0 || target.ExpectedPort > 65535 {
+			t.mu.RUnlock()
+			return nil, fmt.Errorf("invalid stop batch target at index %d", i)
+		}
+		if _, duplicate := seen[taskName]; duplicate {
+			t.mu.RUnlock()
+			return nil, fmt.Errorf("duplicate stop batch target %s", taskName)
+		}
+		seen[taskName] = struct{}{}
+		if port, ok := descriptorPorts[taskName]; !ok || port != target.ExpectedPort {
+			t.mu.RUnlock()
+			return nil, fmt.Errorf("descriptor port mismatch for %s", taskName)
+		}
+		entry, present := t.entries[taskName]
+		if !present || (entry.CurrentPID > 0 && (entry.StartedAt.IsZero() || entry.PIDGeneration <= 0)) || (entry.CurrentPID == 0 && entry.State != daemonRuntimeStateIdle) {
+			t.mu.RUnlock()
+			return nil, fmt.Errorf("stop settlement requires running generation or idle port fence for %s", taskName)
+		}
+		if _, pending := t.stopSettlements[taskName]; pending {
+			t.mu.RUnlock()
+			return nil, fmt.Errorf("stop settlement already pending for %s", taskName)
+		}
+		targets[i], entries[i] = taskName, entry
+	}
+	t.mu.RUnlock()
+	if uint64(len(targets)) > ^uint64(0)-knownEpoch {
+		return nil, fmt.Errorf("stop settlement epoch overflow")
+	}
+	receipts := make([]api.StopSettlementReceiptV1, len(targets))
+	if err := api.MutateSupervisorState(path, func(file *api.SupervisorStateFile) error {
+		epoch := file.StopSettlementEpoch
+		if knownEpoch > epoch {
+			epoch = knownEpoch
+		}
+		if uint64(len(targets)) > ^uint64(0)-epoch {
+			return fmt.Errorf("stop settlement epoch overflow")
+		}
+		for i, taskName := range targets {
+			if _, exists := file.StopSettlements[taskName]; exists {
+				return fmt.Errorf("stop settlement already durable for %s", taskName)
+			}
+			epoch++
+			phase, mode, startedAt := api.StopSettlementPhaseStopRequested, "stop", entries[i].StartedAt.UTC().Format(time.RFC3339Nano)
+			if entries[i].CurrentPID == 0 {
+				phase, mode, startedAt = api.StopSettlementPhaseExitObserved, "port_fence", ""
+			}
+			receipts[i] = api.StopSettlementReceiptV1{
+				Version: 1, BatchID: command.BatchID, TaskName: taskName, Epoch: epoch, PID: entries[i].CurrentPID,
+				StartedAt: startedAt, PIDGeneration: entries[i].PIDGeneration,
+				BatchIndex: i, Mode: "stop", Port: command.Targets[i].ExpectedPort,
+				Revision: 1, Attempt: 1, Phase: phase, OperationID: command.BatchID,
+			}
+			receipts[i].Mode = mode
+			file.StopSettlements[taskName] = receipts[i]
+		}
+		file.StopSettlementEpoch = epoch
+		return advanceStopSettlementMapMetadata(file)
+	}); err != nil {
+		return nil, fmt.Errorf("persist stop batch: %w", err)
+	}
+
+	// Install the whole mirror only if every staged runtime identity remains
+	// current.  A raced exit leaves disk recovery material and refuses the FIFO
+	// post, never a half-admitted transaction.
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i, taskName := range targets {
+		current, present := t.entries[taskName]
+		if !present || !sameStopSettlementRuntimeIdentity(current, receipts[i]) {
+			t.stopSettlementIntegrityErr = fmt.Sprintf("durable stop batch mirror not installed for %s", taskName)
+			return nil, fmt.Errorf("stop batch raced runtime generation for %s", taskName)
+		}
+		if _, pending := t.stopSettlements[taskName]; pending {
+			t.stopSettlementIntegrityErr = fmt.Sprintf("durable stop batch mirror changed during admission for %s", taskName)
+			return nil, fmt.Errorf("stop settlement changed during batch admission for %s", taskName)
+		}
+	}
+	if t.stopSettlements == nil {
+		t.stopSettlements = map[string]api.StopSettlementReceiptV1{}
+	}
+	for _, receipt := range receipts {
+		t.stopSettlements[receipt.TaskName] = receipt
+		if receipt.Epoch > t.stopSettlementEpoch {
+			t.stopSettlementEpoch = receipt.Epoch
+		}
+	}
+	return receipts, nil
+}
+
+// AdvanceStopSettlement persists one exact receipt revision. A stale async
+// completion is rejected rather than overwriting the later phase.
+func (t *DaemonRuntimeTracker) AdvanceStopSettlement(path string, expected api.StopSettlementReceiptV1, phase api.StopSettlementPhase, failureClass api.StopSettlementFailureClass, failureDetail string) (api.StopSettlementReceiptV1, error) {
+	if t == nil {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("nil daemon runtime tracker")
+	}
+	if strings.TrimSpace(path) == "" {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("empty supervisor state path")
+	}
+	if !validStopSettlementReceipt(expected) || phase == "" {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("invalid stop settlement transition")
+	}
+	t.persistMu.Lock()
+	defer t.persistMu.Unlock()
+	t.mu.RLock()
+	current, ok := t.stopSettlements[expected.TaskName]
+	t.mu.RUnlock()
+	if !ok || !sameStopSettlementRevision(current, expected) {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("stale or absent stop settlement receipt for %s", expected.TaskName)
+	}
+	next, err := nextStopSettlementReceipt(expected, phase, failureClass, failureDetail)
+	if err != nil {
+		return api.StopSettlementReceiptV1{}, err
+	}
+	if sameStopSettlementRevision(next, expected) {
+		return expected, nil
+	}
+	if err := api.MutateSupervisorState(path, func(file *api.SupervisorStateFile) error {
+		durable, exists := file.StopSettlements[expected.TaskName]
+		if !exists || !sameStopSettlementRevision(durable, expected) {
+			return fmt.Errorf("stale or absent durable stop settlement receipt for %s", expected.TaskName)
+		}
+		file.StopSettlements[expected.TaskName] = next
+		return advanceStopSettlementMapMetadata(file)
+	}); err != nil {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("persist stop settlement transition: %w", err)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	current, ok = t.stopSettlements[expected.TaskName]
+	if !ok || !sameStopSettlementRevision(current, expected) {
+		t.stopSettlementIntegrityErr = fmt.Sprintf("durable stop settlement transition mirror not installed for %s", expected.TaskName)
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("stop settlement changed during durable transition for %s", expected.TaskName)
+	}
+	t.stopSettlements[expected.TaskName] = next
+	return next, nil
+}
+
+// RemoveStopSettlement performs the commit-last terminal transition. It only
+// removes the exact receipt after the caller has durably recorded that the
+// expected listener is released; a write failure leaves the receipt intact.
+func (t *DaemonRuntimeTracker) RemoveStopSettlement(path string, expected api.StopSettlementReceiptV1) error {
+	if t == nil {
+		return fmt.Errorf("nil daemon runtime tracker")
+	}
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("empty supervisor state path")
+	}
+	if !validStopSettlementReceipt(expected) || expected.Phase != api.StopSettlementPhasePortReleased {
+		return fmt.Errorf("stop settlement removal requires an exact port-released receipt")
+	}
+	t.persistMu.Lock()
+	defer t.persistMu.Unlock()
+	t.mu.RLock()
+	current, ok := t.stopSettlements[expected.TaskName]
+	t.mu.RUnlock()
+	if !ok || !sameStopSettlementRevision(current, expected) {
+		return fmt.Errorf("stale or absent stop settlement receipt for %s", expected.TaskName)
+	}
+	if err := api.MutateSupervisorState(path, func(file *api.SupervisorStateFile) error {
+		durable, exists := file.StopSettlements[expected.TaskName]
+		if !exists || !sameStopSettlementRevision(durable, expected) {
+			return fmt.Errorf("stale or absent durable stop settlement receipt for %s", expected.TaskName)
+		}
+		delete(file.StopSettlements, expected.TaskName)
+		return advanceStopSettlementMapMetadata(file)
+	}); err != nil {
+		return fmt.Errorf("persist stop settlement removal: %w", err)
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	current, ok = t.stopSettlements[expected.TaskName]
+	if !ok || !sameStopSettlementRevision(current, expected) {
+		t.stopSettlementIntegrityErr = fmt.Sprintf("durable stop settlement removal mirror not installed for %s", expected.TaskName)
+		return fmt.Errorf("stop settlement changed during durable removal for %s", expected.TaskName)
+	}
+	delete(t.stopSettlements, expected.TaskName)
+	return nil
+}
+
+func sameStopSettlementRuntimeIdentity(entry DaemonRuntimeEntry, receipt api.StopSettlementReceiptV1) bool {
+	if receipt.Mode == "port_fence" {
+		return entry.State == daemonRuntimeStateIdle && entry.CurrentPID == 0 && entry.PIDGeneration == receipt.PIDGeneration
+	}
+	return entry.CurrentPID == receipt.PID && entry.PIDGeneration == receipt.PIDGeneration && !entry.StartedAt.IsZero() && entry.StartedAt.UTC().Format(time.RFC3339Nano) == receipt.StartedAt
+}
+
+func sameStopSettlementToken(a, b api.StopSettlementReceiptV1) bool {
+	return a.Version == b.Version && a.BatchID == b.BatchID && a.TaskName == b.TaskName && a.Epoch == b.Epoch && a.PID == b.PID && a.StartedAt == b.StartedAt && a.PIDGeneration == b.PIDGeneration && a.BatchIndex == b.BatchIndex && a.Mode == b.Mode && a.Port == b.Port && a.OperationID == b.OperationID
+}
+
+func sameStopSettlementRevision(a, b api.StopSettlementReceiptV1) bool {
+	aDigest, aErr := api.StopSettlementReceiptDigest(a)
+	bDigest, bErr := api.StopSettlementReceiptDigest(b)
+	return aErr == nil && bErr == nil && aDigest == bDigest
+}
+
+func validStopSettlementReceipt(receipt api.StopSettlementReceiptV1) bool {
+	if receipt.Version != 1 || receipt.BatchID == "" || receipt.TaskName == "" || receipt.Epoch == 0 || receipt.BatchIndex < 0 || (receipt.Mode != "stop" && receipt.Mode != "port_fence") || receipt.Port <= 0 || receipt.Port > 65535 || receipt.Revision == 0 || receipt.Attempt == 0 || receipt.OperationID == "" {
+		return false
+	}
+	if receipt.Mode == "stop" {
+		if receipt.PID <= 0 || receipt.StartedAt == "" || receipt.PIDGeneration <= 0 {
+			return false
+		}
+	} else {
+		if receipt.PID != 0 || receipt.StartedAt != "" || receipt.PIDGeneration < 0 {
+			return false
+		}
+	}
+	if receipt.StartedAt != "" {
+		if _, err := time.Parse(time.RFC3339Nano, receipt.StartedAt); err != nil {
+			return false
+		}
+	}
+	switch receipt.Phase {
+	case api.StopSettlementPhaseStopRequested, api.StopSettlementPhaseExitObserved, api.StopSettlementPhasePortReleased, api.StopSettlementPhaseFailed:
+		if receipt.Phase == api.StopSettlementPhaseFailed {
+			if !receipt.FailureClass.Valid() || strings.TrimSpace(receipt.FailureDetail) == "" {
+				return false
+			}
+			if receipt.Mode == "port_fence" {
+				return receipt.ResumePhase == api.StopSettlementPhaseExitObserved || receipt.ResumePhase == api.StopSettlementPhasePortReleased
+			}
+			return receipt.ResumePhase != ""
+		}
+		if receipt.FailureClass != "" || receipt.FailureDetail != "" || receipt.ResumePhase != "" {
+			return false
+		}
+		return receipt.Mode != "port_fence" || receipt.Phase == api.StopSettlementPhaseExitObserved || receipt.Phase == api.StopSettlementPhasePortReleased
+	default:
+		return false
+	}
+}
+
+func nextStopSettlementReceipt(current api.StopSettlementReceiptV1, phase api.StopSettlementPhase, failureClass api.StopSettlementFailureClass, failureDetail string) (api.StopSettlementReceiptV1, error) {
+	if phase == current.Phase && failureClass == current.FailureClass && failureDetail == current.FailureDetail {
+		return current, nil
+	}
+	next := current
+	if phase == api.StopSettlementPhaseFailed {
+		if current.Phase == api.StopSettlementPhaseFailed || !failureClass.Valid() {
+			return api.StopSettlementReceiptV1{}, fmt.Errorf("illegal stop settlement failure transition")
+		}
+		next.Revision++
+		next.Phase = api.StopSettlementPhaseFailed
+		next.FailureClass = failureClass
+		next.FailureDetail = strings.TrimSpace(failureDetail)
+		next.ResumePhase = current.Phase
+		return next, nil
+	}
+	if current.Phase == api.StopSettlementPhaseFailed {
+		if phase != current.ResumePhase {
+			return api.StopSettlementReceiptV1{}, fmt.Errorf("failed stop settlement may resume only at %s", current.ResumePhase)
+		}
+		next.Revision++
+		next.Attempt++
+		next.Phase = phase
+		next.FailureClass = ""
+		next.FailureDetail = ""
+		next.ResumePhase = ""
+		return next, nil
+	}
+	if (current.Phase == api.StopSettlementPhaseStopRequested && phase != api.StopSettlementPhaseExitObserved) || (current.Phase == api.StopSettlementPhaseExitObserved && phase != api.StopSettlementPhasePortReleased) || current.Phase == api.StopSettlementPhasePortReleased {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("illegal stop settlement transition from %s to %s", current.Phase, phase)
+	}
+	next.Revision++
+	next.Phase = phase
+	next.FailureClass = ""
+	next.FailureDetail = ""
+	if !validStopSettlementReceipt(next) {
+		return api.StopSettlementReceiptV1{}, fmt.Errorf("constructed invalid stop settlement receipt")
+	}
+	return next, nil
+}
+
+func advanceStopSettlementMapMetadata(file *api.SupervisorStateFile) error {
+	if file.StopSettlementMapGeneration == ^uint64(0) {
+		return fmt.Errorf("stop settlement map generation overflow")
+	}
+	file.StopSettlementMapGeneration++
+	digest, err := api.StopSettlementMapDigest(file.StopSettlementEpoch, file.StopSettlementMapGeneration, file.StopSettlements)
+	if err != nil {
+		return fmt.Errorf("digest stop settlement map: %w", err)
+	}
+	file.StopSettlementDigest = digest
+	return nil
+}
+
+// StopSettlementIntegrityError reports a durable receipt that this process
+// cannot safely interpret. Callers that mutate lifecycle state must refuse;
+// status remains available for diagnosis.
+func (t *DaemonRuntimeTracker) StopSettlementIntegrityError() error {
+	if t == nil {
+		return errors.New("nil daemon runtime tracker")
+	}
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	if t.stopSettlementIntegrityErr == "" {
+		return nil
+	}
+	return fmt.Errorf("stop settlement recovery required: %s", t.stopSettlementIntegrityErr)
+}
+
 func (t *DaemonRuntimeTracker) HydrateFromState(file *api.SupervisorStateFile) {
 	if t == nil || file == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.stopSettlements == nil {
+		t.stopSettlements = map[string]api.StopSettlementReceiptV1{}
+	}
+	t.stopSettlementIntegrityErr = ""
+	if len(file.StopSettlements) > 0 || file.StopSettlementMapGeneration != 0 || file.StopSettlementDigest != "" {
+		if file.StopSettlementMapGeneration == 0 || file.StopSettlementDigest == "" {
+			t.stopSettlementIntegrityErr = "missing durable stop settlement map integrity metadata"
+		} else if digest, err := api.StopSettlementMapDigest(file.StopSettlementEpoch, file.StopSettlementMapGeneration, file.StopSettlements); err != nil || digest != file.StopSettlementDigest {
+			t.stopSettlementIntegrityErr = "durable stop settlement map digest mismatch"
+		}
+	}
+	if file.StopSettlementEpoch > t.stopSettlementEpoch {
+		t.stopSettlementEpoch = file.StopSettlementEpoch
+	}
+	for taskName, receipt := range file.StopSettlements {
+		canonicalTaskName := canonicalSupervisorTaskName(taskName)
+		if receipt.TaskName != canonicalTaskName || !validStopSettlementReceipt(receipt) {
+			// Preserve the disk row and keep the lifecycle fenced. A malformed or
+			// future-version receipt is evidence of an interrupted transaction,
+			// not an invitation to start a replacement daemon.
+			if t.stopSettlementIntegrityErr == "" {
+				t.stopSettlementIntegrityErr = fmt.Sprintf("invalid durable receipt for %q", taskName)
+			}
+			continue
+		}
+		t.stopSettlements[canonicalTaskName] = receipt
+	}
 	for taskName, daemonState := range file.Daemons {
 		startedAt := time.Time{}
 		if daemonState.StartedAt != "" {
@@ -770,7 +1183,23 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 	if strings.TrimSpace(path) == "" {
 		return fmt.Errorf("empty supervisor state path")
 	}
-	snapshot := t.Snapshot()
+	t.persistMu.Lock()
+	defer t.persistMu.Unlock()
+	// Take a coherent snapshot while holding the tracker only briefly. The
+	// state-file flock, read and atomic write below are deliberately outside
+	// tracker.mu so lifecycle callbacks cannot stall behind filesystem I/O.
+	t.mu.RLock()
+	snapshot := make(map[string]DaemonRuntimeEntry, len(t.entries))
+	for taskName, entry := range t.entries {
+		snapshot[taskName] = entry
+	}
+	settlementEpoch := t.stopSettlementEpoch
+	settlements := make(map[string]api.StopSettlementReceiptV1, len(t.stopSettlements))
+	for taskName, receipt := range t.stopSettlements {
+		settlements[taskName] = receipt
+	}
+	integrityErr := t.stopSettlementIntegrityErr
+	t.mu.RUnlock()
 	return mutateSupervisorStateFile(path, func(file *api.SupervisorStateFile) error {
 		// REPLACE file.Daemons wholesale from the in-memory tracker
 		// snapshot. SupervisorDaemonState now carries ONLY durable state
@@ -805,7 +1234,17 @@ func (t *DaemonRuntimeTracker) PersistTo(path string) error {
 			}
 			file.Daemons[taskName] = daemonState
 		}
-		return nil
+		if settlementEpoch > file.StopSettlementEpoch {
+			file.StopSettlementEpoch = settlementEpoch
+		}
+		// A valid hydrated mirror is authoritative.  An invalid/future disk map
+		// stays untouched so ordinary runtime persistence cannot erase recovery
+		// evidence while lifecycle admission is fenced.
+		if integrityErr != "" {
+			return nil
+		}
+		file.StopSettlements = settlements
+		return advanceStopSettlementMapMetadata(file)
 	})
 }
 

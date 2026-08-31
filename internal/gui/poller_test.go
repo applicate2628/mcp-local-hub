@@ -218,6 +218,38 @@ func TestPoller_EmitsDeltaOnJobProtectionChange(t *testing.T) {
 	}
 }
 
+func TestPoller_EmitsAndClearsStopSettlementDiagnostic(t *testing.T) {
+	receipt := &api.StopSettlementDiagnosticV1{
+		Version:       1,
+		TaskName:      `\mcp-local-hub-time-default`,
+		Epoch:         7,
+		OwnedPID:      4812,
+		StartedAt:     "2026-08-31T12:00:00Z",
+		PIDGeneration: 3,
+		Revision:      2,
+		Phase:         api.StopSettlementPhaseStopRequested,
+	}
+	events, _ := runPollerFrames(t, [][]api.DaemonStatus{
+		{{Server: "time", Daemon: "default", State: "Stopping", Port: 9128, StopSettlement: receipt}},
+		{{Server: "time", Daemon: "default", State: "Stopped", Port: 9128}},
+	}, 2)
+	var deltas []map[string]any
+	for _, event := range events {
+		if event.Type == "daemon-state" {
+			deltas = append(deltas, event.Body)
+		}
+	}
+	if len(deltas) != 2 {
+		t.Fatalf("daemon-state deltas = %v, want receipt set then clear", deltas)
+	}
+	if _, present := deltas[0]["stop_settlement"]; !present {
+		t.Fatalf("initial stop receipt missing from delta: %v", deltas[0])
+	}
+	if value, present := deltas[1]["stop_settlement"]; !present || value != nil {
+		t.Fatalf("receipt-clear delta = %v, want explicit null", deltas[1])
+	}
+}
+
 func TestPoller_EmitsJobProtectionClearOnFalseToUnknown(t *testing.T) {
 	fal := false
 	frames := [][]api.DaemonStatus{

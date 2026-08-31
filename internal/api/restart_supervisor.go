@@ -134,6 +134,17 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 // A missing intent file (no supervisor install) yields (nil, nil) so
 // callers fall through to the legacy scheduler path.
 func loadSupervisorOwnedTargets(server, daemonFilter string) ([]SupervisorDaemon, error) {
+	intent, err := loadSupervisorOwnedIntent()
+	if err != nil || intent == nil {
+		return nil, err
+	}
+	return selectSupervisorOwnedTargets(intent, server, daemonFilter), nil
+}
+
+// loadSupervisorOwnedIntent returns the exact durable intent generation used
+// to select supervisor-owned targets. Stop batches carry this snapshot rather
+// than letting a later watcher observation redefine their transaction.
+func loadSupervisorOwnedIntent() (*SupervisorIntentFile, error) {
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return nil, fmt.Errorf("resolve supervisor intent path: %w", err)
@@ -145,7 +156,7 @@ func loadSupervisorOwnedTargets(server, daemonFilter string) ([]SupervisorDaemon
 		}
 		return nil, fmt.Errorf("read supervisor-intent.json: %w", err)
 	}
-	return selectSupervisorOwnedTargets(intent, server, daemonFilter), nil
+	return intent, nil
 }
 
 func restartSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string) ([]RestartResult, bool, error) {

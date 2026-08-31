@@ -197,6 +197,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 	// when it is nil (macOS / other POSIX) we keep today's PortLive TCP fallback
 	// unchanged — no snapshot, no behavior change.
 	livenessProbe := supervisorLivenessProbeFns
+	var portOwnerSnapshot map[int]int
 	if livenessProbe.PortOwnerPID != nil {
 		var snapshot map[int]int
 		var snapErr error
@@ -207,6 +208,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 			// (keeps the existing direct-call status tests valid).
 			snapshot, snapErr = loopbackPortOwnersSnapshotFn()
 		}
+		portOwnerSnapshot = snapshot
 		// Replace the per-port netstat lookup with a closure that resolves from
 		// the single shared snapshot. Semantics match the per-port path EXACTLY:
 		//   - snapshot error → every port returns that err → the daemon is
@@ -290,6 +292,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		if ok {
 			stateText = supervisorStatusGUIState(runtimeState.State)
 		}
+		stopReceipt, stopPending := tracker.StopSettlementReceipt(taskName)
 		args := d.Args
 		if args == nil {
 			args = []string{}
@@ -315,7 +318,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		}
 		port, deadlineSecs, _ := portResolver.Resolve(effDesc)
 		stalePID := 0
-		if ok && runtimeState.State == daemonRuntimeStateRunning {
+		if ok && !stopPending && runtimeState.State == daemonRuntimeStateRunning {
 			// Status has no bind latch (it is a stateless per-refresh view), so
 			// pass the descriptor's P1b startup deadline as grace and discard the
 			// portBoundByCurrentPID return. Tradeoff: a bound-then-lost port shows
@@ -359,6 +362,37 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 			"current_pid":    runtimeState.CurrentPID,
 			"started_at":     daemonRuntimeStartedAt(runtimeState.StartedAt),
 			"is_maintenance": isSupervisorMaintenanceTask(taskName),
+		}
+		if stopPending {
+			// A receipt is a durable in-progress/failure fact, not a liveness
+			// inference. Do not let the ordinary running-port classifier recast
+			// it as Restarting; only the controller may remove this exact receipt
+			// after real exit and a free listener are durably committed.
+			if stopReceipt.Phase == api.StopSettlementPhaseFailed {
+				row["state"] = "Failed"
+			} else {
+				row["state"] = "Stopping"
+			}
+			diagnostic := map[string]any{
+				"version":        stopReceipt.Version,
+				"task_name":      stopReceipt.TaskName,
+				"epoch":          stopReceipt.Epoch,
+				"owned_pid":      stopReceipt.PID,
+				"started_at":     stopReceipt.StartedAt,
+				"pid_generation": stopReceipt.PIDGeneration,
+				"revision":       stopReceipt.Revision,
+				"phase":          string(stopReceipt.Phase),
+			}
+			if stopReceipt.FailureClass != "" {
+				diagnostic["failure_class"] = string(stopReceipt.FailureClass)
+			}
+			if stopReceipt.FailureDetail != "" {
+				diagnostic["failure_detail"] = stopReceipt.FailureDetail
+			}
+			if ownerPID, ownerKnown := portOwnerSnapshot[port]; ownerKnown && ownerPID > 0 {
+				diagnostic["observed_port_owner_pid"] = ownerPID
+			}
+			row["stop_settlement"] = diagnostic
 		}
 		if observation := api.EncodeReadinessObservationV1(runtimeState.ReadinessObservation); observation != nil {
 			row["readiness_observation"] = observation

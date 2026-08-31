@@ -106,6 +106,16 @@ func boolPtrEqual(a, b *bool) bool {
 	return *a == *b
 }
 
+func stopSettlementEqual(a, b *api.StopSettlementDiagnosticV1) bool {
+	if a == nil && b == nil {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	return *a == *b
+}
+
 // isFailedDaemonState reports whether a daemon row looks failed, using the
 // SAME canonical predicate as the tray (cli.isFailedRow / tray.Aggregate): a
 // real Task-Scheduler/exit-code failure via api.IsRealFailure(LastResult), OR a
@@ -198,6 +208,7 @@ func (p *StatusPoller) poll(ctx context.Context) {
 			prev.StalePID == r.StalePID &&
 			prev.LastResult == r.LastResult &&
 			boolPtrEqual(prev.JobProtection, r.JobProtection) &&
+			stopSettlementEqual(prev.StopSettlement, r.StopSettlement) &&
 			// Pre-spawn existence-gate hold (P1.1). MUST be part of the delta
 			// key: a daemon whose binary vanishes (or reappears) can change
 			// ONLY these two fields, and without them the unchanged-continue
@@ -258,6 +269,14 @@ func (p *StatusPoller) poll(ctx context.Context) {
 		// This is the string analogue of the explicit JSON-null clear above.
 		body["spawn_hold_reason"] = r.SpawnHoldReason
 		body["spawn_hold_path"] = r.SpawnHoldPath
+		// The dashboard applies daemon-state through a shallow delta merge.  A
+		// receipt removal must therefore be an explicit null, not an omitted
+		// field, or a completed stop stays visibly pending until a full reload.
+		if r.StopSettlement != nil {
+			body["stop_settlement"] = r.StopSettlement
+		} else if ok && prev.StopSettlement != nil {
+			body["stop_settlement"] = nil
+		}
 		p.events.Publish(Event{
 			Type: "daemon-state",
 			Body: body,

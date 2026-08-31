@@ -101,6 +101,14 @@ export function DaemonMetrics({ daemon: d }: { daemon: DaemonStatus }) {
           </span>
         </div>
       ) : null}
+      {d.stop_settlement ? (
+        <div class="card-kv" data-testid="stop-settlement-row">
+          <span>Stop settlement</span>
+          <span title={stopSettlementTitle(d.stop_settlement)}>
+            {d.stop_settlement.phase === "failed" ? "FAILED" : "PENDING"} ⚠
+          </span>
+        </div>
+      ) : null}
       {uptimeText ? (
         <div class="card-kv" data-testid="uptime-row">
           <span>Uptime</span>
@@ -115,4 +123,13 @@ export function DaemonMetrics({ daemon: d }: { daemon: DaemonStatus }) {
       ) : null}
     </>
   );
+}
+
+function stopSettlementTitle(receipt: NonNullable<DaemonStatus["stop_settlement"]>): string {
+  const owner = receipt.observed_port_owner_pid;
+  const observation = owner
+    ? ` The expected port is currently observed as owned by PID ${owner}; this is diagnostic only, not a hub-ownership claim.`
+    : "";
+  const failure = receipt.failure ? ` Failure: ${receipt.failure}.` : "";
+  return `Stop receipt ${receipt.phase} (epoch ${receipt.epoch}, generation ${receipt.pid_generation}).${failure}${observation}`;
 }

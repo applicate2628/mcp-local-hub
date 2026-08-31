@@ -2132,30 +2132,27 @@ func TestProductionTerminateFn_TerminateRaceMarksExitedAndPersists(t *testing.T)
 	tracker.MarkSpawned(reconcileWiringTestTaskName, 4242, time.Unix(1700000000, 0).UTC())
 
 	prevQuery := productionQueryPIDStateFn
-	prevVerify := productionVerifyPIDIdentityFn
-	prevTerminate := productionTerminatePIDWithIdentityFn
+	prevHold := productionHoldPIDForTerminationFn
 	productionQueryPIDStateFn = func(pid int) (process.PIDState, error) {
 		if pid != 4242 {
 			t.Fatalf("QueryPIDState pid = %d, want 4242", pid)
 		}
 		return process.PIDStateAlive, nil
 	}
-	productionVerifyPIDIdentityFn = func(proof process.PIDIdentityProof) error {
-		if proof.PID != 4242 {
-			t.Fatalf("VerifyPIDIdentity pid = %d, want 4242", proof.PID)
+	productionHoldPIDForTerminationFn = func(pid int) (process.HeldPIDGeneration, error) {
+		if pid != 4242 {
+			t.Fatalf("HoldPIDForTermination pid = %d, want 4242", pid)
 		}
-		return nil
-	}
-	productionTerminatePIDWithIdentityFn = func(proof process.PIDIdentityProof) error {
-		if proof.PID != 4242 {
-			t.Fatalf("TerminatePIDWithIdentity pid = %d, want 4242", proof.PID)
-		}
-		return process.ErrProcessAlreadyExited
+		return &fakeHeldPIDGeneration{pid: pid, verifyFn: func(proof process.PIDIdentityProof) error {
+			if proof.PID != 4242 {
+				t.Fatalf("held VerifyIdentity pid = %d, want 4242", proof.PID)
+			}
+			return nil
+		}, terminate: func() (bool, error) { return false, process.ErrProcessAlreadyExited }}, nil
 	}
 	t.Cleanup(func() {
 		productionQueryPIDStateFn = prevQuery
-		productionVerifyPIDIdentityFn = prevVerify
-		productionTerminatePIDWithIdentityFn = prevTerminate
+		productionHoldPIDForTerminationFn = prevHold
 	})
 
 	terminateFn := makeProductionTerminateFnWithStatePath(events, map[string]runningProcessIdentity{

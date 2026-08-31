@@ -117,8 +117,8 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/gui"
-	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -142,34 +142,57 @@ var livenessRelaunchFn = relaunchSupervisorOwner
 // depending on machine time.
 var ensureAliveHeadlessFleetNowFn = func() time.Time { return time.Now().UTC() }
 
-// ensureAliveSupervisorOwnerVerifyFn distinguishes the real supervisor owner
-// from a quiet migration/install interlock that borrows the same flock while
-// deliberately retaining a dead predecessor's sidecar. Headless GUI recovery
-// is destructive, so only a live current-binary PID generation may authorize
-// it; every missing, stale, mismatched, or unsupported proof defers safely.
-var ensureAliveSupervisorOwnerVerifyFn = verifyEnsureAliveSupervisorOwner
+type ensureAliveSupervisorOwnerClass string
 
-func verifyEnsureAliveSupervisorOwner(stateDir string, supervisorPID int) error {
+const (
+	ensureAliveSupervisorOwnerCurrentPathVerified   ensureAliveSupervisorOwnerClass = "current_path_verified"
+	ensureAliveSupervisorOwnerAlternatePathVerified ensureAliveSupervisorOwnerClass = "alternate_path_verified"
+	ensureAliveSupervisorOwnerUnverified            ensureAliveSupervisorOwnerClass = "unverified"
+)
+
+type ensureAliveSupervisorOwnerVerification struct {
+	class ensureAliveSupervisorOwnerClass
+	owner api.SupervisorLockOwner
+	image string
+	err   error
+}
+
+var ensureAliveSupervisorOwnerClassifyFn = classifyEnsureAliveSupervisorOwner
+
+func classifyEnsureAliveSupervisorOwner(ctx context.Context, stateDir string, supervisorPID int) ensureAliveSupervisorOwnerVerification {
 	if supervisorPID <= 0 {
-		return errors.New("supervisor lock owner PID is unavailable")
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerUnverified, err: errors.New("supervisor lock owner PID is unavailable")}
 	}
-	owner, err := api.ReadSupervisorLockOwner(filepath.Join(stateDir, "supervisor.lock"))
+	proof, err := api.DialSupervisorIPCRecoveryStatusV1(ctx, stateDir)
 	if err != nil {
-		return fmt.Errorf("read supervisor lock owner: %w", err)
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerUnverified, err: err}
 	}
-	if owner.PID != supervisorPID {
-		return fmt.Errorf("supervisor lock owner PID changed: observed=%d current=%d", supervisorPID, owner.PID)
+	if proof.Owner.PID != supervisorPID {
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerUnverified, err: fmt.Errorf("supervisor lock owner PID changed: observed=%d current=%d", supervisorPID, proof.Owner.PID)}
 	}
-	executable, err := os.Executable()
+	current, err := os.Executable()
 	if err != nil {
-		return fmt.Errorf("resolve current supervisor executable: %w", err)
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerUnverified, err: fmt.Errorf("resolve current executable: %w", err)}
 	}
-	if err := process.VerifyPIDIdentity(process.PIDIdentityProof{
-		PID: owner.PID, ExecutablePath: executable, StartedAt: owner.StartedAt,
-	}); err != nil {
-		return fmt.Errorf("verify supervisor lock owner identity: %w", err)
+	if ensureAlivePathsEqual(current, proof.Server.ImagePath) {
+		return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerCurrentPathVerified, owner: proof.Owner, image: proof.Server.ImagePath}
 	}
-	return nil
+	return ensureAliveSupervisorOwnerVerification{class: ensureAliveSupervisorOwnerAlternatePathVerified, owner: proof.Owner, image: proof.Server.ImagePath}
+}
+
+func ensureAlivePathsEqual(a, b string) bool {
+	ca, errA := filepath.Abs(filepath.Clean(a))
+	cb, errB := filepath.Abs(filepath.Clean(b))
+	if errA != nil || errB != nil || ca == "" || cb == "" {
+		return false
+	}
+	if resolved, err := filepath.EvalSymlinks(ca); err == nil {
+		ca = resolved
+	}
+	if resolved, err := filepath.EvalSymlinks(cb); err == nil {
+		cb = resolved
+	}
+	return strings.EqualFold(filepath.Clean(ca), filepath.Clean(cb))
 }
 
 // standaloneRelaunchFn is the GUI-INDEPENDENT relaunch SEAM (§5 permanent
@@ -1045,17 +1068,35 @@ const guiOwnerUnknownConfirmationFileLeaf = "gui-owner-unknown-confirmation"
 // `return nil` in the caller, matching the best-effort, always-exit-0
 // contract the rest of this file's ensure-alive action upholds.
 func runEnsureAliveHeadlessFleet(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool) {
-	runEnsureAliveHeadlessFleetAt(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch, ensureAliveHeadlessFleetNowFn())
+	_ = runEnsureAliveHeadlessFleetAt(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch, ensureAliveHeadlessFleetNowFn())
 }
 
-func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) {
-	if identityErr := ensureAliveSupervisorOwnerVerifyFn(stateDir, supervisorPID); identityErr != nil {
+type ensureAliveRecoveryOutcomeKind string
+
+const (
+	ensureAliveRecoveryDeferred  ensureAliveRecoveryOutcomeKind = "deferred"
+	ensureAliveRecoveryRecovered ensureAliveRecoveryOutcomeKind = "recovered"
+	ensureAliveRecoveryFailed    ensureAliveRecoveryOutcomeKind = "failed"
+)
+
+type ensureAliveRecoveryOutcome struct {
+	kind ensureAliveRecoveryOutcomeKind
+	err  error
+}
+
+func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) ensureAliveRecoveryOutcome {
+	ownerVerification := ensureAliveSupervisorOwnerClassifyFn(context.Background(), stateDir, supervisorPID)
+	if ownerVerification.class == ensureAliveSupervisorOwnerUnverified {
+		identityErr := ownerVerification.err
+		if identityErr == nil {
+			identityErr = errors.New("supervisor lock owner classification returned no proof")
+		}
 		fmt.Fprintf(out, "ensure-alive: supervisor flock is held but its live owner identity is unverified; treating it as a possible migration/install interlock and deferring GUI relaunch: %v\n", identityErr)
-		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
 			"supervisor-lock-holder-unverified",
-			"supervisor flock is held without a verified live current-binary supervisor owner; deferring headless-fleet recovery because the holder may be a quiet migration/install interlock",
-			map[string]any{"supervisor_pid": supervisorPID, "error": identityErr.Error()})
-		return
+			"supervisor flock is held without a verified live supervisor owner; deferring headless-fleet recovery because the holder may be a quiet migration/install interlock",
+			map[string]any{"supervisor_pid": supervisorPID, "error": identityErr.Error(), "owner_class": ownerVerification.class})
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 	}
 	supervisorAge, ageErr := ensureAliveHeadlessFleetSupervisorUptime(stateDir, observedAt)
 	detectedBody := map[string]any{
@@ -1071,23 +1112,23 @@ func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID
 
 	if !allowGUIOwnerRelaunch {
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "phase-i-lease-unconfirmed", ensureAliveGUILeaseUnconfirmedDetail)
-		return
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 	}
 
 	// (a) Live-handoff suppressor: an unexpired restart-v3 handoff marker
 	// means the GUI is mid-self-restart, not dead.
 	if handoffSuppressed, handoffErr := ensureAliveHeadlessFleetLiveHandoffSuppressed(stateDir, observedAt); handoffErr != nil {
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "live-handoff", fmt.Sprintf("restart-v3 handoff marker unreadable (will retry next tick): %v", handoffErr))
-		return
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 	} else if handoffSuppressed {
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "live-handoff", "an unexpired restart-v3 handoff is in progress")
-		return
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 	}
 
 	// (b) Boot-grace suppressor: the supervisor itself may have just started.
 	if ageErr != nil {
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor start time undeterminable (will retry next tick): %v", ageErr))
-		return
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 	}
 	switch supervisorAge.classification {
 	case ensureAliveHeadlessFleetAgeFutureStart:
@@ -1105,11 +1146,11 @@ func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID
 	case ensureAliveHeadlessFleetAgeTrusted:
 		if supervisorAge.withinBootGrace(ensureAliveHeadlessFleetBootGrace) {
 			ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor uptime %.0fs is within the %s boot-grace window", supervisorAge.age.Seconds(), ensureAliveHeadlessFleetBootGrace))
-			return
+			return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 		}
 	default:
 		ensureAliveHeadlessFleetSuppress(stateDir, out, "boot-grace", fmt.Sprintf("supervisor age classification %q is undeterminable (will retry next tick)", supervisorAge.classification))
-		return
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryDeferred}
 	}
 
 	// (c) Neither suppressor fired: relaunch via the SAME seam the
@@ -1123,18 +1164,30 @@ func runEnsureAliveHeadlessFleetAt(stateDir string, out io.Writer, supervisorPID
 				"supervisor_pid":  supervisorPID,
 				"error":           relaunchErr.Error(),
 			})
-		return
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryFailed, err: fmt.Errorf("ensure-alive recovery scheduler stage: %w", relaunchErr)}
 	}
 
+	readinessCtx, cancelReadiness := context.WithTimeout(context.Background(), ensureAliveHeadlessFleetServingProbeTimeout)
+	readinessErr := ensureAliveGUIRecoveryReadinessFn(readinessCtx, guiPort)
+	cancelReadiness()
 	servingProbeOK := guiServingProbeFn(guiPort)
+	if readinessErr != nil {
+		fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); GUI-owner relaunch did not settle: %v\n", supervisorPID, readinessErr)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn, "liveness-gui-headless-recovery-readiness-failed",
+			"supervisor remained verified but the relaunched GUI endpoint did not settle",
+			map[string]any{"supervisor_pid": supervisorPID, "gui_port": guiPort, "owner_class": ownerVerification.class, "error": readinessErr.Error()})
+		return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryFailed, err: fmt.Errorf("ensure-alive recovery readiness stage: %w", readinessErr)}
+	}
 	fmt.Fprintf(out, "ensure-alive: headless fleet (supervisor pid=%d); relaunched GUI owner via %s\n", supervisorPID, autostart.WindowsTaskName)
 	emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo, "liveness-relaunched-gui-headless-fleet",
 		"supervisor running with no live GUI owner; re-fired the autostart task to relaunch the GUI (adopts the live supervisor, zero daemon churn)",
 		map[string]any{
 			"relaunch_target":  autostart.WindowsTaskName,
 			"supervisor_pid":   supervisorPID,
+			"owner_class":      ownerVerification.class,
 			"serving_probe_ok": servingProbeOK,
 		})
+	return ensureAliveRecoveryOutcome{kind: ensureAliveRecoveryRecovered}
 }
 
 // ensureAliveHeadlessFleetSuppress writes the shared suppressed-tick
@@ -1300,6 +1353,13 @@ func runEnsureAliveGUIOwnerUnknownEscalation(stateDir string, out io.Writer, sup
 // one injected observation time. A future durable marker is a clock anomaly,
 // never negative elapsed proof or an unbounded suppression interval.
 func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) bool {
+	handled, _ := runEnsureAliveGUIOwnerUnknownEscalationOutcomeAt(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch, observedAt)
+	return handled
+}
+
+// runEnsureAliveGUIOwnerUnknownEscalationOutcomeAt preserves the legacy
+// boolean helper while carrying a recovery-stage failure to the CLI owner.
+func runEnsureAliveGUIOwnerUnknownEscalationOutcomeAt(stateDir string, out io.Writer, supervisorPID, guiPID, guiPort int, allowGUIOwnerRelaunch bool, observedAt time.Time) (bool, error) {
 	markerPath := guiOwnerUnknownConfirmationMarkerPath(stateDir)
 	now := observedAt.UTC()
 	if observedAt.IsZero() {
@@ -1307,7 +1367,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 			"gui-owner-unknown-confirmation-clock-anomaly",
 			"GUI-owner-unknown confirmation observation time was invalid; refusing to consume or escalate the confirmation window",
 			map[string]any{"classification": "invalid_observation_time", "supervisor_pid": supervisorPID, "gui_pidport_pid": guiPID})
-		return false
+		return false, nil
 	}
 
 	unheld, probeErr := guiOwnerLockUnheldProbeFn()
@@ -1322,7 +1382,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 				"could not durably clear the GUI-owner-unknown confirmation marker after an interrupting (held/undeterminable) flock observation; a stale window could otherwise survive into a later tick",
 				guiOwnerUnknownConfirmationFailureBody(resetErr, map[string]any{"supervisor_pid": supervisorPID}))
 		}
-		return false
+		return false, nil
 	}
 
 	firstObserved, readErr := readGUIOwnerUnknownConfirmationMarker(markerPath)
@@ -1336,7 +1396,7 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 				"could not durably record the start of the GUI-owner-unknown confirmation window; will retry next tick",
 				guiOwnerUnknownConfirmationFailureBody(writeErr, map[string]any{"supervisor_pid": supervisorPID}))
 		}
-		return false
+		return false, nil
 	}
 
 	age := now.Sub(firstObserved.UTC())
@@ -1358,12 +1418,12 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 				"could not replace a future-dated GUI-owner-unknown confirmation marker; refusing to escalate",
 				guiOwnerUnknownConfirmationFailureBody(writeErr, map[string]any{"supervisor_pid": supervisorPID}))
 		}
-		return false
+		return false, nil
 	}
 	if age < guiOwnerUnknownConfirmationWindow {
 		// Confirmation window still open — fall back to the standard
 		// undeterminable/no-action message.
-		return false
+		return false, nil
 	}
 
 	// Re-check elapsed state and remove the marker under the marker writer's
@@ -1376,10 +1436,10 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 			"gui-owner-unknown-confirmation-consume-failed",
 			"could not durably reset the GUI-owner-unknown confirmation marker before escalating; refusing to relaunch this tick rather than risk an immediate re-arm before the relaunch can take hold",
 			guiOwnerUnknownConfirmationFailureBody(consumeErr, map[string]any{"supervisor_pid": supervisorPID}))
-		return false
+		return false, nil
 	}
 	if !consumed {
-		return false
+		return false, nil
 	}
 	defer emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
 		"gui-owner-unknown-escalated-to-recovery",
@@ -1389,8 +1449,8 @@ func runEnsureAliveGUIOwnerUnknownEscalationAt(stateDir string, out io.Writer, s
 			"gui_pidport_pid":       guiPID,
 			"confirmation_window_s": guiOwnerUnknownConfirmationWindow.Seconds(),
 		})
-	runEnsureAliveHeadlessFleet(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch)
-	return true
+	outcome := runEnsureAliveHeadlessFleetAt(stateDir, out, supervisorPID, guiPID, guiPort, allowGUIOwnerRelaunch, observedAt)
+	return true, outcome.err
 }
 
 // guiOwnerUnknownConfirmationMarkerPath is the single owner of the
@@ -1514,6 +1574,25 @@ func writeGUIOwnerUnknownConfirmationMarker(path string, at time.Time) error {
 // only allowed write path.
 var guiServingProbeFn = probeGUIServingWithinTimeout
 
+// ensureAliveGUIRecoveryReadinessFn is the only post-relaunch GUI verifier.
+// Its GUI-owned core retains the pidport/socket/process generation across
+// strict ping, /api/version, and final revalidation; this layer supplies only
+// the current binary's build expectation.
+var ensureAliveGUIRecoveryReadinessFn = verifyEnsureAliveGUIRecoveryReadiness
+
+func verifyEnsureAliveGUIRecoveryReadiness(ctx context.Context, port int) error {
+	pidportPath, err := gui.PidportPath()
+	if err != nil {
+		return fmt.Errorf("resolve GUI pidport: %w", err)
+	}
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("resolve current executable: %w", err)
+	}
+	version, commit, _ := buildinfo.Get()
+	return gui.VerifyManagedRouterGeneration(ctx, pidportPath, executable, version, commit, port)
+}
+
 // setGUIServingProbeFnForTest installs a test serving-probe function.
 // Returns an "uninstall" function tests defer to restore production wiring.
 // Only supervise_ensure_alive_test.go invokes this; the default dials a real
@@ -1524,6 +1603,12 @@ func setGUIServingProbeFnForTest(fn func(port int) bool) func() {
 	prev := guiServingProbeFn
 	guiServingProbeFn = fn
 	return func() { guiServingProbeFn = prev }
+}
+
+func setEnsureAliveGUIRecoveryReadinessFnForTest(fn func(context.Context, int) error) func() {
+	previous := ensureAliveGUIRecoveryReadinessFn
+	ensureAliveGUIRecoveryReadinessFn = fn
+	return func() { ensureAliveGUIRecoveryReadinessFn = previous }
 }
 
 // probeGUIServingWithinTimeout is a bounded, non-gating attestation stamped
@@ -1601,8 +1686,8 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 			// FIRST Unknown tick's stale timestamp, since this classifier
 			// result never otherwise touches the marker.
 			resetGUIOwnerUnknownConfirmationMarkerLogged(stateDir, pid)
-			runEnsureAliveHeadlessFleet(stateDir, out, pid, guiPID, guiPort, allowGUIOwnerRelaunch)
-			return nil
+			outcome := runEnsureAliveHeadlessFleetAt(stateDir, out, pid, guiPID, guiPort, allowGUIOwnerRelaunch, ensureAliveHeadlessFleetNowFn())
+			return outcome.err
 		case guiOwnerStateUnknown:
 			// Residual 1(b): before printing the standard suppression
 			// message, give the bounded independent confirmation path a
@@ -1612,8 +1697,8 @@ func runEnsureAlive(stateDir string, out io.Writer) error {
 			// window) it delegates to runEnsureAliveHeadlessFleet and
 			// reports the outcome itself; otherwise fall through to the
 			// unchanged undeterminable/no-action message below.
-			if runEnsureAliveGUIOwnerUnknownEscalation(stateDir, out, pid, guiPID, guiPort, allowGUIOwnerRelaunch) {
-				return nil
+			if handled, recoveryErr := runEnsureAliveGUIOwnerUnknownEscalationOutcomeAt(stateDir, out, pid, guiPID, guiPort, allowGUIOwnerRelaunch, ensureAliveHeadlessFleetNowFn()); handled {
+				return recoveryErr
 			}
 			fmt.Fprintf(out, "ensure-alive: supervisor running (pid=%d); GUI owner state undeterminable (pidport malformed/unresolvable); no action (will retry next tick)\n", pid)
 			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,

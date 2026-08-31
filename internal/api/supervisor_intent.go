@@ -12,7 +12,10 @@ import (
 // SupervisorIntentFile is the on-disk schema for <state-dir>/supervisor-intent.json.
 // Spec §"supervisor-intent.json (NEW)".
 type SupervisorIntentFile struct {
-	Version           int                `json:"version"`
+	Version int `json:"version"`
+	// IntentGeneration is a monotonically increasing durable revision. It
+	// fences the complete desired-state snapshot selected by a stop batch.
+	IntentGeneration  uint64             `json:"intent_generation,omitempty"`
 	UpdatedAt         string             `json:"updated_at"`
 	Daemons           []SupervisorDaemon `json:"daemons"`
 	MaintenanceTimers []MaintenanceTimer `json:"maintenance_timers,omitempty"`
@@ -600,6 +603,16 @@ func UnifiedStopsFile(supervisorIntent *SupervisorIntentFile, _ *DaemonIntentFil
 // without the lock loses the cross-process write serialization
 // WriteStateFileAtomic otherwise provides.
 func writeSupervisorIntentLockHeld(path string, f *SupervisorIntentFile) error {
+	if f == nil {
+		return fmt.Errorf("nil supervisor intent")
+	}
+	// Every successful durable rewrite owns one generation. Stop batches carry
+	// this value with their snapshot so the controller can reject an older
+	// command instead of depending on a later watcher refresh.
+	if f.IntentGeneration == ^uint64(0) {
+		return fmt.Errorf("supervisor intent generation overflow")
+	}
+	f.IntentGeneration++
 	raw, err := marshalSupervisorIntent(f)
 	if err != nil {
 		return err

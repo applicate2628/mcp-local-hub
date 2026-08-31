@@ -23,6 +23,15 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
+func stopBatchResultForTest(command StopBatchCommandV1, settlements []StoppedSettlement) StopBatchResultV1 {
+	return StopBatchResultV1{
+		ProtocolVersion: command.ProtocolVersion,
+		BatchID:         command.BatchID,
+		Targets:         append([]StopBatchTargetV1(nil), command.Targets...),
+		Settlements:     settlements,
+	}
+}
+
 const stopSupervisorTestTask = `\mcp-local-hub-time-default`
 
 // stopSupervisorTestSetup builds the hermetic Stop fixture: hardened
@@ -93,12 +102,12 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, intent,
 		[]scheduler.TaskStatus{{Name: stopSupervisorTestTask}})
 
-	var reconcileCalls int32
-	var gotApply bool
+	var stopBatchCalls int32
+	var gotCommand StopBatchCommandV1
 	var intentDesiredAtReconcile string
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		atomic.AddInt32(&reconcileCalls, 1)
-		gotApply = apply
+	restore := setSupervisorStopBatchHookForTest(func(ctx context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+		atomic.AddInt32(&stopBatchCalls, 1)
+		gotCommand = command
 		// Read-back assertion: the stop intent must already be on disk
 		// when the reconcile fires, otherwise the supervisor would see
 		// desired=running and stop nothing. Phase 4-E2: the stop lives in
@@ -106,15 +115,10 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 		if di, ok := lookupSupervisorStop(stopSupervisorTestTask); ok {
 			intentDesiredAtReconcile = di.Desired
 		}
-		// No-legacy drift: every supervisor-intent row is dispatched through
-		// the SM (post_ev_intent_update) — regular daemon included.
-		return ReconcileResponse{
-			AppliedCount: 2,
-			Drift: []DriftEntry{
-				{TaskName: stopSupervisorTestTask, Action: ReconcileActionPostEvIntentUpdate},
-				{TaskName: proxyTask, Action: ReconcileActionPostEvIntentUpdate},
-			},
-		}, nil
+		return stopBatchResultForTest(command, []StoppedSettlement{
+			{TaskName: stopSupervisorTestTask, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+			{TaskName: proxyTask, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+		}), nil
 	})
 	defer restore()
 
@@ -122,11 +126,11 @@ func TestStopUsesSupervisorReconcileAndSkipsKill(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if got := atomic.LoadInt32(&reconcileCalls); got != 1 {
-		t.Fatalf("reconcile calls = %d, want 1", got)
+	if got := atomic.LoadInt32(&stopBatchCalls); got != 1 {
+		t.Fatalf("stop_batch calls = %d, want 1", got)
 	}
-	if !gotApply {
-		t.Fatal("reconcile dialed with apply=false, want apply=true")
+	if gotCommand.ProtocolVersion != 1 || len(gotCommand.Targets) != 2 {
+		t.Fatalf("stop_batch command = %+v, want v1/two targets", gotCommand)
 	}
 	if intentDesiredAtReconcile != IntentDesiredStopped {
 		t.Fatalf("daemon-intent at reconcile time = %q, want %q (intent must be on disk BEFORE the reconcile)",
@@ -169,23 +173,20 @@ func TestStopSerenaSupervisorTargetRecordsStopIntentForSentinelRow(t *testing.T)
 			TaskName:  serenaTask,
 			Server:    "serena",
 			Daemon:    "default",
-			Workspace: `C:\work\alpha`,
+			Workspace: `<workspace-alpha>`,
 			Port:      9500,
 		}},
 	}
 	stopSupervisorTestSetup(t, intent, nil)
 
 	var stopActiveAtReconcile bool
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
+	restore := setSupervisorStopBatchHookForTest(func(ctx context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
 		if di, ok := lookupSupervisorStop(serenaTask); ok {
 			stopActiveAtReconcile, _ = di.IsActiveStop(time.Now().UTC())
 		}
-		return ReconcileResponse{
-			AppliedCount: 1,
-			Drift: []DriftEntry{
-				{TaskName: serenaTask, Action: ReconcileActionPostEvIntentUpdate},
-			},
-		}, nil
+		return stopBatchResultForTest(command, []StoppedSettlement{
+			{TaskName: serenaTask, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+		}), nil
 	})
 	defer restore()
 
@@ -223,8 +224,8 @@ func TestStopKillsSupervisorDescriptorWhenSupervisorIPCUnavailable(t *testing.T)
 	}
 	t.Cleanup(func() { forceKillByPortFn = origForceKill })
 
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, fmt.Errorf("supervisor IPC stop-batch: dial: %w", ErrSupervisorIPCUnavailable)
 	})
 	defer restore()
 
@@ -249,8 +250,8 @@ func TestStopKillsSupervisorDescriptorWhenSupervisorIPCUnavailable(t *testing.T)
 func TestStopSupervisorOwnedDaemons_IPCUnavailableKillsLoadedTargetsAndHandles(t *testing.T) {
 	stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
 
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		return ReconcileResponse{}, fmt.Errorf("supervisor IPC reconcile: dial: %w", ErrSupervisorIPCUnavailable)
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, fmt.Errorf("supervisor IPC stop-batch: dial: %w", ErrSupervisorIPCUnavailable)
 	})
 	defer restore()
 
@@ -293,8 +294,8 @@ func TestStopReconcileFailureKeepsSupervisorOwnedUnkilled(t *testing.T) {
 	kills, fake := stopSupervisorTestSetup(t, stopSupervisorTestIntent(),
 		[]scheduler.TaskStatus{{Name: stopSupervisorTestTask}})
 
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		return ReconcileResponse{}, errors.New("reconcile handler exploded")
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, errors.New("reconcile handler exploded")
 	})
 	defer restore()
 
@@ -338,22 +339,17 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 		})
 
 	var intentDesiredAtReconcile string
-	var gotApply bool
-	restore := setSupervisorReconcileApplyHookForTest(func(ctx context.Context, apply bool) (ReconcileResponse, error) {
-		gotApply = apply
+	var gotCommand StopBatchCommandV1
+	restore := setSupervisorStopBatchHookForTest(func(ctx context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+		gotCommand = command
 		// Phase 4-E2: the stop lives in the supervisor-intent.json stops
 		// sub-block (the sole source), read here via lookupSupervisorStop.
 		if di, ok := lookupSupervisorStop(stopSupervisorTestTask); ok {
 			intentDesiredAtReconcile = di.Desired
 		}
-		// Honesty backstop: the lone daemon is already idle/settled, so its
-		// terminate classifies no_op (nothing live to terminate) — NOT a
-		// post_ev_intent_update. The api side must report it as deferred.
-		return ReconcileResponse{
-			Drift: []DriftEntry{
-				{TaskName: stopSupervisorTestTask, Action: ReconcileActionNoOp},
-			},
-		}, nil
+		return stopBatchResultForTest(command, []StoppedSettlement{
+			{TaskName: stopSupervisorTestTask, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+		}), nil
 	})
 	defer restore()
 
@@ -361,8 +357,8 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StopAll: %v", err)
 	}
-	if !gotApply {
-		t.Fatal("reconcile dialed with apply=false, want apply=true")
+	if gotCommand.ProtocolVersion != 1 || len(gotCommand.Targets) != 1 {
+		t.Fatalf("stop_batch command = %+v, want v1/one target", gotCommand)
 	}
 	if intentDesiredAtReconcile != IntentDesiredStopped {
 		t.Fatalf("daemon-intent at reconcile time = %q, want %q (StopAll must record stop intent BEFORE reconciling)",
@@ -381,15 +377,81 @@ func TestStopAllRecordsIntentThenReconciles(t *testing.T) {
 	if results[0].TaskName != stopSupervisorTestTask || results[0].Err != "" {
 		t.Fatalf("results[0] = %+v, want supervisor row (empty Err)", results[0])
 	}
-	// The already-idle daemon's terminate is no_op, so its row is
-	// success-but-deferred (the honesty backstop), not a plain success.
-	if results[0].Code != DeferredToIntentWatcherCode {
-		t.Fatalf("results[0].Code = %q, want %q (no_op edge → watcher-deferred)",
-			results[0].Code, DeferredToIntentWatcherCode)
+	// The typed settlement proves stopped, so an already-idle daemon is a plain
+	// success rather than a watcher-deferred row.
+	if results[0].Code != "" {
+		t.Fatalf("results[0].Code = %q, want empty code after terminal settlement", results[0].Code)
 	}
 	// The legacy task goes through the kill loop (not supervisor-owned), so
 	// it stays a plain success row with no deferred Code.
 	if results[1].TaskName != legacyTask || results[1].Err != "" || results[1].Code != "" {
 		t.Fatalf("results[1] = %+v, want legacy plain-success row", results[1])
+	}
+}
+
+// A transport-level reconcile success is not a completed stop. The supervisor
+// must return controller-owned terminal settlement for every selected target;
+// otherwise the caller must fail loud instead of publishing Stopped while an
+// owned listener may still be alive.
+func TestStopSupervisorDispatchWithoutTerminalSettlementFailsLoud(t *testing.T) {
+	stopSupervisorTestSetup(t, stopSupervisorTestIntent(), nil)
+
+	restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+		return StopBatchResultV1{}, nil
+	})
+	defer restore()
+
+	results, handled, err := stopSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("stopSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled {
+		t.Fatal("handled=false, want supervisor ownership retained")
+	}
+	if len(results) != 1 || results[0].TaskName != stopSupervisorTestTask {
+		t.Fatalf("results = %+v, want one target row", results)
+	}
+	if results[0].Err == "" {
+		t.Fatalf("dispatch-only reconcile returned success without terminal stop settlement: %+v", results[0])
+	}
+	for _, want := range []string{"settlement", "incomplete"} {
+		if !strings.Contains(strings.ToLower(results[0].Err), want) {
+			t.Fatalf("settlement error = %q, want substring %q", results[0].Err, want)
+		}
+	}
+}
+
+func TestStopSupervisorStoppedSettlementPartialFailureIsPerTarget(t *testing.T) {
+	const secondTask = `\mcp-local-hub-time-proxy`
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{
+		{TaskName: stopSupervisorTestTask, Server: "time", Daemon: "default", Port: 9128},
+		{TaskName: secondTask, Server: "time", Daemon: "proxy", Port: 9129},
+	}}
+	stopSupervisorTestSetup(t, intent, nil)
+
+	restore := setSupervisorStopBatchHookForTest(func(_ context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+		return stopBatchResultForTest(command, []StoppedSettlement{
+			{TaskName: stopSupervisorTestTask, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped},
+			{TaskName: secondTask, State: StoppedSettlementFailed, Reason: StoppedSettlementReasonListenerAlive, Error: "port still bound"},
+		}), nil
+	})
+	defer restore()
+
+	results, handled, err := stopSupervisorOwnedDaemons(context.Background(), "time", "")
+	if err != nil {
+		t.Fatalf("stopSupervisorOwnedDaemons: %v", err)
+	}
+	if !handled || len(results) != 2 {
+		t.Fatalf("handled/results = %v/%+v, want true/two target rows", handled, results)
+	}
+	byTask := map[string]RestartResult{}
+	for _, result := range results {
+		byTask[result.TaskName] = result
+	}
+	if got := byTask[stopSupervisorTestTask]; got.Err != "" {
+		t.Fatalf("successful sibling = %+v, want empty Err", got)
+	}
+	if got := byTask[secondTask]; !strings.Contains(got.Err, "failed") || !strings.Contains(got.Err, "listener_alive") {
+		t.Fatalf("failed sibling = %+v, want typed settlement failure", got)
 	}
 }

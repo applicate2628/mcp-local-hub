@@ -117,12 +117,13 @@ func newRespawnTestDeps(t *testing.T, intent *api.SupervisorIntentFile) (ipcDisp
 	)
 
 	deps := ipcDispatchDeps{
-		stateDir:       tmpHome,
-		events:         events,
-		runtimeTracker: NewDaemonRuntimeTracker(),
-		reconcileReady: &reconcileReady,
-		intent:         intent,
-		respawnLate:    respawnLate,
+		stateDir:                  tmpHome,
+		events:                    events,
+		runtimeTracker:            NewDaemonRuntimeTracker(),
+		reconcileReady:            &reconcileReady,
+		intent:                    intent,
+		respawnLate:               respawnLate,
+		allowDirectRespawnForTest: true,
 	}
 	return deps, &spawnCalls, &terminateCalls
 }
@@ -187,7 +188,7 @@ func TestHandleRespawn_LegacyNilSpecSerenaProxyRefused(t *testing.T) {
 			TaskName:    taskName,
 			Server:      "serena",
 			Daemon:      "deadbeef",
-			Args:        []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121", "--task-name", taskName},
+			Args:        []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `<workspace-alpha>`, "--port", "9121", "--task-name", taskName},
 			RuntimeSpec: nil, // pre-redesign / stale row
 		}},
 	}
@@ -221,13 +222,13 @@ func TestHandleRespawn_SpecBearingSerenaProxyNotRefused(t *testing.T) {
 			TaskName: taskName,
 			Server:   "serena",
 			Daemon:   "cafef00d",
-			Args:     []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\beta`, "--port", "9122", "--task-name", taskName},
+			Args:     []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `<workspace-beta>`, "--port", "9122", "--task-name", taskName},
 			RuntimeSpec: &api.DaemonRuntimeSpec{
 				SpecVersion:   api.DaemonRuntimeSpecVersion,
 				ChildCommand:  "uvx",
 				UpstreamPort:  19122,
 				ExternalPort:  9122,
-				WorkspacePath: `C:\work\beta`,
+				WorkspacePath: `<workspace-beta>`,
 			},
 		}},
 	}
@@ -821,6 +822,14 @@ func TestHandleRespawn_RunningDaemonRoutesThroughController(t *testing.T) {
 	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, fakeSpawn)
 	defer cancel()
 	ctrl.terminate = fakeTerminate
+	// The fixture models a foreign warm-start. Explicit typed proof is required
+	// before the controller may synthesize its otherwise-missing cmd.Wait exit.
+	ctrl.terminateOutcome = func(d api.SupervisorDaemon, expected TerminationExpectedTuple) TerminationOutcome {
+		if err := fakeTerminate(d); err != nil {
+			return TerminationOutcome{Kind: terminationOutcomeFailed, Expected: expected, Cause: err}
+		}
+		return TerminationOutcome{Kind: terminationOutcomeTerminated, Expected: expected}
+	}
 	// Hydrate a running daemon with a live PID. It is NOT own-spawned in
 	// this controller (no real reaper), so the StExiting terminate's
 	// foreign-synthesize drives the queued respawn — exactly the warm-start

@@ -260,6 +260,11 @@ type supervisorController struct {
 	// requests an "issue terminate" side effect (StRunning/StSpawning +
 	// EvIntentUpdate{stopped} | EvRequestGraceful | EvManualRestart).
 	terminate TerminateFunc
+	// terminateOutcome is the typed production termination contract.  The
+	// legacy terminate callback remains for pre-existing fixtures and early
+	// startup paths, but its nil result is deliberately not treated as proof
+	// that a foreign process exited.
+	terminateOutcome terminationOutcomeFunc
 
 	// statePath points at <state-dir>/supervisor-state.json. After every
 	// persistBefore=true transition the controller asks the tracker to
@@ -280,6 +285,11 @@ type supervisorController struct {
 	targetRegistryPath   func() (string, error)
 	targetLivenessProbe  targetSettlementLivenessProbeFunc
 	targetSettlementWait targetSettlementWaitFunc
+	// Stopped-settlement dependencies use the same controller-owned FIFO barrier
+	// as targeted readiness. A complete port-owner snapshot is injected only for
+	// deterministic tests; production takes one context-bound snapshot per sweep.
+	stoppedSettlementPortOwnersSnapshot func(context.Context) (map[int]int, error)
+	stoppedSettlementWait               targetSettlementWaitFunc
 
 	// failureWindow + quarantineThreshold mirror the deleted
 	// runRespawnDispatcher constants. Kept as struct fields so tests
@@ -436,6 +446,11 @@ type supervisorController struct {
 	// adds no SM row). In-memory only: never persisted (no supervisor-state.json
 	// schema change), resets on cold restart by design.
 	quarantineParole sync.Map // canonicalTaskName -> *quarantineParoleEntry
+
+	// stopSettlementRecoveryArmed bounds recovery retries to one scheduled sweep
+	// per task. The timer only invokes recoverPendingStopReceipts; it never
+	// starts a child or loops on a failed observation.
+	stopSettlementRecoveryArmed sync.Map // canonicalTaskName -> struct{}
 }
 
 // quarantineParoleEntry is the per-task F2 parole ladder state (in-memory only).
@@ -731,7 +746,19 @@ const (
 	// rather than merely enqueued. Existing reap tests use the compatibility alias
 	// below for the same ordering proof.
 	evControllerBarrier api.SMEvent = "controller-barrier"
-	evReapBarrier       api.SMEvent = evControllerBarrier
+	// evStopBatch is the sole terminal-stop admission owner.  It is posted once
+	// by reconcile IPC and processes its full transaction on the controller FIFO
+	// before any per-daemon intent transition can interleave.
+	evStopBatch api.SMEvent = "stop-batch"
+	// evStopSettlementRecovery is the controller-owned retry command. Timers and
+	// observers may only post it; resume/terminate decisions run on this FIFO.
+	evStopSettlementRecovery api.SMEvent = "stop-settlement-recovery"
+	// Only these typed event sources can advance a durable stop receipt.
+	// Generic EvChildExit also represents pre-child failures and liveness
+	// synthesis, so it can never be terminal stop evidence.
+	evOwnedChildWaitExit     api.SMEvent = "owned-child-wait-exit"
+	evForeignTerminationExit api.SMEvent = "foreign-termination-exit"
+	evReapBarrier            api.SMEvent = evControllerBarrier
 )
 
 // evParoleTick is the F2 quarantine-parole scan, run as a controller-internal
@@ -1004,6 +1031,19 @@ func (c *IntentCache) Refresh(intent *api.SupervisorIntentFile) {
 		}
 	}
 	c.snap.Store(snap)
+}
+
+// Snapshot returns the immutable intent generation currently selected by the
+// controller. Callers must not mutate it; ownership remains with the cache.
+func (c *IntentCache) Snapshot() *api.SupervisorIntentFile {
+	if c == nil {
+		return nil
+	}
+	s, ok := c.snap.Load().(*intentSnapshot)
+	if !ok || s == nil {
+		return nil
+	}
+	return s.intent
 }
 
 func (c *IntentCache) TaskNames() map[string]struct{} {
@@ -2826,6 +2866,9 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	// goroutine is the class fix for Codex pr302 r3 findings A/B/C/H/I (the
 	// off-loop watcher / IPC / follow-up-timer goroutines now only DETECT + POST).
 	switch ev.Kind {
+	case evOwnedChildWaitExit, evForeignTerminationExit:
+		c.recordExactStopReceiptExit(ev)
+		ev.Kind = api.EvChildExit
 	case evReapScan:
 		prev, _ := ev.Body[reapScanPreviousNamesBodyKey].(map[string]struct{})
 		updated, _ := ev.Body[reapScanIntentBodyKey].(*api.SupervisorIntentFile)
@@ -2846,6 +2889,22 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	case evControllerBarrier:
 		if ch, ok := ev.Body[controllerBarrierResultBodyKey].(chan struct{}); ok {
 			close(ch)
+		}
+		return
+	case evStopBatch:
+		if request, ok := ev.Body[stopBatchRequestBodyKey].(stopBatchLoopRequest); ok {
+			c.handleStopBatchOnLoop(request)
+		}
+		return
+	case evStopSettlementRecovery:
+		c.stopSettlementRecoveryArmed.Delete(canonicalSupervisorTaskName(ev.TaskName))
+		target, ok := c.recoverStopReceiptOnLoop(ev.TaskName)
+		if ok {
+			go func() {
+				ctx, cancel := context.WithTimeout(c.ctx, api.DefaultTargetedReconcileTimeout)
+				defer cancel()
+				c.settleStopBatchTargets(ctx, []api.StopBatchTargetV1{target})
+			}()
 		}
 		return
 	case evParoleTick:
@@ -3374,6 +3433,61 @@ func (c *supervisorController) handleLoopEvent(ev api.LoopEvent) {
 	}
 }
 
+// recordExactStopReceiptExit advances a stop receipt only from a real cmd.Wait
+// event that echoes the receipt's full immutable identity.  Synthetic exit
+// events deliberately carry no complete tuple and can never make a requested
+// stop look terminal.
+func (c *supervisorController) recordExactStopReceiptExit(ev api.LoopEvent) {
+	if c == nil || c.tracker == nil || strings.TrimSpace(c.statePath) == "" || (ev.Kind != evOwnedChildWaitExit && ev.Kind != evForeignTerminationExit) || ev.Body == nil {
+		return
+	}
+	pid, pidOK := ev.Body["pid"].(int)
+	generation, generationOK := ev.Body["pid_generation"].(int)
+	startedAt, startedAtOK := ev.Body["started_at"].(string)
+	if !pidOK || !generationOK || !startedAtOK {
+		return
+	}
+	if !c.advanceExactStopReceiptExit(terminationExpectedTuple{CanonicalTaskName: canonicalSupervisorTaskName(ev.TaskName), PID: pid, StartedAt: startedAt, PIDGeneration: generation, Valid: true}) && c.events != nil {
+		_ = c.events.Emit(api.SupervisorEvent{
+			Severity: api.SupervisorEventSeverityError,
+			Source:   "lifecycle",
+			Event:    "stop-settlement-exit-record-failed",
+			TaskName: ev.TaskName,
+			Body:     map[string]any{"reason": "exact receipt token missing, mismatched, or persist failed"},
+		})
+	}
+}
+
+// advanceExactStopReceiptExit records a terminal child-exit only when a
+// pending receipt names the exact tracker generation that produced it. The
+// exit_observed arm is idempotent for the same immutable token; a retry after
+// an IPC response loss does not fabricate a second receipt revision. Receipt
+// absence is the ordinary foreign warm-start path, so it is not an error.
+func (c *supervisorController) advanceExactStopReceiptExit(expected terminationExpectedTuple) bool {
+	if c == nil || c.tracker == nil || !expected.Valid {
+		return false
+	}
+	receipt, pending := c.tracker.StopSettlementReceipt(expected.CanonicalTaskName)
+	if !pending {
+		return true
+	}
+	if strings.TrimSpace(c.statePath) == "" {
+		return false
+	}
+	if !terminationTupleMatchesReceipt(expected, receipt) {
+		return false
+	}
+	switch receipt.Phase {
+	case api.StopSettlementPhaseExitObserved:
+		return true
+	case api.StopSettlementPhaseStopRequested:
+		_, err := c.tracker.AdvanceStopSettlement(c.statePath, receipt, api.StopSettlementPhaseExitObserved, "", "")
+		return err == nil
+	default:
+		return false
+	}
+}
+
 // executeSideEffect absorbs the dispatcher's responsibilities
 // (sliding-window check, backoff timer, spawn fire, quarantine audit)
 // PLUS the formal terminate side effects from api.Transition.
@@ -3411,6 +3525,9 @@ func (c *supervisorController) executeSideEffect(
 		// none" side string from the StExiting transition.
 		if !strings.Contains(side, "create-process") {
 			return nil
+		}
+		if err := c.admitCreateProcess(ev.TaskName); err != nil {
+			return err
 		}
 
 		// bot PR #246 r2 P2: refuse to fire spawn for a legacy nil-RuntimeSpec
@@ -3522,15 +3639,14 @@ func (c *supervisorController) executeSideEffect(
 		// create-process paths where a lost child may squat the port. This is the
 		// CONVERGENT scope (Codex PR-3 P2-i): the per-event allowlist kept missing
 		// paths (round-1 missed EvIntentUpdate, round-3 missed EvStart), so gate EVERY
-		// create-process transition and EXCLUDE only the ONE that spawns into a
-		// provably-own/free port. The complete create-process set in api.Transition
+		// create-process transition. The complete create-process set in api.Transition
 		// (grep "create-process") is: EvStart (StIdle), EvIntentUpdate(running)
 		// (StIdle/StBackoffWaiting/StQuarantined), EvManualRestart
 		// (StIdle/StBackoffWaiting/StQuarantined), EvTimerDue (StBackoffWaiting), and
-		// EvChildExit (StExiting — the queued respawn after a CONTROLLED restart). Only
-		// EvChildExit-at-StExiting reclaims our OWN just-terminated child's port (the
-		// terminate side effect already ran + cleared CurrentPID), so gating it would
-		// just probe our own dying child; exclude it. Every other event either spawns
+		// EvChildExit (StExiting — the queued respawn after a CONTROLLED restart).
+		// Every event, including that restart path, may race a retained listener and
+		// must re-enter the same gate before creating a replacement process. Every
+		// event either spawns
 		// into a possibly-squatted port (EvStart cold start with stale supervisor
 		// state, EvIntentUpdate re-enable, EvManualRestart/EvTimerDue respawn) — and a
 		// genuinely-free port simply probes free → proceeds (fail-open). Structurally
@@ -3547,22 +3663,17 @@ func (c *supervisorController) executeSideEffect(
 		//      proceed. Owned → hold in backoff (no crash increment) + dispatch the
 		//      classify+reap to the worker, and return the sentinel.
 		//
-		// The EXISTENCE gate (P1.1) runs FIRST and, unlike the port gate, on
-		// EVERY create-process transition including EvChildExit-at-StExiting:
-		// the port gate excludes that event because our own dying child owns
-		// the port, but whether the binary/workspace exists is independent of
-		// which event drove the spawn. It is also the cheaper probe (two local
+		// The EXISTENCE gate runs first on every create-process transition. It is
+		// cheaper (two local
 		// os.Stat calls vs a netstat owner lookup), so a missing binary short-
 		// circuits before we pay for a port probe that cannot matter. A hold
 		// here consumes NO crash budget and re-probes on the armed timer.
 		if held := c.preSpawnMissingPathHold(d, ev); held != nil {
 			return held
 		}
-		if ev.Kind != api.EvChildExit {
-			if _, cleared := c.gateCleared.LoadAndDelete(ev.TaskName); !cleared {
-				if held := c.preSpawnPortGateHold(d, ev); held != nil {
-					return held
-				}
+		if _, cleared := c.gateCleared.LoadAndDelete(ev.TaskName); !cleared {
+			if held := c.preSpawnPortGateHold(d, ev); held != nil {
+				return held
 			}
 		}
 		err := c.spawn(*d)
@@ -3684,11 +3795,18 @@ func (c *supervisorController) executeSideEffect(
 		// StExiting with queued_action=respawn never consumed. Synthesize
 		// the EvChildExit so StExiting -> consume queued respawn ->
 		// StSpawning -> single respawn completes (Codex bot #268 r11 P2).
-		if c.terminate == nil {
-			return nil
-		}
 		terminateDescriptor := descriptorForTerminateSideEffect(d, ev)
-		termErr := c.terminate(*terminateDescriptor)
+		expected := terminationExpectedTupleForTask(c.tracker, terminateDescriptor.TaskName)
+		var outcome terminationOutcome
+		switch {
+		case c.terminateOutcome != nil:
+			outcome = c.terminateOutcome(*terminateDescriptor, expected)
+		case c.terminate != nil:
+			outcome = terminationOutcomeFromLegacy(expected, c.terminate(*terminateDescriptor))
+		default:
+			outcome = terminationOutcome{Kind: terminationOutcomeTargetAbsent, Expected: expected, Cause: errors.New("terminate callback unavailable")}
+		}
+		termErr := outcome.legacyError()
 		// Synthesize ONLY when ALL of:
 		//   (a) the task is foreign (not own-spawned, no own cmd.Wait — else
 		//       we double-emit against the real exit event), AND
@@ -3722,8 +3840,11 @@ func (c *supervisorController) executeSideEffect(
 		// path for a bare own-spawned daemon (finding 4 sweep, pr302 r9).
 		owned := c.loadReapMarkerCanonical(&c.ownSpawned, d.TaskName)
 		reaperPending := c.loadReapMarkerCanonical(&c.reaperOutstanding, d.TaskName)
-		if termErr == nil && !owned && !reaperPending {
-			c.synthesizeForeignChildExit(d, ev)
+		if outcome.AllowsSynthetic() && !owned && !reaperPending {
+			// The typed foreign-termination event carries the already-verified
+			// terminal identity.  It is the only foreign path allowed to advance
+			// a stop receipt; generic synthetic exits remain evidence-inert.
+			c.synthesizeForeignChildExit(d, ev, outcome.Expected)
 		}
 		// Propagate the terminate result. Existing callers (handleLoopEvent's
 		// operator-stop path) ignore it — the idleRespawn channel is nil there —
@@ -3739,6 +3860,23 @@ func (c *supervisorController) executeSideEffect(
 		// gate). StIdle is reached on EvChildExit while exiting,
 		// graceful drain, or initial reconcile of a stopped intent.
 		return nil
+	}
+	return nil
+}
+
+// admitCreateProcess is the universal final gate before every controller spawn
+// origin. Hydration integrity is checked first; then any durable receipt is a
+// recovery obligation, not an absence proof. Only commit-last removal after a
+// free-port observation can make this gate admit a replacement child.
+func (c *supervisorController) admitCreateProcess(taskName string) error {
+	if c == nil || c.tracker == nil {
+		return nil
+	}
+	if err := c.tracker.StopSettlementIntegrityError(); err != nil {
+		return err
+	}
+	if receipt, pending := c.tracker.StopSettlementReceipt(canonicalSupervisorTaskName(taskName)); pending {
+		return fmt.Errorf("create-process denied until stop settlement %s/%d for %s is committed", receipt.Phase, receipt.Attempt, receipt.TaskName)
 	}
 	return nil
 }
@@ -3779,12 +3917,15 @@ func descriptorForTerminateSideEffect(d *api.SupervisorDaemon, ev api.LoopEvent)
 // EvHealthOK / pre-child EvChildExit self-posts. On selfCh saturation
 // (should never happen at production cap) the saturated-audit row fires
 // and the next liveness sweep re-drives the restart.
-func (c *supervisorController) synthesizeForeignChildExit(d *api.SupervisorDaemon, ev api.LoopEvent) {
+func (c *supervisorController) synthesizeForeignChildExit(d *api.SupervisorDaemon, ev api.LoopEvent, expected terminationExpectedTuple) {
 	if c == nil || d == nil || c.eventLoop == nil {
 		return
 	}
 	if c.events != nil {
-		reason, _ := ev.Body["reason"].(string)
+		reason := ""
+		if ev.Body != nil {
+			reason, _ = ev.Body["reason"].(string)
+		}
 		_ = c.events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "lifecycle",
@@ -3796,7 +3937,8 @@ func (c *supervisorController) synthesizeForeignChildExit(d *api.SupervisorDaemo
 			},
 		})
 	}
-	if !c.eventLoop.PostSelf(api.LoopEvent{Kind: api.EvChildExit, TaskName: d.TaskName}) {
+	body := map[string]any{"pid": expected.PID, "pid_generation": expected.PIDGeneration, "started_at": expected.StartedAt}
+	if !c.eventLoop.PostSelf(api.LoopEvent{Kind: evForeignTerminationExit, TaskName: d.TaskName, Body: body}) {
 		c.emitSelfChannelSaturated(d.TaskName, "EvChildExit")
 	}
 }
@@ -4601,6 +4743,9 @@ func runCrashEventBridge(
 			// / synthetic) as current, so gen-less exits pass through.
 			body["pid"] = ev.PID
 			body["pid_generation"] = ev.PIDGeneration
+			if !ev.StartedAt.IsZero() {
+				body["started_at"] = ev.StartedAt.UTC().Format(time.RFC3339Nano)
+			}
 			// clean_exit lets handleLoopEvent distinguish a deliberate
 			// clean shutdown (exit 0, no wait error) from a crash. The
 			// controller honors a clean exit ONLY when a controller-driven
@@ -4611,7 +4756,7 @@ func runCrashEventBridge(
 			// path unchanged.
 			body[supervisorCleanExitBodyKey] = ev.ExitCode == 0 && ev.WaitErr == nil
 			loop.Post(api.LoopEvent{
-				Kind:     api.EvChildExit,
+				Kind:     evOwnedChildWaitExit,
 				TaskName: ev.Daemon.TaskName,
 				Body:     body,
 			})

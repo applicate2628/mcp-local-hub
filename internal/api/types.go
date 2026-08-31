@@ -104,6 +104,10 @@ type DaemonStatus struct {
 	// Sourced from the v0.5.x supervisor IPC path.
 	SpawnHoldReason string `json:"spawn_hold_reason,omitempty"`
 	SpawnHoldPath   string `json:"spawn_hold_path,omitempty"`
+	// StopSettlement is present only while an exact durable stop receipt has
+	// not reached commit-last removal. It is diagnostic-only; lifecycle actions
+	// remain controller-owned.
+	StopSettlement *StopSettlementDiagnosticV1 `json:"stop_settlement,omitempty"`
 
 	// MCP-level health probe (populated only by Status with probeHealth=true).
 	// Running daemon / bound port does NOT imply the MCP protocol is alive —

@@ -441,7 +441,7 @@ func TestSupervisorController_LegacyNilSpecSerenaProxy_QuarantinedNotSpawned(t *
 		TaskName:    legacyTask,
 		Server:      "serena",
 		Daemon:      "deadbeef",
-		Args:        []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121"},
+		Args:        []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `<workspace-alpha>`, "--port", "9121"},
 		RuntimeSpec: nil, // pre-redesign / stale row
 	}
 	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
@@ -771,12 +771,14 @@ func TestSupervisorController_ReregisterOwnSpawnedNoDoubleSynthesize(t *testing.
 			spawned <- pid
 			return nil
 		},
-		terminate: func(d api.SupervisorDaemon) error {
+		terminateOutcome: func(d api.SupervisorDaemon, expected TerminationExpectedTuple) TerminationOutcome {
 			e, _ := tracker.Get(d.TaskName)
-			// Production terminate returns nil when the targeted PID is gone.
 			tracker.MarkTerminated(d.TaskName)
 			terminated <- e.CurrentPID
-			return nil
+			// This fixture models the explicit terminal proof supplied by the
+			// production identity-verified foreign termination path. Legacy nil
+			// termination remains covered by TestLegacyTerminationNilIsUncertain.
+			return TerminationOutcome{Kind: terminationOutcomeTerminated, Expected: expected}
 		},
 	}
 	ctrl.intentCache.Refresh(intent)
@@ -890,6 +892,56 @@ func TestSupervisorController_ReregisterOwnSpawnedNoDoubleSynthesize(t *testing.
 // closes the IntentDesired=stopped branch of StIdle+EvStart: SM
 // returns (StIdle, "intent suppresses spawn") and the spawn closure
 // must not fire.
+func TestSupervisorController_EvChildExitSpawnGateHoldsLiveListenerWithoutCrashAndReleasesOnce(t *testing.T) {
+	const taskName = `\mcp-local-hub-time-default`
+	d := &api.SupervisorDaemon{TaskName: taskName, Port: 9242}
+	tracker := NewDaemonRuntimeTracker()
+	var occupied atomic.Bool
+	occupied.Store(true)
+	var spawns atomic.Int32
+	ctrl := &supervisorController{
+		tracker:    tracker,
+		portGateCh: make(chan portGateReq, 1),
+		portOwnerFn: func(port int) (int, bool, error) {
+			if port != d.Port {
+				t.Fatalf("port probe = %d, want %d", port, d.Port)
+			}
+			if occupied.Load() {
+				return 7777, true, nil // descendant-held / owned listener model
+			}
+			return 0, false, nil
+		},
+		spawn: func(api.SupervisorDaemon) error {
+			spawns.Add(1)
+			return nil
+		},
+	}
+	if err := ctrl.executeSideEffect("create-process", api.StSpawning, d, api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName}); !errors.Is(err, errSpawnHeldPortSquatter) {
+		t.Fatalf("held listener spawn result = %v, want held-port sentinel", err)
+	}
+	if got := spawns.Load(); got != 0 {
+		t.Fatalf("spawn calls while listener held = %d, want 0", got)
+	}
+	if got := tracker.CrashCountInWindow(taskName, time.Now().UTC(), time.Hour); got != 0 {
+		t.Fatalf("held listener consumed crash budget = %d, want 0", got)
+	}
+	select {
+	case request := <-ctrl.portGateCh:
+		if request.ownerPID != 7777 || request.d.TaskName != taskName {
+			t.Fatalf("port-gate request = %+v, want held task/pid", request)
+		}
+	default:
+		t.Fatal("held listener was not dispatched to async port gate")
+	}
+	occupied.Store(false)
+	if err := ctrl.executeSideEffect("create-process", api.StSpawning, d, api.LoopEvent{Kind: api.EvChildExit, TaskName: taskName}); err != nil {
+		t.Fatalf("released listener spawn: %v", err)
+	}
+	if got := spawns.Load(); got != 1 {
+		t.Fatalf("spawn calls after release = %d, want exactly 1", got)
+	}
+}
+
 func TestSupervisorController_HandleEvStart_StopIntentSuppressesSpawn(t *testing.T) {
 	tmpHome := apitest.HardenedTempDir(t)
 	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")

@@ -1230,6 +1230,73 @@ func TestManagedRouterLease_RetainsGenerationRevalidatesAndClosesOnce(t *testing
 	}
 }
 
+type managedRouterGenerationLeaseForTest struct {
+	revalidations []string
+	closeCalls    int
+}
+
+func (l *managedRouterGenerationLeaseForTest) Revalidate(context.Context) string {
+	if len(l.revalidations) == 0 {
+		return ""
+	}
+	result := l.revalidations[0]
+	l.revalidations = l.revalidations[1:]
+	return result
+}
+
+func (l *managedRouterGenerationLeaseForTest) Close() error {
+	l.closeCalls++
+	return nil
+}
+
+func TestVerifyManagedRouterGeneration_BindsVersionCommitAndFinalGeneration(t *testing.T) {
+	version := managedRouterVersion{Version: "0.4.33", Commit: "abcdef0"}
+	t.Run("exact proof", func(t *testing.T) {
+		lease := &managedRouterGenerationLeaseForTest{}
+		err := verifyManagedRouterGeneration(context.Background(), 9125, version.Version, version.Commit,
+			func(context.Context, int) api.ManagedRouterAuthorization {
+				return api.ManagedRouterAuthorization{Lease: lease}
+			},
+			func(context.Context, int) (managedRouterVersion, error) { return version, nil })
+		if err != nil {
+			t.Fatalf("exact generation proof: %v", err)
+		}
+		if lease.closeCalls != 1 {
+			t.Fatalf("lease close calls=%d, want 1", lease.closeCalls)
+		}
+	})
+	t.Run("version commit mismatch is refused", func(t *testing.T) {
+		lease := &managedRouterGenerationLeaseForTest{}
+		err := verifyManagedRouterGeneration(context.Background(), 9125, version.Version, version.Commit,
+			func(context.Context, int) api.ManagedRouterAuthorization {
+				return api.ManagedRouterAuthorization{Lease: lease}
+			},
+			func(context.Context, int) (managedRouterVersion, error) {
+				return managedRouterVersion{Version: version.Version, Commit: "other"}, nil
+			})
+		if err == nil || !strings.Contains(err.Error(), "version or commit mismatch") {
+			t.Fatalf("mismatch error=%v", err)
+		}
+		if lease.closeCalls != 1 {
+			t.Fatalf("lease close calls=%d, want 1", lease.closeCalls)
+		}
+	})
+	t.Run("final generation change is refused", func(t *testing.T) {
+		lease := &managedRouterGenerationLeaseForTest{revalidations: []string{api.ManagedRouterFailureIdentityChanged}}
+		err := verifyManagedRouterGeneration(context.Background(), 9125, version.Version, version.Commit,
+			func(context.Context, int) api.ManagedRouterAuthorization {
+				return api.ManagedRouterAuthorization{Lease: lease}
+			},
+			func(context.Context, int) (managedRouterVersion, error) { return version, nil })
+		if err == nil || !strings.Contains(err.Error(), "final generation revalidation") {
+			t.Fatalf("generation-change error=%v", err)
+		}
+		if lease.closeCalls != 1 {
+			t.Fatalf("lease close calls=%d, want 1", lease.closeCalls)
+		}
+	})
+}
+
 func TestStrictManagedRouterPing(t *testing.T) {
 	tests := []struct {
 		name        string

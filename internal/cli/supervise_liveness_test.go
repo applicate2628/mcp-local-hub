@@ -401,6 +401,15 @@ func TestLoadSupervisorStartupRuntimeTerminatesAliveExpiredUnboundPortBeforeResp
 			return nil
 		},
 	}
+	// The loaded PID is a foreign warm-start. This fixture explicitly proves a
+	// terminal terminate result, which is required before the controller can
+	// synthesize its otherwise-missing child exit and release the queued respawn.
+	ctrl.terminateOutcome = func(d api.SupervisorDaemon, expected TerminationExpectedTuple) TerminationOutcome {
+		if err := ctrl.terminate(d); err != nil {
+			return TerminationOutcome{Kind: terminationOutcomeFailed, Expected: expected, Cause: err}
+		}
+		return TerminationOutcome{Kind: terminationOutcomeTerminated, Expected: expected}
+	}
 	// Startup hydrates the SM state to StRunning from currentRunning (the
 	// same call runSupervise makes at supervise.go before reconcile).
 	hydrateControllerRunningStates(ctrl, currentRunning)
@@ -1168,6 +1177,15 @@ func TestSupervisorLivenessRestartForAliveUnboundPortTerminatesBeforeRespawn(t *
 		},
 	}
 	ctrl.smStates.Store(taskName, api.StRunning)
+	// This foreign warm-start fixture asserts the typed terminal result that
+	// authorizes a synthetic child exit. The legacy nil terminate path remains
+	// covered separately as deliberately uncertain.
+	ctrl.terminateOutcome = func(d api.SupervisorDaemon, expected TerminationExpectedTuple) TerminationOutcome {
+		if err := ctrl.terminate(d); err != nil {
+			return TerminationOutcome{Kind: terminationOutcomeFailed, Expected: expected, Cause: err}
+		}
+		return TerminationOutcome{Kind: terminationOutcomeTerminated, Expected: expected}
+	}
 	loop.RegisterHandler(ctrl.handleLoopEvent)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -1352,6 +1370,15 @@ func TestSupervisorLivenessForeignWarmStartPIDSynthesizesChildExitAndRespawns(t 
 			terminated <- e.CurrentPID
 			return nil
 		},
+	}
+	// This is a foreign warm-start fixture, so it deliberately supplies the
+	// typed terminal proof required to synthesize an exact child exit. A legacy
+	// nil terminate callback is intentionally uncertain after the lifecycle fix.
+	ctrl.terminateOutcome = func(d api.SupervisorDaemon, expected TerminationExpectedTuple) TerminationOutcome {
+		if err := ctrl.terminate(d); err != nil {
+			return TerminationOutcome{Kind: terminationOutcomeFailed, Expected: expected, Cause: err}
+		}
+		return TerminationOutcome{Kind: terminationOutcomeTerminated, Expected: expected}
 	}
 	// Warm-start hydration: SM state is StRunning for the foreign PID, the
 	// same call runSupervise makes via hydrateControllerRunningStates.

@@ -16,7 +16,9 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 )
 
 // supervisorDispatchRowForTarget builds the per-target RestartResult row
@@ -96,10 +98,37 @@ type supervisorReconcileApplyFunc func(ctx context.Context, apply bool) (Reconci
 
 var supervisorReconcileApplyFn supervisorReconcileApplyFunc = DialSupervisorIPCReconcile
 
+type supervisorStopBatchFunc func(ctx context.Context, command StopBatchCommandV1) (StopBatchResultV1, error)
+
+var supervisorStopBatchFn supervisorStopBatchFunc = DialSupervisorIPCStopBatch
+
 func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) func() {
 	prev := supervisorReconcileApplyFn
 	supervisorReconcileApplyFn = fn
-	return func() { supervisorReconcileApplyFn = prev }
+	return func() {
+		supervisorReconcileApplyFn = prev
+	}
+}
+
+func setSupervisorStopBatchHookForTest(fn supervisorStopBatchFunc) func() {
+	previous := supervisorStopBatchFn
+	supervisorStopBatchFn = fn
+	return func() { supervisorStopBatchFn = previous }
+}
+
+func stoppedSettlementResult(taskName string, result StopBatchResultV1, index int) RestartResult {
+	if index < 0 || index >= len(result.Settlements) || result.Settlements[index].TaskName != taskName {
+		return RestartResult{TaskName: taskName, Err: "supervisor stop settlement incomplete: settlement absent"}
+	}
+	row := result.Settlements[index]
+	if row.State == StoppedSettlementStopped && row.Reason == StoppedSettlementReasonStopped {
+		return RestartResult{TaskName: taskName}
+	}
+	detail := row.Reason
+	if row.Error != "" {
+		detail += ": " + row.Error
+	}
+	return RestartResult{TaskName: taskName, Err: "supervisor stop settlement " + string(row.State) + ": " + detail}
 }
 
 // stopSupervisorOwnedDaemons stops the supervisor-owned daemons in scope
@@ -148,43 +177,74 @@ func setSupervisorReconcileApplyHookForTest(fn supervisorReconcileApplyFunc) fun
 // from disk, so a stop intent that is not yet on disk
 // cannot be applied.
 func stopSupervisorOwnedDaemons(ctx context.Context, server, daemonFilter string) ([]RestartResult, bool, error) {
-	targets, err := loadSupervisorOwnedTargets(server, daemonFilter)
+	intent, err := loadSupervisorOwnedIntent()
 	if err != nil {
 		return nil, false, err
 	}
+	targets := selectSupervisorOwnedTargets(intent, server, daemonFilter)
 	if len(targets) == 0 {
 		return nil, false, nil
 	}
-	resp, err := supervisorReconcileApplyFn(ctx, true)
+	results := make([]RestartResult, len(targets))
+	batchTargets := make([]StopBatchTargetV1, 0, len(targets))
+	admitted := make([]int, 0, len(targets))
+	for i, d := range targets {
+		results[i].TaskName = d.TaskName
+		port, ok := EffectiveDaemonPort(d)
+		if !ok {
+			results[i].Err = "resolve stop settlement port: unavailable"
+			continue
+		}
+		batchTargets = append(batchTargets, StopBatchTargetV1{TaskName: d.TaskName, ExpectedPort: port})
+		admitted = append(admitted, i)
+	}
+	if len(admitted) == 0 {
+		return results, true, nil
+	}
+	if intent == nil || intent.IntentGeneration == 0 {
+		return nil, true, fmt.Errorf("supervisor stop intent generation unavailable")
+	}
+	intentSnapshot := cloneSupervisorIntentFile(intent)
+	stopsSnapshot := intentSnapshot.StopsAsDaemonIntentFile()
+	stopsCopy := &DaemonIntentFile{Tasks: make(map[string]DaemonIntent, len(stopsSnapshot.Tasks))}
+	for taskName, stop := range stopsSnapshot.Tasks {
+		stopsCopy.Tasks[taskName] = stop
+	}
+	command := StopBatchCommandV1{
+		ProtocolVersion:  1,
+		BatchID:          fmt.Sprintf("stop-%d", time.Now().UnixNano()),
+		Targets:          batchTargets,
+		IntentGeneration: intentSnapshot.IntentGeneration,
+		SupervisorIntent: intentSnapshot,
+		UnifiedStops:     stopsCopy,
+	}
+	batch, err := supervisorStopBatchFn(ctx, command)
 	if err != nil {
+		admittedTargets := make([]SupervisorDaemon, 0, len(admitted))
+		for _, i := range admitted {
+			admittedTargets = append(admittedTargets, targets[i])
+		}
 		if errors.Is(err, ErrSupervisorIPCUnavailable) {
-			if rows, blocked := supervisorIPCUnavailableRetryRowsForLiveOwner(targets, err); blocked {
-				return rows, true, nil
+			if rows, blocked := supervisorIPCUnavailableRetryRowsForLiveOwner(admittedTargets, err); blocked {
+				for j, i := range admitted {
+					results[i] = rows[j]
+				}
+				return results, true, nil
 			}
-			results := make([]RestartResult, 0, len(targets))
-			for _, d := range targets {
-				results = append(results, forceKillOneSupervisorTarget(d, nil))
+			for _, i := range admitted {
+				results[i] = forceKillOneSupervisorTarget(targets[i], nil)
 			}
 			return results, true, nil
 		}
-		results := make([]RestartResult, 0, len(targets))
-		for _, d := range targets {
-			results = append(results, RestartResult{
-				TaskName: d.TaskName,
-				Err:      "supervisor stop reconcile: " + err.Error(),
-			})
+		for _, i := range admitted {
+			results[i].Err = "supervisor stop reconcile: " + err.Error()
 		}
 		return results, true, nil
 	}
-	// Reconcile transport succeeded — but the response's per-target drift
-	// tells us which targets the supervisor actually posted EvIntentUpdate
-	// for (post_ev_intent_update drift entries) versus which converge only via
-	// the IntentWatcher (the no_op / missing-entry edges) or need operator
-	// intervention (needs_manual_review / unsupported actions). Report each
-	// honestly.
-	results := make([]RestartResult, 0, len(targets))
-	for _, d := range targets {
-		results = append(results, supervisorDispatchRowForTarget(d.TaskName, resp.Drift))
+	// Require one controller-owned same-order terminal settlement per target;
+	// an older supervisor's missing or malformed batch echo fails closed.
+	for batchIndex, i := range admitted {
+		results[i] = stoppedSettlementResult(targets[i].TaskName, batch, batchIndex)
 	}
 	return results, true, nil
 }

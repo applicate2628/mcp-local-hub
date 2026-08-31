@@ -132,6 +132,14 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 	}
 	ctx, cancel := context.WithTimeout(baseReconcileContext(deps), reconcileRequestTimeout(args))
 	defer cancel()
+	if args.Apply && deps.runtimeTracker != nil {
+		if integrityErr := deps.runtimeTracker.StopSettlementIntegrityError(); integrityErr != nil {
+			return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "STOP_SETTLEMENT_RECOVERY_REQUIRED", Message: integrityErr.Error()}, Final: true})
+		}
+	}
+	if args.StopBatch != nil {
+		return handleReconcileStopBatch(conn, req, ctx, deps, *args.StopBatch)
+	}
 
 	// (0) Serena registry/intent self-heal (the P1 fix this closes: `mcphub
 	// workspace register` used to commit a workspaces.yaml row and print
@@ -312,7 +320,7 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		return writeReconcileTimeoutFrame(conn, req, schedErr)
 	}
 	if schedErr != nil {
-		if api.SchedulerUnavailableError(schedErr) {
+		if api.ReconcileSchedulerUnavailableError(schedErr) {
 			schedTasks = nil
 		} else {
 			return writeIPCFrame(conn, api.IPCResponse{
@@ -459,7 +467,11 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 			// A targeted caller needs the same handler deadline to bound event
 			// enqueue as well as controller processing. The target-less path above
 			// remains byte-for-byte on its historical blocking Post behavior.
-			appliedCount, _ = applyReconcileDriftForTarget(ctx, deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent)
+			var applyErr error
+			appliedCount, applyErr = applyReconcileDriftForTargetWithObserver(ctx, deps, drift, cacheRefreshSupervisorIntent, cacheRefreshDaemonIntent, nil)
+			if applyErr != nil {
+				return fmt.Errorf("apply targeted reconcile drift: %w", applyErr)
+			}
 		}
 	}
 
@@ -472,7 +484,6 @@ func handleReconcile(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) er
 		settled := ctrl.settleReconcileTarget(ctx, *args.SettleTarget)
 		targetSettlement = &settled
 	}
-
 	// (8) Audit emit. Failures are non-fatal (the response is still
 	// honored); the event log itself surfaces emit errors via its own
 	// degraded-write path.
@@ -620,7 +631,48 @@ func parseReconcileArgs(raw map[string]any) (api.ReconcileArgs, error) {
 			return args, fmt.Errorf("settle_target expected_port must be in 1..65535")
 		}
 	}
+	if batch := args.StopBatch; batch != nil {
+		if !args.Apply {
+			return args, fmt.Errorf("stop_batch requires apply=true")
+		}
+		if args.SettleTarget != nil {
+			return args, fmt.Errorf("stop_batch cannot be combined with legacy settlement arguments")
+		}
+		if batch.ProtocolVersion != 1 || strings.TrimSpace(batch.BatchID) == "" || len(batch.Targets) == 0 {
+			return args, fmt.Errorf("stop_batch requires protocol_version=1, batch_id, and targets")
+		}
+		seen := make(map[string]struct{}, len(batch.Targets))
+		for i, target := range batch.Targets {
+			if target.TaskName != canonicalTaskNameForReconcile(target.TaskName) || target.ExpectedPort <= 0 || target.ExpectedPort > 65535 {
+				return args, fmt.Errorf("stop_batch target %d must use canonical task_name and port in 1..65535", i)
+			}
+			if _, duplicate := seen[target.TaskName]; duplicate {
+				return args, fmt.Errorf("stop_batch contains duplicate task_name %q", target.TaskName)
+			}
+			seen[target.TaskName] = struct{}{}
+		}
+	}
 	return args, nil
+}
+
+func handleReconcileStopBatch(conn net.Conn, req api.IPCRequest, ctx context.Context, deps ipcDispatchDeps, command api.StopBatchCommandV1) error {
+	if deps.controllerProvider == nil || deps.controllerProvider() == nil {
+		return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "STOP_BATCH_UNSUPPORTED", Message: "supervisor controller unavailable", Retryable: true}, Final: true})
+	}
+	result, err := deps.controllerProvider().postStopBatchAndSettle(ctx, command)
+	if err != nil {
+		code := "STOP_BATCH_REFUSED"
+		retryable := false
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+			code, retryable = "STOP_BATCH_INCOMPLETE", true
+		}
+		return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: code, Message: err.Error(), Retryable: retryable}, Final: true})
+	}
+	body, err := json.Marshal(api.ReconcileResponse{DryRun: false, StopBatch: &result})
+	if err != nil {
+		return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, Error: &api.IPCErr{Code: "STOP_BATCH_MARSHAL_FAILED", Message: err.Error()}, Final: true})
+	}
+	return writeIPCFrame(conn, api.IPCResponse{ID: req.ID, OK: true, Result: json.RawMessage(body), Final: true})
 }
 
 // computeIntentDesired returns the per-task desired-state string. The
@@ -1123,12 +1175,38 @@ func applyReconcileDriftForTarget(
 	return applyReconcileDriftWithContext(ctx, deps, drift, updatedIntent, daemonIntentCacheRefresh)
 }
 
+// applyReconcileDriftForTargetWithObserver is the targeted variant used by a
+// stop settlement.  The observer runs only after PostCtx accepted that exact
+// event, so a durable receipt can distinguish a queued stop from a request
+// that never reached the controller.
+func applyReconcileDriftForTargetWithObserver(
+	ctx context.Context,
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
+	onPosted func(api.LoopEvent) error,
+) (int, error) {
+	return applyReconcileDriftWithContextAndObserver(ctx, deps, drift, updatedIntent, daemonIntentCacheRefresh, onPosted)
+}
+
 func applyReconcileDriftWithContext(
 	postCtx context.Context,
 	deps ipcDispatchDeps,
 	drift []api.DriftEntry,
 	updatedIntent *api.SupervisorIntentFile,
 	daemonIntentCacheRefresh *api.DaemonIntentFile,
+) (int, error) {
+	return applyReconcileDriftWithContextAndObserver(postCtx, deps, drift, updatedIntent, daemonIntentCacheRefresh, nil)
+}
+
+func applyReconcileDriftWithContextAndObserver(
+	postCtx context.Context,
+	deps ipcDispatchDeps,
+	drift []api.DriftEntry,
+	updatedIntent *api.SupervisorIntentFile,
+	daemonIntentCacheRefresh *api.DaemonIntentFile,
+	onPosted func(api.LoopEvent) error,
 ) (int, error) {
 	if deps.controllerProvider == nil {
 		return 0, nil
@@ -1213,6 +1291,11 @@ func applyReconcileDriftWithContext(
 			ctrl.eventLoop.Post(event)
 		} else if err := ctrl.eventLoop.PostCtx(postCtx, event); err != nil {
 			return applied, err
+		}
+		if onPosted != nil {
+			if err := onPosted(event); err != nil {
+				return applied, err
+			}
 		}
 		applied++
 	}
