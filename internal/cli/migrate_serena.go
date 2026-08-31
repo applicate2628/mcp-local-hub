@@ -199,8 +199,11 @@ var reconcileSerenaClientsFn = func(ctx context.Context, w io.Writer) (*api.Migr
 		RoutingTarget: &target,
 		PidportPath:   pidportPath,
 		ReadPidport:   gui.ReadPidport,
-		RemoveLegacy:  true,
-		BackupKeepN:   effectiveBackupKeepN(),
+		VerifyIdentity: func(verifyCtx context.Context, pid, port int) error {
+			return gui.VerifyGUIOwnerListener(verifyCtx, pidportPath, pid, port)
+		},
+		RemoveLegacy: true,
+		BackupKeepN:  effectiveBackupKeepN(),
 	})
 }
 

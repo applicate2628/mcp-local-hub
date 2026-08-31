@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -91,11 +92,13 @@ func TestInodeAnchorIntentCollapseBackupRejectsSymlink(t *testing.T) {
 	}
 }
 
-func TestInodeAnchorSerenaReconcilePidportRejectsSymlink(t *testing.T) {
+func TestSerenaReconcilePidportRequiresCompositionReader(t *testing.T) {
 	path := symlinkStateFileForInodeAnchorTest(t, "gui.pidport", []byte("123 456\n"))
-
-	if _, _, err := parseGUIPidportFile(path); err == nil {
-		t.Fatalf("parseGUIPidportFile followed a symlink; want inode-anchor refusal")
+	prior := readPidportFn
+	readPidportFn = func(string) (int, int, error) { return 0, 0, fmt.Errorf("reader unavailable") }
+	defer func() { readPidportFn = prior }()
+	if _, _, err := readPidportFn(path); err == nil {
+		t.Fatalf("missing composition reader accepted a pidport")
 	}
 }
 

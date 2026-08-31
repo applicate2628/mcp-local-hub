@@ -30,13 +30,12 @@ func TestAcquireSingleInstance_FirstCallerSucceeds(t *testing.T) {
 		t.Fatalf("acquire: %v", err)
 	}
 	defer lock.Release()
-	got, err := os.ReadFile(pidport)
+	record, err := ReadGUIOwnerRecord(pidport)
 	if err != nil {
-		t.Fatalf("read pidport: %v", err)
+		t.Fatalf("read owner record: %v", err)
 	}
-	want := []byte(formatPidport(os.Getpid(), 9100))
-	if string(got) != string(want) {
-		t.Errorf("pidport content = %q, want %q", got, want)
+	if record.Version != guiOwnerRecordVersion || record.State != guiOwnerStateActive || record.PID != os.Getpid() || record.Port != 9100 || record.StartTime.IsZero() || record.Generation == "" {
+		t.Errorf("owner record = %#v, want active v2 current-process record on port 9100", record)
 	}
 }
 
@@ -454,24 +453,23 @@ func TestWritePidport_WritesBothPidAndPort(t *testing.T) {
 	if err := os.WriteFile(pidport, []byte("99999 22222\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := WritePidport(pidport, 12345, 9100); err != nil {
+	if err := WritePidport(pidport, os.Getpid(), 9100); err != nil {
 		t.Fatalf("WritePidport: %v", err)
 	}
-	got, err := os.ReadFile(pidport)
+	record, err := ReadGUIOwnerRecord(pidport)
 	if err != nil {
-		t.Fatalf("read pidport: %v", err)
+		t.Fatalf("read owner record: %v", err)
 	}
-	want := []byte("12345 9100\n")
-	if string(got) != string(want) {
-		t.Errorf("pidport content = %q, want %q", got, want)
+	if record.Version != guiOwnerRecordVersion || record.State != guiOwnerStateActive || record.PID != os.Getpid() || record.Port != 9100 || record.StartTime.IsZero() || record.Generation == "" {
+		t.Errorf("owner record = %#v, want active v2 current-process record on port 9100", record)
 	}
 	// Also verify ReadPidport parses it back cleanly.
 	pid, port, perr := ReadPidport(pidport)
 	if perr != nil {
 		t.Fatalf("ReadPidport: %v", perr)
 	}
-	if pid != 12345 || port != 9100 {
-		t.Errorf("ReadPidport = pid=%d port=%d, want 12345 9100", pid, port)
+	if pid != os.Getpid() || port != 9100 {
+		t.Errorf("ReadPidport = pid=%d port=%d, want %d 9100", pid, port, os.Getpid())
 	}
 }
 

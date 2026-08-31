@@ -579,14 +579,7 @@ func TestRestartV3_ReservationRejectsThirdEntrantAndDesignatedChildWins(t *testi
 	defer designatedLease.Release()
 	assertSingleInstanceFlockHeld(t, pidportPath)
 
-	raw, err := os.ReadFile(pidportPath)
-	if err != nil {
-		t.Fatalf("read designated child pidport: %v", err)
-	}
-	want := []byte(formatPidport(os.Getpid(), 9125))
-	if string(raw) != string(want) {
-		t.Fatalf("designated child pidport = %q, want %q", raw, want)
-	}
+	assertV2GUIOwnerRecord(t, pidportPath, 9125)
 }
 
 func TestRestartV3_ReservedDeadlineOutlivesGenerationFreshness(t *testing.T) {
@@ -1030,10 +1023,10 @@ func TestRestartV3_GateOffAcquireIsLegacyByteIdenticalAndReadsNoMarker(t *testin
 		if markerReads != 0 {
 			t.Fatalf("gate-off marker reads = %d, want zero", markerReads)
 		}
-		assertLegacyPidportBytes(t, pidportPath, 9125)
+		assertV2GUIOwnerRecord(t, pidportPath, 9125)
 	})
 
-	t.Run("gate on absent marker keeps legacy pidport bytes", func(t *testing.T) {
+	t.Run("gate on absent marker writes v2 pidport record", func(t *testing.T) {
 		now := time.Date(2026, 7, 17, 17, 0, 0, 0, time.UTC)
 		dir := apitest.HardenedTempDir(t)
 		pidportPath := filepath.Join(dir, "gui.pidport")
@@ -1054,19 +1047,18 @@ func TestRestartV3_GateOffAcquireIsLegacyByteIdenticalAndReadsNoMarker(t *testin
 		if markerReads != 1 {
 			t.Fatalf("gate-on absent-marker reads = %d, want one", markerReads)
 		}
-		assertLegacyPidportBytes(t, pidportPath, 9125)
+		assertV2GUIOwnerRecord(t, pidportPath, 9125)
 	})
 }
 
-func assertLegacyPidportBytes(t *testing.T, pidportPath string, port int) {
+func assertV2GUIOwnerRecord(t *testing.T, pidportPath string, port int) {
 	t.Helper()
-	raw, err := os.ReadFile(pidportPath)
+	record, err := ReadGUIOwnerRecord(pidportPath)
 	if err != nil {
-		t.Fatalf("read pidport: %v", err)
+		t.Fatalf("read owner record: %v", err)
 	}
-	want := []byte(formatPidport(os.Getpid(), port))
-	if string(raw) != string(want) {
-		t.Fatalf("pidport bytes = %q, want legacy bytes %q", raw, want)
+	if record.Version != guiOwnerRecordVersion || record.State != guiOwnerStateActive || record.PID != os.Getpid() || record.Port != port || record.StartTime.IsZero() || record.Generation == "" {
+		t.Fatalf("owner record = %#v, want active v2 current-process record on port %d", record, port)
 	}
 }
 

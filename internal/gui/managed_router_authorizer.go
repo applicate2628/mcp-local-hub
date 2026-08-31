@@ -29,15 +29,17 @@ const (
 )
 
 type managedRouterProcessGeneration struct {
-	pid        int
-	port       int
-	ownerPID   int
-	executable string
-	startTime  time.Time
+	pid              int
+	port             int
+	ownerPID         int
+	executable       string
+	startTime        time.Time
+	recordGeneration string
 }
 
 type managedRouterAuthorizerDeps struct {
 	readPidport       func(string) (int, int, error)
+	readOwnerRecord   func(string) (GUIOwnerRecord, error)
 	statPidport       func(string) (os.FileInfo, error)
 	portOwner         func(context.Context, int) (int, bool, error)
 	processID         func(int) (ProcessIdentity, error)
@@ -68,10 +70,11 @@ func NewManagedRouterAuthorizer(pidportPath, currentExecutable, expectedVersion 
 		currentExecutable,
 		expectedVersion,
 		managedRouterAuthorizerDeps{
-			readPidport: ReadPidport,
-			statPidport: os.Stat,
-			portOwner:   api.LoopbackPortOwnerPIDContext,
-			processID:   retainedProcessID,
+			readPidport:     ReadPidport,
+			readOwnerRecord: ReadGUIOwnerRecord,
+			statPidport:     os.Stat,
+			portOwner:       api.LoopbackPortOwnerPIDContext,
+			processID:       retainedProcessID,
 			closeID: func(identity *ProcessIdentity) error {
 				return identity.Close()
 			},
@@ -333,8 +336,23 @@ func observeManagedRouterGeneration(
 	expectedExecutable string,
 	deps managedRouterAuthorizerDeps,
 ) (managedRouterProcessGeneration, ProcessIdentity, string) {
-	pid, port, err := deps.readPidport(pidportPath)
-	if err != nil || pid <= 0 || port <= 0 || port > 65535 {
+	var record *GUIOwnerRecord
+	pid, port := 0, 0
+	if deps.readOwnerRecord != nil {
+		owned, err := deps.readOwnerRecord(pidportPath)
+		if err != nil || owned.Legacy || owned.State != guiOwnerStateActive {
+			return managedRouterProcessGeneration{}, ProcessIdentity{}, api.ManagedRouterFailurePIDPortUnavailable
+		}
+		record = &owned
+		pid, port = owned.PID, owned.Port
+	} else {
+		var err error
+		pid, port, err = deps.readPidport(pidportPath)
+		if err != nil {
+			return managedRouterProcessGeneration{}, ProcessIdentity{}, api.ManagedRouterFailurePIDPortUnavailable
+		}
+	}
+	if pid <= 0 || port <= 0 || port > 65535 {
 		return managedRouterProcessGeneration{}, ProcessIdentity{}, api.ManagedRouterFailurePIDPortUnavailable
 	}
 	if port != candidatePort {
@@ -367,7 +385,7 @@ func observeManagedRouterGeneration(
 	if !cmdlineIsGui(identity.Cmdline) {
 		return reject(api.ManagedRouterFailureArgvRoleMismatch)
 	}
-	if identity.StartTime.IsZero() || !startTimeBeforeMtime(identity.StartTime, info.ModTime(), time.Second) {
+	if identity.StartTime.IsZero() || (record != nil && !identity.StartTime.UTC().Equal(record.StartTime.UTC())) || (record == nil && !startTimeBeforeMtime(identity.StartTime, info.ModTime(), time.Second)) {
 		return reject(api.ManagedRouterFailureProcessGenerationInvalid)
 	}
 	ownerMatches, err := deps.ownerMatch(pid)
@@ -383,6 +401,12 @@ func observeManagedRouterGeneration(
 		ownerPID:   ownerPID,
 		executable: observedExecutable,
 		startTime:  identity.StartTime,
+		recordGeneration: func() string {
+			if record != nil {
+				return record.Generation
+			}
+			return ""
+		}(),
 	}, identity, ""
 }
 

@@ -93,6 +93,8 @@ func TestMain(m *testing.M) {
 	// Install every adapter-path redirect before the audit and before m.Run.
 	// The descriptor is the single inventory shared with CLI and GUI tests.
 	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
+	priorReadPidport := readPidportFn
+	readPidportFn = testReadLegacyPidport
 
 	// ── PRIMARY seal: the process-lookup / wmic family ──────────────────────
 	// lookupProcess + lookupProcessBatch are wired at processes.go init() to real
@@ -233,6 +235,7 @@ func TestMain(m *testing.M) {
 	}
 
 	restoreClientEnv()
+	readPidportFn = priorReadPidport
 	if hadMimoCodeDisable {
 		_ = os.Setenv("MIMOCODE_DISABLE_CLAUDE_CODE_MCP", priorMimoCodeDisable)
 	} else {

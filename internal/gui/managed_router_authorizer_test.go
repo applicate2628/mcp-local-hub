@@ -47,6 +47,38 @@ func TestManagedRouterLease_CloseCachesFailureOnce(t *testing.T) {
 	}
 }
 
+func TestManagedRouterAuthorizer_V2RecordRequiresExactProcessStart(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "gui.pidport")
+	start := time.Now().Add(-time.Minute).UTC().Round(0)
+	record := GUIOwnerRecord{
+		Version: guiOwnerRecordVersion, State: guiOwnerStateActive, PID: 4242,
+		StartTime: start, Port: 19125, Generation: guiOwnerGeneration(4242, start),
+	}
+	if err := writeGUIOwnerRecord(path, record); err != nil {
+		t.Fatal(err)
+	}
+	executable := filepath.Join(root, "mcphub.exe")
+	authorize := newManagedRouterAuthorizerWithDeps(path, executable, "1.2.3", managedRouterAuthorizerDeps{
+		readOwnerRecord: func(string) (GUIOwnerRecord, error) { return record, nil },
+		statPidport:     os.Stat,
+		portOwner:       func(context.Context, int) (int, bool, error) { return 4242, true, nil },
+		processID: func(int) (ProcessIdentity, error) {
+			return ProcessIdentity{Alive: true, ImagePath: executable, Cmdline: []string{executable, "gui"}, StartTime: start.Add(time.Nanosecond), Handle: 1}, nil
+		},
+		closeID:    closeManagedRouterIdentityForTest,
+		ownerMatch: func(int) (bool, error) { return true, nil },
+		ping: func(context.Context, int) (managedRouterPing, string) {
+			t.Fatal("ping after generation mismatch")
+			return managedRouterPing{}, ""
+		},
+	})
+	result := authorize(context.Background(), record.Port)
+	if result.Lease != nil || result.FailureClass != api.ManagedRouterFailureProcessGenerationInvalid {
+		t.Fatalf("authorization = %#v, want exact-start refusal", result)
+	}
+}
+
 type managedRouterReleaseEventForTest struct {
 	class string
 	err   error

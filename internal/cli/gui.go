@@ -90,6 +90,28 @@ func (l *releaseOnceLease) Release() {
 	})
 }
 
+// OwnerLifecycle forwards the acquisition-bound lifecycle through the
+// restart-child release wrapper. The wrapper has no record-open fallback:
+// production may not unlock a published active record after a failed reread.
+func (l *releaseOnceLease) OwnerLifecycle() *gui.GUIOwnerLifecycle {
+	if l == nil {
+		return nil
+	}
+	owner, _ := l.lease.(interface{ OwnerLifecycle() *gui.GUIOwnerLifecycle })
+	if owner == nil {
+		return nil
+	}
+	return owner.OwnerLifecycle()
+}
+
+func ownerLifecycleFromLease(lease gui.SingleInstanceLease) *gui.GUIOwnerLifecycle {
+	owner, _ := lease.(interface{ OwnerLifecycle() *gui.GUIOwnerLifecycle })
+	if owner == nil {
+		return nil
+	}
+	return owner.OwnerLifecycle()
+}
+
 type restartV3ParentRuntime struct {
 	SettingsGet func(string) (string, error)
 	Spawn       func([]string, gui.SelfRestartHandoff) (gui.RestartParentChild, error)
@@ -147,6 +169,10 @@ func buildRestartV3ParentDependencies(
 	if runtime.SettingsGet == nil || runtime.Spawn == nil || runtime.Confirm == nil || runtime.Exit == nil {
 		return gui.RestartCoordinatorDependencies{}, errors.New("restart v3 parent runtime seams are incomplete")
 	}
+	// A real GUI lease carries the lifecycle created at acquire time. Synthetic
+	// coordinator tests may have no durable owner record, which leaves this
+	// optional dependency nil; production never re-opens the record here.
+	ownerLifecycle := ownerLifecycleFromLease(lease)
 	var intentMu sync.Mutex
 	var intent guiPortIntent
 	intentResolved := false
@@ -209,7 +235,8 @@ func buildRestartV3ParentDependencies(
 	return gui.RestartCoordinatorDependencies{
 		Context: ctx, StateDir: filepath.Dir(pidportPath), OldPort: oldPort, TargetPort: targetPort,
 		ParentPID: os.Getpid(), Lease: lease, MarkerStore: gui.NewHandoffMarkerStore(filepath.Dir(pidportPath), deadlines),
-		Deadlines: deadlines, Spawn: spawn, Confirm: runtime.Confirm, Exit: runtime.Exit,
+		OwnerLifecycle: ownerLifecycle,
+		Deadlines:      deadlines, Spawn: spawn, Confirm: runtime.Confirm, Exit: runtime.Exit,
 	}, nil
 }
 
@@ -521,7 +548,9 @@ activates the first window and exits 0.`,
 				if d := os.Getenv("MCPHUB_GUI_TEST_PIDPORT_DIR"); d != "" {
 					pidportPath = filepath.Join(d, gui.PidportFileLeaf)
 				}
-				lock, lockErr := gui.AcquireSingleInstanceAt(pidportPath, 0)
+				// This is a maintenance lock, not a GUI launch. Do not publish an
+				// active GUI owner record with no listener.
+				lock, lockErr := gui.AcquireSingleInstanceLockOnlyAt(pidportPath)
 				if lockErr != nil {
 					if errors.Is(lockErr, gui.ErrSingleInstanceBusy) {
 						fmt.Fprintln(cmd.ErrOrStderr(),
@@ -974,12 +1003,26 @@ func shouldRunTray(noTray bool) bool {
 
 func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
 	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode, releaseConsole bool, pidportPath string,
-	startup *guiServerStartup) error {
+	startup *guiServerStartup) (resultErr error) {
 	ownedLease, ok := lock.(*releaseOnceLease)
 	if !ok {
 		ownedLease = &releaseOnceLease{lease: lock}
 	}
-	defer ownedLease.Release()
+	ownerLifecycle := ownerLifecycleFromLease(lock)
+	if ownerLifecycle == nil {
+		// Do not unlock a lease whose published active record cannot be
+		// terminally settled. A real acquisition always carries the lifecycle;
+		// this invariant failure stays explicit and process exit is the only
+		// remaining release boundary.
+		return errors.New("GUI owner lifecycle is missing from acquired lease")
+	}
+	defer func() {
+		if err := ownerLifecycle.TerminalSettle(); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("settle GUI owner record before flock release: %w", err))
+			return
+		}
+		ownedLease.Release()
+	}()
 
 	// Route this command's output through the switchable diagnostic sinks
 	// BEFORE anything is written, so every cmd.OutOrStdout()/ErrOrStderr()
@@ -1215,8 +1258,16 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 		// port from AcquireSingleInstanceAt) and corrective on the
 		// takeover path.
 		actualPort := s.Port()
-		if err := gui.WritePidport(pidportPath, os.Getpid(), actualPort); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "warning: pidport rewrite: %v\n", err)
+		if err := ownerLifecycle.UpdatePort(actualPort); err != nil {
+			// A bound listener without a matching durable active record must not
+			// remain reachable: a later client reconcile could discover stale
+			// ownership. Physically close this listener before the deferred CAS
+			// tombstone and flock release.
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			closeErr := s.GUIListenerOwner().CloseListener(closeCtx)
+			cancel()
+			stop()
+			return errors.Join(fmt.Errorf("publish bound GUI owner record: %w", err), closeErr)
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "GUI listening on http://127.0.0.1:%d\n", actualPort)
 	case err := <-errCh:

@@ -36,7 +36,6 @@ import (
 	"fmt"
 	"net/url"
 	"sort"
-	"strconv"
 	"strings"
 
 	"mcp-local-hub/internal/clients"
@@ -605,37 +604,12 @@ func serenaReconcileClientSet() []string {
 	}
 }
 
-// readPidportFn is the test seam for parsing the GUI pidport file. It
-// mirrors internal/gui.ReadPidport's "<PID> <PORT>\n" parse exactly so the
-// runtime fail-closed contract is identical; the api package cannot import
-// internal/gui directly (internal/gui imports internal/api, so the reverse
-// would be an import cycle). Phase 4's caller in internal/cli — which CAN
-// import both — may inject gui.ReadPidport via SerenaReconcileOpts.ReadPidport.
-//
-// Default: parseGUIPidportFile below.
-var readPidportFn = parseGUIPidportFile
-
-// parseGUIPidportFile reads "<PID> <PORT>\n" from path. Returns (0,0,err) on
-// a missing file or any parse failure — byte-identical semantics to
-// internal/gui.ReadPidport (single_instance.go:92-110).
-func parseGUIPidportFile(path string) (pid, port int, err error) {
-	b, err := readStateFileInodeAnchored(path)
-	if err != nil {
-		return 0, 0, err
-	}
-	parts := strings.Fields(string(b))
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("malformed pidport %q", string(b))
-	}
-	pid, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("parse pid: %w", err)
-	}
-	port, err = strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, 0, fmt.Errorf("parse port: %w", err)
-	}
-	return pid, port, nil
+// readPidportFn deliberately has no parser implementation in api. The v2
+// owner-record schema belongs to internal/gui, while api sits below it in the
+// dependency graph. Composition callers inject gui.ReadPidport; an omitted
+// reader fails closed instead of maintaining a second parser that can drift.
+var readPidportFn = func(string) (int, int, error) {
+	return 0, 0, errors.New("GUI pidport reader must be injected by composition")
 }
 
 // SerenaReconcileOpts configures one client-reconcile run. All discovery
@@ -671,8 +645,8 @@ type SerenaReconcileOpts struct {
 	PidportPath string
 
 	// ReadPidport parses the pidport file at PidportPath into (pid, port).
-	// nil → the package default parseGUIPidportFile (byte-identical to
-	// gui.ReadPidport). Phase 4 may inject gui.ReadPidport directly.
+	// nil → a fail-closed composition error. Production callers inject
+	// gui.ReadPidport directly; api never owns a second schema parser.
 	ReadPidport func(path string) (pid, port int, err error)
 
 	// VerifyIdentity binds the pidport to the listener before any router URL is

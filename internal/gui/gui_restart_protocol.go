@@ -72,17 +72,21 @@ type RestartCoordinatorDependencies struct {
 	Listener    RestartCoordinatorListener
 	FullHandler http.Handler
 	MarkerStore RestartCoordinatorMarkerStore
-	Deadlines   RestartDeadlines
-	NewID       func() (string, error)
-	NewNonce    func() ([]byte, error)
-	WriteNonce  func(string, []byte) error
-	RemoveNonce func(string) error
-	Spawn       func(SelfRestartHandoff) (RestartParentChild, error)
-	Confirm     func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error
-	Events      RestartChildEventPublisher
-	CloseHub    func(context.Context)
-	WaitGrace   func(context.Context, time.Duration) error
-	Exit        func()
+	// OwnerLifecycle persists the parent GUI record through the handoff. It is
+	// optional only for older unit constructors; production composition always
+	// supplies it before a restart can release the flock.
+	OwnerLifecycle *GUIOwnerLifecycle
+	Deadlines      RestartDeadlines
+	NewID          func() (string, error)
+	NewNonce       func() ([]byte, error)
+	WriteNonce     func(string, []byte) error
+	RemoveNonce    func(string) error
+	Spawn          func(SelfRestartHandoff) (RestartParentChild, error)
+	Confirm        func(context.Context, int, []byte, AuthenticatedReadinessIdentity) error
+	Events         RestartChildEventPublisher
+	CloseHub       func(context.Context)
+	WaitGrace      func(context.Context, time.Duration) error
+	Exit           func()
 }
 
 type RestartCoordinatorStart struct {
@@ -399,6 +403,13 @@ func (c *RestartCoordinator) continueHandoff(start RestartCoordinatorStart, reco
 		finish(c.rollbackBeforeRelease(start, noncePath, child, listenerClosed, parentLeaseReleased, err))
 		return
 	}
+	if c.deps.OwnerLifecycle != nil {
+		if err := c.deps.OwnerLifecycle.BeginHandoff(start.HandoffID, start.Generation, child.PID(), start.TargetPort); err != nil {
+			zeroBytes(nonce)
+			finish(c.rollbackBeforeRelease(start, noncePath, child, listenerClosed, parentLeaseReleased, fmt.Errorf("persist GUI owner handoff: %w", err)))
+			return
+		}
+	}
 	c.publishProgress(start, HandoffPhaseReserved, "")
 	select {
 	case <-responseFlushed:
@@ -459,9 +470,19 @@ func (c *RestartCoordinator) rollbackBeforeRelease(start RestartCoordinatorStart
 	}
 	if cleanupErr == nil && restoreErr == nil {
 		if err := c.deps.MarkerStore.ClearAfterProvedPreReleaseRollback(start.Generation); err == nil {
-			c.resetBeforeSpawn()
-			c.publishProgress(start, HandoffPhaseInterrupted, "gui-restart-pre-release-rollback")
-			return RestartCoordinatorResult{Err: cause}
+			if c.deps.OwnerLifecycle != nil {
+				if restoreOwnerErr := c.deps.OwnerLifecycle.RestoreActive(start.HandoffID, start.Generation); restoreOwnerErr != nil {
+					restoreErr = restoreOwnerErr
+				} else {
+					c.resetBeforeSpawn()
+					c.publishProgress(start, HandoffPhaseInterrupted, "gui-restart-pre-release-rollback")
+					return RestartCoordinatorResult{Err: cause}
+				}
+			} else {
+				c.resetBeforeSpawn()
+				c.publishProgress(start, HandoffPhaseInterrupted, "gui-restart-pre-release-rollback")
+				return RestartCoordinatorResult{Err: cause}
+			}
 		} else {
 			restoreErr = err
 		}

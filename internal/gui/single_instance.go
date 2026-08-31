@@ -9,14 +9,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
 
 	"github.com/gofrs/flock"
 
-	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/process"
 )
 
@@ -273,8 +271,20 @@ const (
 // acquisition) to free the flock. The pidport file is intentionally NOT
 // removed on Release — see Release() for the rationale.
 type SingleInstanceLock struct {
-	pidport string
-	fl      singleInstanceFlock
+	pidport        string
+	fl             singleInstanceFlock
+	ownerLifecycle *GUIOwnerLifecycle
+}
+
+// OwnerLifecycle returns the lifecycle created from the exact record that this
+// acquisition published while holding the flock. Callers must carry this
+// object forward rather than re-opening the just-published file: a failed
+// re-read followed by a bare unlock would leave a false active record.
+func (l *SingleInstanceLock) OwnerLifecycle() *GUIOwnerLifecycle {
+	if l == nil {
+		return nil
+	}
+	return l.ownerLifecycle
 }
 
 // AcquireSingleInstance tries to become the sole mcphub gui process for
@@ -300,10 +310,12 @@ func acquireSingleInstanceAt(pidportPath string, port int) (*SingleInstanceLock,
 	if err != nil {
 		return nil, err
 	}
-	if err := api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port))); err != nil {
+	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port)
+	if err != nil {
 		lease.Release()
 		return nil, fmt.Errorf("write pidport: %w", err)
 	}
+	lease.ownerLifecycle = newGUIOwnerLifecycle(pidportPath, ownerRecord)
 	return lease, nil
 }
 
@@ -479,23 +491,11 @@ func (l *SingleInstanceLock) release() error {
 // failure or missing file. Second-instance callers use it to probe the
 // incumbent.
 func ReadPidport(path string) (pid, port int, err error) {
-	b, err := api.ReadStateFileInodeAnchored(path)
+	record, err := ReadGUIOwnerRecord(path)
 	if err != nil {
 		return 0, 0, err
 	}
-	parts := strings.Fields(string(b))
-	if len(parts) != 2 {
-		return 0, 0, fmt.Errorf("malformed pidport %q", string(b))
-	}
-	pid, err = strconv.Atoi(parts[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("parse pid: %w", err)
-	}
-	port, err = strconv.Atoi(parts[1])
-	if err != nil {
-		return 0, 0, fmt.Errorf("parse port: %w", err)
-	}
-	return pid, port, nil
+	return record.PID, record.Port, nil
 }
 
 func formatPidport(pid, port int) string {
@@ -550,12 +550,14 @@ func acquireReservationAwareSingleInstanceAt(pidportPath string, port int, optio
 		return nil, releaseTentativeLeaseWithReason(lease, ErrHandoffReserved)
 	}
 
-	if err := api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port))); err != nil {
+	ownerRecord, err := writeCurrentGUIOwnerRecord(pidportPath, os.Getpid(), port)
+	if err != nil {
 		if releaseErr := lease.release(); releaseErr != nil {
 			return nil, newGUIOwnerLeaseUnknown("release tentative lease after pidport write failure", errors.Join(err, releaseErr))
 		}
 		return nil, fmt.Errorf("write pidport: %w", err)
 	}
+	lease.ownerLifecycle = newGUIOwnerLifecycle(pidportPath, ownerRecord)
 	return lease, nil
 }
 
@@ -781,7 +783,11 @@ func newGUIOwnerLeaseUnknown(operation string, cause error) error {
 // lock — the flock on *.lock gates ownership, the pidport file is
 // ownership metadata the lock holder freely updates.
 func RewritePidportPort(pidportPath string, port int) error {
-	return api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(os.Getpid(), port)))
+	lifecycle, err := NewGUIOwnerLifecycle(pidportPath)
+	if err != nil {
+		return err
+	}
+	return lifecycle.UpdatePort(port)
 }
 
 // WritePidport overwrites the pidport file with the supplied PID and
@@ -797,7 +803,8 @@ func RewritePidportPort(pidportPath string, port int) error {
 // != requestedPort and only updated the port field — leaving the
 // killed incumbent's PID stale in the pidport after a successful kill.
 func WritePidport(pidportPath string, pid, port int) error {
-	return api.WriteStateFileBytesLockHeld(pidportPath, []byte(formatPidport(pid, port)))
+	_, err := writeCurrentGUIOwnerRecord(pidportPath, pid, port)
+	return err
 }
 
 // VerdictClass enumerates the result of Probe / KillRecordedHolder.

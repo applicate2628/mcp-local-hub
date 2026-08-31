@@ -24,6 +24,29 @@ import (
 func okPing(context.Context, int) error             { return nil }
 func okGUIIdentity(context.Context, int, int) error { return nil }
 
+// testReadLegacyPidport is test-only compatibility input. Production api has
+// no pidport parser: composition injects internal/gui.ReadPidport to avoid an
+// api -> gui dependency inversion.
+func testReadLegacyPidport(path string) (int, int, error) {
+	b, err := readStateFileInodeAnchored(path)
+	if err != nil {
+		return 0, 0, err
+	}
+	parts := strings.Fields(string(b))
+	if len(parts) != 2 {
+		return 0, 0, errors.New("malformed test pidport")
+	}
+	pid, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return 0, 0, err
+	}
+	port, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return 0, 0, err
+	}
+	return pid, port, nil
+}
+
 // seedPidport writes a "<PID> <PORT>\n" pidport file into a temp dir and
 // returns its path. Mirrors gui.formatPidport's exact byte layout so the
 // api-side parser (parseGUIPidportFile) reads it identically to
