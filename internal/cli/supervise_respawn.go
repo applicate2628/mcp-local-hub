@@ -378,21 +378,6 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 		})
 	}
 
-	// Isolated unit fixtures may exercise the historical direct closure seam,
-	// but a production request must have been returned through the controller
-	// branches above. This keeps c.spawn as the only production create-process
-	// owner and c.terminateOutcome/c.terminate as the only production stop
-	// owner.
-	if !deps.allowDirectRespawnForTest {
-		return writeIPCFrame(conn, api.IPCResponse{
-			ID:    req.ID,
-			Error: &api.IPCErr{Code: ipcErrorRespawnNotReady, Message: "controller cannot accept this respawn state yet; retry", Retryable: true},
-			Final: true,
-		})
-	}
-
-	// Test-only direct closure seam.
-	//
 	// Graceful terminate. terminateFn marks the runtime tracker entry
 	// as exited and (for production wiring) signals the child process.
 	// We don't poll for "really exited" beyond the terminateFn return —
@@ -460,6 +445,16 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 			ctrl.hydrateSMStateFromTrackerIfMissing(taskName)
 		}
 		routeNonRunningRespawnThroughController, spawnErr = shouldRouteNonRunningRespawnThroughController(ctrl, taskName)
+	}
+	// Production reaches here only after both controller routes had their
+	// chance: StRunning/StExiting returned above, and non-running states were
+	// classified immediately above. Keep the raw closure seam test-only.
+	if !deps.allowDirectRespawnForTest && !routeNonRunningRespawnThroughController {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID:    req.ID,
+			Error: &api.IPCErr{Code: ipcErrorRespawnNotReady, Message: "controller cannot accept this respawn state yet; retry", Retryable: true},
+			Final: true,
+		})
 	}
 	if spawnErr == nil {
 		if routeNonRunningRespawnThroughController {

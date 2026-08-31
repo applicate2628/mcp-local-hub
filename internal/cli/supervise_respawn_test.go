@@ -957,3 +957,112 @@ func TestHandleRespawn_ForcedQuarantineMissingSMStateHydratesAndResetsFailures(t
 		t.Fatalf("forced quarantine restart must reset the failure window via the quarantined transition; got %d failures still tracked (regression: routed through StIdle, #268 P2)", got)
 	}
 }
+
+// TestHandleRespawn_ProductionIdleStoppedIntentUsesTypedControllerRefusal
+// exercises the production-only route (allowDirectRespawnForTest=false).
+// A live controller in StIdle must surface the stopped-intent refusal from
+// the state machine; it must not fall through to raw respawn or claim the
+// controller is unavailable.
+func TestHandleRespawn_ProductionIdleStoppedIntentUsesTypedControllerRefusal(t *testing.T) {
+	const taskName = `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var controllerSpawns atomic.Int32
+	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredStopped, func(api.SupervisorDaemon) error {
+		controllerSpawns.Add(1)
+		return nil
+	})
+	defer cancel()
+	ctrl.tracker.MarkSpawned(taskName, 4812, time.Now().UTC())
+	ctrl.tracker.MarkExited(taskName)
+	ctrl.smStates.Store(taskName, api.StIdle)
+
+	deps, rawSpawnCalls, rawTerminateCalls := newRespawnTestDeps(t, intent)
+	deps.allowDirectRespawnForTest = false
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		func(api.SupervisorDaemon) error {
+			rawSpawnCalls.Add(1)
+			return nil
+		},
+		func(api.SupervisorDaemon) error {
+			rawTerminateCalls.Add(1)
+			return nil
+		},
+	)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{ID: 81, Cmd: "respawn", Args: map[string]any{"task_name": taskName, "force": false}}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if resp.Error == nil || resp.Error.Code != ipcErrorRespawnRefusedIntentStop || resp.Error.Code == ipcErrorRespawnNotReady {
+		t.Fatalf("stopped idle production respawn = %+v, want typed %s refusal not not-ready", resp, ipcErrorRespawnRefusedIntentStop)
+	}
+	if got := controllerSpawns.Load(); got != 0 {
+		t.Fatalf("stopped intent reached controller spawn = %d, want zero", got)
+	}
+	if got := rawSpawnCalls.Load(); got != 0 {
+		t.Fatalf("stopped intent reached raw spawn fallback = %d, want zero", got)
+	}
+	if got := rawTerminateCalls.Load(); got != 0 {
+		t.Fatalf("idle stopped intent reached raw terminate fallback = %d, want zero", got)
+	}
+}
+
+// TestHandleRespawn_ProductionIdleRunningIntentUsesControllerNotRawFallback
+// proves the matching runnable state uses the actual controller event loop,
+// while the legacy raw callback remains inaccessible in production mode.
+func TestHandleRespawn_ProductionIdleRunningIntentUsesControllerNotRawFallback(t *testing.T) {
+	const taskName = `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	var controllerSpawns atomic.Int32
+	var ctrl *supervisorController
+	controllerSpawn := func(d api.SupervisorDaemon) error {
+		controllerSpawns.Add(1)
+		ctrl.tracker.MarkSpawned(d.TaskName, 51000, time.Now().UTC())
+		return nil
+	}
+	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, controllerSpawn)
+	defer cancel()
+	ctrl.tracker.MarkSpawned(taskName, 4812, time.Now().UTC())
+	ctrl.tracker.MarkExited(taskName)
+	ctrl.smStates.Store(taskName, api.StIdle)
+
+	deps, rawSpawnCalls, rawTerminateCalls := newRespawnTestDeps(t, intent)
+	deps.allowDirectRespawnForTest = false
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+	deps.respawnLate.Set(
+		func(api.SupervisorDaemon) error {
+			rawSpawnCalls.Add(1)
+			return nil
+		},
+		func(api.SupervisorDaemon) error {
+			rawTerminateCalls.Add(1)
+			return nil
+		},
+	)
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{ID: 82, Cmd: "respawn", Args: map[string]any{"task_name": taskName, "force": false}}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if !resp.OK || !resp.Final || resp.Error != nil {
+		t.Fatalf("running idle production respawn = %+v, want controller-routed success", resp)
+	}
+	if got := controllerSpawns.Load(); got != 1 {
+		t.Fatalf("controller idle-running spawn calls = %d, want exactly one", got)
+	}
+	if got := rawSpawnCalls.Load(); got != 0 {
+		t.Fatalf("production idle-running route used raw spawn fallback = %d, want zero", got)
+	}
+	if got := rawTerminateCalls.Load(); got != 0 {
+		t.Fatalf("production idle-running route used raw terminate fallback = %d, want zero", got)
+	}
+}
