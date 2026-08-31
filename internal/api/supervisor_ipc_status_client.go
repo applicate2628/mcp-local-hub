@@ -13,8 +13,11 @@ import (
 )
 
 const (
-	supervisorIPCHelloMaxBytes  = 4096
-	supervisorIPCStatusMaxBytes = 1 << 20
+	supervisorIPCHelloMaxBytes = 4096
+	// SupervisorIPCResponseMaxBytes is the API-owned upper bound for every
+	// supervisor-to-client response frame. IPC clients outside package api must
+	// reuse this contract instead of imposing a smaller local cap.
+	SupervisorIPCResponseMaxBytes = 1 << 20
 )
 
 // ErrSupervisorIPCUnavailable marks the rollout-transition case where the
@@ -233,7 +236,7 @@ func writeSupervisorIPCRequest(conn net.Conn, req IPCRequest) error {
 }
 
 func readSupervisorIPCResponse(conn net.Conn) (supervisorIPCRawResponse, error) {
-	line, err := readSupervisorIPCLine(conn, supervisorIPCStatusMaxBytes)
+	line, err := readSupervisorIPCLine(conn, SupervisorIPCResponseMaxBytes)
 	if err != nil {
 		return supervisorIPCRawResponse{}, err
 	}

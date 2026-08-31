@@ -73,6 +73,11 @@ const (
 	UpgradeAdmissionLocalProduct = "local-product-build"
 )
 
+// errUpgradeSupervisorAlreadyExited is the typed benign stop outcome used by
+// platform adapters when the recorded supervisor is proven absent. It lets the
+// transaction distinguish "already gone" from an actual force-kill.
+var errUpgradeSupervisorAlreadyExited = errors.New("supervisor already exited")
+
 // UpgradeCandidateV1 is the immutable identity admitted for one upgrade.
 // Build metadata describes the running product build whose exact bytes were
 // staged; SHA256 binds those bytes across both admission passes and readback.
@@ -548,8 +553,13 @@ func recoverUnpromotedAfterReleaseFailure(ctx context.Context, opts UpgradeOpts,
 	if opts.WithRollbackStopSettlementFence == nil {
 		return fmt.Errorf("%w; canonical prior binary was not promoted, but recovery force-kill was refused because the stop-settlement fence is unavailable", trigger)
 	}
+	stopOutcome := "was killed"
 	if err := opts.WithRollbackStopSettlementFence(ctx, func() error {
-		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil && !isAlreadyExitedError(killErr) {
+		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil {
+			if isAlreadyExitedError(killErr) {
+				stopOutcome = "was already gone"
+				return nil
+			}
 			return fmt.Errorf("force-kill prior supervisor: %w", killErr)
 		}
 		return nil
@@ -558,12 +568,12 @@ func recoverUnpromotedAfterReleaseFailure(ctx context.Context, opts UpgradeOpts,
 	}
 	if opts.WaitSupervisorLockReleased != nil {
 		if err := opts.WaitSupervisorLockReleased(ctx, timeout); err != nil {
-			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery force-killed the prior supervisor, but supervisor.lock remained held: %v", trigger, err)
+			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery prior supervisor %s, but supervisor.lock remained held: %v", trigger, stopOutcome, err)
 		}
 	}
 	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
 		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery force-killed the prior supervisor, but expected ports remained bound: %v", trigger, err)
+			return fmt.Errorf("%w; canonical prior binary was not promoted, recovery prior supervisor %s, but expected ports remained bound: %v", trigger, stopOutcome, err)
 		}
 	}
 	return recoverUnpromotedUpgrade(ctx, opts, timeout, priorSHA256, trigger)
@@ -576,8 +586,13 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 	if opts.WithRollbackStopSettlementFence == nil {
 		return fmt.Errorf("%w; automatic rollback refused before force-kill: stop-settlement fence unavailable", trigger)
 	}
+	stopOutcome := "was killed"
 	if err := opts.WithRollbackStopSettlementFence(ctx, func() error {
-		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil && !isAlreadyExitedError(killErr) {
+		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil {
+			if isAlreadyExitedError(killErr) {
+				stopOutcome = "was already gone"
+				return nil
+			}
 			return fmt.Errorf("force-kill successor: %w", killErr)
 		}
 		return nil
@@ -586,12 +601,12 @@ func rollbackInstallUpgrade(ctx context.Context, opts UpgradeOpts, retainedPrior
 	}
 	if opts.WaitSupervisorLockReleased != nil {
 		if err := opts.WaitSupervisorLockReleased(ctx, timeout); err != nil {
-			return fmt.Errorf("%w; automatic rollback killed the successor but supervisor.lock remained held: %v", trigger, err)
+			return fmt.Errorf("%w; automatic rollback successor %s, but supervisor.lock remained held: %v", trigger, stopOutcome, err)
 		}
 	}
 	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
 		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-			return fmt.Errorf("%w; automatic rollback killed the successor but expected ports remained bound: %v", trigger, err)
+			return fmt.Errorf("%w; automatic rollback successor %s, but expected ports remained bound: %v", trigger, stopOutcome, err)
 		}
 	}
 	if opts.VerifyPrior != nil {
@@ -802,6 +817,9 @@ func ReapSupervisorForRestart(ctx context.Context, opts ReapOpts) error {
 func isAlreadyExitedError(err error) bool {
 	if err == nil {
 		return false
+	}
+	if errors.Is(err, errUpgradeSupervisorAlreadyExited) {
+		return true
 	}
 	// Exit-code path: taskkill / kill wrapped via os/exec.
 	var exitErr *exec.ExitError

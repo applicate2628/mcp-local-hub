@@ -537,6 +537,25 @@ func TestRollbackInstallUpgradeRefusesPendingStopSettlementBeforeForceKill(t *te
 	}
 }
 
+func TestRollbackInstallUpgradeReportsAlreadyGoneWithoutClaimingKill(t *testing.T) {
+	mock := &fakeUpgradeDeps{forceKillErr: errUpgradeSupervisorAlreadyExited}
+	err := rollbackInstallUpgrade(context.Background(), UpgradeOpts{
+		Deps: mock,
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error {
+			return critical()
+		},
+		WaitSupervisorLockReleased: func(context.Context, time.Duration) error {
+			return errors.New("lock still held")
+		},
+	}, "prior.exe", "", time.Second, errors.New("successor readiness failed"))
+	if err == nil || !strings.Contains(err.Error(), "successor was already gone") {
+		t.Fatalf("rollback error = %v, want explicit already-gone outcome", err)
+	}
+	if strings.Contains(err.Error(), "killed the successor") {
+		t.Fatalf("rollback error falsely claimed a kill: %v", err)
+	}
+}
+
 // A rollback caller without the state-path-bound fence must never force-kill a
 // successor merely because it cannot inspect receipts.
 func TestRollbackInstallUpgradeRequiresStopSettlementFence(t *testing.T) {

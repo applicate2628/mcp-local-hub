@@ -54,7 +54,6 @@ func migrateSerenaUpgradeDeps() (*v5UpgradeDeps, string, error) {
 	}
 	deps := &v5UpgradeDeps{
 		exePath:           exe,
-		newBinaryPath:     exe, // current exe IS the new image (no rename in the reap path)
 		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
 		// SEC-F1: dial the SID-based pipe the supervisor LISTENS on, NOT the
 		// USERNAME-based one. See install_migration_wiring_windows.go for the

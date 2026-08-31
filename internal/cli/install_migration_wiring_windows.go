@@ -78,7 +78,7 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) error 
 	if err != nil {
 		return fmt.Errorf("v0.5 upgrade: resolve state-dir: %w", err)
 	}
-	deps := buildV5UpgradeDeps(exe, stateDir)
+	deps := buildV5UpgradeDeps(target, stateDir)
 
 	// Resolve expected daemon ports from supervisor-intent.json so the
 	// post-force-kill verification (codex-r2-c-p1-8 fix) can prove no
@@ -241,10 +241,11 @@ func stageV5UpgradeBinary(exe, target string) (string, error) {
 // stateDir is passed through so the test-isolation discriminator
 // (api.EnableSupervisorIPCTestPipeIsolation) can redirect the dial onto a per-
 // test pipe; production ignores the arg and always derives the SID.
-func buildV5UpgradeDeps(exe, stateDir string) *v5UpgradeDeps {
+func buildV5UpgradeDeps(canonicalTarget, stateDir string) *v5UpgradeDeps {
 	return &v5UpgradeDeps{
-		exePath:           exe,
-		newBinaryPath:     exe, // current exe IS the new image
+		// Force-kill identity is transaction-bound to the canonical target,
+		// never to the updater image returned by os.Executable.
+		exePath:           canonicalTarget,
 		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
 		pipePath:          api.SupervisorIPCAddress(stateDir),
 	}
@@ -336,16 +337,14 @@ func defaultSupervisorReapInstallDir() string {
 //	               SID means the reaper cannot prove the supervisor is gone, so
 //	               it must propagate as a reap FAILURE rather than silently
 //	               report success.
-func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool, error) {
+func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string, transactionInstallDir ...string) (bool, error) {
 	if pid <= 0 {
 		return false, nil
 	}
 	ident, err := processLookupIdentityFn(pid)
 	if err != nil {
 		if errors.Is(err, process.ErrProcessNotFound) {
-			// PID is PROVEN gone — there is no supervisor to reap. Benign
-			// no-op, identical to a genuinely-absent supervisor.
-			return false, nil
+			return false, errUpgradeSupervisorAlreadyExited
 		}
 		// Transient / probe error. We CANNOT prove the recorded PID is dead, so
 		// we must NOT report "nothing to kill". Propagate as a reap failure.
@@ -373,7 +372,12 @@ func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool
 	// Gate 4: ExecutablePath under the mcphub install dir. When the install
 	// dir cannot be resolved (empty) the gate is skipped — fail-open on the
 	// path axis only, never on the identity axes above.
-	installDir := supervisorReapInstallDirFn()
+	installDir := ""
+	if len(transactionInstallDir) > 0 {
+		installDir = strings.TrimSpace(transactionInstallDir[0])
+	} else {
+		installDir = supervisorReapInstallDirFn()
+	}
 	if installDir != "" {
 		absInstall, _ := filepath.Abs(installDir)
 		absExe, _ := filepath.Abs(ident.ExecutablePath)
@@ -399,8 +403,7 @@ func supervisorPIDIsLiveMcphubSupervisor(pid int, sidecarStartedAt string) (bool
 	match, sidErr := reapOwnerSIDMatchesCurrentFn(pid)
 	if sidErr != nil {
 		if errors.Is(sidErr, process.ErrProcessAlreadyExited) {
-			// Supervisor vanished mid-gate — nothing to reap, benign no-op.
-			return false, nil
+			return false, errUpgradeSupervisorAlreadyExited
 		}
 		return false, fmt.Errorf("supervisor kill-target owner-SID gate failed for PID %d: %w", pid, sidErr)
 	}
@@ -611,8 +614,9 @@ func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
 // drives the rename-aside + IPC + supervisor-spawn flow on Windows.
 // Field semantics match the cli.UpgradeOpts shape exactly.
 type v5UpgradeDeps struct {
+	// exePath is the canonical transaction target used to start and identify
+	// the managed supervisor. It is deliberately not the updater executable.
 	exePath           string
-	newBinaryPath     string
 	supervisorLockDir string
 	pipePath          string
 }
@@ -669,8 +673,7 @@ func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	owner, err := api.ReadSupervisorLockOwner(d.supervisorLockDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// Genuine "no supervisor running" — benign.
-			return nil
+			return fmt.Errorf("%w: supervisor lock owner is absent", errUpgradeSupervisorAlreadyExited)
 		}
 		return fmt.Errorf("force-kill: read supervisor lock owner: %w", err)
 	}
@@ -681,15 +684,19 @@ func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	// parity per fable-5 #276). The owner sidecar survives a supervisor crash
 	// and its PID can be REUSED by an unrelated process. Validate the PID is the
 	// live mcphub supervisor the sidecar names before force-killing it:
-	//   - identity-mismatch / process-gone → benign no-op (return nil).
-	//   - a transient / non-ErrProcessNotFound probe error → PROPAGATE
-	//     (fable-5 #276 Finding 2).
-	live, err := supervisorPIDIsLiveMcphubSupervisor(owner.PID, owner.StartedAt)
+	//   - process-gone → typed already-exited outcome consumed by orchestration.
+	//   - identity mismatch → explicit refusal; never report a kill.
+	//   - transient probe error → propagate (fable-5 #276 Finding 2).
+	installDir := ""
+	if strings.TrimSpace(d.exePath) != "" {
+		installDir = filepath.Dir(d.exePath)
+	}
+	live, err := supervisorPIDIsLiveMcphubSupervisor(owner.PID, owner.StartedAt, installDir)
 	if err != nil {
 		return fmt.Errorf("force-kill: %w", err)
 	}
 	if !live {
-		return nil
+		return fmt.Errorf("force-kill: refusing PID %d because its live process identity does not match the transaction canonical target %s", owner.PID, d.exePath)
 	}
 	return killPIDViaTaskkillFn(owner.PID)
 }
@@ -973,7 +980,7 @@ func writeFrame(conn net.Conn, req api.IPCRequest) error {
 // readFrame reads one JSON line from conn and decodes it into an
 // IPCResponse.
 func readFrame(conn net.Conn) (api.IPCResponse, error) {
-	line, err := readLine(conn, 16384)
+	line, err := readLine(conn, api.SupervisorIPCResponseMaxBytes)
 	if err != nil {
 		return api.IPCResponse{}, err
 	}

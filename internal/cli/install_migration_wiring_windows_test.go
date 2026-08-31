@@ -18,6 +18,8 @@
 package cli
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -34,6 +36,150 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/process"
 )
+
+func TestUpgradeIPCResponseFrameUsesSupervisorBound(t *testing.T) {
+	t.Run("realistic status response above 30 KiB is accepted", func(t *testing.T) {
+		raw, err := json.Marshal(api.IPCResponse{
+			ID: 7, OK: true, Final: true,
+			Result: map[string]any{
+				"reconcile_ready": true,
+				"daemons":         []any{map[string]any{"task_name": `\\mcp-local-hub-large-default`, "args": []any{strings.Repeat("x", 40*1024)}}},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, server := net.Pipe()
+		defer client.Close()
+		go func() {
+			defer server.Close()
+			_, _ = server.Write(append(raw, '\n'))
+		}()
+		resp, err := readFrame(client)
+		if err != nil {
+			t.Fatalf("readFrame rejected %d-byte supervisor response: %v", len(raw), err)
+		}
+		if !resp.OK || !resp.Final {
+			t.Fatalf("response = %+v, want OK final response", resp)
+		}
+	})
+
+	t.Run("response above one MiB is rejected", func(t *testing.T) {
+		raw, err := json.Marshal(api.IPCResponse{
+			ID: 8, OK: true, Final: true,
+			Result: map[string]any{"padding": strings.Repeat("x", (1<<20)+1024)},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		client, server := net.Pipe()
+		defer client.Close()
+		go func() {
+			defer server.Close()
+			_, _ = server.Write(append(raw, '\n'))
+		}()
+		if _, err := readFrame(client); err == nil || !strings.Contains(err.Error(), "exceeded") {
+			t.Fatalf("readFrame oversize error = %v, want bounded rejection", err)
+		}
+	})
+}
+
+type targetBoundRollbackDeps struct {
+	*v5UpgradeDeps
+	retained string
+	restored []string
+	started  []string
+}
+
+func (d *targetBoundRollbackDeps) RenameAsideBinary(string, string) (api.RenameAsideResult, error) {
+	return api.RenameAsideResult{Promoted: true, RetainedPrior: d.retained}, nil
+}
+
+func (d *targetBoundRollbackDeps) RestoreRetainedBinary(target, retained string) error {
+	d.restored = append(d.restored, target+"<-"+retained)
+	return nil
+}
+
+func (d *targetBoundRollbackDeps) QuiesceTimers(context.Context, string, int) (api.IPCResponse, error) {
+	return api.IPCResponse{OK: true, Final: true, Result: map[string]any{"still_running": []any{}}}, nil
+}
+
+func (d *targetBoundRollbackDeps) ExitGraceful(context.Context, string, int) (api.IPCResponse, error) {
+	return api.IPCResponse{OK: true, Final: true}, nil
+}
+
+func (d *targetBoundRollbackDeps) StartSupervisor(binary string) error {
+	d.started = append(d.started, binary)
+	return nil
+}
+
+func TestUpgradeRollbackKillsCanonicalTargetSuccessorWhenUpdaterLivesElsewhere(t *testing.T) {
+	root := t.TempDir()
+	updaterDir := filepath.Join(root, "build-output")
+	targetDir := filepath.Join(root, "installed")
+	target := filepath.Join(targetDir, "mcphub.exe")
+	retained := filepath.Join(targetDir, "mcphub.exe.old-exact")
+	lockPath := filepath.Join(root, "state", "supervisor.lock")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	const successorPID = 4242
+	writeStateSidecarBytes(t, lockPath+".owner.json", []byte(`{"pid":4242,"started_at":"`+liveSupervisorStartedAt+`"}`))
+
+	swapProcessLookupForTest(t, process.ProcessIdentity{
+		Basename:         "mcphub.exe",
+		CommandLine:      `"` + target + `" supervise`,
+		ExecutablePath:   target,
+		CreationDateUnix: liveSupervisorCreatedUnix,
+	}, nil)
+	swapSupervisorReapInstallDirForTest(t, updaterDir)
+	swapReapOwnerSIDForTest(t, true, nil)
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	deps := &targetBoundRollbackDeps{
+		v5UpgradeDeps: &v5UpgradeDeps{exePath: target, supervisorLockDir: lockPath},
+		retained:      retained,
+	}
+	readyCalls := 0
+	receipts := 0
+	lockReleaseChecks := 0
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{
+		BinaryPath:                      target,
+		NewBinary:                       filepath.Join(updaterDir, "mcphub.exe.staged"),
+		Deps:                            deps,
+		WithRollbackStopSettlementFence: func(_ context.Context, critical func() error) error { return critical() },
+		WaitSupervisorLockReleased: func(context.Context, time.Duration) error {
+			lockReleaseChecks++
+			return nil
+		},
+		WaitSupervisorReady: func(context.Context, time.Duration, string, UpgradeCandidateV1) error {
+			readyCalls++
+			if readyCalls == 1 {
+				return errors.New("forced successor readiness failure")
+			}
+			return nil
+		},
+		WriteReceipt: func(UpgradeReceiptV1) error {
+			receipts++
+			return nil
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "automatic rollback restored") {
+		t.Fatalf("upgrade error = %v, want successful retained-prior rollback report", err)
+	}
+	if len(*killed) != 1 || (*killed)[0] != successorPID {
+		t.Fatalf("taskkill targets = %v, want exact canonical successor PID %d", *killed, successorPID)
+	}
+	if lockReleaseChecks != 2 {
+		t.Fatalf("lock release checks = %d, want prior release + rollback successor release", lockReleaseChecks)
+	}
+	if len(deps.restored) != 1 || deps.restored[0] != target+"<-"+retained {
+		t.Fatalf("restores = %v, want exact retained prior restored to canonical target", deps.restored)
+	}
+	if receipts != 0 {
+		t.Fatalf("receipts = %d, want none after failed successor readiness", receipts)
+	}
+}
 
 func TestUpgradeReadinessRejectsWrongLiveExecutableBeforePipeAcceptance(t *testing.T) {
 	dir := t.TempDir()
@@ -167,8 +313,8 @@ func TestV5UpgradeDeps_ForceKillSupervisor_NotExistIsBenign(t *testing.T) {
 	// Do NOT create supervisor.lock.owner.json — absence is the test.
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
-	if err := d.ForceKillSupervisor(""); err != nil {
-		t.Fatalf("absent .owner.json must map to benign nil (no supervisor running); got %v", err)
+	if err := d.ForceKillSupervisor(""); !isAlreadyExitedError(err) {
+		t.Fatalf("absent .owner.json outcome = %v, want typed already-exited outcome", err)
 	}
 }
 
@@ -305,12 +451,13 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 	const installDir = `C:\fixture-root\dev\.local\bin`
 	const exeUnderInstall = `C:\fixture-root\dev\.local\bin\mcphub.exe`
 	cases := []struct {
-		name      string
-		ident     process.ProcessIdentity
-		startedAt string
-		err       error
-		want      bool
-		wantErr   bool
+		name            string
+		ident           process.ProcessIdentity
+		startedAt       string
+		err             error
+		want            bool
+		wantErr         bool
+		wantAlreadyGone bool
 	}{
 		{
 			name: "live mcphub supervisor (exe)",
@@ -411,10 +558,12 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 			want:      false,
 		},
 		{
-			name:  "process gone (ErrProcessNotFound) is a benign no-op",
-			ident: process.ProcessIdentity{},
-			err:   process.ErrProcessNotFound,
-			want:  false,
+			name:            "process gone (ErrProcessNotFound) is explicit already-gone",
+			ident:           process.ProcessIdentity{},
+			err:             process.ErrProcessNotFound,
+			want:            false,
+			wantErr:         true,
+			wantAlreadyGone: true,
 		},
 		{
 			// Finding 2: a transient (non-ErrProcessNotFound) probe error must
@@ -441,6 +590,9 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_Gate(t *testing.T) {
 			}
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) err = %v; wantErr %v", pid, err, tc.wantErr)
+			}
+			if isAlreadyExitedError(err) != tc.wantAlreadyGone {
+				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor(%d) already-gone=%v; want %v (err=%v)", pid, isAlreadyExitedError(err), tc.wantAlreadyGone, err)
 			}
 		})
 	}
@@ -477,11 +629,12 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
 	}
 
 	cases := []struct {
-		name     string
-		sidMatch bool
-		sidErr   error
-		want     bool
-		wantErr  bool
+		name            string
+		sidMatch        bool
+		sidErr          error
+		want            bool
+		wantErr         bool
+		wantAlreadyGone bool
 	}{
 		{name: "same owner SID → kill proceeds", sidMatch: true, want: true},
 		{name: "different owner SID → benign no-op (refused)", sidMatch: false, want: false},
@@ -495,15 +648,14 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
 		{
 			// pr301 r4 Finding 2: the supervisor exited between Gate 1's identity
 			// probe and Gate 5's OpenProcess (TOCTOU). The SID gate returns
-			// ErrProcessAlreadyExited; the reaper must treat it as a benign no-op
-			// (false, nil) — nothing to reap — NOT a reap FAILURE that aborts
-			// install --upgrade. Pre-fix the SID gate returned a generic error for
-			// a dead PID and this case would set wantErr=true (the regression).
-			name:     "target vanished mid-gate (ErrProcessAlreadyExited) → benign no-op",
-			sidMatch: false,
-			sidErr:   process.ErrProcessAlreadyExited,
-			want:     false,
-			wantErr:  false,
+			// ErrProcessAlreadyExited; the reaper must return the typed already-gone
+			// outcome so orchestration continues without claiming taskkill succeeded.
+			name:            "target vanished mid-gate (ErrProcessAlreadyExited) → explicit already-gone",
+			sidMatch:        false,
+			sidErr:          process.ErrProcessAlreadyExited,
+			want:            false,
+			wantErr:         true,
+			wantAlreadyGone: true,
 		},
 	}
 	for _, tc := range cases {
@@ -518,12 +670,15 @@ func TestSupervisorPIDIsLiveMcphubSupervisor_OwnerSIDGate(t *testing.T) {
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("supervisorPIDIsLiveMcphubSupervisor owner-SID gate err = %v; wantErr %v", err, tc.wantErr)
 			}
+			if isAlreadyExitedError(err) != tc.wantAlreadyGone {
+				t.Fatalf("owner-SID gate already-gone=%v; want %v (err=%v)", isAlreadyExitedError(err), tc.wantAlreadyGone, err)
+			}
 		})
 	}
 }
 
 // TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID pins that
-// a reused non-supervisor PID is a benign no-op (return nil, no kill).
+// a reused non-supervisor PID is refused explicitly and never killed.
 //
 // Falsification on the unfixed code: ForceKillSupervisor would
 // killPIDViaTaskkillFn(owner.PID) unconditionally → `killed` contains the
@@ -544,8 +699,8 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsReusedNonSupervisorPID(t *testin
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
-	if err := d.ForceKillSupervisor(""); err != nil {
-		t.Fatalf("ForceKillSupervisor on a reused non-supervisor PID must be benign nil; got %v", err)
+	if err := d.ForceKillSupervisor(""); err == nil || !strings.Contains(err.Error(), "refusing") {
+		t.Fatalf("ForceKillSupervisor on reused non-supervisor PID error = %v, want explicit identity refusal", err)
 	}
 	if len(*killed) != 0 {
 		t.Fatalf("reused non-supervisor PID %d must NOT be force-killed; killed=%v", reusedPID, *killed)
@@ -603,8 +758,8 @@ func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testin
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
-	if err := d.ForceKillSupervisor(""); err != nil {
-		t.Fatalf("ForceKillSupervisor on a PID created after the sidecar must be benign nil; got %v", err)
+	if err := d.ForceKillSupervisor(""); err == nil || !strings.Contains(err.Error(), "refusing") {
+		t.Fatalf("ForceKillSupervisor on PID created after sidecar error = %v, want explicit identity refusal", err)
 	}
 	if len(*killed) != 0 {
 		t.Fatalf("reused PID %d (created after sidecar) must NOT be force-killed; killed=%v", reusedPID, *killed)
@@ -652,8 +807,8 @@ func TestV5UpgradeDeps_ForceKillSupervisor_NotFoundIsBenign(t *testing.T) {
 	killed := swapKillPIDViaTaskkillForTest(t)
 
 	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
-	if err := d.ForceKillSupervisor(""); err != nil {
-		t.Fatalf("ErrProcessNotFound (PID gone) must map to benign nil; got %v", err)
+	if err := d.ForceKillSupervisor(""); !isAlreadyExitedError(err) {
+		t.Fatalf("ErrProcessNotFound outcome = %v, want typed already-exited outcome", err)
 	}
 	if len(*killed) != 0 {
 		t.Fatalf("a gone PID must NOT be force-killed; killed=%v", *killed)
