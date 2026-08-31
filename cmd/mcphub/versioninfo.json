@@ -4,13 +4,13 @@
         "FileVersion": {
             "Major": 0,
             "Minor": 4,
-            "Patch": 32,
+            "Patch": 33,
             "Build": 0
         },
         "ProductVersion": {
             "Major": 0,
             "Minor": 4,
-            "Patch": 32,
+            "Patch": 33,
             "Build": 0
         },
         "FileFlagsMask": "3f",
@@ -22,12 +22,12 @@
     "StringFileInfo": {
         "CompanyName": "Dmitry Denisenko (@applicate2628)",
         "FileDescription": "Local shared-daemon manager for MCP servers",
-        "FileVersion": "0.4.32.0",
+        "FileVersion": "0.4.33.0",
         "InternalName": "mcphub",
         "LegalCopyright": "Copyright 2026 Dmitry Denisenko (@applicate2628). Licensed under MPL-2.0. Commercial licenses available separately. https://github.com/applicate2628/mcp-local-hub",
         "OriginalFilename": "mcphub.exe",
         "ProductName": "mcp-local-hub",
-        "ProductVersion": "0.4.32.0",
+        "ProductVersion": "0.4.33.0",
         "Comments": "Homepage: https://github.com/applicate2628/mcp-local-hub | Issues: https://github.com/applicate2628/mcp-local-hub/issues | License: MPL-2.0 | Commercial: https://github.com/applicate2628/mcp-local-hub/blob/master/README.md#license"
     },
     "VarFileInfo": {
