@@ -420,6 +420,38 @@ func TestDaemonRuntimeTracker_StopSettlementTransitionTableAndDigestFence(t *tes
 	}
 }
 
+// TestDaemonRuntimeTracker_HydrateFromStateAcceptsOmittedEstablishedEmptyStopSettlements
+// catches recovery fencing after a successful terminal stop: the writer's
+// empty map is omitted on JSON reload, but its established digest remains
+// authoritative.
+func TestDaemonRuntimeTracker_HydrateFromStateAcceptsOmittedEstablishedEmptyStopSettlements(t *testing.T) {
+	digest, err := api.StopSettlementMapDigest(36, 292, map[string]api.StopSettlementReceiptV1{})
+	if err != nil {
+		t.Fatalf("digest empty map: %v", err)
+	}
+	state := &api.SupervisorStateFile{
+		Version:                     1,
+		StopSettlementEpoch:         36,
+		StopSettlementMapGeneration: 292,
+		StopSettlementDigest:        digest,
+		// StopSettlements is deliberately nil: this is JSON's omitted-map shape.
+	}
+	tracker := NewDaemonRuntimeTracker()
+	tracker.HydrateFromState(state)
+	if err := tracker.StopSettlementIntegrityError(); err != nil {
+		t.Fatalf("omitted established empty map fenced hydration: %v", err)
+	}
+	if pending := tracker.PendingStopSettlements(); len(pending) != 0 {
+		t.Fatalf("pending settlements = %+v, want none", pending)
+	}
+
+	state.StopSettlementDigest = "wrong"
+	tracker.HydrateFromState(state)
+	if err := tracker.StopSettlementIntegrityError(); err == nil {
+		t.Fatal("wrong digest did not fence hydration")
+	}
+}
+
 func TestStopSettlementRevisionComparisonIncludesAllSemanticFields(t *testing.T) {
 	base := api.StopSettlementReceiptV1{
 		Version:       1,

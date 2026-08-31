@@ -115,6 +115,9 @@ type StopSettlementReceiptV1 struct {
 // and its generation. encoding/json orders map keys deterministically, so the
 // same durable map yields the same digest across restart.
 func StopSettlementMapDigest(epoch, generation uint64, rows map[string]StopSettlementReceiptV1) (string, error) {
+	if rows == nil {
+		rows = map[string]StopSettlementReceiptV1{}
+	}
 	payload, err := json.Marshal(struct {
 		Epoch      uint64                             `json:"epoch"`
 		Generation uint64                             `json:"generation"`

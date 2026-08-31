@@ -93,6 +93,30 @@ func TestSupervisorState_StopSettlementReceiptRoundTrip(t *testing.T) {
 	}
 }
 
+// TestStopSettlementMapDigestCanonicalizesNilRows catches the wire-shape
+// mismatch between an omitted JSON receipt map (nil after reload) and the
+// nonnil empty map used by the durable writer.
+func TestStopSettlementMapDigestCanonicalizesNilRows(t *testing.T) {
+	nilDigest, err := StopSettlementMapDigest(36, 292, nil)
+	if err != nil {
+		t.Fatalf("digest nil rows: %v", err)
+	}
+	emptyDigest, err := StopSettlementMapDigest(36, 292, map[string]StopSettlementReceiptV1{})
+	if err != nil {
+		t.Fatalf("digest empty rows: %v", err)
+	}
+	if nilDigest != emptyDigest {
+		t.Fatalf("nil rows digest = %q, empty rows digest = %q; want canonical equality", nilDigest, emptyDigest)
+	}
+	nonemptyDigest, err := StopSettlementMapDigest(36, 292, map[string]StopSettlementReceiptV1{"task": {Version: 1, TaskName: "task"}})
+	if err != nil {
+		t.Fatalf("digest nonempty rows: %v", err)
+	}
+	if nonemptyDigest == emptyDigest {
+		t.Fatal("nonempty rows digest collapsed onto empty rows digest")
+	}
+}
+
 func TestMutateSupervisorStateReadsUnderStateFileFlock(t *testing.T) {
 	dir := hardenedTempDir(t)
 	path := filepath.Join(dir, "supervisor-state.json")
