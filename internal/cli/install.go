@@ -151,13 +151,8 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 				return fmt.Errorf("--check is mutually exclusive with --upgrade/--reconcile-hub-mode/--reconcile-mcp-front; --check is a read-only readiness probe and those modes mutate")
 			}
 
-			// Bug-bash A7 minimal closure (#4): --upgrade is the
-			// one-shot binary replacement entry point. Pre-A7 the
-			// operator had to stop daemons, run `mcphub setup` to
-			// recopy the binary, then restart daemons by hand —
-			// three steps, easy to skip the middle one, and
-			// `mcphub setup` failed loudly with "target is in use"
-			// when daemons were still up.
+			// Upgrade is one admitted managed transaction, not a composition of
+			// setup, stop, and restart commands.
 			if upgrade {
 				// Upgrade has no dry-run contract: admission, shutdown, promotion,
 				// readiness, rollback, and receipt are one indivisible transaction.
@@ -903,9 +898,8 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 
 	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
 	if guiErr != nil {
-		// Best-effort: a wmic failure must not block the upgrade — fall through
-		// and let the binary-copy/rename step surface "target in use" if a GUI
-		// is actually running.
+		// Best-effort: the promotion owner still detects a held canonical image
+		// lock if process enumeration is unavailable.
 		fmt.Fprintf(errOut, "⚠ GUI detection failed (best-effort): %v\n", guiErr)
 	} else if len(guiProcs) > 0 {
 		pids := make([]string, 0, len(guiProcs))
@@ -1288,16 +1282,9 @@ func dispatchUpgrade(cmd *cobra.Command) error {
 // supervisor-owned DAEMON DESCRIPTOR row (len(intent.Daemons) > 0 after the
 // existing one-shot/maintenance filtering in api.ReadSupervisorIntent).
 //
-//   - ≥1 daemon row     → v0.5.x machine (cold-restart upgrade path).
-//   - file absent        → fresh install (binary-copy fallback).
-//   - descriptor-less    → "no v0.5 supervisor". A stops-only / daemon-less
-//     intent file (e.g. a v0.4 scheduler-only host where someone ran a
-//     `mcphub ... stop`, minting a supervisor-intent.json that carries ONLY
-//     Stops and no Daemons) must NOT be treated as a v0.5 install. Routing it
-//     as v0.5 takes runV5UpgradeReal and SKIPS the legacy-scheduler migration,
-//     so existing legacy scheduler tasks are never materialized into
-//     supervisor intent (bot r32 P2). Returning false here routes such files
-//     down the legacy-scheduler probe instead.
+//   - ≥1 daemon row  → managed transaction is eligible.
+//   - absent or descriptor-less intent → no managed fleet; dispatcher refuses
+//     upgrade before mutation.
 //
 // Returns (false, nil) on os.ErrNotExist for both the file and its parent
 // directory — both mean "no supervisor intent on disk" and the caller treats
@@ -1334,11 +1321,9 @@ func hasSupervisorIntent() (bool, error) {
 		// Same fail-closed rationale as the IsDir branch above.
 		return false, fmt.Errorf("hasSupervisorIntent: %s is not a regular file (mode %v)", path, info.Mode())
 	}
-	// Mere regular-file presence is NOT enough (bot r32 P2): a stops-only /
-	// descriptor-less file would otherwise route as a v0.5 install and skip
-	// the legacy-scheduler migration. Read the intent and require at least one
-	// daemon row. api.ReadSupervisorIntent strips legacy one-shot daemons
-	// first, so the count reflects real long-lived supervisor descriptors.
+	// Mere regular-file presence is insufficient: a stops-only or descriptor-
+	// less file has no managed fleet to transact. Require at least one daemon
+	// row; api.ReadSupervisorIntent strips one-shot maintenance rows first.
 	//
 	// A read error is a hard, wrapped, fail-closed error (NOT a silent false):
 	// the file the routing discriminator relied on is unreadable (corrupt
@@ -1411,16 +1396,10 @@ func legacyUpgradeTaskLooksDaemon(name string) bool {
 	if !strings.HasPrefix(name, prefix) {
 		return false
 	}
-	// bot r33 P2 closure on PR #288: workspace-scoped LSP and serena
-	// per-workspace tasks ALSO match the `mcp-local-hub-<rest-with-hyphen>`
-	// shape below (`mcp-local-hub-lsp-<wsKey>-<lang>` and
-	// `mcp-local-hub-serena-<wsKey>`), so classifying them as migratable
-	// global daemons makes `legacyTasks` non-empty while `servers` stays
-	// empty on a workspace-only host — and dispatchUpgradeReal then ABORTS
-	// with "none match a shipped manifest" instead of doing the normal
-	// binary-copy/restart. Those tasks are NOT global daemons (they belong
-	// to the per-workspace `mcphub register` flow, not `mcphub install
-	// --server X`), so exclude them up-front. Reuse the canonical structural
+	// Workspace-scoped LSP and Serena tasks also match the generic task-name
+	// shape, but they are not legacy global daemons. Exclude them so the
+	// unsupported-state diagnostic names only the actual legacy global fleet.
+	// Reuse the canonical structural
 	// predicates from internal/api (both accept the bare, leading-backslash-
 	// stripped form this function receives) rather than re-deriving the
 	// task-name shapes here.

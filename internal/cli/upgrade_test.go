@@ -46,10 +46,9 @@ func TestUpgradeCmd_RoutesThroughDispatchUpgrade(t *testing.T) {
 		dispatched = true
 		return nil
 	}
-	// If the alias regressed to calling runInstallUpgrade directly, it would
-	// resolve the current executable first via this seam. Fail loud if so.
+	// The alias must not bypass the dispatcher and enter preflight directly.
 	upgradeExecutableFn = func() (string, error) {
-		t.Fatal("alias reached the legacy runInstallUpgrade body (resolved current executable) instead of routing through dispatchUpgrade")
+		t.Fatal("alias bypassed dispatchUpgrade and attempted upgrade preflight directly")
 		return "", nil
 	}
 
@@ -122,9 +121,8 @@ func TestUpgradeCmd_FreshHostAliasFailsClosedWithoutMutation(t *testing.T) {
 	resetUpgradeRoutingSeams(t)
 	resetUpgradeSeams(t)
 
-	// Fresh-install state: empty state-dir (no supervisor-intent.json) and an
-	// empty fake scheduler (no legacy daemon tasks) → dispatchUpgradeReal falls
-	// through to runInstallUpgrade.
+	// Fresh-install state has no managed daemon fleet, so the shared dispatcher
+	// must return its stable pre-mutation refusal.
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
 	restoreScheduler := api.SetTestSchedulerFactoryFn(func() (scheduler.Scheduler, error) {

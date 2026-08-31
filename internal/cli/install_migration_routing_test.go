@@ -268,15 +268,8 @@ func TestHasSupervisorIntent_DaemonBearingReturnsTrue(t *testing.T) {
 	}
 }
 
-// TestHasSupervisorIntent_StopsOnlyReturnsFalse is the FIX 1 (bot r32 P2)
-// falsifying regression. A stops-only / descriptor-less supervisor-intent.json
-// (the shape a `mcphub ... stop` mints on a v0.4 scheduler-only host: a Stops
-// map, ZERO Daemons) must route as "no v0.5 supervisor" so the dispatcher runs
-// the legacy-scheduler migration instead of taking runV5UpgradeReal and
-// silently dropping the existing legacy scheduler tasks.
-//
-// Pre-fix this returned true (mere regular-file presence) → the dispatcher
-// took the v5 path and skipped probeLegacySchedulerUpgradeTasks.
+// A stops-only intent has no managed daemon fleet and therefore cannot enter
+// the admitted upgrade transaction; the dispatcher must fail closed upstream.
 func TestHasSupervisorIntent_StopsOnlyReturnsFalse(t *testing.T) {
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))
@@ -305,7 +298,7 @@ func TestHasSupervisorIntent_StopsOnlyReturnsFalse(t *testing.T) {
 		t.Fatalf("hasSupervisorIntent err = %v, want nil (stops-only file is readable)", err)
 	}
 	if got {
-		t.Fatalf("hasSupervisorIntent = true on a stops-only/descriptor-less intent; want false so the legacy-scheduler migration path runs (bot r32 P2)")
+		t.Fatalf("hasSupervisorIntent = true on a stops-only/descriptor-less intent; want false so upgrade fails closed before mutation")
 	}
 }
 
@@ -389,11 +382,8 @@ func (f *upgradeRoutingFakeScheduler) ExportXML(string) ([]byte, error) {
 }
 func (f *upgradeRoutingFakeScheduler) ImportXML(string, []byte) error { f.mutationCalls++; return nil }
 
-// TestHasSupervisorIntent_DirectoryReturnsError pins the round-4 fix:
-// a directory named supervisor-intent.json under the state-dir is a
-// corrupt-state-dir condition that must surface a non-nil error so the routing
-// dispatcher fails closed instead of silently falling through to the legacy
-// runInstallUpgrade path.
+// A directory named supervisor-intent.json is corrupt state and must fail
+// before the dispatcher can enter the sole managed upgrade transaction.
 func TestHasSupervisorIntent_DirectoryReturnsError(t *testing.T) {
 	root := t.TempDir()
 	t.Cleanup(api.SetDaemonStateRootForTest(root))

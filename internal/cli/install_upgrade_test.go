@@ -537,9 +537,8 @@ func TestRollbackInstallUpgradeRefusesPendingStopSettlementBeforeForceKill(t *te
 	}
 }
 
-// TestRollbackInstallUpgradeRequiresStopSettlementFence catches the unsafe
-// legacy fallback: a rollback caller without the state-path-bound fence must
-// never force-kill a successor merely because it cannot inspect receipts.
+// A rollback caller without the state-path-bound fence must never force-kill a
+// successor merely because it cannot inspect receipts.
 func TestRollbackInstallUpgradeRequiresStopSettlementFence(t *testing.T) {
 	mock := &fakeUpgradeDeps{}
 	err := rollbackInstallUpgrade(context.Background(), UpgradeOpts{Deps: mock}, "prior.exe", "", time.Second, errors.New("successor readiness failed"))

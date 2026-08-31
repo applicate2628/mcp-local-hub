@@ -248,17 +248,9 @@ func Bootstrap(w io.Writer) error {
 	return ensureOnPath(w, filepath.Dir(target))
 }
 
-// bootstrapCopyOnly does the binary-copy half of Bootstrap WITHOUT
-// touching PATH. Used by `mcphub install --upgrade` (bot r2 P1 closure
-// on PR #181): an upgrade-time PATH registration failure (HKCU write
-// contention, registry ACL issue, transient WM_SETTINGCHANGE broadcast
-// hiccup) would otherwise leave daemons stopped and the fleet down,
-// since `runInstallUpgrade` propagates the bootstrap error and skips
-// RestartAll. PATH registration is a one-time setup concern, not an
-// upgrade concern \u2014 the canonical path has already been on PATH since
-// the operator's first `mcphub setup`, and re-registering on every
-// upgrade adds zero value while introducing a new fail-stop. If PATH
-// ever falls out, the operator runs `mcphub setup` to reconcile it.
+// bootstrapCopyOnly installs the current executable at the canonical path.
+// Bootstrap calls it before the separate PATH-registration step so setup keeps
+// file installation and environment registration as explicit owners.
 func bootstrapCopyOnly(w io.Writer) error {
 	target, err := setupTargetPath()
 	if err != nil {
