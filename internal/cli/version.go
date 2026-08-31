@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -33,18 +32,34 @@ func normalizeExePath(p string) (string, error) {
 	return filepath.Clean(abs), nil
 }
 
-// pathShadowDiagnostic compares the running executable against the `mcphub`
-// the shell PATH resolves to. Different paths with the same bytes are an
+// versionIdentityDiagnostic compares the process's native executable with the
+// canonical installation target. It intentionally does not inspect PATH: an
+// npm-generated command shim has script bytes and is not the executable that
+// the shim already started.
+func versionIdentityDiagnostic(runningExe string, canonicalTarget func() (string, error)) string {
+	if runningExe == "" {
+		return ""
+	}
+	canonicalExe, err := canonicalTarget()
+	if err != nil || canonicalExe == "" {
+		return fmt.Sprintf("identity-unverified: canonical installation path cannot be resolved for this running binary (%s); "+
+			"Run: %s", runningExe, identityReconciliationCommand())
+	}
+	return binaryIdentityDiagnostic(runningExe, canonicalExe)
+}
+
+// binaryIdentityDiagnostic compares the running executable against the
+// canonical installation. Different paths with the same bytes are an
 // informational alternate path. Different or unreadable identities are an
 // operator warning. Paths are compared case-insensitively only on Windows,
 // where executable paths are case-insensitive; POSIX keeps exact case so
 // case-only distinct paths on case-sensitive filesystems still compare bytes.
-func pathShadowDiagnostic(runningExe, pathResolved string) string {
-	if runningExe == "" || pathResolved == "" {
+func binaryIdentityDiagnostic(runningExe, canonicalExe string) string {
+	if runningExe == "" || canonicalExe == "" {
 		return ""
 	}
 	a, errA := normalizeExePath(runningExe)
-	b, errB := normalizeExePath(pathResolved)
+	b, errB := normalizeExePath(canonicalExe)
 	if errA != nil || errB != nil {
 		return ""
 	}
@@ -52,16 +67,16 @@ func pathShadowDiagnostic(runningExe, pathResolved string) string {
 		return ""
 	}
 	runningSHA256, errRunning := executableSHA256(a)
-	pathSHA256, errPath := executableSHA256(b)
-	if errRunning != nil || errPath != nil {
-		return fmt.Sprintf("identity-unverified: the 'mcphub' on your PATH (%s) cannot be verified against this running binary (%s); "+
-			"a fresh shell may run a different binary. Run: %s", b, a, shadowReconciliationCommand())
+	canonicalSHA256, errCanonical := executableSHA256(b)
+	if errRunning != nil || errCanonical != nil {
+		return fmt.Sprintf("identity-unverified: canonical installation (%s) cannot be verified against this running binary (%s); "+
+			"Run: %s", b, a, identityReconciliationCommand())
 	}
-	if runningSHA256 == pathSHA256 {
-		return fmt.Sprintf("equivalent alternate path: the 'mcphub' on your PATH (%s) is byte-identical to this running binary (%s).", b, a)
+	if runningSHA256 == canonicalSHA256 {
+		return fmt.Sprintf("equivalent canonical binary: canonical installation (%s) is byte-identical to this running binary (%s).", b, a)
 	}
-	return fmt.Sprintf("binary identity differs: the 'mcphub' on your PATH (%s) is NOT this running binary (%s); "+
-		"a fresh shell may run the shadowed one. Run: %s", b, a, shadowReconciliationCommand())
+	return fmt.Sprintf("binary identity differs: canonical installation (%s) is NOT this running binary (%s); "+
+		"Run: %s", b, a, identityReconciliationCommand())
 }
 
 func executableSHA256(path string) (string, error) {
@@ -77,7 +92,7 @@ func executableSHA256(path string) (string, error) {
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
-func shadowReconciliationCommand() string {
+func identityReconciliationCommand() string {
 	return "mcphub setup"
 }
 
@@ -124,22 +139,19 @@ Example:
 			cmd.Printf("  build date: %s\n", date)
 			cmd.Printf("  go version: %s\n", runtime.Version())
 			cmd.Printf("  platform:   %s/%s\n", runtime.GOOS, runtime.GOARCH)
-			// Running-binary location + PATH-shadow diagnostic: surfaces the
-			// case where a stale `mcphub` on PATH (e.g. an npm-global install)
-			// shadows a fresher dev deploy (~/.local/bin). Best-effort — a
-			// lookup failure prints nothing extra.
+			// Running-binary location + canonical binary identity diagnostic.
+			// This compares native executables only: npm command shims are not
+			// binaries and therefore cannot produce a false identity warning.
 			runningExe, _ := os.Executable()
 			if runningExe != "" {
 				cmd.Printf("  running:    %s\n", runningExe)
 			}
-			if resolved, lerr := exec.LookPath("mcphub"); lerr == nil {
-				if diagnostic := pathShadowDiagnostic(runningExe, resolved); diagnostic != "" {
-					prefix := "⚠ shadow"
-					if strings.HasPrefix(diagnostic, "equivalent alternate path:") {
-						prefix = "ℹ shadow"
-					}
-					cmd.Printf("  %s:   %s\n", prefix, diagnostic)
+			if diagnostic := versionIdentityDiagnostic(runningExe, setupTargetPath); diagnostic != "" {
+				prefix := "⚠ identity"
+				if strings.HasPrefix(diagnostic, "equivalent canonical binary:") {
+					prefix = "ℹ identity"
 				}
+				cmd.Printf("  %s:   %s\n", prefix, diagnostic)
 			}
 			cmd.Println()
 			cmd.Println("  homepage:   https://github.com/applicate2628/mcp-local-hub")
