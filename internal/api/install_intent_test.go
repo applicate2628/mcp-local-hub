@@ -22,6 +22,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -434,6 +435,62 @@ func TestStopTaskNamesForServer_UnknownServer_Errors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "load manifest") {
 		t.Errorf("error message: want 'load manifest', got %v", err)
+	}
+}
+
+// TestStopTaskNamesForServer_BuiltinRouteTarget is the stop-intent resolver
+// contract for the supervisor-owned route front. "route" is deliberately not
+// a manifest name, so its two accepted CLI spellings must resolve before any
+// manifest lookup; every other daemon selector must still fail closed.
+func TestStopTaskNamesForServer_BuiltinRouteTarget(t *testing.T) {
+	tests := []struct {
+		name         string
+		server       string
+		daemonFilter string
+		want         []string
+		wantErr      bool
+	}{
+		{
+			name:   "route without daemon selects front",
+			server: BuiltinRouteServer,
+			want:   []string{BuiltinRouteTaskName},
+		},
+		{
+			name:         "route front selects front",
+			server:       BuiltinRouteServer,
+			daemonFilter: BuiltinRouteDaemonName,
+			want:         []string{BuiltinRouteTaskName},
+		},
+		{
+			name:         "route other daemon fails closed",
+			server:       BuiltinRouteServer,
+			daemonFilter: "other",
+			wantErr:      true,
+		},
+		{
+			name:         "ordinary manifest remains manifest derived",
+			server:       "time",
+			daemonFilter: "default",
+			want:         []string{"mcp-local-hub-time-default"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := stopTaskNamesForServer(tt.server, tt.daemonFilter)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("stopTaskNamesForServer: want error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("stopTaskNamesForServer: %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Fatalf("task names = %#v, want %#v", got, tt.want)
+			}
+		})
 	}
 }
 

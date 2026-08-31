@@ -55,6 +55,13 @@ const (
 	BuiltinRouteDaemonName = "front"
 )
 
+// isBuiltinRouteTargetSelector reports whether a server/daemon selector names
+// the one supervisor-owned built-in route front. An empty daemon selector is
+// the CLI's server-wide form and therefore resolves to that sole daemon.
+func isBuiltinRouteTargetSelector(server, daemonFilter string) bool {
+	return server == BuiltinRouteServer && (daemonFilter == "" || daemonFilter == BuiltinRouteDaemonName)
+}
+
 // BuildBuiltinRouteDaemon returns the canonical SupervisorDaemon descriptor
 // for the `mcphub route` front daemon. command is the supervisor's own
 // resolved binary path (internal/cli.canonicalMcphubPath() — the same

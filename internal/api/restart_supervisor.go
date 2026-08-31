@@ -31,6 +31,19 @@ func selectSupervisorOwnedTargets(intent *SupervisorIntentFile, server, daemonFi
 	if intent == nil || len(intent.Daemons) == 0 {
 		return nil
 	}
+	// The built-in route front has exactly one reserved identity. Do not let
+	// malformed or legacy route-named rows widen a targeted route operation.
+	if server == BuiltinRouteServer {
+		if !isBuiltinRouteTargetSelector(server, daemonFilter) {
+			return nil
+		}
+		if descriptor := findBuiltinRouteDescriptor(intent); descriptor != nil {
+			selected := *descriptor
+			selected.TaskName = normalizeSupervisorRestartTaskName(selected.TaskName)
+			return []SupervisorDaemon{selected}
+		}
+		return nil
+	}
 	// r36-3: the installed-server catalog the server-only blank-row arm below
 	// consults to disambiguate a hyphen sibling. Read once. On a read failure
 	// the set is empty, which makes blankServerRowOwnedByLongestInstalledPrefix

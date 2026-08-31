@@ -3840,6 +3840,13 @@ func (a *API) stopSupervisorAwareKill(server, daemonFilter string) ([]RestartRes
 	// so the kill path never taskkills a daemon a live supervisor would
 	// respawn.
 	handledTasks := schedulerBlockedRestartTaskNames(supResults)
+	// The route front is supervisor-only and has no manifest-backed legacy
+	// scheduler task. Once its canonical target was settled by the supervisor,
+	// do not re-enter listTasksForServer: route is deliberately a reserved
+	// manifest name and the fallback has no work to perform.
+	if supervisorHandled && isBuiltinRouteTargetSelector(server, daemonFilter) {
+		return supResults, nil
+	}
 	killResults, err := a.stopKillCore(server, daemonFilter, handledTasks)
 	if err != nil {
 		// Mixed install where the supervisor handled every owned row and

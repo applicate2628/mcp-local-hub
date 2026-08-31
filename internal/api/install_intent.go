@@ -605,6 +605,16 @@ func stopTaskNamesForServer(server, daemonFilter string) ([]string, error) {
 	if server == "" {
 		return nil, errors.New("stop: server is required")
 	}
+	// The built-in route front is supervisor-owned, not manifest-backed: the
+	// reserved server name is intentionally rejected by manifest resolution.
+	// Accept only its one canonical daemon selector before that fail-closed
+	// manifest path; any other selector must remain an explicit error.
+	if server == BuiltinRouteServer {
+		if isBuiltinRouteTargetSelector(server, daemonFilter) {
+			return []string{BuiltinRouteTaskName}, nil
+		}
+		return nil, fmt.Errorf("stop: built-in route daemon %q is not available (only %q)", daemonFilter, BuiltinRouteDaemonName)
+	}
 	data, err := loadManifestYAMLEmbedFirst(server)
 	if err != nil {
 		// Surface the load error. Stop() retries the load via

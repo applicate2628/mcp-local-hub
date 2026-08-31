@@ -72,6 +72,94 @@ func stopSupervisorTestIntent() *SupervisorIntentFile {
 	}
 }
 
+func builtinRouteIntentWithExtraRouteRow() *SupervisorIntentFile {
+	return &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{
+			{
+				TaskName: BuiltinRouteTaskName,
+				Server:   BuiltinRouteServer,
+				Daemon:   BuiltinRouteDaemonName,
+				Port:     9137,
+			},
+			// This is malformed durable state: the reserved route server has one
+			// valid daemon only. A targeted route stop must never widen to it.
+			{
+				TaskName: `\mcp-local-hub-route-other`,
+				Server:   BuiltinRouteServer,
+				Daemon:   "other",
+				Port:     9138,
+			},
+		},
+	}
+}
+
+func TestStopIntentTaskNamesForServer_BuiltinRouteExcludesExtraRouteRow(t *testing.T) {
+	for _, daemonFilter := range []string{"", BuiltinRouteDaemonName} {
+		t.Run("daemon="+daemonFilter, func(t *testing.T) {
+			stopSupervisorTestSetup(t, builtinRouteIntentWithExtraRouteRow(), nil)
+
+			got, err := stopIntentTaskNamesForServer(BuiltinRouteServer, daemonFilter)
+			if err != nil {
+				t.Fatalf("stopIntentTaskNamesForServer: %v", err)
+			}
+			want := strings.TrimPrefix(BuiltinRouteTaskName, `\`)
+			if len(got) != 1 || got[0] != want {
+				t.Fatalf("task names = %v, want exactly [%q]", got, want)
+			}
+		})
+	}
+}
+
+func TestStopBuiltinRouteSupervisorOnlyExcludesExtraRowAndLegacyFallback(t *testing.T) {
+	for _, daemonFilter := range []string{"", BuiltinRouteDaemonName} {
+		t.Run("daemon="+daemonFilter, func(t *testing.T) {
+			kills, fake := stopSupervisorTestSetup(t, builtinRouteIntentWithExtraRouteRow(), nil)
+
+			// A successful supervisor route stop is complete ownership; the legacy
+			// path would re-enter manifest resolution where "route" is reserved.
+			origFactory := stopSchedulerFactory
+			var schedulerFactoryCalls int32
+			stopSchedulerFactory = func() (scheduler.Scheduler, error) {
+				atomic.AddInt32(&schedulerFactoryCalls, 1)
+				return fake, nil
+			}
+			t.Cleanup(func() { stopSchedulerFactory = origFactory })
+
+			var gotTargets []StopBatchTargetV1
+			restore := setSupervisorStopBatchHookForTest(func(_ context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+				gotTargets = append([]StopBatchTargetV1(nil), command.Targets...)
+				return stopBatchResultForTest(command, []StoppedSettlement{{
+					TaskName: BuiltinRouteTaskName,
+					State:    StoppedSettlementStopped,
+					Reason:   StoppedSettlementReasonStopped,
+				}}), nil
+			})
+			defer restore()
+
+			results, err := NewAPI().Stop(BuiltinRouteServer, daemonFilter)
+			if err != nil {
+				t.Fatalf("Stop(route): %v", err)
+			}
+			if len(gotTargets) != 1 || gotTargets[0].TaskName != BuiltinRouteTaskName {
+				t.Fatalf("stop_batch targets = %+v, want only %q", gotTargets, BuiltinRouteTaskName)
+			}
+			if got := atomic.LoadInt32(&schedulerFactoryCalls); got != 0 {
+				t.Fatalf("legacy scheduler factory calls = %d, want 0 for supervisor-owned route", got)
+			}
+			if got := atomic.LoadInt32(kills); got != 0 {
+				t.Fatalf("killByPortFn calls = %d, want 0 for supervisor-owned route", got)
+			}
+			if len(fake.stopNames) != 0 {
+				t.Fatalf("legacy scheduler Stop calls = %v, want none", fake.stopNames)
+			}
+			if len(results) != 1 || results[0].TaskName != BuiltinRouteTaskName || results[0].Err != "" {
+				t.Fatalf("results = %+v, want one successful built-in route result", results)
+			}
+		})
+	}
+}
+
 // TestStopUsesSupervisorReconcileAndSkipsKill: Stop on a server with a
 // matching supervisor-intent row must (1) write Desired=stopped intent
 // BEFORE dialing the reconcile (the reconcile reads it from disk), (2)
