@@ -81,24 +81,24 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false, LogHubMcpEvent)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false, LogHubMcpEvent, stateReadDefaultParentFallbacksObserved)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false, LogHubMcpEvent)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false, LogHubMcpEvent, nil)
 }
 
 // readStateFileInodeAnchoredWithOptions's auditSink parameter is the
 // destination for the relax-fallback "unhardened-parent/file-fallback" warn
-// events below (finding 1, work-items/bugs/2026-07-26-route-daemon-state-
-// read-unhardened-parent-fallback-writes-hub-mcp-log.md): every existing
-// caller in this file passes LogHubMcpEvent, preserving today's behavior
-// exactly. A caller that must never write the shared hub-mcp.log (the
-// read-only `mcphub route` front daemon) reaches this via
+// events below. parentFallbacksObserved is supplied only by the default
+// hub-mcp.log path and receives one complete parent-DACL observation per read;
+// caller-owned sinks pass nil and keep per-call events.
+// A caller that must never write the shared hub-mcp.log (the read-only
+// `mcphub route` front daemon) reaches this via
 // ReadStateFileInodeAnchoredWithAuditSink / Registry.SetAuditSink /
 // LSPWorkspaceRootTrustedWithAuditSink instead, passing
 // RouteReadOnlyStderrSink.
-func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error) ([]byte, error) {
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error, parentFallbacksObserved func(string, []stateReadParentFallbackObservation)) ([]byte, error) {
 	parentDir := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -127,6 +127,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 	// (same as the old verify); default-relax now tolerates BOTH
 	// read-only and write/DAC-edit broadening because the read
 	// below is inode-anchored.
+	var parentFallbacks []stateReadParentFallbackObservation
 	if err := verifyWindowsDACLFromHandle(parentHandle); err != nil {
 		if requiresStrict() {
 			return nil, fmt.Errorf("parent %s not single-user safe: %w; %s=1 is set, so the strict parent-dir gate is enforced (unset that env var, or tighten the parent's DACL to remove the offending principal, to proceed)",
@@ -143,14 +144,22 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			reason = "default-relax-on-solo-host (parent grants WRITE/DAC-edit access; safe under inode-anchored read because subsequent ReadFile is bound to the file handle, not the path)"
 		}
 		if auditFallbacks {
-			_ = auditSink("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			observation := stateReadParentFallbackObservation{level: "warn", event: stateReadUnhardenedParentFallbackEvent, fields: map[string]any{
 				"path":   path,
 				"parent": parentDir,
 				"reason": reason,
 				"err":    err.Error(),
 				"note":   "file's own DACL verified below; ReadFile is handle-bound so TOCTOU swap window is closed at the kernel level",
-			})
+			}}
+			if parentFallbacksObserved != nil {
+				parentFallbacks = append(parentFallbacks, observation)
+			} else {
+				_ = auditSink(observation.level, observation.event, observation.fields)
+			}
 		}
+	}
+	if auditFallbacks && parentFallbacksObserved != nil {
+		parentFallbacksObserved(path, parentFallbacks)
 	}
 
 	// Open the file RELATIVE to the parent handle, with

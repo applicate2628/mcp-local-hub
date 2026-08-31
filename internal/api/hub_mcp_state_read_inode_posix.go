@@ -32,18 +32,18 @@ func readStateFileInodeAnchored(path string) ([]byte, error) {
 }
 
 func readStateFileInodeAnchoredWithStrictPolicy(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false, LogHubMcpEvent)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), true, false, LogHubMcpEvent, stateReadDefaultParentFallbacksObserved)
 }
 
 func readStateFileInodeAnchoredWithStrictPolicyNoAudit(path string, requiresStrict func() bool) ([]byte, error) {
-	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false, LogHubMcpEvent)
+	return readStateFileInodeAnchoredWithOptions(path, requiresStrict, stateFileReadCapBytes(path), false, false, LogHubMcpEvent, nil)
 }
 
 // readStateFileInodeAnchoredWithOptions's auditSink parameter mirrors the
-// Windows leg (hub_mcp_state_read_inode_windows.go) — see its doc comment
-// for the finding-1 rationale. Every existing caller in this file passes
-// LogHubMcpEvent, preserving today's behavior exactly.
-func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error) ([]byte, error) {
+// Windows leg (hub_mcp_state_read_inode_windows.go). parentFallbacksObserved
+// is non-nil only for the default hub-mcp.log path; caller-owned sinks keep
+// their established per-call fallback events.
+func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bool, maxBytes int64, auditFallbacks, consume bool, auditSink func(level, event string, fields map[string]any) error, parentFallbacksObserved func(string, []stateReadParentFallbackObservation)) ([]byte, error) {
 	parentPath := filepath.Dir(path)
 	basename := filepath.Base(path)
 
@@ -67,6 +67,7 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, parentErr
 		}
 	}
+	var parentFallbacks []stateReadParentFallbackObservation
 	if pmode&0o022 != 0 {
 		parentErr := fmt.Errorf("%w: parent=%s mode=%04o grants group/world write", ErrTooLoose, parentPath, pmode&0o777)
 		// Write/DAC-edit broadening on parent — safe under the
@@ -85,12 +86,17 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, parentErr
 		}
 		if auditFallbacks {
-			_ = auditSink("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			observation := stateReadParentFallbackObservation{level: "warn", event: stateReadUnhardenedParentFallbackEvent, fields: map[string]any{
 				"path":        path,
 				"parent":      parentPath,
 				"reason":      "default-relax-on-solo-host (parent grants group/world write; safe under inode-anchored read because subsequent read(2) is bound to the openat fd, not the path)",
 				"parent_mode": fmt.Sprintf("%04o", pmode&0o777),
-			})
+			}}
+			if parentFallbacksObserved != nil {
+				parentFallbacks = append(parentFallbacks, observation)
+			} else {
+				_ = auditSink(observation.level, observation.event, observation.fields)
+			}
 		}
 	}
 	if pmode&0o055 != 0 {
@@ -102,13 +108,21 @@ func readStateFileInodeAnchoredWithOptions(path string, requiresStrict func() bo
 			return nil, parentErr
 		}
 		if auditFallbacks {
-			_ = auditSink("warn", "hub-mcp-state-read-unhardened-parent-fallback", map[string]any{
+			observation := stateReadParentFallbackObservation{level: "warn", event: stateReadUnhardenedParentFallbackEvent, fields: map[string]any{
 				"path":        path,
 				"parent":      parentPath,
 				"reason":      "default-relax-on-solo-host (parent group/world read/exec bits set; write bits cleared)",
 				"parent_mode": fmt.Sprintf("%04o", pmode&0o777),
-			})
+			}}
+			if parentFallbacksObserved != nil {
+				parentFallbacks = append(parentFallbacks, observation)
+			} else {
+				_ = auditSink(observation.level, observation.event, observation.fields)
+			}
 		}
+	}
+	if auditFallbacks && parentFallbacksObserved != nil {
+		parentFallbacksObserved(path, parentFallbacks)
 	}
 
 	fd, err := unix.Openat(pfd, basename, unix.O_RDONLY|unix.O_NONBLOCK|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)

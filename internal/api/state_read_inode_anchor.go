@@ -45,6 +45,7 @@ func ConsumeStateSecretFileInodeAnchored(path string, expectedBytes int64) ([]by
 		false,
 		true,
 		LogHubMcpEvent,
+		nil,
 	)
 	if err != nil {
 		return nil, err
@@ -78,9 +79,9 @@ func ConsumeStateSecretFileInodeAnchored(path string, expectedBytes int64) ([]by
 // DACL/mode gate hits its default-relax fallback.
 func ReadStateFileInodeAnchoredWithAuditSink(path string, sink func(level, event string, fields map[string]any) error) ([]byte, error) {
 	if sink == nil {
-		sink = LogHubMcpEvent
+		return readStateFileInodeAnchoredWithOptions(path, operatorRequiresSingleUserHome, stateFileReadCapBytes(path), true, false, LogHubMcpEvent, stateReadDefaultParentFallbacksObserved)
 	}
-	return readStateFileInodeAnchoredWithOptions(path, operatorRequiresSingleUserHome, stateFileReadCapBytes(path), true, false, sink)
+	return readStateFileInodeAnchoredWithOptions(path, operatorRequiresSingleUserHome, stateFileReadCapBytes(path), true, false, sink, nil)
 }
 
 // ReadStateFileInodeAnchoredEnvStrictOnly is the bootstrap variant for recovery
