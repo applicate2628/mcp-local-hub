@@ -1,6 +1,7 @@
 package gui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -234,6 +235,9 @@ func TestMain(m *testing.M) {
 	}
 
 	restoreState := api.SetDaemonStateRootForTest(stateRoot)
+	// Install/adopt transaction fixtures deliberately use non-runnable
+	// canonical descriptor paths; focused API tests own the real probe.
+	restoreStdioAdmission := api.SetFrozenStdioBridgeAdmissionForTest(func(context.Context, []api.FrozenStdioBridgeAdmissionRequest) error { return nil })
 	// Redirect every client-adapter path input before installing the audit. The
 	// descriptor is shared with API and CLI package test setup.
 	restoreClientEnv := clients.ApplyClientConfigSandboxEnvironment(tmp)
@@ -271,6 +275,7 @@ func TestMain(m *testing.M) {
 	restoreAutostartFixture()
 	restoreEnv()
 	restoreClientEnv()
+	restoreStdioAdmission()
 	restoreState()
 	if cleanupErr := apitest.RemoveTestMainRoot(tmp); cleanupErr != nil {
 		if code == 0 {
