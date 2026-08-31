@@ -309,6 +309,24 @@ func (s *Server) SetSerenaRouterDeps(deps *serenaRouterDeps) {
 	s.serenaRouterDeps.Store(deps)
 }
 
+// SetSerenaActivityCommitterForTest replaces only the explicit activity-IPC
+// dependency on an already-wired Serena router. It exists for construction
+// tests that exercise the real GUI/route resolver and session topology without
+// starting a supervisor process. Production never calls it and retains the
+// direct supervisor IPC function installed by the constructors.
+func (s *Server) SetSerenaActivityCommitterForTest(fn func(context.Context, api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error)) {
+	if s == nil || fn == nil {
+		return
+	}
+	current := s.serenaRouterDeps.Load()
+	if current == nil {
+		return
+	}
+	updated := *current
+	updated.CommitSerenaActivityFn = fn
+	s.serenaRouterDeps.Store(&updated)
+}
+
 // NewInMemorySessionRouter returns a process-local sessionRouter for
 // production callers who want sticky-session binding without depending
 // on Agent A1's serena_routing package directly.

@@ -1231,6 +1231,7 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 
 	regPath := filepath.Join(root, "workspaces.yaml")
 	reg := api.NewRegistry(regPath)
+	registeredAt := time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC)
 	if err := reg.PutSerena(api.WorkspaceEntry{
 		WorkspaceKey:  api.WorkspaceKey(wsAlpha),
 		WorkspacePath: wsAlpha,
@@ -1238,6 +1239,7 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 		Backend:       "serena",
 		Port:          testServerPort(t, tsAlpha),
 		TaskName:      "mcp-local-hub-serena-alpha",
+		RegisteredAt:  registeredAt,
 	}); err != nil {
 		t.Fatalf("PutSerena alpha: %v", err)
 	}
@@ -1248,6 +1250,7 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 		Backend:       "serena",
 		Port:          testServerPort(t, tsBeta),
 		TaskName:      "mcp-local-hub-serena-beta",
+		RegisteredAt:  registeredAt,
 	}); err != nil {
 		t.Fatalf("PutSerena beta: %v", err)
 	}
@@ -1262,6 +1265,14 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 	sessions := serena_routing.NewSessionRouter()
 	s := NewServer(Config{Port: 9125, Version: "test", PID: 1})
 	s.SetSerenaRouterProduction(resolver, sessions)
+	commitCalls := 0
+	s.SetSerenaActivityCommitterForTest(func(_ context.Context, request api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error) {
+		commitCalls++
+		if request.LegacyGenerationUnspecified || !request.RegisteredAt.Equal(registeredAt) {
+			t.Fatalf("production resolver commit request = %+v", request)
+		}
+		return api.SerenaActivityCommitReceiptV1{ProtocolVersion: 1, WorkspaceKey: request.WorkspaceKey, TaskName: request.TaskName, RegisteredAt: request.RegisteredAt, ActivityAt: request.ActivityAt, State: "committed"}, nil
+	})
 
 	bodyAlpha := buildToolCallBody(t, "find_symbol", map[string]any{"relative_path": alphaFile})
 	rrAlpha := postSerena(t, s, bodyAlpha, nil)
@@ -1285,6 +1296,9 @@ func TestSerenaRouter_RealResolverIntegration_RoutesPathArgToCorrectWorkspace(t 
 	}
 	if got := betaToolHits(); got != 1 {
 		t.Fatalf("beta tool hits = %d, want 1", got)
+	}
+	if commitCalls != 2 {
+		t.Fatalf("activity commits = %d, want one per forwarded workspace call", commitCalls)
 	}
 
 	unknown := writeWorkspaceFile(t, filepath.Join(root, "Unregistered"), "src", "unknown.go")

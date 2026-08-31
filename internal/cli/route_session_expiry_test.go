@@ -200,6 +200,7 @@ func TestRouteDaemon_BackendLossReconcileUsesRouteOwnedStores(t *testing.T) {
 		Backend:       "serena",
 		Port:          upstreamPort,
 		TaskName:      "mcp-local-hub-serena-route-reconcile",
+		RegisteredAt:  time.Date(2026, 8, 31, 16, 0, 0, 0, time.UTC),
 	}
 	if err := registry.PutSerena(entry); err != nil {
 		t.Fatalf("put serena workspace: %v", err)
@@ -212,6 +213,14 @@ func TestRouteDaemon_BackendLossReconcileUsesRouteOwnedStores(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildRouteServer: %v", err)
 	}
+	activityCommits := 0
+	s.SetSerenaActivityCommitterForTest(func(_ context.Context, request api.SerenaActivityCommitRequestV1) (api.SerenaActivityCommitReceiptV1, error) {
+		activityCommits++
+		if request.LegacyGenerationUnspecified || !request.RegisteredAt.Equal(entry.RegisteredAt) {
+			t.Fatalf("route commit request = %+v", request)
+		}
+		return api.SerenaActivityCommitReceiptV1{ProtocolVersion: 1, WorkspaceKey: request.WorkspaceKey, TaskName: request.TaskName, RegisteredAt: request.RegisteredAt, ActivityAt: request.ActivityAt, State: "committed"}, nil
+	})
 
 	var statusMu sync.Mutex
 	statusCalls := 0
@@ -258,6 +267,9 @@ func TestRouteDaemon_BackendLossReconcileUsesRouteOwnedStores(t *testing.T) {
 	}
 	if stores.serena.Len() != 1 {
 		t.Fatalf("route sticky store length = %d, want 1 after a route-owned session bind", stores.serena.Len())
+	}
+	if activityCommits != 1 {
+		t.Fatalf("route activity commits = %d, want 1 before forwarded tool call", activityCommits)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
