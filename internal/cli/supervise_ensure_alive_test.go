@@ -20,6 +20,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/gui"
 )
 
@@ -100,6 +101,97 @@ func TestEnsureAlive_LiveLock_NoOp(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "supervisor running") {
 		t.Errorf("output should report the running no-op; got %q", out.String())
+	}
+}
+
+func TestEnsureAlive_SuperviseOwnerLiveNeverProbesGUI(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1, OwnerMode: api.OwnerModeSupervise}); err != nil {
+		t.Fatalf("seed owner mode: %v", err)
+	}
+	lk, err := api.AcquireSupervisorLock(filepath.Join(stateDir, "supervisor.lock"))
+	if err != nil {
+		t.Fatalf("acquire supervisor lock: %v", err)
+	}
+	defer lk.Release()
+	restoreTask := setEnsureAliveOwnerTaskStateForTest(func(autostart.Options) (autostart.State, error) {
+		return autostart.StateEnabledStopped, nil
+	})
+	defer restoreTask()
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) {
+		t.Fatal("supervise owner must not probe GUI while supervisor is alive")
+		return guiOwnerStateUnknown, 0, 0
+	})
+	defer restoreGUI()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if !strings.Contains(out.String(), "supervise owner") {
+		t.Fatalf("output=%q, want supervise-owner no-op", out.String())
+	}
+}
+
+func TestEnsureAlive_SuperviseOwnerDownRelaunchesOnlyVerifiedTask(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1, OwnerMode: api.OwnerModeSupervise}); err != nil {
+		t.Fatalf("seed owner mode: %v", err)
+	}
+	restoreTask := setEnsureAliveOwnerTaskStateForTest(func(autostart.Options) (autostart.State, error) {
+		return autostart.StateEnabledStopped, nil
+	})
+	defer restoreTask()
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) {
+		t.Fatal("supervise owner must not probe GUI while supervisor is down")
+		return guiOwnerStateUnknown, 0, 0
+	})
+	defer restoreGUI()
+	var relaunches int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreRelaunch()
+
+	if err := runEnsureAlive(stateDir, &bytes.Buffer{}); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 1 {
+		t.Fatalf("verified supervise task relaunches=%d, want 1", got)
+	}
+}
+
+func TestEnsureAlive_SuperviseOwnerTaskDriftFailsClosed(t *testing.T) {
+	stateDir := ensureAliveTestStateDir(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1, OwnerMode: api.OwnerModeSupervise}); err != nil {
+		t.Fatalf("seed owner mode: %v", err)
+	}
+	restoreTask := setEnsureAliveOwnerTaskStateForTest(func(autostart.Options) (autostart.State, error) {
+		return autostart.StateDrifted, nil
+	})
+	defer restoreTask()
+	restoreGUI := setGUIOwnerAliveFnForTest(func() (guiOwnerProbeState, int, int) {
+		t.Fatal("unverified supervise owner must not probe GUI")
+		return guiOwnerStateUnknown, 0, 0
+	})
+	defer restoreGUI()
+	var relaunches int32
+	restoreRelaunch := setLivenessRelaunchFnForTest(func() error {
+		atomic.AddInt32(&relaunches, 1)
+		return nil
+	})
+	defer restoreRelaunch()
+
+	out := &bytes.Buffer{}
+	if err := runEnsureAlive(stateDir, out); err != nil {
+		t.Fatalf("runEnsureAlive: %v", err)
+	}
+	if got := atomic.LoadInt32(&relaunches); got != 0 {
+		t.Fatalf("unverified supervise owner relaunches=%d, want 0", got)
+	}
+	if !strings.Contains(out.String(), "unverifiable") {
+		t.Fatalf("output=%q, want fail-closed owner verification", out.String())
 	}
 }
 
@@ -574,7 +666,7 @@ func TestEnsureAlive_HeadlessFleet_AlternatePathVerifiedRecovers(t *testing.T) {
 		return ensureAliveSupervisorOwnerVerification{
 			class: ensureAliveSupervisorOwnerAlternatePathVerified,
 			owner: api.SupervisorLockOwner{PID: pid, StartedAt: time.Now().Add(-2 * time.Minute).Format(time.RFC3339Nano)},
-			image: `C:\\Users\\test\\bin\\mcphub.exe.old`,
+			image: "fixture-old-mcphub.exe",
 		}
 	}
 	noLiveGUIOwner(t)

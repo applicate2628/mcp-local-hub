@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"mcp-local-hub/internal/supervisorowner"
 )
 
 // SupervisorIntentFile is the on-disk schema for <state-dir>/supervisor-intent.json.
@@ -20,6 +22,10 @@ type SupervisorIntentFile struct {
 	Daemons           []SupervisorDaemon `json:"daemons"`
 	MaintenanceTimers []MaintenanceTimer `json:"maintenance_timers,omitempty"`
 	StrictMode        bool               `json:"strict_mode"`
+	// OwnerMode selects the single Windows autostart owner. It is additive so
+	// supervisor-intent files written before owner-mode support decode as the
+	// historic GUI owner. New writes record an explicit value.
+	OwnerMode OwnerMode `json:"owner_mode,omitempty"`
 
 	// Stops is the v0.6 Phase 4-E dual-intent collapse target: the
 	// per-task operator-stop / quarantine override sub-block that used
@@ -60,6 +66,25 @@ type SupervisorIntentFile struct {
 	// pre-runtime_spec reader that used DisallowUnknownFields is already outside
 	// the safe additive-field downgrade boundary documented by HasRuntimeSpecRow.
 	LegacyStopWatermarks map[string]DaemonIntent `json:"legacy_stop_watermarks,omitempty"`
+}
+
+// OwnerMode is the durable ownership topology for the Windows autostart task.
+// The empty value is the compatibility representation of older intent files
+// and therefore means GUI.
+type OwnerMode = supervisorowner.Mode
+
+const (
+	OwnerModeGUI       = supervisorowner.ModeGUI
+	OwnerModeSupervise = supervisorowner.ModeSupervise
+)
+
+// EffectiveOwnerMode resolves the additive zero value to the historical GUI
+// owner. Callers which need to mutate or launch must reject any other value.
+func (f *SupervisorIntentFile) EffectiveOwnerMode() OwnerMode {
+	if f == nil || f.OwnerMode == "" {
+		return OwnerModeGUI
+	}
+	return f.OwnerMode
 }
 
 // SupervisorDaemon is one daemon descriptor keyed by canonical

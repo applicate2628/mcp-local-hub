@@ -3,10 +3,10 @@
 //
 // Per-OS subcommand divergence (PR #212):
 //
-//   - Windows  → `mcphub gui [--strict-mode]`. The GUI process owns
-//     supervisor lifecycle ("tray icon = mcphub running" contract);
-//     GUI adopts an existing supervisor via IPC probe or spawns one
-//     as a detached child. Tray icon = mcphub running.
+//   - Windows  → `mcphub gui [--strict-mode]` by default, or
+//     `mcphub supervise [--strict-mode]` for the persisted supervise owner.
+//     GUI ownership retains the tray lifecycle contract; supervise ownership
+//     intentionally has no tray or GUI server.
 //
 //   - Linux    → `mcphub supervise [--strict-mode]`. Linux is beta
 //     tier with no functional tray surface, so the GUI ownership
@@ -46,6 +46,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"mcp-local-hub/internal/supervisorowner"
+)
+
+// OwnerMode is the durable supervisor-owner topology. Aliases keep the
+// autostart options contract readable while api owns its persisted values.
+type OwnerMode = supervisorowner.Mode
+
+const (
+	OwnerModeGUI       = supervisorowner.ModeGUI
+	OwnerModeSupervise = supervisorowner.ModeSupervise
 )
 
 // ErrStatusObservationUnavailable reports that autostart state could not be
@@ -139,6 +150,10 @@ type Options struct {
 	// --strict-mode` (true) or `mcphub supervise` (false). The flag
 	// flows into the per-OS XML/unit/plist as an extra argv element.
 	StrictMode bool
+
+	// OwnerMode selects Windows' one canonical autostart task command. The
+	// zero value preserves historical GUI ownership; POSIX backends ignore it.
+	OwnerMode OwnerMode
 
 	// MCPHubPath is the absolute path to the mcphub binary the shim
 	// should invoke. Empty means "resolve via os.Executable() at call

@@ -1,8 +1,8 @@
 //go:build windows
 
-// Windows autostart backend: installs `\mcp-local-hub-supervisor` Task
-// Scheduler entry with a LogonTrigger that fires
-// `mcphub.exe supervise [--strict-mode]` at each user logon.
+// Windows autostart backend: installs one `\mcp-local-hub-supervisor` Task
+// Scheduler entry with a LogonTrigger that fires the selected persisted owner
+// (`mcphub.exe gui --no-browser` or `mcphub.exe supervise`) at user logon.
 //
 // Reuses the existing `internal/scheduler.Scheduler` primitives so the
 // XML-generation, schtasks shell-out, and per-user identity gating all
@@ -42,7 +42,7 @@ func newPlatformBackend() (Backend, error) {
 }
 
 // superviseArgs returns the argv slice the LogonTrigger passes to the
-// mcphub binary.
+// mcphub binary for the selected single owner mode.
 //
 // As of 2026-05-18 the autostart entry launches `mcphub gui` instead
 // of `mcphub supervise` — see the "GUI owns supervisor lifecycle"
@@ -55,12 +55,9 @@ func newPlatformBackend() (Backend, error) {
 // supervisor spawn inherits the right intent flag. Drift detection
 // relies on the exact-element diff between the two modes.
 //
-// The legacy `mcphub supervise` autostart entry from PR #211 is
-// rewritten in place — Enable() always Delete's first, so on the
-// next `mcphub autostart enable` invocation the operator transitions
-// from the supervise-only shim to the gui-owns-supervisor shim with
-// no extra step.
-func superviseArgs(opts Options) []string {
+// The task identity remains unchanged across owner modes; Enable always
+// replaces its argv in place so no second task/process family is introduced.
+func superviseArgs(opts Options) ([]string, error) {
 	// --no-browser: the autostart/logon/liveness-recovery GUI is a headless
 	// server + tray indicator, NOT an interactive `mcphub gui`. Without it,
 	// EVERY relaunch (user logon OR a `supervise --ensure-alive` recovery after
@@ -70,10 +67,23 @@ func superviseArgs(opts Options) []string {
 	// test-sweeps of mcphub.exe triggered repeated autostart relaunches, each
 	// popping a browser.) See memory feedback_gui_always_tray (tray on, browser
 	// off) + gui.go's --no-browser flag.
-	if opts.StrictMode {
-		return []string{"gui", "--no-browser", "--strict-mode"}
+	mode := opts.OwnerMode
+	if mode == "" {
+		mode = OwnerModeGUI
 	}
-	return []string{"gui", "--no-browser"}
+	var args []string
+	switch mode {
+	case OwnerModeGUI:
+		args = []string{"gui", "--no-browser"}
+	case OwnerModeSupervise:
+		args = []string{"supervise"}
+	default:
+		return nil, fmt.Errorf("invalid owner mode %q", mode)
+	}
+	if opts.StrictMode {
+		args = append(args, "--strict-mode")
+	}
+	return args, nil
 }
 
 // Enable installs (or replaces) the autostart Task Scheduler entry.
@@ -83,6 +93,14 @@ func superviseArgs(opts Options) []string {
 // keeps the operation atomic-from-the-user-perspective even when the
 // shim was previously installed with different args.
 func (w *windowsBackend) Enable(opts Options) error {
+	// Validate the exact owner argv before touching the existing canonical
+	// task. Delete-before-create is the scheduler replacement protocol, but an
+	// invalid requested mode is a caller error, not a reason to remove a
+	// working owner.
+	args, err := superviseArgs(opts)
+	if err != nil {
+		return err
+	}
 	sched, err := schedulerFactoryFn()
 	if err != nil {
 		return fmt.Errorf("scheduler factory: %w", err)
@@ -100,7 +118,7 @@ func (w *windowsBackend) Enable(opts Options) error {
 		Name:         WindowsTaskName,
 		Description:  "mcp-local-hub supervisor (autostart shim, plan §2531-2541)",
 		Command:      cmd,
-		Args:         superviseArgs(opts),
+		Args:         args,
 		LogonTrigger: true,
 		// RestartOnFailure intentionally false: the supervisor's own
 		// crash policy is handled by the supervise runtime (Job
@@ -340,15 +358,20 @@ func windowsTaskSpecDrifted(spec windowsTaskSpec, opts Options) bool {
 	// `drifted`, masking the need to re-run `mcphub autostart enable`
 	// to get the new GUI-owns-supervisor lifecycle. PR #212 r4
 	// architecture-review finding 2.
-	wantArgs := superviseArgs(opts)
-	if len(wantArgs) > 0 {
-		argTokens := strings.Fields(spec.Arguments)
-		if len(argTokens) == 0 || !strings.EqualFold(argTokens[0], wantArgs[0]) {
+	wantArgs, err := superviseArgs(opts)
+	if err != nil {
+		return true
+	}
+	gotArgs := strings.Fields(spec.Arguments)
+	if len(gotArgs) != len(wantArgs) {
+		return true
+	}
+	for i := range wantArgs {
+		if gotArgs[i] != wantArgs[i] {
 			return true
 		}
 	}
-	hasStrictFlag := strings.Contains(spec.Arguments, "--strict-mode")
-	return hasStrictFlag != opts.StrictMode
+	return false
 }
 
 func windowsShimSpecFingerprint(spec windowsTaskSpec) string {

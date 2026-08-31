@@ -55,6 +55,26 @@ func TestSupervisorIntent_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestSupervisorIntent_OwnerModeDefaultsToGUIAndPersistsSupervise(t *testing.T) {
+	legacy := &SupervisorIntentFile{Version: 1}
+	if got := legacy.EffectiveOwnerMode(); got != OwnerModeGUI {
+		t.Fatalf("legacy effective owner mode=%q, want gui", got)
+	}
+
+	dir := hardenedTempDir(t)
+	path := filepath.Join(dir, "supervisor-intent.json")
+	if err := WriteSupervisorIntent(path, &SupervisorIntentFile{Version: 1, OwnerMode: OwnerModeSupervise}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := ReadSupervisorIntent(path)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	if got.EffectiveOwnerMode() != OwnerModeSupervise {
+		t.Fatalf("persisted effective owner mode=%q, want supervise", got.EffectiveOwnerMode())
+	}
+}
+
 func TestSupervisorIntent_LegacyStopWatermarkJSONIsAdditiveForSupportedOldReaders(t *testing.T) {
 	now := "2026-07-09T09:59:00Z"
 	raw := []byte(`{"version":1,"legacy_stop_watermarks":{"\\mcp-local-hub-paper-search-default":{"desired":"stopped","reason":"user-stop","updated_at":"` + now + `"}}}`)
@@ -525,18 +545,18 @@ func TestSupervisorIntent_RoundTrip_WithRuntimeSpec(t *testing.T) {
 				Server:       "serena",
 				Daemon:       "deadbeef",
 				Command:      `C:\bin\mcphub.exe`,
-				Args:         []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", `C:\work\alpha`, "--port", "9121", "--task-name", `\mcp-local-hub-serena-deadbeef`},
+				Args:         []string{"daemon", "serena-proxy", "--server", "serena", "--workspace", "fixture-workspace-alpha", "--port", "9121", "--task-name", `\mcp-local-hub-serena-deadbeef`},
 				Port:         9121,
-				Workspace:    `C:\work\alpha`,
+				Workspace:    "fixture-workspace-alpha",
 				ManifestHash: "sha256:abc",
 				RuntimeSpec: &DaemonRuntimeSpec{
 					SpecVersion:   DaemonRuntimeSpecVersion,
 					ChildCommand:  "uvx",
-					ChildArgs:     []string{"--from", "git+https://example/serena", "serena", "start-mcp-server", "--project", `C:\work\alpha`, "--context", "codex"},
+					ChildArgs:     []string{"--from", "git+https://example/serena", "serena", "start-mcp-server", "--project", "fixture-workspace-alpha", "--context", "codex"},
 					EnvRefs:       map[string]string{"PYTHONUNBUFFERED": "1", "SERENA_TOKEN": "secret:SERENA_TOKEN"},
 					UpstreamPort:  19121,
 					ExternalPort:  9121,
-					WorkspacePath: `C:\work\alpha`,
+					WorkspacePath: "fixture-workspace-alpha",
 				},
 			},
 		},

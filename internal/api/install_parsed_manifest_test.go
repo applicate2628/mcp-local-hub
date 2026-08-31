@@ -2102,6 +2102,39 @@ func TestInstallPlanCore_GlobalInstall_EnablesAbsentAutostartOwner(t *testing.T)
 	}
 }
 
+func TestInstallPlanCore_GlobalInstall_PreservesAndThreadsOwnerMode(t *testing.T) {
+	stateDir := daemonIntentTestHelper(t)
+	preparePreflightBinaryChecks(t)
+	installFakeScheduler(t, newInstallFakeScheduler())
+	intentPath := filepath.Join(stateDir, supervisorIntentFileLeaf)
+	if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, OwnerMode: OwnerModeSupervise}); err != nil {
+		t.Fatalf("seed supervise owner mode: %v", err)
+	}
+	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateAbsent}
+	installFakeAutostartBackend(t, fb)
+	t.Cleanup(setSupervisorReconcileApplyHookForTest(func(context.Context, bool) (ReconcileResponse, error) {
+		return ReconcileResponse{}, nil
+	}))
+
+	plan, err := BuildPlan(globalTwoDaemonManifest(), "")
+	if err != nil {
+		t.Fatalf("BuildPlan: %v", err)
+	}
+	if err := NewAPI().installPlanCore(context.Background(), globalTwoDaemonManifest(), bindTestPlanManifestHash(plan), "", false, io.Discard); err != nil {
+		t.Fatalf("installPlanCore: %v", err)
+	}
+	intent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatalf("read merged intent: %v", err)
+	}
+	if got := intent.EffectiveOwnerMode(); got != OwnerModeSupervise {
+		t.Fatalf("merged owner mode=%q, want supervise", got)
+	}
+	if len(fb.enableOpts) != 1 || fb.enableOpts[0].OwnerMode != autostart.OwnerModeSupervise {
+		t.Fatalf("autostart options=%+v, want persisted supervise owner mode", fb.enableOpts)
+	}
+}
+
 // TestInstallPlanCore_GlobalInstall_AutostartEnableUsesCanonicalMcphubPath
 // proves install-created autostart shims point at the canonical installed
 // binary, not os.Executable from the current build/download directory.
@@ -2188,7 +2221,7 @@ func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
 	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateDrifted}
 	installFakeAutostartBackend(t, fb)
 
-	ensureGlobalInstallAutostartOwner(io.Discard, true)
+	ensureGlobalInstallAutostartOwner(io.Discard, true, OwnerModeGUI)
 
 	if fb.enableCalls != 1 {
 		t.Fatalf("autostart Enable calls = %d, want 1 for drifted owner", fb.enableCalls)
@@ -2207,7 +2240,7 @@ func TestEnsureGlobalInstallAutostartOwner_EnabledStatesDoNotRewriteShim(t *test
 			fb := &fakeInstallAutostartBackend{statusReturn: state}
 			installFakeAutostartBackend(t, fb)
 
-			ensureGlobalInstallAutostartOwner(io.Discard, false)
+			ensureGlobalInstallAutostartOwner(io.Discard, false, OwnerModeGUI)
 
 			if fb.enableCalls != 0 {
 				t.Fatalf("autostart Enable calls = %d, want 0 for %s", fb.enableCalls, state)

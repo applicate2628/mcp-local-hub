@@ -136,6 +136,54 @@ import (
 // re-establish the GUI owner the autostart task is responsible for).
 var livenessRelaunchFn = relaunchSupervisorOwner
 
+// ensureAliveOwnerTaskStateFn is the narrow read-only proof that a persisted
+// supervise owner still matches the one canonical autostart task before a
+// liveness tick re-fires it. GUI ownership preserves the historical path and
+// therefore does not pay this extra scheduler observation.
+var ensureAliveOwnerTaskStateFn = func(opts autostart.Options) (autostart.State, error) {
+	backend, err := autostart.New()
+	if err != nil {
+		return autostart.StateAbsent, err
+	}
+	return backend.Status(opts)
+}
+
+func setEnsureAliveOwnerTaskStateForTest(fn func(autostart.Options) (autostart.State, error)) func() {
+	previous := ensureAliveOwnerTaskStateFn
+	ensureAliveOwnerTaskStateFn = fn
+	return func() { ensureAliveOwnerTaskStateFn = previous }
+}
+
+// resolveEnsureAliveOwnerMode reads the additive intent-owned mode. Missing
+// files predate the field and retain GUI behavior. A persisted supervise mode
+// must additionally prove that the canonical task has matching argv; otherwise
+// firing it could unexpectedly start a GUI owner, so liveness fails closed.
+func resolveEnsureAliveOwnerMode(stateDir string) (api.OwnerMode, error) {
+	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+	intent, err := api.ReadSupervisorIntent(intentPath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return api.OwnerModeGUI, nil
+		}
+		return "", fmt.Errorf("read supervisor intent: %w", err)
+	}
+	mode := intent.EffectiveOwnerMode()
+	if !mode.Valid() {
+		return "", fmt.Errorf("invalid persisted owner mode %q", mode)
+	}
+	if mode == api.OwnerModeGUI {
+		return mode, nil
+	}
+	state, err := ensureAliveOwnerTaskStateFn(autostart.Options{OwnerMode: autostart.OwnerModeSupervise, StrictMode: intent.StrictMode})
+	if err != nil {
+		return "", fmt.Errorf("observe supervise autostart task: %w", err)
+	}
+	if state != autostart.StateEnabledRunning && state != autostart.StateEnabledStopped {
+		return "", fmt.Errorf("supervise autostart task is %s", state)
+	}
+	return mode, nil
+}
+
 // ensureAliveHeadlessFleetNowFn supplies the wall-clock observation paired
 // with the persisted supervisor StartedAt. Production reads it once per
 // decision; tests replace it to exercise rollback/forward anomalies without
@@ -1649,6 +1697,41 @@ func probeGUIServingWithinTimeout(port int) bool {
 // supervisor-events.log (Task Scheduler discards stdout). Returns nil on EVERY
 // branch — this is a best-effort recovery tick (exit 0), not a gate.
 func runEnsureAlive(stateDir string, out io.Writer) error {
+	ownerMode, ownerModeErr := resolveEnsureAliveOwnerMode(stateDir)
+	if ownerModeErr != nil {
+		fmt.Fprintf(out, "ensure-alive: persisted owner mode is unverifiable; no action: %v\n", ownerModeErr)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+			"liveness-owner-mode-unverifiable",
+			"persisted owner mode or canonical autostart task could not be verified; suppressing recovery",
+			map[string]any{"error": ownerModeErr.Error()})
+		return nil
+	}
+	if ownerMode == api.OwnerModeSupervise {
+		running, pid, err := api.SupervisorRunningUnderStateDir(stateDir)
+		if err != nil {
+			fmt.Fprintf(out, "ensure-alive: supervise owner liveness undeterminable (probe error); no action: %v\n", err)
+			return nil
+		}
+		if running {
+			fmt.Fprintf(out, "ensure-alive: supervise owner supervisor running (pid=%d); no action\n", pid)
+			return nil
+		}
+		if err := livenessRelaunchFn(); err != nil {
+			fmt.Fprintf(out, "ensure-alive: supervise owner supervisor not running; verified task relaunch FAILED (will retry next tick): %v\n", err)
+			emitLivenessEvent(stateDir, api.SupervisorEventSeverityWarn,
+				"liveness-supervise-owner-relaunch-failed",
+				"supervise owner supervisor is down and the verified canonical task relaunch failed; will retry next tick",
+				map[string]any{"relaunch_target": autostart.WindowsTaskName, "error": err.Error()})
+			return nil
+		}
+		fmt.Fprintf(out, "ensure-alive: supervise owner supervisor not running; relaunched verified owner task via %s\n", autostart.WindowsTaskName)
+		emitLivenessEvent(stateDir, api.SupervisorEventSeverityInfo,
+			"liveness-relaunched-supervise-owner",
+			"supervise owner supervisor is down; re-fired the verified canonical autostart task",
+			map[string]any{"relaunch_target": autostart.WindowsTaskName})
+		return nil
+	}
+
 	recovery := runEnsureAliveGUIRecoveryForTick(stateDir, out)
 	defer recovery.emitLivenessEvents(stateDir)
 	allowGUIOwnerRelaunch := recovery.LeaseDisposition != gui.GUIOwnerLeaseMayRetainLease

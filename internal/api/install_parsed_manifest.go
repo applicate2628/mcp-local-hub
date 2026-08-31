@@ -585,6 +585,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 	var nudgeAfterInstall bool
 	var ensureAutostartAfterInstall bool
 	var autostartStrictMode bool
+	var autostartOwnerMode OwnerMode
 	var removedSupervisorTargetsAfterInstall []SupervisorDaemon
 	var removedSupervisorPIDByTask map[string]int
 	// Captured under the intent flock from the authoritative committed
@@ -663,6 +664,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 			if len(plan.SupervisorIntent) > 0 {
 				ensureAutostartAfterInstall = true
 				autostartStrictMode = desiredIntent.StrictMode
+				autostartOwnerMode = desiredIntent.EffectiveOwnerMode()
 			}
 			// Defense-in-depth: a global manifest must never materialize a
 			// runtime_spec row. If one ever appeared it would need the §7.1
@@ -766,7 +768,7 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 		emitDaemonInstalledEvents(m.Name, installedSupervisorRows)
 		cleanupLegacySchedulerTasksForSupervisorInstall(m, daemonFilter, w)
 		if ensureAutostartAfterInstall {
-			ensureGlobalInstallAutostartOwner(w, autostartStrictMode)
+			ensureGlobalInstallAutostartOwner(w, autostartStrictMode, autostartOwnerMode)
 		}
 	} else {
 		// Global manifest with no daemons (e.g. remote-http): client-config
@@ -955,13 +957,13 @@ func legacySchedulerTasksForSupervisorInstallDryRun(m *config.ServerManifest, da
 	return out, nil
 }
 
-func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool) {
+func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool, ownerMode OwnerMode) {
 	backend, err := installAutostartBackendFactoryFn()
 	if err != nil {
 		warnAutostartOwner(w, "resolve backend", err)
 		return
 	}
-	opts := autostart.Options{StrictMode: strictMode}
+	opts := autostart.Options{StrictMode: strictMode, OwnerMode: ownerMode}
 	if canonical, err := canonicalMcphubPath(); err == nil {
 		opts.MCPHubPath = canonical
 	}
@@ -1607,6 +1609,7 @@ func (a *API) buildMergedSupervisorIntent(m *config.ServerManifest, plan *Plan, 
 		Daemons:           kept,
 		MaintenanceTimers: mergeServerWeeklyRefreshTimer(m, daemonFilter, prior.MaintenanceTimers),
 		StrictMode:        prior.StrictMode,
+		OwnerMode:         prior.OwnerMode,
 		// Stops is the E2 sub-block — the SOLE per-daemon stop source. The
 		// install merge does not own stops; dropping it here would wipe
 		// every operator stop across ALL servers on any install (bot PR
@@ -2057,6 +2060,7 @@ func (a *API) removeServerFromSupervisorIntentCore(ctx context.Context, server s
 		Daemons:              keptDaemons,
 		MaintenanceTimers:    keptTimers,
 		StrictMode:           prior.StrictMode,
+		OwnerMode:            prior.OwnerMode,
 		Stops:                keptStops,
 		LegacyStopWatermarks: keptWatermarks,
 	}

@@ -94,7 +94,7 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := b.Enable(Options{MCPHubPath: `C:\mcp\mcphub.exe`}); err != nil {
+	if err := b.Enable(Options{MCPHubPath: `fixture-mcphub.exe`}); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
 	if len(f.createCalls) != 1 {
@@ -107,8 +107,8 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	if !spec.LogonTrigger {
 		t.Error("Create.LogonTrigger = false, want true")
 	}
-	if spec.Command != `C:\mcp\mcphub.exe` {
-		t.Errorf("Create.Command = %q, want %q", spec.Command, `C:\mcp\mcphub.exe`)
+	if spec.Command != `fixture-mcphub.exe` {
+		t.Errorf("Create.Command = %q, want %q", spec.Command, `fixture-mcphub.exe`)
 	}
 	// As of 2026-05-18, the autostart entry launches `mcphub gui`
 	// instead of `mcphub supervise` — GUI process owns supervisor
@@ -126,7 +126,7 @@ func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := b.Enable(Options{StrictMode: true, MCPHubPath: `C:\mcp\mcphub.exe`}); err != nil {
+	if err := b.Enable(Options{StrictMode: true, MCPHubPath: `fixture-mcphub.exe`}); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
 	if len(f.createCalls) != 1 {
@@ -146,6 +146,60 @@ func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
 	}
 }
 
+func TestWindowsBackend_EnableOwnerModeSelectsExactlyOneOwnerCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Options
+		want []string
+	}{
+		{name: "gui non-strict", opts: Options{OwnerMode: OwnerModeGUI, MCPHubPath: `fixture-mcphub.exe`}, want: []string{"gui", "--no-browser"}},
+		{name: "gui strict", opts: Options{OwnerMode: OwnerModeGUI, StrictMode: true, MCPHubPath: `fixture-mcphub.exe`}, want: []string{"gui", "--no-browser", "--strict-mode"}},
+		{name: "supervise non-strict", opts: Options{OwnerMode: OwnerModeSupervise, MCPHubPath: `fixture-mcphub.exe`}, want: []string{"supervise"}},
+		{name: "supervise strict", opts: Options{OwnerMode: OwnerModeSupervise, StrictMode: true, MCPHubPath: `fixture-mcphub.exe`}, want: []string{"supervise", "--strict-mode"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			f := &fakeScheduler{}
+			withFakeScheduler(t, f)
+			b, err := New()
+			if err != nil {
+				t.Fatalf("New: %v", err)
+			}
+			if err := b.Enable(tc.opts); err != nil {
+				t.Fatalf("Enable: %v", err)
+			}
+			if len(f.createCalls) != 1 {
+				t.Fatalf("Create calls=%d, want 1", len(f.createCalls))
+			}
+			got := f.createCalls[0].Args
+			if len(got) != len(tc.want) {
+				t.Fatalf("Create.Args=%v, want %v", got, tc.want)
+			}
+			for i := range tc.want {
+				if got[i] != tc.want[i] {
+					t.Fatalf("Create.Args=%v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsBackend_EnableRejectsInvalidOwnerBeforeMutatingTask(t *testing.T) {
+	f := &fakeScheduler{}
+	withFakeScheduler(t, f)
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	err = b.Enable(Options{OwnerMode: OwnerMode("invalid"), MCPHubPath: "fixture-mcphub.exe"})
+	if err == nil {
+		t.Fatal("Enable returned nil for invalid owner mode")
+	}
+	if len(f.deleteCalls) != 0 || len(f.createCalls) != 0 {
+		t.Fatalf("invalid mode mutated canonical task: deletes=%v creates=%+v", f.deleteCalls, f.createCalls)
+	}
+}
+
 func TestWindowsBackend_EnableReplacesExistingTask(t *testing.T) {
 	// Pre-existing task → Enable must Delete-then-Create to keep the
 	// replacement atomic vs scheduler.Create's "already exists" error.
@@ -158,7 +212,7 @@ func TestWindowsBackend_EnableReplacesExistingTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := b.Enable(Options{MCPHubPath: `C:\mcp\mcphub.exe`}); err != nil {
+	if err := b.Enable(Options{MCPHubPath: `fixture-mcphub.exe`}); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
 	// As of 2026-05-18, Enable also deletes the legacy v0.4.x watchdog
@@ -225,7 +279,7 @@ func TestWindowsBackend_StatusAbsent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -235,7 +289,7 @@ func TestWindowsBackend_StatusAbsent(t *testing.T) {
 }
 
 func TestWindowsBackend_StatusEnabledRunning(t *testing.T) {
-	xml := buildMatchingXML(`C:\mcp\mcphub.exe`, false)
+	xml := buildMatchingXML(`fixture-mcphub.exe`, false)
 	f := &fakeScheduler{
 		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
 		xmlReturn:    xml,
@@ -246,7 +300,7 @@ func TestWindowsBackend_StatusEnabledRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -256,7 +310,7 @@ func TestWindowsBackend_StatusEnabledRunning(t *testing.T) {
 }
 
 func TestWindowsBackend_StatusEnabledStopped(t *testing.T) {
-	xml := buildMatchingXML(`C:\mcp\mcphub.exe`, false)
+	xml := buildMatchingXML(`fixture-mcphub.exe`, false)
 	f := &fakeScheduler{
 		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Ready"},
 		xmlReturn:    xml,
@@ -267,7 +321,7 @@ func TestWindowsBackend_StatusEnabledStopped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -279,7 +333,7 @@ func TestWindowsBackend_StatusEnabledStopped(t *testing.T) {
 func TestWindowsBackend_StatusDrifted_StrictModeMissing(t *testing.T) {
 	// Recorded XML has supervise WITHOUT --strict-mode; caller asks for
 	// strict-mode → drift.
-	xml := buildMatchingXML(`C:\mcp\mcphub.exe`, false)
+	xml := buildMatchingXML(`fixture-mcphub.exe`, false)
 	f := &fakeScheduler{
 		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
 		xmlReturn:    xml,
@@ -290,7 +344,7 @@ func TestWindowsBackend_StatusDrifted_StrictModeMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{StrictMode: true, MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{StrictMode: true, MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -302,7 +356,7 @@ func TestWindowsBackend_StatusDrifted_StrictModeMissing(t *testing.T) {
 func TestWindowsBackend_StatusDrifted_StrictModeUnwanted(t *testing.T) {
 	// Recorded XML has supervise --strict-mode; caller asks WITHOUT
 	// strict-mode → drift.
-	xml := buildMatchingXML(`C:\mcp\mcphub.exe`, true)
+	xml := buildMatchingXML(`fixture-mcphub.exe`, true)
 	f := &fakeScheduler{
 		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
 		xmlReturn:    xml,
@@ -313,7 +367,7 @@ func TestWindowsBackend_StatusDrifted_StrictModeUnwanted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{StrictMode: false, MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{StrictMode: false, MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -332,7 +386,7 @@ func TestWindowsBackend_StatusDrifted_StrictModeUnwanted(t *testing.T) {
 func TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand(t *testing.T) {
 	const legacySuperviseXML = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
 		"<Task><Actions><Exec>\n" +
-		"  <Command>C:\\mcp\\mcphub.exe</Command>\n" +
+		"  <Command>fixture-mcphub.exe</Command>\n" +
 		"  <Arguments>supervise</Arguments>\n" +
 		"</Exec></Actions></Task>\n"
 	f := &fakeScheduler{
@@ -345,12 +399,56 @@ func TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
 	if got != StateDrifted {
 		t.Errorf("Status = %s, want %s (Args=[supervise] should be drifted under Args=[gui] default)", got, StateDrifted)
+	}
+}
+
+func TestWindowsBackend_StatusDrifted_WhenOwnerModeDoesNotMatchTask(t *testing.T) {
+	f := &fakeScheduler{
+		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
+		xmlReturn:    buildWindowsStatusSnapshotXML(`fixture-mcphub.exe`, "gui --no-browser", "true", ""),
+	}
+	withFakeScheduler(t, f)
+	b, err := New()
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	state, err := b.Status(Options{OwnerMode: OwnerModeSupervise, MCPHubPath: `fixture-mcphub.exe`})
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	if state != StateDrifted {
+		t.Fatalf("Status=%s, want drifted when GUI task is not the persisted supervise owner", state)
+	}
+}
+
+func TestWindowsTaskSpecDrifted_RequiresExactCanonicalOwnerArgv(t *testing.T) {
+	tests := []struct {
+		name string
+		opts Options
+		args string
+		want bool
+	}{
+		{name: "gui canonical", opts: Options{OwnerMode: OwnerModeGUI, MCPHubPath: "fixture-mcphub.exe"}, args: "gui --no-browser", want: false},
+		{name: "gui missing no-browser", opts: Options{OwnerMode: OwnerModeGUI, MCPHubPath: "fixture-mcphub.exe"}, args: "gui", want: true},
+		{name: "gui extra token", opts: Options{OwnerMode: OwnerModeGUI, MCPHubPath: "fixture-mcphub.exe"}, args: "gui --no-browser --bad", want: true},
+		{name: "gui duplicate strict", opts: Options{OwnerMode: OwnerModeGUI, StrictMode: true, MCPHubPath: "fixture-mcphub.exe"}, args: "gui --no-browser --strict-mode --strict-mode", want: true},
+		{name: "supervise canonical", opts: Options{OwnerMode: OwnerModeSupervise, StrictMode: true, MCPHubPath: "fixture-mcphub.exe"}, args: "supervise --strict-mode", want: false},
+		{name: "supervise must not carry no-browser", opts: Options{OwnerMode: OwnerModeSupervise, MCPHubPath: "fixture-mcphub.exe"}, args: "supervise --no-browser", want: true},
+		{name: "supervise extra token", opts: Options{OwnerMode: OwnerModeSupervise, MCPHubPath: "fixture-mcphub.exe"}, args: "supervise --bad", want: true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := windowsTaskSpecDrifted(windowsTaskSpec{Command: "fixture-mcphub.exe", Arguments: tc.args}, tc.opts)
+			if got != tc.want {
+				t.Fatalf("windowsTaskSpecDrifted(args=%q)=%v, want %v", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -364,7 +462,7 @@ func TestWindowsBackend_StatusDrifted_LegacySupervisorSubcommand(t *testing.T) {
 func TestWindowsBackend_StatusDrifted_EmptyArguments(t *testing.T) {
 	const emptyArgsXML = "<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n" +
 		"<Task><Actions><Exec>\n" +
-		"  <Command>C:\\mcp\\mcphub.exe</Command>\n" +
+		"  <Command>fixture-mcphub.exe</Command>\n" +
 		"  <Arguments></Arguments>\n" +
 		"</Exec></Actions></Task>\n"
 	f := &fakeScheduler{
@@ -377,7 +475,7 @@ func TestWindowsBackend_StatusDrifted_EmptyArguments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -389,7 +487,7 @@ func TestWindowsBackend_StatusDrifted_EmptyArguments(t *testing.T) {
 func TestWindowsBackend_StatusDrifted_CommandPath(t *testing.T) {
 	// Recorded XML points at an older binary path; caller's MCPHubPath
 	// disagrees → drift.
-	xml := buildMatchingXML(`C:\old\mcphub.exe`, false)
+	xml := buildMatchingXML(`fixture-old-mcphub.exe`, false)
 	f := &fakeScheduler{
 		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
 		xmlReturn:    xml,
@@ -400,7 +498,7 @@ func TestWindowsBackend_StatusDrifted_CommandPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\new\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-new-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -425,7 +523,7 @@ func TestWindowsBackend_StatusXMLUnavailable_TreatedAsRunning(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	got, err := b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	got, err := b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err != nil {
 		t.Fatalf("Status: %v", err)
 	}
@@ -447,7 +545,7 @@ func TestWindowsBackend_StatusSchedulerFactoryError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	_, err = b.Status(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+	_, err = b.Status(Options{MCPHubPath: `fixture-mcphub.exe`})
 	if err == nil {
 		t.Fatal("Status returned nil err, want propagated scheduler-factory failure")
 	}
@@ -478,7 +576,7 @@ func TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
-			snapshot, err := b.StatusSnapshot(Options{MCPHubPath: `C:\mcp\mcphub.exe`})
+			snapshot, err := b.StatusSnapshot(Options{MCPHubPath: `fixture-mcphub.exe`})
 			if err == nil {
 				t.Fatalf("StatusSnapshot returned nil err and snapshot=%+v; XML uncertainty must fail closed", snapshot)
 			}
@@ -491,11 +589,11 @@ func TestWindowsBackend_StatusSnapshotXMLUnavailableFailsClosed(t *testing.T) {
 
 func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testing.T) {
 	baseXML := buildWindowsStatusSnapshotXML(
-		`C:\mcp\mcphub.exe`,
+		`fixture-mcphub.exe`,
 		"gui",
 		"true",
 		"<Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers>"+
-			"<Principals><Principal id=\"Author\"><UserId>S-1-5-21-a</UserId></Principal></Principals>",
+			"<Principals><Principal id=\"Author\"><UserId>fixture-user-a</UserId></Principal></Principals>",
 	)
 	f := &fakeScheduler{
 		statusReturn: scheduler.TaskStatus{Name: WindowsTaskName, State: "Running"},
@@ -507,7 +605,7 @@ func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testi
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	opts := Options{MCPHubPath: `C:\mcp\mcphub.exe`}
+	opts := Options{MCPHubPath: `fixture-mcphub.exe`}
 	first, err := b.StatusSnapshot(opts)
 	if err != nil {
 		t.Fatalf("StatusSnapshot first: %v", err)
@@ -523,24 +621,24 @@ func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testi
 		t.Fatalf("SpecFingerprint unstable across identical re-probes: first=%q second=%q", first.SpecFingerprint, second.SpecFingerprint)
 	}
 
-	argsXML := buildWindowsStatusSnapshotXML(`C:\mcp\mcphub.exe`, "gui --strict-mode", "true", "")
+	argsXML := buildWindowsStatusSnapshotXML(`fixture-mcphub.exe`, "gui --strict-mode", "true", "")
 	argsFingerprint := mustWindowsStatusSnapshotFingerprint(t, argsXML, "Running", opts)
 	if argsFingerprint == first.SpecFingerprint {
 		t.Fatal("SpecFingerprint did not change when only <Arguments> changed")
 	}
 
-	disabledXML := buildWindowsStatusSnapshotXML(`C:\mcp\mcphub.exe`, "gui", "false", "")
+	disabledXML := buildWindowsStatusSnapshotXML(`fixture-mcphub.exe`, "gui", "false", "")
 	disabledFingerprint := mustWindowsStatusSnapshotFingerprint(t, disabledXML, "Running", opts)
 	if disabledFingerprint == first.SpecFingerprint {
 		t.Fatal("SpecFingerprint did not change when only <Settings><Enabled> changed")
 	}
 
 	volatileXML := buildWindowsStatusSnapshotXML(
-		`C:\mcp\mcphub.exe`,
+		`fixture-mcphub.exe`,
 		"gui",
 		"true",
 		"<Triggers><CalendarTrigger><Enabled>false</Enabled></CalendarTrigger></Triggers>"+
-			"<Principals><Principal id=\"Other\"><UserId>S-1-5-21-b</UserId></Principal></Principals>"+
+			"<Principals><Principal id=\"Other\"><UserId>fixture-user-b</UserId></Principal></Principals>"+
 			"<RegistrationInfo><URI>\\changed-liveness-metadata</URI></RegistrationInfo>",
 	)
 	volatileFingerprint := mustWindowsStatusSnapshotFingerprint(t, volatileXML, "Ready", opts)
@@ -554,15 +652,15 @@ func TestWindowsBackend_StatusSnapshotSpecFingerprintTracksShimSpecOnly(t *testi
 // real schtasks /Query /XML output is larger, but the detector only
 // inspects these two fields.
 //
-// Emits `gui` / `gui --strict-mode` to match the current autostart
-// contract (PR #212: GUI owns supervisor lifecycle). Tests that
+// Emits `gui --no-browser` / `gui --no-browser --strict-mode` to match the
+// current autostart contract (PR #212: GUI owns supervisor lifecycle). Tests that
 // deliberately need a pre-PR #212 `supervise` baseline (e.g. to
 // exercise the subcommand-drift detection path) construct the XML
 // inline rather than threading a third parameter through this helper.
 func buildMatchingXML(command string, strictMode bool) []byte {
-	args := "gui"
+	args := "gui --no-browser"
 	if strictMode {
-		args = "gui --strict-mode"
+		args = "gui --no-browser --strict-mode"
 	}
 	return []byte(fmt.Sprintf(
 		"<?xml version=\"1.0\" encoding=\"UTF-16\"?>\n"+
