@@ -3604,8 +3604,15 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// a legacy nil-spec row never reaches this closure. The serena-proxy
 		// launcher keeps its own nil-spec fail-loud as last-resort defense-in-depth.
 		cmd := exec.Command(d.Command, d.Args...)
-		if d.Workspace != "" {
+		// Workspace-scoped descriptors retain their established precedence;
+		// global descriptors use the persisted frozen working directory that
+		// admission already proved. Empty on both sides preserves inherited cwd
+		// for legacy rows.
+		switch {
+		case d.Workspace != "":
 			cmd.Dir = d.Workspace
+		case d.WorkingDir != "":
+			cmd.Dir = d.WorkingDir
 		}
 		// Live overlay reload per-spawn (closes bot PR#222 P1-1: spawn
 		// closure captured the startup overlay snapshot, so later

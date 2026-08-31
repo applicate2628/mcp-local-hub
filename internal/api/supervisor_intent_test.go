@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -72,6 +73,29 @@ func TestSupervisorIntent_OwnerModeDefaultsToGUIAndPersistsSupervise(t *testing.
 	}
 	if got.EffectiveOwnerMode() != OwnerModeSupervise {
 		t.Fatalf("persisted effective owner mode=%q, want supervise", got.EffectiveOwnerMode())
+	}
+}
+
+func TestSupervisorDaemonWorkingDirWireIsAdditiveAndRoundTrips(t *testing.T) {
+	legacy, err := json.Marshal(SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(legacy, []byte(`"working_dir"`)) {
+		t.Fatalf("legacy descriptor grew working_dir: %s", legacy)
+	}
+
+	want := SupervisorDaemon{TaskName: `\mcp-local-hub-memory-default`, WorkingDir: "/frozen/mcphub", StartupBindDeadlineSeconds: 60}
+	raw, err := json.Marshal(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got SupervisorDaemon
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkingDir != want.WorkingDir || got.StartupBindDeadlineSeconds != want.StartupBindDeadlineSeconds {
+		t.Fatalf("descriptor round trip = %#v, want %#v", got, want)
 	}
 }
 

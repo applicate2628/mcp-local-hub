@@ -177,6 +177,7 @@ func TestMain(m *testing.M) {
 	prevTaskkillTree := taskkillProcessTreeByPIDFn
 	prevStopForceKillPID := stopForceKillPIDFn
 	prevSnapshotProcesses := snapshotProcessesFn
+	prevFrozenStdioBridgeAdmission := frozenStdioBridgeAdmissionFn
 	serenaWakeReconcileFn = func(context.Context, bool) (ReconcileResponse, error) {
 		return ReconcileResponse{}, ErrSupervisorIPCUnavailable
 	}
@@ -217,6 +218,12 @@ func TestMain(m *testing.M) {
 	// kills matched PIDs via killOnePID (not the taskkill seams) — seal to an empty
 	// snapshot so the default test path scans nothing and kills nothing.
 	snapshotProcessesFn = func() ([]processRow, error) { return nil, nil }
+	// Existing install/adopt tests use deliberately non-runnable canonical
+	// descriptor paths to isolate later transaction stages. Keep that test
+	// contract hermetic; stdio_bridge_admission_test exercises the real
+	// contained lifecycle directly and overrides this seam when it needs a
+	// specific admission result.
+	frozenStdioBridgeAdmissionFn = func(context.Context, []FrozenStdioBridgeAdmissionRequest) error { return nil }
 
 	// ── Client-config sandbox audit ─────────────────────────────────────────
 	// Fails any test whose admitted adapters resolve to a config path outside
@@ -260,6 +267,7 @@ func TestMain(m *testing.M) {
 	taskkillProcessTreeByPIDFn = prevTaskkillTree
 	stopForceKillPIDFn = prevStopForceKillPID
 	snapshotProcessesFn = prevSnapshotProcesses
+	frozenStdioBridgeAdmissionFn = prevFrozenStdioBridgeAdmission
 	_ = os.RemoveAll(tmp)
 	os.Exit(code)
 }

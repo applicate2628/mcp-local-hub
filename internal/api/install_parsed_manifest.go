@@ -2558,14 +2558,6 @@ func supervisorDaemonsFromPlan(m *config.ServerManifest, plan *Plan, daemonFilte
 	if m.Kind == config.KindWorkspaceScoped {
 		return nil, nil
 	}
-	canonical, err := canonicalMcphubPath()
-	if err != nil {
-		// Fall back to the bare name; the descriptor is still well-formed
-		// and the supervisor resolves the binary on PATH. canonicalMcphubPath
-		// only fails when `mcphub setup` has not run, which the install
-		// preflight already surfaces upstream.
-		canonical = mcphubShortName
-	}
 	out := make([]SupervisorDaemon, 0, len(m.Daemons))
 	for _, d := range m.Daemons {
 		if daemonFilter != "" && d.Name != daemonFilter {
@@ -2576,30 +2568,33 @@ func supervisorDaemonsFromPlan(m *config.ServerManifest, plan *Plan, daemonFilte
 			return nil, fmt.Errorf("install intent: task %q has no exact raw-manifest hash binding", bare)
 		}
 		manifestHash := ""
+		var frozen SupervisorIntentEntry
 		matches := 0
 		if plan != nil {
 			for _, descriptor := range plan.SupervisorIntent {
 				if descriptor.Name == bare {
 					matches++
 					manifestHash = descriptor.manifestHash
+					frozen = descriptor
 				}
 			}
 		}
-		if matches != 1 || manifestHash == "" {
+		if matches != 1 || manifestHash == "" || frozen.Command == "" || len(frozen.Args) == 0 || frozen.WorkingDir == "" || frozen.StartupBindDeadlineSeconds <= 0 {
 			return nil, fmt.Errorf("install intent: task %q requires exactly one plan descriptor with a nonempty exact manifest hash (matches=%d)", bare, matches)
 		}
 		out = append(out, SupervisorDaemon{
 			TaskName:     canonicalIntentTaskKey(bare),
 			Server:       m.Name,
 			Daemon:       d.Name,
-			Command:      canonical,
-			Args:         []string{"daemon", "--server", m.Name, "--daemon", d.Name},
+			Command:      frozen.Command,
+			Args:         append([]string(nil), frozen.Args...),
+			WorkingDir:   frozen.WorkingDir,
 			Env:          cloneStringMap(m.Env),
 			Port:         d.Port,
 			ManifestHash: manifestHash,
 			// P1b: carry the manifest-declared first-bind deadline into the
 			// descriptor the liveness sweep reads (0 = default resolution).
-			StartupBindDeadlineSeconds: d.StartupBindDeadlineSeconds,
+			StartupBindDeadlineSeconds: frozen.StartupBindDeadlineSeconds,
 		})
 	}
 	return out, nil

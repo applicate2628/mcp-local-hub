@@ -1,11 +1,30 @@
 package api
 
 import (
+	"context"
+	"errors"
 	"testing"
 
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/scheduler"
 )
+
+func TestSetFrozenStdioBridgeAdmissionForTest_BindsAndRestores(t *testing.T) {
+	original := frozenStdioBridgeAdmissionFn
+	t.Cleanup(func() { frozenStdioBridgeAdmissionFn = original })
+	restored := errors.New("restored admission")
+	frozenStdioBridgeAdmissionFn = func(context.Context, []FrozenStdioBridgeAdmissionRequest) error { return restored }
+	want := errors.New("fixture admission")
+	restore := SetFrozenStdioBridgeAdmissionForTest(func(context.Context, []FrozenStdioBridgeAdmissionRequest) error { return want })
+	if err := frozenStdioBridgeAdmissionFn(context.Background(), nil); !errors.Is(err, want) {
+		t.Fatalf("fixture admission = %v, want %v", err, want)
+	}
+	restore()
+	restore()
+	if err := frozenStdioBridgeAdmissionFn(context.Background(), nil); !errors.Is(err, restored) {
+		t.Fatalf("restored admission = %v, want %v", err, restored)
+	}
+}
 
 func TestSetInstallAutostartFixtureForTest_BindsAndRestoresAllSeams(t *testing.T) {
 	origSchedulerFactory := schedulerFactoryFn

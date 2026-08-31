@@ -9,6 +9,7 @@
 package api
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -19,6 +20,25 @@ import (
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/scheduler"
 )
+
+// SetFrozenStdioBridgeAdmissionForTest replaces the process-owning stdio
+// admission probe for an entire external-package test binary. It is needed by
+// transaction tests whose intentionally non-runnable canonical descriptors
+// exercise later install/adopt stages; focused API tests retain the real probe.
+func SetFrozenStdioBridgeAdmissionForTest(fn func(context.Context, []FrozenStdioBridgeAdmissionRequest) error) (restore func()) {
+	if !testing.Testing() {
+		panic("api.SetFrozenStdioBridgeAdmissionForTest called outside a test binary — test-only hook")
+	}
+	if fn == nil {
+		panic("api.SetFrozenStdioBridgeAdmissionForTest called with nil admission function")
+	}
+	original := frozenStdioBridgeAdmissionFn
+	frozenStdioBridgeAdmissionFn = fn
+	var once sync.Once
+	return func() {
+		once.Do(func() { frozenStdioBridgeAdmissionFn = original })
+	}
+}
 
 // TestSchedulerIface matches the subset of scheduler.Scheduler that the
 // Register/Unregister paths use. Cross-package fakes implement it to

@@ -7,8 +7,8 @@ import (
 )
 
 // TestSupervisorDaemonsFromPlan_CopiesStartupBindDeadline is the P1b plumb guard:
-// a manifest DaemonSpec.StartupBindDeadlineSeconds must flow verbatim into the
-// derived SupervisorDaemon descriptor the supervisor's liveness sweep reads.
+// the frozen effective start deadline must flow into the derived
+// SupervisorDaemon descriptor the supervisor's liveness sweep reads.
 func TestSupervisorDaemonsFromPlan_CopiesStartupBindDeadline(t *testing.T) {
 	m := &config.ServerManifest{
 		Name:      "slowsvc",
@@ -34,8 +34,8 @@ func TestSupervisorDaemonsFromPlan_CopiesStartupBindDeadline(t *testing.T) {
 	if got := byDaemon["default"].StartupBindDeadlineSeconds; got != 240 {
 		t.Fatalf("default daemon StartupBindDeadlineSeconds = %d, want 240 (copied from DaemonSpec)", got)
 	}
-	if got := byDaemon["fast"].StartupBindDeadlineSeconds; got != 0 {
-		t.Fatalf("fast daemon StartupBindDeadlineSeconds = %d, want 0 (unset → default resolution)", got)
+	if got := byDaemon["fast"].StartupBindDeadlineSeconds; got != 60 {
+		t.Fatalf("fast daemon StartupBindDeadlineSeconds = %d, want frozen effective default 60", got)
 	}
 }
 

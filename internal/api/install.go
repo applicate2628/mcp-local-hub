@@ -380,6 +380,13 @@ func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifes
 			receipt(frozen)
 		}
 	}()
+	// A selected global stdio bridge is not advertisable until the exact frozen
+	// supervisor descriptor has completed a contained initialize -> tools/list
+	// probe and its provisional process tree has been reaped. This runs before
+	// every audit, client, intent, or scheduler writer.
+	if err := admitFrozenStdioBridgeBeforeMutation(ctx, m, plan, opts); err != nil {
+		return err
+	}
 	if receipt != nil && len(plan.ClientUpdates) > 0 {
 		if err := freezeInstallRelayExePath(plan); err != nil {
 			return err
@@ -1483,8 +1490,15 @@ func cleanupHealthProbeSession(client *http.Client, url, sessionID string) error
 	return err
 }
 
-func singleHealthProbe(port int) (probe *HealthProbe) {
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+func singleHealthProbe(port int) *HealthProbe {
+	return singleHealthProbeContext(context.Background(), port)
+}
+
+// singleHealthProbeContext keeps the established three-second health budget
+// while allowing a caller-owned cancellation boundary (such as a provisional
+// install admission) to abort the HTTP exchange and reap its process tree.
+func singleHealthProbeContext(parent context.Context, port int) (probe *HealthProbe) {
+	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
 	defer cancel()
 	url := clients.HubLoopbackURL(port, "/mcp")
 	client := healthProbeHTTPClient()

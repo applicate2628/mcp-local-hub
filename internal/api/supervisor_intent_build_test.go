@@ -33,7 +33,7 @@ func TestSerenaOrPlanDaemonsCarriesManifestHash(t *testing.T) {
 	}
 
 	static := &config.ServerManifest{Name: "static", Kind: config.KindGlobal, Daemons: []config.DaemonSpec{{Name: "alpha", Port: 9483}}}
-	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-static-alpha", manifestHash: hash}}}
+	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-static-alpha", Command: "test-mcphub", Args: []string{"daemon", "--server", "static", "--daemon", "alpha"}, WorkingDir: "/test-frozen-working-dir", StartupBindDeadlineSeconds: 60, manifestHash: hash}}}
 	rows, err = serenaOrPlanDaemons(static, plan, "", nil, "", io.Discard)
 	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
 		t.Fatalf("static rows=%#v err=%v, want exact hash %q", rows, err, hash)

@@ -92,11 +92,16 @@ func (f *SupervisorIntentFile) EffectiveOwnerMode() OwnerMode {
 // prefix at compare time to match production install.go:1639-1642
 // BARE form planned map.
 type SupervisorDaemon struct {
-	TaskName     string            `json:"task_name"` // canonical, e.g. "\\mcp-local-hub-memory-default"
-	Server       string            `json:"server"`
-	Daemon       string            `json:"daemon"`
-	Command      string            `json:"command"`
-	Args         []string          `json:"args"`
+	TaskName string   `json:"task_name"` // canonical, e.g. "\\mcp-local-hub-memory-default"
+	Server   string   `json:"server"`
+	Daemon   string   `json:"daemon"`
+	Command  string   `json:"command"`
+	Args     []string `json:"args"`
+	// WorkingDir is the frozen working directory of the supervisor wrapper.
+	// Empty preserves legacy inherited-cwd descriptors. For new global rows it
+	// is populated from the accepted Plan.SupervisorIntent entry so a later
+	// provisional admission can prove it is reusing the exact generation.
+	WorkingDir   string            `json:"working_dir,omitempty"`
 	Env          map[string]string `json:"env,omitempty"`
 	Workspace    string            `json:"workspace,omitempty"`
 	Port         int               `json:"port"`

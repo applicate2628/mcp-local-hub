@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"mcp-local-hub/internal/mcpcompat/readinesswire"
 	"mcp-local-hub/internal/process"
 )
 
@@ -1228,9 +1229,22 @@ func initializeResponseProtocolVersion(body []byte, requested string) (string, b
 		version = requested
 	}
 	if !stdioHTTPSupportedProtocolVersions[version] {
-		return "", false, fmt.Errorf("initialize negotiated unsupported protocol version %q", version)
+		return "", false, &unsupportedStdioProtocolError{negotiated: version}
 	}
 	return version, true, nil
+}
+
+// unsupportedStdioProtocolError preserves the negotiated value for the HTTP
+// boundary. Its text remains the legacy diagnostic for callers that consume
+// initializeResponseProtocolVersion directly; writeStdioJSONResponse upgrades
+// only the HTTP wire shape to the typed readiness envelope.
+type unsupportedStdioProtocolError struct{ negotiated string }
+
+func (e *unsupportedStdioProtocolError) Error() string {
+	if e == nil {
+		return "initialize negotiated unsupported protocol version"
+	}
+	return fmt.Sprintf("initialize negotiated unsupported protocol version %q", e.negotiated)
 }
 
 func (h *StdioHost) writeStdioJSONResponse(
@@ -1242,6 +1256,19 @@ func (h *StdioHost) writeStdioJSONResponse(
 	if origMethod == "initialize" {
 		version, success, err := initializeResponseProtocolVersion(body, requestedProtocolVersion)
 		if err != nil {
+			var unsupported *unsupportedStdioProtocolError
+			if errors.As(err, &unsupported) {
+				if wireErr := readinesswire.WriteFailure(w, readinesswire.Failure{
+					FailureID:          readinesswire.FailureBackingProtocolUnsupported,
+					Stage:              readinesswire.StageInitialize,
+					HTTPStatus:         http.StatusBadGateway,
+					RequestedProtocol:  requestedProtocolVersion,
+					NegotiatedProtocol: unsupported.negotiated,
+					SupportedFloor:     "2025-03-26",
+				}); wireErr == nil {
+					return
+				}
+			}
 			http.Error(w, err.Error(), http.StatusBadGateway)
 			return
 		}

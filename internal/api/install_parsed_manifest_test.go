@@ -34,8 +34,12 @@ func testSupervisorIntentPlan(m *config.ServerManifest, daemonFilter string) *Pl
 			continue
 		}
 		plan.SupervisorIntent = append(plan.SupervisorIntent, SupervisorIntentEntry{
-			Name:         "mcp-local-hub-" + m.Name + "-" + daemon.Name,
-			manifestHash: strings.Repeat("a", 64),
+			Name:                       "mcp-local-hub-" + m.Name + "-" + daemon.Name,
+			Command:                    "test-mcphub",
+			Args:                       []string{"daemon", "--server", m.Name, "--daemon", daemon.Name},
+			WorkingDir:                 "/test-frozen-working-dir",
+			StartupBindDeadlineSeconds: EffectiveStartupBindDeadlineSeconds(SupervisorDaemon{Server: m.Name, Daemon: daemon.Name, StartupBindDeadlineSeconds: daemon.StartupBindDeadlineSeconds}),
+			manifestHash:               strings.Repeat("a", 64),
 		})
 	}
 	return plan
@@ -47,17 +51,20 @@ func TestSupervisorDaemonsFromPlanCarriesManifestHash(t *testing.T) {
 		Name: "hash-static", Kind: config.KindGlobal,
 		Daemons: []config.DaemonSpec{{Name: "alpha", Port: 9481}},
 	}
-	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-hash-static-alpha", manifestHash: hash}}}
+	plan := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{{Name: "mcp-local-hub-hash-static-alpha", Command: "test-mcphub", Args: []string{"daemon", "--server", "hash-static", "--daemon", "alpha"}, WorkingDir: "/test-frozen-working-dir", StartupBindDeadlineSeconds: 60, manifestHash: hash}}}
 	rows, err := supervisorDaemonsFromPlan(m, plan, "")
 	if err != nil || len(rows) != 1 || rows[0].ManifestHash != hash {
 		t.Fatalf("rows=%#v err=%v, want exact hash %q", rows, err, hash)
+	}
+	if rows[0].WorkingDir != "/test-frozen-working-dir" || rows[0].StartupBindDeadlineSeconds != 60 || !reflect.DeepEqual(rows[0].Args, []string{"daemon", "--server", "hash-static", "--daemon", "alpha"}) {
+		t.Fatalf("descriptor did not preserve frozen runtime fields: %#v", rows[0])
 	}
 	if _, err := supervisorDaemonsFromPlan(m, &Plan{supervisorIntentHashesBound: true}, ""); err == nil {
 		t.Fatal("missing descriptor/hash succeeded")
 	}
 	duplicate := &Plan{supervisorIntentHashesBound: true, SupervisorIntent: []SupervisorIntentEntry{
-		{Name: "mcp-local-hub-hash-static-alpha", manifestHash: hash},
-		{Name: "mcp-local-hub-hash-static-alpha", manifestHash: hash},
+		{Name: "mcp-local-hub-hash-static-alpha", Command: "test-mcphub", Args: []string{"daemon"}, WorkingDir: "/test-frozen-working-dir", StartupBindDeadlineSeconds: 60, manifestHash: hash},
+		{Name: "mcp-local-hub-hash-static-alpha", Command: "test-mcphub", Args: []string{"daemon"}, WorkingDir: "/test-frozen-working-dir", StartupBindDeadlineSeconds: 60, manifestHash: hash},
 	}}
 	if _, err := supervisorDaemonsFromPlan(m, duplicate, ""); err == nil {
 		t.Fatal("ambiguous duplicate descriptor succeeded")

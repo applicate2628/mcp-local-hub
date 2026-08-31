@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/mcpcompat/readinesswire"
 )
 
 type sessionContractHTTPResult struct {
@@ -179,6 +181,13 @@ for line in sys.stdin:
 	first := sessionContractRequest(t, ts.Client(), http.MethodPost, ts.URL, initBody, "", "")
 	if first.status != http.StatusBadGateway || first.header.Get("Mcp-Session-Id") != "" {
 		t.Fatalf("invalid initialize response status=%d session=%q, want 502 and no session; body=%s", first.status, first.header.Get("Mcp-Session-Id"), first.body)
+	}
+	if first.header.Get("Content-Type") != readinesswire.MediaTypeV1 {
+		t.Fatalf("legacy protocol failure content type=%q, want %q", first.header.Get("Content-Type"), readinesswire.MediaTypeV1)
+	}
+	failure := readinesswire.DecodeFailureResponse(first.status, first.header.Get("Content-Type"), strings.NewReader(string(first.body)))
+	if failure.FailureID != readinesswire.FailureBackingProtocolUnsupported || failure.Stage != readinesswire.StageInitialize || failure.RequestedProtocol != "2025-03-26" || failure.NegotiatedProtocol != "2024-11-05" || failure.SupportedFloor != "2025-03-26" {
+		t.Fatalf("legacy protocol failure = %#v", failure)
 	}
 
 	second := sessionContractRequest(t, ts.Client(), http.MethodPost, ts.URL, initBody, "", "")
