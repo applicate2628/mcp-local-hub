@@ -4,6 +4,7 @@ package cli
 
 import (
 	"errors"
+	"fmt"
 	"os/exec"
 
 	"golang.org/x/sys/windows"
@@ -28,12 +29,10 @@ const winCreateBreakawayFromJob = 0x01000000
 // Per Microsoft docs, CreateProcess FAILS with ERROR_ACCESS_DENIED when
 // the parent job does NOT permit breakaway (no JOB_OBJECT_LIMIT_BREAKAWAY_OK).
 // On THAT specific error we retry ONCE flagless via rebuild() — still
-// detached, just without breakaway — and invoke onDegrade so the (rare,
-// locked-down corp host) loss of orphan-protection is operator-visible.
-// It is NEVER a hard spawn failure: turning a survivable-but-killable
-// supervisor into a no-supervisor-at-all is a worse regression than the
-// degraded posture (especially on the upgrade path, where a hard abort
-// leaves the binary swapped + the prior supervisor dead + nothing running).
+// detached, just without breakaway. Only after that retry starts successfully
+// do we invoke onDegrade so the (rare, locked-down corp host) loss of
+// orphan-protection is operator-visible. A failed retry remains a hard spawn
+// failure and reports both CreateProcess attempts.
 //
 // rebuild MUST return a FRESH equivalent cmd (a started exec.Cmd cannot
 // be restarted) that reuses the caller's stdio so the caller's post-spawn
@@ -69,12 +68,12 @@ func startSupervisorDetachedBreakawayWithStart(cmd *exec.Cmd, rebuild func() *ex
 	}
 	// Parent job forbids breakaway. Retry flagless (rebuild constructs a
 	// fresh cmd WITHOUT the breakaway flag) so the supervisor still spawns.
-	if onDegrade != nil {
-		onDegrade(err)
-	}
 	retry := rebuild()
 	if e2 := start(retry); e2 != nil {
-		return retry, e2
+		return retry, fmt.Errorf("breakaway spawn failed: %w; flagless retry failed: %w", err, e2)
+	}
+	if onDegrade != nil {
+		onDegrade(err)
 	}
 	return retry, nil
 }

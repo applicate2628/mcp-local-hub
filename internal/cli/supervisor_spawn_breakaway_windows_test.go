@@ -104,3 +104,51 @@ func TestStartSupervisorDetachedBreakaway_AccessDeniedRetriesFlagless(t *testing
 		t.Fatalf("retry command retained CREATE_BREAKAWAY_FROM_JOB, flags=%#x", retry.SysProcAttr.CreationFlags)
 	}
 }
+
+func TestStartSupervisorDetachedBreakaway_FlaglessRetryFailureDoesNotReportDegradeSuccess(t *testing.T) {
+	initial := exec.Command("cmd", "/c", "exit", "0")
+	retry := exec.Command("cmd", "/c", "exit", "0")
+	retryErr := errors.New("synthetic flagless retry failure")
+	starts := 0
+	degradeCalls := 0
+
+	started, err := startSupervisorDetachedBreakawayWithStart(
+		initial,
+		func() *exec.Cmd { return retry },
+		func(error) { degradeCalls++ },
+		func(cmd *exec.Cmd) error {
+			starts++
+			switch starts {
+			case 1:
+				if cmd != initial {
+					t.Fatal("first start used retry command")
+				}
+				return windows.ERROR_ACCESS_DENIED
+			case 2:
+				if cmd != retry {
+					t.Fatal("retry start did not use rebuilt command")
+				}
+				return retryErr
+			default:
+				t.Fatalf("unexpected start call %d", starts)
+				return nil
+			}
+		},
+	)
+
+	if started != retry {
+		t.Fatal("returned command is not the failed retry command")
+	}
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+		t.Fatalf("error = %v, want initial ERROR_ACCESS_DENIED in causal chain", err)
+	}
+	if !errors.Is(err, retryErr) {
+		t.Fatalf("error = %v, want flagless retry error in causal chain", err)
+	}
+	if starts != 2 {
+		t.Fatalf("start calls = %d, want 2", starts)
+	}
+	if degradeCalls != 0 {
+		t.Fatalf("onDegrade calls = %d, want 0 when flagless retry failed", degradeCalls)
+	}
+}
