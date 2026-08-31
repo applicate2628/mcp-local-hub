@@ -1124,6 +1124,14 @@ func ReconcileSchedulerUnavailableError(err error) bool {
 	return schedulerUnavailableError(err) || errors.Is(err, scheduler.ErrUnavailable)
 }
 
+// restartSchedulerUnavailableError accepts a transient scheduler bridge
+// failure only after Restart has already handled the requested daemon through
+// the supervisor. The supervisor result is then the authoritative outcome;
+// callers without that result must continue to fail loudly.
+func restartSchedulerUnavailableError(err error) bool {
+	return schedulerUnavailableError(err) || errors.Is(err, scheduler.ErrUnavailable)
+}
+
 // forceMaterializeWorkspaceScoped walks rows and for every workspace-scoped
 // entry (non-empty Language), sends a real no-op tools/call via the
 // forceMaterializeProbe hook. The proxy will drive the backend through
@@ -3951,14 +3959,14 @@ func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilte
 	handledTasks := schedulerBlockedRestartTaskNames(results)
 	sch, err := restartSchedulerFactory()
 	if err != nil {
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && restartSchedulerUnavailableError(err) {
 			return results, nil
 		}
 		return nil, err
 	}
 	tasks, err := listTasksForServer(sch, server)
 	if err != nil {
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && restartSchedulerUnavailableError(err) {
 			return results, nil
 		}
 		return nil, err
@@ -4190,14 +4198,14 @@ func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult
 
 	sch, err := restartSchedulerFactory()
 	if err != nil {
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && restartSchedulerUnavailableError(err) {
 			return results, nil
 		}
 		return nil, err
 	}
 	tasks, err := sch.List("mcp-local-hub-")
 	if err != nil {
-		if supervisorHandled && schedulerUnavailableError(err) {
+		if supervisorHandled && restartSchedulerUnavailableError(err) {
 			return results, nil
 		}
 		return nil, err

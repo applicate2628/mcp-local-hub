@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -803,6 +804,132 @@ func TestRestartFallsBackWhenNoSupervisorIntentMatches(t *testing.T) {
 	}
 }
 
+func TestRestartSupervisorHandledToleratesTypedSchedulerUnavailable(t *testing.T) {
+	const taskName = `\mcp-local-hub-memory-default`
+	typedUnavailable := fmt.Errorf("scheduler bridge: %w: protocol", scheduler.ErrUnavailable)
+
+	for _, tc := range []struct {
+		name    string
+		restart func(*API) ([]RestartResult, error)
+		factory func() (scheduler.Scheduler, error)
+	}{
+		{
+			name:    "targeted_factory",
+			restart: func(a *API) ([]RestartResult, error) { return a.Restart("memory", "") },
+			factory: func() (scheduler.Scheduler, error) { return nil, typedUnavailable },
+		},
+		{
+			name:    "targeted_list",
+			restart: func(a *API) ([]RestartResult, error) { return a.Restart("memory", "") },
+			factory: func() (scheduler.Scheduler, error) { return &restartAllFakeScheduler{listErr: typedUnavailable}, nil },
+		},
+		{
+			name:    "all_factory",
+			restart: func(a *API) ([]RestartResult, error) { return a.RestartAll() },
+			factory: func() (scheduler.Scheduler, error) { return nil, typedUnavailable },
+		},
+		{
+			name:    "all_list",
+			restart: func(a *API) ([]RestartResult, error) { return a.RestartAll() },
+			factory: func() (scheduler.Scheduler, error) { return &restartAllFakeScheduler{listErr: typedUnavailable}, nil },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			restoreState := SetDaemonStateRootForTest(stateDir)
+			defer restoreState()
+			if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &SupervisorIntentFile{
+				Version: 1,
+				Daemons: []SupervisorDaemon{{TaskName: taskName, Server: "memory", Daemon: "default", Port: 9123}},
+			}); err != nil {
+				t.Fatalf("seed supervisor intent: %v", err)
+			}
+			restoreRespawn := setSupervisorRestartHooksForTest(func(context.Context, string, bool, int) (RespawnResult, error) {
+				return RespawnResult{Success: true}, nil
+			})
+			defer restoreRespawn()
+			origFactory := restartSchedulerFactory
+			restartSchedulerFactory = tc.factory
+			defer func() { restartSchedulerFactory = origFactory }()
+
+			results, err := tc.restart(NewAPI())
+			if err != nil {
+				t.Fatalf("restart: %v", err)
+			}
+			if len(results) != 1 || results[0].TaskName != taskName || results[0].Err != "" {
+				t.Fatalf("results = %+v, want preserved supervisor success", results)
+			}
+		})
+	}
+}
+
+func TestRestartSchedulerUnavailableRemainsFatalWithoutTypedSupervisorFallback(t *testing.T) {
+	const taskName = `\mcp-local-hub-memory-default`
+	typedUnavailable := fmt.Errorf("scheduler bridge: %w: protocol", scheduler.ErrUnavailable)
+
+	for _, tc := range []struct {
+		name       string
+		seedIntent bool
+		err        error
+		restart    func(*API) ([]RestartResult, error)
+	}{
+		{
+			name:       "targeted_untyped_same_text",
+			seedIntent: true,
+			err:        errors.New(typedUnavailable.Error()),
+			restart:    func(a *API) ([]RestartResult, error) { return a.Restart("memory", "") },
+		},
+		{
+			name:       "all_untyped_same_text",
+			seedIntent: true,
+			err:        errors.New(typedUnavailable.Error()),
+			restart:    func(a *API) ([]RestartResult, error) { return a.RestartAll() },
+		},
+		{
+			name:    "targeted_no_supervisor_result",
+			err:     typedUnavailable,
+			restart: func(a *API) ([]RestartResult, error) { return a.Restart("memory", "") },
+		},
+		{
+			name:    "all_no_supervisor_result",
+			err:     typedUnavailable,
+			restart: func(a *API) ([]RestartResult, error) { return a.RestartAll() },
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			restoreState := SetDaemonStateRootForTest(stateDir)
+			defer restoreState()
+			if tc.seedIntent {
+				if err := WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &SupervisorIntentFile{
+					Version: 1,
+					Daemons: []SupervisorDaemon{{TaskName: taskName, Server: "memory", Daemon: "default", Port: 9123}},
+				}); err != nil {
+					t.Fatalf("seed supervisor intent: %v", err)
+				}
+				restoreRespawn := setSupervisorRestartHooksForTest(func(context.Context, string, bool, int) (RespawnResult, error) {
+					return RespawnResult{Success: true}, nil
+				})
+				defer restoreRespawn()
+			}
+			origFactory := restartSchedulerFactory
+			restartSchedulerFactory = func() (scheduler.Scheduler, error) { return nil, tc.err }
+			defer func() { restartSchedulerFactory = origFactory }()
+
+			results, err := tc.restart(NewAPI())
+			if err == nil {
+				t.Fatalf("restart results = %+v, want scheduler error", results)
+			}
+			if !errors.Is(tc.err, scheduler.ErrUnavailable) && !errors.Is(err, tc.err) {
+				t.Fatalf("restart error = %v, want original untyped scheduler error %v", err, tc.err)
+			}
+			if errors.Is(tc.err, scheduler.ErrUnavailable) && !errors.Is(err, scheduler.ErrUnavailable) {
+				t.Fatalf("restart error = %v, want typed scheduler.ErrUnavailable", err)
+			}
+		})
+	}
+}
+
 // TestSupervisorStopClearVerifiedDistinguishesReadError pins the P3b
 // fail-closed correction: the restart re-enable read-back must tell a genuine
 // "stop cleared" (no entry / expired) apart from a READ FAILURE of the now-sole
@@ -885,6 +1012,7 @@ type restartAllFakeScheduler struct {
 	tasks     []scheduler.TaskStatus
 	runNames  []string
 	stopNames []string
+	listErr   error
 }
 
 func (f *restartAllFakeScheduler) Create(scheduler.TaskSpec) error { return nil }
@@ -901,6 +1029,9 @@ func (f *restartAllFakeScheduler) Status(string) (scheduler.TaskStatus, error) {
 	return scheduler.TaskStatus{}, nil
 }
 func (f *restartAllFakeScheduler) List(prefix string) ([]scheduler.TaskStatus, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	var out []scheduler.TaskStatus
 	for _, task := range f.tasks {
 		if strings.HasPrefix(strings.TrimPrefix(task.Name, `\`), prefix) {
