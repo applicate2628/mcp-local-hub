@@ -83,12 +83,17 @@ func emitAdoptLeaseFailed(manifestName string, err error) {
 	if !errors.As(err, &failure) || failure == nil {
 		return
 	}
-	emitAdoptProvenanceEvent(SupervisorEventSeverityError, "adopt-lease-failed", map[string]any{
+	body := map[string]any{
 		"manifest":          manifestName,
 		"failure_id":        failure.FailureID,
 		"retryable":         failure.Retryable,
 		"recovery_required": failure.RecoveryRequired,
-	})
+	}
+	if failure.ReasonID != "" {
+		body["reason_id"] = failure.ReasonID
+		body["action"] = failure.Action
+	}
+	emitAdoptProvenanceEvent(SupervisorEventSeverityError, "adopt-lease-failed", body)
 }
 
 // emitAdoptProvenanceCaptured records a pending `adopting` row + N snapshots.

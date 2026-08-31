@@ -17,6 +17,9 @@ type forgetProvenanceCLIAPI interface {
 
 var newForgetProvenanceCLIAPI = func() forgetProvenanceCLIAPI { return api.NewAPI() }
 
+var inspectAdoptLeaseNamespaceCLI = api.InspectAdoptLeaseNamespace
+var migrateLegacyAdoptLeaseNamespaceCLI = api.MigrateLegacyAdoptLeaseNamespace
+
 func newAdoptProvenanceCmdReal() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "adopt-provenance",
@@ -31,7 +34,63 @@ func newAdoptProvenanceCmdReal() *cobra.Command {
 			"These subcommands manage stale or blocking records.",
 	}
 	cmd.AddCommand(newAdoptProvenanceForgetCmd())
+	cmd.AddCommand(newAdoptLeaseNamespaceCmd())
 	return cmd
+}
+
+func newAdoptLeaseNamespaceCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "lease-namespace",
+		Short:  "Inspect or migrate the Windows adopt lease namespace",
+		Hidden: true,
+	}
+	cmd.AddCommand(&cobra.Command{
+		Use:   "inspect",
+		Short: "Read the lease namespace classification without changing it",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := inspectAdoptLeaseNamespaceCLI()
+			printAdoptLeaseNamespaceReport(cmd.OutOrStdout(), report)
+			return err
+		},
+	})
+	cmd.AddCommand(newAdoptLeaseNamespaceMigrateLegacyCmd())
+	return cmd
+}
+
+func newAdoptLeaseNamespaceMigrateLegacyCmd() *cobra.Command {
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "migrate-legacy",
+		Short: "Tighten a positively verified legacy lease namespace",
+		Long: "Validates the entire namespace before changing any DACL. Only current-user-owned, " +
+			"real legacy lease leaves and already-safe snapshot siblings are accepted. " +
+			"The command never deletes, renames, or changes file content.",
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			report, err := migrateLegacyAdoptLeaseNamespaceCLI(api.AdoptLeaseNamespaceMigrationOpts{Yes: yes})
+			printAdoptLeaseNamespaceReport(cmd.OutOrStdout(), report)
+			if err != nil {
+				return err
+			}
+			if !yes && report.MigrationEligible {
+				fmt.Fprintln(cmd.OutOrStdout(), "dry_run=true mutation=false")
+				fmt.Fprintln(cmd.OutOrStdout(), "apply=mcphub adopt-provenance lease-namespace migrate-legacy --yes")
+			}
+			return nil
+		},
+	}
+	cmd.Flags().BoolVar(&yes, "yes", false, "apply the validated migration; without this flag the command is read-only")
+	return cmd
+}
+
+func printAdoptLeaseNamespaceReport(w io.Writer, report api.AdoptLeaseNamespaceReport) {
+	fmt.Fprintf(w, "state=%s reason_id=%s action=%s migration_eligible=%t lease_leaves=%d snapshot_dirs=%d\n",
+		report.State, report.ReasonID, report.Action, report.MigrationEligible, report.LeaseLeafCount, report.SnapshotDirCount)
+	if report.ChangedLeafCount > 0 || report.NamespaceChanged || report.RollbackPerformed {
+		fmt.Fprintf(w, "changed_leaves=%d namespace_changed=%t rollback_performed=%t\n",
+			report.ChangedLeafCount, report.NamespaceChanged, report.RollbackPerformed)
+	}
 }
 
 func newAdoptProvenanceForgetCmd() *cobra.Command {

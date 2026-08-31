@@ -42,6 +42,33 @@ const (
 	adoptLeaseFailureCleanup          = "E_ADOPT_LEASE_CLEANUP"
 )
 
+// AdoptLeaseReasonID and AdoptLeaseAction are stable, path-free operator
+// diagnostics. They are safe to project through CLI, GUI, and event channels;
+// the underlying Windows error remains in-process only.
+type AdoptLeaseReasonID string
+type AdoptLeaseAction string
+
+const (
+	AdoptLeaseReasonStateRootUnavailable   AdoptLeaseReasonID = "state-root-unavailable"
+	AdoptLeaseReasonStateRootRefused       AdoptLeaseReasonID = "state-root-refused"
+	AdoptLeaseReasonNamespaceCreateRefused AdoptLeaseReasonID = "namespace-create-refused"
+	AdoptLeaseReasonNamespaceIrregular     AdoptLeaseReasonID = "namespace-irregular"
+	AdoptLeaseReasonNamespaceWrongOwner    AdoptLeaseReasonID = "namespace-wrong-owner"
+	AdoptLeaseReasonNamespaceDACLRefused   AdoptLeaseReasonID = "namespace-dacl-refused"
+	AdoptLeaseReasonNamespaceLegacyDACL    AdoptLeaseReasonID = "namespace-legacy-dacl"
+	AdoptLeaseReasonNamespaceBusy          AdoptLeaseReasonID = "namespace-busy"
+	AdoptLeaseReasonNamespaceUnrecognized  AdoptLeaseReasonID = "namespace-unrecognized"
+	AdoptLeaseReasonNamespaceReady         AdoptLeaseReasonID = "namespace-ready"
+	AdoptLeaseReasonNamespaceMissing       AdoptLeaseReasonID = "namespace-missing"
+	AdoptLeaseReasonPlatformUnsupported    AdoptLeaseReasonID = "platform-unsupported"
+
+	AdoptLeaseActionInspect        AdoptLeaseAction = "inspect-lease-namespace"
+	AdoptLeaseActionMigrateLegacy  AdoptLeaseAction = "migrate-legacy-lease-namespace"
+	AdoptLeaseActionRetryAdopt     AdoptLeaseAction = "retry-adopt"
+	AdoptLeaseActionLeaveUnchanged AdoptLeaseAction = "leave-unchanged"
+	AdoptLeaseActionNone           AdoptLeaseAction = "none"
+)
+
 // AdoptLease is the settlement handle returned by an AdoptLeaseOwner. Its
 // concrete implementation remains platform-owned; callers use this narrow
 // contract to preserve the one acquire/one settlement lifecycle.
@@ -72,6 +99,8 @@ func (realAdoptLeaseOwner) AcquireAdoptLease(manifestName string) (AdoptLease, b
 // the stable failure identifier.
 type LeaseFailure struct {
 	FailureID        string
+	ReasonID         AdoptLeaseReasonID
+	Action           AdoptLeaseAction
 	Retryable        bool
 	RecoveryRequired bool
 	cause            error
@@ -98,6 +127,28 @@ func newLeaseFailure(id string, retryable, recoveryRequired bool, causes ...erro
 		RecoveryRequired: recoveryRequired,
 		cause:            errors.Join(causes...),
 	}
+}
+
+func newLeaseNamespaceFailure(reason AdoptLeaseReasonID, action AdoptLeaseAction, cause error) error {
+	return &LeaseFailure{
+		FailureID: adoptLeaseFailureNamespaceRefused,
+		ReasonID:  reason,
+		Action:    action,
+		cause:     cause,
+	}
+}
+
+// PublicMessage is the complete redacted human-facing projection. It contains
+// only stable identifiers and never includes a filesystem path, SID, or raw OS
+// cause.
+func (e *LeaseFailure) PublicMessage() string {
+	if e == nil {
+		return ""
+	}
+	if e.ReasonID == "" {
+		return e.FailureID
+	}
+	return fmt.Sprintf("%s reason=%s action=%s", e.FailureID, e.ReasonID, e.Action)
 }
 
 func leaseCleanupFailure(causes ...error) error {

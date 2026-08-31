@@ -2,6 +2,7 @@ package gui
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -250,6 +251,16 @@ func adoptExecuteErrorStatus(err error) (int, string) {
 }
 
 func writeAdoptExecuteError(w http.ResponseWriter, err error, status int, code string) {
+	var leaseFailure *api.LeaseFailure
+	if errors.As(err, &leaseFailure) && leaseFailure != nil && leaseFailure.ReasonID != "" {
+		writeJSON(w, status, map[string]string{
+			"error":     leaseFailure.FailureID,
+			"code":      code,
+			"reason_id": string(leaseFailure.ReasonID),
+			"action":    string(leaseFailure.Action),
+		})
+		return
+	}
 	// The public lease cleanup identifier is already redacted and actionable.
 	// Preserve it for the local GUI while every wrapped owner cause stays out of
 	// the wire body and renderer.

@@ -151,7 +151,7 @@ func (e *AdoptStageError) Error() string {
 		// diagnostics without serializing it across channels.
 		var leaseFailure *LeaseFailure
 		if errors.As(e.Cause, &leaseFailure) && leaseFailure.FailureID != "" {
-			return leaseFailure.FailureID
+			return leaseFailure.PublicMessage()
 		}
 		return code
 	}

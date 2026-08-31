@@ -33,7 +33,11 @@ func injectedWindowsAdoptLeaseFailure(stage string) error {
 func acquireAdoptManifestLeasePlatform(manifestName string) (adoptManifestLeasePlatform, bool, error) {
 	ns, err := openWindowsAdoptLeaseNamespace()
 	if err != nil {
-		return nil, false, newLeaseFailure(adoptLeaseFailureNamespaceRefused, false, false, err)
+		var namespaceFailure *LeaseNamespaceFailure
+		if errors.As(err, &namespaceFailure) {
+			return nil, false, newLeaseNamespaceFailure(namespaceFailure.ReasonID, namespaceFailure.Action, err)
+		}
+		return nil, false, newLeaseNamespaceFailure(AdoptLeaseReasonNamespaceUnrecognized, AdoptLeaseActionInspect, err)
 	}
 	guard, _, err := openOrCreateWindowsAdoptLeaseLeaf(ns, adoptLeaseNamespaceLockLeaf)
 	if err != nil {
@@ -100,27 +104,28 @@ func acquireAdoptManifestLeasePlatform(manifestName string) (adoptManifestLeaseP
 func openWindowsAdoptLeaseNamespace() (windows.Handle, error) {
 	stateDir, err := DaemonStateDir()
 	if err != nil {
-		return windows.InvalidHandle, fmt.Errorf("adopt lease namespace: state root unavailable")
+		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootUnavailable, AdoptLeaseActionLeaveUnchanged, err)
 	}
 	root, err := openDirHandleNoReparse(stateDir)
 	if err != nil {
-		return windows.InvalidHandle, fmt.Errorf("adopt lease namespace: state root denied")
+		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
 	}
 	if err := refuseReparsePointHandle(root); err != nil {
-		return windows.InvalidHandle, errors.Join(fmt.Errorf("adopt lease namespace: state root is not a real directory"), windows.CloseHandle(root))
+		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, errors.Join(err, windows.CloseHandle(root)))
 	}
 	if err := verifyWindowsDACLFromHandle(root); err != nil {
-		return windows.InvalidHandle, errors.Join(fmt.Errorf("adopt lease namespace: state root access denied"), err, windows.CloseHandle(root))
+		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, errors.Join(err, windows.CloseHandle(root)))
 	}
 	sd, err := buildRestrictiveSecurityDescriptor()
 	if err != nil {
-		return windows.InvalidHandle, errors.Join(fmt.Errorf("adopt lease namespace: security descriptor unavailable"), windows.CloseHandle(root))
+		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonNamespaceCreateRefused, AdoptLeaseActionInspect, errors.Join(err, windows.CloseHandle(root)))
 	}
 	ns, _, err := mkdirOrVerifyRealDirWindows(root, adoptProvenanceSnapshotSubdir, "adopt-provenance", sd, true)
-	closeErr := windows.CloseHandle(root)
 	if err != nil {
-		return windows.InvalidHandle, errors.Join(fmt.Errorf("adopt lease namespace: refused"), err, closeErr)
+		reason, action := classifyWindowsAdoptLeaseNamespaceRefusal(root)
+		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(reason, action, errors.Join(err, windows.CloseHandle(root)))
 	}
+	closeErr := windows.CloseHandle(root)
 	if closeErr != nil {
 		return windows.InvalidHandle, errors.Join(fmt.Errorf("adopt lease namespace: state root close failed"), windows.CloseHandle(ns), closeErr)
 	}

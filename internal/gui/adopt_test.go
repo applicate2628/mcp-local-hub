@@ -73,6 +73,34 @@ func setupGUIAdoptTestEnv(t *testing.T, entryName, codexBody string) (codexPath,
 	return codexPath, manifestRoot, stateRoot
 }
 
+func TestWriteAdoptExecuteErrorProjectsLeaseNamespaceReasonWithoutCause(t *testing.T) {
+	canary := `private-path-canary foreign-sid-canary secret-canary`
+	err := &api.AdoptStageError{
+		Stage: "lease-acquire", CommitState: "uncommitted",
+		Cause: &api.LeaseFailure{
+			FailureID: "E_ADOPT_LEASE_NAMESPACE_REFUSED",
+			ReasonID:  api.AdoptLeaseReasonNamespaceLegacyDACL,
+			Action:    api.AdoptLeaseActionMigrateLegacy,
+		},
+	}
+	rec := httptest.NewRecorder()
+	writeAdoptExecuteError(rec, fmt.Errorf("%s: %w", canary, err), http.StatusInternalServerError, "ADOPT_FAILED")
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"error":"E_ADOPT_LEASE_NAMESPACE_REFUSED"`, `"reason_id":"namespace-legacy-dacl"`, `"action":"migrate-legacy-lease-namespace"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
+	}
+	for _, forbidden := range []string{"private-path-canary", "foreign-sid-canary", "secret-canary"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("GUI response leaked %q in %s", forbidden, body)
+		}
+	}
+}
+
 func guiAdoptDefaultManifestDir(t *testing.T) string {
 	t.Helper()
 	exe, err := os.Executable()
