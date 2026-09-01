@@ -25,6 +25,11 @@ const (
 // still preserving this lower lifecycle classification and its original cause.
 var ErrSupervisorReapForceKill = errors.New("supervisor reap force-kill failed")
 
+// ErrSupervisorReapPortRelease identifies a daemon-listener release failure
+// after the supervisor handoff. Adapters retain their operation-specific text
+// while preserving the common lower lifecycle classification and bind cause.
+var ErrSupervisorReapPortRelease = errors.New("supervisor reap port release failed")
+
 // SupervisorReapDeps is the lower, capability-neutral owner of an existing
 // supervisor handoff. Implementations authenticate IPC and identity-gate their
 // own force-kill; this transaction never chooses a PID or port itself.
@@ -78,7 +83,7 @@ func ReapSupervisor(ctx context.Context, opts SupervisorReapOpts) error {
 	}
 	if len(opts.ExpectedPorts) != 0 && opts.VerifyPortsUnbound != nil {
 		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, opts.PortReleaseTimeout); err != nil {
-			return fmt.Errorf("port-unbound verification after supervisor reap: %w", err)
+			return fmt.Errorf("%w: port-unbound verification after supervisor reap: %w", ErrSupervisorReapPortRelease, err)
 		}
 	}
 	return nil

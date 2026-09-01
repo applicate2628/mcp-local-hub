@@ -673,7 +673,13 @@ type ReapOpts struct {
 // EITHER path makes the reap fail loud (the migrate aborts before the
 // spec-bearing intent write — legacy stays recoverable).
 func ReapSupervisorForRestart(ctx context.Context, opts ReapOpts) error {
-	return api.ReapSupervisor(ctx, api.SupervisorReapOpts{PipePath: opts.PipePath, QuiesceTimeoutMs: opts.QuiesceTimeoutMs, ExitTimeoutMs: opts.ExitTimeoutMs, ExpectedPorts: opts.ExpectedPorts, VerifyPortsUnbound: opts.VerifyPortsUnbound, PortReleaseTimeout: api.DefaultSupervisorReapPortReleaseTimeout, IsAlreadyExited: isAlreadyExitedError, Deps: opts.Deps})
+	err := api.ReapSupervisor(ctx, api.SupervisorReapOpts{PipePath: opts.PipePath, QuiesceTimeoutMs: opts.QuiesceTimeoutMs, ExitTimeoutMs: opts.ExitTimeoutMs, ExpectedPorts: opts.ExpectedPorts, VerifyPortsUnbound: opts.VerifyPortsUnbound, PortReleaseTimeout: api.DefaultSupervisorReapPortReleaseTimeout, IsAlreadyExited: isAlreadyExitedError, Deps: opts.Deps})
+	if errors.Is(err, api.ErrSupervisorReapPortRelease) {
+		// Migrate callers historically receive this exact diagnostic. Keep it at
+		// the CLI adapter while retaining the lower typed failure and bind cause.
+		return fmt.Errorf("port-unbound verification failed after supervisor reap: %w", err)
+	}
+	return err
 }
 
 // isAlreadyExitedError reports whether err originated from a kill

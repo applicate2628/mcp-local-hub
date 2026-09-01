@@ -55,6 +55,22 @@ func TestReapSupervisor_ForceKillFailureRetainsTypedCause(t *testing.T) {
 	}
 }
 
+func TestReapSupervisor_PortReleaseFailureRetainsTypedCause(t *testing.T) {
+	cause := errors.New("address already in use")
+	f := &reapDepsFake{quiesce: IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true}}
+	err := ReapSupervisor(context.Background(), SupervisorReapOpts{
+		PipePath:      "pipe",
+		ExpectedPorts: []int{9304},
+		VerifyPortsUnbound: func([]int, time.Duration) error {
+			return cause
+		},
+		Deps: f,
+	})
+	if !errors.Is(err, ErrSupervisorReapPortRelease) || !errors.Is(err, cause) {
+		t.Fatalf("error=%v want typed port-release classification and original cause", err)
+	}
+}
+
 func TestReapSupervisor_DefaultPortReleaseTimeoutIsAPIOwned(t *testing.T) {
 	f := &reapDepsFake{quiesce: IPCResponse{Result: map[string]any{"still_running": []any{}}, Final: true}}
 	var got time.Duration
