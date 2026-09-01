@@ -14,7 +14,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/spf13/cobra"
@@ -130,7 +129,6 @@ func newAutostartStatusCmd() *cobra.Command {
 		Long: `Prints one of:
 
   absent           — no shim installed
-  unavailable      — Task Scheduler state could not be observed
   enabled-running  — shim installed AND supervisor process is alive
   enabled-stopped  — shim installed but supervisor is not currently running
   drifted          — shim installed but on-disk args/path disagree with
@@ -150,11 +148,6 @@ Pass --strict-mode to check drift against the strict-mode shim shape.`,
 			}
 			state, err := b.Status(opts)
 			if err != nil {
-				if errors.Is(err, autostart.ErrStatusObservationUnavailable) {
-					fmt.Fprintln(cmd.OutOrStdout(), "unavailable")
-					fmt.Fprintln(cmd.ErrOrStderr(), "AUTOSTART_SCHEDULER_UNAVAILABLE")
-					return nil
-				}
 				return fmt.Errorf("autostart status: %w", err)
 			}
 			fmt.Fprintln(cmd.OutOrStdout(), state.String())

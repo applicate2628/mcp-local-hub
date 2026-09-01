@@ -84,7 +84,7 @@ func TestAutostartStatusPrintsState(t *testing.T) {
 	}
 }
 
-func TestAutostartStatusSchedulerUnavailableIsExplicitAndSuccessful(t *testing.T) {
+func TestAutostartStatusSchedulerUnavailableIsTypedFailure(t *testing.T) {
 	fb := &fakeBackend{statusErr: autostart.ErrStatusObservationUnavailable}
 	withFakeBackend(t, fb)
 
@@ -93,14 +93,15 @@ func TestAutostartStatusSchedulerUnavailableIsExplicitAndSuccessful(t *testing.T
 	cmd.SetOut(&stdout)
 	cmd.SetErr(&stderr)
 	cmd.SetArgs([]string{"status"})
-	if err := cmd.Execute(); err != nil {
-		t.Fatalf("Execute: %v", err)
+	err := cmd.Execute()
+	if !errors.Is(err, autostart.ErrStatusObservationUnavailable) {
+		t.Fatalf("Execute error = %v, want typed observation failure", err)
 	}
-	if got := stdout.String(); got != "unavailable\n" {
-		t.Fatalf("stdout = %q, want unavailable state", got)
+	if got := stdout.String(); strings.Contains(got, "unavailable\n") {
+		t.Fatalf("stdout = %q, must not claim an unavailable state", got)
 	}
-	if got := stderr.String(); got != "AUTOSTART_SCHEDULER_UNAVAILABLE\n" {
-		t.Fatalf("stderr = %q, want stable scheduler diagnostic", got)
+	if strings.Contains(stderr.String(), "AUTOSTART_SCHEDULER_UNAVAILABLE") {
+		t.Fatalf("stderr retained obsolete success diagnostic: %q", stderr.String())
 	}
 }
 
