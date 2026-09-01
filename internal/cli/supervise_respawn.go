@@ -332,7 +332,7 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 	// MarkExited, clearing the tracker for the freshly spawned process and
 	// leaving a live daemon untracked (Codex bot #268 P1). Only StSpawning
 	// (EvManualRestart has no SM transition there) and the ctrl-not-yet-wired
-	// window fall through to the legacy direct path below.
+	// window can fall through to the legacy direct path below in tests.
 	if shouldTerminate && ctrl != nil && ctrl.eventLoop != nil &&
 		controllerStateKnown &&
 		(controllerState == api.StRunning || controllerState == api.StExiting) {
@@ -374,6 +374,18 @@ func handleRespawn(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) erro
 				"state":     "spawned",
 				"route":     "controller-manual-restart",
 			},
+			Final: true,
+		})
+	}
+
+	// A live PID that the controller cannot restart (notably StSpawning,
+	// which has no EvManualRestart transition) must be refused before the
+	// legacy terminate callback has any side effect. Production never uses
+	// the raw terminate+spawn fallback; keep it available only to tests.
+	if shouldTerminate && !deps.allowDirectRespawnForTest {
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID:    req.ID,
+			Error: &api.IPCErr{Code: ipcErrorRespawnNotReady, Message: "controller cannot accept this respawn state yet; retry", Retryable: true},
 			Final: true,
 		})
 	}

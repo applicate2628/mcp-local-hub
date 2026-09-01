@@ -1012,6 +1012,42 @@ func TestHandleRespawn_ProductionIdleStoppedIntentUsesTypedControllerRefusal(t *
 	}
 }
 
+// A live child can be recorded while its controller state is still StSpawning,
+// before EvHealthOK is processed. Production must refuse a restart in that
+// window without first terminating the in-flight child.
+func TestHandleRespawn_ProductionSpawningLivePIDRefusesBeforeTerminate(t *testing.T) {
+	const taskName = `\mcp-local-hub-foo-default`
+	descriptor := api.SupervisorDaemon{TaskName: taskName, Server: "foo", Daemon: "default"}
+	intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{descriptor}}
+
+	ctrl, _, cancel := setupControllerForB1Test(t, descriptor, api.IntentDesiredRunning, func(api.SupervisorDaemon) error {
+		return nil
+	})
+	defer cancel()
+	ctrl.tracker.MarkSpawned(taskName, 4812, time.Now().UTC())
+	ctrl.smStates.Store(taskName, api.StSpawning)
+
+	deps, rawSpawnCalls, rawTerminateCalls := newRespawnTestDeps(t, intent)
+	deps.allowDirectRespawnForTest = false
+	deps.runtimeTracker = ctrl.tracker
+	deps.controllerProvider = func() *supervisorController { return ctrl }
+
+	conn := newFakeIPCConn()
+	if err := handleRespawn(conn, api.IPCRequest{ID: 83, Cmd: "respawn", Args: map[string]any{"task_name": taskName, "force": false}}, deps); err != nil {
+		t.Fatalf("handleRespawn: %v", err)
+	}
+	resp := conn.lastResponse(t)
+	if resp.Error == nil || resp.Error.Code != ipcErrorRespawnNotReady || !resp.Error.Retryable {
+		t.Fatalf("spawning production respawn = %+v, want retryable %s refusal", resp, ipcErrorRespawnNotReady)
+	}
+	if got := rawTerminateCalls.Load(); got != 0 {
+		t.Fatalf("spawning production respawn terminated the in-flight child %d times, want zero", got)
+	}
+	if got := rawSpawnCalls.Load(); got != 0 {
+		t.Fatalf("spawning production respawn used raw spawn fallback %d times, want zero", got)
+	}
+}
+
 // TestHandleRespawn_ProductionIdleRunningIntentUsesControllerNotRawFallback
 // proves the matching runnable state uses the actual controller event loop,
 // while the legacy raw callback remains inaccessible in production mode.
