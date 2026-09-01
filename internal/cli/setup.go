@@ -260,8 +260,16 @@ func bootstrapCopyOnly(w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("resolve current executable: %w", err)
 	}
+	return bootstrapCopyToTarget(w, curExe, target)
+}
+
+func bootstrapCopyToTarget(w io.Writer, curExe, target string) error {
 	if samePath(curExe, target) {
 		fmt.Fprintf(w, "\u2713 mcphub already at %s (no copy needed)\n", target)
+		return nil
+	}
+	if same, err := sameFileContents(curExe, target); err == nil && same {
+		fmt.Fprintf(w, "\u2713 mcphub already at %s (byte-identical; no copy needed)\n", target)
 		return nil
 	}
 	if err := copyExe(curExe, target); err != nil {
