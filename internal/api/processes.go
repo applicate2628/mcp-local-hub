@@ -96,15 +96,17 @@ func splitSnapshotLines(raw string) []string {
 // entry's complete command identity against the snapshot's pre-split lines
 // (deep-review r2 P4-5) instead of re-scanning the raw CSV text per entry.
 func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string) int {
-	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}, legacyAnyTokenFallback: len(patterns) == 1})
+	if len(patterns) == 1 {
+		return countMatchingLines(snap.lines, patterns)
+	}
+	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}})
 }
 
 // processAttribution carries complete root identities separately from the
 // display/cleanup substring patterns. A managed mcphub daemon has a stronger
 // root identity than its manifest command alone: `daemon --server S --daemon D`.
 type processAttribution struct {
-	rootVariants           []processRootIdentity
-	legacyAnyTokenFallback bool
+	rootVariants []processRootIdentity
 }
 
 type processRootIdentity struct {
@@ -121,7 +123,7 @@ func countProcessesFromSnapshotAttribution(snap processSnapshot, attribution pro
 
 func processAttributionForManifest(serverName string, m *config.ServerManifest) processAttribution {
 	if m == nil {
-		return processAttribution{rootVariants: []processRootIdentity{{argvSequence: []string{serverName}}}, legacyAnyTokenFallback: true}
+		return processAttribution{}
 	}
 	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(m.Command)))
 	if isMcphubBinaryBasename(bare) && len(m.Daemons) > 0 {
@@ -151,9 +153,6 @@ func processAttributionForManifest(serverName string, m *config.ServerManifest) 
 func countAttributedProcessLines(records []string, attribution processAttribution) int {
 	if len(attribution.rootVariants) == 0 {
 		return 0
-	}
-	if attribution.legacyAnyTokenFallback {
-		return countMatchingLines(records, attribution.rootVariants[0].argvSequence)
 	}
 	rows, err := parseProcessSnapshotRows(strings.NewReader(strings.Join(records, "\n")))
 	if err != nil || len(rows) == 0 {
@@ -442,7 +441,10 @@ func runProcessSnapshot() (string, error) {
 // going through this io.Reader-based entry point per call.
 func parseWmicCount(r io.Reader, patterns []string) (int, error) {
 	records, err := process.ReadWmicCSVRecords(r)
-	return countAttributedProcessLines(records, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}, legacyAnyTokenFallback: len(patterns) == 1}), err
+	if len(patterns) == 1 {
+		return countMatchingLines(records, patterns), err
+	}
+	return countAttributedProcessLines(records, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}}), err
 }
 
 // ProcessInfo describes one live process match.

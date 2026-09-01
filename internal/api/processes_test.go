@@ -82,6 +82,19 @@ HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+0
 	}
 }
 
+func TestProcessAttributionWithoutManifestDoesNotClaimTokenMentions(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"powershell.exe -NoProfile -Command \"Write-Output graphify\"",20260417180000.000000+000,powershell.exe,1,100,10
+HOST,"cmd.exe /c echo graphify",20260417180000.000000+000,cmd.exe,1,101,10
+HOST,"python.exe helper.py --log-message graphify",20260417180000.000000+000,python.exe,1,102,10
+HOST,"node.exe tools/graphify-wrapper.js",20260417180000.000000+000,node.exe,1,103,10
+`
+	snap := processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}
+	if got := countProcessesFromSnapshotAttribution(snap, processAttributionForManifest("graphify", nil)); got != 0 {
+		t.Fatalf("manifest-less graphify attribution=%d, want no claimed ownership from command-token mentions", got)
+	}
+}
+
 // TestCountProcessesHandlesEmptyInput verifies the parser returns (0, nil)
 // on blank wmic output — zero processes matching, no error.
 func TestCountProcessesHandlesEmptyInput(t *testing.T) {
