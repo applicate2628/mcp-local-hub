@@ -53,31 +53,46 @@ func TestRunContainedStreamSiblingCallerSourceGuard(t *testing.T) {
 		"internal/daemon/http_host.go",
 		"internal/drmemory/runner.go",
 		"internal/oneapirun/handlers.go",
-		"internal/vtune/runner.go",
 	}
 	for _, relative := range protected {
 		path := filepath.Join(root, filepath.FromSlash(relative))
-		file, err := parser.ParseFile(gotoken.NewFileSet(), path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse protected caller %s: %v", relative, err)
-		}
-		found := false
-		ast.Inspect(file, func(node ast.Node) bool {
-			call, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			selector, ok := call.Fun.(*ast.SelectorExpr)
-			if ok && selector.Sel.Name == "RunContainedStream" {
-				found = true
-			}
-			if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "RunContainedStream" {
-				found = true
-			}
-			return true
-		})
-		if found {
+		if sourceCallsRunContainedStream(t, path) {
 			t.Fatalf("protected sibling %s migrated to RunContainedStream", relative)
 		}
 	}
+}
+
+func TestVTuneRunContainedStreamCallerApproved(t *testing.T) {
+	// VTune deliberately adopted the fail-closed contained runner for durable
+	// profiling in the 0.4.35 lifecycle hotfix. Keep the older sibling guard for
+	// unreviewed callers, but require this reviewed owner to stay on the strict
+	// containment seam instead of drifting back to the fail-open Job helper.
+	path := filepath.Clean(filepath.Join("..", "..", "..", "internal", "vtune", "runner.go"))
+	if !sourceCallsRunContainedStream(t, path) {
+		t.Fatal("reviewed VTune owner no longer calls RunContainedStream")
+	}
+}
+
+func sourceCallsRunContainedStream(t *testing.T, path string) bool {
+	t.Helper()
+	file, err := parser.ParseFile(gotoken.NewFileSet(), path, nil, 0)
+	if err != nil {
+		t.Fatalf("parse contained-stream caller %s: %v", path, err)
+	}
+	found := false
+	ast.Inspect(file, func(node ast.Node) bool {
+		call, ok := node.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		selector, ok := call.Fun.(*ast.SelectorExpr)
+		if ok && selector.Sel.Name == "RunContainedStream" {
+			found = true
+		}
+		if ident, ok := call.Fun.(*ast.Ident); ok && ident.Name == "RunContainedStream" {
+			found = true
+		}
+		return true
+	})
+	return found
 }
