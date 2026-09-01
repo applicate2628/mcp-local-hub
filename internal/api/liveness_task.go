@@ -111,6 +111,45 @@ type LivenessTaskReceipt struct {
 
 var ErrLivenessTaskRollbackConflict = errors.New("api: liveness task rollback conflict")
 
+// LivenessTaskPostImportStage identifies a failure after Task Scheduler has
+// accepted a replacement liveness-task definition.
+type LivenessTaskPostImportStage string
+
+const (
+	LivenessTaskPostImportReadback      LivenessTaskPostImportStage = "readback"
+	LivenessTaskPostImportSemanticDrift LivenessTaskPostImportStage = "semantic-drift"
+)
+
+// LivenessTaskPostImportError preserves the original post-import failure and,
+// when necessary, the failure to restore the exact captured pre-state.
+type LivenessTaskPostImportError struct {
+	Stage    LivenessTaskPostImportStage
+	Cause    error
+	Rollback error
+}
+
+func (e *LivenessTaskPostImportError) Error() string {
+	if e.Rollback != nil {
+		return fmt.Sprintf("liveness task post-import %s failure: %v; rollback failed: %v", e.Stage, e.Cause, e.Rollback)
+	}
+	return fmt.Sprintf("liveness task post-import %s failure: %v", e.Stage, e.Cause)
+}
+
+func (e *LivenessTaskPostImportError) Unwrap() []error {
+	if e.Rollback == nil {
+		return []error{e.Cause}
+	}
+	return []error{e.Cause, e.Rollback}
+}
+
+func (e *LivenessTaskPostImportError) LivenessTaskPostImportStage() string {
+	return string(e.Stage)
+}
+
+func (e *LivenessTaskPostImportError) LivenessTaskRollbackError() error {
+	return e.Rollback
+}
+
 // InstallLivenessTask is the idempotent install of the supervisor-liveness
 // scheduled task: resolve the canonical mcphub.exe path + the current Windows
 // user, render the liveness XML via scheduler.BuildLivenessXML, encode it
@@ -159,7 +198,7 @@ func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 		if !livenessTaskReadable(prior) {
 			return receipt, fmt.Errorf("liveness task definition is corrupt")
 		}
-		if livenessTaskMatches(prior, canonicalExe, workingDir, userName) {
+		if livenessTaskDifference(prior, canonicalExe, workingDir, userName) == nil {
 			receipt.Result = LivenessTaskUnchanged
 			receipt.settledXML = append([]byte(nil), prior...)
 			return receipt, nil
@@ -171,13 +210,21 @@ func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 	}
 	settled, err := sch.ExportXML(LivenessTaskName)
 	if err != nil {
-		return receipt, fmt.Errorf("read back liveness task: %w", err)
+		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportReadback, fmt.Errorf("read back liveness task: %w", err))
 	}
 	receipt.settledXML = append([]byte(nil), settled...)
-	if !livenessTaskMatches(settled, canonicalExe, workingDir, userName) {
-		return receipt, fmt.Errorf("liveness task definition drifted after import")
+	if difference := livenessTaskDifference(settled, canonicalExe, workingDir, userName); difference != nil {
+		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportSemanticDrift, fmt.Errorf("liveness task definition drifted after import: %w", difference))
 	}
 	return receipt, nil
+}
+
+func livenessTaskPostImportFailure(sch scheduler.Scheduler, receipt LivenessTaskReceipt, stage LivenessTaskPostImportStage, cause error) error {
+	return &LivenessTaskPostImportError{
+		Stage:    stage,
+		Cause:    cause,
+		Rollback: restoreLivenessTaskSnapshot(sch, receipt),
+	}
 }
 
 // RestoreLivenessTask restores only the exact pre-state captured in receipt.
@@ -196,37 +243,208 @@ func (a *API) RestoreLivenessTask(receipt LivenessTaskReceipt) error {
 	if err != nil || !bytes.Equal(current, receipt.settledXML) {
 		return fmt.Errorf("%w: liveness task changed after settlement", ErrLivenessTaskRollbackConflict)
 	}
-	if receipt.Result == LivenessTaskCreated {
+	return restoreLivenessTaskSnapshot(sch, receipt)
+}
+
+// restoreLivenessTaskSnapshot restores the exact state captured before a
+// replacement. Callers that run after settlement must establish their own
+// ownership fence first; the immediate post-import failure path owns the same
+// scheduler transaction and must always attempt this recovery.
+func restoreLivenessTaskSnapshot(sch scheduler.Scheduler, receipt LivenessTaskReceipt) error {
+	switch receipt.Result {
+	case LivenessTaskCreated:
 		if err := sch.Delete(LivenessTaskName); err != nil {
 			return fmt.Errorf("delete created liveness task: %w", err)
 		}
+		if _, err := sch.ExportXML(LivenessTaskName); !errors.Is(err, scheduler.ErrTaskNotFound) {
+			return fmt.Errorf("%w: created liveness task remains after deletion: %v", ErrLivenessTaskRollbackConflict, err)
+		}
 		return nil
+	case LivenessTaskReplaced:
+		if err := sch.ImportXML(LivenessTaskName, receipt.priorXML); err != nil {
+			return fmt.Errorf("restore liveness task XML: %w", err)
+		}
+		restored, err := sch.ExportXML(LivenessTaskName)
+		if err != nil || !bytes.Equal(restored, receipt.priorXML) {
+			return fmt.Errorf("%w: liveness XML readback differs from captured pre-state", ErrLivenessTaskRollbackConflict)
+		}
+		return nil
+	default:
+		return fmt.Errorf("%w: receipt has no replaceable liveness task state", ErrLivenessTaskRollbackConflict)
 	}
-	if err := sch.ImportXML(LivenessTaskName, receipt.priorXML); err != nil {
-		return fmt.Errorf("restore liveness task XML: %w", err)
+}
+
+type LivenessTaskDifferenceField string
+
+const (
+	livenessTaskFieldDefinition                      LivenessTaskDifferenceField = "definition"
+	livenessTaskFieldPrincipalCount                  LivenessTaskDifferenceField = "principal.count"
+	livenessTaskFieldPrincipalUser                   LivenessTaskDifferenceField = "principal.user"
+	livenessTaskFieldPrincipalLogonType              LivenessTaskDifferenceField = "principal.logon_type"
+	livenessTaskFieldPrincipalRunLevel               LivenessTaskDifferenceField = "principal.run_level"
+	livenessTaskFieldCalendarTriggerCount            LivenessTaskDifferenceField = "trigger.calendar.count"
+	livenessTaskFieldCalendarRepetitionInterval      LivenessTaskDifferenceField = "trigger.calendar.repetition.interval"
+	livenessTaskFieldCalendarDaysInterval            LivenessTaskDifferenceField = "trigger.calendar.schedule_by_day.days_interval"
+	livenessTaskFieldCalendarStopAtDurationEnd       LivenessTaskDifferenceField = "trigger.calendar.repetition.stop_at_duration_end"
+	livenessTaskFieldLogonTriggerCount               LivenessTaskDifferenceField = "trigger.logon.count"
+	livenessTaskFieldLogonTriggerUser                LivenessTaskDifferenceField = "trigger.logon.user"
+	livenessTaskFieldLogonTriggerEnabled             LivenessTaskDifferenceField = "trigger.logon.enabled"
+	livenessTaskFieldSettingsEnabled                 LivenessTaskDifferenceField = "settings.enabled"
+	livenessTaskFieldSettingsExecutionTimeLimit      LivenessTaskDifferenceField = "settings.execution_time_limit"
+	livenessTaskFieldSettingsMultipleInstancesPolicy LivenessTaskDifferenceField = "settings.multiple_instances_policy"
+	livenessTaskFieldActionContext                   LivenessTaskDifferenceField = "action.context"
+	livenessTaskFieldActionCount                     LivenessTaskDifferenceField = "action.count"
+	livenessTaskFieldActionCommand                   LivenessTaskDifferenceField = "action.command"
+	livenessTaskFieldActionArguments                 LivenessTaskDifferenceField = "action.arguments"
+	livenessTaskFieldActionWorkingDirectory          LivenessTaskDifferenceField = "action.working_directory"
+)
+
+// LivenessTaskDefinitionDifference identifies the first semantic field whose
+// Task Scheduler readback differs from the canonical liveness definition.
+type LivenessTaskDefinitionDifference struct {
+	Field LivenessTaskDifferenceField
+}
+
+func (e *LivenessTaskDefinitionDifference) Error() string {
+	return fmt.Sprintf("liveness task definition differs at %s", e.Field)
+}
+
+func (e *LivenessTaskDefinitionDifference) LivenessTaskDifferenceField() string {
+	return string(e.Field)
+}
+
+type livenessPrincipalXML struct {
+	UserID    string `xml:"UserId"`
+	LogonType string `xml:"LogonType"`
+	RunLevel  string `xml:"RunLevel"`
+}
+
+type livenessCalendarTriggerXML struct {
+	Repetition struct {
+		Interval          string `xml:"Interval"`
+		StopAtDurationEnd string `xml:"StopAtDurationEnd"`
+	} `xml:"Repetition"`
+	ScheduleByDay struct {
+		DaysInterval string `xml:"DaysInterval"`
+	} `xml:"ScheduleByDay"`
+}
+
+type livenessLogonTriggerXML struct {
+	UserID  string `xml:"UserId"`
+	Enabled string `xml:"Enabled"`
+}
+
+type livenessExecXML struct {
+	Command          string `xml:"Command"`
+	Arguments        string `xml:"Arguments"`
+	WorkingDirectory string `xml:"WorkingDirectory"`
+}
+
+type livenessSettingsXML struct {
+	Enabled                 string `xml:"Enabled"`
+	ExecutionTimeLimit      string `xml:"ExecutionTimeLimit"`
+	MultipleInstancesPolicy string `xml:"MultipleInstancesPolicy"`
+}
+
+type livenessTaskXML struct {
+	Principals      []livenessPrincipalXML
+	CalendarTrigger []livenessCalendarTriggerXML
+	LogonTrigger    []livenessLogonTriggerXML
+	ActionContext   string
+	Exec            []livenessExecXML
+	Settings        livenessSettingsXML
+}
+
+func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, userName string) *LivenessTaskDefinitionDifference {
+	actual, ok := parseLivenessTaskXML(xmlBlob)
+	if !ok {
+		return &LivenessTaskDefinitionDifference{Field: livenessTaskFieldDefinition}
 	}
-	restored, err := sch.ExportXML(LivenessTaskName)
-	if err != nil || !bytes.Equal(restored, receipt.priorXML) {
-		return fmt.Errorf("%w: liveness XML readback differs from captured pre-state", ErrLivenessTaskRollbackConflict)
+	expected, ok := parseLivenessTaskXML([]byte(scheduler.BuildLivenessXML(canonicalExe, workingDir, userName)))
+	if !ok {
+		return &LivenessTaskDefinitionDifference{Field: livenessTaskFieldDefinition}
+	}
+	difference := func(field LivenessTaskDifferenceField) *LivenessTaskDefinitionDifference {
+		return &LivenessTaskDefinitionDifference{Field: field}
+	}
+	if len(actual.Principals) != len(expected.Principals) {
+		return difference(livenessTaskFieldPrincipalCount)
+	}
+	principal, expectedPrincipal := actual.Principals[0], expected.Principals[0]
+	if !scheduler.WindowsUsersEquivalent(principal.UserID, expectedPrincipal.UserID) {
+		return difference(livenessTaskFieldPrincipalUser)
+	}
+	if principal.LogonType != expectedPrincipal.LogonType {
+		return difference(livenessTaskFieldPrincipalLogonType)
+	}
+	if principal.RunLevel != expectedPrincipal.RunLevel {
+		return difference(livenessTaskFieldPrincipalRunLevel)
+	}
+	if len(actual.CalendarTrigger) != len(expected.CalendarTrigger) {
+		return difference(livenessTaskFieldCalendarTriggerCount)
+	}
+	calendar, expectedCalendar := actual.CalendarTrigger[0], expected.CalendarTrigger[0]
+	if calendar.Repetition.Interval != expectedCalendar.Repetition.Interval {
+		return difference(livenessTaskFieldCalendarRepetitionInterval)
+	}
+	if calendar.ScheduleByDay.DaysInterval != expectedCalendar.ScheduleByDay.DaysInterval {
+		return difference(livenessTaskFieldCalendarDaysInterval)
+	}
+	if !sameTaskXMLBoolean(calendar.Repetition.StopAtDurationEnd, expectedCalendar.Repetition.StopAtDurationEnd) {
+		return difference(livenessTaskFieldCalendarStopAtDurationEnd)
+	}
+	if len(actual.LogonTrigger) != len(expected.LogonTrigger) {
+		return difference(livenessTaskFieldLogonTriggerCount)
+	}
+	logon, expectedLogon := actual.LogonTrigger[0], expected.LogonTrigger[0]
+	if !scheduler.WindowsUsersEquivalent(logon.UserID, expectedLogon.UserID) {
+		return difference(livenessTaskFieldLogonTriggerUser)
+	}
+	if !sameTaskXMLBoolean(logon.Enabled, expectedLogon.Enabled) {
+		return difference(livenessTaskFieldLogonTriggerEnabled)
+	}
+	if !sameTaskXMLBoolean(actual.Settings.Enabled, expected.Settings.Enabled) {
+		return difference(livenessTaskFieldSettingsEnabled)
+	}
+	if actual.Settings.ExecutionTimeLimit != expected.Settings.ExecutionTimeLimit {
+		return difference(livenessTaskFieldSettingsExecutionTimeLimit)
+	}
+	if actual.Settings.MultipleInstancesPolicy != expected.Settings.MultipleInstancesPolicy {
+		return difference(livenessTaskFieldSettingsMultipleInstancesPolicy)
+	}
+	if actual.ActionContext != expected.ActionContext {
+		return difference(livenessTaskFieldActionContext)
+	}
+	if len(actual.Exec) != len(expected.Exec) {
+		return difference(livenessTaskFieldActionCount)
+	}
+	action, expectedAction := actual.Exec[0], expected.Exec[0]
+	if action.Command != expectedAction.Command {
+		return difference(livenessTaskFieldActionCommand)
+	}
+	if action.Arguments != expectedAction.Arguments {
+		return difference(livenessTaskFieldActionArguments)
+	}
+	if action.WorkingDirectory != expectedAction.WorkingDirectory {
+		return difference(livenessTaskFieldActionWorkingDirectory)
 	}
 	return nil
 }
 
-func livenessTaskMatches(xmlBlob []byte, canonicalExe, workingDir, userName string) bool {
-	task, ok := parseLivenessTaskXML(xmlBlob)
-	return ok && task.UserID == userName && task.Exec.Command == canonicalExe &&
-		task.Exec.WorkingDirectory == workingDir && task.Exec.Arguments == "supervise --ensure-alive" &&
-		strings.EqualFold(task.Enabled, "true")
-}
-
-type livenessTaskXML struct {
-	UserID string
-	Exec   struct {
-		Command          string `xml:"Command"`
-		Arguments        string `xml:"Arguments"`
-		WorkingDirectory string `xml:"WorkingDirectory"`
+func sameTaskXMLBoolean(left, right string) bool {
+	normalize := func(value string) (bool, bool) {
+		switch strings.ToLower(strings.TrimSpace(value)) {
+		case "true", "1":
+			return true, true
+		case "false", "0":
+			return false, true
+		default:
+			return false, false
+		}
 	}
-	Enabled string
+	leftValue, leftOK := normalize(left)
+	rightValue, rightOK := normalize(right)
+	return leftOK && rightOK && leftValue == rightValue
 }
 
 func livenessTaskReadable(xmlBlob []byte) bool {
@@ -235,15 +453,19 @@ func livenessTaskReadable(xmlBlob []byte) bool {
 }
 
 func parseLivenessTaskXML(xmlBlob []byte) (livenessTaskXML, bool) {
-	type execNode struct {
-		Command          string `xml:"Command"`
-		Arguments        string `xml:"Arguments"`
-		WorkingDirectory string `xml:"WorkingDirectory"`
-	}
 	type taskRoot struct {
-		UserID  string   `xml:"Principals>Principal>UserId"`
-		Exec    execNode `xml:"Actions>Exec"`
-		Enabled string   `xml:"Settings>Enabled"`
+		Triggers struct {
+			Calendar []livenessCalendarTriggerXML `xml:"CalendarTrigger"`
+			Logon    []livenessLogonTriggerXML    `xml:"LogonTrigger"`
+		} `xml:"Triggers"`
+		Principals struct {
+			Principal []livenessPrincipalXML `xml:"Principal"`
+		} `xml:"Principals"`
+		Settings livenessSettingsXML `xml:"Settings"`
+		Actions  struct {
+			Context string            `xml:"Context,attr"`
+			Exec    []livenessExecXML `xml:"Exec"`
+		} `xml:"Actions"`
 	}
 	if len(xmlBlob) >= 2 && xmlBlob[0] == 0xff && xmlBlob[1] == 0xfe && (len(xmlBlob)-2)%2 == 0 {
 		units := make([]uint16, 0, (len(xmlBlob)-2)/2)
@@ -258,19 +480,17 @@ func parseLivenessTaskXML(xmlBlob []byte) (livenessTaskXML, bool) {
 	if err := decoder.Decode(&task); err != nil {
 		return livenessTaskXML{}, false
 	}
-	if task.Exec.Command == "" || task.Exec.Arguments == "" || task.UserID == "" {
+	if len(task.Principals.Principal) == 0 || len(task.Actions.Exec) == 0 ||
+		task.Principals.Principal[0].UserID == "" || task.Actions.Exec[0].Command == "" || task.Actions.Exec[0].Arguments == "" {
 		return livenessTaskXML{}, false
 	}
 	return livenessTaskXML{
-		UserID: task.UserID,
-		Exec: struct {
-			Command          string `xml:"Command"`
-			Arguments        string `xml:"Arguments"`
-			WorkingDirectory string `xml:"WorkingDirectory"`
-		}{
-			Command: task.Exec.Command, Arguments: task.Exec.Arguments, WorkingDirectory: task.Exec.WorkingDirectory,
-		},
-		Enabled: task.Enabled,
+		Principals:      task.Principals.Principal,
+		CalendarTrigger: task.Triggers.Calendar,
+		LogonTrigger:    task.Triggers.Logon,
+		ActionContext:   task.Actions.Context,
+		Exec:            task.Actions.Exec,
+		Settings:        task.Settings,
 	}, true
 }
 

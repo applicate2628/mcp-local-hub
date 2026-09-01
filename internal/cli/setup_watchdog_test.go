@@ -55,14 +55,15 @@ type setupImportXMLCall struct {
 }
 
 type setupFakeScheduler struct {
-	mu             sync.Mutex
-	tasks          map[string][]byte
-	deleteCalls    []string
-	importXMLCalls []setupImportXMLCall
-	order          []string
-	importXMLErr   error
-	listResult     []scheduler.TaskStatus
-	listErr        error
+	mu              sync.Mutex
+	tasks           map[string][]byte
+	deleteCalls     []string
+	importXMLCalls  []setupImportXMLCall
+	order           []string
+	importXMLErr    error
+	normalizeImport func([]byte) []byte
+	listResult      []scheduler.TaskStatus
+	listErr         error
 }
 
 func (f *setupFakeScheduler) Create(scheduler.TaskSpec) error { return errNotImplementedForSetupTest }
@@ -107,6 +108,9 @@ func (f *setupFakeScheduler) ImportXML(name string, xml []byte) error {
 	f.order = append(f.order, "import:"+name)
 	if f.importXMLErr != nil {
 		return f.importXMLErr
+	}
+	if f.normalizeImport != nil {
+		cp = f.normalizeImport(cp)
 	}
 	f.tasks[name] = cp
 	return nil
@@ -259,6 +263,39 @@ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testin
 		if !strings.Contains(got, want) {
 			t.Errorf("stdout missing %q; got %q", want, got)
 		}
+	}
+}
+
+func TestSetup_LivenessReadbackDriftRestoresPriorTaskAndFailsClosed(t *testing.T) {
+	_, fakeSch := setupWatchdogTestHelper(t)
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		`C:\previous\mcphub.exe`, `C:\previous`, "test-user"))
+	fakeSch.tasks[api.LivenessTaskName] = prior
+	firstImport := true
+	fakeSch.normalizeImport = func(raw []byte) []byte {
+		if !firstImport {
+			return raw
+		}
+		firstImport = false
+		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+			scheduler.BuildLivenessXML(`C:\fake\mcphub.exe`, `C:\fake`, "test-user"),
+			"<Interval>PT1M</Interval>", "<Interval>PT5M</Interval>", 1))
+	}
+
+	out := &bytes.Buffer{}
+	err := runSetupWatchdog(out, false)
+	if err == nil {
+		t.Fatal("runSetupWatchdog: want liveness readback failure")
+	}
+	var fe interface{ ExitCode() int }
+	if !errors.As(err, &fe) || fe.ExitCode() != 12 {
+		t.Fatalf("setup exit=%v, want force exit 12", err)
+	}
+	if got := fakeSch.tasks[api.LivenessTaskName]; !bytes.Equal(got, prior) {
+		t.Fatalf("setup left drifted liveness task: got %q, want exact prior XML %q", got, prior)
+	}
+	if got := fakeSch.importXMLByName(api.LivenessTaskName); got != 2 {
+		t.Fatalf("liveness ImportXML calls=%d, want replacement plus restoration", got)
 	}
 }
 

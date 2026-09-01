@@ -337,17 +337,5 @@ func (w *windowsScheduler) ListContext(ctx context.Context, prefix string) ([]Ta
 // sameWindowsUser compares a Task Scheduler "Run As User" value against the
 // current user's short username (no DOMAIN\ prefix), case-insensitively.
 func sameWindowsUser(owner, currentShortName string) bool {
-	owner = strings.TrimSpace(owner)
-	if owner == "" || currentShortName == "" {
-		return false
-	}
-	owner = strings.ToLower(owner)
-	currentShortName = strings.ToLower(currentShortName)
-	if owner == currentShortName {
-		return true
-	}
-	if i := strings.LastIndex(owner, `\`); i >= 0 {
-		return owner[i+1:] == currentShortName
-	}
-	return false
+	return WindowsUsersEquivalent(owner, currentShortName)
 }

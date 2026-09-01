@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 )
 
 // TaskSpec describes a scheduled task the hub wants the OS to manage.
@@ -76,6 +77,26 @@ var ErrTaskNotRunning = errors.New("scheduler: task not running")
 var ErrPermissionDenied = errors.New("scheduler: permission denied")
 var ErrTaskCorrupt = errors.New("scheduler: task corrupt")
 var ErrUnavailable = errors.New("scheduler: unavailable")
+
+// WindowsUsersEquivalent compares a Task Scheduler Run As User value against
+// the current user's short username. Task Scheduler may qualify the stored
+// identity with a machine or domain and may normalize its case.
+func WindowsUsersEquivalent(owner, currentShortName string) bool {
+	owner = strings.TrimSpace(owner)
+	currentShortName = strings.TrimSpace(currentShortName)
+	if owner == "" || currentShortName == "" {
+		return false
+	}
+	owner = strings.ToLower(owner)
+	currentShortName = strings.ToLower(currentShortName)
+	if owner == currentShortName {
+		return true
+	}
+	if i := strings.LastIndex(owner, `\`); i >= 0 {
+		return owner[i+1:] == currentShortName
+	}
+	return false
+}
 
 // ErrNotImplemented is returned by platform backends that compile but do not
 // yet provide a scheduler implementation. Callers that intentionally support

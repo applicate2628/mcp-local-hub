@@ -31,10 +31,14 @@ func installTestCanonicalMcphubPath(t *testing.T, path string) {
 }
 
 type livenessTaskScheduler struct {
-	tasks     map[string][]byte
-	imports   []importXMLCall
-	deletes   []string
-	importErr error
+	tasks            map[string][]byte
+	imports          []importXMLCall
+	deletes          []string
+	importErr        error
+	importErrForCall func(int) error
+	exportErrForCall func(int) error
+	exportCalls      int
+	normalizeImport  func([]byte) []byte
 }
 
 func newLivenessTaskScheduler() *livenessTaskScheduler {
@@ -51,6 +55,12 @@ func (f *livenessTaskScheduler) List(string) ([]scheduler.TaskStatus, error) {
 	return nil, errNotImplementedForTest
 }
 func (f *livenessTaskScheduler) ExportXML(name string) ([]byte, error) {
+	f.exportCalls++
+	if f.exportErrForCall != nil {
+		if err := f.exportErrForCall(f.exportCalls); err != nil {
+			return nil, err
+		}
+	}
 	xml, ok := f.tasks[name]
 	if !ok {
 		return nil, scheduler.ErrTaskNotFound
@@ -59,10 +69,19 @@ func (f *livenessTaskScheduler) ExportXML(name string) ([]byte, error) {
 }
 func (f *livenessTaskScheduler) ImportXML(name string, xml []byte) error {
 	f.imports = append(f.imports, importXMLCall{name: name, xml: append([]byte(nil), xml...)})
+	if f.importErrForCall != nil {
+		if err := f.importErrForCall(len(f.imports)); err != nil {
+			return err
+		}
+	}
 	if f.importErr != nil {
 		return f.importErr
 	}
-	f.tasks[name] = append([]byte(nil), xml...)
+	settled := append([]byte(nil), xml...)
+	if f.normalizeImport != nil {
+		settled = f.normalizeImport(settled)
+	}
+	f.tasks[name] = settled
 	return nil
 }
 func (f *livenessTaskScheduler) Delete(name string) error {
@@ -174,12 +193,265 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
 	}
 }
 
+func TestEnsureLivenessTask_SemanticNormalizationIsIdempotent(t *testing.T) {
+	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, "test")
+	cases := []struct {
+		name      string
+		normalize func(string) string
+	}{
+		{
+			name: "qualified case-normalized principal",
+			normalize: func(taskXML string) string {
+				return strings.ReplaceAll(taskXML, "<UserId>test</UserId>", `<UserId>MACHINE\TEST</UserId>`)
+			},
+		},
+		{
+			name:      "reversed equivalent trigger order",
+			normalize: reverseLivenessTriggerOrderForTest,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewAPI()
+			f := newLivenessTaskScheduler()
+			f.tasks[LivenessTaskName] = scheduler.EncodeXMLUTF16LEBOM(tc.normalize(canonical))
+			installTestScheduler(t, f)
+			installTestCanonicalMcphubPath(t, livenessFixtureExe)
+			installTestCurrentWindowsUser(t, "test")
+
+			receipt, err := a.EnsureLivenessTask()
+			if err != nil {
+				t.Fatalf("EnsureLivenessTask: %v", err)
+			}
+			if receipt.Result != LivenessTaskUnchanged {
+				t.Fatalf("result=%q, want %q", receipt.Result, LivenessTaskUnchanged)
+			}
+			if got := len(f.importCalls()); got != 0 {
+				t.Fatalf("semantic match re-imported task %d times", got)
+			}
+		})
+	}
+}
+
+type livenessTaskDifferenceReporter interface {
+	LivenessTaskDifferenceField() string
+}
+
+type livenessTaskPostImportFailureReporter interface {
+	LivenessTaskPostImportStage() string
+	LivenessTaskRollbackError() error
+}
+
+func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
+	replace := func(old, new string) func(string) string {
+		return func(taskXML string) string {
+			return strings.Replace(taskXML, old, new, 1)
+		}
+	}
+	replaceLast := func(old, new string) func(string) string {
+		return func(taskXML string) string {
+			at := strings.LastIndex(taskXML, old)
+			if at < 0 {
+				return taskXML
+			}
+			return taskXML[:at] + new + taskXML[at+len(old):]
+		}
+	}
+	cases := []struct {
+		name      string
+		normalize func(string) string
+		wantField string
+	}{
+		{name: "cadence", normalize: replace("<Interval>PT1M</Interval>", "<Interval>PT5M</Interval>"), wantField: "trigger.calendar.repetition.interval"},
+		{name: "run level", normalize: replace("<RunLevel>LeastPrivilege</RunLevel>", "<RunLevel>HighestAvailable</RunLevel>"), wantField: "principal.run_level"},
+		{name: "logon type", normalize: replace("<LogonType>InteractiveToken</LogonType>", "<LogonType>Password</LogonType>"), wantField: "principal.logon_type"},
+		{name: "execution limit", normalize: replace("<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>", "<ExecutionTimeLimit>PT5M</ExecutionTimeLimit>"), wantField: "settings.execution_time_limit"},
+		{name: "multiple instances", normalize: replace("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>", "<MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>"), wantField: "settings.multiple_instances_policy"},
+		{name: "command", normalize: replace("<Command>"+livenessFixtureExe+"</Command>", "<Command>foreign.exe</Command>"), wantField: "action.command"},
+		{name: "arguments", normalize: replace("<Arguments>supervise --ensure-alive</Arguments>", "<Arguments>supervise</Arguments>"), wantField: "action.arguments"},
+		{name: "working directory", normalize: replace("<WorkingDirectory>"+livenessFixtureWorkingDir+"</WorkingDirectory>", "<WorkingDirectory>foreign</WorkingDirectory>"), wantField: "action.working_directory"},
+		{name: "enabled", normalize: replaceLast("<Enabled>true</Enabled>", "<Enabled>false</Enabled>"), wantField: "settings.enabled"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := NewAPI()
+			f := newLivenessTaskScheduler()
+			f.normalizeImport = func(raw []byte) []byte {
+				decoded := decodeUTF16LEBOMForTest(t, raw)
+				return scheduler.EncodeXMLUTF16LEBOM(tc.normalize(decoded))
+			}
+			installTestScheduler(t, f)
+			installTestCanonicalMcphubPath(t, livenessFixtureExe)
+			installTestCurrentWindowsUser(t, "test")
+
+			err := a.InstallLivenessTask()
+			if err == nil {
+				t.Fatal("normalized semantic drift was accepted")
+			}
+			var reporter livenessTaskDifferenceReporter
+			if !errors.As(err, &reporter) {
+				t.Fatalf("error does not report a typed differing field: %v", err)
+			}
+			if got := reporter.LivenessTaskDifferenceField(); got != tc.wantField {
+				t.Fatalf("difference field=%q, want %q (err=%v)", got, tc.wantField, err)
+			}
+		})
+	}
+}
+
+func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
+	a := NewAPI()
+	f := newLivenessTaskScheduler()
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+	f.tasks[LivenessTaskName] = prior
+	f.normalizeImport = func(raw []byte) []byte {
+		if len(f.imports) != 1 {
+			return append([]byte(nil), raw...)
+		}
+		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+			decodeUTF16LEBOMForTest(t, raw),
+			"<Interval>PT1M</Interval>",
+			"<Interval>PT5M</Interval>",
+			1,
+		))
+	}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
+	installTestCurrentWindowsUser(t, "test")
+
+	_, err := a.EnsureLivenessTask()
+	if err == nil {
+		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
+	}
+	var failure livenessTaskPostImportFailureReporter
+	if !errors.As(err, &failure) {
+		t.Fatalf("post-import error is not typed: %v", err)
+	}
+	if got := failure.LivenessTaskPostImportStage(); got != "semantic-drift" {
+		t.Fatalf("post-import stage=%q, want semantic-drift", got)
+	}
+	if rollbackErr := failure.LivenessTaskRollbackError(); rollbackErr != nil {
+		t.Fatalf("rollback error = %v, want nil", rollbackErr)
+	}
+	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+		t.Fatalf("post-import failure left replacement task: got %q, want exact prior XML %q", got, prior)
+	}
+	if got := len(f.importCalls()); got != 2 {
+		t.Fatalf("ImportXML calls=%d, want replacement plus restoration", got)
+	}
+}
+
+func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testing.T) {
+	a := NewAPI()
+	f := newLivenessTaskScheduler()
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+	f.tasks[LivenessTaskName] = prior
+	restoreErr := errors.New("simulated restore failure")
+	f.importErrForCall = func(call int) error {
+		if call == 2 {
+			return restoreErr
+		}
+		return nil
+	}
+	f.normalizeImport = func(raw []byte) []byte {
+		if len(f.imports) != 1 {
+			return append([]byte(nil), raw...)
+		}
+		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+			decodeUTF16LEBOMForTest(t, raw),
+			"<Interval>PT1M</Interval>",
+			"<Interval>PT5M</Interval>",
+			1,
+		))
+	}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
+	installTestCurrentWindowsUser(t, "test")
+
+	_, err := a.EnsureLivenessTask()
+	if err == nil {
+		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
+	}
+	var failure livenessTaskPostImportFailureReporter
+	if !errors.As(err, &failure) {
+		t.Fatalf("post-import error is not typed: %v", err)
+	}
+	if got := failure.LivenessTaskPostImportStage(); got != "semantic-drift" {
+		t.Fatalf("post-import stage=%q, want semantic-drift", got)
+	}
+	if !errors.Is(failure.LivenessTaskRollbackError(), restoreErr) {
+		t.Fatalf("rollback error=%v, want errors.Is(..., %v)", failure.LivenessTaskRollbackError(), restoreErr)
+	}
+	if got := f.tasks[LivenessTaskName]; bytes.Equal(got, prior) {
+		t.Fatal("restore failure unexpectedly reported the exact prior XML as restored")
+	}
+}
+
+func TestEnsureLivenessTask_ReadbackFailureRestoresExactPriorXML(t *testing.T) {
+	a := NewAPI()
+	f := newLivenessTaskScheduler()
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+	f.tasks[LivenessTaskName] = prior
+	readbackErr := errors.New("simulated post-import readback failure")
+	f.exportErrForCall = func(call int) error {
+		if call == 2 {
+			return readbackErr
+		}
+		return nil
+	}
+	installTestScheduler(t, f)
+	installTestCanonicalMcphubPath(t, livenessFixtureExe)
+	installTestCurrentWindowsUser(t, "test")
+
+	_, err := a.EnsureLivenessTask()
+	if err == nil {
+		t.Fatal("EnsureLivenessTask accepted a failed post-import readback")
+	}
+	var failure livenessTaskPostImportFailureReporter
+	if !errors.As(err, &failure) {
+		t.Fatalf("post-import error is not typed: %v", err)
+	}
+	if got := failure.LivenessTaskPostImportStage(); got != "readback" {
+		t.Fatalf("post-import stage=%q, want readback", got)
+	}
+	if !errors.Is(err, readbackErr) {
+		t.Fatalf("post-import error=%v, want errors.Is(..., %v)", err, readbackErr)
+	}
+	if rollbackErr := failure.LivenessTaskRollbackError(); rollbackErr != nil {
+		t.Fatalf("rollback error=%v, want nil", rollbackErr)
+	}
+	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+		t.Fatalf("post-import readback failure left replacement task: got %q, want exact prior XML %q", got, prior)
+	}
+}
+
+func reverseLivenessTriggerOrderForTest(taskXML string) string {
+	calendarStart := strings.Index(taskXML, "    <CalendarTrigger>")
+	calendarEnd := strings.Index(taskXML, "    </CalendarTrigger>")
+	logonStart := strings.Index(taskXML, "    <LogonTrigger>")
+	logonEnd := strings.Index(taskXML, "    </LogonTrigger>")
+	if calendarStart < 0 || calendarEnd < calendarStart || logonStart < 0 || logonEnd < logonStart {
+		return taskXML
+	}
+	calendarEnd += len("    </CalendarTrigger>\n")
+	logonEnd += len("    </LogonTrigger>\n")
+	calendar := taskXML[calendarStart:calendarEnd]
+	logon := taskXML[logonStart:logonEnd]
+	return taskXML[:calendarStart] + logon + calendar + taskXML[logonEnd:]
+}
+
 // TestInstallLivenessTask_PropagatesImportXMLError asserts a scheduler failure
 // is surfaced verbatim — the install path does not swallow errors.
 func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
 	a := NewAPI()
 	want := errors.New("simulated schtasks failure")
 	f := newLivenessTaskScheduler()
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+	f.tasks[LivenessTaskName] = prior
 	f.importErr = want
 	installTestScheduler(t, f)
 	installTestCanonicalMcphubPath(t, livenessFixtureExe)
@@ -191,6 +463,12 @@ func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
 	}
 	if !errors.Is(err, want) {
 		t.Errorf("InstallLivenessTask: want errors.Is(err, want); got %v", err)
+	}
+	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+		t.Fatalf("pre-import failure changed prior task: got %q, want %q", got, prior)
+	}
+	if got := len(f.importCalls()); got != 1 {
+		t.Fatalf("pre-import failure attempted rollback: ImportXML calls=%d, want 1", got)
 	}
 }
 
