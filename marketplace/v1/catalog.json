@@ -195,7 +195,7 @@
       "readme_url": "https://raw.githubusercontent.com/openags/paper-search-mcp/main/README.md",
       "transport": "stdio",
       "command": "uvx",
-      "args": ["--from", "paper-search-mcp", "python", "-m", "paper_search_mcp.server"],
+      "args": ["--from", "paper-search-mcp==0.1.4", "--with", "fastmcp==3.4.7", "--with", "mcp==1.29.0", "python", "-m", "paper_search_mcp.server"],
       "env": {
         "PAPER_SEARCH_MCP_UNPAYWALL_EMAIL": "secret:unpaywall_email"
       },

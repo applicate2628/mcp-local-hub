@@ -5,7 +5,11 @@ transport: stdio-bridge
 command: uvx
 base_args:
   - "--from"
-  - "paper-search-mcp"
+  - "paper-search-mcp==0.1.4"
+  - "--with"
+  - "fastmcp==3.4.7"
+  - "--with"
+  - "mcp==1.29.0"
   - "python"
   - "-m"
   - "paper_search_mcp.server"

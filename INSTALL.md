@@ -412,7 +412,7 @@ The Go rewrite lives in `internal/godbolt/` and can also be built as a standalon
 
 ### paper-search-mcp (port 9127)
 
-Runs `uvx --from paper-search-mcp python -m paper_search_mcp.server`.
+Runs `uvx --from paper-search-mcp==0.1.4 --with fastmcp==3.4.7 --with mcp==1.29.0 python -m paper_search_mcp.server`.
 Requires `uvx`. `PAPER_SEARCH_MCP_UNPAYWALL_EMAIL` is stored in the vault:
 
 ```bash
