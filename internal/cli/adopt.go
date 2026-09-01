@@ -41,12 +41,13 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 			}
 			a := newAPI()
 			plan, err := a.BuildAdoptPlan(api.AdoptOpts{
-				EntryName:                       args[0],
-				Client:                          clientFlag,
-				ManifestName:                    nameFlag,
-				Port:                            portFlag,
-				Clients:                         include,
-				MCPProtocolCompatibilityProfile: compatibilityProfileFlag,
+				EntryName:                               args[0],
+				Client:                                  clientFlag,
+				ManifestName:                            nameFlag,
+				Port:                                    portFlag,
+				Clients:                                 include,
+				MCPProtocolCompatibilityProfile:         compatibilityProfileFlag,
+				MCPProtocolCompatibilityProfileExplicit: cmd.Flags().Changed("mcp-protocol-compatibility-profile"),
 			})
 			if err != nil {
 				return err

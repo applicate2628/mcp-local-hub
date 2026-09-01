@@ -15,6 +15,15 @@ type forgetProvenanceCLIAPI interface {
 	ForgetAdoptProvenance(string, api.ForgetAdoptProvenanceOpts) (*api.ForgetAdoptProvenancePlan, error)
 }
 
+type profileUpdateCLIAPI interface {
+	BuildAdoptProfileUpdatePlan(string, string) (*api.AdoptProfileUpdatePlan, error)
+	ExecuteAdoptProfileUpdate(*api.AdoptProfileUpdatePlan, api.AdoptProfileUpdateOpts) error
+}
+
+type realProfileUpdateCLIAPI struct{ *api.API }
+
+var newProfileUpdateCLIAPI = func() profileUpdateCLIAPI { return realProfileUpdateCLIAPI{api.NewAPI()} }
+
 var newForgetProvenanceCLIAPI = func() forgetProvenanceCLIAPI { return api.NewAPI() }
 
 var inspectAdoptLeaseNamespaceCLI = api.InspectAdoptLeaseNamespace
@@ -34,7 +43,39 @@ func newAdoptProvenanceCmdReal() *cobra.Command {
 			"These subcommands manage stale or blocking records.",
 	}
 	cmd.AddCommand(newAdoptProvenanceForgetCmd())
+	cmd.AddCommand(newAdoptProfileUpdateCmd())
 	cmd.AddCommand(newAdoptLeaseNamespaceCmd())
+	return cmd
+}
+
+func newAdoptProfileUpdateCmd() *cobra.Command {
+	var profile string
+	var yes bool
+	cmd := &cobra.Command{
+		Use:   "update-profile <manifest>",
+		Short: "Update the adopted stdio MCP protocol compatibility profile",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			a := newProfileUpdateCLIAPI()
+			plan, err := a.BuildAdoptProfileUpdatePlan(args[0], profile)
+			if err != nil {
+				return err
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "adopt-provenance update-profile %s\nprofile=%s\nold_manifest_hash=%s\nnew_manifest_hash=%s\nrestart_required=%t\n", plan.ManifestName, plan.Profile, plan.OldManifestHash, plan.NewManifestHash, plan.RestartRequired)
+			if !yes {
+				fmt.Fprintln(cmd.OutOrStdout(), "dry_run=true mutation=false")
+				return nil
+			}
+			if err := a.ExecuteAdoptProfileUpdate(plan, api.AdoptProfileUpdateOpts{}); err != nil {
+				return err
+			}
+			fmt.Fprintln(cmd.OutOrStdout(), "updated=true restart_required=true restart_performed=false")
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&profile, "mcp-protocol-compatibility-profile", "", "required stdio MCP protocol compatibility profile")
+	cmd.Flags().BoolVar(&yes, "yes", false, "apply the reviewed update; without this flag the command is a dry-run")
+	_ = cmd.MarkFlagRequired("mcp-protocol-compatibility-profile")
 	return cmd
 }
 

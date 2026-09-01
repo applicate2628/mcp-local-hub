@@ -173,8 +173,9 @@ type AdoptProvenanceRecord struct {
 
 // AdoptedEntries is the <state-dir>/adopted-entries.json file root.
 type AdoptedEntries struct {
-	Version int                     `json:"version"`
-	Records []AdoptProvenanceRecord `json:"records"`
+	Version                int                         `json:"version"`
+	Records                []AdoptProvenanceRecord     `json:"records"`
+	ProtocolProfileUpdates []AdoptProfileUpdateJournal `json:"protocol_profile_updates,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

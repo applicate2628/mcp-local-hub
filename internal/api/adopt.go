@@ -54,6 +54,10 @@ type AdoptOpts struct {
 	// MCPProtocolCompatibilityProfile is an explicit opt-in for the generated
 	// stdio-bridge daemon. Empty preserves strict current protocol behavior.
 	MCPProtocolCompatibilityProfile string
+	// MCPProtocolCompatibilityProfileExplicit preserves the CLI flag-presence
+	// bit. It distinguishes an omitted profile (idempotent re-adopt) from an
+	// explicit empty or conflicting assertion.
+	MCPProtocolCompatibilityProfileExplicit bool
 }
 
 // AdoptPlan is the side-effect-free preview returned by BuildAdoptPlan.
@@ -92,11 +96,13 @@ type AdoptPlan struct {
 	secretValues map[string]string
 	// codexTarget is planner-private so API/GUI plan serialization never leaks a
 	// project path. Apply consumes only this frozen naming result.
-	codexTarget              *clients.CodexTransportTarget
-	alreadyAdopted           bool
-	requestedPort            int
-	requestedClients         []string
-	requestedClientsExplicit bool
+	codexTarget                           *clients.CodexTransportTarget
+	alreadyAdopted                        bool
+	requestedPort                         int
+	requestedClients                      []string
+	requestedClientsExplicit              bool
+	requestedCompatibilityProfile         string
+	requestedCompatibilityProfileExplicit bool
 }
 
 type ExecuteAdoptOpts struct {
@@ -343,6 +349,9 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, fmt.Errorf("manifest %q collides with a shipped (built-in) server; adopt refuses to shadow shipped manifests", manifestName)
 	}
 	compatibilityProfile := strings.TrimSpace(opts.MCPProtocolCompatibilityProfile)
+	if opts.MCPProtocolCompatibilityProfileExplicit && compatibilityProfile == "" {
+		return nil, fmt.Errorf("adopt MCP protocol compatibility profile cannot be explicitly empty")
+	}
 	if _, err := mcpcompat.ResolveProtocolCompatibilityProfile(compatibilityProfile); err != nil {
 		return nil, fmt.Errorf("adopt MCP protocol compatibility profile: %w", err)
 	}
@@ -363,18 +372,20 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 				targets[client.Client] = adoptClientTargetEntryName(*rec, client)
 			}
 			return &AdoptPlan{
-				EntryName:                       entryName,
-				SourceClient:                    sourceClient,
-				ManifestName:                    manifestName,
-				Port:                            rec.Port,
-				AdoptClients:                    append([]string(nil), rec.AdoptClients...),
-				MCPProtocolCompatibilityProfile: rec.MCPProtocolCompatibilityProfile,
-				ManifestYAML:                    string(manifestBytes),
-				TargetEntryNames:                targets,
-				alreadyAdopted:                  true,
-				requestedPort:                   opts.Port,
-				requestedClients:                requestedClients,
-				requestedClientsExplicit:        len(opts.Clients) > 0,
+				EntryName:                             entryName,
+				SourceClient:                          sourceClient,
+				ManifestName:                          manifestName,
+				Port:                                  rec.Port,
+				AdoptClients:                          append([]string(nil), rec.AdoptClients...),
+				MCPProtocolCompatibilityProfile:       rec.MCPProtocolCompatibilityProfile,
+				ManifestYAML:                          string(manifestBytes),
+				TargetEntryNames:                      targets,
+				alreadyAdopted:                        true,
+				requestedPort:                         opts.Port,
+				requestedClients:                      requestedClients,
+				requestedClientsExplicit:              len(opts.Clients) > 0,
+				requestedCompatibilityProfile:         compatibilityProfile,
+				requestedCompatibilityProfileExplicit: opts.MCPProtocolCompatibilityProfileExplicit,
 			}, nil
 		}
 		return nil, fmt.Errorf("adopt refuses to create manifest %q because a disk manifest already exists; remove or rename the existing manifest before re-running adopt", manifestName)
@@ -1021,6 +1032,12 @@ func validateAdoptRepeatState(plan *AdoptPlan, rec *AdoptProvenanceRecord) error
 	}
 	if plan.requestedClientsExplicit && !sameAdoptClientSet(plan.requestedClients, rec.AdoptClients) {
 		return fmt.Errorf("requested clients do not match the existing adopted clients")
+	}
+	// A flagless re-adopt remains idempotent: BuildAdoptPlan reflects the
+	// recorded profile. An explicit profile is an operator assertion and must
+	// not silently claim an already-adopted manifest has been changed.
+	if plan.requestedCompatibilityProfileExplicit && plan.requestedCompatibilityProfile != rec.MCPProtocolCompatibilityProfile {
+		return fmt.Errorf("requested MCP protocol compatibility profile does not match the existing adopted profile; use adopt-provenance update-profile")
 	}
 	clientRecords := make(map[string]AdoptClientProvenance, len(rec.Clients))
 	for _, clientRec := range rec.Clients {
