@@ -49,10 +49,19 @@ HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+0
 HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,210,211,10
 HOST,"node.exe node_modules/mcp-local-hub/bin/mcphub.js daemon --server vcpkg --daemon default",20260417180000.000000+000,node.exe,1,220,10
 HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,220,221,10
+HOST,"mcphub.exe daemon --server vcpkg-shadow --daemon default",20260417180000.000000+000,mcphub.exe,1,230,10
+HOST,"mcphub.exe daemon --server vcpkg --daemon default-old",20260417180000.000000+000,mcphub.exe,1,240,10
+HOST,"vcpkg/mcphub.exe daemon --server nope --daemon default",20260417180000.000000+000,mcphub.exe,1,250,10
+HOST,"""MCPHUB.EXE"" DaEmOn --SeRvEr VCPKG --DaEmOn DEFAULT",20260417180000.000000+000,mcphub.exe,1,260,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,260,261,10
+HOST,"other.exe ""C:\\tools\\mcphub.exe"" daemon --server vcpkg --daemon default",20260417180000.000000+000,other.exe,1,270,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,270,271,10
+HOST,"""C:\\vcpkg root\\mcphub.exe"" daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,1,280,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,280,281,10
 `
 	spec := processAttributionForManifest("vcpkg", &config.ServerManifest{Command: "mcphub", BaseArgs: []string{"vcpkg"}, Daemons: []config.DaemonSpec{{Name: "default", Port: 9138}}})
-	if got := countProcessesFromSnapshotAttribution(processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}, spec); got != 6 {
-		t.Fatalf("structured Vcpkg attribution=%d, want two canonical + one shim root trees without standalone command", got)
+	if got := countProcessesFromSnapshotAttribution(processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}, spec); got != 10 {
+		t.Fatalf("structured Vcpkg attribution=%d, want canonical duplicate roots, npm shim, and quoted canonical root without argument/path collisions", got)
 	}
 }
 

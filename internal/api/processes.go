@@ -96,15 +96,20 @@ func splitSnapshotLines(raw string) []string {
 // entry's complete command identity against the snapshot's pre-split lines
 // (deep-review r2 P4-5) instead of re-scanning the raw CSV text per entry.
 func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string) int {
-	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: [][]string{patterns}, allowLegacyFallback: len(patterns) == 1})
+	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}, legacyAnyTokenFallback: len(patterns) == 1})
 }
 
 // processAttribution carries complete root identities separately from the
 // display/cleanup substring patterns. A managed mcphub daemon has a stronger
 // root identity than its manifest command alone: `daemon --server S --daemon D`.
 type processAttribution struct {
-	rootVariants        [][]string
-	allowLegacyFallback bool
+	rootVariants           []processRootIdentity
+	legacyAnyTokenFallback bool
+}
+
+type processRootIdentity struct {
+	argvSequence             []string
+	requiresMcphubExecutable bool
 }
 
 func countProcessesFromSnapshotAttribution(snap processSnapshot, attribution processAttribution) int {
@@ -116,14 +121,14 @@ func countProcessesFromSnapshotAttribution(snap processSnapshot, attribution pro
 
 func processAttributionForManifest(serverName string, m *config.ServerManifest) processAttribution {
 	if m == nil {
-		return processAttribution{rootVariants: [][]string{{serverName}}, allowLegacyFallback: true}
+		return processAttribution{rootVariants: []processRootIdentity{{argvSequence: []string{serverName}}}, legacyAnyTokenFallback: true}
 	}
 	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(m.Command)))
 	if isMcphubBinaryBasename(bare) && len(m.Daemons) > 0 {
-		variants := make([][]string, 0, len(m.Daemons))
+		variants := make([]processRootIdentity, 0, len(m.Daemons))
 		for _, daemon := range m.Daemons {
 			if daemon.Name != "" {
-				variants = append(variants, []string{"mcphub", "daemon", "--server", serverName, "--daemon", daemon.Name})
+				variants = append(variants, processRootIdentity{argvSequence: []string{"daemon", "--server", serverName, "--daemon", daemon.Name}, requiresMcphubExecutable: true})
 			}
 		}
 		if len(variants) > 0 {
@@ -131,7 +136,7 @@ func processAttributionForManifest(serverName string, m *config.ServerManifest) 
 		}
 	}
 	patterns := patternsFromManifest(serverName, m)
-	return processAttribution{rootVariants: [][]string{patterns}, allowLegacyFallback: len(patterns) == 1}
+	return processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}}
 }
 
 // countAttributedProcessLines is the scan/process attribution owner. A root
@@ -147,15 +152,15 @@ func countAttributedProcessLines(records []string, attribution processAttributio
 	if len(attribution.rootVariants) == 0 {
 		return 0
 	}
+	if attribution.legacyAnyTokenFallback {
+		return countMatchingLines(records, attribution.rootVariants[0].argvSequence)
+	}
 	rows, err := parseProcessSnapshotRows(strings.NewReader(strings.Join(records, "\n")))
 	if err != nil || len(rows) == 0 {
 		// A multi-token request is a complete server identity. Falling back to
 		// any-token matching when its PID ancestry is unavailable would make a
 		// shared wrapper token (mcphub) attribute unrelated servers again.
-		if !attribution.allowLegacyFallback {
-			return 0
-		}
-		return countMatchingLines(records, attribution.rootVariants[0])
+		return 0
 	}
 	byPID := make(map[int]procRow, len(rows))
 	roots := make(map[int]struct{})
@@ -177,22 +182,97 @@ func countAttributedProcessLines(records []string, attribution processAttributio
 	return count
 }
 
-func processCommandMatchesAnyCompleteIdentity(cmdline string, variants [][]string) bool {
+func processCommandMatchesAnyCompleteIdentity(cmdline string, variants []processRootIdentity) bool {
+	argv := process.TokenizeWindowsCommandLine(cmdline)
 	for _, variant := range variants {
-		if processCommandMatchesAll(cmdline, variant) {
+		if processArgvMatchesIdentity(argv, variant) {
 			return true
 		}
 	}
 	return false
 }
 
-func processCommandMatchesAll(cmdline string, patterns []string) bool {
-	for _, pattern := range patterns {
-		if pattern == "" || !strings.Contains(cmdline, pattern) {
+func processArgvMatchesIdentity(argv []string, identity processRootIdentity) bool {
+	if len(identity.argvSequence) == 0 || len(argv) == 0 {
+		return false
+	}
+	if identity.requiresMcphubExecutable && !processArgvHasMcphubExecutable(argv) {
+		return false
+	}
+	if !identity.requiresMcphubExecutable {
+		return processArgvContainsAllIdentityTokens(argv, identity.argvSequence)
+	}
+	for start := 0; start+len(identity.argvSequence) <= len(argv); start++ {
+		matched := true
+		for i, want := range identity.argvSequence {
+			if !processArgvTokenMatches(argv[start+i], want) {
+				matched = false
+				break
+			}
+		}
+		if matched {
+			return true
+		}
+	}
+	return false
+}
+
+// processArgvContainsAllIdentityTokens preserves the public CountProcesses
+// contract for generic caller-provided token sets while making every token
+// boundary-exact. Managed daemons use the stronger ordered argv sequence above.
+func processArgvContainsAllIdentityTokens(argv, wants []string) bool {
+	for _, want := range wants {
+		found := false
+		for _, actual := range argv {
+			if processArgvTokenMatches(actual, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
 			return false
 		}
 	}
 	return true
+}
+
+func processArgvTokenMatches(actual, want string) bool {
+	if strings.EqualFold(actual, want) {
+		return true
+	}
+	if !isMcphubBinaryBasename(strings.ToLower(want)) {
+		return false
+	}
+	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(actual)))
+	if isMcphubBinaryBasename(bare) {
+		return true
+	}
+	return strings.HasSuffix(bare, ".js") && isMcphubBinaryBasename(strings.TrimSuffix(bare, ".js"))
+}
+
+func processArgvHasMcphubExecutable(argv []string) bool {
+	if isMcphubExecutableToken(argv[0]) {
+		return true
+	}
+	return len(argv) >= 2 && isNodeExecutableToken(argv[0]) && isMcphubScriptToken(argv[1])
+}
+
+func isMcphubExecutableToken(token string) bool {
+	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(token)))
+	return isMcphubBinaryBasename(bare)
+}
+
+func isNodeExecutableToken(token string) bool {
+	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(token)))
+	return bare == "node"
+}
+
+func isMcphubScriptToken(token string) bool {
+	bare := strings.ToLower(basenameAcrossSeparators(token))
+	if !strings.HasSuffix(bare, ".js") {
+		return false
+	}
+	return isMcphubBinaryBasename(strings.TrimSuffix(bare, ".js"))
 }
 
 func processDescendsFromRoot(row procRow, byPID map[int]procRow, roots map[int]struct{}) bool {
@@ -362,7 +442,7 @@ func runProcessSnapshot() (string, error) {
 // going through this io.Reader-based entry point per call.
 func parseWmicCount(r io.Reader, patterns []string) (int, error) {
 	records, err := process.ReadWmicCSVRecords(r)
-	return countAttributedProcessLines(records, processAttribution{rootVariants: [][]string{patterns}, allowLegacyFallback: len(patterns) == 1}), err
+	return countAttributedProcessLines(records, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}, legacyAnyTokenFallback: len(patterns) == 1}), err
 }
 
 // ProcessInfo describes one live process match.
