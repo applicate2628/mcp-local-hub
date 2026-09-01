@@ -132,7 +132,7 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 		"<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>",
 		"<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
 		"<Arguments>supervise --ensure-alive</Arguments>",
-		"<Command>" + livenessFixtureExe + "</Command>",
+		"<Command>" + scheduler.WindowsOwnedEntrypointPath(livenessFixtureExe) + "</Command>",
 		"<WorkingDirectory>" + livenessFixtureWorkingDir + "</WorkingDirectory>",
 		"<UserId>test</UserId>",
 	}
@@ -267,7 +267,7 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
 		{name: "logon type", normalize: replace("<LogonType>InteractiveToken</LogonType>", "<LogonType>Password</LogonType>"), wantField: "principal.logon_type"},
 		{name: "execution limit", normalize: replace("<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>", "<ExecutionTimeLimit>PT5M</ExecutionTimeLimit>"), wantField: "settings.execution_time_limit"},
 		{name: "multiple instances", normalize: replace("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>", "<MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>"), wantField: "settings.multiple_instances_policy"},
-		{name: "command", normalize: replace("<Command>"+livenessFixtureExe+"</Command>", "<Command>foreign.exe</Command>"), wantField: "action.command"},
+		{name: "command", normalize: replace("<Command>"+scheduler.WindowsOwnedEntrypointPath(livenessFixtureExe)+"</Command>", "<Command>foreign.exe</Command>"), wantField: "action.command"},
 		{name: "arguments", normalize: replace("<Arguments>supervise --ensure-alive</Arguments>", "<Arguments>supervise</Arguments>"), wantField: "action.arguments"},
 		{name: "working directory", normalize: replace("<WorkingDirectory>"+livenessFixtureWorkingDir+"</WorkingDirectory>", "<WorkingDirectory>foreign</WorkingDirectory>"), wantField: "action.working_directory"},
 		{name: "enabled", normalize: replaceLast("<Enabled>true</Enabled>", "<Enabled>false</Enabled>"), wantField: "settings.enabled"},

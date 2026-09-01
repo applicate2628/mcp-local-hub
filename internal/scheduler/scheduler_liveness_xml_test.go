@@ -11,9 +11,10 @@ import (
 // cross-platform (no build tag), so this test runs on every platform.
 func TestBuildLivenessXML_Contract(t *testing.T) {
 	const (
-		exe  = `C:\Users\test\.local\bin\mcphub.exe`
-		wdir = `C:\Users\test\.local\bin`
-		user = "test-user"
+		exe        = `C:\Users\test\.local\bin\mcphub.exe`
+		windowless = `C:\Users\test\.local\bin\mcphub-windowless.exe`
+		wdir       = `C:\Users\test\.local\bin`
+		user       = "test-user"
 	)
 	xml := BuildLivenessXML(exe, wdir, user)
 
@@ -33,8 +34,8 @@ func TestBuildLivenessXML_Contract(t *testing.T) {
 		// CalendarTrigger + Repetition recurrence pair.
 		"<CalendarTrigger>",
 		"<Repetition>",
-		// The canonical exe + working dir flow through verbatim.
-		"<Command>" + exe + "</Command>",
+		// Owned liveness runs through the same-directory windowless adapter.
+		"<Command>" + windowless + "</Command>",
 		"<WorkingDirectory>" + wdir + "</WorkingDirectory>",
 		// Per-user principal carries the supplied user id.
 		"<UserId>" + user + "</UserId>",
@@ -61,5 +62,16 @@ func TestBuildLivenessXML_Contract(t *testing.T) {
 	// (no time.Now(), no ambient input).
 	if again := BuildLivenessXML(exe, wdir, user); again != xml {
 		t.Errorf("BuildLivenessXML is not pure: two calls returned different bytes")
+	}
+}
+
+func TestWindowsOwnedEntrypointPathUsesExactSiblingAndIsIdempotent(t *testing.T) {
+	const cli = `C:\Users\test\.local\bin\mcphub.exe`
+	const adapter = `C:\Users\test\.local\bin\mcphub-windowless.exe`
+	if got := WindowsOwnedEntrypointPath(cli); got != adapter {
+		t.Fatalf("got %q want %q", got, adapter)
+	}
+	if got := WindowsOwnedEntrypointPath(adapter); got != adapter {
+		t.Fatalf("adapter changed to %q", got)
 	}
 }

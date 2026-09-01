@@ -149,9 +149,36 @@ func TestWindowsPEAdmissionSetup(t *testing.T) {
 }
 
 func TestWindowsPEAdmissionCanonicalize(t *testing.T) {
-	assertRejectedWithoutDestinationMutation(t, func(src, dst string) error {
-		return canonicalizeBinaryToTarget(&bytes.Buffer{}, src, dst)
-	})
+	for _, tc := range []struct {
+		name      string
+		subsystem uint16
+		malformed bool
+		id        string
+	}{
+		{"GUI in CLI role", binaryadmission.WindowsGUISubsystem, false, binaryadmission.WindowsPESubsystemErrorID},
+		{"malformed CLI", 0, true, binaryadmission.WindowsPEFormatErrorID},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sourceDir := t.TempDir()
+			targetDir := t.TempDir()
+			sourceCLI := filepath.Join(sourceDir, "mcphub.exe")
+			copyAdmissionPEFixture(t, writeAdmissionPEFixture(t, tc.subsystem, tc.malformed), sourceCLI)
+			copyAdmissionPEFixture(t, writeAdmissionPEFixture(t, binaryadmission.WindowsGUISubsystem, false), filepath.Join(sourceDir, "mcphub-windowless.exe"))
+			targetCLI := filepath.Join(targetDir, "mcphub.exe")
+			prior := []byte("PRIOR-EXACT-BYTES")
+			if err := os.WriteFile(targetCLI, prior, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			err := canonicalizeBinaryToTarget(&bytes.Buffer{}, sourceCLI, targetCLI)
+			if err == nil || !strings.Contains(err.Error(), tc.id) {
+				t.Fatalf("error=%v, want %s", err, tc.id)
+			}
+			got, readErr := os.ReadFile(targetCLI)
+			if readErr != nil || !bytes.Equal(got, prior) {
+				t.Fatalf("destination bytes=%q err=%v", got, readErr)
+			}
+		})
+	}
 }
 
 func TestWindowsPEAdmissionMigration(t *testing.T) {

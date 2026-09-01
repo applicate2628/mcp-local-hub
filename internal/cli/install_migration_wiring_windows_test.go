@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -282,7 +283,7 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	exe := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "UNREADABLE-INTENT")
+	exe := writeAdmissionProductPairFixture(t, "UNREADABLE-INTENT")
 	target := filepath.Join(t.TempDir(), "mcphub.exe")
 
 	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
@@ -323,7 +324,14 @@ func TestRunV5UpgradeWindows_HoldsFenceAcrossPrePromotionAndRollbackBarrier(t *t
 	}
 
 	originalRun := runInstallUpgradeWindowsFn
-	t.Cleanup(func() { runInstallUpgradeWindowsFn = originalRun })
+	originalFactory := newWindowsProductPairTxnFn
+	t.Cleanup(func() {
+		runInstallUpgradeWindowsFn = originalRun
+		newWindowsProductPairTxnFn = originalFactory
+	})
+	newWindowsProductPairTxnFn = func(windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
+		return &WindowsProductPairTxn{}, nil
+	}
 	var relaunches int
 	restoreRelaunch := setLivenessRelaunchFnForTest(func() error { relaunches++; return nil })
 	t.Cleanup(restoreRelaunch)
@@ -344,7 +352,7 @@ func TestRunV5UpgradeWindows_HoldsFenceAcrossPrePromotionAndRollbackBarrier(t *t
 
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
-	exe := writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "FENCE-HOLD")
+	exe := writeAdmissionProductPairFixture(t, "FENCE-HOLD")
 	target := filepath.Join(t.TempDir(), "mcphub.exe")
 	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
 	if err == nil || !strings.Contains(err.Error(), "synthetic post-rollback") {
@@ -365,6 +373,85 @@ func TestRunV5UpgradeWindows_HoldsFenceAcrossPrePromotionAndRollbackBarrier(t *t
 	if err := lease.Release(); err != nil {
 		t.Fatalf("release reacquired fence: %v", err)
 	}
+}
+
+func TestRunV5UpgradeWindowsStagesRoleCorrectPairAndWiresSolePairOwner(t *testing.T) {
+	stateDir := withTempStateDir(t)
+	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatalf("seed supervisor intent: %v", err)
+	}
+
+	sourceDir := t.TempDir()
+	cliSource := filepath.Join(sourceDir, "mcphub.exe")
+	windowlessSource := filepath.Join(sourceDir, "mcphub-windowless.exe")
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsCUISubsystem, "PAIR-CLI"), cliSource)
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "PAIR-WINDOWLESS"), windowlessSource)
+	target := filepath.Join(t.TempDir(), "mcphub.exe")
+
+	originalFactory := newWindowsProductPairTxnFn
+	originalRun := runInstallUpgradeWindowsFn
+	t.Cleanup(func() {
+		newWindowsProductPairTxnFn = originalFactory
+		runInstallUpgradeWindowsFn = originalRun
+	})
+	var request windowsProductPairTxnRequest
+	stagedRolesAdmitted := false
+	txn := &WindowsProductPairTxn{}
+	newWindowsProductPairTxnFn = func(got windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
+		request = got
+		if _, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: got.StagedCLI, Role: binaryadmission.WindowsArtifactRoleCLI}); err != nil {
+			return nil, fmt.Errorf("staged CLI: %w", err)
+		}
+		if _, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: got.StagedWindowless, Role: binaryadmission.WindowsArtifactRoleWindowless}); err != nil {
+			return nil, fmt.Errorf("staged windowless: %w", err)
+		}
+		stagedRolesAdmitted = true
+		return txn, nil
+	}
+	var gotOpts UpgradeOpts
+	runInstallUpgradeWindowsFn = func(_ context.Context, opts UpgradeOpts) error {
+		gotOpts = opts
+		return nil
+	}
+
+	cmd := &cobra.Command{}
+	cmd.SetOut(io.Discard)
+	if err := runV5UpgradeWindowsWithPaths(cmd, cliSource, target); err != nil {
+		t.Fatalf("runV5UpgradeWindowsWithPaths: %v", err)
+	}
+	if gotOpts.WindowsProductPair != txn {
+		t.Fatal("legacy upgrade seam did not receive the sole pair owner")
+	}
+	if gotOpts.NewBinary != "" || gotOpts.AdmitStaged != nil || gotOpts.VerifyCanonical != nil || gotOpts.WriteReceipt != nil {
+		t.Fatalf("parallel single-binary mutation callbacks remain wired: %+v", gotOpts)
+	}
+	if request.CLIPath != target || request.WindowlessPath != filepath.Join(filepath.Dir(target), "mcphub-windowless.exe") {
+		t.Fatalf("installed paths = %q/%q", request.CLIPath, request.WindowlessPath)
+	}
+	if !stagedRolesAdmitted {
+		t.Fatal("staged product roles were not admitted before pair construction")
+	}
+}
+
+func copyAdmissionPEFixture(t *testing.T, src, dst string) {
+	t.Helper()
+	raw, err := os.ReadFile(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dst, raw, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func writeAdmissionProductPairFixture(t *testing.T, tag string) string {
+	t.Helper()
+	dir := t.TempDir()
+	cli := filepath.Join(dir, "mcphub.exe")
+	windowless := filepath.Join(dir, "mcphub-windowless.exe")
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsCUISubsystem, tag+"-CLI"), cli)
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, tag+"-WINDOWLESS"), windowless)
+	return cli
 }
 
 // ---------------------------------------------------------------------------

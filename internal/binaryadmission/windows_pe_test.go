@@ -68,6 +68,58 @@ func TestWindowsUpgradePriorAdmission(t *testing.T) {
 	}
 }
 
+func TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes(t *testing.T) {
+	cli := writeWindowsPEFixture(t, 0x20b, WindowsCUISubsystem, nil)
+	windowless := writeWindowsPEFixture(t, 0x20b, WindowsGUISubsystem, nil)
+
+	pair, err := AdmitWindowsProductPair(
+		WindowsArtifact{Path: cli, Role: WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "abc123", BuildDate: "2026-09-01"},
+		WindowsArtifact{Path: windowless, Role: WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "abc123", BuildDate: "2026-09-01"},
+	)
+	if err != nil {
+		t.Fatalf("AdmitWindowsProductPair: %v", err)
+	}
+	if pair.CLI.Role != WindowsArtifactRoleCLI || pair.Windowless.Role != WindowsArtifactRoleWindowless {
+		t.Fatalf("roles = %q/%q", pair.CLI.Role, pair.Windowless.Role)
+	}
+	if len(pair.CLI.SHA256) != 64 || len(pair.Windowless.SHA256) != 64 || pair.CLI.SHA256 == pair.Windowless.SHA256 {
+		t.Fatalf("hashes = %q/%q", pair.CLI.SHA256, pair.Windowless.SHA256)
+	}
+}
+
+func TestWindowsProductPairAdmissionRejectsRoleAndMetadataMismatch(t *testing.T) {
+	cui := writeWindowsPEFixture(t, 0x20b, WindowsCUISubsystem, nil)
+	gui := writeWindowsPEFixture(t, 0x20b, WindowsGUISubsystem, nil)
+
+	for _, tc := range []struct {
+		name       string
+		cli        WindowsArtifact
+		windowless WindowsArtifact
+	}{
+		{
+			name:       "subsystems swapped",
+			cli:        WindowsArtifact{Path: gui, Role: WindowsArtifactRoleCLI, Version: "v", Commit: "c", BuildDate: "d"},
+			windowless: WindowsArtifact{Path: cui, Role: WindowsArtifactRoleWindowless, Version: "v", Commit: "c", BuildDate: "d"},
+		},
+		{
+			name:       "metadata differs",
+			cli:        WindowsArtifact{Path: cui, Role: WindowsArtifactRoleCLI, Version: "v1", Commit: "c", BuildDate: "d"},
+			windowless: WindowsArtifact{Path: gui, Role: WindowsArtifactRoleWindowless, Version: "v2", Commit: "c", BuildDate: "d"},
+		},
+		{
+			name:       "duplicate role",
+			cli:        WindowsArtifact{Path: cui, Role: WindowsArtifactRoleCLI, Version: "v", Commit: "c", BuildDate: "d"},
+			windowless: WindowsArtifact{Path: gui, Role: WindowsArtifactRoleCLI, Version: "v", Commit: "c", BuildDate: "d"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := AdmitWindowsProductPair(tc.cli, tc.windowless); err == nil || !strings.Contains(err.Error(), WindowsProductPairErrorID) {
+				t.Fatalf("error=%v, want %s", err, WindowsProductPairErrorID)
+			}
+		})
+	}
+}
+
 func TestWindowsPEMalformed(t *testing.T) {
 	base := writeWindowsPEFixture(t, 0x20b, WindowsGUISubsystem, nil)
 	valid, err := os.ReadFile(base)

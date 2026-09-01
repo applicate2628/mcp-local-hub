@@ -66,6 +66,44 @@ func TestEntrypointTaskTxnPreservesRawXMLOutsideCommand(t *testing.T) {
 	}
 }
 
+func TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand(t *testing.T) {
+	t.Parallel()
+
+	const priorCLI = "C:\\mcp\\mcphub.exe"
+	const runtime = "C:\\mcp\\mcphub-windowless.exe"
+	const operator = "C:\\operator\\custom-launcher.exe"
+	before := map[string][]byte{
+		"\\mcp-local-hub-autostart": taskXML("\\mcp-local-hub-autostart", "test-user", runtime, "gui", "already migrated"),
+		"\\mcp-local-hub-liveness":  taskXML("\\mcp-local-hub-liveness", "test-user", priorCLI, "supervise --ensure-alive", "legacy"),
+		"\\mcp-local-hub-operator":  taskXML("\\mcp-local-hub-operator", "test-user", operator, "custom", "operator-owned command"),
+	}
+	backend := newEntrypointTaskBackendFake(before, "test-user")
+	txn, err := beginOwnedEntrypointTaskTxnWith(context.Background(), t.TempDir()+"\\entrypoint.lock", priorCLI, runtime, backend, "test-user")
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = txn.Close() })
+	if err := txn.InventoryExport(); err != nil {
+		t.Fatalf("inventory export: %v", err)
+	}
+	if err := txn.RewriteCommand(); err != nil {
+		t.Fatalf("rewrite command: %v", err)
+	}
+	if err := txn.VerifyRuntime(); err != nil {
+		t.Fatalf("verify runtime: %v", err)
+	}
+	for _, name := range []string{"\\mcp-local-hub-autostart", "\\mcp-local-hub-operator"} {
+		got, err := backend.ExportXML(name)
+		if err != nil || !bytes.Equal(got, before[name]) {
+			t.Fatalf("task %s changed: err=%v\n got=%s\nwant=%s", name, err, got, before[name])
+		}
+	}
+	legacy, err := backend.ExportXML("\\mcp-local-hub-liveness")
+	if err != nil || !bytes.Contains(legacy, []byte("<Command>"+runtime+"</Command>")) {
+		t.Fatalf("legacy task was not migrated: err=%v xml=%s", err, legacy)
+	}
+}
+
 func TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator(t *testing.T) {
 	t.Parallel()
 

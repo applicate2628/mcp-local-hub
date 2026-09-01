@@ -105,7 +105,7 @@ func (w *windowsBackend) Enable(opts Options) error {
 	if err != nil {
 		return fmt.Errorf("scheduler factory: %w", err)
 	}
-	cmd, err := resolveMCPHubPath(opts)
+	cmd, err := resolveWindowsOwnedEntrypoint(opts)
 	if err != nil {
 		return err
 	}
@@ -154,6 +154,20 @@ func (w *windowsBackend) Enable(opts Options) error {
 			err, legacyWatchdogTaskName)
 	}
 	return nil
+}
+
+func resolveWindowsOwnedEntrypoint(opts Options) (string, error) {
+	cmd, err := resolveMCPHubPath(opts)
+	if err != nil {
+		return "", err
+	}
+	// An explicit path is an already-resolved test/operator contract. The
+	// production default is canonical mcphub.exe and must route owned logon
+	// launches through its exact sibling adapter.
+	if opts.MCPHubPath != "" {
+		return cmd, nil
+	}
+	return scheduler.WindowsOwnedEntrypointPath(cmd), nil
 }
 
 // Disable removes the autostart Task Scheduler entry. Idempotent —
@@ -341,7 +355,7 @@ func parseWindowsTaskSpec(xmlBlob []byte) (windowsTaskSpec, bool) {
 }
 
 func windowsTaskSpecDrifted(spec windowsTaskSpec, opts Options) bool {
-	want, err := resolveMCPHubPath(opts)
+	want, err := resolveWindowsOwnedEntrypoint(opts)
 	if err != nil {
 		return false
 	}

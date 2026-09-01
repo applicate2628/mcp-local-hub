@@ -12,12 +12,13 @@ import (
 	"github.com/spf13/cobra"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/binaryadmission"
 )
 
 // newCanonicalizeCmdReal returns the hidden `mcphub canonicalize` command: a
-// minimal, non-interactive, BINARY-ONLY copy of the currently-running mcphub
-// into the canonical ~/.local/bin. It exists so the npm package's postinstall
+// minimal, non-interactive product copy into the canonical ~/.local/bin. On
+// Windows the product is the admitted CLI/windowless pair and the same bounded
+// transaction may migrate only exact-owned task Command nodes. It exists so
+// the npm package's postinstall
 // hook (npm/scripts/postinstall.js) can invoke the FRESHLY-installed platform
 // binary to canonicalize itself, so `npm install -g mcp-local-hub@<newer>`
 // refreshes the authoritative ~/.local/bin binary directly (bug
@@ -26,26 +27,29 @@ import (
 // Unlike `mcphub setup`, this command deliberately does NOT:
 //   - register PATH (that is a one-time setup concern; the canonical path has
 //     been on PATH since the operator's first `mcphub setup`);
-//   - install the supervisor-liveness scheduled task;
+//   - create, delete, start, or stop a scheduled task (Windows may rewrite the
+//     Command node of an existing exact-owned task inside the pair transaction);
 //   - rewrite client MCP configs or probe/mutate the OS ephemeral range;
 //   - prompt, request elevation, or refuse when elevated;
 //   - reap or restart the running fleet (it is NOT `install --upgrade`).
 //
-// It reuses the SAME copy owner (copyExe) and canonical-path owner
-// (setupTargetPath) `mcphub setup` uses, and the SAME crash-safe rename-aside
-// swap (api.RenameAsideReplace) `mcphub install --upgrade` uses for the
-// Windows file-lock case — no copy logic is reinvented.
+// It reuses the canonical-path owner (setupTargetPath) `mcphub setup` uses.
+// Windows delegates all binary, task, rollback, and receipt mutation to the
+// same WindowsProductPairTxn used by upgrade; non-Windows keeps the established
+// single-binary replacement path.
 func newCanonicalizeCmdReal() *cobra.Command {
 	return &cobra.Command{
 		Use:   "canonicalize",
-		Short: "Copy this binary into the canonical ~/.local/bin (no PATH, no tasks, no fleet restart)",
+		Short: "Copy this product into canonical ~/.local/bin (no PATH or fleet restart)",
 		Long: `Copy the CURRENTLY-RUNNING mcphub binary into the canonical
 ~/.local/bin/mcphub.exe (Windows) or ~/.local/bin/mcphub (Linux/macOS), and
 do nothing else.
 
-Unlike 'mcphub setup', this command does NOT register PATH, install the
-supervisor-liveness scheduled task, rewrite client MCP configs, probe the OS
-ephemeral range, prompt, request elevation, or reap/restart the running fleet.
+Unlike 'mcphub setup', this command does NOT register PATH, create/delete/start/
+stop a scheduled task, rewrite client MCP configs, probe the OS ephemeral range,
+prompt, request elevation, or reap/restart the running fleet. On Windows the
+atomic product-pair transaction may rewrite only the Command node of an existing
+exact-owned current-user mcphub task so it keeps a windowless entry point.
 
 It is the minimal, non-interactive canonicalize step the npm package's
 postinstall hook (npm/scripts/postinstall.js) runs on the freshly installed
@@ -93,11 +97,10 @@ func canonicalizeBinaryOnly(w io.Writer) error {
 //     so a repeated `npm install` of the SAME version does not churn a
 //     rename-aside `.old-<ts>` on every reinstall.
 func canonicalizeBinaryToTarget(w io.Writer, src, target string) error {
-	if runtime.GOOS == "windows" {
-		if err := binaryadmission.AdmitWindowsGUI(src); err != nil {
-			return fmt.Errorf("admit canonical candidate: %w", err)
-		}
-	}
+	return canonicalizeProductToTarget(w, src, target)
+}
+
+func canonicalizeSingleBinaryToTarget(w io.Writer, src, target string) error {
 	if samePath(src, target) {
 		fmt.Fprintf(w, "✓ mcphub already canonical at %s (running binary is the target)\n", target)
 		return nil

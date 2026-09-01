@@ -5,10 +5,13 @@
 package binaryadmission
 
 import (
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 )
 
 const (
@@ -16,10 +19,37 @@ const (
 	WindowsCUISubsystem       uint16 = 3
 	WindowsPEFormatErrorID           = "E_WINDOWS_PE_FORMAT"
 	WindowsPESubsystemErrorID        = "E_WINDOWS_PE_SUBSYSTEM"
+	WindowsProductPairErrorID        = "E_WINDOWS_PRODUCT_PAIR_INCOMPLETE"
 
 	maxWindowsPEHeaderOffset = 1 << 20
 	windowsPEMaxSingleRead   = 94
 )
+
+// WindowsArtifactRole names one member of the installed Windows product pair.
+// The role is part of persisted identity; subsystem inference is validation,
+// never a replacement for an explicit role.
+type WindowsArtifactRole string
+
+const (
+	WindowsArtifactRoleCLI        WindowsArtifactRole = "cli"
+	WindowsArtifactRoleWindowless WindowsArtifactRole = "windowless"
+)
+
+// WindowsArtifact binds product metadata and exact bytes to one explicit role.
+type WindowsArtifact struct {
+	Path      string              `json:"-"`
+	Role      WindowsArtifactRole `json:"role"`
+	Version   string              `json:"version,omitempty"`
+	Commit    string              `json:"commit,omitempty"`
+	BuildDate string              `json:"build_date,omitempty"`
+	SHA256    string              `json:"sha256"`
+}
+
+// WindowsProductPair is the admitted role-keyed Windows product identity.
+type WindowsProductPair struct {
+	CLI        WindowsArtifact `json:"cli"`
+	Windowless WindowsArtifact `json:"windowless"`
+}
 
 type Error struct {
 	ID          string
@@ -54,6 +84,70 @@ func AdmitWindowsGUI(path string) error {
 		return &Error{ID: WindowsPESubsystemErrorID, Path: path, Expected: WindowsGUISubsystem, Actual: subsystem}
 	}
 	return nil
+}
+
+// AdmitWindowsRole validates one exact Windows artifact role and returns its
+// SHA-256 after the PE role has been proven without executing the image.
+func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
+	expected := uint16(0)
+	switch artifact.Role {
+	case WindowsArtifactRoleCLI:
+		expected = WindowsCUISubsystem
+	case WindowsArtifactRoleWindowless:
+		expected = WindowsGUISubsystem
+	default:
+		return WindowsArtifact{}, fmt.Errorf("%s: %s: invalid artifact role %q", WindowsProductPairErrorID, artifact.Path, artifact.Role)
+	}
+	subsystem, err := readWindowsPESubsystemFile(artifact.Path)
+	if err != nil {
+		return WindowsArtifact{}, err
+	}
+	if subsystem != expected {
+		return WindowsArtifact{}, &Error{ID: WindowsPESubsystemErrorID, Path: artifact.Path, Expected: expected, Actual: subsystem}
+	}
+	f, err := os.Open(artifact.Path)
+	if err != nil {
+		return WindowsArtifact{}, formatError(artifact.Path, err)
+	}
+	h := sha256.New()
+	_, copyErr := io.Copy(h, f)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return WindowsArtifact{}, formatError(artifact.Path, copyErr)
+	}
+	if closeErr != nil {
+		return WindowsArtifact{}, formatError(artifact.Path, closeErr)
+	}
+	actual := hex.EncodeToString(h.Sum(nil))
+	if artifact.SHA256 != "" && !strings.EqualFold(artifact.SHA256, actual) {
+		return WindowsArtifact{}, fmt.Errorf("%s: %s: SHA-256 mismatch", WindowsProductPairErrorID, artifact.Path)
+	}
+	artifact.SHA256 = actual
+	return artifact, nil
+}
+
+// AdmitWindowsProductPair requires the canonical CLI CUI role and the
+// companion windowless GUI role to carry identical, non-empty build metadata.
+// Both hashes are computed from the files read during this call.
+func AdmitWindowsProductPair(cli, windowless WindowsArtifact) (WindowsProductPair, error) {
+	if cli.Role != WindowsArtifactRoleCLI || windowless.Role != WindowsArtifactRoleWindowless {
+		return WindowsProductPair{}, fmt.Errorf("%s: expected roles %q and %q, got %q and %q", WindowsProductPairErrorID, WindowsArtifactRoleCLI, WindowsArtifactRoleWindowless, cli.Role, windowless.Role)
+	}
+	if strings.TrimSpace(cli.Version) == "" || strings.TrimSpace(cli.Commit) == "" || strings.TrimSpace(cli.BuildDate) == "" {
+		return WindowsProductPair{}, fmt.Errorf("%s: product metadata is incomplete", WindowsProductPairErrorID)
+	}
+	if cli.Version != windowless.Version || cli.Commit != windowless.Commit || cli.BuildDate != windowless.BuildDate {
+		return WindowsProductPair{}, fmt.Errorf("%s: product metadata differs between roles", WindowsProductPairErrorID)
+	}
+	admittedCLI, err := AdmitWindowsRole(cli)
+	if err != nil {
+		return WindowsProductPair{}, fmt.Errorf("%s: cli: %w", WindowsProductPairErrorID, err)
+	}
+	admittedWindowless, err := AdmitWindowsRole(windowless)
+	if err != nil {
+		return WindowsProductPair{}, fmt.Errorf("%s: windowless: %w", WindowsProductPairErrorID, err)
+	}
+	return WindowsProductPair{CLI: admittedCLI, Windowless: admittedWindowless}, nil
 }
 
 // AdmitWindowsUpgradePrior validates a retained canonical binary without

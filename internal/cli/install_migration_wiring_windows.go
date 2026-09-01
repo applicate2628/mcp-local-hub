@@ -36,8 +36,8 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
-	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/scheduler"
 )
 
 func init() {
@@ -88,13 +88,12 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 		}
 	}()
 
-	staged, err := stageV5UpgradeBinary(exe, target)
+	stagedCLI, stagedWindowless, err := stageV5UpgradeProductPair(exe, target)
 	if err != nil {
-		return fmt.Errorf("v0.5 upgrade: stage binary beside canonical target: %w", err)
+		return fmt.Errorf("v0.5 upgrade: stage product pair beside canonical target: %w", err)
 	}
-	// RenameAsideReplace consumes staged on success. Remove it on every earlier
-	// or failed return so a stale candidate cannot survive into a later upgrade.
-	defer os.Remove(staged)
+	defer os.Remove(stagedCLI)
+	defer os.Remove(stagedWindowless)
 	deps := buildV5UpgradeDeps(target, stateDir)
 
 	// Resolve expected daemon ports from supervisor-intent.json so the
@@ -131,23 +130,41 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 			expectedPorts = append(expectedPorts, port)
 		}
 	}
+	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
+	pairTxn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
+		Context:          ctx,
+		StateDir:         stateDir,
+		CLIPath:          target,
+		WindowlessPath:   windowlessTarget,
+		StagedCLI:        stagedCLI,
+		StagedWindowless: stagedWindowless,
+		StartSupervisor:  deps.StartSupervisor,
+		RestartPrior:     deps.StartSupervisor,
+		WaitSupervisorReady: func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error {
+			candidate := UpgradeCandidateV1{
+				Admission: UpgradeAdmissionLocalProduct,
+				Version:   pair.CLI.Version,
+				Commit:    pair.CLI.Commit,
+				BuildDate: pair.CLI.BuildDate,
+				SHA256:    pair.CLI.SHA256,
+			}
+			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, cliPath, candidate)
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: construct Windows product pair transaction: %w", err)
+	}
 
 	if err := runInstallUpgradeWindowsFn(ctx, UpgradeOpts{
+		WindowsProductPair:         pairTxn,
 		BinaryPath:                 target,
-		NewBinary:                  staged,
 		PipePath:                   deps.pipePath,
 		Deps:                       deps,
 		ExpectedPorts:              expectedPorts,
 		VerifyPortsUnbound:         verifyPortsUnboundForUpgrade,
 		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
-		WaitSupervisorReady:        deps.WaitSupervisorReady,
-		AdmitStaged:                admitV5UpgradeCandidate,
 		AdmitPrior:                 admitV5UpgradePrior,
 		VerifyPrior:                verifyV5UpgradePrior,
-		VerifyCanonical:            verifyV5UpgradeCanonical,
-		WriteReceipt: func(receipt UpgradeReceiptV1) error {
-			return api.WriteStateFileAtomic(filepath.Join(stateDir, UpgradeReceiptSchemaV1+".json"), receipt)
-		},
 		WithRollbackStopSettlementFence: func(ctx context.Context, critical func() error) error {
 			return api.WithEmptyStopSettlementFence(ctx, filepath.Join(stateDir, "supervisor-state.json"), critical)
 		},
@@ -167,16 +184,9 @@ func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
 	if err := binaryadmission.AdmitWindowsGUI(path); err != nil {
 		return UpgradeCandidateV1{}, fmt.Errorf("admit Windows product PE: %w", err)
 	}
-	version, commit, buildDate := buildinfo.Get()
-	for _, field := range []struct{ name, value string }{
-		{name: "version", value: version},
-		{name: "commit", value: commit},
-		{name: "build_date", value: buildDate},
-	} {
-		trimmed := strings.TrimSpace(field.value)
-		if trimmed == "" || strings.EqualFold(trimmed, "dev") || strings.EqualFold(trimmed, "unknown") {
-			return UpgradeCandidateV1{}, fmt.Errorf("admit local product build: %s is placeholder %q", field.name, field.value)
-		}
+	version, commit, buildDate, err := currentProductBuildMetadata()
+	if err != nil {
+		return UpgradeCandidateV1{}, err
 	}
 	hash, err := hashFile(path)
 	if err != nil {
@@ -241,6 +251,27 @@ func stageV5UpgradeBinary(exe, target string) (string, error) {
 		return "", err
 	}
 	return staged, nil
+}
+
+func stageV5UpgradeProductPair(cliSource, cliTarget string) (stagedCLI, stagedWindowless string, err error) {
+	windowlessSource := scheduler.WindowsOwnedEntrypointPath(cliSource)
+	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(cliTarget)
+	stagedCLI = cliTarget + ".new"
+	stagedWindowless = windowlessTarget + ".new"
+	admitRole := func(role binaryadmission.WindowsArtifactRole) func(string) error {
+		return func(path string) error {
+			_, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: path, Role: role})
+			return err
+		}
+	}
+	if err := copyExeWithWindowsAdmission(cliSource, stagedCLI, admitRole(binaryadmission.WindowsArtifactRoleCLI)); err != nil {
+		return "", "", err
+	}
+	if err := copyExeWithWindowsAdmission(windowlessSource, stagedWindowless, admitRole(binaryadmission.WindowsArtifactRoleWindowless)); err != nil {
+		_ = os.Remove(stagedCLI)
+		return "", "", err
+	}
+	return stagedCLI, stagedWindowless, nil
 }
 
 // buildV5UpgradeDeps constructs the production v5UpgradeDeps for the

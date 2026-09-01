@@ -239,7 +239,7 @@ func reopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorC
 			return nil, fmt.Errorf("entrypoint task reopen: retained XML verification failed for %q", name)
 		}
 		shape, parseErr := parseOwnedEntrypointTaskXML(raw)
-		if parseErr != nil || shape.uri != name || shape.command != priorCLI {
+		if parseErr != nil || shape.uri != name || (shape.command != priorCLI && shape.command != runtime) {
 			_ = txn.Close()
 			return nil, fmt.Errorf("entrypoint task reopen: retained XML is invalid for %q", name)
 		}
@@ -282,14 +282,16 @@ func (t *OwnedEntrypointTaskTxn) InventoryExport() error {
 	})
 
 	inventory := make(map[string]ownedEntrypointTaskSnapshot, len(statuses))
+	seen := make(map[string]struct{}, len(statuses))
 	for _, status := range statuses {
 		name := canonicalOwnedEntrypointTaskName(status.Name)
 		if !strings.HasPrefix(name, `\mcp-local-hub-`) {
 			return fmt.Errorf("entrypoint task inventory: non-hub task %q", name)
 		}
-		if _, exists := inventory[name]; exists {
+		if _, exists := seen[name]; exists {
 			return fmt.Errorf("entrypoint task inventory: duplicate task %q", name)
 		}
+		seen[name] = struct{}{}
 		if !sameWindowsUser(status.Owner, t.owner) {
 			return fmt.Errorf("entrypoint task inventory: foreign owner for %q", name)
 		}
@@ -304,8 +306,8 @@ func (t *OwnedEntrypointTaskTxn) InventoryExport() error {
 		if shape.uri != name {
 			return fmt.Errorf("entrypoint task inventory: XML URI mismatch for %q", name)
 		}
-		if shape.command != t.prior {
-			return fmt.Errorf("entrypoint task inventory: command is not exact prior CLI path for %q", name)
+		if shape.command != t.prior && shape.command != t.runtime {
+			continue
 		}
 		snapshot := ownedEntrypointTaskSnapshot{name: status.Name, xml: append([]byte(nil), raw...)}
 		if t.store != nil {
@@ -346,6 +348,13 @@ func (t *OwnedEntrypointTaskTxn) RewriteCommand() error {
 	}
 	for _, key := range t.sortedInventoryNames() {
 		snapshot := t.inventory[key]
+		shape, err := parseOwnedEntrypointTaskXML(snapshot.xml)
+		if err != nil {
+			return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task rewrite %q: %w", key, err)}
+		}
+		if shape.command == t.runtime {
+			continue
+		}
 		rewritten, err := rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
 		if err != nil {
 			return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task rewrite %q: %w", key, err)}
@@ -368,9 +377,16 @@ func (t *OwnedEntrypointTaskTxn) VerifyRuntime() error {
 		if shape.command != t.runtime {
 			return errors.New("runtime command mismatch")
 		}
-		expected, err := rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
+		priorShape, err := parseOwnedEntrypointTaskXML(snapshot.xml)
 		if err != nil {
 			return err
+		}
+		expected := snapshot.xml
+		if priorShape.command == t.prior {
+			expected, err = rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
+			if err != nil {
+				return err
+			}
 		}
 		if !bytes.Equal(raw, expected) {
 			return errors.New("XML differs outside the Command node")
@@ -445,41 +461,50 @@ func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, own
 	if err != nil {
 		return fmt.Errorf("list owned tasks: %w", err)
 	}
-	live := make(map[string]TaskStatus, len(statuses))
+	type liveTask struct {
+		shape ownedEntrypointTaskShape
+		raw   []byte
+	}
+	live := make(map[string]liveTask, len(statuses))
+	seen := make(map[string]struct{}, len(statuses))
 	for _, status := range statuses {
 		name := canonicalOwnedEntrypointTaskName(status.Name)
 		if !strings.HasPrefix(name, `\mcp-local-hub-`) {
 			return fmt.Errorf("non-hub task %q", name)
 		}
-		if _, exists := live[name]; exists {
+		if _, exists := seen[name]; exists {
 			return fmt.Errorf("duplicate task %q", name)
 		}
+		seen[name] = struct{}{}
 		if !sameWindowsUser(status.Owner, t.owner) {
 			return fmt.Errorf("foreign owner for %q", name)
 		}
-		live[name] = status
+		raw, err := t.backend.ExportXML(status.Name)
+		if err != nil {
+			return fmt.Errorf("export %q: %w", name, err)
+		}
+		shape, err := parseOwnedEntrypointTaskXML(raw)
+		if err != nil {
+			return fmt.Errorf("parse %q: %w", name, err)
+		}
+		if shape.uri != name {
+			return fmt.Errorf("XML URI mismatch for %q", name)
+		}
+		if shape.command != t.prior && shape.command != t.runtime {
+			continue
+		}
+		live[name] = liveTask{shape: shape, raw: raw}
 	}
 	if len(live) != len(t.inventory) {
 		return errors.New("task set changed")
 	}
 	for _, key := range t.sortedInventoryNames() {
 		snapshot := t.inventory[key]
-		status, exists := live[key]
+		item, exists := live[key]
 		if !exists {
 			return fmt.Errorf("task %q is missing", key)
 		}
-		raw, err := t.backend.ExportXML(status.Name)
-		if err != nil {
-			return fmt.Errorf("export %q: %w", key, err)
-		}
-		shape, err := parseOwnedEntrypointTaskXML(raw)
-		if err != nil {
-			return fmt.Errorf("parse %q: %w", key, err)
-		}
-		if shape.uri != key {
-			return fmt.Errorf("XML URI mismatch for %q", key)
-		}
-		if err := check(shape, snapshot, raw); err != nil {
+		if err := check(item.shape, snapshot, item.raw); err != nil {
 			return fmt.Errorf("task %q: %w", key, err)
 		}
 	}
