@@ -91,9 +91,6 @@ func (c *supervisorController) handleStopBatchOnLoop(request stopBatchLoopReques
 	applicationErrors := make(map[string]string)
 	for _, target := range command.Targets {
 		descriptor := command.SupervisorIntent.FindSupervisorDaemonByTaskName(target.TaskName)
-		if receipt, ok := c.tracker.StopSettlementReceipt(target.TaskName); ok && receipt.Mode == "port_fence" {
-			continue
-		}
 		if err := c.applyAuthoritativeStopTransition(target.TaskName, descriptor); err != nil {
 			applicationErrors[target.TaskName] = err.Error()
 			if receipt, ok := c.tracker.StopSettlementReceipt(target.TaskName); ok && receipt.Phase != api.StopSettlementPhaseFailed {
@@ -151,7 +148,7 @@ func (c *supervisorController) preflightStopBatch(command api.StopBatchCommandV1
 			return fmt.Errorf("stop_batch snapshot has no active stopped intent for %s", target.TaskName)
 		}
 		entry, present := c.tracker.Get(target.TaskName)
-		if !present || (entry.CurrentPID > 0 && (entry.PIDGeneration <= 0 || entry.StartedAt.IsZero())) || (entry.CurrentPID == 0 && entry.State != daemonRuntimeStateIdle) {
+		if !stopSettlementAdmissionEntry(entry, present) {
 			return fmt.Errorf("stop settlement requires running generation or idle port fence for %s", target.TaskName)
 		}
 		if _, pending := c.tracker.StopSettlementReceipt(target.TaskName); pending {
@@ -281,6 +278,13 @@ func (c *supervisorController) applyAuthoritativeStopTransition(taskName string,
 		c.queuedActions.Store(taskName, "stop")
 	}
 	c.smStates.Store(taskName, newState)
+	// The direct batch path bypasses handleLoopEvent, so it owns the same
+	// runtime mirror update when an already-crashed backoff is cancelled into
+	// idle. Without this, settlement sees controller idle but tracker backoff
+	// and correctly refuses to claim a terminal stop.
+	if newState == api.StIdle && currentState != api.StIdle && c.tracker != nil {
+		c.tracker.MarkExited(taskName)
+	}
 	if persistBefore && c.tracker != nil && c.statePath != "" {
 		if err := persistDaemonRuntimeTracker(c.events, c.tracker, c.statePath, taskName); err != nil {
 			return err

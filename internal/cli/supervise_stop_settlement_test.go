@@ -368,6 +368,107 @@ func TestStopBatchMixedTrackedAndIdlePortFenceAdmitsInOrder(t *testing.T) {
 	}
 }
 
+func TestStopBatchCrashedBackoffWithNoPIDSettlesThroughIdlePortFence(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "supervisor-state.json")
+	const taskName = `\mcp-local-hub-paper-search-mcp-default`
+	const port = 9127
+	started := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+
+	loop := api.NewEventLoop(8)
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 4812, started)
+	tracker.MarkBackoff(taskName)
+	intent := &api.SupervisorIntentFile{IntentGeneration: 1, Daemons: []api.SupervisorDaemon{{TaskName: taskName, Port: port}}, Stops: map[string]api.DaemonIntent{
+		taskName: {Desired: api.IntentDesiredStopped, UpdatedAt: started},
+	}}
+	terminateCalls := 0
+	spawnCalls := 0
+	ctrl := &supervisorController{
+		intentCache:  newIntentCache(),
+		daemonIntent: newDaemonIntentCache(),
+		eventLoop:    loop,
+		tracker:      tracker,
+		statePath:    statePath,
+		terminate: func(api.SupervisorDaemon) error {
+			terminateCalls++
+			return nil
+		},
+		spawn: func(api.SupervisorDaemon) error {
+			spawnCalls++
+			return nil
+		},
+		stoppedSettlementPortOwnersSnapshot: func(context.Context) (map[int]int, error) {
+			return map[int]int{}, nil
+		},
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.daemonIntent.Refresh(api.UnifiedStopsFile(intent, nil))
+	ctrl.smStates.Store(taskName, api.StBackoffWaiting)
+	loop.RegisterHandler(func(event api.LoopEvent) {
+		switch event.Kind {
+		case evStopBatch:
+			ctrl.handleStopBatchOnLoop(event.Body[stopBatchRequestBodyKey].(stopBatchLoopRequest))
+		case api.EvTimerDue:
+			// A timer queued before the stopped-intent transition is stale: the
+			// backoff was cancelled, so it cannot respawn.
+			ctrl.handleLoopEvent(event)
+		case evControllerBarrier:
+			close(event.Body[controllerBarrierResultBodyKey].(chan struct{}))
+		}
+	})
+	loopCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go loop.Run(loopCtx)
+
+	command := api.StopBatchCommandV1{ProtocolVersion: 1, BatchID: "crashed-backoff-port-fence", Targets: []api.StopBatchTargetV1{{TaskName: taskName, ExpectedPort: port}}, IntentGeneration: intent.IntentGeneration, SupervisorIntent: intent, UnifiedStops: api.UnifiedStopsFile(intent, nil)}
+	result, err := ctrl.postStopBatchAndSettle(context.Background(), command)
+	if err != nil {
+		t.Fatalf("stop crashed backoff daemon: %v", err)
+	}
+	if len(result.Settlements) != 1 || result.Settlements[0].State != api.StoppedSettlementStopped || result.Settlements[0].Reason != api.StoppedSettlementReasonStopped {
+		t.Fatalf("stop settlement = %+v, want stopped after idle port fence", result.Settlements)
+	}
+	if terminateCalls != 0 {
+		t.Fatalf("terminate calls = %d, want 0 for absent crashed child", terminateCalls)
+	}
+	if state, ok := ctrl.GetSMState(taskName); !ok || state != api.StIdle {
+		t.Fatalf("controller state = %q present=%v, want idle after stopped intent", state, ok)
+	}
+	if entry, ok := tracker.Get(taskName); !ok || entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("runtime entry = %+v present=%v, want idle without process", entry, ok)
+	}
+	if receipt, pending := tracker.StopSettlementReceipt(taskName); pending {
+		t.Fatalf("terminal port-fence receipt remained pending: %+v", receipt)
+	}
+	if !loop.TryPost(api.LoopEvent{Kind: api.EvTimerDue, TaskName: taskName}) {
+		t.Fatal("post stale backoff timer event")
+	}
+	if err := ctrl.waitForControllerBarrier(context.Background()); err != nil {
+		t.Fatalf("wait for stale timer processing: %v", err)
+	}
+	if spawnCalls != 0 {
+		t.Fatalf("stale backoff timer spawned %d child processes after stop", spawnCalls)
+	}
+	if state, ok := ctrl.GetSMState(taskName); !ok || state != api.StIdle {
+		t.Fatalf("controller state after stale timer = %q present=%v, want idle", state, ok)
+	}
+	if entry, ok := tracker.Get(taskName); !ok || entry.State != daemonRuntimeStateIdle || entry.CurrentPID != 0 {
+		t.Fatalf("runtime entry after stale timer = %+v present=%v, want idle without process", entry, ok)
+	}
+	retry := command
+	retry.BatchID = "crashed-backoff-port-fence-retry"
+	retried, err := ctrl.postStopBatchAndSettle(context.Background(), retry)
+	if err != nil {
+		t.Fatalf("repeat stop after settled crash: %v", err)
+	}
+	if len(retried.Settlements) != 1 || retried.Settlements[0].State != api.StoppedSettlementStopped || retried.Settlements[0].Reason != api.StoppedSettlementReasonStopped {
+		t.Fatalf("repeat stop settlement = %+v, want idempotent stopped", retried.Settlements)
+	}
+	if terminateCalls != 0 {
+		t.Fatalf("terminate calls after repeat = %d, want 0", terminateCalls)
+	}
+}
+
 func TestStopBatchApplicationFailureContinuesRemainingTargets(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "supervisor-state.json")
 	const failed = `\mcp-local-hub-time-default`

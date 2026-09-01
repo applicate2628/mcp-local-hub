@@ -753,6 +753,22 @@ func (t *DaemonRuntimeTracker) StopSettlementReceipt(taskName string) (api.StopS
 	return receipt, ok
 }
 
+// stopSettlementAdmissionEntry is the one lifecycle-owner predicate for a
+// durable stop settlement. A present live child needs its exact generation;
+// an absent child may be admitted only from idle or crash-backoff. Backoff is
+// not terminal success: the controller must first cancel it into idle, and
+// settlement still must prove the intended listener is free before the durable
+// receipt can be removed.
+func stopSettlementAdmissionEntry(entry DaemonRuntimeEntry, present bool) bool {
+	if !present {
+		return false
+	}
+	if entry.CurrentPID > 0 {
+		return entry.PIDGeneration > 0 && !entry.StartedAt.IsZero()
+	}
+	return entry.State == daemonRuntimeStateIdle || entry.State == daemonRuntimeStateBackoff
+}
+
 // PendingStopSettlements returns a stable snapshot ordered by batch then
 // target index. It is read-only; recovery remains controller-owned.
 func (t *DaemonRuntimeTracker) PendingStopSettlements() []api.StopSettlementReceiptV1 {
@@ -823,7 +839,7 @@ func (t *DaemonRuntimeTracker) BeginStopSettlementBatch(path string, command api
 			return nil, fmt.Errorf("descriptor port mismatch for %s", taskName)
 		}
 		entry, present := t.entries[taskName]
-		if !present || (entry.CurrentPID > 0 && (entry.StartedAt.IsZero() || entry.PIDGeneration <= 0)) || (entry.CurrentPID == 0 && entry.State != daemonRuntimeStateIdle) {
+		if !stopSettlementAdmissionEntry(entry, present) {
 			t.mu.RUnlock()
 			return nil, fmt.Errorf("stop settlement requires running generation or idle port fence for %s", taskName)
 		}
@@ -990,7 +1006,7 @@ func (t *DaemonRuntimeTracker) RemoveStopSettlement(path string, expected api.St
 
 func sameStopSettlementRuntimeIdentity(entry DaemonRuntimeEntry, receipt api.StopSettlementReceiptV1) bool {
 	if receipt.Mode == "port_fence" {
-		return entry.State == daemonRuntimeStateIdle && entry.CurrentPID == 0 && entry.PIDGeneration == receipt.PIDGeneration
+		return entry.CurrentPID == 0 && stopSettlementAdmissionEntry(entry, true) && entry.PIDGeneration == receipt.PIDGeneration
 	}
 	return entry.CurrentPID == receipt.PID && entry.PIDGeneration == receipt.PIDGeneration && !entry.StartedAt.IsZero() && entry.StartedAt.UTC().Format(time.RFC3339Nano) == receipt.StartedAt
 }

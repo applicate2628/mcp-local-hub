@@ -290,6 +290,30 @@ func TestDaemonRuntimeTracker_InvalidHydratedReceiptFencesLifecycleAndSurvivesPe
 	}
 }
 
+func TestStopSettlementAdmissionEntryAllowsOnlyExactProcessOrIdleBackoff(t *testing.T) {
+	started := time.Date(2026, 8, 31, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name    string
+		entry   DaemonRuntimeEntry
+		present bool
+		want    bool
+	}{
+		{name: "absent", present: false},
+		{name: "live without generation", entry: DaemonRuntimeEntry{State: daemonRuntimeStateRunning, CurrentPID: 4812}, present: true},
+		{name: "live without start time", entry: DaemonRuntimeEntry{State: daemonRuntimeStateRunning, CurrentPID: 4812, PIDGeneration: 1}, present: true},
+		{name: "exact live generation", entry: DaemonRuntimeEntry{State: daemonRuntimeStateRunning, CurrentPID: 4812, PIDGeneration: 1, StartedAt: started}, present: true, want: true},
+		{name: "idle no process", entry: DaemonRuntimeEntry{State: daemonRuntimeStateIdle}, present: true, want: true},
+		{name: "crash backoff no process", entry: DaemonRuntimeEntry{State: daemonRuntimeStateBackoff}, present: true, want: true},
+		{name: "quarantined no process", entry: DaemonRuntimeEntry{State: daemonRuntimeStateQuarantine}, present: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := stopSettlementAdmissionEntry(tc.entry, tc.present); got != tc.want {
+				t.Fatalf("stop settlement admission = %v, want %v for %+v present=%v", got, tc.want, tc.entry, tc.present)
+			}
+		})
+	}
+}
+
 func TestDaemonRuntimeTracker_BeginStopSettlementBatchIsAtomic(t *testing.T) {
 	statePath := filepath.Join(apitest.HardenedTempDir(t), "supervisor-state.json")
 	const first = `\mcp-local-hub-time-default`
