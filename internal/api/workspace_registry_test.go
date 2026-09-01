@@ -540,6 +540,99 @@ func TestRegistry_CommitSerenaActivity_RepairsLegacyGenerationWithSupervisorCloc
 	}
 }
 
+func TestRegistry_CommitSerenaActivity_NormalizesTaskNameOnlyForIntentMatch(t *testing.T) {
+	registeredAt := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name         string
+		registryTask string
+		intentTask   string
+		wantStale    bool
+	}{
+		{
+			name:         "bare registry task matches canonical supervisor intent task",
+			registryTask: "mcp-local-hub-serena-default",
+			intentTask:   `\mcp-local-hub-serena-default`,
+		},
+		{
+			name:         "canonical registry task remains unchanged",
+			registryTask: `\mcp-local-hub-serena-default`,
+			intentTask:   `\mcp-local-hub-serena-default`,
+		},
+		{
+			name:         "different task remains stale without mutation",
+			registryTask: "mcp-local-hub-serena-default",
+			intentTask:   `\mcp-local-hub-serena-other`,
+			wantStale:    true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := t.TempDir()
+			registryPath := filepath.Join(stateDir, "workspaces.yaml")
+			intentPath := filepath.Join(stateDir, "supervisor-intent.json")
+			entry := WorkspaceEntry{
+				WorkspaceKey: "serena-task-key", WorkspacePath: "/workspace/serena-task-key",
+				Language: SerenaLanguageSentinel, Backend: SerenaServerName,
+				TaskName: tc.registryTask, Port: 9331, RegisteredAt: registeredAt,
+			}
+			registry := NewRegistry(registryPath)
+			registry.Put(entry)
+			if err := registry.Save(); err != nil {
+				t.Fatalf("seed registry: %v", err)
+			}
+			if err := WriteSupervisorIntent(intentPath, &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
+				TaskName: tc.intentTask, Workspace: entry.WorkspacePath, Port: entry.Port,
+			}}}); err != nil {
+				t.Fatalf("seed supervisor intent: %v", err)
+			}
+			registryBefore, err := os.ReadFile(registryPath)
+			if err != nil {
+				t.Fatalf("read seeded registry: %v", err)
+			}
+			intentBefore, err := os.ReadFile(intentPath)
+			if err != nil {
+				t.Fatalf("read seeded supervisor intent: %v", err)
+			}
+			request := SerenaActivityCommitRequestV1{
+				ProtocolVersion: 1, WorkspaceKey: entry.WorkspaceKey, WorkspacePath: entry.WorkspacePath,
+				TaskName: entry.TaskName, ExpectedPort: entry.Port, RegisteredAt: entry.RegisteredAt,
+				ActivityAt: registeredAt.Add(time.Minute),
+			}
+			receipt, err := registry.CommitSerenaActivity(intentPath, request)
+			if tc.wantStale {
+				if !errors.Is(err, ErrSerenaActivityTargetStale) {
+					t.Fatalf("commit error = %v, want ErrSerenaActivityTargetStale", err)
+				}
+				registryAfter, readErr := os.ReadFile(registryPath)
+				if readErr != nil {
+					t.Fatalf("read registry after stale commit: %v", readErr)
+				}
+				intentAfter, readErr := os.ReadFile(intentPath)
+				if readErr != nil {
+					t.Fatalf("read supervisor intent after stale commit: %v", readErr)
+				}
+				if !bytes.Equal(registryAfter, registryBefore) || !bytes.Equal(intentAfter, intentBefore) {
+					t.Fatal("stale task mismatch mutated registry or supervisor intent")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("commit activity: %v", err)
+			}
+			if receipt.State != "committed" || receipt.TaskName != entry.TaskName {
+				t.Fatalf("receipt = %+v, want committed receipt for %q", receipt, entry.TaskName)
+			}
+			reloaded := NewRegistry(registryPath)
+			if err := reloaded.Load(); err != nil {
+				t.Fatalf("reload registry: %v", err)
+			}
+			got, ok := reloaded.Get(entry.WorkspaceKey, SerenaLanguageSentinel)
+			if !ok || !got.LastToolsCallAt.Equal(request.ActivityAt) {
+				t.Fatalf("persisted activity = %+v, want %v", got, request.ActivityAt)
+			}
+		})
+	}
+}
+
 // TestRegistry_PutLifecycleNoOpOnMissingEntry guards against ghost-row
 // resurrection: after Unregister removes a (workspace_key, language) row,
 // a still-running proxy process MAY emit a late lifecycle write.

@@ -82,8 +82,10 @@ func TestSerenaRouter_PathlessFirstCallUsesConfiguredDefault(t *testing.T) {
 	}
 	intentPath := filepath.Join(root, "supervisor-intent.json")
 	if err := api.WriteSupervisorIntent(intentPath, &api.SupervisorIntentFile{Version: 1, Daemons: []api.SupervisorDaemon{
-		{TaskName: alpha.TaskName, Workspace: alpha.WorkspacePath, Port: alpha.Port},
-		{TaskName: beta.TaskName, Workspace: beta.WorkspacePath, Port: beta.Port},
+		// Task Scheduler returns its task name without a leading backslash,
+		// whereas the supervisor-intent writer stores the canonical task key.
+		{TaskName: `\` + alpha.TaskName, Workspace: alpha.WorkspacePath, Port: alpha.Port},
+		{TaskName: `\` + beta.TaskName, Workspace: beta.WorkspacePath, Port: beta.Port},
 	}}); err != nil {
 		t.Fatalf("write supervisor intent: %v", err)
 	}

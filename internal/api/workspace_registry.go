@@ -799,7 +799,7 @@ func serenaActivityIntentMatches(intent *SupervisorIntentFile, request SerenaAct
 		return false
 	}
 	for _, daemon := range intent.Daemons {
-		if daemon.TaskName == request.TaskName && daemon.Workspace == request.WorkspacePath && daemon.Port == request.ExpectedPort {
+		if canonicalIntentTaskKey(daemon.TaskName) == canonicalIntentTaskKey(request.TaskName) && daemon.Workspace == request.WorkspacePath && daemon.Port == request.ExpectedPort {
 			return true
 		}
 	}
