@@ -53,7 +53,14 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 				return err
 			}
 			if !yes {
+				namespace, err := a.PreflightAdoptPlan(plan)
+				if err != nil {
+					return err
+				}
 				api.PrintAdoptPlan(cmd.OutOrStdout(), plan)
+				if namespace.MigrationEligible {
+					fmt.Fprintf(cmd.OutOrStdout(), "  lease namespace migration: required at apply (state=%s reason_id=%s action=%s)\n", namespace.State, namespace.ReasonID, namespace.Action)
+				}
 				return nil
 			}
 			return a.ExecuteAdoptWithOpts(plan, cmd.OutOrStdout(), api.ExecuteAdoptOpts{LeaseOwner: leaseOwner, ReceivingVerifier: receivingVerifier})

@@ -66,6 +66,7 @@ func TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) {
 	root, home := adoptTestHome(t)
 	manifestDir := filepath.Join(root, "manifests")
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
 	const fixtureKey = "cli-" + "secret-value"
 
 	codexPath := filepath.Join(home, ".codex", "config.toml")
@@ -105,6 +106,53 @@ API_KEY = "` + fixtureKey + `"
 	}
 	if entries, err := os.ReadDir(manifestDir); err == nil && len(entries) > 0 {
 		t.Fatalf("dry-run wrote manifest entries under override dir: %v", entries)
+	}
+}
+
+func TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan(t *testing.T) {
+	root, home := adoptTestHome(t)
+	manifestDir := filepath.Join(root, "manifests")
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+
+	stateRoot := filepath.Join(root, "state-root-file")
+	if err := os.WriteFile(stateRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("seed refused state root: %v", err)
+	}
+	t.Cleanup(api.SetDaemonStateRootForTest(stateRoot))
+
+	const entry = "cli-dry-run-state-root-refused"
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
+		t.Fatalf("mkdir codex config parent: %v", err)
+	}
+	initial := `[mcp_servers.cli-dry-run-state-root-refused]
+command = "go"
+args = ["version"]
+`
+	if err := os.WriteFile(codexPath, []byte(initial), 0o600); err != nil {
+		t.Fatalf("seed codex config: %v", err)
+	}
+
+	cmd := NewRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"adopt", entry, "--client", "codex-cli", "--port", "9314"})
+	err := cmd.Execute()
+	if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-unavailable action=leave-unchanged" {
+		t.Fatalf("dry-run error=%v, want typed state-root refusal", err)
+	}
+	if strings.Contains(out.String(), "Adopt plan") || strings.Contains(out.String(), "No changes made") {
+		t.Fatalf("refused state root offered a dry-run plan: %q", out.String())
+	}
+	after, readErr := os.ReadFile(codexPath)
+	if readErr != nil {
+		t.Fatalf("read codex config after refusal: %v", readErr)
+	}
+	if string(after) != initial {
+		t.Fatalf("refused dry-run mutated client config\nbefore:\n%s\nafter:\n%s", initial, after)
+	}
+	if entries, readErr := os.ReadDir(manifestDir); readErr == nil && len(entries) > 0 {
+		t.Fatalf("refused dry-run wrote manifests: %v", entries)
 	}
 }
 

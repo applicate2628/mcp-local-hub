@@ -525,13 +525,54 @@ func (a *API) ExecuteAdoptResultWithOpts(plan *AdoptPlan, w io.Writer, opts Exec
 	return result, err
 }
 
+// PreflightAdoptPlan verifies the read-only state-root and lease-namespace
+// admission needed by an adopt preview. It never creates, migrates, or leases
+// anything; ExecuteAdoptWithOpts remains authoritative at apply time.
+func (*API) PreflightAdoptPlan(plan *AdoptPlan) (AdoptLeaseNamespaceReport, error) {
+	if plan == nil {
+		return AdoptLeaseNamespaceReport{}, fmt.Errorf("adopt plan is nil")
+	}
+	report, err := preflightAdoptLeaseNamespaceForAdopt()
+	if err != nil {
+		return report, newAdoptStageError("lease-acquire", "uncommitted", err)
+	}
+	return report, nil
+}
+
+// preflightAdoptLeaseNamespaceForAdopt is the single read-only state-root
+// admission classifier shared by preview and apply. Namespace inspection also
+// discovers an eligible legacy migration, but a namespace-only inspection
+// refusal is not an apply admission verdict: the lease owner remains the
+// authoritative mutating revalidation path for historical snapshot contents.
+// This preserves generic/repeat adopt behavior while rejecting unsafe,
+// unavailable, or unsupported state roots before a preview is offered.
+func preflightAdoptLeaseNamespaceForAdopt() (AdoptLeaseNamespaceReport, error) {
+	report, err := InspectAdoptLeaseNamespace()
+	if err == nil {
+		return report, nil
+	}
+	var namespaceFailure *LeaseNamespaceFailure
+	if errors.As(err, &namespaceFailure) {
+		switch namespaceFailure.ReasonID {
+		case AdoptLeaseReasonStateRootUnavailable, AdoptLeaseReasonStateRootRefused, AdoptLeaseReasonPlatformUnsupported:
+			return report, newLeaseNamespaceFailure(namespaceFailure.ReasonID, namespaceFailure.Action, err)
+		default:
+			return report, nil
+		}
+	}
+	return report, nil
+}
+
 // acquireAdoptLeaseForApply repairs only a positively identified Windows legacy
 // namespace before an authorized adopt apply acquires its per-manifest lease.
 // The migration owner takes the exclusive namespace fence, validates every
 // entry, and rolls back its own DACL changes on failure; this seam must not
 // recreate that protocol or weaken the lease owner's normal refusal paths.
 func acquireAdoptLeaseForApply(owner AdoptLeaseOwner, manifestName string) (AdoptLease, bool, error) {
-	report, _ := InspectAdoptLeaseNamespace()
+	report, err := preflightAdoptLeaseNamespaceForAdopt()
+	if err != nil {
+		return nil, false, err
+	}
 	if report.State == AdoptLeaseNamespaceLegacy && report.MigrationEligible &&
 		(report.Action == AdoptLeaseActionMigrateLegacy || report.Action == AdoptLeaseActionMigrateLegacyStateRoot) {
 		if _, err := MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true}); err != nil {
