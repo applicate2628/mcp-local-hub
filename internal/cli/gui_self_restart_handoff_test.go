@@ -524,6 +524,7 @@ func TestRestartV3_ActivatedChildAcceptsSecondRestart(t *testing.T) {
 	defer cancel()
 	childServer := make(chan *gui.Server, 1)
 	confirmStarted := make(chan struct{}, 1)
+	finishConfirm := make(chan struct{})
 	done := make(chan error, 1)
 	go func() {
 		done <- runRestartV3ChildStartup(ctx, restartV3ChildStartupConfig{
@@ -554,8 +555,12 @@ func TestRestartV3_ActivatedChildAcceptsSecondRestart(t *testing.T) {
 							case confirmStarted <- struct{}{}:
 							default:
 							}
-							<-confirmCtx.Done()
-							return confirmCtx.Err()
+							select {
+							case <-finishConfirm:
+								return errors.New("test releases second restart confirmation for rollback")
+							case <-confirmCtx.Done():
+								return confirmCtx.Err()
+							}
 						},
 						Exit: func() {},
 					},
@@ -606,6 +611,8 @@ func TestRestartV3_ActivatedChildAcceptsSecondRestart(t *testing.T) {
 		t.Fatal("second restart coordinator did not begin standby confirmation")
 	}
 
+	close(finishConfirm)
+	waitForHandoffMarkerClear(t, store, 3*time.Second)
 	cancel()
 	select {
 	case err := <-done:
@@ -614,6 +621,30 @@ func TestRestartV3_ActivatedChildAcceptsSecondRestart(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("restart child startup did not stop after cancellation")
+	}
+}
+
+func waitForHandoffMarkerClear(t *testing.T, store *gui.HandoffMarkerStore, timeout time.Duration) {
+	t.Helper()
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	var lastMarker *gui.HandoffMarkerRecord
+	for {
+		marker, err := store.Read()
+		if err != nil {
+			t.Fatalf("Read marker while waiting for second restart cleanup: %v", err)
+		}
+		if marker == nil {
+			return
+		}
+		lastMarker = marker
+		select {
+		case <-deadline.C:
+			t.Fatalf("second restart coordinator did not clear marker before test cleanup; marker=%+v", lastMarker)
+		case <-poll.C:
+		}
 	}
 }
 
