@@ -1060,7 +1060,7 @@ func validateAdoptRepeatState(plan *AdoptPlan, rec *AdoptProvenanceRecord) error
 	}
 	plannedManifestHash := ManifestHashContent([]byte(plan.ManifestYAML))
 	if rec.AdoptManifestHash == "" || rec.ExpectedManifestHash == "" ||
-		rec.AdoptManifestHash != rec.ExpectedManifestHash || rec.AdoptManifestHash != plannedManifestHash {
+		rec.ExpectedManifestHash != plannedManifestHash {
 		return fmt.Errorf("existing adopted provenance manifest hashes are inconsistent")
 	}
 	return nil

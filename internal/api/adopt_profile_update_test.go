@@ -200,10 +200,14 @@ func TestMaterializeSupervisorIntentTargetRejectsClientSettlement(t *testing.T) 
 	}
 }
 
-func TestValidateAdoptRepeatProfileFlagPresence(t *testing.T) {
+func TestValidateAdoptRepeatProfileMigratedRecordFlagPresence(t *testing.T) {
 	manifest := "name: x\n"
-	hash := ManifestHashContent([]byte(manifest))
-	rec := &AdoptProvenanceRecord{ManifestName: "x", SourceClient: "codex-cli", SourceEntryName: "x", Port: 1, AdoptClients: []string{"codex-cli"}, AdoptManifestHash: hash, ExpectedManifestHash: hash, MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05", Clients: []AdoptClientProvenance{{Client: "codex-cli"}}}
+	currentHash := ManifestHashContent([]byte(manifest))
+	originalAdoptHash := ManifestHashContent([]byte("name: x\ncompatibility_profile: original\n"))
+	if originalAdoptHash == currentHash {
+		t.Fatal("fixture does not model a migrated manifest")
+	}
+	rec := &AdoptProvenanceRecord{ManifestName: "x", SourceClient: "codex-cli", SourceEntryName: "x", Port: 1, AdoptClients: []string{"codex-cli"}, AdoptManifestHash: originalAdoptHash, ExpectedManifestHash: currentHash, MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05", Clients: []AdoptClientProvenance{{Client: "codex-cli"}}}
 	plan := &AdoptPlan{ManifestName: "x", SourceClient: "codex-cli", EntryName: "x", Port: 1, AdoptClients: []string{"codex-cli"}, ManifestYAML: manifest, TargetEntryNames: map[string]string{"codex-cli": "x"}}
 	if err := validateAdoptRepeatState(plan, rec); err != nil {
 		t.Fatalf("flagless re-adopt: %v", err)
