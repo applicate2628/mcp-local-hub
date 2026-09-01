@@ -1,4 +1,4 @@
-# npm publish — §13 Phase 3-5: cross-build the 6 platform binaries, inject them
+# npm publish — §13 Phase 3-5: cross-build the 6 platform payloads, inject them
 # into the @applicate2628/mcp-local-hub-<plat>-<arch> sub-packages, and publish
 # all 7 packages (6 scoped platform + the `mcp-local-hub` meta) to the public
 # npm registry with Sigstore provenance. The meta's optionalDependencies pull
@@ -99,7 +99,8 @@ jobs:
         run: |
           go generate ./cmd/mcphub
 
-      - name: Cross-build the 6 platform binaries
+      - name: Cross-build the 6 platform payloads
+        id: native
         shell: bash
         env:
           VERSION: ${{ steps.ver.outputs.version }}
@@ -108,28 +109,54 @@ jobs:
           COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           LD="-s -w -X main.version=$V -X main.commit=$COMMIT -X main.buildDate=$DATE"
+          printf 'commit=%s\nbuild_date=%s\n' "$COMMIT" "$DATE" >> "$GITHUB_OUTPUT"
+          windows_rows() {
+            node <<'NODE'
+          const contract = require('./windows-product-artifacts.json');
+          if (contract.schemaVersion !== 1 || contract.artifacts.length !== 3) {
+            throw new Error('Windows artifact contract must be schemaVersion 1 with exactly three artifacts');
+          }
+          for (const artifact of contract.artifacts) {
+            process.stdout.write([
+              artifact.role,
+              artifact.filename,
+              artifact.source,
+              artifact.subsystem,
+              artifact.productMetadata,
+            ].join('\t') + '\n');
+          }
+          NODE
+          }
+          WINDOWS_ROWS="$RUNNER_TEMP/mcphub-windows-artifacts.tsv"
+          windows_rows > "$WINDOWS_ROWS"
+          if [ "$(wc -l < "$WINDOWS_ROWS")" -ne 3 ]; then
+            echo "::error::Windows artifact contract did not emit exactly three rows"; exit 1
+          fi
           build() { # $1=GOOS $2=GOARCH $3=dir $4=binname
-            echo "build $1/$2 -> npm/packages/$3/bin/$4"
-            # Windows targets MUST link with `-H windowsgui` so the PE subsystem
-            # is WINDOWS_GUI (2), not console (3). A console-subsystem mcphub.exe
-            # makes Windows allocate a console window for EVERY process — the
-            # GUI, the supervisor, and each daemon — so `mcphub gui` sprays 10+
-            # consoles and they respawn on close (daemon dies -> supervisor
-            # respawns -> new console). build.sh already does this; the release
-            # pipeline silently did not, so npm-installed Windows users got a
-            # console-subsystem binary while build.sh deploys did not. mcphub is
-            # a GUI-subsystem binary by design; ordinary launches preserve
-            # inherited redirected handles without attaching a console. `-H windowsgui` is a linker
-            # flag and cross-compiles cleanly from the Linux runner; it is
-            # meaningless on darwin/linux, so apply it to windows ONLY.
-            local ld="$LD"
-            if [ "$1" = "windows" ]; then ld="$LD -H windowsgui"; fi
-            GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$ld" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
-            if [ "$1" = "windows" ]; then
-              GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "-s -w -H windowsgui" \
-                -o "npm/packages/$3/bin/mcphub-pe-admit.exe" ./cmd/mcphub-pe-admit
-              go run ./cmd/mcphub-pe-admit "npm/packages/$3/bin/$4"
+            if [ "$1" != "windows" ]; then
+              echo "build $1/$2 -> npm/packages/$3/bin/$4"
+              GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$LD" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
+              return
             fi
+
+            while IFS=$'\t' read -r role filename source subsystem product_metadata; do
+              local ld="-s -w"
+              if [ "$product_metadata" = "true" ]; then ld="$LD"; fi
+              case "$subsystem" in
+                2) ld="$ld -H windowsgui" ;;
+                3) ;;
+                *) echo "::error::unsupported Windows subsystem $subsystem for role $role"; return 1 ;;
+              esac
+              echo "build $1/$2 role=$role subsystem=$subsystem metadata=$product_metadata -> npm/packages/$3/bin/$filename"
+              GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$ld" \
+                -o "npm/packages/$3/bin/$filename" "$source"
+            done < "$WINDOWS_ROWS"
+
+            while IFS=$'\t' read -r role filename _source _subsystem product_metadata; do
+              if [ "$product_metadata" = "true" ]; then
+                go run ./cmd/mcphub-pe-admit "$role" "npm/packages/$3/bin/$filename"
+              fi
+            done < "$WINDOWS_ROWS"
           }
           build windows amd64 win32-x64    mcphub.exe
           build windows arm64 win32-arm64  mcphub.exe
@@ -140,11 +167,37 @@ jobs:
           chmod +x npm/packages/darwin-*/bin/mcphub npm/packages/linux-*/bin/mcphub || true
           ls -l npm/packages/*/bin/
 
-      - name: Assert Windows binaries are GUI-subsystem (not console)
+      - name: Assert Windows artifact roles, PE subsystems, and product metadata
         shell: bash
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+          COMMIT: ${{ steps.native.outputs.commit }}
+          BUILD_DATE: ${{ steps.native.outputs.build_date }}
         run: |
-          go run ./cmd/mcphub-pe-admit npm/packages/win32-x64/bin/mcphub.exe
-          go run ./cmd/mcphub-pe-admit npm/packages/win32-arm64/bin/mcphub.exe
+          windows_product_rows() {
+            node <<'NODE'
+          const contract = require('./windows-product-artifacts.json');
+          for (const artifact of contract.artifacts.filter((row) => row.productMetadata === true)) {
+            process.stdout.write(`${artifact.role}\t${artifact.filename}\n`);
+          }
+          NODE
+          }
+          WINDOWS_PRODUCT_ROWS="$RUNNER_TEMP/mcphub-windows-product-artifacts.tsv"
+          windows_product_rows > "$WINDOWS_PRODUCT_ROWS"
+          if [ "$(wc -l < "$WINDOWS_PRODUCT_ROWS")" -ne 2 ]; then
+            echo "::error::Windows artifact contract did not emit exactly two metadata-bearing product rows"; exit 1
+          fi
+          for target in win32-x64 win32-arm64; do
+            while IFS=$'\t' read -r role filename; do
+              candidate="npm/packages/$target/bin/$filename"
+              go run ./cmd/mcphub-pe-admit "$role" "$candidate"
+              info="$(go version -m "$candidate")"
+              printf '%s\n' "$info" | grep -F -- "-X main.version=$VERSION" >/dev/null
+              printf '%s\n' "$info" | grep -F -- "-X main.commit=$COMMIT" >/dev/null
+              printf '%s\n' "$info" | grep -F -- "-X main.buildDate=$BUILD_DATE" >/dev/null
+              echo "$target role=$role metadata version=$VERSION commit=$COMMIT buildDate=$BUILD_DATE"
+            done < "$WINDOWS_PRODUCT_ROWS"
+          done
 
       - name: Assert built binary version matches package.json
         shell: bash
@@ -166,6 +219,11 @@ jobs:
           const fs = require('node:fs');
           const path = require('node:path');
           const root = process.env.PACK_EVIDENCE;
+          const contract = require('./windows-product-artifacts.json');
+          const windowsNative = contract.artifacts
+            .filter((artifact) => artifact.npmPayload === true)
+            .map((artifact) => `bin/${artifact.filename}`)
+            .sort();
           const targets = ['win32-x64','win32-arm64','darwin-x64','darwin-arm64','linux-x64','linux-arm64'];
           for (const target of targets) {
             const rows = JSON.parse(fs.readFileSync(path.join(root, `${target}.json`), 'utf8'));
@@ -173,8 +231,9 @@ jobs:
             const files = rows[0].files.map((f) => f.path);
             const count = (name) => files.filter((p) => p === name).length;
             if (target.startsWith('win32-')) {
-              if (count('bin/mcphub.exe') !== 1 || count('bin/mcphub-pe-admit.exe') !== 1) {
-                throw new Error(`${target}: missing unique mcphub.exe/PE adapter payload: ${files.join(', ')}`);
+              const native = files.filter((p) => p.startsWith('bin/')).sort();
+              if (JSON.stringify(native) !== JSON.stringify(windowsNative) || windowsNative.some((p) => count(p) !== 1)) {
+                throw new Error(`${target}: Windows native payload drift: ${files.join(', ')}`);
               }
             } else if (count('bin/mcphub') !== 1 || files.some((p) => p.endsWith('.exe') || p.includes('mcphub-pe-admit'))) {
               throw new Error(`${target}: non-Windows payload drift: ${files.join(', ')}`);

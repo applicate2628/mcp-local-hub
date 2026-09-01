@@ -23,7 +23,7 @@
   "type": "commonjs",
   "scripts": {
     "postinstall": "node scripts/postinstall.js",
-    "test": "node --test sync-version.test.js postinstall.test.js"
+    "test": "node --test sync-version.test.js postinstall.test.js platform-packages.test.js"
   },
   "bin": {
     "mcphub": "bin/cli.js"

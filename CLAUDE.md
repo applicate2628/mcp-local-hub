@@ -424,22 +424,23 @@ exits 0. That is the lever for CI and piped callers.
 
 ### Windows console contract
 
-Every ordinary Windows invocation is console-free. The only public opt-in is
-the exact startup prefix `mcphub --debug-console [command ...]`; it must occupy
-`argv[1]`, affects only that process, and is consumed before Cobra parsing.
-Later occurrences, `--debug-console=...`, config/environment aliases, and
-implicit `gui`, `--foreground`, `--no-tray`, `supervise`, or `restart` modes do
-not enable it. Redirected standard handles remain intact.
+Canonical terminal and npm invocation uses CUI-subsystem `mcphub.exe` and
+inherits the caller's terminal handles. The exact startup prefix
+`mcphub --debug-console [command ...]` remains accepted for compatibility and
+is consumed before Cobra parsing. Supported GUI/Explorer/background entrypoints
+use GUI-subsystem `mcphub-windowless.exe`; raw double-click of `mcphub.exe` is
+deprecated and unsupported as a GUI route.
 
 Background child creation always applies the shared Windows no-console process
 attributes, even when the parent opted into a debug console. Child argv and
 environment never propagate console intent. A configured GUI editor is admitted
 as a GUI-subsystem executable before launch.
 
-Windows product binaries come only from `pwsh ./build.ps1` (or the equivalent
-release workflow). A host-neutral bounded PE reader admits subsystem 2 before
-build publication, setup, canonicalize, migration, or upgrade mutation. Plain
-`go build` remains a non-product compile check.
+Windows product payloads come only from `pwsh ./build.ps1` (or the equivalent
+release workflow). A host-neutral bounded PE reader admits the canonical CLI as
+subsystem 3 and the windowless adapter as subsystem 2 before build publication,
+setup, canonicalize, migration, or upgrade mutation. Plain `go build` remains a
+non-product compile check.
 
 ## GUI frontend (Phase 3B-II onward)
 

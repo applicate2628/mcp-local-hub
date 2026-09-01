@@ -33,24 +33,30 @@ Set-Location <repo-root>
 pwsh ./build.ps1
 ```
 
-`build.ps1` is the sole Windows product-binary route. It embeds the current git
-commit, build date, and Windows version resource, links `WINDOWS_GUI`, and runs
-the repository's bounded PE admission adapter. Plain `go build` is a compile
-check only; do not install or promote its output.
+`build.ps1` is the sole Windows product-payload route. It embeds the same current
+git commit, build date, and product version into canonical terminal
+`mcphub.exe` (CUI subsystem 3) and GUI/Explorer adapter
+`mcphub-windowless.exe` (GUI subsystem 2), then runs the bounded role-aware PE
+admission helper. Plain `go build` is a compile check only; do not install or
+promote its output.
 
-On success: `bin/mcphub.exe` appears (~15 MB, includes Windows version resource metadata).
+On success, `bin/` contains the two product executables plus
+`mcphub-pe-admit.exe`. `mcphub.exe` remains the terminal and npm command;
+supported GUI/Explorer/shortcut launchers use `mcphub-windowless.exe`. Raw
+double-click of `mcphub.exe` is deprecated and unsupported as a GUI entry point
+because a CUI executable may receive a visible console before product code runs.
 
-Ordinary Windows launches never attach or allocate a console. For one process,
-opt in with exact first-argument placement:
+For compatibility, the canonical CLI still accepts exact first-argument
+placement:
 
 ```text
 mcphub --debug-console [command ...]
 ```
 
-There is no environment/config alias or implicit console mode. Redirected
-standard handles are preserved, background children remain console-free, and a
-GUI editor configured for manifest editing must itself be a GUI-subsystem
-executable.
+There is no environment/config alias. Redirected standard handles are
+preserved; supported background/GUI entry points route through the windowless
+adapter, and a GUI editor configured for manifest editing must itself be a
+GUI-subsystem executable.
 
 ## Setup (canonical install)
 

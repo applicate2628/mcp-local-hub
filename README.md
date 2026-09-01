@@ -85,7 +85,7 @@ The npm install above is the fastest path. To build from source instead — for
 dev iteration or to embed your own version metadata:
 
 ```powershell
-# 1. Build the admitted Windows product binary
+# 1. Build the admitted Windows product payload
 pwsh ./build.ps1
 
 # 2. Install to ~/.local/bin and register on user PATH (idempotent)
@@ -93,13 +93,22 @@ pwsh ./build.ps1
 ```
 
 `build.sh` remains the repository automation entry for supported non-Windows
-build environments. On Windows, `build.ps1` is the only product-binary route;
+build environments. On Windows, `build.ps1` is the only product-payload route;
 plain `go build` is a compile check whose output is not installable or
 promotable.
 
-Windows product builds are linked as `WINDOWS_GUI` and are admitted by the
-same bounded PE checker used by setup, canonicalize, upgrade, and npm release.
-Ordinary invocations never attach or allocate a console. The sole opt-in is:
+Windows source builds produce three native files: canonical terminal CLI
+`bin/mcphub.exe` as `WINDOWS_CUI` (PE subsystem 3), supported GUI/Explorer
+adapter `bin/mcphub-windowless.exe` as `WINDOWS_GUI` (subsystem 2), and the
+bounded `bin/mcphub-pe-admit.exe` helper. The product pair receives identical
+version, commit, and build-date metadata and is role-admitted before success.
+
+Terminal and npm use `mcphub.exe`. Supported GUI, Explorer, shortcut, and
+background entry points use `mcphub-windowless.exe`; raw double-click of
+`mcphub.exe` is deprecated and unsupported as a GUI launch path because the
+operating system may create a visible console before product code runs.
+
+`--debug-console` remains accepted as an exact first argument for compatibility:
 
 ```text
 mcphub --debug-console [command ...]
