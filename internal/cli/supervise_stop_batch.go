@@ -79,6 +79,19 @@ func (c *supervisorController) handleStopBatchOnLoop(request stopBatchLoopReques
 		respond(err)
 		return
 	}
+	joined, err := c.joinPendingStopBatch(command)
+	if err != nil {
+		respond(err)
+		return
+	}
+	if joined {
+		// A semantically identical stop is already durable and in flight.  The
+		// caller joins its existing receipt and uses the ordinary FIFO
+		// settlement barrier; it must not allocate a second epoch or issue a
+		// duplicate terminate for the same owned generation.
+		request.reply <- stopBatchLoopResult{}
+		return
+	}
 	if err := c.selectStopBatchIntent(command); err != nil {
 		respond(err)
 		return
@@ -151,9 +164,6 @@ func (c *supervisorController) preflightStopBatch(command api.StopBatchCommandV1
 		if !stopSettlementAdmissionEntry(entry, present) {
 			return fmt.Errorf("stop settlement requires running generation or idle port fence for %s", target.TaskName)
 		}
-		if _, pending := c.tracker.StopSettlementReceipt(target.TaskName); pending {
-			return fmt.Errorf("stop settlement already pending for %s", target.TaskName)
-		}
 		state := c.stopBatchSMState(target.TaskName)
 		failures := c.tracker.CrashCountInWindow(target.TaskName, time.Now().UTC(), c.failureWindow)
 		queuedAction, _ := c.queuedActions.Load(target.TaskName)
@@ -169,6 +179,59 @@ func (c *supervisorController) preflightStopBatch(command api.StopBatchCommandV1
 		}
 	}
 	return nil
+}
+
+// joinPendingStopBatch recognizes one whole-batch retry of an existing
+// nonfailed settlement.  It intentionally admits no mixed batch: allocating a
+// fresh receipt beside an older target would break the original atomic stop
+// transaction.  The current controller snapshot, not only the caller's
+// snapshot, must still keep every target actively stopped.
+func (c *supervisorController) joinPendingStopBatch(command api.StopBatchCommandV1) (bool, error) {
+	if c == nil || c.intentCache == nil || c.tracker == nil {
+		return false, fmt.Errorf("stop_batch controller prerequisites unavailable")
+	}
+	current := c.intentCache.Snapshot()
+	if current == nil {
+		return false, fmt.Errorf("stop_batch current intent unavailable")
+	}
+	pendingCount := 0
+	for _, target := range command.Targets {
+		receipt, pending := c.tracker.StopSettlementReceipt(target.TaskName)
+		if !pending {
+			continue
+		}
+		pendingCount++
+		if receipt.Phase == api.StopSettlementPhaseFailed {
+			return false, fmt.Errorf("stop settlement pending receipt failed for %s", target.TaskName)
+		}
+		if receipt.Port != target.ExpectedPort {
+			return false, fmt.Errorf("stop settlement pending receipt port mismatch for %s", target.TaskName)
+		}
+		descriptor := current.FindSupervisorDaemonByTaskName(target.TaskName)
+		if descriptor == nil {
+			return false, fmt.Errorf("stop settlement pending descriptor absent for %s", target.TaskName)
+		}
+		port, ok := api.EffectiveDaemonPort(*descriptor)
+		if !ok || port != target.ExpectedPort {
+			return false, fmt.Errorf("stop settlement pending current descriptor port mismatch for %s", target.TaskName)
+		}
+		stop, present := current.Stops[target.TaskName]
+		active, _ := stop.IsActiveStop(time.Now().UTC())
+		if !present || stop.Desired != api.IntentDesiredStopped || !active {
+			return false, fmt.Errorf("stop settlement pending current intent is not actively stopped for %s", target.TaskName)
+		}
+		entry, present := c.tracker.Get(target.TaskName)
+		if !present || !stopReceiptRecoveryIdentityMatches(receipt, receipt.Phase, entry) {
+			return false, fmt.Errorf("stop settlement pending runtime generation mismatch for %s", target.TaskName)
+		}
+	}
+	if pendingCount == 0 {
+		return false, nil
+	}
+	if pendingCount != len(command.Targets) {
+		return false, fmt.Errorf("stop settlement pending for only part of stop_batch")
+	}
+	return true, nil
 }
 
 func stopBatchPorts(command api.StopBatchCommandV1) map[string]int {

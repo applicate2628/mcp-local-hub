@@ -330,6 +330,220 @@ func TestStopBatchAdmissionDurablyMirrorsWholeBatchBeforeTransitions(t *testing.
 	}
 }
 
+// TestStopBatchJoinsCompatiblePendingReceipt proves the duplicate-stop race is
+// a JOIN, not a second lifecycle transaction.  The second caller reaches the
+// FIFO while the first owned child exit is deliberately held: it must reuse the
+// first durable receipt, issue no second terminate, then settle after that
+// exact exit and listener release.
+func TestStopBatchJoinsCompatiblePendingReceipt(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "supervisor-state.json")
+	const taskName = `\mcp-local-hub-time-default`
+	const port = 9242
+	started := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	loop := api.NewEventLoop(16)
+	loopCtx, cancel := context.WithCancel(context.Background())
+	loopDone := make(chan struct{})
+	defer func() {
+		cancel()
+		<-loopDone
+	}()
+	tracker := NewDaemonRuntimeTracker()
+	tracker.MarkSpawned(taskName, 4812, started)
+	intent := &api.SupervisorIntentFile{IntentGeneration: 1, Daemons: []api.SupervisorDaemon{{TaskName: taskName, Port: port}}, Stops: map[string]api.DaemonIntent{
+		taskName: {Desired: api.IntentDesiredStopped, UpdatedAt: time.Now().UTC()},
+	}}
+	var terminateCalls atomic.Int32
+	terminateIssued := make(chan struct{})
+	snapshotEntered := make(chan struct{})
+	secondSnapshotEntered := make(chan struct{})
+	releaseSnapshots := make(chan struct{})
+	var snapshotCalls atomic.Int32
+	ctrl := &supervisorController{
+		ctx:          loopCtx,
+		intentCache:  newIntentCache(),
+		daemonIntent: newDaemonIntentCache(),
+		eventLoop:    loop,
+		tracker:      tracker,
+		statePath:    statePath,
+		terminate: func(api.SupervisorDaemon) error {
+			if got := terminateCalls.Add(1); got != 1 {
+				t.Errorf("terminate calls = %d, want exactly one", got)
+			}
+			close(terminateIssued)
+			return nil // exact owned-child exit remains held below.
+		},
+		stoppedSettlementPortOwnersSnapshot: func(context.Context) (map[int]int, error) {
+			switch snapshotCalls.Add(1) {
+			case 1:
+				close(snapshotEntered)
+			case 2:
+				close(secondSnapshotEntered)
+			}
+			<-releaseSnapshots
+			return map[int]int{}, nil
+		},
+	}
+	ctrl.intentCache.Refresh(intent)
+	ctrl.daemonIntent.Refresh(api.UnifiedStopsFile(intent, nil))
+	ctrl.smStates.Store(taskName, api.StRunning)
+	loop.RegisterHandler(ctrl.handleLoopEvent)
+	go func() {
+		defer close(loopDone)
+		loop.Run(loopCtx)
+	}()
+
+	first := api.StopBatchCommandV1{ProtocolVersion: 1, BatchID: "first-stop", Targets: []api.StopBatchTargetV1{{TaskName: taskName, ExpectedPort: port}}, IntentGeneration: intent.IntentGeneration, SupervisorIntent: intent, UnifiedStops: api.UnifiedStopsFile(intent, nil)}
+	second := first
+	second.BatchID = "second-stop"
+	firstResult := make(chan api.StopBatchResultV1, 1)
+	firstErr := make(chan error, 1)
+	go func() {
+		result, err := ctrl.postStopBatchAndSettle(context.Background(), first)
+		firstResult <- result
+		firstErr <- err
+	}()
+	awaitStopSettlementSignal(t, "first terminate", terminateIssued)
+	awaitStopSettlementSignal(t, "first settlement snapshot", snapshotEntered)
+
+	secondResult := make(chan api.StopBatchResultV1, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		result, err := ctrl.postStopBatchAndSettle(context.Background(), second)
+		secondResult <- result
+		secondErr <- err
+	}()
+	awaitStopSettlementSignal(t, "second joined settlement snapshot", secondSnapshotEntered)
+
+	if !tracker.MarkExitedIfCurrent(taskName, 1) {
+		t.Fatal("held child exit did not match the first runtime generation")
+	}
+	if err := loop.PostCtx(context.Background(), api.LoopEvent{Kind: evOwnedChildWaitExit, TaskName: taskName, Body: map[string]any{
+		"pid": 4812, "pid_generation": 1, "started_at": started.UTC().Format(time.RFC3339Nano), "clean_exit": true,
+	}}); err != nil {
+		t.Fatalf("post held child exit: %v", err)
+	}
+	if err := ctrl.waitForControllerBarrier(context.Background()); err != nil {
+		t.Fatalf("wait for held child exit: %v", err)
+	}
+	close(releaseSnapshots)
+
+	for _, call := range []struct {
+		name   string
+		result <-chan api.StopBatchResultV1
+		err    <-chan error
+		batch  string
+	}{
+		{name: "first", result: firstResult, err: firstErr, batch: first.BatchID},
+		{name: "second", result: secondResult, err: secondErr, batch: second.BatchID},
+	} {
+		select {
+		case err := <-call.err:
+			if err != nil {
+				t.Fatalf("%s stop: %v", call.name, err)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for %s stop", call.name)
+		}
+		result := <-call.result
+		if result.BatchID != call.batch || len(result.Settlements) != 1 || result.Settlements[0].State != api.StoppedSettlementStopped {
+			t.Fatalf("%s result = %+v, want its own batch ID and terminal stop", call.name, result)
+		}
+	}
+	if got := terminateCalls.Load(); got != 1 {
+		t.Fatalf("terminate calls after JOIN = %d, want one", got)
+	}
+	if _, pending := tracker.StopSettlementReceipt(taskName); pending {
+		t.Fatal("joined stop left a receipt after exact exit and free listener")
+	}
+	state, err := api.ReadSupervisorState(statePath)
+	if err != nil {
+		t.Fatalf("read joined stop state: %v", err)
+	}
+	if state.StopSettlementEpoch != 1 || len(state.StopSettlements) != 0 {
+		t.Fatalf("joined stop durable state = %+v, want one admitted epoch and no terminal receipt", state)
+	}
+}
+
+func TestStopBatchJoinRefusesIncompatiblePendingReceipt(t *testing.T) {
+	const taskName = `\mcp-local-hub-time-default`
+	const port = 9242
+	started := time.Date(2026, 9, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(t *testing.T, tracker *DaemonRuntimeTracker, ctrl *supervisorController, command *api.StopBatchCommandV1, statePath string)
+	}{
+		{
+			name: "failed_receipt",
+			mutate: func(t *testing.T, tracker *DaemonRuntimeTracker, _ *supervisorController, _ *api.StopBatchCommandV1, statePath string) {
+				t.Helper()
+				receipt, _ := tracker.StopSettlementReceipt(taskName)
+				if _, err := tracker.AdvanceStopSettlement(statePath, receipt, api.StopSettlementPhaseFailed, api.StopSettlementFailureProcessAlive, "first stop remains active"); err != nil {
+					t.Fatalf("fail pending receipt: %v", err)
+				}
+			},
+		},
+		{
+			name: "re_enabled_current_intent",
+			mutate: func(t *testing.T, _ *DaemonRuntimeTracker, ctrl *supervisorController, _ *api.StopBatchCommandV1, _ string) {
+				t.Helper()
+				ctrl.intentCache.Refresh(&api.SupervisorIntentFile{IntentGeneration: 1, Daemons: []api.SupervisorDaemon{{TaskName: taskName, Port: port}}, Stops: map[string]api.DaemonIntent{
+					taskName: {Desired: "running", UpdatedAt: time.Now().UTC()},
+				}})
+			},
+		},
+		{
+			name: "runtime_generation_replaced",
+			mutate: func(t *testing.T, tracker *DaemonRuntimeTracker, _ *supervisorController, _ *api.StopBatchCommandV1, _ string) {
+				t.Helper()
+				tracker.MarkSpawned(taskName, 4813, started.Add(time.Second))
+			},
+		},
+		{
+			name: "current_descriptor_port_mismatch",
+			mutate: func(t *testing.T, _ *DaemonRuntimeTracker, ctrl *supervisorController, command *api.StopBatchCommandV1, _ string) {
+				t.Helper()
+				const changedPort = port + 1
+				changed := &api.SupervisorIntentFile{IntentGeneration: 2, Daemons: []api.SupervisorDaemon{{TaskName: taskName, Port: changedPort}}, Stops: map[string]api.DaemonIntent{
+					taskName: {Desired: api.IntentDesiredStopped, UpdatedAt: time.Now().UTC()},
+				}}
+				command.IntentGeneration = changed.IntentGeneration
+				command.SupervisorIntent = changed
+				command.UnifiedStops = api.UnifiedStopsFile(changed, nil)
+				command.Targets[0].ExpectedPort = changedPort
+				ctrl.intentCache.Refresh(changed)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statePath := filepath.Join(t.TempDir(), "supervisor-state.json")
+			tracker := NewDaemonRuntimeTracker()
+			tracker.MarkSpawned(taskName, 4812, started)
+			intent := &api.SupervisorIntentFile{IntentGeneration: 1, Daemons: []api.SupervisorDaemon{{TaskName: taskName, Port: port}}, Stops: map[string]api.DaemonIntent{
+				taskName: {Desired: api.IntentDesiredStopped, UpdatedAt: time.Now().UTC()},
+			}}
+			command := api.StopBatchCommandV1{ProtocolVersion: 1, BatchID: "new-stop", Targets: []api.StopBatchTargetV1{{TaskName: taskName, ExpectedPort: port}}, IntentGeneration: intent.IntentGeneration, SupervisorIntent: intent, UnifiedStops: api.UnifiedStopsFile(intent, nil)}
+			if _, err := tracker.BeginStopSettlementBatch(statePath, api.StopBatchCommandV1{ProtocolVersion: 1, BatchID: "pending-stop", Targets: command.Targets}, map[string]int{taskName: port}); err != nil {
+				t.Fatalf("seed pending stop receipt: %v", err)
+			}
+			ctrl := &supervisorController{intentCache: newIntentCache(), daemonIntent: newDaemonIntentCache(), tracker: tracker, statePath: statePath, terminate: func(api.SupervisorDaemon) error { t.Fatal("incompatible pending receipt issued terminate"); return nil }}
+			ctrl.intentCache.Refresh(intent)
+			ctrl.daemonIntent.Refresh(api.UnifiedStopsFile(intent, nil))
+			ctrl.smStates.Store(taskName, api.StRunning)
+			tc.mutate(t, tracker, ctrl, &command, statePath)
+
+			joined, err := ctrl.joinPendingStopBatch(command)
+			if err == nil || joined {
+				t.Fatalf("join incompatible pending receipt = joined=%v err=%v, want refusal", joined, err)
+			}
+			if _, pending := tracker.StopSettlementReceipt(taskName); !pending {
+				t.Fatal("incompatible JOIN removed or replaced pending receipt")
+			}
+		})
+	}
+}
+
 func TestStopBatchMixedTrackedAndIdlePortFenceAdmitsInOrder(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "supervisor-state.json")
 	const tracked = `\mcp-local-hub-time-default`

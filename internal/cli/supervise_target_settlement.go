@@ -305,6 +305,13 @@ func (c *supervisorController) finalizeStoppedSettlementReceipt(target api.StopB
 		// this branch, so commit the already-recorded release. A rebound port
 		// never reaches it and retains the receipt for a later retry.
 		if err := c.tracker.RemoveStopSettlement(c.statePath, receipt); err != nil {
+			if _, pending := c.tracker.StopSettlementReceipt(target.TaskName); !pending {
+				// A concurrent compatible stop already performed the identical
+				// commit-last removal after both callers observed the same exact
+				// exit and free listener. Its terminal state is this caller's
+				// terminal state too.
+				return result
+			}
 			c.armStopSettlementRecovery(target.TaskName)
 			return api.StoppedSettlement{TaskName: target.TaskName, State: api.StoppedSettlementIncomplete, Reason: api.StoppedSettlementReasonIdentityUnverified, PIDGeneration: result.PIDGeneration, Error: "commit recovered stop settlement: " + err.Error()}
 		}
@@ -315,10 +322,23 @@ func (c *supervisorController) finalizeStoppedSettlementReceipt(target api.StopB
 	}
 	released, err := c.tracker.AdvanceStopSettlement(c.statePath, receipt, api.StopSettlementPhasePortReleased, "", "")
 	if err != nil {
+		if current, pending := c.tracker.StopSettlementReceipt(target.TaskName); pending && current.Phase == api.StopSettlementPhasePortReleased {
+			if removeErr := c.tracker.RemoveStopSettlement(c.statePath, current); removeErr == nil {
+				return result
+			}
+			if _, stillPending := c.tracker.StopSettlementReceipt(target.TaskName); !stillPending {
+				return result
+			}
+		} else if !pending {
+			return result
+		}
 		c.armStopSettlementRecovery(target.TaskName)
 		return api.StoppedSettlement{TaskName: target.TaskName, State: api.StoppedSettlementIncomplete, Reason: api.StoppedSettlementReasonIdentityUnverified, PIDGeneration: result.PIDGeneration, Error: "persist released stop listener: " + err.Error()}
 	}
 	if err := c.tracker.RemoveStopSettlement(c.statePath, released); err != nil {
+		if _, pending := c.tracker.StopSettlementReceipt(target.TaskName); !pending {
+			return result
+		}
 		c.armStopSettlementRecovery(target.TaskName)
 		return api.StoppedSettlement{TaskName: target.TaskName, State: api.StoppedSettlementIncomplete, Reason: api.StoppedSettlementReasonIdentityUnverified, PIDGeneration: result.PIDGeneration, Error: "commit stop settlement: " + err.Error()}
 	}
