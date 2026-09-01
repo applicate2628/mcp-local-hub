@@ -346,6 +346,9 @@ func TestAutostartDisableCallsBackend(t *testing.T) {
 }
 
 func TestAutostartBackendErrorSurfacesAsCmdError(t *testing.T) {
+	stateDir := apitest.HardenedTempDir(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(stateDir))
+
 	fb := &fakeBackend{enableErr: errors.New("schtasks /Create: COM init failed")}
 	withFakeBackend(t, fb)
 
