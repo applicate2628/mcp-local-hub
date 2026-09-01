@@ -3,7 +3,75 @@ package api
 import (
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/config"
 )
+
+func TestCountProcessesFromSnapshotAttributesMcphubRootsByCompleteIdentityAndKeepsDescendants(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"mcphub.exe lldb",20260417180000.000000+000,mcphub.exe,1,100,10
+HOST,"lldb.exe --stdio",20260417180000.000000+000,lldb.exe,100,101,10
+HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,1,200,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,200,201,10
+HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,1,210,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,210,211,10
+HOST,"node.exe node_modules/mcp-local-hub/bin/mcphub.js daemon --server vcpkg --daemon default",20260417180000.000000+000,node.exe,1,220,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,220,221,10
+HOST,"mcphub.exe godbolt",20260417180000.000000+000,mcphub.exe,1,300,10
+HOST,"node godbolt-child.js",20260417180000.000000+000,node.exe,300,301,10
+HOST,"mcphub.exe unrelated",20260417180000.000000+000,mcphub.exe,1,400,10
+HOST,"mcphub.exe scan --processes",20260417180000.000000+000,mcphub.exe,1,500,10
+`
+	snap := processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}
+	for _, tc := range []struct {
+		name     string
+		patterns []string
+		want     int
+	}{
+		{name: "lldb", patterns: []string{"mcphub", "lldb"}, want: 2},
+		{name: "vcpkg canonical duplicate trees plus npm shim", patterns: []string{"mcphub", "vcpkg"}, want: 6},
+		{name: "godbolt excludes scan command", patterns: []string{"mcphub", "godbolt"}, want: 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NewAPI().CountProcessesFromSnapshot(snap, tc.patterns); got != tc.want {
+				t.Fatalf("CountProcessesFromSnapshot(%v)=%d, want %d", tc.patterns, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStructuredProcessAttributionRequiresManagedDaemonRootIdentity(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"mcphub.exe vcpkg",20260417180000.000000+000,mcphub.exe,1,50,10
+HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,1,200,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,200,201,10
+HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,1,210,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,210,211,10
+HOST,"node.exe node_modules/mcp-local-hub/bin/mcphub.js daemon --server vcpkg --daemon default",20260417180000.000000+000,node.exe,1,220,10
+HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,220,221,10
+`
+	spec := processAttributionForManifest("vcpkg", &config.ServerManifest{Command: "mcphub", BaseArgs: []string{"vcpkg"}, Daemons: []config.DaemonSpec{{Name: "default", Port: 9138}}})
+	if got := countProcessesFromSnapshotAttribution(processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}, spec); got != 6 {
+		t.Fatalf("structured Vcpkg attribution=%d, want two canonical + one shim root trees without standalone command", got)
+	}
+}
+
+func TestCountProcessesFromSnapshotFailsClosedForCompleteIdentityWithoutAncestry(t *testing.T) {
+	for _, raw := range []string{
+		`Node,CommandLine,ProcessId,WorkingSetSize
+HOST,"mcphub.exe daemon --server vcpkg --daemon default",200,10
+HOST,"mcphub.exe daemon --server godbolt --daemon default",300,10
+`,
+		`Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,not-a-parent,200,10
+`,
+	} {
+		snap := processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}
+		if got := NewAPI().CountProcessesFromSnapshot(snap, []string{"mcphub", "vcpkg"}); got != 0 {
+			t.Fatalf("malformed complete identity snapshot counted %d process(es), want fail-closed zero", got)
+		}
+	}
+}
 
 // TestCountProcessesHandlesEmptyInput verifies the parser returns (0, nil)
 // on blank wmic output — zero processes matching, no error.
@@ -36,8 +104,8 @@ HOST,"some-other-process",9999,1000000
 
 func TestCountProcessesMatchesCommandLineOnly(t *testing.T) {
 	wmicCsv := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
-HOST,"node unrelated.js",20260417180000.000000+180,C:\Users\server-memory\node.exe,555,1001,40000000
-HOST,"node server-memory/dist/index.js",20260417180000.000000+180,C:\Tools\node.exe,555,1002,41000000
+HOST,"node unrelated.js",20260417180000.000000+180,node.exe,555,1001,40000000
+HOST,"node server-memory/dist/index.js",20260417180000.000000+180,node.exe,555,1002,41000000
 `
 	got, err := parseWmicCount(strings.NewReader(wmicCsv), []string{"server-memory"})
 	if err != nil {

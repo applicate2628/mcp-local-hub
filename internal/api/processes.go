@@ -10,12 +10,14 @@ import (
 	"strings"
 	"time"
 
+	"mcp-local-hub/internal/config"
 	"mcp-local-hub/internal/process"
 )
 
 // CountProcesses returns how many OS processes currently match the given
-// command-line substring patterns. Typical usage: feed it the server name
-// and the primary command/arg tokens from its manifest.
+// complete command identity patterns. A root must contain every supplied
+// token; descendants of that root are counted even when their command line
+// does not repeat the root identity.
 //
 // Windows-only for Phase 3A.2. On Linux/macOS it returns (0, nil) — the
 // caller gets zero results without error, which keeps scan/cleanup flows
@@ -91,13 +93,126 @@ func splitSnapshotLines(raw string) []string {
 // reuses a single process-snapshot across many pattern sets. Intended
 // for scan --processes which probes 20+ entries; doing one wmic per
 // entry was measured at ~13 s vs ~1 s with this variant. Matches each
-// entry's patterns against the snapshot's pre-split lines (deep-review
-// r2 P4-5) instead of re-scanning the raw CSV text per entry.
+// entry's complete command identity against the snapshot's pre-split lines
+// (deep-review r2 P4-5) instead of re-scanning the raw CSV text per entry.
 func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string) int {
+	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: [][]string{patterns}, allowLegacyFallback: len(patterns) == 1})
+}
+
+// processAttribution carries complete root identities separately from the
+// display/cleanup substring patterns. A managed mcphub daemon has a stronger
+// root identity than its manifest command alone: `daemon --server S --daemon D`.
+type processAttribution struct {
+	rootVariants        [][]string
+	allowLegacyFallback bool
+}
+
+func countProcessesFromSnapshotAttribution(snap processSnapshot, attribution processAttribution) int {
 	if snap.raw == "" {
 		return 0
 	}
-	return countMatchingLines(snap.lines, patterns)
+	return countAttributedProcessLines(snap.lines, attribution)
+}
+
+func processAttributionForManifest(serverName string, m *config.ServerManifest) processAttribution {
+	if m == nil {
+		return processAttribution{rootVariants: [][]string{{serverName}}, allowLegacyFallback: true}
+	}
+	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(m.Command)))
+	if isMcphubBinaryBasename(bare) && len(m.Daemons) > 0 {
+		variants := make([][]string, 0, len(m.Daemons))
+		for _, daemon := range m.Daemons {
+			if daemon.Name != "" {
+				variants = append(variants, []string{"mcphub", "daemon", "--server", serverName, "--daemon", daemon.Name})
+			}
+		}
+		if len(variants) > 0 {
+			return processAttribution{rootVariants: variants}
+		}
+	}
+	patterns := patternsFromManifest(serverName, m)
+	return processAttribution{rootVariants: [][]string{patterns}, allowLegacyFallback: len(patterns) == 1}
+}
+
+// countAttributedProcessLines is the scan/process attribution owner. A root
+// process must contain every manifest-derived command identity token; once a
+// root is selected, all of its descendants are counted even when the child
+// command line does not repeat those tokens. This prevents shared wrappers
+// (notably multiple mcphub subcommands) from being attributed to every server
+// while retaining the existing "server process tree" display contract.
+//
+// Older two-column process listings lack PID ancestry; they retain the legacy
+// any-pattern count rather than inventing parentage from incomplete input.
+func countAttributedProcessLines(records []string, attribution processAttribution) int {
+	if len(attribution.rootVariants) == 0 {
+		return 0
+	}
+	rows, err := parseProcessSnapshotRows(strings.NewReader(strings.Join(records, "\n")))
+	if err != nil || len(rows) == 0 {
+		// A multi-token request is a complete server identity. Falling back to
+		// any-token matching when its PID ancestry is unavailable would make a
+		// shared wrapper token (mcphub) attribute unrelated servers again.
+		if !attribution.allowLegacyFallback {
+			return 0
+		}
+		return countMatchingLines(records, attribution.rootVariants[0])
+	}
+	byPID := make(map[int]procRow, len(rows))
+	roots := make(map[int]struct{})
+	for _, row := range rows {
+		byPID[row.pid] = row
+		if processCommandMatchesAnyCompleteIdentity(row.cmdline, attribution.rootVariants) {
+			roots[row.pid] = struct{}{}
+		}
+	}
+	if len(roots) == 0 {
+		return 0
+	}
+	count := 0
+	for _, row := range rows {
+		if processDescendsFromRoot(row, byPID, roots) {
+			count++
+		}
+	}
+	return count
+}
+
+func processCommandMatchesAnyCompleteIdentity(cmdline string, variants [][]string) bool {
+	for _, variant := range variants {
+		if processCommandMatchesAll(cmdline, variant) {
+			return true
+		}
+	}
+	return false
+}
+
+func processCommandMatchesAll(cmdline string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if pattern == "" || !strings.Contains(cmdline, pattern) {
+			return false
+		}
+	}
+	return true
+}
+
+func processDescendsFromRoot(row procRow, byPID map[int]procRow, roots map[int]struct{}) bool {
+	pid := row.pid
+	seen := make(map[int]struct{})
+	for pid != 0 {
+		if _, ok := roots[pid]; ok {
+			return true
+		}
+		if _, loop := seen[pid]; loop {
+			return false
+		}
+		seen[pid] = struct{}{}
+		current, ok := byPID[pid]
+		if !ok {
+			return false
+		}
+		pid = current.ppid
+	}
+	return false
 }
 
 // countMatchingLines returns how many of the given rows' CommandLine
@@ -247,7 +362,7 @@ func runProcessSnapshot() (string, error) {
 // going through this io.Reader-based entry point per call.
 func parseWmicCount(r io.Reader, patterns []string) (int, error) {
 	records, err := process.ReadWmicCSVRecords(r)
-	return countMatchingLines(records, patterns), err
+	return countAttributedProcessLines(records, processAttribution{rootVariants: [][]string{patterns}, allowLegacyFallback: len(patterns) == 1}), err
 }
 
 // ProcessInfo describes one live process match.

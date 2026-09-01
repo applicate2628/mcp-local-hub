@@ -885,11 +885,8 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// drops the scan to ~1 s.
 		snap := takeProcessSnapshot()
 		for i := range out.Entries {
-			patterns := manifestCache.patterns(out.Entries[i].Name)
-			if len(patterns) == 0 {
-				continue
-			}
-			out.Entries[i].ProcessCount = a.CountProcessesFromSnapshot(snap, patterns)
+			attribution := manifestCache.processAttribution(out.Entries[i].Name)
+			out.Entries[i].ProcessCount = countProcessesFromSnapshotAttribution(snap, attribution)
 		}
 	}
 	return out, nil
@@ -1948,6 +1945,10 @@ func (c *scanManifestCache) patterns(name string) []string {
 		return []string{name}
 	}
 	return patternsFromManifest(name, m)
+}
+
+func (c *scanManifestCache) processAttribution(name string) processAttribution {
+	return processAttributionForManifest(name, c.get(name))
 }
 
 // manifestDaemonPorts returns the set of daemon ports declared by the
