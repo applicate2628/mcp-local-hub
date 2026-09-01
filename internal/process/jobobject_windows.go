@@ -20,11 +20,9 @@ var (
 	procIsProcessInJob = syscall.NewLazyDLL("kernel32.dll").NewProc("IsProcessInJob")
 )
 
-// Job wraps a Windows Job Object configured with
-// JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE so that when the last open handle
-// to the job is closed — including the kernel-driven cleanup that fires
-// when our process is force-killed via `taskkill /F mcphub.exe` —
-// every process still assigned to the job is terminated by the kernel.
+// Job wraps a configured Windows Job Object. When KillOnClose is enabled,
+// closing the last open handle terminates every assigned process. This includes
+// kernel cleanup after our process is force-killed via `taskkill /F mcphub.exe`.
 //
 // This is the only reliable mechanism on Windows for "kill descendants
 // when parent dies." The cooperative tree-kill in
@@ -49,16 +47,21 @@ type Job struct {
 	handle windows.Handle
 }
 
-// NewKillOnCloseJob creates a job object with the kill-on-close limit.
-// Returns nil + error on syscall failure; callers should treat the
-// error as non-fatal (orphan protection is best-effort) and log it.
-func NewKillOnCloseJob() (*Job, error) {
+// NewJob creates a Job Object with exactly the requested lifecycle limits.
+// Every requested option is required: creation or configuration failure is
+// returned to the caller and the partially-created handle is closed.
+func NewJob(options JobOptions) (*Job, error) {
 	h, err := windows.CreateJobObject(nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("CreateJobObject: %w", err)
 	}
 	var info windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-	info.BasicLimitInformation.LimitFlags = windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	if options.KillOnClose {
+		info.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	}
+	if options.BreakawayOK {
+		info.BasicLimitInformation.LimitFlags |= windows.JOB_OBJECT_LIMIT_BREAKAWAY_OK
+	}
 	if _, err := windows.SetInformationJobObject(
 		h,
 		windows.JobObjectExtendedLimitInformation,
@@ -69,6 +72,11 @@ func NewKillOnCloseJob() (*Job, error) {
 		return nil, fmt.Errorf("SetInformationJobObject: %w", err)
 	}
 	return &Job{handle: h}, nil
+}
+
+// NewKillOnCloseJob preserves the established best-effort supervisor API.
+func NewKillOnCloseJob() (*Job, error) {
+	return NewJob(JobOptions{KillOnClose: true})
 }
 
 // Assign places cmd's process into the job. cmd.Process must be set —
