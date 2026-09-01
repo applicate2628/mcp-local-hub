@@ -525,6 +525,26 @@ func (a *API) ExecuteAdoptResultWithOpts(plan *AdoptPlan, w io.Writer, opts Exec
 	return result, err
 }
 
+// acquireAdoptLeaseForApply repairs only a positively identified Windows legacy
+// namespace before an authorized adopt apply acquires its per-manifest lease.
+// The migration owner takes the exclusive namespace fence, validates every
+// entry, and rolls back its own DACL changes on failure; this seam must not
+// recreate that protocol or weaken the lease owner's normal refusal paths.
+func acquireAdoptLeaseForApply(owner AdoptLeaseOwner, manifestName string) (AdoptLease, bool, error) {
+	report, _ := InspectAdoptLeaseNamespace()
+	if report.State == AdoptLeaseNamespaceLegacy && report.MigrationEligible &&
+		(report.Action == AdoptLeaseActionMigrateLegacy || report.Action == AdoptLeaseActionMigrateLegacyStateRoot) {
+		if _, err := MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true}); err != nil {
+			var namespaceFailure *LeaseNamespaceFailure
+			if errors.As(err, &namespaceFailure) {
+				return nil, false, newLeaseNamespaceFailure(namespaceFailure.ReasonID, namespaceFailure.Action, err)
+			}
+			return nil, false, err
+		}
+	}
+	return owner.AcquireAdoptLease(manifestName)
+}
+
 // ExecuteAdoptWithOpts applies a plan built by BuildAdoptPlan with scoped
 // request data that should affect only this execution.
 func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdoptOpts) error {
@@ -553,7 +573,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if leaseOwner == nil {
 		leaseOwner = NewAdoptLeaseOwner()
 	}
-	lease, leased, leaseErr := leaseOwner.AcquireAdoptLease(plan.ManifestName)
+	lease, leased, leaseErr := acquireAdoptLeaseForApply(leaseOwner, plan.ManifestName)
 	if leaseErr != nil {
 		return newAdoptStageError("lease-acquire", "uncommitted", fmt.Errorf("adopt: acquire per-manifest lease for %q: %w", plan.ManifestName, leaseErr))
 	}

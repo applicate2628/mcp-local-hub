@@ -37,9 +37,9 @@ func (e *windowsLeaseNamespaceEntry) close() error {
 }
 
 func inspectAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, error) {
-	root, report, err := openWindowsLeaseNamespaceRoot()
+	root, rootReport, err := openWindowsLeaseNamespaceRoot()
 	if err != nil {
-		return report, err
+		return rootReport, err
 	}
 	defer windows.CloseHandle(root)
 
@@ -57,13 +57,19 @@ func inspectAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, error) {
 	if err != nil {
 		return report, err
 	}
+	if rootReport.MigrationEligible {
+		report.State = AdoptLeaseNamespaceLegacy
+		report.ReasonID = rootReport.ReasonID
+		report.Action = rootReport.Action
+		report.MigrationEligible = true
+	}
 	return report, nil
 }
 
 func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, error) {
-	root, report, err := openWindowsLeaseNamespaceRoot()
+	root, rootReport, err := openWindowsLeaseNamespaceRootForMigration()
 	if err != nil {
-		return report, err
+		return rootReport, err
 	}
 	defer windows.CloseHandle(root)
 
@@ -83,13 +89,23 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 	if err != nil {
 		return report, err
 	}
-	if report.State == AdoptLeaseNamespaceReady {
+	rootNeedsDACL := rootReport.MigrationEligible
+	if report.State == AdoptLeaseNamespaceReady && !rootNeedsDACL {
 		return report, nil
 	}
-	if !report.MigrationEligible {
+	if !report.MigrationEligible && !rootNeedsDACL {
 		return refusedLeaseNamespaceReport(report.ReasonID, report.Action, errors.New("namespace is not a verified legacy shape"))
 	}
 	namespaceNeedsDACL := verifyWindowsDACLFromHandle(ns) != nil
+	var rootSD *windows.SECURITY_DESCRIPTOR
+	var rootSDDL string
+	var rootProtected bool
+	if rootNeedsDACL {
+		rootSD, rootSDDL, rootProtected, err = captureWindowsLeaseNamespaceSD(root)
+		if err != nil {
+			return refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+		}
+	}
 
 	nsSD, nsSDDL, nsProtected, err := captureWindowsLeaseNamespaceSD(ns)
 	if err != nil {
@@ -107,10 +123,14 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 
 	changed := make([]int, 0, len(entries))
 	namespaceChanged := false
+	rootChanged := false
 	rollback := func(primary error) (AdoptLeaseNamespaceReport, error) {
 		var rollbackErr error
+		if rootChanged {
+			rollbackErr = restoreWindowsLeaseNamespaceSD(root, rootSD, rootProtected, rootSDDL)
+		}
 		if namespaceChanged {
-			rollbackErr = restoreWindowsLeaseNamespaceSD(ns, nsSD, nsProtected, nsSDDL)
+			rollbackErr = errors.Join(rollbackErr, restoreWindowsLeaseNamespaceSD(ns, nsSD, nsProtected, nsSDDL))
 		}
 		for i := len(changed) - 1; i >= 0; i-- {
 			entry := &entries[changed[i]]
@@ -153,6 +173,20 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 	if err := verifyWindowsDACLFromHandle(ns); err != nil {
 		return rollback(err)
 	}
+	if rootNeedsDACL {
+		if err := setRestrictiveDACL(root); err != nil {
+			return rollback(err)
+		}
+		rootChanged = true
+		if err := verifyWindowsDACLFromHandle(root); err != nil {
+			return rollback(err)
+		}
+		if hook := adoptLeaseNamespaceMigrationFailureHook; hook != nil {
+			if err := hook("root-tightened"); err != nil {
+				return rollback(err)
+			}
+		}
+	}
 	for i := range entries {
 		if err := verifyWindowsLeaseNamespaceEntryAfterMigration(&entries[i]); err != nil {
 			return rollback(err)
@@ -164,16 +198,34 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 	report.Action = AdoptLeaseActionRetryAdopt
 	report.MigrationEligible = false
 	report.ChangedLeafCount = len(changed)
-	report.NamespaceChanged = namespaceChanged
+	report.NamespaceChanged = namespaceChanged || rootChanged
 	return report, nil
 }
 
 func openWindowsLeaseNamespaceRoot() (windows.Handle, AdoptLeaseNamespaceReport, error) {
+	return openWindowsLeaseNamespaceRootWithAccess(
+		windows.FILE_LIST_DIRECTORY|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.SYNCHRONIZE,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+	)
+}
+
+// openWindowsLeaseNamespaceRootForMigration retains a handle to the exact
+// state-root object (never a re-walked pathname) with the WRITE_DAC right
+// required for the one-shot legacy repair transaction.
+func openWindowsLeaseNamespaceRootForMigration() (windows.Handle, AdoptLeaseNamespaceReport, error) {
+	return openWindowsLeaseNamespaceRootWithAccess(windowsLeaseNamespaceAccess, 0)
+}
+
+func openWindowsLeaseNamespaceRootWithAccess(access, share uint32) (windows.Handle, AdoptLeaseNamespaceReport, error) {
 	stateDir, err := DaemonStateDir()
 	if err != nil {
 		return windows.InvalidHandle, AdoptLeaseNamespaceReport{}, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootUnavailable, AdoptLeaseActionLeaveUnchanged, err)
 	}
-	root, err := openDirHandleNoReparse(stateDir)
+	p, err := windows.UTF16PtrFromString(stateDir)
+	if err != nil {
+		return windows.InvalidHandle, AdoptLeaseNamespaceReport{}, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+	}
+	root, err := windows.CreateFile(p, access, share, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
 		report, publicErr := refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
 		return windows.InvalidHandle, report, publicErr
@@ -184,8 +236,15 @@ func openWindowsLeaseNamespaceRoot() (windows.Handle, AdoptLeaseNamespaceReport,
 		return windows.InvalidHandle, report, publicErr
 	}
 	if err := verifyWindowsDACLFromHandle(root); err != nil {
+		legacy, legacyErr := windowsDACLIsRecognizedInheritedLegacy(root)
+		if legacyErr == nil && legacy {
+			return root, AdoptLeaseNamespaceReport{
+				State: AdoptLeaseNamespaceLegacy, ReasonID: AdoptLeaseReasonStateRootLegacyDACL,
+				Action: AdoptLeaseActionMigrateLegacyStateRoot, MigrationEligible: true,
+			}, nil
+		}
 		_ = windows.CloseHandle(root)
-		report, publicErr := refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+		report, publicErr := refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, errors.Join(err, legacyErr))
 		return windows.InvalidHandle, report, publicErr
 	}
 	return root, AdoptLeaseNamespaceReport{}, nil
@@ -352,22 +411,35 @@ func windowsReadDirNamesFromHandle(h windows.Handle) ([]string, error) {
 }
 
 func windowsDACLIsRecognizedInheritedLegacy(h windows.Handle) (bool, error) {
-	current, err := stateFileOwnerIsCurrentUser(h)
-	if err != nil || !current {
-		return false, err
-	}
 	currentSID, systemSID, adminSID, err := allowlistSIDs()
 	if err != nil {
 		return false, err
 	}
-	allowlist := []*windows.SID{currentSID, systemSID, adminSID}
-	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
+	sd, err := windows.GetSecurityInfo(h, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if err != nil {
+		return false, err
+	}
+	owner, _, err := sd.Owner()
 	if err != nil {
 		return false, err
 	}
 	dacl, _, err := sd.DACL()
-	if err != nil || dacl == nil {
+	if err != nil {
 		return false, err
+	}
+	return classifyWindowsInheritedLegacyDACL(owner, dacl, []*windows.SID{currentSID, systemSID, adminSID})
+}
+
+// classifyWindowsInheritedLegacyDACL is the side-effect-free admission
+// predicate for the narrowly supported pre-0.4.35 state-root shape. Keeping
+// the owner comparison before the ACL walk makes foreign-owned roots refuse
+// deterministically, without any DACL repair attempt.
+func classifyWindowsInheritedLegacyDACL(owner *windows.SID, dacl *windows.ACL, allowlist []*windows.SID) (bool, error) {
+	if len(allowlist) == 0 || allowlist[0] == nil || owner == nil || !owner.Equals(allowlist[0]) {
+		return false, nil
+	}
+	if dacl == nil {
+		return false, nil
 	}
 	foundInheritedOutsideAllowlist := false
 	for i := uint32(0); i < windowsACLAceCount(dacl); i++ {

@@ -49,8 +49,12 @@ type AdoptLeaseReasonID string
 type AdoptLeaseAction string
 
 const (
-	AdoptLeaseReasonStateRootUnavailable   AdoptLeaseReasonID = "state-root-unavailable"
-	AdoptLeaseReasonStateRootRefused       AdoptLeaseReasonID = "state-root-refused"
+	AdoptLeaseReasonStateRootUnavailable AdoptLeaseReasonID = "state-root-unavailable"
+	AdoptLeaseReasonStateRootRefused     AdoptLeaseReasonID = "state-root-refused"
+	// AdoptLeaseReasonStateRootLegacyDACL is a migration-only diagnostic for
+	// the recognized inherited-DACL shape created by earlier hub releases.
+	// It never relaxes the strict state-root admission path.
+	AdoptLeaseReasonStateRootLegacyDACL    AdoptLeaseReasonID = "state-root-legacy-dacl"
 	AdoptLeaseReasonNamespaceCreateRefused AdoptLeaseReasonID = "namespace-create-refused"
 	AdoptLeaseReasonNamespaceIrregular     AdoptLeaseReasonID = "namespace-irregular"
 	AdoptLeaseReasonNamespaceWrongOwner    AdoptLeaseReasonID = "namespace-wrong-owner"
@@ -62,11 +66,12 @@ const (
 	AdoptLeaseReasonNamespaceMissing       AdoptLeaseReasonID = "namespace-missing"
 	AdoptLeaseReasonPlatformUnsupported    AdoptLeaseReasonID = "platform-unsupported"
 
-	AdoptLeaseActionInspect        AdoptLeaseAction = "inspect-lease-namespace"
-	AdoptLeaseActionMigrateLegacy  AdoptLeaseAction = "migrate-legacy-lease-namespace"
-	AdoptLeaseActionRetryAdopt     AdoptLeaseAction = "retry-adopt"
-	AdoptLeaseActionLeaveUnchanged AdoptLeaseAction = "leave-unchanged"
-	AdoptLeaseActionNone           AdoptLeaseAction = "none"
+	AdoptLeaseActionInspect                AdoptLeaseAction = "inspect-lease-namespace"
+	AdoptLeaseActionMigrateLegacy          AdoptLeaseAction = "migrate-legacy-lease-namespace"
+	AdoptLeaseActionMigrateLegacyStateRoot AdoptLeaseAction = "migrate-legacy-state-root"
+	AdoptLeaseActionRetryAdopt             AdoptLeaseAction = "retry-adopt"
+	AdoptLeaseActionLeaveUnchanged         AdoptLeaseAction = "leave-unchanged"
+	AdoptLeaseActionNone                   AdoptLeaseAction = "none"
 )
 
 // AdoptLease is the settlement handle returned by an AdoptLeaseOwner. Its
