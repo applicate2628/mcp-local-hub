@@ -85,6 +85,9 @@ func TestDialSupervisorIPCRespawn_SuccessCodeIsEmpty(t *testing.T) {
 	writeSupervisorOwnerForTest(t, stateDir, owner)
 
 	stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(req IPCRequest) IPCResponse {
+		if req.Cmd == "capabilities" {
+			return IPCResponse{ID: req.ID, OK: true, Result: SupervisorControlCapabilities{StopBatch: true, Respawn: true}}
+		}
 		if req.Cmd != "respawn" {
 			t.Fatalf("cmd = %q, want respawn", req.Cmd)
 		}
@@ -92,7 +95,7 @@ func TestDialSupervisorIPCRespawn_SuccessCodeIsEmpty(t *testing.T) {
 	})
 	defer stop()
 
-	result, err := DialSupervisorIPCRespawn(context.Background(), `\mcp-local-hub-memory-default`, false, 5000)
+	result, err := dialSupervisorIPCRespawnRaw(context.Background(), `\mcp-local-hub-memory-default`, false, 5000)
 	if err != nil {
 		t.Fatalf("DialSupervisorIPCRespawn: %v", err)
 	}
@@ -116,6 +119,9 @@ func TestDialSupervisorIPCRespawn_RefusalCodePropagated(t *testing.T) {
 	writeSupervisorOwnerForTest(t, stateDir, owner)
 
 	stop := startFakeSupervisorIPCStatusServer(t, stateDir, owner, func(req IPCRequest) IPCResponse {
+		if req.Cmd == "capabilities" {
+			return IPCResponse{ID: req.ID, OK: true, Result: SupervisorControlCapabilities{StopBatch: true, Respawn: true}}
+		}
 		if req.Cmd != "respawn" {
 			t.Fatalf("cmd = %q, want respawn", req.Cmd)
 		}
@@ -126,7 +132,7 @@ func TestDialSupervisorIPCRespawn_RefusalCodePropagated(t *testing.T) {
 	})
 	defer stop()
 
-	result, err := DialSupervisorIPCRespawn(context.Background(), `\mcp-local-hub-memory-default`, false, 5000)
+	result, err := dialSupervisorIPCRespawnRaw(context.Background(), `\mcp-local-hub-memory-default`, false, 5000)
 	if err != nil {
 		t.Fatalf("DialSupervisorIPCRespawn: %v", err)
 	}

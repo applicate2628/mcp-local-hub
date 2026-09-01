@@ -702,6 +702,23 @@ func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	if owner.PID <= 0 {
 		return fmt.Errorf("force-kill: supervisor.lock.owner.json has invalid PID %d (corrupt sidecar)", owner.PID)
 	}
+	return d.forceKillSupervisorForOwner(owner)
+}
+
+// forceKillSupervisorForOwner permits compatibility handoffs to bind the
+// exact authenticated legacy generation. A different sidecar owner means the
+// old supervisor already yielded; never kill the replacement generation.
+func (d *v5UpgradeDeps) forceKillSupervisorForOwner(expected api.SupervisorLockOwner) error {
+	current, err := api.ReadSupervisorLockOwner(d.supervisorLockDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("%w: supervisor lock owner is absent", errUpgradeSupervisorAlreadyExited)
+		}
+		return fmt.Errorf("force-kill: read supervisor lock owner: %w", err)
+	}
+	if current != expected {
+		return fmt.Errorf("force-kill: refusing generation change: got pid=%d started_at=%s want pid=%d started_at=%s", current.PID, current.StartedAt, expected.PID, expected.StartedAt)
+	}
 	// Kill-target identity gate (bot PR #276 r3 P2; hardened to four-gate
 	// parity per fable-5 #276). The owner sidecar survives a supervisor crash
 	// and its PID can be REUSED by an unrelated process. Validate the PID is the
@@ -713,14 +730,14 @@ func (d *v5UpgradeDeps) ForceKillSupervisor(pipePath string) error {
 	if strings.TrimSpace(d.exePath) != "" {
 		installDir = filepath.Dir(d.exePath)
 	}
-	live, err := supervisorPIDIsLiveMcphubSupervisor(owner.PID, owner.StartedAt, installDir)
+	live, err := supervisorPIDIsLiveMcphubSupervisor(expected.PID, expected.StartedAt, installDir)
 	if err != nil {
 		return fmt.Errorf("force-kill: %w", err)
 	}
 	if !live {
-		return fmt.Errorf("force-kill: refusing PID %d because its live process identity does not match the transaction canonical target %s", owner.PID, d.exePath)
+		return fmt.Errorf("force-kill: refusing PID %d because its live process identity does not match the transaction canonical target %s", expected.PID, d.exePath)
 	}
-	return killPIDViaTaskkillFn(owner.PID)
+	return killPIDViaTaskkillFn(expected.PID)
 }
 
 func (d *v5UpgradeDeps) StartSupervisor(binaryPath string) error {

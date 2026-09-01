@@ -2143,6 +2143,16 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 				"intent_files_loaded": deps.intentFilesLoaded.Load(),
 			},
 		})
+	case "capabilities":
+		// This is intentionally available before reconcile readiness: it is a
+		// read-only protocol-version probe used to decide whether a legacy
+		// supervisor must be replaced before any stop/restart intent mutation.
+		return writeIPCFrame(conn, api.IPCResponse{
+			ID:     req.ID,
+			OK:     true,
+			Result: api.SupervisorControlCapabilities{StopBatch: true, Respawn: true},
+			Final:  true,
+		})
 	}
 	if !deps.reconcileReady.Load() {
 		return writeIPCFrame(conn, api.IPCResponse{

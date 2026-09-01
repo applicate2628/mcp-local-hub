@@ -3863,6 +3863,9 @@ func clientConfigPath(name string) (string, error) {
 // (incl. ErrIdentityOversize) returns the error verbatim and skips
 // the kill. New callers that need --force should use StopWithOpts.
 func (a *API) Stop(server, daemonFilter string) ([]RestartResult, error) {
+	if err := ensureSupervisorControlAdmission(context.Background()); err != nil {
+		return nil, err
+	}
 	taskNames, err := stopIntentTaskNamesForServer(server, daemonFilter)
 	if err != nil {
 		// Codex deep-sec PR #135 Finding 3: same forensic-trail emission as
@@ -4015,6 +4018,9 @@ func (a *API) Restart(server, daemonFilter string) ([]RestartResult, error) {
 // restartWithFrozenDispatch is the receiver-free private mutation core used by
 // both the legacy wrapper and the command adapter.
 func (a *API) restartWithFrozenDispatch(ctx context.Context, server, daemonFilter string) ([]RestartResult, error) {
+	if err := ensureSupervisorControlAdmission(ctx); err != nil {
+		return nil, err
+	}
 	results, supervisorHandled, err := restartSupervisorOwnedDaemons(ctx, server, daemonFilter)
 	if err != nil {
 		return nil, err
@@ -4210,9 +4216,10 @@ func schedulerBlockedRestartTaskNames(results []RestartResult) map[string]struct
 		if name == "" {
 			continue
 		}
-		if result.Err != "" && result.Code == "SUPERVISOR_UNAVAILABLE" {
-			continue
-		}
+		// A row selected from supervisor-intent is supervisor-owned even
+		// when its current IPC attempt fails. Falling through to the legacy
+		// scheduler would create a second control path after the authenticated
+		// compatibility probe chose the strict supervisor protocol.
 		handledTasks[name] = struct{}{}
 	}
 	return handledTasks
@@ -4258,6 +4265,9 @@ func (a *API) RestartAll() ([]RestartResult, error) {
 // restartAllWithFrozenDispatch is the bulk form of the same private mutation
 // core. It intentionally does not depend on the readiness receiver.
 func (a *API) restartAllWithFrozenDispatch(ctx context.Context) ([]RestartResult, error) {
+	if err := ensureSupervisorControlAdmission(ctx); err != nil {
+		return nil, err
+	}
 	results, supervisorHandled, err := restartSupervisorOwnedDaemons(ctx, "", "")
 	if err != nil {
 		return nil, err
@@ -4353,6 +4363,9 @@ func waitForPortFree(port int, timeout time.Duration) error {
 // for its own targets FIRST. Legacy scheduler tasks keep the historical
 // no-intent kill behavior.
 func (a *API) StopAll() ([]RestartResult, error) {
+	if err := ensureSupervisorControlAdmission(context.Background()); err != nil {
+		return nil, err
+	}
 	supTargets, err := loadSupervisorOwnedTargets("", "")
 	if err != nil {
 		return nil, err

@@ -87,6 +87,42 @@ func dialSupervisorIPCStatusFromStateDir(ctx context.Context, stateDir string) (
 		// respawn-twin shape).
 		return nil, fmt.Errorf("supervisor IPC status: read %s.owner.json: %w: %w", lockPath, ErrStatusSetupFailure, err)
 	}
+	return dialSupervisorIPCStatusForOwner(ctx, stateDir, owner)
+}
+
+// VerifySupervisorControlGeneration proves that the owner which rejected the
+// read-only capabilities probe is still the generation answering a read-only
+// status request. Compatibility replacement uses it before any reaping action
+// so a rapid successor cannot be stopped because its predecessor was legacy.
+func VerifySupervisorControlGeneration(ctx context.Context, expected SupervisorLockOwner) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok := ctx.Deadline(); !ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+	}
+	stateDir, err := DaemonStateDir()
+	if err != nil {
+		return fmt.Errorf("supervisor control generation: resolve state dir: %w", err)
+	}
+	lockPath := filepath.Join(stateDir, "supervisor.lock")
+	current, err := ReadSupervisorLockOwner(lockPath)
+	if err != nil {
+		return fmt.Errorf("supervisor control generation: read owner sidecar: %w", err)
+	}
+	if current != expected {
+		return fmt.Errorf("supervisor control generation changed: got pid=%d started_at=%s want pid=%d started_at=%s", current.PID, current.StartedAt, expected.PID, expected.StartedAt)
+	}
+	_, err = dialSupervisorIPCStatusForOwner(ctx, stateDir, expected)
+	if err != nil {
+		return fmt.Errorf("supervisor control generation: authenticated status: %w", err)
+	}
+	return nil
+}
+
+func dialSupervisorIPCStatusForOwner(ctx context.Context, stateDir string, owner SupervisorLockOwner) ([]DaemonStatus, error) {
 	address := SupervisorIPCAddress(stateDir)
 	conn, err := dialSupervisorIPC(ctx, address)
 	if err != nil {

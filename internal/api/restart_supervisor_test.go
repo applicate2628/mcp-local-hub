@@ -312,7 +312,7 @@ func TestRestartAll_NilLookupPortKillNoOpRunsScheduler(t *testing.T) {
 	}
 }
 
-func TestRestartFallsBackToSchedulerWhenSupervisorRespawnFails(t *testing.T) {
+func TestRestartDoesNotFallBackToSchedulerWhenSupervisorRespawnIsUnavailable(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
@@ -344,11 +344,11 @@ func TestRestartFallsBackToSchedulerWhenSupervisorRespawnFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Restart: %v", err)
 	}
-	if len(fake.runNames) != 1 || fake.runNames[0] != taskName {
-		t.Fatalf("scheduler fallback Run calls = %v, want [%s]", fake.runNames, taskName)
+	if len(fake.runNames) != 0 {
+		t.Fatalf("scheduler fallback Run calls = %v, want none for supervisor-owned task", fake.runNames)
 	}
-	if len(results) != 2 || results[0].Err == "" || results[1].Err != "" {
-		t.Fatalf("results = %+v, want supervisor failure row followed by scheduler success", results)
+	if len(results) != 1 || results[0].Err == "" {
+		t.Fatalf("results = %+v, want only supervisor unavailable row", results)
 	}
 }
 
@@ -392,7 +392,7 @@ func TestRestartAllDoesNotFallBackToSchedulerWhenSupervisorRespawnIsRefused(t *t
 	}
 }
 
-func TestRestartAllFallsBackToSchedulerWhenSupervisorUnavailable(t *testing.T) {
+func TestRestartAllDoesNotFallBackToSchedulerWhenSupervisorUnavailable(t *testing.T) {
 	stateDir := apitest.HardenedTempDir(t)
 	restoreState := SetDaemonStateRootForTest(stateDir)
 	defer restoreState()
@@ -424,11 +424,11 @@ func TestRestartAllFallsBackToSchedulerWhenSupervisorUnavailable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RestartAll: %v", err)
 	}
-	if len(fake.runNames) != 1 || fake.runNames[0] != taskName {
-		t.Fatalf("scheduler fallback Run calls = %v, want [%s]", fake.runNames, taskName)
+	if len(fake.runNames) != 0 {
+		t.Fatalf("scheduler fallback Run calls = %v, want none for supervisor-owned task", fake.runNames)
 	}
-	if len(results) != 2 || results[0].Err == "" || results[1].Err != "" {
-		t.Fatalf("results = %+v, want supervisor unavailable row followed by scheduler success", results)
+	if len(results) != 1 || results[0].Err == "" {
+		t.Fatalf("results = %+v, want only supervisor unavailable row", results)
 	}
 }
 

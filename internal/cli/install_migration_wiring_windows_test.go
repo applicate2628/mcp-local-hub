@@ -811,6 +811,22 @@ func TestV5UpgradeDeps_ForceKillSupervisor_KillsLiveSupervisor(t *testing.T) {
 	}
 }
 
+func TestV5UpgradeDeps_ForceKillSupervisorForOwner_RefusesNewGeneration(t *testing.T) {
+	tmpDir := t.TempDir()
+	lockDir := filepath.Join(tmpDir, "supervisor.lock")
+	writeStateSidecarBytes(t, lockDir+".owner.json", []byte(`{"pid":9001,"started_at":"new"}`))
+	killed := swapKillPIDViaTaskkillForTest(t)
+
+	d := &v5UpgradeDeps{supervisorLockDir: lockDir}
+	err := d.forceKillSupervisorForOwner(api.SupervisorLockOwner{PID: 42, StartedAt: "old"})
+	if err == nil || !strings.Contains(err.Error(), "generation change") {
+		t.Fatalf("forceKillSupervisorForOwner changed generation error=%v, want refusal", err)
+	}
+	if len(*killed) != 0 {
+		t.Fatalf("changed supervisor generation must not be killed; killed=%v", *killed)
+	}
+}
+
 // TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar is the
 // Finding-1 regression for the upgrade reaper.
 func TestV5UpgradeDeps_ForceKillSupervisor_SkipsPIDCreatedAfterSidecar(t *testing.T) {

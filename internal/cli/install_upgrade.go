@@ -217,18 +217,18 @@ type UpgradeOpts struct {
 // constants so the orchestrator + future production adapters share a
 // single source of truth.
 const (
-	// defaultQuiesceTimeoutMs is the per-spec step-3 budget for
+	// defaultQuiesceTimeoutMs is the upgrade transaction's use of the shared step-3 budget.
 	// transient maintenance-timer drain. 30s matches the supervisor-
 	// side QuiesceHandler default and the operator-facing UX
 	// expectation that "upgrade should not appear to hang for more
 	// than half a minute".
-	defaultQuiesceTimeoutMs = 30000
+	defaultQuiesceTimeoutMs = api.DefaultSupervisorReapQuiesceTimeoutMs
 
 	// defaultExitTimeoutMs is the per-spec step-4 budget for the
 	// supervisor's graceful-exit transition. 5s is a generous upper
 	// bound for the supervisor's signal-driven loop-cancel + audit-
 	// emit + lock-release sequence (sub-second in practice).
-	defaultExitTimeoutMs = 5000
+	defaultExitTimeoutMs = api.DefaultSupervisorReapExitTimeoutMs
 
 	// defaultPostForceKillPortVerifyTimeout is the per-port deadline
 	// for VerifyPortsUnbound after a force-kill fallback (codex-r2-c-
@@ -236,7 +236,7 @@ const (
 	// migration/journal.go:1505 — the operator should not wait longer
 	// than that for taskkill /F /T to release the supervisor's
 	// child daemon listeners.
-	defaultPostForceKillPortVerifyTimeout = 10 * time.Second
+	defaultPostForceKillPortVerifyTimeout = api.DefaultSupervisorReapPortReleaseTimeout
 
 	// defaultSupervisorLockReleaseTimeout covers the old supervisor's
 	// post-ACK graceful shutdown window: quiesce drain (30s) plus exit
@@ -303,85 +303,23 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 		}
 	}
 
-	// Stop phase: IPC quiesce-timers (drain transient maintenance-timer
-	// PIDs from supervisor-state.transient_pids).
-	//
-	// Per spec §"Wire format" the supervisor returns two frames: an
-	// immediate `{accepted: true}` (so the orchestrator gets a prompt
-	// ack while drain runs on the supervisor's side goroutine) then
-	// a final `{drained: N, still_running: [...], final: true}` when
-	// drain completes OR the supervisor's internal timeout expires.
-	// QuiesceTimers blocks until the FINAL frame arrives (or the
-	// orchestrator's own ctx fires).
-	//
-	// Codex round-4 Lane B P1 (codex-r4-b-p1): the QuiesceTimers
-	// result envelope MUST be consumed. If `still_running` is non-empty
-	// OR if QuiesceTimers itself returned an error, transients did not
-	// drain — the supervisor's exit{graceful} merely SCHEDULES exit and
-	// does not guarantee the un-drained children get reaped. Route the
-	// orchestrator through the force-kill + verifyPortsUnbound path EVEN
-	// IF the subsequent ExitGraceful ACKs. The historical bug let a
-	// successful ExitGraceful short-circuit force-kill, turning every
-	// un-drained transient into an orphan that held daemon ports.
-	quiesceResp, qErr := opts.Deps.QuiesceTimers(ctx, opts.PipePath, opts.QuiesceTimeoutMs)
-	quiesceUnclean := false
-	if qErr != nil {
-		// Quiesce error → provenance of drain is unproven; force-kill.
-		quiesceUnclean = true
-	} else if body, ok := quiesceResp.Result.(map[string]any); ok {
-		if stillRun, ok := body["still_running"].([]any); ok && len(stillRun) > 0 {
-			// Transients did not drain within the supervisor's
-			// internal timeout. ExitGraceful cannot reliably reap
-			// them; route through force-kill.
-			quiesceUnclean = true
+	// The shared API owner contains the full quiesce -> graceful exit ->
+	// identity-gated force fallback decision. Upgrade retains lock/port
+	// settlement and rollback because those are transaction-specific.
+	if err := api.ReapSupervisor(ctx, api.SupervisorReapOpts{
+		PipePath:         opts.PipePath,
+		QuiesceTimeoutMs: opts.QuiesceTimeoutMs,
+		ExitTimeoutMs:    opts.ExitTimeoutMs,
+		IsAlreadyExited:  isAlreadyExitedError,
+		Deps:             opts.Deps,
+	}); err != nil {
+		if errors.Is(err, api.ErrSupervisorReapForceKill) {
+			// Preserve the established upgrade-facing failure contract while the
+			// shared reap owner retains its typed lifecycle classification and the
+			// platform force-kill cause for callers that need to inspect it.
+			return fmt.Errorf("force-kill supervisor failed: %w", err)
 		}
-	}
-
-	// Step 4: IPC exit{graceful: true, timeout_ms: N}.
-	//
-	// The supervisor responds within timeout_ms with an exit
-	// acknowledgement, then proceeds through its own internal
-	// graceful-exit transition (set graceful_exit_in_progress=true,
-	// cancel event loop, terminate daemon children + remaining
-	// transients, release supervisor.lock, exit 0).
-	//
-	// On error (timeout, connection drop, malformed response),
-	// fall through to the force-kill fallback. The supervisor may
-	// have hung in a non-responsive state — a stuck child, a
-	// stale file handle, or a goroutine deadlock — that prevents
-	// it from honoring the IPC verb. Force-kill closes the gap.
-	_, exitErr := opts.Deps.ExitGraceful(ctx, opts.PipePath, opts.ExitTimeoutMs)
-	if exitErr != nil || quiesceUnclean {
-		// Step 4a: force-kill fallback.
-		//
-		// taskkill /F /T /PID on Windows (kills the supervisor PID
-		// + its children via /T); kill -KILL -<pgid> on POSIX (kills
-		// the supervisor process group). Either way, the running
-		// transients + daemon children die with the supervisor.
-		//
-		// Codex r2 Lane C P1 #8 closure: capture the error and
-		// classify. "Already exited" is benign — the supervisor was
-		// already gone before we issued the kill (often the case
-		// when ExitGraceful failed with "connection refused after
-		// supervisor crash"), so taskkill / kill returns a
-		// process-not-found exit code that does NOT block the
-		// orchestrator. Any OTHER error (permission denied, missing
-		// taskkill binary, malformed PID) propagates up because the
-		// supervisor may still be running and the new supervisor
-		// will fight it for the IPC pipe + the daemon ports.
-		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil {
-			if !isAlreadyExitedError(killErr) {
-				return fmt.Errorf("force-kill supervisor failed after graceful-exit timeout: %w; "+
-					"the prior supervisor may still be running and will fight the new one for the IPC pipe and daemon ports; "+
-					"resolve the underlying error (often permission denied) and re-run `mcphub install --upgrade`",
-					killErr)
-			}
-			// already-exited path: continue to the port verification
-			// step below — taskkill thinks the PID is gone, but a
-			// lingering child listener is still possible if the prior
-			// supervisor died without its Job Object reaping children.
-		}
-
+		return fmt.Errorf("reap prior supervisor for upgrade: %w", err)
 	}
 
 	handoffTimeout := effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, opts.QuiesceTimeoutMs, opts.ExitTimeoutMs)
@@ -676,7 +614,7 @@ type ReapOpts struct {
 	// Deps provides the IPC + force-kill sub-methods. Only QuiesceTimers,
 	// ExitGraceful, and ForceKillSupervisor are invoked; RenameAsideBinary
 	// and StartSupervisor are NEVER called by the reap path.
-	Deps UpgradeDeps
+	Deps api.SupervisorReapDeps
 }
 
 // ReapSupervisorForRestart reaps a currently-running supervisor WITHOUT
@@ -735,68 +673,7 @@ type ReapOpts struct {
 // EITHER path makes the reap fail loud (the migrate aborts before the
 // spec-bearing intent write — legacy stays recoverable).
 func ReapSupervisorForRestart(ctx context.Context, opts ReapOpts) error {
-	if opts.QuiesceTimeoutMs == 0 {
-		opts.QuiesceTimeoutMs = defaultQuiesceTimeoutMs
-	}
-	if opts.ExitTimeoutMs == 0 {
-		opts.ExitTimeoutMs = defaultExitTimeoutMs
-	}
-
-	// Step A: IPC quiesce-timers (drain transients). Consume the result
-	// envelope: a quiesce error OR a non-empty still_running means drain
-	// is unproven, so route through force-kill even if ExitGraceful ACKs
-	// (the same codex-r4-b-p1 invariant RunInstallUpgrade enforces).
-	quiesceResp, qErr := opts.Deps.QuiesceTimers(ctx, opts.PipePath, opts.QuiesceTimeoutMs)
-	quiesceUnclean := false
-	if qErr != nil {
-		quiesceUnclean = true
-	} else if body, ok := quiesceResp.Result.(map[string]any); ok {
-		if stillRun, ok := body["still_running"].([]any); ok && len(stillRun) > 0 {
-			quiesceUnclean = true
-		}
-	}
-
-	// Step B: IPC exit{graceful}. On error (timeout / drop / malformed) OR
-	// an unclean quiesce, fall through to the force-kill fallback.
-	_, exitErr := opts.Deps.ExitGraceful(ctx, opts.PipePath, opts.ExitTimeoutMs)
-	if exitErr != nil || quiesceUnclean {
-		// Step B-a: force-kill fallback. "Already exited" is benign (the
-		// supervisor was already gone); any other error (permission denied,
-		// missing taskkill, corrupt PID) propagates because the prior
-		// supervisor may still be alive and would fight the successor for
-		// the IPC pipe + daemon ports.
-		if killErr := opts.Deps.ForceKillSupervisor(opts.PipePath); killErr != nil {
-			if !isAlreadyExitedError(killErr) {
-				return fmt.Errorf("force-kill supervisor failed during reap-before-restart: %w; "+
-					"the prior supervisor may still be running and would fight the new one for the IPC pipe and daemon ports; "+
-					"resolve the underlying error (often permission denied) and re-run the migrate",
-					killErr)
-			}
-		}
-	}
-
-	// Step B-b: prove the prior supervisor's daemon ports are unbound before
-	// the caller starts the successor (no zombie-listener race). This runs
-	// UNCONDITIONALLY — on the CLEAN graceful-exit path as well as the
-	// force-kill path (PR #250 deeper-review BLOCKER). ExitGraceful returns
-	// success as soon as the supervisor writes its ACK frame, which
-	// handleExit emits BEFORE triggering the child teardown, so a graceful
-	// exit can return with daemon children still releasing their ports — and
-	// a job_protection:false child (PR #242 fallback) can outlive the
-	// supervisor exit entirely. Verifying here on both paths guarantees the
-	// caller's StartSupervisor re-binds cleanly instead of hitting EADDRINUSE.
-	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
-		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
-			return fmt.Errorf("port-unbound verification failed after supervisor reap: %w; "+
-				"one or more daemon ports are still bound; "+
-				"identify the offending listener via `netstat -ano | findstr :<port>` and stop it manually before re-running the migrate",
-				err)
-		}
-	}
-
-	// Reaped. The caller now writes the spec-bearing intent (the §7.1 gate
-	// passes — no supervisor running) and starts the successor.
-	return nil
+	return api.ReapSupervisor(ctx, api.SupervisorReapOpts{PipePath: opts.PipePath, QuiesceTimeoutMs: opts.QuiesceTimeoutMs, ExitTimeoutMs: opts.ExitTimeoutMs, ExpectedPorts: opts.ExpectedPorts, VerifyPortsUnbound: opts.VerifyPortsUnbound, PortReleaseTimeout: api.DefaultSupervisorReapPortReleaseTimeout, IsAlreadyExited: isAlreadyExitedError, Deps: opts.Deps})
 }
 
 // isAlreadyExitedError reports whether err originated from a kill

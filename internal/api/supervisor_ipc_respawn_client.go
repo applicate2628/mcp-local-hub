@@ -62,10 +62,9 @@ const RespawnRefusedIntentStoppedCode = "RESPAWN_REFUSED_INTENT_STOPPED"
 //
 // Code is RestartResult.Code (json:"-"), so this introduces NO wire
 // change. schedulerBlockedRestartTaskNames (install.go) still includes
-// rows carrying this Code in the skip set — it drops only rows with
-// Err != "" AND Code == "SUPERVISOR_UNAVAILABLE" — so the legacy
-// kill/run loop keeps skipping these supervisor-owned task names
-// (intent is on disk; the watcher owns convergence; no taskkill).
+// rows carrying this Code in the skip set, as it does every
+// supervisor-selected row. The legacy kill/run loop must not create a
+// competing fallback after the authenticated compatibility decision.
 const DeferredToIntentWatcherCode = "DEFERRED_TO_INTENT_WATCHER"
 
 // RespawnResult is the operator-facing outcome of a respawn IPC call.
@@ -102,6 +101,19 @@ type RespawnResult struct {
 // Mirrors the DialSupervisorIPCExit/Status pattern (same package); the
 // IPC envelope shape is shared via internal types (IPCRequest, IPCResponse).
 func DialSupervisorIPCRespawn(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ensureSupervisorControlAdmission(ctx); err != nil {
+		return RespawnResult{}, err
+	}
+	return dialSupervisorIPCRespawnRaw(ctx, taskName, force, timeoutMs)
+}
+
+// dialSupervisorIPCRespawnRaw is the authenticated transport used only after
+// an owning restart coordinator has admitted compatibility. It intentionally
+// does not re-run admission so bulk API restarts issue exactly one probe.
+func dialSupervisorIPCRespawnRaw(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}

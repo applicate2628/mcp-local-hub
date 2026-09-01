@@ -12,7 +12,7 @@ package api
 type IPCRequest struct {
 	Version int            `json:"version,omitempty"`
 	ID      int64          `json:"id"`
-	Cmd     string         `json:"cmd"` // status|reload|restart|exit|quiesce-timers
+	Cmd     string         `json:"cmd"` // status|capabilities|reload|restart|exit|quiesce-timers
 	Args    map[string]any `json:"args,omitempty"`
 }
 
@@ -23,7 +23,7 @@ type IPCRequest struct {
 // work-items/decisions/2026-07-19-ipc-audit-readonly-allowlist.md.
 func IPCCommandIsReadOnly(cmd string) bool {
 	switch cmd {
-	case "status":
+	case "status", "capabilities":
 		return true
 	default:
 		return false

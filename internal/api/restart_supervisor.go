@@ -11,7 +11,7 @@ import (
 
 type supervisorRestartRespawnFunc func(ctx context.Context, taskName string, force bool, timeoutMs int) (RespawnResult, error)
 
-var supervisorRestartRespawnFn supervisorRestartRespawnFunc = DialSupervisorIPCRespawn
+var supervisorRestartRespawnFn supervisorRestartRespawnFunc = dialSupervisorIPCRespawnRaw
 
 func setSupervisorRestartHooksForTest(fn supervisorRestartRespawnFunc) func() {
 	prev := supervisorRestartRespawnFn
