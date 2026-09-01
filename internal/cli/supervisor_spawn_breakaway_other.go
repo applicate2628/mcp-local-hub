@@ -2,7 +2,11 @@
 
 package cli
 
-import "os/exec"
+import (
+	"os/exec"
+
+	processowner "mcp-local-hub/internal/process"
+)
 
 // startSupervisorDetachedBreakaway: POSIX has no Windows Job Object
 // cascade, so there is no breakaway flag to set. The detach is already
@@ -10,7 +14,7 @@ import "os/exec"
 // starts the cmd; rebuild and onDegrade are unused on POSIX. Kept as a
 // matching signature so the cross-platform callers (ensureSupervisorRunning)
 // compile on every OS.
-func startSupervisorDetachedBreakaway(cmd *exec.Cmd, _ func() *exec.Cmd, _ func(error)) (*exec.Cmd, error) {
+func startSupervisorDetachedBreakaway(cmd *exec.Cmd, _ func() *exec.Cmd, _ func(error), _ processowner.BreakawayPolicy) (*exec.Cmd, error) {
 	if err := cmd.Start(); err != nil {
 		return cmd, err
 	}

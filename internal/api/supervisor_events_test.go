@@ -1736,6 +1736,27 @@ func (f *failingSupervisorEventFile) Close() error {
 	return errors.Join(closeErr, f.closeErr)
 }
 
+func TestPersistPendingVerifiedReadsBackExactDigestCarrier(t *testing.T) {
+	path := filepath.Join(t.TempDir(), SupervisorEventLogFileLeaf)
+	logger, err := OpenSupervisorEventLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared := mustPrepareSupervisorEvent(t, "verified-pending-carrier")
+	digest, err := logger.PersistPendingVerified(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if digest != hex.EncodeToString(prepared.digest[:]) {
+		t.Fatalf("digest=%q", digest)
+	}
+	carrier := supervisorEventPendingPath(logger, prepared)
+	got, err := os.ReadFile(carrier)
+	if err != nil || !bytes.Equal(got, prepared.raw) {
+		t.Fatalf("carrier=%q err=%v", got, err)
+	}
+}
+
 func mustPrepareSupervisorEvent(t *testing.T, event string) PreparedSupervisorEvent {
 	t.Helper()
 	prepared, err := PrepareSupervisorEvent(SupervisorEvent{

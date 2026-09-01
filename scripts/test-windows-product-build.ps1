@@ -62,16 +62,38 @@ if ($cli.ldflags -match 'windowsgui') { throw "cli linker flags must not select 
 if ($windowless.ldflags -notmatch '(?:^| )-H windowsgui(?: |$)') { throw "windowless linker flags missing -H windowsgui: $($windowless.ldflags)" }
 if ($helper.ldflags -match 'windowsgui') { throw "admission helper must remain CUI: $($helper.ldflags)" }
 
-foreach ($artifact in @($cli, $windowless)) {
-    foreach ($metadata in @("version", "commit", "buildDate")) {
-        if ($artifact.ldflags -notmatch "-X main\.$metadata=") {
-            throw "$($artifact.role) linker flags do not embed ${metadata}: $($artifact.ldflags)"
-        }
+foreach ($metadata in @("version", "commit", "buildDate")) {
+    if ($cli.ldflags -notmatch "-X main\.$metadata=") {
+        throw "CLI linker flags do not embed ${metadata}: $($cli.ldflags)"
     }
+}
+if ($windowless.ldflags -match '-X main\.(version|commit|buildDate)=') {
+    throw "windowless adapter must derive identity from VERSIONINFO, not nonexistent runtime symbols: $($windowless.ldflags)"
 }
 if ($helper.ldflags -match '-X main\.(version|commit|buildDate)=') {
     throw "admission helper must not claim product metadata: $($helper.ldflags)"
 }
+
+$wantVersionInfo = @{
+    cli = @{ InternalName = "mcphub-cli"; OriginalFilename = "mcphub.exe"; SpecialBuild = "mcphub-role-v1;role=cli" }
+    windowless = @{ InternalName = "mcphub-windowless"; OriginalFilename = "mcphub-windowless.exe"; SpecialBuild = "mcphub-role-v1;role=windowless" }
+}
+$planBuildDate = if ($plan.buildDate -is [datetime]) { $plan.buildDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") } else { [string]$plan.buildDate }
+foreach ($artifact in @($cli, $windowless)) {
+    $identity = $artifact.versionInfo
+    if ($identity.ProductName -ne "mcp-local-hub" -or $identity.ProductVersion -ne $plan.version) {
+        throw "$($artifact.role) VERSIONINFO product identity drift"
+    }
+    if ($identity.PrivateBuild -ne "mcphub-build-v1;commit=$($plan.commit);build_date=$planBuildDate") {
+        throw "$($artifact.role) VERSIONINFO PrivateBuild drift: $($identity.PrivateBuild)"
+    }
+    foreach ($field in @("InternalName", "OriginalFilename", "SpecialBuild")) {
+        if ($identity.$field -ne $wantVersionInfo[$artifact.role][$field]) {
+            throw "$($artifact.role) VERSIONINFO ${field}=$($identity.$field), want $($wantVersionInfo[$artifact.role][$field])"
+        }
+    }
+}
+if ($null -ne $helper.versionInfo) { throw "admission helper must not carry product VERSIONINFO identity" }
 
 if ($plan.admissionCommands.Count -ne 2) { throw "admission command count=$($plan.admissionCommands.Count), want 2" }
 if (($plan.admissionCommands[0].argv -join "|") -ne "cli|bin/mcphub.exe") {

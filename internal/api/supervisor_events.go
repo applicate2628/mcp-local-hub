@@ -913,6 +913,25 @@ func (l *SupervisorEventLog) PersistPending(prepared PreparedSupervisorEvent) er
 	return nil
 }
 
+// PersistPendingVerified establishes and then reads back the exact
+// digest-addressed carrier. The returned digest identifies the durable bytes;
+// callers may treat success as publication even when later best-effort replay
+// into the append log is unavailable.
+func (l *SupervisorEventLog) PersistPendingVerified(prepared PreparedSupervisorEvent) (string, error) {
+	if err := l.PersistPending(prepared); err != nil {
+		return hex.EncodeToString(prepared.digest[:]), err
+	}
+	path := filepath.Join(l.path+supervisorEventPendingDirSuffix, hex.EncodeToString(prepared.digest[:])+supervisorEventPendingFileSuffix)
+	readBack, err := l.pendingIO.readBounded(path, supervisorEventMaxBytes+1)
+	if err != nil {
+		return hex.EncodeToString(prepared.digest[:]), fmt.Errorf("read back supervisor event pending carrier %s: %w", path, err)
+	}
+	if !bytes.Equal(readBack, prepared.raw) {
+		return hex.EncodeToString(prepared.digest[:]), fmt.Errorf("supervisor event pending carrier exact-byte mismatch at %s", path)
+	}
+	return hex.EncodeToString(prepared.digest[:]), nil
+}
+
 // TryReplayPending opportunistically drains pending carriers. Lock contention
 // is a successful no-op; every acquired resource is released on all exits.
 func (l *SupervisorEventLog) TryReplayPending() (err error) {

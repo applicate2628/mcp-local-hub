@@ -8,18 +8,19 @@ import (
 	"testing"
 
 	"golang.org/x/sys/windows"
+
+	processowner "mcp-local-hub/internal/process"
 )
 
-// PART 1: the breakaway-tolerant spawn helper must (a) add
-// CREATE_BREAKAWAY_FROM_JOB on the common path, and (b) reserve the
-// flagless rebuild/retry STRICTLY for the ERROR_ACCESS_DENIED
-// (breakaway-rejected) case — a different spawn failure (e.g. missing
-// binary) must propagate, not be masked by a silent retry.
+// These integration guards prove CLI command/result glue delegates the shared
+// process owner's required/optional attempt contract without changing handles
+// or degraded diagnostics. The complete policy matrix lives in
+// internal/process/breakaway_start_windows_test.go.
 
 func TestStartSupervisorDetachedBreakaway_AddsFlagOnSuccess(t *testing.T) {
 	build := func() *exec.Cmd { return exec.Command("cmd", "/c", "exit", "0") }
 	degraded := false
-	started, err := startSupervisorDetachedBreakaway(build(), build, func(error) { degraded = true })
+	started, err := startSupervisorDetachedBreakaway(build(), build, func(error) { degraded = true }, processowner.BreakawayOptional)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -30,7 +31,7 @@ func TestStartSupervisorDetachedBreakaway_AddsFlagOnSuccess(t *testing.T) {
 	if !degraded {
 		// Common dev-host case: the parent job permits breakaway (or the
 		// process is in no job), so the started cmd carries the flag.
-		if started.SysProcAttr == nil || started.SysProcAttr.CreationFlags&winCreateBreakawayFromJob == 0 {
+		if started.SysProcAttr == nil || started.SysProcAttr.CreationFlags&windows.CREATE_BREAKAWAY_FROM_JOB == 0 {
 			t.Fatalf("expected CREATE_BREAKAWAY_FROM_JOB on the started cmd, flags=%#x", started.SysProcAttr.CreationFlags)
 		}
 	}
@@ -47,6 +48,7 @@ func TestStartSupervisorDetachedBreakaway_NonAccessDeniedError_NotRetried(t *tes
 		exec.Command("cmd", "/c", "exit", "0"),
 		rebuild,
 		func(error) { degraded = true },
+		processowner.BreakawayOptional,
 		func(*exec.Cmd) error { return want },
 	)
 	if !errors.Is(err, want) {
@@ -74,6 +76,7 @@ func TestStartSupervisorDetachedBreakaway_AccessDeniedRetriesFlagless(t *testing
 			}
 			degraded = true
 		},
+		processowner.BreakawayOptional,
 		func(cmd *exec.Cmd) error {
 			starts++
 			if starts == 1 {
@@ -100,7 +103,7 @@ func TestStartSupervisorDetachedBreakaway_AccessDeniedRetriesFlagless(t *testing
 	if !degraded {
 		t.Fatal("onDegrade was not called for ERROR_ACCESS_DENIED")
 	}
-	if retry.SysProcAttr != nil && retry.SysProcAttr.CreationFlags&winCreateBreakawayFromJob != 0 {
+	if retry.SysProcAttr != nil && retry.SysProcAttr.CreationFlags&windows.CREATE_BREAKAWAY_FROM_JOB != 0 {
 		t.Fatalf("retry command retained CREATE_BREAKAWAY_FROM_JOB, flags=%#x", retry.SysProcAttr.CreationFlags)
 	}
 }
@@ -116,6 +119,7 @@ func TestStartSupervisorDetachedBreakaway_FlaglessRetryFailureDoesNotReportDegra
 		initial,
 		func() *exec.Cmd { return retry },
 		func(error) { degradeCalls++ },
+		processowner.BreakawayOptional,
 		func(cmd *exec.Cmd) error {
 			starts++
 			switch starts {
@@ -150,5 +154,24 @@ func TestStartSupervisorDetachedBreakaway_FlaglessRetryFailureDoesNotReportDegra
 	}
 	if degradeCalls != 0 {
 		t.Fatalf("onDegrade calls = %d, want 0 when flagless retry failed", degradeCalls)
+	}
+}
+
+func TestStartSupervisorDetachedBreakaway_AccessDeniedRequiredDoesNotRetry(t *testing.T) {
+	initial := exec.Command("cmd", "/c", "exit", "0")
+	starts := 0
+	rebuilt := false
+	started, err := startSupervisorDetachedBreakawayWithStart(
+		initial,
+		func() *exec.Cmd { rebuilt = true; return exec.Command("cmd", "/c", "exit", "0") },
+		func(error) { t.Fatal("required breakaway must not report degraded success") },
+		processowner.BreakawayRequired,
+		func(*exec.Cmd) error { starts++; return windows.ERROR_ACCESS_DENIED },
+	)
+	if started != initial || !errors.Is(err, processowner.ErrWindowsBreakawayRequired) {
+		t.Fatalf("started=%p error=%v", started, err)
+	}
+	if starts != 1 || rebuilt {
+		t.Fatalf("starts=%d rebuilt=%v, want one attempt and no flagless rebuild", starts, rebuilt)
 	}
 }

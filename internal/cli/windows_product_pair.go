@@ -2,13 +2,14 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
 )
 
@@ -31,9 +32,27 @@ const (
 	WindowsProductPairStagePairReadBack       WindowsProductPairStage = "pair-read-back"
 	WindowsProductPairStageSupervisorStarted  WindowsProductPairStage = "supervisor-started"
 	WindowsProductPairStageSupervisorReady    WindowsProductPairStage = "supervisor-ready"
-	WindowsProductPairStageCommitted          WindowsProductPairStage = "committed"
 	WindowsProductPairStageReceiptWritten     WindowsProductPairStage = "receipt-written"
 )
+
+type WindowsProductPairMode string
+
+const (
+	WindowsProductPairModeSetup        WindowsProductPairMode = "setup"
+	WindowsProductPairModeCanonicalize WindowsProductPairMode = "canonicalize"
+	WindowsProductPairModeUpgrade      WindowsProductPairMode = "upgrade"
+)
+
+type WindowsProductPairOutcome string
+
+const (
+	WindowsProductPairCommittedOutcome             WindowsProductPairOutcome = "committed"
+	WindowsProductPairCommittedObservabilityFailed WindowsProductPairOutcome = "committed-observability-failed"
+	WindowsProductPairCommittedCleanupFailed       WindowsProductPairOutcome = "committed-cleanup-failed"
+)
+
+var ErrWindowsProductPairCommittedObservabilityFailed = errors.New("E_WINDOWS_PRODUCT_PAIR_COMMITTED_OBSERVABILITY_FAILED")
+var ErrWindowsProductPairCommittedCleanupFailed = errors.New("E_WINDOWS_PRODUCT_PAIR_COMMITTED_CLEANUP_FAILED")
 
 // WindowsProductPairTaskTxn is the narrow scheduler-owned command migration
 // surface. The concrete Windows adapter is scheduler.OwnedEntrypointTaskTxn.
@@ -96,19 +115,41 @@ func DecodeUpgradeReceipt(raw []byte) (UpgradeReceipt, error) {
 // WindowsProductPairCommitted is the sole successful transaction result. It is
 // observable only after pair and scheduler readback plus supervisor readiness.
 type WindowsProductPairCommitted struct {
-	Schema string
-	Pair   binaryadmission.WindowsProductPair
+	Schema        string
+	Outcome       WindowsProductPairOutcome
+	Pair          binaryadmission.WindowsProductPair
+	ReceiptSHA256 string
+	EventSHA256   string
+}
+
+type WindowsProductPairCommitEvent struct {
+	Schema        string
+	Mode          WindowsProductPairMode
+	ReceiptSchema string
+	ReceiptSHA256 string
+	InstalledAt   string
+	Pair          binaryadmission.WindowsProductPair
+}
+
+type WindowsProductPairPromotion struct {
+	Target        string
+	RetainedPrior string
+	PriorPresent  bool
+	NewSHA256     string
 }
 
 type WindowsProductPairTxnDeps struct {
 	AdmitPair           func(cli, windowless binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error)
-	Promote             func(src, dst string) error
+	Promote             func(src, dst, newSHA256 string) (WindowsProductPairPromotion, error)
+	RestorePromotion    func(WindowsProductPairPromotion) error
 	ReadBackWindowless  func(path string, expected binaryadmission.WindowsArtifact) error
 	StartSupervisor     func(cliPath string) error
 	WaitSupervisorReady func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error
 	RestartPrior        func(cliPath string) error
-	OnCommitted         func(WindowsProductPairCommitted) error
+	SettleSuccessor     func(cliPath string) error
 	WriteReceipt        func(path string, raw []byte) error
+	ReadReceipt         func(path string) ([]byte, error)
+	PublishCommitted    func(WindowsProductPairCommitEvent) (string, error)
 	Fault               func(WindowsProductPairStage) error
 	Now                 func() time.Time
 }
@@ -119,9 +160,7 @@ type WindowsProductPairTxnOpts struct {
 	StagedCLI        string
 	StagedWindowless string
 	ReceiptPath      string
-	Version          string
-	Commit           string
-	BuildDate        string
+	Mode             WindowsProductPairMode
 	Tasks            WindowsProductPairTaskTxn
 	Deps             WindowsProductPairTxnDeps
 }
@@ -142,11 +181,10 @@ func (t *WindowsProductPairTxn) Close() error {
 type productPairFileSnapshot struct {
 	path    string
 	body    []byte
-	mode    os.FileMode
 	present bool
 }
 
-func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCommitted, retErr error) {
+func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPairCommitted, retErr error) {
 	o := t.Opts
 	if o.Tasks == nil {
 		return WindowsProductPairCommitted{}, errors.New("Windows product pair transaction: task transaction is required")
@@ -154,11 +192,28 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 	if o.CLIPath == "" || o.WindowlessPath == "" || o.StagedCLI == "" || o.StagedWindowless == "" || o.ReceiptPath == "" {
 		return WindowsProductPairCommitted{}, errors.New("Windows product pair transaction: all paths are required")
 	}
-	defer func() { retErr = errors.Join(retErr, o.Tasks.Close()) }()
+	if o.Mode != WindowsProductPairModeSetup && o.Mode != WindowsProductPairModeCanonicalize && o.Mode != WindowsProductPairModeUpgrade {
+		return WindowsProductPairCommitted{}, errors.New("Windows product pair transaction: valid caller mode is required")
+	}
+	defer func() {
+		if closeErr := o.Tasks.Close(); closeErr != nil {
+			if result.ReceiptSHA256 != "" {
+				if result.Outcome == WindowsProductPairCommittedOutcome {
+					result.Outcome = WindowsProductPairCommittedCleanupFailed
+				}
+				retErr = errors.Join(retErr, fmt.Errorf("%w: receipt_sha256=%s: %v", ErrWindowsProductPairCommittedCleanupFailed, result.ReceiptSHA256, closeErr))
+			} else {
+				retErr = errors.Join(retErr, closeErr)
+			}
+		}
+	}()
 	d := withWindowsProductPairDefaults(o.Deps)
+	if d.PublishCommitted == nil {
+		return WindowsProductPairCommitted{}, errors.New("Windows product pair transaction: committed publisher is required")
+	}
 	staged, err := d.AdmitPair(
-		binaryadmission.WindowsArtifact{Path: o.StagedCLI, Role: binaryadmission.WindowsArtifactRoleCLI, Version: o.Version, Commit: o.Commit, BuildDate: o.BuildDate},
-		binaryadmission.WindowsArtifact{Path: o.StagedWindowless, Role: binaryadmission.WindowsArtifactRoleWindowless, Version: o.Version, Commit: o.Commit, BuildDate: o.BuildDate},
+		binaryadmission.WindowsArtifact{Path: o.StagedCLI, Role: binaryadmission.WindowsArtifactRoleCLI},
+		binaryadmission.WindowsArtifact{Path: o.StagedWindowless, Role: binaryadmission.WindowsArtifactRoleWindowless},
 	)
 	if err != nil {
 		return WindowsProductPairCommitted{}, fmt.Errorf("admit staged Windows product pair: %w", err)
@@ -180,15 +235,28 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 		return WindowsProductPairCommitted{}, fmt.Errorf("snapshot exact-owned task XML: %w", err)
 	}
 
+	var windowlessPromotion, cliPromotion *WindowsProductPairPromotion
+	successorStarted := false
 	rollback := func(trigger error) error {
 		var restoreErrs []error
+		if successorStarted {
+			if d.SettleSuccessor == nil {
+				restoreErrs = append(restoreErrs, errors.New("settle transaction-started successor: no settlement owner"))
+			} else if err := d.SettleSuccessor(o.CLIPath); err != nil {
+				restoreErrs = append(restoreErrs, fmt.Errorf("settle transaction-started successor: %w", err))
+			}
+		}
+		if err := restoreProductPairPromotion(d, cliPromotion, cliPrior); err != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("restore canonical CLI: %w", err))
+		}
 		if err := o.Tasks.RestoreImport(); err != nil {
 			restoreErrs = append(restoreErrs, err)
 		}
-		for _, snapshot := range []productPairFileSnapshot{receiptPrior, cliPrior, windowlessPrior} {
-			if err := restoreProductPairFile(snapshot); err != nil {
-				restoreErrs = append(restoreErrs, err)
-			}
+		if err := restoreProductPairPromotion(d, windowlessPromotion, windowlessPrior); err != nil {
+			restoreErrs = append(restoreErrs, fmt.Errorf("restore windowless adapter: %w", err))
+		}
+		if err := restoreProductPairFile(receiptPrior); err != nil {
+			restoreErrs = append(restoreErrs, err)
 		}
 		if cliPrior.present && d.RestartPrior != nil {
 			if err := d.RestartPrior(o.CLIPath); err != nil {
@@ -210,8 +278,14 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 		return nil
 	}
 
-	if err := d.Promote(o.StagedWindowless, o.WindowlessPath); err != nil {
+	promotion, err := d.Promote(o.StagedWindowless, o.WindowlessPath, staged.Windowless.SHA256)
+	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("promote windowless adapter: %w", err))
+	}
+	windowlessPromotion = new(WindowsProductPairPromotion)
+	*windowlessPromotion = promotion
+	if err := verifyProductPairPromotion(promotion, windowlessPrior); err != nil {
+		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("verify retained windowless prior: %w", err))
 	}
 	if err := fault(WindowsProductPairStageWindowlessPromoted); err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
@@ -234,15 +308,21 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 	if err := fault(WindowsProductPairStageTasksReadBack); err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
-	if err := d.Promote(o.StagedCLI, o.CLIPath); err != nil {
+	promotion, err = d.Promote(o.StagedCLI, o.CLIPath, staged.CLI.SHA256)
+	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("promote canonical CUI: %w", err))
+	}
+	cliPromotion = new(WindowsProductPairPromotion)
+	*cliPromotion = promotion
+	if err := verifyProductPairPromotion(promotion, cliPrior); err != nil {
+		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("verify retained CLI prior: %w", err))
 	}
 	if err := fault(WindowsProductPairStageCLIPromoted); err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
 	readBack, err := d.AdmitPair(
-		binaryadmission.WindowsArtifact{Path: o.CLIPath, Role: binaryadmission.WindowsArtifactRoleCLI, Version: o.Version, Commit: o.Commit, BuildDate: o.BuildDate, SHA256: staged.CLI.SHA256},
-		binaryadmission.WindowsArtifact{Path: o.WindowlessPath, Role: binaryadmission.WindowsArtifactRoleWindowless, Version: o.Version, Commit: o.Commit, BuildDate: o.BuildDate, SHA256: staged.Windowless.SHA256},
+		binaryadmission.WindowsArtifact{Path: o.CLIPath, Role: binaryadmission.WindowsArtifactRoleCLI, SHA256: staged.CLI.SHA256},
+		binaryadmission.WindowsArtifact{Path: o.WindowlessPath, Role: binaryadmission.WindowsArtifactRoleWindowless, SHA256: staged.Windowless.SHA256},
 	)
 	if err != nil || !sameProductPairIdentity(staged, readBack) {
 		if err == nil {
@@ -257,6 +337,7 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 		if err := d.StartSupervisor(o.CLIPath); err != nil {
 			return WindowsProductPairCommitted{}, rollback(fmt.Errorf("start canonical supervisor: %w", err))
 		}
+		successorStarted = true
 	}
 	if err := fault(WindowsProductPairStageSupervisorStarted); err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
@@ -270,17 +351,8 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
 
-	committed := WindowsProductPairCommitted{Schema: WindowsProductPairCommittedSchemaV1, Pair: readBack}
-	if d.OnCommitted != nil {
-		if err := d.OnCommitted(committed); err != nil {
-			return WindowsProductPairCommitted{}, rollback(fmt.Errorf("publish WindowsProductPairCommitted: %w", err))
-		}
-	}
-	if err := fault(WindowsProductPairStageCommitted); err != nil {
-		return WindowsProductPairCommitted{}, rollback(err)
-	}
 	now := d.Now().UTC().Format(time.RFC3339Nano)
-	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: o.Version, Commit: o.Commit, BuildDate: o.BuildDate, Artifacts: readBack, InstalledAt: now}
+	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: readBack.CLI.Version, Commit: readBack.CLI.Commit, BuildDate: readBack.CLI.BuildDate, Artifacts: readBack, InstalledAt: now}
 	raw, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
@@ -292,6 +364,32 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (_ WindowsProductPairCom
 	if err := fault(WindowsProductPairStageReceiptWritten); err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
+	readReceipt, err := d.ReadReceipt(o.ReceiptPath)
+	if err != nil || string(readReceipt) != string(raw) {
+		if err == nil {
+			err = errors.New("receipt exact-byte readback differs")
+		}
+		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("read back %s: %w", UpgradeReceiptSchemaV2, err))
+	}
+	decoded, err := DecodeUpgradeReceipt(readReceipt)
+	if err != nil || decoded.V2 == nil || !sameProductPairIdentity(decoded.V2.Artifacts, readBack) {
+		if err == nil {
+			err = errors.New("receipt parsed identity differs from admitted pair")
+		}
+		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("validate %s readback: %w", UpgradeReceiptSchemaV2, err))
+	}
+	receiptDigest := fmt.Sprintf("%x", sha256.Sum256(readReceipt))
+	committed := WindowsProductPairCommitted{Schema: WindowsProductPairCommittedSchemaV1, Outcome: WindowsProductPairCommittedOutcome, Pair: readBack, ReceiptSHA256: receiptDigest}
+	event := WindowsProductPairCommitEvent{
+		Schema: WindowsProductPairCommittedSchemaV1, Mode: o.Mode, ReceiptSchema: UpgradeReceiptSchemaV2,
+		ReceiptSHA256: receiptDigest, InstalledAt: receipt.InstalledAt, Pair: readBack,
+	}
+	eventDigest, err := d.PublishCommitted(event)
+	committed.EventSHA256 = eventDigest
+	if err != nil {
+		committed.Outcome = WindowsProductPairCommittedObservabilityFailed
+		return committed, fmt.Errorf("%w: receipt_sha256=%s event_sha256=%s: %v", ErrWindowsProductPairCommittedObservabilityFailed, receiptDigest, eventDigest, err)
+	}
 	return committed, nil
 }
 
@@ -300,12 +398,38 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 		d.AdmitPair = binaryadmission.AdmitWindowsProductPair
 	}
 	if d.Promote == nil {
-		d.Promote = func(src, dst string) error {
-			body, err := os.ReadFile(src)
+		d.Promote = func(src, dst, newSHA256 string) (WindowsProductPairPromotion, error) {
+			if _, err := os.Stat(dst); errors.Is(err, os.ErrNotExist) {
+				if err := os.Rename(src, dst); err != nil {
+					return WindowsProductPairPromotion{}, fmt.Errorf("promote into proven-absent target %s: %w", dst, err)
+				}
+				return WindowsProductPairPromotion{Target: dst, NewSHA256: newSHA256}, nil
+			} else if err != nil {
+				return WindowsProductPairPromotion{}, fmt.Errorf("probe promotion target %s: %w", dst, err)
+			}
+			result, err := api.RenameAsideReplaceWithResult(dst, src)
+			if err != nil {
+				return WindowsProductPairPromotion{Target: dst, RetainedPrior: result.RetainedPrior, PriorPresent: true, NewSHA256: newSHA256}, err
+			}
+			if !result.Promoted || result.RetainedPrior == "" {
+				return WindowsProductPairPromotion{}, errors.New("rename-aside promotion returned incomplete retained-prior result")
+			}
+			return WindowsProductPairPromotion{Target: dst, RetainedPrior: result.RetainedPrior, PriorPresent: true, NewSHA256: newSHA256}, nil
+		}
+	}
+	if d.RestorePromotion == nil {
+		d.RestorePromotion = func(p WindowsProductPairPromotion) error {
+			if !p.PriorPresent || p.RetainedPrior == "" {
+				return errors.New("rename-aside restore requires an exact retained prior")
+			}
+			result, err := api.RenameAsideReplaceWithResult(p.Target, p.RetainedPrior)
 			if err != nil {
 				return err
 			}
-			return writeProductPairFileAtomic(dst, body, 0o755)
+			if !result.Promoted {
+				return errors.New("rename-aside restore did not promote retained prior")
+			}
+			return nil
 		}
 	}
 	if d.ReadBackWindowless == nil {
@@ -322,7 +446,10 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 		}
 	}
 	if d.WriteReceipt == nil {
-		d.WriteReceipt = func(path string, raw []byte) error { return writeProductPairFileAtomic(path, raw, 0o600) }
+		d.WriteReceipt = api.WriteStateFileBytesAtomic
+	}
+	if d.ReadReceipt == nil {
+		d.ReadReceipt = os.ReadFile
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -350,7 +477,7 @@ func snapshotProductPairFile(path string) (productPairFileSnapshot, error) {
 	if err != nil {
 		return productPairFileSnapshot{}, fmt.Errorf("snapshot %s: %w", path, err)
 	}
-	return productPairFileSnapshot{path: path, body: body, mode: info.Mode().Perm(), present: true}, nil
+	return productPairFileSnapshot{path: path, body: body, present: true}, nil
 }
 
 func restoreProductPairFile(snapshot productPairFileSnapshot) error {
@@ -360,46 +487,63 @@ func restoreProductPairFile(snapshot productPairFileSnapshot) error {
 		}
 		return nil
 	}
-	return writeProductPairFileAtomic(snapshot.path, snapshot.body, snapshot.mode)
+	return api.WriteStateFileBytesAtomic(snapshot.path, snapshot.body)
 }
 
-func writeProductPairFileAtomic(path string, body []byte, mode os.FileMode) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
+func verifyProductPairPromotion(promotion WindowsProductPairPromotion, prior productPairFileSnapshot) error {
+	if promotion.Target != prior.path || promotion.PriorPresent != prior.present {
+		return errors.New("promotion prior-presence/target result differs from snapshot")
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if !prior.present {
+		if promotion.RetainedPrior != "" {
+			return errors.New("absent-target promotion unexpectedly retained a prior")
+		}
+		return nil
+	}
+	if promotion.RetainedPrior == "" {
+		return errors.New("existing-target promotion did not return retained prior")
+	}
+	body, err := os.ReadFile(promotion.RetainedPrior)
 	if err != nil {
 		return err
 	}
-	tmpPath := tmp.Name()
-	ok := false
-	defer func() {
-		if !ok {
-			_ = os.Remove(tmpPath)
-		}
-	}()
-	if _, err := tmp.Write(body); err != nil {
-		_ = tmp.Close()
-		return err
+	if string(body) != string(prior.body) {
+		return errors.New("retained prior bytes differ from exact snapshot")
 	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return err
+	return nil
+}
+
+func restoreProductPairPromotion(d WindowsProductPairTxnDeps, promotion *WindowsProductPairPromotion, prior productPairFileSnapshot) error {
+	if promotion == nil {
+		return nil
 	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpPath, mode); err != nil {
-		return err
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		if removeErr := os.Remove(path); removeErr != nil && !errors.Is(removeErr, os.ErrNotExist) {
+	if prior.present {
+		if err := d.RestorePromotion(*promotion); err != nil {
 			return err
 		}
-		if err := os.Rename(tmpPath, path); err != nil {
+	} else {
+		body, err := os.ReadFile(promotion.Target)
+		if err != nil {
+			return err
+		}
+		actual := fmt.Sprintf("%x", sha256.Sum256(body))
+		if actual != promotion.NewSHA256 {
+			return errors.New("refusing to remove absent-prior target whose bytes are not transaction-owned")
+		}
+		if err := os.Remove(promotion.Target); err != nil {
 			return err
 		}
 	}
-	ok = true
+	if prior.present {
+		body, err := os.ReadFile(prior.path)
+		if err != nil {
+			return err
+		}
+		if string(body) != string(prior.body) {
+			return errors.New("restored prior bytes differ from exact snapshot")
+		}
+	} else if _, err := os.Stat(prior.path); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("prior-absent target still exists after rollback: %v", err)
+	}
 	return nil
 }

@@ -404,8 +404,8 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// Step 6: Start the admitted successor through the wired platform adapter.
 	//
 	// Windows always uses spawnSupervisorDetached: detached CreateProcess with
-	// CREATE_BREAKAWAY_FROM_JOB when admitted by the parent job, a flagless
-	// detached retry otherwise, and the shared no-window child policy. The new
+	// required breakaway and the shared no-window child policy. A denied
+	// breakaway fails typed without a flagless successor. The new
 	// supervisor's
 	// stdin/stdout/stderr inherit nothing from this CLI process, so it
 	// survives both the upgrade caller's exit and the closing of the

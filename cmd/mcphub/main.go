@@ -1,9 +1,7 @@
 // Build metadata injection happens through ldflags at link time — see
 // build.ps1 / build.sh in repo root. Binary version info for Windows
-// Explorer Properties is embedded via cmd/mcphub/resource.syso, regenerated
-// from versioninfo.json whenever the file changes:
-//
-//go:generate go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 -64 -o resource.syso versioninfo.json
+// Explorer Properties is embedded by build.ps1 from the shared build tuple and
+// the pinned versioninfo.json template. Plain go build remains a compile check.
 package main
 
 import (

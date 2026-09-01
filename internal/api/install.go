@@ -2048,11 +2048,15 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	if err != nil {
 		return nil, err
 	}
-	// Scheduler tasks reference the canonical ~/.local/bin/mcphub.exe
-	// path (not dev location). See canonicalMcphubPath for the rationale.
+	// Direct supervisor intent remains bound to canonical CUI product logic;
+	// Windows Scheduler actions enter through its exact windowless sibling.
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return nil, err
+	}
+	taskCommand := canonicalPath
+	if runtime.GOOS == "windows" {
+		taskCommand = scheduler.WindowsOwnedEntrypointPath(canonicalPath)
 	}
 	workDir := filepath.Dir(canonicalPath)
 	p := &Plan{Server: m.Name, CanMigrate: canMigrateServer(m.Name), FullInstall: opts.DaemonFilter == ""}
@@ -2068,7 +2072,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		args := []string{"daemon", "--server", m.Name, "--daemon", d.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    name,
-			Command: canonicalPath,
+			Command: taskCommand,
 			Args:    args,
 			Trigger: "At logon",
 		})
@@ -2089,7 +2093,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		args := []string{"restart", "--server", m.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    name,
-			Command: canonicalPath,
+			Command: taskCommand,
 			Args:    args,
 			Trigger: "Weekly Sun 03:00",
 		})

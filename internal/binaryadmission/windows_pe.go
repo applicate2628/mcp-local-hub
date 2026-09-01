@@ -105,6 +105,13 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	if subsystem != expected {
 		return WindowsArtifact{}, &Error{ID: WindowsPESubsystemErrorID, Path: artifact.Path, Expected: expected, Actual: subsystem}
 	}
+	identity, err := readWindowsBuildIdentity(artifact.Path)
+	if err != nil {
+		return WindowsArtifact{}, fmt.Errorf("%s: %s: VERSIONINFO: %w", WindowsProductPairErrorID, artifact.Path, err)
+	}
+	if identity.Role != artifact.Role {
+		return WindowsArtifact{}, fmt.Errorf("%s: %s: VERSIONINFO role %q disagrees with expected role %q", WindowsProductPairErrorID, artifact.Path, identity.Role, artifact.Role)
+	}
 	f, err := os.Open(artifact.Path)
 	if err != nil {
 		return WindowsArtifact{}, formatError(artifact.Path, err)
@@ -122,6 +129,9 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	if artifact.SHA256 != "" && !strings.EqualFold(artifact.SHA256, actual) {
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: SHA-256 mismatch", WindowsProductPairErrorID, artifact.Path)
 	}
+	artifact.Version = identity.Version
+	artifact.Commit = identity.Commit
+	artifact.BuildDate = identity.BuildDate
 	artifact.SHA256 = actual
 	return artifact, nil
 }
@@ -133,12 +143,6 @@ func AdmitWindowsProductPair(cli, windowless WindowsArtifact) (WindowsProductPai
 	if cli.Role != WindowsArtifactRoleCLI || windowless.Role != WindowsArtifactRoleWindowless {
 		return WindowsProductPair{}, fmt.Errorf("%s: expected roles %q and %q, got %q and %q", WindowsProductPairErrorID, WindowsArtifactRoleCLI, WindowsArtifactRoleWindowless, cli.Role, windowless.Role)
 	}
-	if strings.TrimSpace(cli.Version) == "" || strings.TrimSpace(cli.Commit) == "" || strings.TrimSpace(cli.BuildDate) == "" {
-		return WindowsProductPair{}, fmt.Errorf("%s: product metadata is incomplete", WindowsProductPairErrorID)
-	}
-	if cli.Version != windowless.Version || cli.Commit != windowless.Commit || cli.BuildDate != windowless.BuildDate {
-		return WindowsProductPair{}, fmt.Errorf("%s: product metadata differs between roles", WindowsProductPairErrorID)
-	}
 	admittedCLI, err := AdmitWindowsRole(cli)
 	if err != nil {
 		return WindowsProductPair{}, fmt.Errorf("%s: cli: %w", WindowsProductPairErrorID, err)
@@ -146,6 +150,9 @@ func AdmitWindowsProductPair(cli, windowless WindowsArtifact) (WindowsProductPai
 	admittedWindowless, err := AdmitWindowsRole(windowless)
 	if err != nil {
 		return WindowsProductPair{}, fmt.Errorf("%s: windowless: %w", WindowsProductPairErrorID, err)
+	}
+	if admittedCLI.Version != admittedWindowless.Version || admittedCLI.Commit != admittedWindowless.Commit || admittedCLI.BuildDate != admittedWindowless.BuildDate {
+		return WindowsProductPair{}, fmt.Errorf("%s: artifact-derived identity differs between roles", WindowsProductPairErrorID)
 	}
 	return WindowsProductPair{CLI: admittedCLI, Windowless: admittedWindowless}, nil
 }

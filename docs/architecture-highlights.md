@@ -6,7 +6,12 @@ lifecycle design, see [supervisor-architecture.md](supervisor-architecture.md).
 
 ## PATH-based install model
 
-Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path. `mcphub setup` puts the binary there and registers the directory on user PATH (Windows: `HKCU\Environment\Path` + `WM_SETTINGCHANGE` broadcast; Linux/macOS: prints shell-rc line). Moving or rebuilding the binary later only requires re-running `mcphub setup` — scheduler tasks keep pointing at the canonical path and automatically use the new binary.
+On Windows, direct terminal commands use the canonical CUI
+`~/.local/bin/mcphub.exe`, while supported Scheduler and Explorer/background
+routes use its exact `~/.local/bin/mcphub-windowless.exe` sibling. `mcphub
+setup` admits and installs both as one product pair and registers the directory
+on user PATH (`HKCU\Environment\Path` plus `WM_SETTINGCHANGE`). Linux/macOS
+retain the single `~/.local/bin/mcphub` executable and printed shell-rc setup.
 
 ## First-run onboarding
 

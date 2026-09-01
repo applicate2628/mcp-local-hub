@@ -8,6 +8,8 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 )
 
+var admitWindowsRoleFn = binaryadmission.AdmitWindowsRole
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -23,10 +25,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch role {
 	case string(binaryadmission.WindowsArtifactRoleCLI):
 		subsystem = binaryadmission.WindowsCUISubsystem
-		_, err = binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleCLI})
+		_, err = admitWindowsRoleFn(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleCLI})
 	case string(binaryadmission.WindowsArtifactRoleWindowless):
 		subsystem = binaryadmission.WindowsGUISubsystem
-		_, err = binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleWindowless})
+		_, err = admitWindowsRoleFn(binaryadmission.WindowsArtifact{Path: path, Role: binaryadmission.WindowsArtifactRoleWindowless})
 	case "upgrade-prior":
 		err = binaryadmission.AdmitWindowsUpgradePrior(path)
 		if err == nil {

@@ -9,6 +9,22 @@ import (
 	"strings"
 )
 
+func bootstrapProductToTarget(w io.Writer, curExe, target string) error {
+	if samePath(curExe, target) {
+		fmt.Fprintf(w, "\u2713 mcphub already at %s (no copy needed)\n", target)
+		return nil
+	}
+	if same, err := sameFileContents(curExe, target); err == nil && same {
+		fmt.Fprintf(w, "\u2713 mcphub already at %s (byte-identical; no copy needed)\n", target)
+		return nil
+	}
+	if err := copySingleBinaryPlatformArtifact(curExe, target); err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "\u2713 mcphub installed at %s\n", target)
+	return nil
+}
+
 // ensureOnPath on non-Windows prints a one-liner the user can paste into
 // their shell rc. We do NOT modify ~/.bashrc or ~/.zshrc automatically —
 // silently mutating shell startup files is too invasive for an install step.

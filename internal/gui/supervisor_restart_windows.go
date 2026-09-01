@@ -17,7 +17,10 @@ import (
 //
 //	a Ctrl-C in the parent terminal does NOT propagate.
 //
-// CREATE_BREAKAWAY_FROM_JOB        — when the parent is in a Job
+// CREATE_BREAKAWAY_FROM_JOB        — initial attempt requests independent
+//
+//	lifetime; the shared process owner removes it only for an admitted
+//	optional fallback.
 //
 //	Object with KILL_ON_JOB_CLOSE (the canonical Windows
 //	supervisor lifecycle wiring), this flag lets the child

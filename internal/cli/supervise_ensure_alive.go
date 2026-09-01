@@ -119,6 +119,7 @@ import (
 	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/gui"
+	processowner "mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -277,9 +278,7 @@ func spawnStandaloneSupervisor() error {
 		configureSupervisorDetach(c)
 		return c
 	}
-	started, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
-		fmt.Fprintf(os.Stderr, "ensure-alive: standalone supervisor CREATE_BREAKAWAY_FROM_JOB rejected (parent job without BREAKAWAY_OK); spawned flagless: %v\n", degradeErr)
-	})
+	started, err := startSupervisorDetachedBreakaway(build(), build, nil, processowner.BreakawayRequired)
 	if err != nil {
 		return fmt.Errorf("standalone supervisor relaunch: spawn: %w", err)
 	}

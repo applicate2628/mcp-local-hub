@@ -378,8 +378,8 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+
 			"(restores serena entries from their captured backups; removes/restores LSP router entries).")
 	c.Flags().BoolVar(&upgrade, "upgrade", false,
-		"apply the currently-running admitted product build through the managed supervisor transaction: "+
-			"stage/admit, release the prior fleet, promote, identity-bind readiness, verify SHA-256, and write upgrade-receipt-v1. "+
+		"apply the currently-running admitted Windows product pair through the managed supervisor transaction: "+
+			"stage/admit both VERSIONINFO identities, release the prior fleet, promote adapter/tasks/CUI, identity-bind readiness, and read back upgrade-receipt-v2 before the committed event. "+
 			"Requires daemon-bearing supervisor intent and refuses fresh/legacy/unwired states before mutation. "+
 			"Run from a build.ps1 product binary, never from the canonical path.")
 	c.Flags().BoolVar(&check, "check", false,

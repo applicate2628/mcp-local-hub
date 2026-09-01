@@ -239,7 +239,11 @@ scheduler/secrets, and the hidden transport shims — is in
 
 ## Architecture highlights
 
-- **PATH-based install model** — scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path; `mcphub setup` puts the binary there and registers it on user PATH.
+- **PATH-based product-pair install model** — direct terminal commands use CUI
+  `~/.local/bin/mcphub.exe`; supported Scheduler/Explorer/background routes use
+  `~/.local/bin/mcphub-windowless.exe`. `mcphub setup` admits and installs both
+  atomically, migrates exact-owned task commands, and registers the directory on
+  user PATH.
 - **First-run onboarding** — `mcphub setup --trusted-root` blesses LSP trusted roots up front; the GUI shows a dismissable welcome banner until the first server is installed.
 - **go:embed manifests** — all 18 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory. `install --all` targets the 17 global manifests; the remaining manifest is workspace-scoped.
 - **Embedded entry patterns** — `godbolt`, `lldb-bridge`, and `perftools` expose a `NewCommand()` factory imported by both a standalone binary and the hub subcommand. `vcpkg` exposes the same factory only to the hub subcommand because it is deliberately hub-only.

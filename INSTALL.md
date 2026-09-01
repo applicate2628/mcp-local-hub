@@ -60,7 +60,11 @@ GUI-subsystem executable.
 
 ## Setup (canonical install)
 
-Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path (Windows Task Scheduler's CreateProcess call doesn't honor PATH — confirmed empirically), and Antigravity relay entries reference the short name (Node's child_process spawner does honor PATH). Both point at the same canonical install. `mcphub setup` puts the binary there and registers PATH:
+On Windows, supported Scheduler and Explorer/background routes reference the
+windowless `~/.local/bin/mcphub-windowless.exe` adapter, while direct terminal
+and relay commands use the CUI `~/.local/bin/mcphub.exe`. `mcphub setup`
+admits and installs both artifacts as one product pair, migrates only exact-owned
+task `Command` nodes, writes a read-back V2 receipt, and then registers PATH:
 
 ```bash
 ./mcphub.exe setup
@@ -68,15 +72,27 @@ Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path (Windows Ta
 
 What it does:
 
-- Copies the running binary to `%USERPROFILE%\.local\bin\mcphub.exe` (on Linux/macOS: `~/.local/bin/mcphub`).
+- On Windows, installs the running CUI binary and its exact
+  `mcphub-windowless.exe` sibling as an admitted pair. On Linux/macOS, copies
+  the running binary to `~/.local/bin/mcphub`.
 - On Windows: appends that directory to `HKCU\Environment\Path` if it isn't already there, then broadcasts `WM_SETTINGCHANGE` so new shells pick up the change. **The shell that ran `setup` won't see the updated PATH — close and reopen it.**
 - On Linux/macOS: prints the one-line `export PATH=...` snippet to paste into your shell rc. Does not touch rc files.
 
-Idempotent — running it again when the binary is already at the target and the dir is already on PATH is a no-op (no registry write, no duplicate entries).
+Idempotent — running it again reconciles the receipt-bound committed event and
+does not reapply pair mutation when the source, installed pair, and V2 receipt
+already match; PATH registration never creates duplicate entries.
 
 If you skip this step, `mcphub install` will detect that `mcphub.exe` isn't on PATH and either prompt to bootstrap (interactive shells) or fail with a pointer back to `mcphub setup` (CI, pipes).
 
-For a routine move or rebuild on an existing supervised installation, build an admitted product binary and run that candidate's `mcphub upgrade`. The managed transaction stages and admits it, releases the prior fleet, promotes once, verifies successor identity/canonical bytes, and writes a durable receipt. Fresh hosts and legacy scheduler-only hosts fail closed: run `mcphub setup`, establish/migrate supervised daemon state, then use `mcphub upgrade`. `mcphub scheduler upgrade` is advanced repair for surviving infrastructure-task command paths, not the routine binary-upgrade workflow.
+For a routine move or rebuild on an existing supervised installation, build an
+admitted product pair and run that candidate's `mcphub upgrade`. The managed
+transaction stages and admits both artifact identities, releases the prior
+fleet, promotes adapter-first/tasks/CUI-last through rename-aside, verifies
+successor identity/canonical bytes, and writes a durable V2 receipt. Fresh hosts
+and legacy scheduler-only hosts fail closed: run `mcphub setup`,
+establish/migrate supervised daemon state, then use `mcphub upgrade`.
+`mcphub scheduler upgrade` is advanced repair for surviving infrastructure-task
+command paths, not the routine product-pair upgrade workflow.
 
 ### Installed via npm? The canonical binary is refreshed automatically
 

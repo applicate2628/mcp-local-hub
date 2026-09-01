@@ -36,6 +36,7 @@ import (
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/process"
 	"mcp-local-hub/internal/scheduler"
 )
@@ -138,8 +139,12 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 		WindowlessPath:   windowlessTarget,
 		StagedCLI:        stagedCLI,
 		StagedWindowless: stagedWindowless,
+		Mode:             WindowsProductPairModeUpgrade,
 		StartSupervisor:  deps.StartSupervisor,
 		RestartPrior:     deps.StartSupervisor,
+		SettleSuccessor: func(string) error {
+			return deps.ForceKillSupervisor(deps.pipePath)
+		},
 		WaitSupervisorReady: func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error {
 			candidate := UpgradeCandidateV1{
 				Admission: UpgradeAdmissionLocalProduct,
@@ -184,7 +189,7 @@ func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
 	if err := binaryadmission.AdmitWindowsGUI(path); err != nil {
 		return UpgradeCandidateV1{}, fmt.Errorf("admit Windows product PE: %w", err)
 	}
-	version, commit, buildDate, err := currentProductBuildMetadata()
+	version, commit, buildDate, err := legacyRuntimeUpgradeMetadata()
 	if err != nil {
 		return UpgradeCandidateV1{}, err
 	}
@@ -199,6 +204,22 @@ func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
 		BuildDate: buildDate,
 		SHA256:    hex.EncodeToString(hash),
 	}, nil
+}
+
+// legacyRuntimeUpgradeMetadata is confined to the historical single-image
+// compatibility control path. New Windows product-pair admission never calls
+// it and derives all receipt identity from the two candidate PE resources.
+func legacyRuntimeUpgradeMetadata() (version, commit, buildDate string, err error) {
+	version, commit, buildDate = buildinfo.Get()
+	for _, field := range []struct{ name, value string }{
+		{name: "version", value: version}, {name: "commit", value: commit}, {name: "build_date", value: buildDate},
+	} {
+		trimmed := strings.TrimSpace(field.value)
+		if trimmed == "" || strings.EqualFold(trimmed, "dev") || strings.EqualFold(trimmed, "unknown") {
+			return "", "", "", fmt.Errorf("admit legacy runtime upgrade: %s is placeholder %q", field.name, field.value)
+		}
+	}
+	return version, commit, buildDate, nil
 }
 
 func verifyV5UpgradeCanonical(path string, candidate UpgradeCandidateV1) error {
@@ -247,7 +268,7 @@ func verifyV5UpgradePrior(path, expectedSHA256 string) error {
 // pipeline, so a failed copy never exposes a partial .new file.
 func stageV5UpgradeBinary(exe, target string) (string, error) {
 	staged := target + ".new"
-	if err := copyExe(exe, staged); err != nil {
+	if err := copySingleBinaryPlatformArtifact(exe, staged); err != nil {
 		return "", err
 	}
 	return staged, nil
@@ -256,18 +277,12 @@ func stageV5UpgradeBinary(exe, target string) (string, error) {
 func stageV5UpgradeProductPair(cliSource, cliTarget string) (stagedCLI, stagedWindowless string, err error) {
 	windowlessSource := scheduler.WindowsOwnedEntrypointPath(cliSource)
 	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(cliTarget)
-	stagedCLI = cliTarget + ".new"
-	stagedWindowless = windowlessTarget + ".new"
-	admitRole := func(role binaryadmission.WindowsArtifactRole) func(string) error {
-		return func(path string) error {
-			_, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: path, Role: role})
-			return err
-		}
-	}
-	if err := copyExeWithWindowsAdmission(cliSource, stagedCLI, admitRole(binaryadmission.WindowsArtifactRoleCLI)); err != nil {
+	stagedCLI, err = stageWindowsProductCandidate(cliSource, cliTarget)
+	if err != nil {
 		return "", "", err
 	}
-	if err := copyExeWithWindowsAdmission(windowlessSource, stagedWindowless, admitRole(binaryadmission.WindowsArtifactRoleWindowless)); err != nil {
+	stagedWindowless, err = stageWindowsProductCandidate(windowlessSource, windowlessTarget)
+	if err != nil {
 		_ = os.Remove(stagedCLI)
 		return "", "", err
 	}
@@ -634,19 +649,11 @@ func installSupervisorCmdBuilder(exePath string, strictMode bool) func() *exec.C
 // `mcphub install --upgrade` in.
 func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
 	return func() error {
-		// build constructs a fresh detached supervisor cmd so the
-		// breakaway-tolerant flagless retry (PART 1) can rebuild an
-		// equivalent one if the parent job forbids breakaway.
+		// Build supplies fresh equivalent commands to the shared process owner.
 		build := installSupervisorCmdBuilder(exePath, strictMode)
-		// PART 1 (§5 permanent fix): add CREATE_BREAKAWAY_FROM_JOB so the
-		// new supervisor escapes any KILL_ON_JOB_CLOSE job inherited from
-		// the install/migrate CLI's launcher. On a locked-down host that
-		// forbids breakaway it retries flagless rather than hard-failing
-		// the upgrade (a hard abort here leaves the binary swapped + the
-		// prior supervisor dead + nothing running — a worse regression).
-		started, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
-			fmt.Fprintf(os.Stderr, "install: supervisor spawn CREATE_BREAKAWAY_FROM_JOB rejected by parent job (no BREAKAWAY_OK); spawned flagless: %v\n", degradeErr)
-		})
+		// Upgrade successors require independent lifetime. Access-denied
+		// breakaway therefore fails typed after one attempt with no fallback.
+		started, err := startSupervisorDetachedBreakaway(build(), build, nil, process.BreakawayRequired)
 		if err != nil {
 			return fmt.Errorf("spawn supervisor: %w", err)
 		}

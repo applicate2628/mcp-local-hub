@@ -10,12 +10,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/binaryadmission"
-	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/scheduler"
 )
 
@@ -26,9 +24,11 @@ type windowsProductPairTxnRequest struct {
 	WindowlessPath      string
 	StagedCLI           string
 	StagedWindowless    string
+	Mode                WindowsProductPairMode
 	StartSupervisor     func(string) error
 	WaitSupervisorReady func(context.Context, string, binaryadmission.WindowsProductPair) error
 	RestartPrior        func(string) error
+	SettleSuccessor     func(string) error
 }
 
 var newWindowsProductPairTxnFn = newWindowsProductPairTxn
@@ -39,10 +39,6 @@ func newWindowsProductPairTxn(req windowsProductPairTxnRequest) (*WindowsProduct
 	}
 	if req.StateDir == "" || req.CLIPath == "" || req.WindowlessPath == "" || req.StagedCLI == "" || req.StagedWindowless == "" {
 		return nil, errors.New("Windows product pair wiring: state and artifact paths are required")
-	}
-	version, commit, buildDate, err := currentProductBuildMetadata()
-	if err != nil {
-		return nil, err
 	}
 	store, err := newWindowsProductPairTaskStore(req.StateDir)
 	if err != nil {
@@ -66,31 +62,93 @@ func newWindowsProductPairTxn(req windowsProductPairTxnRequest) (*WindowsProduct
 		StagedCLI:        req.StagedCLI,
 		StagedWindowless: req.StagedWindowless,
 		ReceiptPath:      filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json"),
-		Version:          version,
-		Commit:           commit,
-		BuildDate:        buildDate,
+		Mode:             req.Mode,
 		Tasks:            tasks,
 		Deps: WindowsProductPairTxnDeps{
 			StartSupervisor:     req.StartSupervisor,
 			WaitSupervisorReady: req.WaitSupervisorReady,
 			RestartPrior:        req.RestartPrior,
+			SettleSuccessor:     req.SettleSuccessor,
+			PublishCommitted:    windowsProductPairEventPublisher(req.StateDir),
 		},
 	}}, nil
 }
 
-func currentProductBuildMetadata() (version, commit, buildDate string, err error) {
-	version, commit, buildDate = buildinfo.Get()
-	for _, field := range []struct{ name, value string }{
-		{name: "version", value: version},
-		{name: "commit", value: commit},
-		{name: "build_date", value: buildDate},
-	} {
-		trimmed := strings.TrimSpace(field.value)
-		if trimmed == "" || strings.EqualFold(trimmed, "dev") || strings.EqualFold(trimmed, "unknown") {
-			return "", "", "", fmt.Errorf("admit local product build: %s is placeholder %q", field.name, field.value)
+func windowsProductPairEventPublisher(stateDir string) func(WindowsProductPairCommitEvent) (string, error) {
+	return func(event WindowsProductPairCommitEvent) (string, error) {
+		log, err := api.OpenSupervisorEventLog(filepath.Join(stateDir, api.SupervisorEventLogFileLeaf))
+		if err != nil {
+			return "", err
 		}
+		defer log.Close()
+		prepared, err := api.PrepareSupervisorEvent(api.SupervisorEvent{
+			SchemaVersion: api.SupervisorEventSchemaVersion,
+			TS:            event.InstalledAt,
+			Severity:      api.SupervisorEventSeverityInfo,
+			Source:        api.SupervisorEventSourceMigration,
+			Event:         "windows-product-pair-committed",
+			Body: map[string]any{
+				"schema": event.Schema, "mode": string(event.Mode), "receipt_schema": event.ReceiptSchema,
+				"receipt_sha256": event.ReceiptSHA256, "version": event.Pair.CLI.Version,
+				"commit": event.Pair.CLI.Commit, "build_date": event.Pair.CLI.BuildDate,
+				"cli":        map[string]any{"role": event.Pair.CLI.Role, "subsystem": binaryadmission.WindowsCUISubsystem, "sha256": event.Pair.CLI.SHA256},
+				"windowless": map[string]any{"role": event.Pair.Windowless.Role, "subsystem": binaryadmission.WindowsGUISubsystem, "sha256": event.Pair.Windowless.SHA256},
+			},
+		})
+		if err != nil {
+			return "", err
+		}
+		digest, err := log.PersistPendingVerified(prepared)
+		if err != nil {
+			return digest, err
+		}
+		_ = log.TryReplayPending()
+		return digest, nil
 	}
-	return version, commit, buildDate, nil
+}
+
+func reconcileWindowsProductPairReceipt(stateDir, sourceCLI, sourceWindowless, targetCLI, targetWindowless string, mode WindowsProductPairMode) (bool, error) {
+	raw, err := os.ReadFile(filepath.Join(stateDir, UpgradeReceiptSchemaV2+".json"))
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read committed Windows product pair receipt: %w", err)
+	}
+	source, err := binaryadmission.AdmitWindowsProductPair(
+		binaryadmission.WindowsArtifact{Path: sourceCLI, Role: binaryadmission.WindowsArtifactRoleCLI},
+		binaryadmission.WindowsArtifact{Path: sourceWindowless, Role: binaryadmission.WindowsArtifactRoleWindowless},
+	)
+	if err != nil {
+		return false, fmt.Errorf("admit source pair for committed-event reconciliation: %w", err)
+	}
+	target, err := binaryadmission.AdmitWindowsProductPair(
+		binaryadmission.WindowsArtifact{Path: targetCLI, Role: binaryadmission.WindowsArtifactRoleCLI},
+		binaryadmission.WindowsArtifact{Path: targetWindowless, Role: binaryadmission.WindowsArtifactRoleWindowless},
+	)
+	if err != nil {
+		return false, nil
+	}
+	return reconcileWindowsProductPairCommit(raw, source, target, mode, windowsProductPairEventPublisher(stateDir))
+}
+
+func reconcileWindowsProductPairCommit(raw []byte, source, target binaryadmission.WindowsProductPair, mode WindowsProductPairMode, publish func(WindowsProductPairCommitEvent) (string, error)) (bool, error) {
+	decoded, err := DecodeUpgradeReceipt(raw)
+	if err != nil || decoded.V2 == nil {
+		return false, fmt.Errorf("decode committed Windows product pair receipt: %w", err)
+	}
+	if !sameProductPairIdentity(source, target) || !sameProductPairIdentity(target, decoded.V2.Artifacts) {
+		return false, nil
+	}
+	digest := fmt.Sprintf("%x", sha256.Sum256(raw))
+	event := WindowsProductPairCommitEvent{
+		Schema: WindowsProductPairCommittedSchemaV1, Mode: mode, ReceiptSchema: UpgradeReceiptSchemaV2,
+		ReceiptSHA256: digest, InstalledAt: decoded.V2.InstalledAt, Pair: target,
+	}
+	if _, err := publish(event); err != nil {
+		return false, fmt.Errorf("%w: reconcile receipt_sha256=%s: %v", ErrWindowsProductPairCommittedObservabilityFailed, digest, err)
+	}
+	return true, nil
 }
 
 type windowsProductPairTaskOwner struct {

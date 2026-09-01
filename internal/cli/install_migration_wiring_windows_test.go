@@ -395,17 +395,16 @@ func TestRunV5UpgradeWindowsStagesRoleCorrectPairAndWiresSolePairOwner(t *testin
 		runInstallUpgradeWindowsFn = originalRun
 	})
 	var request windowsProductPairTxnRequest
-	stagedRolesAdmitted := false
+	stagedBytesPreserved := false
 	txn := &WindowsProductPairTxn{}
 	newWindowsProductPairTxnFn = func(got windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
 		request = got
-		if _, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: got.StagedCLI, Role: binaryadmission.WindowsArtifactRoleCLI}); err != nil {
-			return nil, fmt.Errorf("staged CLI: %w", err)
+		cliSame, cliErr := sameFileContents(cliSource, got.StagedCLI)
+		windowlessSame, windowlessErr := sameFileContents(windowlessSource, got.StagedWindowless)
+		if cliErr != nil || windowlessErr != nil || !cliSame || !windowlessSame {
+			return nil, fmt.Errorf("staged pair bytes differ: cli_same=%v cli_err=%v windowless_same=%v windowless_err=%v", cliSame, cliErr, windowlessSame, windowlessErr)
 		}
-		if _, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: got.StagedWindowless, Role: binaryadmission.WindowsArtifactRoleWindowless}); err != nil {
-			return nil, fmt.Errorf("staged windowless: %w", err)
-		}
-		stagedRolesAdmitted = true
+		stagedBytesPreserved = true
 		return txn, nil
 	}
 	var gotOpts UpgradeOpts
@@ -428,8 +427,8 @@ func TestRunV5UpgradeWindowsStagesRoleCorrectPairAndWiresSolePairOwner(t *testin
 	if request.CLIPath != target || request.WindowlessPath != filepath.Join(filepath.Dir(target), "mcphub-windowless.exe") {
 		t.Fatalf("installed paths = %q/%q", request.CLIPath, request.WindowlessPath)
 	}
-	if !stagedRolesAdmitted {
-		t.Fatal("staged product roles were not admitted before pair construction")
+	if !stagedBytesPreserved {
+		t.Fatal("staged product pair bytes were not preserved before pair construction")
 	}
 }
 

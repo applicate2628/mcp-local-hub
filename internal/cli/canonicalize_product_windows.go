@@ -6,43 +6,44 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 
 	"mcp-local-hub/internal/api"
-	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/scheduler"
 )
 
 func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) error {
 	windowlessSource := scheduler.WindowsOwnedEntrypointPath(cliSource)
 	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(cliTarget)
-	if _, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: cliSource, Role: binaryadmission.WindowsArtifactRoleCLI}); err != nil {
-		return fmt.Errorf("admit canonical CLI candidate: %w", err)
-	}
-	if _, err := binaryadmission.AdmitWindowsRole(binaryadmission.WindowsArtifact{Path: windowlessSource, Role: binaryadmission.WindowsArtifactRoleWindowless}); err != nil {
-		return fmt.Errorf("admit canonical windowless candidate: %w", err)
-	}
-	if samePath(cliSource, cliTarget) && samePath(windowlessSource, windowlessTarget) {
-		fmt.Fprintf(w, "✓ mcphub product pair already canonical at %s (running binaries are the targets)\n", filepath.Dir(cliTarget))
-		return nil
-	}
-	cliSame, cliErr := sameFileContents(cliSource, cliTarget)
-	windowlessSame, windowlessErr := sameFileContents(windowlessSource, windowlessTarget)
-	if cliErr == nil && windowlessErr == nil && cliSame && windowlessSame {
-		fmt.Fprintf(w, "✓ mcphub product pair already up to date at %s\n", filepath.Dir(cliTarget))
-		return nil
-	}
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("resolve state-dir for Windows product pair canonicalize: %w", err)
 	}
+	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, cliSource, windowlessSource, cliTarget, windowlessTarget, WindowsProductPairModeCanonicalize); err != nil {
+		return err
+	} else if reconciled {
+		fmt.Fprintf(w, "\u2713 mcphub product pair already committed at %s; committed event reconciled\n", filepath.Dir(cliTarget))
+		return nil
+	}
+	stagedCLI, err := stageWindowsProductCandidate(cliSource, cliTarget)
+	if err != nil {
+		return fmt.Errorf("stage canonical CLI candidate: %w", err)
+	}
+	defer os.Remove(stagedCLI)
+	stagedWindowless, err := stageWindowsProductCandidate(windowlessSource, windowlessTarget)
+	if err != nil {
+		return fmt.Errorf("stage windowless candidate: %w", err)
+	}
+	defer os.Remove(stagedWindowless)
 	txn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
 		Context:          context.Background(),
 		StateDir:         stateDir,
 		CLIPath:          cliTarget,
 		WindowlessPath:   windowlessTarget,
-		StagedCLI:        cliSource,
-		StagedWindowless: windowlessSource,
+		StagedCLI:        stagedCLI,
+		StagedWindowless: stagedWindowless,
+		Mode:             WindowsProductPairModeCanonicalize,
 	})
 	if err != nil {
 		return fmt.Errorf("construct Windows product pair canonicalize transaction: %w", err)
@@ -52,4 +53,41 @@ func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) error
 	}
 	fmt.Fprintf(w, "✓ mcphub product pair canonicalized at %s\n", filepath.Dir(cliTarget))
 	return nil
+}
+
+func stageWindowsProductCandidate(source, target string) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", err
+	}
+	in, err := os.Open(source)
+	if err != nil {
+		return "", err
+	}
+	defer in.Close()
+	out, err := os.CreateTemp(filepath.Dir(target), filepath.Base(target)+".*.stage")
+	if err != nil {
+		return "", err
+	}
+	path := out.Name()
+	ok := false
+	defer func() {
+		_ = out.Close()
+		if !ok {
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := io.Copy(out, in); err != nil {
+		return "", err
+	}
+	if err := out.Sync(); err != nil {
+		return "", err
+	}
+	if err := out.Chmod(0o755); err != nil {
+		return "", err
+	}
+	if err := out.Close(); err != nil {
+		return "", err
+	}
+	ok = true
+	return path, nil
 }

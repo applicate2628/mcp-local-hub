@@ -7,9 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"mcp-local-hub/internal/binaryadmission"
 )
 
 func TestRunRequiresExplicitArtifactRole(t *testing.T) {
+	original := admitWindowsRoleFn
+	admitWindowsRoleFn = func(artifact binaryadmission.WindowsArtifact) (binaryadmission.WindowsArtifact, error) {
+		return artifact, nil
+	}
+	t.Cleanup(func() { admitWindowsRoleFn = original })
 	cli := writePEFixture(t, 3)
 	windowless := writePEFixture(t, 2)
 	for _, tc := range []struct {

@@ -144,8 +144,8 @@ func assertRejectedWithoutDestinationMutation(t *testing.T, mutate func(src, dst
 	}
 }
 
-func TestWindowsPEAdmissionSetup(t *testing.T) {
-	assertRejectedWithoutDestinationMutation(t, copyExe)
+func TestWindowsPEAdmissionHistoricalSingleImageCopy(t *testing.T) {
+	assertRejectedWithoutDestinationMutation(t, copySingleBinaryPlatformArtifact)
 }
 
 func TestWindowsPEAdmissionCanonicalize(t *testing.T) {

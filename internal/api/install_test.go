@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -708,6 +709,31 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 	}
 	if !sawWeekly {
 		t.Error("weekly-refresh task missing in full install")
+	}
+}
+
+func TestBuildPlanWindowsSchedulerUsesWindowlessEntrypointAndIntentKeepsCUI(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows product-pair entrypoint contract")
+	}
+	original := testCanonicalMcphubPathOverride
+	canonical := filepath.Join(t.TempDir(), "mcphub.exe")
+	testCanonicalMcphubPathOverride = canonical
+	t.Cleanup(func() { testCanonicalMcphubPathOverride = original })
+	plan, err := BuildPlanWithOpts(genericMultiDaemonManifest(), BuildPlanOpts{GUIPort: 9125})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTask := scheduler.WindowsOwnedEntrypointPath(canonical)
+	for _, task := range plan.SchedulerTasks {
+		if task.Command != wantTask {
+			t.Fatalf("scheduled task %q command=%q want windowless %q", task.Name, task.Command, wantTask)
+		}
+	}
+	for _, intent := range plan.SupervisorIntent {
+		if intent.Command != canonical {
+			t.Fatalf("supervisor intent %q command=%q want CUI %q", intent.Name, intent.Command, canonical)
+		}
 	}
 }
 

@@ -89,13 +89,9 @@ func canonicalizeBinaryOnly(w io.Writer) error {
 
 // canonicalizeBinaryToTarget is the pure core of canonicalizeBinaryOnly,
 // parameterized on src/target so it is directly unit-testable without
-// depending on os.Executable(). It applies two no-op guards before copying:
-//
-//  1. self-copy guard — src IS the canonical target (mirrors
-//     bootstrapCopyOnly's samePath short-circuit); and
-//  2. content guard — the canonical binary is already byte-identical to src,
-//     so a repeated `npm install` of the SAME version does not churn a
-//     rename-aside `.old-<ts>` on every reinstall.
+// depending on os.Executable(). Windows delegates identity, idempotence,
+// exact-owned tasks, receipt, and event reconciliation to the sole product-pair
+// owner; non-Windows keeps the established single-binary guards.
 func canonicalizeBinaryToTarget(w io.Writer, src, target string) error {
 	return canonicalizeProductToTarget(w, src, target)
 }
@@ -138,7 +134,7 @@ func canonicalizeReplace(w io.Writer, src, target string) error {
 
 	if runtime.GOOS == "windows" && targetExists {
 		staged := target + ".new"
-		if err := copyExe(src, staged); err != nil {
+		if err := copySingleBinaryPlatformArtifact(src, staged); err != nil {
 			return fmt.Errorf("stage fresh binary at %s: %w", staged, err)
 		}
 		if err := api.RenameAsideReplace(target, staged); err != nil {
@@ -152,7 +148,7 @@ func canonicalizeReplace(w io.Writer, src, target string) error {
 		return nil
 	}
 
-	if err := copyExe(src, target); err != nil {
+	if err := copySingleBinaryPlatformArtifact(src, target); err != nil {
 		return err
 	}
 	fmt.Fprintf(w, "✓ mcphub canonicalized at %s\n", target)
