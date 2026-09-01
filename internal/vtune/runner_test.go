@@ -1,13 +1,29 @@
 package vtune
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/oneapi"
 )
+
+func TestRunVTunePhase_ContainedCommandStarts(t *testing.T) {
+	if os.Getenv("VTUNE_PHASE_HELPER") == "1" {
+		os.Exit(0)
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := append(os.Environ(), "VTUNE_PHASE_HELPER=1")
+	if err := runVTunePhase(context.Background(), exe, []string{"-test.run=TestRunVTunePhase_ContainedCommandStarts"}, "", env, newCappedBuffer(vtuneOutputCap)); err != nil {
+		t.Fatalf("runVTunePhase must start a pristine contained command: %v", err)
+	}
+}
 
 // TestBuildCollectArgs asserts the collect-phase flag wiring without spawning
 // a process: -collect <analysis>, -r <resultdir>, the "--" separator, then the
@@ -53,6 +69,14 @@ func TestBuildCollectArgs(t *testing.T) {
 				t.Errorf("buildCollectArgs = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestBuildDurableCollectArgs_DelegatesDurationAndFinalization(t *testing.T) {
+	got := buildDurableCollectArgs("hotspots", "result-dir", 240, "target.exe", []string{"--flag"})
+	want := []string{"-collect", "hotspots", "-r", "result-dir", "-duration=240", "-finalization-mode=none", "--", "target.exe", "--flag"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("durable collect args = %#v, want %#v", got, want)
 	}
 }
 

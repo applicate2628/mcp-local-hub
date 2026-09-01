@@ -40,19 +40,30 @@ type profileResult struct {
 	// ResultDir is the retained per-run VTune result dir, populated ONLY when
 	// the caller passed keep_result=true; feed it back to vtune_report to
 	// re-report without re-profiling. Empty (and omitted) on a default run.
-	ResultDir    string    `json:"result_dir,omitempty"`
-	CommandLine  string    `json:"command_line,omitempty"`
-	Stderr       string    `json:"stderr,omitempty"`
-	DurationMS   int64     `json:"duration_ms"`
-	TimedOut     bool      `json:"timed_out"`
-	Truncated    bool      `json:"truncated"`
+	ResultDir   string `json:"result_dir,omitempty"`
+	CommandLine string `json:"command_line,omitempty"`
+	Stderr      string `json:"stderr,omitempty"`
+	DurationMS  int64  `json:"duration_ms"`
+	TimedOut    bool   `json:"timed_out"`
+	Truncated   bool   `json:"truncated"`
 	// Error carries the cause when the run could not produce findings (exe not
 	// found, invalid analysis type, launch failure, panic, missing report).
 	// Empty on a successful parse.
 	Error string `json:"error,omitempty"`
 	// VTunePath is the resolved vtune.exe path used for the run, so a failed
 	// launch is traceable.
-	VTunePath string `json:"vtune_path,omitempty"`
+	VTunePath          string         `json:"vtune_path,omitempty"`
+	SchemaVersion      string         `json:"schema_version,omitempty"`
+	RunID              string         `json:"run_id,omitempty"`
+	State              string         `json:"state,omitempty"`
+	Phase              string         `json:"phase,omitempty"`
+	RequestDisposition string         `json:"request_disposition,omitempty"`
+	FailureID          string         `json:"failure_id,omitempty"`
+	Reportable         bool           `json:"reportable,omitempty"`
+	StopReason         string         `json:"stop_reason,omitempty"`
+	PhaseExitCodes     map[string]int `json:"phase_exit_codes,omitempty"`
+	ReceiptSHA256      string         `json:"receipt_sha256,omitempty"`
+	Quarantined        bool           `json:"quarantined,omitempty"`
 }
 
 // profileTool is the vtune_profile handler. It resolves vtune.exe via the
@@ -75,15 +86,41 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 	}()
 
 	var args struct {
-		Exe          string   `json:"exe"`
-		Args         []string `json:"args"`
-		Cwd          string   `json:"cwd"`
-		AnalysisType string   `json:"analysis_type"`
-		KeepResult   bool     `json:"keep_result"`
-		TimeoutSec   int      `json:"timeout_sec"`
+		Exe            string   `json:"exe"`
+		Args           []string `json:"args"`
+		Cwd            string   `json:"cwd"`
+		AnalysisType   string   `json:"analysis_type"`
+		KeepResult     bool     `json:"keep_result"`
+		TimeoutSec     int      `json:"timeout_sec"`
+		Action         string   `json:"action"`
+		RunID          string   `json:"run_id"`
+		IdempotencyKey string   `json:"idempotency_key"`
+		OperationID    string   `json:"operation_id"`
+		Stop           bool     `json:"stop"`
+		WaitSec        int      `json:"wait_sec"`
 	}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
 		return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	action := strings.TrimSpace(args.Action)
+	if action == "" {
+		action = "run"
+	}
+	if (action == "status" || action == "stop") && vs.owner != nil {
+		if action == "status" {
+			run, ok := vs.owner.Status(args.RunID)
+			if !ok {
+				return structuredErrResult(profileResult{ExitCode: -1, FailureID: failureRunNotFound, Error: failureRunNotFound}), nil
+			}
+			return structuredErrResult(profileResultFromRun(run)), nil
+		}
+		run, disposition, stopErr := vs.owner.Stop(args.RunID, args.OperationID, args.Stop)
+		if stopErr != nil {
+			return structuredErrResult(profileResult{ExitCode: -1, FailureID: failureIDFor(stopErr), Error: stopErr.Error()}), nil
+		}
+		res := profileResultFromRun(run)
+		res.RequestDisposition = disposition
+		return structuredErrResult(res), nil
 	}
 	if strings.TrimSpace(args.Exe) == "" {
 		return errResult("missing required parameter: exe (path to the target .exe)"), nil
@@ -117,11 +154,33 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 			Error:        err.Error(),
 		}), nil
 	}
-
+	// Durable actions intentionally detach from the MCP caller. The existing
+	// no-action path below remains the short synchronous compatibility surface.
 	timeoutSec := args.TimeoutSec
 	if timeoutSec <= 0 {
 		timeoutSec = defaultTimeoutSec
 	}
+	if action != "run" {
+		if vs.owner == nil {
+			return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, FailureID: failureContainmentUnavailable, Error: "vtune durable run owner unavailable"}), nil
+		}
+		switch action {
+		case "start":
+			run, disposition, startErr := vs.owner.Start(vtuneRunRequest{Target: args.Exe, Args: args.Args, Cwd: args.Cwd, AnalysisType: analysis, TimeoutSec: timeoutSec, KeepResult: args.KeepResult, IdempotencyKey: args.IdempotencyKey, VTunePath: exePath})
+			if startErr != nil {
+				return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, FailureID: failureIDFor(startErr), Error: startErr.Error()}), nil
+			}
+			res := profileResultFromRun(run)
+			res.RequestDisposition = disposition
+			return structuredErrResult(res), nil
+		default:
+			return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, Error: "unknown action: must be one of run, start, status, stop"}), nil
+		}
+	}
+	if deadline, hasDeadline := ctx.Deadline(); hasDeadline && time.Until(deadline) < time.Duration(timeoutSec+30)*time.Second {
+		return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, FailureID: failureCallerDeadlineTooShort, Error: "caller deadline is too short for synchronous VTune run; use action=start"}), nil
+	}
+
 	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
@@ -296,9 +355,44 @@ func (vs *VTuneServer) reportTool(ctx context.Context, req *mcp.CallToolRequest)
 		ResultDir    string `json:"result_dir"`
 		AnalysisType string `json:"analysis_type"`
 		TimeoutSec   int    `json:"timeout_sec"`
+		RunID        string `json:"run_id"`
+		WaitSec      int    `json:"wait_sec"`
 	}
 	if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
 		return errResult(fmt.Sprintf("invalid arguments: %v", err)), nil
+	}
+	if strings.TrimSpace(args.RunID) != "" {
+		if vs.owner == nil {
+			return structuredErrResult(profileResult{ExitCode: -1, FailureID: failureContainmentUnavailable, Error: "vtune durable run owner unavailable"}), nil
+		}
+		wait := args.WaitSec
+		if wait < 0 {
+			wait = 0
+		}
+		if wait > 30 {
+			wait = 30
+		}
+		until := time.Now().Add(time.Duration(wait) * time.Second)
+		for {
+			run, ok := vs.owner.Status(args.RunID)
+			if !ok {
+				return structuredErrResult(profileResult{ExitCode: -1, FailureID: failureRunNotFound, Error: failureRunNotFound}), nil
+			}
+			if run.Terminal() || wait == 0 || time.Now().After(until) {
+				if run.Terminal() && !run.Reportable && run.FailureID == "" {
+					run.FailureID = failureResultNonReportable
+					if run.ExitCode == 0 {
+						run.ExitCode = -1
+					}
+				}
+				return structuredErrResult(profileResultFromRun(run)), nil
+			}
+			select {
+			case <-ctx.Done():
+				return structuredErrResult(profileResultFromRun(run)), nil
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
 	}
 	if strings.TrimSpace(args.ResultDir) == "" {
 		return errResult("missing required parameter: result_dir (path to an existing VTune result dir)"), nil
@@ -398,6 +492,9 @@ func (vs *VTuneServer) reportTool(ctx context.Context, req *mcp.CallToolRequest)
 	// empty-looking success.
 	if out.ReportPath == "" && strings.TrimSpace(out.Summary) == "" {
 		res.Error = "vtune produced no report from result_dir (the result dir may be incomplete or from a different vtune version — check stderr / command_line)"
+		if res.ExitCode == 0 {
+			res.ExitCode = -1
+		}
 	}
 
 	body, err := json.Marshal(res)
@@ -441,6 +538,41 @@ func structuredErrResult(res profileResult) *mcp.CallToolResult {
 	}
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(body)}},
+	}
+}
+
+func profileResultFromRun(run vtuneRunRecord) profileResult {
+	res := profileResult{
+		ExitCode: run.ExitCode, AnalysisType: run.Request.AnalysisType,
+		Error: run.Error, VTunePath: run.Request.VTunePath, SchemaVersion: run.SchemaVersion,
+		RunID: run.RunID, State: run.State, Phase: run.Phase, RequestDisposition: run.RequestDisposition,
+		FailureID: run.FailureID, Reportable: run.Reportable, StopReason: run.StopReason,
+		PhaseExitCodes: run.PhaseExitCodes, ReceiptSHA256: run.ReceiptSHA256, Quarantined: run.Quarantined,
+	}
+	if run.Reportable && run.ReceiptSHA256 != "" && run.Request.KeepResult {
+		res.ResultDir = run.Request.ResultDir
+	}
+	if run.Output != nil {
+		res.Summary, res.ReportPath, res.CommandLine, res.Stderr = run.Output.Summary, run.Output.ReportPath, run.Output.CommandLine, run.Output.Stderr
+		res.TopHotspots = parseReport(run.Output.ReportCSV).Hotspots
+		if len(res.TopHotspots) > maxHotspots {
+			res.TopHotspots = res.TopHotspots[:maxHotspots]
+		}
+	}
+	if res.TopHotspots == nil {
+		res.TopHotspots = []Hotspot{}
+	}
+	return res
+}
+
+func failureIDFor(err error) string {
+	switch {
+	case errors.Is(err, errVTuneRunNotFound):
+		return failureRunNotFound
+	case errors.Is(err, errVTuneIdempotencyConflict):
+		return failureIdempotencyConflict
+	default:
+		return failureResultNonReportable
 	}
 }
 

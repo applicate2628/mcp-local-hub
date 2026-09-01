@@ -153,6 +153,41 @@ func TestProfileTool_DefaultsAnalysisHotspots(t *testing.T) {
 	}
 }
 
+func TestProfileTool_StartReturnsDurableRunAndStatusDoesNotNeedCallerContext(t *testing.T) {
+	d := &scriptedVTuneDriver{collectStarted: make(chan struct{}), releaseCollect: make(chan struct{})}
+	o := newScriptedOwner(t, d)
+	vs := &VTuneServer{
+		findExe: func() (string, error) { return `C:\fake\vtune.exe`, nil },
+		owner:   o,
+	}
+	res, err := vs.profileTool(t.Context(), newRequest(t, map[string]any{
+		"action": "start", "exe": `C:\proj\t.exe`, "analysis_type": "hotspots", "timeout_sec": 60, "idempotency_key": "caller-free",
+	}))
+	if err != nil || res.IsError {
+		t.Fatalf("start err=%v body=%s", err, contentText(t, res))
+	}
+	var started profileResult
+	if err := json.Unmarshal([]byte(contentText(t, res)), &started); err != nil {
+		t.Fatal(err)
+	}
+	if started.RunID == "" || (started.State != vtuneRunPrepared && started.State != vtuneRunCollecting) {
+		t.Fatalf("start=%+v", started)
+	}
+	<-d.collectStarted
+	status, err := vs.profileTool(context.Background(), newRequest(t, map[string]any{"action": "status", "run_id": started.RunID}))
+	if err != nil || status.IsError {
+		t.Fatalf("status err=%v", err)
+	}
+	var snapshot profileResult
+	if err := json.Unmarshal([]byte(contentText(t, status)), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.RunID != started.RunID || snapshot.State == "" {
+		t.Fatalf("status=%+v", snapshot)
+	}
+	close(d.releaseCollect)
+}
+
 // TestProfileTool_RejectsUnknownAnalysisType verifies the allowlist guard: an
 // unknown analysis_type is rejected with a STRUCTURED error naming the
 // accepted set, WITHOUT ever resolving the exe or invoking the runner.

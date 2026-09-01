@@ -17,9 +17,11 @@ package vtune
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcp-local-hub/internal/hubtemp"
 	"mcp-local-hub/internal/unsafegate"
 )
 
@@ -59,6 +61,7 @@ type VTuneServer struct {
 	report       reportFunc
 	probeVersion versionProbeFunc
 	listAnalyses listAnalysesFunc
+	owner        *vtuneRunOwnerV1
 }
 
 // Run wires up a fresh VTuneServer with the production seams, registers the
@@ -66,12 +69,26 @@ type VTuneServer struct {
 // cancelled or the transport closes. It is the single source of truth for
 // every entry point; keep runtime behavior here.
 func Run(ctx context.Context) error {
+	runRoot, ok := hubtemp.Dir("vtune")
+	if !ok {
+		return fmt.Errorf("derive vtune run root")
+	}
+	owner, err := newVTuneRunOwnerV1(runRoot, newDefaultVTunePhaseDriver())
+	if err != nil {
+		return fmt.Errorf("initialize vtune run owner: %w", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_ = owner.Close(shutdownCtx)
+	}()
 	vs := &VTuneServer{
 		findExe:      findVTune,
 		run:          defaultRun,
 		report:       defaultReport,
 		probeVersion: defaultVersionProbe,
 		listAnalyses: defaultListAnalyses,
+		owner:        owner,
 	}
 
 	vs.server = mcp.NewServer(&mcp.Implementation{
@@ -198,8 +215,18 @@ func registerProfileTools(vs *VTuneServer) {
 					"type":        "integer",
 					"description": "Hard wall-clock limit in seconds for the collect+report run. Default 600 (10 min).",
 				},
+				"action": map[string]any{
+					"type":        "string",
+					"description": "Optional lifecycle action: run (default synchronous compatibility mode), start (durable async), status, or stop. Long work must use start because it survives the MCP call.",
+				},
+				"run_id":          map[string]any{"type": "string", "description": "Durable run id returned by action=start; required for status and stop."},
+				"idempotency_key": map[string]any{"type": "string", "description": "Optional key for action=start. Repeating identical input returns the same run; changed input is rejected."},
+				"operation_id":    map[string]any{"type": "string", "description": "Required unique operation id for action=stop; repeating it is idempotent."},
+				"stop":            map[string]any{"type": "boolean", "description": "Must be true for action=stop; omitted/false never stops a collection."},
+				"wait_sec":        map[string]any{"type": "integer", "description": "Reserved bounded status/report wait budget in seconds."},
 			},
-			"required": []string{"exe"},
+			// exe is validated by the handler for run/start. status and stop use
+			// only run_id, so JSON Schema cannot require exe unconditionally.
 		},
 	}, vs.profileTool)
 
@@ -228,8 +255,14 @@ func registerProfileTools(vs *VTuneServer) {
 					"type":        "integer",
 					"description": "Hard wall-clock limit in seconds for the report run. Default 600 (10 min).",
 				},
+				"run_id": map[string]any{
+					"type":        "string",
+					"description": "Durable run id returned by vtune_profile action=start. When supplied, reads the finalized receipt; pending runs return a structured snapshot without invoking VTune.",
+				},
+				"wait_sec": map[string]any{"type": "integer", "description": "Optional bounded wait for run_id settlement before returning its snapshot."},
 			},
-			"required": []string{"result_dir"},
+			// result_dir is required only for raw re-reporting; durable run_id is
+			// the alternative identity and is validated by the handler.
 		},
 	}, vs.reportTool)
 }

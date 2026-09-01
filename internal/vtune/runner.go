@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -350,18 +351,23 @@ func defaultReport(ctx context.Context, exePath, resultDir, analysis string) (*r
 // icx-built / MKL-linked target loads its DLLs instead of dying with
 // 0xC0000135 (DLL not found) before profiling.
 func runVTunePhase(ctx context.Context, exePath string, args []string, cwd string, env []string, stderr *cappedBuffer) error {
-	cmd := exec.CommandContext(ctx, exePath, args...)
+	// RunContainedStream owns cancellation, standard streams, wait/reap, and
+	// descendant containment.  It deliberately accepts only a pristine Cmd;
+	// CommandContext (and preconfigured Cancel/WaitDelay/Stderr) would make its
+	// validation reject the command before the VTune child is started.
+	cmd := exec.Command(exePath, args...)
 	process.NoConsole(cmd) // suppress console flash on windowsgui parent
-	cmd.WaitDelay = waitDelayAfterKill
 	cmd.Env = env
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
-	cmd.Stderr = stderr
-	cmd.Stdout = nil
-	// RunUnderKillJob reaps the profiled target's subtree on a timeout kill so a
-	// grandchild can't orphan + hold its pipe/port; WaitDelay bounds the Wait.
-	return process.RunUnderKillJob(cmd)
+	// RunContainedStream fails before target start when containment cannot be
+	// established, and reaps descendants on cancellation. A durable lifecycle
+	// must not profile outside a proven containment boundary.
+	return process.RunContainedStream(ctx, cmd, process.ContainedStreamOptions{CleanupTimeout: waitDelayAfterKill, Stderr: stderr}, func(stdout io.Reader) error {
+		_, err := io.Copy(io.Discard, stdout)
+		return err
+	})
 }
 
 // vtuneEnv returns the environment VTune (and the profiled target) runs
@@ -400,6 +406,16 @@ func vtuneEnv() []string {
 // target argument that looks like a VTune flag is not consumed by VTune.
 func buildCollectArgs(analysis, resultDir, target string, args []string) []string {
 	cmdArgs := []string{"-collect", analysis, "-r", resultDir, "--", target}
+	cmdArgs = append(cmdArgs, args...)
+	return cmdArgs
+}
+
+// buildDurableCollectArgs is the durable-run variant. VTune owns the normal
+// duration boundary and leaves raw data unfinalized until the owner explicitly
+// finalizes it after native stop/settlement; callers never terminate this phase
+// merely because their MCP request ended.
+func buildDurableCollectArgs(analysis, resultDir string, durationSec int, target string, args []string) []string {
+	cmdArgs := []string{"-collect", analysis, "-r", resultDir, fmt.Sprintf("-duration=%d", durationSec), "-finalization-mode=none", "--", target}
 	cmdArgs = append(cmdArgs, args...)
 	return cmdArgs
 }
