@@ -160,6 +160,9 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 	if timeoutSec <= 0 {
 		timeoutSec = defaultTimeoutSec
 	}
+	if action == "start" && timeoutSec > maxDurableTimeoutSec {
+		return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, FailureID: failureTimeoutOutOfRange, Error: fmt.Sprintf("timeout_sec must not exceed %d for durable VTune runs", maxDurableTimeoutSec)}), nil
+	}
 	if action != "run" {
 		if vs.owner == nil {
 			return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, FailureID: failureContainmentUnavailable, Error: "vtune durable run owner unavailable"}), nil
@@ -571,6 +574,10 @@ func failureIDFor(err error) string {
 		return failureRunNotFound
 	case errors.Is(err, errVTuneIdempotencyConflict):
 		return failureIdempotencyConflict
+	case errors.Is(err, errVTuneAdmissionLimited):
+		return failureAdmissionLimited
+	case errors.Is(err, errVTuneTimeoutOutOfRange):
+		return failureTimeoutOutOfRange
 	default:
 		return failureResultNonReportable
 	}

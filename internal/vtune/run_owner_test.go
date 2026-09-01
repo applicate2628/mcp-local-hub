@@ -94,6 +94,63 @@ func newScriptedOwner(t *testing.T, d *scriptedVTuneDriver) *vtuneRunOwnerV1 {
 	return o
 }
 
+func TestVTuneRunOwner_BoundsDurableWork(t *testing.T) {
+	d := &closeDeadlineDriver{collectStarted: make(chan struct{}, maxDurableVTuneRuns), releaseCollect: make(chan struct{})}
+	o, err := newVTuneRunOwnerV1(t.TempDir(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		close(d.releaseCollect)
+		_ = o.Close(context.Background())
+	})
+	for i := 0; i < maxDurableVTuneRuns; i++ {
+		if _, _, err := o.Start(vtuneRunRequest{Target: "target.exe", AnalysisType: "hotspots", TimeoutSec: 60}); err != nil {
+			t.Fatalf("start %d: %v", i, err)
+		}
+		<-d.collectStarted
+	}
+	if _, _, err := o.Start(vtuneRunRequest{Target: "extra.exe", AnalysisType: "hotspots", TimeoutSec: 60}); !errors.Is(err, errVTuneAdmissionLimited) {
+		t.Fatalf("extra start error = %v, want admission limit", err)
+	}
+	if _, _, err := o.Start(vtuneRunRequest{Target: "long.exe", AnalysisType: "hotspots", TimeoutSec: maxDurableTimeoutSec + 1}); !errors.Is(err, errVTuneTimeoutOutOfRange) {
+		t.Fatalf("long start error = %v, want timeout range error", err)
+	}
+}
+
+func TestVTuneRunOwner_DurableCollectHasDeadline(t *testing.T) {
+	d := &deadlineCaptureDriver{deadline: make(chan time.Time, 1)}
+	o, err := newVTuneRunOwnerV1(t.TempDir(), d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = o.Close(context.Background()) })
+	if _, _, err := o.Start(vtuneRunRequest{Target: "target.exe", AnalysisType: "hotspots", TimeoutSec: 1}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := <-d.deadline
+	if remaining := time.Until(deadline); remaining <= 0 || remaining > time.Second {
+		t.Fatalf("collect deadline remaining = %v", remaining)
+	}
+}
+
+type deadlineCaptureDriver struct{ deadline chan time.Time }
+
+func (d *deadlineCaptureDriver) collect(ctx context.Context, _ vtuneRunRequest) (*runOutput, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return nil, errors.New("collect context has no deadline")
+	}
+	d.deadline <- deadline
+	return nil, errors.New("test complete")
+}
+func (*deadlineCaptureDriver) stop(context.Context, vtuneRunRequest) error     { return nil }
+func (*deadlineCaptureDriver) finalize(context.Context, vtuneRunRequest) error { return nil }
+func (*deadlineCaptureDriver) report(context.Context, vtuneRunRequest) (*runOutput, error) {
+	return nil, nil
+}
+func (*deadlineCaptureDriver) forceStop(context.Context, vtuneRunRequest) error { return nil }
+
 func TestVTuneRunOwner_StartStopFinalizesAndPublishesReceipt(t *testing.T) {
 	d := &scriptedVTuneDriver{collectStarted: make(chan struct{}), releaseCollect: make(chan struct{}), releaseOnStop: true}
 	o := newScriptedOwner(t, d)

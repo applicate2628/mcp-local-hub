@@ -27,6 +27,8 @@ const vtuneRunSchemaV1 = "vtune-run-v1"
 const (
 	vtunePhaseTimeout     = 30 * time.Second
 	vtuneArtifactSweepTTL = 24 * time.Hour
+	maxDurableVTuneRuns   = 2
+	maxDurableTimeoutSec  = 3600
 )
 
 var vtuneGenerationSnapshotName = regexp.MustCompile(`^[0-9]{8}\.json$`)
@@ -58,11 +60,15 @@ const (
 	failureResultNonReportable    = "RESULT_NONREPORTABLE"
 	failureCleanupFailed          = "CLEANUP_FAILED"
 	failureOwnerRestarted         = "OWNER_RESTARTED"
+	failureAdmissionLimited       = "ADMISSION_LIMITED"
+	failureTimeoutOutOfRange      = "TIMEOUT_OUT_OF_RANGE"
 )
 
 var (
 	errVTuneIdempotencyConflict = errors.New(failureIdempotencyConflict)
 	errVTuneRunNotFound         = errors.New(failureRunNotFound)
+	errVTuneAdmissionLimited    = errors.New(failureAdmissionLimited)
+	errVTuneTimeoutOutOfRange   = errors.New(failureTimeoutOutOfRange)
 )
 
 // vtuneRunRequest is the durable, caller-independent collection request. It
@@ -193,6 +199,9 @@ func (o *vtuneRunOwnerV1) Start(req vtuneRunRequest) (vtuneRunRecord, string, er
 	if o.closed {
 		return vtuneRunRecord{}, "", fmt.Errorf("VTune run owner is closed")
 	}
+	if req.TimeoutSec <= 0 || req.TimeoutSec > maxDurableTimeoutSec {
+		return vtuneRunRecord{}, "", fmt.Errorf("%w: timeout_sec must be between 1 and %d", errVTuneTimeoutOutOfRange, maxDurableTimeoutSec)
+	}
 	fp := requestFingerprint(req)
 	if req.IdempotencyKey != "" {
 		if id, ok := o.keys[req.IdempotencyKey]; ok {
@@ -202,6 +211,15 @@ func (o *vtuneRunOwnerV1) Start(req vtuneRunRequest) (vtuneRunRecord, string, er
 			}
 			return existing, "replayed", nil
 		}
+	}
+	active := 0
+	for _, run := range o.runs {
+		if !run.Terminal() {
+			active++
+		}
+	}
+	if active >= maxDurableVTuneRuns {
+		return vtuneRunRecord{}, "", fmt.Errorf("%w: at most %d durable VTune runs may be active", errVTuneAdmissionLimited, maxDurableVTuneRuns)
 	}
 	if req.RunID == "" {
 		req.RunID = newVTuneRunID()
@@ -219,7 +237,7 @@ func (o *vtuneRunOwnerV1) Start(req vtuneRunRequest) (vtuneRunRecord, string, er
 	if req.IdempotencyKey != "" {
 		o.keys[req.IdempotencyKey] = record.RunID
 	}
-	collectCtx, cancelCollect := context.WithCancel(context.Background())
+	collectCtx, cancelCollect := context.WithTimeout(context.Background(), time.Duration(req.TimeoutSec)*time.Second)
 	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
 	o.collectCancels[record.RunID] = cancelCollect
 	o.shutdownCancels[record.RunID] = cancelShutdown
