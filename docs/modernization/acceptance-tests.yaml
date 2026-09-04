@@ -1,0 +1,87 @@
+schema_version: 1
+metadata:
+  audit_register: audits/2026-08-12-audit-register.md
+  source_audit_sha256: 5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4
+  count: 20
+  note: Формулировки нормативны в этом файле; audit_line адресует полный неизменяемый аудит, идентифицированный SHA-256.
+acceptance_tests:
+- id: AT-001
+  test: dependency graph
+  expected: отсутствуют запрещённые направления импортов
+  audit_line: 3375
+- id: AT-002
+  test: composition root scan
+  expected: production constructors вызываются только из allowlist `internal/app`
+  audit_line: 3376
+- id: AT-003
+  test: CLI ownership
+  expected: '`internal/cli` не владеет listeners/process state machines'
+  audit_line: 3377
+- id: AT-004
+  test: API construction
+  expected: нет per-request `api.NewAPI()` в GUI/HTTP handlers
+  audit_line: 3378
+- id: AT-005
+  test: mutable globals scan
+  expected: нет новых изменяемых package globals
+  audit_line: 3379
+- id: AT-006
+  test: production test hooks
+  expected: нет `Set*ForTest`/`Restore*ForTest` в non-test API
+  audit_line: 3380
+- id: AT-007
+  test: goroutine ownership
+  expected: каждый worker имеет cancel+join test
+  audit_line: 3381
+- id: AT-008
+  test: file budget
+  expected: новые/изменённые oversized files требуют valid waiver
+  audit_line: 3382
+- id: AT-009
+  test: comment policy
+  expected: новые PR-round history comments отсутствуют вне ADR
+  audit_line: 3383
+- id: AT-010
+  test: embedded docs
+  expected: большие Markdown bodies отсутствуют в `.go` без waiver
+  audit_line: 3384
+- id: AT-011
+  test: one invariant/owner
+  expected: старый и новый owner не активны одновременно после migration gate
+  audit_line: 3385
+- id: AT-012
+  test: supervisor characterization
+  expected: observable lifecycle unchanged после extraction
+  audit_line: 3386
+- id: AT-013
+  test: install planner purity
+  expected: planner не выполняет filesystem/network/process calls
+  audit_line: 3387
+- id: AT-014
+  test: InstallPlan equivalence
+  expected: dry-run и executor используют один serialized plan
+  audit_line: 3388
+- id: AT-015
+  test: registry view contract
+  expected: Serena/LSP проходят общий reload/race suite
+  audit_line: 3389
+- id: AT-016
+  test: childprocess contract
+  expected: stdio/native HTTP проходят общий spawn/exit/cleanup suite
+  audit_line: 3390
+- id: AT-017
+  test: LazyProxy transitions
+  expected: все State×Event transitions покрыты или явно rejected
+  audit_line: 3391
+- id: AT-018
+  test: timeout policy
+  expected: invalid ordering отклоняется одним constructor
+  audit_line: 3392
+- id: AT-019
+  test: test naming/layout
+  expected: новые tests привязаны к contract owner, не к номеру PR
+  audit_line: 3393
+- id: AT-020
+  test: architecture report
+  expected: локальный `.reports/architecture-report.md` содержит zero unowned violations
+  audit_line: 3394

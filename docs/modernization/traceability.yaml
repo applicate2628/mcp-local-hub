@@ -1,0 +1,331 @@
+schema_version: 5
+metadata:
+  date: '2026-08-27'
+  audit_sha: c0527c1232180dd37cd92da5a328bdcdadae1969
+  requirements_path: requirements.yaml
+  acceptance_tests_path: acceptance-tests.yaml
+  master_snapshot: 83b49f4d616e97613e70070bfbc62e7958c01fc4
+  master_delta_path: deltas/2026-08-27-master-83b49f4.md
+  a1_pr: 602
+  a1_head: 0235deb95af170598d6572e9af5f35ab5532bc9d
+  docs_pr: 605
+  live_status: github
+  counts:
+    audit_findings: 36
+    post_audit_deltas: 7
+    requirements: 236
+    acceptance_tests: 20
+    decisions: 17
+    work_packages: 17
+    architecture_prs: 34
+  adr_count: 6
+  source_audit_sha256: 5325de5e644dac96149ac94143c3e47d0895a678fddd031225f7413181f187b4
+  audit_register:
+    path: audits/2026-08-12-audit-register.md
+    sha256: 7b060ef8874b4716340f5e3f80141fccdf5f1ac620b11cb8bee33790cf760bee
+  requirement_ownership_rule: Every requirement ID occurs in exactly one requirement_groups entry; that entry's wp list is its exact work-package ownership.
+  acceptance_ownership_rule: Every AT-* has an explicit non-empty wp list in acceptance_tests.
+  decision_gate_rule: A work package cannot start until every ID in decision_gates is accepted or explicitly superseded by a replacement decision.
+  lane_decision_gate_rule: A named lane cannot start until every matching lane_decision_gates entry is accepted or explicitly superseded; lane gates do not block unrelated earlier work in the same package.
+  delta_gate_rule: Every DELTA-* is structured with work-package ownership and required checks; prose-only delta gates are invalid.
+  dependency_rule: A PR is ready only when all deps are merged and all wp_gates have reached their exit criteria; implicit inheritance is forbidden.
+source_of_truth:
+  audit_findings: metadata.audit_register.path
+  requirement_formulations: metadata.requirements_path
+  acceptance_test_formulations: metadata.acceptance_tests_path
+  post_audit_deltas: deltas
+  decisions: decisions
+  current_code: master or exact-head open PR identified in architecture_prs
+  live_status: GitHub PR/issues
+  architecture_debt_after_A2: architecture/baseline.yaml and architecture/workers.yaml
+work_packages:
+  WP-00: {title: 'Базовая воспроизводимость и тестовая изоляция', start_after: [], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-002], pr_gates: []}
+  WP-01: {title: 'Единая входная безопасность и framing', start_after: [WP-00], decision_gates: [D-001, D-004, D-009], lane_decision_gates: [], delta_gates: [], pr_gates: []}
+  WP-02: {title: 'Correlation router и cancellation', start_after: [WP-00, WP-11A], decision_gates: [D-008], lane_decision_gates: [], delta_gates: [DELTA-001], pr_gates: []}
+  WP-03: {title: 'Sharing policy и Serena project pool', start_after: [WP-02, WP-11D], decision_gates: [D-003], lane_decision_gates: [], delta_gates: [DELTA-002], pr_gates: []}
+  WP-04: {title: 'Разделение legacy и modern MCP', start_after: [WP-02, WP-11E], decision_gates: [D-002], lane_decision_gates: [], delta_gates: [DELTA-006], pr_gates: []}
+  WP-05: {title: 'Точность capabilities, списков и caching', start_after: [WP-02, WP-04, WP-11E], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-007], pr_gates: []}
+  WP-06: {title: 'Единый audit writer', start_after: [WP-00], decision_gates: [D-010], lane_decision_gates: [], delta_gates: [], pr_gates: []}
+  WP-07: {title: 'Crash-safe adoption/de-adoption', start_after: [WP-06, WP-11D], decision_gates: [D-017], lane_decision_gates: [], delta_gates: [DELTA-002, DELTA-003], pr_gates: []}
+  WP-08: {title: 'Platform lifecycle', start_after: [WP-00, WP-01], decision_gates: [D-006, D-017], lane_decision_gates: [], delta_gates: [DELTA-003, DELTA-004, DELTA-005, DELTA-006], pr_gates: [PR-11C-03]}
+  WP-09: {title: 'Release и supply chain', start_after: [WP-00], decision_gates: [D-007], lane_decision_gates: [{decision: D-006, lane: release-candidate}], delta_gates: [DELTA-002], pr_gates: []}
+  WP-10: {title: 'Документация и управление состоянием проекта', start_after: [WP-09], decision_gates: [D-005], lane_decision_gates: [], delta_gates: [DELTA-002, DELTA-006], pr_gates: []}
+  WP-11A: {title: 'Architecture guardrails и инвентаризация', start_after: [WP-00], decision_gates: [D-011, D-013, D-014], lane_decision_gates: [], delta_gates: [DELTA-002, DELTA-004], pr_gates: []}
+  WP-11B: {title: 'Корень композиции и внедрение зависимостей', start_after: [WP-11A], decision_gates: [D-012, D-016], lane_decision_gates: [], delta_gates: [DELTA-001], pr_gates: [PR-11A-06]}
+  WP-11C: {title: 'Supervisor и child-process extraction', start_after: [WP-11A], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-001, DELTA-004, DELTA-005], pr_gates: [PR-11B-07]}
+  WP-11D: {title: 'Registry view и install architecture', start_after: [WP-11A], decision_gates: [], lane_decision_gates: [], delta_gates: [DELTA-002], pr_gates: [PR-11A-03, PR-11A-06]}
+  WP-11E: {title: 'MCP и LazyProxy decomposition', start_after: [WP-11A], decision_gates: [D-015], lane_decision_gates: [], delta_gates: [DELTA-001, DELTA-006], pr_gates: [PR-11A-04, PR-11A-06]}
+  WP-11F: {title: 'Удаление временных путей и hard enforcement', start_after: [WP-11B, WP-11C, WP-11D, WP-11E, WP-10], decision_gates: [], lane_decision_gates: [], delta_gates: [], pr_gates: []}
+decisions:
+  D-001: {status: proposed, before_wp: [WP-01], trigger: before-start}
+  D-002: {status: proposed, before_wp: [WP-04], trigger: before-start}
+  D-003: {status: proposed, before_wp: [WP-03], trigger: before-start}
+  D-004: {status: proposed, before_wp: [WP-01], trigger: before-start}
+  D-005: {status: proposed, before_wp: [WP-10], trigger: immediate}
+  D-006: {status: proposed, before_wp: [WP-08], before_lanes: [{wp: WP-09, lane: release-candidate}], trigger: before-start-or-lane}
+  D-007: {status: proposed, before_wp: [WP-09], trigger: before-start}
+  D-008: {status: proposed, before_wp: [WP-02], trigger: before-start}
+  D-009: {status: proposed, before_wp: [WP-01], trigger: before-start}
+  D-010: {status: proposed, before_wp: [WP-06], trigger: before-start}
+  D-011: {status: accepted, before_wp: [WP-11A], trigger: satisfied, adr: ADR-0001}
+  D-012: {status: accepted, before_wp: [WP-11B], trigger: satisfied, adr: ADR-0002}
+  D-013: {status: proposed, before_wp: [WP-11A], trigger: before-start}
+  D-014: {status: accepted, before_wp: [WP-11A], trigger: satisfied, adr: ADR-0006}
+  D-015: {status: proposed, before_wp: [WP-11E], trigger: before-start}
+  D-016: {status: accepted, before_wp: [WP-11B], trigger: satisfied, adr: ADR-0002}
+  D-017: {status: proposed, before_wp: [WP-07, WP-08], trigger: DELTA-003}
+deltas:
+  DELTA-001:
+    title: route daemon is a current contract
+    status: current-contract
+    wp: [WP-02, WP-11B, WP-11C, WP-11E]
+    requirements: [ARCH-003, ARCH-006, ARCH-010, ARCH-018]
+    acceptance_tests: [AT-003, AT-007, AT-011, AT-012]
+    revalidation: [PR-11A-03, PR-11A-04, PR-11B-05, PR-11C-02, PR-11E-01]
+    required_checks: [route-read-only-state, route-reload-serialization, route-shutdown-contract]
+  DELTA-002:
+    title: large post-audit release delta
+    status: revalidate-current-master
+    wp: [WP-00, WP-03, WP-07, WP-09, WP-10, WP-11A, WP-11D]
+    requirements: [REL-010, CLIENT-001, CLIENT-002, STATE-001, SUPPLY-006, MAINT-006, ARCH-007, ARCH-012]
+    acceptance_tests: [AT-013, AT-014, AT-015, AT-020]
+    revalidation: [PR-11A-02, PR-11A-03, PR-11D-01, PR-11D-04]
+    required_checks: [exact-master-rescan, post-PR604-characterization, release-descriptor-owner-review]
+  DELTA-003:
+    title: auto-reaper former-signature gap
+    status: design-gap
+    wp: [WP-07, WP-08]
+    decision_gates: [D-017]
+    requirements: [STATE-003, STATE-004, SUP-004]
+    acceptance_tests: [AT-016]
+    revalidation: []
+    required_checks: [persisted-former-signature, ttl-expiry, exact-executable-argv-identity, fail-closed-reaper]
+  DELTA-004:
+    title: cross-language lifecycle inventory
+    status: open-inventory
+    wp: [WP-08, WP-11A, WP-11C]
+    requirements: [SUP-001, SUP-002, ARCH-011, ARCH-018]
+    acceptance_tests: [AT-007, AT-016]
+    revalidation: [PR-11A-05, PR-11A-06, PR-11C-03]
+    required_checks: [python-native-process-owner, cancel-join-deadline, process-tree-containment]
+  DELTA-005:
+    title: oneAPI timeout and durable output gap
+    status: design-gap
+    wp: [WP-08, WP-11C]
+    requirements: [REL-001, REL-006, SUP-002, UX-003]
+    acceptance_tests: [AT-016, AT-018]
+    revalidation: [PR-11C-03]
+    required_checks: [durable-output-owner, timeout-settlement, post-timeout-result-retrieval]
+  DELTA-006:
+    title: protocol-incompatible shipped servers
+    status: open-revalidation
+    wp: [WP-04, WP-08, WP-10, WP-11E]
+    requirements: [MCP-002, COMPAT-001, UX-005, SUP-002]
+    acceptance_tests: [AT-018]
+    revalidation: [PR-11A-04, PR-11E-01]
+    required_checks: [process-running-vs-protocol-ready, initialize-probe, actionable-incompatibility]
+  DELTA-007:
+    title: CST third-order schema gap
+    status: product-backlog
+    wp: [WP-05]
+    requirements: [MCP-011, UX-005]
+    acceptance_tests: []
+    revalidation: []
+    required_checks: [cst-third-order-schema-contract]
+architecture_prs:
+  PR-11A-01: {wp: WP-11A, deps: [], wp_gates: [], state: implemented-in-pr, github_pr: 602, reviewed_head: 0235deb95af170598d6572e9af5f35ab5532bc9d, review_status: pass, merge_status: open}
+  PR-11A-02: {wp: WP-11A, deps: [PR-11A-01], wp_gates: [], state: planned}
+  PR-11A-03: {wp: WP-11A, deps: [PR-11A-02], wp_gates: [], state: planned}
+  PR-11A-04: {wp: WP-11A, deps: [PR-11A-02], wp_gates: [], state: planned}
+  PR-11A-05: {wp: WP-11A, deps: [PR-11A-02], wp_gates: [], state: planned}
+  PR-11A-06: {wp: WP-11A, deps: [PR-11A-03, PR-11A-04, PR-11A-05], wp_gates: [], state: planned}
+  PR-11B-01: {wp: WP-11B, deps: [PR-11A-06], wp_gates: [], state: planned}
+  PR-11B-02: {wp: WP-11B, deps: [PR-11B-01], wp_gates: [], state: planned}
+  PR-11B-03: {wp: WP-11B, deps: [PR-11B-02], wp_gates: [], state: planned}
+  PR-11B-04: {wp: WP-11B, deps: [PR-11B-03], wp_gates: [], state: planned}
+  PR-11B-05: {wp: WP-11B, deps: [PR-11B-04], wp_gates: [], state: planned}
+  PR-11B-06: {wp: WP-11B, deps: [PR-11B-05], wp_gates: [], state: planned}
+  PR-11B-07: {wp: WP-11B, deps: [PR-11B-06], wp_gates: [], state: planned}
+  PR-11B-08: {wp: WP-11B, deps: [PR-11B-07], wp_gates: [], state: planned}
+  PR-11C-01: {wp: WP-11C, deps: [PR-11A-06], wp_gates: [], state: planned}
+  PR-11C-02: {wp: WP-11C, deps: [PR-11C-01, PR-11B-07], wp_gates: [], state: planned}
+  PR-11C-03: {wp: WP-11C, deps: [PR-11C-02], wp_gates: [WP-01], state: planned}
+  PR-11C-04: {wp: WP-11C, deps: [PR-11C-03], wp_gates: [], state: planned}
+  PR-11C-05: {wp: WP-11C, deps: [PR-11C-04], wp_gates: [], state: planned}
+  PR-11D-01: {wp: WP-11D, deps: [PR-11A-06], wp_gates: [], state: planned}
+  PR-11D-02: {wp: WP-11D, deps: [PR-11D-01], wp_gates: [], state: planned}
+  PR-11D-03: {wp: WP-11D, deps: [PR-11D-01], wp_gates: [], state: planned}
+  PR-11D-04: {wp: WP-11D, deps: [PR-11A-03, PR-11A-06], wp_gates: [], state: planned}
+  PR-11D-05: {wp: WP-11D, deps: [PR-11D-04], wp_gates: [], state: planned}
+  PR-11D-06: {wp: WP-11D, deps: [PR-11D-02, PR-11D-03, PR-11D-05], wp_gates: [], state: planned}
+  PR-11E-01: {wp: WP-11E, deps: [PR-11A-04, PR-11A-06], wp_gates: [WP-02], state: planned}
+  PR-11E-02: {wp: WP-11E, deps: [PR-11E-01], wp_gates: [], state: planned}
+  PR-11E-03: {wp: WP-11E, deps: [PR-11A-04, PR-11A-06], wp_gates: [], state: planned}
+  PR-11E-04: {wp: WP-11E, deps: [PR-11E-02, PR-11E-03], wp_gates: [WP-08], state: planned}
+  PR-11E-05: {wp: WP-11E, deps: [PR-11E-04], wp_gates: [WP-10], state: planned}
+  PR-11F-01: {wp: WP-11F, deps: [PR-11B-08, PR-11C-05, PR-11D-06, PR-11E-05], wp_gates: [], state: planned}
+  PR-11F-02: {wp: WP-11F, deps: [PR-11F-01], wp_gates: [], state: planned}
+  PR-11F-03: {wp: WP-11F, deps: [PR-11F-01], wp_gates: [], state: planned}
+  PR-11F-04: {wp: WP-11F, deps: [PR-11F-02, PR-11F-03], wp_gates: [], state: planned}
+findings:
+  R-01: {priority: P0, primary: [WP-01], supporting: [WP-00]}
+  R-02: {priority: P1, primary: [WP-02], supporting: [WP-04]}
+  R-03: {priority: P1, primary: [WP-01], supporting: [WP-08]}
+  R-04: {priority: P1, primary: [WP-02], supporting: [WP-04]}
+  R-05: {priority: P1, primary: [WP-02], supporting: [WP-03, WP-04]}
+  R-06: {priority: P1, primary: [WP-04], supporting: [WP-02]}
+  R-07: {priority: P1, primary: [WP-09], supporting: [WP-10]}
+  R-08: {priority: P1, primary: [WP-09], supporting: [WP-00]}
+  R-09: {priority: P2, primary: [WP-04], supporting: []}
+  R-10: {priority: P2, primary: [WP-08], supporting: [WP-09]}
+  R-11: {priority: P1, primary: [WP-03], supporting: [WP-02]}
+  R-12: {priority: P1, primary: [WP-01], supporting: []}
+  R-13: {priority: P2, primary: [WP-00, WP-09], supporting: [WP-10]}
+  R-14: {priority: P3, primary: [WP-08], supporting: [WP-00]}
+  R-15: {priority: P2, primary: [WP-06], supporting: [WP-07]}
+  R-16: {priority: P3, primary: [WP-07], supporting: [WP-06]}
+  R-17: {priority: P1, primary: [WP-00], supporting: [WP-09]}
+  R-18: {priority: P1, primary: [WP-00], supporting: [WP-08]}
+  R-19: {priority: P2, primary: [WP-01], supporting: [WP-00]}
+  R-20: {priority: P2, primary: [WP-09], supporting: [WP-00]}
+  R-21: {priority: P2, primary: [WP-09], supporting: [WP-10]}
+  R-22: {priority: P2, primary: [WP-10], supporting: [WP-09]}
+  R-23: {priority: P2, primary: [WP-10], supporting: [WP-00]}
+  R-24: {priority: P3, primary: [WP-11A], supporting: [WP-10]}
+  R-25: {priority: P3, primary: [WP-01], supporting: [WP-02]}
+  R-26: {priority: P2, primary: [WP-09], supporting: []}
+  R-27: {priority: P2, primary: [WP-11C], supporting: [WP-08]}
+  R-28: {priority: P2, primary: [WP-11B], supporting: [WP-10]}
+  R-29: {priority: P2, primary: [WP-11D], supporting: [WP-07]}
+  R-30: {priority: P2, primary: [WP-11E], supporting: [WP-02, WP-04]}
+  R-31: {priority: P2, primary: [WP-11B], supporting: [WP-00]}
+  R-32: {priority: P3, primary: [WP-11D], supporting: [WP-03]}
+  R-33: {priority: P2, primary: [WP-11C], supporting: [WP-01, WP-08]}
+  R-34: {priority: P2, primary: [WP-11E], supporting: [WP-05, WP-08]}
+  R-35: {priority: P3, primary: [WP-11E], supporting: [WP-10]}
+  R-36: {priority: P3, primary: [WP-11A, WP-11F], supporting: [WP-00]}
+finding_requirements:
+  R-01: [SEC-001, SEC-002, SEC-003, SEC-004, SEC-005, SEC-010]
+  R-02: [MCP-003]
+  R-03: [SEC-006, MCP-005, MCP-006, SUP-005]
+  R-04: [MCP-008, MCP-013, MCP-014]
+  R-05: [MCP-009, MCP-011, MCP-012, SHARE-001, SHARE-002, SHARE-004]
+  R-06: [MCP-001, MCP-002, MCP-004]
+  R-07: [SUPPLY-001, OBS-007]
+  R-08: [SUPPLY-006, SUPPLY-009, SUPPLY-010, REL-010]
+  R-09: [MCP-002, MCP-015]
+  R-10: [SUP-001, SUP-008, SUP-009, SUP-010]
+  R-11: [SHARE-001, SHARE-003, SHARE-005, SHARE-008]
+  R-12: [SEC-005, SEC-006, SEC-007]
+  R-13: [SEC-009, SECRET-001, SECRET-002, SECRET-003, SECRET-004, SECRET-005]
+  R-14: [SUP-003]
+  R-15: [STATE-008, OBS-001, OBS-004]
+  R-16: [STATE-001, STATE-002, STATE-003, STATE-004, STATE-005, STATE-006, STATE-008]
+  R-17: [STATE-010, CLIENT-001, CLIENT-002, REL-010]
+  R-18: [ARCH-018, LT-001, LT-006, REL-002]
+  R-19: [SEC-006, REL-003, MCP-006]
+  R-20: [REL-010, SUPPLY-002, MAINT-003, PT-001, PT-002, PT-003, PT-004]
+  R-21: [SUPPLY-001, SUPPLY-002, SUPPLY-003, SUPPLY-004, SUPPLY-005, SUPPLY-006, SUPPLY-007, SUPPLY-008, SUPPLY-009, SUPPLY-010]
+  R-22: [MAINT-006, MAINT-007, COMPAT-001, COMPAT-003]
+  R-23: [MAINT-006, MAINT-007, K-008, K-015]
+  R-24: [ARCH-020, ARCH-021, ARCH-022, ARCH-029]
+  R-25: [SEC-001, SEC-008, SEC-009]
+  R-26: [SUPPLY-005, SUPPLY-006, SUPPLY-010]
+  R-27: [ARCH-001, ARCH-003, ARCH-006, ARCH-019, ARCH-021, ARCH-025, ARCH-028, ARCH-030]
+  R-28: [ARCH-002, ARCH-004, ARCH-005, ARCH-026, ARCH-027]
+  R-29: [ARCH-007, ARCH-008, ARCH-009]
+  R-30: [ARCH-010, ARCH-026, ARCH-027]
+  R-31: [ARCH-002, ARCH-015, ARCH-016, ARCH-017, ARCH-018, ARCH-029]
+  R-32: [ARCH-012]
+  R-33: [ARCH-011]
+  R-34: [ARCH-001, ARCH-013, ARCH-014, ARCH-018, ARCH-019, ARCH-025, ARCH-028, ARCH-030]
+  R-35: [ARCH-022, ARCH-023]
+  R-36: [ARCH-021, ARCH-024, ARCH-029]
+requirement_groups:
+  SEC-INGRESS: {count: 11, ids: [SEC-001, SEC-002, SEC-003, SEC-004, SEC-005, SEC-006, SEC-007, SEC-008, SEC-010, SEC-011, SEC-012], wp: [WP-01]}
+  SEC-SECRET: {count: 1, ids: [SEC-009], wp: [WP-01, WP-09]}
+  MCP-FRAMING: {count: 3, ids: [MCP-005, MCP-006, MCP-007], wp: [WP-01]}
+  MCP-ROUTING: {count: 5, ids: [MCP-003, MCP-008, MCP-009, MCP-013, MCP-014], wp: [WP-02]}
+  MCP-PROTOCOL: {count: 4, ids: [MCP-001, MCP-002, MCP-004, MCP-015], wp: [WP-04]}
+  MCP-CAPABILITY: {count: 3, ids: [MCP-010, MCP-011, MCP-012], wp: [WP-05]}
+  SHARE: {count: 8, ids: [SHARE-001, SHARE-002, SHARE-003, SHARE-004, SHARE-005, SHARE-006, SHARE-007, SHARE-008], wp: [WP-03]}
+  SUP-PLATFORM: {count: 7, ids: [SUP-001, SUP-002, SUP-003, SUP-004, SUP-008, SUP-009, SUP-010], wp: [WP-08]}
+  SUP-RUNTIME: {count: 3, ids: [SUP-005, SUP-006, SUP-007], wp: [WP-11C]}
+  STATE-AUDIT: {count: 1, ids: [STATE-008], wp: [WP-06]}
+  STATE-RECOVERY: {count: 7, ids: [STATE-001, STATE-002, STATE-003, STATE-004, STATE-005, STATE-006, STATE-010], wp: [WP-07]}
+  STATE-SCHEMA: {count: 2, ids: [STATE-007, STATE-009], wp: [WP-11D]}
+  SECRET-MATERIALIZATION: {count: 5, ids: [SECRET-001, SECRET-002, SECRET-003, SECRET-004, SECRET-005], wp: [WP-00, WP-09]}
+  SECRET-OPERATIONS: {count: 3, ids: [SECRET-006, SECRET-007, SECRET-008], wp: [WP-09]}
+  CLIENT: {count: 8, ids: [CLIENT-001, CLIENT-002, CLIENT-003, CLIENT-004, CLIENT-005, CLIENT-006, CLIENT-007, CLIENT-008], wp: [WP-00]}
+  REL-FRAMING: {count: 1, ids: [REL-003], wp: [WP-01]}
+  REL-STATE: {count: 1, ids: [REL-007], wp: [WP-07]}
+  REL-PROCESS: {count: 7, ids: [REL-001, REL-002, REL-004, REL-005, REL-006, REL-008, REL-009], wp: [WP-08]}
+  REL-TEST: {count: 1, ids: [REL-010], wp: [WP-00]}
+  PERF-ROUTING: {count: 4, ids: [PERF-001, PERF-002, PERF-005, PERF-007], wp: [WP-05]}
+  PERF-LIFECYCLE: {count: 4, ids: [PERF-003, PERF-004, PERF-006, PERF-008], wp: [WP-08]}
+  OBS-AUDIT: {count: 8, ids: [OBS-001, OBS-002, OBS-003, OBS-004, OBS-005, OBS-008, OBS-009, OBS-010], wp: [WP-06]}
+  OBS-HEALTH: {count: 2, ids: [OBS-006, OBS-007], wp: [WP-10]}
+  ARCH-PROGRAM: {count: 1, ids: [ARCH-001], wp: [WP-11F]}
+  ARCH-GUARDRAILS: {count: 5, ids: [ARCH-019, ARCH-020, ARCH-021, ARCH-025, ARCH-029], wp: [WP-11A]}
+  ARCH-COMPOSITION: {count: 4, ids: [ARCH-002, ARCH-004, ARCH-015, ARCH-016], wp: [WP-11B]}
+  ARCH-FACADE: {count: 2, ids: [ARCH-005, ARCH-017], wp: [WP-11B, WP-11F]}
+  ARCH-SUPERVISOR: {count: 4, ids: [ARCH-003, ARCH-006, ARCH-011, ARCH-018], wp: [WP-11A, WP-11C]}
+  ARCH-INSTALL: {count: 4, ids: [ARCH-007, ARCH-008, ARCH-009, ARCH-012], wp: [WP-11D]}
+  ARCH-MCP: {count: 5, ids: [ARCH-010, ARCH-013, ARCH-014, ARCH-022, ARCH-023], wp: [WP-11E]}
+  ARCH-TEST-LAYOUT: {count: 1, ids: [ARCH-024], wp: [WP-11F]}
+  ARCH-MIGRATION: {count: 4, ids: [ARCH-026, ARCH-027, ARCH-028, ARCH-030], wp: [WP-11B, WP-11C, WP-11D, WP-11E, WP-11F]}
+  MAINT-OWNERSHIP: {count: 6, ids: [MAINT-001, MAINT-002, MAINT-003, MAINT-004, MAINT-005, MAINT-008], wp: [WP-11F]}
+  MAINT-GENERATION: {count: 2, ids: [MAINT-006, MAINT-007], wp: [WP-10]}
+  COMPAT-PROTOCOL: {count: 3, ids: [COMPAT-001, COMPAT-002, COMPAT-004], wp: [WP-04]}
+  COMPAT-DOCS: {count: 1, ids: [COMPAT-003], wp: [WP-10]}
+  COMPAT-RELEASE: {count: 2, ids: [COMPAT-005, COMPAT-006], wp: [WP-09]}
+  SUPPLY: {count: 10, ids: [SUPPLY-001, SUPPLY-002, SUPPLY-003, SUPPLY-004, SUPPLY-005, SUPPLY-006, SUPPLY-007, SUPPLY-008, SUPPLY-009, SUPPLY-010], wp: [WP-09]}
+  UX: {count: 8, ids: [UX-001, UX-002, UX-003, UX-004, UX-005, UX-006, UX-007, UX-008], wp: [WP-10]}
+  ST-INGRESS: {count: 16, ids: [ST-001, ST-002, ST-003, ST-004, ST-005, ST-006, ST-007, ST-008, ST-009, ST-010, ST-011, ST-012, ST-013, ST-018, ST-019, ST-020], wp: [WP-00, WP-01]}
+  ST-SECRETS: {count: 3, ids: [ST-014, ST-015, ST-016], wp: [WP-00, WP-09]}
+  ST-SUPPLY: {count: 1, ids: [ST-017], wp: [WP-09]}
+  PT-PROTOCOL: {count: 10, ids: [PT-001, PT-002, PT-003, PT-004, PT-005, PT-006, PT-007, PT-019, PT-022, PT-023], wp: [WP-04]}
+  PT-ROUTING: {count: 10, ids: [PT-008, PT-009, PT-010, PT-011, PT-012, PT-013, PT-014, PT-015, PT-024, PT-025], wp: [WP-02]}
+  PT-PAGINATION: {count: 3, ids: [PT-016, PT-017, PT-018], wp: [WP-05]}
+  PT-FRAMING: {count: 2, ids: [PT-020, PT-021], wp: [WP-01]}
+  LT-CONCURRENCY: {count: 10, ids: [LT-001, LT-002, LT-003, LT-004, LT-008, LT-009, LT-010, LT-011, LT-012, LT-013], wp: [WP-00, WP-08]}
+  LT-PROCESS: {count: 3, ids: [LT-005, LT-006, LT-007], wp: [WP-08]}
+  LT-SERENA: {count: 2, ids: [LT-014, LT-015], wp: [WP-03]}
+  K-PROTOCOL: {count: 2, ids: [K-001, K-004], wp: [WP-04]}
+  K-INGRESS: {count: 1, ids: [K-002], wp: [WP-01]}
+  K-SERENA: {count: 2, ids: [K-003, K-010], wp: [WP-03]}
+  K-SUPERVISOR: {count: 1, ids: [K-005], wp: [WP-11C]}
+  K-SUPPLY: {count: 3, ids: [K-006, K-007, K-013], wp: [WP-09]}
+  K-STATUS: {count: 1, ids: [K-008], wp: [WP-10]}
+  K-AUDIT: {count: 1, ids: [K-009], wp: [WP-06]}
+  K-ARCHITECTURE: {count: 2, ids: [K-011, K-015], wp: [WP-11A]}
+  K-CLEANUP: {count: 1, ids: [K-012], wp: [WP-11F]}
+  K-COMMENTS: {count: 1, ids: [K-014], wp: [WP-11E]}
+acceptance_tests:
+  AT-001: {wp: [WP-11A, WP-11F]}
+  AT-002: {wp: [WP-11B, WP-11F]}
+  AT-003: {wp: [WP-11B, WP-11C]}
+  AT-004: {wp: [WP-11B]}
+  AT-005: {wp: [WP-11A, WP-11B, WP-11F]}
+  AT-006: {wp: [WP-11A, WP-11B, WP-11F]}
+  AT-007: {wp: [WP-11A, WP-11C]}
+  AT-008: {wp: [WP-11A, WP-11F]}
+  AT-009: {wp: [WP-11A, WP-11E, WP-11F]}
+  AT-010: {wp: [WP-11A, WP-11E]}
+  AT-011: {wp: [WP-11B, WP-11C, WP-11D, WP-11E, WP-11F]}
+  AT-012: {wp: [WP-11A, WP-11C]}
+  AT-013: {wp: [WP-11D]}
+  AT-014: {wp: [WP-11D]}
+  AT-015: {wp: [WP-03, WP-11D]}
+  AT-016: {wp: [WP-08, WP-11C]}
+  AT-017: {wp: [WP-11E]}
+  AT-018: {wp: [WP-08, WP-11E]}
+  AT-019: {wp: [WP-11A, WP-11F]}
+  AT-020: {wp: [WP-11A, WP-11F]}
+registries:
+  audit_register: audits/2026-08-12-audit-register.md
+  requirements: requirements.yaml
+  acceptance_tests: acceptance-tests.yaml
+  decisions: decisions.md
+  roadmap: roadmap.md
+  post_audit_deltas: deltas/2026-08-27-master-83b49f4.md

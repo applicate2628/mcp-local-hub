@@ -4,6 +4,10 @@ Deep notes on the five architecture highlights summarized in the
 [README](../README.md#architecture-highlights). For the supervisor /
 lifecycle design, see [supervisor-architecture.md](supervisor-architecture.md).
 
+For the canonical stabilization and modernization program, including the
+roadmap, target architecture, governance, traceability registry, and detailed
+work-package plans, see [docs/modernization](modernization/README.md).
+
 ## PATH-based install model
 
 Scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path. `mcphub setup` puts the binary there and registers the directory on user PATH (Windows: `HKCU\Environment\Path` + `WM_SETTINGCHANGE` broadcast; Linux/macOS: prints shell-rc line). Moving or rebuilding the binary later only requires re-running `mcphub setup` — scheduler tasks keep pointing at the canonical path and automatically use the new binary.
