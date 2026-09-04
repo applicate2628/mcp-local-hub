@@ -1,152 +1,169 @@
 <a id="top"></a>
-# Архитектурный ratchet репозитория
+# Архитектурный ратчет репозитория
 
-**Рабочий пакет:** `PR-11A-02` / A2<br>
-**База подготовки:** `master@f6df9f65387fd89d1fe492b6b89d076edd80bddb`<br>
-**Статус:** draft до генерации и review exact baseline.
+**Рабочий пакет:** `PR-11A-02` / A2.<br>
+**Исходная база подготовки:** `master@f6df9f65387fd89d1fe492b6b89d076edd80bddb`.<br>
+**Статус:** черновик до реального сканирования, создания baseline и проверки окончательного коммита. Этот документ описывает процедуру, а не заявляет результат её выполнения.
 
 ## Оглавление
 
-1. [Цель](#goal)
-2. [Минимальный состав](#scope)
-3. [Что намеренно не добавляется](#non-goals)
-4. [Генерация baseline](#baseline)
-5. [Worker inventory](#workers)
-6. [Критерии готовности](#done)
-
-<a id="goal"></a>
-## 1. Цель
-
-A2 подключает уже слитый `archcheck` к реальному репозиторию. Старый архитектурный долг фиксируется точными fingerprints, а новый, выросший, просроченный, stale либо unowned debt должен блокировать локальную проверку.
-
-A2 не рефакторит runtime и не исправляет найденные нарушения. Его задача — сделать дальнейшую деградацию видимой и воспроизводимой.
+1. [Назначение и границы](#scope)
+2. [Единственные источники данных](#sources)
+3. [Инвентаризация и назначение владельцев](#inventory)
+4. [Первичная генерация из чистого коммита](#generation)
+5. [Проверки перед включением A2](#acceptance)
+6. [Работа после A2 и реестр фоновых задач](#maintenance)
+7. [Термины](#terms)
 
 <a id="scope"></a>
-## 2. Минимальный состав
+## 1. Назначение и границы
+
+Ратчет разрешает только зафиксированный старый архитектурный долг, но запрещает новые нарушения и рост существующих. **Успешная проверка ратчета не означает отсутствие долга.**
+
+A2 не меняет рабочую логику приложения и не создаёт отдельный `doccheck`, генератор документов, новый формат схем, механизм расширений или дополнительную панель статусов. Автоматические процессы GitHub Actions не добавляются и не запускаются.
+
+Полный состав обязательств A2 определяется [каноническим планом](../docs/modernization/plans/wp-11a-to-11f.md#wp-11a). Указанный там общий помощник для сравнения эталонных результатов не считается выполненным только из-за появления policy или baseline; его выполнение либо явное изменение плана — отдельное условие завершения A2.
+
+<a id="sources"></a>
+## 2. Единственные источники данных
 
 | Файл | Ответственность |
 |---|---|
-| [`policy.yaml`](policy.yaml) | Сканируемые корни и машинные правила |
-| [`owners.yaml`](owners.yaml) | Specific-first назначение владельца и рабочего пакета |
-| [`workers.yaml`](workers.yaml) | Отдельный реестр классифицированных Go goroutine |
-| `baseline.yaml` | Генерируется только из clean exact checkout и добавляется до merge A2 |
-| [`../internal/archguard/repository_contract_test.go`](../internal/archguard/repository_contract_test.go) | Один компактный тест согласованности policy и канонических registries |
-| [`../docs/modernization/deltas/2026-09-04-master-f6df9f6.md`](../docs/modernization/deltas/2026-09-04-master-f6df9f6.md) | Актуальная входная delta-review |
+| [policy.yaml](policy.yaml) | Корни сканирования и правила анализатора |
+| [owners.yaml](owners.yaml) | Назначение владельцев: применяется первое подходящее правило |
+| `baseline.yaml` | Сгенерированные отпечатки существующих нарушений, владельцы и сроки |
+| [workers.yaml](workers.yaml) | Реестр классифицированных фоновых задач Go |
+| [repository_contract_test.go](../internal/archguard/repository_contract_test.go) | Один входной контрактный тест с независимыми подпроверками |
+| [traceability.yaml](../docs/modernization/traceability.yaml) | Канонические связи рабочих пакетов, решений и изменений |
+| [Исходный delta-review](../docs/modernization/deltas/2026-09-04-master-f6df9f6.md) | Историческое сравнение двух конкретных состояний `master` |
 
-Начальные file budgets намеренно консервативны:
+GitHub хранит актуальное состояние запросов на включение изменений; файлы не копируют его автоматически. Исторические снимки не переименовываются в «текущие» без новой проверки.
 
-```text
-production advisory: 1200 строк
-production hard:     2200 строк
-test review:         2800 строк
-```
+Тестовые файлы уже исключаются из проверок конструкторов самим `archcheck`, поэтому в `allowed_globs` конструкторов остаётся только `internal/app/**`. Для исторических комментариев исключение `**/*_test.go` сохраняется: у этого правила иная область действия.
 
-Перед merge A2 они либо подтверждаются распределением текущего scan, либо меняются одним reviewable diff согласно `D-013`.
+Начальные ограничения размера файлов: 1200 строк для предупреждения о рабочем коде, 2200 строк для жёсткого порога рабочего кода, 2800 строк для тестового файла. Эти значения **не утверждены измерением**, пока не получено распределение инвентаризации и не принято [решение D-013](../docs/modernization/decisions.md#d-013).
 
-<a id="non-goals"></a>
-## 3. Что намеренно не добавляется
+<a id="inventory"></a>
+## 3. Инвентаризация и назначение владельцев
 
-A2 не создаёт:
+Первый проход нужен для исследования: сохранить отчёт `archcheck scan`, изучить распределение размеров файлов и назначить реальные владельцы всем найденным нарушениям. Временное правило `architecture-triage` помогает выявить неклассифицированные записи, но не допускается в окончательном baseline.
 
-- отдельный `doccheck` binary;
-- генератор Markdown или Mermaid;
-- JSON Schema framework;
-- GitHub-hosted CI;
-- синхронизацию live-status из GitHub в YAML;
-- новый plugin API;
-- параллельный dashboard архитектурного долга.
+Изменения `owners.yaml`, policy, тестов и анализатора должны быть проверены и **зафиксированы до финального `scan_sha`**. Нельзя сначала записать SHA, затем изменить владельцев или правила и выдать результат за сканирование этого SHA.
 
-`traceability.yaml` остаётся точным машинным графом, Markdown — объяснением, GitHub — владельцем live-status.
+Baseline генерируется только командой `archcheck baseline`. Отпечатки, метрики и принадлежность рабочим пакетам не подставляются вручную. После изменения правил владельцев создаётся новый кандидат из нового чистого исходного коммита.
 
-<a id="baseline"></a>
-## 4. Генерация baseline
+Если предварительные тесты выявили дефект уже слитого анализатора A1, он остаётся блокирующим результатом проверки. Нельзя исключать дополнительные тесты или расширять разрешения ради продолжения A2.
 
-Baseline нельзя вычислять вручную или переносить со старого снимка.
+<a id="generation"></a>
+## 4. Первичная генерация из чистого коммита
 
-В чистом checkout ветки A2:
+Процедура ниже предназначена **только для первичного создания A2**, после исследовательской инвентаризации и фиксации всех согласованных входных изменений. Требуется полноценная рабочая копия Git, а не набор отдельных файлов, и версия Go, удовлетворяющая `go.mod`. Записать фактический `go version` в отчёт.
+
+До первого baseline допустимо пропустить **только подпроверку `baseline`**. Остальные подпроверки контракта и тесты анализатора должны выполняться. Это устраняет цикл «для генерации baseline сначала нужен уже существующий baseline», не ослабляя окончательную проверку.
 
 ```bash
 set -euo pipefail
-
+cd "$(git rev-parse --show-toplevel)"
 test -z "$(git status --porcelain=v1)"
-scan_sha="$(git rev-parse HEAD)"
-mkdir -p .reports
+test ! -e architecture/baseline.yaml
 
-go test ./internal/archguard ./tools/archcheck -count=1
+# Все отчёты и исполняемый файл находятся вне сканируемого дерева.
+reports="$(mktemp -d "${TMPDIR:-/tmp}/archcheck-a2.XXXXXX")"
+go version | tee "$reports/go-version.txt"
+go test ./internal/archguard ./tools/archcheck -count=1 \
+  -skip '^TestRepositoryArchitectureContracts$/^baseline$' \
+  > "$reports/preflight-tests.log" 2>&1
 
-go run ./tools/archcheck scan \
-  --root . \
-  --policy architecture/policy.yaml \
-  --report-json .reports/architecture-inventory.json \
-  --report-md .reports/architecture-inventory.md \
-  > .reports/architecture-inventory.stdout.json
+# Зафиксированные правила, владельцы, исходники и тесты уже окончательные.
+test -z "$(git status --porcelain=v1)"
+scan_sha="$(git rev-parse --verify HEAD)"
+printf '%s\n' "$scan_sha" > "$reports/scan-sha.txt"
+git cat-file -e "${scan_sha}^{commit}"
+go build -o "$reports/archcheck" ./tools/archcheck
 
-go run ./tools/archcheck baseline \
-  --root . \
-  --policy architecture/policy.yaml \
+"$reports/archcheck" scan \
+  --root . --policy architecture/policy.yaml \
+  --report-json "$reports/inventory.json" \
+  --report-md "$reports/inventory.md" \
+  > "$reports/inventory.stdout.json"
+
+# Повторный чистый статус: сканирование не должно менять исходники.
+test -z "$(git status --porcelain=v1)"
+"$reports/archcheck" baseline \
+  --root . --policy architecture/policy.yaml \
   --owners architecture/owners.yaml \
   --generated-from "$scan_sha" \
   --baseline architecture/baseline.yaml \
-  --report-json .reports/architecture-baseline-source.json \
-  --report-md .reports/architecture-baseline-source.md
+  --report-json "$reports/baseline-source.json" \
+  --report-md "$reports/baseline-source.md"
 
-go run ./tools/archcheck verify \
-  --root . \
-  --policy architecture/policy.yaml \
+"$reports/archcheck" verify \
+  --root . --policy architecture/policy.yaml \
   --owners architecture/owners.yaml \
   --baseline architecture/baseline.yaml \
   --workers architecture/workers.yaml \
-  --report-json .reports/architecture-verify-source.json \
-  --report-md .reports/architecture-verify-source.md
+  --report-json "$reports/verify-source.json" \
+  --report-md "$reports/verify-source.md" \
+  > "$reports/verify.stdout.log" 2> "$reports/verify.stderr.log"
+
+# Окончательная проверка: НИКАКИХ -skip, --kind или --path.
+go test ./internal/archguard ./tools/archcheck -count=1 \
+  > "$reports/tests.log" 2>&1
+go test -race -shuffle=on ./internal/archguard ./tools/archcheck -count=3 \
+  > "$reports/race-shuffle.log" 2>&1
+go vet ./internal/archguard ./tools/archcheck \
+  > "$reports/vet.log" 2>&1
+
+# Одноразовый контроль неизменности ВСЕХ входов первичного baseline.
+git diff --exit-code "$scan_sha" -- cmd internal tools go.mod go.sum \
+  architecture/policy.yaml architecture/owners.yaml architecture/workers.yaml
+git diff --check
+git status --short
+printf 'Evidence directory: %s\n' "$reports"
 ```
 
-После генерации обязательно проверить:
+Ожидаемое изменение дерева после процедуры — только новый `architecture/baseline.yaml`. Любое другое изменение необходимо изучить; новый исходный коммит требует повторной финальной генерации. Если файл baseline уже создан неудачной попыткой, сначала сохранить его как кандидат вне дерева и осознанно восстановить чистое исходное состояние; скрипт не удаляет его автоматически.
 
-- `generated_from` равен exact clean commit, который был просканирован до добавления `baseline.yaml`;
-- после этого commit изменения в `cmd`, `internal` или `tools` отсутствуют; иначе baseline генерируется заново;
-- ни одна baseline entry не получила `owner: architecture-triage`;
-- широких path allowlists нет;
-- `max_metric` равен текущей фактической метрике;
-- причины и сроки удаления соответствуют primary рабочему пакету;
-- повторный `verify` завершается кодом `0`.
+После добавления baseline отдельным коммитом повторить полные тесты и `verify` на окончательной вершине ветки. Проверить также `git diff --check` для **всего диапазона A2**, а не только незакоммиченных изменений. Сравнить `generated_from` с сохранённым `scan-sha.txt`, а исходные деревья — с коммитом, реально просканированным перед генерацией.
 
-Если до генерации изменился `master`, ветка обновляется и весь scan повторяется.
+Проверка 40 шестнадцатеричных символов в контрактном тесте удостоверяет только формат идентификатора этого репозитория. Она **не доказывает**, что сканирование было выполнено. Доказательство — чистая исходная рабочая копия, сохранённые отчёты, неизменные входы и проверенный диапазон коммитов. Сжатие истории при слиянии может убрать исходный коммит из цепочки предков: это нельзя подменять постоянной проверкой `generated_from` как предка любого будущего `HEAD`.
 
-<a id="workers"></a>
-## 5. Worker inventory
+<a id="acceptance"></a>
+## 5. Проверки перед включением A2
 
-`workers.yaml` на первом шаге пуст. Это не означает отсутствие goroutine.
+Окончательное ревью должно подтвердить:
 
-Команда:
+1. Baseline действительно создан анализатором из зафиксированного чистого коммита; `generated_from` и отчёты относятся к одним входам.
+2. Инвентаризация полная в пределах policy, временных владельцев в baseline нет, метрики совпадают с фактическими, владельцы и сроки содержательны.
+3. Ограничения размеров файлов подтверждены инвентаризацией; D-013 не остаётся неразрешённым входным условием.
+4. Полные тесты двух пакетов, обнаружение гонок, перемешивание порядка тестов, `go vet`, сборка анализатора и неотфильтрованный `verify` проходят.
+5. Один контрактный тест проверяет формат идентификаторов и обязательные корни сканирования, структурные ссылки, схемную версию, хеш реестра аудита и граф зависимостей. Начало и завершение рабочего пакета различаются, поэтому обнаруживаются также смешанные циклы рабочих пакетов и запросов на изменения.
+6. Сопутствующие обязательства канонического плана A2 выполнены либо изменены явным согласованным решением; будущие этапы A3/A4 не лишились общей зависимости.
+7. Рабочая логика приложения и GitHub Actions не изменены. Ревью привязано к точному окончательному коммиту; недоступный внешний проверяющий не записывается как успешный.
+
+Проверка графа удостоверяет структурную непротиворечивость, **не** фактическое выполнение всех решений и не полноту функциональных требований. Поля остальных разделов `traceability.yaml` не переобъявляются как вторая схема в тесте; проверяемая проекция и её границы указаны в исходнике.
+
+<a id="maintenance"></a>
+## 6. Работа после A2 и реестр фоновых задач
+
+После принятия A2 исходный код должен изменяться. Одноразовое сравнение исходников с `generated_from` из раздела [4](#generation) **не переносится в постоянные тесты**: иначе каждый рефакторинг потребует нового baseline и ратчет перестанет защищать от роста долга.
+
+Обычный цикл: изменить код → запустить полный `archcheck verify` → устранить новые нарушения → пересмотреть только действительно устаревшие записи. Нельзя автоматически пересоздавать baseline из всего текущего долга ради зелёного результата. Изменение метаданных baseline проверяется отдельным различием версий; исходные отпечатки не фабрикуются.
+
+Пустой `workers.yaml` не означает отсутствие фоновых задач. В A2 их точные отпечатки могут оставаться временным долгом в baseline. Для просмотра достаточно:
 
 ```bash
 go run ./tools/archcheck workers \
-  --root . \
-  --policy architecture/policy.yaml \
-  --baseline architecture/baseline.yaml \
-  --workers architecture/workers.yaml \
-  --report-json .reports/workers.json \
-  --report-md .reports/workers.md
+  --root . --policy architecture/policy.yaml
 ```
 
-используется для просмотра текущих Go workers. В A2 они могут оставаться точными baseline entries. Критические workers переходят в реестр в A5, полный `zero-unclassified` достигается в A6.
+В A5 критические фоновые задачи получают подтверждённые договорённости о владельце, отмене, ожидании завершения и ограничении времени. В A6 все такие задачи должны быть классифицированы и удалены из baseline. Пустой результат `workers --unclassified` при оставшихся worker-записях baseline **ещё не доказывает завершение A6**.
 
-Native, Python и другие дочерние процессы не считаются Go workers и ведутся отдельным lifecycle inventory.
+Дочерние процессы Python и машинного кода не являются goroutine Go. Их жизненный цикл проверяется отдельно, а не объявляется покрытым `archcheck workers`.
 
-<a id="done"></a>
-## 6. Критерии готовности
+<a id="terms"></a>
+## 7. Термины
 
-A2 готов к merge только когда:
-
-1. `baseline.yaml` создан из exact clean source commit и содержит его SHA в `generated_from`.
-2. Между `generated_from` и финальным HEAD нет изменений в `cmd`, `internal` или `tools`.
-3. `archcheck verify` проходит.
-4. Тест `TestRepositoryArchitectureContracts` проходит.
-5. Ни одна текущая entry не назначена временному `architecture-triage`.
-6. File budgets подтверждены фактическим распределением.
-7. Policy не содержит фиктивных разрешений ради PASS.
-8. Полный diff не меняет production runtime.
-9. GitHub Actions для обычной разработки не добавлены.
-10. Codex review выполнен на exact финальном HEAD либо явно зафиксировано ограничение сервиса без сокрытия результата.
+**A1/A2/A3—A6** — этапы рабочего пакета WP-11A; **WP (Work Package)** — рабочий пакет; **PR (Pull Request)** — запрос на включение изменений. **Baseline** — исходный реестр допускаемого старого долга; **fingerprint** — устойчивый отпечаток нарушения; **ratchet, ратчет** — запрет роста этого долга. **Policy** — проверяемые правила; **glob** — шаблон пути. **SHA (Secure Hash Algorithm)** — семейство алгоритмов хеширования; идентификатор коммита этого репозитория содержит 40 символов, а **SHA-256** — отдельный 256-битный хеш содержимого реестра аудита. **HEAD** — указатель на выбранный коммит рабочей копии. **YAML (YAML Ain't Markup Language)** — формат сериализации конфигурации; **JSON (JavaScript Object Notation)** — формат структурированных данных. **Worker** — фоновая задача; **goroutine** — единица конкурентного выполнения Go. **Race check** — обнаружение гонок доступа к памяти; **shuffle** — изменение порядка тестов; **reviewer** — проверяющий изменения.
 
 [Вернуться к началу](#top)
