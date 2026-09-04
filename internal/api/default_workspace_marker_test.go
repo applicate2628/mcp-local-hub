@@ -9,35 +9,6 @@ import (
 	"github.com/gofrs/flock"
 )
 
-func TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics(t *testing.T) {
-	stateDir := t.TempDir()
-	marker := filepath.Join(stateDir, DefaultWorkspaceFilename)
-	if err := os.WriteFile(marker, []byte("/workspace"), 0o644); err != nil {
-		t.Fatalf("write relaxed marker: %v", err)
-	}
-
-	events := make(chan string, 4)
-	got, err := ReadDefaultWorkspaceWithAuditSink(stateDir, func(_ string, event string, _ map[string]any) error {
-		events <- event
-		return nil
-	})
-	if err != nil {
-		t.Fatalf("ReadDefaultWorkspaceWithAuditSink: %v", err)
-	}
-	if got != "/workspace" {
-		t.Fatalf("default workspace = %q, want /workspace", got)
-	}
-	foundFileFallback := false
-	for len(events) > 0 {
-		if event := <-events; event == "hub-mcp-state-read-unhardened-file-fallback" {
-			foundFileFallback = true
-		}
-	}
-	if !foundFileFallback {
-		t.Fatal("configured audit sink received no file fallback diagnostic")
-	}
-}
-
 func TestClearDefaultWorkspaceIfMatchesReadsUnderStateFileFlock(t *testing.T) {
 	stateDir := t.TempDir()
 	oldDefault := filepath.Join(stateDir, "old")

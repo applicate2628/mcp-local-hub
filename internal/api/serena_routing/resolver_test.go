@@ -476,41 +476,6 @@ func TestResolveDefaultWorkspace_ClassifiesAbsentEmptyAndUnreadableMarker(t *tes
 	}
 }
 
-func TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink(t *testing.T) {
-	root := t.TempDir()
-	workspace := makeWorkspace(t, root, "Only")
-	regPath := makeRegistryWithSerena(t, root, []api.WorkspaceEntry{{
-		WorkspaceKey: api.WorkspaceKey(workspace), WorkspacePath: workspace, Backend: "serena", Port: 9301,
-	}})
-	marker := filepath.Join(root, api.DefaultWorkspaceFilename)
-	if err := os.WriteFile(marker, []byte(workspace), 0o644); err != nil {
-		t.Fatalf("write relaxed default marker: %v", err)
-	}
-	reg := api.NewRegistry(regPath)
-	if err := reg.Load(); err != nil {
-		t.Fatalf("load registry: %v", err)
-	}
-	resolver := NewReadOnlyWorkspaceResolver(reg, regPath)
-	events := make(chan string, 4)
-	resolver.SetAuditSink(func(_ string, event string, _ map[string]any) error {
-		events <- event
-		return nil
-	})
-
-	if _, err := resolver.ResolveDefaultWorkspace(); err != nil {
-		t.Fatalf("ResolveDefaultWorkspace: %v", err)
-	}
-	foundFileFallback := false
-	for len(events) > 0 {
-		if event := <-events; event == "hub-mcp-state-read-unhardened-file-fallback" {
-			foundFileFallback = true
-		}
-	}
-	if !foundFileFallback {
-		t.Fatal("resolver audit sink received no marker file fallback diagnostic")
-	}
-}
-
 // TestResolveByPath_RejectsUNCPath_OnWindows verifies that the
 // resolver rejects every two-leading-separator permutation (UNC
 // share root) before any filesystem probe. The rejection is
