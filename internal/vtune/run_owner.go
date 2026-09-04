@@ -212,13 +212,9 @@ func (o *vtuneRunOwnerV1) Start(req vtuneRunRequest) (vtuneRunRecord, string, er
 			return existing, "replayed", nil
 		}
 	}
-	active := 0
-	for _, run := range o.runs {
-		if !run.Terminal() {
-			active++
-		}
-	}
-	if active >= maxDurableVTuneRuns {
+	// A failed/stopped record can still have a worker settling its driver.
+	// The existing cancellation registry owns admission until worker exit.
+	if len(o.collectCancels) >= maxDurableVTuneRuns {
 		return vtuneRunRecord{}, "", fmt.Errorf("%w: at most %d durable VTune runs may be active", errVTuneAdmissionLimited, maxDurableVTuneRuns)
 	}
 	if req.RunID == "" {
@@ -565,6 +561,13 @@ func (o *vtuneRunOwnerV1) worker(collectCtx, shutdownCtx context.Context, id str
 	defer o.wg.Done()
 	defer func() {
 		o.mu.Lock()
+		// Release deadline timers even when collection finishes naturally.
+		if cancel := o.collectCancels[id]; cancel != nil {
+			cancel()
+		}
+		if cancel := o.shutdownCancels[id]; cancel != nil {
+			cancel()
+		}
 		delete(o.collectCancels, id)
 		delete(o.shutdownCancels, id)
 		closed := o.closed
