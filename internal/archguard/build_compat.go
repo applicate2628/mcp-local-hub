@@ -39,7 +39,9 @@ func filenameBuildConstraint(filePath string) constraint.Expr {
 	if !strings.HasSuffix(base, ".go") {
 		return nil
 	}
-	stem := strings.TrimSuffix(base, ".go")
+	// Match go/build.goodOSArchFile: only text before the first dot
+	// participates in suffix matching, even when the final extension is .go.
+	stem, _, _ := strings.Cut(base, ".")
 	stem = strings.TrimSuffix(stem, "_test")
 	parts := strings.Split(stem, "_")
 	if len(parts) < 2 {
@@ -51,10 +53,10 @@ func filenameBuildConstraint(filePath string) constraint.Expr {
 		if len(parts) >= 3 && isKnownGOOS(parts[len(parts)-2]) {
 			result = &constraint.AndExpr{X: &constraint.TagExpr{Tag: parts[len(parts)-2]}, Y: result}
 		}
-		return result
+		return allowExplicitAutomaticTagOverrides(result)
 	}
 	if isKnownGOOS(last) {
-		return &constraint.TagExpr{Tag: last}
+		return allowExplicitAutomaticTagOverrides(&constraint.TagExpr{Tag: last})
 	}
 	return nil
 }
@@ -231,9 +233,11 @@ func osTagEnabled(goos, tag string) bool {
 	}
 }
 
+// Like Go's internal/syslist.KnownOS, retain historical names for filename
+// matching. Recognizing a name does not add it to knownTargetValues.
 func isKnownGOOS(value string) bool {
 	switch value {
-	case "aix", "android", "darwin", "dragonfly", "freebsd", "illumos", "ios", "js", "linux", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows":
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "js", "linux", "nacl", "netbsd", "openbsd", "plan9", "solaris", "wasip1", "windows", "zos":
 		return true
 	default:
 		return false
@@ -242,16 +246,17 @@ func isKnownGOOS(value string) bool {
 
 func isUnixGOOS(value string) bool {
 	switch value {
-	case "aix", "android", "darwin", "dragonfly", "freebsd", "illumos", "ios", "linux", "netbsd", "openbsd", "solaris":
+	case "aix", "android", "darwin", "dragonfly", "freebsd", "hurd", "illumos", "ios", "linux", "netbsd", "openbsd", "solaris":
 		return true
 	default:
 		return false
 	}
 }
 
+// Historical architectures remain recognized suffixes, not runnable targets.
 func isKnownGOARCH(value string) bool {
 	switch value {
-	case "386", "amd64", "arm", "arm64", "loong64", "mips", "mipsle", "mips64", "mips64le", "ppc64", "ppc64le", "riscv64", "s390x", "sparc64", "wasm":
+	case "386", "amd64", "amd64p32", "arm", "armbe", "arm64", "arm64be", "loong64", "mips", "mipsle", "mips64", "mips64le", "mips64p32", "mips64p32le", "ppc", "ppc64", "ppc64le", "riscv", "riscv64", "s390", "s390x", "sparc", "sparc64", "wasm":
 		return true
 	default:
 		return false

@@ -91,7 +91,7 @@ func TestEmbeddedDocumentResolvesLocalNamedStringConstants(t *testing.T) {
 	policy.SourceRoots = []string{"internal"}
 	policy.EmbeddedDocumentMinBytes = 100
 	got := violationsOfKind(mustScan(t, root, policy), KindEmbeddedDocument)
-	if len(got) != 1 || got[0].Location.Symbol != "document" || got[0].Metric != len(heading)+len(body) {
+	if len(got) != 1 || got[0].Location.Symbol != "F.document" || got[0].Metric != len(heading)+len(body) {
 		t.Fatalf("got=%#v, want the assembled local document finding", got)
 	}
 }

@@ -25,7 +25,7 @@ func TestExplicitAutomaticTagsMayBeSuppliedThroughTags(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			root := newFixtureRepo(t, map[string]string{
 				"internal/dep/a.go": tcBuildSource(tc.explicit, "alpha"),
-				tc.otherPath:         tc.otherBuild + "package beta\n",
+				tc.otherPath:        tc.otherBuild + "package beta\n",
 			})
 			policy := mustLoadPolicyForTest(t)
 			policy.SourceRoots = []string{"internal"}
@@ -36,15 +36,15 @@ func TestExplicitAutomaticTagsMayBeSuppliedThroughTags(t *testing.T) {
 	}
 }
 
-func TestFilenamePlatformConstraintsRemainTargetOnly(t *testing.T) {
+func TestFilenamePlatformConstraintsHonorAdditionalTags(t *testing.T) {
 	root := newFixtureRepo(t, map[string]string{
 		"internal/dep/a_windows.go": "package alpha\n",
 		"internal/dep/b_linux.go":   "package beta\n",
 	})
 	policy := mustLoadPolicyForTest(t)
 	policy.SourceRoots = []string{"internal"}
-	if _, err := Scan(context.Background(), ScanOptions{Root: root, Policy: policy}); err != nil {
-		t.Fatalf("filename-derived Windows and Linux constraints must remain disjoint: %v", err)
+	if _, err := Scan(context.Background(), ScanOptions{Root: root, Policy: policy}); err == nil {
+		t.Fatal("filename-derived Windows and Linux constraints can overlap through -tags")
 	}
 }
 
