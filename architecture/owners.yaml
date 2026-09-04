@@ -1,0 +1,81 @@
+schema_version: 1
+rules:
+  - globs:
+      - internal/archguard/**
+      - tools/archcheck/**
+    owner: architecture-guardrails
+    work_package: WP-11A
+    remove_by: 2027-03-31
+    reason: Architecture-tooling debt is reduced while A2-A6 establish the repository ratchet.
+
+  - globs:
+      - internal/cli/**
+      - internal/process/**
+      - internal/scheduler/**
+      - internal/autostart/**
+      - internal/supervisorowner/**
+      - internal/tray/**
+    owner: lifecycle-runtime
+    work_package: WP-11C
+    remove_by: 2027-03-31
+    reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+
+  - globs:
+      - internal/api/**
+      - internal/config/**
+    owner: application-services
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: Application-service construction and mutable seams migrate to the composition root.
+
+  - globs:
+      - internal/daemon/**
+      - internal/mcpcompat/**
+    owner: mcp-runtime
+    work_package: WP-11E
+    remove_by: 2027-03-31
+    reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+
+  - globs:
+      - internal/gui/**
+    owner: gui-adapter
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: GUI handlers become thin adapters over process-scoped application services.
+
+  - globs:
+      - internal/cmakegraph/**
+      - internal/drmemory/**
+      - internal/gdb/**
+      - internal/godbolt/**
+      - internal/lldb/**
+      - internal/oneapi/**
+      - internal/oneapirun/**
+      - internal/perftools/**
+      - internal/vcpkgmcp/**
+      - internal/vtune/**
+    owner: tool-runtime
+    work_package: WP-08
+    remove_by: 2027-03-31
+    reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+
+  - globs:
+      - cmd/**
+    owner: composition-entrypoints
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: Executable entry points must delegate construction to the single composition root.
+
+  - globs:
+      - tools/**
+    owner: repository-tooling
+    work_package: WP-11A
+    remove_by: 2027-03-31
+    reason: Repository tools follow the same deterministic architecture and reporting contracts.
+
+  - globs:
+      - internal/**
+    owner: architecture-triage
+    work_package: WP-11A
+    remove_by: 2026-10-15
+    reason: Temporary exact-master triage rule; every matched baseline entry must be reassigned before A2 merges.
