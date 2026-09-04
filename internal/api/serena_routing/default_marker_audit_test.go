@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync/atomic"
 	"testing"
 
@@ -57,8 +58,30 @@ func TestReadDefaultWorkspaceWithAuditSinkRoutesFallbackDiagnostics(t *testing.T
 			if err != nil || got != "/workspace" {
 				t.Fatalf("marker read = %q, %v; want /workspace, nil", got, err)
 			}
-			if markerEvents.Load() == 0 {
-				t.Fatal("configured sink did not receive marker fallback diagnostic")
+			if markerEvents.Load() != 1 {
+				t.Fatalf("configured sink marker events = %d, want 1", markerEvents.Load())
+			}
+			var nextEvents atomic.Int32
+			nextSink := func(_ string, event string, fields map[string]any) error {
+				if event == "hub-mcp-state-read-unhardened-file-fallback" && fields["path"] == path {
+					nextEvents.Add(1)
+				}
+				return nil
+			}
+			got, err = api.ReadDefaultWorkspaceWithAuditSink(root, nextSink)
+			if err != nil || got != "/workspace" || markerEvents.Load() != 1 || nextEvents.Load() != 1 {
+				t.Fatalf("per-call sink isolation: read=%q err=%v events=(%d,%d)", got, err, markerEvents.Load(), nextEvents.Load())
+			}
+
+			// Audit redirection must not bypass the existing permission refusal.
+			t.Setenv(api.RequireSingleUserHomeEnv, "1")
+			got, err = api.ReadDefaultWorkspaceWithAuditSink(root, nextSink)
+			wantErr := api.ErrTooLoose
+			if runtime.GOOS == "windows" {
+				wantErr = api.ErrDaclOutsideAllowlist
+			}
+			if got != "" || !errors.Is(err, wantErr) || nextEvents.Load() != 1 {
+				t.Fatalf("strict read=%q err=%v events=%d, want %v without a fallback event", got, err, nextEvents.Load(), wantErr)
 			}
 			assertMarkerAuditFileUnchanged(t, path, contents)
 			assertMarkerAuditFileUnchanged(t, logPath, sentinel)
@@ -105,8 +128,26 @@ func TestResolveDefaultWorkspaceRoutesMarkerFallbackToConfiguredAuditSink(t *tes
 	if err != nil || got == nil || got.WorkspacePath != workspace {
 		t.Fatalf("default workspace = %+v, %v; want %q", got, err, workspace)
 	}
-	if markerEvents.Load() == 0 {
-		t.Fatal("resolver sink did not receive marker fallback diagnostic")
+	if markerEvents.Load() != 1 {
+		t.Fatalf("resolver marker events = %d, want 1", markerEvents.Load())
+	}
+	var nextEvents atomic.Int32
+	resolver.SetAuditSink(func(_ string, event string, fields map[string]any) error {
+		if event == "hub-mcp-state-read-unhardened-file-fallback" && fields["path"] == marker {
+			nextEvents.Add(1)
+		}
+		return nil
+	})
+	got, err = resolver.ResolveDefaultWorkspace()
+	if err != nil || got == nil || got.WorkspacePath != workspace || markerEvents.Load() != 1 || nextEvents.Load() != 1 {
+		t.Fatalf("resolver sink replacement: workspace=%+v err=%v events=(%d,%d)", got, err, markerEvents.Load(), nextEvents.Load())
+	}
+
+	// A cached workspace must not make a now-forbidden marker readable.
+	t.Setenv(api.RequireSingleUserHomeEnv, "1")
+	got, err = resolver.ResolveDefaultWorkspace()
+	if got != nil || !errors.Is(err, ErrDefaultWorkspaceUnavailable) || nextEvents.Load() != 1 {
+		t.Fatalf("strict resolver read=%+v err=%v events=%d, want unavailable without fallback", got, err, nextEvents.Load())
 	}
 	assertMarkerAuditFileUnchanged(t, marker, contents)
 	assertMarkerAuditFileUnchanged(t, regPath, registryBefore)
