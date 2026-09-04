@@ -70,6 +70,7 @@ history_allowed_globs:
   - '**/*_test.go'
 
 test_only_build_tags:
+  - af1_counters
   - test_state_path_env
 
 embedded_document_min_bytes: 4096
