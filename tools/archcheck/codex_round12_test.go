@@ -19,7 +19,7 @@ func TestRunRejectsCollidingReportOutputPathsBeforeWriting(t *testing.T) {
 		"--report-json", report,
 		"--report-md", filepath.Join(filepath.Dir(report), ".", filepath.Base(report)),
 	}, &out, &errOut)
-	if code != 2 || !strings.Contains(errOut.String(), "distinct output files") {
+	if code != 2 || !strings.Contains(errOut.String(), "distinct files") {
 		t.Fatalf("code=%d stderr=%q, want colliding-output rejection", code, errOut.String())
 	}
 	if _, err := os.Stat(report); !os.IsNotExist(err) {
