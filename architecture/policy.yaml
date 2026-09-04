@@ -1,0 +1,87 @@
+schema_version: 1
+module: mcp-local-hub
+
+source_roots:
+  - cmd
+  - internal
+  - tools
+
+exclude_globs:
+  - internal/gui/assets/**
+  - internal/gui/frontend/**
+
+import_rules:
+  - from:
+      - internal/api/**
+      - internal/config/**
+      - internal/daemon/**
+      - internal/process/**
+      - internal/scheduler/**
+    deny:
+      - internal/app/**
+      - internal/cli/**
+      - internal/gui/**
+  - from:
+      - internal/supervisor/**
+    deny:
+      - internal/app/**
+      - internal/cli/**
+      - internal/gui/**
+  - from:
+      - internal/cli/**
+    deny:
+      - internal/gui/**
+  - from:
+      - internal/gui/**
+    deny:
+      - internal/cli/**
+
+api_constructors:
+  - import_path: mcp-local-hub/internal/api
+    symbol: NewAPI
+    allowed_globs:
+      - internal/app/**
+      - '**/*_test.go'
+
+production_constructors:
+  - import_path: mcp-local-hub/internal/cli
+    symbol: NewRootCmd
+    allowed_globs:
+      - internal/app/**
+      - '**/*_test.go'
+  - import_path: mcp-local-hub/internal/gui
+    symbol: NewServer
+    allowed_globs:
+      - internal/app/**
+      - '**/*_test.go'
+
+allowed_global_name_patterns:
+  - '^Err[A-Z][A-Za-z0-9_]*$'
+
+test_hook_name_patterns:
+  - '.*ForTest$'
+  - '^TestHook.*$'
+
+history_comment_patterns:
+  - '(?i)\bPR\s*#?[0-9]+\b'
+  - '(?i)\bround[- ]?[0-9]+\b'
+  - '(?i)\bcodex[-_ ]?round[0-9]*\b'
+
+history_allowed_globs:
+  - '**/*_test.go'
+
+test_only_build_tags:
+  - test_state_path_env
+
+embedded_document_min_bytes: 4096
+
+file_budgets:
+  production_advisory_lines: 1200
+  production_hard_lines: 2200
+  test_review_lines: 2800
+
+generic_package_names:
+  - common
+  - helpers
+  - misc
+  - utils
