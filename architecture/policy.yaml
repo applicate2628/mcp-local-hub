@@ -55,8 +55,7 @@ production_constructors:
       - internal/app/**
       - '**/*_test.go'
 
-allowed_global_name_patterns:
-  - '^Err[A-Z][A-Za-z0-9_]*$'
+allowed_global_name_patterns: []
 
 test_hook_name_patterns:
   - '.*ForTest$'
