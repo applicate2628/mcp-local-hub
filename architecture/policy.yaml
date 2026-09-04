@@ -41,19 +41,16 @@ api_constructors:
     symbol: NewAPI
     allowed_globs:
       - internal/app/**
-      - '**/*_test.go'
 
 production_constructors:
   - import_path: mcp-local-hub/internal/cli
     symbol: NewRootCmd
     allowed_globs:
       - internal/app/**
-      - '**/*_test.go'
   - import_path: mcp-local-hub/internal/gui
     symbol: NewServer
     allowed_globs:
       - internal/app/**
-      - '**/*_test.go'
 
 allowed_global_name_patterns: []
 
