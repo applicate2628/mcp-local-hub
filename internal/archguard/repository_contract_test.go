@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"gopkg.in/yaml.v3"
@@ -56,22 +57,34 @@ type repositoryContractTraceability struct {
 
 func TestRepositoryArchitectureContracts(t *testing.T) {
 	root := repositoryContractRoot(t)
-	for name, load := range map[string]func(string) error{
-		"policy": func(path string) error {
-			_, err := LoadPolicy(path)
-			return err
-		},
-		"owners": func(path string) error {
-			_, err := LoadOwners(path)
-			return err
-		},
-		"workers": func(path string) error {
-			_, err := LoadWorkers(path)
-			return err
-		},
-	} {
-		if err := load(filepath.Join(root, "architecture", name+".yaml")); err != nil {
-			t.Fatalf("load architecture %s: %v", name, err)
+
+	policy, err := LoadPolicy(filepath.Join(root, "architecture", "policy.yaml"))
+	if err != nil {
+		t.Fatalf("load architecture policy: %v", err)
+	}
+	if len(policy.AllowedGlobalNamePatterns) != 0 {
+		t.Fatalf(
+			"allowed_global_name_patterns must stay empty; baseline exact fingerprints instead, got %v",
+			policy.AllowedGlobalNamePatterns,
+		)
+	}
+
+	if _, err := LoadOwners(filepath.Join(root, "architecture", "owners.yaml")); err != nil {
+		t.Fatalf("load architecture owners: %v", err)
+	}
+	if _, err := LoadWorkers(filepath.Join(root, "architecture", "workers.yaml")); err != nil {
+		t.Fatalf("load architecture workers: %v", err)
+	}
+	baseline, err := LoadBaseline(filepath.Join(root, "architecture", "baseline.yaml"))
+	if err != nil {
+		t.Fatalf("load architecture baseline: %v", err)
+	}
+	if strings.TrimSpace(baseline.GeneratedFrom) == "" {
+		t.Fatal("architecture baseline must record generated_from")
+	}
+	for _, entry := range baseline.Entries {
+		if entry.Owner == "architecture-triage" {
+			t.Fatalf("baseline entry %s still uses temporary architecture-triage owner", entry.Fingerprint)
 		}
 	}
 
