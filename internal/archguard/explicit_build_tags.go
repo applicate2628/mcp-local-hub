@@ -5,9 +5,10 @@ import "go/build/constraint"
 const explicitAdditionalTagPrefix = "\x00archcheck:explicit-tag:"
 
 // allowExplicitAutomaticTagOverrides models an automatic tag used in a
-// lexical build expression as true either because of the active build context
-// or because the same spelling was supplied through -tags. Filename-derived
-// constraints remain target-only because they do not pass through this helper.
+// build constraint as true either because of the active build context or
+// because the same spelling was supplied through -tags. Both directives and
+// filename suffixes use this helper, matching go/build.Context.matchTag.
+// Sharing the additional-tag variable preserves negation across both sources.
 func allowExplicitAutomaticTagOverrides(expr constraint.Expr) constraint.Expr {
 	switch value := expr.(type) {
 	case *constraint.TagExpr:

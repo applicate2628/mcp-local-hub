@@ -119,10 +119,15 @@ func TestGo126TargetMatrixMatchesToolchain(t *testing.T) {
 	}
 }
 
-func TestGo126KnownTagsExcludeRemovedPortsAndFutureFeatures(t *testing.T) {
-	for _, tag := range []string{"hurd", "nacl", "zos", "amd64p32", "armbe", "arm64be", "mips64p32", "ppc", "riscv", "s390", "sparc"} {
-		if isKnownGOOS(tag) || isKnownGOARCH(tag) {
-			t.Fatalf("removed Go target %q must remain a custom build tag", tag)
+func TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets(t *testing.T) {
+	for _, goos := range []string{"hurd", "nacl", "zos"} {
+		if !isKnownGOOS(goos) {
+			t.Fatalf("historical GOOS %q must remain a recognized filename suffix", goos)
+		}
+	}
+	for _, goarch := range []string{"amd64p32", "armbe", "arm64be", "mips64p32", "mips64p32le", "ppc", "riscv", "s390", "sparc"} {
+		if !isKnownGOARCH(goarch) {
+			t.Fatalf("historical GOARCH %q must remain a recognized filename suffix", goarch)
 		}
 	}
 	arm64 := &constraint.TagExpr{Tag: "arm64"}

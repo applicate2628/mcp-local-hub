@@ -49,7 +49,7 @@ func F() {
 	}
 }
 
-func TestMutuallyExclusivePlatformPackageNamesRemainScannable(t *testing.T) {
+func TestPlatformPackageNamesCanOverlapThroughAdditionalTags(t *testing.T) {
 	root := newFixtureRepo(t, map[string]string{
 		"internal/variant/ctor_linux.go": `package linuxctor
 func New() any { return nil }
@@ -69,20 +69,8 @@ func Windows() { _ = windowsctor.New() }
 	policy := mustLoadPolicyForTest(t)
 	policy.SourceRoots = []string{"internal"}
 	policy.APIConstructors = []SymbolRule{{ImportPath: "mcp-local-hub/internal/variant", Symbol: "New"}}
-	report, err := Scan(t.Context(), ScanOptions{Root: root, Policy: policy})
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := violationsOfKind(report, KindAPIConstruction)
-	if len(got) != 2 {
-		t.Fatalf("got=%#v, want one platform-specific finding per importer", got)
-	}
-	symbols := map[string]bool{}
-	for _, violation := range got {
-		symbols[violation.Location.Symbol] = true
-	}
-	if !symbols["Linux"] || !symbols["Windows"] {
-		t.Fatalf("symbols=%#v, want Linux and Windows", symbols)
+	if _, err := Scan(t.Context(), ScanOptions{Root: root, Policy: policy}); err == nil {
+		t.Fatal("Linux and Windows filename constraints can select conflicting package names through -tags")
 	}
 }
 

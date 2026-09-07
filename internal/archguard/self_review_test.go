@@ -57,11 +57,11 @@ const document = Heading + ` + strconv.Quote(tail) + `
 	}
 }
 
-func TestIncompatibleLocalConstantDoesNotShadowDotImport(t *testing.T) {
+func TestAdditionalTagCompatibleLocalConstantShadowsDotImport(t *testing.T) {
 	imported := "# Imported\n"
 	tail := "```\n" + strings.Repeat("x", 160)
 	root := newFixtureRepo(t, map[string]string{
-		"internal/docs/constants.go": "package docs\n\nconst Heading = " + strconv.Quote(imported) + "\n",
+		"internal/docs/constants.go":  "package docs\n\nconst Heading = " + strconv.Quote(imported) + "\n",
 		"internal/x/local_windows.go": "package x\n\nconst Heading = \"not markdown\"\n",
 		"internal/x/document_linux.go": `package x
 
@@ -74,7 +74,7 @@ const document = Heading + ` + strconv.Quote(tail) + `
 	policy.SourceRoots = []string{"internal"}
 	policy.EmbeddedDocumentMinBytes = 100
 	got := violationsOfKind(mustScan(t, root, policy), KindEmbeddedDocument)
-	if len(got) != 1 || got[0].Metric != len(imported+tail) {
-		t.Fatalf("got=%#v, incompatible local definition must not hide dot import", got)
+	if len(got) != 0 {
+		t.Fatalf("got=%#v, additional-tag-compatible local definition must shadow dot import", got)
 	}
 }
