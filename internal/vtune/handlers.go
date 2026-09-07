@@ -157,7 +157,10 @@ func (vs *VTuneServer) profileTool(ctx context.Context, req *mcp.CallToolRequest
 	// Durable actions intentionally detach from the MCP caller. The existing
 	// no-action path below remains the short synchronous compatibility surface.
 	timeoutSec := args.TimeoutSec
-	if timeoutSec <= 0 {
+	if action == "start" && timeoutSec < 0 {
+		return structuredErrResult(profileResult{ExitCode: -1, AnalysisType: analysis, FailureID: failureTimeoutOutOfRange, Error: fmt.Sprintf("timeout_sec must be between 1 and %d for durable VTune runs", maxDurableTimeoutSec)}), nil
+	}
+	if timeoutSec == 0 || (action != "start" && timeoutSec < 0) {
 		timeoutSec = defaultTimeoutSec
 	}
 	if action != "run" {
@@ -554,6 +557,7 @@ func profileResultFromRun(run vtuneRunRecord) profileResult {
 	}
 	if run.Output != nil {
 		res.Summary, res.ReportPath, res.CommandLine, res.Stderr = run.Output.Summary, run.Output.ReportPath, run.Output.CommandLine, run.Output.Stderr
+		res.TimedOut = run.Output.TimedOut
 		res.TopHotspots = parseReport(run.Output.ReportCSV).Hotspots
 		if len(res.TopHotspots) > maxHotspots {
 			res.TopHotspots = res.TopHotspots[:maxHotspots]
@@ -571,6 +575,10 @@ func failureIDFor(err error) string {
 		return failureRunNotFound
 	case errors.Is(err, errVTuneIdempotencyConflict):
 		return failureIdempotencyConflict
+	case errors.Is(err, errVTuneAdmissionLimited):
+		return failureAdmissionLimited
+	case errors.Is(err, errVTuneTimeoutOutOfRange):
+		return failureTimeoutOutOfRange
 	default:
 		return failureResultNonReportable
 	}

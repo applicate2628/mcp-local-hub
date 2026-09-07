@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -150,6 +151,27 @@ func TestProfileTool_DefaultsAnalysisHotspots(t *testing.T) {
 	}
 	if gotAnalysis != "hotspots" {
 		t.Errorf("analysis default = %q, want hotspots", gotAnalysis)
+	}
+}
+
+func TestProfileTool_SynchronousNegativeTimeoutKeepsDefaultCompatibility(t *testing.T) {
+	var got context.Context
+	vs := &VTuneServer{
+		findExe: func() (string, error) { return `C:\fake\vtune.exe`, nil },
+		run: func(ctx context.Context, _ string, _ string, _ []string, _ string, _ string, _ bool) (*runOutput, error) {
+			got = ctx
+			return &runOutput{ExitCode: 0, ReportCSV: "Function\tCPU Time\n", Summary: "ok", ReportPath: "p"}, nil
+		},
+	}
+	before := time.Now()
+	res, err := vs.profileTool(t.Context(), newRequest(t, map[string]any{"exe": `C:\proj\t.exe`, "timeout_sec": -1}))
+	after := time.Now()
+	if err != nil || res.IsError {
+		t.Fatalf("synchronous negative timeout err=%v body=%s", err, contentText(t, res))
+	}
+	deadline, ok := got.Deadline()
+	if !ok || deadline.Before(before.Add(defaultTimeoutSec*time.Second)) || deadline.After(after.Add(defaultTimeoutSec*time.Second)) {
+		t.Fatalf("synchronous deadline=%v present=%v, want default timeout", deadline, ok)
 	}
 }
 
