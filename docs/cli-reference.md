@@ -58,10 +58,15 @@ environment. Graphify's optional per-call `project_path` remains an upstream
 tool argument; MCPHub neither filters it nor treats it as a new authorization
 boundary. No shared graph manifest or dynamic graph pool is shipped.
 
-Scholar Search `scholar-search-mcp==0.1.3` is adopted once per exact environment
-profile. Its enabled entry launches the pinned package as
-`python -m scholar_search_mcp` (directly or through the configured pinned `uv`
-argument vector) and keeps its backend-selection environment. For example:
+Scholar Search is adopted once per exact environment profile. Its enabled entry
+must use the complete compatible launch recipe
+`uv run --no-project --with scholar-search-mcp==0.1.3 --with mcp==1.29.0 python -m scholar_search_mcp`
+and keep its backend-selection environment. Both pins are required: Scholar
+declares `mcp>=0.9.0`, but its `@app.list_tools()` / `@app.call_tool()` integration
+uses the decorator-compatible MCP Software Development Kit (SDK) 1.29.0 API;
+an unconstrained MCP 2.x resolution fails during module import before protocol
+startup. This recipe constrains MCPHub-owned dependency resolution; it does not
+claim the upstream Scholar dependency range has been corrected. For example:
 
 ```text
 mcphub adopt scholar-search-default --client codex-cli --port <port> --clients codex-cli,claude-code
