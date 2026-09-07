@@ -2,8 +2,8 @@
 
 package api
 
-import "fmt"
+import "mcp-local-hub/internal/scheduler"
 
 func livenessPrincipalSID() (string, error) {
-	return "", fmt.Errorf("liveness principal SID is unsupported on this platform")
+	return "", scheduler.ErrNotImplemented
 }

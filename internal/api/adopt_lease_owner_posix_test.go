@@ -16,6 +16,16 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+func TestPreflightAdoptLeaseNamespacePlatformUnsupportedDefersToPOSIXLeaseOwner(t *testing.T) {
+	report, err := preflightAdoptLeaseNamespaceForAdopt()
+	if err != nil {
+		t.Fatalf("preflight error = %v, want POSIX lease-owner deferral", err)
+	}
+	if report.State != AdoptLeaseNamespaceRefused || report.ReasonID != AdoptLeaseReasonPlatformUnsupported || report.Action != AdoptLeaseActionLeaveUnchanged {
+		t.Fatalf("preflight report = %+v, want unchanged unsupported inspection report", report)
+	}
+}
+
 func TestPosixAdoptLeaseSettlementRetainsNoncooperativeReplacement(t *testing.T) {
 	_ = isolateStateDir(t)
 	const entry = "posix-noncooperative-replacement"

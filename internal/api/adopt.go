@@ -557,7 +557,7 @@ func preflightAdoptLeaseNamespaceForAdopt() (AdoptLeaseNamespaceReport, error) {
 	var namespaceFailure *LeaseNamespaceFailure
 	if errors.As(err, &namespaceFailure) {
 		switch namespaceFailure.ReasonID {
-		case AdoptLeaseReasonStateRootUnavailable, AdoptLeaseReasonStateRootRefused, AdoptLeaseReasonPlatformUnsupported:
+		case AdoptLeaseReasonStateRootUnavailable, AdoptLeaseReasonStateRootRefused:
 			return report, newLeaseNamespaceFailure(namespaceFailure.ReasonID, namespaceFailure.Action, err)
 		default:
 			return report, nil
