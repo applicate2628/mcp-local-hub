@@ -30,10 +30,13 @@ package oneapirun
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/oneapi"
+	"mcp-local-hub/internal/unsafegate"
 )
 
 // OneAPIRunServer holds the MCP server instance plus the injectable
@@ -42,7 +45,8 @@ import (
 // against synthetic data without invoking the real ~1-3s setvars.bat
 // subprocess.
 type OneAPIRunServer struct {
-	server *mcp.Server
+	server     *mcp.Server
+	asyncOwner *asyncRunOwner
 
 	// captureVSEnv returns the COMPLETE VS + oneAPI environment as a slice of
 	// "KEY=VALUE" strings (from oneAPI's setvars.bat) and a bool reporting
@@ -69,21 +73,47 @@ type OneAPIRunServer struct {
 // over stdio until ctx is cancelled or the transport closes. Single source
 // of truth for both entry points — keep runtime behavior here.
 func Run(ctx context.Context) error {
+	enabled := unsafegate.RegisterAllowed(enableUnsafeOneAPIRunEnv, "oneapi-run")
+	rs, err := newOneAPIRunServer(ctx, enabled, api.DaemonStateDir)
+	if err != nil {
+		return err
+	}
+	runErr := rs.server.Run(ctx, &mcp.StdioTransport{})
+	var closeErr error
+	if rs.asyncOwner != nil {
+		closeErr = rs.asyncOwner.Close()
+	}
+	if closeErr != nil {
+		return fmt.Errorf("oneapi_run_shutdown_unsettled: %w", closeErr)
+	}
+	if runErr != nil {
+		return fmt.Errorf("oneapi-run server: %w", runErr)
+	}
+	return nil
+}
+
+func newOneAPIRunServer(ctx context.Context, enabled bool, stateDir func() (string, error)) (*OneAPIRunServer, error) {
 	rs := &OneAPIRunServer{
 		captureVSEnv:  oneapi.SetvarsEnv,
 		oneAPIDLLDirs: detectOneAPIDLLDirs,
 		detectRoot:    oneapi.DetectRoot,
 	}
-
 	rs.server = mcp.NewServer(&mcp.Implementation{
 		Name:    "oneapi-run",
 		Version: "1.0.0",
 	}, nil)
 
-	registerTools(rs)
-
-	if err := rs.server.Run(ctx, &mcp.StdioTransport{}); err != nil {
-		return fmt.Errorf("oneapi-run server: %w", err)
+	if enabled {
+		stateDir, err := stateDir()
+		if err != nil {
+			return nil, fmt.Errorf("oneapi-run state directory: %w", err)
+		}
+		owner, err := newAsyncRunOwner(ctx, asyncOwnerOptions{StatePath: filepath.Join(stateDir, "oneapi-run", "runs-v1.json"), Execute: rs.executeAsyncRun})
+		if err != nil {
+			return nil, fmt.Errorf("oneapi-run async owner: %w", err)
+		}
+		rs.asyncOwner = owner
 	}
-	return nil
+	registerToolsForGate(rs, enabled)
+	return rs, nil
 }

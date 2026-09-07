@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"time"
 
@@ -79,9 +80,12 @@ func oneAPIRunEnabled() bool {
 // tool is withheld to stderr so the secure-default is observable), so a
 // misconfigured client cannot reach the arbitrary-command surface.
 func registerTools(rs *OneAPIRunServer) {
-	registerStatusTool(rs)
+	registerToolsForGate(rs, unsafegate.RegisterAllowed(enableUnsafeOneAPIRunEnv, "oneapi-run"))
+}
 
-	if !unsafegate.RegisterAllowed(enableUnsafeOneAPIRunEnv, "oneapi-run") {
+func registerToolsForGate(rs *OneAPIRunServer, enabled bool) {
+	registerStatusTool(rs)
+	if !enabled {
 		return
 	}
 
@@ -93,30 +97,62 @@ func registerTools(rs *OneAPIRunServer) {
 			"Pass a NATIVE command and NATIVE-path args (e.g. command=\"ctest\", args=[\"-C\",\"Release\"], cwd=\"C:\\\\path\\\\to\\\\build\"). " +
 			"Returns structured JSON: {exit_code, stdout, stderr, env_source, duration_ms, timed_out}. " +
 			"env_source is \"setvars\" when the full setvars.bat environment was captured, \"oneapi-only\" when setvars.bat was not found (only the oneAPI runtime DLL dirs were prepended to PATH — a prebuilt MKL exe can RUN but a build would fail without LIB/INCLUDE), or \"plain\" when neither is available — the command always runs regardless.",
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"command": map[string]any{
-					"type":        "string",
-					"description": "The program to run (a native executable name or path, e.g. 'ctest', 'gdb', or 'C:\\\\build\\\\app.exe'). NOT a shell command line — args go in the args array.",
-				},
-				"args": map[string]any{
-					"type":        "array",
-					"description": "Arguments passed to command, each as a separate native-path string (no shell quoting). Optional.",
-					"items":       map[string]any{"type": "string"},
-				},
-				"cwd": map[string]any{
-					"type":        "string",
-					"description": "Working directory to run the command in (native path). Optional — inherits the server's cwd when omitted.",
-				},
-				"timeout_sec": map[string]any{
-					"type":        "integer",
-					"description": "Maximum seconds to let the command run before it is killed. Optional — defaults to 600 (10 minutes). Non-positive values fall back to the default.",
-				},
-			},
-			"required": []string{"command"},
-		},
+		InputSchema: oneAPIRunInputSchema(),
 	}, rs.runInOneAPIEnvTool)
+}
+
+func oneAPIRunInputSchema() map[string]any {
+	branch := func(properties map[string]any, required ...string) map[string]any {
+		return map[string]any{
+			"type":                 "object",
+			"properties":           properties,
+			"required":             required,
+			"additionalProperties": false,
+		}
+	}
+	properties := map[string]any{
+		"action": map[string]any{
+			"type":        "string",
+			"enum":        []string{"run", "start", "status", "result", "cancel"},
+			"description": "Optional action. Omit or use run for the unchanged synchronous command; start creates a durable async receipt; status/result/cancel operate on run_id.",
+		},
+		"command": map[string]any{
+			"type":        "string",
+			"description": "The program to run (a native executable name or path, e.g. 'ctest', 'gdb', or 'C:\\\\build\\\\app.exe'). NOT a shell command line — args go in the args array.",
+		},
+		"args": map[string]any{
+			"type": "array", "description": "Arguments passed to command, each as a separate native-path string (no shell quoting). Optional.", "items": map[string]any{"type": "string"},
+		},
+		"cwd":             map[string]any{"type": "string", "description": "Working directory to run the command in (native path). Optional — inherits the server's cwd when omitted."},
+		"timeout_sec":     map[string]any{"type": "integer", "description": "Maximum seconds to let the command run before it is killed. Optional — defaults to 600 (10 minutes). Non-positive values fall back to the default."},
+		"idempotency_key": map[string]any{"type": "string", "minLength": 1, "maxLength": 128},
+		"run_id":          map[string]any{"type": "string"},
+		"confirm":         map[string]any{"type": "boolean"},
+	}
+	return map[string]any{
+		"type":       "object",
+		"properties": properties,
+		"oneOf": []any{
+			branch(map[string]any{
+				"action":      map[string]any{"enum": []string{"run"}},
+				"command":     properties["command"],
+				"args":        properties["args"],
+				"cwd":         properties["cwd"],
+				"timeout_sec": properties["timeout_sec"],
+			}, "command"),
+			branch(map[string]any{
+				"action":          map[string]any{"const": "start"},
+				"command":         properties["command"],
+				"args":            properties["args"],
+				"cwd":             properties["cwd"],
+				"timeout_sec":     properties["timeout_sec"],
+				"idempotency_key": properties["idempotency_key"],
+			}, "action", "command", "idempotency_key"),
+			branch(map[string]any{"action": map[string]any{"const": "status"}, "run_id": properties["run_id"]}, "action", "run_id"),
+			branch(map[string]any{"action": map[string]any{"const": "result"}, "run_id": properties["run_id"]}, "action", "run_id"),
+			branch(map[string]any{"action": map[string]any{"const": "cancel"}, "run_id": properties["run_id"], "confirm": map[string]any{"const": true}}, "action", "run_id", "confirm"),
+		},
+	}
 }
 
 // runInOneAPIEnvTool is the run_in_oneapi_env handler. It computes the
@@ -147,6 +183,23 @@ func (rs *OneAPIRunServer) runInOneAPIEnvTool(ctx context.Context, req *mcp.Call
 		}
 	}()
 
+	var actionProbe map[string]json.RawMessage
+	if err := json.Unmarshal(req.Params.Arguments, &actionProbe); err != nil {
+		return toolErrorResult(fmt.Errorf("invalid arguments: %w", err)), nil
+	}
+	if rawAction, hasAction := actionProbe["action"]; hasAction {
+		var action string
+		if err := json.Unmarshal(rawAction, &action); err != nil {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		if action != "run" {
+			return rs.runAsyncAction(ctx, action, actionProbe)
+		}
+		if !onlyAsyncFields(actionProbe, "action", "command", "args", "cwd", "timeout_sec") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+	}
+
 	var args struct {
 		Command    string   `json:"command"`
 		Args       []string `json:"args"`
@@ -176,6 +229,193 @@ func (rs *OneAPIRunServer) runInOneAPIEnvTool(ctx context.Context, req *mcp.Call
 	return &mcp.CallToolResult{
 		Content: []mcp.Content{&mcp.TextContent{Text: string(payload)}},
 	}, nil
+}
+
+func (rs *OneAPIRunServer) runAsyncAction(_ context.Context, action string, fields map[string]json.RawMessage) (*mcp.CallToolResult, error) {
+	if rs.asyncOwner == nil {
+		return toolErrorResult(errAsyncOwnerClosed), nil
+	}
+	switch action {
+	case "start":
+		if !onlyAsyncFields(fields, "action", "command", "args", "cwd", "timeout_sec", "idempotency_key") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		if !requiredAsyncFields(fields, "command", "idempotency_key") || !nonNullAsyncFields(fields, "args", "cwd", "timeout_sec") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		var args struct {
+			Command        string   `json:"command"`
+			Args           []string `json:"args"`
+			Cwd            string   `json:"cwd"`
+			TimeoutSec     int      `json:"timeout_sec"`
+			IdempotencyKey string   `json:"idempotency_key"`
+		}
+		if err := decodeAsyncFields(fields, &args); err != nil {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		timeoutSec := args.TimeoutSec
+		if timeoutSec <= 0 {
+			timeoutSec = defaultTimeoutSec
+		}
+		receipt, err := rs.asyncOwner.Start(oneAPIRunRequest{Command: args.Command, Args: args.Args, Cwd: args.Cwd, Timeout: time.Duration(timeoutSec) * time.Second, IdempotencyKey: args.IdempotencyKey})
+		if err != nil {
+			return toolErrorResult(err), nil
+		}
+		return asyncJSONResult(receipt)
+	case "status":
+		if !onlyAsyncFields(fields, "action", "run_id") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		if !requiredAsyncFields(fields, "run_id") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		var args struct {
+			RunID string `json:"run_id"`
+		}
+		if err := decodeAsyncFields(fields, &args); err != nil {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		receipt, err := rs.asyncOwner.Status(args.RunID)
+		if err != nil {
+			return toolErrorResult(err), nil
+		}
+		return asyncJSONResult(receipt)
+	case "result":
+		if !onlyAsyncFields(fields, "action", "run_id") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		if !requiredAsyncFields(fields, "run_id") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		var args struct {
+			RunID string `json:"run_id"`
+		}
+		if err := decodeAsyncFields(fields, &args); err != nil {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		receipt, err := rs.asyncOwner.Result(args.RunID)
+		if err != nil {
+			return toolErrorResult(err), nil
+		}
+		return asyncJSONResult(receipt)
+	case "cancel":
+		if !onlyAsyncFields(fields, "action", "run_id", "confirm") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		if !requiredAsyncFields(fields, "run_id", "confirm") {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		var args struct {
+			RunID   string `json:"run_id"`
+			Confirm bool   `json:"confirm"`
+		}
+		if err := decodeAsyncFields(fields, &args); err != nil {
+			return toolErrorResult(errAsyncInvalidRequest), nil
+		}
+		receipt, err := rs.asyncOwner.Cancel(args.RunID, args.Confirm)
+		if err != nil {
+			return toolErrorResult(err), nil
+		}
+		return asyncJSONResult(receipt)
+	default:
+		return toolErrorResult(errAsyncInvalidRequest), nil
+	}
+}
+
+func decodeAsyncFields(fields map[string]json.RawMessage, out any) error {
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(raw, out)
+}
+
+func onlyAsyncFields(fields map[string]json.RawMessage, allowed ...string) bool {
+	set := make(map[string]struct{}, len(allowed))
+	for _, field := range allowed {
+		set[field] = struct{}{}
+	}
+	for field := range fields {
+		if _, ok := set[field]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func requiredAsyncFields(fields map[string]json.RawMessage, required ...string) bool {
+	for _, field := range required {
+		raw, ok := fields[field]
+		if !ok || isAsyncNull(raw) {
+			return false
+		}
+	}
+	return true
+}
+
+func nonNullAsyncFields(fields map[string]json.RawMessage, optional ...string) bool {
+	for _, field := range optional {
+		if raw, ok := fields[field]; ok && isAsyncNull(raw) {
+			return false
+		}
+	}
+	return true
+}
+
+func isAsyncNull(raw json.RawMessage) bool { return bytes.Equal(bytes.TrimSpace(raw), []byte("null")) }
+
+func asyncJSONResult(value any) (*mcp.CallToolResult, error) {
+	payload, err := json.Marshal(value)
+	if err != nil {
+		return toolErrorResult(fmt.Errorf("oneapi async response: %w", err)), nil
+	}
+	return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: string(payload)}}}, nil
+}
+
+// runAsyncCommand uses the approved contained-stream seam rather than the
+// legacy synchronous job runner. Both output streams retain the exact capped
+// buffer semantics used by action-absent run.
+func runAsyncCommand(ctx context.Context, command string, args []string, cwd string, env []string, source string) asyncExecution {
+	start := time.Now()
+	cmd := exec.Command(resolveCommandPath(command, env), args...)
+	process.NoConsole(cmd)
+	cmd.Env = env
+	if cwd != "" {
+		cmd.Dir = cwd
+	}
+	var stdout, stderr cappedBuffer
+	stdout.limit, stderr.limit = maxStreamBytes, maxStreamBytes
+	err := process.RunContainedStream(ctx, cmd, process.ContainedStreamOptions{CleanupTimeout: waitDelayAfterKill, Stderr: &stderr}, func(reader io.Reader) error {
+		_, copyErr := io.Copy(&stdout, reader)
+		return copyErr
+	})
+	result := runResult{Stdout: stdout.String(), Stderr: stderr.String(), EnvSource: source, DurationMs: time.Since(start).Milliseconds()}
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		result.ExitCode, result.TimedOut = -1, true
+		return asyncExecution{Result: result, Err: ctx.Err()}
+	}
+	if err == nil {
+		return asyncExecution{Result: result}
+	}
+	var contained *process.ContainedRunError
+	if errors.As(err, &contained) && contained.Stage == process.ContainedStageExit && contained.ExitCode != nil {
+		result.ExitCode = *contained.ExitCode
+		return asyncExecution{Result: result}
+	}
+	result.ExitCode = -1
+	if result.Stderr != "" {
+		result.Stderr += "\n"
+	}
+	result.Stderr += "oneapi-run: contained execution failed"
+	if errors.As(err, &contained) && contained.Stage == process.ContainedStageStart {
+		return asyncExecution{Result: result, FailureID: "oneapi_run_spawn_failed", Err: err}
+	}
+	return asyncExecution{Result: result, FailureID: "oneapi_run_containment_failed", Err: err}
+}
+
+func (rs *OneAPIRunServer) executeAsyncRun(ctx context.Context, request oneAPIRunRequest) asyncExecution {
+	env, source := computeRunEnv(rs.captureVSEnv, rs.oneAPIDLLDirs)
+	return runAsyncCommand(ctx, request.Command, request.Args, request.Cwd, env, source)
 }
 
 // runCommand executes command with args in cwd under env, capping each
