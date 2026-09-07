@@ -51,7 +51,16 @@ func renderScanGroups(w io.Writer, result *api.ScanResult, withProcs bool) {
 		for _, e := range items {
 			procs := ""
 			if withProcs && e.ProcessCount > 0 {
-				procs = fmt.Sprintf("  · %d process(es)", e.ProcessCount)
+				metric := "process(es)"
+				if e.ProcessAttribution != nil {
+					switch e.ProcessAttribution.Scope {
+					case "managed-daemon-tree":
+						metric = "managed process(es)"
+					case "global-command-match":
+						metric = "global command match(es)"
+					}
+				}
+				procs = fmt.Sprintf("  · %d %s", e.ProcessCount, metric)
 			}
 			fmt.Fprintf(w, "  %-25s %s%s\n", e.Name, presenceSummary(e), procs)
 		}

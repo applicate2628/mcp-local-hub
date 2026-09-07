@@ -353,7 +353,7 @@ url = "http://localhost:9123/mcp"
 
 	// Antigravity — relay (stdio with command=mcphub.exe args=[relay, --server, memory])
 	agPath := filepath.Join(tmp, "mcp_config.json")
-	_ = os.WriteFile(agPath, []byte(`{"mcpServers":{"memory":{"command":"D:/dev/mcphub.exe","args":["relay","--server","memory","--daemon","default"],"disabled":false}}}`), 0600)
+	_ = os.WriteFile(agPath, []byte(`{"mcpServers":{"memory":{"command":"C:/tools/mcphub.exe","args":["relay","--server","memory","--daemon","default"],"disabled":false}}}`), 0600)
 
 	cursorPath := filepath.Join(tmp, "cursor-mcp.json")
 	_ = os.WriteFile(cursorPath, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","type":"http"}}}`), 0600)
@@ -427,7 +427,7 @@ func TestScanCoversWave2Clients(t *testing.T) {
 	tmp := t.TempDir()
 
 	zedPath := filepath.Join(tmp, "zed-settings.json")
-	_ = os.WriteFile(zedPath, []byte(`{"context_servers":{"memory":{"command":"D:/dev/mcphub.exe","args":["relay","--url","http://localhost:9123/mcp"]}}}`), 0600)
+	_ = os.WriteFile(zedPath, []byte(`{"context_servers":{"memory":{"command":"C:/tools/mcphub.exe","args":["relay","--url","http://localhost:9123/mcp"]}}}`), 0600)
 
 	kiroPath := filepath.Join(tmp, "kiro-mcp.json")
 	_ = os.WriteFile(kiroPath, []byte(`{"mcpServers":{"memory":{"url":"http://localhost:9123/mcp","disabled":false}}}`), 0600)
@@ -1019,6 +1019,142 @@ func TestScanWithProcessCountPopulates(t *testing.T) {
 	if !found {
 		t.Error("memory entry missing from scan result")
 	}
+}
+
+func TestScanFromProcessAttribution_ManagedDescriptorTreeAndFailureStates(t *testing.T) {
+	newOpts := func(t *testing.T, outcome processSnapshotOutcome) ScanOpts {
+		t.Helper()
+		root := t.TempDir()
+		configPath := filepath.Join(root, "claude.json")
+		if err := os.WriteFile(configPath, []byte(`{"mcpServers":{"codegraph":{"type":"http","url":"http://127.0.0.1:9303/mcp"}}}`), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		manifestDir := filepath.Join(root, "servers", "codegraph")
+		if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(manifestDir, "manifest.yaml"), []byte("name: codegraph\nkind: global\ntransport: stdio-bridge\ncommand: codegraph\nbase_args: [serve, --mcp]\ndaemons:\n  - name: default\n    port: 9303\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		return ScanOpts{ClaudeConfigPath: configPath, ManifestDir: filepath.Dir(manifestDir), WithProcessCount: true, processSnapshot: &outcome}
+	}
+	managedSnapshot := processSnapshotOutcome{snapshot: processSnapshot{raw: `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"C:\managed\mcphub.exe daemon --server codegraph --daemon default",20260417180000.000000+000,mcphub.exe,1,100,10
+HOST,"conhost.exe 0x4",20260417180000.000000+000,conhost.exe,100,101,10
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,100,102,10
+HOST,"conhost.exe 0x4",20260417180000.000000+000,conhost.exe,102,103,10
+HOST,"node.exe npm-shim.js serve --mcp",20260417180000.000000+000,node.exe,102,104,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,104,105,10
+HOST,"node.exe -e watchdog",20260417180000.000000+000,node.exe,105,106,10
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,900,200,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,200,201,10
+`, lines: nil}}
+	managedSnapshot.snapshot.lines = splitSnapshotLines(managedSnapshot.snapshot.raw)
+
+	run := func(t *testing.T, intent *SupervisorIntentFile, outcome processSnapshotOutcome) ScanEntry {
+		t.Helper()
+		stateRoot := t.TempDir()
+		t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+		if intent != nil {
+			if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
+				t.Fatal(err)
+			}
+		}
+		result, err := NewAPI().ScanFrom(newOpts(t, outcome))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, entry := range result.Entries {
+			if entry.Name == "codegraph" {
+				return entry
+			}
+		}
+		t.Fatal("codegraph entry missing")
+		return ScanEntry{}
+	}
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
+		TaskName: `\mcp-local-hub-codegraph-default`, Server: "codegraph", Daemon: "default", Command: `C:\managed\mcphub.exe`,
+		Args: []string{"daemon", "--server", "codegraph", "--daemon", "default"}, Port: 9303,
+	}}}
+
+	t.Run("managed descriptor selects exact seven tree", func(t *testing.T) {
+		entry := run(t, intent, managedSnapshot)
+		if entry.ProcessCount != 7 || entry.ProcessAttribution == nil {
+			t.Fatalf("managed entry count/diagnostic=%d/%+v, want 7/non-nil", entry.ProcessCount, entry.ProcessAttribution)
+		}
+		diagnostic := entry.ProcessAttribution
+		if diagnostic.Scope != processAttributionScopeManaged || diagnostic.State != processAttributionStateComplete || len(diagnostic.Contributors) != entry.ProcessCount {
+			t.Fatalf("managed diagnostic=%+v, want complete managed seven contributors", diagnostic)
+		}
+		for _, contributor := range diagnostic.Contributors {
+			if contributor.Daemon != "default" || contributor.PID == 200 || contributor.PID == 201 {
+				t.Fatalf("managed diagnostic leaked foreign contributor: %+v", contributor)
+			}
+		}
+		wire, err := json.Marshal(entry)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, forbidden := range []string{"command", "executable", "C:\\managed"} {
+			if strings.Contains(string(wire), forbidden) {
+				t.Fatalf("process attribution wire leaked %q: %s", forbidden, wire)
+			}
+		}
+	})
+
+	t.Run("missing managed descriptor is unavailable without backend fallback", func(t *testing.T) {
+		entry := run(t, nil, managedSnapshot)
+		if entry.ProcessCount != 0 || entry.ProcessAttribution == nil || entry.ProcessAttribution.State != processAttributionStateUnavailable || entry.ProcessAttribution.ReasonID != processAttributionReasonManagedDescriptorUnavailable {
+			t.Fatalf("missing descriptor attribution=%+v count=%d", entry.ProcessAttribution, entry.ProcessCount)
+		}
+	})
+
+	t.Run("unavailable process snapshot is visible", func(t *testing.T) {
+		entry := run(t, intent, processSnapshotOutcome{reasonID: "process-snapshot-unavailable"})
+		if entry.ProcessCount != 0 || entry.ProcessAttribution == nil || entry.ProcessAttribution.State != processAttributionStateUnavailable || entry.ProcessAttribution.ReasonID != "process-snapshot-unavailable" {
+			t.Fatalf("snapshot failure attribution=%+v count=%d", entry.ProcessAttribution, entry.ProcessCount)
+		}
+	})
+}
+
+func TestScanEntryProcessAttributionWireIsAbsentWithoutProcessFlag(t *testing.T) {
+	entry := ScanEntry{Name: "codegraph"}
+	wire, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(wire), "process_count") || strings.Contains(string(wire), "process_attribution") {
+		t.Fatalf("scan without --processes changed wire: %s", wire)
+	}
+}
+
+func TestScanFromWithoutProcessCountKeepsProcessProjectionAbsent(t *testing.T) {
+	root := t.TempDir()
+	configPath := filepath.Join(root, "claude.json")
+	if err := os.WriteFile(configPath, []byte(`{"mcpServers":{"codegraph":{"type":"http","url":"http://127.0.0.1:9303/mcp"}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifestDir := filepath.Join(root, "servers", "codegraph")
+	if err := os.MkdirAll(manifestDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestDir, "manifest.yaml"), []byte("name: codegraph\nkind: global\ntransport: stdio-bridge\ncommand: codegraph\ndaemons:\n  - name: default\n    port: 9303\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := NewAPI().ScanFrom(ScanOpts{ClaudeConfigPath: configPath, ManifestDir: filepath.Dir(manifestDir)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range result.Entries {
+		if entry.Name != "codegraph" {
+			continue
+		}
+		if entry.ProcessCount != 0 || entry.ProcessAttribution != nil {
+			t.Fatalf("scan without process flag projected count/diagnostic=%d/%+v", entry.ProcessCount, entry.ProcessAttribution)
+		}
+		return
+	}
+	t.Fatal("codegraph entry missing")
 }
 
 // TestClassify exercises the server-status classifier against the five
@@ -1809,7 +1945,7 @@ func TestScanFrom_MalformedClientConfigDoesNotFailWholeScan(t *testing.T) {
 		t.Fatalf("seed claude: %v", err)
 	}
 	zedPath := filepath.Join(tmp, "zed-settings.json")
-	if err := os.WriteFile(zedPath, []byte(`{"context_servers":{"filesystem":{"command":"D:/dev/mcphub.exe","args":["relay","--url","http://localhost:9130/mcp"]}}}`), 0o600); err != nil {
+	if err := os.WriteFile(zedPath, []byte(`{"context_servers":{"filesystem":{"command":"C:/tools/mcphub.exe","args":["relay","--url","http://localhost:9130/mcp"]}}}`), 0o600); err != nil {
 		t.Fatalf("seed zed: %v", err)
 	}
 	codexPath := filepath.Join(tmp, "config.toml")

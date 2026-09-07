@@ -74,6 +74,10 @@ type ScanOpts struct {
 	// ReadinessRows is the one supervisor IPC snapshot supplied by the caller.
 	// Scan never performs a second process or MCP observation.
 	ReadinessRows []DaemonStatus
+
+	// processSnapshot is a package-private deterministic snapshot input for
+	// scan tests. Production leaves it nil and captures exactly one OS snapshot.
+	processSnapshot *processSnapshotOutcome
 }
 
 // legacyNamedConfigPathSet maps the back-compat named ScanOpts fields to
@@ -883,13 +887,48 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// CountProcesses launched wmic per entry — for ~20 scan rows
 		// that's ~13 s wall time. Single snapshot + in-memory count
 		// drops the scan to ~1 s.
-		snap := takeProcessSnapshot()
+		snapshot := takeProcessSnapshot()
+		if opts.processSnapshot != nil {
+			snapshot = *opts.processSnapshot
+		}
+		intent, intentErr := readSupervisorIntentForStatus()
+		descriptors := scanProcessDescriptorsByServer(intent)
 		for i := range out.Entries {
-			attribution := manifestCache.processAttribution(out.Entries[i].Name)
-			out.Entries[i].ProcessCount = countProcessesFromSnapshotAttribution(snap, attribution)
+			entry := &out.Entries[i]
+			descriptorRows := descriptors[entry.Name]
+			attribution := manifestCache.processAttribution(entry.Name, descriptorRows)
+			if len(descriptorRows) == 0 && entry.Managed {
+				attribution = unavailableProcessAttribution(processAttributionScopeManaged, processAttributionReasonManagedDescriptorUnavailable)
+			}
+			if snapshot.reasonID != "" && attribution.state != processAttributionStateUnavailable {
+				attribution = unavailableProcessAttribution(attribution.scope, snapshot.reasonID)
+			}
+			if intentErr != nil && entry.Managed {
+				attribution = unavailableProcessAttribution(processAttributionScopeManaged, processAttributionReasonManagedDescriptorUnavailable)
+			}
+			result := processAttributionFromSnapshot(snapshot.snapshot, attribution)
+			entry.ProcessCount = result.count
+			entry.ProcessAttribution = &result.diagnostic
 		}
 	}
 	return out, nil
+}
+
+func scanProcessDescriptorsByServer(intent *SupervisorIntentFile) map[string][]SupervisorDaemon {
+	byServer := map[string][]SupervisorDaemon{}
+	if intent == nil {
+		return byServer
+	}
+	for _, descriptor := range intent.Daemons {
+		server, daemon, ok := DescriptorServerDaemon(descriptor)
+		if !ok || server == "" || daemon == "" {
+			continue
+		}
+		descriptor.Server = server
+		descriptor.Daemon = daemon
+		byServer[server] = append(byServer[server], descriptor)
+	}
+	return byServer
 }
 
 func mergeClientScanEntries(dst, src map[string]*ScanEntry) {
@@ -1947,8 +1986,8 @@ func (c *scanManifestCache) patterns(name string) []string {
 	return patternsFromManifest(name, m)
 }
 
-func (c *scanManifestCache) processAttribution(name string) processAttribution {
-	return processAttributionForManifest(name, c.get(name))
+func (c *scanManifestCache) processAttribution(name string, descriptors []SupervisorDaemon) processAttribution {
+	return processAttributionForManifest(name, c.get(name), descriptors)
 }
 
 // manifestDaemonPorts returns the set of daemon ports declared by the
