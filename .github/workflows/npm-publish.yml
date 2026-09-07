@@ -144,13 +144,7 @@ jobs:
           for target in win32-x64 win32-arm64; do
             while IFS=$'\t' read -r role filename; do
               candidate="npm/packages/$target/bin/$filename"
-              go run ./cmd/mcphub-pe-admit "$role" "$candidate"
-              if [ "$role" = "cli" ]; then
-                info="$(go version -m "$candidate")"
-                printf '%s\n' "$info" | grep -F -- "-X main.version=$VERSION" >/dev/null
-                printf '%s\n' "$info" | grep -F -- "-X main.commit=$COMMIT" >/dev/null
-                printf '%s\n' "$info" | grep -F -- "-X main.buildDate=$BUILD_DATE" >/dev/null
-              fi
+              go run ./cmd/mcphub-pe-admit "$role" "$candidate" "$VERSION" "$COMMIT" "$BUILD_DATE"
               echo "$target role=$role metadata version=$VERSION commit=$COMMIT buildDate=$BUILD_DATE"
             done < "$WINDOWS_PRODUCT_ROWS"
           done
