@@ -35,6 +35,22 @@ func TestStatusCLI_ForceMaterializeFlagExists(t *testing.T) {
 	}
 }
 
+func TestStatusCLI_StatusSourceFailureNeverSucceedsWithEmptyJSON(t *testing.T) {
+	for _, args := range [][]string{nil, {"--json"}} {
+		restore := api.SetTestStatusFn(func() ([]api.DaemonStatus, error) {
+			return nil, errors.New("status source closed after accept")
+		})
+
+		cmd := newStatusCmdReal()
+		cmd.SetArgs(args)
+		if err := cmd.Execute(); err == nil {
+			restore()
+			t.Fatalf("status source failure returned success for args=%q", args)
+		}
+		restore()
+	}
+}
+
 // TestFilterWorkspaceScoped asserts only rows with Language OR Lifecycle
 // populated survive the filter.
 func TestFilterWorkspaceScoped(t *testing.T) {
