@@ -4,6 +4,10 @@ Deep notes on the five architecture highlights summarized in the
 [README](../README.md#architecture-highlights). For the supervisor /
 lifecycle design, see [supervisor-architecture.md](supervisor-architecture.md).
 
+For the canonical stabilization and modernization program, including the
+roadmap, target architecture, governance, traceability registry, and detailed
+work-package plans, see [docs/modernization](modernization/README.md).
+
 ## PATH-based install model
 
 On Windows, direct terminal commands use the canonical CUI
