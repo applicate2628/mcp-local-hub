@@ -66,8 +66,14 @@ func WriteDefaultWorkspace(stateDir, canonical string) error {
 // ReadDefaultWorkspace returns the persisted default workspace path under
 // stateDir, or the empty string when the marker file is absent or empty.
 func ReadDefaultWorkspace(stateDir string) (string, error) {
+	return ReadDefaultWorkspaceWithAuditSink(stateDir, nil)
+}
+
+// ReadDefaultWorkspaceWithAuditSink is the per-call audit variant used by
+// read-only processes that must not write diagnostics to the GUI-owned log.
+func ReadDefaultWorkspaceWithAuditSink(stateDir string, sink func(level, event string, fields map[string]any) error) (string, error) {
 	path := filepath.Join(stateDir, DefaultWorkspaceFilename)
-	data, err := ReadStateFileInodeAnchored(path)
+	data, err := ReadStateFileInodeAnchoredWithAuditSink(path, sink)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return "", nil

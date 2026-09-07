@@ -160,6 +160,15 @@ func (r *WorkspaceResolver) auditDefaultWorkspace(level, event string, fields ma
 	}
 }
 
+func (r *WorkspaceResolver) auditSink() func(level, event string, fields map[string]any) error {
+	if r == nil {
+		return nil
+	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.auditFn
+}
+
 // snapshot returns the current view of serena workspaces, refreshing
 // the in-memory cache if workspaces.yaml mtime has advanced.
 //
@@ -327,7 +336,7 @@ func (r *WorkspaceResolver) ResolveDefaultWorkspace() (*api.WorkspaceEntry, erro
 		return nil, ErrDefaultWorkspaceUnavailable
 	}
 
-	markedPath, err := api.ReadDefaultWorkspace(filepath.Dir(r.registryPath))
+	markedPath, err := api.ReadDefaultWorkspaceWithAuditSink(filepath.Dir(r.registryPath), r.auditSink())
 	if err != nil {
 		r.auditDefaultWorkspace("warn", "serena-default-workspace-unavailable", map[string]any{"reason": "marker_read_failed"})
 		return nil, fmt.Errorf("%w: marker read", ErrDefaultWorkspaceUnavailable)
