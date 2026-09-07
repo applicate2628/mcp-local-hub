@@ -36,7 +36,7 @@ var docsOnlyCatalogIDs = []string{
 	//     caller-supplied <output_dir>/<arxiv_id> with no per-tool consent gate, so a READY
 	//     one-click install is unsafe — it is a docs-only pointer whose manual_install carries
 	//     the destructive-tool caveat + the project-isolated `uv run --no-project` command.
-	"scite", "consensus", "scholar-search",
+	"scite", "consensus", "graphify", "scholar-search",
 }
 
 // TestDocsOnlyPointerText_EmitsPointerNotManifest pins the S4 pointer text: a
@@ -308,7 +308,7 @@ func TestV2DocsOnlyRows_PresentInPointerArray(t *testing.T) {
 		// (remote OAuth MCP, subscription/account-gated) — no OSS license, so "proprietary".
 		// scholar-search is the community silung/scholar-search-mcp package (MIT), a
 		// docs-only pointer only because of its destructive download_arxiv_source tool.
-		"scite": "proprietary", "consensus": "proprietary", "scholar-search": "MIT",
+		"scite": "proprietary", "consensus": "proprietary", "graphify": "Apache-2.0", "scholar-search": "MIT",
 	}
 	if len(cat.DocsOnly) != len(docsOnlyCatalogIDs) {
 		t.Fatalf("docs_only count = %d, want %d", len(cat.DocsOnly), len(docsOnlyCatalogIDs))
