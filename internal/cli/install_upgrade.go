@@ -370,6 +370,10 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	}
 	if opts.WindowsProductPair != nil {
 		_, err := opts.WindowsProductPair.Run(ctx)
+		var prePromotion *WindowsProductPairPrePromotionError
+		if errors.As(err, &prePromotion) {
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, err)
+		}
 		return err
 	}
 

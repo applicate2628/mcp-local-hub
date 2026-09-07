@@ -257,3 +257,64 @@ func TestSweepOldBinaries_SkipsInvalidTimestampSuffix(t *testing.T) {
 		t.Fatalf("invalid-suffix file was swept; want preserved: %v", err)
 	}
 }
+
+func TestSweepOldBinaryTargets_BoundsOnlyDeclaredArbitraryTargets(t *testing.T) {
+	dir := t.TempDir()
+	cli := filepath.Join(dir, "terminal-product.bin")
+	windowless := filepath.Join(dir, "explorer-adapter.payload")
+	for _, target := range []string{cli, windowless} {
+		if err := os.WriteFile(target, []byte("current"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Now().UTC()
+	var valid []string
+	for i := 0; i < renameAsideMaxKeep+2; i++ {
+		target := cli
+		if i%2 == 1 {
+			target = windowless
+		}
+		path := target + ".old-" + now.Add(-time.Duration(i+1)*time.Minute).Format(renameAsideTimestampLayout)
+		if err := os.WriteFile(path, []byte("aside"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		valid = append(valid, path)
+	}
+	aged := windowless + ".old-" + now.Add(-10*24*time.Hour).Format(renameAsideTimestampLayout)
+	if err := os.WriteFile(aged, []byte("aged"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	invalid := cli + ".old-not-a-timestamp"
+	unrelated := filepath.Join(dir, "other-product.bin.old-"+now.Add(-10*24*time.Hour).Format(renameAsideTimestampLayout))
+	directory := cli + ".old-" + now.Add(-11*24*time.Hour).Format(renameAsideTimestampLayout)
+	for _, path := range []string{invalid, unrelated} {
+		if err := os.WriteFile(path, []byte("preserve"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := SweepOldBinaryTargets([]string{cli, windowless}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < renameAsideMaxKeep; i++ {
+		if _, err := os.Stat(valid[i]); err != nil {
+			t.Fatalf("newest declared aside %d removed: %v", i, err)
+		}
+	}
+	for i := renameAsideMaxKeep; i < len(valid); i++ {
+		if _, err := os.Stat(valid[i]); !os.IsNotExist(err) {
+			t.Fatalf("surplus declared aside %d retained: %v", i, err)
+		}
+	}
+	if _, err := os.Stat(aged); !os.IsNotExist(err) {
+		t.Fatalf("aged declared aside retained: %v", err)
+	}
+	for _, path := range []string{invalid, unrelated, directory, cli, windowless} {
+		if _, err := os.Stat(path); err != nil {
+			t.Fatalf("non-target artifact %q was removed: %v", path, err)
+		}
+	}
+}

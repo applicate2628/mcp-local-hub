@@ -22,15 +22,88 @@ import (
 )
 
 type productPairTaskFake struct {
-	order    *[]string
-	restored bool
-	closed   bool
-	closeErr error
+	order        *[]string
+	restored     bool
+	closed       bool
+	closeErr     error
+	inventoryErr error
 }
 
 func (f *productPairTaskFake) InventoryExport() error {
 	*f.order = append(*f.order, "tasks-snapshot")
-	return nil
+	return f.inventoryErr
+}
+
+func TestRunInstallUpgradeRecoversTypedPrePromotionPairFailuresExactlyOnce(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		mutate func(*WindowsProductPairTxn, *productPairTaskFake, *WindowsProductPairTxnDeps, string)
+	}{
+		{"missing publisher", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, deps *WindowsProductPairTxnDeps, _ string) {
+			deps.PublishCommitted = nil
+			txn.Opts.Deps = *deps
+		}},
+		{"staged admission", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, deps *WindowsProductPairTxnDeps, _ string) {
+			deps.AdmitPair = func(binaryadmission.WindowsArtifact, binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error) {
+				return binaryadmission.WindowsProductPair{}, errors.New("staged admission")
+			}
+			txn.Opts.Deps = *deps
+		}},
+		{"cli snapshot", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, dir string) {
+			txn.Opts.CLIPath = dir
+		}},
+		{"windowless snapshot", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, dir string) {
+			txn.Opts.WindowlessPath = dir
+		}},
+		{"receipt snapshot", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, dir string) {
+			txn.Opts.ReceiptPath = dir
+		}},
+		{"task inventory", func(_ *WindowsProductPairTxn, tasks *productPairTaskFake, _ *WindowsProductPairTxnDeps, _ string) {
+			tasks.inventoryErr = errors.New("task inventory")
+		}},
+		{"invalid mode", func(txn *WindowsProductPairTxn, _ *productPairTaskFake, _ *WindowsProductPairTxnDeps, _ string) {
+			txn.Opts.Mode = "invalid"
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			paths := productPairFixturePaths(dir)
+			writePairFixture(t, paths.priorCLI, []byte("prior-cli"))
+			writePairFixture(t, paths.stagedCLI, []byte("staged-cli"))
+			writePairFixture(t, paths.stagedWindowless, []byte("staged-windowless"))
+			var order []string
+			tasks := &productPairTaskFake{order: &order}
+			deps := productPairTestDeps(&order)
+			promotions := 0
+			pairRestarts := 0
+			deps.Promote = func(string, string, string) (WindowsProductPairPromotion, error) {
+				promotions++
+				return WindowsProductPairPromotion{}, errors.New("promotion must not run")
+			}
+			deps.RestartPrior = func(string) error { pairRestarts++; return nil }
+			txn := &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}
+			tc.mutate(txn, tasks, &deps, dir)
+
+			legacy := &fakeUpgradeDeps{quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"still_running": []any{}}, Final: true}, exitResult: api.IPCResponse{ID: 2, OK: true, Final: true}}
+			err := RunInstallUpgrade(context.Background(), UpgradeOpts{WindowsProductPair: txn, BinaryPath: paths.priorCLI, PipePath: "pair-prepromotion", Deps: legacy, WaitSupervisorLockReleased: func(context.Context, time.Duration) error { return nil }})
+			var pre *WindowsProductPairPrePromotionError
+			if !errors.As(err, &pre) {
+				t.Fatalf("error=%v, want typed pre-promotion error", err)
+			}
+			if promotions != 0 || pairRestarts != 0 {
+				t.Fatalf("pre-promotion mutated pair: promotions=%d pair_restarts=%d", promotions, pairRestarts)
+			}
+			starts := 0
+			for _, call := range legacy.calls {
+				if call == "start" {
+					starts++
+				}
+			}
+			if starts != 1 || !tasks.closed {
+				t.Fatalf("outer recovery starts=%d closed=%v calls=%v", starts, tasks.closed, legacy.calls)
+			}
+		})
+	}
 }
 func (f *productPairTaskFake) RewriteCommand() error {
 	*f.order = append(*f.order, "tasks-rewrite")
@@ -316,12 +389,23 @@ func productPairTestDeps(order *[]string) WindowsProductPairTxnDeps {
 			}
 			return promotion, nil
 		},
-		RestorePromotion: func(p WindowsProductPairPromotion) error {
+		RestorePromotion: func(p WindowsProductPairPromotion) (string, error) {
+			successor, err := os.ReadFile(p.Target)
+			if err != nil {
+				return "", err
+			}
 			body, err := os.ReadFile(p.RetainedPrior)
 			if err != nil {
-				return err
+				return "", err
 			}
-			return os.WriteFile(p.Target, body, 0o600)
+			displaced := p.Target + ".old-" + time.Now().UTC().Format("20060102T150405Z")
+			if err := os.WriteFile(displaced, successor, 0o600); err != nil {
+				return "", err
+			}
+			if err := os.WriteFile(p.Target, body, 0o600); err != nil {
+				return displaced, err
+			}
+			return displaced, nil
 		},
 		ReadBackWindowless: func(string, binaryadmission.WindowsArtifact) error {
 			*order = append(*order, "readback-windowless")
@@ -435,6 +519,96 @@ func TestWindowsProductPairTxnCleanupFailureAfterReceiptIsCommittedAndNeverRolls
 	assertPairFile(t, paths.priorCLI, []byte("new-cli"))
 }
 
+func TestWindowsProductPairTxnSweepsExactAdmittedTargetsAfterCommit(t *testing.T) {
+	dir := t.TempDir()
+	paths := productPairFixturePaths(dir)
+	paths.priorCLI = filepath.Join(dir, "terminal-product.bin")
+	paths.windowless = filepath.Join(dir, "explorer-product.payload")
+	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
+	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
+	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
+	var order []string
+	tasks := &productPairTaskFake{order: &order}
+	deps := productPairTestDeps(&order)
+	var swept []string
+	deps.SweepOldTargets = func(targets []string, _ ...func(string, error)) error {
+		swept = append([]string(nil), targets...)
+		return nil
+	}
+	if _, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}).Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(swept, []string{paths.priorCLI, paths.windowless}) {
+		t.Fatalf("swept targets=%v", swept)
+	}
+}
+
+func TestWindowsProductPairRollbackCleanupFailureStillRestartsPrior(t *testing.T) {
+	dir := t.TempDir()
+	paths := productPairFixturePaths(dir)
+	prior := []byte("old-cli")
+	writePairFixture(t, paths.priorCLI, prior)
+	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
+	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
+	var order []string
+	tasks := &productPairTaskFake{order: &order}
+	deps := productPairTestDeps(&order)
+	restarts := 0
+	deps.RestartPrior = func(string) error { restarts++; return nil }
+	deps.RestorePromotion = func(p WindowsProductPairPromotion) (string, error) {
+		body, err := os.ReadFile(p.RetainedPrior)
+		if err != nil {
+			return "", err
+		}
+		if err := os.WriteFile(p.Target, body, 0o600); err != nil {
+			return "", err
+		}
+		return p.Target + ".not-a-generated-aside", nil
+	}
+	deps.Fault = func(stage WindowsProductPairStage) error {
+		if stage == WindowsProductPairStageCLIPromoted {
+			return errors.New("force rollback")
+		}
+		return nil
+	}
+	_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}).Run(context.Background())
+	if err == nil || !strings.Contains(err.Error(), "displaced successor is not an exact generated aside") {
+		t.Fatalf("err=%v", err)
+	}
+	if restarts != 1 {
+		t.Fatalf("prior restarts=%d, want 1", restarts)
+	}
+	assertPairFile(t, paths.priorCLI, prior)
+}
+
+func TestRunInstallUpgradeDoesNotOuterRecoverPostPromotionPairRollback(t *testing.T) {
+	dir := t.TempDir()
+	paths := productPairFixturePaths(dir)
+	writePairFixture(t, paths.priorCLI, []byte("old-cli"))
+	writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
+	writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
+	var order []string
+	tasks := &productPairTaskFake{order: &order}
+	deps := productPairTestDeps(&order)
+	pairRestarts := 0
+	deps.RestartPrior = func(string) error { pairRestarts++; return nil }
+	deps.Fault = func(stage WindowsProductPairStage) error {
+		if stage == WindowsProductPairStageCLIPromoted {
+			return errors.New("post-promotion fault")
+		}
+		return nil
+	}
+	txn := &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}
+	legacy := &fakeUpgradeDeps{quiesceResult: api.IPCResponse{ID: 1, OK: true, Result: map[string]any{"still_running": []any{}}, Final: true}, exitResult: api.IPCResponse{ID: 2, OK: true, Final: true}}
+	err := RunInstallUpgrade(context.Background(), UpgradeOpts{WindowsProductPair: txn, BinaryPath: paths.priorCLI, PipePath: "pair-postpromotion", Deps: legacy, WaitSupervisorLockReleased: func(context.Context, time.Duration) error { return nil }})
+	if err == nil {
+		t.Fatal("post-promotion failure unexpectedly succeeded")
+	}
+	if pairRestarts != 1 || legacy.startCalled {
+		t.Fatalf("pair restarts=%d outer starts=%v calls=%v", pairRestarts, legacy.startCalled, legacy.calls)
+	}
+}
+
 func TestWindowsProductPairDefaultPromotionRestoresMappedImage(t *testing.T) {
 	if marker := os.Getenv("MCPHUB_PAIR_MAPPED_HELPER"); marker != "" {
 		if err := os.WriteFile(marker, []byte("ready"), 0o600); err != nil {
@@ -489,7 +663,7 @@ func TestWindowsProductPairDefaultPromotionRestoresMappedImage(t *testing.T) {
 	}
 	assertPairFile(t, promotion.RetainedPrior, prior)
 	assertPairFile(t, target, newBytes)
-	if err := deps.RestorePromotion(promotion); err != nil {
+	if _, err := deps.RestorePromotion(promotion); err != nil {
 		t.Fatalf("restore mapped prior through rename-aside: %v", err)
 	}
 	assertPairFile(t, target, prior)
