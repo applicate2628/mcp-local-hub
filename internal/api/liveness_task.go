@@ -180,11 +180,22 @@ func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 	if err != nil {
 		return LivenessTaskReceipt{}, err
 	}
+	principalSID, err := livenessPrincipalSID()
+	if err != nil {
+		return LivenessTaskReceipt{}, fmt.Errorf("liveness principal SID: %w", err)
+	}
 	workingDir := livenessWorkingDir(canonicalExe)
 	sch, err := newScheduler()
 	if err != nil {
 		return LivenessTaskReceipt{}, err
 	}
+	return ensureLivenessTaskResolved(canonicalExe, workingDir, principalSID, userName, sch)
+}
+
+// ensureLivenessTaskResolved owns the existing scheduler transaction after
+// composition has resolved every ambient input. Tests use this local seam with
+// synthetic identities; it adds no alternate mutation path.
+func ensureLivenessTaskResolved(canonicalExe, workingDir, principalSID, userName string, sch scheduler.Scheduler) (LivenessTaskReceipt, error) {
 	prior, exportErr := sch.ExportXML(LivenessTaskName)
 	receipt := LivenessTaskReceipt{}
 	if exportErr != nil {
@@ -198,13 +209,13 @@ func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 		if !livenessTaskReadable(prior) {
 			return receipt, fmt.Errorf("liveness task definition is corrupt")
 		}
-		if livenessTaskDifference(prior, canonicalExe, workingDir, userName) == nil {
+		if livenessTaskDifference(prior, canonicalExe, workingDir, principalSID, userName) == nil {
 			receipt.Result = LivenessTaskUnchanged
 			receipt.settledXML = append([]byte(nil), prior...)
 			return receipt, nil
 		}
 	}
-	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(canonicalExe, workingDir, userName))
+	xmlBytes := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(canonicalExe, workingDir, principalSID, userName))
 	if err := sch.ImportXML(LivenessTaskName, xmlBytes); err != nil {
 		return receipt, fmt.Errorf("import liveness task: %w", err)
 	}
@@ -213,7 +224,7 @@ func (a *API) EnsureLivenessTask() (LivenessTaskReceipt, error) {
 		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportReadback, fmt.Errorf("read back liveness task: %w", err))
 	}
 	receipt.settledXML = append([]byte(nil), settled...)
-	if difference := livenessTaskDifference(settled, canonicalExe, workingDir, userName); difference != nil {
+	if difference := livenessTaskDifference(settled, canonicalExe, workingDir, principalSID, userName); difference != nil {
 		return receipt, livenessTaskPostImportFailure(sch, receipt, LivenessTaskPostImportSemanticDrift, fmt.Errorf("liveness task definition drifted after import: %w", difference))
 	}
 	return receipt, nil
@@ -355,12 +366,12 @@ type livenessTaskXML struct {
 	Settings        livenessSettingsXML
 }
 
-func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, userName string) *LivenessTaskDefinitionDifference {
+func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, principalSID, logonAccount string) *LivenessTaskDefinitionDifference {
 	actual, ok := parseLivenessTaskXML(xmlBlob)
 	if !ok {
 		return &LivenessTaskDefinitionDifference{Field: livenessTaskFieldDefinition}
 	}
-	expected, ok := parseLivenessTaskXML([]byte(scheduler.BuildLivenessXML(canonicalExe, workingDir, userName)))
+	expected, ok := parseLivenessTaskXML([]byte(scheduler.BuildLivenessXML(canonicalExe, workingDir, principalSID, logonAccount)))
 	if !ok {
 		return &LivenessTaskDefinitionDifference{Field: livenessTaskFieldDefinition}
 	}
@@ -371,13 +382,13 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, userName s
 		return difference(livenessTaskFieldPrincipalCount)
 	}
 	principal, expectedPrincipal := actual.Principals[0], expected.Principals[0]
-	if !scheduler.WindowsUsersEquivalent(principal.UserID, expectedPrincipal.UserID) {
+	if strings.TrimSpace(principal.UserID) != strings.TrimSpace(expectedPrincipal.UserID) {
 		return difference(livenessTaskFieldPrincipalUser)
 	}
 	if principal.LogonType != expectedPrincipal.LogonType {
 		return difference(livenessTaskFieldPrincipalLogonType)
 	}
-	if principal.RunLevel != expectedPrincipal.RunLevel {
+	if !sameLivenessRunLevel(principal.RunLevel, expectedPrincipal.RunLevel) {
 		return difference(livenessTaskFieldPrincipalRunLevel)
 	}
 	if len(actual.CalendarTrigger) != len(expected.CalendarTrigger) {
@@ -390,7 +401,7 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, userName s
 	if calendar.ScheduleByDay.DaysInterval != expectedCalendar.ScheduleByDay.DaysInterval {
 		return difference(livenessTaskFieldCalendarDaysInterval)
 	}
-	if !sameTaskXMLBoolean(calendar.Repetition.StopAtDurationEnd, expectedCalendar.Repetition.StopAtDurationEnd) {
+	if !sameLivenessStopAtDurationEnd(calendar.Repetition.StopAtDurationEnd, expectedCalendar.Repetition.StopAtDurationEnd) {
 		return difference(livenessTaskFieldCalendarStopAtDurationEnd)
 	}
 	if len(actual.LogonTrigger) != len(expected.LogonTrigger) {
@@ -400,10 +411,10 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, userName s
 	if !scheduler.WindowsUsersEquivalent(logon.UserID, expectedLogon.UserID) {
 		return difference(livenessTaskFieldLogonTriggerUser)
 	}
-	if !sameTaskXMLBoolean(logon.Enabled, expectedLogon.Enabled) {
+	if !sameLivenessLogonEnabled(logon.Enabled, expectedLogon.Enabled) {
 		return difference(livenessTaskFieldLogonTriggerEnabled)
 	}
-	if !sameTaskXMLBoolean(actual.Settings.Enabled, expected.Settings.Enabled) {
+	if !sameLivenessSettingsEnabled(actual.Settings.Enabled, expected.Settings.Enabled) {
 		return difference(livenessTaskFieldSettingsEnabled)
 	}
 	if actual.Settings.ExecutionTimeLimit != expected.Settings.ExecutionTimeLimit {
@@ -431,20 +442,24 @@ func livenessTaskDifference(xmlBlob []byte, canonicalExe, workingDir, userName s
 	return nil
 }
 
-func sameTaskXMLBoolean(left, right string) bool {
-	normalize := func(value string) (bool, bool) {
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "true", "1":
-			return true, true
-		case "false", "0":
-			return false, true
-		default:
-			return false, false
-		}
-	}
-	leftValue, leftOK := normalize(left)
-	rightValue, rightOK := normalize(right)
-	return leftOK && rightOK && leftValue == rightValue
+func sameLivenessRunLevel(actual, canonical string) bool {
+	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
+	return canonical == "LeastPrivilege" && (actual == "LeastPrivilege" || actual == "")
+}
+
+func sameLivenessStopAtDurationEnd(actual, canonical string) bool {
+	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
+	return canonical == "false" && (actual == "false" || actual == "0" || actual == "")
+}
+
+func sameLivenessLogonEnabled(actual, canonical string) bool {
+	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
+	return canonical == "true" && (actual == "true" || actual == "1" || actual == "")
+}
+
+func sameLivenessSettingsEnabled(actual, canonical string) bool {
+	actual, canonical = strings.TrimSpace(actual), strings.TrimSpace(canonical)
+	return canonical == "true" && (actual == "true" || actual == "1" || actual == "")
 }
 
 func livenessTaskReadable(xmlBlob []byte) bool {

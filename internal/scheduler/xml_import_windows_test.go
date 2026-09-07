@@ -31,7 +31,7 @@ func TestPrepareTaskXMLForImportEncodesUnicodeUTF8AsUTF16LEBOM(t *testing.T) {
 }
 
 func TestPrepareTaskXMLForImportPreservesUTF16LEBOMBytes(t *testing.T) {
-	liveness := EncodeXMLUTF16LEBOM(BuildLivenessXML(`C:\bin\mcphub.exe`, `C:\bin`, "§-Привет"))
+	liveness := EncodeXMLUTF16LEBOM(BuildLivenessXML(`C:\bin\mcphub.exe`, `C:\bin`, "S-1-5-21-test", "§-Привет"))
 	got, err := prepareTaskXMLForImport(liveness)
 	if err != nil {
 		t.Fatal(err)

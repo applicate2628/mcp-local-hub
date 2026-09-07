@@ -16,7 +16,7 @@ func TestBuildLivenessXML_Contract(t *testing.T) {
 		wdir       = `C:\Users\test\.local\bin`
 		user       = "test-user"
 	)
-	xml := BuildLivenessXML(exe, wdir, user)
+	xml := BuildLivenessXML(exe, wdir, "S-1-5-21-test", user)
 
 	wantContains := []string{
 		// ~1-min cadence (the Phase-3a done-gate "back within ≈1 min").
@@ -60,8 +60,55 @@ func TestBuildLivenessXML_Contract(t *testing.T) {
 
 	// Purity: repeated calls with the same inputs return identical bytes
 	// (no time.Now(), no ambient input).
-	if again := BuildLivenessXML(exe, wdir, user); again != xml {
+	if again := BuildLivenessXML(exe, wdir, "S-1-5-21-test", user); again != xml {
 		t.Errorf("BuildLivenessXML is not pure: two calls returned different bytes")
+	}
+}
+
+func TestBuildLivenessXML_SeparatesEscapedPrincipalSIDAndLogonAccount(t *testing.T) {
+	const (
+		exe     = `C:\Users\test\.local\bin\mcphub.exe`
+		wdir    = `C:\Users\test\.local\bin`
+		sid     = `S-1-5-21<&>'"`
+		account = `account<&>'"`
+	)
+
+	got := BuildLivenessXML(exe, wdir, sid, account)
+	again := BuildLivenessXML(exe, wdir, sid, account)
+	if again != got {
+		t.Fatal("BuildLivenessXML output changed between identical calls")
+	}
+
+	const (
+		escapedSID     = `S-1-5-21&lt;&amp;&gt;&#39;&#34;`
+		escapedAccount = `account&lt;&amp;&gt;&#39;&#34;`
+	)
+	principalStart := strings.Index(got, "    <Principal id=\"Author\">\n")
+	principalEnd := strings.Index(got, "    </Principal>\n")
+	if principalStart < 0 || principalEnd < principalStart {
+		t.Fatal("principal section is missing")
+	}
+	principal := got[principalStart : principalEnd+len("    </Principal>\n")]
+	if !strings.Contains(principal, "<UserId>"+escapedSID+"</UserId>") || strings.Contains(principal, escapedAccount) {
+		t.Fatalf("principal identity = %q; want only escaped SID %q", principal, escapedSID)
+	}
+	logonStart := strings.Index(got, "    <LogonTrigger>\n")
+	logonEnd := strings.Index(got, "    </LogonTrigger>\n")
+	if logonStart < 0 || logonEnd < logonStart {
+		t.Fatal("logon trigger section is missing")
+	}
+	logon := got[logonStart : logonEnd+len("    </LogonTrigger>\n")]
+	if !strings.Contains(logon, "<UserId>"+escapedAccount+"</UserId>") || strings.Contains(logon, escapedSID) {
+		t.Fatalf("logon identity = %q; want only escaped account %q", logon, escapedAccount)
+	}
+
+	other := BuildLivenessXML(exe, wdir, "S-1-5-21-other", "other-account")
+	scrub := func(xml, principal, logon string) string {
+		xml = strings.Replace(xml, principal, "<principal-identity>", 1)
+		return strings.Replace(xml, logon, "<logon-identity>", 1)
+	}
+	if got, want := scrub(got, escapedSID, escapedAccount), scrub(other, "S-1-5-21-other", "other-account"); got != want {
+		t.Fatalf("identity inputs changed non-identity canonical XML\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
 

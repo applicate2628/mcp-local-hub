@@ -70,7 +70,7 @@ func WindowsOwnedEntrypointPath(canonicalExe string) string {
 // dependencies, so it lives in a non-tagged file.
 // The scheduled-task install side fails through scheduler.New() returning
 // "not implemented" on Linux/macOS.
-func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
+func BuildLivenessXML(canonicalExe, workingDir, principalSID, logonAccount string) string {
 	ownedEntrypoint := WindowsOwnedEntrypointPath(canonicalExe)
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-16"?>`)
@@ -97,7 +97,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// /Create rejects the install with ERROR: Access is denied on a
 	// non-elevated shell (same trap the watchdog XML documents).
 	buf.WriteString("    <LogonTrigger>\n")
-	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(userName)))
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(logonAccount)))
 	buf.WriteString("      <Enabled>true</Enabled>\n")
 	buf.WriteString("    </LogonTrigger>\n")
 	buf.WriteString("  </Triggers>\n")
@@ -106,7 +106,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// daemon tasks.
 	buf.WriteString("  <Principals>\n")
 	buf.WriteString("    <Principal id=\"Author\">\n")
-	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(userName)))
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(principalSID)))
 	buf.WriteString("      <LogonType>InteractiveToken</LogonType>\n")
 	buf.WriteString("      <RunLevel>LeastPrivilege</RunLevel>\n")
 	buf.WriteString("    </Principal>\n")
