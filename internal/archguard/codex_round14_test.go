@@ -112,7 +112,7 @@ func F(flag bool) {
 func TestPolicyRejectsBoringCryptoAsTestOnlyTag(t *testing.T) {
 	policy := mustLoadPolicyForTest(t)
 	policy.TestOnlyBuildTags = []string{"boringcrypto"}
-	if err := policy.validate("policy"); err == nil || !strings.Contains(err.Error(), "boringcrypto") {
+	if err := policy.validate("policy"); err == nil || !strings.Contains(err.Error(), "must be a custom tag") {
 		t.Fatalf("error=%v, want boringcrypto reserved-tag rejection", err)
 	}
 }

@@ -42,7 +42,7 @@ type Config struct {
 }
 
 func TestEmbeddedDocumentResolvesIotaStringConversion(t *testing.T) {
-	tail := " Heading\n```\n" + strings.Repeat("x", 160)
+	tail := "\n# Heading\n```\n" + strings.Repeat("x", 160)
 	root := newFixtureRepo(t, map[string]string{
 		"internal/x/x.go": `package x
 

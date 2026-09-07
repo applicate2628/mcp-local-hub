@@ -191,6 +191,20 @@ func TestDescendantVendorIsSkippedButExplicitRootIsScanned(t *testing.T) {
 	}
 }
 
+func TestExplicitVendorRootPreservesCustomDescendantExclusions(t *testing.T) {
+	root := newFixtureRepo(t, map[string]string{
+		"internal/x/vendor/foo/kept.go":           "package foo\nvar kept = 1\n",
+		"internal/x/vendor/foo/generated/skip.go": "package generated\nvar skipped = 1\n",
+	})
+	policy := mustLoadPolicyForTest(t)
+	policy.SourceRoots = []string{"internal/x/vendor/foo"}
+	policy.ExcludeGlobs = append(policy.ExcludeGlobs, "**/generated/**")
+	got := violationsOfKind(mustScan(t, root, policy), KindMutableGlobal)
+	if len(got) != 1 || got[0].Location.Path != "internal/x/vendor/foo/kept.go" {
+		t.Fatalf("got=%#v, want only the non-excluded explicit vendor-root file", got)
+	}
+}
+
 func TestNormalizeEvidencePreservesSourceBackslashes(t *testing.T) {
 	got := normalizeEvidence(" workers[\"a\\\\b\"]() \n")
 	if got != `workers["a\\b"]()` {

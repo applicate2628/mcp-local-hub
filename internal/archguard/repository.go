@@ -85,12 +85,12 @@ func collectFiles(ctx context.Context, root string, policy Policy) ([]fileContex
 				return nil
 			}
 			if entry.IsDir() {
-				if path != start && matchesAnyGlob(policy.ExcludeGlobs, rel, true) {
+				if path != start && matchesApplicableExcludeGlob(policy.ExcludeGlobs, sourceRoot, rel, true) {
 					return filepath.SkipDir
 				}
 				return nil
 			}
-			if filepath.Ext(path) != ".go" || matchesAnyGlob(policy.ExcludeGlobs, rel, false) {
+			if filepath.Ext(path) != ".go" || matchesApplicableExcludeGlob(policy.ExcludeGlobs, sourceRoot, rel, false) {
 				return nil
 			}
 			if _, ok := seen[rel]; ok {
@@ -113,6 +113,56 @@ func collectFiles(ctx context.Context, root string, policy Policy) ([]fileContex
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Path < out[j].Path })
 	return out, nil
+}
+
+func matchesApplicableExcludeGlob(patterns []string, sourceRoot, path string, directory bool) bool {
+	for _, pattern := range patterns {
+		if isWholeSpecialRootExclusion(pattern, sourceRoot) {
+			continue
+		}
+		if matchGlob(pattern, path) || (directory && matchGlob(pattern, strings.TrimSuffix(path, "/")+"/")) {
+			return true
+		}
+	}
+	return false
+}
+
+// isWholeSpecialRootExclusion identifies a generic exclusion of every file
+// below an explicitly selected vendor or testdata directory. More specific
+// descendants remain policy-controlled exclusions.
+func isWholeSpecialRootExclusion(pattern, sourceRoot string) bool {
+	rootComponents := strings.Split(filepath.ToSlash(filepath.Clean(filepath.FromSlash(sourceRoot))), "/")
+	for _, special := range []string{"vendor", "testdata"} {
+		if !containsPathComponent(rootComponents, special) {
+			continue
+		}
+		components := strings.Split(normalizeGlob(pattern), "/")
+		for i, component := range components {
+			if component != special || i == len(components)-1 {
+				continue
+			}
+			wholeTree := true
+			for _, suffix := range components[i+1:] {
+				if suffix != "**" {
+					wholeTree = false
+					break
+				}
+			}
+			if wholeTree {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func containsPathComponent(components []string, want string) bool {
+	for _, component := range components {
+		if component == want {
+			return true
+		}
+	}
+	return false
 }
 
 func parseFile(path, rel string, testOnlyBuildTags []string) (fileContext, error) {
