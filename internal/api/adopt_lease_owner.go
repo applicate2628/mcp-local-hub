@@ -106,6 +106,8 @@ type LeaseFailure struct {
 	FailureID        string
 	ReasonID         AdoptLeaseReasonID
 	Action           AdoptLeaseAction
+	Category         AdoptLeaseNamespaceFailureCategory
+	NativeErrorCode  uint32
 	Retryable        bool
 	RecoveryRequired bool
 	cause            error
@@ -135,12 +137,18 @@ func newLeaseFailure(id string, retryable, recoveryRequired bool, causes ...erro
 }
 
 func newLeaseNamespaceFailure(reason AdoptLeaseReasonID, action AdoptLeaseAction, cause error) error {
-	return &LeaseFailure{
+	failure := &LeaseFailure{
 		FailureID: adoptLeaseFailureNamespaceRefused,
 		ReasonID:  reason,
 		Action:    action,
 		cause:     cause,
 	}
+	var namespaceFailure *LeaseNamespaceFailure
+	if errors.As(cause, &namespaceFailure) {
+		failure.Category = namespaceFailure.Category
+		failure.NativeErrorCode = namespaceFailure.NativeErrorCode
+	}
+	return failure
 }
 
 // PublicMessage is the complete redacted human-facing projection. It contains
@@ -153,7 +161,7 @@ func (e *LeaseFailure) PublicMessage() string {
 	if e.ReasonID == "" {
 		return e.FailureID
 	}
-	return fmt.Sprintf("%s reason=%s action=%s", e.FailureID, e.ReasonID, e.Action)
+	return publicLeaseNamespaceFailureMessage(e.FailureID, e.ReasonID, e.Action, e.Category, e.NativeErrorCode)
 }
 
 func leaseCleanupFailure(causes ...error) error {

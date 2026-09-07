@@ -5,6 +5,7 @@ package api
 import (
 	"errors"
 	"fmt"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 )
@@ -106,15 +107,18 @@ func openWindowsAdoptLeaseNamespace() (windows.Handle, error) {
 	if err != nil {
 		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootUnavailable, AdoptLeaseActionLeaveUnchanged, err)
 	}
+	if err := injectedWindowsAdoptLeaseFailure("root-open"); err != nil {
+		return windows.InvalidHandle, newWindowsAdoptLeaseStateRootFailure(AdoptLeaseNamespaceFailureRootOpen, err)
+	}
 	root, err := openDirHandleNoReparse(stateDir)
 	if err != nil {
-		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+		return windows.InvalidHandle, newWindowsAdoptLeaseStateRootFailure(AdoptLeaseNamespaceFailureRootOpen, err)
 	}
 	if err := refuseReparsePointHandle(root); err != nil {
-		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, errors.Join(err, windows.CloseHandle(root)))
+		return windows.InvalidHandle, newWindowsAdoptLeaseStateRootFailure(AdoptLeaseNamespaceFailureRootKindReparse, errors.Join(err, windows.CloseHandle(root)))
 	}
 	if err := verifyWindowsDACLFromHandle(root); err != nil {
-		return windows.InvalidHandle, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, errors.Join(err, windows.CloseHandle(root)))
+		return windows.InvalidHandle, newWindowsAdoptLeaseStateRootFailure(AdoptLeaseNamespaceFailureRootSecurity, errors.Join(err, windows.CloseHandle(root)))
 	}
 	sd, err := buildRestrictiveSecurityDescriptor()
 	if err != nil {
@@ -133,6 +137,24 @@ func openWindowsAdoptLeaseNamespace() (windows.Handle, error) {
 		return windows.InvalidHandle, errors.Join(err, windows.CloseHandle(ns))
 	}
 	return ns, nil
+}
+
+func newWindowsAdoptLeaseStateRootFailure(category AdoptLeaseNamespaceFailureCategory, cause error) error {
+	return newLeaseNamespaceOperationFailureWithDiagnostic(
+		AdoptLeaseReasonStateRootRefused,
+		AdoptLeaseActionLeaveUnchanged,
+		category,
+		windowsNativeErrorCode(cause),
+		cause,
+	)
+}
+
+func windowsNativeErrorCode(err error) uint32 {
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		return uint32(errno)
+	}
+	return 0
 }
 
 func openOrCreateWindowsAdoptLeaseLeaf(namespace windows.Handle, leaf string) (windows.Handle, bool, error) {
