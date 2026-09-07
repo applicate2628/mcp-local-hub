@@ -1,0 +1,107 @@
+schema_version: 1
+rules:
+  - globs:
+      - internal/archguard/**
+      - tools/archcheck/**
+    owner: architecture-guardrails
+    work_package: WP-11A
+    remove_by: 2027-03-31
+    reason: Architecture-tooling debt is reduced while A2-A6 establish the repository ratchet.
+
+  - globs:
+      - internal/cli/**
+      - internal/process/**
+      - internal/scheduler/**
+      - internal/autostart/**
+      - internal/supervisorowner/**
+      - internal/tray/**
+      - internal/daemonrecovery/**
+    owner: lifecycle-runtime
+    work_package: WP-11C
+    remove_by: 2027-03-31
+    reason: Lifecycle and process ownership move from CLI-era seams to supervisor and child-process owners.
+
+  - globs:
+      - internal/e2e/windows_console_contract_windows_test.go
+    owner: lifecycle-runtime
+    work_package: WP-11C
+    remove_by: 2027-03-31
+    reason: The Windows console integration oracle verifies CLI and windowless adapter process-lifecycle behavior.
+
+  - globs:
+      - internal/api/**
+      - internal/config/**
+    owner: application-services
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: Application-service construction and mutable seams migrate to the composition root.
+
+  - globs:
+      - internal/clients/**
+    owner: application-services
+    work_package: WP-11D
+    remove_by: 2027-03-31
+    reason: Client adapters participate in the registry and install architecture while client configuration ownership is separated from effects.
+
+  - globs:
+      - internal/secrets/**
+    owner: application-services
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: Secret-vault access remains an application-service dependency reached through the composition boundary.
+
+  - globs:
+      - internal/daemon/**
+      - internal/mcpcompat/**
+    owner: mcp-runtime
+    work_package: WP-11E
+    remove_by: 2027-03-31
+    reason: Protocol, session, routing, dispatch, recovery, and lazy lifecycle ownership are decomposed.
+
+  - globs:
+      - internal/gui/**
+      - internal/branding/**
+    owner: gui-adapter
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: GUI handlers become thin adapters over process-scoped application services.
+
+  - globs:
+      - internal/cmakegraph/**
+      - internal/drmemory/**
+      - internal/gdb/**
+      - internal/godbolt/**
+      - internal/lldb/**
+      - internal/oneapi/**
+      - internal/oneapirun/**
+      - internal/perftools/**
+      - internal/vcpkgmcp/**
+      - internal/vtune/**
+      - internal/hubtemp/**
+      - internal/toolchain/**
+    owner: tool-runtime
+    work_package: WP-08
+    remove_by: 2027-03-31
+    reason: Tool subprocesses and durable jobs require explicit admission, cancellation, join, and output ownership.
+
+  - globs:
+      - cmd/**
+    owner: composition-entrypoints
+    work_package: WP-11B
+    remove_by: 2027-03-31
+    reason: Executable entry points must delegate construction to the single composition root.
+
+  - globs:
+      - tools/**
+    owner: repository-tooling
+    work_package: WP-11A
+    remove_by: 2027-03-31
+    reason: Repository tools follow the same deterministic architecture and reporting contracts.
+
+  - globs:
+      - internal/buildinfo/**
+      - internal/releasegen/**
+    owner: repository-tooling
+    work_package: WP-09
+    remove_by: 2027-03-31
+    reason: Build metadata and generated release projections remain under the release and supply-chain tooling owner.
