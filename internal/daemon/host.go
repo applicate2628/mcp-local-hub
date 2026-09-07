@@ -1180,6 +1180,16 @@ func (h *StdioHost) handlePOST(w http.ResponseWriter, r *http.Request) {
 			return
 		default:
 		}
+		if origMethod == "initialize" {
+			if err := readinesswire.WriteFailure(w, readinesswire.Failure{
+				FailureID:  readinesswire.FailureReadinessChildExited,
+				Stage:      readinesswire.StageInitialize,
+				HTTPStatus: http.StatusBadGateway,
+				Retryable:  true,
+			}); err == nil {
+				return
+			}
+		}
 		http.Error(w, "subprocess died unexpectedly", http.StatusBadGateway)
 	case <-r.Context().Done():
 		http.Error(w, "client canceled", http.StatusRequestTimeout)

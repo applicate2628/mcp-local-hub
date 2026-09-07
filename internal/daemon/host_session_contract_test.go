@@ -19,6 +19,55 @@ type sessionContractHTTPResult struct {
 	body   []byte
 }
 
+func TestStdioHostInitializeChildExitWritesTypedFailureWithoutSession(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	h, err := NewStdioHost(HostConfig{
+		Command: "python",
+		Args: []string{"-u", "-c", `
+import sys
+sys.stdin.readline()
+sys.stderr.write("ERR_NEVER_ON_WIRE\\n")
+sys.stderr.flush()
+raise SystemExit(23)
+`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer h.Stop()
+	ts := httptest.NewServer(h.HTTPHandler())
+	defer ts.Close()
+
+	initBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"child-exit-test","version":"1"}}}`
+	result := sessionContractRequest(t, ts.Client(), http.MethodPost, ts.URL, initBody, "", "")
+	if result.status != http.StatusBadGateway {
+		t.Fatalf("initialize status=%d want=502 body=%s", result.status, result.body)
+	}
+	if result.header.Get("Content-Type") != readinesswire.MediaTypeV1 {
+		t.Fatalf("initialize content type=%q want=%q body=%s", result.header.Get("Content-Type"), readinesswire.MediaTypeV1, result.body)
+	}
+	failure := readinesswire.DecodeFailureResponse(result.status, result.header.Get("Content-Type"), strings.NewReader(string(result.body)))
+	if failure.FailureID != readinesswire.FailureReadinessChildExited || failure.Stage != readinesswire.StageInitialize || failure.HTTPStatus != http.StatusBadGateway || !failure.Retryable {
+		t.Fatalf("initialize failure=%#v", failure)
+	}
+	if result.header.Get("Mcp-Session-Id") != "" {
+		t.Fatalf("failed initialize minted session %q", result.header.Get("Mcp-Session-Id"))
+	}
+	h.sessionMu.Lock()
+	sessionCount := len(h.sessions)
+	h.sessionMu.Unlock()
+	if sessionCount != 0 {
+		t.Fatalf("failed initialize session count=%d want=0", sessionCount)
+	}
+	if strings.Contains(string(result.body), "ERR_NEVER_ON_WIRE") {
+		t.Fatalf("typed failure leaked child stderr: %s", result.body)
+	}
+}
+
 func sessionContractRequest(
 	t *testing.T,
 	client *http.Client,
