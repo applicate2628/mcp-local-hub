@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"golang.org/x/sys/windows"
 	processowner "mcp-local-hub/internal/process"
 )
 
@@ -47,7 +48,13 @@ func runWindowless(args []string, diagnostics io.Writer) int {
 
 	child := exec.Command(target, args...)
 	child.Env = os.Environ()
-	if _, err := processowner.StartWithJobFiles(job, child, os.Stdin, os.Stdout, os.Stderr); err != nil {
+	standardFiles, err := prepareWindowlessStandardFiles(os.Stdin, os.Stdout, os.Stderr)
+	if err != nil {
+		writeLaunchFailure(diagnostics, err)
+		return windowlessLaunchExitCode
+	}
+	defer standardFiles.closeOwned()
+	if _, err := processowner.StartWithJobFiles(job, child, standardFiles.stdin, standardFiles.stdout, standardFiles.stderr); err != nil {
 		writeLaunchFailure(diagnostics, err)
 		return windowlessLaunchExitCode
 	}
@@ -68,6 +75,67 @@ func runWindowless(args []string, diagnostics io.Writer) int {
 	}
 	writeLaunchFailure(diagnostics, fmt.Errorf("wait for sibling mcphub.exe: %w", waitErr))
 	return windowlessLaunchExitCode
+}
+
+type windowlessStandardFiles struct {
+	stdin  *os.File
+	stdout *os.File
+	stderr *os.File
+	owned  []*os.File
+}
+
+func prepareWindowlessStandardFiles(stdin, stdout, stderr *os.File) (*windowlessStandardFiles, error) {
+	files := &windowlessStandardFiles{}
+	for _, candidate := range []struct {
+		name     string
+		original *os.File
+		flags    int
+		target   **os.File
+	}{
+		{name: "stdin", original: stdin, flags: os.O_RDONLY, target: &files.stdin},
+		{name: "stdout", original: stdout, flags: os.O_WRONLY, target: &files.stdout},
+		{name: "stderr", original: stderr, flags: os.O_WRONLY, target: &files.stderr},
+	} {
+		file, owned, err := usableWindowlessStandardFile(candidate.name, candidate.original, candidate.flags)
+		if err != nil {
+			files.closeOwned()
+			return nil, err
+		}
+		*candidate.target = file
+		if owned {
+			files.owned = append(files.owned, file)
+		}
+	}
+	return files, nil
+}
+
+func usableWindowlessStandardFile(name string, original *os.File, flags int) (*os.File, bool, error) {
+	if original != nil {
+		handle := original.Fd()
+		if handle != 0 && handle != ^uintptr(0) {
+			if _, err := windows.GetFileType(windows.Handle(handle)); err == nil {
+				return original, false, nil
+			} else if !errors.Is(err, windows.ERROR_INVALID_HANDLE) {
+				return nil, false, fmt.Errorf("probe inherited %s handle: %w", name, err)
+			}
+		}
+	}
+
+	replacement, err := os.OpenFile(os.DevNull, flags, 0)
+	if err != nil {
+		return nil, false, fmt.Errorf("open NUL for missing %s handle: %w", name, err)
+	}
+	return replacement, true, nil
+}
+
+func (files *windowlessStandardFiles) closeOwned() {
+	if files == nil {
+		return
+	}
+	for _, file := range files.owned {
+		_ = file.Close()
+	}
+	files.owned = nil
 }
 
 func siblingCLIPath() (string, error) {
