@@ -201,17 +201,13 @@ func TestNormalizeEvidencePreservesSourceBackslashes(t *testing.T) {
 func TestImportedTypeResolutionRejectsShadowedAlias(t *testing.T) {
 	root := newFixtureRepo(t, map[string]string{
 		"internal/markdown/type.go": "package markdown\n\ntype Text string\n",
-		"internal/x/x.go": `package x
-
-import "mcp-local-hub/internal/markdown"
-
-type factory struct{}
-func (factory) Text(string) string { return "" }
-
-func F(markdown factory) {
-	_ = markdown.Text("# Heading\n```\n" + "x")
-}
-`,
+		"internal/x/x.go": "package x\n\n" +
+			"import \"mcp-local-hub/internal/markdown\"\n\n" +
+			"type factory struct{}\n" +
+			"func (factory) Text(string) string { return \"\" }\n\n" +
+			"func F(markdown factory) {\n" +
+			"\t_ = markdown.Text(\"# Heading\\n```\\n\" + \"x\")\n" +
+			"}\n",
 	})
 	policy := mustLoadPolicyForTest(t)
 	policy.SourceRoots = []string{"internal"}

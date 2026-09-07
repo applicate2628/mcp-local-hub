@@ -14,8 +14,7 @@ import (
 )
 
 func TestRunWorkersUnclassifiedTreatsBaselineWorkerAsClassified(t *testing.T) {
-	root := t.TempDir()
-	writeRepoModule(t, root)
+	root, _ := fixture(t)
 	source := filepath.Join(root, "internal", "x", "x.go")
 	if err := os.MkdirAll(filepath.Dir(source), 0o755); err != nil {
 		t.Fatal(err)
