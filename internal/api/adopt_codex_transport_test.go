@@ -3,10 +3,56 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
+
+func TestAdoptCodexToolTimeoutRoundTripsBindingAndDeAdopt(t *testing.T) {
+	const entry = "codex-adopt-timeout"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.codex-adopt-timeout]
+command = "node"
+args = ["server.mjs", "--stdio"]
+tool_timeout_sec = 900
+`)
+
+	api := NewAPI()
+	plan, err := api.BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9370,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	manifest, err := config.ParseManifest(strings.NewReader(plan.ManifestYAML))
+	if err != nil {
+		t.Fatalf("ParseManifest(plan): %v", err)
+	}
+	if len(manifest.ClientBindings) != 1 || manifest.ClientBindings[0].ToolTimeoutSec != 900 {
+		t.Fatalf("client bindings = %#v, want codex-cli timeout 900", manifest.ClientBindings)
+	}
+	if err := api.ExecuteAdopt(plan, nil); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	hub, err := clients.AllClients()["codex-cli"].GetEntry(entry)
+	if err != nil || hub == nil || hub.ToolTimeoutSec != 900 {
+		t.Fatalf("adopted Codex entry = %#v, err=%v; want timeout 900", hub, err)
+	}
+	if _, err := api.ExecuteDeAdopt(entry, nil); err != nil {
+		t.Fatalf("ExecuteDeAdopt: %v", err)
+	}
+	restored, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read restored config: %v", err)
+	}
+	if !strings.Contains(string(restored), "tool_timeout_sec = 900") {
+		t.Fatalf("de-adopt lost source timeout:\n%s", restored)
+	}
+}
 
 func TestBuildAdoptPlanCodexCollisionFreezesTargetEntryName(t *testing.T) {
 	const entry = "codex-adopt-transport"

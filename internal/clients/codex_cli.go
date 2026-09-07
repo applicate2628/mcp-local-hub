@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -484,6 +485,9 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 	if len(req.Entry.Headers) > 0 {
 		entryMap["http_headers"] = codexDecodedHeaderMap(req.Entry.Headers)
 	}
+	if req.Entry.ToolTimeoutSec > 0 {
+		entryMap["tool_timeout_sec"] = float64(req.Entry.ToolTimeoutSec)
+	}
 	servers[req.TargetEntryName] = entryMap
 	expected["mcp_servers"] = servers
 	if err := c.writeTOMLWithWriter(expected, req.WriteConfig); err != nil {
@@ -637,11 +641,19 @@ func codexHubEntryMatches(raw map[string]any, expected MCPEntry) (bool, error) {
 	if !exists || !codexTimeoutEqualsTen(timeout) {
 		return false, nil
 	}
+	toolTimeoutSec, err := codexToolTimeoutSec(raw)
+	if err != nil || toolTimeoutSec != expected.ToolTimeoutSec {
+		return false, err
+	}
+	expectedFields := 2
+	if expected.ToolTimeoutSec != 0 {
+		expectedFields++
+	}
 	if len(expected.Headers) == 0 {
-		return len(raw) == 2, nil
+		return len(raw) == expectedFields, nil
 	}
 	headers, ok := raw["http_headers"].(map[string]any)
-	if !ok || len(headers) != len(expected.Headers) || len(raw) != 3 {
+	if !ok || len(headers) != len(expected.Headers) || len(raw) != expectedFields+1 {
 		return false, nil
 	}
 	for key, want := range expected.Headers {
@@ -651,6 +663,32 @@ func codexHubEntryMatches(raw map[string]any, expected MCPEntry) (bool, error) {
 		}
 	}
 	return true, nil
+}
+
+func codexToolTimeoutSec(raw map[string]any) (int, error) {
+	value, exists := raw["tool_timeout_sec"]
+	if !exists {
+		return 0, nil
+	}
+	var timeout int64
+	switch n := value.(type) {
+	case int64:
+		timeout = n
+	case float64:
+		if math.IsNaN(n) || math.IsInf(n, 0) || n != math.Trunc(n) || n > math.MaxInt64 || n < math.MinInt64 {
+			return 0, fmt.Errorf("invalid Codex tool_timeout_sec")
+		}
+		timeout = int64(n)
+	default:
+		return 0, fmt.Errorf("invalid Codex tool_timeout_sec")
+	}
+	if timeout < 0 {
+		return 0, fmt.Errorf("invalid Codex tool_timeout_sec")
+	}
+	if int64(int(timeout)) != timeout {
+		return 0, fmt.Errorf("invalid Codex tool_timeout_sec")
+	}
+	return int(timeout), nil
 }
 
 func codexTimeoutEqualsTen(value any) bool {
@@ -740,6 +778,9 @@ func (c *codexCLI) AddEntry(entry MCPEntry) error {
 }
 
 func (c *codexCLI) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFileFunc) error {
+	if entry.ToolTimeoutSec < 0 {
+		return fmt.Errorf("tool_timeout_sec must be non-negative")
+	}
 	m, err := c.readTOML()
 	if err != nil {
 		return err
@@ -755,6 +796,9 @@ func (c *codexCLI) AddEntryWithConfigWriter(entry MCPEntry, writer WriteConfigFi
 	}
 	if len(entry.Headers) > 0 {
 		entryMap["http_headers"] = entry.Headers
+	}
+	if entry.ToolTimeoutSec > 0 {
+		entryMap["tool_timeout_sec"] = float64(entry.ToolTimeoutSec)
 	}
 	servers[entry.Name] = entryMap
 	m["mcp_servers"] = servers
@@ -788,7 +832,12 @@ func (c *codexCLI) GetEntry(name string) (*MCPEntry, error) {
 	if !ok {
 		return nil, nil
 	}
-	return classifyURLRawEntry(name, raw, "url", "http_headers"), nil
+	entry := classifyURLRawEntry(name, raw, "url", "http_headers")
+	entry.ToolTimeoutSec, err = codexToolTimeoutSec(raw)
+	if err != nil {
+		return nil, err
+	}
+	return entry, nil
 }
 
 // LatestBackupPath delegates to the shared helper.

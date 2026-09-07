@@ -530,8 +530,9 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 						SourceEntryName: rec.SourceEntryName,
 						TargetEntryName: targetEntryName,
 						Target: clients.MCPEntry{
-							Name: targetEntryName,
-							URL:  fmt.Sprintf("http://127.0.0.1:%d%s", rec.Port, adoptDefaultURLPath),
+							Name:           targetEntryName,
+							URL:            fmt.Sprintf("http://127.0.0.1:%d%s", rec.Port, adoptDefaultURLPath),
+							ToolTimeoutSec: clientRec.ToolTimeoutSec,
 						},
 						SourceSnapshot: sourceSnapshot,
 					})
@@ -899,9 +900,10 @@ func deAdoptLiveBindingMatcher(rec *AdoptProvenanceRecord, clientName string) fu
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
 	}
 	binding := config.ClientBinding{
-		Client:  clientName,
-		Daemon:  adoptDefaultDaemonName,
-		URLPath: adoptDefaultURLPath,
+		Client:         clientName,
+		Daemon:         adoptDefaultDaemonName,
+		URLPath:        adoptDefaultURLPath,
+		ToolTimeoutSec: adoptClientToolTimeout(*rec, clientName),
 	}
 	return func(live *clients.MCPEntry) bool {
 		matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, expected)

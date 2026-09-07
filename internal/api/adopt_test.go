@@ -138,6 +138,27 @@ args = ["version"]
 	}
 }
 
+func TestBuildAdoptPlanCodexToolTimeoutRejectsInvalidValuesBeforeMutation(t *testing.T) {
+	for _, rawTimeout := range []string{"-1", "900.5", `"900"`} {
+		t.Run(rawTimeout, func(t *testing.T) {
+			entry := "mui-adopt-invalid-timeout"
+			codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.mui-adopt-invalid-timeout]
+command = "node"
+args = ["server.mjs", "--stdio"]
+tool_timeout_sec = `+rawTimeout+`
+`)
+			before := mustReadFileForAdoptTest(t, codexPath)
+			_, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+				EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9309,
+			})
+			if err == nil || !strings.Contains(err.Error(), "tool_timeout_sec") {
+				t.Fatalf("BuildAdoptPlan(timeout=%s) error = %v, want tool_timeout_sec refusal", rawTimeout, err)
+			}
+			assertAdoptPlanMutationFree(t, codexPath, before, manifestRoot, stateRoot, entry)
+		})
+	}
+}
+
 func TestExecuteAdoptWritesManifestIntentAndRepointsCodexPreservingForeignTables(t *testing.T) {
 	entry := "mui-adopt-full"
 	codexPath, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[profile.default]

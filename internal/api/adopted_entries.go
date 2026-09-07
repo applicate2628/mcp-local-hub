@@ -132,7 +132,8 @@ const (
 // AdoptClientProvenance is the per-client pre-adopt state + pinned-snapshot
 // pointer. SnapshotRef/SnapshotSHA256 are present-only (empty for `absent`).
 type AdoptClientProvenance struct {
-	Client string `json:"client"`
+	Client         string `json:"client"`
+	ToolTimeoutSec int    `json:"tool_timeout_sec,omitempty"`
 	// TargetEntryName is the physical client-config key written by adopt. Older
 	// records omit it; readers treat that omission as SourceEntryName.
 	TargetEntryName string             `json:"target_entry_name,omitempty"`
@@ -516,7 +517,7 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 		if live == nil {
 			continue // cleanly no entry here; check the other adopt_clients
 		}
-		binding := config.ClientBinding{Client: c, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath}
+		binding := config.ClientBinding{Client: c, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath, ToolTimeoutSec: adoptClientToolTimeout(rec, c)}
 		if matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, expected); matched {
 			return adoptRowCommittedKeep // Install committed a live hub binding
 		}
@@ -531,6 +532,15 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 		return adoptRowCommittedKeep
 	}
 	return adoptRowCrashReap // no live binding AND no manifest on disk => pre-install crash orphan
+}
+
+func adoptClientToolTimeout(rec AdoptProvenanceRecord, client string) int {
+	for _, candidate := range rec.Clients {
+		if candidate.Client == client {
+			return candidate.ToolTimeoutSec
+		}
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -805,6 +815,7 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			}
 			out = append(out, AdoptClientProvenance{
 				Client:          name,
+				ToolTimeoutSec:  plan.toolTimeoutForClient(name),
 				TargetEntryName: targetEntryName,
 				OriginalState:   AdoptOriginalStatePresent,
 				RestoreMode:     AdoptRestoreModeFunctionalEquivalent,

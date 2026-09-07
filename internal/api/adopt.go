@@ -103,6 +103,7 @@ type AdoptPlan struct {
 	requestedClientsExplicit              bool
 	requestedCompatibilityProfile         string
 	requestedCompatibilityProfileExplicit bool
+	toolTimeoutByClient                   map[string]int
 }
 
 type ExecuteAdoptOpts struct {
@@ -249,7 +250,7 @@ func verifyAdoptReceivers(a *API, plan *AdoptPlan, plannedRecord *AdoptProvenanc
 			return newAdoptStageError("client-verify", "committed_unverified", fmt.Errorf("client %q is unavailable", clientName))
 		}
 		entry, err := adapter.GetEntry(plan.targetEntryName(clientName))
-		if err != nil || entry == nil || entry.URL != expectedURL || entry.Disabled {
+		if err != nil || entry == nil || entry.URL != expectedURL || entry.Disabled || entry.ToolTimeoutSec != plan.toolTimeoutForClient(clientName) {
 			return newAdoptStageError("client-verify", "committed_unverified", fmt.Errorf("client %q readback does not match the adopted HTTP binding", clientName))
 		}
 	}
@@ -434,7 +435,8 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, err
 	}
 	alsoPresent := clientsOutsideSelection(clientScan.Matching, adoptClients)
-	manifestYAML := renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(manifestName, entry.Command, entry.Args, env, port, adoptClientBindings(adoptClients), compatibilityProfile)
+	bindings := adoptClientBindingsWithToolTimeout(adoptClients, sourceClient, entry.ToolTimeoutSec)
+	manifestYAML := renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(manifestName, entry.Command, entry.Args, env, port, bindings, compatibilityProfile)
 	if _, err := a.ManifestValidateMode(manifestYAML, ValidateModeStrict); err != nil {
 		return nil, fmt.Errorf("entry name %q is not a valid manifest name: %w; adopt with a valid --name is not supported in v1", manifestName, err)
 	}
@@ -482,6 +484,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		presentAtBuild:                  append([]string(nil), clientScan.Matching...),
 		secretValues:                    secretValues,
 		codexTarget:                     codexTarget,
+		toolTimeoutByClient:             adoptToolTimeoutByClient(bindings),
 	}, nil
 }
 
@@ -849,8 +852,9 @@ func applyCodexAdoptTarget(plan *AdoptPlan) (clients.CodexHTTPRelocationResult, 
 		TargetEntryName: plan.codexTarget.TargetEntryName,
 		ExpectedSource:  clients.CodexTransportStdio,
 		Entry: clients.MCPEntry{
-			Name: plan.codexTarget.TargetEntryName,
-			URL:  fmt.Sprintf("http://127.0.0.1:%d%s", plan.Port, adoptDefaultURLPath),
+			Name:           plan.codexTarget.TargetEntryName,
+			URL:            fmt.Sprintf("http://127.0.0.1:%d%s", plan.Port, adoptDefaultURLPath),
+			ToolTimeoutSec: plan.toolTimeoutForClient("codex-cli"),
 		},
 	})
 	return result, err
@@ -1204,16 +1208,35 @@ const (
 	adoptDefaultURLPath    = "/mcp"
 )
 
-func adoptClientBindings(clientNames []string) []map[string]any {
-	bindings := make([]map[string]any, 0, len(clientNames))
+func adoptClientBindings(clientNames []string) []config.ClientBinding {
+	return adoptClientBindingsWithToolTimeout(clientNames, "", 0)
+}
+
+func adoptClientBindingsWithToolTimeout(clientNames []string, sourceClient string, sourceToolTimeoutSec int) []config.ClientBinding {
+	bindings := make([]config.ClientBinding, 0, len(clientNames))
 	for _, client := range clientNames {
-		bindings = append(bindings, map[string]any{
-			"client":   client,
-			"daemon":   adoptDefaultDaemonName,
-			"url_path": adoptDefaultURLPath,
-		})
+		binding := config.ClientBinding{Client: client, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath}
+		if client == "codex-cli" && sourceClient == "codex-cli" {
+			binding.ToolTimeoutSec = sourceToolTimeoutSec
+		}
+		bindings = append(bindings, binding)
 	}
 	return bindings
+}
+
+func adoptToolTimeoutByClient(bindings []config.ClientBinding) map[string]int {
+	result := make(map[string]int, len(bindings))
+	for _, binding := range bindings {
+		result[binding.Client] = binding.ToolTimeoutSec
+	}
+	return result
+}
+
+func (p *AdoptPlan) toolTimeoutForClient(client string) int {
+	if p == nil {
+		return 0
+	}
+	return p.toolTimeoutByClient[client]
 }
 
 func isAdoptSupportedClient(client string) bool {

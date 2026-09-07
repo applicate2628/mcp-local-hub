@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -2389,10 +2390,11 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 }
 
 type extractedStdioEntry struct {
-	Command  string
-	Args     []string
-	Env      map[string]string
-	Disabled bool
+	Command        string
+	Args           []string
+	Env            map[string]string
+	ToolTimeoutSec int
+	Disabled       bool
 }
 
 // Sentinels for adopt-relevant extractStdioEntryFromClient outcomes, so callers
@@ -2687,8 +2689,41 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 			}
 		}
 	}
+	toolTimeoutSec := 0
+	if client == "codex-cli" {
+		var err error
+		toolTimeoutSec, err = codexExtractToolTimeoutSec(raw)
+		if err != nil {
+			return extractedStdioEntry{}, err
+		}
+	}
 
-	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
+	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, ToolTimeoutSec: toolTimeoutSec, Disabled: disabled}, nil
+}
+
+func codexExtractToolTimeoutSec(raw map[string]any) (int, error) {
+	value, present := raw["tool_timeout_sec"]
+	if !present {
+		return 0, nil
+	}
+	switch timeout := value.(type) {
+	case int64:
+		if timeout < 0 {
+			return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+		}
+		return int(timeout), nil
+	case float64:
+		if math.IsNaN(timeout) || math.IsInf(timeout, 0) || timeout < 0 || timeout != math.Trunc(timeout) || timeout > math.MaxInt64 {
+			return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+		}
+		parsed := int64(timeout)
+		if int64(int(parsed)) != parsed {
+			return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+		}
+		return int(parsed), nil
+	default:
+		return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+	}
 }
 
 func rawClientEntryDisabled(raw map[string]any) bool {
@@ -2734,25 +2769,25 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 	return renderStdioBridgeManifestYAML(name, cmd, args, env, port, draftClientBindings())
 }
 
-func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any) string {
+func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []config.ClientBinding) string {
 	return renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd, args, env, port, bindings, "")
 }
 
-func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any, compatibilityProfile string) string {
+func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd string, args []string, env map[string]string, port int, bindings []config.ClientBinding, compatibilityProfile string) string {
 	daemon := map[string]any{"name": "default", "port": port}
 	if compatibilityProfile != "" {
 		daemon["mcp_protocol_compatibility_profile"] = compatibilityProfile
 	}
 	doc := struct {
-		Name           string            `yaml:"name"`
-		Kind           string            `yaml:"kind"`
-		Transport      string            `yaml:"transport"`
-		Command        string            `yaml:"command"`
-		BaseArgs       []string          `yaml:"base_args,omitempty"`
-		Env            map[string]string `yaml:"env,omitempty"`
-		Daemons        []map[string]any  `yaml:"daemons"`
-		ClientBindings []map[string]any  `yaml:"client_bindings"`
-		WeeklyRefresh  bool              `yaml:"weekly_refresh"`
+		Name           string                 `yaml:"name"`
+		Kind           string                 `yaml:"kind"`
+		Transport      string                 `yaml:"transport"`
+		Command        string                 `yaml:"command"`
+		BaseArgs       []string               `yaml:"base_args,omitempty"`
+		Env            map[string]string      `yaml:"env,omitempty"`
+		Daemons        []map[string]any       `yaml:"daemons"`
+		ClientBindings []config.ClientBinding `yaml:"client_bindings"`
+		WeeklyRefresh  bool                   `yaml:"weekly_refresh"`
 	}{
 		Name:      name,
 		Kind:      "global",
@@ -2781,15 +2816,11 @@ func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd 
 // url_path "/mcp" — the same shape the GUI binding editor emits. Deriving from
 // the registry (instead of a hardcoded list) means a future adapter addition
 // automatically appears in the draft with no second edit site to forget.
-func draftClientBindings() []map[string]any {
+func draftClientBindings() []config.ClientBinding {
 	names := clients.SupportedClientNames()
-	bindings := make([]map[string]any, 0, len(names))
+	bindings := make([]config.ClientBinding, 0, len(names))
 	for _, name := range names {
-		bindings = append(bindings, map[string]any{
-			"client":   name,
-			"daemon":   "default",
-			"url_path": "/mcp",
-		})
+		bindings = append(bindings, config.ClientBinding{Client: name, Daemon: "default", URLPath: "/mcp"})
 	}
 	return bindings
 }

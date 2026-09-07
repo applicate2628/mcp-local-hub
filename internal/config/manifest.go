@@ -317,9 +317,10 @@ func validatePortPool(label string, pool *PortPool) error {
 }
 
 type ClientBinding struct {
-	Client  string `yaml:"client"`
-	Daemon  string `yaml:"daemon"`
-	URLPath string `yaml:"url_path"`
+	Client         string `yaml:"client"`
+	Daemon         string `yaml:"daemon"`
+	URLPath        string `yaml:"url_path"`
+	ToolTimeoutSec int    `yaml:"tool_timeout_sec,omitempty"`
 }
 
 // ParseManifest reads YAML from r and returns a validated ServerManifest.
@@ -1185,6 +1186,11 @@ func (m *ServerManifest) Validate() error {
 	// internal/api.AdmissionCheck instead.
 	if err := m.validateVendoredAndAvailability(); err != nil {
 		return err
+	}
+	for _, binding := range m.ClientBindings {
+		if binding.ToolTimeoutSec < 0 {
+			return fmt.Errorf("manifest %s: client binding %q tool_timeout_sec must be non-negative", m.Name, binding.Client)
+		}
 	}
 
 	// required_secrets authoring/integrity gate. Each declared key MUST back a
