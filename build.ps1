@@ -24,7 +24,13 @@
 # add <repo-root> to Defender exclusions. See INSTALL.md.
 
 param(
-    [switch]$PrintPlanJson
+    [switch]$PrintPlanJson,
+    [ValidateSet("amd64", "arm64")]
+    [string]$WindowsTargetArch,
+    [string]$OutputDirectory = "bin",
+    [string]$ReleaseVersion,
+    [string]$ReleaseCommit,
+    [string]$ReleaseBuildDate
 )
 
 $ErrorActionPreference = "Stop"
@@ -33,12 +39,46 @@ $version = "0.4.36"
 try { $commit = (git rev-parse HEAD 2>$null) } catch { $commit = "unknown" }
 if ([string]::IsNullOrWhiteSpace($commit)) { $commit = "unknown" }
 $buildDate = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+$releaseTupleSupplied = -not [string]::IsNullOrWhiteSpace($ReleaseVersion) -or
+    -not [string]::IsNullOrWhiteSpace($ReleaseCommit) -or
+    -not [string]::IsNullOrWhiteSpace($ReleaseBuildDate)
+if ([string]::IsNullOrWhiteSpace($WindowsTargetArch) -and $releaseTupleSupplied) {
+    throw "ReleaseVersion, ReleaseCommit, and ReleaseBuildDate require WindowsTargetArch"
+}
+if (-not [string]::IsNullOrWhiteSpace($WindowsTargetArch)) {
+    if ([string]::IsNullOrWhiteSpace($ReleaseVersion) -or
+        [string]::IsNullOrWhiteSpace($ReleaseCommit) -or
+        [string]::IsNullOrWhiteSpace($ReleaseBuildDate)) {
+        throw "WindowsTargetArch requires ReleaseVersion, ReleaseCommit, and ReleaseBuildDate"
+    }
+    if ($ReleaseCommit -notmatch '^[0-9a-f]{40}$') {
+        throw "ReleaseCommit must be the full lowercase 40-hex Git commit"
+    }
+    if ($ReleaseBuildDate -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$') {
+        throw "ReleaseBuildDate must use strict UTC-seconds format"
+    }
+    try {
+        $parsedBuildDate = [datetime]::ParseExact(
+            $ReleaseBuildDate,
+            "yyyy-MM-ddTHH:mm:ssZ",
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::AssumeUniversal)
+    } catch {
+        throw "ReleaseBuildDate must be a real strict UTC-seconds timestamp"
+    }
+    if ($parsedBuildDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ") -ne $ReleaseBuildDate) {
+        throw "ReleaseBuildDate must be canonical UTC"
+    }
+    $version = $ReleaseVersion
+    $commit = $ReleaseCommit
+    $buildDate = $ReleaseBuildDate
+}
 $versionCore = $version.Split('-', 2)[0].Split('+', 2)[0].Split('.')
 if ($versionCore.Count -ne 3 -or @($versionCore | Where-Object { $_ -notmatch '^(0|[1-9][0-9]*)$' }).Count -ne 0) {
     throw "product version must have a three-component SemVer core: $version"
 }
 
-$outDir = "bin"
+$outDir = $OutputDirectory
 $contractPath = Join-Path $PSScriptRoot "windows-product-artifacts.json"
 $contract = Get-Content -Raw -LiteralPath $contractPath | ConvertFrom-Json
 if ($contract.schemaVersion -ne 1 -or @($contract.artifacts).Count -ne 3) {
@@ -99,11 +139,17 @@ $admissionCommands = @(
         }
     }
 )
+$resourceGeneratorArgs = @("-64")
+if ($WindowsTargetArch -eq "arm64") {
+    $resourceGeneratorArgs += "-arm"
+}
 $plan = [ordered]@{
     schemaVersion = 1
     version = $version
     commit = $commit
     buildDate = $buildDate
+    windowsTargetArch = $WindowsTargetArch
+    resourceGeneratorArgs = $resourceGeneratorArgs
     artifacts = $artifacts
     admissionCommands = $admissionCommands
 }
@@ -119,6 +165,10 @@ if (-not (Test-Path $outDir)) {
 
 $resourceScratch = Join-Path (Join-Path $PSScriptRoot ".scratch") "windows-versioninfo-$PID-$([Guid]::NewGuid().ToString('N'))"
 $generatedResources = @()
+$hadGOOS = Test-Path Env:GOOS
+$hadGOARCH = Test-Path Env:GOARCH
+$priorGOOS = $env:GOOS
+$priorGOARCH = $env:GOARCH
 try {
     New-Item -ItemType Directory -Force -Path $resourceScratch | Out-Null
     $templatePath = Join-Path $PSScriptRoot "cmd/mcphub/versioninfo.json"
@@ -148,12 +198,16 @@ try {
         if (Test-Path -LiteralPath $resourcePath) {
             Remove-Item -LiteralPath $resourcePath -Force
         }
-        Write-Host "==> Generating VERSIONINFO role=$($artifact.role)"
-        & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 -64 -o $resourcePath $resourceJson
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         $generatedResources += $resourcePath
+        Write-Host "==> Generating VERSIONINFO role=$($artifact.role)"
+        & go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.5.0 @resourceGeneratorArgs -o $resourcePath $resourceJson
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($WindowsTargetArch)) {
+        $env:GOOS = "windows"
+        $env:GOARCH = $WindowsTargetArch
+    }
     foreach ($artifact in $artifacts) {
         $outFile = Join-Path $outDir $artifact.filename
         $buildArgs = @("build", "-trimpath")
@@ -166,16 +220,22 @@ try {
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     }
 } finally {
+    if ($hadGOOS) { $env:GOOS = $priorGOOS } else { Remove-Item Env:GOOS -ErrorAction SilentlyContinue }
+    if ($hadGOARCH) { $env:GOARCH = $priorGOARCH } else { Remove-Item Env:GOARCH -ErrorAction SilentlyContinue }
     foreach ($resourcePath in $generatedResources) {
         Remove-Item -LiteralPath $resourcePath -Force -ErrorAction SilentlyContinue
     }
     Remove-Item -LiteralPath $resourceScratch -Recurse -Force -ErrorAction SilentlyContinue
 }
 
-$admitFile = Join-Path $outDir $helper[0].filename
 foreach ($command in $admissionCommands) {
     $candidate = $command.argv[1] -replace '/', [IO.Path]::DirectorySeparatorChar
-    & $admitFile $command.argv[0] $candidate
+    if ([string]::IsNullOrWhiteSpace($WindowsTargetArch)) {
+        $admitFile = Join-Path $outDir $helper[0].filename
+        & $admitFile $command.argv[0] $candidate
+    } else {
+        & go run ./cmd/mcphub-pe-admit $command.argv[0] $candidate
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
@@ -187,8 +247,10 @@ foreach ($artifact in $artifacts) {
     }
 }
 
-Write-Host "==> Product VERSIONINFO resources:"
-foreach ($artifact in $productArtifacts) {
-    (Get-Item (Join-Path $outDir $artifact.filename)).VersionInfo | Format-List ProductVersion,PrivateBuild,SpecialBuild,InternalName,OriginalFilename
+if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+    Write-Host "==> Product VERSIONINFO resources:"
+    foreach ($artifact in $productArtifacts) {
+        (Get-Item (Join-Path $outDir $artifact.filename)).VersionInfo | Format-List ProductVersion,PrivateBuild,SpecialBuild,InternalName,OriginalFilename
+    }
 }
 Write-Host "==> Done. Role/subsystem/artifact-identity admission passed; product metadata version=$version commit=$commit buildDate=$buildDate."

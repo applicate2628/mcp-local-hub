@@ -7,6 +7,9 @@ $scratchRoot = Join-Path $repoRoot ".scratch"
 $fixtureRoot = Join-Path $scratchRoot "windows-build-plan-$PID-$([Guid]::NewGuid().ToString('N'))"
 $fakeTools = Join-Path $fixtureRoot "fake-tools"
 $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
+$releaseVersion = "1.2.3-beta.1"
+$releaseCommit = "0123456789abcdef0123456789abcdef01234567"
+$releaseBuildDate = "2026-09-07T06:07:08Z"
 
 New-Item -ItemType Directory -Force -Path $fakeTools | Out-Null
 Copy-Item -LiteralPath $buildScript -Destination (Join-Path $fixtureRoot "build.ps1")
@@ -14,8 +17,12 @@ $contract = Join-Path $repoRoot "windows-product-artifacts.json"
 if (Test-Path -LiteralPath $contract) {
     Copy-Item -LiteralPath $contract -Destination (Join-Path $fixtureRoot "windows-product-artifacts.json")
 }
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot "cmd/mcphub"))
+[void](New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot "cmd/mcphub-windowless"))
+Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/versioninfo.json") -Destination (Join-Path $fixtureRoot "cmd/mcphub/versioninfo.json")
+Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/mcphub.ico") -Destination (Join-Path $fixtureRoot "cmd/mcphub/mcphub.ico")
 [IO.File]::WriteAllText((Join-Path $fakeTools "git.cmd"), "@echo deadbeef`r`n@exit /b 0`r`n")
-[IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), "@echo unexpected go invocation 1^>^&2`r`n@exit /b 93`r`n")
+[IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), "@echo partial-resource^>cmd\mcphub\zz_product_versioninfo.syso`r`n@exit /b 93`r`n")
 
 $priorPath = $env:PATH
 try {
@@ -25,6 +32,48 @@ try {
         $json = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
         if ($LASTEXITCODE -ne 0) {
             throw "build.ps1 -PrintPlanJson failed with exit $LASTEXITCODE"
+        }
+        $releasePlans = @{}
+        foreach ($arch in @("amd64", "arm64")) {
+            $releaseJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
+                -PrintPlanJson `
+                -WindowsTargetArch $arch `
+                -OutputDirectory "npm/packages/win32-$arch/bin" `
+                -ReleaseVersion $releaseVersion `
+                -ReleaseCommit $releaseCommit `
+                -ReleaseBuildDate $releaseBuildDate
+            if ($LASTEXITCODE -ne 0) {
+                throw "build.ps1 release plan for $arch failed with exit $LASTEXITCODE"
+            }
+            $releasePlans[$arch] = $releaseJson | ConvertFrom-Json
+        }
+        & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson -WindowsTargetArch amd64 *> $null
+        if ($LASTEXITCODE -eq 0) { throw "release plan accepted a missing release tuple" }
+        & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
+            -PrintPlanJson `
+            -WindowsTargetArch amd64 `
+            -ReleaseVersion $releaseVersion `
+            -ReleaseCommit deadbeef `
+            -ReleaseBuildDate $releaseBuildDate *> $null
+        if ($LASTEXITCODE -eq 0) { throw "release plan accepted a short commit" }
+        & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
+            -PrintPlanJson `
+            -ReleaseVersion $releaseVersion `
+            -ReleaseCommit $releaseCommit `
+            -ReleaseBuildDate $releaseBuildDate *> $null
+        if ($LASTEXITCODE -eq 0) { throw "release plan accepted a tuple without WindowsTargetArch" }
+        & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
+            -WindowsTargetArch amd64 `
+            -OutputDirectory "out" `
+            -ReleaseVersion $releaseVersion `
+            -ReleaseCommit $releaseCommit `
+            -ReleaseBuildDate $releaseBuildDate *> $null
+        if ($LASTEXITCODE -ne 93) { throw "failing resource generator exited $LASTEXITCODE, want 93" }
+        if (Test-Path -LiteralPath (Join-Path $fixtureRoot "cmd/mcphub/zz_product_versioninfo.syso")) {
+            throw "failing resource generation left a partial syso"
+        }
+        if (@(Get-ChildItem -LiteralPath (Join-Path $fixtureRoot ".scratch") -Directory -Filter "windows-versioninfo-*" -ErrorAction SilentlyContinue).Count -ne 0) {
+            throw "failing resource generation left its scratch directory"
         }
     } finally {
         Pop-Location
@@ -101,6 +150,43 @@ if (($plan.admissionCommands[0].argv -join "|") -ne "cli|bin/mcphub.exe") {
 }
 if (($plan.admissionCommands[1].argv -join "|") -ne "windowless|bin/mcphub-windowless.exe") {
     throw "windowless admission argv drift: $($plan.admissionCommands[1].argv -join '|')"
+}
+
+foreach ($arch in @("amd64", "arm64")) {
+    $releasePlan = $releasePlans[$arch]
+    if ($releasePlan.windowsTargetArch -ne $arch) {
+        throw "release target arch=$($releasePlan.windowsTargetArch), want $arch"
+    }
+    $wantGeneratorArgs = if ($arch -eq "arm64") { "-64|-arm" } else { "-64" }
+    if (($releasePlan.resourceGeneratorArgs -join "|") -ne $wantGeneratorArgs) {
+        throw "$arch resource generator args=$($releasePlan.resourceGeneratorArgs -join '|'), want $wantGeneratorArgs"
+    }
+    foreach ($artifact in @($releasePlan.artifacts | Where-Object productMetadata)) {
+        if ($artifact.versionInfo.ProductVersion -ne $releaseVersion) {
+            throw "$arch/$($artifact.role) release ProductVersion drift"
+        }
+        if ($artifact.versionInfo.PrivateBuild -ne "mcphub-build-v1;commit=$releaseCommit;build_date=$releaseBuildDate") {
+            throw "$arch/$($artifact.role) release PrivateBuild drift: $($artifact.versionInfo.PrivateBuild)"
+        }
+    }
+}
+
+$publishWorkflow = Get-Content -Raw -LiteralPath (Join-Path $repoRoot ".github/workflows/npm-publish.yml")
+if ($publishWorkflow -match [regex]::Escape("go generate ./cmd/mcphub")) {
+    throw "npm publish workflow must not call the retired go:generate resource path"
+}
+if ($publishWorkflow -notmatch 'COMMIT="\$\(git rev-parse HEAD\)"') {
+    throw "npm publish workflow must capture the full Windows release commit"
+}
+if ($publishWorkflow -notmatch 'SHORT_COMMIT="\$\(git rev-parse --short HEAD\)"' -or
+    $publishWorkflow -notmatch 'main\.commit=\$SHORT_COMMIT') {
+    throw "npm publish workflow must preserve short commit metadata for non-Windows payloads"
+}
+if ($publishWorkflow -notmatch '(?s)build\.ps1.+-WindowsTargetArch.+-ReleaseVersion.+-ReleaseCommit.+-ReleaseBuildDate') {
+    throw "npm publish workflow must delegate Windows payload generation to build.ps1 with the captured tuple"
+}
+if ($publishWorkflow -notmatch '-ReleaseBuildDate "\$DATE" \|\| return \$\?') {
+    throw "npm publish workflow must propagate build.ps1 failure from the build function"
 }
 
 function Get-PESubsystem([string]$Path) {

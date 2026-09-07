@@ -85,20 +85,6 @@ jobs:
           node npm/generate-platform-packages.js
           node npm/sync-version.js --inject   # push $V into build.sh + versioninfo.json so the binary matches
 
-      # sync-version.js --inject rewrites cmd/mcphub/versioninfo.json (the
-      # SOURCE of the Windows PE FileVersion/ProductVersion resource) but NOT
-      # the compiled cmd/mcphub/resource.syso that `go build` embeds. `go build`
-      # never runs `go generate` implicitly (see `go help generate`), so without
-      # this step a workflow-time version bump would embed a STALE PE resource
-      # in the Windows binaries. Regenerate resource.syso from the freshly
-      # injected versioninfo.json BEFORE the cross-build. The //go:generate
-      # directive (cmd/mcphub/main.go) uses `go run …/goversioninfo@v1.5.0`, so
-      # no separate tool install is needed (same as build.sh / build.ps1).
-      - name: Regenerate Windows version resource (resource.syso) from injected versioninfo.json
-        shell: bash
-        run: |
-          go generate ./cmd/mcphub
-
       - name: Cross-build the 6 platform payloads
         id: native
         shell: bash
@@ -106,57 +92,25 @@ jobs:
           VERSION: ${{ steps.ver.outputs.version }}
         run: |
           V="$VERSION"
-          COMMIT="$(git rev-parse --short HEAD)"
+          COMMIT="$(git rev-parse HEAD)"
+          SHORT_COMMIT="$(git rev-parse --short HEAD)"
           DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          LD="-s -w -X main.version=$V -X main.commit=$COMMIT -X main.buildDate=$DATE"
+          LD="-s -w -X main.version=$V -X main.commit=$SHORT_COMMIT -X main.buildDate=$DATE"
           printf 'commit=%s\nbuild_date=%s\n' "$COMMIT" "$DATE" >> "$GITHUB_OUTPUT"
-          windows_rows() {
-            node <<'NODE'
-          const contract = require('./windows-product-artifacts.json');
-          if (contract.schemaVersion !== 1 || contract.artifacts.length !== 3) {
-            throw new Error('Windows artifact contract must be schemaVersion 1 with exactly three artifacts');
-          }
-          for (const artifact of contract.artifacts) {
-            process.stdout.write([
-              artifact.role,
-              artifact.filename,
-              artifact.source,
-              artifact.subsystem,
-              artifact.productMetadata,
-            ].join('\t') + '\n');
-          }
-          NODE
-          }
-          WINDOWS_ROWS="$RUNNER_TEMP/mcphub-windows-artifacts.tsv"
-          windows_rows > "$WINDOWS_ROWS"
-          if [ "$(wc -l < "$WINDOWS_ROWS")" -ne 3 ]; then
-            echo "::error::Windows artifact contract did not emit exactly three rows"; exit 1
-          fi
           build() { # $1=GOOS $2=GOARCH $3=dir $4=binname
-            if [ "$1" != "windows" ]; then
-              echo "build $1/$2 -> npm/packages/$3/bin/$4"
-              GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$LD" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
+            if [ "$1" = "windows" ]; then
+              echo "build $1/$2 through build.ps1 owner -> npm/packages/$3/bin"
+              pwsh -NoProfile -File ./build.ps1 \
+                -WindowsTargetArch "$2" \
+                -OutputDirectory "npm/packages/$3/bin" \
+                -ReleaseVersion "$V" \
+                -ReleaseCommit "$COMMIT" \
+                -ReleaseBuildDate "$DATE" || return $?
               return
             fi
 
-            while IFS=$'\t' read -r role filename source subsystem product_metadata; do
-              local ld="-s -w"
-              if [ "$product_metadata" = "true" ]; then ld="$LD"; fi
-              case "$subsystem" in
-                2) ld="$ld -H windowsgui" ;;
-                3) ;;
-                *) echo "::error::unsupported Windows subsystem $subsystem for role $role"; return 1 ;;
-              esac
-              echo "build $1/$2 role=$role subsystem=$subsystem metadata=$product_metadata -> npm/packages/$3/bin/$filename"
-              GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$ld" \
-                -o "npm/packages/$3/bin/$filename" "$source"
-            done < "$WINDOWS_ROWS"
-
-            while IFS=$'\t' read -r role filename _source _subsystem product_metadata; do
-              if [ "$product_metadata" = "true" ]; then
-                go run ./cmd/mcphub-pe-admit "$role" "npm/packages/$3/bin/$filename"
-              fi
-            done < "$WINDOWS_ROWS"
+            echo "build $1/$2 -> npm/packages/$3/bin/$4"
+            GOOS="$1" GOARCH="$2" go build -trimpath -ldflags "$LD" -o "npm/packages/$3/bin/$4" ./cmd/mcphub
           }
           build windows amd64 win32-x64    mcphub.exe
           build windows arm64 win32-arm64  mcphub.exe
@@ -191,10 +145,12 @@ jobs:
             while IFS=$'\t' read -r role filename; do
               candidate="npm/packages/$target/bin/$filename"
               go run ./cmd/mcphub-pe-admit "$role" "$candidate"
-              info="$(go version -m "$candidate")"
-              printf '%s\n' "$info" | grep -F -- "-X main.version=$VERSION" >/dev/null
-              printf '%s\n' "$info" | grep -F -- "-X main.commit=$COMMIT" >/dev/null
-              printf '%s\n' "$info" | grep -F -- "-X main.buildDate=$BUILD_DATE" >/dev/null
+              if [ "$role" = "cli" ]; then
+                info="$(go version -m "$candidate")"
+                printf '%s\n' "$info" | grep -F -- "-X main.version=$VERSION" >/dev/null
+                printf '%s\n' "$info" | grep -F -- "-X main.commit=$COMMIT" >/dev/null
+                printf '%s\n' "$info" | grep -F -- "-X main.buildDate=$BUILD_DATE" >/dev/null
+              fi
               echo "$target role=$role metadata version=$VERSION commit=$COMMIT buildDate=$BUILD_DATE"
             done < "$WINDOWS_PRODUCT_ROWS"
           done
