@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
@@ -51,12 +52,13 @@ type DeAdoptClientPlan struct {
 // HashReady is also true for a RESUME whose manifest is already absent, because
 // that means the delete step is already complete and must be skipped.
 type DeAdoptManifestReadiness struct {
-	Present       bool
-	AlreadyAbsent bool
-	HashReady     bool
-	ExpectedHash  string
-	ActualHash    string
-	Reason        string
+	Present          bool
+	AlreadyAbsent    bool
+	HashReady        bool
+	ExpectedHash     string
+	ActualHash       string
+	Reason           string
+	expectedBindings map[string]config.ClientBinding
 }
 
 // DeAdoptEligibility is the server-scoped G3 read surface. Eligible is derived
@@ -97,6 +99,7 @@ type DeAdoptPlan struct {
 // lock; naming a client here never by itself makes that client terminal.
 type ExecuteDeAdoptOpts struct {
 	AcceptConflictClients []string
+	providerDeps          providerTransactionDeps
 }
 
 // DeAdoptClientFailure is a redaction-safe per-client failure. Reason is always
@@ -204,6 +207,12 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 			continue
 		}
 		clientPlan.OriginalState = clientRec.OriginalState
+		if _, found := plan.Manifest.expectedBindings[clientName]; !found {
+			clientPlan.Disposition = DeAdoptClientFailed
+			clientPlan.Reason = "manifest has no verified adopted client binding"
+			plan.Clients = append(plan.Clients, clientPlan)
+			continue
+		}
 		targetEntryName := adoptClientTargetEntryName(*rec, clientRec)
 
 		adapter, ok := allClients[clientName]
@@ -224,7 +233,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
 		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
 			targetEntryName,
-			deAdoptLiveBindingMatcher(rec, clientName),
+			deAdoptLiveBindingMatcher(rec, plan.Manifest.expectedBindings[clientName]),
 			snapshotSubtree,
 		)
 		if classifyErr != nil {
@@ -426,6 +435,9 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
 	}
+	if len(readiness.expectedBindings) != len(rec.AdoptClients) {
+		return nil, fmt.Errorf("de-adopt: manifest %q has no verified adopted client bindings; resolve it before de-adopting", plan.ManifestName)
+	}
 
 	acceptSet, err := deAdoptAcceptConflictSet(opts.AcceptConflictClients, rec.AdoptClients)
 	if err != nil {
@@ -460,7 +472,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			continue
 		}
 
-		match := deAdoptLiveBindingMatcher(rec, clientName)
+		binding, found := readiness.expectedBindings[clientName]
+		if !found {
+			return nil, fmt.Errorf("de-adopt: manifest %q has no verified adopted binding for client %q", plan.ManifestName, clientName)
+		}
+		match := deAdoptLiveBindingMatcher(rec, binding)
 		targetEntryName := adoptClientTargetEntryName(*rec, clientRec)
 		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
 		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
@@ -532,7 +548,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 						Target: clients.MCPEntry{
 							Name:           targetEntryName,
 							URL:            fmt.Sprintf("http://127.0.0.1:%d%s", rec.Port, adoptDefaultURLPath),
-							ToolTimeoutSec: clientRec.ToolTimeoutSec,
+							ToolTimeoutSec: binding.ToolTimeoutSec,
 						},
 						SourceSnapshot: sourceSnapshot,
 					})
@@ -586,6 +602,21 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if deAdoptBeforeManifestDeleteHook != nil {
 		deAdoptBeforeManifestDeleteHook()
 	}
+	if rec.ProviderSource != nil {
+		if rec.ProviderSource.DisablePhase != "disable_applied" {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: provider disable phase is not applied")
+		}
+		frozen, frozenErr := frozenProviderAdoptDaemon(rec)
+		if frozenErr != nil {
+			return report, frozenErr
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
+		cancel()
+		if stopErr != nil {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
+		}
+	}
 	if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 		pendingEvents = append(pendingEvents, func() {
 			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
@@ -605,7 +636,19 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		})
 		return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed", plan.ManifestName)
 	}
-
+	if rec.ProviderSource != nil {
+		providerPlan := &AdoptPlan{providerSource: rec.ProviderSource}
+		state, resolveErr := resolveProviderExecutionState(providerPlan, opts.providerDeps.source)
+		if resolveErr != nil {
+			return report, resolveErr
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		restoreErr := providerRestore(ctx, state, rec.ProviderSource)
+		cancel()
+		if restoreErr != nil {
+			return report, restoreErr
+		}
+	}
 	// E5 — CLOSE-READY only. The prefilter and delete each take the vault lock
 	// through their existing owner and release it before the next inner operation.
 	toDelete, sharedSkipped, unreadableManifests, prefilterErr := a.prepareDeAdoptRoutedSecretCleanup(rec.ManifestName, rec.RoutedSecretKeys)
@@ -864,12 +907,18 @@ func dedupeSortedDeAdoptStrings(values []string) []string {
 
 func (a *API) buildDeAdoptManifestReadiness(rec *AdoptProvenanceRecord, routing DeAdoptRoutingVerdict) DeAdoptManifestReadiness {
 	readiness := DeAdoptManifestReadiness{ExpectedHash: rec.ExpectedManifestHash}
-	_, actualHash, err := a.ManifestGetInWithHash(adoptCommittedManifestDir(), rec.ManifestName)
+	manifestBytes, actualHash, err := a.ManifestGetInWithHash(adoptCommittedManifestDir(), rec.ManifestName)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			readiness.AlreadyAbsent = true
 			if routing == DeAdoptRoutingResume {
+				bindings, bindingErr := expectedAdoptBindingsFromProvenance(rec)
+				if bindingErr != nil {
+					readiness.Reason = "durable adopted client bindings are unavailable"
+					return readiness
+				}
 				readiness.HashReady = true
+				readiness.expectedBindings = indexAdoptBindings(bindings)
 				readiness.Reason = "manifest is already absent; delete step is complete"
 			} else {
 				readiness.Reason = "manifest is absent"
@@ -890,20 +939,28 @@ func (a *API) buildDeAdoptManifestReadiness(rec *AdoptProvenanceRecord, routing 
 		readiness.Reason = "manifest hash does not match adopt provenance"
 		return readiness
 	}
+	bindings, bindingErr := expectedAdoptBindingsFromManifestBytes(rec, []byte(manifestBytes))
+	if bindingErr != nil {
+		readiness.Reason = "manifest adopted client bindings are unavailable"
+		return readiness
+	}
 	readiness.HashReady = true
+	readiness.expectedBindings = indexAdoptBindings(bindings)
 	return readiness
 }
 
-func deAdoptLiveBindingMatcher(rec *AdoptProvenanceRecord, clientName string) func(*clients.MCPEntry) bool {
+func indexAdoptBindings(bindings []config.ClientBinding) map[string]config.ClientBinding {
+	indexed := make(map[string]config.ClientBinding, len(bindings))
+	for _, binding := range bindings {
+		indexed[binding.Client] = binding
+	}
+	return indexed
+}
+
+func deAdoptLiveBindingMatcher(rec *AdoptProvenanceRecord, binding config.ClientBinding) func(*clients.MCPEntry) bool {
 	expected := &config.ServerManifest{
 		Name:    rec.ManifestName,
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
-	}
-	binding := config.ClientBinding{
-		Client:         clientName,
-		Daemon:         adoptDefaultDaemonName,
-		URLPath:        adoptDefaultURLPath,
-		ToolTimeoutSec: adoptClientToolTimeout(*rec, clientName),
 	}
 	return func(live *clients.MCPEntry) bool {
 		matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, expected)

@@ -21,8 +21,9 @@ const (
 	WindowsPESubsystemErrorID        = "E_WINDOWS_PE_SUBSYSTEM"
 	WindowsProductPairErrorID        = "E_WINDOWS_PRODUCT_PAIR_INCOMPLETE"
 
-	maxWindowsPEHeaderOffset = 1 << 20
-	windowsPEMaxSingleRead   = 94
+	maxWindowsPEHeaderOffset   = 1 << 20
+	windowsPEMaxSingleRead     = 94
+	windowsPEDLLCharacteristic = 0x2000
 )
 
 // WindowsArtifactRole names one member of the installed Windows product pair.
@@ -82,6 +83,24 @@ func AdmitWindowsGUI(path string) error {
 	}
 	if subsystem != WindowsGUISubsystem {
 		return &Error{ID: WindowsPESubsystemErrorID, Path: path, Expected: WindowsGUISubsystem, Actual: subsystem}
+	}
+	return nil
+}
+
+// ValidateWindowsNativeImage admits a regular PE32 or PE32+ process image
+// without executing it. It is generic: no product role, VERSIONINFO, hash, or
+// filename policy is imposed. DLL images are rejected because they are not
+// launchable process roots.
+func ValidateWindowsNativeImage(path string) error {
+	if _, err := readWindowsPESubsystemFile(path); err != nil {
+		return err
+	}
+	characteristics, err := readWindowsPECharacteristicsFile(path)
+	if err != nil {
+		return err
+	}
+	if characteristics&windowsPEDLLCharacteristic != 0 {
+		return formatError(path, fmt.Errorf("PE image is a DLL"))
 	}
 	return nil
 }
@@ -195,6 +214,40 @@ func readWindowsPESubsystemFile(path string) (uint16, error) {
 		return 0, formatError(path, err)
 	}
 	return subsystem, nil
+}
+
+func readWindowsPECharacteristicsFile(path string) (uint16, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, formatError(path, err)
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		if err == nil {
+			err = fmt.Errorf("not a regular file")
+		}
+		return 0, formatError(path, err)
+	}
+	var dos [64]byte
+	if _, err := f.ReadAt(dos[:], 0); err != nil || string(dos[:2]) != "MZ" {
+		if err == nil {
+			err = fmt.Errorf("missing MZ signature")
+		}
+		return 0, formatError(path, err)
+	}
+	off := int64(binary.LittleEndian.Uint32(dos[0x3c:0x40]))
+	if off < 64 || off > maxWindowsPEHeaderOffset || off > info.Size()-24 {
+		return 0, formatError(path, fmt.Errorf("invalid PE header offset %d", off))
+	}
+	var coff [24]byte
+	if _, err := f.ReadAt(coff[:], off); err != nil || string(coff[:4]) != "PE\x00\x00" {
+		if err == nil {
+			err = fmt.Errorf("missing PE signature")
+		}
+		return 0, formatError(path, err)
+	}
+	return binary.LittleEndian.Uint16(coff[22:24]), nil
 }
 
 func formatError(path string, err error) error {

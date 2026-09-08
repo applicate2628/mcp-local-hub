@@ -163,6 +163,35 @@ API_KEY = "` + fixtureKey + `"
 	}
 }
 
+func TestAdoptCmdProviderPluginForwardsExplicitSelectionAndUsesAPIRedactedPreview(t *testing.T) {
+	adoptTestHome(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+	var got api.AdoptOpts
+	builder := func(_ *api.API, opts api.AdoptOpts) (*api.AdoptPlan, error) {
+		got = opts
+		return &api.AdoptPlan{EntryName: "reader", SourceClient: "codex-cli", ManifestName: "reader", Port: 9344, AdoptClients: []string{"codex-cli"}, TargetEntryNames: map[string]string{"codex-cli": "reader"}}, nil
+	}
+	cmd := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, builder)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"reader", "--client", "codex-cli", "--provider-plugin", "arbitrary@catalog", "--port", "9344"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("provider dry run: %v", err)
+	}
+	if got.ProviderPluginRef != "arbitrary@catalog" || got.Client != "codex-cli" || got.EntryName != "reader" {
+		t.Fatalf("forwarded opts=%+v", got)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "dry-run") {
+		t.Fatalf("preview missing dry-run marker: %s", printed)
+	}
+	missing := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, builder)
+	missing.SetArgs([]string{"reader", "--provider-plugin", "arbitrary@catalog"})
+	if err := missing.Execute(); err == nil || !strings.Contains(err.Error(), "--client is required") {
+		t.Fatalf("missing client error=%v", err)
+	}
+}
+
 func TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan(t *testing.T) {
 	root, home := adoptTestHome(t)
 	manifestDir := filepath.Join(root, "manifests")

@@ -22,6 +22,22 @@ func setupCodexConfig(t *testing.T, initial string) string {
 	return path
 }
 
+func TestResolveCodexHomeUsesExistingAbsoluteCODEXHOME(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	got, err := resolveCodexHome()
+	if err != nil || got != home {
+		t.Fatalf("resolveCodexHome = %q, %v; want %q, nil", got, err, home)
+	}
+}
+
+func TestResolveCodexHomeRejectsRelativeCODEXHOME(t *testing.T) {
+	t.Setenv("CODEX_HOME", "relative-codex-home")
+	if _, err := resolveCodexHome(); err == nil {
+		t.Fatal("resolveCodexHome accepted relative CODEX_HOME")
+	}
+}
+
 func createCodexJunctionForTest(t *testing.T, link, target string) {
 	t.Helper()
 	if runtime.GOOS != "windows" {

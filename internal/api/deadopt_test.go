@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 const deAdoptTestPort = 7 // inert URL data only; these tests never bind a TCP port
@@ -33,6 +34,16 @@ func deAdoptHubConfig(name string) string {
 	return fmt.Sprintf("[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\n", name, deAdoptTestPort)
 }
 
+func deAdoptHubConfigWithToolTimeout(name string, toolTimeoutSec int) string {
+	return fmt.Sprintf("[mcp_servers.%s]\nurl = \"http://127.0.0.1:%d/mcp\"\ntool_timeout_sec = %d\n", name, deAdoptTestPort, toolTimeoutSec)
+}
+
+func deAdoptManagedManifest(name string, toolTimeoutSec int) []byte {
+	return []byte(renderStdioBridgeManifestYAML(name, "go", []string{"version"}, nil, deAdoptTestPort, []config.ClientBinding{{
+		Client: "codex-cli", Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath, ToolTimeoutSec: toolTimeoutSec,
+	}}))
+}
+
 func deAdoptNativeConfig(name, command string) string {
 	return fmt.Sprintf("[mcp_servers.%s]\ncommand = %q\nargs = [\"version\"]\n", name, command)
 }
@@ -50,7 +61,7 @@ func setupDeAdoptPlannerFixture(t *testing.T, name string, fixture deAdoptPlanne
 
 	manifestBytes := fixture.manifestBytes
 	if manifestBytes == nil {
-		manifestBytes = []byte("name: " + name + "\n")
+		manifestBytes = deAdoptManagedManifest(name, 0)
 	}
 	expectedHash := ManifestHashContent(manifestBytes)
 	if fixture.expectedHashOverride != "" {

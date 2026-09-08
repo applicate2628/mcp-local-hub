@@ -183,7 +183,7 @@ See also: install, logs, restart, status.`,
 				return daemonSecretVaultFatalError(server, daemonName, keyPath, vaultPath, verr)
 			}
 			resolver := secrets.NewResolver(vault, nil) // TODO config.local.yaml in later task
-			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver)
+			env, unsetEnv, err := daemonEnvWithOverlay(server, daemonName, m.Env, resolver, m.EnvForwardLocal)
 			if err != nil {
 				return err
 			}
@@ -479,7 +479,7 @@ func daemonVaultDACLRefusedPath(keyPath, vaultPath string, err error) string {
 // declared keys to UNSET in the child (skipped optional secrets) — the host
 // removes these from the inherited os.Environ() so the child sees them as
 // truly absent, not present-but-empty (Codex #377).
-func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver) (map[string]string, []string, error) {
+func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]string, resolver *secrets.Resolver, envForwardLocal ...[]string) (map[string]string, []string, error) {
 	if resolver == nil {
 		return nil, nil, fmt.Errorf("resolve manifest env for %s/%s: resolver is nil", server, daemonName)
 	}
@@ -499,7 +499,7 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 	// logic; the serena proxy reaches the same owner with ITS workspace-keyed
 	// task name (daemon_serena.go), never reconstructing one from server/daemon.
 	taskName := fmt.Sprintf(`\mcp-local-hub-%s-%s`, server, daemonName)
-	return mergeResolvedDaemonEnvWithOverlay(taskName, env, omitted)
+	return mergeResolvedDaemonEnvWithOverlay(taskName, env, omitted, envForwardLocal...)
 }
 
 // mergeResolvedDaemonEnvWithOverlay is the task-name-keyed overlay-merge owner
@@ -521,12 +521,29 @@ func daemonEnvWithOverlay(server, daemonName string, manifestEnv map[string]stri
 // never merged the operator overlay the supervisor had already applied to the
 // wrapper, so an operator override (e.g. SERENA_LOG_LEVEL) was silently
 // dropped and an EnvRefs overlap key clobbered the overlay value.
-func mergeResolvedDaemonEnvWithOverlay(taskName string, resolvedEnv, omittedSecrets map[string]string) (map[string]string, []string, error) {
+func mergeResolvedDaemonEnvWithOverlay(taskName string, resolvedEnv, omittedSecrets map[string]string, envForwardLocal ...[]string) (map[string]string, []string, error) {
+	resolved := make(map[string]string, len(resolvedEnv)+len(envForwardLocal))
+	for key, value := range resolvedEnv {
+		resolved[key] = value
+	}
+	forwardedAbsent := map[string]string{}
+	for _, names := range envForwardLocal {
+		for _, key := range names {
+			if _, static := resolved[key]; static {
+				continue
+			}
+			if value, present := os.LookupEnv(key); present {
+				resolved[key] = value
+			} else {
+				forwardedAbsent[key] = "env_forward_local"
+			}
+		}
+	}
 	overlayEnv, err := daemonOverlayEnv(taskName)
 	if err != nil {
 		return nil, nil, err
 	}
-	merged := mergeDaemonEnvMaps(resolvedEnv, overlayEnv)
+	merged := mergeDaemonEnvMaps(resolved, overlayEnv)
 	// Warn + UNSET only for optional secrets the per-daemon overlay did NOT
 	// supply. An omitted `secret:` ref whose key the overlay provides is NOT
 	// actually missing: warning "spawning without it" would be false, and
@@ -540,6 +557,11 @@ func mergeResolvedDaemonEnvWithOverlay(taskName string, resolvedEnv, omittedSecr
 		unset = append(unset, k)
 		fmt.Fprintf(os.Stderr, "mcphub daemon %s: env %q (%s) is not set — spawning without it; set it via `mcphub secrets` (or the install secret prompt) if this server needs it.\n",
 			taskName, k, ref)
+	}
+	for k := range forwardedAbsent {
+		if _, ok := merged[k]; !ok {
+			unset = append(unset, k)
+		}
 	}
 	return merged, unset, nil
 }

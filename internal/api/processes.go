@@ -76,10 +76,16 @@ type procRow struct {
 // the contract of CountProcesses. Also splits the CSV into lines once
 // here so CountProcessesFromSnapshot never re-tokenizes the raw text.
 func takeProcessSnapshot() processSnapshotOutcome {
+	return takeProcessSnapshotContext(context.Background())
+}
+
+// takeProcessSnapshotContext reuses the canonical Windows process snapshot
+// owner while preserving a caller's cancellation/deadline boundary.
+func takeProcessSnapshotContext(ctx context.Context) processSnapshotOutcome {
 	if runtime.GOOS != "windows" {
 		return processSnapshotOutcome{reasonID: "unsupported-platform"}
 	}
-	out, err := runProcessSnapshot()
+	out, err := runProcessSnapshotContext(ctx)
 	if err != nil {
 		return processSnapshotOutcome{reasonID: "process-snapshot-unavailable"}
 	}
@@ -493,9 +499,15 @@ func parseProcessSnapshotRow(record string, header process.WmicCSVHeader) (procR
 // column order places it. Returned as a single string for convenience; callers
 // wrap in strings.NewReader.
 func runProcessSnapshot() (string, error) {
+	return runProcessSnapshotContext(context.Background())
+}
+
+// runProcessSnapshotContext keeps the existing 60-second wmic-to-PowerShell
+// chain bound while allowing a shorter caller deadline/cancellation to win.
+func runProcessSnapshotContext(parent context.Context) (string, error) {
 	// One deadline shared by the wmic attempt AND the PowerShell fallback, so a
 	// slow wmic cannot buy a second full-price attempt (see probeChainBudget).
-	ctx, cancel := newProbeChainContext()
+	ctx, cancel := context.WithTimeout(parent, probeChainBudget)
 	defer cancel()
 
 	// Legacy path: wmic (present on Windows 10 and older Windows 11).

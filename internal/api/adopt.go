@@ -40,12 +40,13 @@ func AdoptSupportedClients() []string {
 
 // AdoptOpts describes an unmanaged direct stdio entry to absorb into mcphub.
 type AdoptOpts struct {
-	EntryName    string
-	Client       string
-	ManifestName string
-	Port         int
-	Clients      []string
-	ScanOpts     ScanOpts
+	EntryName         string
+	Client            string
+	ManifestName      string
+	Port              int
+	Clients           []string
+	ProviderPluginRef string
+	ScanOpts          ScanOpts
 	// CodexProjectRoot and CodexWorkingDir are composition-root supplied,
 	// read-only bounds for Codex project-layer inspection. They must be supplied
 	// together; an empty pair preserves the global-only adopt behavior.
@@ -73,6 +74,7 @@ type AdoptPlan struct {
 	SecretRoutedKeys                []string
 	MCPProtocolCompatibilityProfile string
 	ManifestYAML                    string
+	providerPreview                 *ProviderAdoptPreview
 	// TargetEntryNames freezes the physical client-config key for each selected
 	// client. Values equal EntryName unless a Codex project layer contributes an
 	// opposite transport under the logical source name.
@@ -104,6 +106,19 @@ type AdoptPlan struct {
 	requestedCompatibilityProfile         string
 	requestedCompatibilityProfileExplicit bool
 	toolTimeoutByClient                   map[string]int
+	providerSource                        *ProviderSourceProvenanceV1
+}
+
+// ProviderAdoptPreview is the redacted provider identity shown by the API-owned
+// dry-run renderer. It intentionally carries no environment value, receipt
+// body, or filesystem path.
+type ProviderAdoptPreview struct {
+	ProviderClient, PluginRef, ServerName                        string
+	ReceiptFingerprint, ActivationFingerprint, PolicyFingerprint string
+	EnvKeys                                                      []string
+	WorkingDirPresent                                            bool
+	ToolTimeoutSec                                               int
+	Scope                                                        string
 }
 
 type ExecuteAdoptOpts struct {
@@ -117,6 +132,7 @@ type ExecuteAdoptOpts struct {
 	// and is never derived from a command, HTTP request, config, or environment.
 	ReceivingVerifier AdoptReceivingVerifier
 	result            *AdoptExecutionResultV1
+	providerDeps      providerTransactionDeps
 }
 
 // AdoptExecutionResultV1 carries only settlements returned by the owning
@@ -364,6 +380,10 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 			if manifestErr != nil {
 				return nil, fmt.Errorf("adopt: read existing disk manifest %q: %w", manifestName, manifestErr)
 			}
+			bindings, bindingErr := expectedAdoptBindingsFromManifestBytes(rec, manifestBytes)
+			if bindingErr != nil {
+				return nil, fmt.Errorf("adopt: existing manifest %q has no usable adopted client bindings: %w", manifestName, bindingErr)
+			}
 			requestedClients, normalizeErr := normalizeAdoptClientNames(opts.Clients, sourceClient)
 			if normalizeErr != nil {
 				return nil, normalizeErr
@@ -387,9 +407,22 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 				requestedClientsExplicit:              len(opts.Clients) > 0,
 				requestedCompatibilityProfile:         compatibilityProfile,
 				requestedCompatibilityProfileExplicit: opts.MCPProtocolCompatibilityProfileExplicit,
+				toolTimeoutByClient:                   adoptToolTimeoutByClient(bindings),
+				providerSource:                        cloneProviderSourceProvenance(rec.ProviderSource),
 			}, nil
 		}
 		return nil, fmt.Errorf("adopt refuses to create manifest %q because a disk manifest already exists; remove or rename the existing manifest before re-running adopt", manifestName)
+	}
+	if opts.ProviderPluginRef != "" {
+		source, ok := clients.AllClients()[sourceClient]
+		if !ok {
+			return nil, fmt.Errorf("provider client %q is unavailable", sourceClient)
+		}
+		provider, ok := source.(clients.ProviderMCPSourceV1)
+		if !ok {
+			return nil, fmt.Errorf("%w: client %q", clients.ErrProviderCapabilityUnsupported, sourceClient)
+		}
+		return a.buildProviderAdoptPlan(opts, source, provider)
 	}
 
 	scanOpts := adoptScanOpts(opts.ScanOpts)
@@ -624,6 +657,22 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	if !leased {
 		return newAdoptStageError("lease-acquire", "uncommitted", fmt.Errorf("adopt: a concurrent adopt of manifest %q is already in progress; retry after it completes", plan.ManifestName))
 	}
+	var providerState providerExecutionState
+	var providerPreObservation providerDirectProcessObservationV1
+	if plan.providerSource != nil {
+		var providerErr error
+		providerState, providerErr = resolveProviderExecutionState(plan, opts.providerDeps.source)
+		if providerErr != nil {
+			return newAdoptStageError("provider-revalidate", "uncommitted", providerErr)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		observation := opts.providerDeps.observe(ctx, providerState.identity, nil)
+		cancel()
+		if observation.State != providerProcessObservationComplete {
+			return newAdoptStageError("provider-process-observe", "uncommitted", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED"))
+		}
+		providerPreObservation = observation
+	}
 
 	// Install emits useful but success-shaped narration (backup locations,
 	// rewritten client binding, and "Install complete"). It is not externally
@@ -632,6 +681,9 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	var installNarration bytes.Buffer
 	stage := "provenance-capture"
 	commitState := "uncommitted"
+	providerDisabled := false
+	providerManagedInstalled := false
+	var providerRec *AdoptProvenanceRecord
 	transactionErr := func() error {
 		if plan.alreadyAdopted {
 			stage = "existing-state-inconsistent"
@@ -671,8 +723,61 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			emitAdoptProvenanceCaptureFailed(plan.ManifestName, "", reason)
 			return fmt.Errorf("adopt: capture pre-adopt provenance before any mutation: %w", err)
 		}
+		providerRec = rec
+		if plan.providerSource != nil {
+			stage = "provider-disable"
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			_, disableErr := providerDisable(ctx, providerState, plan.providerSource)
+			cancel()
+			if disableErr != nil {
+				return disableErr
+			}
+			providerDisabled = true
+			if err := markProviderDisableApplied(plan.ManifestName, plan.providerSource.ExpectedDisabledFingerprint); err != nil {
+				return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: %w", err)
+			}
+			stage = "provider-process-observe"
+			ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
+			observation := opts.providerDeps.observe(ctx, providerState.identity, providerPreObservation.Active)
+			cancel()
+			if observation.State != providerProcessObservationComplete || len(observation.Active) != 0 {
+				ctx, restoreCancel := context.WithTimeout(context.Background(), 60*time.Second)
+				restoreErr := providerRestore(ctx, providerState, plan.providerSource)
+				restoreCancel()
+				if restoreErr != nil {
+					return restoreErr
+				}
+				providerDisabled = false
+				if abortErr := abortAdoptProvenance(rec); abortErr != nil {
+					return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: %w", abortErr)
+				}
+				if observation.State != providerProcessObservationComplete {
+					return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+				}
+				return fmt.Errorf("E_PROVIDER_SOURCE_STILL_RUNNING")
+			}
+			ctx, cancel = context.WithTimeout(context.Background(), 60*time.Second)
+			revalidateErr := providerRevalidateDisabled(ctx, providerState, plan.providerSource)
+			cancel()
+			if revalidateErr != nil {
+				ctx, restoreCancel := context.WithTimeout(context.Background(), 60*time.Second)
+				restoreErr := providerRestore(ctx, providerState, plan.providerSource)
+				restoreCancel()
+				if restoreErr != nil {
+					return restoreErr
+				}
+				providerDisabled = false
+				if abortErr := abortAdoptProvenance(rec); abortErr != nil {
+					return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: %w", abortErr)
+				}
+				return revalidateErr
+			}
+		}
 		stage = "provenance-capture"
 		if err := persistAdoptRoutedSecrets(plan.secretValues); err != nil {
+			if plan.providerSource != nil {
+				return err
+			}
 			if note := abortProvenanceNote(abortAdoptProvenance(rec)); note != "" {
 				return fmt.Errorf("%w%s", err, note)
 			}
@@ -680,7 +785,10 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 		}
 		stage = "manifest-write"
 		if err := a.ManifestCreate(plan.ManifestName, plan.ManifestYAML); err != nil {
-			abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
+			abortNote := ""
+			if plan.providerSource == nil {
+				abortNote = abortProvenanceNote(abortAdoptProvenance(rec))
+			}
 			if len(plan.SecretRoutedKeys) == 0 {
 				if abortNote == "" {
 					return err
@@ -713,6 +821,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			// subset. A process restart is required before same-leaf recovery.
 			var forwardErr *InstallForwardCommittedError
 			if errors.As(err, &forwardErr) {
+				providerManagedInstalled = plan.providerSource != nil
 				return fmt.Errorf(
 					"adopt install committed a forward subset through client %q; later requested clients may have been skipped; "+
 						"the pre-adopt provenance snapshots, manifest %q, and routed vault keys were PRESERVED for recovery, "+
@@ -733,6 +842,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			// the Signal-2b committed-keep state.
 			var rbErr *InstallClientRollbackIncompleteError
 			if errors.As(err, &rbErr) {
+				providerManagedInstalled = plan.providerSource != nil
 				emitAdoptProvenancePreserved(plan.ManifestName, rbErr.Clients) // NAMES/COUNTS only
 				return fmt.Errorf(
 					"adopt install failed and its client-config rollback could not be fully reversed "+
@@ -745,7 +855,10 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			// ABORT — rollback provably complete OR nothing client-side mutated. Existing
 			// cleanup UNCHANGED below.
 			vaultNote := ""
-			abortNote := abortProvenanceNote(abortAdoptProvenance(rec))
+			abortNote := ""
+			if plan.providerSource == nil {
+				abortNote = abortProvenanceNote(abortAdoptProvenance(rec))
+			}
 			if cleanupErr := a.ManifestDelete(plan.ManifestName); cleanupErr != nil {
 				if len(plan.SecretRoutedKeys) > 0 {
 					vaultNote = "; routed vault keys were left intact because the manifest still exists: " + strings.Join(sortedAdoptStrings(plan.SecretRoutedKeys), ",")
@@ -759,6 +872,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			}
 			return fmt.Errorf("adopt install failed after creating manifest %q; removed the adopt-created manifest so adopt can be re-run%s%s: %w", plan.ManifestName, vaultNote, abortNote, err)
 		}
+		providerManagedInstalled = plan.providerSource != nil
 		commitState = "committed_unverified"
 		stage = "client-verify"
 		codexResult, err := applyCodexAdoptTarget(plan)
@@ -772,6 +886,14 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			}
 			if settlementErr != nil {
 				return settlementErr
+			}
+		}
+		if plan.providerSource != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			revalidateErr := providerRevalidateDisabled(ctx, providerState, plan.providerSource)
+			cancel()
+			if revalidateErr != nil {
+				return revalidateErr
 			}
 		}
 		// Install committed. Promotion is a receiving-side receipt gate: a failed
@@ -788,6 +910,19 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 		return nil
 	}()
 
+	if transactionErr != nil && providerDisabled && !providerManagedInstalled {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		restoreErr := providerRestore(ctx, providerState, plan.providerSource)
+		cancel()
+		if restoreErr != nil {
+			transactionErr = errors.Join(transactionErr, restoreErr)
+		} else {
+			providerDisabled = false
+			if providerRec != nil {
+				transactionErr = errors.Join(transactionErr, abortAdoptProvenance(providerRec))
+			}
+		}
+	}
 	leaseReleaseErr := lease.ReleaseAndRemove()
 	if leaseReleaseErr != nil {
 		var leaseFailure *LeaseFailure
@@ -822,6 +957,18 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	}
 	if plan.MCPProtocolCompatibilityProfile != "" {
 		fmt.Fprintf(w, "  MCP protocol compatibility profile: %s\n", plan.MCPProtocolCompatibilityProfile)
+	}
+	if provider := plan.providerPreview; provider != nil {
+		fmt.Fprintf(w, "  provider client: %s\n", provider.ProviderClient)
+		fmt.Fprintf(w, "  provider plugin: %s\n", provider.PluginRef)
+		fmt.Fprintf(w, "  provider server: %s\n", provider.ServerName)
+		fmt.Fprintf(w, "  provider receipt fingerprint: %s\n", provider.ReceiptFingerprint)
+		fmt.Fprintf(w, "  provider activation fingerprint: %s\n", provider.ActivationFingerprint)
+		fmt.Fprintf(w, "  provider policy fingerprint: %s\n", provider.PolicyFingerprint)
+		fmt.Fprintf(w, "  provider env keys: %s\n", strings.Join(provider.EnvKeys, ","))
+		fmt.Fprintf(w, "  provider working_dir_present: %t\n", provider.WorkingDirPresent)
+		fmt.Fprintf(w, "  provider tool timeout seconds: %d\n", provider.ToolTimeoutSec)
+		fmt.Fprintf(w, "  provider scope: %s\n", provider.Scope)
 	}
 	for _, client := range plan.AdoptClients {
 		fmt.Fprintf(w, "  %s: logical source %s -> target %s\n", client, plan.EntryName, plan.targetEntryName(client))
@@ -872,6 +1019,18 @@ func PrintAdoptPlan(w io.Writer, plan *AdoptPlan) {
 	fmt.Fprintf(w, "  clients: %s\n", strings.Join(plan.AdoptClients, ","))
 	if plan.MCPProtocolCompatibilityProfile != "" {
 		fmt.Fprintf(w, "  MCP protocol compatibility profile: %s\n", plan.MCPProtocolCompatibilityProfile)
+	}
+	if provider := plan.providerPreview; provider != nil {
+		fmt.Fprintf(w, "  provider client: %s\n", provider.ProviderClient)
+		fmt.Fprintf(w, "  provider plugin: %s\n", provider.PluginRef)
+		fmt.Fprintf(w, "  provider server: %s\n", provider.ServerName)
+		fmt.Fprintf(w, "  provider receipt fingerprint: %s\n", provider.ReceiptFingerprint)
+		fmt.Fprintf(w, "  provider activation fingerprint: %s\n", provider.ActivationFingerprint)
+		fmt.Fprintf(w, "  provider policy fingerprint: %s\n", provider.PolicyFingerprint)
+		fmt.Fprintf(w, "  provider env keys: %s\n", strings.Join(provider.EnvKeys, ","))
+		fmt.Fprintf(w, "  provider working_dir_present: %t\n", provider.WorkingDirPresent)
+		fmt.Fprintf(w, "  provider tool timeout seconds: %d\n", provider.ToolTimeoutSec)
+		fmt.Fprintf(w, "  provider scope: %s\n", provider.Scope)
 	}
 	for _, client := range plan.AdoptClients {
 		target := plan.targetEntryName(client)
@@ -1230,6 +1389,85 @@ func adoptToolTimeoutByClient(bindings []config.ClientBinding) map[string]int {
 		result[binding.Client] = binding.ToolTimeoutSec
 	}
 	return result
+}
+
+func expectedAdoptBindingsFromManifestBytes(rec *AdoptProvenanceRecord, manifestBytes []byte) ([]config.ClientBinding, error) {
+	if rec == nil || rec.ManifestName == "" || rec.ExpectedManifestHash == "" {
+		return nil, fmt.Errorf("adopt provenance has no manifest binding identity")
+	}
+	if ManifestHashContent(manifestBytes) != rec.ExpectedManifestHash {
+		return nil, fmt.Errorf("manifest hash does not match adopt provenance")
+	}
+	manifest, err := config.ParseManifest(bytes.NewReader(manifestBytes))
+	if err != nil {
+		return nil, fmt.Errorf("parse adopted manifest: %w", err)
+	}
+	if manifest.Name != rec.ManifestName {
+		return nil, fmt.Errorf("manifest name does not match adopt provenance")
+	}
+	return expectedAdoptBindings(rec, manifest.ClientBindings)
+}
+
+func expectedAdoptBindings(rec *AdoptProvenanceRecord, bindings []config.ClientBinding) ([]config.ClientBinding, error) {
+	if rec == nil || len(rec.AdoptClients) == 0 {
+		return nil, fmt.Errorf("adopt provenance has no clients")
+	}
+	wanted := make(map[string]struct{}, len(rec.AdoptClients))
+	for _, client := range rec.AdoptClients {
+		if client == "" {
+			return nil, fmt.Errorf("adopt provenance contains an empty client")
+		}
+		if _, duplicate := wanted[client]; duplicate {
+			return nil, fmt.Errorf("adopt provenance contains duplicate client %q", client)
+		}
+		wanted[client] = struct{}{}
+	}
+	selected := make(map[string]config.ClientBinding, len(wanted))
+	for _, binding := range bindings {
+		if _, needed := wanted[binding.Client]; !needed {
+			continue
+		}
+		if binding.Daemon != adoptDefaultDaemonName || binding.URLPath != adoptDefaultURLPath {
+			return nil, fmt.Errorf("client %q binding is not the adopted default HTTP binding", binding.Client)
+		}
+		if _, duplicate := selected[binding.Client]; duplicate {
+			return nil, fmt.Errorf("client %q has ambiguous adopted bindings", binding.Client)
+		}
+		selected[binding.Client] = binding
+	}
+	result := make([]config.ClientBinding, 0, len(rec.AdoptClients))
+	for _, client := range rec.AdoptClients {
+		binding, found := selected[client]
+		if !found {
+			return nil, fmt.Errorf("client %q has no adopted binding", client)
+		}
+		result = append(result, binding)
+	}
+	return result, nil
+}
+
+func expectedAdoptBindingsFromProvenance(rec *AdoptProvenanceRecord) ([]config.ClientBinding, error) {
+	if rec == nil {
+		return nil, fmt.Errorf("adopt provenance is missing")
+	}
+	bindings := make([]config.ClientBinding, 0, len(rec.AdoptClients))
+	for _, client := range rec.AdoptClients {
+		bindings = append(bindings, config.ClientBinding{
+			Client:         client,
+			Daemon:         adoptDefaultDaemonName,
+			URLPath:        adoptDefaultURLPath,
+			ToolTimeoutSec: adoptClientToolTimeout(*rec, client),
+		})
+	}
+	return expectedAdoptBindings(rec, bindings)
+}
+
+func cloneProviderSourceProvenance(source *ProviderSourceProvenanceV1) *ProviderSourceProvenanceV1 {
+	if source == nil {
+		return nil
+	}
+	copy := *source
+	return &copy
 }
 
 func (p *AdoptPlan) toolTimeoutForClient(client string) int {

@@ -2,6 +2,8 @@ package api
 
 import (
 	"bytes"
+	"encoding/json"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -12,6 +14,22 @@ import (
 	"testing"
 	"time"
 )
+
+func sampleProviderSource() *ProviderSourceProvenanceV1 {
+	return &ProviderSourceProvenanceV1{
+		ProviderClient:              "provider-client",
+		PluginRef:                   "provider-plugin",
+		ServerName:                  "provider-server",
+		Scope:                       "user",
+		ReceiptFingerprint:          "receipt-fingerprint",
+		ActivationFingerprint:       "activation-fingerprint",
+		PolicyFingerprint:           "policy-fingerprint",
+		PriorEnabledPresent:         true,
+		PriorEnabled:                true,
+		ExpectedDisabledFingerprint: "disabled-fingerprint",
+		DisablePhase:                "disable_applied",
+	}
+}
 
 // sampleAdoptRecord builds a fully-populated record (all slices non-nil, fixed
 // UTC times) so round-trip comparisons are deterministic.
@@ -96,8 +114,9 @@ func TestAdoptedEntriesRoundTrip(t *testing.T) {
 func TestAdoptedEntriesSchemaVersionReject(t *testing.T) {
 	isolateStateDir(t)
 
-	if err := writeHubMcpStateFile(adoptedEntriesFileLeaf, []byte(`{"version":2,"records":[]}`)); err != nil {
-		t.Fatalf("seed version-2 store: %v", err)
+	unsupportedVersion := adoptedEntriesSchemaV2 + 1
+	if err := writeHubMcpStateFile(adoptedEntriesFileLeaf, []byte(fmt.Sprintf(`{"version":%d,"records":[]}`, unsupportedVersion))); err != nil {
+		t.Fatalf("seed unsupported-version store: %v", err)
 	}
 	if _, err := readAdoptedEntries(); err == nil {
 		t.Fatal("readAdoptedEntries accepted an unknown schema version; want error")
@@ -114,6 +133,93 @@ func TestAdoptedEntriesSchemaVersionReject(t *testing.T) {
 	}
 	if m.Version != adoptedEntriesSchemaVersion {
 		t.Errorf("version-0 normalized to %d, want %d", m.Version, adoptedEntriesSchemaVersion)
+	}
+}
+
+func TestAdoptedEntriesConditionalProviderSchemaWrite(t *testing.T) {
+	isolateStateDir(t)
+	ordinary := sampleAdoptRecord()
+	provider := sampleAdoptRecord()
+	provider.ManifestName = "provider-entry"
+	provider.ProviderSource = sampleProviderSource()
+
+	for _, tc := range []struct {
+		name    string
+		records []AdoptProvenanceRecord
+		want    int
+	}{
+		{"ordinary v1", []AdoptProvenanceRecord{ordinary}, adoptedEntriesSchemaV1},
+		{"provider v2", []AdoptProvenanceRecord{ordinary, provider}, adoptedEntriesSchemaV2},
+		{"last provider removed v1", []AdoptProvenanceRecord{ordinary}, adoptedEntriesSchemaV1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := writeAdoptedEntries(&AdoptedEntries{Records: tc.records}); err != nil {
+				t.Fatal(err)
+			}
+			raw, err := readHubMcpStateFile(adoptedEntriesFileLeaf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var written AdoptedEntries
+			if err := json.Unmarshal(raw, &written); err != nil {
+				t.Fatal(err)
+			}
+			if written.Version != tc.want {
+				t.Fatalf("written version=%d, want %d", written.Version, tc.want)
+			}
+		})
+	}
+}
+
+func TestAdoptedEntriesProviderSchemaReadCompatibility(t *testing.T) {
+	isolateStateDir(t)
+	ordinary := sampleAdoptRecord()
+	provider := sampleAdoptRecord()
+	provider.ManifestName = "provider-entry"
+	provider.ProviderSource = sampleProviderSource()
+
+	marshal := func(t *testing.T, version int, records []AdoptProvenanceRecord) []byte {
+		t.Helper()
+		raw, err := json.Marshal(AdoptedEntries{Version: version, Records: records})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+	v1 := marshal(t, adoptedEntriesSchemaV1, []AdoptProvenanceRecord{ordinary})
+	v2 := marshal(t, adoptedEntriesSchemaV2, []AdoptProvenanceRecord{ordinary, provider})
+
+	if got, err := decodeAdoptedEntriesWithMaxVersion(v1, adoptedEntriesSchemaV2); err != nil || got.Version != adoptedEntriesSchemaV1 {
+		t.Fatalf("new reader v1 result=%+v err=%v", got, err)
+	}
+	if got, err := decodeAdoptedEntriesWithMaxVersion(v2, adoptedEntriesSchemaV2); err != nil || got.Version != adoptedEntriesSchemaV2 || got.Records[1].ProviderSource == nil {
+		t.Fatalf("new reader v2 result=%+v err=%v", got, err)
+	}
+	if _, err := decodeAdoptedEntriesWithMaxVersion(v2, adoptedEntriesSchemaV1); err == nil {
+		t.Fatal("old v1 reader accepted v2 provider store")
+	}
+	if _, err := decodeAdoptedEntriesWithMaxVersion(marshal(t, adoptedEntriesSchemaV1, []AdoptProvenanceRecord{provider}), adoptedEntriesSchemaV2); err == nil {
+		t.Fatal("v1 store accepted provider provenance")
+	}
+	if _, err := decodeAdoptedEntriesWithMaxVersion(marshal(t, adoptedEntriesSchemaV2, []AdoptProvenanceRecord{ordinary}), adoptedEntriesSchemaV2); err == nil {
+		t.Fatal("v2 store accepted no provider provenance")
+	}
+}
+
+func TestAdoptedEntriesProviderSchemaRejectsInconsistentProvenance(t *testing.T) {
+	isolateStateDir(t)
+	record := sampleAdoptRecord()
+	record.ProviderSource = sampleProviderSource()
+	record.ProviderSource.PriorEnabledPresent = false
+	record.ProviderSource.PriorEnabled = true
+	if err := writeAdoptedEntries(&AdoptedEntries{Records: []AdoptProvenanceRecord{record}}); err == nil {
+		t.Fatal("writer accepted inconsistent provider prior activation")
+	}
+
+	record.ProviderSource = sampleProviderSource()
+	record.ProviderSource.ExpectedDisabledFingerprint = ""
+	if err := writeAdoptedEntries(&AdoptedEntries{Records: []AdoptProvenanceRecord{record}}); err == nil {
+		t.Fatal("writer accepted incomplete provider provenance")
 	}
 }
 

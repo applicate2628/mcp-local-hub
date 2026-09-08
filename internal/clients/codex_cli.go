@@ -2,6 +2,7 @@ package clients
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,11 +17,29 @@ import (
 
 // NewCodexCLI returns a Client bound to ~/.codex/config.toml.
 func NewCodexCLI() (Client, error) {
-	home, err := os.UserHomeDir()
+	home, err := resolveCodexHome()
 	if err != nil {
 		return nil, err
 	}
-	return newLockingClient(&codexCLI{path: filepath.Join(home, ".codex", "config.toml")}), nil
+	return newLockingClient(&codexCLI{path: filepath.Join(home, "config.toml")}), nil
+}
+
+func resolveCodexHome() (string, error) {
+	if configured, present := os.LookupEnv("CODEX_HOME"); present && configured != "" {
+		if !filepath.IsAbs(configured) {
+			return "", fmt.Errorf("CODEX_HOME must be absolute")
+		}
+		info, err := os.Stat(configured)
+		if err != nil || !info.IsDir() {
+			return "", fmt.Errorf("CODEX_HOME must name an existing directory")
+		}
+		return configured, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".codex"), nil
 }
 
 type codexCLI struct {
@@ -838,6 +857,79 @@ func (c *codexCLI) GetEntry(name string) (*MCPEntry, error) {
 		return nil, err
 	}
 	return entry, nil
+}
+
+func (c *codexCLI) CompareAndSetProviderMCPActivation(_ context.Context, req ProviderMCPActivationCASV1) (ProviderMCPActivationResultV1, error) {
+	if err := validateProviderActivationCAS(req); err != nil {
+		return ProviderMCPActivationResultV1{}, err
+	}
+	doc, err := c.readTOML()
+	if err != nil {
+		return ProviderMCPActivationResultV1{}, err
+	}
+	plugins, ok := doc["plugins"].(map[string]any)
+	if !ok {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: plugin subtree missing", ErrProviderSourceChanged)
+	}
+	plugin, ok := plugins[req.PluginRef].(map[string]any)
+	if !ok {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: selected plugin missing", ErrProviderSourceChanged)
+	}
+	servers, serversPresent := plugin["mcp_servers"].(map[string]any)
+	if _, present := plugin["mcp_servers"]; present && !serversPresent {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: plugin MCP subtree invalid", ErrProviderSourceChanged)
+	}
+	if !serversPresent {
+		servers = map[string]any{}
+	}
+	server, serverPresent := servers[req.ServerName].(map[string]any)
+	if _, present := servers[req.ServerName]; present && !serverPresent {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: selected server invalid", ErrProviderSourceChanged)
+	}
+	if !serverPresent {
+		server = map[string]any{}
+	}
+	activationFingerprint, err := providerActivationFingerprint(server)
+	if err != nil {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: activation fingerprint: %v", ErrProviderSourceChanged, err)
+	}
+	policyFingerprint, err := providerPolicyFingerprint(server)
+	if err != nil {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: policy fingerprint: %v", ErrProviderSourceChanged, err)
+	}
+	if activationFingerprint != req.ExpectedActivationFingerprint || policyFingerprint != req.ExpectedPolicyFingerprint {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: activation or policy changed", ErrProviderSourceChanged)
+	}
+	prior, priorPresent := server["enabled"]
+	priorEnabled, priorValid := prior.(bool)
+	if priorPresent && !priorValid {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: enabled is not boolean", ErrProviderSourceChanged)
+	}
+	if req.DesiredEnabledPresent {
+		if !serversPresent {
+			plugin["mcp_servers"] = servers
+		}
+		if !serverPresent {
+			servers[req.ServerName] = server
+		}
+		server["enabled"] = req.DesiredEnabled
+	} else {
+		delete(server, "enabled")
+		if len(server) == 0 {
+			delete(servers, req.ServerName)
+		}
+		if len(servers) == 0 {
+			delete(plugin, "mcp_servers")
+		}
+	}
+	if err := c.writeTOML(doc); err != nil {
+		return ProviderMCPActivationResultV1{}, err
+	}
+	activationFingerprint, err = providerActivationFingerprint(server)
+	if err != nil {
+		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: post-CAS activation fingerprint: %v", ErrProviderSourceChanged, err)
+	}
+	return ProviderMCPActivationResultV1{PriorEnabledPresent: priorPresent, PriorEnabled: priorEnabled, ActivationFingerprint: activationFingerprint}, nil
 }
 
 // LatestBackupPath delegates to the shared helper.

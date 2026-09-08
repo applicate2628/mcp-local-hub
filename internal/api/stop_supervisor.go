@@ -131,6 +131,115 @@ func stoppedSettlementResult(taskName string, result StopBatchResultV1, index in
 	return RestartResult{TaskName: taskName, Err: "supervisor stop settlement " + string(row.State) + ": " + detail}
 }
 
+// stopAdoptOwnedDaemonSettled durably stops one already-frozen adopt-owned
+// descriptor and returns only its controller-echoed terminal settlement. It
+// never broadens selection to a server or daemon family and never uses a kill
+// fallback: the caller needs proof that the managed replacement is settled
+// before it may restore a provider-owned source.
+func (a *API) stopAdoptOwnedDaemonSettled(ctx context.Context, frozen SupervisorDaemon) (StoppedSettlement, error) {
+	if a == nil {
+		return StoppedSettlement{}, errors.New("adopt-owned stop: API is nil")
+	}
+	if _, err := validateFrozenSupervisorDaemon(frozen); err != nil {
+		return StoppedSettlement{}, err
+	}
+	intent, err := loadSupervisorOwnedIntent()
+	if err != nil {
+		return StoppedSettlement{}, err
+	}
+	if _, err := validateFrozenSupervisorDaemonInIntent(intent, frozen); err != nil {
+		return StoppedSettlement{}, err
+	}
+	stop := DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop, UpdatedAt: time.Now().UTC()}
+	if err := a.writeStopIntentWithCompensation(frozen.TaskName, stop, auditWhoMcphubStop, nil); err != nil {
+		return StoppedSettlement{}, fmt.Errorf("adopt-owned stop: write durable stop intent: %w", err)
+	}
+	intent, err = loadSupervisorOwnedIntent()
+	if err != nil {
+		return StoppedSettlement{}, err
+	}
+	current, err := validateFrozenSupervisorDaemonInIntent(intent, frozen)
+	if err != nil {
+		return StoppedSettlement{}, err
+	}
+	if intent.IntentGeneration == 0 {
+		return StoppedSettlement{}, errors.New("adopt-owned stop: intent generation unavailable")
+	}
+	effectivePort, ok := EffectiveDaemonPort(current)
+	if !ok {
+		return StoppedSettlement{}, errors.New("adopt-owned stop: reloaded descriptor effective port unavailable")
+	}
+	intentSnapshot := cloneSupervisorIntentFile(intent)
+	stopsSnapshot := intentSnapshot.StopsAsDaemonIntentFile()
+	stopsCopy := &DaemonIntentFile{Tasks: make(map[string]DaemonIntent, len(stopsSnapshot.Tasks))}
+	for taskName, value := range stopsSnapshot.Tasks {
+		stopsCopy.Tasks[taskName] = value
+	}
+	command := StopBatchCommandV1{
+		ProtocolVersion:  1,
+		BatchID:          fmt.Sprintf("adopt-stop-%d", time.Now().UnixNano()),
+		Targets:          []StopBatchTargetV1{{TaskName: current.TaskName, ExpectedPort: effectivePort}},
+		IntentGeneration: intentSnapshot.IntentGeneration,
+		SupervisorIntent: intentSnapshot,
+		UnifiedStops:     stopsCopy,
+	}
+	result, err := supervisorStopBatchFn(ctx, command)
+	if err != nil {
+		return StoppedSettlement{}, fmt.Errorf("adopt-owned stop: stop batch: %w", err)
+	}
+	if err := validateStopBatchEcho(command, &result); err != nil {
+		return StoppedSettlement{}, fmt.Errorf("adopt-owned stop: validate stop batch echo: %w", err)
+	}
+	if len(result.Settlements) != 1 {
+		return StoppedSettlement{}, errors.New("adopt-owned stop: expected exactly one settlement")
+	}
+	settlement := result.Settlements[0]
+	if settlement.State != StoppedSettlementStopped || settlement.Reason != StoppedSettlementReasonStopped {
+		return settlement, fmt.Errorf("adopt-owned stop: settlement state=%q reason=%q", settlement.State, settlement.Reason)
+	}
+	return settlement, nil
+}
+
+func validateFrozenSupervisorDaemon(frozen SupervisorDaemon) (int, error) {
+	if frozen.TaskName == "" || frozen.Server == "" || frozen.Daemon == "" || frozen.ManifestHash == "" {
+		return 0, errors.New("adopt-owned stop: frozen descriptor identity is incomplete")
+	}
+	port, ok := EffectiveDaemonPort(frozen)
+	if !ok {
+		return 0, errors.New("adopt-owned stop: frozen descriptor effective port unavailable")
+	}
+	return port, nil
+}
+
+func validateFrozenSupervisorDaemonInIntent(intent *SupervisorIntentFile, frozen SupervisorDaemon) (SupervisorDaemon, error) {
+	expectedPort, err := validateFrozenSupervisorDaemon(frozen)
+	if err != nil {
+		return SupervisorDaemon{}, err
+	}
+	if intent == nil {
+		return SupervisorDaemon{}, errors.New("adopt-owned stop: supervisor intent unavailable")
+	}
+	canonicalTask := canonicalIntentTaskKey(frozen.TaskName)
+	var matched *SupervisorDaemon
+	for i := range intent.Daemons {
+		if canonicalIntentTaskKey(intent.Daemons[i].TaskName) != canonicalTask {
+			continue
+		}
+		if matched != nil {
+			return SupervisorDaemon{}, errors.New("adopt-owned stop: frozen task is ambiguous in supervisor intent")
+		}
+		matched = &intent.Daemons[i]
+	}
+	if matched == nil {
+		return SupervisorDaemon{}, errors.New("adopt-owned stop: frozen task is absent from supervisor intent")
+	}
+	actualPort, ok := EffectiveDaemonPort(*matched)
+	if !ok || matched.Server != frozen.Server || matched.Daemon != frozen.Daemon || matched.ManifestHash != frozen.ManifestHash || actualPort != expectedPort {
+		return SupervisorDaemon{}, errors.New("adopt-owned stop: frozen descriptor drifted")
+	}
+	return *matched, nil
+}
+
 // stopSupervisorOwnedDaemons stops the supervisor-owned daemons in scope
 // via the supervisor IPC reconcile verb. Returns (results, handled, err)
 // with the same contract shape as restartSupervisorOwnedDaemons:

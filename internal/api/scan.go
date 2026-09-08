@@ -2774,27 +2774,36 @@ func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[stri
 }
 
 func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd string, args []string, env map[string]string, port int, bindings []config.ClientBinding, compatibilityProfile string) string {
+	return renderProviderStdioBridgeManifestYAML(name, cmd, args, env, nil, "", port, bindings, compatibilityProfile)
+}
+
+func renderProviderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, envForwardLocal []string, cwd string, port int, bindings []config.ClientBinding, compatibilityProfile string) string {
 	daemon := map[string]any{"name": "default", "port": port}
+	if cwd != "" {
+		daemon["cwd"] = cwd
+	}
 	if compatibilityProfile != "" {
 		daemon["mcp_protocol_compatibility_profile"] = compatibilityProfile
 	}
 	doc := struct {
-		Name           string                 `yaml:"name"`
-		Kind           string                 `yaml:"kind"`
-		Transport      string                 `yaml:"transport"`
-		Command        string                 `yaml:"command"`
-		BaseArgs       []string               `yaml:"base_args,omitempty"`
-		Env            map[string]string      `yaml:"env,omitempty"`
-		Daemons        []map[string]any       `yaml:"daemons"`
-		ClientBindings []config.ClientBinding `yaml:"client_bindings"`
-		WeeklyRefresh  bool                   `yaml:"weekly_refresh"`
+		Name            string                 `yaml:"name"`
+		Kind            string                 `yaml:"kind"`
+		Transport       string                 `yaml:"transport"`
+		Command         string                 `yaml:"command"`
+		BaseArgs        []string               `yaml:"base_args,omitempty"`
+		Env             map[string]string      `yaml:"env,omitempty"`
+		EnvForwardLocal []string               `yaml:"env_forward_local,omitempty"`
+		Daemons         []map[string]any       `yaml:"daemons"`
+		ClientBindings  []config.ClientBinding `yaml:"client_bindings"`
+		WeeklyRefresh   bool                   `yaml:"weekly_refresh"`
 	}{
-		Name:      name,
-		Kind:      "global",
-		Transport: "stdio-bridge",
-		Command:   cmd,
-		BaseArgs:  args,
-		Env:       env,
+		Name:            name,
+		Kind:            "global",
+		Transport:       "stdio-bridge",
+		Command:         cmd,
+		BaseArgs:        args,
+		Env:             env,
+		EnvForwardLocal: envForwardLocal,
 		Daemons: []map[string]any{
 			daemon,
 		},

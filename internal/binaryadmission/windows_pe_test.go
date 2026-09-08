@@ -163,6 +163,42 @@ func TestWindowsPEAdmission(t *testing.T) {
 	}
 }
 
+func TestValidateWindowsNativeImage(t *testing.T) {
+	validExtensionless := writeWindowsPEFixture(t, 0x20b, WindowsCUISubsystem, nil)
+	textScript := filepath.Join(t.TempDir(), "native-launcher")
+	if err := os.WriteFile(textScript, []byte("#!/bin/sh\necho fixture\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	corrupt := filepath.Join(t.TempDir(), "corrupt.exe")
+	if err := os.WriteFile(corrupt, []byte("MZ-not-a-pe"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dllImage := writeWindowsPEFixture(t, 0x20b, WindowsCUISubsystem, func(data []byte) {
+		binary.LittleEndian.PutUint16(data[0x80+22:0x80+24], windowsPEDLLCharacteristic)
+	})
+
+	for _, tc := range []struct {
+		name string
+		path string
+		want bool
+	}{
+		{name: "accepts extensionless PE image", path: validExtensionless, want: true},
+		{name: "rejects extensionless shell text", path: textScript},
+		{name: "rejects corrupt PE", path: corrupt},
+		{name: "rejects PE DLL", path: dllImage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateWindowsNativeImage(tc.path)
+			if (err == nil) != tc.want {
+				t.Fatalf("ValidateWindowsNativeImage(%q) error=%v, want success=%t", tc.path, err, tc.want)
+			}
+			if !tc.want && !strings.Contains(err.Error(), WindowsPEFormatErrorID) {
+				t.Fatalf("error=%v, want %s", err, WindowsPEFormatErrorID)
+			}
+		})
+	}
+}
+
 func TestWindowsUpgradePriorAdmission(t *testing.T) {
 	for _, subsystem := range []uint16{WindowsGUISubsystem, WindowsCUISubsystem} {
 		path := writeWindowsPEFixture(t, 0x20b, subsystem, nil)
