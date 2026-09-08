@@ -72,7 +72,14 @@ func (a *API) buildProviderAdoptPlan(opts AdoptOpts, source clients.Client, prov
 	if _, err := providerProcessIdentityFromEntry(e); err != nil {
 		return nil, err
 	}
-	bindings := adoptClientBindingsWithToolTimeout([]string{e.ProviderClient}, e.ProviderClient, e.ToolTimeoutSec)
+	adoptClients, err := normalizeAdoptClientNames(opts.Clients, e.ProviderClient)
+	if err != nil {
+		return nil, err
+	}
+	if len(adoptClients) != 1 || adoptClients[0] != e.ProviderClient {
+		return nil, fmt.Errorf("E_PROVIDER_CLIENT_FANOUT_UNSUPPORTED")
+	}
+	bindings := adoptClientBindingsWithToolTimeout(adoptClients, e.ProviderClient, e.ToolTimeoutSec)
 	port := opts.Port
 	if port == 0 {
 		port, err = pickNextFreeAdoptPort()
@@ -91,7 +98,7 @@ func (a *API) buildProviderAdoptPlan(opts AdoptOpts, source clients.Client, prov
 		envKeys = append(envKeys, key)
 	}
 	sort.Strings(envKeys)
-	return &AdoptPlan{EntryName: opts.EntryName, SourceClient: e.ProviderClient, ManifestName: opts.EntryName, Port: port, AdoptClients: []string{e.ProviderClient}, ManifestYAML: manifest, TargetEntryNames: map[string]string{e.ProviderClient: opts.EntryName}, toolTimeoutByClient: adoptToolTimeoutByClient(bindings), providerPreview: &ProviderAdoptPreview{ProviderClient: e.ProviderClient, PluginRef: e.PluginRef, ServerName: e.ServerName, ReceiptFingerprint: e.ReceiptFingerprint, ActivationFingerprint: e.ActivationFingerprint, PolicyFingerprint: e.PolicyFingerprint, EnvKeys: envKeys, WorkingDirPresent: e.WorkingDir != nil, ToolTimeoutSec: e.ToolTimeoutSec, Scope: string(e.Scope)}, providerSource: &ProviderSourceProvenanceV1{ProviderClient: e.ProviderClient, PluginRef: e.PluginRef, ServerName: e.ServerName, Scope: string(e.Scope), ReceiptFingerprint: e.ReceiptFingerprint, ActivationFingerprint: e.ActivationFingerprint, PolicyFingerprint: e.PolicyFingerprint, PriorEnabledPresent: e.ActivationEnabledPresent, PriorEnabled: e.ActivationEnabled, ExpectedDisabledFingerprint: e.DisabledActivationFingerprint, DisablePhase: "disable_planned"}}, nil
+	return &AdoptPlan{EntryName: opts.EntryName, SourceClient: e.ProviderClient, ManifestName: opts.EntryName, Port: port, AdoptClients: adoptClients, MCPProtocolCompatibilityProfile: opts.MCPProtocolCompatibilityProfile, ManifestYAML: manifest, TargetEntryNames: map[string]string{e.ProviderClient: opts.EntryName}, toolTimeoutByClient: adoptToolTimeoutByClient(bindings), providerPreview: &ProviderAdoptPreview{ProviderClient: e.ProviderClient, PluginRef: e.PluginRef, ServerName: e.ServerName, ReceiptFingerprint: e.ReceiptFingerprint, ActivationFingerprint: e.ActivationFingerprint, PolicyFingerprint: e.PolicyFingerprint, EnvKeys: envKeys, WorkingDirPresent: e.WorkingDir != nil, ToolTimeoutSec: e.ToolTimeoutSec, Scope: string(e.Scope)}, providerSource: &ProviderSourceProvenanceV1{ProviderClient: e.ProviderClient, PluginRef: e.PluginRef, ServerName: e.ServerName, Scope: string(e.Scope), ReceiptFingerprint: e.ReceiptFingerprint, ActivationFingerprint: e.ActivationFingerprint, PolicyFingerprint: e.PolicyFingerprint, PriorEnabledPresent: e.ActivationEnabledPresent, PriorEnabled: e.ActivationEnabled, ExpectedDisabledFingerprint: e.DisabledActivationFingerprint, DisablePhase: "disable_planned"}}, nil
 }
 
 func mapValues(values map[string]string) []string {

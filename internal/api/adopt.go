@@ -376,6 +376,11 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, fmt.Errorf("adopt: check existing disk manifest %q: %w", manifestName, err)
 	} else if exists {
 		if rec, found, readErr := ReadAdoptProvenance(manifestName); readErr == nil && found && rec.OperationState == AdoptOperationStateAdopted {
+			if opts.ProviderPluginRef != "" {
+				if rec.ProviderSource == nil || opts.ProviderPluginRef != rec.ProviderSource.PluginRef {
+					return nil, fmt.Errorf("existing adopted provider plugin does not match the durable receipt")
+				}
+			}
 			manifestBytes, manifestErr := os.ReadFile(filepath.Join(defaultManifestDir(), manifestName, "manifest.yaml"))
 			if manifestErr != nil {
 				return nil, fmt.Errorf("adopt: read existing disk manifest %q: %w", manifestName, manifestErr)
@@ -414,6 +419,12 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, fmt.Errorf("adopt refuses to create manifest %q because a disk manifest already exists; remove or rename the existing manifest before re-running adopt", manifestName)
 	}
 	if opts.ProviderPluginRef != "" {
+		if rec, found, readErr := ReadAdoptProvenance(manifestName); readErr != nil {
+			return nil, fmt.Errorf("adopt: read existing provider recovery receipt for %q: %w", manifestName, readErr)
+		} else if found && rec.OperationState == AdoptOperationStateAdopting && classifyDeadAdoptingRow(*rec) == adoptRowRecoveryKeep {
+			return nil, fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: provider receipt for %q requires explicit de-adopt recovery", manifestName)
+		}
+		opts.MCPProtocolCompatibilityProfile = compatibilityProfile
 		source, ok := clients.AllClients()[sourceClient]
 		if !ok {
 			return nil, fmt.Errorf("provider client %q is unavailable", sourceClient)

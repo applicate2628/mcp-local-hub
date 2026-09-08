@@ -18,6 +18,7 @@ type providerTransactionDeps struct {
 	observer providerDirectProcessObserver
 	source   clients.ProviderMCPSourceV1
 	stop     func(context.Context, SupervisorDaemon) (StoppedSettlement, error)
+	close    func(string) error
 }
 
 func (d providerTransactionDeps) stopManaged(ctx context.Context, api *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
@@ -25,6 +26,13 @@ func (d providerTransactionDeps) stopManaged(ctx context.Context, api *API, froz
 		return d.stop(ctx, frozen)
 	}
 	return api.stopAdoptOwnedDaemonSettled(ctx, frozen)
+}
+
+func (d providerTransactionDeps) closeProvenance(manifestName string) error {
+	if d.close != nil {
+		return d.close(manifestName)
+	}
+	return CloseAdoptProvenance(manifestName)
 }
 
 func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, error) {
@@ -172,6 +180,39 @@ func providerRestore(ctx context.Context, state providerExecutionState, provenan
 		return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED")
 	}
 	return nil
+}
+
+// recoverProviderActivation is explicit de-adopt recovery only. It recognizes
+// the recorded prior fingerprint without writing, restores only from the exact
+// recorded disabled fingerprint, and refuses every other observed state.
+func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) error {
+	if source == nil || provenance == nil {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	entries, err := source.ListProviderMCPEntries(ctx)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	var matches []clients.ProviderMCPEntryV1
+	for _, entry := range entries {
+		if entry.ProviderClient == provenance.ProviderClient && entry.PluginRef == provenance.PluginRef && entry.ServerName == provenance.ServerName {
+			matches = append(matches, entry)
+		}
+	}
+	if len(matches) != 1 {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	entry := matches[0]
+	if entry.ReceiptFingerprint != provenance.ReceiptFingerprint || entry.PolicyFingerprint != provenance.PolicyFingerprint {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	if entry.ActivationFingerprint == provenance.ActivationFingerprint && entry.ActivationEnabledPresent == provenance.PriorEnabledPresent && entry.ActivationEnabled == provenance.PriorEnabled {
+		return nil
+	}
+	if entry.ActivationFingerprint != provenance.ExpectedDisabledFingerprint || entry.Enabled {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	return providerRestore(ctx, providerExecutionState{provider: source, entry: entry}, provenance)
 }
 
 func providerRevalidateDisabled(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) error {

@@ -96,6 +96,7 @@ type ProviderSourceProvenanceV1 struct {
 	PriorEnabled                bool   `json:"prior_enabled"`
 	ExpectedDisabledFingerprint string `json:"expected_disabled_fingerprint"`
 	DisablePhase                string `json:"disable_phase"`
+	DeAdoptPhase                string `json:"de_adopt_phase,omitempty"`
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +339,11 @@ func validateProviderSourceProvenance(provider *ProviderSourceProvenanceV1) erro
 	if provider.DisablePhase != "disable_planned" && provider.DisablePhase != "disable_applied" {
 		return fmt.Errorf("disable_phase %q is invalid", provider.DisablePhase)
 	}
+	switch provider.DeAdoptPhase {
+	case "", "managed_stop_settled", "managed_removed", "restore_applied":
+	default:
+		return fmt.Errorf("de_adopt_phase %q is invalid", provider.DeAdoptPhase)
+	}
 	return nil
 }
 
@@ -558,6 +564,7 @@ type adoptRowVerdict int
 const (
 	adoptRowCommittedKeep adoptRowVerdict = iota // Install committed (a hub binding is live) — NEVER reap
 	adoptRowCrashReap                            // pre-commit crash — safe to reap
+	adoptRowRecoveryKeep                         // provider recovery requires explicit de-adopt
 )
 
 // adoptCommittedManifestDir resolves the on-disk directory that holds an
@@ -615,6 +622,9 @@ var adoptManifestExistsFn = func(manifestName string) (bool, error) {
 // cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
 // disk is the row a true pre-install crash orphan => REAP.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
+	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
+		return adoptRowRecoveryKeep
+	}
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
 	// merely supplies its daemon-port input from the row instead of the mutable file.
@@ -1544,7 +1554,7 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 			case AdoptOperationStateAdopted:
 				// Ready to transition below.
 			case AdoptOperationStateAdopting:
-				if classifyDeadAdoptingRow(*rec) != adoptRowCommittedKeep {
+				if verdict := classifyDeadAdoptingRow(*rec); verdict != adoptRowCommittedKeep && verdict != adoptRowRecoveryKeep {
 					return fmt.Errorf("adopt provenance mark de-adopting: manifest %q adopting row is not committed; refusing to take it from adopt orphan GC", manifestName)
 				}
 			case AdoptOperationStateClosed:
@@ -1561,6 +1571,50 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 		}
 		return fmt.Errorf("adopt provenance mark de-adopting: manifest %q has no provenance row", manifestName)
 	})
+}
+
+// AdvanceProviderDeAdoptPhase persists one verified provider teardown step.
+// The caller holds the manifest lease; this function owns only the atomic row
+// compare-and-write under the adopted-entries lock.
+func AdvanceProviderDeAdoptPhase(manifestName, expectedPhase, nextPhase string) (*AdoptProvenanceRecord, error) {
+	validNext := map[string]string{
+		"":                     "managed_stop_settled",
+		"managed_stop_settled": "managed_removed",
+		"managed_removed":      "restore_applied",
+	}
+	if validNext[expectedPhase] != nextPhase {
+		return nil, fmt.Errorf("provider de-adopt phase transition %q -> %q is invalid", expectedPhase, nextPhase)
+	}
+	var updated *AdoptProvenanceRecord
+	err := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("provider de-adopt phase: read store: %w", err)
+		}
+		for i := range store.Records {
+			rec := &store.Records[i]
+			if rec.ManifestName != manifestName {
+				continue
+			}
+			if rec.OperationState != AdoptOperationStateDeAdopting || rec.ProviderSource == nil {
+				return fmt.Errorf("provider de-adopt phase: manifest %q is not provider de-adopting", manifestName)
+			}
+			if rec.ProviderSource.DeAdoptPhase != expectedPhase {
+				return fmt.Errorf("provider de-adopt phase: manifest %q changed phase", manifestName)
+			}
+			rec.ProviderSource.DeAdoptPhase = nextPhase
+			rec.UpdatedAt = time.Now().UTC()
+			if err := writeAdoptedEntries(store); err != nil {
+				return fmt.Errorf("provider de-adopt phase: write store: %w", err)
+			}
+			copy := *rec
+			copy.ProviderSource = cloneProviderSourceProvenance(rec.ProviderSource)
+			updated = &copy
+			return nil
+		}
+		return fmt.Errorf("provider de-adopt phase: manifest %q has no provenance row", manifestName)
+	})
+	return updated, err
 }
 
 // CloseAdoptProvenance removes a de_adopting row and its snapshots.

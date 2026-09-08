@@ -150,7 +150,7 @@ func TestBuildProviderAdoptPlanReadOnlyValidationMatrix(t *testing.T) {
 		t.Fatal(err)
 	}
 	valid := clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "arbitrary@catalog", ServerName: "reader", Transport: clients.ProviderMCPTransportStdio, Command: exe, Args: []string{"--stdio"}, Env: map[string]string{"MODE": "read"}, EnvForwardLocal: []string{"OPTIONAL_TOKEN"}, WorkingDir: &cwd, ToolTimeoutSec: 41, Scope: clients.ProviderMCPScopeUser, Enabled: true, ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", ActivationEnabledPresent: true, ActivationEnabled: true, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}
-	base := AdoptOpts{EntryName: "reader", Client: "codex-cli", ManifestName: "reader", ProviderPluginRef: "arbitrary@catalog", Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())}
+	base := AdoptOpts{EntryName: "reader", Client: "codex-cli", ManifestName: "reader", ProviderPluginRef: "arbitrary@catalog", Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()), MCPProtocolCompatibilityProfile: "stdio-http-legacy-2024-11-05", MCPProtocolCompatibilityProfileExplicit: true}
 	cases := []struct {
 		name    string
 		entries []clients.ProviderMCPEntryV1
@@ -204,6 +204,15 @@ func TestBuildProviderAdoptPlanReadOnlyValidationMatrix(t *testing.T) {
 	plan, err := (&API{}).buildProviderAdoptPlan(base, nil, fakeProviderMCPSource{entries: []clients.ProviderMCPEntryV1{valid}})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if plan.MCPProtocolCompatibilityProfile != "stdio-http-legacy-2024-11-05" {
+		t.Fatalf("provider plan profile=%q", plan.MCPProtocolCompatibilityProfile)
+	}
+	if _, err := (&API{}).buildProviderAdoptPlan(func() AdoptOpts { x := base; x.Clients = []string{"codex-cli", "claude-code"}; return x }(), nil, fakeProviderMCPSource{entries: []clients.ProviderMCPEntryV1{valid}}); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_CLIENT_FANOUT_UNSUPPORTED") {
+		t.Fatalf("provider fanout error=%v", err)
+	}
+	if _, err := (&API{}).buildProviderAdoptPlan(func() AdoptOpts { x := base; x.Clients = []string{"codex-cli"}; return x }(), nil, fakeProviderMCPSource{entries: []clients.ProviderMCPEntryV1{valid}}); err != nil {
+		t.Fatalf("explicit source-only provider selection: %v", err)
 	}
 	manifest, err := config.ParseManifest(strings.NewReader(plan.ManifestYAML))
 	if err != nil {
@@ -481,6 +490,9 @@ args = ["version"]
 	if err != nil || !repeat.alreadyAdopted {
 		t.Fatalf("repeat plan=%+v err=%v", repeat, err)
 	}
+	if _, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entryName, Client: "codex-cli", ManifestName: entryName, ProviderPluginRef: "different@catalog", Port: port}); err == nil || !strings.Contains(err.Error(), "provider plugin") {
+		t.Fatalf("provider repeat plugin mismatch error=%v", err)
+	}
 	if err := NewAPI().ExecuteAdoptWithOpts(repeat, nil, ExecuteAdoptOpts{providerDeps: providerTransactionDeps{source: provider, observer: observer}}); err != nil {
 		t.Fatalf("repeat execute: %v", err)
 	}
@@ -530,5 +542,24 @@ func TestExpectedAdoptBindingsRequireExactlyOneRecordedClientBinding(t *testing.
 	legacy := config.ClientBinding{Client: "codex-cli", Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath}
 	if bindings, err := expectedAdoptBindings(rec, []config.ClientBinding{legacy}); err != nil || len(bindings) != 1 || bindings[0].ToolTimeoutSec != 0 {
 		t.Fatalf("legacy zero binding = %#v, %v", bindings, err)
+	}
+}
+
+func TestBuildAdoptPlanExistingGenericRefusesProviderFlag(t *testing.T) {
+	entry := "generic-provider-flag"
+	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, "[mcp_servers]\n")
+	manifest := renderStdioBridgeManifestYAML(entry, "go", []string{"version"}, nil, 9367, adoptClientBindings([]string{"codex-cli"}))
+	if err := os.MkdirAll(filepath.Join(manifestRoot, entry), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(manifestRoot, entry, "manifest.yaml"), []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	hash := ManifestHashContent([]byte(manifest))
+	if err := writeAdoptedEntries(&AdoptedEntries{Records: []AdoptProvenanceRecord{{ManifestName: entry, SourceClient: "codex-cli", SourceEntryName: entry, Port: 9367, AdoptClients: []string{"codex-cli"}, AdoptManifestHash: hash, ExpectedManifestHash: hash, OperationState: AdoptOperationStateAdopted, Clients: []AdoptClientProvenance{{Client: "codex-cli", TargetEntryName: entry, OriginalState: AdoptOriginalStateAbsent, RestoreMode: AdoptRestoreModeNA}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: entry, Client: "codex-cli", ManifestName: entry, ProviderPluginRef: "other@catalog"}); err == nil || !strings.Contains(err.Error(), "provider plugin") {
+		t.Fatalf("generic existing provider flag error=%v", err)
 	}
 }
