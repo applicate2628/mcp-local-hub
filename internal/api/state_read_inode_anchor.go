@@ -28,6 +28,17 @@ func ReadStateFileInodeAnchored(path string) ([]byte, error) {
 	return readStateFileInodeAnchored(path)
 }
 
+// ReadStateFileInodeAnchoredWithMaxBytes preserves the inode-anchored state
+// reader's trust checks while letting an owning caller supply its bounded file
+// capacity. It changes only the byte ceiling; strict-mode, access-control,
+// audit, and fallback behavior remain identical to ReadStateFileInodeAnchored.
+func ReadStateFileInodeAnchoredWithMaxBytes(path string, maxBytes int64) ([]byte, error) {
+	if maxBytes <= 0 {
+		return nil, fmt.Errorf("state read maximum bytes must be positive")
+	}
+	return readStateFileInodeAnchoredWithOptions(path, operatorRequiresSingleUserHome, maxBytes, true, false, LogHubMcpEvent, stateReadDefaultParentFallbacksObserved)
+}
+
 // ConsumeStateSecretFileInodeAnchored opens an owner-only secret state file,
 // unlinks the verified entry while retaining the opened file identity, and
 // returns its bytes. The caller owns the returned buffer and must zero it when

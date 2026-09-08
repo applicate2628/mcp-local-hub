@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -32,6 +33,10 @@ const (
 	asyncStateInterrupted     = "interrupted"
 	asyncRunSnapshotVersion   = 1
 	maxAsyncTerminalRuns      = 64
+	// This owner retains up to 64 terminal receipts, each with two capped
+	// streams. It owns this explicit ceiling; the API reader only enforces it.
+	maxAsyncPersistedStateBytes  int64 = 64 << 20
+	maxLegacyExpandedStreamBytes       = 3*maxStreamBytes + len(truncationMarker)
 )
 
 var (
@@ -81,6 +86,10 @@ type asyncRunRecord struct {
 	workerDone chan struct{}      `json:"-"`
 	unsettled  bool               `json:"-"`
 	persistErr error              `json:"-"`
+	// Legacy expansion is set only while migrating an old JSON text stream
+	// whose replacement runes expanded beyond the normal raw-capture bound.
+	stdoutLegacyExpanded bool `json:"-"`
+	stderrLegacyExpanded bool `json:"-"`
 }
 
 func (r *asyncRunRecord) terminal() bool {
@@ -98,13 +107,49 @@ type asyncRunSnapshot struct {
 	Runs             []asyncRunRecord `json:"runs"`
 }
 
+// asyncPersistedRunResult is the durable-only representation. Captured
+// process output is arbitrary bytes, while JSON strings must be UTF-8 and can
+// expand control or invalid bytes. Base64 keeps the exact captured byte count
+// and truncation marker stable across persistence and reload.
+type asyncPersistedRunResult struct {
+	ExitCode             int    `json:"exit_code"`
+	Stdout               string `json:"stdout,omitempty"`
+	StdoutBase64         string `json:"stdout_base64,omitempty"`
+	StdoutLegacyExpanded bool   `json:"stdout_legacy_expanded,omitempty"`
+	Stderr               string `json:"stderr,omitempty"`
+	StderrBase64         string `json:"stderr_base64,omitempty"`
+	StderrLegacyExpanded bool   `json:"stderr_legacy_expanded,omitempty"`
+	EnvSource            string `json:"env_source"`
+	DurationMs           int64  `json:"duration_ms"`
+	TimedOut             bool   `json:"timed_out,omitempty"`
+}
+
+type asyncPersistedRunRecord struct {
+	RunID          string                   `json:"run_id"`
+	IdempotencyKey string                   `json:"idempotency_key"`
+	RequestDigest  string                   `json:"request_digest"`
+	State          string                   `json:"state"`
+	AcceptedAt     time.Time                `json:"accepted_at"`
+	StartedAt      *time.Time               `json:"started_at,omitempty"`
+	FinishedAt     *time.Time               `json:"finished_at,omitempty"`
+	FinishSeq      uint64                   `json:"finish_seq,omitempty"`
+	FailureID      string                   `json:"failure_id,omitempty"`
+	Result         *asyncPersistedRunResult `json:"result,omitempty"`
+}
+
+type asyncPersistedRunSnapshot struct {
+	Version          int                       `json:"version"`
+	TerminalSequence uint64                    `json:"terminal_sequence"`
+	Runs             []asyncPersistedRunRecord `json:"runs"`
+}
+
 type asyncOwnerOptions struct {
 	StatePath string
 	Execute   func(context.Context, oneAPIRunRequest) asyncExecution
 	Now       func() time.Time
 	NextID    func() string
 	Read      func(string) ([]byte, error)
-	Write     func(string, any) error
+	Write     func(string, []byte) error
 	NewLease  func(string) asyncRunLease
 	// BeforeWorkerDone is an owner-instance test seam for the terminal-to-done
 	// window. Production leaves it nil.
@@ -165,7 +210,7 @@ type asyncRunOwner struct {
 	now              func() time.Time
 	nextID           func() string
 	read             func(string) ([]byte, error)
-	write            func(string, any) error
+	write            func(string, []byte) error
 	beforeWorkerDone func()
 }
 
@@ -184,10 +229,12 @@ func newAsyncRunOwner(parent context.Context, options asyncOwnerOptions) (*async
 		}
 	}
 	if options.Read == nil {
-		options.Read = api.ReadStateFileInodeAnchored
+		options.Read = func(path string) ([]byte, error) {
+			return api.ReadStateFileInodeAnchoredWithMaxBytes(path, maxAsyncPersistedStateBytes)
+		}
 	}
 	if options.Write == nil {
-		options.Write = api.WriteStateFileAtomic
+		options.Write = api.WriteStateFileBytesAtomic
 	}
 	if options.NewLease == nil {
 		options.NewLease = func(path string) asyncRunLease { return flock.New(path) }
@@ -231,7 +278,7 @@ func (o *asyncRunOwner) load() error {
 	if err != nil {
 		return fmt.Errorf("oneapi async state read: %w", err)
 	}
-	var snapshot asyncRunSnapshot
+	var snapshot asyncPersistedRunSnapshot
 	decoder := json.NewDecoder(bytesReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&snapshot); err != nil {
@@ -243,8 +290,13 @@ func (o *asyncRunOwner) load() error {
 	if snapshot.Version != asyncRunSnapshotVersion {
 		return fmt.Errorf("oneapi async state version: %w", errAsyncInvalidRequest)
 	}
+	legacyText := false
 	for i := range snapshot.Runs {
-		record := cloneAsyncRecord(&snapshot.Runs[i])
+		record, usedLegacyText, err := asyncRecordFromPersisted(snapshot.Runs[i])
+		if err != nil {
+			return fmt.Errorf("oneapi async state record: %w", err)
+		}
+		legacyText = legacyText || usedLegacyText
 		if err := validateAsyncRecord(record); err != nil {
 			return fmt.Errorf("oneapi async state record: %w", err)
 		}
@@ -264,7 +316,7 @@ func (o *asyncRunOwner) load() error {
 		o.seq = snapshot.TerminalSequence
 	}
 
-	changed := false
+	changed := legacyText
 	beforeEviction := len(o.runs)
 	evictAsyncTerminals(o.runs)
 	if len(o.runs) != beforeEviction {
@@ -555,12 +607,92 @@ func (o *asyncRunOwner) Close() error {
 }
 
 func (o *asyncRunOwner) persistLocked(records map[string]*asyncRunRecord, sequence uint64) error {
-	snapshot := asyncRunSnapshot{Version: asyncRunSnapshotVersion, TerminalSequence: sequence, Runs: make([]asyncRunRecord, 0, len(records))}
+	raw, err := marshalAsyncPersistedSnapshot(records, sequence, maxAsyncPersistedStateBytes)
+	if err != nil {
+		return err
+	}
+	return o.write(o.statePath, raw)
+}
+
+func marshalAsyncPersistedSnapshot(records map[string]*asyncRunRecord, sequence uint64, byteLimit int64) ([]byte, error) {
+	if byteLimit <= 0 {
+		return nil, errAsyncInvalidRequest
+	}
+	raw, err := json.MarshalIndent(asyncPersistedSnapshotFrom(records, sequence), "", "  ")
+	if err != nil {
+		return nil, fmt.Errorf("oneapi async state marshal: %w", err)
+	}
+	if int64(len(raw)) > byteLimit {
+		return nil, fmt.Errorf("oneapi async state exceeds persisted receipt bound: %w", errAsyncPersist)
+	}
+	return raw, nil
+}
+
+func asyncPersistedSnapshotFrom(records map[string]*asyncRunRecord, sequence uint64) asyncPersistedRunSnapshot {
+	snapshot := asyncPersistedRunSnapshot{Version: asyncRunSnapshotVersion, TerminalSequence: sequence, Runs: make([]asyncPersistedRunRecord, 0, len(records))}
 	for _, record := range records {
-		snapshot.Runs = append(snapshot.Runs, *cloneAsyncRecord(record))
+		snapshot.Runs = append(snapshot.Runs, asyncPersistedRecordFrom(record))
 	}
 	sort.Slice(snapshot.Runs, func(i, j int) bool { return snapshot.Runs[i].RunID < snapshot.Runs[j].RunID })
-	return o.write(o.statePath, snapshot)
+	return snapshot
+}
+
+func asyncPersistedRecordFrom(record *asyncRunRecord) asyncPersistedRunRecord {
+	persisted := asyncPersistedRunRecord{
+		RunID: record.RunID, IdempotencyKey: record.IdempotencyKey, RequestDigest: record.RequestDigest,
+		State: record.State, AcceptedAt: record.AcceptedAt, StartedAt: record.StartedAt,
+		FinishedAt: record.FinishedAt, FinishSeq: record.FinishSeq, FailureID: record.FailureID,
+	}
+	if record.Result != nil {
+		persisted.Result = &asyncPersistedRunResult{
+			ExitCode: record.Result.ExitCode, StdoutBase64: base64.StdEncoding.EncodeToString([]byte(record.Result.Stdout)),
+			StdoutLegacyExpanded: record.stdoutLegacyExpanded,
+			StderrBase64:         base64.StdEncoding.EncodeToString([]byte(record.Result.Stderr)), StderrLegacyExpanded: record.stderrLegacyExpanded,
+			EnvSource:  record.Result.EnvSource,
+			DurationMs: record.Result.DurationMs, TimedOut: record.Result.TimedOut,
+		}
+	}
+	return persisted
+}
+
+func asyncRecordFromPersisted(persisted asyncPersistedRunRecord) (*asyncRunRecord, bool, error) {
+	record := &asyncRunRecord{
+		RunID: persisted.RunID, IdempotencyKey: persisted.IdempotencyKey, RequestDigest: persisted.RequestDigest,
+		State: persisted.State, AcceptedAt: persisted.AcceptedAt, StartedAt: persisted.StartedAt,
+		FinishedAt: persisted.FinishedAt, FinishSeq: persisted.FinishSeq, FailureID: persisted.FailureID,
+	}
+	if persisted.Result != nil {
+		stdout, stdoutLegacyExpanded, stdoutLegacyText, err := decodeAsyncPersistedOutput(persisted.Result.Stdout, persisted.Result.StdoutBase64, persisted.Result.StdoutLegacyExpanded)
+		if err != nil {
+			return nil, false, err
+		}
+		stderr, stderrLegacyExpanded, stderrLegacyText, err := decodeAsyncPersistedOutput(persisted.Result.Stderr, persisted.Result.StderrBase64, persisted.Result.StderrLegacyExpanded)
+		if err != nil {
+			return nil, false, err
+		}
+		record.Result = &runResult{ExitCode: persisted.Result.ExitCode, Stdout: stdout, Stderr: stderr, EnvSource: persisted.Result.EnvSource, DurationMs: persisted.Result.DurationMs, TimedOut: persisted.Result.TimedOut}
+		record.stdoutLegacyExpanded = stdoutLegacyExpanded
+		record.stderrLegacyExpanded = stderrLegacyExpanded
+		return record, stdoutLegacyText || stderrLegacyText, nil
+	}
+	return record, false, nil
+}
+
+func decodeAsyncPersistedOutput(legacyText, encoded string, persistedLegacyExpanded bool) (string, bool, bool, error) {
+	if encoded == "" {
+		if persistedLegacyExpanded {
+			return "", false, false, errAsyncInvalidRequest
+		}
+		return legacyText, len(legacyText) > maxStreamBytes+len(truncationMarker), legacyText != "", nil
+	}
+	if legacyText != "" {
+		return "", false, false, errAsyncInvalidRequest
+	}
+	raw, err := base64.StdEncoding.DecodeString(encoded)
+	if err != nil || base64.StdEncoding.EncodeToString(raw) != encoded {
+		return "", false, false, errAsyncInvalidRequest
+	}
+	return string(raw), persistedLegacyExpanded, false, nil
 }
 
 func (o *asyncRunOwner) lookupLocked(runID string) (*asyncRunRecord, error) {
@@ -618,10 +750,19 @@ func validateAsyncRecord(record *asyncRunRecord) error {
 	if record.terminal() && (record.FinishedAt == nil || record.FinishSeq == 0 || record.Result == nil) {
 		return errAsyncInvalidRequest
 	}
-	if record.Result != nil && (len(record.Result.Stdout) > maxStreamBytes+len(truncationMarker) || len(record.Result.Stderr) > maxStreamBytes+len(truncationMarker)) {
+	if record.Result != nil && (!validAsyncPersistedStream(record.Result.Stdout, record.stdoutLegacyExpanded) || !validAsyncPersistedStream(record.Result.Stderr, record.stderrLegacyExpanded)) {
 		return errAsyncInvalidRequest
 	}
 	return nil
+}
+
+func validAsyncPersistedStream(value string, legacyExpanded bool) bool {
+	length := len(value)
+	normalLimit := maxStreamBytes + len(truncationMarker)
+	if legacyExpanded {
+		return length > normalLimit && length <= maxLegacyExpandedStreamBytes
+	}
+	return length <= normalLimit
 }
 
 func validAsyncRequestDigest(digest string) bool {

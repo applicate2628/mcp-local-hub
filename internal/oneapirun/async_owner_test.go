@@ -1,7 +1,9 @@
 package oneapirun
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"os"
@@ -11,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
 )
 
 type asyncTestStore struct {
@@ -28,18 +32,22 @@ func (s *asyncTestStore) Read(string) ([]byte, error) {
 	return append([]byte(nil), s.raw...), nil
 }
 
-func (s *asyncTestStore) Write(_ string, value any) error {
+func (s *asyncTestStore) Write(_ string, raw []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
 		return errors.New("injected write failure")
 	}
+	s.raw = append(s.raw[:0], raw...)
+	return nil
+}
+
+func (s *asyncTestStore) WriteJSON(value any) error {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	s.raw = raw
-	return nil
+	return s.Write("", raw)
 }
 
 func newAsyncTestOwner(t *testing.T, store *asyncTestStore, execute func(context.Context, oneAPIRunRequest) asyncExecution) *asyncRunOwner {
@@ -208,7 +216,7 @@ func TestAsyncRun_RestartMarksNonterminalInterruptedWithoutExecuting(t *testing.
 		RunID: "run-restart", IdempotencyKey: "restart", RequestDigest: mustAsyncRequestDigest(t, oneAPIRunRequest{Command: "fixture", Timeout: time.Minute, IdempotencyKey: "restart"}),
 		State: asyncStateRunning, AcceptedAt: time.Unix(100, 0).UTC(),
 	}}}
-	if err := store.Write("runs-v1.json", seed); err != nil {
+	if err := store.WriteJSON(seed); err != nil {
 		t.Fatal(err)
 	}
 	var launches atomic.Int32
@@ -285,15 +293,15 @@ func TestAsyncRun_TerminalWriteFailureIsVisibleAndCloseReturns(t *testing.T) {
 }
 
 // TestAsyncRun_RejectsOversizedPersistedOutput catches a corrupt snapshot that
-// bypasses the 256 KiB per-stream receipt bound after a restart.
+// exceeds even the migration-only legacy-expanded receipt ceiling after restart.
 func TestAsyncRun_RejectsOversizedPersistedOutput(t *testing.T) {
 	store := &asyncTestStore{}
 	seed := asyncRunSnapshot{Version: asyncRunSnapshotVersion, Runs: []asyncRunRecord{{
 		RunID: "run-overflow", IdempotencyKey: "overflow", RequestDigest: mustAsyncRequestDigest(t, oneAPIRunRequest{Command: "fixture", Timeout: time.Minute, IdempotencyKey: "overflow"}),
 		State: asyncStateCompleted, AcceptedAt: time.Unix(100, 0).UTC(), FinishedAt: timePtr(time.Unix(101, 0).UTC()), FinishSeq: 1,
-		Result: &runResult{Stdout: strings.Repeat("x", maxStreamBytes+len(truncationMarker)+1)},
+		Result: &runResult{Stdout: strings.Repeat("x", maxLegacyExpandedStreamBytes+1)},
 	}}}
-	if err := store.Write("runs-v1.json", seed); err != nil {
+	if err := store.WriteJSON(seed); err != nil {
 		t.Fatal(err)
 	}
 	_, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{StatePath: filepath.Join(t.TempDir(), "runs-v1.json"), Execute: func(context.Context, oneAPIRunRequest) asyncExecution { return asyncExecution{} }, Read: store.Read, Write: store.Write})
@@ -429,6 +437,208 @@ func TestAsyncRun_PersistsDigestWithoutExecutionInputAndReplaysAfterReload(t *te
 	}
 	if !replay.Replayed || replay.RunID != start.RunID || replayLaunches.Load() != 0 {
 		t.Fatalf("replay=%#v launches=%d, want persisted receipt and no execution", replay, replayLaunches.Load())
+	}
+}
+
+// TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output catches a persistence
+// path that lets JSON replace arbitrary captured bytes instead of retaining
+// their exact byte representation in the durable receipt.
+func TestAsyncRun_PersistsAndReloadsCappedNonUTF8Output(t *testing.T) {
+	var captured cappedBuffer
+	captured.limit = maxStreamBytes
+	input := append(bytes.Repeat([]byte{0xff}, maxStreamBytes-1), 0xe2, 0x82, 0xac)
+	if written, err := captured.Write(input); err != nil || written != len(input) {
+		t.Fatalf("capped capture = (%d, %v), want full consumption", written, err)
+	}
+	wantOutput := captured.String()
+	if !captured.truncated || len(wantOutput) != maxStreamBytes+len(truncationMarker) || !bytes.HasSuffix([]byte(wantOutput), []byte(truncationMarker)) {
+		t.Fatalf("capped output lost byte-count/truncation contract: truncated=%v len=%d", captured.truncated, len(wantOutput))
+	}
+
+	statePath := filepath.Join(t.TempDir(), "runs-v1.json")
+	first, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
+		StatePath: statePath,
+		Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
+			return asyncExecution{Result: runResult{ExitCode: 0, Stdout: wantOutput, Stderr: wantOutput}}
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = first.Close() })
+
+	start, err := first.Start(asyncRequest("non-utf8-persist", time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := waitForAsyncTerminal(t, first, start.RunID)
+	if initial.Result == nil || !bytes.Equal([]byte(initial.Result.Stdout), []byte(wantOutput)) || !bytes.Equal([]byte(initial.Result.Stderr), []byte(wantOutput)) {
+		t.Fatalf("initial persisted result did not retain raw captured bytes: %#v", initial.Result)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("first owner close: %v", err)
+	}
+	persistedRaw, err := os.ReadFile(statePath)
+	if err != nil || int64(len(persistedRaw)) > maxAsyncPersistedStateBytes {
+		t.Fatalf("checked persisted receipt = (%d bytes, %v), want bounded same-path state", len(persistedRaw), err)
+	}
+	var persisted asyncPersistedRunSnapshot
+	if err := json.Unmarshal(persistedRaw, &persisted); err != nil || len(persisted.Runs) != 1 || persisted.Runs[0].Result == nil {
+		t.Fatalf("canonical persisted receipt decode = (%#v, %v)", persisted, err)
+	}
+	if persisted.Runs[0].Result.StdoutBase64 == "" || persisted.Runs[0].Result.StderrBase64 == "" || persisted.Runs[0].Result.Stdout != "" || persisted.Runs[0].Result.Stderr != "" || persisted.Runs[0].Result.StdoutLegacyExpanded || persisted.Runs[0].Result.StderrLegacyExpanded {
+		t.Fatalf("new capture persisted non-canonical result: %#v", persisted.Runs[0].Result)
+	}
+
+	reloaded, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
+		StatePath: statePath,
+		Execute:   func(context.Context, oneAPIRunRequest) asyncExecution { return asyncExecution{} },
+	})
+	if err != nil {
+		t.Fatalf("fresh owner must reload capped non-UTF-8 receipt: %v", err)
+	}
+	t.Cleanup(func() { _ = reloaded.Close() })
+	result, err := reloaded.Result(start.RunID)
+	if err != nil || result.Result == nil || !bytes.Equal([]byte(result.Result.Stdout), []byte(wantOutput)) || !bytes.Equal([]byte(result.Result.Stderr), []byte(wantOutput)) {
+		t.Fatalf("reloaded result = (%#v, %v), want exact raw captured bytes", result, err)
+	}
+}
+
+// TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64 proves the reported
+// expanded legacy receipt can be recovered without executing a command, then
+// rewritten at the same state path with explicit migration-only provenance.
+func TestAsyncRun_LoadsLegacyExpandedTextIntoSamePathBase64(t *testing.T) {
+	statePath := filepath.Join(t.TempDir(), "runs-v1.json")
+	request := asyncRequest("legacy-text", time.Second)
+	legacyExpanded := strings.Repeat("\uFFFD", maxStreamBytes) + truncationMarker
+	legacy := asyncRunSnapshot{Version: asyncRunSnapshotVersion, TerminalSequence: 1, Runs: []asyncRunRecord{{
+		RunID: "legacy-run", IdempotencyKey: request.IdempotencyKey, RequestDigest: mustAsyncRequestDigest(t, request),
+		State: asyncStateCompleted, AcceptedAt: time.Unix(100, 0).UTC(), FinishedAt: timePtr(time.Unix(101, 0).UTC()), FinishSeq: 1,
+		Result: &runResult{ExitCode: 0, Stdout: legacyExpanded, Stderr: legacyExpanded},
+	}}}
+	legacyRaw, err := json.MarshalIndent(legacy, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(legacyExpanded) <= maxStreamBytes+len(truncationMarker) || len(legacyExpanded) > maxLegacyExpandedStreamBytes || len(legacyRaw) <= 1<<20 {
+		t.Fatalf("legacy fixture does not exercise expanded same-path recovery: stream=%d file=%d", len(legacyExpanded), len(legacyRaw))
+	}
+	if err := api.WriteStateFileBytesAtomic(statePath, legacyRaw); err != nil {
+		t.Fatal(err)
+	}
+	var launches atomic.Int32
+	owner, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{
+		StatePath: statePath,
+		Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
+			launches.Add(1)
+			return asyncExecution{}
+		},
+	})
+	if err != nil {
+		t.Fatalf("load legacy valid receipt: %v", err)
+	}
+	if launches.Load() != 0 {
+		t.Fatalf("legacy recovery launched %d commands, want zero", launches.Load())
+	}
+	result, err := owner.Result("legacy-run")
+	if err != nil || result.Result == nil || result.Result.Stdout != legacyExpanded || result.Result.Stderr != legacyExpanded {
+		t.Fatalf("legacy reloaded result = (%#v, %v)", result, err)
+	}
+	if err := owner.Close(); err != nil {
+		t.Fatal(err)
+	}
+	canonicalRaw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var canonical asyncPersistedRunSnapshot
+	if err := json.Unmarshal(canonicalRaw, &canonical); err != nil || len(canonical.Runs) != 1 || canonical.Runs[0].Result == nil {
+		t.Fatalf("same-path canonical receipt = (%#v, %v)", canonical, err)
+	}
+	if canonical.Runs[0].Result.StdoutBase64 == "" || canonical.Runs[0].Result.StderrBase64 == "" || !canonical.Runs[0].Result.StdoutLegacyExpanded || !canonical.Runs[0].Result.StderrLegacyExpanded {
+		t.Fatalf("legacy migration did not preserve expanded provenance: %#v", canonical.Runs[0].Result)
+	}
+	second, err := newAsyncRunOwner(t.Context(), asyncOwnerOptions{StatePath: statePath, Execute: func(context.Context, oneAPIRunRequest) asyncExecution { launches.Add(1); return asyncExecution{} }})
+	if err != nil {
+		t.Fatalf("canonical reload: %v", err)
+	}
+	t.Cleanup(func() { _ = second.Close() })
+	secondResult, err := second.Result("legacy-run")
+	if err != nil || secondResult.Result == nil || secondResult.Result.Stdout != legacyExpanded || secondResult.Result.Stderr != legacyExpanded || launches.Load() != 0 {
+		t.Fatalf("canonical reload result=(%#v,%v) launches=%d", secondResult, err, launches.Load())
+	}
+
+}
+
+func TestAsyncPersistedOutputLegacyExpansionPolarity(t *testing.T) {
+	normalLimit := maxStreamBytes + len(truncationMarker)
+	cases := []struct {
+		name     string
+		output   string
+		expanded bool
+	}{
+		{name: "absent-provenance-above-normal", output: strings.Repeat("x", normalLimit+1)},
+		{name: "redundant-provenance-at-normal", output: strings.Repeat("x", normalLimit), expanded: true},
+		{name: "expanded-provenance-above-migration-ceiling", output: strings.Repeat("x", maxLegacyExpandedStreamBytes+1), expanded: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			record, _, err := asyncRecordFromPersisted(asyncPersistedRunRecord{RunID: "run", IdempotencyKey: "key", RequestDigest: mustAsyncRequestDigest(t, asyncRequest("key", time.Second)), State: asyncStateCompleted, AcceptedAt: time.Unix(1, 0).UTC(), FinishedAt: timePtr(time.Unix(2, 0).UTC()), FinishSeq: 1, Result: &asyncPersistedRunResult{StdoutBase64: base64.StdEncoding.EncodeToString([]byte(tc.output)), StdoutLegacyExpanded: tc.expanded}})
+			if err != nil {
+				t.Fatalf("decode error = %v, want validation error", err)
+			}
+			if err := validateAsyncRecord(record); !errors.Is(err, errAsyncInvalidRequest) {
+				t.Fatalf("validate error = %v, want errAsyncInvalidRequest", err)
+			}
+		})
+	}
+}
+
+func TestAsyncPersistedOutputRejectsDirectTextWithExpandedFlag(t *testing.T) {
+	_, _, err := asyncRecordFromPersisted(asyncPersistedRunRecord{RunID: "run", IdempotencyKey: "key", RequestDigest: mustAsyncRequestDigest(t, asyncRequest("key", time.Second)), State: asyncStateCompleted, AcceptedAt: time.Unix(1, 0).UTC(), FinishedAt: timePtr(time.Unix(2, 0).UTC()), FinishSeq: 1, Result: &asyncPersistedRunResult{Stdout: "legacy text", StdoutLegacyExpanded: true}})
+	if !errors.Is(err, errAsyncInvalidRequest) {
+		t.Fatalf("direct text with expanded flag error = %v, want errAsyncInvalidRequest", err)
+	}
+}
+
+func TestAsyncPersistedSnapshotOversizeDoesNotMutateRecordsOrPriorBytes(t *testing.T) {
+	oversized := strings.Repeat("x", int(maxAsyncPersistedStateBytes)+1)
+	records := map[string]*asyncRunRecord{"run": {RunID: "run", IdempotencyKey: "key", RequestDigest: mustAsyncRequestDigest(t, asyncRequest("key", time.Second)), State: asyncStateCompleted, AcceptedAt: time.Unix(1, 0).UTC(), FinishedAt: timePtr(time.Unix(2, 0).UTC()), FinishSeq: 1, Result: &runResult{EnvSource: oversized}}}
+	before := cloneAsyncRunMap(records)
+	prior := []byte("last durable receipt")
+	if _, err := marshalAsyncPersistedSnapshot(records, 1, maxAsyncPersistedStateBytes); !errors.Is(err, errAsyncPersist) {
+		t.Fatalf("oversize marshal error = %v, want errAsyncPersist", err)
+	}
+	if !bytes.Equal(prior, []byte("last durable receipt")) || records["run"].Result.EnvSource != before["run"].Result.EnvSource || len(records) != len(before) {
+		t.Fatal("oversize check mutated candidate records or prior durable bytes")
+	}
+}
+
+func TestAsyncPersistedSnapshotRetains64MaximumOutputTerminalsAndActive(t *testing.T) {
+	output := strings.Repeat("x", maxStreamBytes)
+	records := map[string]*asyncRunRecord{
+		"active": {RunID: "active", IdempotencyKey: "active", RequestDigest: mustAsyncRequestDigest(t, asyncRequest("active", time.Second)), State: asyncStateRunning, AcceptedAt: time.Unix(100, 0).UTC()},
+	}
+	for i := 1; i <= maxAsyncTerminalRuns; i++ {
+		id := "terminal-" + time.Unix(0, int64(i)).UTC().Format("150405.000000000")
+		records[id] = &asyncRunRecord{
+			RunID: id, IdempotencyKey: id, RequestDigest: mustAsyncRequestDigest(t, asyncRequest(id, time.Second)), State: asyncStateCompleted,
+			AcceptedAt: time.Unix(int64(i), 0).UTC(), FinishedAt: timePtr(time.Unix(int64(i+1), 0).UTC()), FinishSeq: uint64(i),
+			Result: &runResult{ExitCode: 0, Stdout: output, Stderr: output},
+		}
+	}
+	if raw, err := marshalAsyncPersistedSnapshot(records, uint64(maxAsyncTerminalRuns), maxAsyncPersistedStateBytes); err != nil || int64(len(raw)) > maxAsyncPersistedStateBytes {
+		t.Fatalf("64-terminal maximum-output snapshot = (%d bytes, %v)", len(raw), err)
+	}
+	active := records["active"]
+	active.State, active.FinishedAt, active.FinishSeq = asyncStateCompleted, timePtr(time.Unix(200, 0).UTC()), maxAsyncTerminalRuns+1
+	active.Result = &runResult{ExitCode: 0, Stdout: output, Stderr: output}
+	evictAsyncTerminals(records)
+	if len(records) != maxAsyncTerminalRuns || records["active"] == nil {
+		t.Fatalf("count retention after active terminal = %d active=%v, want %d retained including active", len(records), records["active"] != nil, maxAsyncTerminalRuns)
+	}
+	if _, err := marshalAsyncPersistedSnapshot(records, active.FinishSeq, maxAsyncPersistedStateBytes); err != nil {
+		t.Fatalf("post-count-eviction maximum-output snapshot: %v", err)
 	}
 }
 
