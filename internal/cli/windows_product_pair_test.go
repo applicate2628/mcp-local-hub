@@ -581,6 +581,51 @@ func TestWindowsProductPairRollbackCleanupFailureStillRestartsPrior(t *testing.T
 	assertPairFile(t, paths.priorCLI, prior)
 }
 
+func TestWindowsProductPairTxnRollsBackPartialPromotionResult(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		role string
+	}{
+		{name: "windowless", role: "windowless"},
+		{name: "cli", role: "cli"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			paths := productPairFixturePaths(dir)
+			oldCLI, oldWindowless := []byte("old-cli"), []byte("old-windowless")
+			writePairFixture(t, paths.priorCLI, oldCLI)
+			writePairFixture(t, paths.windowless, oldWindowless)
+			writePairFixture(t, paths.stagedCLI, []byte("new-cli"))
+			writePairFixture(t, paths.stagedWindowless, []byte("new-windowless"))
+			var order []string
+			tasks := &productPairTaskFake{order: &order}
+			deps := productPairTestDeps(&order)
+			basePromote := deps.Promote
+			deps.Promote = func(src, dst, sha string) (WindowsProductPairPromotion, error) {
+				promotion, err := basePromote(src, dst, sha)
+				if err != nil {
+					return promotion, err
+				}
+				if (tc.role == "windowless" && dst == paths.windowless) || (tc.role == "cli" && dst == paths.priorCLI) {
+					return promotion, errors.New("injected partial promotion after replace")
+				}
+				return promotion, nil
+			}
+			restarts := 0
+			deps.RestartPrior = func(string) error { restarts++; return nil }
+			_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{CLIPath: paths.priorCLI, WindowlessPath: paths.windowless, StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt, Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps}}).Run(context.Background())
+			if err == nil || !strings.Contains(err.Error(), "injected partial promotion") {
+				t.Fatalf("err=%v", err)
+			}
+			assertPairFile(t, paths.priorCLI, oldCLI)
+			assertPairFile(t, paths.windowless, oldWindowless)
+			if restarts != 1 {
+				t.Fatalf("prior restarts=%d, want 1", restarts)
+			}
+		})
+	}
+}
+
 func TestRunInstallUpgradeDoesNotOuterRecoverPostPromotionPairRollback(t *testing.T) {
 	dir := t.TempDir()
 	paths := productPairFixturePaths(dir)

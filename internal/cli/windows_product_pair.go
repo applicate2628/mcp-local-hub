@@ -291,11 +291,11 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 	}
 
 	promotion, err := d.Promote(o.StagedWindowless, o.WindowlessPath, staged.Windowless.SHA256)
+	windowlessPromotion = new(WindowsProductPairPromotion)
+	*windowlessPromotion = promotion
 	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("promote windowless adapter: %w", err))
 	}
-	windowlessPromotion = new(WindowsProductPairPromotion)
-	*windowlessPromotion = promotion
 	if err := verifyProductPairPromotion(promotion, windowlessPrior); err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("verify retained windowless prior: %w", err))
 	}
@@ -321,11 +321,11 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
 	promotion, err = d.Promote(o.StagedCLI, o.CLIPath, staged.CLI.SHA256)
+	cliPromotion = new(WindowsProductPairPromotion)
+	*cliPromotion = promotion
 	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("promote canonical CUI: %w", err))
 	}
-	cliPromotion = new(WindowsProductPairPromotion)
-	*cliPromotion = promotion
 	if err := verifyProductPairPromotion(promotion, cliPrior); err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("verify retained CLI prior: %w", err))
 	}
