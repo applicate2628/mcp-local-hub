@@ -7,6 +7,8 @@ $scratchRoot = Join-Path $repoRoot ".scratch"
 $fixtureRoot = Join-Path $scratchRoot "windows-build-plan-$PID-$([Guid]::NewGuid().ToString('N'))"
 $fakeTools = Join-Path $fixtureRoot "fake-tools"
 $pwsh = (Get-Command pwsh -ErrorAction Stop).Source
+$windowsPowerShell = (Get-Command powershell -ErrorAction Stop).Source
+$realGo = (Get-Command go -ErrorAction Stop).Source
 $releaseVersion = "1.2.3-beta.1"
 $releaseCommit = "0123456789abcdef0123456789abcdef01234567"
 $releaseBuildDate = "2026-09-07T06:07:08Z"
@@ -22,17 +24,21 @@ if (Test-Path -LiteralPath $contract) {
 Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/versioninfo.json") -Destination (Join-Path $fixtureRoot "cmd/mcphub/versioninfo.json")
 Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/mcphub.ico") -Destination (Join-Path $fixtureRoot "cmd/mcphub/mcphub.ico")
 [IO.File]::WriteAllText((Join-Path $fakeTools "git.cmd"), "@echo deadbeef`r`n@exit /b 0`r`n")
-[IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), "@echo partial-resource^>cmd\mcphub\zz_product_versioninfo.syso`r`n@exit /b 93`r`n")
+[IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), '@if "%1"=="env" (@echo %MCPHUB_FAKE_GOARCH% & @exit /b 0) else (@echo partial-resource^>cmd\mcphub\zz_product_versioninfo.syso & @exit /b 93)' + "`r`n")
 
 $priorPath = $env:PATH
 try {
     $env:PATH = $fakeTools
+    $priorFakeArch = $env:MCPHUB_FAKE_GOARCH
+    $env:MCPHUB_FAKE_GOARCH = "amd64"
     Push-Location $fixtureRoot
     try {
         $json = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
         if ($LASTEXITCODE -ne 0) {
             throw "build.ps1 -PrintPlanJson failed with exit $LASTEXITCODE"
         }
+        $nativeArmJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
+        if ($LASTEXITCODE -ne 0) { throw "native amd64 plan failed" }
         $releasePlans = @{}
         foreach ($arch in @("amd64", "arm64")) {
             $releaseJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
@@ -47,6 +53,14 @@ try {
             }
             $releasePlans[$arch] = $releaseJson | ConvertFrom-Json
         }
+        $env:MCPHUB_FAKE_GOARCH = "arm64"
+        $nativeArmJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
+        if ($LASTEXITCODE -ne 0) { throw "native arm64 plan failed" }
+        $nativeArmPlan = $nativeArmJson | ConvertFrom-Json
+        if ($nativeArmPlan.windowsTargetArch -ne "" -or ($nativeArmPlan.resourceGeneratorArgs -join "|") -ne "-64|-arm") {
+            throw "omitted-target arm64 plan=$($nativeArmPlan.resourceGeneratorArgs -join '|')"
+        }
+        $env:MCPHUB_FAKE_GOARCH = "amd64"
         & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson -WindowsTargetArch amd64 *> $null
         if ($LASTEXITCODE -eq 0) { throw "release plan accepted a missing release tuple" }
         & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") `
@@ -80,6 +94,7 @@ try {
     }
 } finally {
     $env:PATH = $priorPath
+    $env:MCPHUB_FAKE_GOARCH = $priorFakeArch
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
@@ -187,6 +202,23 @@ if ($publishWorkflow -notmatch '(?s)build\.ps1.+-WindowsTargetArch.+-ReleaseVers
 }
 if ($publishWorkflow -notmatch '-ReleaseBuildDate "\$DATE" \|\| return \$\?') {
     throw "npm publish workflow must propagate build.ps1 failure from the build function"
+}
+
+$encodingProbe = Join-Path $scratchRoot "windows-build-json-encoding-$PID-$([Guid]::NewGuid().ToString('N'))"
+try {
+    New-Item -ItemType Directory -Force -Path $encodingProbe | Out-Null
+    $decoder = Join-Path $encodingProbe "decode.go"
+    [IO.File]::WriteAllText($decoder, 'package main; import ("encoding/json"; "os"); func main(){ var v interface{}; b,_:=os.ReadFile(os.Args[1]); if json.Unmarshal(b,&v)!=nil { os.Exit(1) } }', (New-Object Text.UTF8Encoding($false)))
+    $noBOM = Join-Path $encodingProbe "resource.json"
+    & $windowsPowerShell -NoProfile -Command "[IO.File]::WriteAllText('$noBOM', '{""probe"":true}', (New-Object Text.UTF8Encoding(`$false)))"
+    & $realGo run $decoder $noBOM
+    if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell no-BOM JSON failed Go decoder" }
+    $bom = Join-Path $encodingProbe "old-bom.json"
+    [IO.File]::WriteAllText($bom, '{"probe":true}', (New-Object Text.UTF8Encoding($true)))
+    & $realGo run $decoder $bom *> $null
+    if ($LASTEXITCODE -eq 0) { throw "Go JSON decoder accepted old UTF8 BOM fixture" }
+} finally {
+    Remove-Item -LiteralPath $encodingProbe -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 function Get-PESubsystem([string]$Path) {

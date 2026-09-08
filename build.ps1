@@ -139,8 +139,15 @@ $admissionCommands = @(
         }
     }
 )
+$effectiveWindowsTargetArch = $WindowsTargetArch
+if ([string]::IsNullOrWhiteSpace($effectiveWindowsTargetArch)) {
+    $effectiveWindowsTargetArch = (& go env GOARCH).Trim()
+}
+if ($effectiveWindowsTargetArch -notin @("amd64", "arm64")) {
+    throw "Windows build target must resolve to amd64 or arm64, got $effectiveWindowsTargetArch"
+}
 $resourceGeneratorArgs = @("-64")
-if ($WindowsTargetArch -eq "arm64") {
+if ($effectiveWindowsTargetArch -eq "arm64") {
     $resourceGeneratorArgs += "-arm"
 }
 $plan = [ordered]@{
@@ -192,7 +199,7 @@ try {
             }
         }
         $resourceJson = Join-Path $resourceScratch "$($artifact.role).json"
-        $config | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $resourceJson -Encoding UTF8
+        [IO.File]::WriteAllText($resourceJson, ($config | ConvertTo-Json -Depth 8), (New-Object Text.UTF8Encoding($false)))
         $commandDir = Join-Path $PSScriptRoot ($artifact.source -replace '^\./', '')
         $resourcePath = Join-Path $commandDir "zz_product_versioninfo.syso"
         if (Test-Path -LiteralPath $resourcePath) {
