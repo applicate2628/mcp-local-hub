@@ -124,7 +124,7 @@ func scanOwnedEntrypointTaskReferences(ctx context.Context, backend ownedEntrypo
 		if err != nil || shape.uri != name {
 			return nil, fmt.Errorf("entrypoint task scan: invalid owned task %q", name)
 		}
-		if shape.command == operatorCLI || shape.command == runtime {
+		if sameWindowsEntrypointPath(shape.command, operatorCLI) || sameWindowsEntrypointPath(shape.command, runtime) {
 			refs = append(refs, OwnedEntrypointTaskReference{TaskName: name, Command: shape.command})
 		}
 	}
@@ -239,7 +239,7 @@ func reopenOwnedEntrypointTaskTxnWithStore(ctx context.Context, lockPath, priorC
 			return nil, fmt.Errorf("entrypoint task reopen: retained XML verification failed for %q", name)
 		}
 		shape, parseErr := parseOwnedEntrypointTaskXML(raw)
-		if parseErr != nil || shape.uri != name || (shape.command != priorCLI && shape.command != runtime) {
+		if parseErr != nil || shape.uri != name || (!sameWindowsEntrypointPath(shape.command, priorCLI) && !sameWindowsEntrypointPath(shape.command, runtime)) {
 			_ = txn.Close()
 			return nil, fmt.Errorf("entrypoint task reopen: retained XML is invalid for %q", name)
 		}
@@ -262,6 +262,13 @@ func currentWindowsTaskOwner() (string, error) {
 		return "", errors.New("entrypoint task current user is empty")
 	}
 	return name, nil
+}
+
+// sameWindowsEntrypointPath compares only Windows path casing. It deliberately
+// does not clean, resolve, or otherwise normalize different path targets: the
+// migration may rewrite only the two exact installed executable identities.
+func sameWindowsEntrypointPath(left, right string) bool {
+	return strings.EqualFold(left, right)
 }
 
 // InventoryExport snapshots every owned task before mutation. It refuses a
@@ -306,7 +313,7 @@ func (t *OwnedEntrypointTaskTxn) InventoryExport() error {
 		if shape.uri != name {
 			return fmt.Errorf("entrypoint task inventory: XML URI mismatch for %q", name)
 		}
-		if shape.command != t.prior && shape.command != t.runtime {
+		if !sameWindowsEntrypointPath(shape.command, t.prior) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
 		}
 		snapshot := ownedEntrypointTaskSnapshot{name: status.Name, xml: append([]byte(nil), raw...)}
@@ -352,7 +359,7 @@ func (t *OwnedEntrypointTaskTxn) RewriteCommand() error {
 		if err != nil {
 			return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task rewrite %q: %w", key, err)}
 		}
-		if shape.command == t.runtime {
+		if sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
 		}
 		rewritten, err := rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
@@ -374,7 +381,7 @@ func (t *OwnedEntrypointTaskTxn) VerifyRuntime() error {
 		return err
 	}
 	if err := t.verify(func(shape ownedEntrypointTaskShape, snapshot ownedEntrypointTaskSnapshot, raw []byte) error {
-		if shape.command != t.runtime {
+		if !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			return errors.New("runtime command mismatch")
 		}
 		priorShape, err := parseOwnedEntrypointTaskXML(snapshot.xml)
@@ -382,7 +389,7 @@ func (t *OwnedEntrypointTaskTxn) VerifyRuntime() error {
 			return err
 		}
 		expected := snapshot.xml
-		if priorShape.command == t.prior {
+		if sameWindowsEntrypointPath(priorShape.command, t.prior) {
 			expected, err = rewriteOwnedEntrypointTaskCommand(snapshot.xml, t.prior, t.runtime)
 			if err != nil {
 				return err
@@ -490,7 +497,7 @@ func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, own
 		if shape.uri != name {
 			return fmt.Errorf("XML URI mismatch for %q", name)
 		}
-		if shape.command != t.prior && shape.command != t.runtime {
+		if !sameWindowsEntrypointPath(shape.command, t.prior) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
 		}
 		live[name] = liveTask{shape: shape, raw: raw}
@@ -652,7 +659,7 @@ func rewriteOwnedEntrypointTaskCommand(raw []byte, prior, runtime string) ([]byt
 	if err != nil {
 		return nil, err
 	}
-	if shape.command != prior {
+	if !sameWindowsEntrypointPath(shape.command, prior) {
 		return nil, errors.New("command is not exact prior CLI path")
 	}
 	var escaped bytes.Buffer
