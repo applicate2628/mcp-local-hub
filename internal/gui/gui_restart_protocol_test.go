@@ -1887,7 +1887,302 @@ func TestRestartV3_ParentDeathWithoutReservationClosesStandbyAndExits(t *testing
 	}
 }
 
-func TestRestartV3_ExactParentDeathSignalClosesStandbyImmediately(t *testing.T) {
+func TestRestartV3_ParentDeathFinalAcquireConvergesAllEdges(t *testing.T) {
+	tests := []struct {
+		name         string
+		configure    func(context.CancelFunc, *phaseFParentDeathWatcher, *RestartChildDependencies, *int, *int, *phaseFLease)
+		wantAcquires int
+		wantWaits    int
+	}{
+		{
+			name: "loop precheck",
+			configure: func(_ context.CancelFunc, parentDeath *phaseFParentDeathWatcher, deps *RestartChildDependencies, acquireCalls, waitCalls *int, lease *phaseFLease) {
+				deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+					*acquireCalls++
+					if *acquireCalls == 1 {
+						return nil, ErrSingleInstanceBusy
+					}
+					return lease, nil
+				}
+				deps.Wait = func(ctx context.Context, _ time.Duration) error {
+					*waitCalls++
+					parentDeath.SignalDeath()
+					<-ctx.Done()
+					return nil // force the next loop precheck to observe parent death
+				}
+			},
+			wantAcquires: 2,
+			wantWaits:    1,
+		},
+		{
+			name: "interrupted wait",
+			configure: func(_ context.CancelFunc, parentDeath *phaseFParentDeathWatcher, deps *RestartChildDependencies, acquireCalls, waitCalls *int, lease *phaseFLease) {
+				deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+					*acquireCalls++
+					if *acquireCalls == 1 {
+						return nil, ErrSingleInstanceBusy
+					}
+					return lease, nil
+				}
+				deps.Wait = func(ctx context.Context, _ time.Duration) error {
+					*waitCalls++
+					parentDeath.SignalDeath()
+					<-ctx.Done()
+					return ctx.Err()
+				}
+			},
+			wantAcquires: 2,
+			wantWaits:    1,
+		},
+		{
+			name: "post acquire cause check",
+			configure: func(_ context.CancelFunc, parentDeath *phaseFParentDeathWatcher, deps *RestartChildDependencies, acquireCalls, waitCalls *int, lease *phaseFLease) {
+				deps.Acquire = func(acquireCtx context.Context) (SingleInstanceLease, error) {
+					*acquireCalls++
+					parentDeath.SignalDeath()
+					<-acquireCtx.Done()
+					return lease, nil
+				}
+			},
+			wantAcquires: 1,
+			wantWaits:    0,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+			child := phaseFChild(t.TempDir())
+			parentDeath := newPhaseFParentDeathWatcher()
+			child.parentDeath = parentDeath
+			t.Cleanup(child.Close)
+			marker := &phaseFMarkerStore{record: phaseFReservedRecord(now)}
+			lease := &phaseFLease{}
+			standby := &phaseFStandby{}
+			events := &phaseFEvents{}
+			deps := phaseFDependencies(&now, marker, lease, standby, events)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			acquireCalls := 0
+			waitCalls := 0
+			activated := 0
+			deps.Activate = func(context.Context, SingleInstanceLease) error {
+				activated++
+				return nil
+			}
+			tc.configure(cancel, parentDeath, &deps, &acquireCalls, &waitCalls, lease)
+
+			result, err := child.Run(ctx, deps)
+			if err != nil || !result.Activated || result.CommitErr != nil {
+				t.Fatalf("Run result=%+v error=%v, want activated committed child", result, err)
+			}
+			if acquireCalls != tc.wantAcquires || waitCalls != tc.wantWaits || activated != 1 {
+				t.Fatalf("acquires=%d waits=%d activated=%d, want %d/%d/1", acquireCalls, waitCalls, activated, tc.wantAcquires, tc.wantWaits)
+			}
+			if lease.releaseCount() != 0 || standby.closeCount() != 0 {
+				t.Fatalf("retained lease releases=%d standby closes=%d, want 0/0", lease.releaseCount(), standby.closeCount())
+			}
+			if got := strings.Join(events.types(), ","); got != "gui-restart-lock-acquired,gui-restart-progress" {
+				t.Fatalf("events=%q, want lock-acquired then committed", got)
+			}
+			lease.Release()
+		})
+	}
+}
+
+func TestRestartV3_CallerCancellationWinsAtAllParentDeathEdges(t *testing.T) {
+	for _, edge := range []string{"loop precheck", "interrupted wait", "post acquire cause check"} {
+		t.Run(edge, func(t *testing.T) {
+			now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+			child := phaseFChild(t.TempDir())
+			parentDeath := newPhaseFParentDeathWatcher()
+			child.parentDeath = parentDeath
+			t.Cleanup(child.Close)
+			lease := &phaseFLease{}
+			standby := &phaseFStandby{}
+			deps := phaseFDependencies(&now, &phaseFMarkerStore{record: phaseFReservedRecord(now)}, lease, standby, &phaseFEvents{})
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(cancel)
+			acquireCalls := 0
+			activated := 0
+			deps.Activate = func(context.Context, SingleInstanceLease) error {
+				activated++
+				return nil
+			}
+
+			switch edge {
+			case "loop precheck":
+				cancel()
+				parentDeath.SignalDeath()
+				deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+					acquireCalls++
+					return lease, nil
+				}
+			case "interrupted wait":
+				deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+					acquireCalls++
+					return nil, ErrSingleInstanceBusy
+				}
+				deps.Wait = func(waitCtx context.Context, _ time.Duration) error {
+					cancel()
+					parentDeath.SignalDeath()
+					<-waitCtx.Done()
+					return waitCtx.Err()
+				}
+			case "post acquire cause check":
+				deps.Acquire = func(acquireCtx context.Context) (SingleInstanceLease, error) {
+					acquireCalls++
+					cancel()
+					parentDeath.SignalDeath()
+					<-acquireCtx.Done()
+					return lease, nil
+				}
+			}
+
+			_, err := child.Run(ctx, deps)
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("Run error=%v, want caller context cancellation", err)
+			}
+			wantAcquires := 1
+			wantReleases := 0
+			if edge == "loop precheck" {
+				wantAcquires = 0
+			}
+			if edge == "post acquire cause check" {
+				wantReleases = 1
+			}
+			if acquireCalls != wantAcquires || lease.releaseCount() != wantReleases || standby.closeCount() != 1 || activated != 0 {
+				t.Fatalf("acquires=%d releases=%d standby=%d activated=%d, want %d/%d/1/0", acquireCalls, lease.releaseCount(), standby.closeCount(), activated, wantAcquires, wantReleases)
+			}
+		})
+	}
+}
+
+func TestRestartV3_ParentDeathFinalAcquireFailuresStayFailClosed(t *testing.T) {
+	unknownErr := errors.New("acquire owner unavailable")
+	for _, tc := range []struct {
+		name      string
+		finalErr  error
+		nilLease  bool
+		wantCause error
+	}{
+		{name: "busy", finalErr: ErrSingleInstanceBusy, wantCause: ErrSingleInstanceBusy},
+		{name: "reservation refused", finalErr: ErrHandoffReserved, wantCause: ErrHandoffReserved},
+		{name: "unknown error", finalErr: unknownErr, wantCause: unknownErr},
+		{name: "nil lease", nilLease: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+			child := phaseFChild(t.TempDir())
+			parentDeath := newPhaseFParentDeathWatcher()
+			child.parentDeath = parentDeath
+			t.Cleanup(child.Close)
+			standby := &phaseFStandby{}
+			deps := phaseFDependencies(&now, &phaseFMarkerStore{record: phaseFReservedRecord(now)}, &phaseFLease{}, standby, &phaseFEvents{})
+			acquireCalls := 0
+			deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+				acquireCalls++
+				if acquireCalls == 1 {
+					return nil, ErrSingleInstanceBusy
+				}
+				if tc.nilLease {
+					return nil, nil
+				}
+				return nil, tc.finalErr
+			}
+			deps.Wait = func(waitCtx context.Context, _ time.Duration) error {
+				parentDeath.SignalDeath()
+				<-waitCtx.Done()
+				return waitCtx.Err()
+			}
+			deps.Activate = func(context.Context, SingleInstanceLease) error {
+				t.Fatal("fail-closed final acquire activated the child")
+				return nil
+			}
+
+			_, err := child.Run(context.Background(), deps)
+			if !errors.Is(err, ErrRestartChildParentExited) {
+				t.Fatalf("Run error=%v, want ErrRestartChildParentExited", err)
+			}
+			if tc.wantCause != nil && !errors.Is(err, tc.wantCause) {
+				t.Fatalf("Run error=%v, want secondary cause %v", err, tc.wantCause)
+			}
+			if tc.nilLease && !strings.Contains(err.Error(), "nil lease") {
+				t.Fatalf("Run error=%v, want nil-lease cause", err)
+			}
+			if acquireCalls != 2 || standby.closeCount() != 1 {
+				t.Fatalf("acquires=%d standby=%d, want exactly 2/1", acquireCalls, standby.closeCount())
+			}
+		})
+	}
+}
+
+func TestRestartV3_ParentDeathFinalAcquireUsesSharedMarkerRevalidation(t *testing.T) {
+	readErr := errors.New("marker reread failed")
+	for _, tc := range []struct {
+		name      string
+		mutate    func(*phaseFMarkerStore, time.Time)
+		wantCause error
+	}{
+		{name: "missing", mutate: func(store *phaseFMarkerStore, _ time.Time) { store.setRecord(nil) }, wantCause: ErrRestartChildMarkerMismatch},
+		{name: "foreign", mutate: func(store *phaseFMarkerStore, now time.Time) {
+			record := phaseFReservedRecord(now)
+			record.Generation = "foreign"
+			store.setRecord(record)
+		}, wantCause: ErrRestartChildMarkerMismatch},
+		{name: "expired", mutate: func(store *phaseFMarkerStore, now time.Time) {
+			record := phaseFReservedRecord(now)
+			record.ReservationExpiresAt = now
+			store.setRecord(record)
+		}, wantCause: ErrRestartChildMarkerMismatch},
+		{name: "read error", mutate: func(store *phaseFMarkerStore, _ time.Time) {
+			store.mu.Lock()
+			store.readErr = readErr
+			store.mu.Unlock()
+		}, wantCause: readErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
+			child := phaseFChild(t.TempDir())
+			parentDeath := newPhaseFParentDeathWatcher()
+			child.parentDeath = parentDeath
+			t.Cleanup(child.Close)
+			marker := &phaseFMarkerStore{record: phaseFReservedRecord(now)}
+			lease := &phaseFLease{}
+			standby := &phaseFStandby{}
+			deps := phaseFDependencies(&now, marker, lease, standby, &phaseFEvents{})
+			acquireCalls := 0
+			activated := 0
+			deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+				acquireCalls++
+				if acquireCalls == 1 {
+					return nil, ErrSingleInstanceBusy
+				}
+				tc.mutate(marker, now)
+				return lease, nil
+			}
+			deps.Wait = func(waitCtx context.Context, _ time.Duration) error {
+				parentDeath.SignalDeath()
+				<-waitCtx.Done()
+				return waitCtx.Err()
+			}
+			deps.Activate = func(context.Context, SingleInstanceLease) error {
+				activated++
+				return nil
+			}
+
+			_, err := child.Run(context.Background(), deps)
+			if !errors.Is(err, tc.wantCause) {
+				t.Fatalf("Run error=%v, want %v", err, tc.wantCause)
+			}
+			if acquireCalls != 2 || lease.releaseCount() != 1 || standby.closeCount() != 1 || activated != 0 {
+				t.Fatalf("acquires=%d releases=%d standby=%d activated=%d, want 2/1/1/0", acquireCalls, lease.releaseCount(), standby.closeCount(), activated)
+			}
+		})
+	}
+}
+
+func TestRestartV3_ParentDeathWithoutMatchingReservationStaysFailClosed(t *testing.T) {
 	now := time.Date(2026, 7, 18, 10, 0, 0, 0, time.UTC)
 	child := phaseFChild(t.TempDir())
 	parentDeath := newPhaseFParentDeathWatcher()
@@ -1897,9 +2192,14 @@ func TestRestartV3_ExactParentDeathSignalClosesStandbyImmediately(t *testing.T) 
 	deps := phaseFDependencies(&now, &phaseFMarkerStore{}, &phaseFLease{}, standby, &phaseFEvents{})
 	acquireStarted := make(chan struct{})
 	var acquireOnce sync.Once
+	acquireCalls := 0
 	deps.Acquire = func(context.Context) (SingleInstanceLease, error) {
+		acquireCalls++
 		acquireOnce.Do(func() { close(acquireStarted) })
-		return nil, ErrSingleInstanceBusy
+		if acquireCalls == 1 {
+			return nil, ErrSingleInstanceBusy
+		}
+		return nil, ErrHandoffReserved
 	}
 	deps.Wait = waitRestartChild
 	deps.RetryInterval = time.Minute
@@ -1927,8 +2227,8 @@ func TestRestartV3_ExactParentDeathSignalClosesStandbyImmediately(t *testing.T) 
 	case <-time.After(time.Second):
 		t.Fatal("exact parent death did not stop standby immediately")
 	}
-	if standby.closeCount() != 1 {
-		t.Fatalf("standby close count = %d, want 1", standby.closeCount())
+	if acquireCalls != 2 || standby.closeCount() != 1 {
+		t.Fatalf("acquires=%d standby close count=%d, want 2/1", acquireCalls, standby.closeCount())
 	}
 }
 
