@@ -12,6 +12,7 @@ $realGo = (Get-Command go -ErrorAction Stop).Source
 $releaseVersion = "1.2.3-beta.1"
 $releaseCommit = "0123456789abcdef0123456789abcdef01234567"
 $releaseBuildDate = "2026-09-07T06:07:08Z"
+$fixtureCommit = "abcdef0123456789abcdef0123456789abcdef01"
 
 New-Item -ItemType Directory -Force -Path $fakeTools | Out-Null
 Copy-Item -LiteralPath $buildScript -Destination (Join-Path $fixtureRoot "build.ps1")
@@ -23,7 +24,16 @@ if (Test-Path -LiteralPath $contract) {
 [void](New-Item -ItemType Directory -Force -Path (Join-Path $fixtureRoot "cmd/mcphub-windowless"))
 Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/versioninfo.json") -Destination (Join-Path $fixtureRoot "cmd/mcphub/versioninfo.json")
 Copy-Item -LiteralPath (Join-Path $repoRoot "cmd/mcphub/mcphub.ico") -Destination (Join-Path $fixtureRoot "cmd/mcphub/mcphub.ico")
-[IO.File]::WriteAllText((Join-Path $fakeTools "git.cmd"), "@echo deadbeef`r`n@exit /b 0`r`n")
+$fakeGit = @"
+@echo off
+@if not "%~1"=="-C" exit /b 91
+@if /I not "%~2"=="$fixtureRoot" exit /b 92
+@if not "%~3"=="rev-parse" exit /b 93
+@if not "%~4"=="HEAD" exit /b 94
+@echo $fixtureCommit
+@exit /b 0
+"@
+[IO.File]::WriteAllText((Join-Path $fakeTools "git.cmd"), $fakeGit)
 [IO.File]::WriteAllText((Join-Path $fakeTools "go.cmd"), '@if "%1"=="env" (@echo %MCPHUB_FAKE_GOARCH% & @exit /b 0) else (@echo partial-resource^>cmd\mcphub\zz_product_versioninfo.syso & @exit /b 93)' + "`r`n")
 
 $priorPath = $env:PATH
@@ -31,6 +41,19 @@ try {
     $env:PATH = $fakeTools
     $priorFakeArch = $env:MCPHUB_FAKE_GOARCH
     $env:MCPHUB_FAKE_GOARCH = "amd64"
+    $outsideCwd = Join-Path $fixtureRoot "caller-cwd"
+    New-Item -ItemType Directory -Force -Path $outsideCwd | Out-Null
+    Push-Location $outsideCwd
+    try {
+        $outsideJson = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson
+        if ($LASTEXITCODE -ne 0) { throw "outside-CWD build plan failed with exit $LASTEXITCODE" }
+        $outsidePlan = $outsideJson | ConvertFrom-Json
+        if ($outsidePlan.commit -ne $fixtureCommit) {
+            throw "outside-CWD build plan commit=$($outsidePlan.commit), want script-root commit $fixtureCommit"
+        }
+    } finally {
+        Pop-Location
+    }
     Push-Location $fixtureRoot
     try {
         $json = & $pwsh -NoProfile -File (Join-Path $fixtureRoot "build.ps1") -PrintPlanJson

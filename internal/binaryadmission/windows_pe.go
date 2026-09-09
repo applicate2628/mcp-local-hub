@@ -44,6 +44,7 @@ type WindowsArtifact struct {
 	Commit    string              `json:"commit,omitempty"`
 	BuildDate string              `json:"build_date,omitempty"`
 	SHA256    string              `json:"sha256"`
+	machine   uint16
 }
 
 // WindowsProductPair is the admitted role-keyed Windows product identity.
@@ -124,6 +125,10 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	if subsystem != expected {
 		return WindowsArtifact{}, &Error{ID: WindowsPESubsystemErrorID, Path: artifact.Path, Expected: expected, Actual: subsystem}
 	}
+	machine, err := readWindowsPEMachineFile(artifact.Path)
+	if err != nil {
+		return WindowsArtifact{}, err
+	}
 	identity, err := readWindowsBuildIdentity(artifact.Path)
 	if err != nil {
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: VERSIONINFO: %w", WindowsProductPairErrorID, artifact.Path, err)
@@ -152,6 +157,7 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	artifact.Commit = identity.Commit
 	artifact.BuildDate = identity.BuildDate
 	artifact.SHA256 = actual
+	artifact.machine = machine
 	return artifact, nil
 }
 
@@ -172,6 +178,9 @@ func AdmitWindowsProductPair(cli, windowless WindowsArtifact) (WindowsProductPai
 	}
 	if admittedCLI.Version != admittedWindowless.Version || admittedCLI.Commit != admittedWindowless.Commit || admittedCLI.BuildDate != admittedWindowless.BuildDate {
 		return WindowsProductPair{}, fmt.Errorf("%s: artifact-derived identity differs between roles", WindowsProductPairErrorID)
+	}
+	if admittedCLI.machine != admittedWindowless.machine {
+		return WindowsProductPair{}, fmt.Errorf("%s: COFF machine differs between roles: cli %#x, windowless %#x", WindowsProductPairErrorID, admittedCLI.machine, admittedWindowless.machine)
 	}
 	return WindowsProductPair{CLI: admittedCLI, Windowless: admittedWindowless}, nil
 }
@@ -197,23 +206,39 @@ func AdmitWindowsUpgradePrior(path string) error {
 }
 
 func readWindowsPESubsystemFile(path string) (uint16, error) {
+	header, err := readWindowsPEHeaderFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return header.subsystem, nil
+}
+
+func readWindowsPEMachineFile(path string) (uint16, error) {
+	header, err := readWindowsPEHeaderFile(path)
+	if err != nil {
+		return 0, err
+	}
+	return header.machine, nil
+}
+
+func readWindowsPEHeaderFile(path string) (windowsPEHeader, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, formatError(path, err)
+		return windowsPEHeader{}, formatError(path, err)
 	}
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
-		return 0, formatError(path, err)
+		return windowsPEHeader{}, formatError(path, err)
 	}
 	if !info.Mode().IsRegular() {
-		return 0, formatError(path, fmt.Errorf("not a regular file"))
+		return windowsPEHeader{}, formatError(path, fmt.Errorf("not a regular file"))
 	}
-	subsystem, err := ReadWindowsPESubsystem(f, info.Size())
+	header, err := readWindowsPEHeader(f, info.Size())
 	if err != nil {
-		return 0, formatError(path, err)
+		return windowsPEHeader{}, formatError(path, err)
 	}
-	return subsystem, nil
+	return header, nil
 }
 
 func readWindowsPECharacteristicsFile(path string) (uint16, error) {
@@ -254,43 +279,59 @@ func formatError(path string, err error) error {
 	return &Error{ID: WindowsPEFormatErrorID, Path: path, Cause: err}
 }
 
+type windowsPEHeader struct {
+	machine   uint16
+	subsystem uint16
+}
+
 // ReadWindowsPESubsystem performs exactly two bounded random-access reads. It
 // accepts only the PE32 and PE32+ optional-header shapes and never allocates
 // from, maps, or executes candidate-controlled offsets.
 func ReadWindowsPESubsystem(r io.ReaderAt, size int64) (uint16, error) {
+	header, err := readWindowsPEHeader(r, size)
+	if err != nil {
+		return 0, err
+	}
+	return header.subsystem, nil
+}
+
+func readWindowsPEHeader(r io.ReaderAt, size int64) (windowsPEHeader, error) {
 	if r == nil {
-		return 0, fmt.Errorf("nil reader")
+		return windowsPEHeader{}, fmt.Errorf("nil reader")
 	}
 	var dos [64]byte
 	if size < int64(len(dos)) {
-		return 0, fmt.Errorf("truncated DOS header: size %d", size)
+		return windowsPEHeader{}, fmt.Errorf("truncated DOS header: size %d", size)
 	}
 	if _, err := r.ReadAt(dos[:], 0); err != nil {
-		return 0, fmt.Errorf("read DOS header: %w", err)
+		return windowsPEHeader{}, fmt.Errorf("read DOS header: %w", err)
 	}
 	if dos[0] != 'M' || dos[1] != 'Z' {
-		return 0, fmt.Errorf("missing MZ signature")
+		return windowsPEHeader{}, fmt.Errorf("missing MZ signature")
 	}
 	peOffset := int64(binary.LittleEndian.Uint32(dos[0x3c:0x40]))
 	const bytesThroughSubsystem = 24 + 70
 	if peOffset < int64(len(dos)) || peOffset > maxWindowsPEHeaderOffset ||
 		peOffset > size-bytesThroughSubsystem {
-		return 0, fmt.Errorf("invalid PE header offset %d for size %d", peOffset, size)
+		return windowsPEHeader{}, fmt.Errorf("invalid PE header offset %d for size %d", peOffset, size)
 	}
 	var header [bytesThroughSubsystem]byte
 	if _, err := r.ReadAt(header[:], peOffset); err != nil {
-		return 0, fmt.Errorf("read PE header: %w", err)
+		return windowsPEHeader{}, fmt.Errorf("read PE header: %w", err)
 	}
 	if string(header[:4]) != "PE\x00\x00" {
-		return 0, fmt.Errorf("missing PE signature")
+		return windowsPEHeader{}, fmt.Errorf("missing PE signature")
 	}
 	optionalSize := binary.LittleEndian.Uint16(header[20:22])
 	if optionalSize < 70 {
-		return 0, fmt.Errorf("optional header too small: %d", optionalSize)
+		return windowsPEHeader{}, fmt.Errorf("optional header too small: %d", optionalSize)
 	}
 	magic := binary.LittleEndian.Uint16(header[24:26])
 	if magic != 0x10b && magic != 0x20b {
-		return 0, fmt.Errorf("unsupported optional-header magic %#x", magic)
+		return windowsPEHeader{}, fmt.Errorf("unsupported optional-header magic %#x", magic)
 	}
-	return binary.LittleEndian.Uint16(header[24+68 : 24+70]), nil
+	return windowsPEHeader{
+		machine:   binary.LittleEndian.Uint16(header[4:6]),
+		subsystem: binary.LittleEndian.Uint16(header[24+68 : 24+70]),
+	}, nil
 }
