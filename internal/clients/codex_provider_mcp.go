@@ -382,29 +382,31 @@ func normalizeCodexProviderEntry(row codexPluginInventoryRow, receiptRoot, serve
 	if providerHasVariable(entry.Command) || providerStringsHaveVariable(args) {
 		return entry, errors.New("receipt variable expansion unsupported")
 	}
-	cwd, present := raw["cwd"]
-	if !present {
-		return entry, errors.New("receipt cwd missing")
-	}
-	cwdText, ok := cwd.(string)
-	if !ok {
-		return entry, errors.New("receipt cwd invalid")
-	}
-	if providerHasVariable(cwdText) {
-		return entry, errors.New("receipt variable expansion unsupported")
-	}
-	if cwdText == "" {
-		entry.WorkingDir = new(string)
-	} else {
-		resolved := filepath.Clean(filepath.Join(receiptRoot, cwdText))
-		if !filepath.IsAbs(resolved) {
-			return entry, errors.New("receipt cwd unresolved")
+	if entry.Transport == ProviderMCPTransportStdio {
+		cwd, present := raw["cwd"]
+		if !present {
+			return entry, errors.New("receipt cwd missing")
 		}
-		info, err := os.Stat(resolved)
-		if err != nil || !info.IsDir() {
-			return entry, errors.New("receipt cwd unavailable")
+		cwdText, ok := cwd.(string)
+		if !ok {
+			return entry, errors.New("receipt cwd invalid")
 		}
-		entry.WorkingDir = &resolved
+		if providerHasVariable(cwdText) {
+			return entry, errors.New("receipt variable expansion unsupported")
+		}
+		if cwdText == "" {
+			entry.WorkingDir = new(string)
+		} else {
+			resolved := filepath.Clean(filepath.Join(receiptRoot, cwdText))
+			if !filepath.IsAbs(resolved) {
+				return entry, errors.New("receipt cwd unresolved")
+			}
+			info, err := os.Stat(resolved)
+			if err != nil || !info.IsDir() {
+				return entry, errors.New("receipt cwd unavailable")
+			}
+			entry.WorkingDir = &resolved
+		}
 	}
 	env, err := providerStringMap(raw["env"])
 	if err != nil {

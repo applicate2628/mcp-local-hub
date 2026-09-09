@@ -1128,6 +1128,64 @@ func TestScanEntryProcessAttributionWireIsAbsentWithoutProcessFlag(t *testing.T)
 	}
 }
 
+// TestScanProcessDescriptorsForEntry_UsesWorkspaceRegistryIdentity keeps
+// workspace-proxy attribution on the registry's persisted client entry,
+// task, and port identity. The LSP producer intentionally serializes the
+// generic server name, so matching an LSP scan row by its language-specific
+// client entry name alone cannot select the correct descriptor.
+func TestScanProcessDescriptorsForEntry_UsesWorkspaceRegistryIdentity(t *testing.T) {
+	workspaceA := WorkspaceEntry{
+		WorkspaceKey:  "aaaabbbb",
+		WorkspacePath: filepath.Join(t.TempDir(), "workspace-a"),
+		Language:      "go",
+		Backend:       "mcp-language-server",
+		Port:          9401,
+		ClientEntries: map[string]string{
+			"codex-cli":   "mcp-language-server-go",
+			"claude-code": "mcp-language-server-go",
+		},
+	}
+	workspaceB := WorkspaceEntry{
+		WorkspaceKey:  "ccccdddd",
+		WorkspacePath: filepath.Join(t.TempDir(), "workspace-b"),
+		Language:      "python",
+		Backend:       "mcp-language-server",
+		Port:          9402,
+		ClientEntries: map[string]string{
+			"codex-cli": "mcp-language-server-python",
+		},
+	}
+	descriptorA := BuildSupervisorDaemonForLSP(workspaceA, "mcphub")
+	descriptorB := BuildSupervisorDaemonForLSP(workspaceB, "mcphub")
+	workspaceA.TaskName = descriptorA.TaskName
+	workspaceB.TaskName = descriptorB.TaskName
+
+	descriptors := map[string][]SupervisorDaemon{
+		"mcp-language-server": {descriptorA, descriptorB},
+		"memory":              {{TaskName: `\\mcp-local-hub-memory-default`, Server: "memory", Daemon: "default", Port: 9123}},
+	}
+	registry := &Registry{Workspaces: []WorkspaceEntry{workspaceA, workspaceB}}
+
+	got := scanProcessDescriptorsForEntry(&ScanEntry{
+		Name: "mcp-language-server-go",
+		ClientPresence: map[string]ClientEntry{
+			"codex-cli":   {Transport: "http", Endpoint: "http://127.0.0.1:9401/mcp"},
+			"claude-code": {Transport: "http", Endpoint: "http://127.0.0.1:9401/mcp"},
+		},
+	}, registry, descriptors)
+	if len(got) != 1 {
+		t.Fatalf("workspace LSP descriptors = %d, want exactly one; got %#v", len(got), got)
+	}
+	if got[0].TaskName != descriptorA.TaskName || got[0].Port != workspaceA.Port {
+		t.Fatalf("workspace LSP descriptor = (%q, %d), want producer A identity (%q, %d)", got[0].TaskName, got[0].Port, descriptorA.TaskName, workspaceA.Port)
+	}
+
+	generic := scanProcessDescriptorsForEntry(&ScanEntry{Name: "memory"}, registry, descriptors)
+	if len(generic) != 1 || generic[0].TaskName != descriptors["memory"][0].TaskName {
+		t.Fatalf("generic descriptor lookup changed: got %#v, want %#v", generic, descriptors["memory"])
+	}
+}
+
 func TestScanFromWithoutProcessCountKeepsProcessProjectionAbsent(t *testing.T) {
 	root := t.TempDir()
 	configPath := filepath.Join(root, "claude.json")

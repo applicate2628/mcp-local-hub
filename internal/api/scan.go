@@ -896,7 +896,7 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		descriptors := scanProcessDescriptorsByServer(intent)
 		for i := range out.Entries {
 			entry := &out.Entries[i]
-			descriptorRows := descriptors[entry.Name]
+			descriptorRows := scanProcessDescriptorsForEntry(entry, reg, descriptors)
 			attribution := manifestCache.processAttribution(entry.Name, descriptorRows)
 			if len(descriptorRows) == 0 && entry.Managed {
 				attribution = unavailableProcessAttribution(processAttributionScopeManaged, processAttributionReasonManagedDescriptorUnavailable)
@@ -930,6 +930,51 @@ func scanProcessDescriptorsByServer(intent *SupervisorIntentFile) map[string][]S
 		byServer[server] = append(byServer[server], descriptor)
 	}
 	return byServer
+}
+
+// scanProcessDescriptorsForEntry selects the persisted descriptors that own a
+// scan row. Ordinary server rows retain their exact server-name lookup. A
+// workspace LSP row is different: client configuration uses its language
+// entry name, while BuildSupervisorDaemonForLSP persists its descriptor under
+// the generic backend name. Resolve that bridge through the workspace registry
+// binding and require the configured loopback port plus registry task/port to
+// agree with the descriptor; never reconstruct an LSP descriptor name.
+func scanProcessDescriptorsForEntry(entry *ScanEntry, reg *Registry, descriptors map[string][]SupervisorDaemon) []SupervisorDaemon {
+	if rows := descriptors[entry.Name]; len(rows) != 0 || reg == nil {
+		return rows
+	}
+
+	selected := make([]SupervisorDaemon, 0)
+	seenTasks := map[string]bool{}
+	for _, workspace := range reg.LSPEntries() {
+		if workspace.Backend == "" || workspace.TaskName == "" || workspace.Port <= 0 || !scanEntryMatchesWorkspaceBinding(entry, workspace) {
+			continue
+		}
+		for _, descriptor := range descriptors[workspace.Backend] {
+			if canonicalIntentTaskKey(descriptor.TaskName) != canonicalIntentTaskKey(workspace.TaskName) || descriptor.Port != workspace.Port {
+				continue
+			}
+			taskKey := canonicalIntentTaskKey(descriptor.TaskName)
+			if seenTasks[taskKey] {
+				continue
+			}
+			seenTasks[taskKey] = true
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected
+}
+
+func scanEntryMatchesWorkspaceBinding(entry *ScanEntry, workspace WorkspaceEntry) bool {
+	for clientName, clientEntry := range entry.ClientPresence {
+		if workspace.ClientEntries[clientName] != entry.Name || clientEntry.Transport != "http" {
+			continue
+		}
+		if port, ok := loopbackEntryPort(clientEntry.Endpoint); ok && port == workspace.Port {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeClientScanEntries(dst, src map[string]*ScanEntry) {

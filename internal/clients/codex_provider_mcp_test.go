@@ -93,6 +93,44 @@ func TestCodexListProviderMCPEntriesClassifiesDisabledHTTPAndPolicy(t *testing.T
 	}
 }
 
+// A provider receipt may contain unrelated HTTP and stdio entries. HTTP owns
+// its URL transport and has no working-directory requirement; a valid stdio
+// sibling must still be normalized from its required cwd.
+func TestCodexListProviderMCPEntriesKeepsHTTPEntryWithoutCWDBesideStdio(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	receipt := filepath.Join(root, "plugins", "cache", "catalog-a", "quartz-tools", "7.4.2")
+	writeProviderReceiptForSchemaTest(t, receipt, "quartz-tools", "7.4.2", `{"mcp_servers":{
+"http-only":{"url":"http://127.0.0.1:9999/mcp"},
+"stdio-worker":{"command":"./bin/launch","args":["--stdio"],"cwd":"."}
+}}`)
+	withProviderInventory(t, providerInventoryJSON(`[{"pluginId":"quartz-tools@catalog-a","name":"quartz-tools","marketplaceName":"catalog-a","version":"7.4.2","installed":true,"enabled":true,"source":{"source":"marketplace","id":"catalog-a"},"installPolicy":"user","authPolicy":"none"}]`))
+
+	entries, err := (&codexCLI{path: filepath.Join(root, "config.toml")}).ListProviderMCPEntries(context.Background())
+	if err != nil {
+		t.Fatalf("mixed inventory: %v", err)
+	}
+	if len(entries) != 2 || entries[0].ServerName != "http-only" || entries[0].Transport != ProviderMCPTransportHTTP || entries[0].WorkingDir != nil {
+		t.Fatalf("HTTP entry = %#v, want bare HTTP transport without working directory", entries)
+	}
+	if entries[1].ServerName != "stdio-worker" || entries[1].Transport != ProviderMCPTransportStdio || entries[1].WorkingDir == nil || *entries[1].WorkingDir != receipt {
+		t.Fatalf("stdio entry = %#v, want cwd-resolved stdio sibling", entries[1])
+	}
+}
+
+func TestCodexListProviderMCPEntriesStillRequiresCWDForStdio(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	receipt := filepath.Join(root, "plugins", "cache", "catalog-a", "quartz-tools", "7.4.2")
+	writeProviderReceiptForSchemaTest(t, receipt, "quartz-tools", "7.4.2", `{"mcp_servers":{"stdio-worker":{"command":"./bin/launch","args":["--stdio"]}}}`)
+	withProviderInventory(t, providerInventoryJSON(`[{"pluginId":"quartz-tools@catalog-a","name":"quartz-tools","marketplaceName":"catalog-a","version":"7.4.2","installed":true,"enabled":true,"source":{"source":"marketplace","id":"catalog-a"},"installPolicy":"user","authPolicy":"none"}]`))
+
+	_, err := (&codexCLI{path: filepath.Join(root, "config.toml")}).ListProviderMCPEntries(context.Background())
+	if !errors.Is(err, errCodexProviderInventoryUnavailable) || !strings.Contains(err.Error(), "receipt cwd missing") {
+		t.Fatalf("stdio receipt without cwd error = %v", err)
+	}
+}
+
 func TestCodexListProviderMCPEntriesCapturesPriorActivationAndDisabledFingerprint(t *testing.T) {
 	for _, tc := range []struct {
 		name        string
