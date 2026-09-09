@@ -88,6 +88,20 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 			api.ReleaseAndJoin(&retErr, fence.Release, "release upgrade transaction fence")
 		}
 	}()
+	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
+	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(ctx, stateDir, target, windowlessTarget))
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", err)
+	}
+	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
+		return nil
+	}
+	windowlessSource := scheduler.WindowsOwnedEntrypointPath(exe)
+	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, exe, windowlessSource, target, windowlessTarget, WindowsProductPairModeUpgrade); err != nil {
+		return fmt.Errorf("v0.5 upgrade: reconcile committed Windows product pair: %w", err)
+	} else if reconciled {
+		return nil
+	}
 
 	stagedCLI, stagedWindowless, err := stageV5UpgradeProductPair(exe, target)
 	if err != nil {
@@ -131,7 +145,6 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 			expectedPorts = append(expectedPorts, port)
 		}
 	}
-	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
 	pairTxn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
 		Context:          ctx,
 		StateDir:         stateDir,
@@ -140,10 +153,15 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 		StagedCLI:        stagedCLI,
 		StagedWindowless: stagedWindowless,
 		Mode:             WindowsProductPairModeUpgrade,
+		PriorFleetReaped: true,
 		StartSupervisor:  deps.StartSupervisor,
 		RestartPrior:     deps.StartSupervisor,
 		SettleSuccessor: func(string) error {
-			return deps.ForceKillSupervisor(deps.pipePath)
+			err := deps.ForceKillSupervisor(deps.pipePath)
+			if isAlreadyExitedError(err) {
+				return nil
+			}
+			return err
 		},
 		WaitSupervisorReady: func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error {
 			candidate := UpgradeCandidateV1{
@@ -316,6 +334,34 @@ func buildV5UpgradeDeps(canonicalTarget, stateDir string) *v5UpgradeDeps {
 		exePath:           canonicalTarget,
 		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
 		pipePath:          api.SupervisorIPCAddress(stateDir),
+	}
+}
+
+func windowsProductPairRecoveryRuntimeRequest(ctx context.Context, stateDir, cliPath, windowlessPath string) windowsProductPairRecoveryRequest {
+	deps := buildV5UpgradeDeps(cliPath, stateDir)
+	return windowsProductPairRecoveryRequest{
+		Context:        ctx,
+		StateDir:       stateDir,
+		CLIPath:        cliPath,
+		WindowlessPath: windowlessPath,
+		SettleSuccessor: func(string) error {
+			err := deps.ForceKillSupervisor(deps.pipePath)
+			if isAlreadyExitedError(err) {
+				return nil
+			}
+			return err
+		},
+		ObservePriorReady: func(ctx context.Context, binaryPath, sha256 string) (bool, error) {
+			ready, err := deps.probeUpgradeReadyOnce(binaryPath, UpgradeCandidateV1{SHA256: sha256})
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, process.ErrProcessNotFound) {
+				return false, nil
+			}
+			return ready, err
+		},
+		RestartPrior: deps.StartSupervisor,
+		WaitPriorReady: func(ctx context.Context, binaryPath, sha256 string) error {
+			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, binaryPath, UpgradeCandidateV1{SHA256: sha256})
+		},
 	}
 }
 

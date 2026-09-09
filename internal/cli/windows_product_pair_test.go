@@ -21,10 +21,16 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 )
 
+var (
+	productPairTestCLISHA        = strings.Repeat("c", sha256.Size*2)
+	productPairTestWindowlessSHA = strings.Repeat("d", sha256.Size*2)
+)
+
 type productPairTaskFake struct {
 	order        *[]string
 	restored     bool
 	closed       bool
+	discarded    bool
 	closeErr     error
 	inventoryErr error
 }
@@ -119,6 +125,52 @@ func (f *productPairTaskFake) RestoreImport() error {
 	return nil
 }
 func (f *productPairTaskFake) Close() error { f.closed = true; return f.closeErr }
+func (f *productPairTaskFake) RecoveryDescriptor() (WindowsProductPairTaskRecovery, error) {
+	return WindowsProductPairTaskRecovery{StoreRoot: filepath.Join(os.TempDir(), "fixture-task-store")}, nil
+}
+func (f *productPairTaskFake) DiscardRecoveryStore() error { f.discarded = true; return nil }
+
+func TestWindowsProductPairTxnRefusesPromotionBeforeExactJournalReadback(t *testing.T) {
+	dir := t.TempDir()
+	paths := productPairFixturePaths(dir)
+	writePairFixture(t, paths.priorCLI, []byte("prior-cli"))
+	writePairFixture(t, paths.stagedCLI, []byte("staged-cli"))
+	writePairFixture(t, paths.stagedWindowless, []byte("staged-windowless"))
+	var order []string
+	tasks := &productPairTaskFake{order: &order}
+	deps := productPairTestDeps(&order)
+	deps.WriteRecoveryJournal = func(path string, raw []byte) error {
+		order = append(order, "journal-write")
+		if path != filepath.Join(filepath.Dir(paths.receipt), WindowsProductPairRecoveryFileLeaf) {
+			t.Fatalf("journal path=%q", path)
+		}
+		return nil
+	}
+	deps.ReadRecoveryJournal = func(string) ([]byte, error) {
+		order = append(order, "journal-readback")
+		return []byte(`{"schema":"tampered"}`), nil
+	}
+	promotions := 0
+	deps.Promote = func(string, string, string) (WindowsProductPairPromotion, error) {
+		promotions++
+		return WindowsProductPairPromotion{}, errors.New("promotion must remain unreachable")
+	}
+	_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
+		StateDir: filepath.Dir(paths.receipt), CLIPath: paths.priorCLI, WindowlessPath: paths.windowless,
+		StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
+		Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
+	}}).Run(context.Background())
+	if err == nil || !errors.Is(err, ErrWindowsProductPairRecoveryPrepare) {
+		t.Fatalf("error=%v, want durable recovery prepare failure", err)
+	}
+	if promotions != 0 || !tasks.closed || tasks.discarded {
+		t.Fatalf("promotions=%d closed=%v discarded=%v", promotions, tasks.closed, tasks.discarded)
+	}
+	wantPrefix := []string{"admit-staged", "tasks-snapshot", "journal-write", "journal-readback", "journal-readback"}
+	if !reflect.DeepEqual(order, wantPrefix) {
+		t.Fatalf("order=%v want=%v", order, wantPrefix)
+	}
+}
 
 func TestWindowsProductPairTxnOrdersAdapterTasksCLIReadbackReadinessAndReceipt(t *testing.T) {
 	dir := t.TempDir()
@@ -152,7 +204,7 @@ func TestWindowsProductPairTxnOrdersAdapterTasksCLIReadbackReadinessAndReceipt(t
 		t.Fatal(err)
 	}
 	decoded, err := DecodeUpgradeReceipt(raw)
-	if err != nil || decoded.V2 == nil || decoded.V2.Artifacts.CLI.SHA256 != "cli-sha" || decoded.V2.Artifacts.Windowless.SHA256 != "windowless-sha" {
+	if err != nil || decoded.V2 == nil || decoded.V2.Artifacts.CLI.SHA256 != productPairTestCLISHA || decoded.V2.Artifacts.Windowless.SHA256 != productPairTestWindowlessSHA {
 		t.Fatalf("receipt=%+v err=%v raw=%s", decoded, err, raw)
 	}
 }
@@ -360,8 +412,8 @@ func productPairTestDeps(order *[]string) WindowsProductPairTxnDeps {
 				*order = append(*order, "readback-pair")
 			}
 			return binaryadmission.WindowsProductPair{
-				CLI:        binaryadmission.WindowsArtifact{Path: cli.Path, Role: binaryadmission.WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: "cli-sha"},
-				Windowless: binaryadmission.WindowsArtifact{Path: windowless.Path, Role: binaryadmission.WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: "windowless-sha"},
+				CLI:        binaryadmission.WindowsArtifact{Path: cli.Path, Role: binaryadmission.WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: productPairTestCLISHA},
+				Windowless: binaryadmission.WindowsArtifact{Path: windowless.Path, Role: binaryadmission.WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: productPairTestWindowlessSHA},
 			}, nil
 		},
 		Promote: func(src, dst, _ string) (WindowsProductPairPromotion, error) {
@@ -468,8 +520,8 @@ func TestWindowsProductPairTxnEventFailureAfterReceiptDoesNotRollbackCommittedPa
 
 func TestWindowsProductPairCommitReconciliationIsReceiptBoundAndIdempotent(t *testing.T) {
 	pair := binaryadmission.WindowsProductPair{
-		CLI:        binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: "cli-sha"},
-		Windowless: binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: "windowless-sha"},
+		CLI:        binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: productPairTestCLISHA},
+		Windowless: binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: productPairTestWindowlessSHA},
 	}
 	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-01T00:00:01Z"}
 	raw, err := json.Marshal(receipt)

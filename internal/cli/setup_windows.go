@@ -20,12 +20,28 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-func bootstrapProductToTarget(w io.Writer, curExe, target string) error {
+func bootstrapProductToTarget(w io.Writer, curExe, target string) (retErr error) {
 	windowlessSource := scheduler.WindowsOwnedEntrypointPath(curExe)
 	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("resolve state-dir for Windows setup product pair: %w", err)
+	}
+	fence, acquired, err := api.TryAcquireUpgradeFence(context.Background(), stateDir)
+	if err != nil {
+		return fmt.Errorf("acquire Windows setup product-pair fence: %w", err)
+	}
+	if !acquired {
+		return errors.New("acquire Windows setup product-pair fence: another product-pair transaction is active")
+	}
+	defer api.ReleaseAndJoin(&retErr, fence.Release, "release Windows setup product-pair fence")
+	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(context.Background(), stateDir, target, windowlessTarget))
+	if err != nil {
+		return fmt.Errorf("recover Windows setup product pair: %w", err)
+	}
+	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
+		fmt.Fprintf(w, "\u2713 mcphub Windows product pair crash recovery kept committed pair at %s\n", filepath.Dir(target))
+		return nil
 	}
 	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, curExe, windowlessSource, target, windowlessTarget, WindowsProductPairModeSetup); err != nil {
 		return err

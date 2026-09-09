@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"mcp-local-hub/internal/api"
@@ -25,6 +26,7 @@ type windowsProductPairTxnRequest struct {
 	StagedCLI           string
 	StagedWindowless    string
 	Mode                WindowsProductPairMode
+	PriorFleetReaped    bool
 	StartSupervisor     func(string) error
 	WaitSupervisorReady func(context.Context, string, binaryadmission.WindowsProductPair) error
 	RestartPrior        func(string) error
@@ -32,6 +34,69 @@ type windowsProductPairTxnRequest struct {
 }
 
 var newWindowsProductPairTxnFn = newWindowsProductPairTxn
+
+func reconcileWiredWindowsProductPairRecovery(req windowsProductPairRecoveryRequest) (*WindowsProductPairRecoverySettled, error) {
+	if req.Context == nil {
+		req.Context = context.Background()
+	}
+	if req.Deps.ReopenTasks == nil {
+		req.Deps.ReopenTasks = func(ctx context.Context, recovery WindowsProductPairTaskRecovery) (WindowsProductPairTaskTxn, error) {
+			store, err := reopenWindowsProductPairTaskStore(req.StateDir, recovery, true)
+			if err != nil {
+				return nil, err
+			}
+			backups := make([]scheduler.OwnedEntrypointTaskBackup, 0, len(recovery.Backups))
+			for _, backup := range recovery.Backups {
+				backups = append(backups, scheduler.OwnedEntrypointTaskBackup{TaskName: backup.TaskName, Ref: backup.Ref, SHA256: backup.SHA256})
+			}
+			txn, err := scheduler.ReopenOwnedEntrypointTaskTxnWithStore(
+				ctx,
+				filepath.Join(req.StateDir, "windows-product-pair-entrypoint.lock"),
+				req.CLIPath,
+				req.WindowlessPath,
+				store,
+				backups,
+			)
+			if err != nil {
+				return nil, err
+			}
+			return &windowsProductPairTaskOwner{txn: txn, store: store}, nil
+		}
+	}
+	if req.Deps.DiscardTaskStore == nil {
+		req.Deps.DiscardTaskStore = func(recovery WindowsProductPairTaskRecovery) error {
+			store, err := reopenWindowsProductPairTaskStore(req.StateDir, recovery, false)
+			if err != nil {
+				return err
+			}
+			return store.Close()
+		}
+	}
+	if req.ReconcileCommitted == nil {
+		req.ReconcileCommitted = func(journal windowsProductPairRecoveryJournal) error {
+			raw, err := api.ReadStateFileInodeAnchored(journal.Receipt.Path)
+			if err != nil {
+				return fmt.Errorf("read recovered committed Windows product pair receipt: %w", err)
+			}
+			pair, err := binaryadmission.AdmitWindowsProductPair(
+				binaryadmission.WindowsArtifact{Path: req.CLIPath, Role: binaryadmission.WindowsArtifactRoleCLI, SHA256: journal.CLI.NewSHA256},
+				binaryadmission.WindowsArtifact{Path: req.WindowlessPath, Role: binaryadmission.WindowsArtifactRoleWindowless, SHA256: journal.Windowless.NewSHA256},
+			)
+			if err != nil {
+				return fmt.Errorf("admit recovered committed Windows product pair: %w", err)
+			}
+			reconciled, err := reconcileWindowsProductPairCommit(raw, pair, pair, journal.Mode, windowsProductPairEventPublisher(req.StateDir))
+			if err != nil {
+				return err
+			}
+			if !reconciled {
+				return errors.New("recovered committed Windows product pair receipt no longer matches its canonical pair")
+			}
+			return nil
+		}
+	}
+	return reconcileWindowsProductPairRecovery(req)
+}
 
 func newWindowsProductPairTxn(req windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
 	if req.Context == nil {
@@ -57,12 +122,14 @@ func newWindowsProductPairTxn(req windowsProductPairTxnRequest) (*WindowsProduct
 	}
 	tasks := &windowsProductPairTaskOwner{txn: taskTxn, store: store}
 	return &WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
+		StateDir:         req.StateDir,
 		CLIPath:          req.CLIPath,
 		WindowlessPath:   req.WindowlessPath,
 		StagedCLI:        req.StagedCLI,
 		StagedWindowless: req.StagedWindowless,
 		ReceiptPath:      filepath.Join(req.StateDir, UpgradeReceiptSchemaV2+".json"),
 		Mode:             req.Mode,
+		PriorFleetReaped: req.PriorFleetReaped,
 		Tasks:            tasks,
 		Deps: WindowsProductPairTxnDeps{
 			StartSupervisor:     req.StartSupervisor,
@@ -157,12 +224,19 @@ type windowsProductPairTaskOwner struct {
 }
 
 func (o *windowsProductPairTaskOwner) InventoryExport() error { return o.txn.InventoryExport() }
-func (o *windowsProductPairTaskOwner) RewriteCommand() error  { return o.txn.RewriteCommand() }
-func (o *windowsProductPairTaskOwner) VerifyRuntime() error   { return o.txn.VerifyRuntime() }
-func (o *windowsProductPairTaskOwner) RestoreImport() error   { return o.txn.RestoreImport() }
-func (o *windowsProductPairTaskOwner) Close() error {
-	return errors.Join(o.txn.Close(), o.store.Close())
+func (o *windowsProductPairTaskOwner) RecoveryDescriptor() (WindowsProductPairTaskRecovery, error) {
+	backups := o.txn.Backups()
+	converted := make([]WindowsProductPairTaskBackup, 0, len(backups))
+	for _, backup := range backups {
+		converted = append(converted, WindowsProductPairTaskBackup{TaskName: backup.TaskName, Ref: backup.Ref, SHA256: backup.SHA256})
+	}
+	return WindowsProductPairTaskRecovery{StoreRoot: o.store.root, Backups: converted}, nil
 }
+func (o *windowsProductPairTaskOwner) RewriteCommand() error       { return o.txn.RewriteCommand() }
+func (o *windowsProductPairTaskOwner) VerifyRuntime() error        { return o.txn.VerifyRuntime() }
+func (o *windowsProductPairTaskOwner) RestoreImport() error        { return o.txn.RestoreImport() }
+func (o *windowsProductPairTaskOwner) DiscardRecoveryStore() error { return o.store.Close() }
+func (o *windowsProductPairTaskOwner) Close() error                { return o.txn.Close() }
 
 // windowsProductPairTaskStore keeps exact task XML only for the lifetime of one
 // pair transaction. Writes and reads use the hardened state-file owner; Close
@@ -184,6 +258,31 @@ func newWindowsProductPairTaskStore(stateDir string) (*windowsProductPairTaskSto
 		return nil, fmt.Errorf("protect Windows product pair task rollback store: %w", err)
 	}
 	return &windowsProductPairTaskStore{root: root, hashes: make(map[string]string)}, nil
+}
+
+func reopenWindowsProductPairTaskStore(stateDir string, recovery WindowsProductPairTaskRecovery, requireRoot bool) (*windowsProductPairTaskStore, error) {
+	root := filepath.Clean(recovery.StoreRoot)
+	if !sameWindowsRecoveryPath(filepath.Dir(root), filepath.Clean(stateDir)) || !strings.HasPrefix(filepath.Base(root), "windows-product-pair-task-rollback-") {
+		return nil, errors.New("Windows product pair task rollback store is outside the exact state-directory owner")
+	}
+	if info, err := os.Lstat(root); err != nil {
+		if requireRoot || !errors.Is(err, os.ErrNotExist) {
+			return nil, fmt.Errorf("inspect retained task rollback store: %w", err)
+		}
+	} else if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, errors.New("retained task rollback store is not an ordinary directory")
+	}
+	hashes := make(map[string]string, len(recovery.Backups))
+	for _, backup := range recovery.Backups {
+		if backup.Ref == "" || filepath.Base(backup.Ref) != backup.Ref || strings.ContainsAny(backup.Ref, `/\\`) || backup.SHA256 == "" {
+			return nil, errors.New("retained task rollback descriptor contains an invalid opaque ref")
+		}
+		if prior, exists := hashes[backup.Ref]; exists && prior != backup.SHA256 {
+			return nil, errors.New("retained task rollback descriptor repeats an opaque ref with different identity")
+		}
+		hashes[backup.Ref] = backup.SHA256
+	}
+	return &windowsProductPairTaskStore{root: root, hashes: hashes}, nil
 }
 
 func (s *windowsProductPairTaskStore) Retain(ctx context.Context, xml []byte) (string, error) {

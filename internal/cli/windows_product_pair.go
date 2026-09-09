@@ -1,12 +1,20 @@
 package cli
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"path/filepath"
+	"reflect"
+	"sort"
+	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
@@ -16,6 +24,17 @@ import (
 const (
 	UpgradeReceiptSchemaV2              = "upgrade-receipt-v2"
 	WindowsProductPairCommittedSchemaV1 = "windows-product-pair-committed-v1"
+	WindowsProductPairRecoverySchemaV1  = "windows-product-pair-recovery-v1"
+	WindowsProductPairRecoveryFileLeaf  = WindowsProductPairRecoverySchemaV1 + ".json"
+)
+
+type WindowsProductPairRecoveryPhase string
+
+const (
+	WindowsProductPairRecoveryPrepared          WindowsProductPairRecoveryPhase = "prepared"
+	WindowsProductPairRecoverySuccessorStarting WindowsProductPairRecoveryPhase = "successor_starting"
+	WindowsProductPairRecoverySettledCommit     WindowsProductPairRecoveryPhase = "settled_commit"
+	WindowsProductPairRecoverySettledRollback   WindowsProductPairRecoveryPhase = "settled_rollback"
 )
 
 // WindowsProductPairStage is the deterministic fault/readback boundary used by
@@ -53,6 +72,10 @@ const (
 
 var ErrWindowsProductPairCommittedObservabilityFailed = errors.New("E_WINDOWS_PRODUCT_PAIR_COMMITTED_OBSERVABILITY_FAILED")
 var ErrWindowsProductPairCommittedCleanupFailed = errors.New("E_WINDOWS_PRODUCT_PAIR_COMMITTED_CLEANUP_FAILED")
+var ErrWindowsProductPairRecoveryPrepare = errors.New("E_WINDOWS_PRODUCT_PAIR_RECOVERY_PREPARE")
+var ErrWindowsProductPairRecoveryIdentity = errors.New("E_WINDOWS_PRODUCT_PAIR_RECOVERY_IDENTITY")
+var ErrWindowsProductPairRecoveryRollback = errors.New("E_WINDOWS_PRODUCT_PAIR_RECOVERY_ROLLBACK")
+var ErrWindowsProductPairRecoveryCleanup = errors.New("E_WINDOWS_PRODUCT_PAIR_RECOVERY_CLEANUP")
 
 // WindowsProductPairPrePromotionError marks a direct pair failure before any
 // artifact, task, or receipt promotion. Only the outer upgrade owner knows
@@ -68,10 +91,57 @@ func (e *WindowsProductPairPrePromotionError) Unwrap() error { return e.Cause }
 // surface. The concrete Windows adapter is scheduler.OwnedEntrypointTaskTxn.
 type WindowsProductPairTaskTxn interface {
 	InventoryExport() error
+	RecoveryDescriptor() (WindowsProductPairTaskRecovery, error)
 	RewriteCommand() error
 	VerifyRuntime() error
 	RestoreImport() error
+	DiscardRecoveryStore() error
 	Close() error
+}
+
+type WindowsProductPairTaskBackup struct {
+	TaskName string `json:"task_name"`
+	Ref      string `json:"opaque_ref"`
+	SHA256   string `json:"sha256"`
+}
+
+type WindowsProductPairTaskRecovery struct {
+	StoreRoot string                         `json:"retained_store_root"`
+	Backups   []WindowsProductPairTaskBackup `json:"backups"`
+}
+
+type windowsProductPairRecoveryArtifact struct {
+	Target                 string   `json:"target"`
+	PriorPresent           bool     `json:"prior_present"`
+	PriorSHA256            string   `json:"prior_sha256"`
+	NewSHA256              string   `json:"new_sha256"`
+	BaselineAsideBasenames []string `json:"baseline_generated_aside_basenames"`
+}
+
+type windowsProductPairRecoveryReceipt struct {
+	Path         string `json:"path"`
+	PriorPresent bool   `json:"prior_present"`
+	PriorBytes   []byte `json:"prior_bytes"`
+}
+
+type windowsProductPairRecoveryStaged struct {
+	CLIPath          string `json:"cli_path"`
+	CLISHA256        string `json:"cli_sha256"`
+	WindowlessPath   string `json:"windowless_path"`
+	WindowlessSHA256 string `json:"windowless_sha256"`
+}
+
+type windowsProductPairRecoveryJournal struct {
+	Schema           string                             `json:"schema"`
+	TransactionID    string                             `json:"transaction_id"`
+	Phase            WindowsProductPairRecoveryPhase    `json:"phase"`
+	Mode             WindowsProductPairMode             `json:"mode"`
+	CLI              windowsProductPairRecoveryArtifact `json:"cli"`
+	Windowless       windowsProductPairRecoveryArtifact `json:"windowless"`
+	Receipt          windowsProductPairRecoveryReceipt  `json:"receipt"`
+	Tasks            WindowsProductPairTaskRecovery     `json:"tasks"`
+	Staged           windowsProductPairRecoveryStaged   `json:"staged"`
+	PriorFleetReaped bool                               `json:"prior_fleet_reaped"`
 }
 
 // UpgradeReceiptV2 binds both role-correct artifacts after pair readback.
@@ -149,29 +219,35 @@ type WindowsProductPairPromotion struct {
 }
 
 type WindowsProductPairTxnDeps struct {
-	AdmitPair           func(cli, windowless binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error)
-	Promote             func(src, dst, newSHA256 string) (WindowsProductPairPromotion, error)
-	RestorePromotion    func(WindowsProductPairPromotion) (string, error)
-	SweepOldTargets     func([]string, ...func(string, error)) error
-	ReadBackWindowless  func(path string, expected binaryadmission.WindowsArtifact) error
-	StartSupervisor     func(cliPath string) error
-	WaitSupervisorReady func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error
-	RestartPrior        func(cliPath string) error
-	SettleSuccessor     func(cliPath string) error
-	WriteReceipt        func(path string, raw []byte) error
-	ReadReceipt         func(path string) ([]byte, error)
-	PublishCommitted    func(WindowsProductPairCommitEvent) (string, error)
-	Fault               func(WindowsProductPairStage) error
-	Now                 func() time.Time
+	AdmitPair             func(cli, windowless binaryadmission.WindowsArtifact) (binaryadmission.WindowsProductPair, error)
+	Promote               func(src, dst, newSHA256 string) (WindowsProductPairPromotion, error)
+	RestorePromotion      func(WindowsProductPairPromotion) (string, error)
+	SweepOldTargets       func([]string, ...func(string, error)) error
+	ReadBackWindowless    func(path string, expected binaryadmission.WindowsArtifact) error
+	StartSupervisor       func(cliPath string) error
+	WaitSupervisorReady   func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error
+	RestartPrior          func(cliPath string) error
+	SettleSuccessor       func(cliPath string) error
+	WriteReceipt          func(path string, raw []byte) error
+	ReadReceipt           func(path string) ([]byte, error)
+	WriteRecoveryJournal  func(path string, raw []byte) error
+	ReadRecoveryJournal   func(path string) ([]byte, error)
+	RemoveRecoveryJournal func(path string) error
+	ListGeneratedAsides   func(target string) ([]string, error)
+	PublishCommitted      func(WindowsProductPairCommitEvent) (string, error)
+	Fault                 func(WindowsProductPairStage) error
+	Now                   func() time.Time
 }
 
 type WindowsProductPairTxnOpts struct {
+	StateDir         string
 	CLIPath          string
 	WindowlessPath   string
 	StagedCLI        string
 	StagedWindowless string
 	ReceiptPath      string
 	Mode             WindowsProductPairMode
+	PriorFleetReaped bool
 	Tasks            WindowsProductPairTaskTxn
 	Deps             WindowsProductPairTxnDeps
 }
@@ -197,6 +273,9 @@ type productPairFileSnapshot struct {
 
 func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPairCommitted, retErr error) {
 	o := t.Opts
+	if o.StateDir == "" && o.ReceiptPath != "" {
+		o.StateDir = filepath.Dir(o.ReceiptPath)
+	}
 	prePromotion := func(err error) error { return &WindowsProductPairPrePromotionError{Cause: err} }
 	if o.Tasks == nil {
 		return WindowsProductPairCommitted{}, prePromotion(errors.New("Windows product pair transaction: task transaction is required"))
@@ -207,6 +286,7 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 	if o.Mode != WindowsProductPairModeSetup && o.Mode != WindowsProductPairModeCanonicalize && o.Mode != WindowsProductPairModeUpgrade {
 		return WindowsProductPairCommitted{}, prePromotion(errors.New("Windows product pair transaction: valid caller mode is required"))
 	}
+	preserveRecovery := false
 	defer func() {
 		if closeErr := o.Tasks.Close(); closeErr != nil {
 			if result.ReceiptSHA256 != "" {
@@ -216,6 +296,11 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 				retErr = errors.Join(retErr, fmt.Errorf("%w: receipt_sha256=%s: %v", ErrWindowsProductPairCommittedCleanupFailed, result.ReceiptSHA256, closeErr))
 			} else {
 				retErr = errors.Join(retErr, closeErr)
+			}
+		}
+		if !preserveRecovery {
+			if discardErr := o.Tasks.DiscardRecoveryStore(); discardErr != nil {
+				retErr = errors.Join(retErr, fmt.Errorf("discard Windows product pair recovery store: %w", discardErr))
 			}
 		}
 	}()
@@ -245,6 +330,11 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 	}
 	if err := o.Tasks.InventoryExport(); err != nil {
 		return WindowsProductPairCommitted{}, prePromotion(fmt.Errorf("snapshot exact-owned task XML: %w", err))
+	}
+	journal, journalMayExist, err := prepareWindowsProductPairRecoveryJournal(o, d, staged, cliPrior, windowlessPrior, receiptPrior)
+	preserveRecovery = journalMayExist
+	if err != nil {
+		return WindowsProductPairCommitted{}, prePromotion(fmt.Errorf("%w: %v", ErrWindowsProductPairRecoveryPrepare, err))
 	}
 
 	var windowlessPromotion, cliPromotion *WindowsProductPairPromotion
@@ -276,8 +366,12 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 			}
 		}
 		if joined := errors.Join(restoreErrs...); joined != nil {
-			return fmt.Errorf("%w; exact Windows product pair rollback failed: %v", trigger, joined)
+			return errors.Join(trigger, fmt.Errorf("%w: exact Windows product pair rollback failed: %v", ErrWindowsProductPairRecoveryRollback, joined))
 		}
+		if err := settleWindowsProductPairRecoveryJournal(o, d, &journal, WindowsProductPairRecoverySettledRollback); err != nil {
+			return errors.Join(trigger, err)
+		}
+		preserveRecovery = false
 		return fmt.Errorf("%w; exact Windows product pair rollback completed", trigger)
 	}
 	fault := func(stage WindowsProductPairStage) error {
@@ -346,6 +440,10 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
 	if d.StartSupervisor != nil {
+		journal.Phase = WindowsProductPairRecoverySuccessorStarting
+		if err := persistWindowsProductPairRecoveryJournal(filepath.Join(o.StateDir, WindowsProductPairRecoveryFileLeaf), journal, d); err != nil {
+			return WindowsProductPairCommitted{}, rollback(fmt.Errorf("persist successor-starting recovery phase: %w", err))
+		}
 		if err := d.StartSupervisor(o.CLIPath); err != nil {
 			return WindowsProductPairCommitted{}, rollback(fmt.Errorf("start canonical supervisor: %w", err))
 		}
@@ -392,6 +490,11 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 	}
 	receiptDigest := fmt.Sprintf("%x", sha256.Sum256(readReceipt))
 	committed := WindowsProductPairCommitted{Schema: WindowsProductPairCommittedSchemaV1, Outcome: WindowsProductPairCommittedOutcome, Pair: readBack, ReceiptSHA256: receiptDigest}
+	if err := settleWindowsProductPairRecoveryJournal(o, d, &journal, WindowsProductPairRecoverySettledCommit); err != nil {
+		committed.Outcome = WindowsProductPairCommittedCleanupFailed
+		return committed, fmt.Errorf("%w: receipt_sha256=%s: %v", ErrWindowsProductPairCommittedCleanupFailed, receiptDigest, err)
+	}
+	preserveRecovery = false
 	event := WindowsProductPairCommitEvent{
 		Schema: WindowsProductPairCommittedSchemaV1, Mode: o.Mode, ReceiptSchema: UpgradeReceiptSchemaV2,
 		ReceiptSHA256: receiptDigest, InstalledAt: receipt.InstalledAt, Pair: readBack,
@@ -471,7 +574,24 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 		d.WriteReceipt = api.WriteStateFileBytesAtomic
 	}
 	if d.ReadReceipt == nil {
-		d.ReadReceipt = os.ReadFile
+		d.ReadReceipt = api.ReadStateFileInodeAnchored
+	}
+	if d.WriteRecoveryJournal == nil {
+		d.WriteRecoveryJournal = api.WriteStateFileBytesAtomic
+	}
+	if d.ReadRecoveryJournal == nil {
+		d.ReadRecoveryJournal = api.ReadStateFileInodeAnchored
+	}
+	if d.RemoveRecoveryJournal == nil {
+		d.RemoveRecoveryJournal = func(path string) error {
+			if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			return nil
+		}
+	}
+	if d.ListGeneratedAsides == nil {
+		d.ListGeneratedAsides = listGeneratedRenameAsideBasenames
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -480,6 +600,178 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 		d.SweepOldTargets = api.SweepOldBinaryTargets
 	}
 	return d
+}
+
+func prepareWindowsProductPairRecoveryJournal(o WindowsProductPairTxnOpts, d WindowsProductPairTxnDeps, staged binaryadmission.WindowsProductPair, cliPrior, windowlessPrior, receiptPrior productPairFileSnapshot) (windowsProductPairRecoveryJournal, bool, error) {
+	if o.StateDir == "" {
+		return windowsProductPairRecoveryJournal{}, false, errors.New("state directory is required")
+	}
+	tasks, err := o.Tasks.RecoveryDescriptor()
+	if err != nil || strings.TrimSpace(tasks.StoreRoot) == "" {
+		return windowsProductPairRecoveryJournal{}, false, fmt.Errorf("task recovery descriptor unavailable: %w", err)
+	}
+	cliBaseline, err := d.ListGeneratedAsides(o.CLIPath)
+	if err != nil {
+		return windowsProductPairRecoveryJournal{}, false, fmt.Errorf("inventory canonical CLI asides: %w", err)
+	}
+	windowlessBaseline, err := d.ListGeneratedAsides(o.WindowlessPath)
+	if err != nil {
+		return windowsProductPairRecoveryJournal{}, false, fmt.Errorf("inventory windowless asides: %w", err)
+	}
+	id, err := newWindowsProductPairTransactionID()
+	if err != nil {
+		return windowsProductPairRecoveryJournal{}, false, err
+	}
+	journal := windowsProductPairRecoveryJournal{
+		Schema: WindowsProductPairRecoverySchemaV1, TransactionID: id, Phase: WindowsProductPairRecoveryPrepared, Mode: o.Mode,
+		CLI:              recoveryArtifactFromSnapshot(cliPrior, staged.CLI.SHA256, cliBaseline),
+		Windowless:       recoveryArtifactFromSnapshot(windowlessPrior, staged.Windowless.SHA256, windowlessBaseline),
+		Receipt:          windowsProductPairRecoveryReceipt{Path: receiptPrior.path, PriorPresent: receiptPrior.present, PriorBytes: append([]byte(nil), receiptPrior.body...)},
+		Tasks:            tasks,
+		Staged:           windowsProductPairRecoveryStaged{CLIPath: o.StagedCLI, CLISHA256: staged.CLI.SHA256, WindowlessPath: o.StagedWindowless, WindowlessSHA256: staged.Windowless.SHA256},
+		PriorFleetReaped: o.PriorFleetReaped,
+	}
+	if err := validateWindowsProductPairRecoveryJournal(journal); err != nil {
+		return windowsProductPairRecoveryJournal{}, false, err
+	}
+	journalPath := filepath.Join(o.StateDir, WindowsProductPairRecoveryFileLeaf)
+	if err := persistWindowsProductPairRecoveryJournal(journalPath, journal, d); err != nil {
+		_, probeErr := d.ReadRecoveryJournal(journalPath)
+		journalMayExist := !errors.Is(probeErr, os.ErrNotExist)
+		return journal, journalMayExist, err
+	}
+	return journal, true, nil
+}
+
+func recoveryArtifactFromSnapshot(snapshot productPairFileSnapshot, newSHA string, baseline []string) windowsProductPairRecoveryArtifact {
+	priorSHA := ""
+	if snapshot.present {
+		priorSHA = fmt.Sprintf("%x", sha256.Sum256(snapshot.body))
+	}
+	return windowsProductPairRecoveryArtifact{Target: snapshot.path, PriorPresent: snapshot.present, PriorSHA256: priorSHA, NewSHA256: newSHA, BaselineAsideBasenames: append([]string(nil), baseline...)}
+}
+
+func newWindowsProductPairTransactionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", fmt.Errorf("create recovery transaction id: %w", err)
+	}
+	return fmt.Sprintf("%x", raw[:]), nil
+}
+
+func listGeneratedRenameAsideBasenames(target string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		return nil, err
+	}
+	basenames := make([]string, 0)
+	for _, entry := range entries {
+		candidate := filepath.Join(filepath.Dir(target), entry.Name())
+		if api.IsGeneratedRenameAsideForTarget(target, candidate) {
+			basenames = append(basenames, entry.Name())
+		}
+	}
+	sort.Strings(basenames)
+	return basenames, nil
+}
+
+func persistWindowsProductPairRecoveryJournal(path string, journal windowsProductPairRecoveryJournal, d WindowsProductPairTxnDeps) error {
+	raw, err := json.MarshalIndent(journal, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	if err := d.WriteRecoveryJournal(path, raw); err != nil {
+		return err
+	}
+	readBack, err := d.ReadRecoveryJournal(path)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(readBack, raw) {
+		return errors.New("recovery journal exact-byte readback differs")
+	}
+	decoded, err := decodeWindowsProductPairRecoveryJournal(readBack)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(decoded, journal) {
+		return errors.New("recovery journal decoded value differs")
+	}
+	return nil
+}
+
+func decodeWindowsProductPairRecoveryJournal(raw []byte) (windowsProductPairRecoveryJournal, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var journal windowsProductPairRecoveryJournal
+	if err := dec.Decode(&journal); err != nil {
+		return windowsProductPairRecoveryJournal{}, err
+	}
+	if err := dec.Decode(new(any)); !errors.Is(err, io.EOF) {
+		return windowsProductPairRecoveryJournal{}, errors.New("recovery journal has trailing JSON")
+	}
+	if err := validateWindowsProductPairRecoveryJournal(journal); err != nil {
+		return windowsProductPairRecoveryJournal{}, err
+	}
+	return journal, nil
+}
+
+func validateWindowsProductPairRecoveryJournal(j windowsProductPairRecoveryJournal) error {
+	if j.Schema != WindowsProductPairRecoverySchemaV1 || !validRecoveryHex(j.TransactionID, 16) {
+		return errors.New("invalid recovery schema or transaction identity")
+	}
+	if j.Phase != WindowsProductPairRecoveryPrepared && j.Phase != WindowsProductPairRecoverySuccessorStarting && j.Phase != WindowsProductPairRecoverySettledCommit && j.Phase != WindowsProductPairRecoverySettledRollback {
+		return errors.New("invalid recovery phase")
+	}
+	if j.Mode != WindowsProductPairModeSetup && j.Mode != WindowsProductPairModeCanonicalize && j.Mode != WindowsProductPairModeUpgrade {
+		return errors.New("invalid recovery mode")
+	}
+	if !filepath.IsAbs(j.CLI.Target) || !filepath.IsAbs(j.Windowless.Target) || strings.EqualFold(filepath.Clean(j.CLI.Target), filepath.Clean(j.Windowless.Target)) || !filepath.IsAbs(j.Receipt.Path) || !filepath.IsAbs(j.Tasks.StoreRoot) || !filepath.IsAbs(j.Staged.CLIPath) || !filepath.IsAbs(j.Staged.WindowlessPath) {
+		return errors.New("incomplete recovery paths")
+	}
+	for _, a := range []windowsProductPairRecoveryArtifact{j.CLI, j.Windowless} {
+		if !validRecoveryHex(a.NewSHA256, sha256.Size) || (a.PriorPresent && !validRecoveryHex(a.PriorSHA256, sha256.Size)) || (!a.PriorPresent && a.PriorSHA256 != "") || !sort.StringsAreSorted(a.BaselineAsideBasenames) {
+			return errors.New("invalid recovery artifact identity")
+		}
+		for i, name := range a.BaselineAsideBasenames {
+			if filepath.Base(name) != name || !api.IsGeneratedRenameAsideForTarget(a.Target, filepath.Join(filepath.Dir(a.Target), name)) || (i > 0 && name == a.BaselineAsideBasenames[i-1]) {
+				return errors.New("invalid recovery aside baseline")
+			}
+		}
+	}
+	if j.Staged.CLISHA256 != j.CLI.NewSHA256 || j.Staged.WindowlessSHA256 != j.Windowless.NewSHA256 || j.Receipt.PriorPresent != (j.Receipt.PriorBytes != nil) {
+		return errors.New("inconsistent recovery preimage")
+	}
+	for _, backup := range j.Tasks.Backups {
+		if strings.TrimSpace(backup.TaskName) == "" || filepath.Base(backup.Ref) != backup.Ref || strings.ContainsAny(backup.Ref, `/\\`) || !validRecoveryHex(backup.SHA256, sha256.Size) {
+			return errors.New("invalid recovery task descriptor")
+		}
+	}
+	return nil
+}
+
+func validRecoveryHex(value string, decodedBytes int) bool {
+	if len(value) != decodedBytes*2 {
+		return false
+	}
+	raw, err := hex.DecodeString(value)
+	return err == nil && len(raw) == decodedBytes
+}
+
+func settleWindowsProductPairRecoveryJournal(o WindowsProductPairTxnOpts, d WindowsProductPairTxnDeps, journal *windowsProductPairRecoveryJournal, phase WindowsProductPairRecoveryPhase) error {
+	journal.Phase = phase
+	path := filepath.Join(o.StateDir, WindowsProductPairRecoveryFileLeaf)
+	if err := persistWindowsProductPairRecoveryJournal(path, *journal, d); err != nil {
+		return fmt.Errorf("%w: persist %s: %v", ErrWindowsProductPairRecoveryCleanup, phase, err)
+	}
+	if err := o.Tasks.DiscardRecoveryStore(); err != nil {
+		return fmt.Errorf("%w: discard retained task store: %v", ErrWindowsProductPairRecoveryCleanup, err)
+	}
+	if err := d.RemoveRecoveryJournal(path); err != nil {
+		return fmt.Errorf("%w: remove settled journal: %v", ErrWindowsProductPairRecoveryCleanup, err)
+	}
+	return nil
 }
 
 func sameProductPairIdentity(a, b binaryadmission.WindowsProductPair) bool {

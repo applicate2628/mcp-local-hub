@@ -13,12 +13,28 @@ import (
 	"mcp-local-hub/internal/scheduler"
 )
 
-func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) error {
+func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) (retErr error) {
 	windowlessSource := scheduler.WindowsOwnedEntrypointPath(cliSource)
 	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(cliTarget)
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("resolve state-dir for Windows product pair canonicalize: %w", err)
+	}
+	fence, acquired, err := api.TryAcquireUpgradeFence(context.Background(), stateDir)
+	if err != nil {
+		return fmt.Errorf("acquire Windows product-pair canonicalize fence: %w", err)
+	}
+	if !acquired {
+		return fmt.Errorf("acquire Windows product-pair canonicalize fence: another product-pair transaction is active")
+	}
+	defer api.ReleaseAndJoin(&retErr, fence.Release, "release Windows product-pair canonicalize fence")
+	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(context.Background(), stateDir, cliTarget, windowlessTarget))
+	if err != nil {
+		return fmt.Errorf("recover Windows product-pair canonicalize: %w", err)
+	}
+	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
+		fmt.Fprintf(w, "\u2713 mcphub product-pair crash recovery kept committed pair at %s\n", filepath.Dir(cliTarget))
+		return nil
 	}
 	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, cliSource, windowlessSource, cliTarget, windowlessTarget, WindowsProductPairModeCanonicalize); err != nil {
 		return err
