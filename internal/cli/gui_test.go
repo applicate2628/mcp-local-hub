@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/serena_routing"
 	"mcp-local-hub/internal/gui"
+	"mcp-local-hub/internal/tray"
 )
 
 func TestActivateDashboardFromTrayDecisionMatrix(t *testing.T) {
@@ -271,6 +274,49 @@ func TestGuiCmd_TrayRuntimePolicyFromRoutedInvocation(t *testing.T) {
 				t.Fatalf("shouldRunTray(noTray=%t) = %t, want %t", noTray, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestStartTrayIfEnabled_NoTrayMakesZeroCalls(t *testing.T) {
+	calls := 0
+	startTrayIfEnabled(true, func() { calls++ })
+	if calls != 0 {
+		t.Fatalf("tray launch calls = %d, want 0 for --no-tray", calls)
+	}
+}
+
+func TestTrayLifecycleGUIEvent_BoundsAndRedactsDetail(t *testing.T) {
+	privatePath := filepath.Join(t.TempDir(), "private", "mcphub.exe")
+	if !filepath.IsAbs(privatePath) {
+		t.Fatalf("diagnostic fixture path is not absolute: %q", privatePath)
+	}
+	ev := trayLifecycleGUIEvent(tray.LifecycleReport{
+		Type:        "tray-child-unavailable",
+		Phase:       "spawn",
+		Attempt:     3,
+		NextRetryMS: 500,
+		ErrorDetail: fmt.Sprintf("open %s\nfailed", privatePath),
+	})
+	if ev.Type != "tray-child-unavailable" {
+		t.Fatalf("event type = %q", ev.Type)
+	}
+	if got := ev.Body["error_detail"]; got != "operation failed" {
+		t.Fatalf("error_detail = %q, want path-free fallback", got)
+	}
+	if got := ev.Body["error_detail"].(string); strings.Contains(got, privatePath) || strings.Contains(got, "private") {
+		t.Fatalf("error_detail disclosed fixture path: %q", got)
+	}
+	if ev.Body["phase"] != "spawn" || ev.Body["attempt"] != 3 || ev.Body["next_retry_ms"] != int64(500) {
+		t.Fatalf("event body = %#v", ev.Body)
+	}
+
+	protocol := trayLifecycleGUIEvent(tray.LifecycleReport{
+		Type:    "tray-child-protocol-warning",
+		Attempt: 4,
+		Phase:   "event-json-invalid",
+	})
+	if protocol.Body["attempt"] != 4 || protocol.Body["phase"] != "event-json-invalid" {
+		t.Fatalf("protocol warning body = %#v", protocol.Body)
 	}
 }
 

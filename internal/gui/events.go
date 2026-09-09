@@ -516,6 +516,10 @@ func classifyEvent(eventType string) (source string, severity string) {
 		return "poller", api.GUIEventSeverityError
 	case "bulk-action":
 		return "servers", api.GUIEventSeverityInfo
+	case "tray-child-unavailable", "tray-child-retry-summary", "tray-child-protocol-warning":
+		return "tray", api.GUIEventSeverityWarn
+	case "tray-child-stable":
+		return "tray", api.GUIEventSeverityInfo
 	case "gui-restart-progress", "gui-restart-lock-acquired", "gui-restart-reservation-held":
 		// Coarse restart lifecycle updates are expected control-flow. Keep
 		// them at info while registering the source explicitly so future

@@ -35,6 +35,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -47,7 +48,6 @@ import (
 )
 
 // Config is what Run needs to produce the menu and route actions.
-// Identical to the previous in-process API so callers don't change.
 type Config struct {
 	// ActivateWindow is called when the user picks "Open dashboard"
 	// from the right-click menu (or left-clicks the icon).
@@ -99,13 +99,174 @@ type Config struct {
 	// /api/settings/state-read-relax with the inverse of the
 	// currently-known value. Optional: silently no-op if nil.
 	ToggleStateReadRelax func()
+	// LifecycleReport receives bounded, path-free child recovery facts.
+	// It is optional and is invoked synchronously; the GUI binds it to its
+	// existing non-blocking Broadcaster.Publish sink.
+	LifecycleReport func(LifecycleReport)
 }
 
-// Run spawns the tray subprocess and routes events between it and
-// the in-process Config callbacks. Returns when ctx is canceled or
-// the subprocess exits. On non-Windows hosts (or when subprocess
-// spawn fails) it falls back to blocking on ctx.Done() so the
-// caller's goroutine still exits cleanly.
+// LifecycleReport is a typed tray-child recovery fact. The GUI composition
+// root maps it onto its existing event broadcaster; tray owns neither the
+// broadcaster nor durable event storage.
+type LifecycleReport struct {
+	Type             string
+	Phase            string
+	Attempt          int
+	NextRetryMS      int64
+	Failures         int
+	OutageDurationMS int64
+	AttemptCount     int
+	ErrorDetail      string
+}
+
+type lifecyclePhase string
+
+const (
+	lifecyclePhaseSelfPath   lifecyclePhase = "self-path"
+	lifecyclePhaseStdinPipe  lifecyclePhase = "stdin-pipe"
+	lifecyclePhaseStdoutPipe lifecyclePhase = "stdout-pipe"
+	lifecyclePhaseSpawn      lifecyclePhase = "spawn"
+	lifecyclePhaseChildExit  lifecyclePhase = "child-exit"
+
+	lifecycleEventUnavailable     = "tray-child-unavailable"
+	lifecycleEventRetrySummary    = "tray-child-retry-summary"
+	lifecycleEventProtocolWarning = "tray-child-protocol-warning"
+	lifecycleEventStable          = "tray-child-stable"
+
+	lifecycleStableAfter     = 30 * time.Second
+	lifecycleSummaryInterval = 30 * time.Second
+	lifecycleShutdownTimeout = 2 * time.Second
+)
+
+var lifecycleRetryDelays = [...]time.Duration{
+	100 * time.Millisecond,
+	250 * time.Millisecond,
+	500 * time.Millisecond,
+	time.Second,
+	2 * time.Second,
+}
+
+type lifecycleClock interface {
+	Now() time.Time
+	Wait(context.Context, time.Duration) bool
+}
+
+type realLifecycleClock struct{}
+
+func (realLifecycleClock) Now() time.Time { return time.Now() }
+
+func (realLifecycleClock) Wait(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+type childAttempt struct {
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	wait   func() error
+	kill   func() error
+}
+
+type lifecycleDeps struct {
+	launch func() (*childAttempt, lifecyclePhase, error)
+	clock  lifecycleClock
+}
+
+type stateSnapshot struct {
+	generation uint64
+	hasState   bool
+	state      string
+	hasRelax   bool
+	relax      bool
+}
+
+type stateCollector struct {
+	requests chan chan stateSnapshot
+	updates  chan stateSnapshot
+	done     chan struct{}
+}
+
+func startStateCollector(ctx context.Context, cfg Config, cancelRun context.CancelFunc) *stateCollector {
+	c := &stateCollector{
+		requests: make(chan chan stateSnapshot),
+		updates:  make(chan stateSnapshot, 1),
+		done:     make(chan struct{}),
+	}
+	go func() {
+		defer close(c.done)
+		stateCh := cfg.StateCh
+		relaxCh := cfg.StateReadRelaxCh
+		var snapshot stateSnapshot
+		publish := func() {
+			select {
+			case c.updates <- snapshot:
+			default:
+				select {
+				case <-c.updates:
+				default:
+				}
+				select {
+				case c.updates <- snapshot:
+				default:
+				}
+			}
+		}
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case reply := <-c.requests:
+				reply <- snapshot
+			case state, ok := <-stateCh:
+				if !ok {
+					cancelRun()
+					return
+				}
+				snapshot.generation++
+				snapshot.hasState = true
+				snapshot.state = state.String()
+				publish()
+			case relax, ok := <-relaxCh:
+				if !ok {
+					relaxCh = nil
+					continue
+				}
+				snapshot.generation++
+				snapshot.hasRelax = true
+				snapshot.relax = relax
+				publish()
+			}
+		}
+	}()
+	return c
+}
+
+func (c *stateCollector) snapshot(ctx context.Context) (stateSnapshot, bool) {
+	reply := make(chan stateSnapshot, 1)
+	select {
+	case c.requests <- reply:
+	case <-ctx.Done():
+		return stateSnapshot{}, false
+	}
+	select {
+	case snapshot := <-reply:
+		return snapshot, true
+	case <-ctx.Done():
+		return stateSnapshot{}, false
+	}
+}
+
+// Run owns the restartable tray subprocess lifecycle and routes events between
+// it and the in-process Config callbacks. It returns when ctx is canceled or
+// StateCh closes; child setup failures and exits are retried while the parent
+// lifecycle remains live. On non-Windows hosts it blocks on ctx.Done() without
+// starting a collector, timer, or child.
 //
 // The subprocess is the running mcphub binary invoked with the
 // hidden `tray` subcommand: `<self> tray`. The child reads JSON
@@ -124,152 +285,354 @@ func Run(ctx context.Context, cfg Config) error {
 		<-ctx.Done()
 		return nil
 	}
+	return runLifecycle(ctx, cfg, lifecycleDeps{launch: launchTrayChild, clock: realLifecycleClock{}})
+}
 
+func launchTrayChild() (*childAttempt, lifecyclePhase, error) {
 	selfPath, err := os.Executable()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tray: cannot resolve self path (%v); tray disabled\n", err)
-		<-ctx.Done()
-		return nil
+		return nil, lifecyclePhaseSelfPath, err
 	}
-
-	// Plain exec.Command (NOT exec.CommandContext): the child needs a
-	// graceful shutdown sequence — close stdin → child reads EOF →
-	// child's WM_CLOSE handler runs NIM_DELETE before destroying the
-	// window — to avoid leaving a ghost tray icon. exec.CommandContext
-	// would Process.Kill() on ctx cancel, skipping that path.
-	// Codex bot review on PR #24 P2.
-	c := exec.Command(selfPath, "tray")
-	process.NoConsole(c) // child mcphub.exe is windowsgui too; belt-and-braces
+	c := exec.Command(selfPath, "tray") // intentionally not CommandContext; graceful stdin EOF comes first
+	process.NoConsole(c)
 	stdin, err := c.StdinPipe()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tray: stdin pipe: %v; tray disabled\n", err)
-		<-ctx.Done()
-		return nil
+		return nil, lifecyclePhaseStdinPipe, err
 	}
 	stdout, err := c.StdoutPipe()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "tray: stdout pipe: %v; tray disabled\n", err)
-		<-ctx.Done()
-		return nil
+		_ = stdin.Close()
+		return nil, lifecyclePhaseStdoutPipe, err
 	}
-	// Forward child diagnostics ONLY when the parent's stderr is a
-	// valid handle. Windows GUI apps launched without a console (the
-	// normal Explorer-launch path) have invalid std handles; passing
-	// an invalid *os.File to exec.Cmd would make Start() fail with
-	// invalid-handle, disabling the tray entirely. Codex bot review
-	// on PR #24 P1 (avoid inheriting invalid stderr).
 	if stderrIsValid() {
 		c.Stderr = os.Stderr
 	}
-
 	if err := c.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "tray: spawn: %v; tray disabled\n", err)
-		<-ctx.Done()
-		return nil
+		_ = stdin.Close()
+		_ = stdout.Close()
+		return nil, lifecyclePhaseSpawn, err
 	}
-
-	// childDone closes when the child exits — used by the watchdog to
-	// stop waiting for ctx cancellation if the child died on its own.
-	// runCtx is a parent-derived context that we explicitly cancel as
-	// soon as scanning completes, so the stdin writer exits immediately
-	// instead of one extra encode-to-dead-pipe iteration. Codex bot
-	// review on PR #24 P2 (tray.go: stdin-writer race on early child
-	// exit).
-	childDone := make(chan struct{})
-	runCtx, cancelRun := context.WithCancel(ctx)
-	defer cancelRun()
-
-	// wg waits on the stdin-writer goroutine so Run does not return
-	// while it is still alive. The watchdog is bounded by ctx anyway.
-	var wg sync.WaitGroup
-	wg.Add(1)
-
-	// Stdin writer: drain cfg.StateCh, write JSON state lines.
-	// Exits when runCtx cancels (parent ctx OR cancelRun on child exit)
-	// OR cfg.StateCh closes. Closes stdin on exit so the child reads
-	// EOF and runs its graceful shutdown path.
-	go func() {
-		defer wg.Done()
-		enc := json.NewEncoder(stdin)
-		defer stdin.Close()
-		// stateReadRelaxCh is allowed to be nil; receive on a nil
-		// channel blocks forever, which is the desired behavior
-		// (just makes that select case inert).
-		stateReadRelaxCh := cfg.StateReadRelaxCh
-		for {
-			select {
-			case <-runCtx.Done():
-				return
-			case state, ok := <-cfg.StateCh:
-				if !ok {
-					return
-				}
-				_ = enc.Encode(stateMessage{State: state.String()})
-			case relax, ok := <-stateReadRelaxCh:
-				if !ok {
-					stateReadRelaxCh = nil
-					continue
-				}
-				_ = enc.Encode(stateMessage{StateReadRelax: &relax})
+	return &childAttempt{
+		stdin:  stdin,
+		stdout: stdout,
+		wait:   c.Wait,
+		kill: func() error {
+			if c.Process == nil {
+				return nil
 			}
-		}
+			return c.Process.Kill()
+		},
+	}, "", nil
+}
+
+func runLifecycle(ctx context.Context, cfg Config, deps lifecycleDeps) error {
+	runCtx, cancelRun := context.WithCancel(ctx)
+	collector := startStateCollector(runCtx, cfg, cancelRun)
+	defer func() {
+		cancelRun()
+		<-collector.done
 	}()
 
-	// Cancellation watchdog: when parent ctx cancels, close stdin so
-	// the child receives EOF and exits gracefully (running NIM_DELETE).
-	// If the child doesn't exit within a bounded fallback window,
-	// kill it to avoid a hung GUI shutdown. If the child exits on its
-	// own first (childDone), the watchdog has nothing to do — exit
-	// instead of leaking until parent cancels.
-	go func() {
-		select {
-		case <-ctx.Done():
-			_ = stdin.Close() // signal child to exit gracefully
-			select {
-			case <-childDone:
-				// graceful exit — done
-			case <-time.After(2 * time.Second):
-				if c.Process != nil {
-					_ = c.Process.Kill()
-				}
+	retryIndex := 0
+	attemptNumber := 0
+	reporter := lifecycleReporter{emit: cfg.LifecycleReport, clock: deps.clock}
+	for {
+		if runCtx.Err() != nil {
+			return nil
+		}
+		attemptNumber++
+		attempt, phase, err := deps.launch()
+		if runCtx.Err() != nil {
+			if attempt != nil {
+				settleUnservedAttempt(attempt, deps.clock)
 			}
-		case <-childDone:
-			// Child exited on its own; nothing to do.
+			return nil
+		}
+		if err != nil {
+			delay := lifecycleRetryDelays[retryIndex]
+			if retryIndex < len(lifecycleRetryDelays)-1 {
+				retryIndex++
+			}
+			reporter.failure(phase, attemptNumber, delay, err)
+			if !deps.clock.Wait(runCtx, delay) {
+				return nil
+			}
+			continue
+		}
+		if runCtx.Err() != nil {
+			settleUnservedAttempt(attempt, deps.clock)
+			return nil
+		}
+		snapshot, ok := collector.snapshot(runCtx)
+		if !ok {
+			settleUnservedAttempt(attempt, deps.clock)
+			return nil
+		}
+		result := serveAttempt(runCtx, cfg, attempt, snapshot, collector.updates, deps.clock, func() {
+			retryIndex = 0
+			reporter.stable(attemptNumber)
+		}, func() {
+			reporter.protocolWarning(attemptNumber)
+		})
+		if result.terminal || runCtx.Err() != nil {
+			return nil
+		}
+		delay := lifecycleRetryDelays[retryIndex]
+		if retryIndex < len(lifecycleRetryDelays)-1 {
+			retryIndex++
+		}
+		reporter.failure(lifecyclePhaseChildExit, attemptNumber, delay, result.err)
+		if !deps.clock.Wait(runCtx, delay) {
+			return nil
+		}
+	}
+}
+
+type attemptResult struct {
+	terminal bool
+	err      error
+}
+
+func serveAttempt(ctx context.Context, cfg Config, attempt *childAttempt, snapshot stateSnapshot, updates <-chan stateSnapshot, clock lifecycleClock, onStable, onProtocolWarning func()) attemptResult {
+	startedAt := clock.Now()
+	stable := false
+	markStable := func() {
+		if stable {
 			return
 		}
-	}()
+		stable = true
+		onStable()
+	}
+	markStableIfElapsed := func() {
+		if clock.Now().Sub(startedAt) >= lifecycleStableAfter {
+			markStable()
+		}
+	}
+	attemptCtx, cancelAttempt := context.WithCancel(ctx)
+	defer cancelAttempt()
 
-	// Read JSON event lines from child's stdout, dispatch via callbacks.
+	writerDone := make(chan error, 1)
+	readerDone := make(chan error, 1)
+	protocolWarningCh := make(chan struct{})
+	waitDone := make(chan error, 1)
+	stableCh := make(chan struct{}, 1)
+	var workers sync.WaitGroup
+	workers.Add(3)
+	go func() {
+		defer workers.Done()
+		writerDone <- writeAttemptStates(attemptCtx, attempt.stdin, snapshot, updates)
+	}()
+	go func() {
+		defer workers.Done()
+		readerDone <- readAttemptEvents(attemptCtx, attempt.stdout, cfg, protocolWarningCh)
+	}()
+	go func() {
+		defer workers.Done()
+		if clock.Wait(attemptCtx, lifecycleStableAfter) {
+			stableCh <- struct{}{}
+		}
+	}()
+	go func() { waitDone <- attempt.wait() }()
+
+	waited := false
+	var waitErr error
+	for {
+		select {
+		case <-ctx.Done():
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, waitErr, clock)
+			workers.Wait()
+			return attemptResult{terminal: true, err: waitErr}
+		case err := <-waitDone:
+			waited, waitErr = true, err
+			markStableIfElapsed()
+			cancelAttempt()
+			_ = attempt.stdin.Close()
+			_ = attempt.stdout.Close()
+			workers.Wait()
+			return attemptResult{err: waitErr}
+		case err := <-readerDone:
+			markStableIfElapsed()
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, err, clock)
+			workers.Wait()
+			return attemptResult{err: waitErr}
+		case err := <-writerDone:
+			if err == nil && attemptCtx.Err() != nil {
+				continue
+			}
+			markStableIfElapsed()
+			waitErr = settleAttempt(attempt, cancelAttempt, waitDone, waited, err, clock)
+			workers.Wait()
+			return attemptResult{err: waitErr}
+		case <-stableCh:
+			markStable()
+			stableCh = nil
+		case <-protocolWarningCh:
+			onProtocolWarning()
+		}
+	}
+}
+
+func settleAttempt(attempt *childAttempt, cancel context.CancelFunc, waitDone <-chan error, waited bool, prior error, clock lifecycleClock) error {
+	cancel()
+	_ = attempt.stdin.Close()
+	waitErr := prior
+	if !waited {
+		shutdownCtx, stopShutdown := context.WithCancel(context.Background())
+		graceExpired := make(chan bool, 1)
+		go func() { graceExpired <- clock.Wait(shutdownCtx, lifecycleShutdownTimeout) }()
+		select {
+		case err := <-waitDone:
+			stopShutdown()
+			<-graceExpired
+			waitErr = err
+		case expired := <-graceExpired:
+			stopShutdown()
+			if expired {
+				_ = attempt.kill()
+			}
+			waitErr = <-waitDone
+		}
+	}
+	_ = attempt.stdout.Close()
+	return waitErr
+}
+
+func settleUnservedAttempt(attempt *childAttempt, clock lifecycleClock) {
+	_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	waitDone := make(chan error, 1)
+	go func() { waitDone <- attempt.wait() }()
+	_ = settleAttempt(attempt, cancel, waitDone, false, nil, clock)
+}
+
+func writeAttemptStates(ctx context.Context, stdin io.WriteCloser, initial stateSnapshot, updates <-chan stateSnapshot) error {
+	defer stdin.Close()
+	enc := json.NewEncoder(stdin)
+	lastGeneration := initial.generation
+	if initial.hasState || initial.hasRelax {
+		if err := enc.Encode(snapshotMessage(initial)); err != nil {
+			return err
+		}
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case snapshot := <-updates:
+			if snapshot.generation <= lastGeneration {
+				continue
+			}
+			if err := enc.Encode(snapshotMessage(snapshot)); err != nil {
+				return err
+			}
+			lastGeneration = snapshot.generation
+		}
+	}
+}
+
+func snapshotMessage(snapshot stateSnapshot) stateMessage {
+	message := stateMessage{}
+	if snapshot.hasState {
+		message.State = snapshot.state
+	}
+	if snapshot.hasRelax {
+		relax := snapshot.relax
+		message.StateReadRelax = &relax
+	}
+	return message
+}
+
+func readAttemptEvents(ctx context.Context, stdout io.Reader, cfg Config, protocolWarnings chan<- struct{}) error {
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		var ev eventMessage
 		if err := json.Unmarshal(scanner.Bytes(), &ev); err != nil {
-			fmt.Fprintf(os.Stderr, "tray: bad event line %q: %v\n", scanner.Bytes(), err)
+			select {
+			case protocolWarnings <- struct{}{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
 			continue
 		}
 		dispatchEvent(ev.Event, cfg)
 	}
-	// scanner.Err() may be context.Canceled on parent shutdown — not
-	// worth logging. Cancel runCtx FIRST so the writer exits without
-	// any further encode attempts on the now-dying pipe, then reap and
-	// signal childDone for the watchdog.
-	cancelRun()
-	waitErr := c.Wait()
-	close(childDone)
-	wg.Wait()
-	// If the child exited with a non-zero status AND the parent ctx
-	// is still alive, surface the failure so the GUI doesn't silently
-	// lose tray functionality. Common failure modes: spawn went OK but
-	// the child crashed mid-pump (Win32 shell init error,
-	// CreateWindowExW failure, panic). Without surfacing, the GUI runs
-	// without a tray and the user gets no signal — Windows desktop
-	// builds typically have no visible stderr console to read the
-	// child's diagnostics. Codex bot review on PR #24 P2.
-	if waitErr != nil && ctx.Err() == nil {
-		fmt.Fprintf(os.Stderr, "tray: subprocess exited unexpectedly: %v\n", waitErr)
-		return fmt.Errorf("tray subprocess exited: %w", waitErr)
+	return scanner.Err()
+}
+
+type lifecycleReporter struct {
+	emit               func(LifecycleReport)
+	clock              lifecycleClock
+	outageStart        time.Time
+	outageStartAttempt int
+	lastReport         time.Time
+	failures           int
+	lastProtocolWarn   time.Time
+	hasProtocolWarn    bool
+}
+
+func (r *lifecycleReporter) failure(phase lifecyclePhase, attempt int, retry time.Duration, err error) {
+	if r.emit == nil {
+		return
 	}
-	return nil
+	now := r.clock.Now()
+	if r.outageStart.IsZero() {
+		r.outageStart = now
+		r.outageStartAttempt = attempt
+		r.lastReport = now
+		r.emit(LifecycleReport{Type: lifecycleEventUnavailable, Phase: string(phase), Attempt: attempt, NextRetryMS: retry.Milliseconds(), ErrorDetail: safeErrorDetail(err)})
+		return
+	}
+	r.failures++
+	if now.Sub(r.lastReport) < lifecycleSummaryInterval {
+		return
+	}
+	r.emit(LifecycleReport{Type: lifecycleEventRetrySummary, Phase: string(phase), Attempt: attempt, NextRetryMS: retry.Milliseconds(), Failures: r.failures, ErrorDetail: safeErrorDetail(err)})
+	r.failures = 0
+	r.lastReport = now
+}
+
+func (r *lifecycleReporter) stable(attempt int) {
+	if r.emit == nil || r.outageStart.IsZero() {
+		return
+	}
+	r.emit(LifecycleReport{Type: lifecycleEventStable, Attempt: attempt, OutageDurationMS: r.clock.Now().Sub(r.outageStart).Milliseconds(), AttemptCount: attempt - r.outageStartAttempt + 1})
+	r.outageStart = time.Time{}
+	r.outageStartAttempt = 0
+	r.lastReport = time.Time{}
+	r.failures = 0
+}
+
+func (r *lifecycleReporter) protocolWarning(attempt int) {
+	if r.emit == nil {
+		return
+	}
+	now := r.clock.Now()
+	if r.hasProtocolWarn && now.Sub(r.lastProtocolWarn) < lifecycleSummaryInterval {
+		return
+	}
+	r.emit(LifecycleReport{Type: lifecycleEventProtocolWarning, Phase: "event-json-invalid", Attempt: attempt})
+	r.lastProtocolWarn = now
+	r.hasProtocolWarn = true
+}
+
+func safeErrorDetail(err error) string {
+	if err == nil {
+		return "process ended"
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && exitErr.ProcessState != nil {
+		return fmt.Sprintf("process exited with status %d", exitErr.ProcessState.ExitCode())
+	}
+	switch {
+	case errors.Is(err, os.ErrPermission):
+		return "permission denied"
+	case errors.Is(err, os.ErrNotExist):
+		return "resource not found"
+	case errors.Is(err, io.ErrClosedPipe):
+		return "pipe closed"
+	default:
+		return "operation failed"
+	}
 }
 
 // RunChild is the entry point for the tray subprocess. It reads
