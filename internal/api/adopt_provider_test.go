@@ -58,8 +58,8 @@ func TestProviderProcessIdentityWindowsRejectsScriptsAndKeepsNativeCommandArgs(t
 	if err != nil {
 		t.Fatalf("extensionless native command rejected: %v", err)
 	}
-	if identity.ExecutablePath == "" || !reflect.DeepEqual(identity.Args, args) {
-		t.Fatalf("native identity=%+v, want command plus unchanged script arguments", identity)
+	if identity.ExecutablePath == "" || !reflect.DeepEqual(identity.Args, args) || !identity.WorkingDirectoryObject.valid {
+		t.Fatalf("native identity=%+v, want command, unchanged script arguments, and canonical working-directory key", identity)
 	}
 }
 

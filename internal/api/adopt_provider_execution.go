@@ -75,6 +75,10 @@ func providerProcessIdentityFromEntry(entry clients.ProviderMCPEntryV1) (provide
 	if command == "" || entry.WorkingDir == nil || *entry.WorkingDir == "" || !filepath.IsAbs(*entry.WorkingDir) {
 		return providerDirectProcessIdentityV1{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
+	workingDirectoryObject, err := providerWorkingDirectoryObjectIdentityFromPath(*entry.WorkingDir)
+	if err != nil {
+		return providerDirectProcessIdentityV1{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
 	if filepath.IsAbs(command) {
 		// retained as supplied
 	} else if strings.ContainsAny(command, `\/`) {
@@ -97,7 +101,7 @@ func providerProcessIdentityFromEntry(entry clients.ProviderMCPEntryV1) (provide
 	if runtime.GOOS == "windows" && binaryadmission.ValidateWindowsNativeImage(resolved) != nil {
 		return providerDirectProcessIdentityV1{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	return providerDirectProcessIdentityV1{ExecutablePath: resolved, Args: append([]string(nil), entry.Args...)}, nil
+	return providerDirectProcessIdentityV1{ExecutablePath: resolved, Args: append([]string(nil), entry.Args...), WorkingDirectoryObject: workingDirectoryObject}, nil
 }
 
 func observeProviderDirectProcessTwice(deps providerTransactionDeps, identity providerDirectProcessIdentityV1, prior []providerProcessGenerationV1) (providerDirectProcessObservationV1, providerDirectProcessObservationV1) {
