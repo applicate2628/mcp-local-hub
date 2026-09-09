@@ -8,7 +8,45 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
+
+	"mcp-local-hub/internal/buildinfo"
 )
+
+// TestNewRootCmd_RootVersionFlagUsesBuildInfoWithoutRunningCommand guards the
+// conventional Cobra root --version path. The flag must expose the same
+// build-version source as `mcphub version`, without entering the bare-command
+// GUI route or another command runner.
+func TestNewRootCmd_RootVersionFlagUsesBuildInfoWithoutRunningCommand(t *testing.T) {
+	originalVersion, originalCommit, originalDate := buildinfo.Get()
+	t.Cleanup(func() {
+		SetBuildInfo(originalVersion, originalCommit, originalDate)
+	})
+	SetBuildInfo("root-version-flag-test", "test-commit", "test-date")
+
+	root := NewRootCmd()
+	if got, want := root.Version, "root-version-flag-test"; got != want {
+		t.Fatalf("root version = %q, want build version %q", got, want)
+	}
+
+	var stdout bytes.Buffer
+	root.SetOut(&stdout)
+	root.SetArgs([]string{"--version"})
+	ranCommand := false
+	root.Run = func(*cobra.Command, []string) {
+		ranCommand = true
+	}
+	if err := root.Execute(); err != nil {
+		t.Fatalf("execute root --version: %v", err)
+	}
+	if ranCommand {
+		t.Fatal("root --version ran the root command instead of exiting during Cobra flag handling")
+	}
+	if got, want := stdout.String(), "mcphub version root-version-flag-test\n"; got != want {
+		t.Errorf("root --version output = %q, want %q", got, want)
+	}
+}
 
 // TestNewRootCmd_EveryVisibleCommandHasARegisteredGroup enforces the
 // invariant root.go asserts in prose: every command cobra will actually

@@ -3,6 +3,7 @@ package cli
 import (
 	"github.com/spf13/cobra"
 
+	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/drmemory"
 	"mcp-local-hub/internal/gdb"
 	"mcp-local-hub/internal/godbolt"
@@ -47,6 +48,7 @@ func RouteInvocationArgs(args []string) []string {
 }
 
 func NewRootCmd() *cobra.Command {
+	version, _, _ := buildinfo.Get()
 	root := &cobra.Command{
 		Use:   "mcphub",
 		Short: "Local shared-daemon manager for MCP servers",
@@ -56,6 +58,7 @@ process per client, and points every MCP client at them.
 Run "mcphub" with no arguments to start the hub and open the GUI.` + windowsConsoleStartupUsage(),
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		Version:       version,
 	}
 
 	// Groups must be registered BEFORE any command claiming them: cobra's
