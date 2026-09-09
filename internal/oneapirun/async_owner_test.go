@@ -208,28 +208,105 @@ func TestAsyncRun_ShutdownJoinsAndPersistsServerShutdown(t *testing.T) {
 	}
 }
 
-// TestAsyncRun_RestartMarksNonterminalInterruptedWithoutExecuting catches any
-// restart path that resumes a persisted command or treats a PID as authority.
-func TestAsyncRun_RestartMarksNonterminalInterruptedWithoutExecuting(t *testing.T) {
-	store := &asyncTestStore{}
-	seed := asyncRunSnapshot{Version: asyncRunSnapshotVersion, Runs: []asyncRunRecord{{
-		RunID: "run-restart", IdempotencyKey: "restart", RequestDigest: mustAsyncRequestDigest(t, oneAPIRunRequest{Command: "fixture", Timeout: time.Minute, IdempotencyKey: "restart"}),
-		State: asyncStateRunning, AcceptedAt: time.Unix(100, 0).UTC(),
-	}}}
-	if err := store.WriteJSON(seed); err != nil {
-		t.Fatal(err)
-	}
-	var launches atomic.Int32
-	owner := newAsyncTestOwner(t, store, func(context.Context, oneAPIRunRequest) asyncExecution {
-		launches.Add(1)
-		return asyncExecution{}
-	})
-	status, err := owner.Status("run-restart")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if status.State != asyncStateInterrupted || status.FailureID != "oneapi_run_interrupted" || !status.Terminal || launches.Load() != 0 {
-		t.Fatalf("restart status=%#v launches=%d, want interrupted without execution", status, launches.Load())
+// TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting proves a
+// reloaded owner never invents settlement or reopens admission without a
+// durable receipt that proves the prior process tree is gone.
+func TestAsyncRun_RestartRetainsUnsettledNonterminalWithoutExecuting(t *testing.T) {
+	const recoveryFailureID = "oneapi_run_recovery_unsettled"
+
+	for _, tc := range []struct {
+		name      string
+		state     string
+		startedAt *time.Time
+	}{
+		{name: "accepted", state: asyncStateAccepted},
+		{name: "running", state: asyncStateRunning, startedAt: timePtr(time.Unix(101, 0).UTC())},
+		{name: "cancel requested", state: asyncStateCancelRequested, startedAt: timePtr(time.Unix(101, 0).UTC())},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := &asyncTestStore{}
+			request := asyncRequest("restart-"+tc.state, time.Minute)
+			acceptedAt := time.Unix(100, 0).UTC()
+			seed := asyncRunSnapshot{Version: asyncRunSnapshotVersion, Runs: []asyncRunRecord{{
+				RunID: "run-restart-" + tc.state, IdempotencyKey: request.IdempotencyKey, RequestDigest: mustAsyncRequestDigest(t, request),
+				State: tc.state, AcceptedAt: acceptedAt, StartedAt: tc.startedAt,
+			}}}
+			if err := store.WriteJSON(seed); err != nil {
+				t.Fatal(err)
+			}
+			before, err := store.Read("")
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			var launches, writes atomic.Int32
+			lease := &asyncTestLease{}
+			options := asyncOwnerOptions{
+				StatePath: filepath.Join(t.TempDir(), "runs-v1.json"),
+				Execute: func(context.Context, oneAPIRunRequest) asyncExecution {
+					launches.Add(1)
+					return asyncExecution{}
+				},
+				Read: store.Read,
+				Write: func(string, []byte) error {
+					writes.Add(1)
+					return errors.New("recovery must not write")
+				},
+				NewLease: func(string) asyncRunLease { return lease },
+			}
+			owner, err := newAsyncRunOwner(t.Context(), options)
+			if err != nil {
+				t.Fatalf("load recovered %s run: %v", tc.state, err)
+			}
+
+			status, err := owner.Status(seed.Runs[0].RunID)
+			startedAtPreserved := (status.StartedAt == nil && tc.startedAt == nil) || (status.StartedAt != nil && tc.startedAt != nil && status.StartedAt.Equal(*tc.startedAt))
+			if err != nil || status.State != tc.state || status.Terminal || status.FailureID != recoveryFailureID || !status.AcceptedAt.Equal(acceptedAt) || !startedAtPreserved || status.FinishedAt != nil {
+				t.Fatalf("recovered status=(%#v,%v), want preserved nonterminal recovery receipt", status, err)
+			}
+			result, err := owner.Result(seed.Runs[0].RunID)
+			if err != nil || result.State != tc.state || result.Terminal || result.Available || result.Result != nil {
+				t.Fatalf("recovered result=(%#v,%v), want unavailable nonterminal receipt", result, err)
+			}
+			replay, err := owner.Start(request)
+			if err != nil || !replay.Replayed || replay.RunID != seed.Runs[0].RunID || replay.State != tc.state || replay.Terminal {
+				t.Fatalf("recovered replay=(%#v,%v), want preserved nonterminal run", replay, err)
+			}
+			conflict := request
+			conflict.Args = []string{"different"}
+			if _, err := owner.Start(conflict); !errors.Is(err, errAsyncIdempotencyConflict) {
+				t.Fatalf("recovered conflict error=%v, want idempotency conflict", err)
+			}
+			if _, err := owner.Start(asyncRequest("new-"+tc.state, time.Minute)); !errors.Is(err, errAsyncBusy) {
+				t.Fatalf("recovered new key error=%v, want busy", err)
+			}
+			if _, err := owner.Cancel(seed.Runs[0].RunID, false); !errors.Is(err, errAsyncInvalidRequest) {
+				t.Fatalf("unconfirmed recovered cancel error=%v, want invalid request", err)
+			}
+			if _, err := owner.Cancel(seed.Runs[0].RunID, true); err == nil || err.Error() != recoveryFailureID {
+				t.Fatalf("confirmed recovered cancel error=%v, want recovery unsettled", err)
+			}
+			if err := owner.Close(); err == nil || err.Error() != recoveryFailureID || lease.unlockCalls != 1 {
+				t.Fatalf("recovered close=(%v, unlocks=%d), want recovery unsettled and one lease release", err, lease.unlockCalls)
+			}
+
+			secondLease := &asyncTestLease{}
+			options.NewLease = func(string) asyncRunLease { return secondLease }
+			second, err := newAsyncRunOwner(t.Context(), options)
+			if err != nil {
+				t.Fatalf("second recovered load: %v", err)
+			}
+			if _, err := second.Start(asyncRequest("second-new-"+tc.state, time.Minute)); !errors.Is(err, errAsyncBusy) {
+				t.Fatalf("second recovered new key error=%v, want busy", err)
+			}
+			if err := second.Close(); err == nil || err.Error() != recoveryFailureID || secondLease.unlockCalls != 1 {
+				t.Fatalf("second recovered close=(%v, unlocks=%d), want recovery unsettled and one lease release", err, secondLease.unlockCalls)
+			}
+			after, err := store.Read("")
+			if err != nil || !bytes.Equal(after, before) || launches.Load() != 0 || writes.Load() != 0 {
+				t.Fatalf("recovery changed persistence or executed: raw same=%t launches=%d writes=%d err=%v", bytes.Equal(after, before), launches.Load(), writes.Load(), err)
+			}
+		})
 	}
 }
 

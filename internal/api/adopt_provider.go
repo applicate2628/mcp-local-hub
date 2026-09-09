@@ -79,7 +79,7 @@ func (a *API) buildProviderAdoptPlan(opts AdoptOpts, source clients.Client, prov
 	if len(adoptClients) != 1 || adoptClients[0] != e.ProviderClient {
 		return nil, fmt.Errorf("E_PROVIDER_CLIENT_FANOUT_UNSUPPORTED")
 	}
-	bindings := adoptClientBindingsWithToolTimeout(adoptClients, e.ProviderClient, e.ToolTimeoutSec)
+	bindings := adoptClientBindingsWithToolTimeout(adoptClients, e.ProviderClient, e.ToolTimeoutSec, nil)
 	port := opts.Port
 	if port == 0 {
 		port, err = pickNextFreeAdoptPort()

@@ -479,7 +479,7 @@ func (a *API) BuildAdoptPlan(opts AdoptOpts) (*AdoptPlan, error) {
 		return nil, err
 	}
 	alsoPresent := clientsOutsideSelection(clientScan.Matching, adoptClients)
-	bindings := adoptClientBindingsWithToolTimeout(adoptClients, sourceClient, entry.ToolTimeoutSec)
+	bindings := adoptClientBindingsWithToolTimeout(adoptClients, sourceClient, entry.ToolTimeoutSec, clientScan.MatchingToolTimeoutByID)
 	manifestYAML := renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(manifestName, entry.Command, entry.Args, env, port, bindings, compatibilityProfile)
 	if _, err := a.ManifestValidateMode(manifestYAML, ValidateModeStrict); err != nil {
 		return nil, fmt.Errorf("entry name %q is not a valid manifest name: %w; adopt with a valid --name is not supported in v1", manifestName, err)
@@ -1100,11 +1100,12 @@ func adoptScanOpts(opts ScanOpts) ScanOpts {
 }
 
 type adoptClientScanResult struct {
-	Found      []string
-	Matching   []string
-	Mismatched []AdoptClientSignatureMismatch
-	Disabled   []AdoptClientDisabled
-	Errored    []AdoptClientErrored
+	Found                   []string
+	Matching                []string
+	MatchingToolTimeoutByID map[string]int
+	Mismatched              []AdoptClientSignatureMismatch
+	Disabled                []AdoptClientDisabled
+	Errored                 []AdoptClientErrored
 }
 
 type adoptEntrySignature struct {
@@ -1182,6 +1183,10 @@ func (a *API) adoptClientsWithSameNameEntry(entryName string, scanOpts ScanOpts,
 		reasons := sourceSignature.diffReasons(newAdoptEntrySignature(entry))
 		if len(reasons) == 0 {
 			result.Matching = append(result.Matching, client)
+			if result.MatchingToolTimeoutByID == nil {
+				result.MatchingToolTimeoutByID = make(map[string]int)
+			}
+			result.MatchingToolTimeoutByID[client] = entry.ToolTimeoutSec
 			continue
 		}
 		if client != sourceClient {
@@ -1378,15 +1383,19 @@ const (
 )
 
 func adoptClientBindings(clientNames []string) []config.ClientBinding {
-	return adoptClientBindingsWithToolTimeout(clientNames, "", 0)
+	return adoptClientBindingsWithToolTimeout(clientNames, "", 0, nil)
 }
 
-func adoptClientBindingsWithToolTimeout(clientNames []string, sourceClient string, sourceToolTimeoutSec int) []config.ClientBinding {
+func adoptClientBindingsWithToolTimeout(clientNames []string, sourceClient string, sourceToolTimeoutSec int, matchingToolTimeoutByID map[string]int) []config.ClientBinding {
 	bindings := make([]config.ClientBinding, 0, len(clientNames))
 	for _, client := range clientNames {
 		binding := config.ClientBinding{Client: client, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath}
-		if client == "codex-cli" && sourceClient == "codex-cli" {
-			binding.ToolTimeoutSec = sourceToolTimeoutSec
+		if client == "codex-cli" {
+			if sourceClient == "codex-cli" {
+				binding.ToolTimeoutSec = sourceToolTimeoutSec
+			} else {
+				binding.ToolTimeoutSec = matchingToolTimeoutByID[client]
+			}
 		}
 		bindings = append(bindings, binding)
 	}

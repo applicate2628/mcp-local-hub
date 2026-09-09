@@ -46,6 +46,7 @@ var (
 	errAsyncIdempotencyConflict = errors.New("oneapi_run_idempotency_conflict")
 	errAsyncPersist             = errors.New("oneapi_run_persist_failed")
 	errAsyncTerminalPersist     = errors.New("oneapi_run_terminal_persist_failed")
+	errAsyncRecoveryUnsettled   = errors.New("oneapi_run_recovery_unsettled")
 	errAsyncOwnerClosed         = errors.New("oneapi_run_server_shutdown")
 	errAsyncOwnerBusy           = errors.New("oneapi_run_owner_busy")
 )
@@ -85,7 +86,10 @@ type asyncRunRecord struct {
 	done       chan struct{}      `json:"-"`
 	workerDone chan struct{}      `json:"-"`
 	unsettled  bool               `json:"-"`
-	persistErr error              `json:"-"`
+	// recoveryUnsettled means a nonterminal persisted receipt was reloaded
+	// without a runtime handle that can prove its prior process settled.
+	recoveryUnsettled bool  `json:"-"`
+	persistErr        error `json:"-"`
 	// Legacy expansion is set only while migrating an old JSON text stream
 	// whose replacement runes expanded beyond the normal raw-capture bound.
 	stdoutLegacyExpanded bool `json:"-"`
@@ -323,24 +327,16 @@ func (o *asyncRunOwner) load() error {
 		o.rebuildKeysLocked()
 		changed = true
 	}
-	nextSequence := o.seq
 	for _, record := range o.runs {
-		if !record.terminal() {
-			now := o.now().UTC()
-			record.State = asyncStateInterrupted
-			record.FinishedAt = &now
-			record.FailureID = "oneapi_run_interrupted"
-			record.Result = &runResult{ExitCode: -1, Stderr: "oneapi-run: interrupted after restart"}
-			nextSequence++
-			record.FinishSeq = nextSequence
-			changed = true
+		switch record.State {
+		case asyncStateAccepted, asyncStateRunning, asyncStateCancelRequested:
+			record.recoveryUnsettled = true
 		}
 	}
 	if changed {
-		if err := o.persistLocked(o.runs, nextSequence); err != nil {
-			return fmt.Errorf("oneapi async interrupted receipt: %w", err)
+		if err := o.persistLocked(o.runs, o.seq); err != nil {
+			return fmt.Errorf("oneapi async state recovery: %w", err)
 		}
-		o.seq = nextSequence
 	}
 	return nil
 }
@@ -502,6 +498,9 @@ func (o *asyncRunOwner) Result(runID string) (asyncResultReceipt, error) {
 	if record.unsettled {
 		return asyncResultReceipt{}, errAsyncTerminalPersist
 	}
+	if record.recoveryUnsettled {
+		return asyncResultReceipt{Action: "result", RunID: record.RunID, State: record.State}, nil
+	}
 	return asyncResultReceipt{Action: "result", RunID: record.RunID, State: record.State, Terminal: record.terminal(), Available: record.terminal(), Result: cloneRunResult(record.Result)}, nil
 }
 
@@ -518,6 +517,10 @@ func (o *asyncRunOwner) Cancel(runID string, confirm bool) (asyncStatusReceipt, 
 	if record.unsettled {
 		o.mu.Unlock()
 		return asyncStatusReceipt{}, errAsyncTerminalPersist
+	}
+	if record.recoveryUnsettled {
+		o.mu.Unlock()
+		return asyncStatusReceipt{}, errAsyncRecoveryUnsettled
 	}
 	if record.terminal() {
 		receipt := cancelReceipt(record)
@@ -583,6 +586,9 @@ func (o *asyncRunOwner) Close() error {
 	for _, record := range o.runs {
 		if record.unsettled {
 			closeErr = errors.Join(closeErr, errAsyncTerminalPersist)
+		}
+		if record.recoveryUnsettled {
+			closeErr = errors.Join(closeErr, errAsyncRecoveryUnsettled)
 		}
 	}
 	lease := o.lease
@@ -801,7 +807,11 @@ func classifyAsyncExecution(record *asyncRunRecord, runCtx context.Context, exec
 }
 
 func statusReceipt(record *asyncRunRecord) asyncStatusReceipt {
-	return asyncStatusReceipt{Action: "status", RunID: record.RunID, State: record.State, Terminal: record.terminal(), AcceptedAt: record.AcceptedAt, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, FailureID: record.FailureID}
+	receipt := asyncStatusReceipt{Action: "status", RunID: record.RunID, State: record.State, Terminal: record.terminal(), AcceptedAt: record.AcceptedAt, StartedAt: record.StartedAt, FinishedAt: record.FinishedAt, FailureID: record.FailureID}
+	if record.recoveryUnsettled {
+		receipt.FailureID = errAsyncRecoveryUnsettled.Error()
+	}
+	return receipt
 }
 
 func cancelReceipt(record *asyncRunRecord) asyncStatusReceipt {
