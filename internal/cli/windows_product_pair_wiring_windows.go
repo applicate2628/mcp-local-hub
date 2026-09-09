@@ -204,6 +204,9 @@ func reconcileWindowsProductPairCommit(raw []byte, source, target binaryadmissio
 	if err != nil || decoded.V2 == nil {
 		return false, fmt.Errorf("decode committed Windows product pair receipt: %w", err)
 	}
+	if !windowsProductPairReceiptModeMatches(decoded.V2.Mode, mode) {
+		return false, nil
+	}
 	if !sameProductPairIdentity(source, target) || !sameProductPairIdentity(target, decoded.V2.Artifacts) {
 		return false, nil
 	}

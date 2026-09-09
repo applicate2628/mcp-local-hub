@@ -432,6 +432,49 @@ func TestRunV5UpgradeWindowsStagesRoleCorrectPairAndWiresSolePairOwner(t *testin
 	}
 }
 
+func TestUpgradeReceiptModeControlsLifecycleCompletion(t *testing.T) {
+	pair := binaryadmission.WindowsProductPair{
+		CLI:        binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "receipt-mode", BuildDate: "2026-09-09T00:00:00Z", SHA256: strings.Repeat("a", 64)},
+		Windowless: binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "receipt-mode", BuildDate: "2026-09-09T00:00:00Z", SHA256: strings.Repeat("b", 64)},
+	}
+	for _, tc := range []struct {
+		name               string
+		receiptMode        WindowsProductPairMode
+		wantLifecycleCalls int
+		wantEvents         int
+	}{
+		{name: "canonicalize receipt does not settle upgrade", receiptMode: WindowsProductPairModeCanonicalize, wantLifecycleCalls: 1},
+		{name: "upgrade receipt remains idempotent", receiptMode: WindowsProductPairModeUpgrade, wantLifecycleCalls: 0, wantEvents: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			receipt := UpgradeReceiptV2{
+				Schema: UpgradeReceiptSchemaV2, Mode: tc.receiptMode, Admission: UpgradeAdmissionLocalProduct,
+				Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate,
+				Artifacts: pair, InstalledAt: "2026-09-09T00:00:00Z",
+			}
+			raw, err := json.Marshal(receipt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := 0
+			reconciled, err := reconcileWindowsProductPairCommit(raw, pair, pair, WindowsProductPairModeUpgrade, func(WindowsProductPairCommitEvent) (string, error) {
+				events++
+				return "event", nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			lifecycleCalls := 0
+			if !reconciled {
+				lifecycleCalls++
+			}
+			if lifecycleCalls != tc.wantLifecycleCalls || events != tc.wantEvents {
+				t.Fatalf("receipt mode=%s reconciled=%v lifecycle calls=%d events=%d, want lifecycle=%d events=%d", tc.receiptMode, reconciled, lifecycleCalls, events, tc.wantLifecycleCalls, tc.wantEvents)
+			}
+		})
+	}
+}
+
 func copyAdmissionPEFixture(t *testing.T, src, dst string) {
 	t.Helper()
 	raw, err := os.ReadFile(src)

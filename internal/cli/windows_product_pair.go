@@ -148,6 +148,7 @@ type windowsProductPairRecoveryJournal struct {
 // V1 remains a separate read-compatible historical shape.
 type UpgradeReceiptV2 struct {
 	Schema      string                             `json:"schema"`
+	Mode        WindowsProductPairMode             `json:"mode,omitempty"`
 	Admission   string                             `json:"admission"`
 	Version     string                             `json:"version"`
 	Commit      string                             `json:"commit"`
@@ -465,7 +466,7 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 	}
 
 	now := d.Now().UTC().Format(time.RFC3339Nano)
-	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: readBack.CLI.Version, Commit: readBack.CLI.Commit, BuildDate: readBack.CLI.BuildDate, Artifacts: readBack, InstalledAt: now}
+	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Mode: o.Mode, Admission: UpgradeAdmissionLocalProduct, Version: readBack.CLI.Version, Commit: readBack.CLI.Commit, BuildDate: readBack.CLI.BuildDate, Artifacts: readBack, InstalledAt: now}
 	raw, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(err)
@@ -780,6 +781,13 @@ func settleWindowsProductPairRecoveryJournal(o WindowsProductPairTxnOpts, d Wind
 func sameProductPairIdentity(a, b binaryadmission.WindowsProductPair) bool {
 	return a.CLI.Role == b.CLI.Role && a.CLI.Version == b.CLI.Version && a.CLI.Commit == b.CLI.Commit && a.CLI.BuildDate == b.CLI.BuildDate && a.CLI.SHA256 == b.CLI.SHA256 &&
 		a.Windowless.Role == b.Windowless.Role && a.Windowless.Version == b.Windowless.Version && a.Windowless.Commit == b.Windowless.Commit && a.Windowless.BuildDate == b.Windowless.BuildDate && a.Windowless.SHA256 == b.Windowless.SHA256
+}
+
+func windowsProductPairReceiptModeMatches(receiptMode, expectedMode WindowsProductPairMode) bool {
+	if receiptMode != WindowsProductPairModeSetup && receiptMode != WindowsProductPairModeCanonicalize && receiptMode != WindowsProductPairModeUpgrade {
+		return false
+	}
+	return receiptMode == expectedMode
 }
 
 func snapshotProductPairFile(path string) (productPairFileSnapshot, error) {

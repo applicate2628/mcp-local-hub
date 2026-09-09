@@ -376,7 +376,7 @@ func TestWindowsProductPairRecoveryMatchingReceiptCommitsWithoutRollback(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
-	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-08T00:00:00Z"}
+	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Mode: WindowsProductPairModeUpgrade, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-08T00:00:00Z"}
 	raw, err := json.MarshalIndent(receipt, "", "  ")
 	if err != nil {
 		t.Fatal(err)
@@ -407,7 +407,7 @@ func TestWindowsProductPairRecoveryCommittedEventFailureNeverRollsBack(t *testin
 	promoteRecoveryFixture(t, f.windowless, f.newWindowless, 12)
 	promoteRecoveryFixture(t, f.cli, f.newCLI, 13)
 	pair, _ := f.request(&recoveryTaskTxnFake{}, new([]string), nil).Deps.AdmitPair(binaryadmission.WindowsArtifact{Path: f.cli}, binaryadmission.WindowsArtifact{Path: f.windowless})
-	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-08T00:00:00Z"}
+	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Mode: WindowsProductPairModeUpgrade, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-08T00:00:00Z"}
 	raw, _ := json.MarshalIndent(receipt, "", "  ")
 	if err := api.WriteStateFileBytesAtomic(f.receipt, append(raw, '\n')); err != nil {
 		t.Fatal(err)

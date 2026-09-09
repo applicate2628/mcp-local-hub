@@ -11,6 +11,9 @@ import (
 )
 
 func (a *API) buildProviderAdoptPlan(opts AdoptOpts, source clients.Client, provider clients.ProviderMCPSourceV1) (*AdoptPlan, error) {
+	if !providerDirectProcessObservationSupported() {
+		return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
 	entries, err := provider.ListProviderMCPEntries(context.Background())
 	if err != nil {
 		return nil, err

@@ -208,6 +208,12 @@ func TestWindowsProductPairTxnOrdersAdapterTasksCLIReadbackReadinessAndReceipt(t
 	if err != nil || decoded.V2 == nil || decoded.V2.Artifacts.CLI.SHA256 != productPairTestCLISHA || decoded.V2.Artifacts.Windowless.SHA256 != productPairTestWindowlessSHA {
 		t.Fatalf("receipt=%+v err=%v raw=%s", decoded, err, raw)
 	}
+	var receiptEnvelope struct {
+		Mode WindowsProductPairMode `json:"mode"`
+	}
+	if err := json.Unmarshal(raw, &receiptEnvelope); err != nil || receiptEnvelope.Mode != WindowsProductPairModeUpgrade {
+		t.Fatalf("receipt mode=%q err=%v raw=%s", receiptEnvelope.Mode, err, raw)
+	}
 }
 
 func TestWindowsProductPairTxnFaultMatrixRestoresExactPriorPairTasksAndReceipt(t *testing.T) {
@@ -524,7 +530,9 @@ func TestWindowsProductPairCommitReconciliationIsReceiptBoundAndIdempotent(t *te
 		CLI:        binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleCLI, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: productPairTestCLISHA},
 		Windowless: binaryadmission.WindowsArtifact{Role: binaryadmission.WindowsArtifactRoleWindowless, Version: "0.4.36", Commit: "abc1234", BuildDate: "2026-09-01T00:00:00Z", SHA256: productPairTestWindowlessSHA},
 	}
-	receipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-01T00:00:01Z"}
+	legacyReceipt := UpgradeReceiptV2{Schema: UpgradeReceiptSchemaV2, Admission: UpgradeAdmissionLocalProduct, Version: pair.CLI.Version, Commit: pair.CLI.Commit, BuildDate: pair.CLI.BuildDate, Artifacts: pair, InstalledAt: "2026-09-01T00:00:01Z"}
+	receipt := legacyReceipt
+	receipt.Mode = WindowsProductPairModeSetup
 	raw, err := json.Marshal(receipt)
 	if err != nil {
 		t.Fatal(err)
@@ -547,6 +555,29 @@ func TestWindowsProductPairCommitReconciliationIsReceiptBoundAndIdempotent(t *te
 	mismatch.CLI.SHA256 = "different"
 	if reconciled, err := reconcileWindowsProductPairCommit(raw, mismatch, pair, WindowsProductPairModeSetup, publish); err != nil || reconciled || len(events) != 2 {
 		t.Fatalf("mismatch reconciled=%v err=%v events=%d", reconciled, err, len(events))
+	}
+	if reconciled, err := reconcileWindowsProductPairCommit(raw, pair, pair, WindowsProductPairModeUpgrade, publish); err != nil || reconciled || len(events) != 2 {
+		t.Fatalf("cross-mode receipt reconciled=%v err=%v events=%d", reconciled, err, len(events))
+	}
+	legacyRaw, err := json.Marshal(legacyReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reconciled, err := reconcileWindowsProductPairCommit(legacyRaw, pair, pair, WindowsProductPairModeSetup, publish); err != nil || reconciled || len(events) != 2 {
+		t.Fatalf("mode-less receipt reconciled=%v err=%v events=%d", reconciled, err, len(events))
+	}
+	unsupportedReceipt := legacyReceipt
+	unsupportedReceipt.Mode = "future-mode"
+	unsupportedRaw, err := json.Marshal(unsupportedReceipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := DecodeUpgradeReceipt(unsupportedRaw)
+	if err != nil || decoded.V2 == nil || decoded.V2.Mode != "future-mode" {
+		t.Fatalf("unsupported mode receipt was not read-compatible: decoded=%+v err=%v", decoded, err)
+	}
+	if reconciled, err := reconcileWindowsProductPairCommit(unsupportedRaw, pair, pair, "future-mode", publish); err != nil || reconciled || len(events) != 2 {
+		t.Fatalf("unsupported mode receipt reconciled=%v err=%v events=%d", reconciled, err, len(events))
 	}
 }
 

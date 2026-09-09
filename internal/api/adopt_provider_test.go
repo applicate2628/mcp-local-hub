@@ -223,6 +223,31 @@ func TestBuildProviderAdoptPlanReadOnlyValidationMatrix(t *testing.T) {
 	}
 }
 
+func TestBuildProviderAdoptPlanRejectsUnsupportedObservationPlatform(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("provider process observation is available on Windows")
+	}
+	cwd := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := clients.ProviderMCPEntryV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: "linux-provider",
+		Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd,
+		Scope: clients.ProviderMCPScopeUser, Enabled: true, ReceiptFingerprint: "receipt",
+		ActivationFingerprint: "activation", ActivationEnabledPresent: true, ActivationEnabled: true,
+		DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy",
+	}
+	_, err = (&API{}).buildProviderAdoptPlan(AdoptOpts{
+		EntryName: entry.ServerName, Client: entry.ProviderClient, ManifestName: entry.ServerName,
+		ProviderPluginRef: entry.PluginRef, Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+	}, nil, fakeProviderMCPSource{entries: []clients.ProviderMCPEntryV1{entry}})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("non-Windows provider plan error=%v, want E_PROVIDER_LIFECYCLE_UNSUPPORTED", err)
+	}
+}
+
 func TestAdoptPlanProviderPreviewIsNotSerialized(t *testing.T) {
 	plan := AdoptPlan{EntryName: "reader", providerPreview: &ProviderAdoptPreview{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", EnvKeys: []string{"TOKEN"}}}
 	raw, err := json.Marshal(plan)

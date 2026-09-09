@@ -324,7 +324,7 @@ func recoveryCommitProven(j windowsProductPairRecoveryJournal, tasks WindowsProd
 		return false, binaryadmission.WindowsProductPair{}
 	}
 	decoded, err := DecodeUpgradeReceipt(raw)
-	if err != nil || decoded.V2 == nil || !sameProductPairIdentity(decoded.V2.Artifacts, pair) || tasks.VerifyRuntime() != nil {
+	if err != nil || decoded.V2 == nil || !windowsProductPairReceiptModeMatches(decoded.V2.Mode, j.Mode) || !sameProductPairIdentity(decoded.V2.Artifacts, pair) || tasks.VerifyRuntime() != nil {
 		return false, binaryadmission.WindowsProductPair{}
 	}
 	return true, pair

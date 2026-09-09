@@ -38,8 +38,12 @@ type providerDirectProcessObservationV1 struct {
 
 type providerDirectProcessObserver func(context.Context, providerDirectProcessIdentityV1, []providerProcessGenerationV1) providerDirectProcessObservationV1
 
+func providerDirectProcessObservationSupported() bool {
+	return runtime.GOOS == "windows"
+}
+
 func observeProviderDirectProcessTree(ctx context.Context, identity providerDirectProcessIdentityV1, prior []providerProcessGenerationV1) providerDirectProcessObservationV1 {
-	if runtime.GOOS != "windows" {
+	if !providerDirectProcessObservationSupported() {
 		return providerDirectProcessObservationUnavailable(identity, "unsupported-platform", errors.New("provider process observation is Windows-only"))
 	}
 	if err := ctx.Err(); err != nil {
