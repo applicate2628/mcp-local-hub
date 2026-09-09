@@ -740,7 +740,10 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			if r.OperationState != AdoptOperationStateAdopting {
 				return fmt.Errorf("adopt provenance capture: manifest %q already has committed adopt provenance (state %q); refusing to overwrite it", plan.ManifestName, r.OperationState)
 			}
-			if classifyDeadAdoptingRow(r) == adoptRowCommittedKeep {
+			switch classifyDeadAdoptingRow(r) {
+			case adoptRowRecoveryKeep:
+				return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: adopt provenance capture: manifest %q has an unresolved provider recovery receipt; use de-adopt --yes to resume recovery explicitly", plan.ManifestName)
+			case adoptRowCommittedKeep:
 				return fmt.Errorf("adopt provenance capture: manifest %q already has a committed (install-live) adopt still in `adopting` state; refusing to overwrite it", plan.ManifestName)
 			}
 			if !adoptRowProvablyUnmutatedFn(r) {

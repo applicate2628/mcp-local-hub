@@ -670,21 +670,6 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	}
 	var providerState providerExecutionState
 	var providerPreObservation providerDirectProcessObservationV1
-	if plan.providerSource != nil {
-		var providerErr error
-		providerState, providerErr = resolveProviderExecutionState(plan, opts.providerDeps.source)
-		if providerErr != nil {
-			return newAdoptStageError("provider-revalidate", "uncommitted", providerErr)
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		observation := opts.providerDeps.observe(ctx, providerState.identity, nil)
-		cancel()
-		if observation.State != providerProcessObservationComplete {
-			return newAdoptStageError("provider-process-observe", "uncommitted", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED"))
-		}
-		providerPreObservation = observation
-	}
-
 	// Install emits useful but success-shaped narration (backup locations,
 	// rewritten client binding, and "Install complete"). It is not externally
 	// credible until the lease owner has settled; keep it private until the same
@@ -696,6 +681,20 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 	providerManagedInstalled := false
 	var providerRec *AdoptProvenanceRecord
 	transactionErr := func() error {
+		if plan.providerSource != nil {
+			var providerErr error
+			providerState, providerErr = resolveProviderExecutionState(plan, opts.providerDeps.source)
+			if providerErr != nil {
+				return newAdoptStageError("provider-revalidate", "uncommitted", providerErr)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			observation := opts.providerDeps.observe(ctx, providerState.identity, nil)
+			cancel()
+			if observation.State != providerProcessObservationComplete {
+				return newAdoptStageError("provider-process-observe", "uncommitted", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED"))
+			}
+			providerPreObservation = observation
+		}
 		if plan.alreadyAdopted {
 			stage = "existing-state-inconsistent"
 			commitState = "committed_unverified"

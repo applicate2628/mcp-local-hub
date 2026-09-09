@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -246,6 +247,68 @@ func TestBuildAdoptPlanRefusesProviderRecoveryReceipt(t *testing.T) {
 	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: rec.ManifestName, Client: "codex-cli", ManifestName: rec.ManifestName, ProviderPluginRef: rec.ProviderSource.PluginRef})
 	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_RECOVERY_REQUIRED") {
 		t.Fatalf("fresh provider adopt error=%v, want recovery refusal", err)
+	}
+}
+
+func TestCaptureAdoptProvenanceGenericUpsertPreservesProviderRecoveryReceipt(t *testing.T) {
+	entry := "provider-recovery-generic-capture"
+	setupAdoptTestEnv(t, entry, `[mcp_servers.provider-recovery-generic-capture]
+command = "go"
+args = ["version"]
+`)
+
+	prior := sampleAdoptRecord()
+	prior.ManifestName = entry
+	prior.SourceEntryName = entry
+	prior.AdoptClients = []string{"codex-cli"}
+	prior.Clients = prior.Clients[:1]
+	prior.Clients[0].Client = "codex-cli"
+	prior.Clients[0].SnapshotRef = "adopt-provenance/" + entry + "/codex-cli.snapshot"
+	prior.OperationState = AdoptOperationStateAdopting
+	prior.ProviderSource = sampleProviderSource()
+	prior.ProviderSource.ServerName = entry
+	prior.ProviderSource.DisablePhase = "disable_planned"
+	snapshotDir := seedAdoptProvenanceMutatorRecord(t, prior)
+	before, found, err := ReadAdoptProvenance(entry)
+	if err != nil || !found {
+		t.Fatalf("read seeded recovery receipt: found=%v err=%v", found, err)
+	}
+	snapshotPath := filepath.Join(snapshotDir, "codex-cli.snapshot")
+	snapshotBefore, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("read seeded recovery snapshot: %v", err)
+	}
+
+	plan := &AdoptPlan{
+		EntryName:        entry,
+		SourceClient:     "codex-cli",
+		ManifestName:     entry,
+		Port:             nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+		AdoptClients:     []string{"codex-cli"},
+		ManifestYAML:     "name: " + entry + "\n",
+		presentAtBuild:   []string{"codex-cli"},
+		TargetEntryNames: map[string]string{"codex-cli": entry},
+	}
+	previousUnmutated := adoptRowProvablyUnmutatedFn
+	adoptRowProvablyUnmutatedFn = func(AdoptProvenanceRecord) bool { return true }
+	t.Cleanup(func() { adoptRowProvablyUnmutatedFn = previousUnmutated })
+	if _, err := NewAPI().captureAdoptProvenance(plan); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_RECOVERY_REQUIRED") {
+		t.Fatalf("generic capture error=%v, want E_PROVIDER_RECOVERY_REQUIRED", err)
+	}
+
+	after, found, err := ReadAdoptProvenance(entry)
+	if err != nil || !found {
+		t.Fatalf("read recovery receipt after generic capture: found=%v err=%v", found, err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("generic capture changed provider recovery receipt\nbefore=%#v\nafter=%#v", before, after)
+	}
+	snapshotAfter, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("read recovery snapshot after generic capture: %v", err)
+	}
+	if !reflect.DeepEqual(snapshotAfter, snapshotBefore) {
+		t.Fatalf("generic capture changed provider recovery snapshot: before=%q after=%q", snapshotBefore, snapshotAfter)
 	}
 }
 

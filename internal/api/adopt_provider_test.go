@@ -246,13 +246,17 @@ func TestPrintAdoptPlanProviderPreviewIsRedacted(t *testing.T) {
 	}
 }
 
-func TestExecuteProviderAdoptPlanRefusesUnsupportedLifecycleBeforeProviderMutation(t *testing.T) {
+func TestExecuteProviderAdoptPreflightFailureSettlesLeaseBeforeProviderMutation(t *testing.T) {
 	entry := "provider-execution-refused"
 	codexPath, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.keep]
 command = "provider-tool"
 args = ["--stdio"]
 `)
 	cwd := t.TempDir()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
 	casCalls := 0
 	provider := fakeProviderMCPSource{
 		entries: []clients.ProviderMCPEntryV1{{
@@ -260,7 +264,7 @@ args = ["--stdio"]
 			PluginRef:                     "arbitrary@catalog",
 			ServerName:                    entry,
 			Transport:                     clients.ProviderMCPTransportStdio,
-			Command:                       "provider-tool",
+			Command:                       exe,
 			Args:                          []string{"--stdio"},
 			Env:                           map[string]string{"MODE": "read"},
 			EnvForwardLocal:               []string{"OPTIONAL_TOKEN"},
@@ -291,6 +295,7 @@ args = ["--stdio"]
 	if plan == nil || plan.providerSource == nil {
 		t.Fatalf("provider plan = %#v, want non-nil provider provenance", plan)
 	}
+	provider.entries[0].PolicyFingerprint = "source-drift"
 
 	clientRoot := filepath.Dir(filepath.Dir(codexPath))
 	beforeClient := snapshotRegularFiles(t, clientRoot)
@@ -303,8 +308,8 @@ args = ["--stdio"]
 	if !errors.As(err, &staged) || staged.Stage != "provider-revalidate" || staged.CommitState != "uncommitted" {
 		t.Fatalf("error = %v, staged = %#v, want provider-revalidate/uncommitted", err, staged)
 	}
-	if staged.Cause == nil || !strings.Contains(staged.Cause.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
-		t.Fatalf("cause = %v, want E_PROVIDER_LIFECYCLE_UNSUPPORTED", staged.Cause)
+	if staged.Cause == nil || !strings.Contains(staged.Cause.Error(), "E_PROVIDER_SOURCE_CHANGED") {
+		t.Fatalf("cause = %v, want E_PROVIDER_SOURCE_CHANGED", staged.Cause)
 	}
 	if casCalls != 0 {
 		t.Fatalf("provider CAS calls=%d, want zero", casCalls)
@@ -317,6 +322,20 @@ args = ["--stdio"]
 	}
 	if after := snapshotRegularFiles(t, manifestRoot); !reflect.DeepEqual(after, beforeManifest) {
 		t.Fatalf("manifest fixture mutated\nbefore=%#v\nafter=%#v", beforeManifest, after)
+	}
+	leasePath, err := adoptManifestLeasePath(entry)
+	if err != nil {
+		t.Fatalf("adoptManifestLeasePath: %v", err)
+	}
+	if _, err := os.Lstat(leasePath); !os.IsNotExist(err) {
+		t.Fatalf("provider preflight refusal left lease file behind: %v", err)
+	}
+	lease, acquired, acquireErr := tryAcquireAdoptManifestLease(entry)
+	if acquireErr != nil || !acquired {
+		t.Fatalf("provider preflight refusal left lease handle held: acquired=%v err=%v", acquired, acquireErr)
+	}
+	if releaseErr := lease.ReleaseAndRemove(); releaseErr != nil {
+		t.Fatalf("release verification lease: %v", releaseErr)
 	}
 }
 
