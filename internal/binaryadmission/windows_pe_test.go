@@ -75,10 +75,10 @@ func buildVersionResourceFixture(role WindowsArtifactRole, version, commit, buil
 }
 
 func writeWindowsPEVersionFixture(t *testing.T, role WindowsArtifactRole, version, commit, buildDate string, duplicateProductName bool) string {
-	return writeWindowsPEVersionFixtureWithMachine(t, role, version, commit, buildDate, duplicateProductName, 0x8664)
+	return writeWindowsPEVersionFixtureWithCOFF(t, role, version, commit, buildDate, duplicateProductName, 0x8664, 0)
 }
 
-func writeWindowsPEVersionFixtureWithMachine(t *testing.T, role WindowsArtifactRole, version, commit, buildDate string, duplicateProductName bool, machine uint16) string {
+func writeWindowsPEVersionFixtureWithCOFF(t *testing.T, role WindowsArtifactRole, version, commit, buildDate string, duplicateProductName bool, machine, characteristics uint16) string {
 	t.Helper()
 	subsystem := WindowsCUISubsystem
 	if role == WindowsArtifactRoleWindowless {
@@ -93,6 +93,7 @@ func writeWindowsPEVersionFixtureWithMachine(t *testing.T, role WindowsArtifactR
 	binary.LittleEndian.PutUint16(data[peOffset+4:peOffset+6], machine)
 	binary.LittleEndian.PutUint16(data[peOffset+6:peOffset+8], 1)
 	binary.LittleEndian.PutUint16(data[peOffset+20:peOffset+22], optionalSize)
+	binary.LittleEndian.PutUint16(data[peOffset+22:peOffset+24], characteristics)
 	optional := data[peOffset+24 : peOffset+24+optionalSize]
 	binary.LittleEndian.PutUint16(optional[0:2], 0x20b)
 	binary.LittleEndian.PutUint16(optional[68:70], subsystem)
@@ -256,8 +257,8 @@ func TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine(t *testing.T) {
 		{name: "mixed AMD64 and ARM64", cliMachine: amd64Machine, windowlessMachine: arm64Machine, wantError: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			cli := writeWindowsPEVersionFixtureWithMachine(t, WindowsArtifactRoleCLI, "0.4.36", "abc1234", "2026-09-01T12:34:56Z", false, tc.cliMachine)
-			windowless := writeWindowsPEVersionFixtureWithMachine(t, WindowsArtifactRoleWindowless, "0.4.36", "abc1234", "2026-09-01T12:34:56Z", false, tc.windowlessMachine)
+			cli := writeWindowsPEVersionFixtureWithCOFF(t, WindowsArtifactRoleCLI, "0.4.36", "abc1234", "2026-09-01T12:34:56Z", false, tc.cliMachine, 0)
+			windowless := writeWindowsPEVersionFixtureWithCOFF(t, WindowsArtifactRoleWindowless, "0.4.36", "abc1234", "2026-09-01T12:34:56Z", false, tc.windowlessMachine, 0)
 			_, err := AdmitWindowsProductPair(
 				WindowsArtifact{Path: cli, Role: WindowsArtifactRoleCLI},
 				WindowsArtifact{Path: windowless, Role: WindowsArtifactRoleWindowless},
@@ -270,6 +271,18 @@ func TestWindowsProductPairAdmissionRequiresMatchingCOFFMachine(t *testing.T) {
 			}
 			if err != nil {
 				t.Fatalf("AdmitWindowsProductPair: %v", err)
+			}
+		})
+	}
+}
+
+func TestWindowsRoleAdmissionRejectsMetadataValidDLLImages(t *testing.T) {
+	for _, role := range []WindowsArtifactRole{WindowsArtifactRoleCLI, WindowsArtifactRoleWindowless} {
+		t.Run(string(role), func(t *testing.T) {
+			path := writeWindowsPEVersionFixtureWithCOFF(t, role, "0.4.36", "abc1234", "2026-09-01T12:34:56Z", false, 0x8664, windowsPEDLLCharacteristic)
+			_, err := AdmitWindowsRole(WindowsArtifact{Path: path, Role: role})
+			if err == nil || !strings.Contains(err.Error(), WindowsPEFormatErrorID) {
+				t.Fatalf("AdmitWindowsRole(%q) error=%v, want %s DLL refusal", role, err, WindowsPEFormatErrorID)
 			}
 		})
 	}

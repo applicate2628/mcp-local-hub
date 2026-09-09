@@ -118,6 +118,9 @@ func AdmitWindowsRole(artifact WindowsArtifact) (WindowsArtifact, error) {
 	default:
 		return WindowsArtifact{}, fmt.Errorf("%s: %s: invalid artifact role %q", WindowsProductPairErrorID, artifact.Path, artifact.Role)
 	}
+	if err := ValidateWindowsNativeImage(artifact.Path); err != nil {
+		return WindowsArtifact{}, err
+	}
 	subsystem, err := readWindowsPESubsystemFile(artifact.Path)
 	if err != nil {
 		return WindowsArtifact{}, err
