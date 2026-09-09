@@ -33,6 +33,7 @@ type productPairTaskFake struct {
 	discarded    bool
 	closeErr     error
 	inventoryErr error
+	restoreErr   error
 }
 
 func (f *productPairTaskFake) InventoryExport() error {
@@ -122,7 +123,7 @@ func (f *productPairTaskFake) VerifyRuntime() error {
 func (f *productPairTaskFake) RestoreImport() error {
 	f.restored = true
 	*f.order = append(*f.order, "tasks-restore")
-	return nil
+	return f.restoreErr
 }
 func (f *productPairTaskFake) Close() error { f.closed = true; return f.closeErr }
 func (f *productPairTaskFake) RecoveryDescriptor() (WindowsProductPairTaskRecovery, error) {
@@ -595,7 +596,7 @@ func TestWindowsProductPairTxnSweepsExactAdmittedTargetsAfterCommit(t *testing.T
 	}
 }
 
-func TestWindowsProductPairRollbackCleanupFailureStillRestartsPrior(t *testing.T) {
+func TestWindowsProductPairRollbackCleanupFailureDoesNotRestartPrior(t *testing.T) {
 	dir := t.TempDir()
 	paths := productPairFixturePaths(dir)
 	prior := []byte("old-cli")
@@ -627,10 +628,94 @@ func TestWindowsProductPairRollbackCleanupFailureStillRestartsPrior(t *testing.T
 	if err == nil || !strings.Contains(err.Error(), "displaced successor is not an exact generated aside") {
 		t.Fatalf("err=%v", err)
 	}
-	if restarts != 1 {
-		t.Fatalf("prior restarts=%d, want 1", restarts)
+	if restarts != 0 {
+		t.Fatalf("prior restarts=%d, want 0 while rollback cleanup is incomplete", restarts)
 	}
 	assertPairFile(t, paths.priorCLI, prior)
+}
+
+func TestWindowsProductPairRollbackRestorationFailureDoesNotRestartPrior(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		faultStage WindowsProductPairStage
+		inject     func(*testing.T, productPairPaths, *productPairTaskFake, *WindowsProductPairTxnDeps)
+		wantCause  string
+	}{
+		{
+			name:       "artifact",
+			faultStage: WindowsProductPairStageCLIPromoted,
+			inject: func(_ *testing.T, _ productPairPaths, _ *productPairTaskFake, deps *WindowsProductPairTxnDeps) {
+				deps.RestorePromotion = func(WindowsProductPairPromotion) (string, error) {
+					return "", errors.New("injected artifact restore failure")
+				}
+			},
+			wantCause: "injected artifact restore failure",
+		},
+		{
+			name:       "task XML",
+			faultStage: WindowsProductPairStageCLIPromoted,
+			inject: func(_ *testing.T, _ productPairPaths, tasks *productPairTaskFake, _ *WindowsProductPairTxnDeps) {
+				tasks.restoreErr = errors.New("injected task restore failure")
+			},
+			wantCause: "injected task restore failure",
+		},
+		{
+			name:       "receipt",
+			faultStage: WindowsProductPairStageReceiptWritten,
+			inject:     func(*testing.T, productPairPaths, *productPairTaskFake, *WindowsProductPairTxnDeps) {},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			paths := productPairFixturePaths(dir)
+			writePairFixture(t, paths.priorCLI, []byte("prior-cli"))
+			writePairFixture(t, paths.windowless, []byte("prior-windowless"))
+			writePairFixture(t, paths.stagedCLI, []byte("successor-cli"))
+			writePairFixture(t, paths.stagedWindowless, []byte("successor-windowless"))
+			writePairFixture(t, paths.receipt, []byte("prior-receipt"))
+			var order []string
+			tasks := &productPairTaskFake{order: &order}
+			deps := productPairTestDeps(&order)
+			tc.inject(t, paths, tasks, &deps)
+			restarts := 0
+			deps.RestartPrior = func(string) error { restarts++; return nil }
+			triggerErr := errors.New("trigger rollback after " + string(tc.faultStage))
+			deps.Fault = func(stage WindowsProductPairStage) error {
+				if stage != tc.faultStage {
+					return nil
+				}
+				if tc.name == "receipt" {
+					if err := os.Remove(paths.receipt); err != nil {
+						t.Fatal(err)
+					}
+					if err := os.Mkdir(paths.receipt, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+				return triggerErr
+			}
+			_, err := (WindowsProductPairTxn{Opts: WindowsProductPairTxnOpts{
+				StateDir: filepath.Dir(paths.receipt), CLIPath: paths.priorCLI, WindowlessPath: paths.windowless,
+				StagedCLI: paths.stagedCLI, StagedWindowless: paths.stagedWindowless, ReceiptPath: paths.receipt,
+				Mode: WindowsProductPairModeUpgrade, Tasks: tasks, Deps: deps,
+			}}).Run(context.Background())
+			if err == nil || !errors.Is(err, ErrWindowsProductPairRecoveryRollback) || (tc.wantCause != "" && !strings.Contains(err.Error(), tc.wantCause)) {
+				t.Fatalf("error=%v, want typed rollback failure containing %q", err, tc.wantCause)
+			}
+			if !errors.Is(err, triggerErr) {
+				t.Fatalf("rollback error lost original trigger: %v", err)
+			}
+			if restarts != 0 {
+				t.Fatalf("prior restarts=%d, want 0 while exact restoration is incomplete", restarts)
+			}
+			if !tasks.closed || tasks.discarded {
+				t.Fatalf("task owner closed=%v discarded=%v, want lock release with retained recovery store", tasks.closed, tasks.discarded)
+			}
+			if _, statErr := os.Stat(filepath.Join(filepath.Dir(paths.receipt), WindowsProductPairRecoveryFileLeaf)); statErr != nil {
+				t.Fatalf("nonterminal recovery journal not retained: %v", statErr)
+			}
+		})
+	}
 }
 
 func TestWindowsProductPairTxnRollsBackPartialPromotionResult(t *testing.T) {

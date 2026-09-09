@@ -360,6 +360,9 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 		if err := restoreProductPairFile(receiptPrior); err != nil {
 			restoreErrs = append(restoreErrs, err)
 		}
+		if joined := errors.Join(restoreErrs...); joined != nil {
+			return errors.Join(trigger, fmt.Errorf("%w: exact Windows product pair rollback failed: %v", ErrWindowsProductPairRecoveryRollback, joined))
+		}
 		if cliPrior.present && d.RestartPrior != nil {
 			if err := d.RestartPrior(o.CLIPath); err != nil {
 				restoreErrs = append(restoreErrs, fmt.Errorf("restart prior supervisor: %w", err))
