@@ -67,3 +67,29 @@ func TestClientConfigSandboxEnvironment_MissingRedirectFailsClosed(t *testing.T)
 		t.Fatalf("synthetic outside path was unexpectedly present or inaccessible after audit: %v", err)
 	}
 }
+
+func TestClientConfigSandboxEnvironment_UnsetsCODEXHOMEAndRestoresIt(t *testing.T) {
+	outside := t.TempDir()
+	t.Setenv("CODEX_HOME", outside)
+	root := t.TempDir()
+	restoreEnv := ApplyClientConfigSandboxEnvironment(root)
+
+	if value, present := os.LookupEnv("CODEX_HOME"); present {
+		t.Fatalf("CODEX_HOME remains set to %q inside sandbox", value)
+	}
+	client, err := NewCodexCLI()
+	if err != nil {
+		t.Fatalf("construct Codex adapter from sandbox: %v", err)
+	}
+	if got, want := client.ConfigPath(), filepath.Join(root, ".codex", "config.toml"); got != want {
+		t.Fatalf("Codex config path = %q, want sandbox path %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "config.toml")); !os.IsNotExist(err) {
+		t.Fatalf("outside CODEX_HOME config was unexpectedly touched: %v", err)
+	}
+
+	restoreEnv()
+	if value, present := os.LookupEnv("CODEX_HOME"); !present || value != outside {
+		t.Fatalf("CODEX_HOME after restore = %q, present=%v; want %q, true", value, present, outside)
+	}
+}

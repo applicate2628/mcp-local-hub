@@ -42,6 +42,7 @@ func ClientConfigSandboxEnvironment(root string) []ClientConfigSandboxEnv {
 		redirect("XDG_STATE_HOME", filepath.Join(".local", "state")),
 		redirect("ProgramData", "ProgramData"),
 		redirect("MIMOCODE_TEST_MANAGED_CONFIG_DIR", filepath.Join("ProgramData", "opencode")),
+		{Key: "CODEX_HOME", Unset: true},
 		{Key: "COPILOT_HOME", Unset: true},
 		{Key: "KIMI_CODE_HOME", Unset: true},
 		{Key: "MIMOCODE_HOME", Unset: true},

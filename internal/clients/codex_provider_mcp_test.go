@@ -2,6 +2,7 @@ package clients
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -128,6 +129,74 @@ func TestCodexListProviderMCPEntriesStillRequiresCWDForStdio(t *testing.T) {
 	_, err := (&codexCLI{path: filepath.Join(root, "config.toml")}).ListProviderMCPEntries(context.Background())
 	if !errors.Is(err, errCodexProviderInventoryUnavailable) || !strings.Contains(err.Error(), "receipt cwd missing") {
 		t.Fatalf("stdio receipt without cwd error = %v", err)
+	}
+}
+
+func TestCodexListProviderMCPEntriesSkipsSkillsOnlyPlugin(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("CODEX_HOME", root)
+	writeProviderFixture(t, root, "quartz-tools@catalog-a", "quartz-tools", "catalog-a", "7.4.2", "orbit-reader", false, false)
+
+	skillsOnlyReceipt := filepath.Join(root, "plugins", "cache", "catalog-a", "skills-only", "1.0.0")
+	if err := os.MkdirAll(filepath.Join(skillsOnlyReceipt, ".codex-plugin"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillsOnlyReceipt, ".codex-plugin", "plugin.json"), []byte(`{"name":"skills-only","version":"1.0.0"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	withProviderInventory(t, providerInventoryJSON(`[
+{"pluginId":"skills-only@catalog-a","name":"skills-only","marketplaceName":"catalog-a","version":"1.0.0","installed":true,"enabled":true,"source":{"source":"marketplace","id":"catalog-a"},"installPolicy":"user","authPolicy":"none"},
+{"pluginId":"quartz-tools@catalog-a","name":"quartz-tools","marketplaceName":"catalog-a","version":"7.4.2","installed":true,"enabled":true,"source":{"source":"marketplace","id":"catalog-a"},"installPolicy":"user","authPolicy":"none"}
+]`))
+
+	entries, err := (&codexCLI{path: filepath.Join(root, "config.toml")}).ListProviderMCPEntries(context.Background())
+	if err != nil {
+		t.Fatalf("skills-only receipt blocked inventory: %v", err)
+	}
+	if len(entries) != 1 || entries[0].PluginRef != "quartz-tools@catalog-a" || entries[0].ServerName != "orbit-reader" {
+		t.Fatalf("entries=%+v, want only the MCP-bearing plugin", entries)
+	}
+}
+
+func TestCodexProviderReceiptServersDistinguishesAbsentAndMalformedMCPPointer(t *testing.T) {
+	root := t.TempDir()
+	row := codexPluginInventoryRow{Name: "skills-only", Version: "1.0.0"}
+	absPointer, err := json.Marshal(filepath.Join(root, "outside.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name      string
+		field     string
+		wantError bool
+	}{
+		{name: "absent", field: "", wantError: false},
+		{name: "empty", field: `,"mcpServers":""`, wantError: true},
+		{name: "null", field: `,"mcpServers":null`, wantError: true},
+		{name: "non-string", field: `,"mcpServers":42`, wantError: true},
+		{name: "absolute", field: `,"mcpServers":` + string(absPointer), wantError: true},
+		{name: "escape", field: `,"mcpServers":"../outside.json"`, wantError: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			receipt := filepath.Join(root, tc.name)
+			if err := os.MkdirAll(filepath.Join(receipt, ".codex-plugin"), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			manifest := `{"name":"skills-only","version":"1.0.0"` + tc.field + `}`
+			if err := os.WriteFile(filepath.Join(receipt, ".codex-plugin", "plugin.json"), []byte(manifest), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			servers, _, err := codexProviderReceiptServers(receipt, row)
+			if tc.wantError {
+				if err == nil {
+					t.Fatal("accepted malformed mcpServers pointer")
+				}
+				return
+			}
+			if err != nil || len(servers) != 0 {
+				t.Fatalf("skills-only receipt servers=%v err=%v, want empty nil", servers, err)
+			}
+		})
 	}
 }
 

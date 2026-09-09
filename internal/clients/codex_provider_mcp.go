@@ -51,9 +51,9 @@ type codexPluginInventorySource struct {
 }
 
 type codexPluginManifest struct {
-	Name       string `json:"name"`
-	Version    string `json:"version"`
-	MCPServers string `json:"mcpServers"`
+	Name       string          `json:"name"`
+	Version    string          `json:"version"`
+	MCPServers json.RawMessage `json:"mcpServers"`
 }
 
 func (c *codexCLI) ListProviderMCPEntries(ctx context.Context) ([]ProviderMCPEntryV1, error) {
@@ -288,13 +288,20 @@ func codexProviderReceiptServers(receiptRoot string, row codexPluginInventoryRow
 		return nil, "", err
 	}
 	var manifest codexPluginManifest
-	if err := json.Unmarshal(pluginRaw, &manifest); err != nil || manifest.Name != row.Name || manifest.Version != row.Version || manifest.MCPServers == "" {
-		return nil, "", errors.New("receipt manifest identity or mcp pointer invalid")
+	if err := json.Unmarshal(pluginRaw, &manifest); err != nil || manifest.Name != row.Name || manifest.Version != row.Version {
+		return nil, "", errors.New("receipt manifest identity invalid")
 	}
-	if filepath.IsAbs(manifest.MCPServers) {
+	if len(manifest.MCPServers) == 0 {
+		return map[string]map[string]any{}, "", nil
+	}
+	var mcpPointer string
+	if err := json.Unmarshal(manifest.MCPServers, &mcpPointer); err != nil || mcpPointer == "" {
+		return nil, "", errors.New("receipt mcp pointer invalid")
+	}
+	if filepath.IsAbs(mcpPointer) {
 		return nil, "", errors.New("receipt mcp pointer is absolute")
 	}
-	mcpPath := filepath.Clean(filepath.Join(receiptRoot, manifest.MCPServers))
+	mcpPath := filepath.Clean(filepath.Join(receiptRoot, mcpPointer))
 	rel, err := filepath.Rel(receiptRoot, mcpPath)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return nil, "", errors.New("receipt mcp pointer escapes root")
