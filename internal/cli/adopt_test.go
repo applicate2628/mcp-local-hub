@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -193,6 +194,9 @@ func TestAdoptCmdProviderPluginForwardsExplicitSelectionAndUsesAPIRedactedPrevie
 }
 
 func TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("state-root lease namespace refusal is Windows-specific")
+	}
 	root, home := adoptTestHome(t)
 	manifestDir := filepath.Join(root, "manifests")
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)

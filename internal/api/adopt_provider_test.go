@@ -144,6 +144,9 @@ func (f fakeProviderMCPSource) CompareAndSetProviderMCPActivation(context.Contex
 }
 
 func TestBuildProviderAdoptPlanReadOnlyValidationMatrix(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("provider lifecycle planning is Windows-only; TestBuildProviderAdoptPlanRejectsUnsupportedObservationPlatform covers the unsupported contract")
+	}
 	cwd := t.TempDir()
 	exe, err := os.Executable()
 	if err != nil {

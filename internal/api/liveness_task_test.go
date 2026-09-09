@@ -103,6 +103,14 @@ func installTestCurrentWindowsUser(t *testing.T, name string) {
 	t.Cleanup(func() { currentWindowsUserFn = orig })
 }
 
+// ensureLivenessTaskFixtureResolved exercises the scheduler transaction with
+// explicit fixture identities. Public composition resolves the current Windows
+// principal before reaching this transaction, so it is intentionally covered by
+// the platform-specific SID tests instead.
+func ensureLivenessTaskFixtureResolved(f scheduler.Scheduler) (LivenessTaskReceipt, error) {
+	return ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, "S-1-5-21-test", "test", f)
+}
+
 func TestLivenessTaskDifferenceNativeDefaultsAndIdentityMatrix(t *testing.T) {
 	const sid, account = "S-1-5-21-101-202-303-404", "account-canary"
 	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, sid, account)
@@ -227,13 +235,9 @@ func TestEnsureLivenessTaskResolved_StrictOppositeReadbackRestoresExactPriorXML(
 // liveness XML body (PT1M cadence + `supervise --ensure-alive` action). Reuses
 // the apiSurfacesFakeScheduler + seam helpers from api_surfaces_test.go.
 func TestInstallLivenessTask_HappyPath(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("InstallLivenessTask: %v", err)
 	}
 
@@ -267,13 +271,9 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 }
 
 func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("InstallLivenessTask: %v", err)
 	}
 	imports := f.importCalls()
@@ -294,16 +294,12 @@ func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
 
 // TestInstallLivenessTask_Idempotent asserts a verified second run is a no-op.
 func TestInstallLivenessTask_Idempotent(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("first InstallLivenessTask: %v", err)
 	}
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("second InstallLivenessTask (idempotent): %v", err)
 	}
 	if got := len(f.importCalls()); got != 1 {
@@ -312,10 +308,7 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
 }
 
 func TestEnsureLivenessTask_SemanticNormalizationIsIdempotent(t *testing.T) {
-	sid, err := livenessPrincipalSID()
-	if err != nil {
-		t.Fatal(err)
-	}
+	const sid = "S-1-5-21-test"
 	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, sid, "test")
 	cases := []struct {
 		name      string
@@ -328,14 +321,10 @@ func TestEnsureLivenessTask_SemanticNormalizationIsIdempotent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := NewAPI()
 			f := newLivenessTaskScheduler()
 			f.tasks[LivenessTaskName] = scheduler.EncodeXMLUTF16LEBOM(tc.normalize(canonical))
-			installTestScheduler(t, f)
-			installTestCanonicalMcphubPath(t, livenessFixtureExe)
-			installTestCurrentWindowsUser(t, "test")
 
-			receipt, err := a.EnsureLivenessTask()
+			receipt, err := ensureLivenessTaskFixtureResolved(f)
 			if err != nil {
 				t.Fatalf("EnsureLivenessTask: %v", err)
 			}
@@ -390,17 +379,13 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := NewAPI()
 			f := newLivenessTaskScheduler()
 			f.normalizeImport = func(raw []byte) []byte {
 				decoded := decodeUTF16LEBOMForTest(t, raw)
 				return scheduler.EncodeXMLUTF16LEBOM(tc.normalize(decoded))
 			}
-			installTestScheduler(t, f)
-			installTestCanonicalMcphubPath(t, livenessFixtureExe)
-			installTestCurrentWindowsUser(t, "test")
 
-			err := a.InstallLivenessTask()
+			_, err := ensureLivenessTaskFixtureResolved(f)
 			if err == nil {
 				t.Fatal("normalized semantic drift was accepted")
 			}
@@ -416,7 +401,6 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
 }
 
 func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
 		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
@@ -432,11 +416,8 @@ func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
 			1,
 		))
 	}
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	_, err := a.EnsureLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
 	}
@@ -459,7 +440,6 @@ func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
 }
 
 func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
 		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
@@ -482,11 +462,8 @@ func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testi
 			1,
 		))
 	}
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	_, err := a.EnsureLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
 	}
@@ -506,7 +483,6 @@ func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testi
 }
 
 func TestEnsureLivenessTask_ReadbackFailureRestoresExactPriorXML(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
 		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
@@ -518,11 +494,8 @@ func TestEnsureLivenessTask_ReadbackFailureRestoresExactPriorXML(t *testing.T) {
 		}
 		return nil
 	}
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	_, err := a.EnsureLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("EnsureLivenessTask accepted a failed post-import readback")
 	}
@@ -562,18 +535,14 @@ func reverseLivenessTriggerOrderForTest(taskXML string) string {
 // TestInstallLivenessTask_PropagatesImportXMLError asserts a scheduler failure
 // is surfaced verbatim — the install path does not swallow errors.
 func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
-	a := NewAPI()
 	want := errors.New("simulated schtasks failure")
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
 		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	f.importErr = want
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	err := a.InstallLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("InstallLivenessTask: want error, got nil")
 	}
@@ -595,10 +564,8 @@ func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement
 		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	receipt, err := a.EnsureLivenessTask()
+	receipt, err := ensureLivenessTaskFixtureResolved(f)
 	if err != nil {
 		t.Fatalf("EnsureLivenessTask: %v", err)
 	}
@@ -612,7 +579,7 @@ func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement
 		t.Fatalf("SchedulerRollbackExactXML: restored XML = %q, want %q", got, prior)
 	}
 
-	receipt, err = a.EnsureLivenessTask()
+	receipt, err = ensureLivenessTaskFixtureResolved(f)
 	if err != nil {
 		t.Fatalf("EnsureLivenessTask second: %v", err)
 	}
