@@ -1201,9 +1201,13 @@ func (m *ServerManifest) Validate() error {
 		}
 		seenForward[key] = struct{}{}
 	}
+	const toolTimeoutClient = "codex-cli"
 	for _, binding := range m.ClientBindings {
 		if binding.ToolTimeoutSec < 0 {
 			return fmt.Errorf("manifest %s: client binding %q tool_timeout_sec must be non-negative", m.Name, binding.Client)
+		}
+		if binding.ToolTimeoutSec > 0 && binding.Client != toolTimeoutClient {
+			return fmt.Errorf("manifest %s: client binding %q tool_timeout_sec is supported only by canonical client %q", m.Name, binding.Client, toolTimeoutClient)
 		}
 	}
 
