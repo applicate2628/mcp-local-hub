@@ -389,8 +389,7 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 	}
 
 	promotion, err := d.Promote(o.StagedWindowless, o.WindowlessPath, staged.Windowless.SHA256)
-	windowlessPromotion = new(WindowsProductPairPromotion)
-	*windowlessPromotion = promotion
+	windowlessPromotion = rollbackProductPairPromotion(promotion, windowlessPrior)
 	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("promote windowless adapter: %w", err))
 	}
@@ -419,8 +418,7 @@ func (t WindowsProductPairTxn) Run(ctx context.Context) (result WindowsProductPa
 		return WindowsProductPairCommitted{}, rollback(err)
 	}
 	promotion, err = d.Promote(o.StagedCLI, o.CLIPath, staged.CLI.SHA256)
-	cliPromotion = new(WindowsProductPairPromotion)
-	*cliPromotion = promotion
+	cliPromotion = rollbackProductPairPromotion(promotion, cliPrior)
 	if err != nil {
 		return WindowsProductPairCommitted{}, rollback(fmt.Errorf("promote canonical CUI: %w", err))
 	}
@@ -538,7 +536,7 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 			}
 			result, err := api.RenameAsideReplaceWithResult(dst, src)
 			if err != nil {
-				return WindowsProductPairPromotion{Target: dst, RetainedPrior: result.RetainedPrior, PriorPresent: true, NewSHA256: newSHA256}, err
+				return WindowsProductPairPromotion{Target: dst, RetainedPrior: result.RetainedPrior, PriorPresent: !result.PriorCanonical, NewSHA256: newSHA256}, err
 			}
 			if !result.Promoted || result.RetainedPrior == "" {
 				return WindowsProductPairPromotion{}, errors.New("rename-aside promotion returned incomplete retained-prior result")
@@ -604,6 +602,20 @@ func withWindowsProductPairDefaults(d WindowsProductPairTxnDeps) WindowsProductP
 		d.SweepOldTargets = api.SweepOldBinaryTargets
 	}
 	return d
+}
+
+// rollbackProductPairPromotion returns a rollback token only when the
+// promotion result proves that it changed the exact target snapshot. The
+// rename-aside producer reports PriorCanonical when its attempted rename left
+// the prior binary at the target; such an error is not restorable here.
+func rollbackProductPairPromotion(promotion WindowsProductPairPromotion, prior productPairFileSnapshot) *WindowsProductPairPromotion {
+	if promotion.Target != prior.path || promotion.NewSHA256 == "" || promotion.PriorPresent != prior.present {
+		return nil
+	}
+	if prior.present && promotion.RetainedPrior == "" {
+		return nil
+	}
+	return &promotion
 }
 
 func prepareWindowsProductPairRecoveryJournal(o WindowsProductPairTxnOpts, d WindowsProductPairTxnDeps, staged binaryadmission.WindowsProductPair, cliPrior, windowlessPrior, receiptPrior productPairFileSnapshot) (windowsProductPairRecoveryJournal, bool, error) {

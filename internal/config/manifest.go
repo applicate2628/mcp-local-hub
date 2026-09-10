@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -1189,17 +1190,22 @@ func (m *ServerManifest) Validate() error {
 		return err
 	}
 	seenForward := make(map[string]struct{}, len(m.EnvForwardLocal))
+	seenEnv := make(map[string]struct{}, len(m.Env))
+	for key := range m.Env {
+		seenEnv[manifestEnvironmentKey(key)] = struct{}{}
+	}
 	for _, key := range m.EnvForwardLocal {
 		if key == "" || strings.ContainsAny(key, "\x00=") {
 			return fmt.Errorf("manifest %s: env_forward_local contains invalid name", m.Name)
 		}
-		if _, duplicate := seenForward[key]; duplicate {
+		canonicalKey := manifestEnvironmentKey(key)
+		if _, duplicate := seenForward[canonicalKey]; duplicate {
 			return fmt.Errorf("manifest %s: env_forward_local contains duplicate %q", m.Name, key)
 		}
-		if _, collision := m.Env[key]; collision {
+		if _, collision := seenEnv[canonicalKey]; collision {
 			return fmt.Errorf("manifest %s: env_forward_local %q collides with env", m.Name, key)
 		}
-		seenForward[key] = struct{}{}
+		seenForward[canonicalKey] = struct{}{}
 	}
 	const toolTimeoutClient = "codex-cli"
 	for _, binding := range m.ClientBindings {
@@ -1447,6 +1453,15 @@ func (m *ServerManifest) Validate() error {
 		}
 	}
 	return nil
+}
+
+// manifestEnvironmentKey matches mergeDaemonEnv: Windows environment names
+// collide case-insensitively, while POSIX retains case-sensitive names.
+func manifestEnvironmentKey(key string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func (m *ServerManifest) validateDaemonMCPProtocolCompatibilityProfiles() error {
