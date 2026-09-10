@@ -54,3 +54,24 @@ func TestScanStatusBuckets_CoverViaHubInherited(t *testing.T) {
 		t.Fatalf("scanStatusBuckets must contain via-hub-inherited; got %v", scanStatusBuckets)
 	}
 }
+
+func TestRenderScanGroups_NamesManagedAndLegacyProcessMetrics(t *testing.T) {
+	result := &api.ScanResult{Entries: []api.ScanEntry{
+		{
+			Name: "managed", Status: "via-hub", ProcessCount: 7,
+			ProcessAttribution: &api.ProcessAttributionDiagnosticV1{Scope: "managed-daemon-tree", State: "complete"},
+		},
+		{
+			Name: "legacy", Status: "can-migrate", ProcessCount: 2,
+			ProcessAttribution: &api.ProcessAttributionDiagnosticV1{Scope: "global-command-match", State: "complete"},
+		},
+	}}
+	var buf bytes.Buffer
+	renderScanGroups(&buf, result, true)
+	out := buf.String()
+	for _, want := range []string{"managed process(es)", "global command match(es)"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("pretty scan output missing %q:\n%s", want, out)
+		}
+	}
+}

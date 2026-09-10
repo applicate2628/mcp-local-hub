@@ -5,13 +5,68 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/api/apitest"
+	"mcp-local-hub/internal/autostart"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/scheduler"
 )
+
+type adoptTestInstallFixture struct {
+	scheduler             *upgradeRoutingFakeScheduler
+	backend               *fakeAutostartBackend
+	schedulerFactoryCalls int
+	backendFactoryCalls   int
+	backendStatusCalls    int
+	startOwnerCalls       int
+}
+
+func installAdoptTestFixture(t *testing.T) *adoptTestInstallFixture {
+	t.Helper()
+	fixture := &adoptTestInstallFixture{
+		scheduler: &upgradeRoutingFakeScheduler{},
+		backend:   &fakeAutostartBackend{},
+	}
+	fixture.backend.statusFn = func(autostart.Options) (autostart.State, error) {
+		fixture.backendStatusCalls++
+		return autostart.StateEnabledStopped, nil
+	}
+	t.Cleanup(api.SetInstallAutostartFixtureForTest(
+		func() (scheduler.Scheduler, error) {
+			fixture.schedulerFactoryCalls++
+			return fixture.scheduler, nil
+		},
+		func() (autostart.Backend, error) {
+			fixture.backendFactoryCalls++
+			return fixture.backend, nil
+		},
+		func() error {
+			fixture.startOwnerCalls++
+			return nil
+		},
+	))
+	return fixture
+}
+
+func assertAdoptTestInstallFixture(t *testing.T, fixture *adoptTestInstallFixture) {
+	t.Helper()
+	if fixture.schedulerFactoryCalls == 0 {
+		t.Fatal("adopt apply did not reach the fake scheduler factory")
+	}
+	if fixture.scheduler.mutationCalls != 0 {
+		t.Fatalf("adopt apply mutated through fake scheduler %d times", fixture.scheduler.mutationCalls)
+	}
+	if fixture.backendFactoryCalls != 1 || fixture.backendStatusCalls != 1 {
+		t.Fatalf("autostart fake factory/status calls = %d/%d, want 1/1", fixture.backendFactoryCalls, fixture.backendStatusCalls)
+	}
+	if len(fixture.backend.enableCalls) != 0 || fixture.startOwnerCalls != 1 {
+		t.Fatalf("adopt apply requested fake autostart enable/start = %d/%d, want 0/1", len(fixture.backend.enableCalls), fixture.startOwnerCalls)
+	}
+}
 
 // adoptTestHome installs the sandbox both adopt CLI tests need and returns
 // (root, home).
@@ -66,6 +121,7 @@ func TestAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) {
 	root, home := adoptTestHome(t)
 	manifestDir := filepath.Join(root, "manifests")
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
 	const fixtureKey = "cli-" + "secret-value"
 
 	codexPath := filepath.Join(home, ".codex", "config.toml")
@@ -105,6 +161,85 @@ API_KEY = "` + fixtureKey + `"
 	}
 	if entries, err := os.ReadDir(manifestDir); err == nil && len(entries) > 0 {
 		t.Fatalf("dry-run wrote manifest entries under override dir: %v", entries)
+	}
+}
+
+func TestAdoptCmdProviderPluginForwardsExplicitSelectionAndUsesAPIRedactedPreview(t *testing.T) {
+	adoptTestHome(t)
+	t.Cleanup(api.SetDaemonStateRootForTest(apitest.HardenedTempDir(t)))
+	var got api.AdoptOpts
+	builder := func(_ *api.API, opts api.AdoptOpts) (*api.AdoptPlan, error) {
+		got = opts
+		return &api.AdoptPlan{EntryName: "reader", SourceClient: "codex-cli", ManifestName: "reader", Port: 9344, AdoptClients: []string{"codex-cli"}, TargetEntryNames: map[string]string{"codex-cli": "reader"}}, nil
+	}
+	cmd := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, builder)
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"reader", "--client", "codex-cli", "--provider-plugin", "arbitrary@catalog", "--port", "9344"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("provider dry run: %v", err)
+	}
+	if got.ProviderPluginRef != "arbitrary@catalog" || got.Client != "codex-cli" || got.EntryName != "reader" {
+		t.Fatalf("forwarded opts=%+v", got)
+	}
+	printed := out.String()
+	if !strings.Contains(printed, "dry-run") {
+		t.Fatalf("preview missing dry-run marker: %s", printed)
+	}
+	missing := newAdoptCmdWithDepsAndPlanBuilder(api.NewAPI, nil, nil, builder)
+	missing.SetArgs([]string{"reader", "--provider-plugin", "arbitrary@catalog"})
+	if err := missing.Execute(); err == nil || !strings.Contains(err.Error(), "--client is required") {
+		t.Fatalf("missing client error=%v", err)
+	}
+}
+
+func TestAdoptCmdDryRunRefusesStateRootBeforeOfferingPlan(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("state-root lease namespace refusal is Windows-specific")
+	}
+	root, home := adoptTestHome(t)
+	manifestDir := filepath.Join(root, "manifests")
+	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestDir)
+
+	stateRoot := filepath.Join(root, "state-root-file")
+	if err := os.WriteFile(stateRoot, []byte("not a directory"), 0o600); err != nil {
+		t.Fatalf("seed refused state root: %v", err)
+	}
+	t.Cleanup(api.SetDaemonStateRootForTest(stateRoot))
+
+	const entry = "cli-dry-run-state-root-refused"
+	codexPath := filepath.Join(home, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
+		t.Fatalf("mkdir codex config parent: %v", err)
+	}
+	initial := `[mcp_servers.cli-dry-run-state-root-refused]
+command = "go"
+args = ["version"]
+`
+	if err := os.WriteFile(codexPath, []byte(initial), 0o600); err != nil {
+		t.Fatalf("seed codex config: %v", err)
+	}
+
+	cmd := NewRootCmd()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetArgs([]string{"adopt", entry, "--client", "codex-cli", "--port", "9314"})
+	err := cmd.Execute()
+	if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-unavailable action=leave-unchanged" {
+		t.Fatalf("dry-run error=%v, want typed state-root refusal", err)
+	}
+	if strings.Contains(out.String(), "Adopt plan") || strings.Contains(out.String(), "No changes made") {
+		t.Fatalf("refused state root offered a dry-run plan: %q", out.String())
+	}
+	after, readErr := os.ReadFile(codexPath)
+	if readErr != nil {
+		t.Fatalf("read codex config after refusal: %v", readErr)
+	}
+	if string(after) != initial {
+		t.Fatalf("refused dry-run mutated client config\nbefore:\n%s\nafter:\n%s", initial, after)
+	}
+	if entries, readErr := os.ReadDir(manifestDir); readErr == nil && len(entries) > 0 {
+		t.Fatalf("refused dry-run wrote manifests: %v", entries)
 	}
 }
 
@@ -168,6 +303,7 @@ func (l cliCleanupFailureLease) ReleaseAndRemove() error {
 
 func TestAdoptLeaseCleanupFailureKeepsCLIChannelsRedacted(t *testing.T) {
 	root, home := adoptTestHome(t)
+	fixture := installAdoptTestFixture(t)
 	entry := "cli-lease-cleanup"
 	secret := "cli-source-secret-DO-NOT-LEAK"
 	canary := `Z:\\private-user\\adopt-provenance\\cli-lease-cleanup.lease token=cli-unlock-canary` + "\x1b[2J"
@@ -214,10 +350,12 @@ args = ["version"]
 			t.Fatalf("CLI %s emitted success narration before failed settlement: %q", channel, text)
 		}
 	}
+	assertAdoptTestInstallFixture(t, fixture)
 }
 
 func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
 	root, home := adoptTestHome(t)
+	fixture := installAdoptTestFixture(t)
 	entry := "cli-global-only-codex"
 	manifestRoot := cliAdoptDefaultManifestDir(t)
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
@@ -261,4 +399,5 @@ func TestAdoptCLI_GlobalCodexSameNamePathHasNoHSettlement(t *testing.T) {
 	if raw, readErr := os.ReadFile(filepath.Join(stateRoot, api.SupervisorEventLogFileLeaf)); readErr == nil && strings.Contains(string(raw), `"event":"client-config-settled"`) {
 		t.Fatalf("global-only CLI emitted H event: %s", raw)
 	}
+	assertAdoptTestInstallFixture(t, fixture)
 }

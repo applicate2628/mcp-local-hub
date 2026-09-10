@@ -15,6 +15,8 @@ import (
 
 const schedulerCOMDeadline = 15 * time.Second
 
+const schedulerCOMUTF8Preamble = `$utf8=[System.Text.UTF8Encoding]::new($false);[Console]::InputEncoding=$utf8;[Console]::OutputEncoding=$utf8;`
+
 type schedulerCOMRequest struct {
 	Operation string `json:"operation"`
 	Name      string `json:"name,omitempty"`
@@ -39,14 +41,14 @@ type schedulerCOMResponse struct {
 
 // The script is fixed code. Request values arrive solely through JSON stdin;
 // task names are never interpolated into PowerShell source.
-const schedulerCOMScript = `$r=[Console]::In.ReadToEnd()|ConvertFrom-Json;try{$s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');$all=@($f.GetTasks(0));$n=([string]$r.name).TrimStart('\');$t=@($all|Where-Object {$_.Name -ceq $n})[0];if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};if($null -eq $t){[pscustomobject]@{ok=$false;kind='task_absent'}|ConvertTo-Json -Compress;exit};if($r.operation -eq 'delete'){$f.DeleteTask($t.Name,0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};if($r.operation -eq 'stop'){if([int]$t.State -ne 4){[pscustomobject]@{ok=$false;kind='task_not_running'}|ConvertTo-Json -Compress;exit};$t.Stop(0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};[pscustomobject]@{ok=$true;task=[pscustomobject]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}}|ConvertTo-Json -Compress -Depth 4}catch{[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]$_.Exception.HResult}|ConvertTo-Json -Compress}`
+const schedulerCOMScript = `$r=[Console]::In.ReadToEnd()|ConvertFrom-Json;try{$s=New-Object -ComObject 'Schedule.Service';$s.Connect();$f=$s.GetFolder('\');$all=@($f.GetTasks(0));$n=([string]$r.name).TrimStart('\');$t=@($all|Where-Object {$_.Name -ceq $n})[0];if($r.operation -eq 'list'){$rows=@($all|Where-Object {$_.Name.StartsWith([string]$r.prefix)}|ForEach-Object{[pscustomobject]@{name=$_.Name;state=[int]$_.State;xml=[string]$_.Xml;owner=[string]$_.Definition.Principal.UserId}});[pscustomobject]@{ok=$true;tasks=$rows}|ConvertTo-Json -Compress -Depth 4;exit};if($null -eq $t){[pscustomobject]@{ok=$false;kind='task_absent'}|ConvertTo-Json -Compress;exit};if($r.operation -eq 'delete'){$f.DeleteTask($t.Name,0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};if($r.operation -eq 'stop'){if([int]$t.State -ne 4){[pscustomobject]@{ok=$false;kind='task_not_running'}|ConvertTo-Json -Compress;exit};$t.Stop(0);[pscustomobject]@{ok=$true}|ConvertTo-Json -Compress;exit};[pscustomobject]@{ok=$true;task=[pscustomobject]@{name=$t.Name;state=[int]$t.State;xml=[string]$t.Xml;owner=[string]$t.Definition.Principal.UserId}}|ConvertTo-Json -Compress -Depth 4}catch{[pscustomobject]@{ok=$false;kind='scheduler_unavailable';phase='com';hresult=[uint32]([int64]$_.Exception.HResult -band 0xffffffffL)}|ConvertTo-Json -Compress}`
 
 var schedulerCOMRun = func(ctx context.Context, request schedulerCOMRequest) (schedulerCOMResponse, error) {
 	raw, err := json.Marshal(request)
 	if err != nil {
 		return schedulerCOMResponse{}, err
 	}
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", schedulerCOMScript)
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", schedulerCOMUTF8Preamble+schedulerCOMScript)
 	process.NoConsole(cmd)
 	cmd.Stdin = strings.NewReader(string(raw))
 	out, err := cmd.Output()

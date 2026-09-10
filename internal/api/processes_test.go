@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/process"
 )
 
 func TestCountProcessesFromSnapshotAttributesMcphubRootsByCompleteIdentityAndKeepsDescendants(t *testing.T) {
@@ -59,9 +60,129 @@ HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,270,271,10
 HOST,"""C:\\vcpkg root\\mcphub.exe"" daemon --server vcpkg --daemon default",20260417180000.000000+000,mcphub.exe,1,280,10
 HOST,"vcpkg.exe serve",20260417180000.000000+000,vcpkg.exe,280,281,10
 `
-	spec := processAttributionForManifest("vcpkg", &config.ServerManifest{Command: "mcphub", BaseArgs: []string{"vcpkg"}, Daemons: []config.DaemonSpec{{Name: "default", Port: 9138}}})
+	spec := processAttributionForManifest("vcpkg", &config.ServerManifest{Command: "mcphub", BaseArgs: []string{"vcpkg"}, Daemons: []config.DaemonSpec{{Name: "default", Port: 9138}}}, nil)
 	if got := countProcessesFromSnapshotAttribution(processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}, spec); got != 10 {
 		t.Fatalf("structured Vcpkg attribution=%d, want canonical duplicate roots, npm shim, and quoted canonical root without argument/path collisions", got)
+	}
+}
+
+func TestProcessAttributionForManifest_UsesManagedLauncherTreeInsteadOfBackendTokenRoots(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"C:\managed\mcphub.exe daemon --server codegraph --daemon default",20260417180000.000000+000,mcphub.exe,1,100,10
+HOST,"conhost.exe 0x4",20260417180000.000000+000,conhost.exe,100,101,10
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,100,102,10
+HOST,"conhost.exe 0x4",20260417180000.000000+000,conhost.exe,102,103,10
+HOST,"node.exe npm-shim.js serve --mcp",20260417180000.000000+000,node.exe,102,104,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,104,105,10
+HOST,"node.exe -e watchdog",20260417180000.000000+000,node.exe,105,106,10
+HOST,"C:\foreign\mcphub.exe daemon --server codegraph --daemon default",20260417180000.000000+000,mcphub.exe,1,150,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,150,151,10
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,900,200,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,200,201,10
+HOST,"mcphub.exe daemon --server foreign --daemon default",20260417180000.000000+000,mcphub.exe,1,300,10
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,300,301,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,301,302,10
+HOST,"mcphub.exe daemon --server codegraph --daemon other",20260417180000.000000+000,mcphub.exe,1,400,10
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,400,401,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,401,402,10
+`
+	manifest := &config.ServerManifest{
+		Command:  "codegraph",
+		BaseArgs: []string{"serve", "--mcp"},
+		Daemons:  []config.DaemonSpec{{Name: "default", Port: 9303}},
+	}
+	snap := processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}
+	descriptors := []SupervisorDaemon{{
+		Server: "codegraph", Daemon: "default", Command: `C:\managed\mcphub.exe`,
+		Args: []string{"daemon", "--server", "codegraph", "--daemon", "default"},
+	}}
+	if got := countProcessesFromSnapshotAttribution(snap, processAttributionForManifest("codegraph", manifest, descriptors)); got != 7 {
+		t.Fatalf("CodeGraph managed launcher tree count=%d, want 7; foreign same-command and wrong launcher identities must be excluded", got)
+	}
+}
+
+func TestProcessAttributionForManifest_SeparatesMultipleManagedDaemons(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"C:\managed\mcphub.exe daemon --server codegraph --daemon alpha",20260417180000.000000+000,mcphub.exe,1,100,10
+HOST,"node.exe alpha-child",20260417180000.000000+000,node.exe,100,101,10
+HOST,"C:\managed\mcphub.exe daemon --server codegraph --daemon beta",20260417180000.000000+000,mcphub.exe,1,200,10
+HOST,"node.exe beta-child",20260417180000.000000+000,node.exe,200,201,10
+HOST,"C:\managed\mcphub.exe daemon --server foreign --daemon alpha",20260417180000.000000+000,mcphub.exe,1,300,10
+HOST,"node.exe foreign-child",20260417180000.000000+000,node.exe,300,301,10
+`
+	descriptors := []SupervisorDaemon{
+		{Server: "codegraph", Daemon: "alpha", Command: `C:\managed\mcphub.exe`, Args: []string{"daemon", "--server", "codegraph", "--daemon", "alpha"}},
+		{Server: "codegraph", Daemon: "beta", Command: `C:\managed\mcphub.exe`, Args: []string{"daemon", "--server", "codegraph", "--daemon", "beta"}},
+	}
+	result := processAttributionFromSnapshot(
+		processSnapshot{raw: raw, lines: splitSnapshotLines(raw)},
+		processAttributionForManifest("codegraph", &config.ServerManifest{Command: "codegraph", Daemons: []config.DaemonSpec{{Name: "alpha"}, {Name: "beta"}}}, descriptors),
+	)
+	if result.count != 4 || len(result.diagnostic.Contributors) != 4 {
+		t.Fatalf("managed multi-daemon count/contributors=%d/%d, want 4/4", result.count, len(result.diagnostic.Contributors))
+	}
+	wantDaemon := map[int]string{100: "alpha", 101: "alpha", 200: "beta", 201: "beta"}
+	for _, contributor := range result.diagnostic.Contributors {
+		if got, ok := wantDaemon[contributor.PID]; !ok || contributor.Daemon != got {
+			t.Fatalf("unexpected contributor %+v; want only alpha/beta managed trees", contributor)
+		}
+	}
+}
+
+func TestProcessAttributionForManifest_PreservesLegacyGlobalCommandMatch(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"cmd.exe /c codegraph serve --mcp",20260417180000.000000+000,cmd.exe,1,100,10
+HOST,"node.exe codegraph.js serve --mcp",20260417180000.000000+000,node.exe,100,101,10
+`
+	result := processAttributionFromSnapshot(
+		processSnapshot{raw: raw, lines: splitSnapshotLines(raw)},
+		processAttributionForManifest("codegraph", &config.ServerManifest{Command: "codegraph", BaseArgs: []string{"serve", "--mcp"}}, nil),
+	)
+	if result.count != 2 || result.diagnostic.Scope != processAttributionScopeGlobal || result.diagnostic.State != processAttributionStateComplete {
+		t.Fatalf("legacy attribution=%+v count=%d, want complete global-command-match count 2", result.diagnostic, result.count)
+	}
+	if result.diagnostic.Contributors[0].Relation != "match-root" || result.diagnostic.Contributors[0].Daemon != "" {
+		t.Fatalf("legacy root contributor=%+v, want match-root with no daemon", result.diagnostic.Contributors[0])
+	}
+}
+
+func TestProcessAttributionFromSnapshot_MalformedSnapshotIsUnavailable(t *testing.T) {
+	attribution := processAttributionForManifest("codegraph", &config.ServerManifest{Command: "codegraph", Daemons: []config.DaemonSpec{{Name: "default"}}}, []SupervisorDaemon{{
+		Server: "codegraph", Daemon: "default", Command: `C:\managed\mcphub.exe`, Args: []string{"daemon", "--server", "codegraph", "--daemon", "default"},
+	}})
+	result := processAttributionFromSnapshot(processSnapshot{raw: "not-a-process-snapshot", lines: []string{"not-a-process-snapshot"}}, attribution)
+	if result.count != 0 || result.diagnostic.State != processAttributionStateUnavailable || result.diagnostic.ReasonID != "process-snapshot-unavailable" || len(result.diagnostic.Contributors) != 0 {
+		t.Fatalf("malformed snapshot result=%+v count=%d, want unavailable process-snapshot-unavailable with no contributors", result.diagnostic, result.count)
+	}
+}
+
+func TestManagedLauncherIdentity_PreservesArgumentCaseWhileNormalizingWindowsCommandPath(t *testing.T) {
+	commandLine := `c:\MANAGED\MCPHUB.EXE daemon --server codegraph --daemon default -B OpaqueValue`
+	argv := process.TokenizeWindowsCommandLine(commandLine)
+	if len(argv) != 8 || argv[6] != "-B" || argv[7] != "OpaqueValue" {
+		t.Fatalf("tokenizer changed argument case: %#v", argv)
+	}
+	base := processRootIdentity{
+		command:      `C:\managed\mcphub.exe`,
+		argvSequence: []string{"daemon", "--server", "codegraph", "--daemon", "default", "-B", "OpaqueValue"},
+	}
+	if !processArgvMatchesIdentity(argv, base) {
+		t.Fatal("Windows command-path case variation must match exact ordered arguments")
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{name: "flag case differs", args: []string{"daemon", "--server", "codegraph", "--daemon", "default", "-b", "OpaqueValue"}},
+		{name: "opaque value case differs", args: []string{"daemon", "--server", "codegraph", "--daemon", "default", "-B", "opaquevalue"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			identity := base
+			identity.argvSequence = tc.args
+			if processArgvMatchesIdentity(argv, identity) {
+				t.Fatalf("managed launcher matched different argument semantics: argv=%#v identity=%#v", argv, identity.argvSequence)
+			}
+		})
 	}
 }
 
@@ -79,6 +200,19 @@ HOST,"mcphub.exe daemon --server vcpkg --daemon default",20260417180000.000000+0
 		if got := NewAPI().CountProcessesFromSnapshot(snap, []string{"mcphub", "vcpkg"}); got != 0 {
 			t.Fatalf("malformed complete identity snapshot counted %d process(es), want fail-closed zero", got)
 		}
+	}
+}
+
+func TestProcessAttributionWithoutManifestDoesNotClaimTokenMentions(t *testing.T) {
+	raw := `Node,CommandLine,CreationDate,ExecutablePath,ParentProcessId,ProcessId,WorkingSetSize
+HOST,"powershell.exe -NoProfile -Command \"Write-Output graphify\"",20260417180000.000000+000,powershell.exe,1,100,10
+HOST,"cmd.exe /c echo graphify",20260417180000.000000+000,cmd.exe,1,101,10
+HOST,"python.exe helper.py --log-message graphify",20260417180000.000000+000,python.exe,1,102,10
+HOST,"node.exe tools/graphify-wrapper.js",20260417180000.000000+000,node.exe,1,103,10
+`
+	snap := processSnapshot{raw: raw, lines: splitSnapshotLines(raw)}
+	if got := countProcessesFromSnapshotAttribution(snap, processAttributionForManifest("graphify", nil, nil)); got != 0 {
+		t.Fatalf("manifest-less graphify attribution=%d, want no claimed ownership from command-token mentions", got)
 	}
 }
 

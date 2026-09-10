@@ -112,8 +112,16 @@ func F() { _ = ctor.New() }
 	policy.SourceRoots = []string{"internal"}
 	policy.APIConstructors = []SymbolRule{{ImportPath: "example.com/ctor/v2", Symbol: "New"}}
 	got := violationsOfKind(mustScan(t, root, policy), KindAPIConstruction)
-	if len(got) != 1 || !strings.Contains(got[0].Message, "explicit alias") {
-		t.Fatalf("got=%#v, want fail-closed explicit-alias finding", got)
+	if len(got) != 2 {
+		t.Fatalf("got=%#v, want both unresolved-call and explicit-alias fail-closed findings", got)
+	}
+	seen := map[string]bool{}
+	for _, violation := range got {
+		seen[violation.Message] = true
+	}
+	if !seen["constructor example.com/ctor/v2.New is called through an unresolved unaliased import outside its allowed composition paths"] ||
+		!seen["constructor package example.com/ctor/v2 must use an explicit alias because its declared package name could not be resolved from the scanned module"] {
+		t.Fatalf("got=%#v, want both fail-closed findings", got)
 	}
 }
 

@@ -19,7 +19,12 @@ func newAdoptCmdReal() *cobra.Command {
 // lease owner. Alternate in-process compositions can supply an owner while
 // still exercising the same Cobra command and API transaction.
 func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner, receivingVerifier api.AdoptReceivingVerifier) *cobra.Command {
+	return newAdoptCmdWithDepsAndPlanBuilder(newAPI, leaseOwner, receivingVerifier, nil)
+}
+
+func newAdoptCmdWithDepsAndPlanBuilder(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner, receivingVerifier api.AdoptReceivingVerifier, buildPlan func(*api.API, api.AdoptOpts) (*api.AdoptPlan, error)) *cobra.Command {
 	var clientFlag string
+	var providerPluginFlag string
 	var nameFlag string
 	var clientsFlag string
 	var compatibilityProfileFlag string
@@ -40,7 +45,7 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 				return err
 			}
 			a := newAPI()
-			plan, err := a.BuildAdoptPlan(api.AdoptOpts{
+			opts := api.AdoptOpts{
 				EntryName:                               args[0],
 				Client:                                  clientFlag,
 				ManifestName:                            nameFlag,
@@ -48,18 +53,32 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 				Clients:                                 include,
 				MCPProtocolCompatibilityProfile:         compatibilityProfileFlag,
 				MCPProtocolCompatibilityProfileExplicit: cmd.Flags().Changed("mcp-protocol-compatibility-profile"),
-			})
+				ProviderPluginRef:                       providerPluginFlag,
+			}
+			builder := buildPlan
+			if builder == nil {
+				builder = (*api.API).BuildAdoptPlan
+			}
+			plan, err := builder(a, opts)
 			if err != nil {
 				return err
 			}
 			if !yes {
+				namespace, err := a.PreflightAdoptPlan(plan)
+				if err != nil {
+					return err
+				}
 				api.PrintAdoptPlan(cmd.OutOrStdout(), plan)
+				if namespace.MigrationEligible {
+					fmt.Fprintf(cmd.OutOrStdout(), "  lease namespace migration: required at apply (state=%s reason_id=%s action=%s)\n", namespace.State, namespace.ReasonID, namespace.Action)
+				}
 				return nil
 			}
 			return a.ExecuteAdoptWithOpts(plan, cmd.OutOrStdout(), api.ExecuteAdoptOpts{LeaseOwner: leaseOwner, ReceivingVerifier: receivingVerifier})
 		},
 	}
 	cmd.Flags().StringVar(&clientFlag, "client", "", "source client ("+strings.Join(api.AdoptSupportedClients(), " | ")+")")
+	cmd.Flags().StringVar(&providerPluginFlag, "provider-plugin", "", "explicit provider-owned plugin reference")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "manifest name (default: entry name; v1 requires it to match)")
 	cmd.Flags().IntVar(&portFlag, "port", 0, "hub daemon port (default: first free 9300-9399)")
 	cmd.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated clients to repoint (default: every same-name direct entry found)")

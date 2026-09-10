@@ -1025,6 +1025,46 @@ type RestartChildResult struct {
 	CommitErr error
 }
 
+// acquireAfterRestartParentExit gives the designated child one final
+// reservation-aware linearization attempt after the exact parent-death edge.
+// Parent death is expected after the parent releases the GUI-owner lease; the
+// canonical Acquire seam remains the sole owner of flock, marker, reservation,
+// nonce, and owner-record admission. Caller cancellation always wins, and an
+// already-acquired lease is retained rather than discarded and reacquired.
+func acquireAfterRestartParentExit(ctx context.Context, deps RestartChildDependencies, acquired SingleInstanceLease) (SingleInstanceLease, error) {
+	if err := ctx.Err(); err != nil {
+		if acquired != nil {
+			acquired.Release()
+		}
+		closeRestartChildStandby(deps)
+		return nil, err
+	}
+	if acquired != nil {
+		return acquired, nil
+	}
+
+	finalLease, err := deps.Acquire(ctx)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		if finalLease != nil {
+			finalLease.Release()
+		}
+		closeRestartChildStandby(deps)
+		return nil, ctxErr
+	}
+	if err != nil {
+		if finalLease != nil {
+			finalLease.Release()
+		}
+		closeRestartChildStandby(deps)
+		return nil, errors.Join(ErrRestartChildParentExited, err)
+	}
+	if finalLease == nil {
+		closeRestartChildStandby(deps)
+		return nil, errors.Join(ErrRestartChildParentExited, errors.New("restart child final acquire returned a nil lease"))
+	}
+	return finalLease, nil
+}
+
 // Run waits only for the reservation-aware flock acquisition. A matching
 // reservation activates immediately; no parent signal or hub state is an
 // activation input. A successful Activate call takes ownership of the lease.
@@ -1057,6 +1097,14 @@ func (c *SpawnedGUIChild) Run(ctx context.Context, deps RestartChildDependencies
 	var lease SingleInstanceLease
 	for {
 		if err := context.Cause(standbyCtx); err != nil {
+			if errors.Is(err, ErrRestartChildParentExited) {
+				lease, err = acquireAfterRestartParentExit(ctx, deps, nil)
+				if err == nil {
+					stopWatchingParent()
+					break
+				}
+				return RestartChildResult{}, err
+			}
 			closeRestartChildStandby(deps)
 			return RestartChildResult{}, err
 		}
@@ -1068,6 +1116,14 @@ func (c *SpawnedGUIChild) Run(ctx context.Context, deps RestartChildDependencies
 			}
 			lease = acquired
 			if err := context.Cause(standbyCtx); err != nil {
+				if errors.Is(err, ErrRestartChildParentExited) {
+					lease, err = acquireAfterRestartParentExit(ctx, deps, lease)
+					if err == nil {
+						stopWatchingParent()
+						break
+					}
+					return RestartChildResult{}, err
+				}
 				lease.Release()
 				closeRestartChildStandby(deps)
 				return RestartChildResult{}, err
@@ -1089,10 +1145,19 @@ func (c *SpawnedGUIChild) Run(ctx context.Context, deps RestartChildDependencies
 			wait = remaining
 		}
 		if err := deps.Wait(standbyCtx, wait); err != nil {
-			closeRestartChildStandby(deps)
 			if cause := context.Cause(standbyCtx); cause != nil {
+				if errors.Is(cause, ErrRestartChildParentExited) {
+					lease, cause = acquireAfterRestartParentExit(ctx, deps, nil)
+					if cause == nil {
+						stopWatchingParent()
+						break
+					}
+					return RestartChildResult{}, cause
+				}
+				closeRestartChildStandby(deps)
 				return RestartChildResult{}, cause
 			}
+			closeRestartChildStandby(deps)
 			return RestartChildResult{}, err
 		}
 	}

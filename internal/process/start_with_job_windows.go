@@ -58,6 +58,14 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	return startWithJobFiles(job, cmd, nil, nil, nil)
 }
 
+// StartWithJobFiles starts cmd atomically inside job while forwarding the
+// caller-owned standard files. The caller retains ownership of the files and
+// must keep them open until cmd.Wait returns. All three files are required so
+// the child never receives a partially-defined STARTF_USESTDHANDLES contract.
+func StartWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (int, error) {
+	return startWithJobFiles(job, cmd, stdin, stdout, stderr)
+}
+
 // startWithJobFiles is the sole Windows at-create containment owner. The
 // exported legacy path deliberately supplies no standard handles; the strict
 // runner supplies all three and receives an allowlisted child handle set.

@@ -3,6 +3,7 @@
 package api
 
 import (
+	"net"
 	"testing"
 	"time"
 
@@ -10,6 +11,12 @@ import (
 )
 
 func startFakeSupervisorIPCStatusServer(t *testing.T, stateDir string, hello SupervisorLockOwner, handler func(IPCRequest) IPCResponse) func() {
+	return startFakeSupervisorIPCStatusServerWithConnection(t, stateDir, func(conn net.Conn) {
+		serveFakeSupervisorIPCStatusConn(t, conn, hello, handler)
+	})
+}
+
+func startFakeSupervisorIPCStatusServerWithConnection(t *testing.T, stateDir string, serve func(net.Conn)) func() {
 	t.Helper()
 	// Route the pipe name through the per-test discriminator instead of the
 	// kernel SID. SupervisorIPCAddress (supervisor_ipc_address_windows.go)
@@ -43,7 +50,8 @@ func startFakeSupervisorIPCStatusServer(t *testing.T, stateDir string, hello Sup
 		if err != nil {
 			return
 		}
-		serveFakeSupervisorIPCStatusConn(t, conn, hello, handler)
+		defer conn.Close()
+		serve(conn)
 	}()
 	return func() {
 		_ = ln.Close()

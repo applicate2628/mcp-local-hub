@@ -27,6 +27,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/windows"
@@ -59,25 +60,42 @@ type RenameAsideResult struct {
 }
 
 func RenameAsideReplaceWithResult(target, newSrc string) (RenameAsideResult, error) {
-	ts := time.Now().UTC().Format(renameAsideTimestampLayout)
-	oldPath := target + ".old-" + ts
-
 	targetW, err := windows.UTF16PtrFromString(target)
 	if err != nil {
 		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 target: %w", err)
-	}
-	oldW, err := windows.UTF16PtrFromString(oldPath)
-	if err != nil {
-		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 old: %w", err)
 	}
 	newSrcW, err := windows.UTF16PtrFromString(newSrc)
 	if err != nil {
 		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 newSrc: %w", err)
 	}
 
-	// Step 1: move running binary out of the way.
-	if err := windows.MoveFileEx(targetW, oldW, windows.MOVEFILE_REPLACE_EXISTING); err != nil {
-		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx target→old (%s → %s): %w", target, oldPath, err)
+	// Step 1: move the running binary to a collision-free retained path. An
+	// immediate rollback can pass the just-created retained path as newSrc in
+	// the same second, so reusing that timestamp would overwrite the bytes being
+	// restored. Probe successive timestamp identities and never replace one.
+	base := time.Now().UTC()
+	var oldPath string
+	var oldW *uint16
+	for attempt := 0; attempt < 120; attempt++ {
+		candidate := target + ".old-" + base.Add(time.Duration(attempt)*time.Second).Format(renameAsideTimestampLayout)
+		if strings.EqualFold(candidate, newSrc) {
+			continue
+		}
+		candidateW, utfErr := windows.UTF16PtrFromString(candidate)
+		if utfErr != nil {
+			return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 old: %w", utfErr)
+		}
+		moveErr := windows.MoveFileEx(targetW, candidateW, 0)
+		if moveErr == nil {
+			oldPath, oldW = candidate, candidateW
+			break
+		}
+		if moveErr != windows.ERROR_ALREADY_EXISTS && moveErr != windows.ERROR_FILE_EXISTS {
+			return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx target→old (%s → %s): %w", target, candidate, moveErr)
+		}
+	}
+	if oldPath == "" {
+		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx target→old (%s): no collision-free retained path", target)
 	}
 	// Step 2: move new binary into place.
 	if err := windows.MoveFileEx(newSrcW, targetW, 0); err != nil {

@@ -277,6 +277,15 @@ function canonicalize() {
   }
 
   if (process.platform === "win32") {
+    let windowlessPath;
+    try {
+      windowlessPath = require.resolve(`${pkg}/bin/mcphub-windowless.exe`);
+    } catch {
+      notice(
+        `windowless adapter is missing for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
+    }
     let admitPath;
     try {
       admitPath = require.resolve(`${pkg}/bin/mcphub-pe-admit.exe`);
@@ -286,21 +295,26 @@ function canonicalize() {
       );
       return;
     }
-    const admission = spawnSync(admitPath, [binPath], {
-      stdio: "inherit",
-      shell: false,
-      windowsHide: true,
-    });
-    if (admission.error || admission.signal || admission.status !== 0) {
-      const detail = admission.error
-        ? admission.error.code || admission.error.message
-        : admission.signal
-          ? `signal ${admission.signal}`
-          : `exit ${admission.status}`;
-      notice(
-        `PE admission rejected the platform binary (${detail}); ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
-      );
-      return;
+    for (const [role, candidate] of [
+      ["cli", binPath],
+      ["windowless", windowlessPath],
+    ]) {
+      const admission = spawnSync(admitPath, [role, candidate], {
+        stdio: "inherit",
+        shell: false,
+        windowsHide: true,
+      });
+      if (admission.error || admission.signal || admission.status !== 0) {
+        const detail = admission.error
+          ? admission.error.code || admission.error.message
+          : admission.signal
+            ? `signal ${admission.signal}`
+            : `exit ${admission.status}`;
+        notice(
+          `PE admission rejected the ${role} platform binary (${detail}); ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+        );
+        return;
+      }
     }
   }
 

@@ -17,6 +17,11 @@ func StartWithJob(job *Job, cmd *exec.Cmd) (int, error) {
 	return startWithJobFiles(job, cmd, nil, nil, nil)
 }
 
+// StartWithJobFiles is the standard-file-preserving form of StartWithJob.
+func StartWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (int, error) {
+	return startWithJobFiles(job, cmd, stdin, stdout, stderr)
+}
+
 func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (int, error) {
 	_ = job
 	if cmd == nil {

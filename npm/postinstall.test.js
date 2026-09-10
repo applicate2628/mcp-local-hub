@@ -360,6 +360,7 @@ function buildForcedWindowsFixture() {
   const platformBin = path.join(pkgDir, "node_modules", ...platformPkg.split("/"), "bin");
   fs.mkdirSync(platformBin, { recursive: true });
   fs.writeFileSync(path.join(platformBin, "mcphub.exe"), "candidate fixture\n");
+  fs.writeFileSync(path.join(platformBin, "mcphub-windowless.exe"), "windowless fixture\n");
   fs.writeFileSync(path.join(platformBin, "mcphub-pe-admit.exe"), "adapter fixture\n");
 
   const tracePath = path.join(base, "spawn-trace.jsonl");
@@ -374,7 +375,8 @@ function buildForcedWindowsFixture() {
       `cp.spawnSync = (file, args, opts) => {\n` +
       `  fs.appendFileSync(process.env.MCPHUB_TEST_SPAWN_TRACE, JSON.stringify({file,args,stdio:opts.stdio,shell:opts.shell,windowsHide:opts.windowsHide,hasEnv:Object.prototype.hasOwnProperty.call(opts,"env")}) + "\\n");\n` +
       `  const leaf = path.basename(file).toLowerCase();\n` +
-      `  const status = leaf === "mcphub-pe-admit.exe" ? Number(process.env.MCPHUB_TEST_ADMIT_STATUS || 0) : Number(process.env.MCPHUB_TEST_CANDIDATE_STATUS || 0);\n` +
+      `  const role = leaf === "mcphub-pe-admit.exe" ? args[0] : "candidate";\n` +
+      `  const status = role === "cli" ? Number(process.env.MCPHUB_TEST_ADMIT_CLI_STATUS || 0) : role === "windowless" ? Number(process.env.MCPHUB_TEST_ADMIT_WINDOWLESS_STATUS || 0) : Number(process.env.MCPHUB_TEST_CANDIDATE_STATUS || 0);\n` +
       `  return {status, signal:null, error:null};\n` +
       `};\n`,
   );
@@ -407,7 +409,12 @@ test("Windows platform payload includes PE adapter", () => {
     const manifest = require(`./packages/${target}/package.json`);
     assert.deepStrictEqual(
       [...manifest.files].sort(),
-      ["bin/mcphub.exe", "bin/mcphub-pe-admit.exe", "README.md"].sort(),
+      [
+        "bin/mcphub.exe",
+        "bin/mcphub-windowless.exe",
+        "bin/mcphub-pe-admit.exe",
+        "README.md",
+      ].sort(),
     );
     assert.deepStrictEqual(manifest.bin, { mcphub: "bin/mcphub.exe" });
   }
@@ -420,40 +427,68 @@ test("Non-Windows platform payload excludes PE adapter", () => {
   }
 });
 
-test("Postinstall resolves package-local PE adapter before canonicalize", () => {
+test("Postinstall role-admits the complete Windows pair before canonicalize", () => {
   const fixture = buildForcedWindowsFixture();
   try {
     const script = path.join(fixture.pkgDir, "scripts", "postinstall.js");
     const rejected = spawnSync(process.execPath, [script], {
       encoding: "utf8",
       cwd: fixture.pkgDir,
-      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_STATUS: "17" }),
+      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_CLI_STATUS: "17" }),
     });
     assert.strictEqual(rejected.status, 0, rejected.stderr);
     assert.match(rejected.stderr, /PE admission rejected.*left as-is/);
     let trace = readSpawnTrace(fixture);
     assert.strictEqual(trace.length, 1, `rejected trace=${JSON.stringify(trace)}`);
     assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub-pe-admit.exe");
-    assert.strictEqual(path.basename(trace[0].args[0]).toLowerCase(), "mcphub.exe");
+    assert.deepStrictEqual(
+      [trace[0].args[0], path.basename(trace[0].args[1]).toLowerCase()],
+      ["cli", "mcphub.exe"],
+    );
     assert.strictEqual(trace[0].windowsHide, true);
     assert.strictEqual(trace[0].shell, false);
     assert.strictEqual(trace[0].hasEnv, false);
 
     fs.rmSync(fixture.tracePath, { force: true });
+    const windowlessRejected = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      cwd: fixture.pkgDir,
+      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_WINDOWLESS_STATUS: "19" }),
+    });
+    assert.strictEqual(windowlessRejected.status, 0, windowlessRejected.stderr);
+    assert.match(windowlessRejected.stderr, /PE admission rejected.*left as-is/);
+    trace = readSpawnTrace(fixture);
+    assert.strictEqual(trace.length, 2, `windowless rejected trace=${JSON.stringify(trace)}`);
+    assert.deepStrictEqual(
+      trace.slice(0, 2).map((row) => [row.args[0], path.basename(row.args[1]).toLowerCase()]),
+      [
+        ["cli", "mcphub.exe"],
+        ["windowless", "mcphub-windowless.exe"],
+      ],
+    );
+
+    fs.rmSync(fixture.tracePath, { force: true });
     const admitted = spawnSync(process.execPath, [script], {
       encoding: "utf8",
       cwd: fixture.pkgDir,
-      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_STATUS: "0" }),
+      env: forcedWindowsEnv(fixture),
     });
     assert.strictEqual(admitted.status, 0, admitted.stderr);
     trace = readSpawnTrace(fixture);
-    assert.strictEqual(trace.length, 2, `admitted trace=${JSON.stringify(trace)}`);
+    assert.strictEqual(trace.length, 3, `admitted trace=${JSON.stringify(trace)}`);
     assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub-pe-admit.exe");
-    assert.strictEqual(path.basename(trace[1].file).toLowerCase(), "mcphub.exe");
-    assert.deepStrictEqual(trace[1].args, ["canonicalize"]);
-    assert.strictEqual(trace[1].windowsHide, true);
-    assert.strictEqual(trace[1].stdio, "inherit");
-    assert.strictEqual(trace[1].hasEnv, false);
+    assert.deepStrictEqual(
+      trace.slice(0, 2).map((row) => [row.args[0], path.basename(row.args[1]).toLowerCase()]),
+      [
+        ["cli", "mcphub.exe"],
+        ["windowless", "mcphub-windowless.exe"],
+      ],
+    );
+    assert.strictEqual(path.basename(trace[2].file).toLowerCase(), "mcphub.exe");
+    assert.deepStrictEqual(trace[2].args, ["canonicalize"]);
+    assert.strictEqual(trace[2].windowsHide, true);
+    assert.strictEqual(trace[2].stdio, "inherit");
+    assert.strictEqual(trace[2].hasEnv, false);
   } finally {
     fs.rmSync(fixture.base, { recursive: true, force: true });
   }

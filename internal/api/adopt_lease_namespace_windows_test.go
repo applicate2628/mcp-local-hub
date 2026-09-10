@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -92,6 +93,177 @@ args = ["version"]
 	if got := readSortedNames(t, namespace); !reflect.DeepEqual(got, beforeNames) {
 		t.Fatalf("dry-run plan changed legacy namespace entries: before=%v after=%v", beforeNames, got)
 	}
+}
+
+func TestPreflightAdoptPlanAdmitsLegacyStateRootWithoutMutation(t *testing.T) {
+	entry := "graphify-touchstone-preflight-legacy-root"
+	_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.graphify-touchstone-preflight-legacy-root]
+command = "go"
+args = ["version"]
+`)
+	stateRoot, namespace, _ := seedRecognizedLegacyStateRoot(t, []string{"existing.lease"})
+	beforeRoot := windowsSDDLForTest(t, stateRoot)
+	beforeNamespace := windowsSDDLForTest(t, namespace)
+	beforeNames := readSortedNames(t, namespace)
+
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9356,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	report, err := NewAPI().PreflightAdoptPlan(plan)
+	if err != nil || report.State != AdoptLeaseNamespaceLegacy || !report.MigrationEligible ||
+		report.ReasonID != AdoptLeaseReasonStateRootLegacyDACL || report.Action != AdoptLeaseActionMigrateLegacyStateRoot {
+		t.Fatalf("legacy preflight report=%+v err=%v", report, err)
+	}
+	if got := windowsSDDLForTest(t, stateRoot); got != beforeRoot {
+		t.Fatal("legacy preflight changed state-root DACL")
+	}
+	if got := windowsSDDLForTest(t, namespace); got != beforeNamespace {
+		t.Fatal("legacy preflight changed namespace DACL")
+	}
+	if got := readSortedNames(t, namespace); !reflect.DeepEqual(got, beforeNames) {
+		t.Fatalf("legacy preflight changed namespace entries: before=%v after=%v", beforeNames, got)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("legacy preflight wrote manifest: %v", statErr)
+	}
+}
+
+func TestPreflightAdoptPlanStateRootDriftRefusesApplyWithoutMutation(t *testing.T) {
+	entry := "graphify-touchstone-preflight-root-drift"
+	_, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.graphify-touchstone-preflight-root-drift]
+command = "go"
+args = ["version"]
+`)
+	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9357,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	namespace := filepath.Join(stateRoot, adoptProvenanceSnapshotSubdir)
+	beforeNames := readSortedNames(t, namespace)
+	report, err := NewAPI().PreflightAdoptPlan(plan)
+	if err != nil || report.State != AdoptLeaseNamespaceReady || report.ReasonID != AdoptLeaseReasonNamespaceReady || report.Action != AdoptLeaseActionNone {
+		t.Fatalf("ready-root preflight report=%+v err=%v", report, err)
+	}
+	applyFileDACLWithAuthUsersReadACE(t, stateRoot)
+
+	err = NewAPI().ExecuteAdopt(plan, io.Discard)
+	if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-security" {
+		t.Fatalf("apply after preflight drift error=%v, want typed state-root refusal", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("drift refusal wrote manifest: %v", statErr)
+	}
+	if got := readSortedNames(t, namespace); !reflect.DeepEqual(got, beforeNames) {
+		t.Fatalf("drift refusal changed lease namespace entries: before=%v after=%v", beforeNames, got)
+	}
+}
+
+func TestPreflightAdoptPlanRefusesHostileStateRootsWithoutMutation(t *testing.T) {
+	t.Run("root-open", func(t *testing.T) {
+		entry := "graphify-touchstone-preflight-root-open"
+		_, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.graphify-touchstone-preflight-root-open]
+command = "go"
+args = ["version"]
+`)
+		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9360,
+		})
+		if err != nil {
+			t.Fatalf("BuildAdoptPlan: %v", err)
+		}
+		namespace := filepath.Join(stateRoot, adoptProvenanceSnapshotSubdir)
+		beforeNames := readSortedNames(t, namespace)
+		previous := adoptLeaseWindowsFailureHook
+		adoptLeaseWindowsFailureHook = func(stage string) error {
+			if stage == "root-open" {
+				return syscall.Errno(windows.ERROR_ACCESS_DENIED)
+			}
+			return nil
+		}
+		t.Cleanup(func() { adoptLeaseWindowsFailureHook = previous })
+
+		report, err := NewAPI().PreflightAdoptPlan(plan)
+		if err == nil || report.State != AdoptLeaseNamespaceRefused || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-open native_error_code=5" {
+			t.Fatalf("root-open preflight report=%+v err=%v", report, err)
+		}
+		if got := readSortedNames(t, namespace); !reflect.DeepEqual(got, beforeNames) {
+			t.Fatalf("root-open preflight changed namespace entries: before=%v after=%v", beforeNames, got)
+		}
+		if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
+			t.Fatalf("root-open preflight wrote manifest: %v", statErr)
+		}
+	})
+
+	t.Run("explicit-broad-dacl", func(t *testing.T) {
+		entry := "graphify-touchstone-preflight-broad-root"
+		_, manifestRoot, stateRoot := setupAdoptTestEnv(t, entry, `[mcp_servers.graphify-touchstone-preflight-broad-root]
+command = "go"
+args = ["version"]
+`)
+		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9358,
+		})
+		if err != nil {
+			t.Fatalf("BuildAdoptPlan: %v", err)
+		}
+		beforeRoot := windowsSDDLForTest(t, stateRoot)
+		namespace := filepath.Join(stateRoot, adoptProvenanceSnapshotSubdir)
+		beforeNames := readSortedNames(t, namespace)
+		applyFileDACLWithAuthUsersReadACE(t, stateRoot)
+		beforeRefusalRoot := windowsSDDLForTest(t, stateRoot)
+
+		_, err = NewAPI().PreflightAdoptPlan(plan)
+		if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-security" {
+			t.Fatalf("broad-root preflight error=%v, want typed refusal", err)
+		}
+		if got := windowsSDDLForTest(t, stateRoot); got != beforeRefusalRoot || got == beforeRoot {
+			t.Fatal("broad-root preflight changed state-root DACL")
+		}
+		if got := readSortedNames(t, namespace); !reflect.DeepEqual(got, beforeNames) {
+			t.Fatalf("broad-root preflight changed namespace entries: before=%v after=%v", beforeNames, got)
+		}
+		if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
+			t.Fatalf("broad-root preflight wrote manifest: %v", statErr)
+		}
+	})
+
+	t.Run("reparse", func(t *testing.T) {
+		entry := "graphify-touchstone-preflight-reparse-root"
+		_, manifestRoot, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.graphify-touchstone-preflight-reparse-root]
+command = "go"
+args = ["version"]
+`)
+		plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
+			EntryName: entry, Client: "codex-cli", ManifestName: entry, Port: 9359,
+		})
+		if err != nil {
+			t.Fatalf("BuildAdoptPlan: %v", err)
+		}
+		parent := hardenedTempDir(t)
+		foreign := hardenedTempDir(t)
+		stateRoot := filepath.Join(parent, "state-root-link")
+		if err := createJunctionForTest(stateRoot, foreign); err != nil {
+			t.Skipf("junction creation unavailable; root reparse falsifier remains unrun: %v", err)
+		}
+		t.Cleanup(SetDaemonStateRootForTest(stateRoot))
+		before := readSortedNames(t, foreign)
+
+		_, err = NewAPI().PreflightAdoptPlan(plan)
+		if err == nil || err.Error() != "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-kind-reparse" {
+			t.Fatalf("reparse-root preflight error=%v, want typed refusal", err)
+		}
+		if got := readSortedNames(t, foreign); !reflect.DeepEqual(got, before) {
+			t.Fatalf("reparse-root preflight changed foreign target: before=%v after=%v", before, got)
+		}
+		if _, statErr := os.Stat(filepath.Join(manifestRoot, entry, "manifest.yaml")); !os.IsNotExist(statErr) {
+			t.Fatalf("reparse-root preflight wrote manifest: %v", statErr)
+		}
+	})
 }
 
 func TestExecuteAdoptMigratesEligibleLegacyLeaseNamespaceAndRepeats(t *testing.T) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -74,6 +75,10 @@ type ScanOpts struct {
 	// ReadinessRows is the one supervisor IPC snapshot supplied by the caller.
 	// Scan never performs a second process or MCP observation.
 	ReadinessRows []DaemonStatus
+
+	// processSnapshot is a package-private deterministic snapshot input for
+	// scan tests. Production leaves it nil and captures exactly one OS snapshot.
+	processSnapshot *processSnapshotOutcome
 }
 
 // legacyNamedConfigPathSet maps the back-compat named ScanOpts fields to
@@ -883,13 +888,93 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		// CountProcesses launched wmic per entry — for ~20 scan rows
 		// that's ~13 s wall time. Single snapshot + in-memory count
 		// drops the scan to ~1 s.
-		snap := takeProcessSnapshot()
+		snapshot := takeProcessSnapshot()
+		if opts.processSnapshot != nil {
+			snapshot = *opts.processSnapshot
+		}
+		intent, intentErr := readSupervisorIntentForStatus()
+		descriptors := scanProcessDescriptorsByServer(intent)
 		for i := range out.Entries {
-			attribution := manifestCache.processAttribution(out.Entries[i].Name)
-			out.Entries[i].ProcessCount = countProcessesFromSnapshotAttribution(snap, attribution)
+			entry := &out.Entries[i]
+			descriptorRows := scanProcessDescriptorsForEntry(entry, reg, descriptors)
+			attribution := manifestCache.processAttribution(entry.Name, descriptorRows)
+			if len(descriptorRows) == 0 && entry.Managed {
+				attribution = unavailableProcessAttribution(processAttributionScopeManaged, processAttributionReasonManagedDescriptorUnavailable)
+			}
+			if snapshot.reasonID != "" && attribution.state != processAttributionStateUnavailable {
+				attribution = unavailableProcessAttribution(attribution.scope, snapshot.reasonID)
+			}
+			if intentErr != nil && entry.Managed {
+				attribution = unavailableProcessAttribution(processAttributionScopeManaged, processAttributionReasonManagedDescriptorUnavailable)
+			}
+			result := processAttributionFromSnapshot(snapshot.snapshot, attribution)
+			entry.ProcessCount = result.count
+			entry.ProcessAttribution = &result.diagnostic
 		}
 	}
 	return out, nil
+}
+
+func scanProcessDescriptorsByServer(intent *SupervisorIntentFile) map[string][]SupervisorDaemon {
+	byServer := map[string][]SupervisorDaemon{}
+	if intent == nil {
+		return byServer
+	}
+	for _, descriptor := range intent.Daemons {
+		server, daemon, ok := DescriptorServerDaemon(descriptor)
+		if !ok || server == "" || daemon == "" {
+			continue
+		}
+		descriptor.Server = server
+		descriptor.Daemon = daemon
+		byServer[server] = append(byServer[server], descriptor)
+	}
+	return byServer
+}
+
+// scanProcessDescriptorsForEntry selects the persisted descriptors that own a
+// scan row. Ordinary server rows retain their exact server-name lookup. A
+// workspace LSP row is different: client configuration uses its language
+// entry name, while BuildSupervisorDaemonForLSP persists its descriptor under
+// the generic backend name. Resolve that bridge through the workspace registry
+// binding and require the configured loopback port plus registry task/port to
+// agree with the descriptor; never reconstruct an LSP descriptor name.
+func scanProcessDescriptorsForEntry(entry *ScanEntry, reg *Registry, descriptors map[string][]SupervisorDaemon) []SupervisorDaemon {
+	if rows := descriptors[entry.Name]; len(rows) != 0 || reg == nil {
+		return rows
+	}
+
+	selected := make([]SupervisorDaemon, 0)
+	seenTasks := map[string]bool{}
+	for _, workspace := range reg.LSPEntries() {
+		if workspace.Backend == "" || workspace.TaskName == "" || workspace.Port <= 0 || !scanEntryMatchesWorkspaceBinding(entry, workspace) {
+			continue
+		}
+		for _, descriptor := range descriptors[workspace.Backend] {
+			if canonicalIntentTaskKey(descriptor.TaskName) != canonicalIntentTaskKey(workspace.TaskName) || descriptor.Port != workspace.Port {
+				continue
+			}
+			taskKey := canonicalIntentTaskKey(descriptor.TaskName)
+			if seenTasks[taskKey] {
+				continue
+			}
+			seenTasks[taskKey] = true
+			selected = append(selected, descriptor)
+		}
+	}
+	return selected
+}
+
+func scanEntryMatchesWorkspaceBinding(entry *ScanEntry, workspace WorkspaceEntry) bool {
+	for clientName, clientEntry := range entry.ClientPresence {
+		if workspace.ClientEntries[clientName] != entry.Name || clientEntry.Transport != "http" {
+			continue
+		}
+		if port, ok := loopbackEntryPort(clientEntry.Endpoint); ok && port == workspace.Port {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeClientScanEntries(dst, src map[string]*ScanEntry) {
@@ -1947,8 +2032,8 @@ func (c *scanManifestCache) patterns(name string) []string {
 	return patternsFromManifest(name, m)
 }
 
-func (c *scanManifestCache) processAttribution(name string) processAttribution {
-	return processAttributionForManifest(name, c.get(name))
+func (c *scanManifestCache) processAttribution(name string, descriptors []SupervisorDaemon) processAttribution {
+	return processAttributionForManifest(name, c.get(name), descriptors)
 }
 
 // manifestDaemonPorts returns the set of daemon ports declared by the
@@ -2350,10 +2435,11 @@ func (a *API) ExtractManifestFromClient(client, serverName string, opts ScanOpts
 }
 
 type extractedStdioEntry struct {
-	Command  string
-	Args     []string
-	Env      map[string]string
-	Disabled bool
+	Command        string
+	Args           []string
+	Env            map[string]string
+	ToolTimeoutSec int
+	Disabled       bool
 }
 
 // Sentinels for adopt-relevant extractStdioEntryFromClient outcomes, so callers
@@ -2648,8 +2734,41 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 			}
 		}
 	}
+	toolTimeoutSec := 0
+	if client == "codex-cli" {
+		var err error
+		toolTimeoutSec, err = codexExtractToolTimeoutSec(raw)
+		if err != nil {
+			return extractedStdioEntry{}, err
+		}
+	}
 
-	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, Disabled: disabled}, nil
+	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, ToolTimeoutSec: toolTimeoutSec, Disabled: disabled}, nil
+}
+
+func codexExtractToolTimeoutSec(raw map[string]any) (int, error) {
+	value, present := raw["tool_timeout_sec"]
+	if !present {
+		return 0, nil
+	}
+	switch timeout := value.(type) {
+	case int64:
+		if timeout < 0 {
+			return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+		}
+		return int(timeout), nil
+	case float64:
+		if math.IsNaN(timeout) || math.IsInf(timeout, 0) || timeout < 0 || timeout != math.Trunc(timeout) || timeout > math.MaxInt64 {
+			return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+		}
+		parsed := int64(timeout)
+		if int64(int(parsed)) != parsed {
+			return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+		}
+		return int(parsed), nil
+	default:
+		return 0, fmt.Errorf("Codex tool_timeout_sec must be a positive integer or zero")
+	}
 }
 
 func rawClientEntryDisabled(raw map[string]any) bool {
@@ -2695,32 +2814,41 @@ func renderDraftManifestYAML(name, cmd string, args []string, env map[string]str
 	return renderStdioBridgeManifestYAML(name, cmd, args, env, port, draftClientBindings())
 }
 
-func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any) string {
+func renderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, port int, bindings []config.ClientBinding) string {
 	return renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd, args, env, port, bindings, "")
 }
 
-func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd string, args []string, env map[string]string, port int, bindings []map[string]any, compatibilityProfile string) string {
+func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd string, args []string, env map[string]string, port int, bindings []config.ClientBinding, compatibilityProfile string) string {
+	return renderProviderStdioBridgeManifestYAML(name, cmd, args, env, nil, "", port, bindings, compatibilityProfile)
+}
+
+func renderProviderStdioBridgeManifestYAML(name, cmd string, args []string, env map[string]string, envForwardLocal []string, cwd string, port int, bindings []config.ClientBinding, compatibilityProfile string) string {
 	daemon := map[string]any{"name": "default", "port": port}
+	if cwd != "" {
+		daemon["cwd"] = cwd
+	}
 	if compatibilityProfile != "" {
 		daemon["mcp_protocol_compatibility_profile"] = compatibilityProfile
 	}
 	doc := struct {
-		Name           string            `yaml:"name"`
-		Kind           string            `yaml:"kind"`
-		Transport      string            `yaml:"transport"`
-		Command        string            `yaml:"command"`
-		BaseArgs       []string          `yaml:"base_args,omitempty"`
-		Env            map[string]string `yaml:"env,omitempty"`
-		Daemons        []map[string]any  `yaml:"daemons"`
-		ClientBindings []map[string]any  `yaml:"client_bindings"`
-		WeeklyRefresh  bool              `yaml:"weekly_refresh"`
+		Name            string                 `yaml:"name"`
+		Kind            string                 `yaml:"kind"`
+		Transport       string                 `yaml:"transport"`
+		Command         string                 `yaml:"command"`
+		BaseArgs        []string               `yaml:"base_args,omitempty"`
+		Env             map[string]string      `yaml:"env,omitempty"`
+		EnvForwardLocal []string               `yaml:"env_forward_local,omitempty"`
+		Daemons         []map[string]any       `yaml:"daemons"`
+		ClientBindings  []config.ClientBinding `yaml:"client_bindings"`
+		WeeklyRefresh   bool                   `yaml:"weekly_refresh"`
 	}{
-		Name:      name,
-		Kind:      "global",
-		Transport: "stdio-bridge",
-		Command:   cmd,
-		BaseArgs:  args,
-		Env:       env,
+		Name:            name,
+		Kind:            "global",
+		Transport:       "stdio-bridge",
+		Command:         cmd,
+		BaseArgs:        args,
+		Env:             env,
+		EnvForwardLocal: envForwardLocal,
 		Daemons: []map[string]any{
 			daemon,
 		},
@@ -2742,15 +2870,11 @@ func renderStdioBridgeManifestYAMLWithMCPProtocolCompatibilityProfile(name, cmd 
 // url_path "/mcp" — the same shape the GUI binding editor emits. Deriving from
 // the registry (instead of a hardcoded list) means a future adapter addition
 // automatically appears in the draft with no second edit site to forget.
-func draftClientBindings() []map[string]any {
+func draftClientBindings() []config.ClientBinding {
 	names := clients.SupportedClientNames()
-	bindings := make([]map[string]any, 0, len(names))
+	bindings := make([]config.ClientBinding, 0, len(names))
 	for _, name := range names {
-		bindings = append(bindings, map[string]any{
-			"client":   name,
-			"daemon":   "default",
-			"url_path": "/mcp",
-		})
+		bindings = append(bindings, config.ClientBinding{Client: name, Daemon: "default", URLPath: "/mcp"})
 	}
 	return bindings
 }

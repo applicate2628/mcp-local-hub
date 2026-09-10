@@ -27,6 +27,8 @@ config.local.yaml
 /perftools.exe
 /perftools.exe~
 /bin/
+# Product VERSIONINFO resources are generated transiently by build.ps1.
+cmd/*/zz_product_versioninfo.syso
 
 # Build outputs from in-directory `go build` inside cmd/* — not the
 # canonical path (root is), but some workflows still land them here.
@@ -58,11 +60,6 @@ coverage.out
 
 # Serena LSP runtime (cache, memories, per-project overrides regenerated at activate_project)
 .serena/
-
-# Note: cmd/mcphub/resource.syso is committed (Windows version resource,
-# generated from versioninfo.json via `go generate ./cmd/mcphub`). Keeping
-# it in the repo so `go build` works without first running goversioninfo.
-# Regenerate when versioninfo.json changes, then commit both.
 
 # Tool artifacts from Claude Code / superpowers skills
 /.claude/

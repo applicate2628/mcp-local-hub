@@ -3,32 +3,26 @@
 package gui
 
 import (
+	"errors"
 	"os/exec"
+	"path/filepath"
 	"testing"
+
+	"golang.org/x/sys/windows"
+
+	processowner "mcp-local-hub/internal/process"
 )
 
-// These tests pin the breakaway-tolerant manual-restart spawn helper
-// (POST /api/supervisor/restart). They cover the two STATE-SAFE branches:
-//
-//   (a) common path — a successful spawn returns the started cmd and never
-//       strips flags;
-//   (b) a non-ERROR_ACCESS_DENIED start failure (e.g. missing binary)
-//       propagates unchanged — it must NOT be masked by the flagless /
-//       minimal-flag retry chain.
-//
-// The §5-residual minimal-flag fallback (clear ALL CreationFlags on a second
-// ERROR_ACCESS_DENIED) is NOT unit-tested here: triggering a real
-// ERROR_ACCESS_DENIED requires a breakaway-rejecting parent Job Object (same
-// reason the sibling internal/cli helper documents it as field-path-only),
-// and that branch also emits a hub-mcp event (state write) which must not run
-// in a fleet-live test. The live locked-down-host field path covers it.
+// These integration guards pin GUI command/result mapping around the shared
+// internal/process policy owner. The owner-level tests deterministically cover
+// required, flagless, minimal, attempt-count, and error-classification paths.
 
 // TestStartDetachedSupervisorTolerant_SuccessReturnsStarted asserts the
 // common dev-host path: build()+Start() succeeds, the started cmd is returned,
 // and no error surfaces.
 func TestStartDetachedSupervisorTolerant_SuccessReturnsStarted(t *testing.T) {
 	build := func() *exec.Cmd { return exec.Command("cmd", "/c", "exit", "0") }
-	started, err := startDetachedSupervisorTolerant(build)
+	started, err := startDetachedSupervisorTolerant(build, processowner.BreakawayOptional)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -43,10 +37,10 @@ func TestStartDetachedSupervisorTolerant_SuccessReturnsStarted(t *testing.T) {
 // fails the CreateProcess path lookup) propagates immediately — neither the
 // breakaway-cleared retry nor the minimal-flag retry must mask it.
 func TestStartDetachedSupervisorTolerant_NonAccessDeniedError_NotRetried(t *testing.T) {
-	bad := `Z:\definitely\nonexistent\mcphub-nope.exe`
+	bad := filepath.Join(t.TempDir(), "missing", "mcphub-nope.exe")
 	calls := 0
 	build := func() *exec.Cmd { calls++; return exec.Command(bad) }
-	_, err := startDetachedSupervisorTolerant(build)
+	_, err := startDetachedSupervisorTolerant(build, processowner.BreakawayOptional)
 	if err == nil {
 		t.Fatal("expected a spawn error for a nonexistent binary")
 	}
@@ -54,5 +48,21 @@ func TestStartDetachedSupervisorTolerant_NonAccessDeniedError_NotRetried(t *test
 	// ACCESS_DENIED error must short-circuit BEFORE any retry rebuild.
 	if calls != 1 {
 		t.Fatalf("non-ACCESS_DENIED error must not trigger a retry rebuild; build() called %d times (want 1)", calls)
+	}
+}
+
+func TestStartDetachedSupervisorTolerant_RequiredAccessDeniedNoFallback(t *testing.T) {
+	calls := 0
+	build := func() *exec.Cmd { calls++; return exec.Command("cmd", "/c", "exit", "0") }
+	starts := 0
+	started, err := startDetachedSupervisorTolerantWithStart(build, processowner.BreakawayRequired, func(*exec.Cmd) error {
+		starts++
+		return windows.ERROR_ACCESS_DENIED
+	})
+	if started == nil || !errors.Is(err, processowner.ErrWindowsBreakawayRequired) {
+		t.Fatalf("started=%v error=%v", started, err)
+	}
+	if calls != 1 || starts != 1 {
+		t.Fatalf("build calls=%d start calls=%d, want exactly one required attempt", calls, starts)
 	}
 }

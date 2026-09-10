@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/api"
+	processowner "mcp-local-hub/internal/process"
 )
 
 // supervisorOwner manages a supervisor process from the GUI side.
@@ -165,20 +166,13 @@ func ensureSupervisorRunning(ctx context.Context, mcphubBin string, strictMode b
 	// trace prefix, while bounding worst-case memory pressure if the
 	// supervisor floods stderr in a panic loop. PR #212 r5 finding 2.
 	stderrBuf := newBoundedBuffer(4096)
-	// build constructs a fresh detached supervisor cmd reusing the SAME
-	// stderr buffer, so the breakaway-tolerant flagless retry (PART 1)
-	// can rebuild an equivalent cmd whose stderr the readiness-timeout
-	// error still reads.
+	// Every shared-owner attempt reuses the same bounded stderr sink.
 	build := func() *exec.Cmd { return newGUISupervisorCmd(mcphubBin, args, stderrBuf) }
-	// PART 1 (§5 permanent fix): spawn with CREATE_BREAKAWAY_FROM_JOB so
-	// the long-lived supervisor escapes any KILL_ON_JOB_CLOSE job it would
-	// otherwise inherit from the GUI's launcher — the same asymmetry the
-	// manual /api/supervisor/restart path already fixed. On a locked-down
-	// host that forbids breakaway, startSupervisorDetachedBreakaway retries
-	// flagless (still detached) so the spawn never hard-fails.
+	// A proven direct-GUI lifecycle admits the optional flagless compatibility
+	// attempt; Job-owned or ambiguous launchers resolve to required/no-retry.
 	startedCmd, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
 		fmt.Fprintf(supervisorMonitorStderr, "supervisor owner: CREATE_BREAKAWAY_FROM_JOB rejected by parent job (no BREAKAWAY_OK); spawned flagless — supervisor may be cascade-killed if the launcher's job closes: %v\n", degradeErr)
-	})
+	}, processowner.BreakawayPolicyForCurrentProcess())
 	if err != nil {
 		return nil, fmt.Errorf("supervisor owner: spawn %q: %w", mcphubBin, err)
 	}

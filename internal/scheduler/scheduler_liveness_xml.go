@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/xml"
 	"fmt"
+	"strings"
 )
 
 // livenessXMLEscape XML-escapes element text for the liveness task XML.
@@ -17,6 +18,24 @@ func livenessXMLEscape(s string) string {
 	var out bytes.Buffer
 	_ = xml.EscapeText(&out, []byte(s))
 	return out.String()
+}
+
+// WindowsOwnedEntrypointPath maps a canonical product executable to the exact
+// same-directory windowless adapter. It is idempotent so readback/status code
+// can apply the resolver to either admitted member without inventing a third
+// path or consulting PATH.
+func WindowsOwnedEntrypointPath(canonicalExe string) string {
+	const adapter = "mcphub-windowless.exe"
+	if i := strings.LastIndexAny(canonicalExe, `\/`); i >= 0 {
+		if strings.EqualFold(canonicalExe[i+1:], adapter) {
+			return canonicalExe
+		}
+		return canonicalExe[:i+1] + adapter
+	}
+	if strings.EqualFold(canonicalExe, adapter) {
+		return canonicalExe
+	}
+	return adapter
 }
 
 // BuildLivenessXML serializes the canonical supervisor-liveness scheduled-task
@@ -51,7 +70,8 @@ func livenessXMLEscape(s string) string {
 // dependencies, so it lives in a non-tagged file.
 // The scheduled-task install side fails through scheduler.New() returning
 // "not implemented" on Linux/macOS.
-func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
+func BuildLivenessXML(canonicalExe, workingDir, principalSID, logonAccount string) string {
+	ownedEntrypoint := WindowsOwnedEntrypointPath(canonicalExe)
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-16"?>`)
 	buf.WriteString("\n")
@@ -77,7 +97,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// /Create rejects the install with ERROR: Access is denied on a
 	// non-elevated shell (same trap the watchdog XML documents).
 	buf.WriteString("    <LogonTrigger>\n")
-	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(userName)))
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(logonAccount)))
 	buf.WriteString("      <Enabled>true</Enabled>\n")
 	buf.WriteString("    </LogonTrigger>\n")
 	buf.WriteString("  </Triggers>\n")
@@ -86,7 +106,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// daemon tasks.
 	buf.WriteString("  <Principals>\n")
 	buf.WriteString("    <Principal id=\"Author\">\n")
-	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(userName)))
+	buf.WriteString(fmt.Sprintf("      <UserId>%s</UserId>\n", livenessXMLEscape(principalSID)))
 	buf.WriteString("      <LogonType>InteractiveToken</LogonType>\n")
 	buf.WriteString("      <RunLevel>LeastPrivilege</RunLevel>\n")
 	buf.WriteString("    </Principal>\n")
@@ -139,7 +159,7 @@ func BuildLivenessXML(canonicalExe, workingDir, userName string) string {
 	// Actions — bound to the per-user "Author" principal. The action is
 	// `supervise --ensure-alive` (the new minimal liveness probe).
 	buf.WriteString("  <Actions Context=\"Author\">\n    <Exec>\n")
-	buf.WriteString(fmt.Sprintf("      <Command>%s</Command>\n", livenessXMLEscape(canonicalExe)))
+	buf.WriteString(fmt.Sprintf("      <Command>%s</Command>\n", livenessXMLEscape(ownedEntrypoint)))
 	buf.WriteString("      <Arguments>supervise --ensure-alive</Arguments>\n")
 	buf.WriteString(fmt.Sprintf("      <WorkingDirectory>%s</WorkingDirectory>\n", livenessXMLEscape(workingDir)))
 	buf.WriteString("    </Exec>\n  </Actions>\n")

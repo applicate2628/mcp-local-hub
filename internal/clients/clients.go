@@ -27,6 +27,9 @@ type MCPEntry struct {
 	URL     string            // full URL, e.g., "http://localhost:9121/mcp"
 	Headers map[string]string // optional HTTP headers
 	Env     map[string]string // only used by stdio entries (for rollback); URL entries leave this nil
+	// ToolTimeoutSec is the optional per-client MCP tool-call timeout. Zero
+	// preserves each adapter's historical serialized shape.
+	ToolTimeoutSec int
 
 	// Relay-based stdio adapters (Antigravity): these three fields identify
 	// the manifest lookup the stdio client should perform when it spawns

@@ -15,7 +15,38 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/config"
+	"mcp-local-hub/internal/daemon"
 )
+
+func TestDaemonCmdWolframEmbeddedManifestBuildsLegacyHostConfig(t *testing.T) {
+	raw, err := api.NewAPI().CatalogManifestGet("wolfram")
+	if err != nil {
+		t.Fatalf("load embedded wolfram manifest: %v", err)
+	}
+	m, err := config.ParseManifest(strings.NewReader(raw))
+	if err != nil {
+		t.Fatalf("parse embedded wolfram manifest: %v", err)
+	}
+	if m.Transport != config.TransportStdioBridge {
+		t.Fatalf("wolfram transport = %q, want %q", m.Transport, config.TransportStdioBridge)
+	}
+	if len(m.Daemons) != 1 || m.Daemons[0].Name != "default" {
+		t.Fatalf("wolfram daemons = %#v, want one default daemon", m.Daemons)
+	}
+	const wantProfile = "stdio-http-legacy-2024-11-05"
+	if got := m.Daemons[0].MCPProtocolCompatibilityProfile; got != wantProfile {
+		t.Fatalf("wolfram/default compatibility profile = %q, want %q", got, wantProfile)
+	}
+	if _, err := daemon.NewStdioHost(daemon.HostConfig{
+		Command:                         "wolfram-test-child",
+		MCPProtocolCompatibilityProfile: m.Daemons[0].MCPProtocolCompatibilityProfile,
+	}); err != nil {
+		t.Fatalf("wolfram/default profile did not reach HostConfig: %v", err)
+	}
+}
 
 func TestDaemonCmdCodeGraphDiskManifestPropagatesLegacyProfile(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")

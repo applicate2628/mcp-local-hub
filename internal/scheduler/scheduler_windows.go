@@ -15,6 +15,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"mcp-local-hub/internal/process"
 )
@@ -254,12 +255,16 @@ func (w *windowsScheduler) ExportXML(name string) ([]byte, error) {
 // failed mid-sequence. Idempotent: if the task already exists, /F
 // overwrites it.
 func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
+	prepared, err := prepareTaskXMLForImport(xml)
+	if err != nil {
+		return fmt.Errorf("prepare task XML: %w", err)
+	}
 	tmp, err := os.CreateTemp("", "mcp-task-restore-*.xml")
 	if err != nil {
 		return fmt.Errorf("create temp: %w", err)
 	}
 	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(xml); err != nil {
+	if _, err := tmp.Write(prepared); err != nil {
 		tmp.Close()
 		return fmt.Errorf("write xml: %w", err)
 	}
@@ -271,6 +276,50 @@ func (w *windowsScheduler) ImportXML(name string, xml []byte) error {
 		return fmt.Errorf("schtasks /Create /XML: %w: %s", err, string(out))
 	}
 	return nil
+}
+
+// prepareTaskXMLForImport preserves Task Scheduler's existing UTF-16LE+BOM
+// exports exactly. UTF-8 exports are converted once to that required on-disk
+// format; malformed or unsupported byte encodings fail before any temp file or
+// scheduler mutation is attempted.
+func prepareTaskXMLForImport(raw []byte) ([]byte, error) {
+	if bytes.HasPrefix(raw, []byte{0xFF, 0xFE}) {
+		if !validUTF16LEBOM(raw) {
+			return nil, fmt.Errorf("invalid UTF-16LE task XML")
+		}
+		return append([]byte(nil), raw...), nil
+	}
+	if bytes.HasPrefix(raw, []byte{0xFE, 0xFF}) {
+		return nil, fmt.Errorf("unsupported UTF-16BE task XML")
+	}
+	raw = bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})
+	if !utf8.Valid(raw) {
+		return nil, fmt.Errorf("invalid UTF-8 task XML")
+	}
+	return EncodeXMLUTF16LEBOM(string(raw)), nil
+}
+
+func validUTF16LEBOM(raw []byte) bool {
+	if len(raw) < 2 || (len(raw)-2)%2 != 0 {
+		return false
+	}
+	for i := 2; i < len(raw); i += 2 {
+		unit := uint16(raw[i]) | uint16(raw[i+1])<<8
+		switch {
+		case unit >= 0xD800 && unit <= 0xDBFF:
+			if i+3 >= len(raw) {
+				return false
+			}
+			next := uint16(raw[i+2]) | uint16(raw[i+3])<<8
+			if next < 0xDC00 || next > 0xDFFF {
+				return false
+			}
+			i += 2
+		case unit >= 0xDC00 && unit <= 0xDFFF:
+			return false
+		}
+	}
+	return true
 }
 
 func (w *windowsScheduler) Run(name string) error {

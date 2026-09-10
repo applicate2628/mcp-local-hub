@@ -36,7 +36,7 @@ import (
 func newUpgradeCmdReal() *cobra.Command {
 	return &cobra.Command{
 		Use:   "upgrade",
-		Short: "Transactionally apply an admitted build to the canonical mcphub binary (alias for `install --upgrade`)",
+		Short: "Transactionally apply an admitted pair to the canonical mcphub binary paths (alias for `install --upgrade`)",
 		Long: `Apply an admitted mcphub product build through the managed supervisor
 upgrade transaction. A daemon-bearing supervisor intent must already exist.
 
@@ -45,12 +45,13 @@ What upgrade does:
      (the running image cannot replace itself on Windows). Build
 	     a new Windows product binary with ` + "`pwsh ./build.ps1`" + ` and run
 	     ` + "`./bin/mcphub.exe upgrade`" + ` from the build directory.
-  2. Stage and admit the Windows GUI PE, non-placeholder build metadata,
-     and SHA-256 before touching the running fleet.
+  2. Stage and admit both Windows PE roles from their strict embedded
+     VERSIONINFO identities and SHA-256 before touching the running fleet.
   3. Quiesce and exit/reap the prior supervisor; prove its lock and every
      expected daemon port are released; re-admit the unchanged candidate.
-  4. Promote once through rename-aside, start and identity-bind the successor,
-     verify canonical bytes, then atomically write upgrade-receipt-v1.
+  4. Promote adapter-first/tasks/CUI-last through rename-aside, start and
+     identity-bind the successor, verify canonical bytes, then atomically write
+     and read back upgrade-receipt-v2 before publishing its committed event.
   5. Any post-promotion failure restores the exact retained prior bytes,
      verifies their SHA-256, and proves the prior supervisor ready.
 

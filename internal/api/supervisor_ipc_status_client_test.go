@@ -110,6 +110,137 @@ func TestDialSupervisorIPCStatus_NoSupervisor(t *testing.T) {
 	}
 }
 
+func TestDialSupervisorIPCStatus_TransportTransitionsNeverReturnEmptySuccess(t *testing.T) {
+	owner := SupervisorLockOwner{PID: 4242, StartedAt: "2026-05-18T10:00:00Z"}
+	validResponse := func(id int64) IPCResponse {
+		return IPCResponse{ID: id, OK: true, Result: map[string]any{
+			"state": "running",
+			"daemons": []map[string]any{{
+				"task_name": `\mcp-local-hub-memory-default`,
+				"server":    "memory", "daemon": "default", "state": "Running", "current_pid": 4321,
+			}},
+		}}
+	}
+	writeHello := func(conn net.Conn) bool {
+		raw, err := json.Marshal(map[string]any{"hello": IPCHello{Version: 1, PID: owner.PID, StartedAt: owner.StartedAt}})
+		if err != nil {
+			return false
+		}
+		_, err = conn.Write(append(raw, '\n'))
+		return err == nil
+	}
+	readStatusRequest := func(conn net.Conn) (IPCRequest, bool) {
+		line, err := readTestIPCLine(conn, 4096)
+		if err != nil {
+			return IPCRequest{}, false
+		}
+		var req IPCRequest
+		if err := json.Unmarshal(line, &req); err != nil || req.Cmd != "status" {
+			return IPCRequest{}, false
+		}
+		return req, true
+	}
+	writeResponse := func(conn net.Conn, response IPCResponse) bool {
+		raw, err := json.Marshal(response)
+		if err != nil {
+			return false
+		}
+		_, err = conn.Write(append(raw, '\n'))
+		return err == nil
+	}
+
+	cases := []struct {
+		name      string
+		serve     func(net.Conn)
+		wantRows  int
+		wantError bool
+	}{
+		{
+			name: "accepted pipe holds before hello until client deadline",
+			serve: func(conn net.Conn) {
+				time.Sleep(250 * time.Millisecond)
+			},
+			wantError: true,
+		},
+		{
+			name: "delayed valid response remains a real snapshot",
+			serve: func(conn net.Conn) {
+				if !writeHello(conn) {
+					return
+				}
+				req, ok := readStatusRequest(conn)
+				if !ok {
+					return
+				}
+				time.Sleep(20 * time.Millisecond)
+				_ = writeResponse(conn, validResponse(req.ID))
+			},
+			wantRows: 1,
+		},
+		{
+			name: "peer closes after request",
+			serve: func(conn net.Conn) {
+				if !writeHello(conn) {
+					return
+				}
+				_, _ = readStatusRequest(conn)
+			},
+			wantError: true,
+		},
+		{
+			name: "malformed response",
+			serve: func(conn net.Conn) {
+				if !writeHello(conn) {
+					return
+				}
+				if _, ok := readStatusRequest(conn); !ok {
+					return
+				}
+				_, _ = conn.Write([]byte(`{"id":` + "\n"))
+			},
+			wantError: true,
+		},
+		{
+			name: "partial response then peer close",
+			serve: func(conn net.Conn) {
+				if !writeHello(conn) {
+					return
+				}
+				if _, ok := readStatusRequest(conn); !ok {
+					return
+				}
+				_, _ = conn.Write([]byte(`{"id":1,"ok":true`))
+			},
+			wantError: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stateDir := apitest.HardenedTempDir(t)
+			withDaemonStateRootOverride(t, stateDir)
+			writeSupervisorOwnerForTest(t, stateDir, owner)
+			stop := startFakeSupervisorIPCStatusServerWithConnection(t, stateDir, tc.serve)
+			defer stop()
+
+			ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+			defer cancel()
+			rows, err := DialSupervisorIPCStatus(ctx)
+			if tc.wantError {
+				if err == nil || len(rows) != 0 {
+					t.Fatalf("transition returned rows=%+v err=%v; want transport error with no snapshot", rows, err)
+				}
+				if errors.Is(err, ErrStatusSetupFailure) {
+					t.Fatalf("transport transition err=%v matched local setup failure", err)
+				}
+				return
+			}
+			if err != nil || len(rows) != tc.wantRows || rows[0].Server != "memory" {
+				t.Fatalf("delayed valid transition rows=%+v err=%v, want one memory snapshot", rows, err)
+			}
+		})
+	}
+}
+
 // TestStatusSetupErrorSentinel_ClassifiesAndPreservesCause pins the
 // ErrStatusSetupFailure multi-%w wrapping contract (bot PR #477 P3, status
 // twin): a wrapped setup error classifies via errors.Is AND still exposes its

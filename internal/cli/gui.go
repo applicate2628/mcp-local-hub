@@ -1001,6 +1001,58 @@ func shouldRunTray(noTray bool) bool {
 	return !noTray
 }
 
+func startTrayIfEnabled(noTray bool, run func()) {
+	if !shouldRunTray(noTray) {
+		return
+	}
+	go run()
+}
+
+func safeTrayLifecycleDetail(detail string) string {
+	detail = strings.ReplaceAll(strings.ReplaceAll(detail, "\r", " "), "\n", " ")
+	if len(detail) > 512 {
+		detail = detail[:512]
+	}
+	switch detail {
+	case "permission denied", "resource not found", "pipe closed", "operation failed", "process ended":
+		return detail
+	}
+	const exitPrefix = "process exited with status "
+	if strings.HasPrefix(detail, exitPrefix) {
+		status := strings.TrimPrefix(detail, exitPrefix)
+		if status != "" {
+			for _, char := range status {
+				if char < '0' || char > '9' {
+					return "operation failed"
+				}
+			}
+			return detail
+		}
+	}
+	return "operation failed"
+}
+
+func trayLifecycleGUIEvent(report tray.LifecycleReport) gui.Event {
+	body := make(map[string]any, 5)
+	switch report.Type {
+	case "tray-child-unavailable", "tray-child-retry-summary":
+		body["phase"] = report.Phase
+		body["attempt"] = report.Attempt
+		body["next_retry_ms"] = report.NextRetryMS
+		body["error_detail"] = safeTrayLifecycleDetail(report.ErrorDetail)
+		if report.Type == "tray-child-retry-summary" {
+			body["failures_since_previous"] = report.Failures
+		}
+	case "tray-child-stable":
+		body["outage_duration_ms"] = report.OutageDurationMS
+		body["attempt_count"] = report.AttemptCount
+	case "tray-child-protocol-warning":
+		body["phase"] = report.Phase
+		body["attempt"] = report.Attempt
+	}
+	return gui.Event{Type: report.Type, Body: body}
+}
+
 func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop context.CancelFunc,
 	lock gui.SingleInstanceLease, port int, noBrowser, noTray, strictMode, releaseConsole bool, pidportPath string,
 	startup *guiServerStartup) (resultErr error) {
@@ -1394,159 +1446,159 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.ErrOrStderr(), "warning: could not auto-launch browser: %v\n", err)
 		}
 	}
-	if shouldRunTray(noTray) {
-		go func() {
-			// PR #24 added child-failure propagation: tray.Run
-			// returns non-nil when the tray subprocess exits
-			// unexpectedly while ctx is alive. Surface the error
-			// so the GUI doesn't silently lose tray functionality.
-			// Tray callbacks dispatch through the SAME HTTP endpoints as the
-			// Dashboard buttons. Going through HTTP (rather than calling
-			// api.NewAPI() directly) means the SSE Broadcaster fires
-			// bulk-action lifecycle events that any open Dashboard tab
-			// observes — buttons flash "Starting…" / "Stopping…" exactly
-			// as if the user had clicked them in the browser. Without
-			// this round-trip the tray would mutate daemon state silently
-			// and the Dashboard would only catch up via the per-daemon
-			// SSE updates, with no overall progress indicator. One
-			// pipeline, one source of truth.
-			port := int(s.Port())
-			postBulk := func(action string) error {
-				url := fmt.Sprintf("http://127.0.0.1:%d/api/%s-all", port, action)
-				req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
-				if err != nil {
-					return err
-				}
-				// requireSameOrigin gate accepts requests with no Origin
-				// header (CSRF middleware allows non-browser clients);
-				// adding the loopback Origin makes the request indistinguishable
-				// from a Dashboard fetch on the wire.
-				req.Header.Set("Origin", fmt.Sprintf("http://127.0.0.1:%d", port))
-				resp, err := http.DefaultClient.Do(req)
-				if err != nil {
-					return err
-				}
-				defer resp.Body.Close()
-				// 207 Multi-Status is partial failure (per-task errors).
-				// 4xx (e.g. 403 from requireSameOrigin) and 5xx are
-				// real failures. Only 200 is a clean success — flag
-				// everything else so the tray surfaces it to stderr
-				// instead of letting QuitAndStopAll silently shut
-				// down without confirming the action ran. Codex bot
-				// review on PR #38 commit ef0f4ea P2 ("Treat all
-				// non-2xx tray bulk POST responses as failures").
-				if resp.StatusCode == http.StatusMultiStatus {
-					return fmt.Errorf("HTTP 207 partial: at least one task failed; see daemon logs")
-				}
-				if resp.StatusCode >= 400 {
-					return fmt.Errorf("HTTP %d", resp.StatusCode)
-				}
-				return nil
+	startTrayIfEnabled(noTray, func() {
+		// tray.Run owns child recovery and reports bounded lifecycle
+		// diagnostics through the broadcaster callback below. A return is
+		// terminal for this one GUI-owned tray lifecycle invocation.
+		// Tray callbacks dispatch through the SAME HTTP endpoints as the
+		// Dashboard buttons. Going through HTTP (rather than calling
+		// api.NewAPI() directly) means the SSE Broadcaster fires
+		// bulk-action lifecycle events that any open Dashboard tab
+		// observes — buttons flash "Starting…" / "Stopping…" exactly
+		// as if the user had clicked them in the browser. Without
+		// this round-trip the tray would mutate daemon state silently
+		// and the Dashboard would only catch up via the per-daemon
+		// SSE updates, with no overall progress indicator. One
+		// pipeline, one source of truth.
+		port := int(s.Port())
+		postBulk := func(action string) error {
+			url := fmt.Sprintf("http://127.0.0.1:%d/api/%s-all", port, action)
+			req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, nil)
+			if err != nil {
+				return err
 			}
-			// state-read-relax broadcast channel — buffered so a
-			// quick init-push doesn't block during tray.Run's
-			// goroutine startup window.
-			stateRelaxCh := make(chan bool, 4)
-			go pollStateReadRelaxForTray(ctx, port, stateRelaxCh)
+			// requireSameOrigin gate accepts requests with no Origin
+			// header (CSRF middleware allows non-browser clients);
+			// adding the loopback Origin makes the request indistinguishable
+			// from a Dashboard fetch on the wire.
+			req.Header.Set("Origin", fmt.Sprintf("http://127.0.0.1:%d", port))
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				return err
+			}
+			defer resp.Body.Close()
+			// 207 Multi-Status is partial failure (per-task errors).
+			// 4xx (e.g. 403 from requireSameOrigin) and 5xx are
+			// real failures. Only 200 is a clean success — flag
+			// everything else so the tray surfaces it to stderr
+			// instead of letting QuitAndStopAll silently shut
+			// down without confirming the action ran. Codex bot
+			// review on PR #38 commit ef0f4ea P2 ("Treat all
+			// non-2xx tray bulk POST responses as failures").
+			if resp.StatusCode == http.StatusMultiStatus {
+				return fmt.Errorf("HTTP 207 partial: at least one task failed; see daemon logs")
+			}
+			if resp.StatusCode >= 400 {
+				return fmt.Errorf("HTTP %d", resp.StatusCode)
+			}
+			return nil
+		}
+		// state-read-relax broadcast channel — buffered so a
+		// quick init-push doesn't block during tray.Run's
+		// goroutine startup window.
+		stateRelaxCh := make(chan bool, 4)
+		go pollStateReadRelaxForTray(ctx, port, stateRelaxCh)
 
-			if err := tray.Run(ctx, tray.Config{
-				ActivateWindow: func() {
-					activateDashboardFromTray(
-						pidportPath,
-						port,
-						cmd.ErrOrStderr(),
-						gui.TryActivateIncumbent,
-						gui.LaunchBrowser,
-					)
-				},
-				StateCh:          trayStateCh,
-				StateReadRelaxCh: stateRelaxCh,
-				ToggleStateReadRelax: func() {
-					if err := postToggleStateRelax(ctx, port, stateRelaxCh); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: toggle state-read-relax: %v\n", err)
-					}
-				},
-				Quit: func() {
-					// GUI exit-reason attribution: emit BEFORE stop() so the
-					// event is durable even if shutdown proceeds quickly.
-					// Bounded (guiExitReasonEmitTimeout) — never delays Quit
-					// beyond that ceiling. If an OS signal races this click,
-					// gui.EmitExitReasonEvent's own process-wide
-					// first-trigger-wins dedup (P2-5 review fix) ensures only
-					// whichever call actually runs first is durably recorded
-					// — never both.
-					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuit, nil)
-					stop()
-				},
-				QuitAndStopAll: func() {
-					// GUI exit-reason attribution: see Quit above.
-					gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuitAndStopAll, nil)
-					// Stop all via HTTP (so the Dashboard sees the SSE
-					// lifecycle), then trigger the GUI shutdown. Errors
-					// don't block the shutdown — partial cleanup beats
-					// a hung GUI.
-					if err := postBulk("stop"); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
-					}
-					stop()
-				},
-				RunAllDaemons: func() {
-					if err := postBulk("restart"); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/restart-all: %v\n", err)
-					}
-				},
-				StopAllDaemons: func() {
-					if err := postBulk("stop"); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
-					}
-				},
-				RescanClients: func() {
-					// Publish an SSE event so any open Servers/Migration
-					// screen re-fetches its scan state. Same SSE bus the
-					// Dashboard already subscribes to (PR #38), so the
-					// pipeline stays single-source-of-truth.
-					s.Broadcaster().Publish(gui.Event{Type: "clients-rescan"})
-				},
-				OpenLogsFolder: func() {
-					// In-process spawn — best-effort, errors logged to
-					// the parent's stderr so a failed spawn doesn't
-					// silently no-op the menu click.
-					//
-					// MkdirAll first: on first-run hosts the daemon
-					// hasn't written any log yet so the dir doesn't
-					// exist, and explorer.exe / xdg-open / open all
-					// fail on a non-existent path. Same precedent as
-					// /api/logs-folder backend handler and the
-					// advanced.open_app_data_folder Settings action.
-					// Codex bot review on PR #48 P2.
-					dir := api.DefaultLogDir()
-					if err := os.MkdirAll(dir, 0700); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: mkdir logs folder: %v\n", err)
-						return
-					}
-					if err := gui.OpenPath(dir); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: open logs folder: %v\n", err)
-					}
-				},
-				OpenDataFolder: func() {
-					// Same MkdirAll-before-spawn precedent as
-					// OpenLogsFolder. The data dir holds gui-preferences
-					// + secrets; first-run hosts have neither yet.
-					// Codex bot review on PR #48 P2.
-					dir := filepath.Dir(api.SettingsPath())
-					if err := os.MkdirAll(dir, 0700); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: mkdir data folder: %v\n", err)
-						return
-					}
-					if err := gui.OpenPath(dir); err != nil {
-						fmt.Fprintf(cmd.ErrOrStderr(), "tray: open data folder: %v\n", err)
-					}
-				},
-			}); err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "tray: %v (GUI continues without tray)\n", err)
-			}
-		}()
-	}
+		if err := tray.Run(ctx, tray.Config{
+			LifecycleReport: func(report tray.LifecycleReport) {
+				s.Broadcaster().Publish(trayLifecycleGUIEvent(report))
+			},
+			ActivateWindow: func() {
+				activateDashboardFromTray(
+					pidportPath,
+					port,
+					cmd.ErrOrStderr(),
+					gui.TryActivateIncumbent,
+					gui.LaunchBrowser,
+				)
+			},
+			StateCh:          trayStateCh,
+			StateReadRelaxCh: stateRelaxCh,
+			ToggleStateReadRelax: func() {
+				if err := postToggleStateRelax(ctx, port, stateRelaxCh); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: toggle state-read-relax: %v\n", err)
+				}
+			},
+			Quit: func() {
+				// GUI exit-reason attribution: emit BEFORE stop() so the
+				// event is durable even if shutdown proceeds quickly.
+				// Bounded (guiExitReasonEmitTimeout) — never delays Quit
+				// beyond that ceiling. If an OS signal races this click,
+				// gui.EmitExitReasonEvent's own process-wide
+				// first-trigger-wins dedup (P2-5 review fix) ensures only
+				// whichever call actually runs first is durably recorded
+				// — never both.
+				gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuit, nil)
+				stop()
+			},
+			QuitAndStopAll: func() {
+				// GUI exit-reason attribution: see Quit above.
+				gui.EmitExitReasonEvent(gui.GUIExitReasonTrayQuitAndStopAll, nil)
+				// Stop all via HTTP (so the Dashboard sees the SSE
+				// lifecycle), then trigger the GUI shutdown. Errors
+				// don't block the shutdown — partial cleanup beats
+				// a hung GUI.
+				if err := postBulk("stop"); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
+				}
+				stop()
+			},
+			RunAllDaemons: func() {
+				if err := postBulk("restart"); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/restart-all: %v\n", err)
+				}
+			},
+			StopAllDaemons: func() {
+				if err := postBulk("stop"); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: POST /api/stop-all: %v\n", err)
+				}
+			},
+			RescanClients: func() {
+				// Publish an SSE event so any open Servers/Migration
+				// screen re-fetches its scan state. Same SSE bus the
+				// Dashboard already subscribes to (PR #38), so the
+				// pipeline stays single-source-of-truth.
+				s.Broadcaster().Publish(gui.Event{Type: "clients-rescan"})
+			},
+			OpenLogsFolder: func() {
+				// In-process spawn — best-effort, errors logged to
+				// the parent's stderr so a failed spawn doesn't
+				// silently no-op the menu click.
+				//
+				// MkdirAll first: on first-run hosts the daemon
+				// hasn't written any log yet so the dir doesn't
+				// exist, and explorer.exe / xdg-open / open all
+				// fail on a non-existent path. Same precedent as
+				// /api/logs-folder backend handler and the
+				// advanced.open_app_data_folder Settings action.
+				// Codex bot review on PR #48 P2.
+				dir := api.DefaultLogDir()
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: mkdir logs folder: %v\n", err)
+					return
+				}
+				if err := gui.OpenPath(dir); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: open logs folder: %v\n", err)
+				}
+			},
+			OpenDataFolder: func() {
+				// Same MkdirAll-before-spawn precedent as
+				// OpenLogsFolder. The data dir holds gui-preferences
+				// + secrets; first-run hosts have neither yet.
+				// Codex bot review on PR #48 P2.
+				dir := filepath.Dir(api.SettingsPath())
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: mkdir data folder: %v\n", err)
+					return
+				}
+				if err := gui.OpenPath(dir); err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "tray: open data folder: %v\n", err)
+				}
+			},
+		}); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "tray: %v (GUI continues without tray)\n", err)
+		}
+	})
 
 	// Auto-cleanup ticker: every 5 min, POST to the GUI's own
 	// /api/cleanup/orphans with {apply:true} so orphan

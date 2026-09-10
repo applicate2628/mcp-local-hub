@@ -18,6 +18,7 @@
 package api
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"sort"
@@ -39,7 +40,7 @@ const renameAsideRetention = 7 * 24 * time.Hour
 // prior semantics — no unconditional keep-newest), so this only ADDS pruning.
 const renameAsideMaxKeep = 5
 
-// SweepOldBinaries removes `<dir>/mcphub*.old-*` aside files that are EITHER
+// SweepOldBinaries removes legacy canonical aside files that are EITHER
 // older than renameAsideRetention (7 days) OR beyond the newest
 // renameAsideMaxKeep (the rollback chain). Both Windows and POSIX patterns are
 // checked on every host so a tree that was cross-installed (rare; defensive) is
@@ -57,10 +58,16 @@ const renameAsideMaxKeep = 5
 // Binary crash auto-recovery is deferred; see
 // work-items/backlog/2026-06-21-binary-crash-recovery-deferred.md.
 func SweepOldBinaries(dir string, warn ...func(string, error)) error {
-	patterns := []string{
-		filepath.Join(dir, "mcphub.exe.old-*"),
-		filepath.Join(dir, "mcphub.old-*"),
-	}
+	return SweepOldBinaryTargets([]string{
+		filepath.Join(dir, "mcphub.exe"),
+		filepath.Join(dir, "mcphub"),
+	}, warn...)
+}
+
+// SweepOldBinaryTargets bounds generated `.old-<timestamp>` backups for the
+// exact canonical targets supplied by the caller. It never derives executable
+// names or installation roots from a target basename.
+func SweepOldBinaryTargets(targets []string, warn ...func(string, error)) error {
 	// Collect every aside (across both patterns) with its encoded timestamp so the count
 	// cap can rank them newest-first independent of which pattern matched.
 	type aside struct {
@@ -68,14 +75,31 @@ func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 		createdAt time.Time
 	}
 	var asides []aside
-	for _, pattern := range patterns {
-		matches, err := filepath.Glob(pattern)
+	seenTargets := make(map[string]struct{}, len(targets))
+	seenAsides := make(map[string]struct{})
+	for _, target := range targets {
+		target = filepath.Clean(target)
+		if target == "." || target == "" {
+			continue
+		}
+		if _, duplicate := seenTargets[target]; duplicate {
+			continue
+		}
+		seenTargets[target] = struct{}{}
+		entries, err := os.ReadDir(filepath.Dir(target))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
 		if err != nil {
 			return err
 		}
-		for _, m := range matches {
-			createdAt, ok := generatedRenameAsideTime(m)
+		for _, entry := range entries {
+			m := filepath.Join(filepath.Dir(target), entry.Name())
+			createdAt, ok := generatedRenameAsideTargetTime(target, m)
 			if !ok {
+				continue
+			}
+			if _, duplicate := seenAsides[m]; duplicate {
 				continue
 			}
 			info, err := os.Stat(m)
@@ -91,6 +115,7 @@ func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 				// it does. Skip.
 				continue
 			}
+			seenAsides[m] = struct{}{}
 			asides = append(asides, aside{path: m, createdAt: createdAt})
 		}
 	}
@@ -111,6 +136,27 @@ func SweepOldBinaries(dir string, warn ...func(string, error)) error {
 		}
 	}
 	return nil
+}
+
+// IsGeneratedRenameAsideForTarget reports whether candidate is a valid
+// generated aside of that exact target path.
+func IsGeneratedRenameAsideForTarget(target, candidate string) bool {
+	_, ok := generatedRenameAsideTargetTime(target, candidate)
+	return ok
+}
+
+func generatedRenameAsideTargetTime(target, candidate string) (time.Time, bool) {
+	target = filepath.Clean(target)
+	candidate = filepath.Clean(candidate)
+	prefix := target + ".old-"
+	if !strings.HasPrefix(candidate, prefix) {
+		return time.Time{}, false
+	}
+	suffix := strings.TrimPrefix(candidate, prefix)
+	if suffix == "" || strings.ContainsAny(suffix, `/\\`) {
+		return time.Time{}, false
+	}
+	return parseRenameAsideTimestamp(suffix)
 }
 
 func generatedRenameAsideTime(path string) (time.Time, bool) {

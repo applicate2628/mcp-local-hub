@@ -48,6 +48,11 @@ const TARGETS = [
 const NPM_DIR = __dirname;
 const PACKAGES_DIR = path.join(NPM_DIR, "packages");
 const META_PKG_PATH = path.join(NPM_DIR, "package.json");
+const WINDOWS_ARTIFACT_CONTRACT_PATH = path.join(
+  NPM_DIR,
+  "..",
+  "windows-product-artifacts.json",
+);
 
 function readMeta() {
   const raw = fs.readFileSync(META_PKG_PATH, "utf8");
@@ -56,6 +61,19 @@ function readMeta() {
 
 function binaryBasename(nodeOs) {
   return nodeOs === "win32" ? "mcphub.exe" : "mcphub";
+}
+
+function readWindowsArtifactContract() {
+  const contract = JSON.parse(fs.readFileSync(WINDOWS_ARTIFACT_CONTRACT_PATH, "utf8"));
+  const artifacts = Array.isArray(contract.artifacts) ? contract.artifacts : [];
+  const npmPayload = artifacts.filter((artifact) => artifact.npmPayload === true);
+  const npmBins = npmPayload.filter((artifact) => artifact.npmBin === true);
+  if (contract.schemaVersion !== 1 || artifacts.length !== 3 || npmPayload.length !== 3 || npmBins.length !== 1) {
+    throw new Error(
+      "windows-product-artifacts.json must declare schemaVersion 1, exactly three npm payloads, and one npm bin",
+    );
+  }
+  return { npmPayload, npmBin: npmBins[0] };
 }
 
 function tierBlurb(tier) {
@@ -67,7 +85,8 @@ function tierBlurb(tier) {
 function subPackageJson(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
   const name = platformPackageName(nodeOs, nodeCpu);
-  const bin = binaryBasename(nodeOs);
+  const windowsContract = nodeOs === "win32" ? readWindowsArtifactContract() : null;
+  const bin = windowsContract ? windowsContract.npmBin.filename : binaryBasename(nodeOs);
   // Stable key order so output is deterministic across Node versions.
   return {
     name,
@@ -91,10 +110,9 @@ function subPackageJson(meta, target) {
     os: [nodeOs],
     cpu: [nodeCpu],
     bin: { mcphub: `bin/${bin}` },
-    files:
-      nodeOs === "win32"
-        ? [`bin/${bin}`, "bin/mcphub-pe-admit.exe", "README.md"]
-        : [`bin/${bin}`, "README.md"],
+    files: windowsContract
+      ? [...windowsContract.npmPayload.map((artifact) => `bin/${artifact.filename}`), "README.md"]
+      : [`bin/${bin}`, "README.md"],
     engines: meta.engines,
   };
 }
@@ -102,14 +120,28 @@ function subPackageJson(meta, target) {
 function subPackageReadme(meta, target) {
   const { nodeOs, nodeCpu, goos, goarch, tier } = target;
   const name = platformPackageName(nodeOs, nodeCpu);
-  const bin = binaryBasename(nodeOs);
+  const windowsContract = nodeOs === "win32" ? readWindowsArtifactContract() : null;
+  const bin = windowsContract ? windowsContract.npmBin.filename : binaryBasename(nodeOs);
+  const payloadDescription = windowsContract
+    ? windowsContract.npmPayload
+        .map(
+          (artifact) =>
+            `  - \`bin/${artifact.filename}\` (${artifact.role}, PE subsystem ${artifact.subsystem})\n`,
+        )
+        .join("") +
+      `- The npm \`mcphub\` command resolves only to \`bin/${bin}\`; ` +
+      `the windowless adapter is reserved for supported GUI/Explorer entry points.\n\n`
+    : `- Binary: \`bin/${bin}\` — injected by the release job at publish time, ` +
+      `NOT committed to git.\n\n`;
   return (
     `# ${name}\n\n` +
     `Platform binary sub-package for [\`mcp-local-hub\`](https://www.npmjs.com/package/mcp-local-hub).\n\n` +
     `- Target: \`${nodeOs}/${nodeCpu}\` (Go \`${goos}/${goarch}\`)\n` +
     `- Support tier: **${tierBlurb(tier)}**\n` +
-    `- Binary: \`bin/${bin}\` — injected by the release job at publish time, ` +
-    `NOT committed to git.\n\n` +
+    (windowsContract
+      ? `- Native payload (injected by the release job; NOT committed to git):\n`
+      : "") +
+    payloadDescription +
     `You do not install this package directly. The \`mcp-local-hub\` meta package ` +
     `declares it in \`optionalDependencies\`; npm installs only the ` +
     `sub-package matching your host's \`os\`/\`cpu\`.\n\n` +

@@ -25,9 +25,14 @@ import "os/exec"
 // Job stub cannot improve.
 type Job struct{}
 
-// NewKillOnCloseJob is a no-op on POSIX; returns a non-nil empty Job
-// so callers can use it without runtime.GOOS branches.
-func NewKillOnCloseJob() (*Job, error) { return &Job{}, nil }
+// NewJob is a no-op on POSIX; returns a non-nil empty Job so callers can use
+// the shared construction seam without runtime.GOOS branches.
+func NewJob(_ JobOptions) (*Job, error) { return &Job{}, nil }
+
+// NewKillOnCloseJob preserves the established cross-platform API.
+func NewKillOnCloseJob() (*Job, error) {
+	return NewJob(JobOptions{KillOnClose: true})
+}
 
 // Assign is a no-op on POSIX.
 func (j *Job) Assign(_ *exec.Cmd) error { return nil }

@@ -38,6 +38,7 @@ import (
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/buildinfo"
 	"mcp-local-hub/internal/process"
+	"mcp-local-hub/internal/scheduler"
 )
 
 func init() {
@@ -87,14 +88,27 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 			api.ReleaseAndJoin(&retErr, fence.Release, "release upgrade transaction fence")
 		}
 	}()
-
-	staged, err := stageV5UpgradeBinary(exe, target)
+	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
+	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(ctx, stateDir, target, windowlessTarget))
 	if err != nil {
-		return fmt.Errorf("v0.5 upgrade: stage binary beside canonical target: %w", err)
+		return fmt.Errorf("v0.5 upgrade: recover Windows product pair: %w", err)
 	}
-	// RenameAsideReplace consumes staged on success. Remove it on every earlier
-	// or failed return so a stale candidate cannot survive into a later upgrade.
-	defer os.Remove(staged)
+	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
+		return nil
+	}
+	windowlessSource := scheduler.WindowsOwnedEntrypointPath(exe)
+	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, exe, windowlessSource, target, windowlessTarget, WindowsProductPairModeUpgrade); err != nil {
+		return fmt.Errorf("v0.5 upgrade: reconcile committed Windows product pair: %w", err)
+	} else if reconciled {
+		return nil
+	}
+
+	stagedCLI, stagedWindowless, err := stageV5UpgradeProductPair(exe, target)
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: stage product pair beside canonical target: %w", err)
+	}
+	defer os.Remove(stagedCLI)
+	defer os.Remove(stagedWindowless)
 	deps := buildV5UpgradeDeps(target, stateDir)
 
 	// Resolve expected daemon ports from supervisor-intent.json so the
@@ -131,23 +145,49 @@ func runV5UpgradeWindowsWithPaths(cmd *cobra.Command, exe, target string) (retEr
 			expectedPorts = append(expectedPorts, port)
 		}
 	}
+	pairTxn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
+		Context:          ctx,
+		StateDir:         stateDir,
+		CLIPath:          target,
+		WindowlessPath:   windowlessTarget,
+		StagedCLI:        stagedCLI,
+		StagedWindowless: stagedWindowless,
+		Mode:             WindowsProductPairModeUpgrade,
+		PriorFleetReaped: true,
+		StartSupervisor:  deps.StartSupervisor,
+		RestartPrior:     deps.StartSupervisor,
+		SettleSuccessor: func(string) error {
+			err := deps.ForceKillSupervisor(deps.pipePath)
+			if isAlreadyExitedError(err) {
+				return nil
+			}
+			return err
+		},
+		WaitSupervisorReady: func(ctx context.Context, cliPath string, pair binaryadmission.WindowsProductPair) error {
+			candidate := UpgradeCandidateV1{
+				Admission: UpgradeAdmissionLocalProduct,
+				Version:   pair.CLI.Version,
+				Commit:    pair.CLI.Commit,
+				BuildDate: pair.CLI.BuildDate,
+				SHA256:    pair.CLI.SHA256,
+			}
+			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, cliPath, candidate)
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("v0.5 upgrade: construct Windows product pair transaction: %w", err)
+	}
 
 	if err := runInstallUpgradeWindowsFn(ctx, UpgradeOpts{
+		WindowsProductPair:         pairTxn,
 		BinaryPath:                 target,
-		NewBinary:                  staged,
 		PipePath:                   deps.pipePath,
 		Deps:                       deps,
 		ExpectedPorts:              expectedPorts,
 		VerifyPortsUnbound:         verifyPortsUnboundForUpgrade,
 		WaitSupervisorLockReleased: deps.WaitSupervisorLockReleased,
-		WaitSupervisorReady:        deps.WaitSupervisorReady,
-		AdmitStaged:                admitV5UpgradeCandidate,
 		AdmitPrior:                 admitV5UpgradePrior,
 		VerifyPrior:                verifyV5UpgradePrior,
-		VerifyCanonical:            verifyV5UpgradeCanonical,
-		WriteReceipt: func(receipt UpgradeReceiptV1) error {
-			return api.WriteStateFileAtomic(filepath.Join(stateDir, UpgradeReceiptSchemaV1+".json"), receipt)
-		},
 		WithRollbackStopSettlementFence: func(ctx context.Context, critical func() error) error {
 			return api.WithEmptyStopSettlementFence(ctx, filepath.Join(stateDir, "supervisor-state.json"), critical)
 		},
@@ -167,16 +207,9 @@ func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
 	if err := binaryadmission.AdmitWindowsGUI(path); err != nil {
 		return UpgradeCandidateV1{}, fmt.Errorf("admit Windows product PE: %w", err)
 	}
-	version, commit, buildDate := buildinfo.Get()
-	for _, field := range []struct{ name, value string }{
-		{name: "version", value: version},
-		{name: "commit", value: commit},
-		{name: "build_date", value: buildDate},
-	} {
-		trimmed := strings.TrimSpace(field.value)
-		if trimmed == "" || strings.EqualFold(trimmed, "dev") || strings.EqualFold(trimmed, "unknown") {
-			return UpgradeCandidateV1{}, fmt.Errorf("admit local product build: %s is placeholder %q", field.name, field.value)
-		}
+	version, commit, buildDate, err := legacyRuntimeUpgradeMetadata()
+	if err != nil {
+		return UpgradeCandidateV1{}, err
 	}
 	hash, err := hashFile(path)
 	if err != nil {
@@ -189,6 +222,22 @@ func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
 		BuildDate: buildDate,
 		SHA256:    hex.EncodeToString(hash),
 	}, nil
+}
+
+// legacyRuntimeUpgradeMetadata is confined to the historical single-image
+// compatibility control path. New Windows product-pair admission never calls
+// it and derives all receipt identity from the two candidate PE resources.
+func legacyRuntimeUpgradeMetadata() (version, commit, buildDate string, err error) {
+	version, commit, buildDate = buildinfo.Get()
+	for _, field := range []struct{ name, value string }{
+		{name: "version", value: version}, {name: "commit", value: commit}, {name: "build_date", value: buildDate},
+	} {
+		trimmed := strings.TrimSpace(field.value)
+		if trimmed == "" || strings.EqualFold(trimmed, "dev") || strings.EqualFold(trimmed, "unknown") {
+			return "", "", "", fmt.Errorf("admit legacy runtime upgrade: %s is placeholder %q", field.name, field.value)
+		}
+	}
+	return version, commit, buildDate, nil
 }
 
 func verifyV5UpgradeCanonical(path string, candidate UpgradeCandidateV1) error {
@@ -237,10 +286,25 @@ func verifyV5UpgradePrior(path, expectedSHA256 string) error {
 // pipeline, so a failed copy never exposes a partial .new file.
 func stageV5UpgradeBinary(exe, target string) (string, error) {
 	staged := target + ".new"
-	if err := copyExe(exe, staged); err != nil {
+	if err := copySingleBinaryPlatformArtifact(exe, staged); err != nil {
 		return "", err
 	}
 	return staged, nil
+}
+
+func stageV5UpgradeProductPair(cliSource, cliTarget string) (stagedCLI, stagedWindowless string, err error) {
+	windowlessSource := scheduler.WindowsOwnedEntrypointPath(cliSource)
+	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(cliTarget)
+	stagedCLI, err = stageWindowsProductCandidate(cliSource, cliTarget)
+	if err != nil {
+		return "", "", err
+	}
+	stagedWindowless, err = stageWindowsProductCandidate(windowlessSource, windowlessTarget)
+	if err != nil {
+		_ = os.Remove(stagedCLI)
+		return "", "", err
+	}
+	return stagedCLI, stagedWindowless, nil
 }
 
 // buildV5UpgradeDeps constructs the production v5UpgradeDeps for the
@@ -270,6 +334,34 @@ func buildV5UpgradeDeps(canonicalTarget, stateDir string) *v5UpgradeDeps {
 		exePath:           canonicalTarget,
 		supervisorLockDir: filepath.Join(stateDir, "supervisor.lock"),
 		pipePath:          api.SupervisorIPCAddress(stateDir),
+	}
+}
+
+func windowsProductPairRecoveryRuntimeRequest(ctx context.Context, stateDir, cliPath, windowlessPath string) windowsProductPairRecoveryRequest {
+	deps := buildV5UpgradeDeps(cliPath, stateDir)
+	return windowsProductPairRecoveryRequest{
+		Context:        ctx,
+		StateDir:       stateDir,
+		CLIPath:        cliPath,
+		WindowlessPath: windowlessPath,
+		SettleSuccessor: func(string) error {
+			err := deps.ForceKillSupervisor(deps.pipePath)
+			if isAlreadyExitedError(err) {
+				return nil
+			}
+			return err
+		},
+		ObservePriorReady: func(ctx context.Context, binaryPath, sha256 string) (bool, error) {
+			ready, err := deps.probeUpgradeReadyOnce(binaryPath, UpgradeCandidateV1{SHA256: sha256})
+			if errors.Is(err, os.ErrNotExist) || errors.Is(err, process.ErrProcessNotFound) {
+				return false, nil
+			}
+			return ready, err
+		},
+		RestartPrior: deps.StartSupervisor,
+		WaitPriorReady: func(ctx context.Context, binaryPath, sha256 string) error {
+			return deps.WaitSupervisorReady(ctx, defaultSupervisorLockReleaseTimeout, binaryPath, UpgradeCandidateV1{SHA256: sha256})
+		},
 	}
 }
 
@@ -603,19 +695,11 @@ func installSupervisorCmdBuilder(exePath string, strictMode bool) func() *exec.C
 // `mcphub install --upgrade` in.
 func spawnSupervisorDetached(exePath string, strictMode bool) func() error {
 	return func() error {
-		// build constructs a fresh detached supervisor cmd so the
-		// breakaway-tolerant flagless retry (PART 1) can rebuild an
-		// equivalent one if the parent job forbids breakaway.
+		// Build supplies fresh equivalent commands to the shared process owner.
 		build := installSupervisorCmdBuilder(exePath, strictMode)
-		// PART 1 (§5 permanent fix): add CREATE_BREAKAWAY_FROM_JOB so the
-		// new supervisor escapes any KILL_ON_JOB_CLOSE job inherited from
-		// the install/migrate CLI's launcher. On a locked-down host that
-		// forbids breakaway it retries flagless rather than hard-failing
-		// the upgrade (a hard abort here leaves the binary swapped + the
-		// prior supervisor dead + nothing running — a worse regression).
-		started, err := startSupervisorDetachedBreakaway(build(), build, func(degradeErr error) {
-			fmt.Fprintf(os.Stderr, "install: supervisor spawn CREATE_BREAKAWAY_FROM_JOB rejected by parent job (no BREAKAWAY_OK); spawned flagless: %v\n", degradeErr)
-		})
+		// Upgrade successors require independent lifetime. Access-denied
+		// breakaway therefore fails typed after one attempt with no fallback.
+		started, err := startSupervisorDetachedBreakaway(build(), build, nil, process.BreakawayRequired)
 		if err != nil {
 			return fmt.Errorf("spawn supervisor: %w", err)
 		}

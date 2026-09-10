@@ -690,3 +690,80 @@ func TestStopSupervisorStoppedSettlementPartialFailureIsPerTarget(t *testing.T) 
 		t.Fatalf("failed sibling = %+v, want typed settlement failure", got)
 	}
 }
+
+func TestStopAdoptOwnedDaemonSettledRequiresExactFrozenTargetAndTerminalStop(t *testing.T) {
+	const task = `\mcp-local-hub-provider-default`
+	newIntent := func() *SupervisorIntentFile {
+		return &SupervisorIntentFile{
+			Version:          1,
+			IntentGeneration: 7,
+			Daemons: []SupervisorDaemon{{
+				TaskName: task, Server: "provider", Daemon: "default", Port: 9417, ManifestHash: "manifest-hash",
+			}},
+		}
+	}
+	frozen := SupervisorDaemon{TaskName: task, Server: "provider", Daemon: "default", Port: 9417, ManifestHash: "manifest-hash"}
+	echo := func(command StopBatchCommandV1, settlements []StoppedSettlement) StopBatchResultV1 {
+		result := stopBatchResultForTest(command, settlements)
+		result.IntentGeneration = command.IntentGeneration
+		result.SupervisorIntent = command.SupervisorIntent
+		result.UnifiedStops = command.UnifiedStops
+		return result
+	}
+
+	t.Run("exact target writes stop intent and returns stopped settlement", func(t *testing.T) {
+		stopSupervisorTestSetup(t, newIntent(), nil)
+		var calls int
+		restore := setSupervisorStopBatchHookForTest(func(_ context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+			calls++
+			if len(command.Targets) != 1 || command.Targets[0] != (StopBatchTargetV1{TaskName: task, ExpectedPort: 9417}) || command.IntentGeneration == 0 {
+				t.Fatalf("command=%+v", command)
+			}
+			return echo(command, []StoppedSettlement{{TaskName: task, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped}}), nil
+		})
+		t.Cleanup(restore)
+
+		settlement, err := NewAPI().stopAdoptOwnedDaemonSettled(context.Background(), frozen)
+		if err != nil || settlement.State != StoppedSettlementStopped || settlement.Reason != StoppedSettlementReasonStopped || calls != 1 {
+			t.Fatalf("settlement=%+v err=%v calls=%d", settlement, err, calls)
+		}
+		if stop, ok := lookupSupervisorStop(task); !ok || stop.Desired != IntentDesiredStopped || stop.Reason != IntentReasonUserStop {
+			t.Fatalf("durable stop=%+v present=%v", stop, ok)
+		}
+	})
+
+	t.Run("manifest drift rejects before stop batch", func(t *testing.T) {
+		intent := newIntent()
+		intent.Daemons[0].ManifestHash = "different"
+		stopSupervisorTestSetup(t, intent, nil)
+		calls := 0
+		restore := setSupervisorStopBatchHookForTest(func(context.Context, StopBatchCommandV1) (StopBatchResultV1, error) {
+			calls++
+			return StopBatchResultV1{}, nil
+		})
+		t.Cleanup(restore)
+
+		if _, err := NewAPI().stopAdoptOwnedDaemonSettled(context.Background(), frozen); err == nil {
+			t.Fatal("drifted target unexpectedly settled")
+		}
+		if calls != 0 {
+			t.Fatalf("stop batch calls=%d, want 0", calls)
+		}
+		if _, ok := lookupSupervisorStop(task); ok {
+			t.Fatal("drifted target wrote a stop intent")
+		}
+	})
+
+	t.Run("nonstopped settlement returns error", func(t *testing.T) {
+		stopSupervisorTestSetup(t, newIntent(), nil)
+		restore := setSupervisorStopBatchHookForTest(func(_ context.Context, command StopBatchCommandV1) (StopBatchResultV1, error) {
+			return echo(command, []StoppedSettlement{{TaskName: task, State: StoppedSettlementFailed, Reason: StoppedSettlementReasonListenerAlive}}), nil
+		})
+		t.Cleanup(restore)
+
+		settlement, err := NewAPI().stopAdoptOwnedDaemonSettled(context.Background(), frozen)
+		if err == nil || settlement.State != StoppedSettlementFailed || settlement.Reason != StoppedSettlementReasonListenerAlive {
+			t.Fatalf("settlement=%+v err=%v", settlement, err)
+		}
+	})
+}

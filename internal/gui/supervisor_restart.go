@@ -397,11 +397,9 @@ func spawnDetachedSupervisor() (int, error) {
 		exe = resolved
 	}
 	build := func() *exec.Cmd { return newDetachedSupervisorCmd(exe) }
-	// §5-follow-up: route the manual-restart spawn through the breakaway-tolerant
-	// helper so it gains the same CREATE_BREAKAWAY_FROM_JOB orphan-escape +
-	// ERROR_ACCESS_DENIED flagless-retry the automatic (cli) spawn paths got — it
-	// is no longer the less-robust path on a locked-down host.
-	cmd, err := startDetachedSupervisorTolerant(build)
+	// The process owner chooses required/no-retry for Job-owned launchers and
+	// optional compatibility attempts only for a proven direct-GUI lifecycle.
+	cmd, err := startDetachedSupervisorTolerant(build, process.BreakawayPolicyForCurrentProcess())
 	if err != nil {
 		return 0, fmt.Errorf("start supervisor: %w", err)
 	}

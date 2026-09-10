@@ -2,7 +2,9 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -63,6 +65,274 @@ func TestExecuteDeAdoptT1HappyPathClosesAllOwnedState(t *testing.T) {
 	if !bytes.Contains(logBytes, []byte(`"source":"deadopt"`)) || !bytes.Contains(logBytes, []byte(`"event":"deadopt-executed"`)) {
 		t.Fatalf("deadopt-executed event missing:\n%s", logBytes)
 	}
+}
+
+func TestExecuteDeAdoptAbsentClientUsesVerifiedManifestTimeoutAtPreviewAndCAS(t *testing.T) {
+	name := "deadopt-absent-timeout"
+	codexPath, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateAdopted, originalState: AdoptOriginalStateAbsent,
+		liveConfig: deAdoptHubConfigWithToolTimeout(name, 30), manifestPresent: true,
+		manifestBytes: deAdoptManagedManifest(name, 30),
+	})
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(plan.Clients) != 1 || plan.Clients[0].Disposition != DeAdoptClientRemovePending {
+		t.Fatalf("preview clients=%+v; want timeout-matched remove-pending", plan.Clients)
+	}
+	report, err := NewAPI().ExecuteDeAdopt(name, nil)
+	if err != nil {
+		t.Fatalf("apply after matching preview: %v", err)
+	}
+	if len(report.Failed) != 0 || len(report.Restored) != 1 {
+		t.Fatalf("apply report=%+v", report)
+	}
+	if live := mustReadFileForAdoptTest(t, codexPath); bytes.Contains(live, []byte(name)) {
+		t.Fatalf("absent original hub entry remained after CAS removal:\n%s", live)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderRestoresOnlyAfterManagedStopSettlement(t *testing.T) {
+	name := "provider-deadopt-settlement"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateAdopted, originalState: AdoptOriginalStatePresent,
+		liveConfig: deAdoptHubConfig(name), snapshotBytes: snapshot, writeSnapshot: true,
+		manifestPresent: true, manifestBytes: deAdoptManagedManifest(name, 0),
+	})
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied"}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: false, ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled", ActivationEnabledPresent: true, ActivationEnabled: false, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	stop := func(_ context.Context, frozen SupervisorDaemon) (StoppedSettlement, error) {
+		if frozen.Server != name || frozen.ManifestHash != rec.ExpectedManifestHash {
+			t.Fatalf("frozen descriptor=%+v", frozen)
+		}
+		stopped = true
+		return StoppedSettlement{TaskName: frozen.TaskName, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped}, nil
+	}
+	provider.onCAS = func() {
+		if !stopped {
+			t.Fatal("provider activation restored before managed stop settlement")
+		}
+	}
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, nil, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider, stop: stop}})
+	if err != nil {
+		t.Fatalf("execute provider deadopt: %v", err)
+	}
+	if !stopped || provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("stop=%t provider=%+v report=%+v", stopped, provider.entry, report)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderStopFailurePreservesDisabledRecovery(t *testing.T) {
+	name := "provider-deadopt-stop-failure"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{state: AdoptOperationStateAdopted, originalState: AdoptOriginalStatePresent, liveConfig: deAdoptHubConfig(name), snapshotBytes: snapshot, writeSnapshot: true, manifestPresent: true, manifestBytes: deAdoptManagedManifest(name, 0)})
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied"}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptSupervisorIntent(t, stateRoot, rec)
+	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: false, ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled", ActivationEnabledPresent: true, ActivationEnabled: false, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, nil, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider, stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+		return StoppedSettlement{State: StoppedSettlementFailed, Reason: StoppedSettlementReasonProcessAlive}, errors.New("managed still active")
+	}}})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("error=%v", err)
+	}
+	if provider.calls != 0 || provider.entry.Enabled {
+		t.Fatalf("provider restored despite failed managed settlement: %+v", provider.entry)
+	}
+	if _, err := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
+		t.Fatalf("manifest not preserved: %v", err)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateDeAdopting {
+		t.Fatalf("provider recovery row=%+v found=%t err=%v", persisted, found, readErr)
+	}
+}
+
+func TestExecuteDeAdoptProviderRestoreCrashRecognizesPriorWithoutSecondCAS(t *testing.T) {
+	name := "provider-deadopt-restore-crash"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateDeAdopting, originalState: AdoptOriginalStatePresent,
+		liveConfig: string(snapshot), snapshotBytes: snapshot, writeSnapshot: true,
+		manifestPresent: false,
+	})
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied", DeAdoptPhase: "managed_removed"}
+	writeDeAdoptExecutorRecord(t, rec)
+	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: true, ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", ActivationEnabledPresent: true, ActivationEnabled: true, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
+	if err != nil {
+		t.Fatalf("retry after restore-CAS crash: %v", err)
+	}
+	if provider.calls != 0 || report == nil {
+		t.Fatalf("prior fingerprint retry calls=%d report=%+v, want zero CAS and completion", provider.calls, report)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderManagedRemovalCrashRetriesWithoutDescriptorLookup(t *testing.T) {
+	name := "provider-deadopt-removal-crash"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateDeAdopting, originalState: AdoptOriginalStatePresent,
+		liveConfig: string(snapshot), snapshotBytes: snapshot, writeSnapshot: true,
+		manifestPresent: false,
+	})
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied", DeAdoptPhase: "managed_stop_settled"}
+	writeDeAdoptExecutorRecord(t, rec)
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: false, ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled", ActivationEnabledPresent: true, ActivationEnabled: false, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider, stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+		t.Fatal("retry looked up/stopped a descriptor already removed")
+		return StoppedSettlement{}, nil
+	}}})
+	if err != nil || report == nil || provider.calls != 1 {
+		t.Fatalf("removal retry report=%+v calls=%d err=%v", report, provider.calls, err)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderSecretCleanupRetrySkipsAlreadyDeletedKey(t *testing.T) {
+	name := "provider-deadopt-secret-retry"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateDeAdopting, originalState: AdoptOriginalStatePresent,
+		liveConfig: string(snapshot), snapshotBytes: snapshot, writeSnapshot: true,
+		manifestPresent: false,
+	})
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied", DeAdoptPhase: "restore_applied"}
+	rec.RoutedSecretKeys = []string{"provider-secret-first", "provider-secret-second"}
+	writeDeAdoptExecutorRecord(t, rec)
+	seedDeAdoptVault(t, map[string]string{"provider-secret-second": "value"})
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{})
+	if err != nil || report == nil {
+		t.Fatalf("secret cleanup retry report=%+v err=%v", report, err)
+	}
+	if got := deAdoptVaultKeys(t); len(got) != 0 {
+		t.Fatalf("remaining routed keys=%v, want second key deleted while absent first was accepted", got)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderCloseFailurePreservesRestorePhaseForRetry(t *testing.T) {
+	name := "provider-deadopt-close-retry"
+	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateDeAdopting, originalState: AdoptOriginalStatePresent,
+		liveConfig: string(snapshot), snapshotBytes: snapshot, writeSnapshot: true,
+		manifestPresent: false,
+	})
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied", DeAdoptPhase: "restore_applied"}
+	writeDeAdoptExecutorRecord(t, rec)
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeFailure := errors.New("injected close failure")
+	leaseFailure := errors.New("injected lease failure")
+	previousUnlock := adoptLeaseUnlockFailureHook
+	adoptLeaseUnlockFailureHook = func() error { return leaseFailure }
+	t.Cleanup(func() { adoptLeaseUnlockFailureHook = previousUnlock })
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{close: func(string) error { return closeFailure }}})
+	if err == nil || !errors.Is(err, closeFailure) || !errors.Is(err, leaseFailure) {
+		t.Fatalf("joined close/lease error=%v close=%t lease=%t", err, errors.Is(err, closeFailure), errors.Is(err, leaseFailure))
+	}
+	adoptLeaseUnlockFailureHook = previousUnlock
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateDeAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "restore_applied" {
+		t.Fatalf("close failure lost retry state: row=%+v found=%t err=%v", persisted, found, readErr)
+	}
+	plan, err = NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{}); err != nil {
+		t.Fatalf("close retry: %v", err)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderDisableMarkCrashRestoresOnlyExplicitRecovery(t *testing.T) {
+	name := "provider-disable-mark-crash"
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateAdopting, originalState: AdoptOriginalStateAbsent,
+		liveConfig: "[mcp_servers]\n", manifestPresent: false,
+	})
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	rec.AdoptClients = nil
+	rec.Clients = nil
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_planned"}
+	writeDeAdoptExecutorRecord(t, rec)
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: false, ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled", ActivationEnabledPresent: true, ActivationEnabled: false, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh {
+		t.Fatalf("explicit recovery plan=%+v err=%v", plan, err)
+	}
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
+		t.Fatalf("explicit recovery apply: %v", err)
+	}
+	if provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("explicit recovery provider=%+v calls=%d", provider.entry, provider.calls)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
 
 func TestExecuteDeAdoptT7RollForwardSkipsRestoreDoneAndCompletes(t *testing.T) {
@@ -1238,10 +1508,11 @@ func seedDeAdoptSupervisorIntent(t *testing.T, stateRoot string, rec AdoptProven
 	intent := &SupervisorIntentFile{
 		Version: 1,
 		Daemons: []SupervisorDaemon{{
-			TaskName: `\mcp-local-hub-` + rec.ManifestName + `-` + adoptDefaultDaemonName,
-			Server:   rec.ManifestName,
-			Daemon:   adoptDefaultDaemonName,
-			Port:     rec.Port,
+			TaskName:     `\mcp-local-hub-` + rec.ManifestName + `-` + adoptDefaultDaemonName,
+			Server:       rec.ManifestName,
+			Daemon:       adoptDefaultDaemonName,
+			Port:         rec.Port,
+			ManifestHash: rec.ExpectedManifestHash,
 		}},
 	}
 	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {

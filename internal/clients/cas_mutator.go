@@ -576,7 +576,7 @@ func classifyEntryFromPhysicalBytes(
 	match func(*MCPEntry) bool,
 	snapshotSubtree any,
 	extract func([]byte, string) (any, bool, error),
-	project func(string, map[string]any) *MCPEntry,
+	project func(string, map[string]any) (*MCPEntry, error),
 ) (EntryClassification, error) {
 	configBytes, err := readRawConfig(configPath)
 	if err != nil {
@@ -602,7 +602,10 @@ func classifyEntryFromPhysicalBytes(
 	if !ok {
 		return classifyInvalid, fmt.Errorf("classify entry %q: write-target subtree has type %T, want object", name, liveSubtree)
 	}
-	live := project(name, raw)
+	live, err := project(name, raw)
+	if err != nil {
+		return classifyInvalid, fmt.Errorf("classify entry %q: project write-target subtree: %w", name, err)
+	}
 	if match == nil {
 		return classifyInvalid, fmt.Errorf("classify entry %q: nil recognizer", name)
 	}
@@ -717,8 +720,8 @@ func (c *claudeCode) EntryRawSubtree(configBytes []byte, name string) (any, bool
 	return jsoncEntryRawSubtree(configBytes, claudeCodeMCPServersKey, name)
 }
 func (c *claudeCode) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return classifyURLRawEntry(name, raw, "url", "headers")
+	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyURLRawEntry(name, raw, "url", "headers"), nil
 	})
 }
 func (c *claudeCode) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -735,8 +738,14 @@ func (c *codexCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool, 
 	return tomlEntryRawSubtree(configBytes, "mcp_servers", name)
 }
 func (c *codexCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return classifyURLRawEntry(name, raw, "url", "http_headers")
+	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		entry := classifyURLRawEntry(name, raw, "url", "http_headers")
+		toolTimeoutSec, err := codexToolTimeoutSec(raw)
+		if err != nil {
+			return nil, err
+		}
+		entry.ToolTimeoutSec = toolTimeoutSec
+		return entry, nil
 	})
 }
 func (c *codexCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -753,8 +762,8 @@ func (v *vscodeClient) EntryRawSubtree(configBytes []byte, name string) (any, bo
 	return jsoncEntryRawSubtree(configBytes, vscodeServersKey, name)
 }
 func (v *vscodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(v.path, name, match, snapshotSubtree, v.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return classifyURLRawEntry(name, raw, "url", "headers")
+	return classifyEntryFromPhysicalBytes(v.path, name, match, snapshotSubtree, v.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyURLRawEntry(name, raw, "url", "headers"), nil
 	})
 }
 func (v *vscodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -771,7 +780,9 @@ func (o *openCodeClient) EntryRawSubtree(configBytes []byte, name string) (any, 
 	return jsoncEntryRawSubtree(configBytes, openCodeMCPKey, name)
 }
 func (o *openCodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, classifyOpenCodeRawEntry)
+	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyOpenCodeRawEntry(name, raw), nil
+	})
 }
 func (o *openCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, o.GetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, nil, false)
@@ -797,8 +808,8 @@ func (o *mimoCodeClient) EntryRawSubtree(configBytes []byte, name string) (any, 
 	return jsoncEntryRawSubtree(configBytes, mimoCodeMCPKey, name)
 }
 func (o *mimoCodeClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return mimoCodeProjectEntry(name, raw, raw, false)
+	return classifyEntryFromPhysicalBytes(o.path, name, match, snapshotSubtree, o.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return mimoCodeProjectEntry(name, raw, raw, false), nil
 	})
 }
 func (o *mimoCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -874,8 +885,8 @@ func (c *cursorClient) EntryRawSubtree(configBytes []byte, name string) (any, bo
 	return jsoncEntryRawSubtree(configBytes, c.sectionKey(), name)
 }
 func (c *cursorClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return classifyURLRawEntry(name, raw, c.urlField, "headers")
+	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyURLRawEntry(name, raw, c.urlField, "headers"), nil
 	})
 }
 func (c *cursorClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -892,8 +903,8 @@ func (g *geminiCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool,
 	return jsoncEntryRawSubtree(configBytes, g.sectionKey(), name)
 }
 func (g *geminiCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(g.path, name, match, snapshotSubtree, g.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return classifyURLRawEntry(name, raw, "url", "headers")
+	return classifyEntryFromPhysicalBytes(g.path, name, match, snapshotSubtree, g.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyURLRawEntry(name, raw, "url", "headers"), nil
 	})
 }
 func (g *geminiCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -910,8 +921,8 @@ func (q *qwenCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool, e
 	return jsoncEntryRawSubtree(configBytes, q.sectionKey(), name)
 }
 func (q *qwenCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(q.path, name, match, snapshotSubtree, q.EntryRawSubtree, func(name string, raw map[string]any) *MCPEntry {
-		return classifyURLRawEntry(name, raw, "httpUrl", "headers")
+	return classifyEntryFromPhysicalBytes(q.path, name, match, snapshotSubtree, q.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyURLRawEntry(name, raw, "httpUrl", "headers"), nil
 	})
 }
 func (q *qwenCLI) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
@@ -928,7 +939,9 @@ func (a *antigravityClient) EntryRawSubtree(configBytes []byte, name string) (an
 	return jsoncEntryRawSubtree(configBytes, a.sectionKey(), name)
 }
 func (a *antigravityClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
-	return classifyEntryFromPhysicalBytes(a.path, name, match, snapshotSubtree, a.EntryRawSubtree, classifyAntigravityRawEntry)
+	return classifyEntryFromPhysicalBytes(a.path, name, match, snapshotSubtree, a.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+		return classifyAntigravityRawEntry(name, raw), nil
+	})
 }
 func (a *antigravityClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, a.GetEntry, a.EntryPresentInBytes, a.restoreEntryFromBytes, nil, false)

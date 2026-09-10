@@ -3,16 +3,79 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/registry"
+
+	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/scheduler"
 )
+
+func bootstrapProductToTarget(w io.Writer, curExe, target string) (retErr error) {
+	windowlessSource := scheduler.WindowsOwnedEntrypointPath(curExe)
+	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(target)
+	stateDir, err := api.DaemonStateDir()
+	if err != nil {
+		return fmt.Errorf("resolve state-dir for Windows setup product pair: %w", err)
+	}
+	fence, acquired, err := api.TryAcquireUpgradeFence(context.Background(), stateDir)
+	if err != nil {
+		return fmt.Errorf("acquire Windows setup product-pair fence: %w", err)
+	}
+	if !acquired {
+		return errors.New("acquire Windows setup product-pair fence: another product-pair transaction is active")
+	}
+	defer api.ReleaseAndJoin(&retErr, fence.Release, "release Windows setup product-pair fence")
+	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(context.Background(), stateDir, target, windowlessTarget))
+	if err != nil {
+		return fmt.Errorf("recover Windows setup product pair: %w", err)
+	}
+	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
+		fmt.Fprintf(w, "\u2713 mcphub Windows product pair crash recovery kept committed pair at %s\n", filepath.Dir(target))
+		return nil
+	}
+	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, curExe, windowlessSource, target, windowlessTarget, WindowsProductPairModeSetup); err != nil {
+		return err
+	} else if reconciled {
+		fmt.Fprintf(w, "\u2713 mcphub Windows product pair already committed at %s; committed event reconciled\n", filepath.Dir(target))
+		return nil
+	}
+	stagedCLI, err := stageWindowsProductCandidate(curExe, target)
+	if err != nil {
+		return fmt.Errorf("stage setup canonical CLI: %w", err)
+	}
+	defer os.Remove(stagedCLI)
+	stagedWindowless, err := stageWindowsProductCandidate(windowlessSource, windowlessTarget)
+	if err != nil {
+		return fmt.Errorf("stage setup windowless adapter: %w", err)
+	}
+	defer os.Remove(stagedWindowless)
+	txn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
+		Context: context.Background(), StateDir: stateDir, CLIPath: target, WindowlessPath: windowlessTarget,
+		StagedCLI: stagedCLI, StagedWindowless: stagedWindowless, Mode: WindowsProductPairModeSetup,
+	})
+	if err != nil {
+		return fmt.Errorf("construct Windows setup product pair transaction: %w", err)
+	}
+	result, err := txn.Run(context.Background())
+	if err != nil {
+		return fmt.Errorf("install Windows setup product pair: %w", err)
+	}
+	if result.Outcome != WindowsProductPairCommittedOutcome {
+		return fmt.Errorf("install Windows setup product pair: unexpected terminal outcome %q", result.Outcome)
+	}
+	fmt.Fprintf(w, "\u2713 mcphub Windows product pair installed at %s\n", filepath.Dir(target))
+	return nil
+}
 
 // Windows SendMessageTimeout constants. Kept local so we don't pull in the
 // whole golang.org/x/sys/windows package just for two numbers.
@@ -100,7 +163,7 @@ func pathContainsDir(pathValue, dir string) bool {
 
 // normalizeWinPath expands %VAR% references, converts forward slashes to
 // backslashes, and trims whitespace plus trailing separators so user-entered
-// spellings like "C:\Users\foo/.local/bin" and "C:\Users\foo\.local\bin\"
+// spellings like "%USERPROFILE%/.local/bin" and "%USERPROFILE%\.local\bin\"
 // compare equal.
 func normalizeWinPath(s string) string {
 	s = strings.TrimSpace(s)

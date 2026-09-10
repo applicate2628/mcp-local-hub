@@ -138,6 +138,27 @@ func TestClassifyEvent_RestartV3ProgressAndDiscriminators(t *testing.T) {
 	}
 }
 
+func TestClassifyEvent_TrayRecoveryLifecycle(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		eventType, wantSeverity string
+	}{
+		{"tray-child-unavailable", api.GUIEventSeverityWarn},
+		{"tray-child-retry-summary", api.GUIEventSeverityWarn},
+		{"tray-child-protocol-warning", api.GUIEventSeverityWarn},
+		{"tray-child-stable", api.GUIEventSeverityInfo},
+	}
+	for _, tc := range cases {
+		t.Run(tc.eventType, func(t *testing.T) {
+			source, severity := classifyEvent(tc.eventType)
+			if source != "tray" || severity != tc.wantSeverity {
+				t.Fatalf("classifyEvent(%q) = %q/%q, want tray/%q", tc.eventType, source, severity, tc.wantSeverity)
+			}
+		})
+	}
+}
+
 // TestBroadcaster_DisableGUIEventLog_SkipsPersist guards the opt-out
 // path used by tests and ephemeral surfaces.
 func TestBroadcaster_DisableGUIEventLog_SkipsPersist(t *testing.T) {

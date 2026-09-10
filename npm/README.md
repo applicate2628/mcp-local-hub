@@ -29,6 +29,15 @@ in its `optionalDependencies`, and npm installs **only** the sub-package whose
 (`bin/cli.js`) then locates that platform binary and execs it, passing your
 arguments through and propagating its exit code.
 
+On Windows, the platform package contains exactly three native files:
+`mcphub.exe` (canonical terminal CLI, PE subsystem 3),
+`mcphub-windowless.exe` (supported GUI/Explorer adapter, subsystem 2), and
+`mcphub-pe-admit.exe` (internal role-admission helper). The npm `mcphub` shim
+continues to resolve only `mcphub.exe`, preserving argv, standard streams, and
+exit status. Supported GUI/Explorer/shortcut launchers use the windowless
+adapter; raw double-click of `mcphub.exe` is deprecated and unsupported as a GUI
+entry point.
+
 There is **no `postinstall` _download_ script** by design: a postinstall that
 FETCHES a binary over the network is the top npm supply-chain attack vector.
 The binary arrives purely through the optional dependency npm itself installs,
@@ -118,6 +127,9 @@ fallback channel:
   do not hand-edit them.
 - Platform binaries are injected into each sub-package's `bin/` by the release
   job at publish time; they are **not** committed to git.
+- `../windows-product-artifacts.json` — the single build/package contract for
+  exact Windows filenames, roles, source packages, PE subsystems, metadata
+  policy, payload membership, and the canonical npm bin.
 
 ## Why the platform packages are scoped
 

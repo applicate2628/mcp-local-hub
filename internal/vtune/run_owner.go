@@ -27,6 +27,8 @@ const vtuneRunSchemaV1 = "vtune-run-v1"
 const (
 	vtunePhaseTimeout     = 30 * time.Second
 	vtuneArtifactSweepTTL = 24 * time.Hour
+	maxDurableVTuneRuns   = 2
+	maxDurableTimeoutSec  = 3600
 )
 
 var vtuneGenerationSnapshotName = regexp.MustCompile(`^[0-9]{8}\.json$`)
@@ -58,11 +60,16 @@ const (
 	failureResultNonReportable    = "RESULT_NONREPORTABLE"
 	failureCleanupFailed          = "CLEANUP_FAILED"
 	failureOwnerRestarted         = "OWNER_RESTARTED"
+	failureAdmissionLimited       = "ADMISSION_LIMITED"
+	failureTimeoutOutOfRange      = "TIMEOUT_OUT_OF_RANGE"
+	failureCollectTimeout         = "COLLECT_TIMEOUT"
 )
 
 var (
 	errVTuneIdempotencyConflict = errors.New(failureIdempotencyConflict)
 	errVTuneRunNotFound         = errors.New(failureRunNotFound)
+	errVTuneAdmissionLimited    = errors.New(failureAdmissionLimited)
+	errVTuneTimeoutOutOfRange   = errors.New(failureTimeoutOutOfRange)
 )
 
 // vtuneRunRequest is the durable, caller-independent collection request. It
@@ -203,6 +210,14 @@ func (o *vtuneRunOwnerV1) Start(req vtuneRunRequest) (vtuneRunRecord, string, er
 			return existing, "replayed", nil
 		}
 	}
+	if req.TimeoutSec <= 0 || req.TimeoutSec > maxDurableTimeoutSec {
+		return vtuneRunRecord{}, "", fmt.Errorf("%w: timeout_sec must be between 1 and %d", errVTuneTimeoutOutOfRange, maxDurableTimeoutSec)
+	}
+	// A failed/stopped record can still have a worker settling its driver.
+	// The existing cancellation registry owns admission until worker exit.
+	if len(o.collectCancels) >= maxDurableVTuneRuns {
+		return vtuneRunRecord{}, "", fmt.Errorf("%w: at most %d durable VTune runs may be active", errVTuneAdmissionLimited, maxDurableVTuneRuns)
+	}
 	if req.RunID == "" {
 		req.RunID = newVTuneRunID()
 	}
@@ -219,7 +234,9 @@ func (o *vtuneRunOwnerV1) Start(req vtuneRunRequest) (vtuneRunRecord, string, er
 	if req.IdempotencyKey != "" {
 		o.keys[req.IdempotencyKey] = record.RunID
 	}
-	collectCtx, cancelCollect := context.WithCancel(context.Background())
+	// VTune owns the requested duration. The owner watchdog adds the existing
+	// phase budget so startup and native settlement cannot preempt finalization.
+	collectCtx, cancelCollect := context.WithTimeout(context.Background(), time.Duration(req.TimeoutSec)*time.Second+vtunePhaseTimeout)
 	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
 	o.collectCancels[record.RunID] = cancelCollect
 	o.shutdownCancels[record.RunID] = cancelShutdown
@@ -547,6 +564,13 @@ func (o *vtuneRunOwnerV1) worker(collectCtx, shutdownCtx context.Context, id str
 	defer o.wg.Done()
 	defer func() {
 		o.mu.Lock()
+		// Release deadline timers even when collection finishes naturally.
+		if cancel := o.collectCancels[id]; cancel != nil {
+			cancel()
+		}
+		if cancel := o.shutdownCancels[id]; cancel != nil {
+			cancel()
+		}
 		delete(o.collectCancels, id)
 		delete(o.shutdownCancels, id)
 		closed := o.closed
@@ -576,12 +600,19 @@ func (o *vtuneRunOwnerV1) worker(collectCtx, shutdownCtx context.Context, id str
 		return
 	}
 	out, err := o.driver.collect(collectCtx, req)
-	if err != nil && !isVTuneExitError(err) {
+	timedOut := isVTuneCollectTimeout(err, out, collectCtx)
+	if err != nil && (!isVTuneExitError(err) || timedOut) {
 		failureID := failureCollectStartFailed
 		if errors.Is(err, process.ErrContainmentUnavailable) {
 			failureID = failureContainmentUnavailable
 		} else if hasContainedCleanupFailure(err) {
 			failureID = failureCleanupFailed
+		} else if timedOut {
+			failureID = failureCollectTimeout
+			if out == nil {
+				out = &runOutput{ExitCode: phaseExitCode(err), ResultDir: req.ResultDir, CommandLine: "collect"}
+			}
+			out.TimedOut = true
 		}
 		o.fail(id, failureID, err, out)
 		return
@@ -692,6 +723,17 @@ func (o *vtuneRunOwnerV1) releasePhase(id string) {
 func isVTuneExitError(err error) bool {
 	var contained *process.ContainedRunError
 	return errors.As(err, &contained) && contained.Stage == process.ContainedStageExit && contained.ExitCode != nil && contained.CleanupCause == nil
+}
+
+func isVTuneCollectTimeout(err error, out *runOutput, collectCtx context.Context) bool {
+	if out != nil && out.TimedOut {
+		return true
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(collectCtx.Err(), context.DeadlineExceeded) {
+		return true
+	}
+	var contained *process.ContainedRunError
+	return errors.As(err, &contained) && errors.Is(contained.Cause, context.DeadlineExceeded)
 }
 
 func hasContainedCleanupFailure(err error) bool {

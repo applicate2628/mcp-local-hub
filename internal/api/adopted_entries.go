@@ -75,10 +75,29 @@ const (
 	adoptManifestLeaseSuffix = ".lease"
 )
 
-// adoptedEntriesSchemaVersion is the on-disk format version. Bumping requires a
-// migration step in readAdoptedEntries. Isolated from managed-entries.json's
-// schema (separate file, separate version) per the store-shape decision.
-const adoptedEntriesSchemaVersion = 1
+// Adopted-entry schema v1 remains the ordinary-record format. Schema v2 is
+// required only while a provider source record exists, so removing the last
+// provider record restores safe v1 downgrade compatibility.
+const (
+	adoptedEntriesSchemaV1      = 1
+	adoptedEntriesSchemaV2      = 2
+	adoptedEntriesSchemaVersion = adoptedEntriesSchemaV1
+)
+
+type ProviderSourceProvenanceV1 struct {
+	ProviderClient              string `json:"provider_client"`
+	PluginRef                   string `json:"plugin_ref"`
+	ServerName                  string `json:"server_name"`
+	Scope                       string `json:"scope"`
+	ReceiptFingerprint          string `json:"receipt_fingerprint"`
+	ActivationFingerprint       string `json:"activation_fingerprint"`
+	PolicyFingerprint           string `json:"policy_fingerprint"`
+	PriorEnabledPresent         bool   `json:"prior_enabled_present"`
+	PriorEnabled                bool   `json:"prior_enabled"`
+	ExpectedDisabledFingerprint string `json:"expected_disabled_fingerprint"`
+	DisablePhase                string `json:"disable_phase"`
+	DeAdoptPhase                string `json:"de_adopt_phase,omitempty"`
+}
 
 // ---------------------------------------------------------------------------
 // Schema types (design "API-contract sketch", design.md:426-459).
@@ -132,7 +151,8 @@ const (
 // AdoptClientProvenance is the per-client pre-adopt state + pinned-snapshot
 // pointer. SnapshotRef/SnapshotSHA256 are present-only (empty for `absent`).
 type AdoptClientProvenance struct {
-	Client string `json:"client"`
+	Client         string `json:"client"`
+	ToolTimeoutSec int    `json:"tool_timeout_sec,omitempty"`
 	// TargetEntryName is the physical client-config key written by adopt. Older
 	// records omit it; readers treat that omission as SourceEntryName.
 	TargetEntryName string             `json:"target_entry_name,omitempty"`
@@ -162,13 +182,14 @@ type AdoptProvenanceRecord struct {
 	// bytes (plan.ManifestYAML). ExpectedManifestHash starts equal to it; de-adopt
 	// updates ExpectedManifestHash after a subset binding edit. BOTH are populated
 	// AT CAPTURE (arch F1) so a committed-but-`adopting` row is never empty-hashed.
-	AdoptManifestHash    string                  `json:"adopt_manifest_hash"`
-	ExpectedManifestHash string                  `json:"expected_manifest_hash"`
-	RoutedSecretKeys     []string                "json:\"routed_secr\u0065t_keys\""
-	OperationState       AdoptOperationState     `json:"operation_state"`
-	CreatedAt            time.Time               `json:"created_at"`
-	UpdatedAt            time.Time               `json:"updated_at"`
-	Clients              []AdoptClientProvenance `json:"clients"`
+	AdoptManifestHash    string                      `json:"adopt_manifest_hash"`
+	ExpectedManifestHash string                      `json:"expected_manifest_hash"`
+	RoutedSecretKeys     []string                    "json:\"routed_secr\u0065t_keys\""
+	OperationState       AdoptOperationState         `json:"operation_state"`
+	CreatedAt            time.Time                   `json:"created_at"`
+	UpdatedAt            time.Time                   `json:"updated_at"`
+	Clients              []AdoptClientProvenance     `json:"clients"`
+	ProviderSource       *ProviderSourceProvenanceV1 `json:"provider_source,omitempty"`
 }
 
 // AdoptedEntries is the <state-dir>/adopted-entries.json file root.
@@ -211,11 +232,9 @@ func withAdoptedEntriesLock(fn func() error) error {
 	return fn()
 }
 
-// readAdoptedEntries returns the parsed store, or an empty
-// AdoptedEntries{Version: adoptedEntriesSchemaVersion} when the file does not yet
-// exist. A version-0 file (pre-version write) is normalized to the current
-// version; any other version is a hard error (fail-closed). Every other
-// read/parse error propagates.
+// readAdoptedEntries accepts ordinary v1 and provider-bearing v2 stores. The
+// existing v1 reader contract is preserved by decodeAdoptedEntriesWithMaxVersion
+// when a caller's maximum is v1.
 func readAdoptedEntries() (*AdoptedEntries, error) {
 	raw, err := readHubMcpStateFile(adoptedEntriesFileLeaf)
 	if err != nil {
@@ -224,15 +243,36 @@ func readAdoptedEntries() (*AdoptedEntries, error) {
 		}
 		return nil, err
 	}
+	return decodeAdoptedEntriesWithMaxVersion(raw, adoptedEntriesSchemaV2)
+}
+
+func decodeAdoptedEntriesWithMaxVersion(raw []byte, maxVersion int) (*AdoptedEntries, error) {
 	var m AdoptedEntries
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return nil, fmt.Errorf("parse adopted-entries.json: %w", err)
 	}
 	if m.Version == 0 {
-		m.Version = adoptedEntriesSchemaVersion
+		m.Version = adoptedEntriesSchemaV1
 	}
-	if m.Version != adoptedEntriesSchemaVersion {
-		return nil, fmt.Errorf("adopted-entries.json: unknown schema version %d (this build expects %d)", m.Version, adoptedEntriesSchemaVersion)
+	if m.Version != adoptedEntriesSchemaV1 && m.Version != adoptedEntriesSchemaV2 || m.Version > maxVersion {
+		return nil, fmt.Errorf("adopted-entries.json: unknown schema version %d (this build expects at most %d)", m.Version, maxVersion)
+	}
+	hasProvider := false
+	for i := range m.Records {
+		provider := m.Records[i].ProviderSource
+		if provider == nil {
+			continue
+		}
+		hasProvider = true
+		if err := validateProviderSourceProvenance(provider); err != nil {
+			return nil, fmt.Errorf("adopted-entries.json: record %q provider source: %w", m.Records[i].ManifestName, err)
+		}
+	}
+	if hasProvider && m.Version != adoptedEntriesSchemaV2 {
+		return nil, errors.New("adopted-entries.json: provider provenance requires schema version 2")
+	}
+	if !hasProvider && m.Version != adoptedEntriesSchemaV1 {
+		return nil, errors.New("adopted-entries.json: schema version 2 requires provider provenance")
 	}
 	return &m, nil
 }
@@ -240,12 +280,97 @@ func readAdoptedEntries() (*AdoptedEntries, error) {
 // writeAdoptedEntries serializes m and writes it via the hardened hub-mcp
 // state-file pipeline (handle-relative, DACL-bound temp + atomic rename).
 func writeAdoptedEntries(m *AdoptedEntries) error {
-	m.Version = adoptedEntriesSchemaVersion
+	version, err := adoptedEntriesVersionForRecords(m.Records)
+	if err != nil {
+		return err
+	}
+	m.Version = version
 	raw, err := json.MarshalIndent(m, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal adopted-entries: %w", err)
 	}
 	return writeHubMcpStateFile(adoptedEntriesFileLeaf, raw)
+}
+
+func adoptedEntriesVersionForRecords(records []AdoptProvenanceRecord) (int, error) {
+	hasProvider := false
+	for i := range records {
+		if records[i].ProviderSource == nil {
+			continue
+		}
+		hasProvider = true
+		if err := validateProviderSourceProvenance(records[i].ProviderSource); err != nil {
+			return 0, fmt.Errorf("adopted-entries: record %q provider source: %w", records[i].ManifestName, err)
+		}
+	}
+	if hasProvider {
+		return adoptedEntriesSchemaV2, nil
+	}
+	return adoptedEntriesSchemaV1, nil
+}
+
+func validateProviderSourceProvenance(provider *ProviderSourceProvenanceV1) error {
+	if provider == nil {
+		return nil
+	}
+	for _, field := range []struct {
+		name  string
+		value string
+	}{
+		{"provider_client", provider.ProviderClient},
+		{"plugin_ref", provider.PluginRef},
+		{"server_name", provider.ServerName},
+		{"scope", provider.Scope},
+		{"receipt_fingerprint", provider.ReceiptFingerprint},
+		{"activation_fingerprint", provider.ActivationFingerprint},
+		{"policy_fingerprint", provider.PolicyFingerprint},
+		{"expected_disabled_fingerprint", provider.ExpectedDisabledFingerprint},
+	} {
+		if strings.TrimSpace(field.value) == "" {
+			return fmt.Errorf("%s is required", field.name)
+		}
+	}
+	if provider.Scope != "user" {
+		return fmt.Errorf("scope %q is unsupported", provider.Scope)
+	}
+	if !provider.PriorEnabledPresent && provider.PriorEnabled {
+		return errors.New("prior_enabled requires prior_enabled_present")
+	}
+	if provider.DisablePhase != "disable_planned" && provider.DisablePhase != "disable_applied" {
+		return fmt.Errorf("disable_phase %q is invalid", provider.DisablePhase)
+	}
+	switch provider.DeAdoptPhase {
+	case "", "managed_stop_settled", "managed_removed", "restore_applied":
+	default:
+		return fmt.Errorf("de_adopt_phase %q is invalid", provider.DeAdoptPhase)
+	}
+	return nil
+}
+
+func markProviderDisableApplied(manifestName string, activationFingerprint string) error {
+	if activationFingerprint == "" {
+		return fmt.Errorf("provider disable applied: activation fingerprint is empty")
+	}
+	return withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return err
+		}
+		for i := range store.Records {
+			record := &store.Records[i]
+			if record.ManifestName != manifestName || record.ProviderSource == nil {
+				continue
+			}
+			provider := record.ProviderSource
+			if provider.DisablePhase != "disable_planned" || provider.ExpectedDisabledFingerprint != activationFingerprint {
+				return fmt.Errorf("provider disable applied: durable provider state changed")
+			}
+			provider.DisablePhase = "disable_applied"
+			record.UpdatedAt = time.Now().UTC()
+			return writeAdoptedEntries(store)
+		}
+		return fmt.Errorf("provider disable applied: provenance record missing")
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +564,7 @@ type adoptRowVerdict int
 const (
 	adoptRowCommittedKeep adoptRowVerdict = iota // Install committed (a hub binding is live) — NEVER reap
 	adoptRowCrashReap                            // pre-commit crash — safe to reap
+	adoptRowRecoveryKeep                         // provider recovery requires explicit de-adopt
 )
 
 // adoptCommittedManifestDir resolves the on-disk directory that holds an
@@ -496,6 +622,9 @@ var adoptManifestExistsFn = func(manifestName string) (bool, error) {
 // cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
 // disk is the row a true pre-install crash orphan => REAP.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
+	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
+		return adoptRowRecoveryKeep
+	}
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
 	// merely supplies its daemon-port input from the row instead of the mutable file.
@@ -516,7 +645,7 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 		if live == nil {
 			continue // cleanly no entry here; check the other adopt_clients
 		}
-		binding := config.ClientBinding{Client: c, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath}
+		binding := config.ClientBinding{Client: c, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath, ToolTimeoutSec: adoptClientToolTimeout(rec, c)}
 		if matched, _ := liveEntryMatchesManifestBinding(live, rec.SourceEntryName, binding, expected); matched {
 			return adoptRowCommittedKeep // Install committed a live hub binding
 		}
@@ -531,6 +660,15 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 		return adoptRowCommittedKeep
 	}
 	return adoptRowCrashReap // no live binding AND no manifest on disk => pre-install crash orphan
+}
+
+func adoptClientToolTimeout(rec AdoptProvenanceRecord, client string) int {
+	for _, candidate := range rec.Clients {
+		if candidate.Client == client {
+			return candidate.ToolTimeoutSec
+		}
+	}
+	return 0
 }
 
 // ---------------------------------------------------------------------------
@@ -602,7 +740,10 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			if r.OperationState != AdoptOperationStateAdopting {
 				return fmt.Errorf("adopt provenance capture: manifest %q already has committed adopt provenance (state %q); refusing to overwrite it", plan.ManifestName, r.OperationState)
 			}
-			if classifyDeadAdoptingRow(r) == adoptRowCommittedKeep {
+			switch classifyDeadAdoptingRow(r) {
+			case adoptRowRecoveryKeep:
+				return fmt.Errorf("E_PROVIDER_RECOVERY_REQUIRED: adopt provenance capture: manifest %q has an unresolved provider recovery receipt; use de-adopt --yes to resume recovery explicitly", plan.ManifestName)
+			case adoptRowCommittedKeep:
 				return fmt.Errorf("adopt provenance capture: manifest %q already has a committed (install-live) adopt still in `adopting` state; refusing to overwrite it", plan.ManifestName)
 			}
 			if !adoptRowProvablyUnmutatedFn(r) {
@@ -643,6 +784,7 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			CreatedAt:                       now,
 			UpdatedAt:                       now,
 			Clients:                         nil, // ANCHOR: no snapshots pinned yet (row-first)
+			ProviderSource:                  plan.providerSource,
 		})
 		store.Records = kept
 		return writeAdoptedEntries(store)
@@ -747,7 +889,7 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			if presentAtBuild[name] {
 				return nil, fmt.Errorf("adopt provenance capture: client %q had the %q entry at plan time but its config is missing at capture; refusing to record it absent (fail-closed — a guessed absent would let de-adopt delete the adopted entry)", name, plan.EntryName)
 			}
-			out = append(out, adoptClientProvenanceAbsent(name, targetEntryName))
+			out = append(out, adoptClientProvenanceAbsent(name, targetEntryName, plan.toolTimeoutForClient(name)))
 		case err != nil:
 			return nil, fmt.Errorf("adopt provenance capture: read client %q config: %w", name, err)
 		case entry != nil:
@@ -805,6 +947,7 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			}
 			out = append(out, AdoptClientProvenance{
 				Client:          name,
+				ToolTimeoutSec:  plan.toolTimeoutForClient(name),
 				TargetEntryName: targetEntryName,
 				OriginalState:   AdoptOriginalStatePresent,
 				RestoreMode:     AdoptRestoreModeFunctionalEquivalent,
@@ -821,15 +964,16 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			if presentAtBuild[name] {
 				return nil, fmt.Errorf("adopt provenance capture: client %q had the %q entry at plan time but it is gone at capture; refusing to record it absent (fail-closed — a guessed absent would let de-adopt delete the adopted entry)", name, plan.EntryName)
 			}
-			out = append(out, adoptClientProvenanceAbsent(name, targetEntryName))
+			out = append(out, adoptClientProvenanceAbsent(name, targetEntryName, plan.toolTimeoutForClient(name)))
 		}
 	}
 	return out, nil
 }
 
-func adoptClientProvenanceAbsent(name, targetEntryName string) AdoptClientProvenance {
+func adoptClientProvenanceAbsent(name, targetEntryName string, toolTimeoutSec int) AdoptClientProvenance {
 	return AdoptClientProvenance{
 		Client:          name,
+		ToolTimeoutSec:  toolTimeoutSec,
 		TargetEntryName: targetEntryName,
 		OriginalState:   AdoptOriginalStateAbsent,
 		RestoreMode:     AdoptRestoreModeNA,
@@ -1097,7 +1241,10 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 
 		verdict, err := mutator.ClassifyEntryUnderLock(
 			rec.SourceEntryName,
-			deAdoptLiveBindingMatcher(&rec, c.Client),
+			deAdoptLiveBindingMatcher(&rec, config.ClientBinding{
+				Client: c.Client, Daemon: adoptDefaultDaemonName, URLPath: adoptDefaultURLPath,
+				ToolTimeoutSec: adoptClientToolTimeout(rec, c.Client),
+			}),
 			snapshotSubtree,
 		)
 		if err != nil {
@@ -1410,7 +1557,7 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 			case AdoptOperationStateAdopted:
 				// Ready to transition below.
 			case AdoptOperationStateAdopting:
-				if classifyDeadAdoptingRow(*rec) != adoptRowCommittedKeep {
+				if verdict := classifyDeadAdoptingRow(*rec); verdict != adoptRowCommittedKeep && verdict != adoptRowRecoveryKeep {
 					return fmt.Errorf("adopt provenance mark de-adopting: manifest %q adopting row is not committed; refusing to take it from adopt orphan GC", manifestName)
 				}
 			case AdoptOperationStateClosed:
@@ -1427,6 +1574,50 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 		}
 		return fmt.Errorf("adopt provenance mark de-adopting: manifest %q has no provenance row", manifestName)
 	})
+}
+
+// AdvanceProviderDeAdoptPhase persists one verified provider teardown step.
+// The caller holds the manifest lease; this function owns only the atomic row
+// compare-and-write under the adopted-entries lock.
+func AdvanceProviderDeAdoptPhase(manifestName, expectedPhase, nextPhase string) (*AdoptProvenanceRecord, error) {
+	validNext := map[string]string{
+		"":                     "managed_stop_settled",
+		"managed_stop_settled": "managed_removed",
+		"managed_removed":      "restore_applied",
+	}
+	if validNext[expectedPhase] != nextPhase {
+		return nil, fmt.Errorf("provider de-adopt phase transition %q -> %q is invalid", expectedPhase, nextPhase)
+	}
+	var updated *AdoptProvenanceRecord
+	err := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("provider de-adopt phase: read store: %w", err)
+		}
+		for i := range store.Records {
+			rec := &store.Records[i]
+			if rec.ManifestName != manifestName {
+				continue
+			}
+			if rec.OperationState != AdoptOperationStateDeAdopting || rec.ProviderSource == nil {
+				return fmt.Errorf("provider de-adopt phase: manifest %q is not provider de-adopting", manifestName)
+			}
+			if rec.ProviderSource.DeAdoptPhase != expectedPhase {
+				return fmt.Errorf("provider de-adopt phase: manifest %q changed phase", manifestName)
+			}
+			rec.ProviderSource.DeAdoptPhase = nextPhase
+			rec.UpdatedAt = time.Now().UTC()
+			if err := writeAdoptedEntries(store); err != nil {
+				return fmt.Errorf("provider de-adopt phase: write store: %w", err)
+			}
+			copy := *rec
+			copy.ProviderSource = cloneProviderSourceProvenance(rec.ProviderSource)
+			updated = &copy
+			return nil
+		}
+		return fmt.Errorf("provider de-adopt phase: manifest %q has no provenance row", manifestName)
+	})
+	return updated, err
 }
 
 // CloseAdoptProvenance removes a de_adopting row and its snapshots.

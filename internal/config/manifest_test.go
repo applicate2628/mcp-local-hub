@@ -74,6 +74,38 @@ daemons:
 	}
 }
 
+func TestParseManifest_ToolTimeoutRequiresCanonicalCodexClient(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		client     string
+		timeout    int
+		wantErr    bool
+		wantParsed int
+	}{
+		{name: "canonical codex propagates", client: "codex-cli", timeout: 42, wantParsed: 42},
+		{name: "unsupported claude rejects", client: "claude-code", timeout: 42, wantErr: true},
+		{name: "codex alias rejects", client: "codex", timeout: 42, wantErr: true},
+		{name: "zero remains portable", client: "claude-code", timeout: 0, wantParsed: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			yaml := "name: timeout-client\nkind: global\ntransport: stdio-bridge\ncommand: bash\ndaemons:\n  - name: default\n    port: 9999\nclient_bindings:\n  - client: " + tc.client + "\n    tool_timeout_sec: " + strconv.Itoa(tc.timeout) + "\n"
+			manifest, err := ParseManifest(strings.NewReader(yaml))
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), "tool_timeout_sec") {
+					t.Fatalf("ParseManifest error=%v, want tool_timeout_sec refusal", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ParseManifest: %v", err)
+			}
+			if len(manifest.ClientBindings) != 1 || manifest.ClientBindings[0].ToolTimeoutSec != tc.wantParsed {
+				t.Fatalf("parsed bindings=%+v, want timeout=%d", manifest.ClientBindings, tc.wantParsed)
+			}
+		})
+	}
+}
+
 // TestParseManifest_MissingEnvIsErrorNotSilentEmpty is the regression
 // guard for the finding 'manifest env expansion returns empty string
 // up to resolver validation'. Previously expandEnvCrossPlatform

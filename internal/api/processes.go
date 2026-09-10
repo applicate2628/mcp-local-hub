@@ -53,6 +53,11 @@ type processSnapshot struct {
 	lines []string
 }
 
+type processSnapshotOutcome struct {
+	snapshot processSnapshot
+	reasonID string
+}
+
 // procRow is one parsed runProcessSnapshot row. It is shared by process count
 // parsing, orphan cleanup, and log-watcher cleanup so every consumer of the
 // shared WMIC/PowerShell snapshot gets the same comma-safe row parse.
@@ -70,15 +75,21 @@ type procRow struct {
 // failure — callers then see zero counts instead of an error, matching
 // the contract of CountProcesses. Also splits the CSV into lines once
 // here so CountProcessesFromSnapshot never re-tokenizes the raw text.
-func takeProcessSnapshot() processSnapshot {
+func takeProcessSnapshot() processSnapshotOutcome {
+	return takeProcessSnapshotContext(context.Background())
+}
+
+// takeProcessSnapshotContext reuses the canonical Windows process snapshot
+// owner while preserving a caller's cancellation/deadline boundary.
+func takeProcessSnapshotContext(ctx context.Context) processSnapshotOutcome {
 	if runtime.GOOS != "windows" {
-		return processSnapshot{}
+		return processSnapshotOutcome{reasonID: "unsupported-platform"}
 	}
-	out, err := runProcessSnapshot()
+	out, err := runProcessSnapshotContext(ctx)
 	if err != nil {
-		return processSnapshot{}
+		return processSnapshotOutcome{reasonID: "process-snapshot-unavailable"}
 	}
-	return processSnapshot{raw: out, lines: splitSnapshotLines(out)}
+	return processSnapshotOutcome{snapshot: processSnapshot{raw: out, lines: splitSnapshotLines(out)}}
 }
 
 // splitSnapshotLines tokenizes a wmic/PowerShell CSV snapshot into logical
@@ -96,47 +107,150 @@ func splitSnapshotLines(raw string) []string {
 // entry's complete command identity against the snapshot's pre-split lines
 // (deep-review r2 P4-5) instead of re-scanning the raw CSV text per entry.
 func (a *API) CountProcessesFromSnapshot(snap processSnapshot, patterns []string) int {
-	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}, legacyAnyTokenFallback: len(patterns) == 1})
+	if len(patterns) == 1 {
+		return countMatchingLines(snap.lines, patterns)
+	}
+	return countProcessesFromSnapshotAttribution(snap, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}})
 }
 
 // processAttribution carries complete root identities separately from the
 // display/cleanup substring patterns. A managed mcphub daemon has a stronger
 // root identity than its manifest command alone: `daemon --server S --daemon D`.
 type processAttribution struct {
-	rootVariants           []processRootIdentity
-	legacyAnyTokenFallback bool
+	scope        string
+	state        string
+	reasonID     string
+	rootVariants []processRootIdentity
 }
 
 type processRootIdentity struct {
+	command                  string
 	argvSequence             []string
 	requiresMcphubExecutable bool
+	daemon                   string
+}
+
+const (
+	processAttributionScopeManaged                       = "managed-daemon-tree"
+	processAttributionScopeGlobal                        = "global-command-match"
+	processAttributionStateComplete                      = "complete"
+	processAttributionStateUnavailable                   = "unavailable"
+	processAttributionReasonManagedDescriptorUnavailable = "managed-descriptor-unavailable"
+	processAttributionReasonManifestIdentityUnavailable  = "manifest-identity-unavailable"
+)
+
+type processAttributionResult struct {
+	count      int
+	diagnostic ProcessAttributionDiagnosticV1
 }
 
 func countProcessesFromSnapshotAttribution(snap processSnapshot, attribution processAttribution) int {
-	if snap.raw == "" {
-		return 0
-	}
-	return countAttributedProcessLines(snap.lines, attribution)
+	return processAttributionFromSnapshot(snap, attribution).count
 }
 
-func processAttributionForManifest(serverName string, m *config.ServerManifest) processAttribution {
+func processAttributionForManifest(serverName string, m *config.ServerManifest, descriptors []SupervisorDaemon) processAttribution {
+	if len(descriptors) > 0 {
+		variants := make([]processRootIdentity, 0, len(descriptors))
+		for _, descriptor := range descriptors {
+			if descriptor.Command == "" || len(descriptor.Args) == 0 {
+				continue
+			}
+			variants = append(variants, processRootIdentity{
+				command:      descriptor.Command,
+				argvSequence: append([]string(nil), descriptor.Args...),
+				daemon:       descriptor.Daemon,
+			})
+		}
+		if len(variants) == 0 {
+			return unavailableProcessAttribution(processAttributionScopeManaged, processAttributionReasonManagedDescriptorUnavailable)
+		}
+		return processAttribution{
+			scope:        processAttributionScopeManaged,
+			state:        processAttributionStateComplete,
+			rootVariants: variants,
+		}
+	}
 	if m == nil {
-		return processAttribution{rootVariants: []processRootIdentity{{argvSequence: []string{serverName}}}, legacyAnyTokenFallback: true}
+		return unavailableProcessAttribution(processAttributionScopeGlobal, processAttributionReasonManifestIdentityUnavailable)
 	}
 	bare := strings.ToLower(stripExtension(basenameAcrossSeparators(m.Command)))
 	if isMcphubBinaryBasename(bare) && len(m.Daemons) > 0 {
 		variants := make([]processRootIdentity, 0, len(m.Daemons))
 		for _, daemon := range m.Daemons {
 			if daemon.Name != "" {
-				variants = append(variants, processRootIdentity{argvSequence: []string{"daemon", "--server", serverName, "--daemon", daemon.Name}, requiresMcphubExecutable: true})
+				variants = append(variants, processRootIdentity{argvSequence: []string{"daemon", "--server", serverName, "--daemon", daemon.Name}, requiresMcphubExecutable: true, daemon: daemon.Name})
 			}
 		}
 		if len(variants) > 0 {
-			return processAttribution{rootVariants: variants}
+			return processAttribution{scope: processAttributionScopeGlobal, state: processAttributionStateComplete, rootVariants: variants}
 		}
 	}
-	patterns := patternsFromManifest(serverName, m)
-	return processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}}
+	patterns, fallback := patternsFromManifestEx(serverName, m)
+	if fallback {
+		return unavailableProcessAttribution(processAttributionScopeGlobal, processAttributionReasonManifestIdentityUnavailable)
+	}
+	return processAttribution{scope: processAttributionScopeGlobal, state: processAttributionStateComplete, rootVariants: []processRootIdentity{{argvSequence: patterns}}}
+}
+
+func unavailableProcessAttribution(scope, reasonID string) processAttribution {
+	return processAttribution{scope: scope, state: processAttributionStateUnavailable, reasonID: reasonID}
+}
+
+func processAttributionFromSnapshot(snap processSnapshot, attribution processAttribution) processAttributionResult {
+	diagnostic := ProcessAttributionDiagnosticV1{
+		Version:      1,
+		Scope:        attribution.scope,
+		State:        attribution.state,
+		ReasonID:     attribution.reasonID,
+		Contributors: []ProcessAttributionContributorV1{},
+	}
+	if attribution.state == processAttributionStateUnavailable {
+		return processAttributionResult{diagnostic: diagnostic}
+	}
+	if snap.raw == "" {
+		diagnostic.State = processAttributionStateUnavailable
+		diagnostic.ReasonID = "process-snapshot-unavailable"
+		return processAttributionResult{diagnostic: diagnostic}
+	}
+	rows, err := parseProcessSnapshotRows(strings.NewReader(strings.Join(snap.lines, "\n")))
+	if err != nil || len(rows) == 0 {
+		diagnostic.State = processAttributionStateUnavailable
+		diagnostic.ReasonID = "process-snapshot-unavailable"
+		return processAttributionResult{diagnostic: diagnostic}
+	}
+	byPID := make(map[int]procRow, len(rows))
+	roots := make(map[int]processRootIdentity)
+	for _, row := range rows {
+		byPID[row.pid] = row
+		for _, variant := range attribution.rootVariants {
+			if processArgvMatchesIdentity(process.TokenizeWindowsCommandLine(row.cmdline), variant) {
+				roots[row.pid] = variant
+				break
+			}
+		}
+	}
+	for _, row := range rows {
+		rootPID, ok := processRootForRow(row, byPID, roots)
+		if !ok {
+			continue
+		}
+		relation := "descendant"
+		if row.pid == rootPID {
+			if attribution.scope == processAttributionScopeManaged {
+				relation = "managed-root"
+			} else {
+				relation = "match-root"
+			}
+		}
+		contributor := ProcessAttributionContributorV1{
+			PID: row.pid, ParentPID: row.ppid, RootPID: rootPID, Relation: relation,
+		}
+		if attribution.scope == processAttributionScopeManaged {
+			contributor.Daemon = roots[rootPID].daemon
+		}
+		diagnostic.Contributors = append(diagnostic.Contributors, contributor)
+	}
+	return processAttributionResult{count: len(diagnostic.Contributors), diagnostic: diagnostic}
 }
 
 // countAttributedProcessLines is the scan/process attribution owner. A root
@@ -149,37 +263,7 @@ func processAttributionForManifest(serverName string, m *config.ServerManifest) 
 // Older two-column process listings lack PID ancestry; they retain the legacy
 // any-pattern count rather than inventing parentage from incomplete input.
 func countAttributedProcessLines(records []string, attribution processAttribution) int {
-	if len(attribution.rootVariants) == 0 {
-		return 0
-	}
-	if attribution.legacyAnyTokenFallback {
-		return countMatchingLines(records, attribution.rootVariants[0].argvSequence)
-	}
-	rows, err := parseProcessSnapshotRows(strings.NewReader(strings.Join(records, "\n")))
-	if err != nil || len(rows) == 0 {
-		// A multi-token request is a complete server identity. Falling back to
-		// any-token matching when its PID ancestry is unavailable would make a
-		// shared wrapper token (mcphub) attribute unrelated servers again.
-		return 0
-	}
-	byPID := make(map[int]procRow, len(rows))
-	roots := make(map[int]struct{})
-	for _, row := range rows {
-		byPID[row.pid] = row
-		if processCommandMatchesAnyCompleteIdentity(row.cmdline, attribution.rootVariants) {
-			roots[row.pid] = struct{}{}
-		}
-	}
-	if len(roots) == 0 {
-		return 0
-	}
-	count := 0
-	for _, row := range rows {
-		if processDescendsFromRoot(row, byPID, roots) {
-			count++
-		}
-	}
-	return count
+	return processAttributionFromSnapshot(processSnapshot{raw: strings.Join(records, "\n"), lines: records}, attribution).count
 }
 
 func processCommandMatchesAnyCompleteIdentity(cmdline string, variants []processRootIdentity) bool {
@@ -195,6 +279,17 @@ func processCommandMatchesAnyCompleteIdentity(cmdline string, variants []process
 func processArgvMatchesIdentity(argv []string, identity processRootIdentity) bool {
 	if len(identity.argvSequence) == 0 || len(argv) == 0 {
 		return false
+	}
+	if identity.command != "" {
+		if !strings.EqualFold(argv[0], identity.command) || len(argv) != len(identity.argvSequence)+1 {
+			return false
+		}
+		for i, want := range identity.argvSequence {
+			if argv[i+1] != want {
+				return false
+			}
+		}
+		return true
 	}
 	if identity.requiresMcphubExecutable && !processArgvHasMcphubExecutable(argv) {
 		return false
@@ -276,23 +371,32 @@ func isMcphubScriptToken(token string) bool {
 }
 
 func processDescendsFromRoot(row procRow, byPID map[int]procRow, roots map[int]struct{}) bool {
+	rootIdentities := make(map[int]processRootIdentity, len(roots))
+	for pid := range roots {
+		rootIdentities[pid] = processRootIdentity{}
+	}
+	_, ok := processRootForRow(row, byPID, rootIdentities)
+	return ok
+}
+
+func processRootForRow(row procRow, byPID map[int]procRow, roots map[int]processRootIdentity) (int, bool) {
 	pid := row.pid
 	seen := make(map[int]struct{})
 	for pid != 0 {
 		if _, ok := roots[pid]; ok {
-			return true
+			return pid, true
 		}
 		if _, loop := seen[pid]; loop {
-			return false
+			return 0, false
 		}
 		seen[pid] = struct{}{}
 		current, ok := byPID[pid]
 		if !ok {
-			return false
+			return 0, false
 		}
 		pid = current.ppid
 	}
-	return false
+	return 0, false
 }
 
 // countMatchingLines returns how many of the given rows' CommandLine
@@ -395,9 +499,15 @@ func parseProcessSnapshotRow(record string, header process.WmicCSVHeader) (procR
 // column order places it. Returned as a single string for convenience; callers
 // wrap in strings.NewReader.
 func runProcessSnapshot() (string, error) {
+	return runProcessSnapshotContext(context.Background())
+}
+
+// runProcessSnapshotContext keeps the existing 60-second wmic-to-PowerShell
+// chain bound while allowing a shorter caller deadline/cancellation to win.
+func runProcessSnapshotContext(parent context.Context) (string, error) {
 	// One deadline shared by the wmic attempt AND the PowerShell fallback, so a
 	// slow wmic cannot buy a second full-price attempt (see probeChainBudget).
-	ctx, cancel := newProbeChainContext()
+	ctx, cancel := context.WithTimeout(parent, probeChainBudget)
 	defer cancel()
 
 	// Legacy path: wmic (present on Windows 10 and older Windows 11).
@@ -442,7 +552,10 @@ func runProcessSnapshot() (string, error) {
 // going through this io.Reader-based entry point per call.
 func parseWmicCount(r io.Reader, patterns []string) (int, error) {
 	records, err := process.ReadWmicCSVRecords(r)
-	return countAttributedProcessLines(records, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}, legacyAnyTokenFallback: len(patterns) == 1}), err
+	if len(patterns) == 1 {
+		return countMatchingLines(records, patterns), err
+	}
+	return countAttributedProcessLines(records, processAttribution{rootVariants: []processRootIdentity{{argvSequence: patterns}}}), err
 }
 
 // ProcessInfo describes one live process match.

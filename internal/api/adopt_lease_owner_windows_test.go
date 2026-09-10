@@ -4,8 +4,11 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -423,5 +426,170 @@ func TestAdoptLeaseWindowsLateReadbackReplacementIsRecoveryRequired(t *testing.T
 	}
 	if got, readErr := os.ReadFile(leasePath); readErr != nil || string(got) != foreign {
 		t.Fatalf("late foreign replacement changed: bytes=%q err=%v", got, readErr)
+	}
+}
+
+// TestAdoptLeaseRootRefusalDiagnosticCategories keeps the public refusal
+// contract stable while making the three root-admission refusal boundaries
+// distinguishable to in-process diagnostics. Each hostile fixture must remain
+// untouched: acquisition may not create a namespace or a manifest lease.
+func TestAdoptLeaseRootRefusalDiagnosticCategories(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		configure      func(t *testing.T) func() error
+		wantCategory   AdoptLeaseNamespaceFailureCategory
+		wantNativeCode bool
+		wantPublic     string
+	}{
+		{
+			name: "root-open",
+			configure: func(t *testing.T) func() error {
+				t.Helper()
+				stateRoot := isolateStateDir(t)
+				previous := adoptLeaseWindowsFailureHook
+				adoptLeaseWindowsFailureHook = func(stage string) error {
+					if stage == "root-open" {
+						return syscall.Errno(windows.ERROR_ACCESS_DENIED)
+					}
+					return nil
+				}
+				t.Cleanup(func() { adoptLeaseWindowsFailureHook = previous })
+				return func() error {
+					if _, err := os.Stat(filepath.Join(stateRoot, adoptProvenanceSnapshotSubdir)); !os.IsNotExist(err) {
+						return err
+					}
+					return nil
+				}
+			},
+			wantCategory:   AdoptLeaseNamespaceFailureRootOpen,
+			wantNativeCode: true,
+			wantPublic:     "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-open native_error_code=5",
+		},
+		{
+			name: "root-kind-reparse",
+			configure: func(t *testing.T) func() error {
+				t.Helper()
+				statePathsHelper(t)
+				parent := hardenedTempDir(t)
+				foreign := hardenedTempDir(t)
+				stateRoot := filepath.Join(parent, "state-root-link")
+				if err := createJunctionForTest(stateRoot, foreign); err != nil {
+					t.Skipf("junction creation unavailable; root reparse category remains unrun: %v", err)
+				}
+				daemonStateRootOverride = stateRoot
+				before := readSortedNames(t, foreign)
+				return func() error {
+					if got := readSortedNames(t, foreign); !reflect.DeepEqual(got, before) {
+						return fmt.Errorf("foreign target changed: before=%v after=%v", before, got)
+					}
+					return nil
+				}
+			},
+			wantCategory: AdoptLeaseNamespaceFailureRootKindReparse,
+			wantPublic:   "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-kind-reparse",
+		},
+		{
+			name: "root-security",
+			configure: func(t *testing.T) func() error {
+				t.Helper()
+				statePathsHelper(t)
+				stateRoot := hardenedTempDir(t)
+				daemonStateRootOverride = stateRoot
+				applyFileDACLWithAuthUsersReadACE(t, stateRoot)
+				beforeDACL := windowsSDDLForTest(t, stateRoot)
+				beforeNames := readSortedNames(t, stateRoot)
+				return func() error {
+					if got := windowsSDDLForTest(t, stateRoot); got != beforeDACL {
+						return fmt.Errorf("state-root DACL changed")
+					}
+					if got := readSortedNames(t, stateRoot); !reflect.DeepEqual(got, beforeNames) {
+						return fmt.Errorf("state-root entries changed: before=%v after=%v", beforeNames, got)
+					}
+					return nil
+				}
+			},
+			wantCategory: AdoptLeaseNamespaceFailureRootSecurity,
+			wantPublic:   "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged category=root-security",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			unchanged := tc.configure(t)
+			lease, acquired, err := acquireAdoptManifestLeasePlatform("diagnostic-" + tc.name)
+			if lease != nil {
+				t.Cleanup(func() { _ = lease.unlock() })
+			}
+			if err == nil || acquired {
+				t.Fatalf("refusal result: acquired=%v err=%v", acquired, err)
+			}
+			var failure *LeaseFailure
+			if !errors.As(err, &failure) || failure.Category != tc.wantCategory {
+				t.Fatalf("lease failure category=%q err=%v, want %q", failure.Category, err, tc.wantCategory)
+			}
+			if got := failure.PublicMessage(); got != tc.wantPublic {
+				t.Fatalf("public refusal=%q, want %q", got, tc.wantPublic)
+			}
+			if got := newAdoptStageError("lease-acquire", "uncommitted", err).Error(); got != tc.wantPublic {
+				t.Fatalf("stage public refusal=%q, want %q", got, tc.wantPublic)
+			}
+			if (failure.NativeErrorCode != 0) != tc.wantNativeCode {
+				t.Fatalf("lease failure native code=%d, want present=%v", failure.NativeErrorCode, tc.wantNativeCode)
+			}
+			if tc.wantNativeCode && !errors.Is(err, syscall.Errno(windows.ERROR_ACCESS_DENIED)) {
+				t.Fatalf("lease failure did not preserve the native cause: %v", err)
+			}
+			var namespaceFailure *LeaseNamespaceFailure
+			if !errors.As(err, &namespaceFailure) || namespaceFailure.Category != tc.wantCategory {
+				t.Fatalf("namespace failure category=%q err=%v, want %q", namespaceFailure.Category, err, tc.wantCategory)
+			}
+			if err := unchanged(); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestAdoptLeaseNamespaceFailurePublicProjectionDropsUnknownCategory(t *testing.T) {
+	const want = "E_ADOPT_LEASE_NAMESPACE_REFUSED reason=state-root-refused action=leave-unchanged"
+	const untrusted = AdoptLeaseNamespaceFailureCategory("root-secret-canary")
+	for _, tc := range []struct {
+		name string
+		got  string
+	}{
+		{
+			name: "lease-owner",
+			got: (&LeaseFailure{
+				FailureID:       adoptLeaseFailureNamespaceRefused,
+				ReasonID:        AdoptLeaseReasonStateRootRefused,
+				Action:          AdoptLeaseActionLeaveUnchanged,
+				Category:        untrusted,
+				NativeErrorCode: 12345,
+			}).PublicMessage(),
+		},
+		{
+			name: "namespace-owner",
+			got: (&LeaseNamespaceFailure{
+				FailureID:       adoptLeaseFailureNamespaceRefused,
+				ReasonID:        AdoptLeaseReasonStateRootRefused,
+				Action:          AdoptLeaseActionLeaveUnchanged,
+				Category:        untrusted,
+				NativeErrorCode: 12345,
+			}).Error(),
+		},
+		{
+			name: "stage-projection",
+			got: newAdoptStageError("lease-acquire", "uncommitted", &LeaseFailure{
+				FailureID:       adoptLeaseFailureNamespaceRefused,
+				ReasonID:        AdoptLeaseReasonStateRootRefused,
+				Action:          AdoptLeaseActionLeaveUnchanged,
+				Category:        untrusted,
+				NativeErrorCode: 12345,
+			}).Error(),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.got != want {
+				t.Fatalf("untrusted category leaked into public projection: %q", tc.got)
+			}
+		})
 	}
 }

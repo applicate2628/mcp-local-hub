@@ -76,7 +76,7 @@ func Second() { api.NewAPI() }
 	}
 }
 
-func TestEmbeddedDocumentResolvesCompatibleBuildVariant(t *testing.T) {
+func TestEmbeddedDocumentResolvesAdditionalTagCompatibleBuildVariant(t *testing.T) {
 	linuxHeading := "# Linux\n" + strings.Repeat("a", 60)
 	windowsHeading := "# Windows\n" + strings.Repeat("w", 60)
 	tail := "\n```\n" + strings.Repeat("b", 60)
@@ -89,8 +89,8 @@ func TestEmbeddedDocumentResolvesCompatibleBuildVariant(t *testing.T) {
 	policy.SourceRoots = []string{"internal"}
 	policy.EmbeddedDocumentMinBytes = 100
 	got := violationsOfKind(mustScan(t, root, policy), KindEmbeddedDocument)
-	if len(got) != 1 || got[0].Location.Symbol != "document" || got[0].Metric != len(linuxHeading)+len(tail) {
-		t.Fatalf("got=%#v, want the Linux-compatible assembled document", got)
+	if len(got) != 1 || got[0].Location.Symbol != "document" || got[0].Metric != len(windowsHeading)+len(tail) {
+		t.Fatalf("got=%#v, want the largest additional-tag-compatible assembled document", got)
 	}
 }
 

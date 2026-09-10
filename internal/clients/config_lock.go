@@ -1,6 +1,7 @@
 package clients
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -569,6 +570,34 @@ func (l *lockingClient) ResolveTransportTarget(req CodexTransportTargetRequest) 
 		return CodexTransportTarget{}, fmt.Errorf("client %s does not support Codex transport inspection", l.Client.Name())
 	}
 	return codex.ResolveTransportTarget(req)
+}
+
+func (l *lockingClient) ListProviderMCPEntries(ctx context.Context) ([]ProviderMCPEntryV1, error) {
+	provider, ok := l.Client.(interface {
+		ListProviderMCPEntries(context.Context) ([]ProviderMCPEntryV1, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("%w: client %s", ErrProviderCapabilityUnsupported, l.Client.Name())
+	}
+	entries, err := provider.ListProviderMCPEntries(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return cloneProviderMCPEntries(entries), nil
+}
+
+func (l *lockingClient) CompareAndSetProviderMCPActivation(ctx context.Context, req ProviderMCPActivationCASV1) (result ProviderMCPActivationResultV1, err error) {
+	err = withConfigMutationLock(l.Client.ConfigPath(), func() error {
+		provider, ok := l.Client.(interface {
+			CompareAndSetProviderMCPActivation(context.Context, ProviderMCPActivationCASV1) (ProviderMCPActivationResultV1, error)
+		})
+		if !ok {
+			return fmt.Errorf("%w: client %s", ErrProviderCapabilityUnsupported, l.Client.Name())
+		}
+		result, err = provider.CompareAndSetProviderMCPActivation(ctx, req)
+		return err
+	})
+	return result, err
 }
 
 // RelocateHTTPEntry holds the single global config lock around the Codex

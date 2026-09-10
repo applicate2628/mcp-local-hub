@@ -118,6 +118,24 @@ func TestWindowsBackend_EnableCreatesTask(t *testing.T) {
 	}
 }
 
+func TestWindowsBackend_DefaultExecutableRoutesOwnedLogonThroughWindowlessAdapter(t *testing.T) {
+	prev := osExecutableFn
+	osExecutableFn = func() (string, error) { return `C:\bin\mcphub.exe`, nil }
+	t.Cleanup(func() { osExecutableFn = prev })
+	f := &fakeScheduler{}
+	withFakeScheduler(t, f)
+	b, err := New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := b.Enable(Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.createCalls[0].Command; got != `C:\bin\mcphub-windowless.exe` {
+		t.Fatalf("Command=%q", got)
+	}
+}
+
 func TestWindowsBackend_EnableStrictModeAddsFlag(t *testing.T) {
 	f := &fakeScheduler{}
 	withFakeScheduler(t, f)

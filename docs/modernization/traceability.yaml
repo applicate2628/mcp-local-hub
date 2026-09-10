@@ -69,7 +69,7 @@ decisions:
   D-010: {status: proposed, before_wp: [WP-06], trigger: before-start}
   D-011: {status: accepted, before_wp: [WP-11A], trigger: satisfied, adr: ADR-0001}
   D-012: {status: accepted, before_wp: [WP-11B], trigger: satisfied, adr: ADR-0002}
-  D-013: {status: proposed, before_wp: [WP-11A], trigger: before-start}
+  D-013: {status: accepted, before_wp: [WP-11A], trigger: satisfied}
   D-014: {status: accepted, before_wp: [WP-11A], trigger: satisfied, adr: ADR-0006}
   D-015: {status: proposed, before_wp: [WP-11E], trigger: before-start}
   D-016: {status: accepted, before_wp: [WP-11B], trigger: satisfied, adr: ADR-0002}

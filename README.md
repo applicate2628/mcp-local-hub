@@ -85,7 +85,7 @@ The npm install above is the fastest path. To build from source instead — for
 dev iteration or to embed your own version metadata:
 
 ```powershell
-# 1. Build the admitted Windows product binary
+# 1. Build the admitted Windows product payload
 pwsh ./build.ps1
 
 # 2. Install to ~/.local/bin and register on user PATH (idempotent)
@@ -93,13 +93,22 @@ pwsh ./build.ps1
 ```
 
 `build.sh` remains the repository automation entry for supported non-Windows
-build environments. On Windows, `build.ps1` is the only product-binary route;
+build environments. On Windows, `build.ps1` is the only product-payload route;
 plain `go build` is a compile check whose output is not installable or
 promotable.
 
-Windows product builds are linked as `WINDOWS_GUI` and are admitted by the
-same bounded PE checker used by setup, canonicalize, upgrade, and npm release.
-Ordinary invocations never attach or allocate a console. The sole opt-in is:
+Windows source builds produce three native files: canonical terminal CLI
+`bin/mcphub.exe` as `WINDOWS_CUI` (PE subsystem 3), supported GUI/Explorer
+adapter `bin/mcphub-windowless.exe` as `WINDOWS_GUI` (subsystem 2), and the
+bounded `bin/mcphub-pe-admit.exe` helper. The product pair receives identical
+version, commit, and build-date metadata and is role-admitted before success.
+
+Terminal and npm use `mcphub.exe`. Supported GUI, Explorer, shortcut, and
+background entry points use `mcphub-windowless.exe`; raw double-click of
+`mcphub.exe` is deprecated and unsupported as a GUI launch path because the
+operating system may create a visible console before product code runs.
+
+`--debug-console` remains accepted as an exact first argument for compatibility:
 
 ```text
 mcphub --debug-console [command ...]
@@ -230,7 +239,11 @@ scheduler/secrets, and the hidden transport shims — is in
 
 ## Architecture highlights
 
-- **PATH-based install model** — scheduler tasks reference `~/.local/bin/mcphub.exe` by absolute path; `mcphub setup` puts the binary there and registers it on user PATH.
+- **PATH-based product-pair install model** — direct terminal commands use CUI
+  `~/.local/bin/mcphub.exe`; supported Scheduler/Explorer/background routes use
+  `~/.local/bin/mcphub-windowless.exe`. `mcphub setup` admits and installs both
+  atomically, migrates exact-owned task commands, and registers the directory on
+  user PATH.
 - **First-run onboarding** — `mcphub setup --trusted-root` blesses LSP trusted roots up front; the GUI shows a dismissable welcome banner until the first server is installed.
 - **go:embed manifests** — all 18 server manifests are baked into the binary, so the binary runs without a sibling `servers/` directory. `install --all` targets the 17 global manifests; the remaining manifest is workspace-scoped.
 - **Embedded entry patterns** — `godbolt`, `lldb-bridge`, and `perftools` expose a `NewCommand()` factory imported by both a standalone binary and the hub subcommand. `vcpkg` exposes the same factory only to the hub subcommand because it is deliberately hub-only.

@@ -31,7 +31,7 @@
 | <a id="d-010"></a>`D-010` | `proposed` | Какой результат lock-release failure? | committed-but-audit-uncertain, без автоматического replay | до `WP-06` | — |
 | <a id="d-011"></a>`D-011` | `accepted` | Какой общий архитектурный стиль? | модульный монолит; один deployable product, явные внутренние модули | до `WP-11A` | [`ADR-0001`](adr/0001-modular-monolith.md) |
 | <a id="d-012"></a>`D-012` | `accepted` | Где создаются production dependencies? | только `internal/app` как корень композиции | до `WP-11B` | [`ADR-0002`](adr/0002-single-composition-root.md) |
-| <a id="d-013"></a>`D-013` | `proposed` | Какие file-size budgets применять? | 1000 advisory/1500 production hard/2000 test review как стартовые thresholds | до `WP-11A` | — |
+| <a id="d-013"></a>`D-013` | `accepted` | Какие file-size budgets применять? | 1000 advisory/1500 production hard/2000 test review; initial inventory found 77 existing findings, retained as baseline-owned debt | до `WP-11A` | [inventory evidence](../../architecture/README.md#inventory) |
 | <a id="d-014"></a>`D-014` | `accepted` | Как хранить историю сложных решений? | текущий invariant в code comment, история и trade-offs в ADR | до `WP-11A` | [`ADR-0006`](adr/0006-invariant-history-separation.md) |
 | <a id="d-015"></a>`D-015` | `proposed` | Как моделировать LazyProxy/supervisor transitions? | typed state/event reducer + effect runner | до `WP-11E` | — |
 | <a id="d-016"></a>`D-016` | `accepted` | Допустимы ли production test hooks? | нет; только injected dependencies и testkit, исключения по ADR | до `WP-11B` | [`ADR-0002`](adr/0002-single-composition-root.md) |
@@ -40,7 +40,7 @@
 ### Уточнения post-audit
 
 - `D-006`: «native CI» из старого аудита трактуется как native evidence на owned/local runner; обычный hosted GitHub CI остаётся запрещён.
-- `D-013`: thresholds 1000/1500/2000 являются proposal и подтверждаются inventory актуального master перед A2.
+- `D-013`: initial inventory accepted thresholds 1000/1500/2000 and found 77 existing findings. They remain baseline-owned debt; final baseline generation reruns on the committed frozen source.
 - `D-017`: возник из review закрытого без merge PR №565; старая ветка не является реализацией решения.
 - Структурированные связи `D-* → WP-*` являются нормативными в [`traceability.yaml`](traceability.yaml); этот Markdown-реестр обязан использовать те же zero-padded идентификаторы.
 

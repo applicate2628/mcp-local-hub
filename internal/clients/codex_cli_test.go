@@ -22,6 +22,22 @@ func setupCodexConfig(t *testing.T, initial string) string {
 	return path
 }
 
+func TestResolveCodexHomeUsesExistingAbsoluteCODEXHOME(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("CODEX_HOME", home)
+	got, err := resolveCodexHome()
+	if err != nil || got != home {
+		t.Fatalf("resolveCodexHome = %q, %v; want %q, nil", got, err, home)
+	}
+}
+
+func TestResolveCodexHomeRejectsRelativeCODEXHOME(t *testing.T) {
+	t.Setenv("CODEX_HOME", "relative-codex-home")
+	if _, err := resolveCodexHome(); err == nil {
+		t.Fatal("resolveCodexHome accepted relative CODEX_HOME")
+	}
+}
+
 func createCodexJunctionForTest(t *testing.T, link, target string) {
 	t.Helper()
 	if runtime.GOOS != "windows" {
@@ -97,6 +113,69 @@ args = ["hi"]
 	// Other section preserved
 	if !strings.Contains(s, "[mcp_servers.other]") {
 		t.Error("other section dropped")
+	}
+}
+
+func TestCodexCLIToolTimeoutRoundTripExactMatchAndRollback(t *testing.T) {
+	path := setupCodexConfig(t, `[mcp_servers.security]
+command = "node"
+args = ["server.mjs", "--stdio"]
+tool_timeout_sec = 900
+`)
+	c := &codexCLI{path: path}
+
+	backup, err := c.Backup()
+	if err != nil {
+		t.Fatalf("Backup: %v", err)
+	}
+	expected := MCPEntry{Name: "security", URL: "http://127.0.0.1:9300/mcp", ToolTimeoutSec: 900}
+	if err := c.AddEntry(expected); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	got, err := c.GetEntry("security")
+	if err != nil {
+		t.Fatalf("GetEntry: %v", err)
+	}
+	if got == nil || got.ToolTimeoutSec != 900 {
+		t.Fatalf("GetEntry = %#v, want tool timeout 900", got)
+	}
+	root, err := c.readTOML()
+	if err != nil {
+		t.Fatalf("readTOML: %v", err)
+	}
+	raw, _ := root["mcp_servers"].(map[string]any)["security"].(map[string]any)
+	matched, err := codexHubEntryMatches(raw, expected)
+	if err != nil || !matched {
+		t.Fatalf("codexHubEntryMatches(timeout=900) = %t, %v; want true, nil", matched, err)
+	}
+	matched, err = codexHubEntryMatches(raw, MCPEntry{Name: "security", URL: expected.URL})
+	if err != nil || matched {
+		t.Fatalf("codexHubEntryMatches(timeout=0) = %t, %v; want false, nil", matched, err)
+	}
+	if err := c.RestoreEntryFromBackupForRollback(backup, "security"); err != nil {
+		t.Fatalf("RestoreEntryFromBackupForRollback: %v", err)
+	}
+	restored, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read restored config: %v", err)
+	}
+	if !strings.Contains(string(restored), "tool_timeout_sec = 900") {
+		t.Fatalf("rollback lost source tool timeout:\n%s", restored)
+	}
+}
+
+func TestCodexCLIAddEntryZeroToolTimeoutPreservesHistoricalShape(t *testing.T) {
+	path := setupCodexConfig(t, "[mcp_servers]\n")
+	c := &codexCLI{path: path}
+	if err := c.AddEntry(MCPEntry{Name: "security", URL: "http://127.0.0.1:9300/mcp"}); err != nil {
+		t.Fatalf("AddEntry: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config: %v", err)
+	}
+	if strings.Contains(string(raw), "tool_timeout_sec") {
+		t.Fatalf("zero timeout changed historical output:\n%s", raw)
 	}
 }
 

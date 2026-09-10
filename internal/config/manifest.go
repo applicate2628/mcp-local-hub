@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"unicode"
@@ -109,6 +110,7 @@ type ServerManifest struct {
 	BaseArgs         []string          `yaml:"base_args"`
 	BaseArgsTemplate []string          `yaml:"base_args_template"`
 	Env              map[string]string `yaml:"env"`
+	EnvForwardLocal  []string          `yaml:"env_forward_local,omitempty"`
 	Daemons          []DaemonSpec      `yaml:"daemons"`
 	Languages        []LanguageSpec    `yaml:"languages"`
 	PortPool         *PortPool         `yaml:"port_pool"`
@@ -317,9 +319,10 @@ func validatePortPool(label string, pool *PortPool) error {
 }
 
 type ClientBinding struct {
-	Client  string `yaml:"client"`
-	Daemon  string `yaml:"daemon"`
-	URLPath string `yaml:"url_path"`
+	Client         string `yaml:"client"`
+	Daemon         string `yaml:"daemon"`
+	URLPath        string `yaml:"url_path"`
+	ToolTimeoutSec int    `yaml:"tool_timeout_sec,omitempty"`
 }
 
 // ParseManifest reads YAML from r and returns a validated ServerManifest.
@@ -382,7 +385,7 @@ func ParseManifest(r io.Reader) (*ServerManifest, error) {
 	// Key-presence detection requires the YAML-level second pass.
 	if m.Transport == TransportRemoteHTTP {
 		for _, k := range []string{
-			"command", "base_args", "base_args_template", "env",
+			"command", "base_args", "base_args_template", "env", "env_forward_local",
 			"daemons", "languages", "port_pool", "idle_timeout_min",
 		} {
 			if _, mentioned := keyed[k]; mentioned {
@@ -1186,6 +1189,33 @@ func (m *ServerManifest) Validate() error {
 	if err := m.validateVendoredAndAvailability(); err != nil {
 		return err
 	}
+	seenForward := make(map[string]struct{}, len(m.EnvForwardLocal))
+	seenEnv := make(map[string]struct{}, len(m.Env))
+	for key := range m.Env {
+		seenEnv[manifestEnvironmentKey(key)] = struct{}{}
+	}
+	for _, key := range m.EnvForwardLocal {
+		if key == "" || strings.ContainsAny(key, "\x00=") {
+			return fmt.Errorf("manifest %s: env_forward_local contains invalid name", m.Name)
+		}
+		canonicalKey := manifestEnvironmentKey(key)
+		if _, duplicate := seenForward[canonicalKey]; duplicate {
+			return fmt.Errorf("manifest %s: env_forward_local contains duplicate %q", m.Name, key)
+		}
+		if _, collision := seenEnv[canonicalKey]; collision {
+			return fmt.Errorf("manifest %s: env_forward_local %q collides with env", m.Name, key)
+		}
+		seenForward[canonicalKey] = struct{}{}
+	}
+	const toolTimeoutClient = "codex-cli"
+	for _, binding := range m.ClientBindings {
+		if binding.ToolTimeoutSec < 0 {
+			return fmt.Errorf("manifest %s: client binding %q tool_timeout_sec must be non-negative", m.Name, binding.Client)
+		}
+		if binding.ToolTimeoutSec > 0 && binding.Client != toolTimeoutClient {
+			return fmt.Errorf("manifest %s: client binding %q tool_timeout_sec is supported only by canonical client %q", m.Name, binding.Client, toolTimeoutClient)
+		}
+	}
 
 	// required_secrets authoring/integrity gate. Each declared key MUST back a
 	// `secret:<key>` value in this manifest's Env — otherwise the required-secret
@@ -1247,6 +1277,9 @@ func (m *ServerManifest) Validate() error {
 	//     §"Validation rules" — accepted-but-no-op semantic for the
 	//     YAML-bool-can't-distinguish-absent-vs-false edge).
 	if m.Transport == TransportRemoteHTTP {
+		if len(m.EnvForwardLocal) != 0 {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects env_forward_local", m.Name)
+		}
 		// codex bot r8 P2 closure (PR #169): workspace-scoped is
 		// per-(workspace, language) lazy-proxy. That model
 		// requires local LSP backends + port_pool — none of which
@@ -1273,6 +1306,9 @@ func (m *ServerManifest) Validate() error {
 		}
 		if len(m.Env) != 0 {
 			return fmt.Errorf("manifest %s: transport=remote-http rejects env (no local subprocess; remote endpoint manages its own env)", m.Name)
+		}
+		if m.EnvForwardLocal != nil {
+			return fmt.Errorf("manifest %s: transport=remote-http rejects env_forward_local", m.Name)
 		}
 		if len(m.Daemons) != 0 {
 			return fmt.Errorf("manifest %s: transport=remote-http rejects daemons[] (no per-daemon-port model; clients connect directly to the remote URL)", m.Name)
@@ -1417,6 +1453,15 @@ func (m *ServerManifest) Validate() error {
 		}
 	}
 	return nil
+}
+
+// manifestEnvironmentKey matches mergeDaemonEnv: Windows environment names
+// collide case-insensitively, while POSIX retains case-sensitive names.
+func manifestEnvironmentKey(key string) string {
+	if runtime.GOOS == "windows" {
+		return strings.ToUpper(key)
+	}
+	return key
 }
 
 func (m *ServerManifest) validateDaemonMCPProtocolCompatibilityProfiles() error {

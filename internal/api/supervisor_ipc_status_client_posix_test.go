@@ -10,6 +10,12 @@ import (
 )
 
 func startFakeSupervisorIPCStatusServer(t *testing.T, stateDir string, hello SupervisorLockOwner, handler func(IPCRequest) IPCResponse) func() {
+	return startFakeSupervisorIPCStatusServerWithConnection(t, stateDir, func(conn net.Conn) {
+		serveFakeSupervisorIPCStatusConn(t, conn, hello, handler)
+	})
+}
+
+func startFakeSupervisorIPCStatusServerWithConnection(t *testing.T, stateDir string, serve func(net.Conn)) func() {
 	t.Helper()
 	addr := SupervisorIPCAddress(stateDir)
 	_ = os.Remove(addr)
@@ -24,7 +30,8 @@ func startFakeSupervisorIPCStatusServer(t *testing.T, stateDir string, hello Sup
 		if err != nil {
 			return
 		}
-		serveFakeSupervisorIPCStatusConn(t, conn, hello, handler)
+		defer conn.Close()
+		serve(conn)
 	}()
 	return func() {
 		_ = ln.Close()

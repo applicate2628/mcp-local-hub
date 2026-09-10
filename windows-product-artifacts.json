@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "artifacts": [
+    {
+      "role": "cli",
+      "filename": "mcphub.exe",
+      "source": "./cmd/mcphub",
+      "subsystem": 3,
+      "productMetadata": true,
+      "npmPayload": true,
+      "npmBin": true
+    },
+    {
+      "role": "windowless",
+      "filename": "mcphub-windowless.exe",
+      "source": "./cmd/mcphub-windowless",
+      "subsystem": 2,
+      "productMetadata": true,
+      "npmPayload": true,
+      "npmBin": false
+    },
+    {
+      "role": "admission-helper",
+      "filename": "mcphub-pe-admit.exe",
+      "source": "./cmd/mcphub-pe-admit",
+      "subsystem": 3,
+      "productMetadata": false,
+      "npmPayload": true,
+      "npmBin": false
+    }
+  ]
+}

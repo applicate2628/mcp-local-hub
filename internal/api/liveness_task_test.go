@@ -103,19 +103,141 @@ func installTestCurrentWindowsUser(t *testing.T, name string) {
 	t.Cleanup(func() { currentWindowsUserFn = orig })
 }
 
+// ensureLivenessTaskFixtureResolved exercises the scheduler transaction with
+// explicit fixture identities. Public composition resolves the current Windows
+// principal before reaching this transaction, so it is intentionally covered by
+// the platform-specific SID tests instead.
+func ensureLivenessTaskFixtureResolved(f scheduler.Scheduler) (LivenessTaskReceipt, error) {
+	return ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, "S-1-5-21-test", "test", f)
+}
+
+func TestLivenessTaskDifferenceNativeDefaultsAndIdentityMatrix(t *testing.T) {
+	const sid, account = "S-1-5-21-101-202-303-404", "account-canary"
+	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, sid, account)
+	check := func(name, xml string, want LivenessTaskDifferenceField) {
+		t.Helper()
+		got := livenessTaskDifference([]byte(xml), livenessFixtureExe, livenessFixtureWorkingDir, sid, account)
+		if want == "" && got != nil {
+			t.Fatalf("%s difference=%v", name, got)
+		}
+		if want != "" && (got == nil || got.Field != want) {
+			t.Fatalf("%s difference=%v want=%s", name, got, want)
+		}
+	}
+	for _, tc := range []struct{ name, old string }{
+		{"run-level", "<RunLevel>LeastPrivilege</RunLevel>"},
+		{"stop", "<StopAtDurationEnd>false</StopAtDurationEnd>"},
+		{"trigger-enabled", "<Enabled>true</Enabled>"},
+		{"settings-enabled", "<Enabled>true</Enabled>"},
+	} {
+		check("omit-"+tc.name, strings.Replace(canonical, tc.old, "", 1), "")
+	}
+	check("wrong-sid", strings.Replace(canonical, sid, "S-1-5-21-wrong", 1), livenessTaskFieldPrincipalUser)
+	check("wrong-account", strings.Replace(canonical, ">"+account+"<", ">wrong<", 1), livenessTaskFieldLogonTriggerUser)
+	check("highest", strings.Replace(canonical, "LeastPrivilege", "HighestAvailable", 1), livenessTaskFieldPrincipalRunLevel)
+	check("stop-true", strings.Replace(canonical, "<StopAtDurationEnd>false", "<StopAtDurationEnd>true", 1), livenessTaskFieldCalendarStopAtDurationEnd)
+	check("trigger-disabled", strings.Replace(canonical, "<Enabled>true", "<Enabled>false", 1), livenessTaskFieldLogonTriggerEnabled)
+	check("settings-disabled", strings.Replace(canonical, "<Settings>\n    <Hidden>false</Hidden>\n    <Priority>7</Priority>\n    <ExecutionTimeLimit>PT1M</ExecutionTimeLimit>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n    <AllowStartOnDemand>true</AllowStartOnDemand>\n    <Enabled>true", "<Settings>\n    <Hidden>false</Hidden>\n    <Priority>7</Priority>\n    <ExecutionTimeLimit>PT1M</ExecutionTimeLimit>\n    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>\n    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>\n    <RunOnlyIfIdle>false</RunOnlyIfIdle>\n    <AllowStartOnDemand>true</AllowStartOnDemand>\n    <Enabled>false", 1), livenessTaskFieldSettingsEnabled)
+}
+
+func TestEnsureLivenessTaskResolved_AcceptsNativeDefaultOmissionsAndIsIdempotent(t *testing.T) {
+	const sid, account = "S-1-5-21-101-202-303-404", "account-canary"
+	f := newLivenessTaskScheduler()
+	f.normalizeImport = func(raw []byte) []byte {
+		xml := decodeUTF16LEBOMForTest(t, raw)
+		principalStart := strings.Index(xml, "    <Principal id=\"Author\">\n")
+		principalEnd := strings.Index(xml, "    </Principal>\n")
+		if principalStart < 0 || principalEnd < principalStart {
+			t.Fatal("imported XML has no principal section")
+		}
+		principal := xml[principalStart : principalEnd+len("    </Principal>\n")]
+		if !strings.Contains(principal, "<UserId>"+sid+"</UserId>") || strings.Contains(principal, account) {
+			t.Fatalf("imported principal = %q; want resolved SID only", principal)
+		}
+		xml = strings.Replace(xml, "<RunLevel>LeastPrivilege</RunLevel>", "", 1)
+		xml = strings.Replace(xml, "<StopAtDurationEnd>false</StopAtDurationEnd>", "", 1)
+		xml = strings.Replace(xml, "<Enabled>true</Enabled>", "", 1)
+		if at := strings.LastIndex(xml, "<Enabled>true</Enabled>"); at >= 0 {
+			xml = xml[:at] + xml[at+len("<Enabled>true</Enabled>"):]
+		} else {
+			t.Fatal("imported XML has no settings enabled default to omit")
+		}
+		return scheduler.EncodeXMLUTF16LEBOM(xml)
+	}
+
+	receipt, err := ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, sid, account, f)
+	if err != nil {
+		t.Fatalf("first resolved ensure: %v", err)
+	}
+	if receipt.Result != LivenessTaskCreated {
+		t.Fatalf("first result=%q, want %q", receipt.Result, LivenessTaskCreated)
+	}
+	if got := len(f.importCalls()); got != 1 {
+		t.Fatalf("first ensure ImportXML calls=%d, want 1", got)
+	}
+
+	receipt, err = ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, sid, account, f)
+	if err != nil {
+		t.Fatalf("second resolved ensure: %v", err)
+	}
+	if receipt.Result != LivenessTaskUnchanged {
+		t.Fatalf("second result=%q, want %q", receipt.Result, LivenessTaskUnchanged)
+	}
+	if got := len(f.importCalls()); got != 1 {
+		t.Fatalf("second ensure re-imported normalized task: calls=%d, want 1", got)
+	}
+}
+
+func TestEnsureLivenessTaskResolved_StrictOppositeReadbackRestoresExactPriorXML(t *testing.T) {
+	const sid, account = "S-1-5-21-101-202-303-404", "account-canary"
+	f := newLivenessTaskScheduler()
+	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-prior", "prior-account"))
+	f.tasks[LivenessTaskName] = prior
+	f.normalizeImport = func(raw []byte) []byte {
+		if len(f.importCalls()) != 1 {
+			return raw
+		}
+		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
+			decodeUTF16LEBOMForTest(t, raw),
+			"<RunLevel>LeastPrivilege</RunLevel>",
+			"<RunLevel>HighestAvailable</RunLevel>",
+			1,
+		))
+	}
+
+	_, err := ensureLivenessTaskResolved(livenessFixtureExe, livenessFixtureWorkingDir, sid, account, f)
+	if err == nil {
+		t.Fatal("strict opposite run level was accepted after import")
+	}
+	var failure livenessTaskPostImportFailureReporter
+	if !errors.As(err, &failure) {
+		t.Fatalf("post-import error is not typed: %v", err)
+	}
+	if got := failure.LivenessTaskPostImportStage(); got != string(LivenessTaskPostImportSemanticDrift) {
+		t.Fatalf("post-import stage=%q, want %q", got, LivenessTaskPostImportSemanticDrift)
+	}
+	var difference livenessTaskDifferenceReporter
+	if !errors.As(err, &difference) || difference.LivenessTaskDifferenceField() != string(livenessTaskFieldPrincipalRunLevel) {
+		t.Fatalf("strict opposite difference=%v, want %s", err, livenessTaskFieldPrincipalRunLevel)
+	}
+	if got := f.tasks[LivenessTaskName]; !bytes.Equal(got, prior) {
+		t.Fatalf("strict opposite readback left XML %q, want exact prior %q", got, prior)
+	}
+	if got := len(f.importCalls()); got != 2 {
+		t.Fatalf("strict opposite ImportXML calls=%d, want replacement plus restoration", got)
+	}
+}
+
 // TestInstallLivenessTask_HappyPath asserts the supervisor-liveness install
 // (v0.6 spec §15 P1-b / §5.x Phase 3a) resolves the canonical mcphub path +
 // current user via the seams, then ImportXML under LivenessTaskName with the
 // liveness XML body (PT1M cadence + `supervise --ensure-alive` action). Reuses
 // the apiSurfacesFakeScheduler + seam helpers from api_surfaces_test.go.
 func TestInstallLivenessTask_HappyPath(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("InstallLivenessTask: %v", err)
 	}
 
@@ -132,7 +254,7 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 		"<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>",
 		"<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
 		"<Arguments>supervise --ensure-alive</Arguments>",
-		"<Command>" + livenessFixtureExe + "</Command>",
+		"<Command>" + scheduler.WindowsOwnedEntrypointPath(livenessFixtureExe) + "</Command>",
 		"<WorkingDirectory>" + livenessFixtureWorkingDir + "</WorkingDirectory>",
 		"<UserId>test</UserId>",
 	}
@@ -149,13 +271,9 @@ func TestInstallLivenessTask_HappyPath(t *testing.T) {
 }
 
 func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("InstallLivenessTask: %v", err)
 	}
 	imports := f.importCalls()
@@ -176,16 +294,12 @@ func TestInstallLivenessTask_ImportXMLReceivesUTF16LEBOM(t *testing.T) {
 
 // TestInstallLivenessTask_Idempotent asserts a verified second run is a no-op.
 func TestInstallLivenessTask_Idempotent(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("first InstallLivenessTask: %v", err)
 	}
-	if err := a.InstallLivenessTask(); err != nil {
+	if _, err := ensureLivenessTaskFixtureResolved(f); err != nil {
 		t.Fatalf("second InstallLivenessTask (idempotent): %v", err)
 	}
 	if got := len(f.importCalls()); got != 1 {
@@ -194,17 +308,12 @@ func TestInstallLivenessTask_Idempotent(t *testing.T) {
 }
 
 func TestEnsureLivenessTask_SemanticNormalizationIsIdempotent(t *testing.T) {
-	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, "test")
+	const sid = "S-1-5-21-test"
+	canonical := scheduler.BuildLivenessXML(livenessFixtureExe, livenessFixtureWorkingDir, sid, "test")
 	cases := []struct {
 		name      string
 		normalize func(string) string
 	}{
-		{
-			name: "qualified case-normalized principal",
-			normalize: func(taskXML string) string {
-				return strings.ReplaceAll(taskXML, "<UserId>test</UserId>", `<UserId>MACHINE\TEST</UserId>`)
-			},
-		},
 		{
 			name:      "reversed equivalent trigger order",
 			normalize: reverseLivenessTriggerOrderForTest,
@@ -212,14 +321,10 @@ func TestEnsureLivenessTask_SemanticNormalizationIsIdempotent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := NewAPI()
 			f := newLivenessTaskScheduler()
 			f.tasks[LivenessTaskName] = scheduler.EncodeXMLUTF16LEBOM(tc.normalize(canonical))
-			installTestScheduler(t, f)
-			installTestCanonicalMcphubPath(t, livenessFixtureExe)
-			installTestCurrentWindowsUser(t, "test")
 
-			receipt, err := a.EnsureLivenessTask()
+			receipt, err := ensureLivenessTaskFixtureResolved(f)
 			if err != nil {
 				t.Fatalf("EnsureLivenessTask: %v", err)
 			}
@@ -267,24 +372,20 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
 		{name: "logon type", normalize: replace("<LogonType>InteractiveToken</LogonType>", "<LogonType>Password</LogonType>"), wantField: "principal.logon_type"},
 		{name: "execution limit", normalize: replace("<ExecutionTimeLimit>PT1M</ExecutionTimeLimit>", "<ExecutionTimeLimit>PT5M</ExecutionTimeLimit>"), wantField: "settings.execution_time_limit"},
 		{name: "multiple instances", normalize: replace("<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>", "<MultipleInstancesPolicy>Parallel</MultipleInstancesPolicy>"), wantField: "settings.multiple_instances_policy"},
-		{name: "command", normalize: replace("<Command>"+livenessFixtureExe+"</Command>", "<Command>foreign.exe</Command>"), wantField: "action.command"},
+		{name: "command", normalize: replace("<Command>"+scheduler.WindowsOwnedEntrypointPath(livenessFixtureExe)+"</Command>", "<Command>foreign.exe</Command>"), wantField: "action.command"},
 		{name: "arguments", normalize: replace("<Arguments>supervise --ensure-alive</Arguments>", "<Arguments>supervise</Arguments>"), wantField: "action.arguments"},
 		{name: "working directory", normalize: replace("<WorkingDirectory>"+livenessFixtureWorkingDir+"</WorkingDirectory>", "<WorkingDirectory>foreign</WorkingDirectory>"), wantField: "action.working_directory"},
 		{name: "enabled", normalize: replaceLast("<Enabled>true</Enabled>", "<Enabled>false</Enabled>"), wantField: "settings.enabled"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := NewAPI()
 			f := newLivenessTaskScheduler()
 			f.normalizeImport = func(raw []byte) []byte {
 				decoded := decodeUTF16LEBOMForTest(t, raw)
 				return scheduler.EncodeXMLUTF16LEBOM(tc.normalize(decoded))
 			}
-			installTestScheduler(t, f)
-			installTestCanonicalMcphubPath(t, livenessFixtureExe)
-			installTestCurrentWindowsUser(t, "test")
 
-			err := a.InstallLivenessTask()
+			_, err := ensureLivenessTaskFixtureResolved(f)
 			if err == nil {
 				t.Fatal("normalized semantic drift was accepted")
 			}
@@ -300,10 +401,9 @@ func TestInstallLivenessTask_ReadbackDifferenceReportsField(t *testing.T) {
 }
 
 func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	f.normalizeImport = func(raw []byte) []byte {
 		if len(f.imports) != 1 {
@@ -316,11 +416,8 @@ func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
 			1,
 		))
 	}
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	_, err := a.EnsureLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
 	}
@@ -343,10 +440,9 @@ func TestEnsureLivenessTask_ReadbackDriftRestoresExactPriorXML(t *testing.T) {
 }
 
 func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	restoreErr := errors.New("simulated restore failure")
 	f.importErrForCall = func(call int) error {
@@ -366,11 +462,8 @@ func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testi
 			1,
 		))
 	}
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	_, err := a.EnsureLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("EnsureLivenessTask accepted post-import semantic drift")
 	}
@@ -390,10 +483,9 @@ func TestEnsureLivenessTask_PostImportRollbackFailureIsRecoveryRequired(t *testi
 }
 
 func TestEnsureLivenessTask_ReadbackFailureRestoresExactPriorXML(t *testing.T) {
-	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	readbackErr := errors.New("simulated post-import readback failure")
 	f.exportErrForCall = func(call int) error {
@@ -402,11 +494,8 @@ func TestEnsureLivenessTask_ReadbackFailureRestoresExactPriorXML(t *testing.T) {
 		}
 		return nil
 	}
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	_, err := a.EnsureLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("EnsureLivenessTask accepted a failed post-import readback")
 	}
@@ -446,18 +535,14 @@ func reverseLivenessTriggerOrderForTest(taskXML string) string {
 // TestInstallLivenessTask_PropagatesImportXMLError asserts a scheduler failure
 // is surfaced verbatim — the install path does not swallow errors.
 func TestInstallLivenessTask_PropagatesImportXMLError(t *testing.T) {
-	a := NewAPI()
 	want := errors.New("simulated schtasks failure")
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	f.importErr = want
-	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	err := a.InstallLivenessTask()
+	_, err := ensureLivenessTaskFixtureResolved(f)
 	if err == nil {
 		t.Fatal("InstallLivenessTask: want error, got nil")
 	}
@@ -476,13 +561,11 @@ func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement
 	a := NewAPI()
 	f := newLivenessTaskScheduler()
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		livenessPriorFixtureExe, livenessPriorFixtureDir, "test"))
+		livenessPriorFixtureExe, livenessPriorFixtureDir, "S-1-5-21-test", "test"))
 	f.tasks[LivenessTaskName] = prior
 	installTestScheduler(t, f)
-	installTestCanonicalMcphubPath(t, livenessFixtureExe)
-	installTestCurrentWindowsUser(t, "test")
 
-	receipt, err := a.EnsureLivenessTask()
+	receipt, err := ensureLivenessTaskFixtureResolved(f)
 	if err != nil {
 		t.Fatalf("EnsureLivenessTask: %v", err)
 	}
@@ -496,7 +579,7 @@ func TestLivenessTaskReceipt_RestoresExactPriorXMLAndPreservesForeignReplacement
 		t.Fatalf("SchedulerRollbackExactXML: restored XML = %q, want %q", got, prior)
 	}
 
-	receipt, err = a.EnsureLivenessTask()
+	receipt, err = ensureLivenessTaskFixtureResolved(f)
 	if err != nil {
 		t.Fatalf("EnsureLivenessTask second: %v", err)
 	}

@@ -3,10 +3,138 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
+
+func TestAdoptCodexToolTimeoutRoundTripsBindingAndDeAdopt(t *testing.T) {
+	const entry = "codex-adopt-timeout"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.codex-adopt-timeout]
+command = "node"
+args = ["server.mjs", "--stdio"]
+tool_timeout_sec = 900
+`)
+
+	api := NewAPI()
+	plan, err := api.BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "codex-cli",
+		ManifestName: entry,
+		Port:         9370,
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	manifest, err := config.ParseManifest(strings.NewReader(plan.ManifestYAML))
+	if err != nil {
+		t.Fatalf("ParseManifest(plan): %v", err)
+	}
+	if len(manifest.ClientBindings) != 1 || manifest.ClientBindings[0].ToolTimeoutSec != 900 {
+		t.Fatalf("client bindings = %#v, want codex-cli timeout 900", manifest.ClientBindings)
+	}
+	if err := api.ExecuteAdopt(plan, nil); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	hub, err := clients.AllClients()["codex-cli"].GetEntry(entry)
+	if err != nil || hub == nil || hub.ToolTimeoutSec != 900 {
+		t.Fatalf("adopted Codex entry = %#v, err=%v; want timeout 900", hub, err)
+	}
+	if _, err := api.ExecuteDeAdopt(entry, nil); err != nil {
+		t.Fatalf("ExecuteDeAdopt: %v", err)
+	}
+	restored, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read restored config: %v", err)
+	}
+	if !strings.Contains(string(restored), "tool_timeout_sec = 900") {
+		t.Fatalf("de-adopt lost source timeout:\n%s", restored)
+	}
+}
+
+func TestAdoptNonCodexSourcePreservesMatchingCodexReceiverToolTimeout(t *testing.T) {
+	const entry = "claude-source-codex-timeout"
+	codexPath, _, _ := setupAdoptTestEnv(t, entry, `[mcp_servers.claude-source-codex-timeout]
+command = "node"
+args = ["server.mjs", "--stdio"]
+tool_timeout_sec = 900
+`)
+	home := filepath.Dir(filepath.Dir(codexPath))
+	claudePath := filepath.Join(home, ".claude.json")
+	if err := os.WriteFile(claudePath, []byte(`{"mcpServers":{"claude-source-codex-timeout":{"type":"stdio","command":"node","args":["server.mjs","--stdio"]}}}`), 0o600); err != nil {
+		t.Fatalf("seed Claude source config: %v", err)
+	}
+
+	api := NewAPI()
+	plan, err := api.BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "claude-code",
+		ManifestName: entry,
+		Port:         nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	manifest, err := config.ParseManifest(strings.NewReader(plan.ManifestYAML))
+	if err != nil {
+		t.Fatalf("ParseManifest(plan): %v", err)
+	}
+	var codexBinding *config.ClientBinding
+	for i := range manifest.ClientBindings {
+		if manifest.ClientBindings[i].Client == "codex-cli" {
+			codexBinding = &manifest.ClientBindings[i]
+		}
+	}
+	if codexBinding == nil || codexBinding.ToolTimeoutSec != 900 {
+		t.Fatalf("Codex receiver binding = %#v, want timeout 900", codexBinding)
+	}
+
+	if err := api.ExecuteAdopt(plan, nil); err != nil {
+		t.Fatalf("ExecuteAdopt: %v", err)
+	}
+	hub, err := clients.AllClients()["codex-cli"].GetEntry(entry)
+	if err != nil || hub == nil || hub.ToolTimeoutSec != 900 {
+		t.Fatalf("adopted Codex receiver = %#v, err=%v, want timeout 900", hub, err)
+	}
+	repeat, err := api.BuildAdoptPlan(AdoptOpts{
+		EntryName:    entry,
+		Client:       "claude-code",
+		ManifestName: entry,
+		Port:         plan.Port,
+	})
+	if err != nil || !repeat.alreadyAdopted || repeat.toolTimeoutForClient("codex-cli") != 900 {
+		t.Fatalf("repeat plan = %#v, err=%v; want existing Codex timeout 900", repeat, err)
+	}
+	if err := api.ExecuteAdopt(repeat, nil); err != nil {
+		t.Fatalf("repeat ExecuteAdopt: %v", err)
+	}
+	rec, found, err := ReadAdoptProvenance(entry)
+	if err != nil || !found {
+		t.Fatalf("ReadAdoptProvenance: found=%v err=%v", found, err)
+	}
+	var codexReceipt *AdoptClientProvenance
+	for i := range rec.Clients {
+		if rec.Clients[i].Client == "codex-cli" {
+			codexReceipt = &rec.Clients[i]
+		}
+	}
+	if codexReceipt == nil || codexReceipt.ToolTimeoutSec != 900 {
+		t.Fatalf("Codex receiver provenance = %#v, want timeout 900", codexReceipt)
+	}
+
+	if _, err := api.ExecuteDeAdopt(entry, nil); err != nil {
+		t.Fatalf("ExecuteDeAdopt: %v", err)
+	}
+	restored, err := os.ReadFile(codexPath)
+	if err != nil {
+		t.Fatalf("read restored Codex config: %v", err)
+	}
+	if !strings.Contains(string(restored), "tool_timeout_sec = 900") {
+		t.Fatalf("de-adopt lost Codex receiver timeout:\n%s", restored)
+	}
+}
 
 func TestBuildAdoptPlanCodexCollisionFreezesTargetEntryName(t *testing.T) {
 	const entry = "codex-adopt-transport"

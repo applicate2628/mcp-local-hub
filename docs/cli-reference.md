@@ -33,6 +33,60 @@ For install / per-client behaviour / troubleshooting see
 | `mcphub manifest list` | List every manifest under `servers/*/manifest.yaml` |
 | `mcphub manifest show <name>` | Print a manifest's contents |
 
+### Adopt an existing enabled stdio entry
+
+`mcphub adopt` converts one exact, already-configured stdio entry into a
+supervisor-owned manifest and repoints the selected clients to its loopback hub
+endpoint. The source entry must be enabled. Run without `--yes` first: the
+preview shows the selected clients, command, argument vector, environment,
+port, omissions, and signature mismatches without writing state. Apply only
+after that projection is correct. A second identical apply is an already-adopted
+no-op. Use `mcphub de-adopt <manifest-name> --yes` to restore the captured
+pre-adopt client state.
+
+Graphify `graphifyy==0.9.53` uses one named identity per fixed graph and
+environment profile. The existing entry must launch `graphify-mcp <graph-json>`;
+do not reuse one entry name for multiple graph files. For example:
+
+```text
+mcphub adopt graphify-project-a --client codex-cli --port <port> --clients codex-cli,claude-code
+mcphub adopt graphify-project-a --client codex-cli --port <port> --clients codex-cli,claude-code --yes
+```
+
+The generated manifest preserves that entry's exact command, arguments, and
+environment. Graphify's optional per-call `project_path` remains an upstream
+tool argument; MCPHub neither filters it nor treats it as a new authorization
+boundary. No shared graph manifest or dynamic graph pool is shipped.
+
+Scholar Search is adopted once per exact environment profile. Its enabled entry
+must use the complete compatible launch recipe
+`uv run --no-project --with scholar-search-mcp==0.1.3 --with mcp==1.29.0 python -m scholar_search_mcp`
+and keep its backend-selection environment. Both pins are required: Scholar
+declares `mcp>=0.9.0`, but its `@app.list_tools()` / `@app.call_tool()` integration
+uses the decorator-compatible MCP Software Development Kit (SDK) 1.29.0 API;
+an unconstrained MCP 2.x resolution fails during module import before protocol
+startup. This recipe constrains MCPHub-owned dependency resolution; it does not
+claim the upstream Scholar dependency range has been corrected. For example:
+
+```text
+mcphub adopt scholar-search-default --client codex-cli --port <port> --clients codex-cli,claude-code
+mcphub adopt scholar-search-default --client codex-cli --port <port> --clients codex-cli,claude-code --yes
+```
+
+Scholar's `download_arxiv_source` tool is destructive: it deletes or overwrites
+`<output_dir>/<arxiv_id>` before fetching. Only pass a safe, dedicated
+`output_dir`; never pass a home or configuration directory. Setting
+`SCHOLAR_ARXIV_SOURCE_DIR` changes the default only and does not constrain an
+explicit caller-supplied `output_dir`. MCPHub forwards that argument unchanged
+and adds no filesystem-containment guarantee.
+
+Chrome, Codex Security, and a generic `server.cjs` entry are deliberately not
+managed recipes in this release. Chrome still needs an exact package pin plus
+the browser endpoint/profile identity; Codex Security still needs evidence for
+its plugin-owned activation and repointing path; `server.cjs` still needs the
+owning package/script identity. Capture those facts before proposing adoption;
+their presence in a client config does not prove a managed installation.
+
 ## Supervisor lifecycle
 
 | Command | Short | Long |

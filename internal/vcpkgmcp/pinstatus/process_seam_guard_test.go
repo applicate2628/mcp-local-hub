@@ -52,7 +52,6 @@ func TestRunContainedStreamSiblingCallerSourceGuard(t *testing.T) {
 		"internal/daemon/host.go",
 		"internal/daemon/http_host.go",
 		"internal/drmemory/runner.go",
-		"internal/oneapirun/handlers.go",
 	}
 	for _, relative := range protected {
 		path := filepath.Join(root, filepath.FromSlash(relative))
@@ -70,6 +69,16 @@ func TestVTuneRunContainedStreamCallerApproved(t *testing.T) {
 	path := filepath.Clean(filepath.Join("..", "..", "..", "internal", "vtune", "runner.go"))
 	if !sourceCallsRunContainedStream(t, path) {
 		t.Fatal("reviewed VTune owner no longer calls RunContainedStream")
+	}
+}
+
+func TestOneAPIRunContainedStreamCallerApproved(t *testing.T) {
+	// Durable async oneAPI execution deliberately uses the reviewed fail-closed
+	// contained runner. Keep the generic sibling ban for unreviewed callers,
+	// but fail if this approved owner drifts back to the legacy job runner.
+	path := filepath.Clean(filepath.Join("..", "..", "..", "internal", "oneapirun", "handlers.go"))
+	if !sourceCallsRunContainedStream(t, path) {
+		t.Fatal("reviewed oneAPI owner no longer calls RunContainedStream")
 	}
 }
 

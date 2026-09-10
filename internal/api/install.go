@@ -177,15 +177,16 @@ const (
 // operator's terminal even when URL embeds it (codex cumulative G6
 // review P2 closure — URL-as-secret-bearer is rare but real).
 type ClientUpdatePlan struct {
-	Client     string
-	Path       string
-	Action     ClientUpdateAction
-	EntryName  string            // "mcphub-hub" for aggregate; "<server>" for per-daemon
-	URL        string            // empty for Remove
-	DisplayURL string            // safe-to-print form of URL; falls back to URL when not set
-	Headers    map[string]string // F-G5: token + instance id; empty for per-daemon
-	RelayURL   string            // optional direct relay target for relay-stdio clients
-	DaemonName string            // legacy; only meaningful for per-daemon entries
+	Client         string
+	Path           string
+	Action         ClientUpdateAction
+	EntryName      string            // "mcphub-hub" for aggregate; "<server>" for per-daemon
+	URL            string            // empty for Remove
+	DisplayURL     string            // safe-to-print form of URL; falls back to URL when not set
+	Headers        map[string]string // F-G5: token + instance id; empty for per-daemon
+	ToolTimeoutSec int               // optional client tool-call timeout; zero preserves historical output
+	RelayURL       string            // optional direct relay target for relay-stdio clients
+	DaemonName     string            // legacy; only meaningful for per-daemon entries
 
 	// codexAlreadyConfigured is an execution-only settled-repeat marker. It is
 	// deliberately unexported: the plan still carries the frozen EntryName on
@@ -2048,11 +2049,15 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	if err != nil {
 		return nil, err
 	}
-	// Scheduler tasks reference the canonical ~/.local/bin/mcphub.exe
-	// path (not dev location). See canonicalMcphubPath for the rationale.
+	// Direct supervisor intent remains bound to canonical CUI product logic;
+	// Windows Scheduler actions enter through its exact windowless sibling.
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return nil, err
+	}
+	taskCommand := canonicalPath
+	if runtime.GOOS == "windows" {
+		taskCommand = scheduler.WindowsOwnedEntrypointPath(canonicalPath)
 	}
 	workDir := filepath.Dir(canonicalPath)
 	p := &Plan{Server: m.Name, CanMigrate: canMigrateServer(m.Name), FullInstall: opts.DaemonFilter == ""}
@@ -2068,7 +2073,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		args := []string{"daemon", "--server", m.Name, "--daemon", d.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    name,
-			Command: canonicalPath,
+			Command: taskCommand,
 			Args:    args,
 			Trigger: "At logon",
 		})
@@ -2089,7 +2094,7 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		args := []string{"restart", "--server", m.Name}
 		p.SchedulerTasks = append(p.SchedulerTasks, ScheduledTaskPlan{
 			Name:    name,
-			Command: canonicalPath,
+			Command: taskCommand,
 			Args:    args,
 			Trigger: "Weekly Sun 03:00",
 		})
@@ -2147,13 +2152,14 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 		// transitions; per-server installs only refresh their own
 		// per-(server, client) bindings.
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
-			Client:     b.Client,
-			Path:       path,
-			Action:     ClientUpdateAddReplace,
-			EntryName:  m.Name,
-			URL:        url,
-			RelayURL:   relayURL,
-			DaemonName: b.Daemon,
+			Client:         b.Client,
+			Path:           path,
+			Action:         ClientUpdateAddReplace,
+			EntryName:      m.Name,
+			URL:            url,
+			ToolTimeoutSec: b.ToolTimeoutSec,
+			RelayURL:       relayURL,
+			DaemonName:     b.Daemon,
 		})
 	}
 	return freezeCodexInstallTargetNames(p, opts)
@@ -2197,9 +2203,10 @@ func freezeCodexInstallTargetNames(p *Plan, opts BuildPlanOpts) (*Plan, error) {
 	for _, update := range p.ClientUpdates {
 		if update.Client == "codex-cli" {
 			desiredEntry = clients.MCPEntry{
-				Name:    p.Server + "-mcphub",
-				URL:     update.URL,
-				Headers: update.Headers,
+				Name:           p.Server + "-mcphub",
+				URL:            update.URL,
+				Headers:        update.Headers,
+				ToolTimeoutSec: update.ToolTimeoutSec,
 			}
 			break
 		}
@@ -2270,7 +2277,7 @@ func codexInstallTargetMatchesPlan(entry *clients.MCPEntry, updates []ClientUpda
 		if update.Client != "codex-cli" {
 			continue
 		}
-		if entry.URL != update.URL || len(entry.Headers) != len(update.Headers) {
+		if entry.URL != update.URL || entry.ToolTimeoutSec != update.ToolTimeoutSec || len(entry.Headers) != len(update.Headers) {
 			return false
 		}
 		for key, value := range update.Headers {
@@ -2429,11 +2436,12 @@ func buildRemoteHTTPPlan(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, e
 			return nil, err
 		}
 		p.ClientUpdates = append(p.ClientUpdates, ClientUpdatePlan{
-			Client:    b.Client,
-			Path:      path,
-			Action:    ClientUpdateAddReplace,
-			EntryName: m.Name,
-			URL:       expandedURL,
+			Client:         b.Client,
+			Path:           path,
+			Action:         ClientUpdateAddReplace,
+			EntryName:      m.Name,
+			URL:            expandedURL,
+			ToolTimeoutSec: b.ToolTimeoutSec,
 			// DisplayURL keeps the manifest's literal pre-expansion
 			// URL so plan + install stdout never echo path/query
 			// tokens that may have come from ${secret:KEY}
@@ -3696,13 +3704,14 @@ func installClientEntryV1(server string, update ClientUpdatePlan, relayExePath s
 		entryName = server
 	}
 	return clients.MCPEntry{
-		Name:         entryName,
-		URL:          update.URL,
-		Headers:      update.Headers,
-		RelayServer:  server,
-		RelayDaemon:  update.DaemonName,
-		RelayExePath: relayExePath,
-		RelayURL:     update.RelayURL,
+		Name:           entryName,
+		URL:            update.URL,
+		Headers:        update.Headers,
+		ToolTimeoutSec: update.ToolTimeoutSec,
+		RelayServer:    server,
+		RelayDaemon:    update.DaemonName,
+		RelayExePath:   relayExePath,
+		RelayURL:       update.RelayURL,
 	}
 }
 

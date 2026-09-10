@@ -3,6 +3,7 @@ package api
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -197,4 +198,141 @@ func TestMarkAdoptProvenanceDeAdoptingT12B4ReclassifiesAdoptingRow(t *testing.T)
 			t.Fatalf("refused orphan was not reapable: found=%v err=%v", found, readErr)
 		}
 	})
+}
+
+func TestBuildDeAdoptPlanProviderRecoveryKeepsAmbiguousAdoptingRow(t *testing.T) {
+	isolateStateDir(t)
+	rec := sampleAdoptRecord()
+	rec.ManifestName = "provider-recovery-keep"
+	rec.SourceEntryName = rec.ManifestName
+	rec.AdoptClients = nil
+	rec.Clients = nil
+	rec.OperationState = AdoptOperationStateAdopting
+	rec.UpdatedAt = time.Now().Add(-2 * time.Hour).UTC()
+	rec.ProviderSource = &ProviderSourceProvenanceV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: rec.ManifestName,
+		Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "prior",
+		PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true,
+		ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_planned",
+	}
+	seedAdoptProvenanceMutatorRecord(t, rec)
+
+	if reaped, err := gcOrphanedAdoptingProvenance(time.Hour); err != nil || reaped != 0 {
+		t.Fatalf("ambiguous provider recovery GC = reaped=%d err=%v, want retained", reaped, err)
+	}
+	plan, err := NewAPI().BuildDeAdoptPlan(rec.ManifestName)
+	if err != nil {
+		t.Fatalf("BuildDeAdoptPlan provider recovery: %v", err)
+	}
+	if plan.Routing != DeAdoptRoutingFresh || plan.RefusalReason != "" {
+		t.Fatalf("provider recovery plan = %+v, want executable explicit recovery", plan)
+	}
+}
+
+func TestBuildAdoptPlanRefusesProviderRecoveryReceipt(t *testing.T) {
+	isolateStateDir(t)
+	rec := sampleAdoptRecord()
+	rec.ManifestName = "provider-recovery-refusal"
+	rec.SourceEntryName = rec.ManifestName
+	rec.AdoptClients = nil
+	rec.Clients = nil
+	rec.OperationState = AdoptOperationStateAdopting
+	rec.ProviderSource = &ProviderSourceProvenanceV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: rec.ManifestName,
+		Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "prior",
+		PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true,
+		ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_planned",
+	}
+	seedAdoptProvenanceMutatorRecord(t, rec)
+	_, err := NewAPI().BuildAdoptPlan(AdoptOpts{EntryName: rec.ManifestName, Client: "codex-cli", ManifestName: rec.ManifestName, ProviderPluginRef: rec.ProviderSource.PluginRef})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_RECOVERY_REQUIRED") {
+		t.Fatalf("fresh provider adopt error=%v, want recovery refusal", err)
+	}
+}
+
+func TestCaptureAdoptProvenanceGenericUpsertPreservesProviderRecoveryReceipt(t *testing.T) {
+	entry := "provider-recovery-generic-capture"
+	setupAdoptTestEnv(t, entry, `[mcp_servers.provider-recovery-generic-capture]
+command = "go"
+args = ["version"]
+`)
+
+	prior := sampleAdoptRecord()
+	prior.ManifestName = entry
+	prior.SourceEntryName = entry
+	prior.AdoptClients = []string{"codex-cli"}
+	prior.Clients = prior.Clients[:1]
+	prior.Clients[0].Client = "codex-cli"
+	prior.Clients[0].SnapshotRef = "adopt-provenance/" + entry + "/codex-cli.snapshot"
+	prior.OperationState = AdoptOperationStateAdopting
+	prior.ProviderSource = sampleProviderSource()
+	prior.ProviderSource.ServerName = entry
+	prior.ProviderSource.DisablePhase = "disable_planned"
+	snapshotDir := seedAdoptProvenanceMutatorRecord(t, prior)
+	before, found, err := ReadAdoptProvenance(entry)
+	if err != nil || !found {
+		t.Fatalf("read seeded recovery receipt: found=%v err=%v", found, err)
+	}
+	snapshotPath := filepath.Join(snapshotDir, "codex-cli.snapshot")
+	snapshotBefore, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("read seeded recovery snapshot: %v", err)
+	}
+
+	plan := &AdoptPlan{
+		EntryName:        entry,
+		SourceClient:     "codex-cli",
+		ManifestName:     entry,
+		Port:             nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+		AdoptClients:     []string{"codex-cli"},
+		ManifestYAML:     "name: " + entry + "\n",
+		presentAtBuild:   []string{"codex-cli"},
+		TargetEntryNames: map[string]string{"codex-cli": entry},
+	}
+	previousUnmutated := adoptRowProvablyUnmutatedFn
+	adoptRowProvablyUnmutatedFn = func(AdoptProvenanceRecord) bool { return true }
+	t.Cleanup(func() { adoptRowProvablyUnmutatedFn = previousUnmutated })
+	if _, err := NewAPI().captureAdoptProvenance(plan); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_RECOVERY_REQUIRED") {
+		t.Fatalf("generic capture error=%v, want E_PROVIDER_RECOVERY_REQUIRED", err)
+	}
+
+	after, found, err := ReadAdoptProvenance(entry)
+	if err != nil || !found {
+		t.Fatalf("read recovery receipt after generic capture: found=%v err=%v", found, err)
+	}
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("generic capture changed provider recovery receipt\nbefore=%#v\nafter=%#v", before, after)
+	}
+	snapshotAfter, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("read recovery snapshot after generic capture: %v", err)
+	}
+	if !reflect.DeepEqual(snapshotAfter, snapshotBefore) {
+		t.Fatalf("generic capture changed provider recovery snapshot: before=%q after=%q", snapshotBefore, snapshotAfter)
+	}
+}
+
+func TestAdvanceProviderDeAdoptPhaseRequiresExactLinearTransition(t *testing.T) {
+	isolateStateDir(t)
+	rec := sampleAdoptRecord()
+	rec.ManifestName = "provider-phase"
+	rec.OperationState = AdoptOperationStateDeAdopting
+	rec.ProviderSource = &ProviderSourceProvenanceV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: rec.ManifestName,
+		Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "prior",
+		PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true,
+		ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied",
+	}
+	seedAdoptProvenanceMutatorRecord(t, rec)
+
+	if _, err := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_removed"); err == nil {
+		t.Fatal("skipped phase transition was accepted")
+	}
+	updated, err := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
+	if err != nil || updated.ProviderSource.DeAdoptPhase != "managed_stop_settled" {
+		t.Fatalf("first phase update = %+v err=%v", updated, err)
+	}
+	if _, err := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled"); err == nil {
+		t.Fatal("stale expected phase was accepted")
+	}
 }

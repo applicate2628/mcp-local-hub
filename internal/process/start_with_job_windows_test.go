@@ -49,6 +49,7 @@ func TestPrepareWindowsCommand_EnvironmentParity(t *testing.T) {
 		{name: "mixed_case_last_wins", env: []string{"McpHub_PR591_Case=first", "MCPHUB_PR591_CASE=last", "PWD=explicit"}},
 		{name: "explicit_empty_systemroot", env: []string{"SYSTEMROOT="}},
 		{name: "leading_equals", env: []string{"=C:=C:\\work", "MCPHUB_PR591_CASE=value"}},
+		{name: "non_ascii", env: []string{"MCPHUB_PR591_CASE=Привет🙂"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cmd := &exec.Cmd{Path: exe, Args: []string{exe}, Env: tc.env}
@@ -56,8 +57,8 @@ func TestPrepareWindowsCommand_EnvironmentParity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			got := decodeWindowsEnvironmentBlock(t, block)
 			want := sortedWindowsEnvironment(cmd.Environ())
+			got := decodeWindowsEnvironmentBlock(t, block, windowsEnvironmentBlockUnits(want))
 			if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 				t.Fatalf("environment block=%q, want Cmd.Environ normalization=%q", got, want)
 			}
@@ -128,12 +129,12 @@ func TestStartWithJob_ChildSeesNormalizedEnvironment(t *testing.T) {
 	t.Fatal("child did not write normalized environment probe")
 }
 
-func decodeWindowsEnvironmentBlock(t *testing.T, ptr *uint16) []string {
+func decodeWindowsEnvironmentBlock(t *testing.T, ptr *uint16, wordsCount int) []string {
 	t.Helper()
 	if ptr == nil {
 		t.Fatal("nil environment block")
 	}
-	words := unsafe.Slice(ptr, 1<<20)
+	words := unsafe.Slice(ptr, wordsCount)
 	var out []string
 	start := 0
 	for i, word := range words {
@@ -148,6 +149,14 @@ func decodeWindowsEnvironmentBlock(t *testing.T, ptr *uint16) []string {
 	}
 	t.Fatal("environment block lacks final double NUL")
 	return nil
+}
+
+func windowsEnvironmentBlockUnits(env []string) int {
+	wordsCount := 1 // final NUL terminator
+	for _, entry := range env {
+		wordsCount += len(utf16.Encode([]rune(entry))) + 1
+	}
+	return wordsCount
 }
 
 func sortedWindowsEnvironment(env []string) []string {

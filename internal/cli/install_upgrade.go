@@ -146,11 +146,15 @@ type UpgradeReceiptV1 struct {
 //     each method to its real implementation (see file-level
 //     docstring binding table).
 type UpgradeOpts struct {
-	BinaryPath       string
-	NewBinary        string
-	PipePath         string
-	QuiesceTimeoutMs int
-	ExitTimeoutMs    int
+	// WindowsProductPair selects the role-aware two-artifact transaction. When
+	// present it is the sole mutation/receipt owner; none of the historical
+	// single-binary callbacks below are invoked.
+	WindowsProductPair *WindowsProductPairTxn
+	BinaryPath         string
+	NewBinary          string
+	PipePath           string
+	QuiesceTimeoutMs   int
+	ExitTimeoutMs      int
 	// ExpectedPorts is the list of listening ports the prior
 	// supervisor's daemon children were bound to (read from
 	// supervisor-intent.json before invoking RunInstallUpgrade).
@@ -268,7 +272,10 @@ const (
 // == 0, defaults (30000 / 5000 ms respectively) are filled in. This
 // matches the spec's stated budgets without forcing every caller to
 // repeat them.
-func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
+func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
+	if opts.WindowsProductPair != nil {
+		defer func() { retErr = errors.Join(retErr, opts.WindowsProductPair.Close()) }()
+	}
 	callerQuiesceTimeoutMs := opts.QuiesceTimeoutMs
 	callerExitTimeoutMs := opts.ExitTimeoutMs
 
@@ -361,6 +368,14 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 				fmt.Errorf("prior canonical drifted after fleet release and before promotion: %w", err))
 		}
 	}
+	if opts.WindowsProductPair != nil {
+		_, err := opts.WindowsProductPair.Run(ctx)
+		var prePromotion *WindowsProductPairPrePromotionError
+		if errors.As(err, &prePromotion) {
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, err)
+		}
+		return err
+	}
 
 	// Promotion occurs only after candidate admission and complete old-fleet
 	// release have both been proven.
@@ -393,8 +408,8 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) error {
 	// Step 6: Start the admitted successor through the wired platform adapter.
 	//
 	// Windows always uses spawnSupervisorDetached: detached CreateProcess with
-	// CREATE_BREAKAWAY_FROM_JOB when admitted by the parent job, a flagless
-	// detached retry otherwise, and the shared no-window child policy. The new
+	// required breakaway and the shared no-window child policy. A denied
+	// breakaway fails typed without a flagless successor. The new
 	// supervisor's
 	// stdin/stdout/stderr inherit nothing from this CLI process, so it
 	// survives both the upgrade caller's exit and the closing of the

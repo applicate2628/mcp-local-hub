@@ -2,6 +2,7 @@ package clients
 
 import (
 	"bytes"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,6 +66,71 @@ func TestClassifyEntryUnderLockPerAdapter(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Codex's physical de-adopt preview must project the same HTTP timeout that
+// the guarded mutation re-reads. Otherwise an exact managed entry can be
+// previewed as changed even though its strict CAS matcher accepts it.
+func TestCodexClassifyEntryUnderLockProjectsToolTimeoutSec(t *testing.T) {
+	matchTimeout := func(timeout int) func(*MCPEntry) bool {
+		return func(entry *MCPEntry) bool {
+			return entry != nil && entry.URL == casHubURL && entry.ToolTimeoutSec == timeout
+		}
+	}
+	configForTimeout := func(timeoutLine string) string {
+		return "[mcp_servers.serena]\n" +
+			"url = \"" + casHubURL + "\"\n" +
+			"startup_timeout_sec = 10\n" + timeoutLine
+	}
+
+	t.Run("timeout-30-matches-classification-and-guarded-read", func(t *testing.T) {
+		c := &codexCLI{path: casWriteCfg(t, "config.toml", configForTimeout("tool_timeout_sec = 30\n"))}
+		entry, err := c.GetEntry("serena")
+		if err != nil || entry == nil || entry.ToolTimeoutSec != 30 {
+			t.Fatalf("GetEntry timeout = (%+v, %v), want timeout 30", entry, err)
+		}
+
+		verdict, err := c.ClassifyEntryUnderLock("serena", matchTimeout(30), nil)
+		if err != nil || verdict != ClassifyStillHub {
+			t.Fatalf("timeout-30 classify = (%v, %v), want (%v, nil)", verdict, err, ClassifyStillHub)
+		}
+	})
+
+	t.Run("absent-timeout-projects-zero", func(t *testing.T) {
+		c := &codexCLI{path: casWriteCfg(t, "config.toml", configForTimeout(""))}
+		entry, err := c.GetEntry("serena")
+		if err != nil || entry == nil || entry.ToolTimeoutSec != 0 {
+			t.Fatalf("GetEntry absent timeout = (%+v, %v), want timeout 0", entry, err)
+		}
+
+		verdict, err := c.ClassifyEntryUnderLock("serena", matchTimeout(0), nil)
+		if err != nil || verdict != ClassifyStillHub {
+			t.Fatalf("absent-timeout classify = (%v, %v), want (%v, nil)", verdict, err, ClassifyStillHub)
+		}
+	})
+
+	t.Run("real-timeout-mismatch-remains-conflict-and-refuses-remove", func(t *testing.T) {
+		c := &codexCLI{path: casWriteCfg(t, "config.toml", configForTimeout("tool_timeout_sec = 31\n"))}
+		before, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		verdict, err := c.ClassifyEntryUnderLock("serena", matchTimeout(30), nil)
+		if err != nil || verdict != ClassifyGenuineConflict {
+			t.Fatalf("timeout mismatch classify = (%v, %v), want (%v, nil)", verdict, err, ClassifyGenuineConflict)
+		}
+		if err := c.CASGuardedRemoveEntry("serena", matchTimeout(30)); !errors.Is(err, ErrCASConflict) {
+			t.Fatalf("timeout mismatch remove = %v, want ErrCASConflict", err)
+		}
+		after, err := os.ReadFile(c.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(after, before) {
+			t.Fatalf("timeout mismatch remove mutated config:\n before: %s\n after: %s", before, after)
+		}
+	})
 }
 
 // T16: a lower MiMoCode layer re-emerges in GetEntry after the hub's write-target

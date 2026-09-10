@@ -51,9 +51,9 @@ func runDeAdoptCommandWithFake(t *testing.T, fake *fakeDeAdoptCLIAPI, args ...st
 
 func TestDeAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) {
 	const (
-		name   = "deadopt-dry-cli"
-		secret = "deadopt-cli-secret-must-not-leak"
+		name = "deadopt-dry-cli"
 	)
+	secret := "fixture-only-canary:deadopt-cli:" + t.Name()
 	root := t.TempDir()
 	home := filepath.Join(root, "home")
 	stateRoot := filepath.Join(root, "state")
@@ -72,8 +72,21 @@ func TestDeAdoptCmdDryRunByDefaultMutatesNothingAndRedactsSecrets(t *testing.T) 
 	if err := os.MkdirAll(filepath.Dir(codexPath), 0o700); err != nil {
 		t.Fatalf("mkdir codex config parent: %v", err)
 	}
+	if err := os.WriteFile(codexPath, []byte(`[mcp_servers.deadopt-dry-cli]
+command = "go"
+args = ["version"]
+`), 0o600); err != nil {
+		t.Fatalf("seed direct codex config for manifest producer: %v", err)
+	}
+	adoptPlan, err := api.NewAPI().BuildAdoptPlan(api.AdoptOpts{
+		EntryName: name, Client: "codex-cli", ManifestName: name, Port: 9345,
+	})
+	if err != nil {
+		t.Fatalf("build adopted manifest fixture: %v", err)
+	}
+	manifestBytes := []byte(adoptPlan.ManifestYAML)
 	initialConfig := `[mcp_servers.deadopt-dry-cli]
-url = "http://127.0.0.1:0/mcp"
+url = "http://127.0.0.1:9345/mcp"
 
 [mcp_servers.unrelated]
 command = "go"
@@ -83,10 +96,8 @@ args = ["version"]
 API_KEY = "` + secret + `"
 `
 	if err := os.WriteFile(codexPath, []byte(initialConfig), 0o600); err != nil {
-		t.Fatalf("seed codex config: %v", err)
+		t.Fatalf("seed adopted codex config: %v", err)
 	}
-
-	manifestBytes := []byte("name: " + name + "\n")
 	manifestPath := filepath.Join(manifestRoot, name, "manifest.yaml")
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o700); err != nil {
 		t.Fatalf("mkdir manifest dir: %v", err)
@@ -102,8 +113,8 @@ API_KEY = "` + secret + `"
 			ManifestName:         name,
 			SourceClient:         "codex-cli",
 			SourceEntryName:      name,
-			Port:                 0,
-			AdoptClients:         []string{"codex-cli"},
+			Port:                 adoptPlan.Port,
+			AdoptClients:         append([]string(nil), adoptPlan.AdoptClients...),
 			AdoptManifestHash:    hash,
 			ExpectedManifestHash: hash,
 			OperationState:       api.AdoptOperationStateAdopted,

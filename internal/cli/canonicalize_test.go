@@ -64,7 +64,7 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		want := writeGUIPEFile(src, "FRESH-v2")
 
 		var w bytes.Buffer
-		if err := canonicalizeBinaryToTarget(&w, src, target); err != nil {
+		if err := canonicalizeSingleBinaryToTarget(&w, src, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
 		if got := readFile(target); !bytes.Equal(got, want) {
@@ -80,7 +80,7 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		writeGUIPEFile(target, "STALE-v1")
 
 		var w bytes.Buffer
-		if err := canonicalizeBinaryToTarget(&w, src, target); err != nil {
+		if err := canonicalizeSingleBinaryToTarget(&w, src, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
 		if got := readFile(target); !bytes.Equal(got, want) {
@@ -102,7 +102,7 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		writeFile(target, want)
 
 		var w bytes.Buffer
-		if err := canonicalizeBinaryToTarget(&w, src, target); err != nil {
+		if err := canonicalizeSingleBinaryToTarget(&w, src, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
 		if got := readFile(target); !bytes.Equal(got, want) {
@@ -119,7 +119,7 @@ func TestCanonicalizeBinaryToTarget(t *testing.T) {
 		want := writeGUIPEFile(target, "RUNNING")
 
 		var w bytes.Buffer
-		if err := canonicalizeBinaryToTarget(&w, target, target); err != nil {
+		if err := canonicalizeSingleBinaryToTarget(&w, target, target); err != nil {
 			t.Fatalf("canonicalize: %v", err)
 		}
 		if got := readFile(target); !bytes.Equal(got, want) {

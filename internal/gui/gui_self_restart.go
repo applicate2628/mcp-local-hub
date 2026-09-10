@@ -57,6 +57,7 @@ import (
 	"sync"
 
 	"mcp-local-hub/internal/api"
+	processowner "mcp-local-hub/internal/process"
 )
 
 // SelfRestartHandoffEnv is the env var the parent sets on the spawned
@@ -315,7 +316,7 @@ func SpawnRestartV3GUI(argv []string, handoff SelfRestartHandoff) (RestartParent
 	childArgs := append([]string(nil), argv...)
 	childEnv := replaceEnvironmentValue(os.Environ(), SelfRestartHandoffEnv, rawHandoff)
 	build := func() *exec.Cmd { return newRestartV3GUICmd(exe, childArgs, childEnv) }
-	cmd, err := startDetachedSupervisorTolerant(build)
+	cmd, err := startDetachedSupervisorTolerant(build, processowner.BreakawayPolicyForCurrentProcess())
 	if err != nil {
 		return nil, fmt.Errorf("start retained replacement gui: %w", err)
 	}

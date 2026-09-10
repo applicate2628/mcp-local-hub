@@ -221,18 +221,23 @@ func openWindowsLeaseNamespaceRootWithAccess(access, share uint32) (windows.Hand
 	if err != nil {
 		return windows.InvalidHandle, AdoptLeaseNamespaceReport{}, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootUnavailable, AdoptLeaseActionLeaveUnchanged, err)
 	}
+	if err := injectedWindowsAdoptLeaseFailure("root-open"); err != nil {
+		report, publicErr := refusedWindowsAdoptLeaseStateRootReport(AdoptLeaseNamespaceFailureRootOpen, err)
+		return windows.InvalidHandle, report, publicErr
+	}
 	p, err := windows.UTF16PtrFromString(stateDir)
 	if err != nil {
-		return windows.InvalidHandle, AdoptLeaseNamespaceReport{}, newLeaseNamespaceOperationFailure(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+		report, publicErr := refusedWindowsAdoptLeaseStateRootReport(AdoptLeaseNamespaceFailureRootOpen, err)
+		return windows.InvalidHandle, report, publicErr
 	}
 	root, err := windows.CreateFile(p, access, share, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
-		report, publicErr := refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+		report, publicErr := refusedWindowsAdoptLeaseStateRootReport(AdoptLeaseNamespaceFailureRootOpen, err)
 		return windows.InvalidHandle, report, publicErr
 	}
 	if err := refuseReparsePointHandle(root); err != nil {
 		_ = windows.CloseHandle(root)
-		report, publicErr := refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, err)
+		report, publicErr := refusedWindowsAdoptLeaseStateRootReport(AdoptLeaseNamespaceFailureRootKindReparse, err)
 		return windows.InvalidHandle, report, publicErr
 	}
 	if err := verifyWindowsDACLFromHandle(root); err != nil {
@@ -244,10 +249,15 @@ func openWindowsLeaseNamespaceRootWithAccess(access, share uint32) (windows.Hand
 			}, nil
 		}
 		_ = windows.CloseHandle(root)
-		report, publicErr := refusedLeaseNamespaceReport(AdoptLeaseReasonStateRootRefused, AdoptLeaseActionLeaveUnchanged, errors.Join(err, legacyErr))
+		report, publicErr := refusedWindowsAdoptLeaseStateRootReport(AdoptLeaseNamespaceFailureRootSecurity, errors.Join(err, legacyErr))
 		return windows.InvalidHandle, report, publicErr
 	}
 	return root, AdoptLeaseNamespaceReport{}, nil
+}
+
+func refusedWindowsAdoptLeaseStateRootReport(category AdoptLeaseNamespaceFailureCategory, cause error) (AdoptLeaseNamespaceReport, error) {
+	report := AdoptLeaseNamespaceReport{State: AdoptLeaseNamespaceRefused, ReasonID: AdoptLeaseReasonStateRootRefused, Action: AdoptLeaseActionLeaveUnchanged}
+	return report, newWindowsAdoptLeaseStateRootFailure(category, cause)
 }
 
 func openExistingWindowsLeaseNamespace(root windows.Handle, access, share uint32) (windows.Handle, bool, error) {

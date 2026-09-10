@@ -269,7 +269,7 @@ func TestSetup_LivenessInstallFailureFailsClosedAndKeepsLegacyWatchdog(t *testin
 func TestSetup_LivenessReadbackDriftRestoresPriorTaskAndFailsClosed(t *testing.T) {
 	_, fakeSch := setupWatchdogTestHelper(t)
 	prior := scheduler.EncodeXMLUTF16LEBOM(scheduler.BuildLivenessXML(
-		`C:\previous\mcphub.exe`, `C:\previous`, "test-user"))
+		`C:\previous\mcphub.exe`, `C:\previous`, "S-1-5-21-test", "test-user"))
 	fakeSch.tasks[api.LivenessTaskName] = prior
 	firstImport := true
 	fakeSch.normalizeImport = func(raw []byte) []byte {
@@ -278,7 +278,7 @@ func TestSetup_LivenessReadbackDriftRestoresPriorTaskAndFailsClosed(t *testing.T
 		}
 		firstImport = false
 		return scheduler.EncodeXMLUTF16LEBOM(strings.Replace(
-			scheduler.BuildLivenessXML(`C:\fake\mcphub.exe`, `C:\fake`, "test-user"),
+			scheduler.BuildLivenessXML(`C:\fake\mcphub.exe`, `C:\fake`, "S-1-5-21-test", "test-user"),
 			"<Interval>PT1M</Interval>", "<Interval>PT5M</Interval>", 1))
 	}
 

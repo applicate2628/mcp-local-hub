@@ -134,11 +134,10 @@ func samePath(a, b string) bool {
 	return ac == bc
 }
 
-// copyExe copies src to dst via a tempfile + rename so a failed copy never
-// leaves a partial exe at dst. On Windows an existing dst must be removed
-// first because os.Rename refuses to overwrite; if dst is locked by a
-// running process we surface a friendly hint.
-func copyExe(src, dst string) error {
+// copySingleBinaryPlatformArtifact is the non-Windows product-copy helper and
+// the historical Windows single-GUI compatibility helper. New Windows setup,
+// canonicalize, and upgrade product paths must use WindowsProductPairTxn.
+func copySingleBinaryPlatformArtifact(src, dst string) error {
 	return copyExeWithWindowsAdmission(src, dst, binaryadmission.AdmitWindowsGUI)
 }
 
@@ -260,15 +259,7 @@ func bootstrapCopyOnly(w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("resolve current executable: %w", err)
 	}
-	if samePath(curExe, target) {
-		fmt.Fprintf(w, "\u2713 mcphub already at %s (no copy needed)\n", target)
-		return nil
-	}
-	if err := copyExe(curExe, target); err != nil {
-		return err
-	}
-	fmt.Fprintf(w, "\u2713 mcphub installed at %s\n", target)
-	return nil
+	return bootstrapProductToTarget(w, curExe, target)
 }
 
 // newSetupCmdReal returns the `mcphub setup` command.
@@ -280,15 +271,18 @@ func newSetupCmdReal() *cobra.Command {
 	var fixEphemeralRange bool
 	c := &cobra.Command{
 		Use:   "setup",
-		Short: "Install mcphub to ~/.local/bin, register PATH, install the supervisor-liveness task",
-		Long: `Canonicalize the mcphub binary at ~/.local/bin/mcphub.exe (Windows) or
+		Short: "Install the mcphub product to ~/.local/bin, register PATH, install the supervisor-liveness task",
+		Long: `Install the admitted mcphub.exe + mcphub-windowless.exe product pair at
+~/.local/bin on Windows, or canonicalize ~/.local/bin/mcphub on Linux/macOS,
 ~/.local/bin/mcphub (Linux/macOS), ensure that directory is on user PATH,
 and install the supervisor-liveness scheduled task that relaunches the
 supervisor/GUI owner if it dies mid-session (cadence ~1 min).
 
 What setup does:
-  1. Copies the currently-running mcphub binary to ~/.local/bin/
-     (idempotent — skips copy if already at target)
+  1. Windows: admits the currently-running CUI mcphub.exe and its exact
+     mcphub-windowless.exe sibling, then installs adapter-first/tasks/CUI-last,
+     reads back the pair and exact-owned task Command nodes, and commits a V2
+     receipt. Linux/macOS: copies the running binary to ~/.local/bin/.
   2. Windows: ensures %USERPROFILE%\.local\bin is in HKCU\Environment\Path,
      broadcasts WM_SETTINGCHANGE so new shells pick it up
   3. Linux/macOS: prints the 'export PATH=...' line to paste into shell rc
@@ -327,7 +321,7 @@ What setup does:
      No prompts — intended for scripted/CI setup. The server name is validated
      against the shipped manifest set up front, and the whole command fails
      loud (before any side effect)
-     if it is unknown. Runs last, after the binary is canonicalized and the
+     if it is unknown. Runs last, after the product is canonicalized and the
      maintenance task is installed. Omitting the flag leaves the default
      flow unchanged (setup installs no server).
 
@@ -347,16 +341,15 @@ Rollback:
   preregistrations for the router's auto-register path.
 
 Why this exists:
-  Scheduler tasks reference ~/.local/bin/mcphub.exe by absolute path
-  (Task Scheduler's CreateProcess doesn't honor PATH reliably, so a
-  bare 'mcphub.exe' Command fails with ERROR_FILE_NOT_FOUND). The
-  canonical path depends only on $HOME, not on dev checkout location,
-  so moving or rebuilding the binary only requires 're-running setup'
-  — scheduler tasks keep working without any rewrite.
+  Direct terminal commands use ~/.local/bin/mcphub.exe. Supported Scheduler
+  tasks and Explorer/background routes use the absolute windowless adapter
+  ~/.local/bin/mcphub-windowless.exe; Task Scheduler does not resolve this
+  product contract through PATH. Setup migrates only admitted exact-owned task
+  Command nodes inside the same pair transaction.
 
 Examples:
   mcphub setup                    # after 'go build', before first 'install'
-  mcphub setup                    # after pulling + rebuilding — replaces the canonical copy
+  mcphub setup                    # after pulling + rebuilding — settles the canonical product pair
   mcphub setup --rollback-lsp-router
   mcphub setup --allow-elevated   # bypass §42 elevation refusal (audit fail-closed)
   mcphub setup --trusted-root <project-root>    # bless one LSP trusted root
@@ -366,9 +359,8 @@ Examples:
 Caveats:
   - The shell that ran 'setup' won't see the updated PATH — close and
     reopen it. WM_SETTINGCHANGE only reaches NEW shells.
-  - If ~/.local/bin/mcphub.exe is currently running (as a hub daemon),
-    the copy step fails with 'target is in use' — run 'mcphub stop --all'
-    first, or kill the daemon processes manually.
+  - Existing mapped Windows product images are replaced with running-image-safe
+    rename-aside; setup does not require a remove-first copy or a fleet stop.
   - --allow-elevated overrides plan §42 administrator-install refusal.
     Use it ONLY when you know the supervisor-liveness task must run as
     the elevated user. The override is recorded in intent-audit.log with

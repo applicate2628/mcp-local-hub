@@ -66,6 +66,82 @@ func TestEntrypointTaskTxnPreservesRawXMLOutsideCommand(t *testing.T) {
 	}
 }
 
+func TestEntrypointTaskTxnKeepsExistingRuntimeAndIgnoresOperatorCommand(t *testing.T) {
+	t.Parallel()
+
+	const priorCLI = "C:\\mcp\\mcphub.exe"
+	const runtime = "C:\\mcp\\mcphub-windowless.exe"
+	const operator = "C:\\operator\\custom-launcher.exe"
+	before := map[string][]byte{
+		"\\mcp-local-hub-autostart": taskXML("\\mcp-local-hub-autostart", "test-user", runtime, "gui", "already migrated"),
+		"\\mcp-local-hub-liveness":  taskXML("\\mcp-local-hub-liveness", "test-user", priorCLI, "supervise --ensure-alive", "legacy"),
+		"\\mcp-local-hub-operator":  taskXML("\\mcp-local-hub-operator", "test-user", operator, "custom", "operator-owned command"),
+	}
+	backend := newEntrypointTaskBackendFake(before, "test-user")
+	txn, err := beginOwnedEntrypointTaskTxnWith(context.Background(), t.TempDir()+"\\entrypoint.lock", priorCLI, runtime, backend, "test-user")
+	if err != nil {
+		t.Fatalf("begin transaction: %v", err)
+	}
+	t.Cleanup(func() { _ = txn.Close() })
+	if err := txn.InventoryExport(); err != nil {
+		t.Fatalf("inventory export: %v", err)
+	}
+	if err := txn.RewriteCommand(); err != nil {
+		t.Fatalf("rewrite command: %v", err)
+	}
+	if err := txn.VerifyRuntime(); err != nil {
+		t.Fatalf("verify runtime: %v", err)
+	}
+	for _, name := range []string{"\\mcp-local-hub-autostart", "\\mcp-local-hub-operator"} {
+		got, err := backend.ExportXML(name)
+		if err != nil || !bytes.Equal(got, before[name]) {
+			t.Fatalf("task %s changed: err=%v\n got=%s\nwant=%s", name, err, got, before[name])
+		}
+	}
+	legacy, err := backend.ExportXML("\\mcp-local-hub-liveness")
+	if err != nil || !bytes.Contains(legacy, []byte("<Command>"+runtime+"</Command>")) {
+		t.Fatalf("legacy task was not migrated: err=%v xml=%s", err, legacy)
+	}
+}
+
+func TestEntrypointTaskTxnMigratesCaseVariantPriorPathButKeepsDifferentTarget(t *testing.T) {
+	const priorCLI = `C:\Program Files\mcp-local-hub\mcphub.exe`
+	const runtime = `C:\Program Files\mcp-local-hub\mcphub-windowless.exe`
+	caseVariantPrior := `c:\PROGRAM FILES\MCP-LOCAL-HUB\MCPHUB.EXE`
+	caseVariantRuntime := `c:\program files\mcp-local-hub\mcphub-windowless.exe`
+	const differentTarget = `C:\Program Files\mcp-local-hub\mcphub-other.exe`
+	before := map[string][]byte{
+		`\mcp-local-hub-legacy`:  taskXML(`\mcp-local-hub-legacy`, "test-user", caseVariantPrior, "gui", "legacy"),
+		`\mcp-local-hub-runtime`: taskXML(`\mcp-local-hub-runtime`, "test-user", caseVariantRuntime, "gui", "already migrated"),
+		`\mcp-local-hub-other`:   taskXML(`\mcp-local-hub-other`, "test-user", differentTarget, "gui", "operator target"),
+	}
+	backend := newEntrypointTaskBackendFake(before, "test-user")
+	txn, err := beginOwnedEntrypointTaskTxnWith(context.Background(), t.TempDir()+`\entrypoint.lock`, priorCLI, runtime, backend, "test-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = txn.Close() })
+	if err := txn.InventoryExport(); err != nil {
+		t.Fatalf("inventory case variant: %v", err)
+	}
+	if err := txn.RewriteCommand(); err != nil {
+		t.Fatalf("rewrite case variant: %v", err)
+	}
+	if err := txn.VerifyRuntime(); err != nil {
+		t.Fatalf("verify case variant: %v", err)
+	}
+	legacy, err := backend.ExportXML(`\mcp-local-hub-legacy`)
+	if err != nil || !bytes.Contains(legacy, []byte(`<Command>`+runtime+`</Command>`)) {
+		t.Fatalf("case-variant legacy task was not migrated: err=%v xml=%s", err, legacy)
+	}
+	for _, name := range []string{`\mcp-local-hub-runtime`, `\mcp-local-hub-other`} {
+		got, err := backend.ExportXML(name)
+		if err != nil || !bytes.Equal(got, before[name]) {
+			t.Fatalf("non-prior task %q changed: err=%v got=%s want=%s", name, err, got, before[name])
+		}
+	}
+}
+
 func TestEntrypointTaskTxnRewriteFailureLeavesCompensationToCoordinator(t *testing.T) {
 	t.Parallel()
 

@@ -14,6 +14,7 @@ env:
 daemons:
   - name: default
     port: 9132
+    mcp_protocol_compatibility_profile: stdio-http-legacy-2024-11-05
 
 client_bindings:
   - client: claude-code

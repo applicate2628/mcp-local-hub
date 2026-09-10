@@ -119,10 +119,15 @@ func TestGo126TargetMatrixMatchesToolchain(t *testing.T) {
 	}
 }
 
-func TestGo126KnownTagsExcludeRemovedPortsAndFutureFeatures(t *testing.T) {
-	for _, tag := range []string{"hurd", "nacl", "zos", "amd64p32", "armbe", "arm64be", "mips64p32", "ppc", "riscv", "s390", "sparc"} {
-		if isKnownGOOS(tag) || isKnownGOARCH(tag) {
-			t.Fatalf("removed Go target %q must remain a custom build tag", tag)
+func TestHistoricalFilenameTagsRemainRecognizedWithoutExpandingTargets(t *testing.T) {
+	for _, goos := range []string{"hurd", "nacl", "zos"} {
+		if !isKnownGOOS(goos) {
+			t.Fatalf("historical GOOS %q must remain a recognized filename suffix", goos)
+		}
+	}
+	for _, goarch := range []string{"amd64p32", "armbe", "arm64be", "mips64p32", "mips64p32le", "ppc", "riscv", "s390", "sparc"} {
+		if !isKnownGOARCH(goarch) {
+			t.Fatalf("historical GOARCH %q must remain a recognized filename suffix", goarch)
 		}
 	}
 	arm64 := &constraint.TagExpr{Tag: "arm64"}
@@ -191,6 +196,20 @@ func TestDescendantVendorIsSkippedButExplicitRootIsScanned(t *testing.T) {
 	}
 }
 
+func TestExplicitVendorRootPreservesCustomDescendantExclusions(t *testing.T) {
+	root := newFixtureRepo(t, map[string]string{
+		"internal/x/vendor/foo/kept.go":           "package foo\nvar kept = 1\n",
+		"internal/x/vendor/foo/generated/skip.go": "package generated\nvar skipped = 1\n",
+	})
+	policy := mustLoadPolicyForTest(t)
+	policy.SourceRoots = []string{"internal/x/vendor/foo"}
+	policy.ExcludeGlobs = append(policy.ExcludeGlobs, "**/generated/**")
+	got := violationsOfKind(mustScan(t, root, policy), KindMutableGlobal)
+	if len(got) != 1 || got[0].Location.Path != "internal/x/vendor/foo/kept.go" {
+		t.Fatalf("got=%#v, want only the non-excluded explicit vendor-root file", got)
+	}
+}
+
 func TestNormalizeEvidencePreservesSourceBackslashes(t *testing.T) {
 	got := normalizeEvidence(" workers[\"a\\\\b\"]() \n")
 	if got != `workers["a\\b"]()` {
@@ -201,17 +220,13 @@ func TestNormalizeEvidencePreservesSourceBackslashes(t *testing.T) {
 func TestImportedTypeResolutionRejectsShadowedAlias(t *testing.T) {
 	root := newFixtureRepo(t, map[string]string{
 		"internal/markdown/type.go": "package markdown\n\ntype Text string\n",
-		"internal/x/x.go": `package x
-
-import "mcp-local-hub/internal/markdown"
-
-type factory struct{}
-func (factory) Text(string) string { return "" }
-
-func F(markdown factory) {
-	_ = markdown.Text("# Heading\n```\n" + "x")
-}
-`,
+		"internal/x/x.go": "package x\n\n" +
+			"import \"mcp-local-hub/internal/markdown\"\n\n" +
+			"type factory struct{}\n" +
+			"func (factory) Text(string) string { return \"\" }\n\n" +
+			"func F(markdown factory) {\n" +
+			"\t_ = markdown.Text(\"# Heading\\n```\\n\" + \"x\")\n" +
+			"}\n",
 	})
 	policy := mustLoadPolicyForTest(t)
 	policy.SourceRoots = []string{"internal"}

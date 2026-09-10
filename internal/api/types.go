@@ -207,12 +207,13 @@ type ScanEntry struct {
 	// is "via-hub" only when its URL port matches one of these. Empty/
 	// absent when no manifest exists (so any loopback entry is unmanaged
 	// for this server). Mirrored as TS ScanEntry.daemon_ports.
-	DaemonPorts          []int                     `json:"daemon_ports,omitempty"`
-	ProcessCount         int                       `json:"process_count,omitempty"`
-	Classification       ReadinessClassificationV1 `json:"classification,omitempty"`
-	MaterializationState MaterializationStateV1    `json:"materialization_state,omitempty"`
-	BindingState         BindingStateV1            `json:"binding_state,omitempty"`
-	Readiness            *ReadinessSnapshotV1      `json:"readiness,omitempty"`
+	DaemonPorts          []int                           `json:"daemon_ports,omitempty"`
+	ProcessCount         int                             `json:"process_count,omitempty"`
+	ProcessAttribution   *ProcessAttributionDiagnosticV1 `json:"process_attribution,omitempty"`
+	Classification       ReadinessClassificationV1       `json:"classification,omitempty"`
+	MaterializationState MaterializationStateV1          `json:"materialization_state,omitempty"`
+	BindingState         BindingStateV1                  `json:"binding_state,omitempty"`
+	Readiness            *ReadinessSnapshotV1            `json:"readiness,omitempty"`
 
 	// ProjectEnabled is the per-project-GUI Phase 2b claude-code .mcp.json
 	// (Project-scope) APPROVAL reconciliation result for THIS server: true =
@@ -242,6 +243,27 @@ type ScanEntry struct {
 	// claude-code entry. The Local definition itself is surfaced once in
 	// ProjectScope.LocalServers.
 	ProjectShadowedByLocal *bool `json:"project_shadowed_by_local,omitempty"`
+}
+
+// ProcessAttributionContributorV1 identifies one process included in a scan
+// process count. It intentionally excludes command line, executable path,
+// environment, and creation-time data.
+type ProcessAttributionContributorV1 struct {
+	PID       int    `json:"pid"`
+	ParentPID int    `json:"parent_pid"`
+	RootPID   int    `json:"root_pid"`
+	Relation  string `json:"relation"`
+	Daemon    string `json:"daemon,omitempty"`
+}
+
+// ProcessAttributionDiagnosticV1 explains how ScanEntry.ProcessCount was
+// derived when ScanOpts.WithProcessCount is enabled.
+type ProcessAttributionDiagnosticV1 struct {
+	Version      int                               `json:"version"`
+	Scope        string                            `json:"scope"`
+	State        string                            `json:"state"`
+	ReasonID     string                            `json:"reason_id,omitempty"`
+	Contributors []ProcessAttributionContributorV1 `json:"contributors"`
 }
 
 // ClientEntry captures the shape of how one MCP server is configured inside
