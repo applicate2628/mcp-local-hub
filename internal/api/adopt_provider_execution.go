@@ -55,6 +55,25 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 	return matches[0], nil
 }
 
+// providerAdoptDaemonAbsent reports whether Install has not yet created any
+// supervisor ownership row for this adoption. It is used only while recovering
+// an adopting receipt: a mismatched row is not absence and remains fail-closed.
+func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
+	if rec == nil {
+		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	intent, err := loadSupervisorOwnedIntent()
+	if err != nil {
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	for _, daemon := range intent.Daemons {
+		if daemon.Server == rec.ManifestName && daemon.Daemon == adoptDefaultDaemonName {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 type providerExecutionState struct {
 	provider clients.ProviderMCPSourceV1
 	entry    clients.ProviderMCPEntryV1

@@ -627,13 +627,18 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
 		frozen, frozenErr := frozenProviderAdoptDaemon(rec)
 		if frozenErr != nil {
-			return report, frozenErr
+			absent, absentErr := providerAdoptDaemonAbsent(rec)
+			if rec.OperationState != AdoptOperationStateAdopting || absentErr != nil || !absent {
+				return report, frozenErr
+			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
-		cancel()
-		if stopErr != nil {
-			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
+		if frozenErr == nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
+			cancel()
+			if stopErr != nil {
+				return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
+			}
 		}
 		updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
 		if phaseErr != nil {

@@ -620,11 +620,9 @@ var adoptManifestExistsFn = func(manifestName string) (bool, error) {
 // manifest that exists OR cannot be stat'd => KEEP (fail-closed — REAP demands
 // positive absence, destructive-default polarity). Only when EVERY adopt_client is
 // cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
-// disk is the row a true pre-install crash orphan => REAP.
+// disk is the row a true pre-install crash orphan => REAP, except that a provider
+// receipt must be retained for explicit activation recovery.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
-	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
-		return adoptRowRecoveryKeep
-	}
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
 	// merely supplies its daemon-port input from the row instead of the mutable file.
@@ -658,6 +656,9 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 	// ManifestCreate), so it cannot spuriously refuse an operator re-adopt.
 	if exists, err := adoptManifestExistsFn(rec.ManifestName); err != nil || exists {
 		return adoptRowCommittedKeep
+	}
+	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
+		return adoptRowRecoveryKeep
 	}
 	return adoptRowCrashReap // no live binding AND no manifest on disk => pre-install crash orphan
 }
