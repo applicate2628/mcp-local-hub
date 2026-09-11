@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 )
@@ -216,5 +217,41 @@ func TestProviderRestoreGateDoesNotInventLegacySettlementFromAdoptingReceipt(t *
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("failed restore gate unexpectedly materialized marker: %v", err)
+	}
+}
+
+func TestRecordInstallAuditMarksProviderInstallStartedAfterAuditBarrier(t *testing.T) {
+	name := "provider-install-audit-barrier"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
+
+	previous := appendIntentAuditFn
+	appendIntentAuditFn = func(IntentAuditEntry) error { return nil }
+	t.Cleanup(func() { appendIntentAuditFn = previous })
+
+	if err := NewAPI().recordInstallAuditForTasks([]string{task}); err != nil {
+		t.Fatalf("recordInstallAuditForTasks: %v", err)
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseStarted {
+		t.Fatalf("phase after successful audit=%q err=%v, want %q", phase, err, providerInstallPhaseStarted)
+	}
+}
+
+func TestRecordInstallAuditFailureLeavesProviderInstallNotStarted(t *testing.T) {
+	name := "provider-install-audit-refusal"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
+
+	previous := appendIntentAuditFn
+	appendIntentAuditFn = func(IntentAuditEntry) error { return errors.New("injected audit failure") }
+	t.Cleanup(func() { appendIntentAuditFn = previous })
+
+	if err := NewAPI().recordInstallAuditForTasks([]string{task}); err == nil {
+		t.Fatal("recordInstallAuditForTasks unexpectedly crossed failed audit")
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseNotStarted {
+		t.Fatalf("phase after failed audit=%q err=%v, want %q", phase, err, providerInstallPhaseNotStarted)
 	}
 }
