@@ -75,14 +75,21 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 	return daemon, nil
 }
 
-// providerAdoptDaemonAbsent reports whether Install has not yet created any
-// supervisor ownership row for this adoption. It uses the same manifest-aware
-// ownership predicate as supervisor-intent removal so legacy blank-Server rows
-// cannot be mistaken for positive absence. Any owned row that is not the exact
-// frozen provider descriptor remains conflicting state and therefore fail-closed.
+// providerAdoptDaemonAbsent reports whether no supervisor ownership row exists
+// for this adoption. While de-adopt has not yet advanced a provider teardown
+// phase, absence is allowed to stand in for an already-satisfied managed-stop
+// obligation ONLY when the durable provider-install marker proves Install was
+// never entered. A missing/legacy marker or a started marker is therefore
+// fail-closed even if supervisor-intent.json is currently empty.
 func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
+		neverStarted, err := providerInstallNeverStarted(rec)
+		if err != nil || !neverStarted {
+			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
 	}
 	intent, err := loadSupervisorOwnedIntent()
 	if err != nil {
@@ -249,6 +256,12 @@ func resolveProviderExecutionState(plan *AdoptPlan, injected clients.ProviderMCP
 }
 
 func providerDisable(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) (clients.ProviderMCPActivationResultV1, error) {
+	if provenance == nil {
+		return clients.ProviderMCPActivationResultV1{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	if err := initializeProviderInstallPhase(provenance.ServerName); err != nil {
+		return clients.ProviderMCPActivationResultV1{}, err
+	}
 	result, err := state.provider.CompareAndSetProviderMCPActivation(ctx, clients.ProviderMCPActivationCASV1{
 		PluginRef: state.entry.PluginRef, ServerName: state.entry.ServerName,
 		ExpectedActivationFingerprint: provenance.ActivationFingerprint,
@@ -311,9 +324,6 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 	}
 	defer releaseSupervisorIntentAndJoin(&retErr, release, "provider restore ownership")
 
-	// Re-read both authorities after acquiring the writer lock. The provenance
-	// row protects which adoption is being recovered; the intent read protects
-	// the absence proof that authorizes provider re-enable.
 	current, found, provenanceErr = ReadAdoptProvenance(provenance.ServerName)
 	if provenanceErr != nil || !found || current.ProviderSource == nil || current.ProviderSource.DeAdoptPhase != "managed_removed" {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
