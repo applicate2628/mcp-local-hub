@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 )
 
@@ -63,18 +64,26 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 // initializeProviderInstallPhase is called before the provider activation CAS.
 // The marker lives inside the provenance snapshot directory, so the existing
 // snapshots-first abort/close owner removes it with the rest of the recovery
-// state. Existing bytes are accepted only when they are the exact initial state.
+// state. Existing bytes are accepted only when they are the exact initial state;
+// an existing corrupt/link/unreadable marker is never rewritten into invented
+// history.
 func initializeProviderInstallPhase(manifestName string) error {
 	path, err := providerInstallPhasePath(manifestName)
 	if err != nil {
 		return err
 	}
-	if phase, readErr := readProviderInstallPhase(manifestName); readErr == nil {
-		if phase == providerInstallPhaseNotStarted {
-			return nil
+	_, statErr := os.Lstat(path)
+	switch {
+	case statErr == nil:
+		phase, readErr := readProviderInstallPhase(manifestName)
+		if readErr != nil || phase != providerInstallPhaseNotStarted {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
+		return nil
+	case !errors.Is(statErr, fs.ErrNotExist):
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
+
 	raw, err := encodeProviderInstallPhase(providerInstallPhaseNotStarted)
 	if err != nil {
 		return err
