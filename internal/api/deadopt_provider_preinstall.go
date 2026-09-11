@@ -30,7 +30,8 @@ func settleProviderPreInstallManagedStop(manifestName string, expected *AdoptPro
 			}
 			if !deAdoptProvenanceIdentityMatches(expected, record) ||
 				record.OperationState != AdoptOperationStateAdopting ||
-				record.ProviderSource == nil {
+				record.ProviderSource == nil ||
+				*record.ProviderSource != *expected.ProviderSource {
 				return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 			}
 			if record.ProviderSource.DeAdoptPhase != "" {
