@@ -10,12 +10,17 @@ import (
 // created a supervisor ownership row. The caller holds the per-manifest lease
 // and must obtain that proof immediately before calling this helper.
 //
-// Persisting the phase while the record is still adopting closes the crash
-// window between entering de_adopting and E4: a retry no longer has to infer a
-// historical pre-Install fact from the current operation state.
+// The owner admits only an exact current record in adopting or de_adopting with
+// no later provider phase. The de_adopting case is the legacy crash-after-E2
+// state left by the previous implementation; callers must separately prove the
+// exact manifest still exists and supervisor ownership is positively absent.
 func settleProviderPreInstallManagedStop(manifestName string, expected *AdoptProvenanceRecord) (*AdoptProvenanceRecord, error) {
 	if expected == nil || expected.ProviderSource == nil {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	if expected.OperationState != AdoptOperationStateAdopting &&
+		expected.OperationState != AdoptOperationStateDeAdopting {
+		return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	var updated *AdoptProvenanceRecord
 	err := withAdoptedEntriesLock(func() error {
@@ -29,7 +34,7 @@ func settleProviderPreInstallManagedStop(manifestName string, expected *AdoptPro
 				continue
 			}
 			if !deAdoptProvenanceIdentityMatches(expected, record) ||
-				record.OperationState != AdoptOperationStateAdopting ||
+				record.OperationState != expected.OperationState ||
 				record.ProviderSource == nil ||
 				*record.ProviderSource != *expected.ProviderSource {
 				return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
