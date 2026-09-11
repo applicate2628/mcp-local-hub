@@ -181,12 +181,12 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	case AdoptOperationStateAdopted:
 		plan.Routing = DeAdoptRoutingFresh
 	case AdoptOperationStateAdopting:
-		// Provider disable is persisted before ManifestCreate. A positively absent
-		// manifest therefore identifies the explicit provider-recovery lane before
-		// any fallible client adapter/GetEntry probe. Stat uncertainty remains
-		// fail-closed and falls through to the ordinary committed classifier.
+		// Provider disable is persisted before ManifestCreate, but current file
+		// absence is not historical proof that Install never started. Bypass the
+		// fallible client probes only when the durable provider-install marker is
+		// exactly not_started as well as the manifest being positively absent.
 		if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
-			if exists, manifestErr := adoptManifestExistsFn(rec.ManifestName); manifestErr == nil && !exists {
+			if exists, manifestErr := adoptManifestExistsFn(rec.ManifestName); manifestErr == nil && !exists && providerInstallPhaseIsNotStarted(rec.ManifestName) {
 				plan.Routing = DeAdoptRoutingFresh
 				plan.providerRecovery = true
 				break
@@ -697,9 +697,10 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	}
 
 	deleteManifest := func() error {
-		if readiness.AlreadyAbsent {
-			return nil
-		}
+		// Always use the mutation-point hash gate, even when the earlier readiness
+		// snapshot observed the file absent. ManifestDeleteInWithHash is
+		// idempotent for continued absence, deletes an exact recreation, and
+		// rejects a changed recreation.
 		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
