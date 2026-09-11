@@ -130,6 +130,59 @@ func TestExecuteDeAdoptProviderPreInstallRowAfterManifestDeleteIsPreserved(t *te
 	}
 }
 
+func TestExecuteDeAdoptProviderRestoreRepairsLateExactRowAfterManagedRemoved(t *testing.T) {
+	name := "provider-restore-late-exact-row"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
+		t.Fatalf("remove manifest: %v", err)
+	}
+	rec.ProviderSource.DeAdoptPhase = "managed_removed"
+	writeDeAdoptExecutorRecord(t, rec)
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
+		TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
+		Server:       name,
+		Daemon:       adoptDefaultDaemonName,
+		Port:         rec.Port,
+		ManifestHash: rec.ExpectedManifestHash,
+	}}
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
+		t.Fatal(err)
+	}
+
+	previousStop := providerRecoveryStopManagedFn
+	stops := 0
+	providerRecoveryStopManagedFn = func(_ context.Context, _ *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
+		stops++
+		if frozen.Server != name || frozen.Daemon != adoptDefaultDaemonName || frozen.Port != rec.Port || frozen.ManifestHash != rec.ExpectedManifestHash {
+			t.Fatalf("unexpected late frozen row: %+v", frozen)
+		}
+		return StoppedSettlement{TaskName: frozen.TaskName, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped}, nil
+	}
+	t.Cleanup(func() { providerRecoveryStopManagedFn = previousStop })
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
+		providerDeps: providerTransactionDeps{source: provider},
+	})
+	if err != nil {
+		t.Fatalf("late exact managed row retry should repair and complete: %v", err)
+	}
+	if stops != 1 || provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("stops=%d provider=%+v calls=%d", stops, provider.entry, provider.calls)
+	}
+	intent, readErr := ReadSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf))
+	if readErr != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", readErr)
+	}
+	if len(intent.Daemons) != 0 {
+		t.Fatalf("late exact supervisor row remained after repair: %+v", intent.Daemons)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
 func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
 	name := "provider-restore-late-legacy-row"
 	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
