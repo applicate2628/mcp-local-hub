@@ -214,3 +214,46 @@ func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
 		t.Fatalf("provider restored while a legacy owned row remained: provider=%+v calls=%d", provider.entry, provider.calls)
 	}
 }
+
+func TestRemoveSettledProviderAdoptDaemonGenerationRejectsSameContentRewrite(t *testing.T) {
+	name := "provider-settled-generation-rewrite"
+	_, stateRoot, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
+		TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
+		Server:       name,
+		Daemon:       adoptDefaultDaemonName,
+		Port:         rec.Port,
+		ManifestHash: rec.ExpectedManifestHash,
+	}}
+	if err := WriteSupervisorIntent(intentPath, intent); err != nil {
+		t.Fatal(err)
+	}
+	frozen, generation, err := frozenProviderAdoptDaemonWithGeneration(rec)
+	if err != nil {
+		t.Fatalf("freeze provider row: %v", err)
+	}
+
+	// Recommit the identical descriptor. Descriptor equality alone cannot
+	// distinguish this replacement from the generation that was settled.
+	current, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(intentPath, current); err != nil {
+		t.Fatalf("rewrite identical provider row: %v", err)
+	}
+	if err := removeSettledProviderAdoptDaemonGeneration(rec, frozen, generation); err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("generation cleanup error=%v, want fail-closed replacement refusal", err)
+	}
+	preserved, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preserved.Daemons) != 1 || preserved.Daemons[0].TaskName != frozen.TaskName {
+		t.Fatalf("rewritten provider row was deleted: %+v", preserved.Daemons)
+	}
+	if preserved.IntentGeneration == generation {
+		t.Fatalf("rewrite did not advance intent generation: still %d", generation)
+	}
+}
