@@ -277,9 +277,10 @@ func providerRestore(ctx context.Context, state providerExecutionState, provenan
 // recoverProviderActivation is explicit de-adopt recovery only. It recognizes
 // the recorded prior fingerprint without writing, restores only from the exact
 // recorded disabled fingerprint, and refuses every other observed state. The
-// provider may be re-enabled only after the current adopt row proves that no
-// supervisor-owned daemon for the same manifest remains.
-func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) error {
+// final ownership proof and provider CAS execute while the canonical
+// supervisor-intent lock is held, so a concurrent Install cannot publish a
+// managed owner between the proof and re-enabling the direct provider.
+func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) (retErr error) {
 	if source == nil || provenance == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -299,6 +300,29 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 			return err
 		}
 	}
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	release, err := lockSupervisorIntent(intentPath)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	defer releaseSupervisorIntentAndJoin(&retErr, release, "provider restore ownership")
+
+	// Re-read both authorities after acquiring the writer lock. The provenance
+	// row protects which adoption is being recovered; the intent read protects
+	// the absence proof that authorizes provider re-enable.
+	current, found, provenanceErr = ReadAdoptProvenance(provenance.ServerName)
+	if provenanceErr != nil || !found || current.ProviderSource == nil || current.ProviderSource.DeAdoptPhase != "managed_removed" {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	absent, ownershipErr = providerAdoptDaemonAbsent(current)
+	if ownershipErr != nil || !absent {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+
 	entries, err := source.ListProviderMCPEntries(ctx)
 	if err != nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
