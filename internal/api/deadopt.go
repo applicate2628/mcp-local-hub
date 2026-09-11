@@ -181,6 +181,17 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	case AdoptOperationStateAdopted:
 		plan.Routing = DeAdoptRoutingFresh
 	case AdoptOperationStateAdopting:
+		// Provider disable is persisted before ManifestCreate. A positively absent
+		// manifest therefore identifies the explicit provider-recovery lane before
+		// any fallible client adapter/GetEntry probe. Stat uncertainty remains
+		// fail-closed and falls through to the ordinary committed classifier.
+		if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
+			if exists, manifestErr := adoptManifestExistsFn(rec.ManifestName); manifestErr == nil && !exists {
+				plan.Routing = DeAdoptRoutingFresh
+				plan.providerRecovery = true
+				break
+			}
+		}
 		verdict := classifyDeadAdoptingRow(*rec)
 		if verdict == adoptRowRecoveryKeep {
 			plan.Routing = DeAdoptRoutingFresh
@@ -275,7 +286,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 
 // PrintDeAdoptPlan writes a redacted dry-run summary for CLI callers. It
 // deliberately omits manifest hashes, config bodies, snapshot bytes, and secret
-// values; only names, state labels, counts, and planner-authored reasons appear.
+// values; only names, state labels, reasons, and hashes only.
 func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
 	if w == nil || plan == nil {
 		return
@@ -647,6 +658,15 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if deAdoptBeforeManifestDeleteHook != nil {
 		deAdoptBeforeManifestDeleteHook()
 	}
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
+		// A positive absence settlement is historical evidence only. Re-prove the
+		// live ownership boundary immediately before E4 so a later regular Install
+		// cannot be silently deleted and followed by provider restoration.
+		absent, absentErr := providerAdoptDaemonAbsent(rec)
+		if absentErr != nil || !absent {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+	}
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
 		frozen, frozenErr := frozenProviderAdoptDaemon(rec)
 		if frozenErr != nil {
@@ -678,11 +698,27 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 				return report, fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
 			}
 		}
-		if _, _, _, err := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); err != nil {
+		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
+			// Re-check again after deleting the manifest. New installs cannot start
+			// from the now-absent manifest; an in-flight install that published a row
+			// in the interval is therefore caught before intent mutation.
+			absent, absentErr := providerAdoptDaemonAbsent(rec)
+			if absentErr != nil || !absent {
+				return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+			}
+		}
+		_, removedDaemons, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false)
+		if removeErr != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "supervisor-intent", report)
 			})
 			return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed", plan.ManifestName)
+		}
+		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" && len(removedDaemons) != 0 {
+			// A row appeared after the final absence proof. The cleanup may have
+			// removed its ownership row, but provider restoration must remain blocked
+			// so two independently running sources can never be enabled together.
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 		if rec.ProviderSource != nil {
 			updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
