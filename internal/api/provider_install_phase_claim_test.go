@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"os"
 	"testing"
 )
 
@@ -84,6 +85,57 @@ func TestProviderManagedStopMakesStartedInstallRestoreEligible(t *testing.T) {
 	}
 	if !providerInstallPhaseAllowsRestore(name) {
 		t.Fatal("terminal managed settlement did not become restore-eligible")
+	}
+}
+
+func TestProviderManagedStopBootstrapsLegacyMissingMarker(t *testing.T) {
+	name := "provider-install-legacy-managed-settled"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	marker, err := providerInstallPhasePath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("remove provider-install phase marker: %v", err)
+	}
+
+	deps := providerTransactionDeps{stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+		return StoppedSettlement{
+			State:  StoppedSettlementStopped,
+			Reason: StoppedSettlementReasonStopped,
+		}, nil
+	}}
+	if _, err := deps.stopManaged(context.Background(), NewAPI(), SupervisorDaemon{Server: name}); err != nil {
+		t.Fatalf("legacy stopManaged: %v", err)
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseManagedSettled {
+		t.Fatalf("legacy phase=%q err=%v, want %q", phase, err, providerInstallPhaseManagedSettled)
+	}
+	if !providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("legacy exact managed settlement did not become restore-eligible")
+	}
+}
+
+func TestProviderRestoreGateClaimsNotStartedMarker(t *testing.T) {
+	name := "provider-install-restore-gate-claim"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseNotStarted {
+		t.Fatalf("phase=%q err=%v, want %q", phase, err, providerInstallPhaseNotStarted)
+	}
+	if !providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("restore gate failed to claim a genuine not-started provider adoption")
+	}
+	phase, err = readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseRecoveryClaimed {
+		t.Fatalf("phase after restore gate=%q err=%v, want %q", phase, err, providerInstallPhaseRecoveryClaimed)
+	}
+
+	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
+	if err := markProviderInstallStartedForTask(task); err == nil {
+		t.Fatal("Install start unexpectedly crossed the restore-gate recovery claim")
 	}
 }
 
