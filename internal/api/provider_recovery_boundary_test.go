@@ -138,6 +138,9 @@ func TestExecuteDeAdoptProviderRestoreRepairsLateExactRowAfterManagedRemoved(t *
 	}
 	rec.ProviderSource.DeAdoptPhase = "managed_removed"
 	writeDeAdoptExecutorRecord(t, rec)
+	if err := writeProviderInstallPhase(name, providerInstallPhaseRecoveryClaimed); err != nil {
+		t.Fatalf("set reachable recovery phase: %v", err)
+	}
 	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
 		TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
 		Server:       name,
