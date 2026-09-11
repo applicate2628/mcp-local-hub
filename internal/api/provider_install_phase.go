@@ -58,7 +58,8 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 			// Missing is deliberately UNKNOWN, never equivalent to not_started.
 			// Provider provenance written before this marker existed therefore
 			// stays fail-closed until an exact managed settlement supplies the
-			// missing durable fact through markProviderManagedSettled.
+			// missing durable fact through markProviderManagedSettled, or a
+			// legacy de-adopt phase is migrated by the final restore gate.
 			return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 		return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -71,6 +72,14 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 		return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	return record.Phase, nil
+}
+
+// providerInstallPhaseIsNotStarted is the read-only planner proof for the
+// pre-ManifestCreate recovery lane. Missing, legacy, corrupt, linked, started,
+// or already-settled markers are not equivalent to not_started.
+func providerInstallPhaseIsNotStarted(manifestName string) bool {
+	phase, err := readProviderInstallPhase(manifestName)
+	return err == nil && phase == providerInstallPhaseNotStarted
 }
 
 func writeProviderInstallPhase(manifestName, phase string) error {
@@ -265,6 +274,51 @@ func markProviderManagedSettled(manifestName string) error {
 	})
 }
 
+// bootstrapLegacyProviderManagedSettled migrates only the durable legacy
+// de-adopt states which already assert that managed ownership was settled or
+// removed. It never infers settlement from present-day absence alone. The
+// caller's final supervisor ownership gate still runs before provider restore.
+func bootstrapLegacyProviderManagedSettled(manifestName string) bool {
+	bootstrapped := false
+	err := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return err
+		}
+		var current *AdoptProvenanceRecord
+		for i := range store.Records {
+			candidate := &store.Records[i]
+			if candidate.ManifestName != manifestName {
+				continue
+			}
+			if current != nil || candidate.ProviderSource == nil {
+				return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+			}
+			current = candidate
+		}
+		if current == nil || current.OperationState != AdoptOperationStateDeAdopting {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		phase := current.ProviderSource.DeAdoptPhase
+		if phase != "managed_stop_settled" && phase != "managed_removed" {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		path, err := providerInstallPhasePath(manifestName)
+		if err != nil {
+			return err
+		}
+		if _, statErr := os.Lstat(path); !errors.Is(statErr, fs.ErrNotExist) {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		if err := writeProviderInstallPhase(manifestName, providerInstallPhaseManagedSettled); err != nil {
+			return err
+		}
+		bootstrapped = true
+		return nil
+	})
+	return err == nil && bootstrapped
+}
+
 // providerInstallPhaseAllowsRestore is the final restore gate. A genuine
 // pre-Install recovery may arrive here with a still-not_started marker because
 // older recovery sequencing advanced de-adopt before claiming the marker. The
@@ -272,11 +326,16 @@ func markProviderManagedSettled(manifestName string) error {
 // atomically claiming not_started under adopted-entries.lock therefore closes
 // the Install-vs-restore race: if Install already changed the marker to started,
 // the claim loses and restore is refused; if recovery claims first, Install is
-// permanently refused before it can mutate managed ownership.
+// permanently refused before it can mutate managed ownership. Legacy receipts
+// with no marker are admitted only from a durable de_adopting settled/removed
+// phase, never from current filesystem absence.
 func providerInstallPhaseAllowsRestore(manifestName string) bool {
 	phase, err := readProviderInstallPhase(manifestName)
 	if err != nil {
-		return false
+		if !bootstrapLegacyProviderManagedSettled(manifestName) {
+			return false
+		}
+		phase = providerInstallPhaseManagedSettled
 	}
 	if phase == providerInstallPhaseRecoveryClaimed || phase == providerInstallPhaseManagedSettled {
 		return true
