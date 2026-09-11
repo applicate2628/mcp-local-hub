@@ -412,6 +412,18 @@ func (a *API) recordInstallAuditForTasks(taskNames []string) error {
 			return fmt.Errorf("install audit failed for %s (refusing to proceed; manifest may have malicious oversized identifier): %w", canonical, err)
 		}
 	}
+	// The audit batch is the existing fail-closed barrier immediately before
+	// executeInstallTo may mutate scheduler, client, or supervisor state. Once
+	// every audit append has succeeded, atomically mark any matching provider
+	// adoption as started. A concurrent pre-Install recovery claims the same
+	// durable marker under adopted-entries.lock, so exactly one side may cross
+	// this mutation boundary.
+	for _, tn := range taskNames {
+		canonical := canonicalIntentTaskKey(tn)
+		if err := markProviderInstallStartedForTask(canonical); err != nil {
+			return fmt.Errorf("provider install start refused for %s: %w", canonical, err)
+		}
+	}
 	return nil
 }
 
