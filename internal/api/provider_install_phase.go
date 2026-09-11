@@ -74,12 +74,14 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 	return record.Phase, nil
 }
 
-// providerInstallPhaseIsNotStarted is the read-only planner proof for the
-// pre-ManifestCreate recovery lane. Missing, legacy, corrupt, linked, started,
-// or already-settled markers are not equivalent to not_started.
+// providerInstallPhaseIsNotStarted is the read-only proof that Install never
+// entered its mutation path. recovery_claimed is included because it is an
+// idempotent durable claim of the same historical fact. Missing, legacy,
+// corrupt, linked, started, or managed-settled markers are not equivalent to
+// never-started history.
 func providerInstallPhaseIsNotStarted(manifestName string) bool {
 	phase, err := readProviderInstallPhase(manifestName)
-	return err == nil && phase == providerInstallPhaseNotStarted
+	return err == nil && (phase == providerInstallPhaseNotStarted || phase == providerInstallPhaseRecoveryClaimed)
 }
 
 func writeProviderInstallPhase(manifestName, phase string) error {
