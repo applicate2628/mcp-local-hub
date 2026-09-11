@@ -37,7 +37,7 @@ func TestExecuteDeAdoptProviderPreInstallLegacyBlankServerRowFailsClosed(t *test
 		t.Fatalf("manifest was removed despite unresolved legacy daemon ownership: %v", statErr)
 	}
 	persisted, found, readErr := ReadAdoptProvenance(name)
-	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" {
-		t.Fatalf("legacy ownership mutated provenance before refusal: row=%+v found=%t err=%v", persisted, found, readErr)
+	if readErr != nil || !found || persisted.OperationState != AdoptOperationStateDeAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" {
+		t.Fatalf("legacy ownership refusal changed destructive provider phase: row=%+v found=%t err=%v", persisted, found, readErr)
 	}
 }
