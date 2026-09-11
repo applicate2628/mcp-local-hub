@@ -12,6 +12,7 @@ import (
 
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 type providerTransactionDeps struct {
@@ -56,9 +57,10 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 }
 
 // providerAdoptDaemonAbsent reports whether Install has not yet created any
-// supervisor ownership row for this adoption. Any row under the same manifest
-// name is conflicting state, even when daemon name/port/hash differs; only
-// positive absence of the manifest from supervisor ownership admits recovery.
+// supervisor ownership row for this adoption. It uses the same manifest-aware
+// ownership predicate as supervisor-intent removal so legacy blank-Server rows
+// cannot be mistaken for positive absence. Any owned row that is not the exact
+// frozen provider descriptor remains conflicting state and therefore fail-closed.
 func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -70,8 +72,13 @@ func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	if intent == nil {
 		return true, nil
 	}
+	expected := &config.ServerManifest{
+		Name:    rec.ManifestName,
+		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
+	}
+	scope := supervisorIntentOwnershipScopeForManifest(expected, nil, "")
 	for _, daemon := range intent.Daemons {
-		if daemon.Server == rec.ManifestName {
+		if supervisorIntentRowOwnedByScope(daemon, rec.ManifestName, scope) {
 			return false, nil
 		}
 	}
