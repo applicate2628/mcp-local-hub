@@ -620,10 +620,8 @@ var adoptManifestExistsFn = func(manifestName string) (bool, error) {
 // manifest that exists OR cannot be stat'd => KEEP (fail-closed — REAP demands
 // positive absence, destructive-default polarity). Only when EVERY adopt_client is
 // cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
-// disk is the row a true pre-install crash orphan => REAP. A provider receipt is
-// retained for explicit activation recovery only when the durable install-phase
-// marker proves Install never started; started/missing/corrupt phase is uncertainty
-// and therefore KEEP.
+// disk is the row a true pre-install crash orphan => REAP, except that a provider
+// receipt must be retained for explicit activation recovery.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
@@ -660,10 +658,7 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 		return adoptRowCommittedKeep
 	}
 	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
-		if providerInstallPhaseIsNotStarted(rec.ManifestName) {
-			return adoptRowRecoveryKeep
-		}
-		return adoptRowCommittedKeep
+		return adoptRowRecoveryKeep
 	}
 	return adoptRowCrashReap // no live binding AND no manifest on disk => pre-install crash orphan
 }
@@ -865,6 +860,13 @@ var adoptCaptureBeforeSnapshotReadHook func(client string)
 //     never guess `absent` on a corrupted/unreadable config)
 func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, error) {
 	all := clients.AllClients()
+	// presentAtBuild = clients whose same-name entry was PRESENT and adoptable at
+	// BuildAdoptPlan time (always includes the source client). Such a client MUST
+	// NOT be recorded `absent` if it reads no-entry at capture — that is a
+	// Build->capture change, and since Install still writes the hub relay to it,
+	// a guessed `absent` would let de-adopt delete the adopted entry with no
+	// snapshot (security F4 — a vanished entry does not "parse cleanly and lack
+	// the entry"; it is a fail-closed capture failure).
 	presentAtBuild := make(map[string]bool, len(plan.presentAtBuild))
 	for _, c := range plan.presentAtBuild {
 		presentAtBuild[c] = true
@@ -874,11 +876,17 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 		targetEntryName := plan.targetEntryName(name)
 		adapter, ok := all[name]
 		if !ok {
+			// A selected client whose adapter cannot be constructed on this host
+			// is a capture failure — we cannot prove its pre-adopt state, so we
+			// must not guess (fail closed, symmetric with F4).
 			return nil, fmt.Errorf("adopt provenance capture: client %q not constructible on this host", name)
 		}
 		entry, err := adapter.GetEntry(plan.EntryName)
 		switch {
 		case err != nil && errors.Is(err, fs.ErrNotExist):
+			// A genuinely-missing config file. Fail closed if the client was present
+			// at Build (its config vanished in the Build->capture window); otherwise
+			// it is a legitimate configless fanout target with no entry to preserve.
 			if presentAtBuild[name] {
 				return nil, fmt.Errorf("adopt provenance capture: client %q had the %q entry at plan time but its config is missing at capture; refusing to record it absent (fail-closed — a guessed absent would let de-adopt delete the adopted entry)", name, plan.EntryName)
 			}
@@ -886,6 +894,15 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 		case err != nil:
 			return nil, fmt.Errorf("adopt provenance capture: read client %q config: %w", name, err)
 		case entry != nil:
+			// Finding 1 (codex bot PR #528 r4): present-merged-lower is keyed on the
+			// ADAPTER's authoritative SourceBelowWriteTarget signal, NOT on a missing
+			// ConfigPath. SourceBelowWriteTarget==true means the entry resolves from a
+			// LOWER read/import layer the hub never writes; the write target may EXIST
+			// (holding other entries) yet not contain this entry. Record
+			// present-merged-lower with NO snapshot — de-adopt restores by removing the
+			// hub entry from the write target, which re-exposes the untouched lower-layer
+			// original — and do NOT read or snapshot the write-target bytes.
+			// (present-merged-lower <=> SourceBelowWriteTarget, exactly.)
 			if entry.SourceBelowWriteTarget {
 				out = append(out, AdoptClientProvenance{
 					Client:          name,
@@ -897,12 +914,26 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 			}
 			cfgPath := adapter.ConfigPath()
 			if adoptCaptureBeforeSnapshotReadHook != nil {
-				adoptCaptureBeforeSnapshotReadHook(name)
+				adoptCaptureBeforeSnapshotReadHook(name) // test-only: simulate a concurrent config edit
 			}
 			configBytes, rErr := os.ReadFile(cfgPath)
 			if rErr != nil {
+				// Finding 2 (r4): a SourceBelowWriteTarget==false entry lives IN the
+				// write target (ConfigPath). If that file is now gone, the config
+				// vanished in the GetEntry->ReadFile window — there are no durable bytes
+				// to preserve. FAIL CLOSED. This is deliberately NOT present-merged-lower:
+				// that state is keyed EXCLUSIVELY on SourceBelowWriteTarget above, so a
+				// ConfigPath ENOENT here (fs.ErrNotExist included) is a capture failure,
+				// never a merged-lower guess.
 				return nil, fmt.Errorf("adopt provenance capture: client %q config for entry %q disappeared during capture (%v); refusing to record present with no durable snapshot bytes (fail-closed)", name, plan.EntryName, rErr)
 			}
+			// Finding 3 (r4): validate the EXACT snapshotted bytes physically contain the
+			// entry, parsed via the adapter's own reader (NO second disk read). The prior
+			// GetEntry re-verify left a double-TOCTOU open: the entry could be deleted
+			// before ReadFile (so configBytes LACKS it) then re-created before the
+			// re-verify (so GetEntry sees it again) — pinning a snapshot whose bytes a
+			// later de-adopt would restore as a DELETION. Checking the captured bytes
+			// themselves closes it.
 			checker, ok := adapter.(clients.EntryBytesChecker)
 			if !ok {
 				return nil, fmt.Errorf("adopt provenance capture: client %q does not support snapshot-byte validation; refusing to pin an unvalidated snapshot (fail-closed)", name)
@@ -925,6 +956,12 @@ func captureAdoptClientsProvenance(plan *AdoptPlan) ([]AdoptClientProvenance, er
 				SnapshotSHA256:  sha,
 			})
 		default:
+			// entry == nil, err == nil: the config parsed cleanly but the same-name
+			// entry is gone. Fail closed if the client was present at Build (the
+			// entry was deleted/renamed/edited away in the Build->capture window —
+			// the TOCTOU that Install would still write the hub relay over, so a
+			// guessed `absent` is silent data loss on de-adopt, security F4).
+			// Otherwise it is a legitimate entryless-fanout target.
 			if presentAtBuild[name] {
 				return nil, fmt.Errorf("adopt provenance capture: client %q had the %q entry at plan time but it is gone at capture; refusing to record it absent (fail-closed — a guessed absent would let de-adopt delete the adopted entry)", name, plan.EntryName)
 			}
@@ -951,6 +988,14 @@ func adoptClientTargetEntryName(rec AdoptProvenanceRecord, client AdoptClientPro
 	return rec.SourceEntryName
 }
 
+// promoteAdoptProvenanceToAdopted flips the manifest's row adopting -> adopted.
+// It writes NO hashes (both are already on the row from capture, F1) and is
+// idempotent (already-adopted -> no-op success). A missing row is an error (the
+// row must exist — capture wrote it before Install). A flip-write failure leaves
+// a recoverable `adopting` state; the transaction owner reports that receipt
+// failure and never converts it to success or unsafe rollback.
+//
+// NOTE (Phase B): UNWIRED — called by unit tests only until Phase C.
 func promoteAdoptProvenanceToAdopted(manifestName string) error {
 	var (
 		flipped      bool
@@ -967,7 +1012,7 @@ func promoteAdoptProvenanceToAdopted(manifestName string) error {
 			}
 			manifestHash = store.Records[i].AdoptManifestHash
 			if store.Records[i].OperationState == AdoptOperationStateAdopted {
-				return nil
+				return nil // idempotent no-op
 			}
 			store.Records[i].OperationState = AdoptOperationStateAdopted
 			store.Records[i].UpdatedAt = time.Now().UTC()
@@ -985,8 +1030,25 @@ func promoteAdoptProvenanceToAdopted(manifestName string) error {
 	return nil
 }
 
+// writeAdoptedEntriesFn is the abort-path store-write step, injected as a package
+// var ONLY so a test can prove abort's crash-safe ordering (snapshots removed
+// BEFORE the row write — codex bot PR #528 finding 3) by forcing the write to
+// fail after the snapshot removal. Production always uses writeAdoptedEntries.
 var writeAdoptedEntriesFn = writeAdoptedEntries
 
+// abortAdoptProvenance deletes the manifest's row and RemoveAll's its snapshot
+// dir during adopt failure cleanup. Idempotent + best-effort: a second call (or
+// a call for a manifest with no row) is a no-op success; an abort error is
+// RETURNED to the caller (which appends it to the operator message) and never
+// masks the caller's original adopt error.
+//
+// Crash-safe ordering (codex bot PR #528 finding 3): the secret-bearing snapshot
+// dir is removed FIRST, then the row is dropped. A crash between leaves a
+// row->missing-snapshot (harmless; GC/UPSERT reclaims the row), never a
+// snapshot->no-row (an unreclaimable secret leak the row-scanning GC could never
+// reach) — the same ordering gcOrphanedAdoptingProvenance uses.
+//
+// NOTE (Phase B): UNWIRED — called by unit tests only until Phase C.
 func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 	if rec == nil || rec.ManifestName == "" {
 		return nil
@@ -1020,8 +1082,27 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 	return nil
 }
 
+// adoptOrphanGCThreshold is the age past which an `adopting` provenance row is
+// treated as a hard-crash orphan. A live in-flight adopt has a fresh updated_at
+// and holds the provenance lock across each mutation, so only a process that died
+// between capture and promote/abort leaves an aged `adopting` row. Default per
+// design.md "Orphan lifecycle + upsert" (24h) — conservative on purpose so a
+// genuinely-slow in-flight adopt is never reaped out from under itself.
 const adoptOrphanGCThreshold = 24 * time.Hour
 
+// reapAdoptProvenanceRow removes a manifest's snapshot dir (FIRST) then drops its
+// row (crash-safe ordering, codex bot PR #528 finding 3). Caller MUST hold the
+// manifest lease so the reap cannot race a concurrent adopt. No event emit — the
+// GC caller emits orphan-reaped.
+//
+// Identity gate (bug 2026-07-11): the reap is a NO-OP unless the LIVE row still
+// matches the caller's expected identity — same ManifestName AND OperationState ==
+// expectedState AND UpdatedAt.Equal(expectedUpdatedAt). The held lease already
+// excludes a concurrent same-manifest adopt, but the caller selected the row from a
+// copy taken EARLIER (the GC's Phase-1 snapshot); this defense-in-depth re-check AT
+// THE MUTATION POINT ensures a name-only match can never destroy a row that was
+// REPLACED since selection (a fresh committed re-adopt + its secret snapshots).
+// Mismatch or absent => return nil without touching snapshots or the store.
 func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationState, expectedUpdatedAt time.Time) error {
 	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
@@ -1036,7 +1117,7 @@ func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationSta
 			}
 		}
 		if !matched {
-			return nil
+			return nil // live row changed/vanished since selection => not ours => no-op
 		}
 		if err := removeAdoptSnapshots(manifestName); err != nil {
 			return fmt.Errorf("adopt provenance reap: remove snapshots: %w", err)
@@ -1056,23 +1137,92 @@ func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationSta
 	})
 }
 
+// adoptGCBeforePhase2Hook is a test-only seam fired ONCE inside
+// gcOrphanedAdoptingProvenance AFTER Phase 1 snapshots the candidates but BEFORE
+// Phase 2 re-reads + classifies them. It lets a test deterministically simulate a
+// concurrent same-manifest re-adopt committing inside the Phase-1->Phase-2 gap and
+// exercise Phase 2's under-lease re-read guard (bug 2026-07-11). nil in production.
 var adoptGCBeforePhase2Hook func()
+
+// adoptGCBeforeReapHook is a test-only seam fired ONCE inside
+// gcOrphanedAdoptingProvenance Phase 2 AFTER a candidate classifies CRASH_REAP but
+// BEFORE the mutation-point manifest guard re-checks the manifest. It lets a test
+// deterministically simulate a manifest re-created inside the classify->reap window
+// and exercise the guard's refuse-and-emit path (bug 2026-07-11 P1-2 Part 3). nil in
+// production.
 var adoptGCBeforeReapHook func()
+
+// errAdoptPriorConfigMutated flags the ONE capture-UPSERT refusal where a prior
+// `adopting` row classifies CRASH_REAP but its per-client entry proof cannot establish
+// that Install committed nowhere. The capture refuses to overwrite it rather than
+// strand the de-adopt snapshots. It is wrapped into that refusal error so
+// ExecuteAdoptWithOpts can errors.Is-recognize it and classify the audit event's reason
+// distinctly from an ordinary capture I/O failure (path-free class).
 var errAdoptPriorConfigMutated = errors.New("prior adopt entry state does not prove a pre-Install crash; refusing to overwrite committed-looking provenance")
+
+// adoptRowProvablyUnmutatedFn is the GC-lane positive-crash-evidence gate (bug
+// 2026-07-11 P1-2 case-5 / Option B), a package var only so a test can prove the gate
+// is load-bearing (neutralize it => a case-5 row reaps => data loss). Production
+// always uses adoptRowProvablyUnmutated.
 var adoptRowProvablyUnmutatedFn = adoptRowProvablyUnmutated
+
+// reapAdoptProvenanceRowFn is the GC Phase-2 row-reap step, a package var ONLY so a
+// test can force the reap to fail and exercise the reap-failed audit path (P3-3).
+// Production always uses reapAdoptProvenanceRow.
 var reapAdoptProvenanceRowFn = reapAdoptProvenanceRow
+
+// gcRemoveRowlessSnapshotsFn is the GC Phase-3 rowless-dir snapshot-removal step, a
+// package var ONLY so a test can force the removal to fail and exercise the
+// reap-failed audit path (P3-3). Production always uses removeAdoptSnapshots.
 var gcRemoveRowlessSnapshotsFn = removeAdoptSnapshots
 
+// adoptRowProvablyUnmutated reports POSITIVE crash-before-Install evidence for a
+// dead-owner `adopting` row the caller has already classified CRASH_REAP. REAP
+// destroys the row's secret snapshots, so uncertainty always KEEPS the row
+// (destructive-default polarity); absence of a committed signal alone is never proof.
+//
+// SAFETY RESTS ON VALUE-AT-RISK, NOT MONOTONICITY. An earlier draft claimed no
+// `adopting` path removes an installed write-target hub relay, so hub-relay presence
+// was a monotonic Install-commit signal (ClassifyStillHub => Install committed => keep).
+// That premise is FALSE: demigrate / uninstall / hub-mode reconcile revert a committed
+// client's entry to native WITHOUT consulting provenance, so ClassifyStillHub can go
+// absent on a row Install DID commit. The predicate is safe anyway because a reap never
+// puts a secret/config value at risk. Every recorded client is classified through
+// CASEntryMutator while its config read lock is held, against the physical write target
+// rather than any merged view, and the per-state gate is:
+//   - `present`: inode-anchored read + sha-gate the pinned snapshot, extract its raw
+//     entry subtree, and require ClassifyRestoreDone — the live write-target entry
+//     reflect.DeepEqual-equals the pinned native snapshot. The snapshot is therefore
+//     deleted ONLY when its exact content already survives, identical, in the live
+//     config: zero restore value at risk. A committed-then-reverted row reaps only when
+//     the reverted native equals the pinned native (the original spelling is already
+//     live) — the deleted snapshot was redundant. Unrelated whole-config churn is
+//     intentionally irrelevant.
+//   - `absent` / `present-merged-lower`: no native snapshot is pinned by construction,
+//     so classify against a nil snapshot and require a readable non-hub verdict
+//     (ClassifyRestoreDone or ClassifyGenuineConflict). A reap here deletes only the row
+//   - empty snapshot dir — no secret at risk.
+//
+// The reap NEVER deletes the row's routed vault keys (owned by de-adopt's hash-gated
+// --reclaim-crashed), so the worst case of a wrongly-reaped committed-but-reverted row
+// is a BOOKKEEPING residual (orphan row + lingering owner-only vault keys), never a lost
+// secret/config spelling. See work-items/bugs/
+// 2026-07-12-adopt-reap-native-revert-deletes-committed-provenance.md.
+//
+// An unavailable/non-CAS adapter, unverifiable snapshot, unreadable classification,
+// unknown original state, ClassifyStillHub, or any unexpected verdict fails safe to
+// KEEP. A row with NO recorded clients remains vacuously reap-safe: capture writes the
+// anchor before Install and has no committed snapshots to preserve.
 func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 	all := clients.AllClients()
 	for _, c := range rec.Clients {
 		adapter, ok := all[c.Client]
 		if !ok {
-			return false
+			return false // adapter not constructible on this host => cannot prove
 		}
 		mutator, ok := clients.AsCASEntryMutator(adapter)
 		if !ok {
-			return false
+			return false // no locked write-target classifier => cannot prove
 		}
 
 		var snapshotSubtree any
@@ -1080,12 +1230,14 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 		case AdoptOriginalStatePresent:
 			state, _, subtree, _ := readDeAdoptSnapshot(&rec, c, mutator)
 			if state != deAdoptSnapshotAvailable {
-				return false
+				return false // pinned native snapshot missing/unreadable/mismatched => KEEP
 			}
 			snapshotSubtree = subtree
 		case AdoptOriginalStateAbsent, AdoptOriginalStatePresentMergedLower:
+			// These states intentionally have no snapshot. Their proof is solely that
+			// Install did not place the expected hub relay in the physical write target.
 		default:
-			return false
+			return false // unknown persisted state => cannot prove
 		}
 
 		verdict, err := mutator.ClassifyEntryUnderLock(
@@ -1097,28 +1249,84 @@ func adoptRowProvablyUnmutated(rec AdoptProvenanceRecord) bool {
 			snapshotSubtree,
 		)
 		if err != nil {
-			return false
+			return false // read/parse/recognizer failure => cannot prove
 		}
 
 		switch c.OriginalState {
 		case AdoptOriginalStatePresent:
+			// ClassifyRestoreDone is reflect.DeepEqual(liveSubtree, snapshotSubtree)
+			// over PARSED subtrees (cas_mutator.go:352), not byte equality — which is
+			// exactly the right gate, because de-adopt would perform NO restore from a
+			// snapshot in this state, so deleting it risks zero restore value:
+			//   - De-adopt's OWN disposition consumes the SAME ClassifyEntryUnderLock
+			//     verdict: ClassifyRestoreDone maps to DeAdoptClientRestoreDone
+			//     ("client already in its de-adopted target state", deadopt.go:980-981)
+			//     and the executor SKIPS the client's mutation entirely
+			//     (deadopt.go:504-508). Same predicate on both sides, not two DeepEquals.
+			//   - Backstop: de-adopt's E3 restore is CASRestoreEntryFromBytes with
+			//     allowHubEntry=false (cas_mutator.go:258); casRestoreFromBytes requires
+			//     the LIVE entry to still hub-recognizer-match before it touches the
+			//     snapshot, so a native (RestoreDone) live entry fails the match =>
+			//     ErrCASConflict, no write (cas_mutator.go:216-225). The snapshot is
+			//     provably never consumed under RestoreDone.
+			// So the byte-level formatting the parsed compare ignores (quote style,
+			// comments, whitespace) is never a de-adopt restore product; its loss on
+			// reap is immaterial, and the secret-literal VALUE round-trips through the
+			// shared extractor anyway. The ONE byte-exact writer,
+			// wholeFileRestoreIfWriteTargetGone, is gated on allowHubEntry=true so it is
+			// unreachable from de-adopt (adopt-rollback lane only), and it fires only
+			// when the live file is ABSENT — which a present client classifies
+			// GenuineConflict (present=false + non-nil snapshot), never RestoreDone.
 			if verdict != clients.ClassifyRestoreDone {
-				return false
+				return false // StillHub, conflict, unreadable, or unknown => KEEP
 			}
 		case AdoptOriginalStateAbsent, AdoptOriginalStatePresentMergedLower:
 			if verdict != clients.ClassifyRestoreDone && verdict != clients.ClassifyGenuineConflict {
-				return false
+				return false // StillHub, unreadable, or unknown => KEEP
 			}
 		}
 	}
-	return true
+	return true // Install committed on no recorded client
 }
 
+// gcOrphanedAdoptingProvenance reaps stale CROSS-manifest orphans using the three
+// design-r2 signals — the per-manifest LEASE (Signal 1), the hub-binding-live
+// classifier (Signal 2), and the snapshot-dir backstop (Signal 3):
+//
+//	Phase 1 (store lock): snapshot the aged `adopting` candidates + the set of
+//	  manifests that have ANY store row; release the store lock.
+//	Phase 2 (per candidate, OUTSIDE the store lock): TryLock its lease — a lease-PATH
+//	  resolver ERROR (a legacy ".lease"-suffixed manifest now refused by the P3-1
+//	  guard) is REPORTED as adopt-provenance-reap-failed{phase:gc-lease-path-error}
+//	  then skipped (F1 — an unreachable orphan must not be silent); a lease HELD by a
+//	  LIVE adopt is a legitimate silent skip (claim 16). With the lease held the owner
+//	  is provably dead; then RE-READ the row under the store lock and require it is STILL the
+//	  exact orphan Phase 1 selected (still `adopting`, UpdatedAt unchanged, still
+//	  older than the cutoff) — a stale Phase-1 copy must never drive a reap after a
+//	  concurrent re-adopt replaced the row (bug 2026-07-11). classifyDeadAdoptingRow
+//	  decides on the LIVE bytes: COMMITTED_KEEP (a live hub binding OR a manifest on
+//	  disk, Signal 2b) is preserved. A CRASH_REAP verdict then passes TWO more
+//	  destructive-safety gates before the reap (bug 2026-07-11 P1-2): a mutation-point
+//	  manifest re-check (Part 3 — refuse + emit adopt-provenance-reap-skipped-manifest
+//	  -present if a manifest exists now), and a POSITIVE crash-evidence gate (Part 2 —
+//	  adoptRowProvablyUnmutatedFn: reap only when every client's locked physical
+//	  write-target entry shape proves Install committed nowhere; any uncertainty =>
+//	  KEEP). Only a triply-cleared row removes snapshots-then-row under the held lease,
+//	  identity-gated at the mutation point.
+//	Phase 3 (backstop): reap ROWLESS snapshot dirs (a <manifest>/ dir with no store
+//	  row — findings 3/4 residue or any future ordering bug), gated on the lease +
+//	  no-store-row, NOT age-gated (a rowless dir has no updated_at). Same F1 lease-path
+//	  -error report as Phase 2 for a rowless legacy ".lease"-named dir.
+//
+// Lock order (acyclic): <manifest>.lease (TryLock, non-blocking) -> adopted-entries
+// .lock. The store lock is NEVER held while acquiring a lease. Returns the count
+// reaped; a GC error must not block a fresh adopt (callers run it best-effort).
 func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err error) {
 	type candidate struct {
 		rec    AdoptProvenanceRecord
 		ageSec float64
 	}
+	// Phase 1 — snapshot aged `adopting` candidates + the row-manifest set.
 	var candidates []candidate
 	rowManifests := map[string]bool{}
 	cutoff := time.Now().Add(-olderThan)
@@ -1138,21 +1346,38 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 		return 0, lockErr
 	}
 
+	// Test-only seam: simulate a concurrent same-manifest re-adopt committing inside
+	// the Phase-1->Phase-2 gap. nil in production.
 	if adoptGCBeforePhase2Hook != nil {
 		adoptGCBeforePhase2Hook()
 	}
 
+	// Phase 2 — reap true cross-manifest row-bearing orphans under each own lease.
 	for _, c := range candidates {
 		lk, ok, lErr := tryAcquireAdoptManifestLease(c.rec.ManifestName)
 		if lErr != nil {
+			// A lease-PATH resolver error (notably a legacy ".lease"-suffixed manifest a
+			// pre-P3-1 build allowed on disk — its lease path now fails the reserved-suffix
+			// guard) makes this orphan permanently unreachable by the reaper. Do NOT silently
+			// skip it (F1): REPORT it so an operator can remove adopt-provenance/<name>
+			// manually. Best-effort emit; still skip the reap (nothing was mutated).
 			emitAdoptProvenanceReapFailed(c.rec.ManifestName, adoptReapFailPhaseLeasePathError, lErr.Error())
 			continue
 		}
 		if !ok {
-			continue
+			continue // lease HELD by a live adopt => legitimate silent skip (claim 16)
 		}
 		cleanupErr := func() (cleanupErr error) {
 			defer func() { cleanupErr = finishAdoptGCLease(c.rec.ManifestName, lk) }()
+			// RE-READ the row UNDER the held lease before classifying (bug 2026-07-11).
+			// c.rec is the STALE Phase-1 copy taken before the lease was held: a concurrent
+			// same-manifest re-adopt can UPSERT a FRESH committed row (new UpdatedAt /
+			// `adopted` state / a new port) into the Phase-1->Phase-2 gap. Classifying the
+			// stale copy would reconstruct the expected binding from the OLD port, miss the
+			// new live binding, and reap the freshly-committed row + its secret snapshots.
+			// Only reap when the LIVE row is STILL the exact dead-owner orphan Phase 1
+			// selected: still `adopting`, UpdatedAt unchanged, still older than the cutoff
+			// (mirrors Phase 3's under-lease re-confirm). Classify the LIVE bytes.
 			var (
 				live      AdoptProvenanceRecord
 				stillOurs bool
@@ -1160,7 +1385,7 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 			_ = withAdoptedEntriesLock(func() error {
 				store, rErr := readAdoptedEntries()
 				if rErr != nil {
-					return nil
+					return nil // fail-safe: leave stillOurs=false, do not reap on a read error
 				}
 				for _, r := range store.Records {
 					if r.ManifestName != c.rec.ManifestName {
@@ -1175,25 +1400,53 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 				return nil
 			})
 			if !stillOurs {
-				return nil
+				return nil // row changed/vanished since Phase-1 selection => not our orphan => skip
 			}
 			if classifyDeadAdoptingRow(live) != adoptRowCrashReap {
-				return nil
+				return nil // COMMITTED_KEEP (live hub binding OR manifest on disk, Signal 2b)
 			}
+			// Test-only seam: simulate a manifest re-created inside the classify->reap
+			// window so the mutation-point guard below is exercised. nil in production.
 			if adoptGCBeforeReapHook != nil {
 				adoptGCBeforeReapHook()
 			}
+			// Part 3 — mutation-point manifest guard (defense-in-depth for Signal 2b).
+			// Re-check the manifest UNDER the held lease, immediately before the destructive
+			// reap. classifyDeadAdoptingRow already KEEPs a manifest-present row, so under
+			// normal flow this never fires; it catches a classifier regression or a manifest
+			// re-created between the classify and the reap, and records a DISTINCT audit event
+			// so an over-reap-that-was-averted is operator-visible (NAMES/COUNTS only).
 			if exists, mErr := adoptManifestExistsFn(live.ManifestName); mErr != nil || exists {
 				emitAdoptProvenanceReapSkippedManifestPresent(live.ManifestName, c.ageSec)
 				return nil
 			}
+			// Part 2 — positive crash-before-Install evidence gate (case-5 closure). REAP
+			// only when every client's locked physical write-target entry shape proves
+			// Install committed nowhere; anything unprovable fails safe toward KEEP. This
+			// distinguishes a committed adopt after manifest/binding drift without treating
+			// unrelated whole-config churn as evidence of Install.
 			if !adoptRowProvablyUnmutatedFn(live) {
-				return nil
+				return nil // cannot positively prove pre-install => preserve the row + snapshots
 			}
 			if rErr := reapAdoptProvenanceRowFn(live.ManifestName, AdoptOperationStateAdopting, live.UpdatedAt); rErr == nil {
 				emitAdoptProvenanceOrphanReaped(live.ManifestName, c.ageSec, adoptOrphanReapTriggerGC)
 				reaped++
+				// The GC reaps the row + snapshot dir ONLY. It does NOT delete the row's
+				// routed vault keys: a background GC must never autonomously drop secret
+				// material a live adopt could still reference (bug
+				// 2026-07-12-adopt-preinstall-crash-orphan-triple — a normalization
+				// collision or corrupted-provenance row could share a key with a LIVE
+				// committed adopt, so cross-manifest key deletion here is unsafe). Routed-key
+				// cleanup is owned by de-adopt (hash-gated, operator-driven --reclaim-crashed).
+				// Bounded residual: a reversed-preserve reap leaves the routed keys in the
+				// owner-only vault until de-adopt (or the operator) removes them.
 			} else {
+				// Reap failed (store write / snapshot removal error): the secret-bearing
+				// `adopting` orphan remains on disk. Surface it (P3-3) so an operator sees
+				// the stuck orphan instead of it being silently retried next pass. The reason
+				// is the returned error's path/class string (reapAdoptProvenanceRow errors are
+				// path/class only, never a secret value). Best-effort — an audit miss must
+				// never fail the best-effort GC.
 				emitAdoptProvenanceReapFailed(live.ManifestName, adoptReapFailPhaseRow, rErr.Error())
 			}
 			return nil
@@ -1203,29 +1456,34 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 		}
 	}
 
+	// Phase 3 — snapshot-dir backstop: reap ROWLESS <manifest>/ dirs under lease.
 	dirManifests, dErr := listAdoptProvenanceSnapshotManifests()
 	if dErr != nil {
 		return reaped, dErr
 	}
 	for _, m := range dirManifests {
 		if rowManifests[m] {
-			continue
+			continue // has (or had) a store row — handled by Phase 2 or kept intentionally
 		}
 		lk, ok, lErr := tryAcquireAdoptManifestLease(m)
 		if lErr != nil {
+			// Same F1 legacy ".lease" case as Phase 2: a rowless snapshot dir whose name
+			// fails the lease-path suffix guard is unreachable by the reaper — REPORT it
+			// instead of silently skipping. Best-effort emit; still skip the removal.
 			emitAdoptProvenanceReapFailed(m, adoptReapFailPhaseLeasePathError, lErr.Error())
 			continue
 		}
 		if !ok {
-			continue
+			continue // live adopt (may be mid-anchor) => legitimate silent skip
 		}
 		cleanupErr := func() (cleanupErr error) {
 			defer func() { cleanupErr = finishAdoptGCLease(m, lk) }()
+			// Confirm still rowless UNDER the lease before removing (authoritative).
 			hasRow := true
 			_ = withAdoptedEntriesLock(func() error {
 				store, rErr := readAdoptedEntries()
 				if rErr != nil {
-					return nil
+					return nil // fail-safe: leave hasRow=true, do not reap on read error
 				}
 				hasRow = false
 				for _, r := range store.Records {
@@ -1241,6 +1499,10 @@ func gcOrphanedAdoptingProvenance(olderThan time.Duration) (reaped int, err erro
 					emitAdoptProvenanceOrphanReaped(m, 0, adoptOrphanReapTriggerGC)
 					reaped++
 				} else {
+					// Rowless-dir snapshot removal failed: the secret-bearing rowless dir
+					// remains. Surface it (P3-3) instead of silently leaving it for the next
+					// pass. Reason is the error's path/class string (removeAdoptSnapshots
+					// errors are path/class only, never a secret value). Best-effort.
 					emitAdoptProvenanceReapFailed(m, adoptReapFailPhaseRowlessDir, rmErr.Error())
 				}
 			}
@@ -1264,6 +1526,21 @@ func finishAdoptGCLease(manifestName string, lease *AdoptManifestLease) error {
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// De-adopt-owned MUTATORS. Phase 6 implements the whole-manifest Mark + Close
+// operations here against the protected store. The subset hash update remains
+// declared-only for its follow-up:
+//
+//	func UpdateAdoptExpectedManifestHash(manifestName, newHash string) error // subset binding edit
+// ---------------------------------------------------------------------------
+
+// MarkAdoptProvenanceDeAdopting transitions adopted (or a re-verified,
+// committed adopting row) to de_adopting.
+//
+// PRECONDITION: the caller (the de-adopt executor, ExecuteDeAdoptWithOpts) holds
+// the per-manifest lease across the E1..E6 flow; this mutator does NOT re-acquire
+// it (a second same-process flock handle would fail-closed on Windows). The
+// entries lock still protects the row read-classify-write transaction.
 func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
@@ -1279,6 +1556,7 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 			case AdoptOperationStateDeAdopting:
 				return nil
 			case AdoptOperationStateAdopted:
+				// Ready to transition below.
 			case AdoptOperationStateAdopting:
 				if verdict := classifyDeadAdoptingRow(*rec); verdict != adoptRowCommittedKeep && verdict != adoptRowRecoveryKeep {
 					return fmt.Errorf("adopt provenance mark de-adopting: manifest %q adopting row is not committed; refusing to take it from adopt orphan GC", manifestName)
@@ -1299,6 +1577,9 @@ func MarkAdoptProvenanceDeAdopting(manifestName string) error {
 	})
 }
 
+// AdvanceProviderDeAdoptPhase persists one verified provider teardown step.
+// The caller holds the manifest lease; this function owns only the atomic row
+// compare-and-write under the adopted-entries lock.
 func AdvanceProviderDeAdoptPhase(manifestName, expectedPhase, nextPhase string) (*AdoptProvenanceRecord, error) {
 	validNext := map[string]string{
 		"":                     "managed_stop_settled",
@@ -1340,6 +1621,14 @@ func AdvanceProviderDeAdoptPhase(manifestName, expectedPhase, nextPhase string) 
 	return updated, err
 }
 
+// CloseAdoptProvenance removes a de_adopting row and its snapshots.
+//
+// PRECONDITION: the caller (the de-adopt executor, ExecuteDeAdoptWithOpts) holds
+// the per-manifest lease across the E1..E6 flow; this mutator does NOT re-acquire
+// it (a second same-process flock handle would fail-closed on Windows). The
+// caller retains the lease while CloseAdoptProvenance delegates deletion to
+// reapAdoptProvenanceRow, the store's single identity-gated snapshots-first
+// deletion path.
 func CloseAdoptProvenance(manifestName string) error {
 	var (
 		found     bool
