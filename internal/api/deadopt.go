@@ -470,28 +470,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, err
 	}
 
-	// A provider adoption can crash after ManifestCreate but before Install has
-	// created any supervisor ownership row. Settle that already-satisfied stop
-	// obligation before E2 changes a fresh adopting record, and also repair the
-	// exact legacy crash-after-E2 state left by the previous implementation. The
-	// latter is admitted only while the exact adopted manifest is still present;
-	// supervisor absence must still be positively proven and mismatches fail closed.
-	preInstallState := rec.OperationState == AdoptOperationStateAdopting ||
-		rec.OperationState == AdoptOperationStateDeAdopting
-	if !plan.providerRecovery && rec.ProviderSource != nil && preInstallState &&
-		rec.ProviderSource.DeAdoptPhase == "" && readiness.Present && readiness.HashReady {
-		if _, frozenErr := frozenProviderAdoptDaemon(rec); frozenErr != nil {
-			absent, absentErr := providerAdoptDaemonAbsent(rec)
-			if absentErr != nil || !absent {
-				return nil, frozenErr
-			}
-			settled, settleErr := settleProviderPreInstallManagedStop(rec.ManifestName, rec)
-			if settleErr != nil {
-				return nil, settleErr
-			}
-			rec = settled
-		}
-	}
+	// Do not persist a pre-Install absence as a managed stop settlement here.
+	// E2 may safely change adopting -> de_adopting because E4 re-proves absence
+	// from the current supervisor intent. A crash before E4 therefore leaves an
+	// empty provider phase and forces the retry to re-establish the same facts,
+	// rather than trusting stale historical absence.
 
 	// E2 — idempotently enter de_adopting. Mark performs the B4 committed-row
 	// re-verification while this caller retains the lease.
@@ -647,9 +630,12 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return report, nil
 	}
 
-	// E4 — CLOSE-READY only. Build the exact adopt-created one-daemon ownership
-	// scope before deleting the manifest. captureLivePIDs=false keeps the existing
-	// cleanup core free of IPC, process probes, kills, and waits under the lease.
+	// E4 — CLOSE-READY only. The ordinary provider path proves one frozen daemon
+	// settled before it removes the corresponding supervisor ownership. The
+	// pre-Install crash path is deliberately different: positive absence is
+	// re-proved at E4, the manifest is deleted, absence is re-proved again, and no
+	// supervisor row is removed at all. Any row published by an in-flight Install
+	// therefore remains visible to the final provider-restore ownership gate.
 	expectedManifest := &config.ServerManifest{
 		Name:    rec.ManifestName,
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
@@ -658,76 +644,137 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if deAdoptBeforeManifestDeleteHook != nil {
 		deAdoptBeforeManifestDeleteHook()
 	}
-	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
-		// A positive absence settlement is historical evidence only. Re-prove the
-		// live ownership boundary immediately before E4 so a later regular Install
-		// cannot be silently deleted and followed by provider restoration.
-		absent, absentErr := providerAdoptDaemonAbsent(rec)
-		if absentErr != nil || !absent {
-			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+
+	providerPreInstallAbsence := false
+	if rec.ProviderSource != nil {
+		switch rec.ProviderSource.DeAdoptPhase {
+		case "":
+			frozen, frozenErr := frozenProviderAdoptDaemon(rec)
+			if frozenErr == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
+				cancel()
+				if stopErr != nil {
+					return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
+				}
+				updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
+				if phaseErr != nil {
+					return report, phaseErr
+				}
+				rec = updated
+			} else {
+				preInstallState := rec.OperationState == AdoptOperationStateAdopting || rec.OperationState == AdoptOperationStateDeAdopting
+				absenceWindow := (readiness.Present && readiness.HashReady) || (effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent)
+				absent, absentErr := providerAdoptDaemonAbsent(rec)
+				if !preInstallState || !absenceWindow || absentErr != nil || !absent {
+					return report, frozenErr
+				}
+				providerPreInstallAbsence = true
+			}
+		case "managed_stop_settled":
+			// Older hotfix revisions may already have persisted this phase for a
+			// positive pre-Install absence. Distinguish that legacy state from an
+			// ordinary settled stop using current ownership. If an owned row exists,
+			// settle it again before any removal; this is idempotent for an already
+			// stopped daemon and safely handles a late row that appeared after the old
+			// absence proof.
+			frozen, frozenErr := frozenProviderAdoptDaemon(rec)
+			if frozenErr == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
+				cancel()
+				if stopErr != nil {
+					return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon resettlement: %w", stopErr)
+				}
+			} else {
+				absent, absentErr := providerAdoptDaemonAbsent(rec)
+				if absentErr != nil || !absent {
+					return report, frozenErr
+				}
+				providerPreInstallAbsence = true
+			}
 		}
 	}
-	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
-		frozen, frozenErr := frozenProviderAdoptDaemon(rec)
-		if frozenErr != nil {
-			return report, frozenErr
+
+	deleteManifest := func() error {
+		if readiness.AlreadyAbsent {
+			return nil
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
-		cancel()
-		if stopErr != nil {
-			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
-		}
-		updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
-		if phaseErr != nil {
-			return report, phaseErr
-		}
-		rec = updated
-	}
-	if rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
 		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
 			})
 			switch {
 			case errors.Is(err, ErrManifestHashRequired):
-				return report, fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
+				return fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
 			case errors.Is(err, ErrManifestHashMismatch):
-				return report, fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
+				return fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
 			default:
-				return report, fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
+				return fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
 			}
 		}
-		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
-			// Re-check again after deleting the manifest. New installs cannot start
-			// from the now-absent manifest; an in-flight install that published a row
-			// in the interval is therefore caught before intent mutation.
-			absent, absentErr := providerAdoptDaemonAbsent(rec)
-			if absentErr != nil || !absent {
-				return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-			}
+		return nil
+	}
+
+	if rec.ProviderSource == nil {
+		if err := deleteManifest(); err != nil {
+			return report, err
 		}
-		_, removedDaemons, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false)
-		if removeErr != nil {
+		if deAdoptAfterManifestDeleteHook != nil {
+			deAdoptAfterManifestDeleteHook()
+		}
+		if _, _, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); removeErr != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "supervisor-intent", report)
 			})
 			return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed", plan.ManifestName)
 		}
-		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" && len(removedDaemons) != 0 {
-			// A row appeared after the final absence proof. The cleanup may have
-			// removed its ownership row, but provider restoration must remain blocked
-			// so two independently running sources can never be enabled together.
+	} else if providerPreInstallAbsence {
+		if err := deleteManifest(); err != nil {
+			return report, err
+		}
+		if deAdoptAfterManifestDeleteHook != nil {
+			deAdoptAfterManifestDeleteHook()
+		}
+		absent, absentErr := providerAdoptDaemonAbsent(rec)
+		if absentErr != nil || !absent {
+			// Never delete a row that appeared after the positive pre-Install
+			// absence proof. Leaving it intact is the fail-closed recovery state:
+			// provider restoration stays blocked until that managed owner is
+			// explicitly settled on a later retry.
 			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
-		if rec.ProviderSource != nil {
-			updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
-			if phaseErr != nil {
-				return report, phaseErr
-			}
-			rec = updated
+		var updated *AdoptProvenanceRecord
+		var phaseErr error
+		if rec.ProviderSource.DeAdoptPhase == "" {
+			updated, phaseErr = advanceProviderPreInstallManagedRemoved(rec.ManifestName, rec)
+		} else {
+			updated, phaseErr = AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
 		}
+		if phaseErr != nil {
+			return report, phaseErr
+		}
+		rec = updated
+	} else if rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
+		if err := deleteManifest(); err != nil {
+			return report, err
+		}
+		if deAdoptAfterManifestDeleteHook != nil {
+			deAdoptAfterManifestDeleteHook()
+		}
+		if _, _, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); removeErr != nil {
+			pendingEvents = append(pendingEvents, func() {
+				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "supervisor-intent", report)
+			})
+			return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed", plan.ManifestName)
+		}
+		updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
+		if phaseErr != nil {
+			return report, phaseErr
+		}
+		rec = updated
 	}
+
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_removed" {
 		source := opts.providerDeps.source
 		if source == nil {
@@ -1009,6 +1056,11 @@ func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys 
 // deAdoptBeforeManifestDeleteHook makes the readiness-to-E4 recreate window
 // deterministic in package tests. Production leaves it nil.
 var deAdoptBeforeManifestDeleteHook func()
+
+// deAdoptAfterManifestDeleteHook enlarges the post-delete/pre-provider-phase
+// window for package tests. It proves that a supervisor row published by an
+// already in-flight Install is preserved and blocks provider restoration.
+var deAdoptAfterManifestDeleteHook func()
 
 func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []string) (map[string]bool, []string, error) {
 	candidates := make(map[string]bool, len(routedKeys))
