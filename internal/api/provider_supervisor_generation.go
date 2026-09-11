@@ -40,10 +40,13 @@ func frozenProviderAdoptDaemonWithGeneration(rec *AdoptProvenanceRecord) (Superv
 }
 
 // removeSettledProviderAdoptDaemonGeneration removes the descriptor only when
-// the canonical supervisor-intent still represents the exact generation that
-// was frozen before the managed stop. The comparison runs inside the canonical
-// intent flock. A same-content rewrite is still a new generation and therefore
-// fails closed; a retry must freeze and settle that generation explicitly.
+// the canonical supervisor-intent still represents the exact descriptor that
+// was frozen and no writer has committed after the managed-stop write. The stop
+// itself is allowed to advance the generation exactly once because
+// stopAdoptOwnedDaemonSettled durably adds the user-stop override before it asks
+// the supervisor for terminal settlement. Any other generation change, or a
+// generation advance without that exact stop override, fails closed. This keeps
+// same-content rewrites fenced while not rejecting our own stop mutation.
 func removeSettledProviderAdoptDaemonGeneration(rec *AdoptProvenanceRecord, frozen SupervisorDaemon, frozenGeneration uint64) error {
 	if rec == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -57,7 +60,18 @@ func removeSettledProviderAdoptDaemonGeneration(rec *AdoptProvenanceRecord, froz
 		return err
 	}
 	if err := MutateSupervisorIntentIfChanged(intentPath, func(intent *SupervisorIntentFile) (bool, error) {
-		if intent == nil || intent.IntentGeneration != frozenGeneration {
+		if intent == nil {
+			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		switch intent.IntentGeneration {
+		case frozenGeneration:
+			// Test seams and already-durable stops may not need another intent write.
+		case frozenGeneration + 1:
+			stop, ok := intent.Stops[frozen.TaskName]
+			if !ok || stop.Desired != IntentDesiredStopped || stop.Reason != IntentReasonUserStop {
+				return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+			}
+		default:
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 		ownedIndex := -1
