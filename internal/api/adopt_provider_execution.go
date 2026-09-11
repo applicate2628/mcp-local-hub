@@ -23,10 +23,25 @@ type providerTransactionDeps struct {
 }
 
 func (d providerTransactionDeps) stopManaged(ctx context.Context, api *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
+	var (
+		settlement StoppedSettlement
+		err        error
+	)
 	if d.stop != nil {
-		return d.stop(ctx, frozen)
+		settlement, err = d.stop(ctx, frozen)
+	} else {
+		settlement, err = api.stopAdoptOwnedDaemonSettled(ctx, frozen)
 	}
-	return api.stopAdoptOwnedDaemonSettled(ctx, frozen)
+	if err != nil {
+		return settlement, err
+	}
+	if settlement.State != StoppedSettlementStopped || settlement.Reason != StoppedSettlementReasonStopped {
+		return settlement, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement is not terminal")
+	}
+	if err := markProviderManagedSettled(frozen.Server); err != nil {
+		return settlement, err
+	}
+	return settlement, nil
 }
 
 func (d providerTransactionDeps) closeProvenance(manifestName string) error {
@@ -133,8 +148,15 @@ func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecor
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	api := NewAPI()
-	if _, err := providerRecoveryStopManagedFn(ctx, api, frozen); err != nil {
+	settlement, err := providerRecoveryStopManagedFn(ctx, api, frozen)
+	if err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late managed daemon settlement: %w", err)
+	}
+	if settlement.State != StoppedSettlementStopped || settlement.Reason != StoppedSettlementReasonStopped {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late managed daemon settlement is not terminal")
+	}
+	if err := markProviderManagedSettled(rec.ManifestName); err != nil {
+		return err
 	}
 	scope, err := providerAdoptOwnershipScope(rec)
 	if err != nil {
@@ -290,9 +312,10 @@ func providerRestore(ctx context.Context, state providerExecutionState, provenan
 // recoverProviderActivation is explicit de-adopt recovery only. It recognizes
 // the recorded prior fingerprint without writing, restores only from the exact
 // recorded disabled fingerprint, and refuses every other observed state. The
-// final ownership proof and provider CAS execute while the canonical
-// supervisor-intent lock is held, so a concurrent Install cannot publish a
-// managed owner between the proof and re-enabling the direct provider.
+// final ownership proof, durable settlement proof, and provider CAS execute
+// while the canonical supervisor-intent lock is held, so a concurrent Install
+// cannot publish a managed owner between the proof and re-enabling the direct
+// provider.
 func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) (retErr error) {
 	if source == nil || provenance == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -329,7 +352,7 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	absent, ownershipErr = providerAdoptDaemonAbsent(current)
-	if ownershipErr != nil || !absent {
+	if ownershipErr != nil || !absent || !providerInstallPhaseAllowsRestore(current.ManifestName) {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 
