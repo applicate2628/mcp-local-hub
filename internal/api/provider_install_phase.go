@@ -15,6 +15,7 @@ const (
 	providerInstallPhaseNotStarted      = "not_started"
 	providerInstallPhaseStarted         = "started"
 	providerInstallPhaseRecoveryClaimed = "recovery_claimed"
+	providerInstallPhaseManagedSettled  = "managed_settled"
 )
 
 type providerInstallPhaseV1 struct {
@@ -32,7 +33,7 @@ func providerInstallPhasePath(manifestName string) (string, error) {
 
 func validProviderInstallPhase(phase string) bool {
 	switch phase {
-	case providerInstallPhaseNotStarted, providerInstallPhaseStarted, providerInstallPhaseRecoveryClaimed:
+	case providerInstallPhaseNotStarted, providerInstallPhaseStarted, providerInstallPhaseRecoveryClaimed, providerInstallPhaseManagedSettled:
 		return true
 	default:
 		return false
@@ -165,7 +166,7 @@ func markProviderInstallStartedForTask(taskName string) error {
 			return nil
 		case providerInstallPhaseNotStarted:
 			return writeProviderInstallPhase(record.ManifestName, providerInstallPhaseStarted)
-		case providerInstallPhaseRecoveryClaimed:
+		case providerInstallPhaseRecoveryClaimed, providerInstallPhaseManagedSettled:
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		default:
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -217,7 +218,7 @@ func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 			}
 			claimed = true
 			return nil
-		case providerInstallPhaseStarted:
+		case providerInstallPhaseStarted, providerInstallPhaseManagedSettled:
 			return nil
 		default:
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -227,4 +228,33 @@ func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 		return false, err
 	}
 	return claimed, nil
+}
+
+// markProviderManagedSettled records a concrete managed-daemon settlement.
+// It is the ordinary-install counterpart to recovery_claimed: provider restore
+// is permitted only after one of those two durable facts exists. The transition
+// is serialized with Install/recovery phase changes by adopted-entries.lock.
+func markProviderManagedSettled(manifestName string) error {
+	return withAdoptedEntriesLock(func() error {
+		phase, err := readProviderInstallPhase(manifestName)
+		if err != nil {
+			return err
+		}
+		switch phase {
+		case providerInstallPhaseManagedSettled:
+			return nil
+		case providerInstallPhaseStarted, providerInstallPhaseRecoveryClaimed:
+			return writeProviderInstallPhase(manifestName, providerInstallPhaseManagedSettled)
+		default:
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+	})
+}
+
+func providerInstallPhaseAllowsRestore(manifestName string) bool {
+	phase, err := readProviderInstallPhase(manifestName)
+	if err != nil {
+		return false
+	}
+	return phase == providerInstallPhaseRecoveryClaimed || phase == providerInstallPhaseManagedSettled
 }
