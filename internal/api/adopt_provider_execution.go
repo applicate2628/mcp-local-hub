@@ -36,6 +36,17 @@ func (d providerTransactionDeps) closeProvenance(manifestName string) error {
 	return CloseAdoptProvenance(manifestName)
 }
 
+func providerAdoptOwnershipScope(rec *AdoptProvenanceRecord) (*supervisorIntentOwnershipScope, error) {
+	if rec == nil {
+		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	expected := &config.ServerManifest{
+		Name:    rec.ManifestName,
+		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
+	}
+	return supervisorIntentOwnershipScopeForManifest(expected, nil, ""), nil
+}
+
 func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, error) {
 	if rec == nil {
 		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -44,16 +55,24 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 	if err != nil || intent == nil {
 		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	var matches []SupervisorDaemon
+	scope, err := providerAdoptOwnershipScope(rec)
+	if err != nil {
+		return SupervisorDaemon{}, err
+	}
+	var owned []SupervisorDaemon
 	for _, daemon := range intent.Daemons {
-		if daemon.Server == rec.ManifestName && daemon.Daemon == adoptDefaultDaemonName && daemon.Port == rec.Port && daemon.ManifestHash == rec.ExpectedManifestHash {
-			matches = append(matches, daemon)
+		if supervisorIntentRowOwnedByScope(daemon, rec.ManifestName, scope) {
+			owned = append(owned, daemon)
 		}
 	}
-	if len(matches) != 1 {
+	if len(owned) != 1 {
 		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	return matches[0], nil
+	daemon := owned[0]
+	if daemon.Server != rec.ManifestName || daemon.Daemon != adoptDefaultDaemonName || daemon.Port != rec.Port || daemon.ManifestHash != rec.ExpectedManifestHash {
+		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	return daemon, nil
 }
 
 // providerAdoptDaemonAbsent reports whether Install has not yet created any
@@ -72,11 +91,10 @@ func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	if intent == nil {
 		return true, nil
 	}
-	expected := &config.ServerManifest{
-		Name:    rec.ManifestName,
-		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
+	scope, err := providerAdoptOwnershipScope(rec)
+	if err != nil {
+		return false, err
 	}
-	scope := supervisorIntentOwnershipScopeForManifest(expected, nil, "")
 	for _, daemon := range intent.Daemons {
 		if supervisorIntentRowOwnedByScope(daemon, rec.ManifestName, scope) {
 			return false, nil
