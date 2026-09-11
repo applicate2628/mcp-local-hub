@@ -294,7 +294,7 @@ func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
 		plan.Eligibility.AdoptOwned, plan.Eligibility.GateOn, plan.Eligibility.Eligible)
 	if len(plan.Eligibility.GateOnClients) != 0 {
 		fmt.Fprintf(w, "  gate-on clients: %d (%s)\n",
-			len(plan.Eligibility.GateOnClients), strings.Join(plan.Eligibility.GateOnClients, ","))
+			len(plan.Eligibility.GateOnClients), strings.Join(plan.Eligibility.GateOnClients, ", "))
 	}
 	if plan.Eligibility.BlockedReason != "" {
 		fmt.Fprintf(w, "  eligibility reason: %s\n", plan.Eligibility.BlockedReason)
@@ -461,12 +461,14 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 
 	// A provider adoption can crash after ManifestCreate but before Install has
 	// created any supervisor ownership row. Settle that already-satisfied stop
-	// obligation durably while the row is still adopting, before E2 changes the
-	// operation state. A retry then consumes the persisted phase instead of
-	// attempting to infer this historical fact from de_adopting.
-	if !plan.providerRecovery && rec.ProviderSource != nil &&
-		rec.OperationState == AdoptOperationStateAdopting &&
-		rec.ProviderSource.DeAdoptPhase == "" {
+	// obligation before E2 changes a fresh adopting record, and also repair the
+	// exact legacy crash-after-E2 state left by the previous implementation. The
+	// latter is admitted only while the exact adopted manifest is still present;
+	// supervisor absence must still be positively proven and mismatches fail closed.
+	preInstallState := rec.OperationState == AdoptOperationStateAdopting ||
+		rec.OperationState == AdoptOperationStateDeAdopting
+	if !plan.providerRecovery && rec.ProviderSource != nil && preInstallState &&
+		rec.ProviderSource.DeAdoptPhase == "" && readiness.Present && readiness.HashReady {
 		if _, frozenErr := frozenProviderAdoptDaemon(rec); frozenErr != nil {
 			absent, absentErr := providerAdoptDaemonAbsent(rec)
 			if absentErr != nil || !absent {
