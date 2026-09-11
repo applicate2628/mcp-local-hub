@@ -31,8 +31,8 @@ func TestBuildDeAdoptPlanProviderPreManifestRecoveryPrecedesClientProbe(t *testi
 	}
 }
 
-func TestExecuteDeAdoptProviderSettledAbsenceRejectsRowAppearingBeforeE4(t *testing.T) {
-	name := "provider-settled-absence-e4-race"
+func TestExecuteDeAdoptProviderPreInstallRowAppearingBeforeE4IsStopped(t *testing.T) {
+	name := "provider-preinstall-e4-row"
 	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
 	if err != nil {
@@ -54,11 +54,56 @@ func TestExecuteDeAdoptProviderSettledAbsenceRejectsRowAppearingBeforeE4(t *test
 	}
 	t.Cleanup(func() { deAdoptBeforeManifestDeleteHook = previous })
 
+	stops := 0
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
+		providerDeps: providerTransactionDeps{
+			source: provider,
+			stop: func(_ context.Context, frozen SupervisorDaemon) (StoppedSettlement, error) {
+				stops++
+				if frozen.Server != name || frozen.Daemon != adoptDefaultDaemonName || frozen.Port != rec.Port {
+					t.Fatalf("unexpected frozen row: %+v", frozen)
+				}
+				return StoppedSettlement{TaskName: frozen.TaskName, State: StoppedSettlementStopped, Reason: StoppedSettlementReasonStopped}, nil
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("late pre-E4 row should be settled, not mistaken for historical absence: %v", err)
+	}
+	if stops != 1 || provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("stops=%d provider=%+v calls=%d", stops, provider.entry, provider.calls)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderPreInstallRowAfterManifestDeleteIsPreserved(t *testing.T) {
+	name := "provider-preinstall-post-delete-row"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	previous := deAdoptAfterManifestDeleteHook
+	deAdoptAfterManifestDeleteHook = func() {
+		intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
+			TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
+			Server:       name,
+			Daemon:       adoptDefaultDaemonName,
+			Port:         rec.Port,
+			ManifestHash: rec.ExpectedManifestHash,
+		}}
+		if writeErr := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); writeErr != nil {
+			t.Fatalf("inject post-delete supervisor row: %v", writeErr)
+		}
+	}
+	t.Cleanup(func() { deAdoptAfterManifestDeleteHook = previous })
+
 	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
 		providerDeps: providerTransactionDeps{
 			source: provider,
 			stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
-				t.Fatal("settled-absence path must reject a later row rather than silently treating it as already stopped")
+				t.Fatal("post-delete row must be preserved for a later retry, not deleted without settlement")
 				return StoppedSettlement{}, nil
 			},
 		},
@@ -67,10 +112,21 @@ func TestExecuteDeAdoptProviderSettledAbsenceRejectsRowAppearingBeforeE4(t *test
 		t.Fatalf("error=%v, want fail-closed lifecycle refusal", err)
 	}
 	if provider.calls != 0 || provider.entry.Enabled {
-		t.Fatalf("provider restored after E4 ownership race: provider=%+v calls=%d", provider.entry, provider.calls)
+		t.Fatalf("provider restored after post-delete ownership race: provider=%+v calls=%d", provider.entry, provider.calls)
 	}
-	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); statErr != nil {
-		t.Fatalf("manifest removed after E4 ownership race: %v", statErr)
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("manifest should already be hash-deleted before the injected late row, stat err=%v", statErr)
+	}
+	intent, readErr := ReadSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf))
+	if readErr != nil {
+		t.Fatalf("ReadSupervisorIntent: %v", readErr)
+	}
+	if len(intent.Daemons) != 1 || intent.Daemons[0].Server != name {
+		t.Fatalf("late supervisor row was not preserved: %+v", intent.Daemons)
+	}
+	persisted, found, readErr := ReadAdoptProvenance(name)
+	if readErr != nil || !found || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" {
+		t.Fatalf("pre-install recovery phase advanced despite late ownership: row=%+v found=%t err=%v", persisted, found, readErr)
 	}
 }
 
