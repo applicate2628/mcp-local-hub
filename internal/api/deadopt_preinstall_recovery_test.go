@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
@@ -27,6 +28,9 @@ func setupProviderPreInstallRecoveryFixture(t *testing.T, name string, state Ado
 		ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied",
 	}
 	writeDeAdoptExecutorRecord(t, rec)
+	if err := initializeProviderInstallPhase(name); err != nil {
+		t.Fatalf("initialize provider install phase: %v", err)
+	}
 	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{
 		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name,
 		Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd,
@@ -108,11 +112,11 @@ func TestExecuteDeAdoptProviderPreInstallAbsenceIsReprovedAfterCrashAndRetry(t *
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
 
-func TestExecuteDeAdoptProviderLegacyDeAdoptingPreInstallRecovers(t *testing.T) {
-	name := "provider-preinstall-legacy-deadopting"
+func TestExecuteDeAdoptProviderDeAdoptingNotStartedRecovers(t *testing.T) {
+	name := "provider-preinstall-deadopting"
 	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
 	if rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "" {
-		t.Fatalf("fixture must model legacy crash-after-E2 state: %+v", rec)
+		t.Fatalf("fixture must model crash-after-E2 state: %+v", rec)
 	}
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
@@ -120,15 +124,68 @@ func TestExecuteDeAdoptProviderLegacyDeAdoptingPreInstallRecovers(t *testing.T) 
 
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
 	if err != nil || plan.Routing != DeAdoptRoutingResume || plan.providerRecovery {
-		t.Fatalf("legacy pre-install plan=%+v err=%v, want ordinary resume", plan, err)
+		t.Fatalf("pre-install plan=%+v err=%v, want ordinary resume", plan, err)
 	}
 	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
 		providerDeps: providerTransactionDeps{source: provider},
 	}); err != nil {
-		t.Fatalf("legacy pre-install recovery apply: %v", err)
+		t.Fatalf("pre-install recovery apply: %v", err)
 	}
 	if provider.calls != 1 || !provider.entry.Enabled {
-		t.Fatalf("legacy recovery provider=%+v calls=%d", provider.entry, provider.calls)
+		t.Fatalf("recovery provider=%+v calls=%d", provider.entry, provider.calls)
 	}
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderStartedInstallCannotBecomePreInstallByDeletingIntent(t *testing.T) {
+	name := "provider-started-intent-lost"
+	_, stateRoot, _, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	if err := markProviderInstallStartedForTask("mcp-local-hub-" + name + "-" + adoptDefaultDaemonName); err != nil {
+		t.Fatalf("mark provider install started: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
+	}
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
+		providerDeps: providerTransactionDeps{source: provider},
+	})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("error=%v, want durable started-install refusal", err)
+	}
+	if provider.calls != 0 || provider.entry.Enabled {
+		t.Fatalf("provider restored after started Install lost its descriptor: provider=%+v calls=%d", provider.entry, provider.calls)
+	}
+}
+
+func TestExecuteDeAdoptProviderLegacyMissingInstallMarkerFailsClosed(t *testing.T) {
+	name := "provider-legacy-marker-missing"
+	_, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	marker, err := providerInstallPhasePath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
+	}
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
+		providerDeps: providerTransactionDeps{source: provider},
+	})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("error=%v, want missing-marker fail-closed refusal; rec=%+v", err, rec)
+	}
+	if provider.calls != 0 || provider.entry.Enabled {
+		t.Fatalf("provider restored from synthetic legacy history: provider=%+v calls=%d", provider.entry, provider.calls)
+	}
 }
