@@ -143,7 +143,7 @@ func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecor
 	if rec == nil || rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "managed_removed" {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	frozen, err := frozenProviderAdoptDaemon(rec)
+	frozen, frozenGeneration, err := frozenProviderAdoptDaemonWithGeneration(rec)
 	if err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
@@ -158,12 +158,8 @@ func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecor
 	if err := markProviderManagedSettled(rec.ManifestName); err != nil {
 		return err
 	}
-	scope, err := providerAdoptOwnershipScope(rec)
-	if err != nil {
+	if err := removeSettledProviderAdoptDaemonGeneration(rec, frozen, frozenGeneration); err != nil {
 		return err
-	}
-	if _, _, _, err := api.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, scope, false); err != nil {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late supervisor-intent cleanup: %w", err)
 	}
 	absent, err := providerAdoptDaemonAbsent(rec)
 	if err != nil || !absent {
