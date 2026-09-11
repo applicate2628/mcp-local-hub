@@ -10,10 +10,11 @@ import (
 )
 
 const (
-	providerInstallPhaseLeaf       = "provider-install-phase.json"
-	providerInstallPhaseVersion    = 1
-	providerInstallPhaseNotStarted = "not_started"
-	providerInstallPhaseStarted    = "started"
+	providerInstallPhaseLeaf            = "provider-install-phase.json"
+	providerInstallPhaseVersion         = 1
+	providerInstallPhaseNotStarted      = "not_started"
+	providerInstallPhaseStarted         = "started"
+	providerInstallPhaseRecoveryClaimed = "recovery_claimed"
 )
 
 type providerInstallPhaseV1 struct {
@@ -29,8 +30,17 @@ func providerInstallPhasePath(manifestName string) (string, error) {
 	return filepath.Join(dir, providerInstallPhaseLeaf), nil
 }
 
+func validProviderInstallPhase(phase string) bool {
+	switch phase {
+	case providerInstallPhaseNotStarted, providerInstallPhaseStarted, providerInstallPhaseRecoveryClaimed:
+		return true
+	default:
+		return false
+	}
+}
+
 func encodeProviderInstallPhase(phase string) ([]byte, error) {
-	if phase != providerInstallPhaseNotStarted && phase != providerInstallPhaseStarted {
+	if !validProviderInstallPhase(phase) {
 		return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	return json.Marshal(providerInstallPhaseV1{Version: providerInstallPhaseVersion, Phase: phase})
@@ -55,10 +65,29 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 	if err := json.Unmarshal(raw, &record); err != nil || record.Version != providerInstallPhaseVersion {
 		return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	if record.Phase != providerInstallPhaseNotStarted && record.Phase != providerInstallPhaseStarted {
+	if !validProviderInstallPhase(record.Phase) {
 		return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	return record.Phase, nil
+}
+
+func writeProviderInstallPhase(manifestName, phase string) error {
+	path, err := providerInstallPhasePath(manifestName)
+	if err != nil {
+		return err
+	}
+	raw, err := encodeProviderInstallPhase(phase)
+	if err != nil {
+		return err
+	}
+	if err := WriteStateFileBytesAtomic(path, raw); err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: write provider install phase: %w", err)
+	}
+	observed, err := readProviderInstallPhase(manifestName)
+	if err != nil || observed != phase {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	return nil
 }
 
 // initializeProviderInstallPhase is called before the provider activation CAS.
@@ -84,85 +113,118 @@ func initializeProviderInstallPhase(manifestName string) error {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 
-	raw, err := encodeProviderInstallPhase(providerInstallPhaseNotStarted)
-	if err != nil {
-		return err
-	}
-	if err := WriteStateFileBytesAtomic(path, raw); err != nil {
+	if err := writeProviderInstallPhase(manifestName, providerInstallPhaseNotStarted); err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: initialize provider install phase: %w", err)
-	}
-	phase, err := readProviderInstallPhase(manifestName)
-	if err != nil || phase != providerInstallPhaseNotStarted {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	return nil
 }
 
 // markProviderInstallStartedForTask is invoked only after the fail-closed
 // server-install audit append succeeds and before executeInstallTo may mutate a
-// scheduler/client/intent surface. It scans the durable adopting provider rows
-// instead of parsing a potentially ambiguous hyphenated task name; an exact
-// canonical task match is the authority. No matching provider adoption is a
-// normal non-provider install and therefore a no-op.
+// scheduler/client/intent surface. The adopted-entries lock serializes this
+// not_started -> started transition against the recovery claimant below. Once a
+// pre-Install recovery has claimed the operation, Install must fail before any
+// mutation instead of recreating managed ownership behind de-adopt's proof.
 func markProviderInstallStartedForTask(taskName string) error {
 	canonical := canonicalIntentTaskKey(taskName)
-	store, err := readAdoptedEntries()
-	if err != nil {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	var manifestName string
-	for i := range store.Records {
-		rec := &store.Records[i]
-		if rec.ProviderSource == nil || rec.OperationState != AdoptOperationStateAdopting {
-			continue
-		}
-		expected := canonicalIntentTaskKey("mcp-local-hub-" + rec.ManifestName + "-" + adoptDefaultDaemonName)
-		if expected != canonical {
-			continue
-		}
-		if manifestName != "" {
+	return withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
-		manifestName = rec.ManifestName
-	}
-	if manifestName == "" {
-		return nil
-	}
-	phase, err := readProviderInstallPhase(manifestName)
-	if err != nil {
-		return err
-	}
-	if phase == providerInstallPhaseStarted {
-		return nil
-	}
-	if phase != providerInstallPhaseNotStarted {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	path, err := providerInstallPhasePath(manifestName)
-	if err != nil {
-		return err
-	}
-	raw, err := encodeProviderInstallPhase(providerInstallPhaseStarted)
-	if err != nil {
-		return err
-	}
-	if err := WriteStateFileBytesAtomic(path, raw); err != nil {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: mark provider install started: %w", err)
-	}
-	phase, err = readProviderInstallPhase(manifestName)
-	if err != nil || phase != providerInstallPhaseStarted {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	return nil
+		var record *AdoptProvenanceRecord
+		for i := range store.Records {
+			rec := &store.Records[i]
+			if rec.ProviderSource == nil {
+				continue
+			}
+			expected := canonicalIntentTaskKey("mcp-local-hub-" + rec.ManifestName + "-" + adoptDefaultDaemonName)
+			if expected != canonical {
+				continue
+			}
+			if rec.OperationState == AdoptOperationStateDeAdopting {
+				return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+			}
+			if rec.OperationState != AdoptOperationStateAdopting {
+				continue
+			}
+			if record != nil {
+				return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+			}
+			record = rec
+		}
+		if record == nil {
+			return nil
+		}
+		phase, err := readProviderInstallPhase(record.ManifestName)
+		if err != nil {
+			return err
+		}
+		switch phase {
+		case providerInstallPhaseStarted:
+			return nil
+		case providerInstallPhaseNotStarted:
+			return writeProviderInstallPhase(record.ManifestName, providerInstallPhaseStarted)
+		case providerInstallPhaseRecoveryClaimed:
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		default:
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+	})
 }
 
+// providerInstallNeverStarted is the destructive pre-Install recovery claim.
+// The first successful caller atomically converts not_started to
+// recovery_claimed under adopted-entries.lock. Replays by the same durable
+// recovery state remain admitted, while a concurrent/future Install observes
+// recovery_claimed and is refused before executeInstallTo mutates anything.
+// A started or missing/legacy marker is never treated as pre-Install history.
 func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil || rec.ProviderSource == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
-	phase, err := readProviderInstallPhase(rec.ManifestName)
+	claimed := false
+	err := withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		var current *AdoptProvenanceRecord
+		for i := range store.Records {
+			candidate := &store.Records[i]
+			if candidate.ManifestName != rec.ManifestName {
+				continue
+			}
+			if current != nil || candidate.ProviderSource == nil || !deAdoptProvenanceIdentityMatches(rec, candidate) {
+				return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+			}
+			current = candidate
+		}
+		if current == nil {
+			return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+		}
+		phase, err := readProviderInstallPhase(rec.ManifestName)
+		if err != nil {
+			return err
+		}
+		switch phase {
+		case providerInstallPhaseRecoveryClaimed:
+			claimed = true
+			return nil
+		case providerInstallPhaseNotStarted:
+			if err := writeProviderInstallPhase(rec.ManifestName, providerInstallPhaseRecoveryClaimed); err != nil {
+				return err
+			}
+			claimed = true
+			return nil
+		case providerInstallPhaseStarted:
+			return nil
+		default:
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+	})
 	if err != nil {
 		return false, err
 	}
-	return phase == providerInstallPhaseNotStarted, nil
+	return claimed, nil
 }
