@@ -152,3 +152,69 @@ func TestProviderInstallStartRefusesDeAdoptingProvider(t *testing.T) {
 		t.Fatalf("phase=%q err=%v, want untouched %q", phase, err, providerInstallPhaseNotStarted)
 	}
 }
+
+func TestProviderInstallPhaseReadOnlyNotStartedProofRejectsStartedAndMissing(t *testing.T) {
+	name := "provider-install-readonly-proof"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	if !providerInstallPhaseIsNotStarted(name) {
+		t.Fatal("fresh durable not_started marker was not recognized")
+	}
+	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
+	if err := markProviderInstallStartedForTask(task); err != nil {
+		t.Fatal(err)
+	}
+	if providerInstallPhaseIsNotStarted(name) {
+		t.Fatal("started marker was misclassified as pre-install")
+	}
+	marker, err := providerInstallPhasePath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+	if providerInstallPhaseIsNotStarted(name) {
+		t.Fatal("missing legacy marker was misclassified as pre-install")
+	}
+}
+
+func TestProviderRestoreGateBootstrapsLegacySettledRemovedReceipt(t *testing.T) {
+	name := "provider-install-legacy-removed-restore"
+	_, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	rec.ProviderSource.DeAdoptPhase = "managed_removed"
+	writeDeAdoptExecutorRecord(t, rec)
+	marker, err := providerInstallPhasePath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatalf("remove legacy provider-install marker: %v", err)
+	}
+
+	if !providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("durable legacy managed_removed receipt did not bootstrap restore authority")
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseManagedSettled {
+		t.Fatalf("bootstrapped phase=%q err=%v, want %q", phase, err, providerInstallPhaseManagedSettled)
+	}
+}
+
+func TestProviderRestoreGateDoesNotInventLegacySettlementFromAdoptingReceipt(t *testing.T) {
+	name := "provider-install-missing-marker-adopting"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	marker, err := providerInstallPhasePath(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(marker); err != nil {
+		t.Fatal(err)
+	}
+
+	if providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("missing marker on an adopting receipt invented managed settlement")
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("failed restore gate unexpectedly materialized marker: %v", err)
+	}
+}
