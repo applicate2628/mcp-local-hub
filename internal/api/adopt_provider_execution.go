@@ -236,10 +236,20 @@ func providerRestore(ctx context.Context, state providerExecutionState, provenan
 
 // recoverProviderActivation is explicit de-adopt recovery only. It recognizes
 // the recorded prior fingerprint without writing, restores only from the exact
-// recorded disabled fingerprint, and refuses every other observed state.
+// recorded disabled fingerprint, and refuses every other observed state. The
+// provider may be re-enabled only after the current adopt row proves that no
+// supervisor-owned daemon for the same manifest remains.
 func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) error {
 	if source == nil || provenance == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	current, found, provenanceErr := ReadAdoptProvenance(provenance.ServerName)
+	if provenanceErr != nil || !found || current.ProviderSource == nil {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	absent, ownershipErr := providerAdoptDaemonAbsent(current)
+	if ownershipErr != nil || !absent {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	entries, err := source.ListProviderMCPEntries(ctx)
 	if err != nil {
