@@ -9,10 +9,10 @@ import (
 	"mcp-local-hub/internal/clients"
 )
 
-func setupProviderPreInstallRecoveryFixture(t *testing.T, name string) (string, string, *AdoptProvenanceRecord, *providerLifecycleFake) {
+func setupProviderPreInstallRecoveryFixture(t *testing.T, name string, state AdoptOperationState) (string, string, *AdoptProvenanceRecord, *providerLifecycleFake) {
 	t.Helper()
 	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
-		state: AdoptOperationStateAdopting, originalState: AdoptOriginalStateAbsent,
+		state: state, originalState: AdoptOriginalStateAbsent,
 		liveConfig: "[mcp_servers]\n", manifestPresent: true,
 	})
 	exe, err := os.Executable()
@@ -40,7 +40,7 @@ func setupProviderPreInstallRecoveryFixture(t *testing.T, name string) (string, 
 
 func TestExecuteDeAdoptProviderPreInstallMissingSupervisorIntent(t *testing.T) {
 	name := "provider-preinstall-intent-absent"
-	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name)
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
 	}
@@ -62,7 +62,7 @@ func TestExecuteDeAdoptProviderPreInstallMissingSupervisorIntent(t *testing.T) {
 
 func TestExecuteDeAdoptProviderPreInstallSettlementSurvivesCrashAndRetry(t *testing.T) {
 	name := "provider-preinstall-crash-retry"
-	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name)
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
 	}
@@ -104,6 +104,31 @@ func TestExecuteDeAdoptProviderPreInstallSettlementSurvivesCrashAndRetry(t *test
 	}
 	if provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatalf("retry provider=%+v calls=%d", provider.entry, provider.calls)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderLegacyDeAdoptingPreInstallRecovers(t *testing.T) {
+	name := "provider-preinstall-legacy-deadopting"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	if rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "" {
+		t.Fatalf("fixture must model legacy crash-after-E2 state: %+v", rec)
+	}
+	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
+		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
+	}
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingResume || plan.providerRecovery {
+		t.Fatalf("legacy pre-install plan=%+v err=%v, want ordinary resume", plan, err)
+	}
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
+		providerDeps: providerTransactionDeps{source: provider},
+	}); err != nil {
+		t.Fatalf("legacy pre-install recovery apply: %v", err)
+	}
+	if provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("legacy recovery provider=%+v calls=%d", provider.entry, provider.calls)
 	}
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
