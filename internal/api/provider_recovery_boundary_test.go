@@ -73,3 +73,35 @@ func TestExecuteDeAdoptProviderSettledAbsenceRejectsRowAppearingBeforeE4(t *test
 		t.Fatalf("manifest removed after E4 ownership race: %v", statErr)
 	}
 }
+
+func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
+	name := "provider-restore-late-legacy-row"
+	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
+		t.Fatalf("remove manifest: %v", err)
+	}
+	rec.ProviderSource.DeAdoptPhase = "managed_removed"
+	writeDeAdoptExecutorRecord(t, rec)
+	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
+		TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
+		Port:         rec.Port,
+		ManifestHash: rec.ExpectedManifestHash,
+	}}
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
+		t.Fatal(err)
+	}
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
+		providerDeps: providerTransactionDeps{source: provider},
+	})
+	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("error=%v, want provider restore ownership refusal", err)
+	}
+	if provider.calls != 0 || provider.entry.Enabled {
+		t.Fatalf("provider restored while a legacy owned row remained: provider=%+v calls=%d", provider.entry, provider.calls)
+	}
+}
