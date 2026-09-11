@@ -40,7 +40,7 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	intent, err := loadSupervisorOwnedIntent()
-	if err != nil {
+	if err != nil || intent == nil {
 		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	var matches []SupervisorDaemon
@@ -65,6 +65,9 @@ func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	intent, err := loadSupervisorOwnedIntent()
 	if err != nil {
 		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	if intent == nil {
+		return true, nil
 	}
 	for _, daemon := range intent.Daemons {
 		if daemon.Server == rec.ManifestName && daemon.Daemon == adoptDefaultDaemonName {
