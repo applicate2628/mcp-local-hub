@@ -60,7 +60,7 @@ func TestExecuteDeAdoptProviderPreInstallMissingSupervisorIntent(t *testing.T) {
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }
 
-func TestExecuteDeAdoptProviderPreInstallSettlementSurvivesCrashAndRetry(t *testing.T) {
+func TestExecuteDeAdoptProviderPreInstallAbsenceIsReprovedAfterCrashAndRetry(t *testing.T) {
 	name := "provider-preinstall-crash-retry"
 	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
@@ -89,8 +89,8 @@ func TestExecuteDeAdoptProviderPreInstallSettlementSurvivesCrashAndRetry(t *test
 	if err != nil || !found {
 		t.Fatalf("ReadAdoptProvenance: found=%t err=%v", found, err)
 	}
-	if persisted.OperationState != AdoptOperationStateDeAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "managed_stop_settled" {
-		t.Fatalf("crash state=%+v, want de_adopting with durable managed_stop_settled", persisted)
+	if persisted.OperationState != AdoptOperationStateDeAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" {
+		t.Fatalf("crash state=%+v, want de_adopting with empty phase so retry must re-prove absence", persisted)
 	}
 
 	retry, err := NewAPI().BuildDeAdoptPlan(name)
