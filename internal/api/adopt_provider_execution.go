@@ -103,6 +103,46 @@ func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	return true, nil
 }
 
+// providerRecoveryStopManagedFn is a narrow test seam for the late-row recovery
+// path below. Production always delegates to the same exact frozen-descriptor
+// settlement owner used by ordinary provider de-adopt.
+var providerRecoveryStopManagedFn = func(ctx context.Context, api *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
+	return api.stopAdoptOwnedDaemonSettled(ctx, frozen)
+}
+
+// repairProviderLateManagedRow handles the only recoverable ownership race after
+// a pre-Install lane has already durably reached managed_removed. A same-operation
+// Install can publish its exact descriptor after the second absence proof but
+// before provider restoration. The final restore gate must not only refuse that
+// state forever: while the manifest lease is still held, an exact frozen row is
+// settled and removed, then absence is re-proved. Ambiguous, legacy, mismatched,
+// or otherwise non-exact ownership stays fail-closed.
+func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecord) error {
+	if rec == nil || rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "managed_removed" {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	frozen, err := frozenProviderAdoptDaemon(rec)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	api := NewAPI()
+	if _, err := providerRecoveryStopManagedFn(ctx, api, frozen); err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late managed daemon settlement: %w", err)
+	}
+	scope, err := providerAdoptOwnershipScope(rec)
+	if err != nil {
+		return err
+	}
+	if _, _, _, err := api.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, scope, false); err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late supervisor-intent cleanup: %w", err)
+	}
+	absent, err := providerAdoptDaemonAbsent(rec)
+	if err != nil || !absent {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	return nil
+}
+
 type providerExecutionState struct {
 	provider clients.ProviderMCPSourceV1
 	entry    clients.ProviderMCPEntryV1
@@ -248,8 +288,16 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	absent, ownershipErr := providerAdoptDaemonAbsent(current)
-	if ownershipErr != nil || !absent {
+	if ownershipErr != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	if !absent {
+		if current.ProviderSource.DeAdoptPhase != "managed_removed" {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		if err := repairProviderLateManagedRow(ctx, current); err != nil {
+			return err
+		}
 	}
 	entries, err := source.ListProviderMCPEntries(ctx)
 	if err != nil {
