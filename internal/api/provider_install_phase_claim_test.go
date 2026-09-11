@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"testing"
 )
 
@@ -15,6 +16,9 @@ func TestProviderInstallRecoveryClaimBlocksInstallStart(t *testing.T) {
 	phase, err := readProviderInstallPhase(name)
 	if err != nil || phase != providerInstallPhaseRecoveryClaimed {
 		t.Fatalf("phase=%q err=%v, want %q", phase, err, providerInstallPhaseRecoveryClaimed)
+	}
+	if !providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("claimed pre-install recovery must be restore-eligible after ownership is absent")
 	}
 
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
@@ -33,7 +37,7 @@ func TestProviderInstallRecoveryClaimBlocksInstallStart(t *testing.T) {
 	}
 }
 
-func TestProviderInstallStartedBlocksRecoveryClaim(t *testing.T) {
+func TestProviderInstallStartedBlocksRecoveryClaimAndRestore(t *testing.T) {
 	name := "provider-install-started-wins"
 	_, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
@@ -51,6 +55,35 @@ func TestProviderInstallStartedBlocksRecoveryClaim(t *testing.T) {
 	phase, err := readProviderInstallPhase(name)
 	if err != nil || phase != providerInstallPhaseStarted {
 		t.Fatalf("phase=%q err=%v, want %q", phase, err, providerInstallPhaseStarted)
+	}
+	if providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("started Install without managed settlement unexpectedly became restore-eligible")
+	}
+}
+
+func TestProviderManagedStopMakesStartedInstallRestoreEligible(t *testing.T) {
+	name := "provider-install-managed-settled"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
+	if err := markProviderInstallStartedForTask(task); err != nil {
+		t.Fatalf("markProviderInstallStartedForTask: %v", err)
+	}
+
+	deps := providerTransactionDeps{stop: func(context.Context, SupervisorDaemon) (StoppedSettlement, error) {
+		return StoppedSettlement{
+			State:  StoppedSettlementStopped,
+			Reason: StoppedSettlementReasonStopped,
+		}, nil
+	}}
+	if _, err := deps.stopManaged(context.Background(), NewAPI(), SupervisorDaemon{Server: name}); err != nil {
+		t.Fatalf("stopManaged: %v", err)
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseManagedSettled {
+		t.Fatalf("phase=%q err=%v, want %q", phase, err, providerInstallPhaseManagedSettled)
+	}
+	if !providerInstallPhaseAllowsRestore(name) {
+		t.Fatal("terminal managed settlement did not become restore-eligible")
 	}
 }
 
