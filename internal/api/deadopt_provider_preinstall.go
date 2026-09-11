@@ -5,17 +5,20 @@ import (
 	"time"
 )
 
-// settleProviderPreInstallManagedStop persists the fact that the managed-daemon
-// stop obligation was already satisfied by a positive proof that Install never
-// created a supervisor ownership row. The caller holds the per-manifest lease
-// and must obtain that proof immediately before calling this helper.
+// advanceProviderPreInstallManagedRemoved closes the provider managed-side
+// obligation only after the exact adopt manifest is already absent and the
+// caller has positively re-proved that no supervisor-owned daemon exists.
 //
-// The owner admits only an exact current record in adopting or de_adopting with
-// no later provider phase. The de_adopting case is the legacy crash-after-E2
-// state left by the previous implementation; callers must separately prove the
-// exact manifest still exists and supervisor ownership is positively absent.
-func settleProviderPreInstallManagedStop(manifestName string, expected *AdoptProvenanceRecord) (*AdoptProvenanceRecord, error) {
-	if expected == nil || expected.ProviderSource == nil {
+// Unlike an ordinary provider de-adopt, the pre-Install crash lane never had a
+// managed daemon to stop or a supervisor descriptor to remove. Persisting
+// managed_stop_settled before E4 loses that distinction and creates a race where
+// a late regular Install row can be deleted without ever being stopped. This
+// helper therefore performs the single durable empty -> managed_removed jump
+// only after E4's manifest deletion/absence proof. A crash before this write
+// leaves an empty phase; retry re-proves the same facts instead of trusting
+// historical absence.
+func advanceProviderPreInstallManagedRemoved(manifestName string, expected *AdoptProvenanceRecord) (*AdoptProvenanceRecord, error) {
+	if expected == nil || expected.ProviderSource == nil || expected.ProviderSource.DeAdoptPhase != "" {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	if expected.OperationState != AdoptOperationStateAdopting &&
@@ -26,7 +29,7 @@ func settleProviderPreInstallManagedStop(manifestName string, expected *AdoptPro
 	err := withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
-			return fmt.Errorf("provider pre-install settlement: read store: %w", err)
+			return fmt.Errorf("provider pre-install removal: read store: %w", err)
 		}
 		for i := range store.Records {
 			record := &store.Records[i]
@@ -34,25 +37,16 @@ func settleProviderPreInstallManagedStop(manifestName string, expected *AdoptPro
 				continue
 			}
 			if !deAdoptProvenanceIdentityMatches(expected, record) ||
-				record.OperationState != expected.OperationState ||
+				record.OperationState != AdoptOperationStateDeAdopting ||
 				record.ProviderSource == nil ||
-				*record.ProviderSource != *expected.ProviderSource {
+				*record.ProviderSource != *expected.ProviderSource ||
+				record.ProviderSource.DeAdoptPhase != "" {
 				return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 			}
-			if record.ProviderSource.DeAdoptPhase != "" {
-				if record.ProviderSource.DeAdoptPhase != "managed_stop_settled" {
-					return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-				}
-				copyRecord := *record
-				copyProvider := *record.ProviderSource
-				copyRecord.ProviderSource = &copyProvider
-				updated = &copyRecord
-				return nil
-			}
-			record.ProviderSource.DeAdoptPhase = "managed_stop_settled"
+			record.ProviderSource.DeAdoptPhase = "managed_removed"
 			record.UpdatedAt = time.Now().UTC()
 			if err := writeAdoptedEntries(store); err != nil {
-				return fmt.Errorf("provider pre-install settlement: write store: %w", err)
+				return fmt.Errorf("provider pre-install removal: write store: %w", err)
 			}
 			copyRecord := *record
 			copyProvider := *record.ProviderSource
