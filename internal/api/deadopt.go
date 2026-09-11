@@ -459,6 +459,27 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, err
 	}
 
+	// A provider adoption can crash after ManifestCreate but before Install has
+	// created any supervisor ownership row. Settle that already-satisfied stop
+	// obligation durably while the row is still adopting, before E2 changes the
+	// operation state. A retry then consumes the persisted phase instead of
+	// attempting to infer this historical fact from de_adopting.
+	if !plan.providerRecovery && rec.ProviderSource != nil &&
+		rec.OperationState == AdoptOperationStateAdopting &&
+		rec.ProviderSource.DeAdoptPhase == "" {
+		if _, frozenErr := frozenProviderAdoptDaemon(rec); frozenErr != nil {
+			absent, absentErr := providerAdoptDaemonAbsent(rec)
+			if absentErr != nil || !absent {
+				return nil, frozenErr
+			}
+			settled, settleErr := settleProviderPreInstallManagedStop(rec.ManifestName, rec)
+			if settleErr != nil {
+				return nil, settleErr
+			}
+			rec = settled
+		}
+	}
+
 	// E2 — idempotently enter de_adopting. Mark performs the B4 committed-row
 	// re-verification while this caller retains the lease.
 	if err := MarkAdoptProvenanceDeAdopting(plan.ManifestName); err != nil {
@@ -627,18 +648,13 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
 		frozen, frozenErr := frozenProviderAdoptDaemon(rec)
 		if frozenErr != nil {
-			absent, absentErr := providerAdoptDaemonAbsent(rec)
-			if rec.OperationState != AdoptOperationStateAdopting || absentErr != nil || !absent {
-				return report, frozenErr
-			}
+			return report, frozenErr
 		}
-		if frozenErr == nil {
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
-			cancel()
-			if stopErr != nil {
-				return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
-			}
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
+		cancel()
+		if stopErr != nil {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
 		}
 		updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
 		if phaseErr != nil {
@@ -762,9 +778,11 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 		if intentErr != nil {
 			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
-		for _, daemon := range intent.Daemons {
-			if daemon.Server == current.ManifestName && daemon.Daemon == adoptDefaultDaemonName && daemon.Port == current.Port && daemon.ManifestHash == current.ExpectedManifestHash {
-				return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		if intent != nil {
+			for _, daemon := range intent.Daemons {
+				if daemon.Server == current.ManifestName && daemon.Daemon == adoptDefaultDaemonName && daemon.Port == current.Port && daemon.ManifestHash == current.ExpectedManifestHash {
+					return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+				}
 			}
 		}
 		current, err = AdvanceProviderDeAdoptPhase(current.ManifestName, "", "managed_stop_settled")
