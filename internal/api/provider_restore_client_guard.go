@@ -15,5 +15,12 @@ func providerRestoreBindingsClear(manifestName string) bool {
 	if current.ProviderSource.DeAdoptPhase != "managed_removed" {
 		return true
 	}
+	// A claimed pre-Install recovery never mutated client bindings. Requiring
+	// a client probe here would undo the recovery lane's independence from
+	// unavailable adapters. Real managed settlements still recheck E3 below.
+	phase, phaseErr := readProviderInstallPhase(manifestName)
+	if phaseErr == nil && phase == providerInstallPhaseRecoveryClaimed {
+		return true
+	}
 	return classifyDeadAdoptingRow(*current) != adoptRowCommittedKeep
 }
