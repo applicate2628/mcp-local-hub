@@ -47,7 +47,7 @@ func TestExecuteDeAdoptProviderPreInstallRowAppearingBeforeE4IsStopped(t *testin
 			Daemon:       adoptDefaultDaemonName,
 			Port:         rec.Port,
 			ManifestHash: rec.ExpectedManifestHash,
-		}}
+		}}}
 		if writeErr := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); writeErr != nil {
 			t.Fatalf("inject supervisor row: %v", writeErr)
 		}
@@ -92,7 +92,7 @@ func TestExecuteDeAdoptProviderPreInstallRowAfterManifestDeleteIsPreserved(t *te
 			Daemon:       adoptDefaultDaemonName,
 			Port:         rec.Port,
 			ManifestHash: rec.ExpectedManifestHash,
-		}}
+		}}}
 		if writeErr := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); writeErr != nil {
 			t.Fatalf("inject post-delete supervisor row: %v", writeErr)
 		}
@@ -147,7 +147,7 @@ func TestExecuteDeAdoptProviderRestoreRepairsLateExactRowAfterManagedRemoved(t *
 		Daemon:       adoptDefaultDaemonName,
 		Port:         rec.Port,
 		ManifestHash: rec.ExpectedManifestHash,
-	}}
+	}}}
 	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
 		TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
 		Port:         rec.Port,
 		ManifestHash: rec.ExpectedManifestHash,
-	}}
+	}}}
 	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), intent); err != nil {
 		t.Fatal(err)
 	}
@@ -228,7 +228,7 @@ func TestRemoveSettledProviderAdoptDaemonGenerationRejectsSameContentRewrite(t *
 		Daemon:       adoptDefaultDaemonName,
 		Port:         rec.Port,
 		ManifestHash: rec.ExpectedManifestHash,
-	}}
+	}}}
 	if err := WriteSupervisorIntent(intentPath, intent); err != nil {
 		t.Fatal(err)
 	}
