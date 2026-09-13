@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -166,7 +167,11 @@ func TestProviderInstallPhaseReadOnlyNotStartedProofRejectsStartedAndMissing(t *
 
 func TestProviderRestoreGateBootstrapsLegacySettledRemovedReceipt(t *testing.T) {
 	name := "provider-install-legacy-removed-restore"
-	_, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	manifestRoot, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	// managed_removed follows manifest deletion in the real de-adopt sequence.
+	if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
+		t.Fatal(err)
+	}
 	rec.ProviderSource.DeAdoptPhase = "managed_removed"
 	writeDeAdoptExecutorRecord(t, *rec)
 	marker, err := providerInstallPhasePath(name)
@@ -178,6 +183,10 @@ func TestProviderRestoreGateBootstrapsLegacySettledRemovedReceipt(t *testing.T) 
 	}
 	if !providerInstallPhaseAllowsRestore(name) {
 		t.Fatal("durable legacy managed_removed receipt did not bootstrap restore authority")
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseManagedSettled {
+		t.Fatalf("bootstrapped phase=%q err=%v, want %q", phase, err, providerInstallPhaseManagedSettled)
 	}
 }
 
@@ -207,6 +216,10 @@ func TestRecordInstallAuditMarksProviderInstallStartedAfterAuditBarrier(t *testi
 	if err := NewAPI().recordInstallAuditForTasks(batch); err != nil {
 		t.Fatalf("recordInstallAuditForTasks: %v", err)
 	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseStarted {
+		t.Fatalf("phase after successful audit=%q err=%v, want %q", phase, err, providerInstallPhaseStarted)
+	}
 }
 
 func TestRecordInstallAuditFailureLeavesProviderInstallNotStarted(t *testing.T) {
@@ -219,6 +232,10 @@ func TestRecordInstallAuditFailureLeavesProviderInstallNotStarted(t *testing.T) 
 	batch := installAuditTaskBatch{ManifestName: name, TaskNames: []string{task}}
 	if err := NewAPI().recordInstallAuditForTasks(batch); err == nil {
 		t.Fatal("recordInstallAuditForTasks unexpectedly crossed failed audit")
+	}
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseNotStarted {
+		t.Fatalf("phase after failed audit=%q err=%v, want %q", phase, err, providerInstallPhaseNotStarted)
 	}
 }
 
@@ -240,5 +257,9 @@ func TestRecordInstallAuditTaskCollisionDoesNotClaimOtherManifest(t *testing.T) 
 	provider := installAuditTaskBatch{ManifestName: providerName, TaskNames: []string{collidingTask}}
 	if err := NewAPI().recordInstallAuditForTasks(provider); err != nil {
 		t.Fatalf("provider install admission failed: %v", err)
+	}
+	phase, err = readProviderInstallPhase(providerName)
+	if err != nil || phase != providerInstallPhaseStarted {
+		t.Fatalf("provider install phase=%q err=%v, want %q", phase, err, providerInstallPhaseStarted)
 	}
 }
