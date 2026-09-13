@@ -1,6 +1,8 @@
 package api
 
 import (
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 )
@@ -108,5 +110,63 @@ func TestRemoveSettledProviderAdoptDaemonFencePrunesLegacyWatermark(t *testing.T
 	}
 	if _, ok := settled.LegacyStopWatermarks[canonicalIntentTaskKey(otherTask)]; !ok {
 		t.Fatalf("unrelated watermark was removed: %+v", settled.LegacyStopWatermarks)
+	}
+}
+
+func TestProviderSettlementMigratesLegacyZeroIntentGeneration(t *testing.T) {
+	name := "provider-legacy-zero-generation"
+	_, stateRoot, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+	intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
+	task := "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
+	legacy := &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{{
+			TaskName:     task,
+			Server:       name,
+			Daemon:       adoptDefaultDaemonName,
+			Port:         rec.Port,
+			ManifestHash: rec.ExpectedManifestHash,
+		}},
+	}
+	raw, err := json.Marshal(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(intentPath, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	observed, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observed.IntentGeneration != 0 {
+		t.Fatalf("legacy fixture unexpectedly has generation %d", observed.IntentGeneration)
+	}
+
+	fence, err := frozenProviderAdoptDaemonFence(rec)
+	if err != nil {
+		t.Fatalf("legacy zero-generation row was rejected before settlement: %v", err)
+	}
+	if fence.IntentGeneration != 0 {
+		t.Fatalf("frozen legacy generation=%d, want 0", fence.IntentGeneration)
+	}
+	if err := MutateSupervisorIntentIfChanged(intentPath, func(current *SupervisorIntentFile) (bool, error) {
+		if current.Stops == nil {
+			current.Stops = make(map[string]DaemonIntent)
+		}
+		current.Stops[task] = DaemonIntent{Desired: IntentDesiredStopped, Reason: IntentReasonUserStop}
+		return true, nil
+	}); err != nil {
+		t.Fatalf("migrate legacy generation through stop write: %v", err)
+	}
+	migrated, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if migrated.IntentGeneration != 1 {
+		t.Fatalf("migrated generation=%d, want 1", migrated.IntentGeneration)
+	}
+	if err := removeSettledProviderAdoptDaemonFence(rec, fence); err != nil {
+		t.Fatalf("cleanup rejected migrated legacy settlement: %v", err)
 	}
 }
