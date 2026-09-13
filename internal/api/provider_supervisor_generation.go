@@ -62,13 +62,21 @@ func frozenProviderAdoptDaemonWithGeneration(rec *AdoptProvenanceRecord) (Superv
 	return fence.Daemon, fence.IntentGeneration, nil
 }
 
+func removeSettledProviderLifecycleArtifacts(intent *SupervisorIntentFile, daemon SupervisorDaemon) {
+	removed := []SupervisorDaemon{daemon}
+	intent.Stops = pruneStopsForRemovedSupervisorTargets(intent.Stops, removed)
+	intent.LegacyStopWatermarks = pruneLegacyStopWatermarksForRemovedSupervisorTargets(intent.LegacyStopWatermarks, removed)
+}
+
 // removeSettledProviderAdoptDaemonFence removes only the descriptor generation
 // whose terminal stop was just established. The stop implementation writes a
 // fresh stopped/user_stop directive before asking the supervisor for terminal
 // settlement, so one generation advance is accepted only when that directive
 // changed relative to the frozen pre-stop snapshot. Any later write, including
 // an equal-looking daemon rewrite, fails closed and leaves ownership intact for
-// a fresh settlement on retry.
+// a fresh settlement on retry. Descriptor removal also prunes that exact task's
+// stop and legacy-stop watermark in the same flocked intent mutation, matching
+// the normal uninstall/decommission lifecycle contract.
 func removeSettledProviderAdoptDaemonFence(rec *AdoptProvenanceRecord, fence providerAdoptDaemonFence) error {
 	if rec == nil || fence.IntentGeneration == 0 {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -112,7 +120,9 @@ func removeSettledProviderAdoptDaemonFence(rec *AdoptProvenanceRecord, fence pro
 		if ownedIndex < 0 || !reflect.DeepEqual(intent.Daemons[ownedIndex], fence.Daemon) {
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
+		removedDaemon := intent.Daemons[ownedIndex]
 		intent.Daemons = append(intent.Daemons[:ownedIndex], intent.Daemons[ownedIndex+1:]...)
+		removeSettledProviderLifecycleArtifacts(intent, removedDaemon)
 		return true, nil
 	}); err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: settled supervisor-intent cleanup: %w", err)
@@ -152,7 +162,9 @@ func removeSettledProviderAdoptDaemonGeneration(rec *AdoptProvenanceRecord, froz
 		if ownedIndex < 0 || !reflect.DeepEqual(intent.Daemons[ownedIndex], frozen) {
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
+		removedDaemon := intent.Daemons[ownedIndex]
 		intent.Daemons = append(intent.Daemons[:ownedIndex], intent.Daemons[ownedIndex+1:]...)
+		removeSettledProviderLifecycleArtifacts(intent, removedDaemon)
 		return true, nil
 	}); err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: exact supervisor-intent cleanup: %w", err)
