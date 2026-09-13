@@ -24,7 +24,7 @@ func TestProviderInstallRecoveryClaimBlocksInstallStart(t *testing.T) {
 	}
 
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
-	if err := markProviderInstallStartedForTask(task); err == nil {
+	if err := markProviderInstallStartedForTask(name, task); err == nil {
 		t.Fatal("Install start unexpectedly crossed a claimed pre-install recovery")
 	}
 	phase, err = readProviderInstallPhase(name)
@@ -44,7 +44,7 @@ func TestProviderInstallStartedBlocksRecoveryClaimAndRestore(t *testing.T) {
 	_, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
 
-	if err := markProviderInstallStartedForTask(task); err != nil {
+	if err := markProviderInstallStartedForTask(name, task); err != nil {
 		t.Fatalf("markProviderInstallStartedForTask: %v", err)
 	}
 	claimed, err := providerInstallNeverStarted(rec)
@@ -67,7 +67,7 @@ func TestProviderManagedStopMakesStartedInstallRestoreEligible(t *testing.T) {
 	name := "provider-install-managed-settled"
 	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
-	if err := markProviderInstallStartedForTask(task); err != nil {
+	if err := markProviderInstallStartedForTask(name, task); err != nil {
 		t.Fatalf("markProviderInstallStartedForTask: %v", err)
 	}
 
@@ -135,7 +135,7 @@ func TestProviderRestoreGateClaimsNotStartedMarker(t *testing.T) {
 	}
 
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
-	if err := markProviderInstallStartedForTask(task); err == nil {
+	if err := markProviderInstallStartedForTask(name, task); err == nil {
 		t.Fatal("Install start unexpectedly crossed the restore-gate recovery claim")
 	}
 }
@@ -145,7 +145,7 @@ func TestProviderInstallStartRefusesDeAdoptingProvider(t *testing.T) {
 	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
 
-	if err := markProviderInstallStartedForTask(task); err == nil {
+	if err := markProviderInstallStartedForTask(name, task); err == nil {
 		t.Fatal("Install start unexpectedly admitted while provider de-adopt is active")
 	}
 	phase, err := readProviderInstallPhase(name)
@@ -161,7 +161,7 @@ func TestProviderInstallPhaseReadOnlyNotStartedProofRejectsStartedAndMissing(t *
 		t.Fatal("fresh durable not_started marker was not recognized")
 	}
 	task := "mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
-	if err := markProviderInstallStartedForTask(task); err != nil {
+	if err := markProviderInstallStartedForTask(name, task); err != nil {
 		t.Fatal(err)
 	}
 	if providerInstallPhaseIsNotStarted(name) {
@@ -229,7 +229,8 @@ func TestRecordInstallAuditMarksProviderInstallStartedAfterAuditBarrier(t *testi
 	appendIntentAuditFn = func(IntentAuditEntry) error { return nil }
 	t.Cleanup(func() { appendIntentAuditFn = previous })
 
-	if err := NewAPI().recordInstallAuditForTasks([]string{task}); err != nil {
+	batch := installAuditTaskBatch{ManifestName: name, TaskNames: []string{task}}
+	if err := NewAPI().recordInstallAuditForTasks(batch); err != nil {
 		t.Fatalf("recordInstallAuditForTasks: %v", err)
 	}
 	phase, err := readProviderInstallPhase(name)
@@ -247,11 +248,43 @@ func TestRecordInstallAuditFailureLeavesProviderInstallNotStarted(t *testing.T) 
 	appendIntentAuditFn = func(IntentAuditEntry) error { return errors.New("injected audit failure") }
 	t.Cleanup(func() { appendIntentAuditFn = previous })
 
-	if err := NewAPI().recordInstallAuditForTasks([]string{task}); err == nil {
+	batch := installAuditTaskBatch{ManifestName: name, TaskNames: []string{task}}
+	if err := NewAPI().recordInstallAuditForTasks(batch); err == nil {
 		t.Fatal("recordInstallAuditForTasks unexpectedly crossed failed audit")
 	}
 	phase, err := readProviderInstallPhase(name)
 	if err != nil || phase != providerInstallPhaseNotStarted {
 		t.Fatalf("phase after failed audit=%q err=%v, want %q", phase, err, providerInstallPhaseNotStarted)
+	}
+}
+
+func TestRecordInstallAuditTaskCollisionDoesNotClaimOtherManifest(t *testing.T) {
+	providerName := "foo-bar"
+	_, _, _, _ = setupProviderPreInstallRecoveryFixture(t, providerName, AdoptOperationStateAdopting)
+	collidingTask := "mcp-local-hub-foo-bar-default"
+
+	previous := appendIntentAuditFn
+	appendIntentAuditFn = func(IntentAuditEntry) error { return nil }
+	t.Cleanup(func() { appendIntentAuditFn = previous })
+
+	// Ordinary manifest foo / daemon bar-default has the same concatenated task
+	// name as provider manifest foo-bar / daemon default. It must not consume the
+	// provider receipt's install admission.
+	ordinary := installAuditTaskBatch{ManifestName: "foo", TaskNames: []string{collidingTask}}
+	if err := NewAPI().recordInstallAuditForTasks(ordinary); err != nil {
+		t.Fatalf("unrelated colliding install was rejected: %v", err)
+	}
+	phase, err := readProviderInstallPhase(providerName)
+	if err != nil || phase != providerInstallPhaseNotStarted {
+		t.Fatalf("colliding ordinary install changed provider phase=%q err=%v", phase, err)
+	}
+
+	provider := installAuditTaskBatch{ManifestName: providerName, TaskNames: []string{collidingTask}}
+	if err := NewAPI().recordInstallAuditForTasks(provider); err != nil {
+		t.Fatalf("provider install admission failed: %v", err)
+	}
+	phase, err = readProviderInstallPhase(providerName)
+	if err != nil || phase != providerInstallPhaseStarted {
+		t.Fatalf("provider install did not claim its own phase=%q err=%v", phase, err)
 	}
 }
