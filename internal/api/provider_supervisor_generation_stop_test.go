@@ -15,7 +15,7 @@ func TestRemoveSettledProviderAdoptDaemonGenerationAcceptsOwnStopGeneration(t *t
 		Daemon:       adoptDefaultDaemonName,
 		Port:         rec.Port,
 		ManifestHash: rec.ExpectedManifestHash,
-	}}
+	}}}
 	if err := WriteSupervisorIntent(intentPath, intent); err != nil {
 		t.Fatal(err)
 	}
