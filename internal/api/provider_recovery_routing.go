@@ -1,10 +1,12 @@
 package api
 
 // providerPreManifestRecovery is the read-only routing predicate shared by the
-// planner and lease-held executor. An E2 crash changes the operation state but
-// not the durable never-started proof, so adopting and de_adopting recover the
-// same lane. Markerless legacy receipts are deliberately excluded: present-day
-// absence cannot prove that Install was never entered.
+// planner and lease-held executor. Despite the historical name, this is a
+// pre-Install predicate, not a pre-ManifestCreate predicate: a crash may occur
+// after the exact adopt manifest was created but before Install crossed its
+// mutation barrier. The durable provider-install marker is the historical proof;
+// current manifest presence or absence is not. Markerless legacy receipts remain
+// excluded because present-day absence cannot prove that Install was never entered.
 func providerPreManifestRecovery(rec *AdoptProvenanceRecord) bool {
 	if rec == nil || rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "" {
 		return false
@@ -13,10 +15,6 @@ func providerPreManifestRecovery(rec *AdoptProvenanceRecord) bool {
 		return false
 	}
 	if rec.ProviderSource.DisablePhase != "disable_planned" && rec.ProviderSource.DisablePhase != "disable_applied" {
-		return false
-	}
-	exists, err := adoptManifestExistsFn(rec.ManifestName)
-	if err != nil || exists {
 		return false
 	}
 	return providerInstallPhaseIsNotStarted(rec.ManifestName)
