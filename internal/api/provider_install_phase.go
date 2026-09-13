@@ -55,10 +55,6 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 	raw, err := ReadStateFileInodeAnchored(path)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			// Missing is deliberately UNKNOWN, never equivalent to not_started.
-			// Provider provenance written before this marker existed therefore
-			// stays fail-closed until an exact managed settlement supplies new,
-			// positive evidence through markProviderManagedSettled.
 			return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 		return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -73,11 +69,6 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 	return record.Phase, nil
 }
 
-// providerInstallPhaseIsNotStarted is the read-only proof that Install never
-// entered its mutation path. recovery_claimed is included because it is an
-// idempotent durable claim of the same historical fact. Missing, legacy,
-// corrupt, linked, started, or managed-settled markers are not equivalent to
-// never-started history.
 func providerInstallPhaseIsNotStarted(manifestName string) bool {
 	phase, err := readProviderInstallPhase(manifestName)
 	return err == nil && (phase == providerInstallPhaseNotStarted || phase == providerInstallPhaseRecoveryClaimed)
@@ -102,12 +93,6 @@ func writeProviderInstallPhase(manifestName, phase string) error {
 	return nil
 }
 
-// initializeProviderInstallPhase is called before the provider activation CAS.
-// The marker lives inside the provenance snapshot directory, so the existing
-// snapshots-first abort/close owner removes it with the rest of the recovery
-// state. Existing bytes are accepted only when they are the exact initial state;
-// an existing corrupt/link/unreadable marker is never rewritten into invented
-// history.
 func initializeProviderInstallPhase(manifestName string) error {
 	path, err := providerInstallPhasePath(manifestName)
 	if err != nil {
@@ -124,22 +109,12 @@ func initializeProviderInstallPhase(manifestName string) error {
 	case !errors.Is(statErr, fs.ErrNotExist):
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-
 	if err := writeProviderInstallPhase(manifestName, providerInstallPhaseNotStarted); err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: initialize provider install phase: %w", err)
 	}
 	return nil
 }
 
-// markProviderInstallStartedForTask is invoked only after the fail-closed
-// server-install audit append succeeds and before executeInstallTo may mutate a
-// scheduler/client/intent surface. Both the installing manifest identity and its
-// canonical task identity must match the provider provenance. Task names alone
-// are not injective when server and daemon names may contain hyphens (for
-// example foo-bar/default and foo/bar-default produce the same scheduler task).
-// The adopted-entries lock serializes the exact not_started -> started
-// transition against the recovery claimant below. Once a pre-Install recovery
-// has claimed the operation, that manifest's Install must fail before mutation.
 func markProviderInstallStartedForTask(manifestName, taskName string) error {
 	if manifestName == "" {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -191,17 +166,6 @@ func markProviderInstallStartedForTask(manifestName, taskName string) error {
 	})
 }
 
-// providerInstallNeverStarted is the destructive pre-Install recovery claim.
-// The first successful caller atomically converts a durable not_started marker
-// to recovery_claimed under adopted-entries.lock. Replays by the same durable
-// recovery state remain admitted, while a concurrent/future Install observes
-// recovery_claimed and is refused before executeInstallTo mutates anything.
-//
-// A physically missing marker is UNKNOWN historical state. Present-day absence
-// of a manifest, supervisor row, listener, or runtime status can never recreate
-// the historical fact that Install was not entered. Markerless receipts therefore
-// stay fail-closed here; legacy recovery becomes restore-eligible only after an
-// exact terminal managed settlement records managed_settled elsewhere.
 func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil || rec.ProviderSource == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -252,16 +216,6 @@ func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 	return claimed, nil
 }
 
-// markProviderManagedSettled records a concrete managed-daemon settlement.
-// It is the ordinary-install counterpart to recovery_claimed: provider restore
-// is permitted only after one of those two durable facts exists. The transition
-// is serialized with Install/recovery phase changes by adopted-entries.lock.
-//
-// Provider provenance created before provider-install-phase.json existed is a
-// special compatibility case: an exact terminal stop settlement is itself new,
-// positive evidence that managed ownership was settled. Only that caller reaches
-// this function, so a physically absent marker may be bootstrapped directly to
-// managed_settled. An existing corrupt/link/unreadable marker remains fail-closed.
 func markProviderManagedSettled(manifestName string) error {
 	return withAdoptedEntriesLock(func() error {
 		phase, err := readProviderInstallPhase(manifestName)
@@ -286,10 +240,6 @@ func markProviderManagedSettled(manifestName string) error {
 	})
 }
 
-// bootstrapLegacyProviderManagedSettled migrates only the durable legacy
-// de-adopt states which already assert that managed ownership was settled or
-// removed. It never infers settlement from present-day absence alone. The
-// caller's final supervisor ownership gate still runs before provider restore.
 func bootstrapLegacyProviderManagedSettled(manifestName string) bool {
 	bootstrapped := false
 	err := withAdoptedEntriesLock(func() error {
@@ -331,16 +281,6 @@ func bootstrapLegacyProviderManagedSettled(manifestName string) bool {
 	return err == nil && bootstrapped
 }
 
-// providerInstallPhaseAllowsRestore is the final restore gate. A genuine
-// pre-Install recovery may arrive here with a still-not_started marker because
-// older recovery sequencing advanced de-adopt before claiming the marker. The
-// gate runs while recoverProviderActivation holds the supervisor-intent lock;
-// atomically claiming not_started under adopted-entries.lock therefore closes
-// the Install-vs-restore race: if Install already changed the marker to started,
-// the claim loses and restore is refused; if recovery claims first, Install is
-// permanently refused before it can mutate managed ownership. Legacy receipts
-// with no marker are admitted only from a durable de_adopting settled/removed
-// phase, never from current filesystem absence.
 func providerInstallPhaseAllowsRestore(manifestName string) bool {
 	phase, err := readProviderInstallPhase(manifestName)
 	if err != nil {
@@ -350,7 +290,7 @@ func providerInstallPhaseAllowsRestore(manifestName string) bool {
 		phase = providerInstallPhaseManagedSettled
 	}
 	if phase == providerInstallPhaseRecoveryClaimed || phase == providerInstallPhaseManagedSettled {
-		return true
+		return providerRestoreBindingsClear(manifestName)
 	}
 	if phase != providerInstallPhaseNotStarted {
 		return false
@@ -360,5 +300,5 @@ func providerInstallPhaseAllowsRestore(manifestName string) bool {
 		return false
 	}
 	claimed, err := providerInstallNeverStarted(current)
-	return err == nil && claimed
+	return err == nil && claimed && providerRestoreBindingsClear(manifestName)
 }
