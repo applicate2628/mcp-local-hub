@@ -133,11 +133,17 @@ func initializeProviderInstallPhase(manifestName string) error {
 
 // markProviderInstallStartedForTask is invoked only after the fail-closed
 // server-install audit append succeeds and before executeInstallTo may mutate a
-// scheduler/client/intent surface. The adopted-entries lock serializes this
-// not_started -> started transition against the recovery claimant below. Once a
-// pre-Install recovery has claimed the operation, Install must fail before any
-// mutation instead of recreating managed ownership behind de-adopt's proof.
-func markProviderInstallStartedForTask(taskName string) error {
+// scheduler/client/intent surface. Both the installing manifest identity and its
+// canonical task identity must match the provider provenance. Task names alone
+// are not injective when server and daemon names may contain hyphens (for
+// example foo-bar/default and foo/bar-default produce the same scheduler task).
+// The adopted-entries lock serializes the exact not_started -> started
+// transition against the recovery claimant below. Once a pre-Install recovery
+// has claimed the operation, that manifest's Install must fail before mutation.
+func markProviderInstallStartedForTask(manifestName, taskName string) error {
+	if manifestName == "" {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
 	canonical := canonicalIntentTaskKey(taskName)
 	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
@@ -147,7 +153,7 @@ func markProviderInstallStartedForTask(taskName string) error {
 		var record *AdoptProvenanceRecord
 		for i := range store.Records {
 			rec := &store.Records[i]
-			if rec.ProviderSource == nil {
+			if rec.ProviderSource == nil || rec.ManifestName != manifestName {
 				continue
 			}
 			expected := canonicalIntentTaskKey("mcp-local-hub-" + rec.ManifestName + "-" + adoptDefaultDaemonName)
