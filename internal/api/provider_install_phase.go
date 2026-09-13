@@ -57,9 +57,8 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			// Missing is deliberately UNKNOWN, never equivalent to not_started.
 			// Provider provenance written before this marker existed therefore
-			// stays fail-closed until an exact managed settlement supplies the
-			// missing durable fact through markProviderManagedSettled, or a
-			// narrowly proven legacy pre-Install recovery claims it below.
+			// stays fail-closed until an exact managed settlement supplies new,
+			// positive evidence through markProviderManagedSettled.
 			return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 		return "", fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -187,18 +186,16 @@ func markProviderInstallStartedForTask(taskName string) error {
 }
 
 // providerInstallNeverStarted is the destructive pre-Install recovery claim.
-// The first successful caller atomically converts not_started to
-// recovery_claimed under adopted-entries.lock. Replays by the same durable
+// The first successful caller atomically converts a durable not_started marker
+// to recovery_claimed under adopted-entries.lock. Replays by the same durable
 // recovery state remain admitted, while a concurrent/future Install observes
 // recovery_claimed and is refused before executeInstallTo mutates anything.
 //
-// A physically missing marker has one compatibility path for receipts created
-// before provider-install-phase.json existed: the exact provenance row must
-// still be adopting/de_adopting with no de-adopt phase, and the canonical
-// supervisor intent must positively contain no row owned by this manifest. The
-// claim is then written under the same adopted-entries lock that gates Install.
-// Corrupt, linked, unreadable, or otherwise present markers never enter this
-// migration path.
+// A physically missing marker is UNKNOWN historical state. Present-day absence
+// of a manifest, supervisor row, listener, or runtime status can never recreate
+// the historical fact that Install was not entered. Markerless receipts therefore
+// stay fail-closed here; legacy recovery becomes restore-eligible only after an
+// exact terminal managed settlement records managed_settled elsewhere.
 func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil || rec.ProviderSource == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -225,36 +222,7 @@ func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 		}
 		phase, err := readProviderInstallPhase(rec.ManifestName)
 		if err != nil {
-			path, pathErr := providerInstallPhasePath(rec.ManifestName)
-			if pathErr != nil {
-				return pathErr
-			}
-			if _, statErr := os.Lstat(path); !errors.Is(statErr, fs.ErrNotExist) {
-				return err
-			}
-			if (current.OperationState != AdoptOperationStateAdopting && current.OperationState != AdoptOperationStateDeAdopting) || current.ProviderSource.DeAdoptPhase != "" {
-				return err
-			}
-			intent, intentErr := loadSupervisorOwnedIntent()
-			if intentErr != nil {
-				return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-			}
-			scope, scopeErr := providerAdoptOwnershipScope(current)
-			if scopeErr != nil {
-				return scopeErr
-			}
-			if intent != nil {
-				for _, daemon := range intent.Daemons {
-					if supervisorIntentRowOwnedByScope(daemon, current.ManifestName, scope) {
-						return nil
-					}
-				}
-			}
-			if err := writeProviderInstallPhase(rec.ManifestName, providerInstallPhaseRecoveryClaimed); err != nil {
-				return err
-			}
-			claimed = true
-			return nil
+			return err
 		}
 		switch phase {
 		case providerInstallPhaseRecoveryClaimed:
