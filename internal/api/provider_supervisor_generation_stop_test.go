@@ -34,8 +34,15 @@ func TestRemoveSettledProviderAdoptDaemonGenerationAcceptsOwnStopGeneration(t *t
 		t.Fatalf("record managed stop: %v", err)
 	}
 
-	if err := removeSettledProviderAdoptDaemonGeneration(rec, frozen, generation); err != nil {
-		t.Fatalf("cleanup rejected the generation written by its own managed stop: %v", err)
+	settledIntent, err := ReadSupervisorIntent(intentPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if settledIntent.IntentGeneration != generation+1 {
+		t.Fatalf("managed stop generation=%d, want %d", settledIntent.IntentGeneration, generation+1)
+	}
+	if err := removeSettledProviderAdoptDaemonGeneration(rec, frozen, settledIntent.IntentGeneration); err != nil {
+		t.Fatalf("cleanup rejected the exact generation written by its own managed stop: %v", err)
 	}
 	settled, err := ReadSupervisorIntent(intentPath)
 	if err != nil {

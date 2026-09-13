@@ -93,15 +93,16 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 // providerAdoptDaemonAbsent reports whether no supervisor ownership row exists
 // for this adoption. While de-adopt has not yet advanced a provider teardown
 // phase, absence is allowed to stand in for an already-satisfied managed-stop
-// obligation ONLY when the durable provider-install marker proves Install was
-// never entered. A missing/legacy marker or a started marker is therefore
-// fail-closed even if supervisor-intent.json is currently empty.
+// obligation ONLY when durable history proves Install was never entered. New
+// receipts use the provider-install marker; markerless legacy receipts require
+// the additional runtime-absence proof in claimProviderInstallNeverStarted. A
+// started marker remains fail-closed even if supervisor-intent.json is empty.
 func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
-		neverStarted, err := providerInstallNeverStarted(rec)
+		neverStarted, err := claimProviderInstallNeverStarted(rec)
 		if err != nil || !neverStarted {
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
@@ -143,12 +144,12 @@ func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecor
 	if rec == nil || rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "managed_removed" {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	frozen, frozenGeneration, err := frozenProviderAdoptDaemonWithGeneration(rec)
+	fence, err := frozenProviderAdoptDaemonFence(rec)
 	if err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	api := NewAPI()
-	settlement, err := providerRecoveryStopManagedFn(ctx, api, frozen)
+	settlement, err := providerRecoveryStopManagedFn(ctx, api, fence.Daemon)
 	if err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late managed daemon settlement: %w", err)
 	}
@@ -158,7 +159,7 @@ func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecor
 	if err := markProviderManagedSettled(rec.ManifestName); err != nil {
 		return err
 	}
-	if err := removeSettledProviderAdoptDaemonGeneration(rec, frozen, frozenGeneration); err != nil {
+	if err := removeSettledProviderAdoptDaemonFence(rec, fence); err != nil {
 		return err
 	}
 	absent, err := providerAdoptDaemonAbsent(rec)

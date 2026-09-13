@@ -34,6 +34,10 @@ func TestBuildDeAdoptPlanProviderPreManifestRecoveryPrecedesClientProbe(t *testi
 func TestExecuteDeAdoptProviderPreInstallRowAppearingBeforeE4IsStopped(t *testing.T) {
 	name := "provider-preinstall-e4-row"
 	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+	// Model an Install admitted before E2, not a daemon with never-started history.
+	if err := markProviderInstallStartedForTask("mcp-local-hub-" + name + "-" + adoptDefaultDaemonName); err != nil {
+		t.Fatal(err)
+	}
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
 	if err != nil {
 		t.Fatal(err)
