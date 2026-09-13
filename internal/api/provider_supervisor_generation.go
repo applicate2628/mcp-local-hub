@@ -7,10 +7,13 @@ import (
 
 // providerAdoptDaemonFence freezes the exact provider-owned descriptor together
 // with the whole supervisor-intent generation and the pre-stop value of this
-// task's stop directive. The latter is load-bearing: a generation+1 rewrite is
-// attributable to our managed-stop write only when that write actually changed
-// the task's stop directive. A pre-existing stopped/user_stop entry therefore
-// cannot authenticate an unrelated same-content descriptor rewrite.
+// task's stop directive. Generation zero is a valid legacy snapshot: production
+// settlement must first write the stop, which migrates that snapshot to
+// generation one before destructive cleanup is admitted. The prior stop value
+// is load-bearing: a generation+1 rewrite is attributable to our managed-stop
+// write only when that write actually changed the task's stop directive. A
+// pre-existing stopped/user_stop entry therefore cannot authenticate an
+// unrelated same-content descriptor rewrite.
 type providerAdoptDaemonFence struct {
 	Daemon           SupervisorDaemon
 	IntentGeneration uint64
@@ -23,7 +26,7 @@ func frozenProviderAdoptDaemonFence(rec *AdoptProvenanceRecord) (providerAdoptDa
 		return providerAdoptDaemonFence{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	intent, err := loadSupervisorOwnedIntent()
-	if err != nil || intent == nil || intent.IntentGeneration == 0 {
+	if err != nil || intent == nil {
 		return providerAdoptDaemonFence{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	scope, err := providerAdoptOwnershipScope(rec)
@@ -74,11 +77,13 @@ func removeSettledProviderLifecycleArtifacts(intent *SupervisorIntentFile, daemo
 // settlement, so one generation advance is accepted only when that directive
 // changed relative to the frozen pre-stop snapshot. Any later write, including
 // an equal-looking daemon rewrite, fails closed and leaves ownership intact for
-// a fresh settlement on retry. Descriptor removal also prunes that exact task's
-// stop and legacy-stop watermark in the same flocked intent mutation, matching
-// the normal uninstall/decommission lifecycle contract.
+// a fresh settlement on retry. A legacy generation-zero fence is never removed
+// at generation zero: the stop write must first migrate it to generation one.
+// Descriptor removal also prunes that exact task's stop and legacy-stop
+// watermark in the same flocked intent mutation, matching the normal
+// uninstall/decommission lifecycle contract.
 func removeSettledProviderAdoptDaemonFence(rec *AdoptProvenanceRecord, fence providerAdoptDaemonFence) error {
-	if rec == nil || fence.IntentGeneration == 0 {
+	if rec == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	intentPath, err := DefaultSupervisorIntentPath()
@@ -95,7 +100,12 @@ func removeSettledProviderAdoptDaemonFence(rec *AdoptProvenanceRecord, fence pro
 		}
 		switch intent.IntentGeneration {
 		case fence.IntentGeneration:
-			// Test seams and an already-durable terminal stop may not rewrite intent.
+			// Test seams and an already-durable terminal stop may not rewrite
+			// a modern intent. A legacy zero-generation snapshot has no such
+			// generation proof, so it must pass through the stop-write migration.
+			if fence.IntentGeneration == 0 {
+				return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+			}
 		case fence.IntentGeneration + 1:
 			stop, ok := intent.Stops[canonicalIntentTaskKey(fence.Daemon.TaskName)]
 			if !ok || stop.Desired != IntentDesiredStopped || stop.Reason != IntentReasonUserStop {
