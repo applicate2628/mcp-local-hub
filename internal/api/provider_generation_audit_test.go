@@ -47,7 +47,7 @@ func TestProviderGenerationAuditOrdinaryRemovalPreservesReplacement(t *testing.T
 	name := "provider-audit-ordinary-replacement"
 	_, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
 	task := "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName
-	if err := markProviderInstallStartedForTask(task); err != nil {
+	if err := markProviderInstallStartedForTask(name, task); err != nil {
 		t.Fatal(err)
 	}
 	intentPath := filepath.Join(stateRoot, supervisorIntentFileLeaf)
