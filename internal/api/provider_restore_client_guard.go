@@ -18,9 +18,13 @@ func providerRestoreBindingsClear(manifestName string) bool {
 	if current.ProviderSource.DeAdoptPhase != "managed_removed" {
 		return true
 	}
+	if exists, err := adoptManifestExistsFn(current.ManifestName); err != nil || exists {
+		return false
+	}
 	// A claimed pre-Install recovery never mutated client bindings. Requiring
 	// a client probe here would undo the recovery lane's independence from
-	// unavailable adapters. Real managed settlements still recheck E3 below.
+	// unavailable adapters. Manifest absence is required for both paths.
+	// Real managed settlements still recheck E3 below.
 	phase, phaseErr := readProviderInstallPhase(manifestName)
 	if phaseErr == nil && phase == providerInstallPhaseRecoveryClaimed {
 		return true
@@ -44,6 +48,5 @@ func providerRestoreBindingsClear(manifestName string) bool {
 			return false
 		}
 	}
-	exists, err := adoptManifestExistsFn(current.ManifestName)
-	return err == nil && !exists
+	return true
 }

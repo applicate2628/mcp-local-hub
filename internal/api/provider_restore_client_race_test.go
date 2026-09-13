@@ -138,3 +138,34 @@ func TestProviderRecoveryExecutableRequiresPositiveManifestProof(t *testing.T) {
 		})
 	}
 }
+
+func TestProviderClaimedRestoreRequiresAbsentManifest(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		exists  bool
+		err     error
+		allowed bool
+	}{
+		{name: "absent", allowed: true},
+		{name: "recreated", exists: true},
+		{name: "unreadable", err: os.ErrPermission},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-claimed-restore-manifest"
+			_, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+			rec.ProviderSource.DeAdoptPhase = "managed_removed"
+			rec.AdoptClients = []string{"provider-client-probe-unavailable"}
+			rec.Clients = nil
+			writeDeAdoptExecutorRecord(t, *rec)
+			if err := writeProviderInstallPhase(name, providerInstallPhaseRecoveryClaimed); err != nil {
+				t.Fatal(err)
+			}
+			previous := adoptManifestExistsFn
+			adoptManifestExistsFn = func(string) (bool, error) { return tc.exists, tc.err }
+			t.Cleanup(func() { adoptManifestExistsFn = previous })
+			if allowed := providerRestoreBindingsClear(name); allowed != tc.allowed {
+				t.Fatalf("claimed restore allowed=%t, want %t", allowed, tc.allowed)
+			}
+		})
+	}
+}
