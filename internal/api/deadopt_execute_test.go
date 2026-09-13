@@ -318,6 +318,9 @@ func TestExecuteDeAdoptProviderDisableMarkCrashRestoresOnlyExplicitRecovery(t *t
 	rec.Clients = nil
 	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_planned"}
 	writeDeAdoptExecutorRecord(t, rec)
+	if err := initializeProviderInstallPhase(name); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -348,14 +351,17 @@ func TestExecuteDeAdoptProviderCrashAfterManifestBeforeInstall(t *testing.T) {
 	cwd := t.TempDir()
 	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied"}
 	writeDeAdoptExecutorRecord(t, rec)
+	if err := initializeProviderInstallPhase(name); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
 	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: false, ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled", ActivationEnabledPresent: true, ActivationEnabled: false, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
 
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
-	if err != nil || plan.Routing != DeAdoptRoutingFresh || plan.providerRecovery {
-		t.Fatalf("post-manifest recovery plan=%+v err=%v, want ordinary fresh teardown", plan, err)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh || !plan.providerRecovery {
+		t.Fatalf("post-manifest recovery plan=%+v err=%v, want durable pre-Install recovery", plan, err)
 	}
 	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
 		t.Fatalf("post-manifest recovery apply: %v", err)
