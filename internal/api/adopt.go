@@ -821,7 +821,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			installOpts.SkipClientConfigWrites = len(installOpts.ClientsInclude) == 0
 		}
 		stage = "install"
-		if err := a.Install(installOpts); err != nil {
+		if err := a.installWithAdoptLeaseHeld(context.Background(), installOpts, nil); err != nil {
 			// FORWARD-COMMITTED branch: install proved that one client mutation is
 			// applied, deliberately retained earlier independent work, and skipped
 			// later optional clients after config-lock release became unconfirmed.
@@ -861,6 +861,29 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 						"restore those clients from the timestamped .bak-mcp-local-hub-* backup printed above, "+
 						"then remove manifest %q, or reverse it with de-adopt once available: %w",
 					strings.Join(sortedAdoptStrings(rbErr.Clients), ","), plan.ManifestName, plan.ManifestName, err)
+			}
+			if plan.providerSource != nil {
+				// Do not let ordinary-error cleanup re-enable a direct provider
+				// beside committed/uncertain intent. Reuse the guarded recovery
+				// owner for every provider rollback instead of a second cleanup.
+				providerManagedInstalled = true // suppress the raw outer restore
+				phase, phaseErr := readProviderInstallPhase(plan.ManifestName)
+				var rolledBack *providerInstallUnpublishedRollbackError
+				if phaseErr != nil || errors.Is(err, ErrLockReleaseUnconfirmed) ||
+					errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) ||
+					(phase == providerInstallPhaseStarted && !errors.As(err, &rolledBack)) {
+					return fmt.Errorf("adopt install did not prove managed rollback; manifest and provenance preserved for recovery: %w", err)
+				}
+				if phase == providerInstallPhaseStarted {
+					if settleErr := markProviderUnpublishedRollbackSettled(plan.ManifestName); settleErr != nil {
+						return errors.Join(err, settleErr)
+					}
+				}
+				if markErr := MarkAdoptProvenanceDeAdopting(plan.ManifestName); markErr != nil {
+					return errors.Join(err, markErr)
+				}
+				_, recoveryErr := a.executeProviderRecoveryDeAdopt(rec, ExecuteDeAdoptOpts{providerDeps: opts.providerDeps}, io.Discard)
+				return fmt.Errorf("adopt install failed; provider cleanup used durable recovery: %w", errors.Join(err, recoveryErr))
 			}
 			// ABORT — rollback provably complete OR nothing client-side mutated. Existing
 			// cleanup UNCHANGED below.

@@ -457,12 +457,19 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	// Recovery routing is advisory in the plan. Reconstruct it from the same
 	// durable history for fresh and resumed receipts while holding the lease.
 	providerRecovery := providerPreManifestRecovery(rec)
+	// Only positively never-entered recovery may skip untouched adapters.
+	// Managed retries must rerun E3 if an earlier Install recreated a binding.
+	providerClientsUntouched := false
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase != "" {
+		phase, phaseErr := readProviderInstallPhase(rec.ManifestName)
+		providerClientsUntouched = phaseErr == nil && phase == providerInstallPhaseRecoveryClaimed
+	}
 	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting)
 	if !providerRecovery && !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
 	}
 	if !providerRecovery && len(readiness.expectedBindings) != len(rec.AdoptClients) {
-		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase != "" && readiness.AlreadyAbsent {
+		if providerClientsUntouched && readiness.AlreadyAbsent {
 			// A crash after exact manifest/intent removal but before its durable
 			// marker has already passed client restoration; resume removal below.
 		} else {
@@ -500,7 +507,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 
 	// E3 — restore/remove every target before any topology mutation.
 	for _, clientName := range rec.AdoptClients {
-		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase != "" && readiness.AlreadyAbsent {
+		if providerClientsUntouched && readiness.AlreadyAbsent {
 			resolvedClients++
 			continue
 		}
@@ -791,6 +798,14 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		rec = updated
 	}
 
+	// An old removal phase is not proof of continued manifest absence.
+	// Delete exact recreations and refuse changed ones before secret cleanup.
+	if rec.ProviderSource != nil && (rec.ProviderSource.DeAdoptPhase == "managed_removed" || rec.ProviderSource.DeAdoptPhase == "restore_applied") {
+		if err := deleteManifest(); err != nil {
+			return report, err
+		}
+	}
+
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_removed" {
 		source := opts.providerDeps.source
 		if source == nil {
@@ -815,6 +830,12 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			return report, phaseErr
 		}
 		rec = updated
+	}
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "restore_applied" {
+		absent, absenceErr := providerAdoptDaemonAbsent(rec)
+		if absenceErr != nil || !absent {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
 	}
 	// E5 — CLOSE-READY only. The prefilter and delete each take the vault lock
 	// through their existing owner and release it before the next inner operation.

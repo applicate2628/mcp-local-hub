@@ -41,13 +41,14 @@ func providerRecoveryManifestExact(rec *AdoptProvenanceRecord) (bool, error) {
 	return true, nil
 }
 
-// claimProviderInstallNeverStarted takes recovery authority only from durable
+// claimProviderUnmanagedRecovery accepts never-started or positively settled
+// unpublished rollback history. It takes authority only from durable
 // history. Before writing recovery_claimed it proves that no managed owner exists
 // and that any already-created manifest is the exact adopt-owned content. After
 // the claim it re-proves ownership, then hash-deletes that exact manifest. A
 // markerless legacy receipt remains UNKNOWN and is never promoted from current
 // absence.
-func claimProviderInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
+func claimProviderUnmanagedRecovery(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil || rec.ProviderSource == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
@@ -58,9 +59,15 @@ func claimProviderInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) 
 	if _, err := providerRecoveryManifestExact(rec); err != nil {
 		return false, err
 	}
-	claimed, err := providerInstallNeverStarted(rec)
-	if err != nil || !claimed {
-		return claimed, err
+	phase, phaseErr := readProviderInstallPhase(rec.ManifestName)
+	if phaseErr != nil {
+		return false, phaseErr
+	}
+	if phase != providerInstallPhaseManagedSettled {
+		claimed, err := providerInstallNeverStarted(rec)
+		if err != nil || !claimed {
+			return claimed, err
+		}
 	}
 	absent, err = providerRecoveryOwnershipAbsent(rec)
 	if err != nil || !absent {

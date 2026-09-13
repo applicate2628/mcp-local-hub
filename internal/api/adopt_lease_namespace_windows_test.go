@@ -921,3 +921,13 @@ func readSortedNames(t *testing.T, dir string) []string {
 	}
 	return names
 }
+
+func TestInstallMigratesEligibleLegacyLeaseNamespace(t *testing.T) {
+	const name = "install-legacy-namespace"
+	setupInstallLeaseRemoteFixture(t, name)
+	_, namespace, _ := seedRecognizedLegacyLeaseNamespace(t, []string{"existing.lease"}, false)
+	if err := NewAPI().Install(InstallOpts{Server: name, Writer: io.Discard}); err != nil {
+		t.Fatalf("ordinary install rejected recognized legacy namespace: %v", err)
+	}
+	assertWindowsPathDACLAllowlist(t, namespace, true)
+}

@@ -437,7 +437,7 @@ func (a *API) ManifestCreate(name, yaml string) (err error) {
 	if err := checkManifestName(name); err != nil {
 		return err
 	}
-	lease, acquired, leaseErr := tryAcquireAdoptManifestLease(name)
+	lease, acquired, leaseErr := acquireAdoptLeaseForApply(manifestMutationLeaseOwner{}, name)
 	if leaseErr != nil || !acquired {
 		if leaseErr == nil {
 			leaseErr = newLeaseFailure(adoptLeaseFailureBusy, true, false)

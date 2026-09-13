@@ -68,7 +68,8 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 }
 
 // providerAdoptDaemonAbsent verifies absence under the common ownership scope.
-// With an empty teardown phase it first claims durable never-started recovery
+// With an empty teardown phase it claims durable never-started or unpublished
+// settled rollback recovery
 // and hash-deletes any exact adopt manifest; it is not a read-only predicate.
 // Missing or started install history cannot authorize that recovery claim.
 func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
@@ -76,8 +77,8 @@ func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
-		neverStarted, err := claimProviderInstallNeverStarted(rec)
-		if err != nil || !neverStarted {
+		unmanaged, err := claimProviderUnmanagedRecovery(rec)
+		if err != nil || !unmanaged {
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	}

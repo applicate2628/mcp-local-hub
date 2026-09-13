@@ -314,6 +314,69 @@ func (a *API) Install(opts InstallOpts) error {
 // wrapper and the command adapter. The optional receipt callback observes the
 // one plan instance that is subsequently applied; it must not re-plan.
 func (a *API) installWithFrozenPlan(ctx context.Context, opts InstallOpts, receipt func(InstallMutationReceiptV1)) error {
+	return withInstallManifestLease(opts, func(opts InstallOpts) error {
+		return a.installWithAdoptLeaseHeld(ctx, opts, receipt)
+	})
+}
+
+// withInstallManifestLease excludes adopt/de-adopt before the authoritative
+// manifest read, not just at the audit barrier. Otherwise a frozen Install can
+// outlive provenance close and mistake the missing receipt for an unrelated
+// server. Keep the existing outermost lease through apply and rollback; previews
+// remain read-only. Callers already inside adopt use the lease-held body.
+func withInstallManifestLease(opts InstallOpts, apply func(InstallOpts) error) (err error) {
+	if err := checkManifestName(opts.Server); err != nil {
+		return err
+	}
+	if opts.DryRun {
+		return apply(opts)
+	}
+	lease, acquired, leaseErr := acquireAdoptLeaseForApply(manifestMutationLeaseOwner{}, opts.Server)
+	if leaseErr != nil || !acquired {
+		if leaseErr == nil {
+			leaseErr = newLeaseFailure(adoptLeaseFailureBusy, true, false)
+		}
+		return fmt.Errorf("install: acquire per-manifest lease for %q: %w", opts.Server, leaseErr)
+	}
+	w := opts.Writer
+	if w == nil {
+		w = os.Stderr
+	}
+	terminal := &installCompletionWriter{Writer: w}
+	opts.Writer = terminal
+	defer func() {
+		if unlockErr := lease.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("install: release per-manifest lease for %q: %w", opts.Server, unlockErr))
+		}
+		if err == nil && terminal.complete {
+			printInstallCompletion(w, terminal.withWarnings)
+		}
+	}()
+	return apply(opts)
+}
+
+// Progress and rollback diagnostics stream normally; terminal success waits for
+// the outer lease to settle. Adopt already buffers its complete narration.
+type installCompletionWriter struct {
+	io.Writer
+	complete, withWarnings bool
+}
+
+func printInstallCompletion(w io.Writer, withWarnings bool) {
+	if terminal, ok := w.(*installCompletionWriter); ok {
+		terminal.complete, terminal.withWarnings = true, withWarnings
+		return
+	}
+	if withWarnings {
+		fmt.Fprintln(w, "\nInstall complete with warnings.")
+	} else {
+		fmt.Fprintln(w, "\nInstall complete.")
+	}
+}
+
+// installWithAdoptLeaseHeld loads and applies one plan while its caller owns
+// the canonical manifest lease (or is performing a read-only dry run).
+func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, receipt func(InstallMutationReceiptV1)) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
@@ -549,40 +612,7 @@ func (a *API) installUsingEmbedFirst(opts InstallOpts) error {
 }
 
 func (a *API) installUsingEmbedFirstWithReceipt(opts InstallOpts, receipt func(InstallMutationReceiptV1)) error {
-	w := opts.Writer
-	if w == nil {
-		w = os.Stderr
-	}
-	// Same pre-existing embed-vs-disk collision warn as Install (this is the
-	// InstallAllWithOpts per-server entry). Warn only — never delete.
-	if warn := embeddedDiskShadowWarning(opts.Server, installShadowWarnDir()); warn != "" {
-		fmt.Fprintf(w, "warning: %s\n", warn)
-	}
-	data, err := loadManifestYAMLEmbedFirst(opts.Server)
-	if err != nil {
-		return fmt.Errorf("load manifest %s: %w", opts.Server, err)
-	}
-	m, err := parseManifestForName(opts.Server, data)
-	if err != nil {
-		return err
-	}
-	authorityRequest := CanonicalAtAdmission()
-	if IsSerenaServer(m.Name) && installOptsMayWriteClients(opts) {
-		var targetErr error
-		authorityRequest, targetErr = a.prepareInstallClientRoutingDecision(&opts)
-		if targetErr != nil {
-			return fmt.Errorf("resolve client routing target: %w", targetErr)
-		}
-	}
-	if err := preflightWithScope(m, installScopeFromOpts(opts)); err != nil {
-		return err
-	}
-	plan, err := BuildPlanWithOpts(m, a.installBuildPlanOpts(opts))
-	if err != nil {
-		return err
-	}
-	bindPlanSupervisorIntentManifestHash(plan, ManifestHashContent(data))
-	return a.installFrozenPlanCore(context.Background(), m, plan, opts, authorityRequest, w, receipt)
+	return a.installWithFrozenPlan(context.Background(), opts, receipt)
 }
 
 // installBuildPlanOpts is the SINGLE owner of "which BuildPlanOpts does an
@@ -621,6 +651,12 @@ func (a *API) installFromManifestDir(opts InstallOpts, manifestDir string) error
 }
 
 func (a *API) installFromManifestDirWithReceipt(opts InstallOpts, manifestDir string, receipt func(InstallMutationReceiptV1)) error {
+	return withInstallManifestLease(opts, func(opts InstallOpts) error {
+		return a.installFromManifestDirWithAdoptLeaseHeld(opts, manifestDir, receipt)
+	})
+}
+
+func (a *API) installFromManifestDirWithAdoptLeaseHeld(opts InstallOpts, manifestDir string, receipt func(InstallMutationReceiptV1)) error {
 	w := opts.Writer
 	if w == nil {
 		w = os.Stderr
@@ -3658,11 +3694,7 @@ clientUpdates:
 			}
 		}
 	}
-	if postCommitWarnings {
-		fmt.Fprintln(w, "\nInstall complete with warnings.")
-	} else {
-		fmt.Fprintln(w, "\nInstall complete.")
-	}
+	printInstallCompletion(w, postCommitWarnings)
 	return nil
 }
 

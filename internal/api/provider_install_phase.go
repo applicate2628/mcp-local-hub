@@ -302,3 +302,40 @@ func providerInstallPhaseAllowsRestore(manifestName string) bool {
 	claimed, err := providerInstallNeverStarted(current)
 	return err == nil && claimed && providerRestoreBindingsClear(manifestName)
 }
+
+// providerInstallUnpublishedRollbackError is affirmative, in-memory evidence
+// from the rollback owner. An arbitrary Install error cannot prove settlement.
+type providerInstallUnpublishedRollbackError struct{ cause error }
+
+func (e *providerInstallUnpublishedRollbackError) Error() string { return e.cause.Error() }
+func (e *providerInstallUnpublishedRollbackError) Unwrap() error { return e.cause }
+
+// markProviderUnpublishedRollbackSettled is called only with the manifest lease
+// held and the rollback owner's positive proof. Unlike managed teardown's legacy
+// bootstrap, it must never synthesize evidence from a missing or corrupt marker.
+func markProviderUnpublishedRollbackSettled(name string) error {
+	return withAdoptedEntriesLock(func() error {
+		store, err := readAdoptedEntries()
+		if err != nil {
+			return err
+		}
+		matches := 0
+		for _, rec := range store.Records {
+			if rec.ManifestName != name {
+				continue
+			}
+			if rec.ProviderSource == nil || rec.OperationState != AdoptOperationStateAdopting {
+				return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+			}
+			matches++
+		}
+		if matches != 1 {
+			return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+		}
+		phase, err := readProviderInstallPhase(name)
+		if err != nil || phase != providerInstallPhaseStarted {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		return writeProviderInstallPhase(name, providerInstallPhaseManagedSettled)
+	})
+}
