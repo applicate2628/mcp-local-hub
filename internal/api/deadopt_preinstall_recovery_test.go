@@ -39,7 +39,7 @@ func setupProviderPreInstallRecoveryFixture(t *testing.T, name string, state Ado
 		ActivationEnabled: false, DisabledActivationFingerprint: "disabled",
 		PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy",
 	}}
-	return manifestRoot, stateRoot, rec, provider
+	return manifestRoot, stateRoot, &rec, provider
 }
 
 func TestExecuteDeAdoptProviderPreInstallMissingSupervisorIntent(t *testing.T) {
@@ -48,20 +48,17 @@ func TestExecuteDeAdoptProviderPreInstallMissingSupervisorIntent(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
 	}
-
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
-	if err != nil || plan.Routing != DeAdoptRoutingFresh || plan.providerRecovery {
-		t.Fatalf("pre-install plan=%+v err=%v, want ordinary fresh teardown", plan, err)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh || !plan.providerRecovery {
+		t.Fatalf("pre-install plan=%+v err=%v, want explicit durable recovery", plan, err)
 	}
-	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	}); err != nil {
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
 		t.Fatalf("pre-install recovery apply: %v", err)
 	}
 	if provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatalf("pre-install recovery provider=%+v calls=%d", provider.entry, provider.calls)
 	}
-	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 }
 
 func TestExecuteDeAdoptProviderPreInstallAbsenceIsReprovedAfterCrashAndRetry(t *testing.T) {
@@ -70,46 +67,48 @@ func TestExecuteDeAdoptProviderPreInstallAbsenceIsReprovedAfterCrashAndRetry(t *
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
 	}
-
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || !plan.providerRecovery {
+		t.Fatalf("pre-install recovery plan=%+v err=%v", plan, err)
 	}
-	const crash = "injected pre-E4 crash"
-	deAdoptBeforeManifestDeleteHook = func() { panic(crash) }
+	previous := deAdoptAfterManifestDeleteHook
+	t.Cleanup(func() { deAdoptAfterManifestDeleteHook = previous })
+	const crash = "injected post-delete pre-E2 crash"
+	deAdoptAfterManifestDeleteHook = func() { panic(crash) }
 	func() {
 		defer func() {
 			if got := recover(); got != crash {
 				t.Fatalf("recovered panic=%v, want %q", got, crash)
 			}
 		}()
-		_, _ = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-			providerDeps: providerTransactionDeps{source: provider},
-		})
+		_, _ = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
 	}()
-	deAdoptBeforeManifestDeleteHook = nil
-
+	deAdoptAfterManifestDeleteHook = previous
 	persisted, found, err := ReadAdoptProvenance(name)
 	if err != nil || !found {
 		t.Fatalf("ReadAdoptProvenance: found=%t err=%v", found, err)
 	}
-	if persisted.OperationState != AdoptOperationStateDeAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" {
-		t.Fatalf("crash state=%+v, want de_adopting with empty phase so retry must re-prove absence", persisted)
+	if persisted.OperationState != AdoptOperationStateAdopting || persisted.ProviderSource == nil || persisted.ProviderSource.DeAdoptPhase != "" {
+		t.Fatalf("crash state=%+v, want adopting with empty de-adopt phase", persisted)
 	}
-
+	phase, err := readProviderInstallPhase(name)
+	if err != nil || phase != providerInstallPhaseRecoveryClaimed {
+		t.Fatalf("crash lost durable recovery claim: phase=%q err=%v", phase, err)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestRoot, name, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("exact manifest should already be deleted at crash boundary: %v", statErr)
+	}
 	retry, err := NewAPI().BuildDeAdoptPlan(name)
-	if err != nil || retry.Routing != DeAdoptRoutingResume {
+	if err != nil || retry.Routing != DeAdoptRoutingFresh || !retry.providerRecovery {
 		t.Fatalf("retry plan=%+v err=%v", retry, err)
 	}
-	if _, err := NewAPI().executeDeAdoptPlanWithOpts(retry, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	}); err != nil {
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(retry, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
 		t.Fatalf("retry apply: %v", err)
 	}
 	if provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatalf("retry provider=%+v calls=%d", provider.entry, provider.calls)
 	}
-	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 }
 
 func TestExecuteDeAdoptProviderDeAdoptingNotStartedRecovers(t *testing.T) {
@@ -121,39 +120,33 @@ func TestExecuteDeAdoptProviderDeAdoptingNotStartedRecovers(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
 	}
-
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
-	if err != nil || plan.Routing != DeAdoptRoutingResume || plan.providerRecovery {
-		t.Fatalf("pre-install plan=%+v err=%v, want ordinary resume", plan, err)
+	if err != nil || plan.Routing != DeAdoptRoutingResume || !plan.providerRecovery {
+		t.Fatalf("pre-install plan=%+v err=%v, want durable recovery resume", plan, err)
 	}
-	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	}); err != nil {
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
 		t.Fatalf("pre-install recovery apply: %v", err)
 	}
 	if provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatalf("recovery provider=%+v calls=%d", provider.entry, provider.calls)
 	}
-	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 }
 
 func TestExecuteDeAdoptProviderStartedInstallCannotBecomePreInstallByDeletingIntent(t *testing.T) {
 	name := "provider-started-intent-lost"
 	_, stateRoot, _, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
-	if err := markProviderInstallStartedForTask("mcp-local-hub-" + name + "-" + adoptDefaultDaemonName); err != nil {
+	if err := markProviderInstallStartedForTask(name, "mcp-local-hub-"+name+"-"+adoptDefaultDaemonName); err != nil {
 		t.Fatalf("mark provider install started: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(stateRoot, supervisorIntentFileLeaf)); !os.IsNotExist(err) {
 		t.Fatalf("supervisor intent must be genuinely absent, stat err=%v", err)
 	}
-
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	})
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
 	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
 		t.Fatalf("error=%v, want durable started-install refusal", err)
 	}
@@ -179,9 +172,7 @@ func TestExecuteDeAdoptProviderLegacyMissingInstallMarkerFailsClosed(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	})
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
 	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
 		t.Fatalf("error=%v, want missing-marker fail-closed refusal; rec=%+v", err, rec)
 	}
