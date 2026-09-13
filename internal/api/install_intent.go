@@ -377,6 +377,11 @@ func installAuditTaskNames(m *config.ServerManifest, daemonFilter string) []stri
 	return out
 }
 
+type installAuditTaskBatch struct {
+	ManifestName string
+	TaskNames    []string
+}
+
 // recordInstallAuditPreMutation emits one server-install audit entry
 // per planned task BEFORE any scheduler / intent mutation (plan §62
 // audit-first canonical timing). Returns the first error and aborts;
@@ -387,17 +392,21 @@ func installAuditTaskNames(m *config.ServerManifest, daemonFilter string) []stri
 // no intent file modifications, no client-config writes. Tests in
 // install_intent_test.go assert this end-state invariant.
 func (a *API) recordInstallAuditPreMutation(m *config.ServerManifest, daemonFilter string) error {
-	return a.recordInstallAuditForTasks(installAuditTaskNames(m, daemonFilter))
+	return a.recordInstallAuditForTasks(installAuditTaskBatch{
+		ManifestName: m.Name,
+		TaskNames:    installAuditTaskNames(m, daemonFilter),
+	})
 }
 
 // recordInstallAuditForTasks emits one server-install audit entry per task in
-// taskNames BEFORE any mutation, with the same fail-closed contract as
-// recordInstallAuditPreMutation. Splitting the per-task emission from the
-// task-list derivation lets the workspace-scoped fan-out (whose manifest has
-// an empty m.Daemons) feed its MATERIALIZED per-workspace task names through
-// the same fail-closed pipeline — see installPlanOpts.AuditTaskNames.
-func (a *API) recordInstallAuditForTasks(taskNames []string) error {
-	for _, tn := range taskNames {
+// the batch BEFORE any mutation, with the same fail-closed contract as
+// recordInstallAuditPreMutation. The batch carries the exact manifest identity
+// separately from scheduler task names because the concatenated task namespace
+// is not injective when server/daemon names contain hyphens. Splitting the
+// per-task emission from task-list derivation still lets workspace-scoped fan-out
+// feed materialized task names through the same pipeline.
+func (a *API) recordInstallAuditForTasks(batch installAuditTaskBatch) error {
+	for _, tn := range batch.TaskNames {
 		// Codex deep-sec PR #135 Finding 1: audit entries carry the
 		// canonical leading-backslash task identity so the on-disk audit
 		// log uses one shape downstream filters can pivot on.
@@ -414,29 +423,29 @@ func (a *API) recordInstallAuditForTasks(taskNames []string) error {
 	}
 	// The audit batch is the existing fail-closed barrier immediately before
 	// executeInstallTo may mutate scheduler, client, or supervisor state. Once
-	// every audit append has succeeded, atomically mark any matching provider
-	// adoption as started. A concurrent pre-Install recovery claims the same
-	// durable marker under adopted-entries.lock, so exactly one side may cross
-	// this mutation boundary.
-	for _, tn := range taskNames {
+	// every audit append has succeeded, atomically mark only the provider
+	// adoption whose exact manifest identity and task both match this install.
+	// A concurrent pre-Install recovery claims the same durable marker under
+	// adopted-entries.lock, so exactly one side may cross this mutation boundary.
+	for _, tn := range batch.TaskNames {
 		canonical := canonicalIntentTaskKey(tn)
-		if err := markProviderInstallStartedForTask(canonical); err != nil {
-			return fmt.Errorf("provider install start refused for %s: %w", canonical, err)
+		if err := markProviderInstallStartedForTask(batch.ManifestName, canonical); err != nil {
+			return fmt.Errorf("provider install start refused for %s/%s: %w", batch.ManifestName, canonical, err)
 		}
 	}
 	return nil
 }
 
-// installAuditTaskNamesOrOverride returns override verbatim when it is
-// non-empty, otherwise the manifest-derived installAuditTaskNames(m,
-// daemonFilter). The fan-out install passes the materialized per-workspace
-// task names as override because a DaemonTemplate manifest's m.Daemons is
-// empty; every other caller passes nil and keeps the manifest-derived list.
-func installAuditTaskNamesOrOverride(m *config.ServerManifest, daemonFilter string, override []string) []string {
-	if len(override) > 0 {
-		return override
+// installAuditTaskNamesOrOverride carries the manifest identity together with
+// either the materialized override task list or the manifest-derived task list.
+// The fan-out install passes materialized per-workspace task names because a
+// DaemonTemplate manifest's m.Daemons is empty; every other caller passes nil.
+func installAuditTaskNamesOrOverride(m *config.ServerManifest, daemonFilter string, override []string) installAuditTaskBatch {
+	taskNames := override
+	if len(taskNames) == 0 {
+		taskNames = installAuditTaskNames(m, daemonFilter)
 	}
-	return installAuditTaskNames(m, daemonFilter)
+	return installAuditTaskBatch{ManifestName: m.Name, TaskNames: taskNames}
 }
 
 // recordInstallIntentPostSuccess writes Desired=running intent for
