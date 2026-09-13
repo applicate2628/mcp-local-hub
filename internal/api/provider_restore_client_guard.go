@@ -1,12 +1,15 @@
 package api
 
-// providerRestoreBindingsClear is the final client-side race gate. It is only
-// load-bearing once E4 has reached managed_removed. A reinstall admitted before
-// E2 may otherwise rewrite a hub binding after E3 restored clients; supervisor
-// settlement alone would then remove its daemon while leaving that client entry
-// pointing at the deleted manifest. classifyDeadAdoptingRow is reused because it
-// already fails closed on unreadable adapters and recognizes the exact recorded
-// hub binding shape.
+import (
+	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
+)
+
+// providerRestoreBindingsClear rechecks the physical client keys restored by E3
+// before provider activation. A reinstall admitted before E2 may recreate one of
+// those bindings after E3. The source name alone is insufficient after an alias
+// relocation; use the same provenance lookup and binding matcher as E3 instead
+// of the adopting-row garbage-collection classifier.
 func providerRestoreBindingsClear(manifestName string) bool {
 	current, found, err := ReadAdoptProvenance(manifestName)
 	if err != nil || !found || current == nil || current.ProviderSource == nil {
@@ -22,5 +25,25 @@ func providerRestoreBindingsClear(manifestName string) bool {
 	if phaseErr == nil && phase == providerInstallPhaseRecoveryClaimed {
 		return true
 	}
-	return classifyDeadAdoptingRow(*current) != adoptRowCommittedKeep
+	all := clients.AllClients()
+	for _, clientName := range current.AdoptClients {
+		clientRec, ok := deAdoptClientRecord(current, clientName)
+		adapter := all[clientName]
+		if !ok || adapter == nil {
+			return false
+		}
+		live, err := adapter.GetEntry(adoptClientTargetEntryName(*current, clientRec))
+		if err != nil {
+			return false
+		}
+		binding := config.ClientBinding{
+			Client: clientName, Daemon: adoptDefaultDaemonName,
+			URLPath: adoptDefaultURLPath, ToolTimeoutSec: clientRec.ToolTimeoutSec,
+		}
+		if live != nil && deAdoptLiveBindingMatcher(current, binding)(live) {
+			return false
+		}
+	}
+	exists, err := adoptManifestExistsFn(current.ManifestName)
+	return err == nil && !exists
 }
