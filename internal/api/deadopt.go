@@ -147,6 +147,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	plan := &DeAdoptPlan{
 		ManifestName: server,
 		Routing:      DeAdoptRoutingRefuse,
+		Clients:      make([]DeAdoptClientPlan, 0),
 		Eligibility: DeAdoptEligibility{
 			GateOn:        len(probe.GatedOn) != 0,
 			GateOnClients: append([]string(nil), probe.GatedOn...),

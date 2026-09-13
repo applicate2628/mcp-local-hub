@@ -230,6 +230,9 @@ func TestProviderRecoveryPlanWireReadiness(t *testing.T) {
 			if err := json.Unmarshal(raw, &public); err != nil {
 				t.Fatal(err)
 			}
+			if _, ok := public["Clients"].([]any); !ok {
+				t.Fatalf("wire client dispositions must be an array: %s", raw)
+			}
 			want := state == "absent" || state == "verified"
 			if public["ProviderRecoveryReady"] != want {
 				t.Fatalf("wire recovery readiness=%v, want %v; plan=%s", public["ProviderRecoveryReady"], want, raw)
