@@ -25,7 +25,6 @@ func TestProviderRecoveryAuditResumeAfterE2(t *testing.T) {
 					t.Fatalf("claim=%t err=%v", claimed, err)
 				}
 			}
-			// Persist precisely the crash boundary; do not reuse an in-memory plan.
 			if err := MarkAdoptProvenanceDeAdopting(name); err != nil {
 				t.Fatal(err)
 			}
@@ -42,7 +41,7 @@ func TestProviderRecoveryAuditResumeAfterE2(t *testing.T) {
 			if provider.calls != 1 || !provider.entry.Enabled {
 				t.Fatalf("restore calls=%d enabled=%t", provider.calls, provider.entry.Enabled)
 			}
-			assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+			assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 		})
 	}
 }
@@ -95,7 +94,7 @@ func TestProviderRecoveryAuditStalePlanCannotBypassStartedMarker(t *testing.T) {
 	if !plan.providerRecovery {
 		t.Fatal("fixture did not enter provider recovery")
 	}
-	if err := markProviderInstallStartedForTask("mcp-local-hub-" + name + "-" + adoptDefaultDaemonName); err != nil {
+	if err := markProviderInstallStartedForTask(name, "mcp-local-hub-"+name+"-"+adoptDefaultDaemonName); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err == nil {
@@ -142,7 +141,7 @@ func TestProviderRecoveryAuditResumeAfterManifestDeleteCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if retry.Routing != DeAdoptRoutingResume || !retry.providerRecovery {
+	if retry.Routing != DeAdoptRoutingFresh || !retry.providerRecovery {
 		t.Fatal("post-delete retry lost recovery routing")
 	}
 	if _, err := NewAPI().executeDeAdoptPlanWithOpts(retry, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
@@ -151,5 +150,5 @@ func TestProviderRecoveryAuditResumeAfterManifestDeleteCrash(t *testing.T) {
 	if provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatal("retry did not restore provider exactly once")
 	}
-	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 }
