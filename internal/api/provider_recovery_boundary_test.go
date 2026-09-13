@@ -15,12 +15,9 @@ func TestBuildDeAdoptPlanProviderPreManifestRecoveryPrecedesClientProbe(t *testi
 	if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
 		t.Fatalf("remove manifest: %v", err)
 	}
-	// A pre-ManifestCreate provider crash has no client-side Install commit to
-	// classify. Make the recorded adopt client intentionally unavailable so this
-	// regression proves provider recovery is selected before fallible client probes.
 	rec.AdoptClients = []string{"provider-client-probe-unavailable"}
 	rec.Clients = nil
-	writeDeAdoptExecutorRecord(t, rec)
+	writeDeAdoptExecutorRecord(t, *rec)
 
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
 	if err != nil {
@@ -34,8 +31,7 @@ func TestBuildDeAdoptPlanProviderPreManifestRecoveryPrecedesClientProbe(t *testi
 func TestExecuteDeAdoptProviderPreInstallRowAppearingBeforeE4IsStopped(t *testing.T) {
 	name := "provider-preinstall-e4-row"
 	manifestRoot, stateRoot, rec, provider := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
-	// Model an Install admitted before E2, not a daemon with never-started history.
-	if err := markProviderInstallStartedForTask("mcp-local-hub-" + name + "-" + adoptDefaultDaemonName); err != nil {
+	if err := markProviderInstallStartedForTask(name, "mcp-local-hub-"+name+"-"+adoptDefaultDaemonName); err != nil {
 		t.Fatal(err)
 	}
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
@@ -77,7 +73,7 @@ func TestExecuteDeAdoptProviderPreInstallRowAppearingBeforeE4IsStopped(t *testin
 	if stops != 1 || provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatalf("stops=%d provider=%+v calls=%d", stops, provider.entry, provider.calls)
 	}
-	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 }
 
 func TestExecuteDeAdoptProviderPreInstallRowAfterManifestDeleteIsPreserved(t *testing.T) {
@@ -141,7 +137,7 @@ func TestExecuteDeAdoptProviderRestoreRepairsLateExactRowAfterManagedRemoved(t *
 		t.Fatalf("remove manifest: %v", err)
 	}
 	rec.ProviderSource.DeAdoptPhase = "managed_removed"
-	writeDeAdoptExecutorRecord(t, rec)
+	writeDeAdoptExecutorRecord(t, *rec)
 	if err := writeProviderInstallPhase(name, providerInstallPhaseRecoveryClaimed); err != nil {
 		t.Fatalf("set reachable recovery phase: %v", err)
 	}
@@ -171,9 +167,7 @@ func TestExecuteDeAdoptProviderRestoreRepairsLateExactRowAfterManagedRemoved(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	})
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
 	if err != nil {
 		t.Fatalf("late exact managed row retry should repair and complete: %v", err)
 	}
@@ -187,7 +181,7 @@ func TestExecuteDeAdoptProviderRestoreRepairsLateExactRowAfterManagedRemoved(t *
 	if len(intent.Daemons) != 0 {
 		t.Fatalf("late exact supervisor row remained after repair: %+v", intent.Daemons)
 	}
-	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, *rec)
 }
 
 func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
@@ -197,7 +191,7 @@ func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
 		t.Fatalf("remove manifest: %v", err)
 	}
 	rec.ProviderSource.DeAdoptPhase = "managed_removed"
-	writeDeAdoptExecutorRecord(t, rec)
+	writeDeAdoptExecutorRecord(t, *rec)
 	intent := &SupervisorIntentFile{Version: 1, Daemons: []SupervisorDaemon{{
 		TaskName:     "\\mcp-local-hub-" + name + "-" + adoptDefaultDaemonName,
 		Port:         rec.Port,
@@ -211,9 +205,7 @@ func TestExecuteDeAdoptProviderRestoreRejectsLateLegacyOwnedRow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{
-		providerDeps: providerTransactionDeps{source: provider},
-	})
+	_, err = NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}})
 	if err == nil || !strings.Contains(err.Error(), "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
 		t.Fatalf("error=%v, want provider restore ownership refusal", err)
 	}
@@ -240,9 +232,6 @@ func TestRemoveSettledProviderAdoptDaemonGenerationRejectsSameContentRewrite(t *
 	if err != nil {
 		t.Fatalf("freeze provider row: %v", err)
 	}
-
-	// Recommit the identical descriptor. Descriptor equality alone cannot
-	// distinguish this replacement from the generation that was settled.
 	current, err := ReadSupervisorIntent(intentPath)
 	if err != nil {
 		t.Fatal(err)
