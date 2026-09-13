@@ -87,3 +87,24 @@ func TestProviderManagedSettlementStillRequiresReadableClient(t *testing.T) {
 		t.Fatal("managed settlement bypassed the unreadable-client guard")
 	}
 }
+
+func TestProviderRecoveryExecutableRequiresPositiveManifestProof(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		readiness DeAdoptManifestReadiness
+		want      bool
+	}{
+		{name: "unknown", readiness: DeAdoptManifestReadiness{}},
+		{name: "unreadable", readiness: DeAdoptManifestReadiness{Reason: "manifest could not be read"}},
+		{name: "hash mismatch", readiness: DeAdoptManifestReadiness{Present: true}},
+		{name: "absent", readiness: DeAdoptManifestReadiness{AlreadyAbsent: true}, want: true},
+		{name: "verified", readiness: DeAdoptManifestReadiness{Present: true, HashReady: true}, want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			plan := &DeAdoptPlan{Routing: DeAdoptRoutingFresh, providerRecovery: true, Manifest: tc.readiness}
+			if got := plan.ProviderRecoveryExecutable(); got != tc.want {
+				t.Fatalf("executable=%t, want %t for readiness %+v", got, tc.want, tc.readiness)
+			}
+		})
+	}
+}

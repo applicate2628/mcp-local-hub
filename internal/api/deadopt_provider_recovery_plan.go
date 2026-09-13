@@ -8,5 +8,5 @@ func (p *DeAdoptPlan) ProviderRecoveryExecutable() bool {
 	if p == nil || !p.providerRecovery || p.Routing == DeAdoptRoutingRefuse || p.RefusalReason != "" {
 		return false
 	}
-	return !p.Manifest.Present || p.Manifest.HashReady
+	return p.Manifest.AlreadyAbsent || p.Manifest.HashReady
 }
