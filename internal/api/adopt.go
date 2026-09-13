@@ -794,7 +794,7 @@ func (a *API) ExecuteAdoptWithOpts(plan *AdoptPlan, w io.Writer, opts ExecuteAdo
 			return err
 		}
 		stage = "manifest-write"
-		if err := a.ManifestCreate(plan.ManifestName, plan.ManifestYAML); err != nil {
+		if err := a.manifestCreateWithAdoptLeaseHeld(plan.ManifestName, plan.ManifestYAML); err != nil {
 			abortNote := ""
 			if plan.providerSource == nil {
 				abortNote = abortProvenanceNote(abortAdoptProvenance(rec))
