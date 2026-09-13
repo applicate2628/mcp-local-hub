@@ -63,40 +63,14 @@ func providerAdoptOwnershipScope(rec *AdoptProvenanceRecord) (*supervisorIntentO
 }
 
 func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, error) {
-	if rec == nil {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
-	}
-	intent, err := loadSupervisorOwnedIntent()
-	if err != nil || intent == nil {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	scope, err := providerAdoptOwnershipScope(rec)
-	if err != nil {
-		return SupervisorDaemon{}, err
-	}
-	var owned []SupervisorDaemon
-	for _, daemon := range intent.Daemons {
-		if supervisorIntentRowOwnedByScope(daemon, rec.ManifestName, scope) {
-			owned = append(owned, daemon)
-		}
-	}
-	if len(owned) != 1 {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	daemon := owned[0]
-	if daemon.Server != rec.ManifestName || daemon.Daemon != adoptDefaultDaemonName || daemon.Port != rec.Port || daemon.ManifestHash != rec.ExpectedManifestHash {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	return daemon, nil
+	fence, err := frozenProviderAdoptDaemonFence(rec)
+	return fence.Daemon, err
 }
 
-// providerAdoptDaemonAbsent reports whether no supervisor ownership row exists
-// for this adoption. While de-adopt has not yet advanced a provider teardown
-// phase, absence is allowed to stand in for an already-satisfied managed-stop
-// obligation ONLY when durable history proves Install was never entered. New
-// receipts use the provider-install marker; markerless legacy receipts require
-// the additional runtime-absence proof in claimProviderInstallNeverStarted. A
-// started marker remains fail-closed even if supervisor-intent.json is empty.
+// providerAdoptDaemonAbsent verifies absence under the common ownership scope.
+// With an empty teardown phase it first claims durable never-started recovery
+// and hash-deletes any exact adopt manifest; it is not a read-only predicate.
+// Missing or started install history cannot authorize that recovery claim.
 func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 	if rec == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -107,23 +81,7 @@ func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	}
-	intent, err := loadSupervisorOwnedIntent()
-	if err != nil {
-		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-	}
-	if intent == nil {
-		return true, nil
-	}
-	scope, err := providerAdoptOwnershipScope(rec)
-	if err != nil {
-		return false, err
-	}
-	for _, daemon := range intent.Daemons {
-		if supervisorIntentRowOwnedByScope(daemon, rec.ManifestName, scope) {
-			return false, nil
-		}
-	}
-	return true, nil
+	return providerRecoveryOwnershipAbsent(rec)
 }
 
 // providerRecoveryStopManagedFn is a narrow test seam for the late-row recovery

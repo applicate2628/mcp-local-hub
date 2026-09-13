@@ -10,26 +10,56 @@ import (
 )
 
 func TestProviderRestoreGateRejectsReinstalledHubBinding(t *testing.T) {
-	name := "provider-restore-reinstall-race"
-	manifestRoot, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
-	if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
-		t.Fatal(err)
-	}
-	rec.ProviderSource.DeAdoptPhase = "managed_removed"
-	writeDeAdoptExecutorRecord(t, *rec)
-	if err := writeProviderInstallPhase(name, providerInstallPhaseManagedSettled); err != nil {
-		t.Fatal(err)
-	}
-	adapter := clients.AllClients()["codex-cli"]
-	if adapter == nil {
-		t.Fatal("codex-cli adapter unavailable")
-	}
-	if err := os.WriteFile(adapter.ConfigPath(), []byte(deAdoptHubConfig(name)), 0o600); err != nil {
-		t.Fatalf("inject reinstalled hub binding: %v", err)
-	}
-
-	if providerInstallPhaseAllowsRestore(name) {
-		t.Fatal("provider restore accepted a hub binding recreated after E3")
+	for _, tc := range []struct {
+		name      string
+		alias     bool
+		recreated bool
+	}{
+		{name: "legacy source", recreated: true},
+		{name: "recreated alias", alias: true, recreated: true},
+		{name: "removed alias", alias: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			name := "provider-restore-target-key"
+			manifestRoot, _, rec, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateDeAdopting)
+			if err := os.Remove(filepath.Join(manifestRoot, name, "manifest.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			if len(rec.Clients) != 1 || rec.Clients[0].Client != "codex-cli" {
+				t.Fatalf("unexpected fixture client provenance: %+v", rec.Clients)
+			}
+			target := rec.SourceEntryName
+			if tc.alias {
+				target += "-http"
+				rec.Clients[0].TargetEntryName = target
+			}
+			rec.Clients[0].ToolTimeoutSec = 30
+			rec.ProviderSource.DeAdoptPhase = "managed_removed"
+			writeDeAdoptExecutorRecord(t, *rec)
+			if err := writeProviderInstallPhase(name, providerInstallPhaseManagedSettled); err != nil {
+				t.Fatal(err)
+			}
+			config := deAdoptNativeConfig(rec.SourceEntryName, "native-command")
+			if tc.recreated {
+				config = deAdoptHubConfigWithToolTimeout(target, 30)
+				if tc.alias {
+					config += deAdoptNativeConfig(rec.SourceEntryName, "native-command")
+				}
+			}
+			adapter := clients.AllClients()["codex-cli"]
+			if adapter == nil {
+				t.Fatal("codex-cli adapter unavailable")
+			}
+			if err := os.WriteFile(adapter.ConfigPath(), []byte(config), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if allowed := providerInstallPhaseAllowsRestore(name); allowed == tc.recreated {
+				t.Fatalf("restore allowed=%t for target %q, recreated=%t", allowed, target, tc.recreated)
+			}
+			if got := mustReadFileForAdoptTest(t, adapter.ConfigPath()); string(got) != config {
+				t.Fatal("read-only restore guard changed the client configuration")
+			}
+		})
 	}
 }
 
