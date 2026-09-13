@@ -328,6 +328,9 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 			writeAPIError(w, fmt.Errorf("%q is a built-in shipped server; installing it would draft a disk manifest the hub ignores in favor of the shipped one — pick a different name (e.g. %q) to install a customized copy", name, name+"-custom"), http.StatusBadRequest, "EMBEDDED_NAME_COLLISION")
 			return
 		}
+		if writeRetryableManifestLeaseConflict(w, err) {
+			return
+		}
 		log.Printf("/api/marketplace/install ManifestCreate name=%q: %v", name, err)
 		writeAPIError(w, errors.New("internal error creating manifest"), http.StatusInternalServerError, "INSTALL_FAILED")
 		return

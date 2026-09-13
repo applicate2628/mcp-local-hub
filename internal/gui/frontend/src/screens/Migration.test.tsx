@@ -185,6 +185,7 @@ function basicDeAdoptPlan(
     AdoptClients: [],
     Routing: routing,
     RefusalReason: refusalReason,
+    ProviderRecoveryReady: false,
     Manifest: {
       Present: true,
       AlreadyAbsent: false,
@@ -897,8 +898,55 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
     expect(executeCalls).toBe(0);
   });
 
+  it.each([true, false, undefined])("gates absent-manifest recovery on explicit readiness: %s", async (ready) => {
+    let executeCalls = 0;
+    const base = basicDeAdoptPlan();
+    const plan = {
+      ...base,
+      ProviderRecoveryReady: ready,
+      Manifest: {
+        ...base.Manifest,
+        Present: false,
+        AlreadyAbsent: true,
+        HashReady: false,
+        Reason: "manifest is already absent; provider recovery remains",
+      },
+    } as DeAdoptPlan;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/deadopt/eligible": () =>
+          jsonResponse(200, {
+            eligible: true,
+            adopt_owned: true,
+            gate_on: false,
+            gate_on_clients: [],
+            blocked_reason: "",
+          }),
+        "/api/deadopt/plan": () => jsonResponse(200, plan),
+        "/api/deadopt": () => {
+          executeCalls += 1;
+          return jsonResponse(200, { restored: [], accepted: [], failed: [] });
+        },
+        "/api/scan": () => jsonResponse(200, managedDiscoveryScan()),
+        "/api/dismissed": () => jsonResponse(200, { unknown: [] }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<DiscoveryScreen />);
+    fireEvent.click(await screen.findByRole("button", { name: "De-adopt to native" }));
+    const modal = await screen.findByTestId("deadopt-confirm-modal");
+    await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    const confirm = within(modal).getByRole("button", {
+      name: "De-adopt to native",
+    }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(ready !== true);
+    fireEvent.click(confirm);
+    await vi.waitFor(() => expect(executeCalls).toBe(ready === true ? 1 : 0));
+  });
+
   it("shows irreversible snapshot-destruction consent for accept-conflict", async () => {
     const plan = basicDeAdoptPlan();
+    plan.ProviderRecoveryReady = false; // Ordinary conflict consent must not require provider recovery.
     plan.Clients = [
       {
         Client: "claude-code",
@@ -936,6 +984,9 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
         "IRREVERSIBLE: the accepted client's pinned snapshot is DESTROYED at close and its pre-adopt original config + secret-literal spellings are discarded without ever being restored.",
       ),
     ).toBeTruthy();
+    await vi.waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    fireEvent.click(within(modal).getByLabelText(/I understand this is irreversible/));
+    expect((within(modal).getByRole("button", { name: "De-adopt to native" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("plans and executes eligible de-adopt and renders partial failure reasons", async () => {
@@ -959,6 +1010,7 @@ describe("DiscoveryScreen — auto-refresh + Rescan", () => {
             AdoptClients: ["codex-cli", "claude-code"],
             Routing: "FRESH",
             RefusalReason: "",
+            ProviderRecoveryReady: false,
             Manifest: {
               Present: true,
               AlreadyAbsent: false,

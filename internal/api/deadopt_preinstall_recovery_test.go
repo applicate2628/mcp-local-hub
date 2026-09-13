@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -51,6 +52,17 @@ func TestExecuteDeAdoptProviderPreInstallMissingSupervisorIntent(t *testing.T) {
 	plan, err := NewAPI().BuildDeAdoptPlan(name)
 	if err != nil || plan.Routing != DeAdoptRoutingFresh || !plan.providerRecovery {
 		t.Fatalf("pre-install plan=%+v err=%v, want explicit durable recovery", plan, err)
+	}
+	wire, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal recovery plan: %v", err)
+	}
+	var public map[string]any
+	if err := json.Unmarshal(wire, &public); err != nil {
+		t.Fatalf("decode recovery plan: %v", err)
+	}
+	if public["ProviderRecoveryReady"] != true {
+		t.Fatalf("recovery plan wire ProviderRecoveryReady=%#v, want true; wire=%s", public["ProviderRecoveryReady"], wire)
 	}
 	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
 		t.Fatalf("pre-install recovery apply: %v", err)
@@ -178,5 +190,57 @@ func TestExecuteDeAdoptProviderLegacyMissingInstallMarkerFailsClosed(t *testing.
 	}
 	if provider.calls != 0 || provider.entry.Enabled {
 		t.Fatalf("provider restored from synthetic legacy history: provider=%+v calls=%d", provider.entry, provider.calls)
+	}
+}
+
+func TestProviderRecoveryPlanWireReadiness(t *testing.T) {
+	for _, state := range []string{"absent", "verified", "changed", "unreadable"} {
+		t.Run(state, func(t *testing.T) {
+			name := "provider-plan-wire"
+			root, _, _, _ := setupProviderPreInstallRecoveryFixture(t, name, AdoptOperationStateAdopting)
+			path := filepath.Join(root, name, "manifest.yaml")
+			switch state {
+			case "absent", "unreadable":
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if state == "unreadable" {
+					if err := os.Mkdir(path, 0o700); err != nil {
+						t.Fatal(err)
+					}
+				}
+			case "changed":
+				raw, err := os.ReadFile(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, append(raw, []byte("\n# external edit\n")...), 0o600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			plan, err := NewAPI().BuildDeAdoptPlan(name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, err := json.Marshal(plan)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var public map[string]any
+			if err := json.Unmarshal(raw, &public); err != nil {
+				t.Fatal(err)
+			}
+			want := state == "absent" || state == "verified"
+			if public["ProviderRecoveryReady"] != want {
+				t.Fatalf("wire recovery readiness=%v, want %v; plan=%s", public["ProviderRecoveryReady"], want, raw)
+			}
+			if state == "absent" && (!plan.Manifest.AlreadyAbsent || plan.Manifest.HashReady) {
+				t.Fatalf("pre-manifest readiness=%+v", plan.Manifest)
+			}
+			phase, err := readProviderInstallPhase(name)
+			if err != nil || phase != providerInstallPhaseNotStarted {
+				t.Fatalf("planning changed durable phase: %q, %v", phase, err)
+			}
+		})
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -630,5 +631,42 @@ func TestRealMarketplaceDirectWriterAppliedReleaseRecordsUpdatedAndFailed(t *tes
 	}
 	if first.entries["remote"].URL == "" || second.entries["remote"].URL == "" {
 		t.Fatalf("actual writes not recorded: first=%+v second=%+v", first.entries, second.entries)
+	}
+}
+
+func TestMarketplaceInstall_HubRetryableManifestLeaseConflict409(t *testing.T) {
+	const canary = "C:\\Users\\operator\\private-lease-path"
+	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
+	creator := &fakeManifestCreator{err: fmt.Errorf("%s: %w", canary, &api.LeaseFailure{
+		FailureID: "E_ADOPT_LEASE_GUARD_BUSY",
+		Retryable: true,
+	})}
+	installer := &fakeInstaller{}
+	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{port: 9207}, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, creator, installer)
+
+	rec := postInstall(t, s, `{"id":"filesystem","mode":"hub"}`, "same-origin")
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		FailureID string `json:"failure_id"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode lease conflict: %v; body=%q", err, rec.Body.String())
+	}
+	if body.Code != "MANIFEST_LEASE_BUSY" || body.FailureID != "E_ADOPT_LEASE_GUARD_BUSY" || !body.Retryable {
+		t.Fatalf("lease conflict body=%+v", body)
+	}
+	if !strings.Contains(body.Error, "retry") {
+		t.Fatalf("lease conflict is not actionable: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), canary) {
+		t.Fatalf("lease conflict leaked wrapped backend details: %q", rec.Body.String())
+	}
+	if installer.called {
+		t.Fatal("Install must not run after manifest lease contention")
 	}
 }

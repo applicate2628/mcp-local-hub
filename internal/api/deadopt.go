@@ -80,9 +80,12 @@ type DeAdoptPlan struct {
 	AdoptClients    []string
 	Routing         DeAdoptRoutingVerdict
 	RefusalReason   string
-	Manifest        DeAdoptManifestReadiness
-	Eligibility     DeAdoptEligibility
-	Clients         []DeAdoptClientPlan
+	// ProviderRecoveryReady exposes only durable pre-Install recovery readiness.
+	// Ordinary client restoration and conflict consent keep their existing gates.
+	ProviderRecoveryReady bool
+	Manifest              DeAdoptManifestReadiness
+	Eligibility           DeAdoptEligibility
+	Clients               []DeAdoptClientPlan
 
 	// provenance includes execution-only fields such as routed secret-key names
 	// and snapshot references. It is unexported so embedding DeAdoptPlan in a GUI
@@ -150,6 +153,9 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 		},
 		snapshotBytes: make(map[string][]byte),
 	}
+	defer func() {
+		plan.ProviderRecoveryReady = plan.ProviderRecoveryExecutable()
+	}()
 
 	// Read the row even after the P0 probe so the G3 ownership surface stays
 	// truthful on a gate-ON refusal. State-specific routing still stops at P0.

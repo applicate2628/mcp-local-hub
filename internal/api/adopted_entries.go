@@ -697,10 +697,12 @@ func adoptClientToolTimeout(rec AdoptProvenanceRecord, client string) int {
 // `adopting` ANCHOR row (manifest + BOTH hashes + empty clients) under the store
 // lock BEFORE any secret-bearing snapshot; then pins the snapshots OUTSIDE the
 // store lock (each takes its own per-file flock); then finalizes the row with the
-// client provenance under the store lock again. A crash at any point leaves a row
-// a reaper can find (row->maybe-missing-snapshots is reclaimable), NEVER a snapshot
-// dir with no row. Lock order: <manifest>.lease (held by the caller) ->
-// adopted-entries.lock (per transaction) -> <snapshot>.lock (per file).
+// client provenance under the store lock again. Provider-backed capture first
+// persists its non-secret, idempotent install-phase marker, then publishes the
+// anchor: a crash may leave a marker-only directory, but never a provider anchor
+// without durable phase proof and never a secret-bearing snapshot without a row.
+// Lock order: <manifest>.lease (held by the caller) -> adopted-entries.lock (per
+// transaction) -> <snapshot>.lock (per file).
 //
 // PRECONDITION: the caller (ExecuteAdoptWithOpts) holds the per-manifest lease, so
 // a prior `adopting` row for this manifest has a PROVABLY-DEAD owner and is
@@ -769,6 +771,13 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 		if reapedPrior {
 			if err := removeAdoptSnapshots(plan.ManifestName); err != nil {
 				return fmt.Errorf("adopt provenance capture: reap stale snapshot dir: %w", err)
+			}
+		}
+		if plan.providerSource != nil {
+			// Publish durable never-started proof before the provider-backed anchor.
+			// providerDisable re-checks the same marker immediately before its CAS.
+			if err := initializeProviderInstallPhase(plan.ManifestName); err != nil {
+				return fmt.Errorf("adopt provenance capture: initialize provider install phase before publishing anchor: %w", err)
 			}
 		}
 		kept = append(kept, AdoptProvenanceRecord{
