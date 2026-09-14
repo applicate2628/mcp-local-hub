@@ -108,17 +108,18 @@ args = ["version"]
 		t.Fatalf("read seeded codex config: %v", err)
 	}
 
+	port := nextBindableAdoptPortForTest(t, collectUsedAdoptPorts())
 	plan, err := NewAPI().BuildAdoptPlan(AdoptOpts{
 		EntryName:    entry,
 		Client:       "codex-cli",
 		ManifestName: entry,
-		Port:         9307,
+		Port:         port,
 	})
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan: %v", err)
 	}
-	if plan.Port != 9307 {
-		t.Fatalf("Port = %d, want 9307", plan.Port)
+	if plan.Port != port {
+		t.Fatalf("Port = %d, want %d", plan.Port, port)
 	}
 	if !reflect.DeepEqual(plan.AdoptClients, []string{"codex-cli"}) {
 		t.Fatalf("AdoptClients = %#v, want [codex-cli]", plan.AdoptClients)

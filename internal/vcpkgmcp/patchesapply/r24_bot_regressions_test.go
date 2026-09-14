@@ -54,7 +54,7 @@ func TestR24GetFilenameComponentHonorsBaseDir(t *testing.T) {
 	portDir := t.TempDir()
 	baseDir := filepath.Join(portDir, "other")
 	env := newVarEnv(portDir, "", "", nil, nil)
-	entries, _, structural := walkPortfile("get_filename_component(PATCH file.patch ABSOLUTE BASE_DIR "+baseDir+")\nvcpkg_from_github(PATCHES ${PATCH})\n", env)
+	entries, _, structural := walkPortfile("get_filename_component(PATCH file.patch ABSOLUTE BASE_DIR \""+filepath.ToSlash(baseDir)+"\")\nvcpkg_from_github(PATCHES ${PATCH})\n", env)
 	want := filepath.Join(baseDir, "file.patch")
 	if structural != parserStructuralNone || len(entries) != 1 || entries[0].expanded != want {
 		t.Fatalf("entries=%+v structural=%v, want %q", entries, structural, want)

@@ -259,6 +259,9 @@ func registerManifestRoutes(s *Server) {
 				writeAPIError(w, fmt.Errorf("%q is a built-in shipped server; a disk manifest under this name is ignored at install (the shipped manifest installs) — rename the server (e.g. %q) to save a customized copy", name, name+"-custom"), http.StatusBadRequest, "EMBEDDED_NAME_COLLISION")
 				return
 			}
+			if writeRetryableManifestLeaseConflict(w, err) {
+				return
+			}
 			// Codex R1 (#16 P2): err may be an *os.PathError that includes an
 			// absolute filesystem path. Log the real error server-side; send
 			// a stable sanitized message to the client.

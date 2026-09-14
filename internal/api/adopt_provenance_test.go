@@ -397,3 +397,93 @@ func TestAdoptProvenanceEventBodiesRedacted(t *testing.T) {
 		}
 	}
 }
+
+func setupProviderCapturePhasePlan(t *testing.T) *AdoptPlan {
+	t.Helper()
+	entry := "provider-capture-phase-order"
+	setupAdoptTestEnv(t, entry, `[mcp_servers.provider-capture-phase-order]
+command = "go"
+args = ["version"]
+`)
+	api := NewAPI()
+	plan, err := api.BuildAdoptPlan(AdoptOpts{
+		EntryName: entry, Client: "codex-cli", ManifestName: entry,
+		Port: nextBindableAdoptPortForTest(t, collectUsedAdoptPorts()),
+	})
+	if err != nil {
+		t.Fatalf("BuildAdoptPlan: %v", err)
+	}
+	plan.providerSource = &ProviderSourceProvenanceV1{
+		ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: entry,
+		Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation",
+		PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true,
+		ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_planned",
+	}
+
+	return plan
+}
+
+func TestCaptureProviderAdoptPersistsNotStartedBeforePublishingProvenance(t *testing.T) {
+	plan := setupProviderCapturePhasePlan(t)
+	entry := plan.ManifestName
+	api := NewAPI()
+	previous := adoptCaptureBeforeSnapshotReadHook
+	defer func() { adoptCaptureBeforeSnapshotReadHook = previous }()
+	var observedPhase string
+	var observedPhaseErr error
+	var observedRow bool
+	adoptCaptureBeforeSnapshotReadHook = func(string) {
+		observedPhase, observedPhaseErr = readProviderInstallPhase(entry)
+		_, observedRow, _ = ReadAdoptProvenance(entry)
+	}
+	if _, err := api.captureAdoptProvenance(plan); err != nil {
+		t.Fatalf("captureAdoptProvenance: %v", err)
+	}
+	if !observedRow {
+		t.Fatal("test hook ran before the provider provenance anchor was published")
+	}
+	if observedPhaseErr != nil || observedPhase != providerInstallPhaseNotStarted {
+		t.Fatalf("phase at published-anchor boundary=%q err=%v, want %q", observedPhase, observedPhaseErr, providerInstallPhaseNotStarted)
+	}
+}
+
+func TestCaptureProviderAdoptPhaseInitializationFailurePublishesNoAnchor(t *testing.T) {
+	plan := setupProviderCapturePhasePlan(t)
+	path, err := providerInstallPhasePath(plan.ManifestName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A directory at the phase-file path makes the actual writer/readback refuse.
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAPI().captureAdoptProvenance(plan); err == nil {
+		t.Fatal("capture published provider provenance without a writable phase file")
+	}
+	if _, found, err := ReadAdoptProvenance(plan.ManifestName); err != nil || found {
+		t.Fatalf("failed initialization published an anchor: found=%v err=%v", found, err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewAPI().captureAdoptProvenance(plan); err != nil {
+		t.Fatalf("retry after initialization failure: %v", err)
+	}
+}
+
+func TestCaptureProviderAdoptReusesMarkerOnlyCrashState(t *testing.T) {
+	plan := setupProviderCapturePhasePlan(t)
+	if err := initializeProviderInstallPhase(plan.ManifestName); err != nil {
+		t.Fatal(err)
+	}
+	if _, found, err := ReadAdoptProvenance(plan.ManifestName); err != nil || found {
+		t.Fatalf("fixture must contain only a marker: found=%v err=%v", found, err)
+	}
+	if _, err := NewAPI().captureAdoptProvenance(plan); err != nil {
+		t.Fatalf("capture after marker-only crash: %v", err)
+	}
+	phase, err := readProviderInstallPhase(plan.ManifestName)
+	if err != nil || phase != providerInstallPhaseNotStarted {
+		t.Fatalf("phase after capture=%q err=%v", phase, err)
+	}
+}

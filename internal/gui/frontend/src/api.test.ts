@@ -99,6 +99,22 @@ describe("postManifestCreate", () => {
     await expect(postManifestCreate("demo", "name: demo")).rejects.toThrow(/manifest already exists/);
   });
 
+  it("surfaces retry guidance from a manifest lease 409", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({
+        error: "another operation is changing this manifest; retry after it completes",
+        code: "MANIFEST_LEASE_BUSY",
+        retryable: true,
+      }),
+    }) as unknown as Response);
+    await expect(postManifestCreate("demo", "name: demo")).rejects.toThrow(
+      /retry after it completes/,
+    );
+  });
+
   it("serializes name + yaml into JSON body", async () => {
     const seen: { body?: string } = {};
     globalThis.fetch = vi.fn(async (_url: RequestInfo | URL, init?: RequestInit) => {
@@ -325,6 +341,22 @@ describe("installMarketplaceEntry", () => {
     }) as unknown as Response);
     const out = await installMarketplaceEntry({ id: "git", mode: "hub" });
     expect(out).toEqual({ kind: "name-conflict", suggestedName: "git-2" });
+  });
+
+  it("surfaces a manifest-lease 409 instead of misclassifying it as a name conflict", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({
+        error: "another operation is changing this manifest; retry after it completes",
+        code: "MANIFEST_LEASE_BUSY",
+        retryable: true,
+      }),
+    }) as unknown as Response);
+    await expect(installMarketplaceEntry({ id: "git", mode: "hub" })).rejects.toThrow(
+      /retry after it completes/,
+    );
   });
 
   // FINDING 3 regression: a 412 AVAILABILITY_PROBE_PENDING must map to its OWN

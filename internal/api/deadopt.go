@@ -80,9 +80,12 @@ type DeAdoptPlan struct {
 	AdoptClients    []string
 	Routing         DeAdoptRoutingVerdict
 	RefusalReason   string
-	Manifest        DeAdoptManifestReadiness
-	Eligibility     DeAdoptEligibility
-	Clients         []DeAdoptClientPlan
+	// ProviderRecoveryReady exposes only durable pre-Install recovery readiness.
+	// Ordinary client restoration and conflict consent keep their existing gates.
+	ProviderRecoveryReady bool
+	Manifest              DeAdoptManifestReadiness
+	Eligibility           DeAdoptEligibility
+	Clients               []DeAdoptClientPlan
 
 	// provenance includes execution-only fields such as routed secret-key names
 	// and snapshot references. It is unexported so embedding DeAdoptPlan in a GUI
@@ -144,12 +147,16 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	plan := &DeAdoptPlan{
 		ManifestName: server,
 		Routing:      DeAdoptRoutingRefuse,
+		Clients:      make([]DeAdoptClientPlan, 0),
 		Eligibility: DeAdoptEligibility{
 			GateOn:        len(probe.GatedOn) != 0,
 			GateOnClients: append([]string(nil), probe.GatedOn...),
 		},
 		snapshotBytes: make(map[string][]byte),
 	}
+	defer func() {
+		plan.ProviderRecoveryReady = plan.ProviderRecoveryExecutable()
+	}()
 
 	// Read the row even after the P0 probe so the G3 ownership surface stays
 	// truthful on a gate-ON refusal. State-specific routing still stops at P0.
@@ -181,11 +188,16 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	case AdoptOperationStateAdopted:
 		plan.Routing = DeAdoptRoutingFresh
 	case AdoptOperationStateAdopting:
-		verdict := classifyDeadAdoptingRow(*rec)
-		if verdict == adoptRowRecoveryKeep {
+		if providerPreManifestRecovery(rec) {
 			plan.Routing = DeAdoptRoutingFresh
 			plan.providerRecovery = true
 			break
+		}
+		verdict := classifyDeadAdoptingRow(*rec)
+		if verdict == adoptRowRecoveryKeep {
+			// Current absence alone must not manufacture never-started history.
+			plan.RefusalReason = "E_PROVIDER_LIFECYCLE_UNSUPPORTED: provider recovery requires durable pre-install evidence"
+			return plan, nil
 		}
 		if verdict != adoptRowCommittedKeep {
 			plan.RefusalReason = fmt.Sprintf("manifest %q has an adopting row without a live hub binding; adopt orphan GC owns it", server)
@@ -194,6 +206,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 		plan.Routing = DeAdoptRoutingFresh
 	case AdoptOperationStateDeAdopting:
 		plan.Routing = DeAdoptRoutingResume
+		plan.providerRecovery = providerPreManifestRecovery(rec)
 	case AdoptOperationStateClosed:
 		plan.RefusalReason = fmt.Sprintf("manifest %q is already de-adopted", server)
 		return plan, nil
@@ -275,7 +288,7 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 
 // PrintDeAdoptPlan writes a redacted dry-run summary for CLI callers. It
 // deliberately omits manifest hashes, config bodies, snapshot bytes, and secret
-// values; only names, state labels, counts, and planner-authored reasons appear.
+// values; only names, state labels, reasons, and hashes only.
 func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
 	if w == nil || plan == nil {
 		return
@@ -294,7 +307,7 @@ func PrintDeAdoptPlan(w io.Writer, plan *DeAdoptPlan) {
 		plan.Eligibility.AdoptOwned, plan.Eligibility.GateOn, plan.Eligibility.Eligible)
 	if len(plan.Eligibility.GateOnClients) != 0 {
 		fmt.Fprintf(w, "  gate-on clients: %d (%s)\n",
-			len(plan.Eligibility.GateOnClients), strings.Join(plan.Eligibility.GateOnClients, ","))
+			len(plan.Eligibility.GateOnClients), strings.Join(plan.Eligibility.GateOnClients, ", "))
 	}
 	if plan.Eligibility.BlockedReason != "" {
 		fmt.Fprintf(w, "  eligibility reason: %s\n", plan.Eligibility.BlockedReason)
@@ -441,12 +454,22 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	// Recompute the destructive manifest gate from the authoritative row. A
 	// fresh operation must still have the exact adopted manifest; only a resume
 	// may proceed when it is already absent. E4 rechecks at the mutation point.
+	// Recovery routing is advisory in the plan. Reconstruct it from the same
+	// durable history for fresh and resumed receipts while holding the lease.
+	providerRecovery := providerPreManifestRecovery(rec)
+	// Only positively never-entered recovery may skip untouched adapters.
+	// Managed retries must rerun E3 if an earlier Install recreated a binding.
+	providerClientsUntouched := false
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase != "" {
+		phase, phaseErr := readProviderInstallPhase(rec.ManifestName)
+		providerClientsUntouched = phaseErr == nil && phase == providerInstallPhaseRecoveryClaimed
+	}
 	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting)
-	if !plan.providerRecovery && !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
+	if !providerRecovery && !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
 	}
-	if !plan.providerRecovery && len(readiness.expectedBindings) != len(rec.AdoptClients) {
-		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase != "" && readiness.AlreadyAbsent {
+	if !providerRecovery && len(readiness.expectedBindings) != len(rec.AdoptClients) {
+		if providerClientsUntouched && readiness.AlreadyAbsent {
 			// A crash after exact manifest/intent removal but before its durable
 			// marker has already passed client restoration; resume removal below.
 		} else {
@@ -459,12 +482,22 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return nil, err
 	}
 
+	// Claim never-started recovery before E2. The marker is durable across a
+	// crash after de_adopting is written, and Install competes for that same
+	// marker before it may mutate managed ownership. Do not invent a stop phase.
+	if providerRecovery {
+		absent, absenceErr := providerAdoptDaemonAbsent(rec)
+		if absenceErr != nil || !absent {
+			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+	}
+
 	// E2 — idempotently enter de_adopting. Mark performs the B4 committed-row
 	// re-verification while this caller retains the lease.
 	if err := MarkAdoptProvenanceDeAdopting(plan.ManifestName); err != nil {
 		return nil, fmt.Errorf("de-adopt: mark provenance for manifest %q de-adopting failed", plan.ManifestName)
 	}
-	if plan.providerRecovery {
+	if providerRecovery {
 		return a.executeProviderRecoveryDeAdopt(rec, opts, w)
 	}
 
@@ -474,7 +507,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 
 	// E3 — restore/remove every target before any topology mutation.
 	for _, clientName := range rec.AdoptClients {
-		if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase != "" && readiness.AlreadyAbsent {
+		if providerClientsUntouched && readiness.AlreadyAbsent {
 			resolvedClients++
 			continue
 		}
@@ -613,9 +646,12 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		return report, nil
 	}
 
-	// E4 — CLOSE-READY only. Build the exact adopt-created one-daemon ownership
-	// scope before deleting the manifest. captureLivePIDs=false keeps the existing
-	// cleanup core free of IPC, process probes, kills, and waits under the lease.
+	// E4 — CLOSE-READY only. The ordinary provider path proves one frozen daemon
+	// settled before it removes the corresponding supervisor ownership. The
+	// pre-Install crash path is deliberately different: positive absence is
+	// re-proved at E4, the manifest is deleted, absence is re-proved again, and no
+	// supervisor row is removed at all. Any row published by an in-flight Install
+	// therefore remains visible to the final provider-restore ownership gate.
 	expectedManifest := &config.ServerManifest{
 		Name:    rec.ManifestName,
 		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
@@ -624,51 +660,152 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	if deAdoptBeforeManifestDeleteHook != nil {
 		deAdoptBeforeManifestDeleteHook()
 	}
-	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
-		frozen, frozenErr := frozenProviderAdoptDaemon(rec)
-		if frozenErr != nil {
-			return report, frozenErr
+
+	providerPreInstallAbsence := false
+	var settledProviderFence *providerAdoptDaemonFence
+	if rec.ProviderSource != nil {
+		switch rec.ProviderSource.DeAdoptPhase {
+		case "":
+			fence, frozenErr := frozenProviderAdoptDaemonFence(rec)
+			if frozenErr == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				_, stopErr := opts.providerDeps.stopManaged(ctx, a, fence.Daemon)
+				cancel()
+				if stopErr != nil {
+					return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
+				}
+				settledProviderFence = &fence
+				updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
+				if phaseErr != nil {
+					return report, phaseErr
+				}
+				rec = updated
+			} else {
+				preInstallState := rec.OperationState == AdoptOperationStateAdopting || rec.OperationState == AdoptOperationStateDeAdopting
+				absenceWindow := (readiness.Present && readiness.HashReady) || (effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent)
+				absent, absentErr := providerAdoptDaemonAbsent(rec)
+				if !preInstallState || !absenceWindow || absentErr != nil || !absent {
+					return report, frozenErr
+				}
+				providerPreInstallAbsence = true
+			}
+		case "managed_stop_settled":
+			// Older hotfix revisions may already have persisted this phase for a
+			// positive pre-Install absence. Distinguish that legacy state from an
+			// ordinary settled stop using current ownership. If an owned row exists,
+			// settle it again before any removal; this is idempotent for an already
+			// stopped daemon and safely handles a late row that appeared after the old
+			// absence proof.
+			fence, frozenErr := frozenProviderAdoptDaemonFence(rec)
+			if frozenErr == nil {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				_, stopErr := opts.providerDeps.stopManaged(ctx, a, fence.Daemon)
+				cancel()
+				if stopErr != nil {
+					return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon resettlement: %w", stopErr)
+				}
+				settledProviderFence = &fence
+			} else {
+				absent, absentErr := providerAdoptDaemonAbsent(rec)
+				if absentErr != nil || !absent {
+					return report, frozenErr
+				}
+				providerPreInstallAbsence = true
+			}
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-		_, stopErr := opts.providerDeps.stopManaged(ctx, a, frozen)
-		cancel()
-		if stopErr != nil {
-			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement: %w", stopErr)
-		}
-		updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "", "managed_stop_settled")
-		if phaseErr != nil {
-			return report, phaseErr
-		}
-		rec = updated
 	}
-	if rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
+
+	deleteManifest := func() error {
+		// Always use the mutation-point hash gate, even when the earlier readiness
+		// snapshot observed the file absent. ManifestDeleteInWithHash is
+		// idempotent for continued absence, deletes an exact recreation, and
+		// rejects a changed recreation.
 		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
 			})
 			switch {
 			case errors.Is(err, ErrManifestHashRequired):
-				return report, fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
+				return fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
 			case errors.Is(err, ErrManifestHashMismatch):
-				return report, fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
+				return fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
 			default:
-				return report, fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
+				return fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
 			}
 		}
-		if _, _, _, err := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); err != nil {
+		return nil
+	}
+
+	if rec.ProviderSource == nil {
+		if err := deleteManifest(); err != nil {
+			return report, err
+		}
+		if deAdoptAfterManifestDeleteHook != nil {
+			deAdoptAfterManifestDeleteHook()
+		}
+		if _, _, _, removeErr := a.removeServerFromSupervisorIntentCore(context.Background(), rec.ManifestName, intentScope, false); removeErr != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "supervisor-intent", report)
 			})
 			return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed", plan.ManifestName)
 		}
-		if rec.ProviderSource != nil {
-			updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
-			if phaseErr != nil {
-				return report, phaseErr
-			}
-			rec = updated
+	} else if providerPreInstallAbsence {
+		if err := deleteManifest(); err != nil {
+			return report, err
+		}
+		if deAdoptAfterManifestDeleteHook != nil {
+			deAdoptAfterManifestDeleteHook()
+		}
+		absent, absentErr := providerAdoptDaemonAbsent(rec)
+		if absentErr != nil || !absent {
+			// Never delete a row that appeared after the positive pre-Install
+			// absence proof. Leaving it intact is the fail-closed recovery state:
+			// provider restoration stays blocked until that managed owner is
+			// explicitly settled on a later retry.
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		var updated *AdoptProvenanceRecord
+		var phaseErr error
+		if rec.ProviderSource.DeAdoptPhase == "" {
+			updated, phaseErr = advanceProviderPreInstallManagedRemoved(rec.ManifestName, rec)
+		} else {
+			updated, phaseErr = AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
+		}
+		if phaseErr != nil {
+			return report, phaseErr
+		}
+		rec = updated
+	} else if rec.ProviderSource.DeAdoptPhase == "managed_stop_settled" {
+		if err := deleteManifest(); err != nil {
+			return report, err
+		}
+		if deAdoptAfterManifestDeleteHook != nil {
+			deAdoptAfterManifestDeleteHook()
+		}
+		if settledProviderFence == nil {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		if removeErr := removeSettledProviderAdoptDaemonFence(rec, *settledProviderFence); removeErr != nil {
+			pendingEvents = append(pendingEvents, func() {
+				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "supervisor-intent", report)
+			})
+			return report, fmt.Errorf("de-adopt: supervisor-intent cleanup for manifest %q failed: %w", plan.ManifestName, removeErr)
+		}
+		updated, phaseErr := AdvanceProviderDeAdoptPhase(rec.ManifestName, "managed_stop_settled", "managed_removed")
+		if phaseErr != nil {
+			return report, phaseErr
+		}
+		rec = updated
+	}
+
+	// An old removal phase is not proof of continued manifest absence.
+	// Delete exact recreations and refuse changed ones before secret cleanup.
+	if rec.ProviderSource != nil && (rec.ProviderSource.DeAdoptPhase == "managed_removed" || rec.ProviderSource.DeAdoptPhase == "restore_applied") {
+		if err := deleteManifest(); err != nil {
+			return report, err
 		}
 	}
+
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "managed_removed" {
 		source := opts.providerDeps.source
 		if source == nil {
@@ -693,6 +830,12 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			return report, phaseErr
 		}
 		rec = updated
+	}
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "restore_applied" {
+		absent, absenceErr := providerAdoptDaemonAbsent(rec)
+		if absenceErr != nil || !absent {
+			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
 	}
 	// E5 — CLOSE-READY only. The prefilter and delete each take the vault lock
 	// through their existing owner and release it before the next inner operation.
@@ -749,24 +892,19 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
 	if current.ProviderSource.DeAdoptPhase == "" {
+		// Re-prove the claim and the complete scoped ownership set before any
+		// durable phase advance, including callers which did not use the planner.
+		absent, absenceErr := providerAdoptDaemonAbsent(current)
+		if absenceErr != nil || !absent {
+			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
 		exists, manifestErr := manifestExistsIn(defaultManifestDir(), current.ManifestName)
 		if manifestErr != nil || exists {
 			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
-		intent, intentErr := loadSupervisorOwnedIntent()
-		if intentErr != nil {
-			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-		}
-		for _, daemon := range intent.Daemons {
-			if daemon.Server == current.ManifestName && daemon.Daemon == adoptDefaultDaemonName && daemon.Port == current.Port && daemon.ManifestHash == current.ExpectedManifestHash {
-				return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
-			}
-		}
-		current, err = AdvanceProviderDeAdoptPhase(current.ManifestName, "", "managed_stop_settled")
-		if err != nil {
-			return nil, err
-		}
-		current, err = AdvanceProviderDeAdoptPhase(current.ManifestName, "managed_stop_settled", "managed_removed")
+		// No daemon was stopped here. Use the existing pre-install transition
+		// instead of writing an artificial managed_stop_settled intermediate.
+		current, err = advanceProviderPreInstallManagedRemoved(current.ManifestName, current)
 		if err != nil {
 			return nil, err
 		}
@@ -948,6 +1086,11 @@ func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys 
 // deAdoptBeforeManifestDeleteHook makes the readiness-to-E4 recreate window
 // deterministic in package tests. Production leaves it nil.
 var deAdoptBeforeManifestDeleteHook func()
+
+// deAdoptAfterManifestDeleteHook enlarges the post-delete/pre-provider-phase
+// window for package tests. It proves that a supervisor row published by an
+// already in-flight Install is preserved and blocks provider restoration.
+var deAdoptAfterManifestDeleteHook func()
 
 func (a *API) deAdoptSharedRoutedSecretKeys(manifestName string, routedKeys []string) (map[string]bool, []string, error) {
 	candidates := make(map[string]bool, len(routedKeys))

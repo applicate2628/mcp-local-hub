@@ -921,3 +921,157 @@ func readSortedNames(t *testing.T, dir string) []string {
 	}
 	return names
 }
+
+func TestInstallMigratesEligibleLegacyLeaseNamespace(t *testing.T) {
+	const name = "install-legacy-namespace"
+	setupInstallLeaseRemoteFixture(t, name)
+	_, namespace, _ := seedRecognizedLegacyLeaseNamespace(t, []string{"existing.lease"}, false)
+	if err := NewAPI().Install(InstallOpts{Server: name, Writer: io.Discard}); err != nil {
+		t.Fatalf("ordinary install rejected recognized legacy namespace: %v", err)
+	}
+	assertWindowsPathDACLAllowlist(t, namespace, true)
+}
+
+func TestAdoptLeaseNamespaceMissingLegacyRootInspectionAndMigration(t *testing.T) {
+	stateRoot, namespace, _ := seedRecognizedLegacyStateRoot(t, nil)
+	if err := os.Remove(namespace); err != nil {
+		t.Fatal(err)
+	}
+	before := windowsSDDLForTest(t, stateRoot)
+	report, err := MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{})
+	if err != nil || report.State != AdoptLeaseNamespaceLegacy || !report.MigrationEligible ||
+		report.ReasonID != AdoptLeaseReasonStateRootLegacyDACL || report.Action != AdoptLeaseActionMigrateLegacyStateRoot {
+		t.Fatalf("missing namespace lost legacy root eligibility: report=%+v err=%v", report, err)
+	}
+	if got := windowsSDDLForTest(t, stateRoot); got != before {
+		t.Fatal("inspection changed state-root DACL")
+	}
+	if _, err := os.Lstat(namespace); !os.IsNotExist(err) {
+		t.Fatalf("inspection created namespace: %v", err)
+	}
+	report, err = MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true})
+	if err != nil || report.State != AdoptLeaseNamespaceMissing || report.MigrationEligible || !report.NamespaceChanged ||
+		report.ReasonID != AdoptLeaseReasonNamespaceMissing || report.Action != AdoptLeaseActionRetryAdopt {
+		t.Fatalf("root-only migration: report=%+v err=%v", report, err)
+	}
+	assertWindowsPathDACLAllowlist(t, stateRoot, true)
+	if _, err := os.Lstat(namespace); !os.IsNotExist(err) {
+		t.Fatalf("migration should leave namespace creation to lease owner: %v", err)
+	}
+	report, err = MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true})
+	if err != nil || report.State != AdoptLeaseNamespaceMissing || report.NamespaceChanged || report.MigrationEligible {
+		t.Fatalf("repeat root-only migration: report=%+v err=%v", report, err)
+	}
+}
+
+func TestAdoptLeaseNamespaceMissingLegacyRootRollback(t *testing.T) {
+	stateRoot, namespace, _ := seedRecognizedLegacyStateRoot(t, nil)
+	if err := os.Remove(namespace); err != nil {
+		t.Fatal(err)
+	}
+	before := windowsSDDLForTest(t, stateRoot)
+	previous := adoptLeaseNamespaceMigrationFailureHook
+	t.Cleanup(func() { adoptLeaseNamespaceMigrationFailureHook = previous })
+	canary := errors.New("root-only-rollback-canary")
+	adoptLeaseNamespaceMigrationFailureHook = func(stage string) error {
+		if stage == "root-tightened" {
+			return canary
+		}
+		return nil
+	}
+	report, err := MigrateLegacyAdoptLeaseNamespace(AdoptLeaseNamespaceMigrationOpts{Yes: true})
+	if !errors.Is(err, canary) || !report.RollbackPerformed || report.NamespaceChanged {
+		t.Fatalf("root-only rollback: report=%+v err=%v", report, err)
+	}
+	if strings.Contains(err.Error(), canary.Error()) {
+		t.Fatal("root-only rollback exposed private cause")
+	}
+	if got := windowsSDDLForTest(t, stateRoot); got != before {
+		t.Fatal("root-only rollback did not restore DACL")
+	}
+	if _, err := os.Lstat(namespace); !os.IsNotExist(err) {
+		t.Fatalf("root-only rollback created namespace: %v", err)
+	}
+}
+
+func TestManifestMutationMissingLegacyNamespace(t *testing.T) {
+	for _, operation := range []string{"create", "install"} {
+		for _, suffix := range []string{"", ".lease"} {
+			for _, unsafeRoot := range []bool{false, true} {
+				label := operation + suffix + "/eligible"
+				if unsafeRoot {
+					label = operation + suffix + "/unsafe"
+				}
+				t.Run(label, func(t *testing.T) {
+					name := "missing-namespace-" + operation + suffix
+					manifestRoot := setupInstallLeaseRemoteFixture(t, name)
+					manifestPath := filepath.Join(manifestRoot, name, "manifest.yaml")
+					body, err := os.ReadFile(manifestPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if operation == "create" {
+						if err := os.Remove(manifestPath); err != nil {
+							t.Fatal(err)
+						}
+					}
+					stateRoot, namespace, _ := seedRecognizedLegacyStateRoot(t, nil)
+					if err := os.Remove(namespace); err != nil {
+						t.Fatal(err)
+					}
+					if unsafeRoot {
+						applyFileDACLWithAuthUsersReadACE(t, stateRoot)
+					}
+					before := windowsSDDLForTest(t, stateRoot)
+					if operation == "create" {
+						err = NewAPI().ManifestCreate(name, string(body))
+					} else {
+						err = NewAPI().Install(InstallOpts{Server: name, Writer: io.Discard})
+					}
+					if unsafeRoot {
+						var failure *LeaseFailure
+						if !errors.As(err, &failure) || failure.ReasonID != AdoptLeaseReasonStateRootRefused || failure.Action != AdoptLeaseActionLeaveUnchanged {
+							t.Fatalf("unsafe root was not refused: err=%v failure=%+v", err, failure)
+						}
+						if got := windowsSDDLForTest(t, stateRoot); got != before {
+							t.Fatal("unsafe root refusal changed DACL")
+						}
+						if _, err := os.Lstat(namespace); !os.IsNotExist(err) {
+							t.Fatalf("unsafe root refusal created namespace: %v", err)
+						}
+						if operation == "create" {
+							if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+								t.Fatalf("unsafe root refusal wrote manifest: %v", err)
+							}
+							return
+						}
+					} else {
+						if err != nil {
+							t.Fatalf("%s rejected eligible legacy root with missing namespace: %v", operation, err)
+						}
+						assertWindowsPathDACLAllowlist(t, stateRoot, true)
+						assertWindowsPathDACLAllowlist(t, namespace, true)
+						lease, acquired, err := tryAcquireManifestMutationLease(name)
+						if err != nil || !acquired {
+							t.Fatalf("%s leaked mutation lease: acquired=%v err=%v", operation, acquired, err)
+						}
+						if err := lease.Unlock(); err != nil {
+							t.Fatal(err)
+						}
+						if suffix != "" {
+							if lease, acquired, err := tryAcquireAdoptManifestLease(name); err == nil || acquired || lease != nil {
+								if lease != nil {
+									_ = lease.Unlock()
+								}
+								t.Fatalf("snapshot-owning adopt accepted reserved suffix: acquired=%v err=%v", acquired, err)
+							}
+						}
+					}
+					if got, err := os.ReadFile(manifestPath); err != nil || string(got) != string(body) {
+						t.Fatalf("manifest bytes changed: err=%v", err)
+					}
+				})
+			}
+		}
+	}
+}

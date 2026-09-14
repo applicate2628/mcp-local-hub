@@ -81,6 +81,9 @@ func TestDeAdoptPlanRouteRoundTripsAdoptedPlan(t *testing.T) {
 	if body["ManifestName"] != name || body["Routing"] != string("FRESH") {
 		t.Fatalf("plan identity/routing=%#v/%#v, want %q/FRESH", body["ManifestName"], body["Routing"], name)
 	}
+	if body["ProviderRecoveryReady"] != false {
+		t.Fatalf("ordinary plan ProviderRecoveryReady=%#v, want false", body["ProviderRecoveryReady"])
+	}
 	eligibility, _ := body["Eligibility"].(map[string]any)
 	if eligibility["AdoptOwned"] != true || eligibility["GateOn"] != false || eligibility["Eligible"] != true {
 		t.Fatalf("Eligibility=%#v, want adopted + gate-OFF + eligible", eligibility)

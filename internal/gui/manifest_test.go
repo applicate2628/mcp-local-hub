@@ -890,3 +890,34 @@ func TestManifestDeleteSubtree_DoesNotShadowExactPaths(t *testing.T) {
 		t.Error("delete subtree must NOT have intercepted POST /api/manifest/create")
 	}
 }
+
+func TestManifestCreateHandler_RetryableLeaseConflict409(t *testing.T) {
+	const canary = "C:\\Users\\operator\\private-lease-path"
+	create := &fakeManifestCreator{err: fmt.Errorf("%s: %w", canary, &api.LeaseFailure{
+		FailureID: "E_ADOPT_LEASE_BUSY",
+		Retryable: true,
+	})}
+	s := newManifestTestServer(create, &fakeManifestValidator{})
+	rec := postJSON(t, s, "/api/manifest/create", `{"name":"demo","yaml":"name: demo"}`)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		FailureID string `json:"failure_id"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode lease conflict: %v; body=%q", err, rec.Body.String())
+	}
+	if body.Code != "MANIFEST_LEASE_BUSY" || body.FailureID != "E_ADOPT_LEASE_BUSY" || !body.Retryable {
+		t.Fatalf("lease conflict body=%+v", body)
+	}
+	if !strings.Contains(body.Error, "retry") {
+		t.Fatalf("lease conflict is not actionable: %+v", body)
+	}
+	if strings.Contains(rec.Body.String(), canary) {
+		t.Fatalf("lease conflict leaked wrapped backend details: %q", rec.Body.String())
+	}
+}

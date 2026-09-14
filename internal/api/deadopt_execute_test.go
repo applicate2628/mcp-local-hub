@@ -318,6 +318,9 @@ func TestExecuteDeAdoptProviderDisableMarkCrashRestoresOnlyExplicitRecovery(t *t
 	rec.Clients = nil
 	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_planned"}
 	writeDeAdoptExecutorRecord(t, rec)
+	if err := initializeProviderInstallPhase(name); err != nil {
+		t.Fatal(err)
+	}
 	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
 		t.Fatal(err)
 	}
@@ -331,6 +334,40 @@ func TestExecuteDeAdoptProviderDisableMarkCrashRestoresOnlyExplicitRecovery(t *t
 	}
 	if provider.calls != 1 || !provider.entry.Enabled {
 		t.Fatalf("explicit recovery provider=%+v calls=%d", provider.entry, provider.calls)
+	}
+	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
+}
+
+func TestExecuteDeAdoptProviderCrashAfterManifestBeforeInstall(t *testing.T) {
+	name := "provider-manifest-before-install-crash"
+	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
+		state: AdoptOperationStateAdopting, originalState: AdoptOriginalStateAbsent,
+		liveConfig: "[mcp_servers]\n", manifestPresent: true,
+	})
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	rec.ProviderSource = &ProviderSourceProvenanceV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Scope: "user", ReceiptFingerprint: "receipt", ActivationFingerprint: "activation", PolicyFingerprint: "policy", PriorEnabledPresent: true, PriorEnabled: true, ExpectedDisabledFingerprint: "disabled", DisablePhase: "disable_applied"}
+	writeDeAdoptExecutorRecord(t, rec)
+	if err := initializeProviderInstallPhase(name); err != nil {
+		t.Fatal(err)
+	}
+	if err := WriteSupervisorIntent(filepath.Join(stateRoot, supervisorIntentFileLeaf), &SupervisorIntentFile{Version: 1}); err != nil {
+		t.Fatal(err)
+	}
+	provider := &providerLifecycleFake{entry: clients.ProviderMCPEntryV1{ProviderClient: "codex-cli", PluginRef: "fixture@catalog", ServerName: name, Transport: clients.ProviderMCPTransportStdio, Command: exe, WorkingDir: &cwd, Scope: clients.ProviderMCPScopeUser, Enabled: false, ReceiptFingerprint: "receipt", ActivationFingerprint: "disabled", ActivationEnabledPresent: true, ActivationEnabled: false, DisabledActivationFingerprint: "disabled", PolicyState: clients.ProviderMCPPolicyNone, PolicyFingerprint: "policy"}}
+
+	plan, err := NewAPI().BuildDeAdoptPlan(name)
+	if err != nil || plan.Routing != DeAdoptRoutingFresh || !plan.providerRecovery {
+		t.Fatalf("post-manifest recovery plan=%+v err=%v, want durable pre-Install recovery", plan, err)
+	}
+	if _, err := NewAPI().executeDeAdoptPlanWithOpts(plan, io.Discard, ExecuteDeAdoptOpts{providerDeps: providerTransactionDeps{source: provider}}); err != nil {
+		t.Fatalf("post-manifest recovery apply: %v", err)
+	}
+	if provider.calls != 1 || !provider.entry.Enabled {
+		t.Fatalf("post-manifest recovery provider=%+v calls=%d", provider.entry, provider.calls)
 	}
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }

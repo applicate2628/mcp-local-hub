@@ -1769,19 +1769,30 @@ export async function installMarketplaceEntry(
     body: JSON.stringify(req),
   });
 
-  // 409 NAME_CONFLICT is an expected, recoverable branch — surface the
-  // suggested name as a result, not an error.
+  // 409 has two distinct contracts. NAME_CONFLICT is an expected result with a
+  // suggested name; manifest-lease contention is a retryable backend error and
+  // must retain its actionable envelope instead of being mislabelled as a name
+  // conflict.
   if (resp.status === 409) {
-    let body: { error_code?: string; suggested_name?: string } | null = null;
+    type ConflictBody = {
+      error_code?: string;
+      suggested_name?: string;
+      error?: string;
+      code?: string;
+      retryable?: boolean;
+    };
+    let body: ConflictBody | null = null;
     try {
-      body = (await resp.json()) as { error_code?: string; suggested_name?: string };
+      body = (await resp.json()) as ConflictBody;
     } catch {
-      // Non-JSON 409 body; fall through to a generic error.
+      // Non-JSON 409 body; fall through to a generic conflict error.
     }
     if (body?.error_code === "NAME_CONFLICT" && body.suggested_name) {
       return { kind: "name-conflict", suggestedName: body.suggested_name };
     }
-    throw new Error(`/api/marketplace/install: name conflict (no suggested name)`);
+    const msg = body?.error ?? "conflict response did not include a supported recovery action";
+    const code = body?.code ?? body?.error_code ?? "HTTP_409";
+    throw new Error(`/api/marketplace/install [${code}]: ${msg}`);
   }
 
   // 412 Precondition Failed covers TWO distinct gates, disambiguated by the
