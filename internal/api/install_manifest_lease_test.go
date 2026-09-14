@@ -89,7 +89,10 @@ func TestInstallManifestLeasePreventsRecoveryAfterPlanFreeze(t *testing.T) {
 				if recoveryErr == nil || !strings.Contains(recoveryErr.Error(), "concurrent operation") {
 					t.Errorf("recovery during frozen Install error=%v, want lease contention before any teardown", recoveryErr)
 				}
-				return stop // no real process, scheduler, or client mutation is needed to expose the race
+				// This lease-only seam starts no process and therefore explicitly
+				// certifies cleanup. An unqualified error now correctly preserves
+				// started history; actual uncertain/reaped processes have separate tests.
+				return &stdioBridgeAdmissionReapedError{cause: stop}
 			}
 			if err := entry.run(a, InstallOpts{Server: name, Writer: io.Discard}, dir); !errors.Is(err, stop) {
 				t.Fatalf("install error=%v, want frozen admission stop", err)

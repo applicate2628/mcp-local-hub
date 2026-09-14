@@ -744,9 +744,13 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 				var forward *InstallForwardCommittedError
 				if freshProviderInstall && !intentWriteAttempted &&
 					!errors.As(err, &incomplete) && !errors.As(err, &forward) &&
+					!errors.Is(err, ErrClientConfigSettlementEventFailed) &&
+					!errors.Is(err, ErrClientConfigSettlementInvalid) &&
 					!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
 					// This call ran compensation without any scheduler changes,
-					// prior owned intent, or attempted managed publication.
+					// prior owned intent, or attempted managed publication. Codex
+					// settlement errors retain their client mutation instead of
+					// running compensation and must never supply this proof.
 					return &providerInstallUnpublishedRollbackError{cause: err}
 				}
 				return err

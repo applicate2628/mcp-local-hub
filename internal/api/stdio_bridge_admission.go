@@ -33,8 +33,18 @@ type FrozenStdioBridgeAdmissionRequest struct {
 
 // frozenStdioBridgeAdmissionFn is a narrow test seam around the only
 // process-owning admission operation. Production always runs the contained
-// initialize -> tools/list probe below.
+// initialize -> tools/list probe below. Nil certifies successful admission and
+// complete provisional cleanup; an error carries no cleanup proof unless the
+// process owner explicitly returns stdioBridgeAdmissionReapedError.
 var frozenStdioBridgeAdmissionFn = admitFrozenStdioBridgeRequests
+
+// stdioBridgeAdmissionReapedError preserves the probe failure while positively
+// certifying TerminateAndWait completed. Arbitrary errors (including start or
+// cleanup failures) do not carry this authority.
+type stdioBridgeAdmissionReapedError struct{ cause error }
+
+func (e *stdioBridgeAdmissionReapedError) Error() string { return e.cause.Error() }
+func (e *stdioBridgeAdmissionReapedError) Unwrap() error { return e.cause }
 
 // admitFrozenStdioBridgeBeforeMutation is the fail-before-advertise gate for
 // selected global stdio-bridge daemons. Dry-runs never call it.
@@ -49,7 +59,35 @@ func admitFrozenStdioBridgeBeforeMutation(ctx context.Context, m *config.ServerM
 	if len(requests) == 0 {
 		return nil
 	}
-	return frozenStdioBridgeAdmissionFn(ctx, requests)
+	// Pending provider recovery checks durable history, so the start barrier
+	// must precede handing control to the process-owning probe. Ordinary servers
+	// keep their existing admission path without provider phase mutations.
+	rec, found, err := ReadAdoptProvenance(m.Name)
+	if err != nil {
+		return err
+	}
+	startedHere := false
+	if found && rec.ProviderSource != nil {
+		for _, request := range requests {
+			started, err := startProviderInstallForTask(m.Name, supervisorTaskNameForManifestDaemon(m.Name, request.DaemonName))
+			if err != nil {
+				return err
+			}
+			startedHere = startedHere || started
+		}
+	}
+	err = frozenStdioBridgeAdmissionFn(ctx, requests)
+	// Require proof for the complete returned outcome, not a sentinel found
+	// inside a join that can also contain unconfirmed cleanup. A successful
+	// probe's nil result certifies reaping by the admission owner's contract.
+	_, reaped := err.(*stdioBridgeAdmissionReapedError)
+	if startedHere && (err == nil || reaped) {
+		// No install writer has run yet. Restore only the not_started history
+		// this call claimed, so later admission/audit failures stay recoverable
+		// and the existing client rollback owner can still identify a fresh run.
+		err = errors.Join(err, settleProviderInstallStarted(m.Name, providerInstallPhaseNotStarted))
+	}
+	return err
 }
 
 func frozenStdioBridgeAdmissionRequests(m *config.ServerManifest, plan *Plan, daemonFilter string) ([]FrozenStdioBridgeAdmissionRequest, error) {
@@ -122,6 +160,10 @@ func admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridg
 		}
 		if portInUse(request.Port) {
 			err = errors.Join(err, fmt.Errorf("stdio bridge admission: provisional %s/%s left port %d in use", request.ManifestName, request.DaemonName, request.Port))
+			return
+		}
+		if err != nil {
+			err = &stdioBridgeAdmissionReapedError{cause: err}
 		}
 	}()
 	if err := waitFrozenStdioBridgePort(probeCtx, request.Port); err != nil {

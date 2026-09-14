@@ -466,7 +466,16 @@ func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifes
 	// global daemons spawn from supervisor-intent.json (installPlanCore writes
 	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
 	// rather than from per-daemon scheduler tasks.
-	return a.installPlanCoreWithRoutingTargetLease(ctx, m, plan, opts, authorityRequest, w)
+	err = a.installPlanCoreWithRoutingTargetLease(ctx, m, plan, opts, authorityRequest, w)
+	// The rollback proof is produced under inner locks. Consume it only after
+	// their deferred releases have settled, while every caller still holds the
+	// canonical manifest lease (ordinary Install, bulk install, and adopt).
+	var rolledBack *providerInstallUnpublishedRollbackError
+	if errors.As(err, &rolledBack) && !errors.Is(err, ErrLockReleaseUnconfirmed) &&
+		!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
+		err = errors.Join(err, markProviderUnpublishedRollbackSettled(m.Name))
+	}
+	return err
 }
 
 func freezeInstallRelayExePath(plan *Plan) error {

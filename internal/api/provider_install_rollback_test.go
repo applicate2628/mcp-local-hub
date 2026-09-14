@@ -208,3 +208,78 @@ func TestProviderInstallSettledHistoryWithRetainedDescriptorUsesManagedRecovery(
 	}
 	assertDeAdoptClosed(t, dir, state, *rec)
 }
+
+// A pending provider receipt can also be resumed by ordinary Install, whose
+// explicit project authority can select a Codex alias. An event append failure
+// retains that real client transaction, so it must not become rollback evidence.
+func TestProviderInstallRetainedCodexSettlementIsNotRollback(t *testing.T) {
+	const name = "provider-retained-codex-settlement"
+	clientPath, dir, state, adoptPlan, _, _ := setupProviderInstallFailureFixture(t, name)
+	original := []byte("[mcp_servers." + name + "]\nurl = \"http://127.0.0.1:9292/mcp\"\nenabled = false\n")
+	if err := os.WriteFile(clientPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	api := NewAPI()
+	if _, err := api.captureAdoptProvenance(adoptPlan); err != nil {
+		t.Fatal(err)
+	}
+	if err := api.ManifestCreate(name, adoptPlan.ManifestYAML); err != nil {
+		t.Fatal(err)
+	}
+	projectRoot := t.TempDir()
+	projectPath := filepath.Join(projectRoot, ".codex", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(projectPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	projectBytes := []byte("[mcp_servers." + name + "]\ncommand = \"go\"\nargs = [\"version\"]\n")
+	if err := os.WriteFile(projectPath, projectBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// Fail only the settlement-event sink; the separate admission audit and
+	// the actual Codex transaction continue to use their production owners.
+	eventPath := filepath.Join(state, SupervisorEventLogFileLeaf)
+	if err := os.Remove(eventPath); err != nil && !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(eventPath, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	err := api.Install(InstallOpts{
+		Server: name, ClientsInclude: []string{"codex-cli"}, Writer: io.Discard,
+		CodexProjectRoot: projectRoot, CodexWorkingDir: projectRoot,
+	})
+	if !errors.Is(err, ErrClientConfigSettlementEventFailed) {
+		t.Fatalf("expected retained settlement-event failure, got %v", err)
+	}
+	var rolledBack *providerInstallUnpublishedRollbackError
+	if errors.As(err, &rolledBack) {
+		t.Error("retained Codex client mutation was certified as unpublished rollback")
+	}
+	client := clients.AllClients()["codex-cli"]
+	alias, readErr := client.GetEntry(name + "-mcphub")
+	if readErr != nil || alias == nil || alias.URL == "" {
+		t.Fatalf("real retained alias missing: entry=%+v err=%v", alias, readErr)
+	}
+	if source, readErr := client.GetEntry(name); readErr != nil || source != nil {
+		t.Fatalf("logical source was not relocated: entry=%+v err=%v", source, readErr)
+	}
+	if got := string(mustReadFileForAdoptTest(t, projectPath)); got != string(projectBytes) {
+		t.Error("read-only project layer was changed")
+	}
+	if phase, readErr := readProviderInstallPhase(name); readErr != nil || phase != providerInstallPhaseStarted {
+		t.Errorf("retained client mutation lost started history: phase=%q err=%v", phase, readErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(state, supervisorIntentFileLeaf)); !os.IsNotExist(statErr) {
+		t.Errorf("test did not isolate the pre-intent error: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, name, "manifest.yaml")); statErr != nil {
+		t.Errorf("retained mutation lost manifest: %v", statErr)
+	}
+	if _, found, readErr := ReadAdoptProvenance(name); readErr != nil || !found {
+		t.Errorf("retained mutation lost provenance: found=%v err=%v", found, readErr)
+	}
+	snapshotPath := filepath.Join(state, adoptProvenanceSnapshotSubdir, name, "codex-cli"+adoptSnapshotFileSuffix)
+	if got := string(mustReadFileForAdoptTest(t, snapshotPath)); got != string(original) {
+		t.Error("retained mutation lost its exact pre-install recovery snapshot")
+	}
+}

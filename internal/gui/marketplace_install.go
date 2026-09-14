@@ -336,6 +336,9 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 		return
 	}
 	if err := s.installer.Install(name, s.Port()); err != nil {
+		if writeRetryableManifestLeaseConflict(w, err) {
+			return
+		}
 		log.Printf("/api/marketplace/install Install name=%q: %v", name, err)
 		writeAPIError(w, errors.New("internal error installing server"), http.StatusInternalServerError, "INSTALL_FAILED")
 		return

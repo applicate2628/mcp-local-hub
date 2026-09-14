@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -89,6 +90,95 @@ func TestInstallHandler_ForwardsBoundGUIPort(t *testing.T) {
 	}
 	if inst.seenGUIPort != 9125 {
 		t.Fatalf("installer saw guiPort=%d, want 9125", inst.seenGUIPort)
+	}
+}
+
+func TestInstallHandler_RetryableManifestLeaseConflict409(t *testing.T) {
+	const canary = "C:\\private-install-lease-path"
+	inst := &fakeInstaller{err: fmt.Errorf("%s: %w", canary, &api.LeaseFailure{
+		FailureID: "E_ADOPT_LEASE_BUSY",
+		Retryable: true,
+	})}
+	s := newInstallTestServer(inst)
+	s.port.Store(9125)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9125/api/install?name=filesystem", nil)
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		FailureID string `json:"failure_id"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode lease conflict: %v; body=%q", err, rec.Body.String())
+	}
+	if body.Error != "another operation is changing this manifest; retry after it completes" || body.Code != manifestLeaseBusyCode || body.FailureID != "E_ADOPT_LEASE_BUSY" || !body.Retryable {
+		t.Fatalf("lease conflict body=%+v", body)
+	}
+	if !inst.called || inst.seenName != "filesystem" {
+		t.Fatalf("installer called=%v name=%q, want true/filesystem", inst.called, inst.seenName)
+	}
+}
+
+func TestInstallHandler_NonRetryableFailureKeepsInstallFailed500(t *testing.T) {
+	tests := []struct {
+		name      string
+		err       error
+		wantError string
+	}{
+		{
+			name: "nonretryable lease",
+			err: fmt.Errorf("wrapped: %w", &api.LeaseFailure{
+				FailureID: "E_ADOPT_LEASE_CLEANUP",
+				Retryable: false,
+			}),
+			wantError: "wrapped: E_ADOPT_LEASE_CLEANUP",
+		},
+		{
+			name:      "unrelated error",
+			err:       errors.New("synthetic installer failure"),
+			wantError: "synthetic installer failure",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newInstallTestServer(&fakeInstaller{err: tt.err})
+			s.port.Store(9125)
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9125/api/install?name=filesystem", nil)
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500; body=%q", rec.Code, rec.Body.String())
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode fallback body: %v; body=%q", err, rec.Body.String())
+			}
+			var code, message string
+			if err := json.Unmarshal(body["code"], &code); err != nil {
+				t.Fatalf("decode fallback code: %v", err)
+			}
+			if err := json.Unmarshal(body["error"], &message); err != nil {
+				t.Fatalf("decode fallback error: %v", err)
+			}
+			if code != "INSTALL_FAILED" || message != tt.wantError {
+				t.Fatalf("fallback body code=%q error=%q, want INSTALL_FAILED/%q", code, message, tt.wantError)
+			}
+			if _, ok := body["failure_id"]; ok {
+				t.Fatalf("fallback body unexpectedly has failure_id: %q", rec.Body.String())
+			}
+			if _, ok := body["retryable"]; ok {
+				t.Fatalf("fallback body unexpectedly has retryable: %q", rec.Body.String())
+			}
+		})
 	}
 }
 

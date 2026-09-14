@@ -670,3 +670,98 @@ func TestMarketplaceInstall_HubRetryableManifestLeaseConflict409(t *testing.T) {
 		t.Fatal("Install must not run after manifest lease contention")
 	}
 }
+
+func TestMarketplaceInstall_HubInstallRetryableManifestLeaseConflict409(t *testing.T) {
+	const canary = "C:\\private-install-lease-path"
+	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
+	creator := &fakeManifestCreator{}
+	installer := &fakeInstaller{err: fmt.Errorf("%s: %w", canary, &api.LeaseFailure{
+		FailureID: "E_ADOPT_LEASE_BUSY",
+		Retryable: true,
+	})}
+	s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{port: 9207}, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, creator, installer)
+	s.port.Store(9125)
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9125/api/marketplace/install", strings.NewReader(`{"id":"filesystem","mode":"hub"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409; body=%q", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error     string `json:"error"`
+		Code      string `json:"code"`
+		FailureID string `json:"failure_id"`
+		Retryable bool   `json:"retryable"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode lease conflict: %v; body=%q", err, rec.Body.String())
+	}
+	if body.Error != "another operation is changing this manifest; retry after it completes" || body.Code != manifestLeaseBusyCode || body.FailureID != "E_ADOPT_LEASE_BUSY" || !body.Retryable {
+		t.Fatalf("lease conflict body=%+v", body)
+	}
+	if creator.name != "filesystem" {
+		t.Fatalf("ManifestCreate name=%q, want filesystem", creator.name)
+	}
+	if !installer.called || installer.seenName != "filesystem" {
+		t.Fatalf("installer called=%v name=%q, want true/filesystem", installer.called, installer.seenName)
+	}
+}
+
+func TestMarketplaceInstall_HubInstallNonRetryableFailureKeepsInstallFailed500(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{
+			name: "nonretryable lease",
+			err: fmt.Errorf("wrapped: %w", &api.LeaseFailure{
+				FailureID: "E_ADOPT_LEASE_CLEANUP",
+				Retryable: false,
+			}),
+		},
+		{
+			name: "unrelated error",
+			err:  errors.New("synthetic installer failure"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
+			creator := &fakeManifestCreator{}
+			s := newMarketplaceInstallTestServer(loader, &fakeGlobalPortPicker{port: 9207}, &fakeServerNamePresence{}, &fakeDirectClientWriter{}, creator, &fakeInstaller{err: tt.err})
+			s.port.Store(9125)
+			req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:9125/api/marketplace/install", strings.NewReader(`{"id":"filesystem","mode":"hub"}`))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Sec-Fetch-Site", "same-origin")
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want 500; body=%q", rec.Code, rec.Body.String())
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode fallback body: %v; body=%q", err, rec.Body.String())
+			}
+			var code, message string
+			if err := json.Unmarshal(body["code"], &code); err != nil {
+				t.Fatalf("decode fallback code: %v", err)
+			}
+			if err := json.Unmarshal(body["error"], &message); err != nil {
+				t.Fatalf("decode fallback error: %v", err)
+			}
+			if code != "INSTALL_FAILED" || message != "internal error installing server" {
+				t.Fatalf("fallback body code=%q error=%q, want INSTALL_FAILED/internal error installing server", code, message)
+			}
+			if _, ok := body["failure_id"]; ok {
+				t.Fatalf("fallback body unexpectedly has failure_id: %q", rec.Body.String())
+			}
+			if _, ok := body["retryable"]; ok {
+				t.Fatalf("fallback body unexpectedly has retryable: %q", rec.Body.String())
+			}
+		})
+	}
+}

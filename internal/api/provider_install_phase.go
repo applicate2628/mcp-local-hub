@@ -116,11 +116,19 @@ func initializeProviderInstallPhase(manifestName string) error {
 }
 
 func markProviderInstallStartedForTask(manifestName, taskName string) error {
+	_, err := startProviderInstallForTask(manifestName, taskName)
+	return err
+}
+
+// startProviderInstallForTask also reports whether this call owns the transition
+// from not_started. A retry must never erase a previous process owner's history.
+func startProviderInstallForTask(manifestName, taskName string) (bool, error) {
 	if manifestName == "" {
-		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
 	canonical := canonicalIntentTaskKey(taskName)
-	return withAdoptedEntriesLock(func() error {
+	startedHere := false
+	err := withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -157,13 +165,18 @@ func markProviderInstallStartedForTask(manifestName, taskName string) error {
 		case providerInstallPhaseStarted:
 			return nil
 		case providerInstallPhaseNotStarted:
-			return writeProviderInstallPhase(record.ManifestName, providerInstallPhaseStarted)
+			if err := writeProviderInstallPhase(record.ManifestName, providerInstallPhaseStarted); err != nil {
+				return err
+			}
+			startedHere = true
+			return nil
 		case providerInstallPhaseRecoveryClaimed, providerInstallPhaseManagedSettled:
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		default:
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	})
+	return startedHere, err
 }
 
 func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
@@ -314,6 +327,13 @@ func (e *providerInstallUnpublishedRollbackError) Unwrap() error { return e.caus
 // held and the rollback owner's positive proof. Unlike managed teardown's legacy
 // bootstrap, it must never synthesize evidence from a missing or corrupt marker.
 func markProviderUnpublishedRollbackSettled(name string) error {
+	return settleProviderInstallStarted(name, providerInstallPhaseManagedSettled)
+}
+
+// Both callers hold the manifest lease and carry affirmative settlement proof:
+// either this invocation's provisional admission was reaped before any install
+// mutation, or the unpublished client transaction completed its rollback.
+func settleProviderInstallStarted(name, phase string) error {
 	return withAdoptedEntriesLock(func() error {
 		store, err := readAdoptedEntries()
 		if err != nil {
@@ -332,10 +352,15 @@ func markProviderUnpublishedRollbackSettled(name string) error {
 		if matches != 1 {
 			return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 		}
-		phase, err := readProviderInstallPhase(name)
-		if err != nil || phase != providerInstallPhaseStarted {
+		currentPhase, err := readProviderInstallPhase(name)
+		// An audit refusal can leave the original not_started marker intact.
+		// The rollback owner proved no mutation, so no transition is needed.
+		if err == nil && currentPhase == providerInstallPhaseNotStarted && phase == providerInstallPhaseManagedSettled {
+			return nil
+		}
+		if err != nil || currentPhase != providerInstallPhaseStarted {
 			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
-		return writeProviderInstallPhase(name, providerInstallPhaseManagedSettled)
+		return writeProviderInstallPhase(name, phase)
 	})
 }
