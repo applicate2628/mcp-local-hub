@@ -175,7 +175,7 @@ func TestExecuteDeAdoptProviderStopFailurePreservesDisabledRecovery(t *testing.T
 	}
 }
 
-func TestExecuteDeAdoptProviderRestoreCrashRecognizesPriorWithoutSecondCAS(t *testing.T) {
+func TestExecuteDeAdoptProviderRestoreCrashUsesReadOnlyCASFence(t *testing.T) {
 	name := "provider-deadopt-restore-crash"
 	snapshot := []byte(deAdoptNativeConfig(name, "native-command"))
 	_, manifestRoot, stateRoot, rec := setupDeAdoptPlannerFixture(t, name, deAdoptPlannerFixture{
@@ -200,8 +200,8 @@ func TestExecuteDeAdoptProviderRestoreCrashRecognizesPriorWithoutSecondCAS(t *te
 	if err != nil {
 		t.Fatalf("retry after restore-CAS crash: %v", err)
 	}
-	if provider.calls != 0 || report == nil {
-		t.Fatalf("prior fingerprint retry calls=%d report=%+v, want zero CAS and completion", provider.calls, report)
+	if provider.calls != 1 || report == nil {
+		t.Fatalf("prior fingerprint retry calls=%d report=%+v, want one same-state CAS fence and completion", provider.calls, report)
 	}
 	assertDeAdoptClosed(t, manifestRoot, stateRoot, rec)
 }

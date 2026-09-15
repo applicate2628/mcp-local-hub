@@ -253,9 +253,13 @@ func providerDisable(ctx context.Context, state providerExecutionState, provenan
 }
 
 func providerRestore(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) error {
+	return providerRestoreFromActivation(ctx, state, provenance, provenance.ExpectedDisabledFingerprint)
+}
+
+func providerRestoreFromActivation(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1, expectedActivation string) error {
 	result, err := state.provider.CompareAndSetProviderMCPActivation(ctx, clients.ProviderMCPActivationCASV1{
 		PluginRef: state.entry.PluginRef, ServerName: state.entry.ServerName,
-		ExpectedActivationFingerprint: provenance.ExpectedDisabledFingerprint,
+		ExpectedActivationFingerprint: expectedActivation,
 		ExpectedPolicyFingerprint:     provenance.PolicyFingerprint,
 		DesiredEnabledPresent:         provenance.PriorEnabledPresent, DesiredEnabled: provenance.PriorEnabled,
 	})
@@ -271,7 +275,8 @@ func providerRestore(ctx context.Context, state providerExecutionState, provenan
 // final ownership proof, durable settlement proof, and provider CAS execute
 // while the canonical supervisor-intent lock is held, so a concurrent Install
 // cannot publish a managed owner between the proof and re-enabling the direct
-// provider.
+// provider. Inventory may launch a subprocess, so it is read and validated
+// before taking that global lock; the CAS still rejects activation/policy drift.
 func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) (retErr error) {
 	if source == nil || provenance == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -293,6 +298,28 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 		}
 	}
 
+	entries, err := source.ListProviderMCPEntries(ctx)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	var matches []clients.ProviderMCPEntryV1
+	for _, entry := range entries {
+		if entry.ProviderClient == provenance.ProviderClient && entry.PluginRef == provenance.PluginRef && entry.ServerName == provenance.ServerName {
+			matches = append(matches, entry)
+		}
+	}
+	if len(matches) != 1 {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	entry := matches[0]
+	if entry.ReceiptFingerprint != provenance.ReceiptFingerprint || entry.PolicyFingerprint != provenance.PolicyFingerprint {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	alreadyRestored := entry.ActivationFingerprint == provenance.ActivationFingerprint && entry.ActivationEnabledPresent == provenance.PriorEnabledPresent && entry.ActivationEnabled == provenance.PriorEnabled
+	if !alreadyRestored && (entry.ActivationFingerprint != provenance.ExpectedDisabledFingerprint || entry.Enabled) {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+
 	intentPath, err := DefaultSupervisorIntentPath()
 	if err != nil {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
@@ -311,31 +338,11 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 	if ownershipErr != nil || !absent || !providerInstallPhaseAllowsRestore(current.ManifestName) {
 		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-
-	entries, err := source.ListProviderMCPEntries(ctx)
-	if err != nil {
-		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	expectedActivation := provenance.ExpectedDisabledFingerprint
+	if alreadyRestored {
+		expectedActivation = provenance.ActivationFingerprint
 	}
-	var matches []clients.ProviderMCPEntryV1
-	for _, entry := range entries {
-		if entry.ProviderClient == provenance.ProviderClient && entry.PluginRef == provenance.PluginRef && entry.ServerName == provenance.ServerName {
-			matches = append(matches, entry)
-		}
-	}
-	if len(matches) != 1 {
-		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
-	}
-	entry := matches[0]
-	if entry.ReceiptFingerprint != provenance.ReceiptFingerprint || entry.PolicyFingerprint != provenance.PolicyFingerprint {
-		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
-	}
-	if entry.ActivationFingerprint == provenance.ActivationFingerprint && entry.ActivationEnabledPresent == provenance.PriorEnabledPresent && entry.ActivationEnabled == provenance.PriorEnabled {
-		return nil
-	}
-	if entry.ActivationFingerprint != provenance.ExpectedDisabledFingerprint || entry.Enabled {
-		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
-	}
-	return providerRestore(ctx, providerExecutionState{provider: source, entry: entry}, provenance)
+	return providerRestoreFromActivation(ctx, providerExecutionState{provider: source, entry: entry}, provenance, expectedActivation)
 }
 
 func providerRevalidateDisabled(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) error {

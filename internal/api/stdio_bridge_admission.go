@@ -38,9 +38,13 @@ type FrozenStdioBridgeAdmissionRequest struct {
 // process owner explicitly returns stdioBridgeAdmissionReapedError.
 var frozenStdioBridgeAdmissionFn = admitFrozenStdioBridgeRequests
 
-// stdioBridgeAdmissionReapedError preserves the probe failure while positively
-// certifying TerminateAndWait completed. Arbitrary errors (including start or
-// cleanup failures) do not carry this authority.
+// startStdioBridgeProvisionalFn permits owner-level startup failures in tests
+// while retaining the admission probe and its cleanup-proof classification.
+var startStdioBridgeProvisionalFn = process.StartProvisional
+
+// stdioBridgeAdmissionReapedError preserves the admission failure while
+// certifying that the owner created no process or TerminateAndWait completed.
+// Arbitrary start or cleanup failures do not carry this authority.
 type stdioBridgeAdmissionReapedError struct{ cause error }
 
 func (e *stdioBridgeAdmissionReapedError) Error() string { return e.cause.Error() }
@@ -148,9 +152,15 @@ func admitFrozenStdioBridgeRequest(ctx context.Context, request FrozenStdioBridg
 	defer cancel()
 	cmd := exec.Command(request.Command, request.Args...)
 	cmd.Dir = request.WorkingDir
-	child, err := process.StartProvisional(cmd)
+	child, err := startStdioBridgeProvisionalFn(cmd)
 	if err != nil {
-		return fmt.Errorf("stdio bridge admission: start provisional %s/%s: %w", request.ManifestName, request.DaemonName, err)
+		startErr := fmt.Errorf("stdio bridge admission: start provisional %s/%s: %w", request.ManifestName, request.DaemonName, err)
+		// Classify the whole owner outcome before wrapping it. A matching cause
+		// nested in a join cannot rule out an unknown process or cleanup failure.
+		if noProcess, ok := err.(*process.ProvisionalNoProcessError); ok && noProcess != nil {
+			return &stdioBridgeAdmissionReapedError{cause: startErr}
+		}
+		return startErr
 	}
 	defer func() {
 		cleanupErr := child.TerminateAndWait(provisionalStdioBridgeCleanupDeadline)

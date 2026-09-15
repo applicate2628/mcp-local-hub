@@ -829,7 +829,9 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 			// Publish durable never-started proof before the provider-backed anchor.
 			// providerDisable re-checks the same marker immediately before its CAS.
 			if err := initializeProviderInstallPhase(plan.ManifestName); err != nil {
-				return fmt.Errorf("adopt provenance capture: initialize provider install phase before publishing anchor: %w", err)
+				return fmt.Errorf("adopt provenance capture: initialize provider install phase before publishing anchor: %w; "+
+					"inspect retained state with `mcphub adopt-provenance forget %s` (dry-run). "+
+					"Forgetting does not restore client configs or provider activation; discard it only after verifying the earlier operation is settled", err, plan.ManifestName)
 			}
 		}
 		kept = append(kept, AdoptProvenanceRecord{

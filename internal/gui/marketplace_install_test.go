@@ -671,7 +671,7 @@ func TestMarketplaceInstall_HubRetryableManifestLeaseConflict409(t *testing.T) {
 	}
 }
 
-func TestMarketplaceInstall_HubInstallRetryableManifestLeaseConflict409(t *testing.T) {
+func TestMarketplaceInstall_HubInstallLeaseConflictReportsCreatedManifest(t *testing.T) {
 	const canary = "C:\\private-install-lease-path"
 	loader := &fakeMarketplaceEntryLoader{entry: stdioEntry("filesystem"), found: true}
 	creator := &fakeManifestCreator{}
@@ -699,7 +699,7 @@ func TestMarketplaceInstall_HubInstallRetryableManifestLeaseConflict409(t *testi
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode lease conflict: %v; body=%q", err, rec.Body.String())
 	}
-	if body.Error != "another operation is changing this manifest; retry after it completes" || body.Code != manifestLeaseBusyCode || body.FailureID != "E_ADOPT_LEASE_BUSY" || !body.Retryable {
+	if !strings.Contains(body.Error, "Servers") || body.Code != "MANIFEST_CREATED_INSTALL_PENDING" || body.FailureID != "E_ADOPT_LEASE_BUSY" || body.Retryable {
 		t.Fatalf("lease conflict body=%+v", body)
 	}
 	if creator.name != "filesystem" {

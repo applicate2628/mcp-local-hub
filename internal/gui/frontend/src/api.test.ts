@@ -929,3 +929,26 @@ describe("postDaemonRecover", () => {
     );
   });
 });
+describe("marketplace partial-create recovery", () => {
+  beforeEach(() => { vi.restoreAllMocks(); });
+
+  it("surfaces install-existing guidance without suggesting a duplicate name", async () => {
+    const message = 'manifest "demo" was created; use Install for this server on the Servers screen';
+    globalThis.fetch = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      statusText: "Conflict",
+      json: async () => ({
+        error: message,
+        code: "MANIFEST_CREATED_INSTALL_PENDING",
+        name: "demo",
+        failure_id: "E_ADOPT_LEASE_BUSY",
+        retryable: false,
+      }),
+    }) as unknown as Response);
+    await expect(installMarketplaceEntry({ id: "demo", mode: "hub" })).rejects.toThrow(
+      `/api/marketplace/install [MANIFEST_CREATED_INSTALL_PENDING]: ${message}`,
+    );
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+});

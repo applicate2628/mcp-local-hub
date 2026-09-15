@@ -336,7 +336,17 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 		return
 	}
 	if err := s.installer.Install(name, s.Port()); err != nil {
-		if writeRetryableManifestLeaseConflict(w, err) {
+		var failure *api.LeaseFailure
+		if errors.As(err, &failure) && failure != nil && failure.Retryable {
+			// Creation already committed. Replaying this marketplace request would
+			// collide with its own manifest; continue through install-existing instead.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":      fmt.Sprintf("manifest %q was created, but another operation blocked installation; after it completes, use Install for this server on the Servers screen instead of creating it again", name),
+				"code":       "MANIFEST_CREATED_INSTALL_PENDING",
+				"name":       name,
+				"failure_id": failure.FailureID,
+				"retryable":  false,
+			})
 			return
 		}
 		log.Printf("/api/marketplace/install Install name=%q: %v", name, err)

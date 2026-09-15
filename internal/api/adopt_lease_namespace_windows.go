@@ -361,7 +361,7 @@ func openAndValidateWindowsLeaseNamespaceEntry(ns windows.Handle, name string, s
 	if !singleWindowsPathComponent(name) {
 		return windows.InvalidHandle, "", false, errors.New("invalid namespace entry")
 	}
-	if name == adoptLeaseNamespaceLockLeaf || (strings.HasSuffix(name, adoptManifestLeaseSuffix) && validLegacyLeaseManifestName(strings.TrimSuffix(name, adoptManifestLeaseSuffix))) {
+	if name == adoptLeaseNamespaceLockLeaf || (strings.HasSuffix(name, adoptManifestLeaseSuffix) && CheckManifestName(strings.TrimSuffix(name, adoptManifestLeaseSuffix)) == nil) {
 		h, err := ntCreateRelativeWithShareAccess(ns, name,
 			windows.FILE_READ_DATA|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.WRITE_DAC|windows.SYNCHRONIZE,
 			windows.FILE_OPEN, windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT, nil, share)
