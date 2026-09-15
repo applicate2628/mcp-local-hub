@@ -224,8 +224,10 @@ func TestBuildDeAdoptPlanProviderRecoveryKeepsAmbiguousAdoptingRow(t *testing.T)
 	if err != nil {
 		t.Fatalf("BuildDeAdoptPlan provider recovery: %v", err)
 	}
-	if plan.Routing != DeAdoptRoutingFresh || plan.RefusalReason != "" {
-		t.Fatalf("provider recovery plan = %+v, want executable explicit recovery", plan)
+	// No durable pre-install marker was seeded: keep the receipt, but do not
+	// infer that installation never started from current manifest absence.
+	if plan.Routing != DeAdoptRoutingRefuse || !strings.Contains(plan.RefusalReason, "E_PROVIDER_LIFECYCLE_UNSUPPORTED") {
+		t.Fatalf("provider recovery plan = %+v, want markerless recovery refusal", plan)
 	}
 }
 

@@ -328,11 +328,27 @@ func (s *Server) handleMarketplaceHubInstall(w http.ResponseWriter, req *marketp
 			writeAPIError(w, fmt.Errorf("%q is a built-in shipped server; installing it would draft a disk manifest the hub ignores in favor of the shipped one — pick a different name (e.g. %q) to install a customized copy", name, name+"-custom"), http.StatusBadRequest, "EMBEDDED_NAME_COLLISION")
 			return
 		}
+		if writeRetryableManifestLeaseConflict(w, err) {
+			return
+		}
 		log.Printf("/api/marketplace/install ManifestCreate name=%q: %v", name, err)
 		writeAPIError(w, errors.New("internal error creating manifest"), http.StatusInternalServerError, "INSTALL_FAILED")
 		return
 	}
 	if err := s.installer.Install(name, s.Port()); err != nil {
+		var failure *api.LeaseFailure
+		if errors.As(err, &failure) && failure != nil && failure.Retryable {
+			// Creation already committed. Replaying this marketplace request would
+			// collide with its own manifest; continue through install-existing instead.
+			writeJSON(w, http.StatusConflict, map[string]any{
+				"error":      fmt.Sprintf("manifest %q was created, but another operation blocked installation; after it completes, use Install for this server on the Servers screen instead of creating it again", name),
+				"code":       "MANIFEST_CREATED_INSTALL_PENDING",
+				"name":       name,
+				"failure_id": failure.FailureID,
+				"retryable":  false,
+			})
+			return
+		}
 		log.Printf("/api/marketplace/install Install name=%q: %v", name, err)
 		writeAPIError(w, errors.New("internal error installing server"), http.StatusInternalServerError, "INSTALL_FAILED")
 		return

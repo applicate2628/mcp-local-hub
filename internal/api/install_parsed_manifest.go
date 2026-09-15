@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"mcp-local-hub/internal/autostart"
+	"mcp-local-hub/internal/clients"
 	"mcp-local-hub/internal/config"
 )
 
@@ -689,12 +690,19 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 				}
 			}
 
+			phase, phaseErr := readProviderInstallPhase(m.Name)
+			freshProviderInstall := phaseErr == nil && phase == providerInstallPhaseNotStarted &&
+				!supervisorIntentHasServerLifecycleArtifactsScope(priorIntent, m.Name, ownershipScope)
+			intentWriteAttempted := false
 			var intermediate intentWriteStep
 			if intentWriteNeeded {
 				intermediate = func() (func(), error) {
 					if cerr := ctx.Err(); cerr != nil {
 						return nil, fmt.Errorf("supervisor-intent commit canceled before write: %w", cerr)
 					}
+					// A write error can follow publication. Never certify rollback
+					// merely because the writer did not return its undo closure.
+					intentWriteAttempted = true
 					if werr := writeSupervisorIntentLockHeld(intentPath, desiredIntent); werr != nil {
 						return nil, fmt.Errorf("write supervisor intent %s: %w", intentPath, werr)
 					}
@@ -732,6 +740,19 @@ func (a *API) installPlanCoreWithSymlinkConsents(ctx context.Context, m *config.
 				SkipSchedulerPrune: true,
 				SymlinkConsents:    symlinkConsents,
 			}); err != nil {
+				var incomplete *InstallClientRollbackIncompleteError
+				var forward *InstallForwardCommittedError
+				if freshProviderInstall && !intentWriteAttempted &&
+					!errors.As(err, &incomplete) && !errors.As(err, &forward) &&
+					!errors.Is(err, ErrClientConfigSettlementEventFailed) &&
+					!errors.Is(err, ErrClientConfigSettlementInvalid) &&
+					!errors.Is(err, clients.ErrConfigLockReleaseUnconfirmed) {
+					// This call ran compensation without any scheduler changes,
+					// prior owned intent, or attempted managed publication. Codex
+					// settlement errors retain their client mutation instead of
+					// running compensation and must never supply this proof.
+					return &providerInstallUnpublishedRollbackError{cause: err}
+				}
 				return err
 			}
 			committed = intentWriteNeeded

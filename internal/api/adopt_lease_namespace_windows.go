@@ -45,6 +45,9 @@ func inspectAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, error) {
 
 	ns, missing, err := openExistingWindowsLeaseNamespace(root, windowsLeaseNamespaceAccess, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE)
 	if missing {
+		if rootReport.MigrationEligible {
+			return rootReport, nil
+		}
 		return AdoptLeaseNamespaceReport{State: AdoptLeaseNamespaceMissing, ReasonID: AdoptLeaseReasonNamespaceMissing, Action: AdoptLeaseActionRetryAdopt}, nil
 	}
 	if err != nil {
@@ -76,19 +79,25 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 	// ShareAccess=0 is the mutation fence. Any live lease/namespace user makes
 	// this open fail busy; migration then changes nothing.
 	ns, missing, err := openExistingWindowsLeaseNamespace(root, windowsLeaseNamespaceAccess, 0)
-	if missing {
+	if missing && !rootReport.MigrationEligible {
 		return AdoptLeaseNamespaceReport{State: AdoptLeaseNamespaceMissing, ReasonID: AdoptLeaseReasonNamespaceMissing, Action: AdoptLeaseActionRetryAdopt}, nil
 	}
-	if err != nil {
+	if err != nil && !missing {
 		return refusedLeaseNamespaceReport(AdoptLeaseReasonNamespaceBusy, AdoptLeaseActionLeaveUnchanged, err)
 	}
-	defer windows.CloseHandle(ns)
 
-	entries, report, err := analyzeWindowsLeaseNamespace(ns, true)
-	defer closeWindowsLeaseNamespaceEntries(entries)
-	if err != nil {
-		return report, err
+	// An absent namespace still needs the same validated root repair. Leave
+	// namespace creation to the lease owner after this transaction succeeds.
+	var entries []windowsLeaseNamespaceEntry
+	report := rootReport
+	if !missing {
+		defer windows.CloseHandle(ns)
+		entries, report, err = analyzeWindowsLeaseNamespace(ns, true)
+		if err != nil {
+			return report, err
+		}
 	}
+	defer closeWindowsLeaseNamespaceEntries(entries)
 	rootNeedsDACL := rootReport.MigrationEligible
 	if report.State == AdoptLeaseNamespaceReady && !rootNeedsDACL {
 		return report, nil
@@ -96,7 +105,7 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 	if !report.MigrationEligible && !rootNeedsDACL {
 		return refusedLeaseNamespaceReport(report.ReasonID, report.Action, errors.New("namespace is not a verified legacy shape"))
 	}
-	namespaceNeedsDACL := verifyWindowsDACLFromHandle(ns) != nil
+	namespaceNeedsDACL := !missing && verifyWindowsDACLFromHandle(ns) != nil
 	var rootSD *windows.SECURITY_DESCRIPTOR
 	var rootSDDL string
 	var rootProtected bool
@@ -107,9 +116,14 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 		}
 	}
 
-	nsSD, nsSDDL, nsProtected, err := captureWindowsLeaseNamespaceSD(ns)
-	if err != nil {
-		return refusedLeaseNamespaceReport(AdoptLeaseReasonNamespaceUnrecognized, AdoptLeaseActionLeaveUnchanged, err)
+	var nsSD *windows.SECURITY_DESCRIPTOR
+	var nsSDDL string
+	var nsProtected bool
+	if !missing {
+		nsSD, nsSDDL, nsProtected, err = captureWindowsLeaseNamespaceSD(ns)
+		if err != nil {
+			return refusedLeaseNamespaceReport(AdoptLeaseReasonNamespaceUnrecognized, AdoptLeaseActionLeaveUnchanged, err)
+		}
 	}
 	for i := range entries {
 		if !entries[i].needsDACL {
@@ -170,8 +184,10 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 			}
 		}
 	}
-	if err := verifyWindowsDACLFromHandle(ns); err != nil {
-		return rollback(err)
+	if !missing {
+		if err := verifyWindowsDACLFromHandle(ns); err != nil {
+			return rollback(err)
+		}
 	}
 	if rootNeedsDACL {
 		if err := setRestrictiveDACL(root); err != nil {
@@ -195,6 +211,10 @@ func migrateLegacyAdoptLeaseNamespacePlatform() (AdoptLeaseNamespaceReport, erro
 
 	report.State = AdoptLeaseNamespaceReady
 	report.ReasonID = AdoptLeaseReasonNamespaceReady
+	if missing {
+		report.State = AdoptLeaseNamespaceMissing
+		report.ReasonID = AdoptLeaseReasonNamespaceMissing
+	}
 	report.Action = AdoptLeaseActionRetryAdopt
 	report.MigrationEligible = false
 	report.ChangedLeafCount = len(changed)
@@ -341,7 +361,7 @@ func openAndValidateWindowsLeaseNamespaceEntry(ns windows.Handle, name string, s
 	if !singleWindowsPathComponent(name) {
 		return windows.InvalidHandle, "", false, errors.New("invalid namespace entry")
 	}
-	if name == adoptLeaseNamespaceLockLeaf || (strings.HasSuffix(name, adoptManifestLeaseSuffix) && validLegacyLeaseManifestName(strings.TrimSuffix(name, adoptManifestLeaseSuffix))) {
+	if name == adoptLeaseNamespaceLockLeaf || (strings.HasSuffix(name, adoptManifestLeaseSuffix) && CheckManifestName(strings.TrimSuffix(name, adoptManifestLeaseSuffix)) == nil) {
 		h, err := ntCreateRelativeWithShareAccess(ns, name,
 			windows.FILE_READ_DATA|windows.FILE_READ_ATTRIBUTES|windows.READ_CONTROL|windows.WRITE_DAC|windows.SYNCHRONIZE,
 			windows.FILE_OPEN, windows.FILE_NON_DIRECTORY_FILE|windows.FILE_SYNCHRONOUS_IO_NONALERT|windows.FILE_OPEN_REPARSE_POINT, nil, share)

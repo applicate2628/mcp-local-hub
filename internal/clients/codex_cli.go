@@ -905,6 +905,13 @@ func (c *codexCLI) CompareAndSetProviderMCPActivation(_ context.Context, req Pro
 	if priorPresent && !priorValid {
 		return ProviderMCPActivationResultV1{}, fmt.Errorf("%w: enabled is not boolean", ErrProviderSourceChanged)
 	}
+	if priorPresent == req.DesiredEnabledPresent && (!priorPresent || priorEnabled == req.DesiredEnabled) {
+		return ProviderMCPActivationResultV1{
+			PriorEnabledPresent:   priorPresent,
+			PriorEnabled:          priorEnabled,
+			ActivationFingerprint: activationFingerprint,
+		}, nil
+	}
 	if req.DesiredEnabledPresent {
 		if !serversPresent {
 			plugin["mcp_servers"] = servers

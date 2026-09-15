@@ -447,6 +447,58 @@ func removeAdoptSnapshots(manifestName string) error {
 	return nil
 }
 
+// removeAdoptSnapshotsBeforeRow removes secret-bearing snapshots before deleting
+// their row. A provider row also needs its existing, non-secret install phase
+// for recovery, so keep that file byte-identical until the store write succeeds.
+// The caller holds the store lock and the manifest lease over both cleanup steps.
+func removeAdoptSnapshotsBeforeRow(manifestName string, keepProviderPhase bool) (err error) {
+	if !keepProviderPhase {
+		return removeAdoptSnapshots(manifestName)
+	}
+	dir, err := adoptSnapshotDir(manifestName)
+	if err != nil {
+		return err
+	}
+	info, err := os.Lstat(dir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("remove adopt snapshots %s: snapshot directory is not a real directory", manifestName)
+	}
+	// The lease owns the parent namespace. Bind enumeration and deletion to this
+	// directory's identity; a swapped leaf or child symlink must not redirect the
+	// cleanup into another snapshot tree or outside the snapshot directory.
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return err
+	}
+	defer func() { err = errors.Join(err, root.Close()) }()
+	opened, err := root.Stat(".")
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, opened) {
+		return fmt.Errorf("remove adopt snapshots %s: snapshot directory changed", manifestName)
+	}
+	children, err := fs.ReadDir(root.FS(), ".")
+	if err != nil {
+		return err
+	}
+	for _, child := range children {
+		if child.Name() == providerInstallPhaseLeaf {
+			continue
+		}
+		if err := root.RemoveAll(child.Name()); err != nil {
+			return fmt.Errorf("remove adopt snapshots %s: %w", manifestName, err)
+		}
+	}
+	return nil
+}
+
 // validateAdoptSnapshotClientName rejects a client id that would not be a safe
 // single path component once suffixed with ".snapshot".
 func validateAdoptSnapshotClientName(client string) error {
@@ -620,11 +672,9 @@ var adoptManifestExistsFn = func(manifestName string) (bool, error) {
 // manifest that exists OR cannot be stat'd => KEEP (fail-closed — REAP demands
 // positive absence, destructive-default polarity). Only when EVERY adopt_client is
 // cleanly readable AND NONE holds the expected hub entry AND no manifest exists on
-// disk is the row a true pre-install crash orphan => REAP.
+// disk is the row a true pre-install crash orphan => REAP, except that a provider
+// receipt must be retained for explicit activation recovery.
 func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
-	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
-		return adoptRowRecoveryKeep
-	}
 	// Synthetic manifest carrying only the row's IMMUTABLE name + captured port; the
 	// recognition SHAPE stays single-owned in liveEntryMatchesManifestBinding — this
 	// merely supplies its daemon-port input from the row instead of the mutable file.
@@ -658,6 +708,9 @@ func classifyDeadAdoptingRow(rec AdoptProvenanceRecord) adoptRowVerdict {
 	// ManifestCreate), so it cannot spuriously refuse an operator re-adopt.
 	if exists, err := adoptManifestExistsFn(rec.ManifestName); err != nil || exists {
 		return adoptRowCommittedKeep
+	}
+	if rec.ProviderSource != nil && (rec.ProviderSource.DisablePhase == "disable_planned" || rec.ProviderSource.DisablePhase == "disable_applied") {
+		return adoptRowRecoveryKeep
 	}
 	return adoptRowCrashReap // no live binding AND no manifest on disk => pre-install crash orphan
 }
@@ -696,10 +749,12 @@ func adoptClientToolTimeout(rec AdoptProvenanceRecord, client string) int {
 // `adopting` ANCHOR row (manifest + BOTH hashes + empty clients) under the store
 // lock BEFORE any secret-bearing snapshot; then pins the snapshots OUTSIDE the
 // store lock (each takes its own per-file flock); then finalizes the row with the
-// client provenance under the store lock again. A crash at any point leaves a row
-// a reaper can find (row->maybe-missing-snapshots is reclaimable), NEVER a snapshot
-// dir with no row. Lock order: <manifest>.lease (held by the caller) ->
-// adopted-entries.lock (per transaction) -> <snapshot>.lock (per file).
+// client provenance under the store lock again. Provider-backed capture first
+// persists its non-secret, idempotent install-phase marker, then publishes the
+// anchor: a crash may leave a marker-only directory, but never a provider anchor
+// without durable phase proof and never a secret-bearing snapshot without a row.
+// Lock order: <manifest>.lease (held by the caller) -> adopted-entries.lock (per
+// transaction) -> <snapshot>.lock (per file).
 //
 // PRECONDITION: the caller (ExecuteAdoptWithOpts) holds the per-manifest lease, so
 // a prior `adopting` row for this manifest has a PROVABLY-DEAD owner and is
@@ -768,6 +823,15 @@ func (a *API) captureAdoptProvenance(plan *AdoptPlan) (*AdoptProvenanceRecord, e
 		if reapedPrior {
 			if err := removeAdoptSnapshots(plan.ManifestName); err != nil {
 				return fmt.Errorf("adopt provenance capture: reap stale snapshot dir: %w", err)
+			}
+		}
+		if plan.providerSource != nil {
+			// Publish durable never-started proof before the provider-backed anchor.
+			// providerDisable re-checks the same marker immediately before its CAS.
+			if err := initializeProviderInstallPhase(plan.ManifestName); err != nil {
+				return fmt.Errorf("adopt provenance capture: initialize provider install phase before publishing anchor: %w; "+
+					"inspect retained state with `mcphub adopt-provenance forget %s` (dry-run). "+
+					"Forgetting does not restore client configs or provider activation; discard it only after verifying the earlier operation is settled", err, plan.ManifestName)
 			}
 		}
 		kept = append(kept, AdoptProvenanceRecord{
@@ -1029,10 +1093,9 @@ func promoteAdoptProvenanceToAdopted(manifestName string) error {
 	return nil
 }
 
-// writeAdoptedEntriesFn is the abort-path store-write step, injected as a package
-// var ONLY so a test can prove abort's crash-safe ordering (snapshots removed
-// BEFORE the row write — codex bot PR #528 finding 3) by forcing the write to
-// fail after the snapshot removal. Production always uses writeAdoptedEntries.
+// writeAdoptedEntriesFn is the cleanup store-write step, injected as a package
+// var ONLY so tests can prove abort/reap crash-safe ordering by forcing the
+// write to fail after secret removal. Production always uses writeAdoptedEntries.
 var writeAdoptedEntriesFn = writeAdoptedEntries
 
 // abortAdoptProvenance deletes the manifest's row and RemoveAll's its snapshot
@@ -1041,13 +1104,10 @@ var writeAdoptedEntriesFn = writeAdoptedEntries
 // RETURNED to the caller (which appends it to the operator message) and never
 // masks the caller's original adopt error.
 //
-// Crash-safe ordering (codex bot PR #528 finding 3): the secret-bearing snapshot
-// dir is removed FIRST, then the row is dropped. A crash between leaves a
-// row->missing-snapshot (harmless; GC/UPSERT reclaims the row), never a
-// snapshot->no-row (an unreclaimable secret leak the row-scanning GC could never
-// reach) — the same ordering gcOrphanedAdoptingProvenance uses.
-//
-// NOTE (Phase B): UNWIRED — called by unit tests only until Phase C.
+// Crash-safe ordering: secret-bearing snapshots are removed FIRST, then the row
+// is dropped. Provider rows retain their existing non-secret install phase until
+// the row deletion commits, so a failed write cannot strand markerless recovery.
+// Nonprovider rows retain the original entire-directory-first ordering.
 func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 	if rec == nil || rec.ManifestName == "" {
 		return nil
@@ -1059,18 +1119,25 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 			return fmt.Errorf("adopt provenance abort: read store: %w", err)
 		}
 		var kept []AdoptProvenanceRecord
+		keepProviderPhase := false
 		for _, r := range store.Records {
 			if r.ManifestName == manifestName {
+				keepProviderPhase = keepProviderPhase || r.ProviderSource != nil
 				continue
 			}
 			kept = append(kept, r)
 		}
 		store.Records = kept
-		if err := removeAdoptSnapshots(manifestName); err != nil {
+		if err := removeAdoptSnapshotsBeforeRow(manifestName, keepProviderPhase); err != nil {
 			return fmt.Errorf("adopt provenance abort: remove snapshots: %w", err)
 		}
 		if err := writeAdoptedEntriesFn(store); err != nil {
 			return fmt.Errorf("adopt provenance abort: write store: %w", err)
+		}
+		if keepProviderPhase {
+			if err := removeAdoptSnapshots(manifestName); err != nil {
+				return fmt.Errorf("adopt provenance abort: remove provider phase: %w", err)
+			}
 		}
 		return nil
 	})
@@ -1089,8 +1156,8 @@ func abortAdoptProvenance(rec *AdoptProvenanceRecord) error {
 // genuinely-slow in-flight adopt is never reaped out from under itself.
 const adoptOrphanGCThreshold = 24 * time.Hour
 
-// reapAdoptProvenanceRow removes a manifest's snapshot dir (FIRST) then drops its
-// row (crash-safe ordering, codex bot PR #528 finding 3). Caller MUST hold the
+// reapAdoptProvenanceRow removes secret-bearing snapshots FIRST, then drops the
+// row, then removes any retained non-secret provider phase. Caller MUST hold the
 // manifest lease so the reap cannot race a concurrent adopt. No event emit — the
 // GC caller emits orphan-reaped.
 //
@@ -1109,16 +1176,18 @@ func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationSta
 			return fmt.Errorf("adopt provenance reap: read store: %w", err)
 		}
 		matched := false
+		keepProviderPhase := false
 		for _, r := range store.Records {
 			if r.ManifestName == manifestName && r.OperationState == expectedState && r.UpdatedAt.Equal(expectedUpdatedAt) {
 				matched = true
+				keepProviderPhase = r.ProviderSource != nil
 				break
 			}
 		}
 		if !matched {
 			return nil // live row changed/vanished since selection => not ours => no-op
 		}
-		if err := removeAdoptSnapshots(manifestName); err != nil {
+		if err := removeAdoptSnapshotsBeforeRow(manifestName, keepProviderPhase); err != nil {
 			return fmt.Errorf("adopt provenance reap: remove snapshots: %w", err)
 		}
 		var kept []AdoptProvenanceRecord
@@ -1129,8 +1198,13 @@ func reapAdoptProvenanceRow(manifestName string, expectedState AdoptOperationSta
 			kept = append(kept, r)
 		}
 		store.Records = kept
-		if err := writeAdoptedEntries(store); err != nil {
+		if err := writeAdoptedEntriesFn(store); err != nil {
 			return fmt.Errorf("adopt provenance reap: write store: %w", err)
+		}
+		if keepProviderPhase {
+			if err := removeAdoptSnapshots(manifestName); err != nil {
+				return fmt.Errorf("adopt provenance reap: remove provider phase: %w", err)
+			}
 		}
 		return nil
 	})

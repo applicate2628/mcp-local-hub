@@ -40,8 +40,9 @@ func newDeAdoptCmdReal() *cobra.Command {
 			}
 			if !yes {
 				api.PrintDeAdoptPlan(cmd.OutOrStdout(), plan)
+				providerRecovery := plan.ProviderRecoveryExecutable()
 				blockers := make([]string, 0)
-				if !plan.Manifest.HashReady {
+				if !plan.Manifest.HashReady && !providerRecovery {
 					blockers = append(blockers, fmt.Sprintf("manifest is not delete-ready (%s)", plan.Manifest.Reason))
 				}
 				failures := make([]string, 0)
@@ -56,12 +57,13 @@ func newDeAdoptCmdReal() *cobra.Command {
 				if len(blockers) != 0 {
 					return fmt.Errorf("de-adopt plan is not executable: %s", strings.Join(blockers, "; "))
 				}
+				if providerRecovery && !plan.Manifest.HashReady {
+					fmt.Fprintln(cmd.OutOrStdout(), "No changes made. Re-run with --yes to apply.")
+				}
 				return nil
 			}
 
-			report, err := a.ExecuteDeAdoptWithOpts(args[0], cmd.OutOrStdout(), api.ExecuteDeAdoptOpts{
-				AcceptConflictClients: acceptConflictClients,
-			})
+			report, err := a.ExecuteDeAdoptWithOpts(args[0], cmd.OutOrStdout(), api.ExecuteDeAdoptOpts{AcceptConflictClients: acceptConflictClients})
 			if err != nil {
 				return err
 			}

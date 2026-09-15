@@ -181,6 +181,9 @@ func registerInstallRoutes(s *Server) {
 			return
 		}
 		if err := s.installer.Install(name, s.Port()); err != nil {
+			if writeRetryableManifestLeaseConflict(w, err) {
+				return
+			}
 			writeAPIError(w, err, http.StatusInternalServerError, "INSTALL_FAILED")
 			return
 		}

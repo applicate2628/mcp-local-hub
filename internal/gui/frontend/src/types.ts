@@ -227,6 +227,7 @@ export interface DeAdoptPlan {
   AdoptClients: string[];
   Routing: DeAdoptRouting;
   RefusalReason: string;
+  ProviderRecoveryReady: boolean;
   Manifest: DeAdoptManifest;
   Eligibility: DeAdoptPlanEligibility;
   Clients: DeAdoptClientPlan[];
