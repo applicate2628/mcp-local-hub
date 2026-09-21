@@ -430,9 +430,31 @@ func (a *API) ManifestGetWithHash(name string) (string, string, error) {
 }
 
 // ManifestCreate writes a new manifest under the default servers dir.
-// Rejects if the server name already has a manifest — use ManifestEdit
-// to change existing ones.
-func (a *API) ManifestCreate(name, yaml string) error {
+// Rejects if the server name already has a manifest; use ManifestEdit
+// to change existing ones. The per-manifest adopt lease serializes creation
+// with adopt/de-adopt recovery through their final cleanup boundary.
+func (a *API) ManifestCreate(name, yaml string) (err error) {
+	if err := checkManifestName(name); err != nil {
+		return err
+	}
+	lease, acquired, leaseErr := acquireAdoptLeaseForApply(manifestMutationLeaseOwner{}, name)
+	if leaseErr != nil || !acquired {
+		if leaseErr == nil {
+			leaseErr = newLeaseFailure(adoptLeaseFailureBusy, true, false)
+		}
+		return fmt.Errorf("manifest create: acquire per-manifest lease for %q: %w", name, leaseErr)
+	}
+	defer func() {
+		if unlockErr := lease.Unlock(); unlockErr != nil {
+			err = errors.Join(err, fmt.Errorf("manifest create: release per-manifest lease for %q: %w", name, unlockErr))
+		}
+	}()
+	return a.manifestCreateWithAdoptLeaseHeld(name, yaml)
+}
+
+// manifestCreateWithAdoptLeaseHeld is the default-dir write used by callers
+// that already own the per-manifest adopt lease.
+func (a *API) manifestCreateWithAdoptLeaseHeld(name, yaml string) error {
 	return a.ManifestCreateIn(defaultManifestDir(), name, yaml)
 }
 

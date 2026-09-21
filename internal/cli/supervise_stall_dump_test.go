@@ -644,7 +644,7 @@ func TestStallDumpSentinelUnconsumableIsReportedAndRateLimited(t *testing.T) {
 // listener and no accept loop here — if the verb depended on IPC, this could
 // not pass.
 func TestSuperviseDumpStacksVerbFiresTheManualArm(t *testing.T) {
-	deps, _ := makeTestDeps(t)
+	deps, logPath := makeTestDeps(t)
 	trig := newStallDumpTriggerWithConfig(deps.stateDir, deps.events,
 		shortStallDumpConfig(time.Millisecond, time.Hour))
 
@@ -659,6 +659,9 @@ func TestSuperviseDumpStacksVerbFiresTheManualArm(t *testing.T) {
 		t.Fatalf("verb wrote %s, but the watcher polls %s", sentinel, want)
 	}
 
+	// Directory visibility precedes the atomic writer closing its handle on Windows.
+	// The existing captured event is emitted only after that write completes.
+	waitForSupervisorEvent(t, logPath, `"event":"supervisor-stall-dump-captured"`, 3*time.Second)
 	names := waitForStallDump(t, trig.dir, 1, 3*time.Second)
 	raw, err := os.ReadFile(filepath.Join(trig.dir, names[0]))
 	if err != nil {

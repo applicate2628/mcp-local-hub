@@ -12,6 +12,7 @@ import (
 
 	"mcp-local-hub/internal/binaryadmission"
 	"mcp-local-hub/internal/clients"
+	"mcp-local-hub/internal/config"
 )
 
 type providerTransactionDeps struct {
@@ -22,10 +23,25 @@ type providerTransactionDeps struct {
 }
 
 func (d providerTransactionDeps) stopManaged(ctx context.Context, api *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
+	var (
+		settlement StoppedSettlement
+		err        error
+	)
 	if d.stop != nil {
-		return d.stop(ctx, frozen)
+		settlement, err = d.stop(ctx, frozen)
+	} else {
+		settlement, err = api.stopAdoptOwnedDaemonSettled(ctx, frozen)
 	}
-	return api.stopAdoptOwnedDaemonSettled(ctx, frozen)
+	if err != nil {
+		return settlement, err
+	}
+	if settlement.State != StoppedSettlementStopped || settlement.Reason != StoppedSettlementReasonStopped {
+		return settlement, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: managed daemon settlement is not terminal")
+	}
+	if err := markProviderManagedSettled(frozen.Server); err != nil {
+		return settlement, err
+	}
+	return settlement, nil
 }
 
 func (d providerTransactionDeps) closeProvenance(manifestName string) error {
@@ -35,24 +51,81 @@ func (d providerTransactionDeps) closeProvenance(manifestName string) error {
 	return CloseAdoptProvenance(manifestName)
 }
 
-func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, error) {
+func providerAdoptOwnershipScope(rec *AdoptProvenanceRecord) (*supervisorIntentOwnershipScope, error) {
 	if rec == nil {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
-	intent, err := loadSupervisorOwnedIntent()
-	if err != nil {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	expected := &config.ServerManifest{
+		Name:    rec.ManifestName,
+		Daemons: []config.DaemonSpec{{Name: adoptDefaultDaemonName, Port: rec.Port}},
 	}
-	var matches []SupervisorDaemon
-	for _, daemon := range intent.Daemons {
-		if daemon.Server == rec.ManifestName && daemon.Daemon == adoptDefaultDaemonName && daemon.Port == rec.Port && daemon.ManifestHash == rec.ExpectedManifestHash {
-			matches = append(matches, daemon)
+	return supervisorIntentOwnershipScopeForManifest(expected, nil, ""), nil
+}
+
+func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, error) {
+	fence, err := frozenProviderAdoptDaemonFence(rec)
+	return fence.Daemon, err
+}
+
+// providerAdoptDaemonAbsent verifies absence under the common ownership scope.
+// With an empty teardown phase it claims durable never-started or unpublished
+// settled rollback recovery
+// and hash-deletes any exact adopt manifest; it is not a read-only predicate.
+// Missing or started install history cannot authorize that recovery claim.
+func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
+	if rec == nil {
+		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
+		unmanaged, err := claimProviderUnmanagedRecovery(rec)
+		if err != nil || !unmanaged {
+			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	}
-	if len(matches) != 1 {
-		return SupervisorDaemon{}, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	return providerRecoveryOwnershipAbsent(rec)
+}
+
+// providerRecoveryStopManagedFn is a narrow test seam for the late-row recovery
+// path below. Production always delegates to the same exact frozen-descriptor
+// settlement owner used by ordinary provider de-adopt.
+var providerRecoveryStopManagedFn = func(ctx context.Context, api *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
+	return api.stopAdoptOwnedDaemonSettled(ctx, frozen)
+}
+
+// repairProviderLateManagedRow handles the only recoverable ownership race after
+// a pre-Install lane has already durably reached managed_removed. A same-operation
+// Install can publish its exact descriptor after the second absence proof but
+// before provider restoration. The final restore gate must not only refuse that
+// state forever: while the manifest lease is still held, an exact frozen row is
+// settled and removed, then absence is re-proved. Ambiguous, legacy, mismatched,
+// or otherwise non-exact ownership stays fail-closed.
+func repairProviderLateManagedRow(ctx context.Context, rec *AdoptProvenanceRecord) error {
+	if rec == nil || rec.ProviderSource == nil || rec.ProviderSource.DeAdoptPhase != "managed_removed" {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	return matches[0], nil
+	fence, err := frozenProviderAdoptDaemonFence(rec)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	api := NewAPI()
+	settlement, err := providerRecoveryStopManagedFn(ctx, api, fence.Daemon)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late managed daemon settlement: %w", err)
+	}
+	if settlement.State != StoppedSettlementStopped || settlement.Reason != StoppedSettlementReasonStopped {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: late managed daemon settlement is not terminal")
+	}
+	if err := markProviderManagedSettled(rec.ManifestName); err != nil {
+		return err
+	}
+	if err := removeSettledProviderAdoptDaemonFence(rec, fence); err != nil {
+		return err
+	}
+	absent, err := providerAdoptDaemonAbsent(rec)
+	if err != nil || !absent {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	return nil
 }
 
 type providerExecutionState struct {
@@ -161,6 +234,12 @@ func resolveProviderExecutionState(plan *AdoptPlan, injected clients.ProviderMCP
 }
 
 func providerDisable(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) (clients.ProviderMCPActivationResultV1, error) {
+	if provenance == nil {
+		return clients.ProviderMCPActivationResultV1{}, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	if err := initializeProviderInstallPhase(provenance.ServerName); err != nil {
+		return clients.ProviderMCPActivationResultV1{}, err
+	}
 	result, err := state.provider.CompareAndSetProviderMCPActivation(ctx, clients.ProviderMCPActivationCASV1{
 		PluginRef: state.entry.PluginRef, ServerName: state.entry.ServerName,
 		ExpectedActivationFingerprint: provenance.ActivationFingerprint,
@@ -174,9 +253,13 @@ func providerDisable(ctx context.Context, state providerExecutionState, provenan
 }
 
 func providerRestore(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) error {
+	return providerRestoreFromActivation(ctx, state, provenance, provenance.ExpectedDisabledFingerprint)
+}
+
+func providerRestoreFromActivation(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1, expectedActivation string) error {
 	result, err := state.provider.CompareAndSetProviderMCPActivation(ctx, clients.ProviderMCPActivationCASV1{
 		PluginRef: state.entry.PluginRef, ServerName: state.entry.ServerName,
-		ExpectedActivationFingerprint: provenance.ExpectedDisabledFingerprint,
+		ExpectedActivationFingerprint: expectedActivation,
 		ExpectedPolicyFingerprint:     provenance.PolicyFingerprint,
 		DesiredEnabledPresent:         provenance.PriorEnabledPresent, DesiredEnabled: provenance.PriorEnabled,
 	})
@@ -188,11 +271,33 @@ func providerRestore(ctx context.Context, state providerExecutionState, provenan
 
 // recoverProviderActivation is explicit de-adopt recovery only. It recognizes
 // the recorded prior fingerprint without writing, restores only from the exact
-// recorded disabled fingerprint, and refuses every other observed state.
-func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) error {
+// recorded disabled fingerprint, and refuses every other observed state. The
+// final ownership proof, durable settlement proof, and provider CAS execute
+// while the canonical supervisor-intent lock is held, so a concurrent Install
+// cannot publish a managed owner between the proof and re-enabling the direct
+// provider. Inventory may launch a subprocess, so it is read and validated
+// before taking that global lock; the CAS still rejects activation/policy drift.
+func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSourceV1, provenance *ProviderSourceProvenanceV1) (retErr error) {
 	if source == nil || provenance == nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
+	current, found, provenanceErr := ReadAdoptProvenance(provenance.ServerName)
+	if provenanceErr != nil || !found || current.ProviderSource == nil {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	absent, ownershipErr := providerAdoptDaemonAbsent(current)
+	if ownershipErr != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	if !absent {
+		if current.ProviderSource.DeAdoptPhase != "managed_removed" {
+			return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+		}
+		if err := repairProviderLateManagedRow(ctx, current); err != nil {
+			return err
+		}
+	}
+
 	entries, err := source.ListProviderMCPEntries(ctx)
 	if err != nil {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -210,13 +315,34 @@ func recoverProviderActivation(ctx context.Context, source clients.ProviderMCPSo
 	if entry.ReceiptFingerprint != provenance.ReceiptFingerprint || entry.PolicyFingerprint != provenance.PolicyFingerprint {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
-	if entry.ActivationFingerprint == provenance.ActivationFingerprint && entry.ActivationEnabledPresent == provenance.PriorEnabledPresent && entry.ActivationEnabled == provenance.PriorEnabled {
-		return nil
-	}
-	if entry.ActivationFingerprint != provenance.ExpectedDisabledFingerprint || entry.Enabled {
+	alreadyRestored := entry.ActivationFingerprint == provenance.ActivationFingerprint && entry.ActivationEnabledPresent == provenance.PriorEnabledPresent && entry.ActivationEnabled == provenance.PriorEnabled
+	if !alreadyRestored && (entry.ActivationFingerprint != provenance.ExpectedDisabledFingerprint || entry.Enabled) {
 		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
-	return providerRestore(ctx, providerExecutionState{provider: source, entry: entry}, provenance)
+
+	intentPath, err := DefaultSupervisorIntentPath()
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	release, err := lockSupervisorIntent(intentPath)
+	if err != nil {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	defer releaseSupervisorIntentAndJoin(&retErr, release, "provider restore ownership")
+
+	current, found, provenanceErr = ReadAdoptProvenance(provenance.ServerName)
+	if provenanceErr != nil || !found || current.ProviderSource == nil || current.ProviderSource.DeAdoptPhase != "managed_removed" {
+		return fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
+	}
+	absent, ownershipErr = providerAdoptDaemonAbsent(current)
+	if ownershipErr != nil || !absent || !providerInstallPhaseAllowsRestore(current.ManifestName) {
+		return fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
+	}
+	expectedActivation := provenance.ExpectedDisabledFingerprint
+	if alreadyRestored {
+		expectedActivation = provenance.ActivationFingerprint
+	}
+	return providerRestoreFromActivation(ctx, providerExecutionState{provider: source, entry: entry}, provenance, expectedActivation)
 }
 
 func providerRevalidateDisabled(ctx context.Context, state providerExecutionState, provenance *ProviderSourceProvenanceV1) error {

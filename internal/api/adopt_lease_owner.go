@@ -227,6 +227,22 @@ func tryAcquireAdoptManifestLease(manifestName string) (*AdoptManifestLease, boo
 	if _, err := adoptManifestLeasePath(manifestName); err != nil {
 		return nil, false, err
 	}
+	return tryAcquireManifestMutationLease(manifestName)
+}
+
+// Manifest writes and installs own only a lock, never a snapshot directory.
+// Keep the same OS lease identity without importing adoption's reserved-suffix
+// rule into ordinary server names. Snapshot-owning callers retain the guard.
+type manifestMutationLeaseOwner struct{}
+
+func (manifestMutationLeaseOwner) AcquireAdoptLease(name string) (AdoptLease, bool, error) {
+	return tryAcquireManifestMutationLease(name)
+}
+
+func tryAcquireManifestMutationLease(manifestName string) (*AdoptManifestLease, bool, error) {
+	if err := checkManifestName(manifestName); err != nil {
+		return nil, false, err
+	}
 	impl, acquired, err := acquireAdoptManifestLeasePlatform(manifestName)
 	if err != nil || !acquired {
 		return nil, acquired, err

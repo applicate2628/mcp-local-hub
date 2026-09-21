@@ -181,6 +181,51 @@ func TestManifestCreateWritesYAML(t *testing.T) {
 	}
 }
 
+func TestManifestCreateRefusesWhileDeAdoptLeaseHeld(t *testing.T) {
+	_ = isolateStateDir(t)
+
+	const name = "manifest-create-during-deadopt"
+	manifestRoot := defaultManifestDir()
+	manifestDir := filepath.Join(manifestRoot, name)
+	if err := os.RemoveAll(manifestDir); err != nil {
+		t.Fatalf("remove stale test manifest: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(manifestDir) })
+
+	body := "name: " + name + "\nkind: global\ntransport: stdio-bridge\ncommand: echo\ndaemons:\n  - name: default\n    port: 9202\nclient_bindings: []\nweekly_refresh: false\n"
+
+	lease, acquired, err := tryAcquireAdoptManifestLease(name)
+	if err != nil || !acquired {
+		t.Fatalf("acquire de-adopt lease: acquired=%v err=%v", acquired, err)
+	}
+	released := false
+	t.Cleanup(func() {
+		if !released {
+			_ = lease.Unlock()
+		}
+	})
+
+	err = NewAPI().ManifestCreate(name, body)
+	var failure *LeaseFailure
+	if !errors.As(err, &failure) || !failure.Retryable {
+		t.Fatalf("ManifestCreate while de-adopt lease held error=%v, want retryable lease refusal", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestDir, "manifest.yaml")); !os.IsNotExist(statErr) {
+		t.Fatalf("manifest was created while de-adopt owned its cleanup lease: stat err=%v", statErr)
+	}
+
+	if err := lease.Unlock(); err != nil {
+		t.Fatalf("release de-adopt lease: %v", err)
+	}
+	released = true
+	if err := NewAPI().ManifestCreate(name, body); err != nil {
+		t.Fatalf("ManifestCreate after de-adopt lease release: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(manifestDir, "manifest.yaml")); statErr != nil {
+		t.Fatalf("manifest was not created after lease release: %v", statErr)
+	}
+}
+
 func TestManifestCreateRejectsYAMLNameMismatch(t *testing.T) {
 	tmp := t.TempDir()
 	a := NewAPI()

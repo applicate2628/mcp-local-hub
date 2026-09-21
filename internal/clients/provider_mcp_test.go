@@ -2,7 +2,9 @@ package clients
 
 import (
 	"context"
+	"os"
 	"testing"
+	"time"
 )
 
 type providerSourceForWrapperTest struct {
@@ -44,6 +46,46 @@ func TestCodexProviderMCPActivationCASRequiresFingerprints(t *testing.T) {
 	_, err := c.CompareAndSetProviderMCPActivation(context.Background(), ProviderMCPActivationCASV1{PluginRef: "alpha@catalog", ServerName: "reader", DesiredEnabledPresent: true, DesiredEnabled: false})
 	if err == nil {
 		t.Fatal("CAS accepted missing fingerprints")
+	}
+}
+
+func TestCodexProviderMCPActivationCASAlreadyDesiredDoesNotRewrite(t *testing.T) {
+	path := setupCodexConfig(t, `[plugins."alpha@catalog".mcp_servers.reader]
+enabled = true
+scope = "user"
+`)
+	c := &codexCLI{path: path}
+	doc, err := c.readTOML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := doc["plugins"].(map[string]any)["alpha@catalog"].(map[string]any)["mcp_servers"].(map[string]any)["reader"].(map[string]any)
+	activation, err := providerActivationFingerprint(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy, err := providerPolicyFingerprint(server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixed := time.Unix(1_700_000_000, 0)
+	if err := os.Chtimes(path, fixed, fixed); err != nil {
+		t.Fatal(err)
+	}
+	result, err := c.CompareAndSetProviderMCPActivation(context.Background(), ProviderMCPActivationCASV1{
+		PluginRef: "alpha@catalog", ServerName: "reader",
+		ExpectedActivationFingerprint: activation, ExpectedPolicyFingerprint: policy,
+		DesiredEnabledPresent: true, DesiredEnabled: true,
+	})
+	if err != nil || !result.PriorEnabledPresent || !result.PriorEnabled || result.ActivationFingerprint != activation {
+		t.Fatalf("same-state CAS result=%+v err=%v", result, err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.ModTime().Equal(fixed) {
+		t.Fatalf("same-state CAS rewrote config: modtime=%s want=%s", info.ModTime(), fixed)
 	}
 }
 

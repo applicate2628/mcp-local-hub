@@ -21,19 +21,33 @@ type ProvisionalProcess struct {
 	waitDone chan error
 }
 
+// ProvisionalNoProcessError certifies that StartProvisional returned before
+// handing the command to StartWithJob. Only this exact whole error is proof;
+// finding it inside a wrapper or join cannot certify the other outcomes.
+type ProvisionalNoProcessError struct{ cause error }
+
+func (e *ProvisionalNoProcessError) Error() string { return e.cause.Error() }
+func (e *ProvisionalNoProcessError) Unwrap() error { return e.cause }
+
 // StartProvisional starts cmd in an at-create contained Job on Windows and as
 // a process-group leader on POSIX. The returned owner must be settled with
 // TerminateAndWait on every path.
 func StartProvisional(cmd *exec.Cmd) (*ProvisionalProcess, error) {
+	return startProvisional(cmd, NewKillOnCloseJob)
+}
+
+// startProvisional keeps containment creation injectable per call without
+// replacing the process owner's startup or cleanup logic.
+func startProvisional(cmd *exec.Cmd, newJob func() (*Job, error)) (*ProvisionalProcess, error) {
 	if cmd == nil || cmd.Path == "" {
-		return nil, errors.New("start provisional process: command is nil or has an empty path")
+		return nil, &ProvisionalNoProcessError{cause: errors.New("start provisional process: command is nil or has an empty path")}
 	}
-	job, err := NewKillOnCloseJob()
+	job, err := newJob()
 	if err != nil || job == nil {
 		if err == nil {
 			err = errors.New("job creation returned nil job")
 		}
-		return nil, fmt.Errorf("start provisional process containment: %w", err)
+		return nil, &ProvisionalNoProcessError{cause: fmt.Errorf("start provisional process containment: %w", err)}
 	}
 	prepareProcessGroup(cmd)
 	if _, err := StartWithJob(job, cmd); err != nil {

@@ -1081,7 +1081,7 @@ function DeAdoptConfirmModal(props: {
   const confirmDisabled =
     props.busy ||
     plan?.Routing === "REFUSE" ||
-    plan?.Manifest.HashReady !== true;
+    (plan?.Manifest.HashReady !== true && plan?.ProviderRecoveryReady !== true);
   return (
     <dialog
       ref={dialogRef}
