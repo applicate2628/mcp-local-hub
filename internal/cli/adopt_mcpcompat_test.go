@@ -15,6 +15,7 @@ import (
 
 func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {
 	root, home := adoptTestHome(t)
+	fixture := installAdoptTestFixture(t)
 	const entry = "codegraph"
 	manifestRoot := cliAdoptDefaultManifestDir(t)
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
@@ -44,6 +45,7 @@ func TestAdoptCLIProfilePersistsAndBuildsLegacyHost(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("adopt: %v\n%s", err, out.String())
 	}
+	assertAdoptTestInstallFixture(t, fixture)
 	if !strings.Contains(out.String(), "stdio-http-legacy-2024-11-05") {
 		t.Fatalf("adopt result does not surface profile:\n%s", out.String())
 	}

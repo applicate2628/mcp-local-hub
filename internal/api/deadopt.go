@@ -183,7 +183,6 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 	plan.AdoptClients = append([]string(nil), rec.AdoptClients...)
 	plan.provenance = rec
 
-	allClients := clients.AllClients()
 	switch rec.OperationState {
 	case AdoptOperationStateAdopted:
 		plan.Routing = DeAdoptRoutingFresh
@@ -215,10 +214,21 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 		return plan, nil
 	}
 
-	plan.Manifest = a.buildDeAdoptManifestReadiness(rec, plan.Routing)
+	manifestDir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return nil, fmt.Errorf("de-adopt plan: resolve manifest root: %w", err)
+	}
+	plan.Manifest = a.buildDeAdoptManifestReadiness(rec, plan.Routing, manifestDir)
+	if rec.OperationState == AdoptOperationStateDeAdopting &&
+		deAdoptPreinstallRecoveryEligible(rec) &&
+		rec.ProviderSource.DeAdoptPhase == "" &&
+		plan.Manifest.AlreadyAbsent {
+		plan.providerRecovery = true
+	}
 	if plan.providerRecovery {
 		return plan, nil
 	}
+	targetResolver := newAdoptClientTargetResolver()
 	plan.Clients = make([]DeAdoptClientPlan, 0, len(rec.AdoptClients))
 	for _, clientName := range rec.AdoptClients {
 		clientPlan := DeAdoptClientPlan{Client: clientName}
@@ -236,15 +246,18 @@ func (a *API) BuildDeAdoptPlan(server string) (*DeAdoptPlan, error) {
 			plan.Clients = append(plan.Clients, clientPlan)
 			continue
 		}
-		targetEntryName := adoptClientTargetEntryName(*rec, clientRec)
-
-		adapter, ok := allClients[clientName]
-		if !ok {
+		resolvedTarget, resolveErr := targetResolver.resolveRecordClient(*rec, clientRec)
+		if resolveErr != nil {
+			if errors.Is(resolveErr, errProjectAdoptConfigTargetInvalid) {
+				return nil, resolveErr
+			}
 			clientPlan.Disposition = DeAdoptClientFailed
 			clientPlan.Reason = "client adapter is unavailable"
 			plan.Clients = append(plan.Clients, clientPlan)
 			continue
 		}
+		targetEntryName := resolvedTarget.targetEntryName
+		adapter := resolvedTarget.client
 		mutator, ok := clients.AsCASEntryMutator(adapter)
 		if !ok {
 			clientPlan.Disposition = DeAdoptClientFailed
@@ -384,6 +397,10 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	}
 
 	plannedRec := plan.provenance
+	manifestDir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return nil, fmt.Errorf("de-adopt: resolve manifest root: %w", err)
+	}
 
 	// E1 — acquire the outermost per-manifest lease. No IPC, process kill, or
 	// wait is invoked anywhere before the deferred unlock.
@@ -464,7 +481,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		phase, phaseErr := readProviderInstallPhase(rec.ManifestName)
 		providerClientsUntouched = phaseErr == nil && phase == providerInstallPhaseRecoveryClaimed
 	}
-	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting)
+	readiness := a.buildDeAdoptManifestReadiness(rec, effectiveRouting, manifestDir)
 	if !providerRecovery && !readiness.HashReady && !(effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent) {
 		return nil, fmt.Errorf("de-adopt: manifest %q is not delete-ready (%s); resolve it before de-adopting", plan.ManifestName, readiness.Reason)
 	}
@@ -486,8 +503,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 	// crash after de_adopting is written, and Install competes for that same
 	// marker before it may mutate managed ownership. Do not invent a stop phase.
 	if providerRecovery {
-		absent, absenceErr := providerAdoptDaemonAbsent(rec)
-		if absenceErr != nil || !absent {
+		absent, absenceErr := providerAdoptDaemonAbsent(rec, opts.providerDeps)
+		if absenceErr != nil {
+			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: provider ownership proof: %w", absenceErr)
+		}
+		if !absent {
 			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	}
@@ -503,7 +523,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 
 	report = &DeAdoptReport{}
 	resolvedClients := 0
-	allClients := clients.AllClients()
+	targetResolver := newAdoptClientTargetResolver()
 
 	// E3 — restore/remove every target before any topology mutation.
 	for _, clientName := range rec.AdoptClients {
@@ -516,11 +536,15 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			deAdoptFailClient(report, clientName, "client provenance is missing or duplicated", w)
 			continue
 		}
-		adapter, ok := allClients[clientName]
-		if !ok {
+		resolvedTarget, resolveErr := targetResolver.resolveRecordClient(*rec, clientRec)
+		if resolveErr != nil {
+			if errors.Is(resolveErr, errProjectAdoptConfigTargetInvalid) {
+				return nil, resolveErr
+			}
 			deAdoptFailClient(report, clientName, "client adapter is unavailable", w)
 			continue
 		}
+		adapter := resolvedTarget.client
 		mutator, ok := clients.AsCASEntryMutator(adapter)
 		if !ok {
 			deAdoptFailClient(report, clientName, "client does not support atomic de-adopt mutation", w)
@@ -532,7 +556,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			return nil, fmt.Errorf("de-adopt: manifest %q has no verified adopted binding for client %q", plan.ManifestName, clientName)
 		}
 		match := deAdoptLiveBindingMatcher(rec, binding)
-		targetEntryName := adoptClientTargetEntryName(*rec, clientRec)
+		targetEntryName := resolvedTarget.targetEntryName
 		snapshotState, snapshot, snapshotSubtree, snapshotReason := readDeAdoptSnapshot(rec, clientRec, mutator)
 		verdict, classifyErr := mutator.ClassifyEntryUnderLock(
 			targetEntryName,
@@ -683,8 +707,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 			} else {
 				preInstallState := rec.OperationState == AdoptOperationStateAdopting || rec.OperationState == AdoptOperationStateDeAdopting
 				absenceWindow := (readiness.Present && readiness.HashReady) || (effectiveRouting == DeAdoptRoutingResume && readiness.AlreadyAbsent)
-				absent, absentErr := providerAdoptDaemonAbsent(rec)
-				if !preInstallState || !absenceWindow || absentErr != nil || !absent {
+				absent, absentErr := providerAdoptDaemonAbsent(rec, opts.providerDeps)
+				if absentErr != nil {
+					return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: provider ownership proof: %w", absentErr)
+				}
+				if !preInstallState || !absenceWindow || !absent {
 					return report, frozenErr
 				}
 				providerPreInstallAbsence = true
@@ -706,8 +733,11 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 				}
 				settledProviderFence = &fence
 			} else {
-				absent, absentErr := providerAdoptDaemonAbsent(rec)
-				if absentErr != nil || !absent {
+				absent, absentErr := providerAdoptDaemonAbsent(rec, opts.providerDeps)
+				if absentErr != nil {
+					return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED: provider ownership proof: %w", absentErr)
+				}
+				if !absent {
 					return report, frozenErr
 				}
 				providerPreInstallAbsence = true
@@ -720,7 +750,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		// snapshot observed the file absent. ManifestDeleteInWithHash is
 		// idempotent for continued absence, deletes an exact recreation, and
 		// rejects a changed recreation.
-		if err := a.ManifestDeleteInWithHash(adoptCommittedManifestDir(), rec.ManifestName, rec.ExpectedManifestHash); err != nil {
+		if err := a.manifestDeleteInWithHashUnderLease(manifestDir, rec.ManifestName, rec.ExpectedManifestHash); err != nil {
 			pendingEvents = append(pendingEvents, func() {
 				emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "manifest-delete", report)
 			})
@@ -729,6 +759,8 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 				return fmt.Errorf("de-adopt: manifest %q delete refused because its expected hash is missing", plan.ManifestName)
 			case errors.Is(err, ErrManifestHashMismatch):
 				return fmt.Errorf("de-adopt: manifest %q delete refused because its content hash changed", plan.ManifestName)
+			case errors.As(err, new(*LeaseFailure)):
+				return fmt.Errorf("de-adopt: manifest %q delete refused by a concurrent vault reference transaction; retry after it completes: %w", plan.ManifestName, err)
 			default:
 				return fmt.Errorf("de-adopt: hash-gated manifest delete for %q failed", plan.ManifestName)
 			}
@@ -756,7 +788,7 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		if deAdoptAfterManifestDeleteHook != nil {
 			deAdoptAfterManifestDeleteHook()
 		}
-		absent, absentErr := providerAdoptDaemonAbsent(rec)
+		absent, absentErr := providerAdoptDaemonAbsent(rec, opts.providerDeps)
 		if absentErr != nil || !absent {
 			// Never delete a row that appeared after the positive pre-Install
 			// absence proof. Leaving it intact is the fail-closed recovery state:
@@ -832,25 +864,23 @@ func (a *API) executeDeAdoptPlanWithOpts(plan *DeAdoptPlan, w io.Writer, opts Ex
 		rec = updated
 	}
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "restore_applied" {
-		absent, absenceErr := providerAdoptDaemonAbsent(rec)
+		absent, absenceErr := providerAdoptDaemonAbsent(rec, opts.providerDeps)
 		if absenceErr != nil || !absent {
 			return report, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	}
-	// E5 — CLOSE-READY only. The prefilter and delete each take the vault lock
-	// through their existing owner and release it before the next inner operation.
-	toDelete, sharedSkipped, unreadableManifests, prefilterErr := a.prepareDeAdoptRoutedSecretCleanup(rec.ManifestName, rec.RoutedSecretKeys)
-	if prefilterErr != nil {
+	// E5 — CLOSE-READY only. Vault read, all-manifest reference scan, and delete
+	// share one critical section, so no successful canonical writer can enter
+	// between scan and delete.
+	sharedSkipped, unreadableManifests, cleanupStage, attempted, cleanupErr := a.executeDeAdoptRoutedSecretCleanup(rec.ManifestName, rec.RoutedSecretKeys)
+	if cleanupErr != nil {
 		pendingEvents = append(pendingEvents, func() {
-			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "routed-secret-prefilter", report)
+			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, cleanupStage, report)
 		})
+		if cleanupStage == deAdoptCleanupStageDelete {
+			return report, fmt.Errorf("de-adopt: routed-secret cleanup for manifest %q failed for %d key(s)", plan.ManifestName, attempted)
+		}
 		return report, fmt.Errorf("de-adopt: routed-secret prefilter for manifest %q failed", plan.ManifestName)
-	}
-	if err := deleteAdoptRoutedSecrets(toDelete); err != nil {
-		pendingEvents = append(pendingEvents, func() {
-			emitDeAdoptCloseFailed(plan.ManifestName, rec.ExpectedManifestHash, "routed-secret-delete", report)
-		})
-		return report, fmt.Errorf("de-adopt: routed-secret cleanup for manifest %q failed for %d key(s)", plan.ManifestName, len(toDelete))
 	}
 	if len(unreadableManifests) != 0 {
 		for _, unreadableManifest := range unreadableManifests {
@@ -887,6 +917,10 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 	if rec == nil || rec.ProviderSource == nil {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
+	manifestDir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return nil, fmt.Errorf("de-adopt provider recovery: resolve manifest root: %w", err)
+	}
 	current, found, err := ReadAdoptProvenance(rec.ManifestName)
 	if err != nil || !found || current.OperationState != AdoptOperationStateDeAdopting || current.ProviderSource == nil {
 		return nil, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
@@ -894,11 +928,11 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 	if current.ProviderSource.DeAdoptPhase == "" {
 		// Re-prove the claim and the complete scoped ownership set before any
 		// durable phase advance, including callers which did not use the planner.
-		absent, absenceErr := providerAdoptDaemonAbsent(current)
+		absent, absenceErr := providerAdoptDaemonAbsent(current, opts.providerDeps)
 		if absenceErr != nil || !absent {
 			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
-		exists, manifestErr := manifestExistsIn(defaultManifestDir(), current.ManifestName)
+		exists, manifestErr := manifestExistsIn(manifestDir, current.ManifestName)
 		if manifestErr != nil || exists {
 			return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
@@ -939,11 +973,7 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 	if current.ProviderSource.DeAdoptPhase != "restore_applied" {
 		return nil, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 	}
-	toDelete, _, _, cleanupErr := a.prepareDeAdoptRoutedSecretCleanup(current.ManifestName, current.RoutedSecretKeys)
-	if cleanupErr != nil {
-		return nil, cleanupErr
-	}
-	if cleanupErr := deleteAdoptRoutedSecrets(toDelete); cleanupErr != nil {
+	if _, _, _, _, cleanupErr := a.executeDeAdoptRoutedSecretCleanup(current.ManifestName, current.RoutedSecretKeys); cleanupErr != nil {
 		return nil, cleanupErr
 	}
 	if err := opts.providerDeps.closeProvenance(current.ManifestName); err != nil {
@@ -951,6 +981,15 @@ func (a *API) executeProviderRecoveryDeAdopt(rec *AdoptProvenanceRecord, opts Ex
 	}
 	fmt.Fprintf(w, "De-adopted provider recovery manifest %q.\n", current.ManifestName)
 	return &DeAdoptReport{}, nil
+}
+
+// deAdoptPreinstallRecoveryEligible is the single owner of the provider
+// recovery admission decision: only a durable preinstall managed-install state
+// proves the install never started and may use no-stop preinstall recovery.
+func deAdoptPreinstallRecoveryEligible(rec *AdoptProvenanceRecord) bool {
+	return rec != nil &&
+		rec.ProviderSource != nil &&
+		rec.ProviderSource.ManagedInstallState == ProviderManagedInstallPreInstall
 }
 
 func deAdoptAcceptConflictSet(requested, targets []string) (map[string]bool, error) {
@@ -1029,26 +1068,28 @@ func deAdoptFailClient(report *DeAdoptReport, clientName, reason string, w io.Wr
 	fmt.Fprintf(w, "De-adopt client %q failed: %s.\n", clientName, reason)
 }
 
-// prepareDeAdoptRoutedSecretCleanup returns only still-present, non-shared keys
-// for deleteAdoptRoutedSecrets. A missing vault means every routed key is
-// already absent and cleanup is complete. For a readable vault, a key already
-// absent is complete; a present key referenced by another live on-disk manifest
-// is deliberately skipped and also complete for E6. An unreadable manifest
-// conservatively makes every present candidate possibly shared.
-func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys []string) (toDelete, sharedSkipped, unreadableManifests []string, err error) {
+const (
+	deAdoptCleanupStagePrefilter = "routed-secret-prefilter"
+	deAdoptCleanupStageDelete    = "routed-secret-delete"
+)
+
+// executeDeAdoptRoutedSecretCleanup is the single owner of E5/provider routed
+// key cleanup. It holds vaultMutex and the vault flock across vault read,
+// all-manifest reference scan, and deleteAdoptRoutedSecretsLocked.
+func (a *API) executeDeAdoptRoutedSecretCleanup(manifestName string, routedKeys []string) (sharedSkipped, unreadableManifests []string, stage string, attempted int, err error) {
 	keys := dedupeSortedDeAdoptStrings(routedKeys)
 	if len(keys) == 0 {
-		return nil, nil, nil, nil
+		return nil, nil, "", 0, nil
 	}
 
+	stage = deAdoptCleanupStagePrefilter
 	present := make(map[string]bool)
-	vaultAbsent := false
 	vaultMutex.Lock()
+	defer vaultMutex.Unlock()
 	err = secrets.WithVaultLock(secrets.DefaultVaultPath(), func() error {
 		vault, openErr := secrets.OpenVault(secrets.DefaultKeyPath(), secrets.DefaultVaultPath())
 		if openErr != nil {
 			if adoptRoutedSecretVaultAbsent() {
-				vaultAbsent = true
 				return nil
 			}
 			return fmt.Errorf("routed-secret vault is unavailable")
@@ -1056,31 +1097,30 @@ func (a *API) prepareDeAdoptRoutedSecretCleanup(manifestName string, routedKeys 
 		for _, key := range vault.List() {
 			present[key] = true
 		}
-		return nil
+		shared, unreadable, scanErr := a.deAdoptSharedRoutedSecretKeys(manifestName, keys)
+		if scanErr != nil {
+			return scanErr
+		}
+		var toDelete []string
+		for _, key := range keys {
+			if !present[key] {
+				continue
+			}
+			if shared[key] {
+				sharedSkipped = append(sharedSkipped, key)
+				continue
+			}
+			toDelete = append(toDelete, key)
+		}
+		unreadableManifests = unreadable
+		attempted = len(toDelete)
+		stage = deAdoptCleanupStageDelete
+		return deleteAdoptRoutedSecretsLocked(toDelete)
 	})
-	vaultMutex.Unlock()
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, stage, attempted, err
 	}
-	if vaultAbsent {
-		return nil, nil, nil, nil
-	}
-
-	shared, unreadableManifests, err := a.deAdoptSharedRoutedSecretKeys(manifestName, keys)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	for _, key := range keys {
-		if !present[key] {
-			continue
-		}
-		if shared[key] {
-			sharedSkipped = append(sharedSkipped, key)
-			continue
-		}
-		toDelete = append(toDelete, key)
-	}
-	return toDelete, sharedSkipped, unreadableManifests, nil
+	return sharedSkipped, unreadableManifests, "", attempted, nil
 }
 
 // deAdoptBeforeManifestDeleteHook makes the readiness-to-E4 recreate window
@@ -1172,9 +1212,9 @@ func dedupeSortedDeAdoptStrings(values []string) []string {
 	return out
 }
 
-func (a *API) buildDeAdoptManifestReadiness(rec *AdoptProvenanceRecord, routing DeAdoptRoutingVerdict) DeAdoptManifestReadiness {
+func (a *API) buildDeAdoptManifestReadiness(rec *AdoptProvenanceRecord, routing DeAdoptRoutingVerdict, manifestDir string) DeAdoptManifestReadiness {
 	readiness := DeAdoptManifestReadiness{ExpectedHash: rec.ExpectedManifestHash}
-	manifestBytes, actualHash, err := a.ManifestGetInWithHash(adoptCommittedManifestDir(), rec.ManifestName)
+	manifestBytes, actualHash, err := a.ManifestGetInWithHash(manifestDir, rec.ManifestName)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			readiness.AlreadyAbsent = true

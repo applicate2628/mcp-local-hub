@@ -43,6 +43,10 @@ type LazyProxyConfig struct {
 	// RegistryPath is the workspace registry YAML file. Lifecycle transitions
 	// are written here under flock.
 	RegistryPath string
+	// Readiness identifies this wrapper incarnation and supplies the bounded
+	// supervisor commit seam. Its zero value disables publication for callers
+	// that do not run under the supervisor (including standalone tests).
+	Readiness LazyProxyReadinessConfig
 
 	// InflightMinRetryGap defaults to 2 seconds when zero. Applied to the
 	// inflight gate's retry-throttle on materialization failures.
@@ -101,6 +105,23 @@ type LazyProxyConfig struct {
 	// Defaults to DefaultLSPColdStartMaxProbation (5m) when zero; a negative
 	// value disables the watchdog.
 	ColdStartMaxProbation time.Duration
+}
+
+// LazyProxyReadinessCommitFunc publishes one backend-lifetime fact to the
+// supervisor-owned readiness tracker. The implementation must honor ctx.
+type LazyProxyReadinessCommitFunc func(context.Context, api.LazyProxyReadinessEventV1) (api.LazyProxyReadinessReceiptV1, error)
+
+// LazyProxyReadinessConfig binds publisher facts to one exact wrapper
+// incarnation. Fatal receives failure to settle a still-current non-Running
+// transition; the daemon-workspace composition root owns process shutdown.
+type LazyProxyReadinessConfig struct {
+	TaskName         string
+	WrapperPID       int
+	WrapperStartedAt time.Time
+	Commit           LazyProxyReadinessCommitFunc
+	// Fatal must have capacity for one error when Commit is enabled; the
+	// daemon-workspace composition root consumes it in its shutdown select.
+	Fatal chan<- error
 }
 
 const (
@@ -191,10 +212,11 @@ func (e *coldStartSlotsBusyError) Is(target error) bool { return target == errCo
 //   - LastToolsCallAt registry writes are coalesced to the debounce interval
 //     to keep the YAML file churn-free under sustained traffic.
 type LazyProxy struct {
-	cfg      LazyProxyConfig
-	gate     *InflightGate
-	server   *http.Server
-	listener net.Listener // populated by Bind; consumed by Serve
+	cfg       LazyProxyConfig
+	gate      *InflightGate
+	server    *http.Server
+	listener  net.Listener // populated by Bind; consumed by Serve
+	readiness *lazyProxyReadinessPublisher
 	// reserveMaterializedSlotFn is an invocation-local test seam for the
 	// reservation settlement boundary. Production leaves it nil and uses
 	// reserveMaterializedSlot directly.
@@ -219,12 +241,16 @@ type LazyProxy struct {
 	// stays !warmed past ColdStartMaxProbation from this instant. Zero when no
 	// endpoint is published.
 	endpointPublishedAt time.Time
-	// endpointGeneration is bumped on every endpoint publish AND every teardown.
+	// endpointGeneration is bumped when a materialized endpoint enters its
+	// pre-exposure readiness publication and on every teardown.
 	// A request captures the generation when it obtains the endpoint and passes
 	// it to markWarmedOnFirstSuccess, which no-ops if the generation changed in
 	// the meantime — so a late first-success cannot stamp LifecycleActive over a
 	// Failed that a concurrent teardown just wrote (F6a).
 	endpointGeneration uint64
+	// readinessReadyEpoch marks the first organic success whose publisher wait
+	// was already charged. Later successes may retry publication asynchronously.
+	readinessReadyEpoch uint64
 	// startingSince is when reserveMaterializedSlot last set this row Starting
 	// without an endpoint yet published. Cleared on publish and on every
 	// teardown. The probation watchdog's belt-and-braces branch uses it to reap
@@ -356,6 +382,7 @@ func NewLazyProxy(cfg LazyProxyConfig) *LazyProxy {
 		idleStop: make(chan struct{}),
 		docRefs:  make(map[string]int),
 	}
+	p.readiness = newLazyProxyReadinessPublisher(cfg.Readiness, p.onBackendExit)
 	p.startIdleReaper()
 	return p
 }
@@ -442,6 +469,7 @@ func (p *LazyProxy) Stop(ctx context.Context) error {
 		return nil
 	}
 	p.stopIdleReaper()
+	p.readiness.stop()
 	p.mu.Lock()
 	if p.endpoint != nil {
 		_ = p.endpoint.Close()
@@ -711,6 +739,7 @@ func (p *LazyProxy) handleToolsCall(w http.ResponseWriter, r *http.Request, req 
 	}
 	// First successful response ends probation and reconciles LifecycleActive.
 	p.markWarmedOnFirstSuccess(gen)
+	p.publishReadinessReady(gen)
 	// Only record the tools-call timestamp on successful forward.
 	p.debounceWriteToolsCallTimestamp()
 	out, err := json.Marshal(resp)
@@ -772,6 +801,7 @@ func (p *LazyProxy) handleForward(w http.ResponseWriter, r *http.Request, req *J
 		return
 	}
 	p.markWarmedOnFirstSuccess(gen)
+	p.publishReadinessReady(gen)
 	out, err := json.Marshal(resp)
 	if err != nil {
 		writeRPCError(w, req.ID, rpcErrInternalError, "marshal response: "+err.Error())
@@ -1063,6 +1093,7 @@ func (p *LazyProxy) handleDocLifecycle(w http.ResponseWriter, r *http.Request, r
 	}
 	// The backend served a request → first success ends probation (F2).
 	p.markWarmedOnFirstSuccess(gen)
+	p.publishReadinessReady(gen)
 	if resp != nil && resp.Error != nil {
 		// Backend rejected the lifecycle notification, so do not retain a
 		// refcount that would suppress a future legitimate open/close. The
@@ -1456,7 +1487,6 @@ func (p *LazyProxy) ensureMaterialized(ctx context.Context) (MCPEndpoint, uint64
 // proxy is closing or mid-teardown, so the fn reports failure rather than
 // publishing into a dead proxy.
 func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
-	now := time.Now().UTC()
 	p.mu.Lock()
 	if p.closed.Load() || p.reaping {
 		// This flight is ending WITHOUT a publish (bot PR #492 r1 P2): release its
@@ -1499,15 +1529,47 @@ func (p *LazyProxy) publishMaterializedEndpoint(ep MCPEndpoint) error {
 		_ = ep.Close()
 		return nil
 	}
-	p.endpoint = ep
 	p.endpointGeneration++
+	epoch := p.endpointGeneration
 	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
-	p.endpointPublishedAt = now
+	p.mu.Unlock()
+
+	// The tracker must acknowledge the non-Running state before the endpoint is
+	// visible to ensureMaterialized. The publisher performs its bounded IPC work
+	// without p.mu; its worker installs the endpoint-exit watch before releasing
+	// this wait.
+	if err := p.publishReadinessStarting(epoch, endpointBackendExited(ep)); err != nil {
+		_ = ep.Close()
+		p.mu.Lock()
+		if p.endpointGeneration == epoch {
+			p.startingSince = time.Time{}
+		}
+		p.mu.Unlock()
+		if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
+			err = fmt.Errorf("%w; lifecycle stop: %v", err, stopErr)
+		}
+		p.gate.Forget(p.inflightKey())
+		return fmt.Errorf("publish lazy proxy readiness starting: %w", err)
+	}
+
+	p.mu.Lock()
+	if p.closed.Load() || p.reaping || p.endpointGeneration != epoch || p.endpoint != nil {
+		p.startingSince = time.Time{}
+		p.mu.Unlock()
+		_ = ep.Close()
+		if stopErr := p.cfg.Lifecycle.Stop(); stopErr != nil {
+			fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: lifecycle stop after invalidated readiness publish: %v\n", stopErr)
+		}
+		p.gate.Forget(p.inflightKey())
+		return fmt.Errorf("%w: readiness epoch invalidated before endpoint exposure", errLazyProxyUnpublishable)
+	}
+	p.endpoint = ep
+	p.endpointPublishedAt = time.Now().UTC()
 	p.startingSince = time.Time{}
 	// Reconcile the freshly published (unwarmed) endpoint to Starting under the
 	// new generation. Idempotent; the acquisition-return reconcile is the backstop.
-	p.reconcileRegistryLifecycleLocked(p.endpointGeneration)
+	p.reconcileRegistryLifecycleLocked(epoch)
 	p.mu.Unlock()
 	return nil
 }
@@ -1848,12 +1910,14 @@ func (p *LazyProxy) reapIdleBackend(now time.Time) {
 		_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 			p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed,
 			fmt.Sprintf("idle reaper lifecycle stop: %v", err))
+		p.publishReadinessInvalidation(gen, "failed")
 		p.mu.Lock()
 		p.reaping = false
 		p.mu.Unlock()
 		return
 	}
 	p.gate.Forget(p.inflightKey())
+	p.publishReadinessInvalidation(gen, "idle")
 	// Edge 1: route the terminal Configured write through the SINGLE authoritative
 	// lifecycle writer (reconcileRegistryLifecycleLocked) under p.mu instead of an
 	// out-of-band PutLifecycle. Post-teardown the derived state is Configured
@@ -1935,6 +1999,7 @@ func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 		p.reaping = true
 		p.endpoint = nil
 		p.endpointGeneration++
+		epoch := p.endpointGeneration
 		p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 		p.warmed = false
 		p.endpointPublishedAt = time.Time{}
@@ -1944,7 +2009,7 @@ func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 
 		_ = ep.Close()
 		p.resetDocRefs()
-		p.teardownWedgedLifecycle(fmt.Sprintf("backend never served a first response within %s", p.cfg.ColdStartMaxProbation))
+		p.teardownWedgedLifecycle(fmt.Sprintf("backend never served a first response within %s", p.cfg.ColdStartMaxProbation), epoch)
 		return
 	}
 	// Branch B — orphan Starting row with no endpoint.
@@ -1984,21 +2049,25 @@ func (p *LazyProxy) reapWedgedProbation(now time.Time) {
 	}
 	p.mu.Lock()
 	p.startingSince = time.Time{}
+	p.endpointGeneration++
+	epoch := p.endpointGeneration
+	p.lastWrittenLifecycle = ""
 	p.mu.Unlock()
 	p.resetDocRefs()
-	p.teardownWedgedLifecycle("backend never published an endpoint within " + p.cfg.ColdStartMaxProbation.String())
+	p.teardownWedgedLifecycle("backend never published an endpoint within "+p.cfg.ColdStartMaxProbation.String(), epoch)
 }
 
 // teardownWedgedLifecycle is the shared tail of reapWedgedProbation's two
 // branches: best-effort Stop the lifecycle, forget the gate, stamp Failed, and
 // clear the reaping flag.
-func (p *LazyProxy) teardownWedgedLifecycle(reason string) {
+func (p *LazyProxy) teardownWedgedLifecycle(reason string, epoch uint64) {
 	if err := p.cfg.Lifecycle.Stop(); err != nil {
 		fmt.Fprintf(daemonDiagWriter(), "warn: lazy_proxy: probation watchdog lifecycle stop: %v\n", err)
 	}
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed, reason)
+	p.publishReadinessInvalidation(epoch, "failed")
 	p.mu.Lock()
 	p.reaping = false
 	p.mu.Unlock()
@@ -2043,7 +2112,7 @@ func (p *LazyProxy) registryRowIsStarting() (bool, error) {
 // gen-guards every lifecycle mutation.
 func (p *LazyProxy) onSendFailure(gen uint64, err error) {
 	p.mu.Lock()
-	if p.reaping || p.endpointGeneration != gen {
+	if p.closed.Load() || p.reaping || p.endpointGeneration != gen {
 		p.mu.Unlock()
 		return
 	}
@@ -2053,6 +2122,7 @@ func (p *LazyProxy) onSendFailure(gen uint64, err error) {
 		p.endpoint = nil
 	}
 	p.endpointGeneration++
+	epoch := p.endpointGeneration
 	p.lastWrittenLifecycle = "" // Predicate 2: reset the shadow on the gen bump
 	p.warmed = false
 	p.endpointPublishedAt = time.Time{}
@@ -2076,9 +2146,17 @@ func (p *LazyProxy) onSendFailure(gen uint64, err error) {
 	p.gate.Forget(p.inflightKey())
 	_ = api.NewRegistry(p.cfg.RegistryPath).PutLifecycle(
 		p.cfg.WorkspaceKey, p.cfg.Language, api.LifecycleFailed, err.Error())
+	p.publishReadinessInvalidation(epoch, "failed")
 	p.mu.Lock()
 	p.reaping = false
 	p.mu.Unlock()
+}
+
+func (p *LazyProxy) onBackendExit(gen uint64) {
+	if gen == 0 {
+		return
+	}
+	p.onSendFailure(gen, errors.New("backend subprocess exited"))
 }
 
 // debounceWriteToolsCallTimestamp coalesces LastToolsCallAt writes to the

@@ -70,6 +70,8 @@ func newInstallCmdReal() *cobra.Command {
 	var reconcileMCPFront bool
 	var rollbackMCPFront bool
 	var upgrade bool
+	var terminateGUIForUpgrade bool
+	var stopGUIOwnedFleetForUpgrade bool
 	var check bool
 	var noClientConfig bool
 	c := &cobra.Command{
@@ -110,6 +112,12 @@ Prerequisites:
 
 See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if terminateGUIForUpgrade && !upgrade {
+				return fmt.Errorf("--terminate-gui-for-upgrade requires --upgrade")
+			}
+			if stopGUIOwnedFleetForUpgrade && (!upgrade || !terminateGUIForUpgrade) {
+				return fmt.Errorf("--stop-gui-owned-fleet-for-upgrade requires --upgrade and --terminate-gui-for-upgrade")
+			}
 			// A3 PR-2: in an INTERACTIVE terminal, a client-config write that
 			// hits a SYMLINKED destination prompts the operator [y/N] (default
 			// N) before following the symlink to its resolved target. The port
@@ -378,10 +386,14 @@ See also: status, restart, uninstall, rollback, scheduler upgrade.`,
 		"with --reconcile-mcp-front: reverse the most recent reconcile-mcp-front run "+
 			"(restores serena entries from their captured backups; removes/restores LSP router entries).")
 	c.Flags().BoolVar(&upgrade, "upgrade", false,
-		"apply the currently-running admitted Windows product pair through the managed supervisor transaction: "+
-			"stage/admit both VERSIONINFO identities, release the prior fleet, promote adapter/tasks/CUI, identity-bind readiness, and read back upgrade-receipt-v2 before the committed event. "+
+		"apply the currently-running admitted Windows Product through the managed supervisor transaction: "+
+			"stage/admit its sole VERSIONINFO and SHA-256 identity, persist pre-settlement recovery, release the prior fleet, promote the canonical product then exact-owned tasks, retire an admitted legacy adapter, prove successor readiness and cleanup, and read back upgrade-receipt-v3 before the committed event. "+
 			"Requires daemon-bearing supervisor intent and refuses fresh/legacy/unwired states before mutation. "+
 			"Run from a build.ps1 product binary, never from the canonical path.")
+	c.Flags().BoolVar(&terminateGUIForUpgrade, "terminate-gui-for-upgrade", false,
+		"with --upgrade only: after a held upgrade fence and exact identity checks, force-exit the incumbent GUI/tray; this may lose unsaved GUI-only work")
+	c.Flags().BoolVar(&stopGUIOwnedFleetForUpgrade, "stop-gui-owned-fleet-for-upgrade", false,
+		"with --upgrade and --terminate-gui-for-upgrade only: permit a verified GUI-child Job-bound supervisor fleet stop after V3 recovery preimage readback")
 	c.Flags().BoolVar(&check, "check", false,
 		"print the readiness report for --server (missing dependencies/launchers as blockers, "+
 			"unset optional secrets as advisories) and exit WITHOUT installing or mutating anything")
@@ -895,6 +907,11 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 				curExe, version)
 		}
 	}
+	if upgradeGUIRequested(cmd) {
+		// The Windows fenced adapter proves and settles the exact GUI generation.
+		// All other preflight gates above remain unchanged.
+		return curExe, target, nil
+	}
 
 	guiProcs, guiErr := findRunningGUIsOnTarget(a, target)
 	if guiErr != nil {
@@ -917,6 +934,22 @@ func runInstallUpgradePreflightGuards(cmd *cobra.Command) (curExe, target string
 			target, strings.Join(pids, ", "))
 	}
 	return curExe, target, nil
+}
+
+func upgradeGUIRequested(cmd *cobra.Command) bool {
+	if cmd == nil || cmd.Flags().Lookup("terminate-gui-for-upgrade") == nil {
+		return false
+	}
+	requested, err := cmd.Flags().GetBool("terminate-gui-for-upgrade")
+	return err == nil && requested
+}
+
+func upgradeGUIOwnedFleetStopRequested(cmd *cobra.Command) bool {
+	if cmd == nil || cmd.Flags().Lookup("stop-gui-owned-fleet-for-upgrade") == nil {
+		return false
+	}
+	requested, err := cmd.Flags().GetBool("stop-gui-owned-fleet-for-upgrade")
+	return err == nil && requested
 }
 
 // findRunningGUIsOnTargetFn is the production seam for

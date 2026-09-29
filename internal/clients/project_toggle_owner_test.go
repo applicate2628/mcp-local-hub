@@ -5,10 +5,10 @@
 //
 //   - ProjectToggleOwner dispatch: (client, scope) → the right write owner; the
 //     GUI never re-derives this mapping.
-//   - ToggleProjectObjectMember: enable adds the member under the client's
-//     section key (mcpServers for cursor/claude, servers for vscode); disable
-//     removes it. Comments/unrelated keys preserved (hujson). NEVER touches the
-//     adapter GLOBAL paths — it writes the supplied PROJECT config path.
+//   - ToggleProjectObjectMember: enable adds the member under the writable
+//     client's section key (mcpServers for cursor, servers for vscode); disable
+//     removes it. Read-only Claude/Codex rows refuse before I/O. Comments and
+//     unrelated keys are preserved (hujson). NEVER touches adapter GLOBAL paths.
 //
 // STATE-SAFETY: writes target a t.TempDir() project config path; the test
 // default WriteConfigFile (plain os.WriteFile) handles it. No HOME/state dir is
@@ -39,6 +39,7 @@ func TestProjectToggleOwner_Dispatch(t *testing.T) {
 		// STAYS in projectScopeRegistry for the scan/read path; only this WRITE
 		// classifier narrows.
 		{"claude-project-object-member-REJECTED", "claude-code", ScopeProjectObjectMember, OwnerUnsupported},
+		{"codex-project-object-member-REJECTED", "codex-cli", ScopeProjectObjectMember, OwnerUnsupported},
 		{"unknown-client-object-member", "emacs", ScopeProjectObjectMember, OwnerUnsupported},
 		{"claude-local-membership", "claude-code", ScopeClaudeLocalMembership, OwnerClaudeLocalMembership},
 		{"non-claude-local-membership-unsupported", "cursor", ScopeClaudeLocalMembership, OwnerUnsupported},
@@ -79,6 +80,10 @@ func TestProjectToggleOwner_ClaudeCodeObjectMemberRejected(t *testing.T) {
 		t.Fatalf("ProjectToggleOwner(claude-code, project-object-member) = %d, want OwnerUnsupported (%d) — destructive member-delete route must be closed",
 			got, OwnerUnsupported)
 	}
+	if got := ProjectToggleOwner("codex-cli", ScopeProjectObjectMember); got != OwnerUnsupported {
+		t.Fatalf("ProjectToggleOwner(codex-cli, project-object-member) = %d, want OwnerUnsupported (%d) — TOML must not enter JSON object-member writer",
+			got, OwnerUnsupported)
+	}
 
 	// Scan/read path UNAFFECTED: claude-code is still in the project-scope registry.
 	if projectScopeForClient("claude-code") == nil {
@@ -88,7 +93,7 @@ func TestProjectToggleOwner_ClaudeCodeObjectMemberRejected(t *testing.T) {
 	if !clientUsesApprovalArrayToggle("claude-code") {
 		t.Errorf("clientUsesApprovalArrayToggle(claude-code) = false, want true")
 	}
-	for _, c := range []string{"cursor", "vscode", "emacs", ""} {
+	for _, c := range []string{"cursor", "vscode", "codex-cli", "emacs", ""} {
 		if clientUsesApprovalArrayToggle(c) {
 			t.Errorf("clientUsesApprovalArrayToggle(%q) = true, want false (only claude-code is approval-array-gated)", c)
 		}
@@ -119,7 +124,6 @@ func TestToggleProjectObjectMember_AddRemove(t *testing.T) {
 	}{
 		{"cursor", filepath.Join(".cursor", "mcp.json"), "mcpServers"},
 		{"vscode", filepath.Join(".vscode", "mcp.json"), "servers"},
-		{"claude-code", ".mcp.json", "mcpServers"},
 	}
 	for _, c := range cases {
 		t.Run(c.client, func(t *testing.T) {
@@ -151,6 +155,52 @@ func TestToggleProjectObjectMember_AddRemove(t *testing.T) {
 			}
 			if err := ToggleProjectObjectMember(c.client, cfg, "srv", nil, false); err != nil {
 				t.Errorf("idempotent re-disable errored: %v", err)
+			}
+		})
+	}
+}
+
+// Catches the direct writer treating every supported scan row as JSON write
+// authority. Both enable and disable must refuse before config/lock mutation.
+func TestToggleProjectObjectMember_ReadOnlyScopesRefuseBeforeIO(t *testing.T) {
+	for _, tc := range []struct {
+		client  string
+		relFile string
+		bytes   []byte
+	}{
+		{client: "claude-code", relFile: ".mcp.json", bytes: []byte("{\n  \"mcpServers\": {\"srv\": {\"command\": \"original\"}}\n}\n")},
+		{client: "codex-cli", relFile: filepath.Join(".codex", "config.toml"), bytes: []byte("[mcp_servers.srv]\ncommand = 'original'\n")},
+	} {
+		t.Run(tc.client, func(t *testing.T) {
+			root := t.TempDir()
+			configPath := filepath.Join(root, tc.relFile)
+			if err := os.MkdirAll(filepath.Dir(configPath), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(configPath, tc.bytes, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, operation := range []struct {
+				name   string
+				enable bool
+				value  any
+			}{
+				{name: "enable", enable: true, value: map[string]any{"command": "replacement"}},
+				{name: "disable"},
+			} {
+				t.Run(operation.name, func(t *testing.T) {
+					err := ToggleProjectObjectMember(tc.client, configPath, "srv", operation.value, operation.enable)
+					if err == nil {
+						t.Fatal("ToggleProjectObjectMember returned nil, want capability refusal")
+					}
+					got, readErr := os.ReadFile(configPath)
+					if readErr != nil || string(got) != string(tc.bytes) {
+						t.Fatalf("config changed/read: read=%v before=%q after=%q", readErr, tc.bytes, got)
+					}
+					if _, statErr := os.Stat(configPath + ".lock"); !os.IsNotExist(statErr) {
+						t.Fatalf("adjacent lock created before refusal: %v", statErr)
+					}
+				})
 			}
 		})
 	}

@@ -193,7 +193,10 @@ func commandSettlementV1(operation CommandOperationV1, commitState string, rows 
 }
 
 func freezeInstallBindingExpectations(plan *Plan, server, relayExePath string) ([]bindingExpectationV1, error) {
-	allClients := clients.AllClients()
+	return freezeInstallBindingExpectationsFromClients(plan, server, relayExePath, clients.AllClients())
+}
+
+func freezeInstallBindingExpectationsFromClients(plan *Plan, server, relayExePath string, allClients map[string]clients.Client) ([]bindingExpectationV1, error) {
 	expectations := make([]bindingExpectationV1, 0, len(plan.ClientUpdates))
 	for _, update := range plan.ClientUpdates {
 		client := allClients[update.Client]

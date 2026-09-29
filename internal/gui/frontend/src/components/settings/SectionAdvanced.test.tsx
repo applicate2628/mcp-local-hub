@@ -56,7 +56,11 @@ function deferred<T>() {
 }
 
 describe("SectionAdvanced", () => {
-  beforeEach(() => vi.restoreAllMocks());
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
+  });
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();
@@ -184,6 +188,86 @@ describe("SectionAdvanced", () => {
     expect(onDirty.mock.calls.map(([dirty]) => dirty)).toEqual([false, true, false]);
   });
 
+  it("requires an explicit Restart confirmation after first click, Cancel, or Escape", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = typeof input === "string" ? input : input.toString();
+      return new Response(JSON.stringify(url === "/api/supervisor/restart"
+        ? { killed_pid: 100, killed: true, spawned_pid: 101, spawned: true }
+        : { enabled: false }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+    const restartPosts = () => fetchSpy.mock.calls.filter(([input, init]) =>
+      String(input) === "/api/supervisor/restart" && init?.method === "POST");
+    const view = render(<SectionAdvanced snapshot={portSnap()} />);
+    const restartButton = view.getByRole("button", { name: "Restart supervisor now" });
+
+    restartButton.focus();
+    await userEvent.setup().keyboard("{Enter}");
+    expect((view.getByTestId("advanced-restart-confirm") as HTMLDialogElement).open).toBe(true);
+    expect(view.getByText("Restart supervisor?")).toBeTruthy();
+    expect(restartPosts()).toHaveLength(0);
+
+    fireEvent.click(view.getByTestId("advanced-restart-confirm-cancel"));
+    expect(view.queryByTestId("advanced-restart-confirm")).toBeNull();
+    expect(restartPosts()).toHaveLength(0);
+
+    fireEvent.click(restartButton);
+    fireEvent(view.getByTestId("advanced-restart-confirm"), new Event("cancel", { cancelable: true }));
+    expect(view.queryByTestId("advanced-restart-confirm")).toBeNull();
+    expect(restartPosts()).toHaveLength(0);
+
+    fireEvent.click(restartButton);
+    fireEvent.click(view.getByTestId("advanced-restart-confirm-confirm"));
+    await waitFor(() => expect(restartPosts()).toHaveLength(1));
+    await waitFor(() => expect(view.queryByTestId("advanced-restart-confirm")).toBeNull());
+    expect(view.getByRole("status").textContent).toContain("Supervisor restart requested.");
+  });
+
+  it("keeps Restart keyboard focus in the dialog and returns it to the trigger after each close", async () => {
+    stubRelaxFetch();
+    const restartSpy = vi.spyOn(appApi, "restartSupervisor").mockResolvedValue({
+      killed_pid: 100,
+      killed: true,
+      spawned_pid: 101,
+      spawned: true,
+    });
+    const view = render(<SectionAdvanced snapshot={portSnap()} />);
+    const trigger = view.getByRole("button", { name: "Restart supervisor now" });
+
+    trigger.focus();
+    fireEvent.click(trigger);
+    let dialog = view.getByTestId("advanced-restart-confirm");
+    let cancel = view.getByTestId("advanced-restart-confirm-cancel");
+    let confirm = view.getByTestId("advanced-restart-confirm-confirm");
+    cancel.focus();
+    fireEvent.keyDown(cancel, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(confirm);
+    fireEvent.keyDown(confirm, { key: "Tab" });
+    expect(document.activeElement).toBe(cancel);
+
+    fireEvent.click(cancel);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(restartSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    dialog = view.getByTestId("advanced-restart-confirm");
+    cancel = view.getByTestId("advanced-restart-confirm-cancel");
+    cancel.focus();
+    fireEvent(dialog, new Event("cancel", { cancelable: true }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(restartSpy).not.toHaveBeenCalled();
+
+    fireEvent.click(trigger);
+    confirm = view.getByTestId("advanced-restart-confirm-confirm");
+    confirm.focus();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(restartSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(view.queryByTestId("advanced-restart-confirm")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
   it("blocks a forced stale Restart after same-task port input", async () => {
     stubRelaxFetch();
     const putSpy = vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
@@ -205,6 +289,25 @@ describe("SectionAdvanced", () => {
     expect(putSpy).not.toHaveBeenCalled();
   });
 
+  it("rechecks a port draft at Confirm time and sends no restart request", async () => {
+    stubRelaxFetch();
+    const restartSpy = vi.spyOn(appApi, "restartSupervisor").mockResolvedValue({
+      killed_pid: 100,
+      killed: true,
+      spawned_pid: 101,
+      spawned: true,
+    });
+    const view = render(<SectionAdvanced snapshot={portSnap()} />);
+    fireEvent.click(view.getByRole("button", { name: "Restart supervisor now" }));
+    const input = view.getByRole("spinbutton", { name: /MCP front port/ });
+    fireEvent.input(input, { target: { value: "9142" } });
+    fireEvent.click(view.getByTestId("advanced-restart-confirm-confirm"));
+
+    expect(restartSpy).not.toHaveBeenCalled();
+    await waitFor(() => expect(view.queryByTestId("advanced-restart-confirm")).toBeNull());
+    expect((view.getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("blocks a forced stale Restart while the port PUT is unresolved", async () => {
     stubRelaxFetch();
     const put = deferred<void>();
@@ -215,16 +318,16 @@ describe("SectionAdvanced", () => {
       spawned_pid: 101,
       spawned: true,
     });
-    const { getByRole } = render(<SectionAdvanced snapshot={portSnap()} />);
+    const { getByRole, getByTestId } = render(<SectionAdvanced snapshot={portSnap()} />);
     const input = getByRole("spinbutton", { name: /MCP front port/ }) as HTMLInputElement;
     const restart = getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
 
+    fireEvent.click(restart);
     fireEvent.input(input, { target: { value: "9142" } });
     await waitFor(() => expect((getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(getByRole("button", { name: "Save" }));
     await waitFor(() => expect(putSpy).toHaveBeenCalledTimes(1));
-    restart.disabled = false;
-    fireEvent.click(restart);
+    fireEvent.click(getByTestId("advanced-restart-confirm-confirm"));
     expect(restartSpy).not.toHaveBeenCalled();
     put.resolve(undefined);
   });
@@ -234,13 +337,14 @@ describe("SectionAdvanced", () => {
     const restart = deferred<Awaited<ReturnType<typeof appApi.restartSupervisor>>>();
     const restartSpy = vi.spyOn(appApi, "restartSupervisor").mockReturnValue(restart.promise);
     const putSpy = vi.spyOn(api, "putSetting").mockResolvedValue(undefined);
-    const { getByRole } = render(<SectionAdvanced snapshot={portSnap()} />);
+    const { getByRole, getByTestId } = render(<SectionAdvanced snapshot={portSnap()} />);
     const input = getByRole("spinbutton", { name: /MCP front port/ }) as HTMLInputElement;
     const save = getByRole("button", { name: "Save" }) as HTMLButtonElement;
     const reset = getByRole("button", { name: "Reset" }) as HTMLButtonElement;
     const restartButton = getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
 
     fireEvent.click(restartButton);
+    fireEvent.click(getByTestId("advanced-restart-confirm-confirm"));
     expect(restartSpy).toHaveBeenCalledTimes(1);
     expect(input.disabled).toBe(true);
 
@@ -386,7 +490,7 @@ describe("SectionAdvanced", () => {
       spawned_pid: 101,
       spawned: true,
     });
-    const { getByRole } = render(<SectionAdvanced snapshot={portSnap()} />);
+    const { getByRole, getByTestId } = render(<SectionAdvanced snapshot={portSnap()} />);
     const input = getByRole("spinbutton", { name: /MCP front port/ }) as HTMLInputElement;
     const restart = getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
 
@@ -395,6 +499,8 @@ describe("SectionAdvanced", () => {
     fireEvent.click(getByRole("button", { name: "Reset" }));
     await waitFor(() => expect(restart.disabled).toBe(false));
     fireEvent.click(restart);
+    expect(restartSpy).not.toHaveBeenCalled();
+    fireEvent.click(getByTestId("advanced-restart-confirm-confirm"));
 
     await waitFor(() => expect(restartSpy).toHaveBeenCalledTimes(1));
     expect(putSpy).not.toHaveBeenCalled();
@@ -404,15 +510,53 @@ describe("SectionAdvanced", () => {
     stubRelaxFetch();
     const restart = deferred<Awaited<ReturnType<typeof appApi.restartSupervisor>>>();
     const restartSpy = vi.spyOn(appApi, "restartSupervisor").mockReturnValue(restart.promise);
-    const { getByRole } = render(<SectionAdvanced snapshot={portSnap()} />);
+    const { getByRole, getByTestId } = render(<SectionAdvanced snapshot={portSnap()} />);
     const button = getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
 
     fireEvent.click(button);
+    const confirm = getByTestId("advanced-restart-confirm-confirm") as HTMLButtonElement;
+    fireEvent.click(confirm);
+    confirm.disabled = false;
+    fireEvent.click(confirm);
     button.disabled = false;
     fireEvent.click(button);
 
     expect(restartSpy).toHaveBeenCalledTimes(1);
     restart.resolve({ killed_pid: 100, killed: true, spawned_pid: 101, spawned: true });
+  });
+
+  it("keeps a partial restart result inline and restores the Restart control", async () => {
+    stubRelaxFetch();
+    vi.spyOn(appApi, "restartSupervisor").mockResolvedValue({
+      killed_pid: 100,
+      killed: true,
+      spawned_pid: 0,
+      spawned: false,
+      per_step_error: { spawn: "permission denied" },
+    });
+    const view = render(<SectionAdvanced snapshot={portSnap()} />);
+    const restartButton = view.getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
+
+    fireEvent.click(restartButton);
+    fireEvent.click(view.getByTestId("advanced-restart-confirm-confirm"));
+
+    await waitFor(() => expect(view.getByRole("alert").textContent).toContain("Restart incomplete: spawn: permission denied"));
+    expect(view.queryByTestId("advanced-restart-confirm")).toBeNull();
+    expect(restartButton.disabled).toBe(false);
+  });
+
+  it("keeps a rejected restart error inline and restores the Restart control", async () => {
+    stubRelaxFetch();
+    vi.spyOn(appApi, "restartSupervisor").mockRejectedValue(new Error("restart transport failed"));
+    const view = render(<SectionAdvanced snapshot={portSnap()} />);
+    const restartButton = view.getByRole("button", { name: "Restart supervisor now" }) as HTMLButtonElement;
+
+    fireEvent.click(restartButton);
+    fireEvent.click(view.getByTestId("advanced-restart-confirm-confirm"));
+
+    await waitFor(() => expect(view.getByRole("alert").textContent).toContain("restart transport failed"));
+    expect(view.queryByTestId("advanced-restart-confirm")).toBeNull();
+    expect(restartButton.disabled).toBe(false);
   });
 });
 

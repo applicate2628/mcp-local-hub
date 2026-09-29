@@ -69,6 +69,15 @@ func readProviderInstallPhase(manifestName string) (string, error) {
 	return record.Phase, nil
 }
 
+func providerInstallPhaseMissing(manifestName string) bool {
+	path, err := providerInstallPhasePath(manifestName)
+	if err != nil {
+		return false
+	}
+	_, err = os.Lstat(path)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 func providerInstallPhaseIsNotStarted(manifestName string) bool {
 	phase, err := readProviderInstallPhase(manifestName)
 	return err == nil && (phase == providerInstallPhaseNotStarted || phase == providerInstallPhaseRecoveryClaimed)
@@ -205,7 +214,14 @@ func providerInstallNeverStarted(rec *AdoptProvenanceRecord) (bool, error) {
 		}
 		phase, err := readProviderInstallPhase(rec.ManifestName)
 		if err != nil {
-			return err
+			if current.ProviderSource.ManagedInstallState != ProviderManagedInstallPreInstall ||
+				!providerInstallPhaseMissing(rec.ManifestName) {
+				return err
+			}
+			if err := writeProviderInstallPhase(rec.ManifestName, providerInstallPhaseNotStarted); err != nil {
+				return err
+			}
+			phase = providerInstallPhaseNotStarted
 		}
 		switch phase {
 		case providerInstallPhaseRecoveryClaimed:

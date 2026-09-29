@@ -5,6 +5,8 @@ package scheduler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
@@ -63,6 +65,44 @@ func TestEntrypointTaskTxnPreservesRawXMLOutsideCommand(t *testing.T) {
 		if !bytes.Equal(got, before[name]) {
 			t.Fatalf("task %s restore is not byte-exact\n got: %s\nwant: %s", name, got, before[name])
 		}
+	}
+}
+
+func TestEntrypointTaskTxnDigestUsesSortedCanonicalNamesAndExactLiveXML(t *testing.T) {
+	const (
+		prior   = `C:\mcp\mcphub-windowless.exe`
+		product = `C:\mcp\mcphub.exe`
+	)
+	before := map[string][]byte{
+		`\mcp-local-hub-zeta`:  taskXML(`\mcp-local-hub-zeta`, "test-user", prior, "gui", "zeta"),
+		`\mcp-local-hub-alpha`: taskXML(`\mcp-local-hub-alpha`, "test-user", prior, "supervise", "alpha"),
+	}
+	backend := newEntrypointTaskBackendFake(before, "test-user")
+	txn, err := beginOwnedEntrypointTaskTxnWith(context.Background(), t.TempDir()+`\entrypoint.lock`, prior, product, backend, "test-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = txn.Close() })
+	if err := txn.InventoryExport(); err != nil {
+		t.Fatal(err)
+	}
+	if err := txn.RewriteCommand(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := txn.VerifyRuntimeSHA256()
+	if err != nil {
+		t.Fatal(err)
+	}
+	alpha, _ := backend.ExportXML(`\mcp-local-hub-alpha`)
+	zeta, _ := backend.ExportXML(`\mcp-local-hub-zeta`)
+	alphaSHA, zetaSHA := sha256.Sum256(alpha), sha256.Sum256(zeta)
+	canonicalJSON := fmt.Sprintf(
+		`[{"task_name":"\\mcp-local-hub-alpha","xml_sha256":"%s"},{"task_name":"\\mcp-local-hub-zeta","xml_sha256":"%s"}]`,
+		hex.EncodeToString(alphaSHA[:]), hex.EncodeToString(zetaSHA[:]),
+	)
+	wantSHA := sha256.Sum256([]byte(canonicalJSON))
+	if want := hex.EncodeToString(wantSHA[:]); got != want {
+		t.Fatalf("task-set digest=%s want=%s input=%s", got, want, canonicalJSON)
 	}
 }
 

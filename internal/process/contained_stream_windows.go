@@ -13,10 +13,11 @@ import (
 )
 
 type windowsContainedChild struct {
-	cmd     *exec.Cmd
-	job     *Job
-	process windows.Handle
-	thread  windows.Handle
+	cmd      *exec.Cmd
+	job      *Job
+	process  windows.Handle
+	thread   windows.Handle
+	original containedJobOriginal
 }
 
 func newPlatformContainedChild(cmd *exec.Cmd) (containedChild, error) {
@@ -62,6 +63,15 @@ func (c *windowsContainedChild) start(
 	}
 	if cmd.Path == "" {
 		return fixedContainedError(ContainedStageStart, errors.New("empty command path"))
+	}
+	// The Job is fresh and dedicated to this launch. Bind the original process
+	// handle to that empty Job before any child could have entered it.
+	before, err := c.job.queryAccounting()
+	if err != nil {
+		return fixedContainedError(ContainedStageContainment, fmt.Errorf("prelaunch Job accounting: %w", err))
+	}
+	if before.TotalProcesses != 0 || before.ActiveProcesses != 0 {
+		return fixedContainedError(ContainedStageContainment, errors.New("contained Job was not empty before launch"))
 	}
 	if len(cmd.Args) == 0 {
 		cmd.Args = []string{cmd.Path}
@@ -151,6 +161,7 @@ func (c *windowsContainedChild) start(
 	if pi.Process == 0 {
 		return fixedContainedError(ContainedStageStart, errors.New("CreateProcess returned no process handle"))
 	}
+	c.original = containedJobOriginal{job: c.job, handle: pi.Process, pid: pi.ProcessId, atCreate: true}
 	return nil
 }
 
@@ -180,9 +191,9 @@ func (c *windowsContainedChild) wait() containedWaitResult {
 
 func (c *windowsContainedChild) terminate(timeoutMs uint32) error {
 	if c == nil || c.job == nil {
-		return nil
+		return &JobTerminationProofError{Stage: "invalid_job", Cause: errors.New("missing contained Job")}
 	}
-	return c.job.TerminateAll(timeoutMs)
+	return c.job.terminateForContained(timeoutMs, c.original)
 }
 
 func (c *windowsContainedChild) close() error {

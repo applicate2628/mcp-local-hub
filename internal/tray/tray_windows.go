@@ -69,6 +69,8 @@ func runChildImpl(r io.Reader, w io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("tray child init: %w", err)
 	}
+	stopTestControl := startTestTrayControl(tc)
+	defer stopTestControl()
 	// Cleanup is wrapped in a function literal so a panic on the
 	// pump thread still fires NIM_DELETE and frees handles. That's
 	// the difference between a clean exit and a ghost icon left in
@@ -170,7 +172,6 @@ type trayChild struct {
 	// later changes.
 	encMu sync.Mutex
 	enc   *json.Encoder
-
 }
 
 // newTrayChild registers the window class, creates the message-only
@@ -400,9 +401,9 @@ func (tc *trayChild) reAddIcon() {
 // buildNID assembles the NOTIFYICONDATAW used by NIM_ADD/MODIFY.
 func (tc *trayChild) buildNID(state TrayState, hicon uintptr) NOTIFYICONDATAW {
 	nid := NOTIFYICONDATAW{
-		CbSize:           uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
-		HWnd:             tc.hwnd,
-		UID:              tc.uid,
+		CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
+		HWnd:   tc.hwnd,
+		UID:    tc.uid,
 		// NIF_SHOWTIP forces the standard tooltip on V4 (the Win7+
 		// callback ABI we use); without it, NOTIFYICONDATA docs say
 		// the standard tooltip is suppressed and SzTip never reaches
@@ -964,11 +965,11 @@ func (tc *trayChild) handleMessage(hwnd uintptr, msg uint32, wparam, lparam uint
 		postQuitMessage(0)
 		return 0
 
-	// WM_COMMAND case removed: TrackPopupMenu now uses TPM_NONOTIFY
-	// (see showPopupMenuAt), so menu selections come back ONLY via
-	// TPM_RETURNCMD. Without TPM_NONOTIFY, the shell sent BOTH
-	// channels for one click, firing each menu action twice
-	// (Codex bot review on PR #24 P1).
+		// WM_COMMAND case removed: TrackPopupMenu now uses TPM_NONOTIFY
+		// (see showPopupMenuAt), so menu selections come back ONLY via
+		// TPM_RETURNCMD. Without TPM_NONOTIFY, the shell sent BOTH
+		// channels for one click, firing each menu action twice
+		// (Codex bot review on PR #24 P1).
 	}
 	return defWindowProcW(hwnd, msg, wparam, lparam)
 }

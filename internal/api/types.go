@@ -18,6 +18,11 @@ type DaemonStatus struct {
 	Server   string `json:"server"`
 	Daemon   string `json:"daemon"`
 	TaskName string `json:"task_name"`
+	// Existing supervisor wire fields retained only for internal exact-generation
+	// admission. They are never added to public status JSON.
+	CommandInternal   string   `json:"-"`
+	ArgsInternal      []string `json:"-"`
+	StartedAtInternal string   `json:"-"`
 	// DisplayName is a human-readable label for the row, computed by
 	// ComputeDaemonDisplayName (the single owner of the presentation rule):
 	// "serena · <project>" for workspace serena, "<lang> @ <workspace>" for
@@ -44,6 +49,9 @@ type DaemonStatus struct {
 	PID              int                 `json:"pid,omitempty"`
 	RAMBytes         uint64              `json:"ram_bytes,omitempty"`
 	UptimeSec        int64               `json:"uptime_sec,omitempty"`
+	// CrashesInWindow is the current supervisor-owned in-memory crash count for
+	// the canonical respawn failure window. Zero is emitted intentionally.
+	CrashesInWindow int `json:"crashes_in_window"`
 	// OrphanPID is the Windows post-create orphan PID when the
 	// supervisor's best-effort kill failed during spawn. Operator-
 	// visible via `mcphub status --json` and the GUI Dashboard for

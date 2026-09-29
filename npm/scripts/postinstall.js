@@ -68,9 +68,14 @@
 "use strict";
 
 const { spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
-const { PACKAGE_BY_PLATFORM, binaryBasename } = require("../lib/platform-binary");
+const {
+  PACKAGE_BY_PLATFORM,
+  binaryBasename,
+  identityManifestBasename,
+} = require("../lib/platform-binary");
 
 const SETUP_FALLBACK = "run `mcphub setup` to update ~/.local/bin manually";
 
@@ -277,44 +282,65 @@ function canonicalize() {
   }
 
   if (process.platform === "win32") {
-    let windowlessPath;
+    const identityName = identityManifestBasename(process.platform);
+    let identityPath;
     try {
-      windowlessPath = require.resolve(`${pkg}/bin/mcphub-windowless.exe`);
+      identityPath = require.resolve(`${pkg}/bin/${identityName}`);
     } catch {
       notice(
-        `windowless adapter is missing for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+        `Windows product identity manifest is missing for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
       );
       return;
     }
-    let admitPath;
+    let identity;
     try {
-      admitPath = require.resolve(`${pkg}/bin/mcphub-pe-admit.exe`);
-    } catch {
+      identity = JSON.parse(fs.readFileSync(identityPath, "utf8"));
+    } catch (err) {
       notice(
-        `PE admission adapter is missing for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+        `Windows product identity manifest is invalid for "${key}" (${err.code || err.message}); ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
       );
       return;
     }
-    for (const [role, candidate] of [
-      ["cli", binPath],
-      ["windowless", windowlessPath],
-    ]) {
-      const admission = spawnSync(admitPath, [role, candidate], {
-        stdio: "inherit",
-        shell: false,
-        windowsHide: true,
-      });
-      if (admission.error || admission.signal || admission.status !== 0) {
-        const detail = admission.error
-          ? admission.error.code || admission.error.message
-          : admission.signal
-            ? `signal ${admission.signal}`
-            : `exit ${admission.status}`;
-        notice(
-          `PE admission rejected the ${role} platform binary (${detail}); ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
-        );
-        return;
-      }
+    if (identity.schema !== "windows-product-identity-v1") {
+      notice(
+        `Windows product identity manifest schema is unsupported for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
+    }
+    const expectedMachine = process.arch === "arm64" ? 0xaa64 : 0x8664;
+    const shapeValid =
+      identity.role === "product" &&
+      identity.filename === binName &&
+      identity.subsystem === 2 &&
+      identity.machine === expectedMachine &&
+      typeof identity.version === "string" &&
+      identity.version.length > 0 &&
+      typeof identity.commit === "string" &&
+      /^[0-9a-f]{40}$/.test(identity.commit) &&
+      typeof identity.build_date === "string" &&
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(identity.build_date) &&
+      typeof identity.sha256 === "string" &&
+      /^[0-9a-f]{64}$/.test(identity.sha256);
+    if (!shapeValid) {
+      notice(
+        `Windows product identity manifest fields are invalid for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
+    }
+    let actualHash;
+    try {
+      actualHash = crypto.createHash("sha256").update(fs.readFileSync(binPath)).digest("hex");
+    } catch (err) {
+      notice(
+        `could not hash the Windows platform binary for "${key}" (${err.code || err.message}); ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
+    }
+    if (actualHash !== identity.sha256) {
+      notice(
+        `Windows product identity manifest SHA-256 mismatch for "${key}"; ~/.local/bin left as-is — ${SETUP_FALLBACK}.`,
+      );
+      return;
     }
   }
 

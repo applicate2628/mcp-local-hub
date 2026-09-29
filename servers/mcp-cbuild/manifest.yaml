@@ -1,0 +1,36 @@
+name: mcp-cbuild
+description: "CMake preset, configure, build, test, workflow, clean, and optional vcpkg manifest tools."
+kind: global
+transport: stdio-bridge
+command: mcphub
+base_args: [cbuild]
+required_binaries: [cmake]
+
+daemons:
+  - name: default
+    port: 9143
+
+client_bindings:
+  - client: claude-code
+    daemon: default
+    url_path: /mcp
+  - client: codex-cli
+    daemon: default
+    url_path: /mcp
+  - client: cursor
+    daemon: default
+    url_path: /mcp
+  - client: vscode
+    daemon: default
+    url_path: /mcp
+  - client: gemini-cli
+    daemon: default
+    url_path: /mcp
+  - client: qwen-cli
+    daemon: default
+    url_path: /mcp
+  - client: antigravity
+    daemon: default
+    url_path: /mcp
+
+weekly_refresh: false

@@ -93,9 +93,27 @@ export async function postDismiss(server: string): Promise<void> {
   throw new Error(`/api/dismiss: ${body?.error ?? resp.statusText}`);
 }
 
+export async function deleteDismiss(server: string): Promise<void> {
+  const resp = await fetch("/api/dismiss", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ server }),
+  });
+  if (resp.status === 204) return;
+  let body: { error?: string } | null = null;
+  try {
+    body = (await resp.json()) as { error?: string };
+  } catch {
+    // Non-JSON error body; fall through.
+  }
+  throw new Error(`/api/dismiss: ${body?.error ?? resp.statusText}`);
+}
+
 export interface AdoptRequest {
   entry: string;
   client: string;
+  project_source_root?: string;
+  project_source_preimage_token?: string;
   clients?: string[];
   name?: string;
   port?: number;
@@ -128,6 +146,7 @@ export interface AdoptPlan {
   SecretRoutedKeys: string[];
   ManifestYAML: string;
   symlink_targets: AdoptSymlinkTarget[];
+  project_source_preimage_token?: string;
 }
 
 export interface AdoptResult {
@@ -542,8 +561,10 @@ async function postResolveSymlink<T>(body: Record<string, unknown>): Promise<T> 
   } catch {
     // Non-JSON error body; fall through.
   }
-  const message = parsed?.error ?? resp.statusText ?? "unknown";
   const code = parsed?.code ?? `HTTP_${resp.status}`;
+  const message = resp.status === 500 && code === "WRITE_REFUSED"
+    ? "The symlink action was refused. Check the local Hub log for the exact cause; if strict mode is active, check the target directory permissions. Correct the cause, then retry this action."
+    : parsed?.error ?? resp.statusText ?? "unknown";
   throw new SymlinkWriteError(
     `/api/resolve-symlink-and-write [${code}]: ${message}`,
     code,

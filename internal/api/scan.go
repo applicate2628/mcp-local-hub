@@ -75,6 +75,9 @@ type ScanOpts struct {
 	// ReadinessRows is the one supervisor IPC snapshot supplied by the caller.
 	// Scan never performs a second process or MCP observation.
 	ReadinessRows []DaemonStatus
+	// ShadowWarningTracker is an optional long-lived notification owner. A nil
+	// tracker preserves one-shot scan warnings for CLI and direct callers.
+	ShadowWarningTracker *DiskShadowWarningTracker
 
 	// processSnapshot is a package-private deterministic snapshot input for
 	// scan tests. Production leaves it nil and captures exactly one OS snapshot.
@@ -797,9 +800,12 @@ func (a *API) ScanFrom(opts ScanOpts) (*ScanResult, error) {
 		mergeClientScanEntries(entries, clientEntries)
 	}
 
-	manifestNames, err := readManifestNames(opts.ManifestDir)
+	manifestNames, shadowWarnings, err := readManifestNamesWithShadowObservations(opts.ManifestDir)
 	if err != nil {
 		return nil, fmt.Errorf("manifests: %w", err)
+	}
+	for _, warning := range opts.ShadowWarningTracker.Complete(shadowWarnings) {
+		log.Printf("scan: %s", warning.Message)
 	}
 	// manifestCache holds each server's parsed manifest at most once for the
 	// lifetime of this ScanFrom call. Without it, manifestDaemonPorts below
@@ -1898,19 +1904,32 @@ func shapeWindsurfEntry(raw map[string]any) ClientEntry {
 	return scanClientEntry("stdio", cmd, raw)
 }
 
-// scanShadowWarnDir resolves the disk-fallback dir the embed-first scan path
-// (dir == "") inspects for a pre-existing embed-vs-disk collision. Package var
-// following the installShadowWarnDir seam idiom: production stays on
-// defaultManifestDir (exe-location-derived, not seedable); the embed-first warn
-// test points it at a temp dir and restores via t.Cleanup.
-var scanShadowWarnDir = defaultManifestDir
-
 // readManifestNames returns the set of available server names.
 // Empty dir selects the production path (embedded manifests union
-// on-disk defaultManifestDir). A non-empty dir restricts to that
+// canonical on-disk manifests). A non-empty dir restricts to that
 // directory only — used by tests to inject a hermetic manifest set.
 func readManifestNames(dir string) (map[string]bool, error) {
+	names, shadowWarnings, err := readManifestNamesWithShadowObservations(dir)
+	if err != nil {
+		return nil, err
+	}
+	for _, warning := range shadowWarnings {
+		log.Printf("scan: %s", warning.Message)
+	}
+	return names, nil
+}
+
+func readManifestNamesWithShadowObservations(dir string) (map[string]bool, []DiskShadowWarningObservation, error) {
 	names := map[string]bool{}
+	var shadowWarnings []DiskShadowWarningObservation
+	canonicalDir := ""
+	if dir == "" && manifestDirForTests() == "" {
+		var err error
+		canonicalDir, err = CanonicalManifestDir()
+		if err != nil {
+			return nil, nil, fmt.Errorf("resolve manifest root: %w", err)
+		}
+	}
 	// add registers a manifest name UNLESS it is a kind=companion manifest. A
 	// companion is a hub-managed NON-MCP process (e.g. the excalidraw canvas) and
 	// must never appear as an MCP server in classify / the Servers matrix /
@@ -1931,32 +1950,39 @@ func readManifestNames(dir string) (map[string]bool, error) {
 		// dir/name/manifest.yaml DIRECTLY (migrate.go — disk wins, embed is NOT
 		// consulted), so the disk manifest is actually USED there and the
 		// "ignored" warn would be false (bot PR #494 P3). The embed-first path
-		// shadows against scanShadowWarnDir(); embeddedDiskShadowWarning is
+		// shadows against the operation's resolved canonical directory;
+		// embeddedDiskShadowWarning is
 		// override-symmetric, so hermetic scans under MCPHUB_MANIFEST_DIR_OVERRIDE
 		// stay quiet regardless.
 		if dir == "" {
-			if warn := embeddedDiskShadowWarning(n, scanShadowWarnDir()); warn != "" {
-				log.Printf("scan: %s", warn)
+			if warning, ok := embeddedDiskShadowObservation(n, canonicalDir); ok {
+				shadowWarnings = append(shadowWarnings, warning)
 			}
 		}
 		names[n] = true
 	}
 	if dir == "" {
-		list, err := listManifestNamesEmbedFirst()
+		var list []string
+		var err error
+		if canonicalDir != "" {
+			list, err = listManifestNamesEmbedFirstFromDir(canonicalDir)
+		} else {
+			list, err = listManifestNamesEmbedFirst()
+		}
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		for _, n := range list {
 			add(n)
 		}
-		return names, nil
+		return names, shadowWarnings, nil
 	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return names, nil
+			return names, shadowWarnings, nil
 		}
-		return nil, err
+		return nil, nil, err
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
@@ -1966,7 +1992,7 @@ func readManifestNames(dir string) (map[string]bool, error) {
 			add(e.Name())
 		}
 	}
-	return names, nil
+	return names, shadowWarnings, nil
 }
 
 // scanManifestCache memoizes each server's parsed manifest for the lifetime
@@ -2351,7 +2377,7 @@ func (a *API) Scan() (*ScanResult, error) {
 	return a.ScanFrom(ScanOpts{
 		ConfigPaths: DefaultScanConfigPaths(),
 		// Empty ManifestDir → ScanFrom uses the embed-first resolution
-		// path. The on-disk defaultManifestDir stays available as a
+		// path. The on-disk canonical manifest root stays available as a
 		// secondary source for dev-checkout scenarios where a freshly-
 		// added manifest hasn't been compiled into the binary yet.
 		ManifestDir:   "",
@@ -2385,36 +2411,6 @@ func DefaultScanConfigPaths() map[string]string {
 	return out
 }
 
-// defaultManifestDir returns the path to `servers/` resolved against the
-// running binary's location. Two layouts supported:
-//   - binary and servers/ in the same directory (legacy / standalone install)
-//   - binary in bin/ and servers/ in bin/../ (standard Go project layout)
-//
-// If neither exists, returns the sibling path (exeDir/servers) without
-// consulting the current working directory. This avoids untrusted CWD-based
-// manifest resolution while preserving a deterministic on-disk location.
-func defaultManifestDir() string {
-	exe, err := os.Executable()
-	if err != nil {
-		// Fail closed to a deterministic, clearly invalid absolute-ish path
-		// rather than a CWD-relative location.
-		return filepath.Join(string(os.PathSeparator), "nonexistent", "mcphub", "servers")
-	}
-	exeDir := filepath.Dir(exe)
-	// Legacy: exe and servers/ at same level.
-	sibling := filepath.Join(exeDir, "servers")
-	if st, err := os.Stat(sibling); err == nil && st.IsDir() {
-		return sibling
-	}
-	// Standard: exe in bin/, servers/ one level up.
-	parent := filepath.Join(exeDir, "..", "servers")
-	if st, err := os.Stat(parent); err == nil && st.IsDir() {
-		return parent
-	}
-	// Last resort: deterministic path near the executable (not CWD).
-	return sibling
-}
-
 // ExtractManifestFromClient reads a stdio entry from the specified client
 // config and renders a draft manifest.yaml suitable for the GUI "Create
 // manifest" flow. The draft includes bindings for every supported managed
@@ -2440,6 +2436,7 @@ type extractedStdioEntry struct {
 	Env            map[string]string
 	ToolTimeoutSec int
 	Disabled       bool
+	URLPresent     bool
 }
 
 // Sentinels for adopt-relevant extractStdioEntryFromClient outcomes, so callers
@@ -2488,14 +2485,7 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 		if err != nil {
 			return extractedStdioEntry{}, err
 		}
-		var root map[string]any
-		if err := toml.Unmarshal(data, &root); err != nil {
-			return extractedStdioEntry{}, err
-		}
-		servers, _ := root["mcp_servers"].(map[string]any)
-		if servers != nil {
-			raw, _ = servers[serverName].(map[string]any)
-		}
+		return extractCodexStdioEntryFromBytes(data, serverName, codexStdioEntryGlobal)
 
 	case "cursor":
 		if opts.CursorConfigPath == "" {
@@ -2744,6 +2734,100 @@ func (a *API) extractStdioEntryFromClient(client, serverName string, opts ScanOp
 	}
 
 	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, ToolTimeoutSec: toolTimeoutSec, Disabled: disabled}, nil
+}
+
+type codexStdioEntryMode uint8
+
+const (
+	codexStdioEntryGlobal codexStdioEntryMode = iota
+	codexStdioEntryProject
+)
+
+// extractCodexStdioEntryFromBytes is the single TOML-byte parser for both the
+// historical global Codex source and a physically validated project snapshot.
+// Global mode intentionally preserves the former lenient extraction semantics;
+// project mode fails closed on malformed or ambiguous source data.
+func extractCodexStdioEntryFromBytes(data []byte, serverName string, mode codexStdioEntryMode) (extractedStdioEntry, error) {
+	var root map[string]any
+	if err := toml.Unmarshal(data, &root); err != nil {
+		return extractedStdioEntry{}, err
+	}
+	servers, _ := root["mcp_servers"].(map[string]any)
+	var raw map[string]any
+	if servers != nil {
+		raw, _ = servers[serverName].(map[string]any)
+	}
+	if raw == nil {
+		return extractedStdioEntry{}, fmt.Errorf("server %q not found in client %q config: %w", serverName, "codex-cli", ErrClientEntryNotPresent)
+	}
+
+	disabled := rawClientEntryDisabled(raw)
+	cmd, _ := raw["command"].(string)
+	if cmd == "" {
+		return extractedStdioEntry{}, fmt.Errorf("server %q in client %q has no `command` field — it is an HTTP-only or hub-managed entry, not user-configured stdio (run `mcphub demigrate %s` to restore the pre-migrate shape first if this server was migrated): %w", serverName, "codex-cli", serverName, ErrClientEntryNotStdio)
+	}
+	_, hasURL := raw["url"]
+	if mode == codexStdioEntryProject {
+		if hasURL {
+			return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q mixes `command` and `url`: %w", serverName, ErrClientEntryNotStdio)
+		}
+		if disabled {
+			return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q is disabled", serverName)
+		}
+	} else if mode != codexStdioEntryGlobal {
+		return extractedStdioEntry{}, fmt.Errorf("invalid Codex stdio entry mode %d", mode)
+	}
+
+	var args []string
+	if rawArgs, present := raw["args"]; present {
+		arr, ok := rawArgs.([]any)
+		if !ok {
+			if mode == codexStdioEntryProject {
+				return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q arguments must be an array of strings", serverName)
+			}
+		} else {
+			for index, value := range arr {
+				arg, ok := value.(string)
+				if !ok {
+					if mode == codexStdioEntryProject {
+						return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q argument %d is not a string", serverName, index)
+					}
+					continue
+				}
+				args = append(args, arg)
+			}
+		}
+	}
+
+	envMap := map[string]string{}
+	if rawEnv, present := raw["env"]; present {
+		envAny, ok := rawEnv.(map[string]any)
+		if !ok {
+			if mode == codexStdioEntryProject {
+				return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q environment must be a string map", serverName)
+			}
+		} else {
+			for key, value := range envAny {
+				envValue, ok := value.(string)
+				if !ok {
+					if mode == codexStdioEntryProject {
+						return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q environment value %q is not a string", serverName, key)
+					}
+					continue
+				}
+				envMap[key] = envValue
+			}
+		}
+	}
+
+	toolTimeoutSec, err := codexExtractToolTimeoutSec(raw)
+	if err != nil {
+		return extractedStdioEntry{}, err
+	}
+	if mode == codexStdioEntryProject && clients.IsMcphubBinary(cmd) && len(args) > 0 && args[0] == "relay" {
+		return extractedStdioEntry{}, fmt.Errorf("Codex project source entry %q is a mcphub-managed relay stdio: %w", serverName, ErrClientEntryHubRelay)
+	}
+	return extractedStdioEntry{Command: cmd, Args: args, Env: envMap, ToolTimeoutSec: toolTimeoutSec, Disabled: disabled, URLPresent: hasURL}, nil
 }
 
 func codexExtractToolTimeoutSec(raw map[string]any) (int, error) {

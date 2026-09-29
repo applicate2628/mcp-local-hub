@@ -1504,10 +1504,11 @@ export function DashboardScreen() {
 // "bulk-action" event stream so any trigger source — Dashboard click,
 // tray menu, future API client — produces the same visual feedback.
 //
-// Click handlers fire HTTP POST and return immediately; they do NOT
-// set local state. The visual state (Starting…/Started/Failed) flows
-// in via SSE. This is the ONE source of truth: backend is canonical,
-// UI is a projection.
+// Run all fires its HTTP POST immediately. Stop all first opens the shared
+// ConfirmModal; only its explicit confirmation fires the existing POST path.
+// Neither action writes outcome state here: visual state
+// (Starting…/Started/Failed) flows in via SSE. This is the ONE source of
+// truth: backend is canonical, UI is a projection.
 //
 // Mutual exclusion is preserved by the shared inflight prop — while
 // one bulk action is in flight, BOTH buttons are disabled. Codex bot
@@ -1519,6 +1520,8 @@ function BulkActionsRow(props: {
   inflight: BulkAction | null;
   outcome: BulkOutcome | null;
 }) {
+  const [stopConfirmOpen, setStopConfirmOpen] = useState(false);
+
   function labelFor(action: BulkAction, idle: string, working: string, done: string): string {
     if (props.inflight === action) return working;
     if (props.outcome && props.outcome.action === action) {
@@ -1542,7 +1545,7 @@ function BulkActionsRow(props: {
       </button>
       <button
         onClick={() => {
-          if (!lockDisabled) void props.stopAll();
+          if (!lockDisabled) setStopConfirmOpen(true);
         }}
         disabled={lockDisabled}
         class="btn btn-danger btn-stop"
@@ -1550,6 +1553,25 @@ function BulkActionsRow(props: {
       >
         {labelFor("stop", "Stop all", "Stopping…", "Stopped")}
       </button>
+      {stopConfirmOpen && (
+        <ConfirmModal
+          open={stopConfirmOpen}
+          title="Stop ALL running mcphub daemons?"
+          body={
+            <p class="m-0 text-sm">
+              Each daemon's subprocess tree will be tree-killed; clients reconnect on next request.
+            </p>
+          }
+          confirmLabel="Stop all"
+          danger
+          onConfirm={async () => {
+            setStopConfirmOpen(false);
+            await props.stopAll();
+          }}
+          onCancel={() => setStopConfirmOpen(false)}
+          testId="dashboard-stop-all-confirm"
+        />
+      )}
     </div>
   );
 }
@@ -1939,6 +1961,7 @@ function RecoveryActions(props: {
 }) {
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [restartBusy, setRestartBusy] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [msg, setMsg] = useState<{ text: string; kind: "ok" | "error" } | null>(null);
   // In normal mode the recovery buttons start collapsed so existing
   // Dashboard tests that do `document.querySelectorAll("button")` to
@@ -2012,13 +2035,30 @@ function RecoveryActions(props: {
       </button>
       <button
         type="button"
-        onClick={handleRestart}
+        onClick={() => {
+          if (!cleanupBusy && !restartBusy) setRestartConfirmOpen(true);
+        }}
         disabled={cleanupBusy || restartBusy}
         data-testid="recovery-restart-supervisor"
         title="Kill the current supervisor process and spawn a fresh one. Use when /api/status times out or returns 'IPC failed'."
       >
         {restartBusy ? "Restarting…" : "Restart supervisor"}
       </button>
+      {restartConfirmOpen && (
+        <ConfirmModal
+          open={restartConfirmOpen}
+          title="Restart the supervisor?"
+          body={<p class="m-0 text-sm">The current supervisor process will be stopped and a fresh one started. Connected clients may be briefly interrupted.</p>}
+          confirmLabel="Restart supervisor"
+          danger
+          onConfirm={async () => {
+            setRestartConfirmOpen(false);
+            await handleRestart();
+          }}
+          onCancel={() => setRestartConfirmOpen(false)}
+          testId="recovery-restart-confirm"
+        />
+      )}
       {msg && (
         <span
           class={msg.kind === "error" ? "error" : "info"}

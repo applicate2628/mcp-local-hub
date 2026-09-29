@@ -64,6 +64,13 @@ var failureRules = map[string]failureRule{
 	FailureReadinessTimeout:           {http.StatusGatewayTimeout, true},
 }
 
+// IsRetryableFailureID exposes the registry's retry classification without
+// duplicating failure policy in readiness consumers.
+func IsRetryableFailureID(failureID string) bool {
+	rule, ok := failureRules[failureID]
+	return ok && rule.retryable
+}
+
 var (
 	identifierV1 = regexp.MustCompile(`^[A-Za-z0-9._-]{0,128}$`)
 	legacyV1     = regexp.MustCompile(`^initialize negotiated unsupported protocol version \"(2024-11-05|2025-03-26|2025-06-18|2025-11-25)\"\n$`)

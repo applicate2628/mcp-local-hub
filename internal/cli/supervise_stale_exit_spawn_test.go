@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -95,9 +96,8 @@ func TestWaitGoroutine_StaleExitNoCrashPostNoClear(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	statePath := filepath.Join(tmpHome, "supervisor-state.json")
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, tracker, statePath, nil, "", crashCh, shutdown, nil, false,
+		events, tracker, statePath, nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	taskName := reconcileWiringTestTaskName
@@ -177,9 +177,8 @@ func TestWaitGoroutine_CurrentExitPostsWithGeneration(t *testing.T) {
 	tracker := NewDaemonRuntimeTracker()
 	statePath := filepath.Join(tmpHome, "supervisor-state.json")
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, tracker, statePath, nil, "", crashCh, shutdown, nil, false,
+		events, tracker, statePath, nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	taskName := reconcileWiringTestTaskName
@@ -215,5 +214,4 @@ func TestWaitGoroutine_CurrentExitPostsWithGeneration(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("current-generation exit did not post a crashEvent within 30s")
 	}
-	_ = shutdown
 }

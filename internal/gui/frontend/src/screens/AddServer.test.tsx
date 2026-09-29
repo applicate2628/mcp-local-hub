@@ -343,6 +343,52 @@ describe("AddServerScreen — readiness inline secrets", () => {
 });
 
 describe("AddServerScreen — create save follow-up edits", () => {
+  it("reports only the completed install after an empty 204 response", async () => {
+    mockFetch.mockImplementation((input: RequestInfo | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url.includes("/api/secrets")) {
+        return Promise.resolve(jsonResponse({ vault_state: "ok", secrets: [], manifest_errors: [] }));
+      }
+      if (url === "/api/server/readiness") {
+        return Promise.resolve(jsonResponse({ server: "demo", ready: true, requirements: [] }));
+      }
+      if (url === "/api/manifest/validate") {
+        return Promise.resolve(jsonResponse({ warnings: [] }));
+      }
+      if (url === "/api/manifest/create") {
+        return Promise.resolve(jsonResponse({ restart_required: false, hub_live: false }));
+      }
+      if (url.startsWith("/api/manifest/get")) {
+        return Promise.resolve(jsonResponse({
+          yaml: "name: 'demo'\nkind: global\ntransport: stdio-bridge\ncommand: 'node'\n",
+          hash: "hash-after-create",
+        }));
+      }
+      if (url.startsWith("/api/install")) {
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const user = userEvent.setup();
+    render(<AddServerScreen />);
+
+    await user.type(document.querySelector<HTMLInputElement>("#field-name")!, "demo");
+    await user.click(screen.getByRole("button", { name: /Command/i }));
+    await user.type(screen.getByLabelText("Command"), "node");
+    const installButton = document.querySelector<HTMLButtonElement>('[data-action="save-and-install"]')!;
+    await waitFor(() => expect(installButton.disabled).toBe(false));
+    await user.click(installButton);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("banner").textContent).toBe("Installed demo.");
+    });
+    const successText = screen.getByTestId("banner").textContent ?? "";
+    expect(successText).not.toMatch(/running/i);
+    expect(successText).not.toMatch(/next logon/i);
+    expect(successText).not.toMatch(/restart/i);
+  });
+
   it("uses manifest edit after a create-mode save has committed", async () => {
     const requests: Array<{ url: string; body?: string }> = [];
     mockFetch.mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {

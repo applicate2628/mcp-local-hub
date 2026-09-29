@@ -192,6 +192,10 @@ type supervisorIPCStatusDaemon struct {
 	CurrentPID    int      `json:"current_pid"`
 	StartedAt     string   `json:"started_at"`
 	IsMaintenance bool     `json:"is_maintenance"`
+	// CrashesInWindow is the supervisor's current in-memory crash count for the
+	// canonical respawn failure window. Zero is a valid observation and remains
+	// present on current producer payloads; a missing legacy field decodes to zero.
+	CrashesInWindow int `json:"crashes_in_window"`
 	// RAMBytes is the daemon's resident set size (working-set bytes),
 	// looked up by the supervisor from the live current_pid for Running
 	// daemons (internal/cli/supervise_status.go). Zero/omitted when RAM
@@ -318,9 +322,12 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 	rows := make([]DaemonStatus, 0, len(result.Daemons))
 	for _, d := range result.Daemons {
 		rows = append(rows, DaemonStatus{
-			Server:   d.Server,
-			Daemon:   d.Daemon,
-			TaskName: d.TaskName,
+			Server:            d.Server,
+			Daemon:            d.Daemon,
+			TaskName:          d.TaskName,
+			CommandInternal:   d.Command,
+			ArgsInternal:      append([]string(nil), d.Args...),
+			StartedAtInternal: d.StartedAt,
 			// DisplayName: human-readable label via the single owner
 			// (ComputeDaemonDisplayName). The supervisor descriptor already
 			// carries the workspace ROOT path (d.Workspace) for serena/LSP
@@ -355,6 +362,7 @@ func decodeSupervisorIPCStatusResult(raw json.RawMessage) ([]DaemonStatus, error
 			// the GUI Dashboard omits the RAM row in that case.
 			RAMBytes:             d.RAMBytes,
 			IsMaintenance:        d.IsMaintenance,
+			CrashesInWindow:      d.CrashesInWindow,
 			ReadinessObservation: d.ReadinessObservation.Decode(),
 		})
 	}

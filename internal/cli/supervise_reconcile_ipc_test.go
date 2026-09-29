@@ -34,6 +34,129 @@ func TestReconcileRequestTimeout_TargetUsesStartupSettlementBudget(t *testing.T)
 	}
 }
 
+func TestDispatchIPCRequest_ReconcileApplySchedulesMCPFrontRecoveryAfterResponse(t *testing.T) {
+	fx := newReconcileTestFixture(t, &api.SupervisorIntentFile{Version: 1})
+	installSchedulerListFake(t, nil)
+
+	conn := newFakeIPCConn()
+	recoveryStarted := make(chan bool, 2)
+	firstObservedNoWork := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	driver := startMCPFrontRouteActivationRecoveryDriver(context.Background(), nil, func(context.Context) {
+		call := calls.Add(1)
+		conn.mu.Lock()
+		responseWritten := conn.buf.Len() > 0
+		conn.mu.Unlock()
+		recoveryStarted <- responseWritten
+		if call == 1 {
+			close(firstObservedNoWork)
+			<-releaseFirst
+		}
+	})
+	t.Cleanup(driver.Stop)
+	fx.deps.mcpFrontRouteActivationRecovery = driver
+	driver.Trigger() // startup-ready pass observes no phase/work before the request.
+	select {
+	case <-firstObservedNoWork:
+	case <-time.After(2 * time.Second):
+		t.Fatal("startup recovery pass did not start")
+	}
+	if responseWritten := <-recoveryStarted; responseWritten {
+		t.Fatal("startup recovery unexpectedly observed a request response")
+	}
+
+	req := api.IPCRequest{ID: 588, Cmd: "reconcile", Args: map[string]any{"apply": true}}
+	if err := dispatchIPCRequest(conn, req, fx.deps); err != nil {
+		t.Fatalf("dispatch reconcile: %v", err)
+	}
+	close(releaseFirst)
+	select {
+	case responseWritten := <-recoveryStarted:
+		if !responseWritten {
+			t.Fatal("coalesced recovery started before the reconcile response was written")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("successful reconcile apply response was lost behind the active startup pass")
+	}
+}
+
+func TestMCPFrontRouteActivationRecoveryDriver_CoalescesActiveSignalsIntoOnePendingPass(t *testing.T) {
+	entered := make(chan int32, 3)
+	releaseFirst := make(chan struct{})
+	var calls atomic.Int32
+	driver := startMCPFrontRouteActivationRecoveryDriver(context.Background(), nil, func(context.Context) {
+		call := calls.Add(1)
+		entered <- call
+		if call == 1 {
+			<-releaseFirst
+		}
+	})
+	t.Cleanup(driver.Stop)
+
+	driver.Trigger()
+	select {
+	case call := <-entered:
+		if call != 1 {
+			t.Fatalf("first recovery call = %d, want 1", call)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("recovery driver did not start")
+	}
+	for i := 0; i < 8; i++ {
+		driver.Trigger()
+	}
+	close(releaseFirst)
+	select {
+	case call := <-entered:
+		if call != 2 {
+			t.Fatalf("coalesced pending recovery call = %d, want 2", call)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("signal arriving during active recovery was lost")
+	}
+	select {
+	case call := <-entered:
+		t.Fatalf("signal burst scheduled an unbounded extra recovery call %d", call)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("coalesced recovery calls = %d, want 2", got)
+	}
+}
+
+func TestMCPFrontRouteActivationRecoveryDriver_StopCancelsAndJoins(t *testing.T) {
+	entered := make(chan struct{})
+	exited := make(chan struct{})
+	driver := startMCPFrontRouteActivationRecoveryDriver(context.Background(), nil, func(ctx context.Context) {
+		close(entered)
+		<-ctx.Done()
+		close(exited)
+	})
+	driver.Trigger()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("recovery driver did not start")
+	}
+
+	stopReturned := make(chan struct{})
+	go func() {
+		driver.Stop()
+		close(stopReturned)
+	}()
+	select {
+	case <-stopReturned:
+	case <-time.After(2 * time.Second):
+		t.Fatal("driver Stop did not cancel and join the active recovery")
+	}
+	select {
+	case <-exited:
+	default:
+		t.Fatal("driver Stop returned before the recovery callback exited")
+	}
+}
+
 // newReconcileTestDeps constructs an ipcDispatchDeps suitable for
 // unit-testing handleReconcile. The controller carries a real
 // supervisorController + EventLoop so we can observe EvIntentUpdate
@@ -134,8 +257,19 @@ func newReconcileTestFixture(t *testing.T, intent *api.SupervisorIntentFile) *re
 		}
 	})
 	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	go loop.Run(ctx)
+	loopDone := make(chan struct{})
+	go func() {
+		defer close(loopDone)
+		loop.Run(ctx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-loopDone:
+		case <-time.After(2 * time.Second):
+			t.Error("reconcile fixture event loop did not settle")
+		}
+	})
 
 	ctrl = &supervisorController{
 		intentCache:         newIntentCache(),

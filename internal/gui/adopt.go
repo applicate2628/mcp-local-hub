@@ -16,12 +16,14 @@ import (
 )
 
 type adoptRequest struct {
-	Entry          string               `json:"entry"`
-	Client         string               `json:"client"`
-	Clients        []string             `json:"clients"`
-	Name           string               `json:"name"`
-	Port           int                  `json:"port"`
-	SymlinkConsent []adoptSymlinkTarget `json:"symlink_consent"`
+	Entry                      string               `json:"entry"`
+	Client                     string               `json:"client"`
+	Clients                    []string             `json:"clients"`
+	Name                       string               `json:"name"`
+	Port                       int                  `json:"port"`
+	SymlinkConsent             []adoptSymlinkTarget `json:"symlink_consent"`
+	ProjectSourceRoot          string               `json:"project_source_root,omitempty"`
+	ProjectSourcePreimageToken string               `json:"project_source_preimage_token,omitempty"`
 }
 
 type adoptSymlinkTarget struct {
@@ -34,7 +36,8 @@ type adoptSymlinkTarget struct {
 
 type adoptPlanResponse struct {
 	*api.AdoptPlan
-	SymlinkTargets []adoptSymlinkTarget `json:"symlink_targets"`
+	SymlinkTargets             []adoptSymlinkTarget `json:"symlink_targets"`
+	ProjectSourcePreimageToken string               `json:"project_source_preimage_token,omitempty"`
 }
 
 type adoptExecuteResponse struct {
@@ -66,8 +69,9 @@ func (s *Server) adoptPlanHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, adoptPlanResponse{
-		AdoptPlan:      plan,
-		SymlinkTargets: targets,
+		AdoptPlan:                  plan,
+		SymlinkTargets:             targets,
+		ProjectSourcePreimageToken: plan.ProjectSourcePreimageToken(),
 	})
 }
 
@@ -82,7 +86,16 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 		writeDecodeBodyError(w, err, "BAD_REQUEST")
 		return
 	}
-	plan, targets, err := buildGUIAdoptPlan(&req)
+	plan, err := buildGUIAdoptAPIPlan(&req)
+	if err != nil {
+		writeAdoptPlanError(w, err)
+		return
+	}
+	if err := plan.ValidateProjectSourcePreimageToken(req.ProjectSourcePreimageToken); err != nil {
+		writeGUIProjectAdoptTokenError(w, err)
+		return
+	}
+	targets, err := adoptSymlinkTargetsForPlan(&req, plan)
 	if err != nil {
 		writeAdoptPlanError(w, err)
 		return
@@ -127,21 +140,43 @@ func (s *Server) adoptHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func buildGUIAdoptPlan(req *adoptRequest) (*api.AdoptPlan, []adoptSymlinkTarget, error) {
-	plan, err := api.NewAPI().BuildAdoptPlan(api.AdoptOpts{
-		EntryName:    req.Entry,
-		Client:       req.Client,
-		ManifestName: req.Name,
-		Port:         req.Port,
-		Clients:      req.Clients,
-	})
+	plan, err := buildGUIAdoptAPIPlan(req)
 	if err != nil {
 		return nil, nil, err
 	}
-	targets, err := adoptSymlinkTargets(plan.AdoptClients)
+	targets, err := adoptSymlinkTargetsForPlan(req, plan)
 	if err != nil {
 		return nil, nil, err
 	}
 	return plan, targets, nil
+}
+
+func buildGUIAdoptAPIPlan(req *adoptRequest) (*api.AdoptPlan, error) {
+	plan, err := api.NewAPI().BuildAdoptPlan(api.AdoptOpts{
+		EntryName:              req.Entry,
+		Client:                 req.Client,
+		ManifestName:           req.Name,
+		Port:                   req.Port,
+		Clients:                req.Clients,
+		CodexProjectSourceRoot: req.ProjectSourceRoot,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return plan, nil
+}
+
+func adoptSymlinkTargetsForPlan(req *adoptRequest, plan *api.AdoptPlan) ([]adoptSymlinkTarget, error) {
+	clientNames := plan.AdoptClients
+	if req.ProjectSourceRoot != "" {
+		clientNames = make([]string, 0, len(plan.AdoptClients))
+		for _, clientName := range plan.AdoptClients {
+			if clientName != "codex-cli" {
+				clientNames = append(clientNames, clientName)
+			}
+		}
+	}
+	return adoptSymlinkTargets(clientNames)
 }
 
 func adoptSymlinkTargets(clientNames []string) ([]adoptSymlinkTarget, error) {
@@ -237,6 +272,21 @@ func adoptPlanErrorStatus(err error) (int, string) {
 		return http.StatusConflict, "NAME_CONFLICT"
 	}
 	return http.StatusBadRequest, "BAD_INPUT"
+}
+
+func writeGUIProjectAdoptTokenError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, clients.ErrCodexProjectSourcePreviewRequired):
+		writeAPIError(w, err, http.StatusConflict, "CODEX_PROJECT_SOURCE_PREVIEW_REQUIRED")
+	case errors.Is(err, clients.ErrCodexProjectSourceChanged):
+		writeAPIError(w, err, http.StatusConflict, "CODEX_PROJECT_SOURCE_CHANGED")
+	case errors.Is(err, api.ErrProjectAdoptSourcePreimageUnexpected):
+		writeAPIError(w, err, http.StatusBadRequest, "PROJECT_ADOPT_SOURCE_PREIMAGE_UNEXPECTED")
+	case errors.Is(err, api.ErrProjectAdoptRepeatStateInconsistent):
+		writeAPIError(w, err, http.StatusConflict, "PROJECT_ADOPT_REPEAT_STATE_INCONSISTENT")
+	default:
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "ADOPT_FAILED", "/api/adopt")
+	}
 }
 
 func adoptExecuteErrorStatus(err error) (int, string) {

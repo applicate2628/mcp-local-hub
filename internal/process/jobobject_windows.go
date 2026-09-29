@@ -44,7 +44,8 @@ var (
 // Windows the assignment fails — log + continue without the
 // orphan-protection guarantee rather than break the daemon.
 type Job struct {
-	handle windows.Handle
+	handle         windows.Handle
+	terminationOps *jobTerminationOps // per-Job fault seam; nil uses real Windows operations
 }
 
 // NewJob creates a Job Object with exactly the requested lifecycle limits.
@@ -183,6 +184,113 @@ type jobTerminateTimeoutError struct {
 	activeProcesses uint32
 }
 
+// JobTerminationProofError identifies the observation that prevented a timed
+// termination from proving every original Job member settled.
+type JobTerminationProofError struct {
+	Stage string
+	Cause error
+}
+
+func (e *JobTerminationProofError) Error() string {
+	return "Job timed termination proof " + e.Stage + ": " + e.Cause.Error()
+}
+func (e *JobTerminationProofError) Unwrap() error { return e.Cause }
+
+type jobProcessIDList struct {
+	Assigned uint32
+	PIDs     []uint32
+}
+
+type jobTerminationOps struct {
+	accounting   func(*Job) (jobObjectBasicAccountingInformation, error)
+	listMembers  func(*Job) (jobProcessIDList, error)
+	openProcess  func(uint32) (windows.Handle, error)
+	isMember     func(windows.Handle, *Job) (bool, error)
+	terminate    func(*Job) error
+	wait         func(windows.Handle) (uint32, error)
+	closeProcess func(windows.Handle) error
+	now          func() time.Time
+	sleep        func(time.Duration)
+}
+
+// containedJobOriginal is minted only by the at-create contained launcher.
+// The child owns the handle; Job may observe it but must never close it.
+type containedJobOriginal struct {
+	job      *Job
+	handle   windows.Handle
+	pid      uint32
+	atCreate bool
+	required bool
+}
+
+type jobTerminationObservation struct {
+	ObservedCurrentMembersExited bool
+	StrictOriginalsSettled       bool
+	strictFailure                error
+}
+
+func (j *Job) terminationOperations() jobTerminationOps {
+	var ops jobTerminationOps
+	if j.terminationOps != nil {
+		ops = *j.terminationOps
+	}
+	if ops.accounting == nil {
+		ops.accounting = (*Job).queryAccounting
+	}
+	if ops.listMembers == nil {
+		ops.listMembers = (*Job).queryProcessIDList
+	}
+	if ops.openProcess == nil {
+		ops.openProcess = func(pid uint32) (windows.Handle, error) {
+			return windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+		}
+	}
+	if ops.isMember == nil {
+		ops.isMember = jobMemberFromHandle
+	}
+	if ops.terminate == nil {
+		ops.terminate = func(job *Job) error { return windows.TerminateJobObject(job.handle, 1) }
+	}
+	if ops.wait == nil {
+		ops.wait = func(h windows.Handle) (uint32, error) { return windows.WaitForSingleObject(h, 0) }
+	}
+	if ops.closeProcess == nil {
+		ops.closeProcess = windows.CloseHandle
+	}
+	if ops.now == nil {
+		ops.now = time.Now
+	}
+	if ops.sleep == nil {
+		ops.sleep = time.Sleep
+	}
+	return ops
+}
+
+func (j *Job) queryAccounting() (jobObjectBasicAccountingInformation, error) {
+	var info jobObjectBasicAccountingInformation
+	var used uint32
+	err := windows.QueryInformationJobObject(j.handle, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), &used)
+	if err != nil {
+		return info, err
+	}
+	if used != 0 && used < uint32(unsafe.Sizeof(info)) {
+		return info, fmt.Errorf("short Job accounting response: %d", used)
+	}
+	return info, nil
+}
+
+func jobMemberFromHandle(process windows.Handle, job *Job) (bool, error) {
+	var member int32
+	r1, _, callErr := procIsProcessInJob.Call(uintptr(process), uintptr(job.handle), uintptr(unsafe.Pointer(&member)))
+	if r1 == 0 {
+		if callErr != nil && callErr != syscall.Errno(0) {
+			return false, callErr
+		}
+		return false, errors.New("IsProcessInJob failed")
+	}
+	return member != 0, nil
+}
+
 func (e *jobTerminateTimeoutError) Error() string {
 	return fmt.Sprintf(
 		"TerminateAll: timeout after %dms with %d processes still in job",
@@ -195,12 +303,8 @@ func (e *jobTerminateTimeoutError) Unwrap() error {
 	return ErrCleanupTimeout
 }
 
-// terminateAllPollInterval is how often TerminateAll re-queries
-// JobObjectBasicAccountingInformation while waiting for
-// ActiveProcesses to reach zero. 50ms is a balance between
-// responsiveness (sub-deadline tearing-down processes typically
-// exit in milliseconds on modern Windows) and syscall pressure
-// (each poll is one QueryInformationJobObject call).
+// terminateAllPollInterval caps the per-call adaptive Job proof polling
+// cadence. Short proof windows observe up to ten times before expiry.
 const terminateAllPollInterval = 50 * time.Millisecond
 
 // processIDs enumerates the PIDs currently assigned to the Job via
@@ -213,13 +317,17 @@ const terminateAllPollInterval = 50 * time.Millisecond
 // removes PIDs from the id-list as part of teardown; once kicked off
 // the list is unreliable.
 //
-// Returns a copy of the PID list; failures are surfaced to the
-// caller, which may proceed with ActiveProcesses-only polling as
-// a degraded fallback.
+// Returns a copy of the complete PID list; an incomplete or malformed
+// response is an error, never a proof of membership.
 func (j *Job) processIDs() ([]uint32, error) {
 	if j == nil || j.handle == 0 {
 		return nil, nil
 	}
+	list, err := j.queryProcessIDList()
+	return list.PIDs, err
+}
+
+func (j *Job) queryProcessIDList() (jobProcessIDList, error) {
 	// JOBOBJECT_BASIC_PROCESS_ID_LIST header is 8 bytes
 	// (NumberOfAssignedProcesses uint32 + NumberOfProcessIdsInList uint32),
 	// followed by NumberOfProcessIdsInList × uintptr PID entries.
@@ -242,10 +350,10 @@ func (j *Job) processIDs() ([]uint32, error) {
 				bufSize *= 2
 				continue
 			}
-			return nil, fmt.Errorf("QueryInformationJobObject(BasicProcessIdList): %w", err)
+			return jobProcessIDList{}, fmt.Errorf("QueryInformationJobObject(BasicProcessIdList): %w", err)
 		}
 		if retlen < 8 {
-			return nil, nil
+			return jobProcessIDList{}, fmt.Errorf("short Job member-list header: %d", retlen)
 		}
 		numAssigned := *(*uint32)(unsafe.Pointer(&buf[0]))
 		numInList := *(*uint32)(unsafe.Pointer(&buf[4]))
@@ -254,20 +362,27 @@ func (j *Job) processIDs() ([]uint32, error) {
 			bufSize *= 2
 			continue
 		}
+		if numAssigned != numInList || uint64(8)+uint64(numInList)*uint64(ptrSize) > uint64(retlen) || retlen > bufSize {
+			return jobProcessIDList{}, fmt.Errorf("malformed Job member-list header assigned=%d listed=%d bytes=%d", numAssigned, numInList, retlen)
+		}
 		out := make([]uint32, 0, numInList)
+		seen := make(map[uint32]struct{}, numInList)
 		for i := range numInList {
 			off := 8 + i*ptrSize
-			if off+ptrSize > retlen {
-				break
+			word := *(*uintptr)(unsafe.Pointer(&buf[off]))
+			if word == 0 || uint64(word) > uint64(^uint32(0)) {
+				return jobProcessIDList{}, fmt.Errorf("invalid Job member PID at index %d", i)
 			}
-			pid := uint32(*(*uintptr)(unsafe.Pointer(&buf[off])))
-			if pid > 0 {
-				out = append(out, pid)
+			pid := uint32(word)
+			if _, duplicate := seen[pid]; duplicate {
+				return jobProcessIDList{}, fmt.Errorf("duplicate Job member PID %d", pid)
 			}
+			seen[pid] = struct{}{}
+			out = append(out, pid)
 		}
-		return out, nil
+		return jobProcessIDList{Assigned: numAssigned, PIDs: out}, nil
 	}
-	return nil, fmt.Errorf("processIDs: buffer grew past safety limit")
+	return jobProcessIDList{}, fmt.Errorf("processIDs: buffer grew past safety limit")
 }
 
 // MemberPIDs is the exported wrapper around processIDs for callers
@@ -344,104 +459,224 @@ func (j *Job) MemberPIDs() ([]uint32, error) {
 // supervisor) would terminate every healthy daemon along with the
 // intended target. Bot P1 on PR #238 331b0df documented this hazard.
 func (j *Job) TerminateAll(timeoutMs uint32) error {
-	if j == nil || j.handle == 0 {
+	observation, err := j.terminateAllObserved(timeoutMs, containedJobOriginal{})
+	if err != nil {
+		return err
+	}
+	if timeoutMs == 0 || observation.StrictOriginalsSettled {
 		return nil
 	}
-	// Pre-enumerate PIDs AND open SYNCHRONIZE handles BEFORE
-	// TerminateJobObject — closing the PID-recycling race the bot
-	// flagged as P2 on PR #241. When a job member exits quickly
-	// after termination starts, Windows can recycle its PID to an
-	// unrelated process; opening the handle AFTER TerminateJobObject
-	// would then leave us waiting on the unrelated process and
-	// reporting a spurious timeout even though the orphan tree was
-	// successfully killed. The handles installed here are tied to
-	// the ORIGINAL kernel process objects via the SYNCHRONIZE handle
-	// (process object lives until its last handle is closed), so
-	// WaitForSingleObject reports the original process's signaled
-	// state regardless of PID recycling.
-	//
-	// Both processIDs() and per-PID OpenProcess failures are
-	// non-fatal: TerminateJobObject still fires, and the loop
-	// degrades to ActiveProcesses-only polling when the handles
-	// slice is empty (handlesAllSignaled returns true on empty).
-	pids, _ := j.processIDs()
-	handles := make([]windows.Handle, 0, len(pids))
-	for _, pid := range pids {
-		h, err := windows.OpenProcess(windows.SYNCHRONIZE, false, pid)
-		if err == nil {
-			handles = append(handles, h)
-		}
-	}
-	defer func() {
-		for _, h := range handles {
-			_ = windows.CloseHandle(h)
-		}
-	}()
-
-	if err := windows.TerminateJobObject(j.handle, 1); err != nil {
-		// ERROR_ACCESS_DENIED can occur if the job is already being
-		// torn down. Continue to the wait loop below - the goal (no
-		// processes remain in the job) may still be reached by the
-		// kernel's in-flight teardown.
-		if !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
-			return fmt.Errorf("TerminateJobObject: %w", err)
-		}
-	}
-	if timeoutMs == 0 {
-		// Caller opted out of wait. Behavior matches the pre-ADR
-		// stub: fire-and-return-immediately. Discouraged for the
-		// orphan-cleanup path (caller will race the still-tearing-
-		// down processes).
-		return nil
-	}
-
-	// Poll until ActiveProcesses == 0 AND every known process
-	// handle is signaled, OR the deadline elapses.
-	var info jobObjectBasicAccountingInformation
-	infoSize := uint32(unsafe.Sizeof(info))
-	deadline := time.Now().Add(time.Duration(timeoutMs) * time.Millisecond)
-	for {
-		var retlen uint32
-		err := windows.QueryInformationJobObject(
-			j.handle,
-			windows.JobObjectBasicAccountingInformation,
-			uintptr(unsafe.Pointer(&info)),
-			infoSize,
-			&retlen,
-		)
-		if err != nil {
-			return fmt.Errorf("QueryInformationJobObject(BasicAccounting): %w", err)
-		}
-		if info.ActiveProcesses == 0 && handlesAllSignaled(handles) {
-			return nil
-		}
-		if time.Now().After(deadline) {
-			return &jobTerminateTimeoutError{
-				timeoutMs:       timeoutMs,
-				activeProcesses: info.ActiveProcesses,
-			}
-		}
-		time.Sleep(terminateAllPollInterval)
-	}
+	return observation.strictFailure
 }
 
-// handlesAllSignaled returns true when every process handle in the
-// list is signaled (process fully exited per the kernel). An empty
-// list is trivially satisfied. WaitForSingleObject errors are
-// treated as "signaled" — the handle is gone, so the underlying
-// process must be too. The 0ms timeout makes this a pure state
-// query, not a block.
-func handlesAllSignaled(handles []windows.Handle) bool {
-	for _, h := range handles {
-		ev, err := windows.WaitForSingleObject(h, 0)
-		if err != nil {
-			continue
+// terminateForContained projects only current-tree quiescence. It cannot
+// authorize a supervisor respawn or a strict-runner timeout-root deletion.
+func (j *Job) terminateForContained(timeoutMs uint32, original containedJobOriginal) error {
+	original.required = true
+	observation, err := j.terminateAllObserved(timeoutMs, original)
+	if err != nil {
+		return err
+	}
+	if observation.ObservedCurrentMembersExited {
+		return nil
+	}
+	return &JobTerminationProofError{Stage: "member_wait", Cause: errors.New("current Job members not proved exited")}
+}
+
+func (j *Job) terminateAllObserved(timeoutMs uint32, original containedJobOriginal) (jobTerminationObservation, error) {
+	var observation jobTerminationObservation
+	if j == nil || j.handle == 0 {
+		if timeoutMs == 0 {
+			return observation, nil
 		}
-		if ev != uint32(windows.WAIT_OBJECT_0) {
-			return false
+		return observation, &JobTerminationProofError{Stage: "invalid_job", Cause: errors.New("nil or closed Job cannot prove timed termination")}
+	}
+	ops := j.terminationOperations()
+	if timeoutMs == 0 {
+		if err := ops.terminate(j); err != nil && !errors.Is(err, windows.ERROR_ACCESS_DENIED) {
+			return observation, fmt.Errorf("TerminateJobObject: %w", err)
+		}
+		return observation, nil
+	}
+	var problems []error
+	add := func(stage string, cause error) {
+		problems = append(problems, &JobTerminationProofError{Stage: stage, Cause: cause})
+	}
+	initial, snapshotErr := ops.accounting(j)
+	if snapshotErr != nil {
+		add("snapshot", snapshotErr)
+	}
+	borrowed := original.atCreate && original.job == j && original.handle != 0 && original.handle != windows.InvalidHandle && original.pid != 0
+	if original.required && !borrowed {
+		add("borrowed_handle", errors.New("invalid at-create original process evidence"))
+	}
+	var list jobProcessIDList
+	if snapshotErr == nil {
+		var listErr error
+		list, listErr = ops.listMembers(j)
+		if listErr != nil {
+			add("member_list", listErr)
+		} else {
+			seen := make(map[uint32]struct{}, len(list.PIDs))
+			if uint32(len(list.PIDs)) != list.Assigned || (len(list.PIDs) == 0 && (!borrowed || initial.ActiveProcesses != 0)) {
+				add("member_list", fmt.Errorf("incomplete Job member list assigned=%d listed=%d", list.Assigned, len(list.PIDs)))
+			}
+			for _, pid := range list.PIDs {
+				if pid == 0 {
+					add("member_list", errors.New("zero Job member PID"))
+					break
+				}
+				if _, duplicate := seen[pid]; duplicate {
+					add("member_list", fmt.Errorf("duplicate Job member PID %d", pid))
+					break
+				}
+				seen[pid] = struct{}{}
+			}
+			if len(problems) == 0 {
+				covered := list.Assigned
+				if borrowed {
+					seenBorrowed := false
+					for _, pid := range list.PIDs {
+						if pid == original.pid {
+							seenBorrowed = true
+							break
+						}
+					}
+					if !seenBorrowed {
+						covered++
+					}
+				}
+				if covered != initial.TotalProcesses {
+					observation.strictFailure = &JobTerminationProofError{Stage: "membership_changed", Cause: fmt.Errorf("lifetime count=%d captured originals=%d", initial.TotalProcesses, covered)}
+				}
+			}
 		}
 	}
-	return true
+	handles := make([]windows.Handle, 0, len(list.PIDs))
+	if len(problems) == 0 {
+		for _, pid := range list.PIDs {
+			h, openErr := ops.openProcess(pid)
+			if openErr != nil || h == 0 {
+				if openErr == nil {
+					openErr = errors.New("zero member handle")
+				}
+				add("member_handle", fmt.Errorf("pid=%d: %w", pid, openErr))
+				continue
+			}
+			handles = append(handles, h)
+			member, memberErr := ops.isMember(h, j)
+			if memberErr != nil {
+				add("member_identity", fmt.Errorf("pid=%d: %w", pid, memberErr))
+			} else if !member {
+				add("member_identity", fmt.Errorf("pid=%d not in original Job", pid))
+			}
+		}
+	}
+
+	terminateErr := ops.terminate(j)
+	if terminateErr != nil && !errors.Is(terminateErr, windows.ERROR_ACCESS_DENIED) {
+		problems = append(problems, fmt.Errorf("TerminateJobObject: %w", terminateErr))
+	}
+	pollMs := timeoutMs / 10
+	if pollMs < 1 {
+		pollMs = 1
+	}
+	pollInterval := time.Duration(pollMs) * time.Millisecond
+	if pollInterval > terminateAllPollInterval {
+		pollInterval = terminateAllPollInterval
+	}
+	deadline := ops.now().Add(time.Duration(timeoutMs) * time.Millisecond)
+	if len(problems) == 0 {
+		for {
+			info, err := ops.accounting(j)
+			if err != nil {
+				add("accounting", err)
+				break
+			}
+			if info.TotalProcesses != initial.TotalProcesses {
+				add("membership_changed", fmt.Errorf("lifetime count changed %d to %d", initial.TotalProcesses, info.TotalProcesses))
+				break
+			}
+			allSignaled := info.ActiveProcesses == 0
+			if allSignaled {
+				for _, h := range handles {
+					status, waitErr := ops.wait(h)
+					if waitErr != nil {
+						add("member_wait", waitErr)
+						allSignaled = false
+						break
+					}
+					switch status {
+					case uint32(windows.WAIT_OBJECT_0):
+					case uint32(windows.WAIT_TIMEOUT):
+						allSignaled = false
+					default:
+						add("member_wait", fmt.Errorf("unexpected wait status %d", status))
+						allSignaled = false
+					}
+					if len(problems) != 0 {
+						break
+					}
+				}
+				if allSignaled && borrowed {
+					status, waitErr := ops.wait(original.handle)
+					if waitErr != nil {
+						add("borrowed_wait", waitErr)
+						allSignaled = false
+					} else if status == uint32(windows.WAIT_TIMEOUT) {
+						allSignaled = false
+					} else if status != uint32(windows.WAIT_OBJECT_0) {
+						add("borrowed_wait", fmt.Errorf("unexpected wait status %d", status))
+						allSignaled = false
+					}
+				}
+			}
+			if len(problems) != 0 {
+				break
+			}
+			if !ops.now().Before(deadline) {
+				add("member_wait", &jobTerminateTimeoutError{timeoutMs: timeoutMs, activeProcesses: info.ActiveProcesses})
+				break
+			}
+			if allSignaled {
+				final, finalErr := ops.accounting(j)
+				if finalErr != nil {
+					add("accounting", finalErr)
+				} else if final.TotalProcesses != initial.TotalProcesses {
+					add("membership_changed", fmt.Errorf("final lifetime count changed %d to %d", initial.TotalProcesses, final.TotalProcesses))
+				} else if final.ActiveProcesses != 0 {
+					add("accounting", fmt.Errorf("final active member count=%d", final.ActiveProcesses))
+				}
+				if !ops.now().Before(deadline) {
+					add("member_wait", &jobTerminateTimeoutError{timeoutMs: timeoutMs, activeProcesses: final.ActiveProcesses})
+				}
+				if len(problems) == 0 {
+					observation.ObservedCurrentMembersExited = true
+				}
+				break
+			}
+			pause := deadline.Sub(ops.now())
+			if pause > pollInterval {
+				pause = pollInterval
+			}
+			ops.sleep(pause)
+		}
+	}
+	for _, h := range handles {
+		if err := ops.closeProcess(h); err != nil {
+			add("handle_close", err)
+		}
+	}
+	if len(problems) != 0 {
+		return observation, errors.Join(problems...)
+	}
+	if observation.ObservedCurrentMembersExited && observation.strictFailure == nil {
+		observation.StrictOriginalsSettled = true
+	}
+	if observation.strictFailure == nil && !observation.StrictOriginalsSettled {
+		observation.strictFailure = &JobTerminationProofError{Stage: "member_list", Cause: errors.New("lifetime member coverage not proved")}
+	}
+	return observation, nil
 }
 
 // Close releases the job handle. When this is the last handle, the

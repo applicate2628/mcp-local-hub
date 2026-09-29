@@ -6,6 +6,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"encoding/xml"
 	"errors"
 	"fmt"
@@ -377,10 +379,22 @@ func (t *OwnedEntrypointTaskTxn) RewriteCommand() error {
 // and byte-equivalence outside that Command node. A failed verification leaves
 // restoration to the bundle coordinator that owns the transaction settlement.
 func (t *OwnedEntrypointTaskTxn) VerifyRuntime() error {
+	_, err := t.VerifyRuntimeSHA256()
+	return err
+}
+
+type ownedEntrypointTaskDigestRow struct {
+	TaskName  string `json:"task_name"`
+	XMLSHA256 string `json:"xml_sha256"`
+}
+
+// VerifyRuntimeSHA256 proves the command-only rewrite and exact live task set,
+// then digests the verified rows from that same export pass.
+func (t *OwnedEntrypointTaskTxn) VerifyRuntimeSHA256() (string, error) {
 	if err := t.requireInventory(); err != nil {
-		return err
+		return "", err
 	}
-	if err := t.verify(func(shape ownedEntrypointTaskShape, snapshot ownedEntrypointTaskSnapshot, raw []byte) error {
+	rows, err := t.verify(func(shape ownedEntrypointTaskShape, snapshot ownedEntrypointTaskSnapshot, raw []byte) error {
 		if !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			return errors.New("runtime command mismatch")
 		}
@@ -399,10 +413,16 @@ func (t *OwnedEntrypointTaskTxn) VerifyRuntime() error {
 			return errors.New("XML differs outside the Command node")
 		}
 		return nil
-	}); err != nil {
-		return &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task runtime verification: %w", err)}
+	})
+	if err != nil {
+		return "", &EntrypointTaskPartialProgressError{Cause: fmt.Errorf("entrypoint task runtime verification: %w", err)}
 	}
-	return nil
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		return "", fmt.Errorf("entrypoint task digest encoding: %w", err)
+	}
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:]), nil
 }
 
 // RestoreImport imports every captured raw XML body, then performs the
@@ -419,7 +439,7 @@ func (t *OwnedEntrypointTaskTxn) RestoreImport() error {
 			errs = append(errs, fmt.Errorf("entrypoint task restore import %q: %w", key, err))
 		}
 	}
-	if err := t.verify(func(_ ownedEntrypointTaskShape, snapshot ownedEntrypointTaskSnapshot, raw []byte) error {
+	if _, err := t.verify(func(_ ownedEntrypointTaskShape, snapshot ownedEntrypointTaskSnapshot, raw []byte) error {
 		if !bytes.Equal(raw, snapshot.xml) {
 			return errors.New("restored XML is not byte-exact")
 		}
@@ -463,10 +483,10 @@ func (e *EntrypointTaskPartialProgressError) Unwrap() error {
 	return e.Cause
 }
 
-func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, ownedEntrypointTaskSnapshot, []byte) error) error {
+func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, ownedEntrypointTaskSnapshot, []byte) error) ([]ownedEntrypointTaskDigestRow, error) {
 	statuses, err := t.backend.List(ownedEntrypointTaskPrefix)
 	if err != nil {
-		return fmt.Errorf("list owned tasks: %w", err)
+		return nil, fmt.Errorf("list owned tasks: %w", err)
 	}
 	type liveTask struct {
 		shape ownedEntrypointTaskShape
@@ -477,25 +497,25 @@ func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, own
 	for _, status := range statuses {
 		name := canonicalOwnedEntrypointTaskName(status.Name)
 		if !strings.HasPrefix(name, `\mcp-local-hub-`) {
-			return fmt.Errorf("non-hub task %q", name)
+			return nil, fmt.Errorf("non-hub task %q", name)
 		}
 		if _, exists := seen[name]; exists {
-			return fmt.Errorf("duplicate task %q", name)
+			return nil, fmt.Errorf("duplicate task %q", name)
 		}
 		seen[name] = struct{}{}
 		if !sameWindowsUser(status.Owner, t.owner) {
-			return fmt.Errorf("foreign owner for %q", name)
+			return nil, fmt.Errorf("foreign owner for %q", name)
 		}
 		raw, err := t.backend.ExportXML(status.Name)
 		if err != nil {
-			return fmt.Errorf("export %q: %w", name, err)
+			return nil, fmt.Errorf("export %q: %w", name, err)
 		}
 		shape, err := parseOwnedEntrypointTaskXML(raw)
 		if err != nil {
-			return fmt.Errorf("parse %q: %w", name, err)
+			return nil, fmt.Errorf("parse %q: %w", name, err)
 		}
 		if shape.uri != name {
-			return fmt.Errorf("XML URI mismatch for %q", name)
+			return nil, fmt.Errorf("XML URI mismatch for %q", name)
 		}
 		if !sameWindowsEntrypointPath(shape.command, t.prior) && !sameWindowsEntrypointPath(shape.command, t.runtime) {
 			continue
@@ -503,19 +523,21 @@ func (t *OwnedEntrypointTaskTxn) verify(check func(ownedEntrypointTaskShape, own
 		live[name] = liveTask{shape: shape, raw: raw}
 	}
 	if len(live) != len(t.inventory) {
-		return errors.New("task set changed")
+		return nil, errors.New("task set changed")
 	}
+	rows := make([]ownedEntrypointTaskDigestRow, 0, len(t.inventory))
 	for _, key := range t.sortedInventoryNames() {
 		snapshot := t.inventory[key]
 		item, exists := live[key]
 		if !exists {
-			return fmt.Errorf("task %q is missing", key)
+			return nil, fmt.Errorf("task %q is missing", key)
 		}
 		if err := check(item.shape, snapshot, item.raw); err != nil {
-			return fmt.Errorf("task %q: %w", key, err)
+			return nil, fmt.Errorf("task %q: %w", key, err)
 		}
+		rows = append(rows, ownedEntrypointTaskDigestRow{TaskName: key, XMLSHA256: sha256Hex(item.raw)})
 	}
-	return nil
+	return rows, nil
 }
 
 func (t *OwnedEntrypointTaskTxn) sortedInventoryNames() []string {

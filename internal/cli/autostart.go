@@ -24,7 +24,7 @@ import (
 // autostartBackendFactoryFn is the test seam — production paths leave
 // it pointing at autostart.New, but autostart_test.go injects a
 // recording fake. Restored via t.Cleanup between tests.
-var autostartBackendFactoryFn = autostart.New
+var autostartBackendFactoryFn = newAutostartBackendForCLI
 
 // newAutostartCmd returns the parent `mcphub autostart` cobra command
 // with three subcommands attached. Registered in root.go next to

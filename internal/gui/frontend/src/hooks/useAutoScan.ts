@@ -18,7 +18,8 @@ const AGO_TICK_MS = 1_000;
 // (critically) the Servers dirty/pending model. The screen passes:
 //
 //   - run: the screen's own refetch (it updates that screen's rendered
-//     baseline however it likes — setScan, collectServers, etc.). It is
+//     baseline however it likes — setScan, collectServers, etc.). It calls
+//     markScanAccepted only when it publishes an accepted scan. It is
 //     read through a ref so a fresh closure each render does NOT restart
 //     the interval.
 //   - paused: when true, the interval tick is skipped and the
@@ -30,10 +31,12 @@ const AGO_TICK_MS = 1_000;
 //   - rescan(): fire an immediate refetch and RESET the interval (so the
 //     next auto tick is a full period away). The "Rescan now" button
 //     calls this.
-//   - lastScanAt: epoch-ms of the most recent successful run (null until
-//     the first completes). Drives the "updated Ns ago" indicator.
+//   - markScanAccepted(): record the accepted snapshot's age origin, including
+//     direct screen reloads that do not go through this hook's poller.
+//   - lastScanAt: epoch-ms of the most recently accepted scan (null until
+//     the first is published). Drives the "updated Ns ago" indicator.
 //   - agoSeconds: whole seconds since lastScanAt, re-rendered on a 1s
-//     tick so the label advances live. null until the first run.
+//     tick so the label advances live. null until the first accepted scan.
 //
 // Timer discipline mirrors Dashboard.tsx exactly: a single resettable
 // setInterval, a `cancelled` flag so an in-flight run that resolves after
@@ -41,9 +44,9 @@ const AGO_TICK_MS = 1_000;
 // visibilitychange listener is registered on `document` and removed on
 // unmount.
 export function useAutoScan(
-  run: () => void | Promise<void>,
+  run: (markScanAccepted: () => void) => void | Promise<void>,
   paused: boolean,
-): { rescan: () => void; lastScanAt: number | null; agoSeconds: number | null } {
+): { rescan: () => void; markScanAccepted: () => void; lastScanAt: number | null; agoSeconds: number | null } {
   const [lastScanAt, setLastScanAt] = useState<number | null>(null);
   // `now` is bumped on a 1s tick purely so the derived agoSeconds advances
   // between scans. It never drives a refetch.
@@ -58,17 +61,18 @@ export function useAutoScan(
   const pausedRef = useRef(paused);
   pausedRef.current = paused;
 
-  // doRun executes the screen's refetch and stamps lastScanAt on success.
-  // `cancelledRef` guards the post-await setState against a resolve after
-  // unmount. Mirrors Dashboard's `cancelled` flag.
+  // Only an accepted scan may stamp the label. `cancelledRef` also makes a
+  // late screen acceptance after unmount inert.
   const cancelledRef = useRef(false);
-  const doRun = useCallback(async () => {
-    try {
-      await runRef.current();
-    } finally {
-      if (!cancelledRef.current) setLastScanAt(Date.now());
-    }
+  const markScanAccepted = useCallback(() => {
+    if (cancelledRef.current) return;
+    const acceptedAt = Date.now();
+    setLastScanAt(acceptedAt);
+    setNow(acceptedAt);
   }, []);
+  const doRun = useCallback(async () => {
+    await runRef.current(markScanAccepted);
+  }, [markScanAccepted]);
 
   // Single poll handle, stored in a ref so rescan() can clear + restart it
   // (reset-the-timer semantic) without rebuilding the mount-scoped effect.
@@ -126,5 +130,5 @@ export function useAutoScan(
   const agoSeconds =
     lastScanAt == null ? null : Math.max(0, Math.floor((now - lastScanAt) / 1000));
 
-  return { rescan, lastScanAt, agoSeconds };
+  return { rescan, markScanAccepted, lastScanAt, agoSeconds };
 }

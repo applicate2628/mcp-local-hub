@@ -1,9 +1,11 @@
 package api
 
 import (
+	"bytes"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -386,6 +388,108 @@ func TestRepairSerenaIntentFromRegistry_MissingRowAppended(t *testing.T) {
 	// The pre-existing healthy daemon is still present.
 	if !got.HasSerenaDaemonForWorkspaceKey(healthyKey) {
 		t.Errorf("pre-existing healthy key %q daemon dropped by repair; daemons: %+v", healthyKey, got.Daemons)
+	}
+}
+
+func TestRepairSerenaIntentFromRegistry_IntentMissingProjectionBecomesCoherent(t *testing.T) {
+	regPath := autoRegisterTestEnv(t)
+	healthyPath := liveWorkspace(t)
+	targetPath := liveWorkspace(t)
+	healthyKey := seedSerenaRegistryRow(t, regPath, healthyPath, 9151)
+	targetKey := seedSerenaRegistryRow(t, regPath, targetPath, 9150)
+
+	intentPath := seedIntent(t, &SupervisorIntentFile{
+		Version: 1,
+		Daemons: []SupervisorDaemon{healthySerenaDaemon(t, healthyPath, 9151)},
+	})
+
+	reg := NewRegistry(regPath)
+	unlock, err := reg.Lock()
+	if err != nil {
+		t.Fatalf("lock registry for projection input: %v", err)
+	}
+	if err := reg.Load(); err != nil {
+		_ = unlock()
+		t.Fatalf("load registry for projection input: %v", err)
+	}
+	target, ok := reg.GetSerena(targetKey)
+	if releaseErr := unlock(); releaseErr != nil {
+		t.Fatalf("release registry after projection input: %v", releaseErr)
+	}
+	if !ok {
+		t.Fatalf("synthetic target row %q missing from registry", targetKey)
+	}
+
+	before := serenaAuthorityJoinHealthyInput()
+	before.RegistryRows = []WorkspaceEntry{target}
+	before.SupervisorIntent = SupervisorIntentFile{}
+	before.StatusRows = nil
+	before.Readiness = ReadinessSnapshotV1{}
+	out, err := ProjectSerenaWorkspaceSnapshot(before)
+	var mismatch *SerenaWorkspaceStateMismatchError
+	if !errors.As(err, &mismatch) || mismatch.Kind != SerenaWorkspaceStateMismatchIntentMissing {
+		t.Fatalf("before repair error = %T (%v), want typed intent_missing", err, err)
+	}
+	if mismatch.WorkspaceKey != targetKey || mismatch.RegistryPort != 9150 || mismatch.IntentPort != 0 || mismatch.StatusPort != 0 || mismatch.ReadinessPort != 0 {
+		t.Fatalf("before repair mismatch = %+v, want target key with ports 9150/0/0/0", mismatch)
+	}
+	if len(out.Workspaces) != 0 || len(out.StatusRows) != 0 {
+		t.Fatalf("rejected pre-repair projection returned partial output: %+v", out)
+	}
+
+	result, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil || result.Outcome != SerenaIntentRepairOutcomeCompleted || result.Repaired != 1 || len(result.Deferred) != 0 {
+		t.Fatalf("repair result = %+v err=%v, want completed/repaired=1", result, err)
+	}
+	repaired := readIntent(t, intentPath)
+	if !repaired.HasSerenaDaemonForWorkspaceKey(healthyKey) || !repaired.HasSerenaDaemonForWorkspaceKey(targetKey) {
+		t.Fatalf("repair failed preservation/append invariant: %+v", repaired.Daemons)
+	}
+
+	var targetIntent *SupervisorDaemon
+	for i := range repaired.Daemons {
+		if repaired.Daemons[i].Workspace == targetPath && repaired.Daemons[i].Port == 9150 {
+			targetIntent = &repaired.Daemons[i]
+			break
+		}
+	}
+	if targetIntent == nil {
+		t.Fatalf("repaired target descriptor not found: %+v", repaired.Daemons)
+	}
+
+	const generation = 7
+	statusTask := strings.TrimPrefix(targetIntent.TaskName, `\`)
+	after := serenaAuthorityJoinHealthyInput()
+	after.RegistryRows = []WorkspaceEntry{target}
+	after.SupervisorIntent = *repaired
+	after.StatusRows = []DaemonStatus{{
+		TaskName: statusTask, Server: SerenaServerName, Backend: SerenaServerName,
+		Workspace: targetPath, Port: 9150, State: "Running",
+		ReadinessObservation: &DaemonReadinessObservationV1{
+			TaskName: statusTask, Port: 9150,
+			CurrentPIDGeneration: generation, ObservedPIDGeneration: generation,
+		},
+	}}
+	after.Readiness = ReadinessSnapshotV1{Settled: true, Daemons: []DaemonReadinessV1{{
+		TaskName: targetIntent.TaskName, Port: 9150, PIDGeneration: generation,
+		ServiceState: ServiceStateRunning, Stage: ReadinessStageComplete, Settled: true,
+	}}}
+	projected, err := ProjectSerenaWorkspaceSnapshot(after)
+	if err != nil || len(projected.Workspaces) != 1 || len(projected.StatusRows) != 1 || projected.Workspaces[0].WorkspaceProxyPort != 9150 {
+		t.Fatalf("after repair projection = %+v err=%v, want one coherent port-9150 row", projected, err)
+	}
+
+	beforeSecond, err := os.ReadFile(intentPath)
+	if err != nil {
+		t.Fatalf("read intent before idempotent repair: %v", err)
+	}
+	second, err := NewAPI().RepairSerenaIntentFromRegistry(mustStateDir(t))
+	if err != nil || second.Outcome != SerenaIntentRepairOutcomeCompleted || second.Repaired != 0 || len(second.Deferred) != 0 {
+		t.Fatalf("second repair = %+v err=%v, want completed no-op", second, err)
+	}
+	afterSecond, err := os.ReadFile(intentPath)
+	if err != nil || !bytes.Equal(beforeSecond, afterSecond) {
+		t.Fatalf("idempotent repair changed intent bytes: err=%v", err)
 	}
 }
 

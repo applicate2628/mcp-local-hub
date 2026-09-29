@@ -2,7 +2,10 @@ package binaryadmission
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -47,8 +50,11 @@ func versionStringFixture(key, value string) []byte {
 
 func buildVersionResourceFixture(role WindowsArtifactRole, version, commit, buildDate string, duplicateProductName bool) []byte {
 	filename, internalName, subsystemRole := "mcphub.exe", "mcphub-cli", "cli"
-	if role == WindowsArtifactRoleWindowless {
+	switch role {
+	case WindowsArtifactRoleWindowless:
 		filename, internalName, subsystemRole = "mcphub-windowless.exe", "mcphub-windowless", "windowless"
+	case WindowsArtifactRole("product"):
+		filename, internalName, subsystemRole = "mcphub.exe", "mcphub", "product"
 	}
 	children := [][]byte{
 		versionStringFixture("ProductName", "mcp-local-hub"),
@@ -81,7 +87,7 @@ func writeWindowsPEVersionFixture(t *testing.T, role WindowsArtifactRole, versio
 func writeWindowsPEVersionFixtureWithCOFF(t *testing.T, role WindowsArtifactRole, version, commit, buildDate string, duplicateProductName bool, machine, characteristics uint16) string {
 	t.Helper()
 	subsystem := WindowsCUISubsystem
-	if role == WindowsArtifactRoleWindowless {
+	if role == WindowsArtifactRoleWindowless || role == WindowsArtifactRole("product") {
 		subsystem = WindowsGUISubsystem
 	}
 	versionResource := buildVersionResourceFixture(role, version, commit, buildDate, duplicateProductName)
@@ -119,11 +125,60 @@ func writeWindowsPEVersionFixtureWithCOFF(t *testing.T, role WindowsArtifactRole
 	binary.LittleEndian.PutUint32(resource[0x60:0x64], resourceRVA+resourceDataOffset)
 	binary.LittleEndian.PutUint32(resource[0x64:0x68], uint32(len(versionResource)))
 	copy(resource[resourceDataOffset:], versionResource)
-	path := filepath.Join(t.TempDir(), filepath.Base(map[WindowsArtifactRole]string{WindowsArtifactRoleCLI: "mcphub.exe", WindowsArtifactRoleWindowless: "mcphub-windowless.exe"}[role]))
+	path := filepath.Join(t.TempDir(), filepath.Base(map[WindowsArtifactRole]string{
+		WindowsArtifactRoleCLI:         "mcphub.exe",
+		WindowsArtifactRoleWindowless:  "mcphub-windowless.exe",
+		WindowsArtifactRole("product"): "mcphub.exe",
+	}[role]))
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestWindowsProductRoleAdmissionBindsExactIdentityAndHash(t *testing.T) {
+	const productRole WindowsArtifactRole = "product"
+	const (
+		version   = "0.4.36-rc.1+qa"
+		commit    = "abc1234"
+		buildDate = "2026-09-11T12:34:56Z"
+		machine   = uint16(0x8664)
+	)
+
+	path := writeWindowsPEVersionFixtureWithCOFF(t, productRole, version, commit, buildDate, false, machine, 0)
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHashBytes := sha256.Sum256(contents)
+	wantHash := hex.EncodeToString(wantHashBytes[:])
+
+	admitted, err := AdmitWindowsRole(WindowsArtifact{Path: path, Role: productRole, SHA256: wantHash})
+	if err != nil {
+		t.Fatalf("AdmitWindowsRole(product): %v", err)
+	}
+	if admitted.Role != productRole || admitted.Version != version || admitted.Commit != commit || admitted.BuildDate != buildDate {
+		t.Fatalf("product identity = %+v", admitted)
+	}
+	if admitted.Subsystem != WindowsGUISubsystem || admitted.Machine != machine || admitted.SHA256 != wantHash {
+		t.Fatalf("product PE identity = %+v", admitted)
+	}
+
+	_, err = AdmitWindowsRole(WindowsArtifact{Path: path, Role: productRole, SHA256: strings.Repeat("0", 64)})
+	if err == nil || !strings.Contains(err.Error(), "SHA-256 mismatch") {
+		t.Fatalf("mismatched supplied SHA-256 error = %v", err)
+	}
+
+	cuiContents := append([]byte(nil), contents...)
+	binary.LittleEndian.PutUint16(cuiContents[0x80+24+68:0x80+24+70], WindowsCUISubsystem)
+	cuiPath := filepath.Join(t.TempDir(), "mcphub.exe")
+	if err := os.WriteFile(cuiPath, cuiContents, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = AdmitWindowsRole(WindowsArtifact{Path: cuiPath, Role: productRole})
+	if err == nil || !strings.Contains(err.Error(), WindowsPESubsystemErrorID) {
+		t.Fatalf("product CUI error = %v, want %s", err, WindowsPESubsystemErrorID)
+	}
 }
 
 func writeWindowsPEFixture(t *testing.T, magic, subsystem uint16, mutate func([]byte)) string {
@@ -237,6 +292,16 @@ func TestWindowsProductPairAdmissionBindsRolesMetadataAndHashes(t *testing.T) {
 	}
 	if len(pair.CLI.SHA256) != 64 || len(pair.Windowless.SHA256) != 64 || pair.CLI.SHA256 == pair.Windowless.SHA256 {
 		t.Fatalf("hashes = %q/%q", pair.CLI.SHA256, pair.Windowless.SHA256)
+	}
+	if pair.CLI.Machine != 0x8664 || pair.Windowless.Machine != 0x8664 || pair.CLI.Subsystem != WindowsCUISubsystem || pair.Windowless.Subsystem != WindowsGUISubsystem {
+		t.Fatalf("legacy PE identity = cli(%#x,%d) windowless(%#x,%d)", pair.CLI.Machine, pair.CLI.Subsystem, pair.Windowless.Machine, pair.Windowless.Subsystem)
+	}
+	encoded, err := json.Marshal(pair)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte("Machine")) || bytes.Contains(encoded, []byte("machine")) || bytes.Contains(encoded, []byte("Subsystem")) || bytes.Contains(encoded, []byte("subsystem")) {
+		t.Fatalf("legacy pair JSON leaked non-persisted PE fields: %s", encoded)
 	}
 }
 

@@ -14,8 +14,7 @@ import (
 )
 
 func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) (retErr error) {
-	windowlessSource := scheduler.WindowsOwnedEntrypointPath(cliSource)
-	windowlessTarget := scheduler.WindowsOwnedEntrypointPath(cliTarget)
+	legacyWindowlessTarget := scheduler.WindowsLegacyEntrypointPath(cliTarget)
 	stateDir, err := api.DaemonStateDir()
 	if err != nil {
 		return fmt.Errorf("resolve state-dir for Windows product pair canonicalize: %w", err)
@@ -28,18 +27,17 @@ func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) (retE
 		return fmt.Errorf("acquire Windows product-pair canonicalize fence: another product-pair transaction is active")
 	}
 	defer api.ReleaseAndJoin(&retErr, fence.Release, "release Windows product-pair canonicalize fence")
-	settled, err := reconcileWiredWindowsProductPairRecovery(windowsProductPairRecoveryRuntimeRequest(context.Background(), stateDir, cliTarget, windowlessTarget))
+	settled, err := reconcileWiredWindowsProductRecovery(windowsProductRecoveryRuntimeRequest(context.Background(), stateDir, cliTarget, legacyWindowlessTarget))
 	if err != nil {
 		return fmt.Errorf("recover Windows product-pair canonicalize: %w", err)
 	}
 	if settled != nil && settled.Outcome == WindowsProductPairRecoverySettledCommit {
-		fmt.Fprintf(w, "\u2713 mcphub product-pair crash recovery kept committed pair at %s\n", filepath.Dir(cliTarget))
-		return nil
+		fmt.Fprintf(w, "\u2713 mcphub product crash recovery kept committed product at %s\n", filepath.Dir(cliTarget))
 	}
-	if reconciled, err := reconcileWindowsProductPairReceipt(stateDir, cliSource, windowlessSource, cliTarget, windowlessTarget, WindowsProductPairModeCanonicalize); err != nil {
+	if reconciled, err := reconcileWindowsProductReceipt(stateDir, cliSource, cliTarget, WindowsProductPairModeCanonicalize); err != nil {
 		return err
 	} else if reconciled {
-		fmt.Fprintf(w, "\u2713 mcphub product pair already committed at %s; committed event reconciled\n", filepath.Dir(cliTarget))
+		fmt.Fprintf(w, "\u2713 mcphub product already committed at %s; committed event reconciled\n", filepath.Dir(cliTarget))
 		return nil
 	}
 	stagedCLI, err := stageWindowsProductCandidate(cliSource, cliTarget)
@@ -47,27 +45,26 @@ func canonicalizeProductToTarget(w io.Writer, cliSource, cliTarget string) (retE
 		return fmt.Errorf("stage canonical CLI candidate: %w", err)
 	}
 	defer os.Remove(stagedCLI)
-	stagedWindowless, err := stageWindowsProductCandidate(windowlessSource, windowlessTarget)
+	authority, err := windowsSingleProductNonUpgradeReplacementAuthority(stagedCLI, cliTarget)
 	if err != nil {
-		return fmt.Errorf("stage windowless candidate: %w", err)
+		return fmt.Errorf("preflight Windows product pair canonicalize: %w", err)
 	}
-	defer os.Remove(stagedWindowless)
-	txn, err := newWindowsProductPairTxnFn(windowsProductPairTxnRequest{
-		Context:          context.Background(),
-		StateDir:         stateDir,
-		CLIPath:          cliTarget,
-		WindowlessPath:   windowlessTarget,
-		StagedCLI:        stagedCLI,
-		StagedWindowless: stagedWindowless,
-		Mode:             WindowsProductPairModeCanonicalize,
+	txn, err := newWindowsProductTxnFn(windowsProductTxnRequest{
+		Context:              context.Background(),
+		StateDir:             stateDir,
+		ProductPath:          cliTarget,
+		LegacyWindowlessPath: legacyWindowlessTarget,
+		StagedProduct:        stagedCLI,
+		Mode:                 WindowsProductPairModeCanonicalize,
+		ReplacementAuthority: authority,
 	})
 	if err != nil {
-		return fmt.Errorf("construct Windows product pair canonicalize transaction: %w", err)
+		return fmt.Errorf("construct Windows product canonicalize transaction: %w", err)
 	}
 	if _, err := txn.Run(context.Background()); err != nil {
-		return fmt.Errorf("canonicalize Windows product pair: %w", err)
+		return fmt.Errorf("canonicalize Windows product: %w", err)
 	}
-	fmt.Fprintf(w, "✓ mcphub product pair canonicalized at %s\n", filepath.Dir(cliTarget))
+	fmt.Fprintf(w, "✓ mcphub product canonicalized at %s\n", filepath.Dir(cliTarget))
 	return nil
 }
 

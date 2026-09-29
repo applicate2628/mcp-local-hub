@@ -1,15 +1,68 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"mcp-local-hub/internal/mcpcompat/readinesswire"
 )
+
+func TestMCPReadinessCarriesRegistryRetryabilityOutsideJSON(t *testing.T) {
+	retryable := readinessFromFailure(readinesswire.Failure{
+		FailureID: readinesswire.FailureReadinessHostUnavailable,
+		Stage:     readinesswire.StageHost,
+	})
+	terminal := readinessFromFailure(readinesswire.Failure{
+		FailureID: readinesswire.FailureChildResponseInvalid,
+		Stage:     readinesswire.StageToolsList,
+	})
+	if !retryable.Retryable || terminal.Retryable {
+		t.Fatalf("retryability retryable=%v terminal=%v", retryable.Retryable, terminal.Retryable)
+	}
+	raw, err := json.Marshal(retryable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := fields["retryable"]; exists {
+		t.Fatalf("internal retryability leaked into JSON: %s", raw)
+	}
+}
+
+func TestProbeMCPReadinessContextCancelsInFlightRequest(t *testing.T) {
+	previous := healthProbeHTTPClient
+	t.Cleanup(func() { healthProbeHTTPClient = previous })
+	entered := make(chan struct{})
+	healthProbeHTTPClient = func() *http.Client {
+		return &http.Client{Transport: healthProbeRoundTripper(func(req *http.Request) (*http.Response, error) {
+			close(entered)
+			<-req.Context().Done()
+			return nil, req.Context().Err()
+		})}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan MCPReadinessResult, 1)
+	go func() { done <- ProbeMCPReadinessContext(ctx, 9133) }()
+	<-entered
+	cancel()
+	select {
+	case result := <-done:
+		if result.FailureID != readinesswire.FailureReadinessHostUnavailable || !result.Retryable {
+			t.Fatalf("cancelled result=%#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("context-aware readiness probe did not return after cancellation")
+	}
+}
 
 // TestMCPReadinessSecondaryFailureWireIsAdditive catches a regression that
 // emits one half of the secondary pair or changes ordinary V1 byte shapes.

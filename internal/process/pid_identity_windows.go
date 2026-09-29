@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -20,13 +21,115 @@ type processHandleIdentity struct {
 	CreationTime   time.Time
 }
 
+// PIDHandleIdentity is one precise kernel observation of a process PID. It is
+// an observation value only; it does not grant termination authority.
+type PIDHandleIdentity struct {
+	PID            int
+	ExecutablePath string
+	StartedAt      time.Time
+}
+
+// HeldPIDIdentity reads the exact generation from an already-owned process
+// handle. Unlike a PID lookup, it cannot silently switch to a reused PID.
+type HeldPIDIdentity interface {
+	Identity() (PIDHandleIdentity, error)
+}
+
 type heldPIDGeneration struct {
 	pid    int
 	handle windows.Handle
 	ops    heldPIDGenerationOps
 }
 
+// HeldPIDJobObservation owns a query-only process handle. The caller must
+// Close it on every path; it carries no process-termination authority.
+type HeldPIDJobObservation interface {
+	VerifyIdentity(PIDIdentityProof) error
+	InAnyJob() (bool, error)
+	Close() error
+}
+
+type heldPIDJobObservation struct {
+	pid      int
+	handle   windows.Handle
+	verified bool
+	verify   func(PIDIdentityProof, windows.Handle) error
+	query    func(windows.Handle) (bool, error)
+	close    func(windows.Handle) error
+	identity func(int, windows.Handle) (processHandleIdentity, error)
+}
+
+func HoldPIDForJobObservation(pid int) (HeldPIDJobObservation, error) {
+	return holdPIDForJobObservation(pid, windows.OpenProcess, verifyHandleIdentity, processInAnyJob, windows.CloseHandle)
+}
+
+func holdPIDForJobObservation(pid int, open func(uint32, bool, uint32) (windows.Handle, error), verify func(PIDIdentityProof, windows.Handle) error, query func(windows.Handle) (bool, error), close func(windows.Handle) error) (HeldPIDJobObservation, error) {
+	if pid <= 0 {
+		return nil, fmt.Errorf("process: invalid PID %d", pid)
+	}
+	h, err := open(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return nil, fmt.Errorf("process: open PID %d for job observation: %w", pid, err)
+	}
+	return &heldPIDJobObservation{pid: pid, handle: h, verify: verify, query: query, close: close, identity: identityFromHandle}, nil
+}
+
+func (h *heldPIDJobObservation) Identity() (PIDHandleIdentity, error) {
+	if h == nil || h.handle == 0 {
+		return PIDHandleIdentity{}, errors.New("process: held PID job observation is closed")
+	}
+	return identityFromHeld(h.pid, h.handle, h.identity)
+}
+
+func (h *heldPIDJobObservation) VerifyIdentity(proof PIDIdentityProof) error {
+	if h == nil || h.handle == 0 {
+		return errors.New("process: held PID job observation is closed")
+	}
+	h.verified = false
+	if proof.PID != h.pid {
+		return fmt.Errorf("%w: proof PID %d differs from held PID %d", ErrProcessIdentityMismatch, proof.PID, h.pid)
+	}
+	if err := h.verify(proof, h.handle); err != nil {
+		return err
+	}
+	h.verified = true
+	return nil
+}
+
+func (h *heldPIDJobObservation) InAnyJob() (bool, error) {
+	if h == nil || h.handle == 0 || !h.verified {
+		return false, errors.New("process: held PID job observation lacks verified identity")
+	}
+	member, err := h.query(h.handle)
+	if err != nil {
+		return false, fmt.Errorf("process: query PID %d job membership: %w", h.pid, err)
+	}
+	return member, nil
+}
+
+func (h *heldPIDJobObservation) Close() error {
+	if h == nil || h.handle == 0 {
+		return nil
+	}
+	err := h.close(h.handle)
+	h.handle, h.verified = 0, false
+	if err != nil {
+		return fmt.Errorf("process: close PID %d job observation: %w", h.pid, err)
+	}
+	return nil
+}
+
+func processInAnyJob(h windows.Handle) (bool, error) {
+	var member uint32
+	r1, _, callErr := procIsProcessInJob.Call(uintptr(h), 0, uintptr(unsafe.Pointer(&member)))
+	if r1 == 0 {
+		return false, fmt.Errorf("IsProcessInJob: %w", callErr)
+	}
+	return member != 0, nil
+}
+
 type heldPIDGenerationOps struct {
+	identity       func(int, windows.Handle) (processHandleIdentity, error)
 	verifyIdentity func(PIDIdentityProof, windows.Handle) error
 	terminate      func(windows.Handle, uint32) error
 	wait           func(windows.Handle, uint32) (uint32, error)
@@ -34,6 +137,7 @@ type heldPIDGenerationOps struct {
 }
 
 var productionHeldPIDGenerationOps = heldPIDGenerationOps{
+	identity:       identityFromHandle,
 	verifyIdentity: verifyHandleIdentity,
 	terminate:      windows.TerminateProcess,
 	wait:           windows.WaitForSingleObject,
@@ -71,6 +175,24 @@ func (h *heldPIDGeneration) PID() int {
 		return 0
 	}
 	return h.pid
+}
+
+func (h *heldPIDGeneration) Identity() (PIDHandleIdentity, error) {
+	if h == nil || h.handle == 0 {
+		return PIDHandleIdentity{}, errors.New("process: held PID generation is closed")
+	}
+	return identityFromHeld(h.pid, h.handle, h.ops.identity)
+}
+
+func identityFromHeld(pid int, handle windows.Handle, read func(int, windows.Handle) (processHandleIdentity, error)) (PIDHandleIdentity, error) {
+	if read == nil {
+		return PIDHandleIdentity{}, errors.New("process: held identity reader unavailable")
+	}
+	identity, err := read(pid, handle)
+	if err != nil {
+		return PIDHandleIdentity{}, fmt.Errorf("process: read held PID %d identity: %w", pid, err)
+	}
+	return PIDHandleIdentity{PID: pid, ExecutablePath: identity.ExecutablePath, StartedAt: identity.CreationTime.UTC()}, nil
 }
 
 func (h *heldPIDGeneration) VerifyIdentity(proof PIDIdentityProof) error {
@@ -131,6 +253,42 @@ func PIDExecutableMatches(pid int, expectedPath string) bool {
 		return false
 	}
 	return executablePathMatches(ident.ExecutablePath, expectedPath)
+}
+
+// LookupPIDHandleIdentity returns the executable path and exact kernel creation
+// time obtained from one handle. The handle is closed before this function
+// returns on both success and error paths.
+func LookupPIDHandleIdentity(pid int) (PIDHandleIdentity, error) {
+	return lookupPIDHandleIdentity(pid, windows.OpenProcess, identityFromHandle, windows.CloseHandle)
+}
+
+func lookupPIDHandleIdentity(
+	pid int,
+	openProcess func(uint32, bool, uint32) (windows.Handle, error),
+	identityFromHandle func(int, windows.Handle) (processHandleIdentity, error),
+	closeHandle func(windows.Handle) error,
+) (identity PIDHandleIdentity, retErr error) {
+	if pid <= 0 {
+		return PIDHandleIdentity{}, fmt.Errorf("process: invalid PID %d", pid)
+	}
+	h, err := openProcess(uint32(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE), false, uint32(pid))
+	if err != nil {
+		return PIDHandleIdentity{}, fmt.Errorf("process: open PID %d for handle identity: %w", pid, err)
+	}
+	defer func() {
+		if err := closeHandle(h); err != nil {
+			identity = PIDHandleIdentity{}
+			retErr = errors.Join(retErr, fmt.Errorf("process: close PID %d handle identity: %w", pid, err))
+		}
+	}()
+	handleIdentity, err := identityFromHandle(pid, h)
+	if err != nil {
+		return PIDHandleIdentity{}, err
+	}
+	if handleIdentity.ExecutablePath == "" || handleIdentity.CreationTime.IsZero() {
+		return PIDHandleIdentity{}, fmt.Errorf("process: PID %d handle identity is incomplete", pid)
+	}
+	return PIDHandleIdentity{PID: pid, ExecutablePath: handleIdentity.ExecutablePath, StartedAt: handleIdentity.CreationTime.UTC()}, nil
 }
 
 func VerifyPIDIdentity(proof PIDIdentityProof) error {

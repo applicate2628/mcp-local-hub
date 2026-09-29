@@ -21,7 +21,7 @@ const (
 )
 
 var (
-	adoptManifestDirFn             = defaultManifestDir
+	adoptManifestDirFn             = CanonicalManifestDir
 	collectEmbeddedManifestPortsFn = collectEmbeddedManifestPorts
 )
 
@@ -32,7 +32,10 @@ var (
 )
 
 func pickNextFreeAdoptPort() (int, error) {
-	used := collectUsedAdoptPorts()
+	used, err := collectUsedAdoptPortsResolved()
+	if err != nil {
+		return 0, err
+	}
 	for p := adoptPortStart; p <= adoptPortEnd; p++ {
 		if used[p] {
 			continue
@@ -48,7 +51,11 @@ func validateExplicitAdoptPort(port int) error {
 	if port < adoptPortStart || port > adoptPortEnd {
 		return fmt.Errorf("adopt port %d is outside the adopted-server port range %d-%d", port, adoptPortStart, adoptPortEnd)
 	}
-	if collectUsedAdoptPorts()[port] {
+	used, err := collectUsedAdoptPortsResolved()
+	if err != nil {
+		return err
+	}
+	if used[port] {
 		return fmt.Errorf("adopt port %d is already in use by an existing manifest, manifest port pool, or supervisor intent", port)
 	}
 	if !adoptPortBindable(port) {
@@ -58,12 +65,21 @@ func validateExplicitAdoptPort(port int) error {
 }
 
 func collectUsedAdoptPorts() map[int]bool {
+	used, _ := collectUsedAdoptPortsResolved()
+	return used
+}
+
+func collectUsedAdoptPortsResolved() (map[int]bool, error) {
 	used := map[int]bool{}
-	collectDiskManifestPorts(adoptManifestDirFn(), used)
+	dir, err := adoptManifestDirFn()
+	if err != nil {
+		return nil, fmt.Errorf("adopt port allocation: %w", err)
+	}
+	collectDiskManifestPorts(dir, used)
 	collectEmbeddedManifestPortsFn(used)
 	collectSupervisorIntentPorts(used)
 	collectConfiguredGUIPort(used)
-	return used
+	return used, nil
 }
 
 func collectDiskManifestPorts(dir string, used map[int]bool) {

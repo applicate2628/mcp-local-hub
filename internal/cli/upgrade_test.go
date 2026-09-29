@@ -28,8 +28,8 @@ func TestUpgradeCmd_Registered(t *testing.T) {
 	if got == nil {
 		t.Fatal("upgrade subcommand not registered on root")
 	}
-	if !strings.Contains(*got, "canonical mcphub binary") {
-		t.Errorf("Short description should mention canonical binary; got %q", *got)
+	if !strings.Contains(*got, "canonical mcphub.exe") {
+		t.Errorf("Short description should mention canonical mcphub.exe; got %q", *got)
 	}
 	if !strings.Contains(*got, "install --upgrade") {
 		t.Errorf("Short description should reference install --upgrade alias; got %q", *got)
@@ -64,6 +64,57 @@ func TestUpgradeCmd_RoutesThroughDispatchUpgrade(t *testing.T) {
 	}
 	if !dispatched {
 		t.Fatal("upgrade alias did not route through dispatchUpgrade (upgradeDispatcher seam never fired)")
+	}
+}
+
+// A committed-only recovery request must never enter ordinary upgrade routing,
+// which refuses a running canonical GUI before it can inspect the journal.
+func TestUpgradeCmd_CommittedRecoveryBypassesOrdinaryDispatcher(t *testing.T) {
+	resetUpgradeRoutingSeams(t)
+	resetUpgradeSeams(t)
+	priorRecovery := committedRecoveryFn
+	t.Cleanup(func() { committedRecoveryFn = priorRecovery })
+	recovered := false
+	committedRecoveryFn = func(*cobra.Command) error {
+		recovered = true
+		return nil
+	}
+	upgradeDispatcher = func(*cobra.Command) error {
+		t.Fatal("committed recovery entered ordinary upgrade dispatcher")
+		return nil
+	}
+	root := NewRootCmd()
+	root.SetArgs([]string{"upgrade", "--complete-committed-recovery"})
+	root.SetOut(&bytes.Buffer{})
+	root.SetErr(&bytes.Buffer{})
+	root.SilenceUsage = true
+	root.SilenceErrors = true
+	if err := root.Execute(); err != nil || !recovered {
+		t.Fatalf("committed recovery routing error = %v", err)
+	}
+}
+
+func TestUpgradeCmd_CommittedRecoveryRejectsConflictingFlagsAndArguments(t *testing.T) {
+	priorRecovery := committedRecoveryFn
+	t.Cleanup(func() { committedRecoveryFn = priorRecovery })
+	committedRecoveryFn = func(*cobra.Command) error {
+		t.Fatal("recovery adapter called for invalid flags or arguments")
+		return nil
+	}
+	for _, args := range [][]string{
+		{"upgrade", "--complete-committed-recovery", "--terminate-gui-for-upgrade"},
+		{"upgrade", "--complete-committed-recovery", "--stop-gui-owned-fleet-for-upgrade"},
+		{"upgrade", "--complete-committed-recovery", "unexpected"},
+	} {
+		root := NewRootCmd()
+		root.SetArgs(args)
+		root.SetOut(&bytes.Buffer{})
+		root.SetErr(&bytes.Buffer{})
+		root.SilenceUsage = true
+		root.SilenceErrors = true
+		if err := root.Execute(); err == nil || !strings.Contains(err.Error(), "UPGRADE_COMMITTED_RECOVERY_NOT_ADMITTED") {
+			t.Fatalf("args %q: error = %v", args, err)
+		}
 	}
 }
 

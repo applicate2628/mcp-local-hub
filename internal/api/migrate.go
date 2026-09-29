@@ -254,6 +254,16 @@ func migrateOneBinding(
 		// clients and keeps the report focused on actual attempts.
 		return
 	}
+	guard, guardErr := acquireAttachmentBindingGuard(server, binding.Client, adapter, false)
+	if guardErr != nil {
+		report.Failed = append(report.Failed, FailedMigration{Server: server, Client: binding.Client, Err: guardErr.Error()})
+		return
+	}
+	defer func() {
+		if releaseErr := guard.release(); releaseErr != nil {
+			report.Failed = append(report.Failed, FailedMigration{Server: server, Client: binding.Client, Err: "attachment operation lease release unverified"})
+		}
+	}()
 	if _, err := adapter.BackupKeep(keepN); err != nil {
 		report.Failed = append(report.Failed, FailedMigration{
 			Server: server, Client: binding.Client, Err: err.Error(),

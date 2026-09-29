@@ -78,6 +78,36 @@ func TestReduceReadinessV1_StaleGenerationNeverPromotesAndFailureOrderIsStable(t
 	}
 }
 
+func TestReduceReadinessV1_RetryableFailureStartsUntilDeadline(t *testing.T) {
+	observation := readyExternalObservation("mcp-local-hub-fetch-default")
+	observation.MCPInitializeReady = false
+	observation.MCPToolsListReady = false
+	observation.Failures = []ReadinessFailureV1{{
+		Stage: ReadinessStageMCPInitialize, FailureID: "MCP_READINESS_HOST_UNAVAILABLE",
+		Retryable: true, TaskName: observation.TaskName, Port: observation.Port,
+	}}
+	for _, tc := range []struct {
+		name      string
+		deadline  bool
+		wantState ServiceStateV1
+		settled   bool
+	}{
+		{name: "before deadline", wantState: ServiceStateStarting},
+		{name: "deadline exceeded", deadline: true, wantState: ServiceStateDegraded, settled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			current := observation
+			current.DeadlineExceeded = tc.deadline
+			got := ReduceReadinessV1(ReadinessRequest{Observations: []DaemonReadinessObservationV1{current}})
+			if len(got.Daemons) != 1 || got.Daemons[0].ServiceState != tc.wantState ||
+				got.Daemons[0].Settled != tc.settled || got.Daemons[0].Failure == nil ||
+				!got.Daemons[0].Failure.Retryable {
+				t.Fatalf("readiness=%#v want state=%s settled=%v retryable failure", got.Daemons, tc.wantState, tc.settled)
+			}
+		})
+	}
+}
+
 func TestReduceReadinessV1_ClassificationPrecedenceMatrix(t *testing.T) {
 	tests := []struct {
 		name           string

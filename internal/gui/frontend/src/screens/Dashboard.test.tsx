@@ -96,11 +96,112 @@ function scanResponse(entries: ScanEntry[]): Response {
   });
 }
 
+describe("DashboardScreen — supervisor Restart confirmation", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("normal recovery: first click and Cancel send no POST; Confirm sends one and retains busy/result/reload", async () => {
+    let statusCalls = 0;
+    let resolveRestart!: (response: Response) => void;
+    const restartResponse = new Promise<Response>((resolve) => { resolveRestart = resolve; });
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCalls++;
+        return Promise.resolve(statusResponse([runningRow]));
+      }
+      if (url === "/api/supervisor/restart") return restartResponse;
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const restartPosts = () => fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/supervisor/restart");
+    const view = render(<DashboardScreen />);
+    fireEvent.click(await view.findByTestId("recovery-toggle"));
+    const restartButton = view.getByRole("button", { name: "Restart supervisor" }) as HTMLButtonElement;
+
+    fireEvent.click(restartButton);
+    expect((view.getByTestId("recovery-restart-confirm") as HTMLDialogElement).open).toBe(true);
+    expect(restartPosts()).toHaveLength(0);
+
+    fireEvent.click(view.getByTestId("recovery-restart-confirm-cancel"));
+    expect(view.queryByTestId("recovery-restart-confirm")).toBeNull();
+    expect(restartPosts()).toHaveLength(0);
+
+    fireEvent.click(restartButton);
+    fireEvent.click(view.getByTestId("recovery-restart-confirm-confirm"));
+    await waitFor(() => expect(restartPosts()).toHaveLength(1));
+    expect(fetchSpy).toHaveBeenCalledWith("/api/supervisor/restart", expect.objectContaining({ method: "POST" }));
+    expect(view.queryByTestId("recovery-restart-confirm")).toBeNull();
+    expect(restartButton.disabled).toBe(true);
+    expect((view.getByTestId("recovery-cleanup") as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => {
+      resolveRestart(jsonResponse(200, {
+        killed: true, killed_pid: 42, spawned: true, spawned_pid: 43,
+      }));
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect((await view.findByTestId("recovery-msg")).textContent).toContain("killed PID 42, spawned PID 43");
+    expect(restartButton.disabled).toBe(false);
+    expect(statusCalls).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1499); });
+    expect(statusCalls).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(statusCalls).toBe(2);
+  });
+
+  it("error recovery: first click and Cancel send no POST; Confirm sends one and retains error feedback", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        return Promise.resolve(jsonResponse(500, {
+          error: "supervisor unreachable — restart the hub", code: "STATUS_FAILED",
+        }));
+      }
+      if (url === "/api/supervisor/restart") {
+        return Promise.resolve(jsonResponse(500, { error: "restart denied", code: "RESTART_FAILED" }));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+    const restartPosts = () => fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/supervisor/restart");
+    const view = render(<DashboardScreen />);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await vi.advanceTimersByTimeAsync(30_000);
+    await view.findByTestId("dashboard-error");
+    const restartButton = view.getByRole("button", { name: "Restart supervisor" }) as HTMLButtonElement;
+
+    fireEvent.click(restartButton);
+    expect((view.getByTestId("recovery-restart-confirm") as HTMLDialogElement).open).toBe(true);
+    expect(restartPosts()).toHaveLength(0);
+    fireEvent.click(view.getByTestId("recovery-restart-confirm-cancel"));
+    expect(view.queryByTestId("recovery-restart-confirm")).toBeNull();
+    expect(restartPosts()).toHaveLength(0);
+
+    fireEvent.click(restartButton);
+    fireEvent.click(view.getByTestId("recovery-restart-confirm-confirm"));
+    await waitFor(() => expect(restartPosts()).toHaveLength(1));
+    expect(fetchSpy).toHaveBeenCalledWith("/api/supervisor/restart", expect.objectContaining({ method: "POST" }));
+    await view.findByTestId("recovery-msg");
+    expect(view.getByTestId("recovery-msg").textContent).toContain("restart denied");
+  });
+});
+
 describe("DashboardScreen — Stop button", () => {
   beforeEach(() => {
     cleanup();
     vi.restoreAllMocks();
     vi.useFakeTimers();
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+    HTMLDialogElement.prototype.close = function () { this.open = false; };
   });
   afterEach(() => {
     vi.useRealTimers();
@@ -304,7 +405,7 @@ describe("DashboardScreen — Stop button", () => {
     await waitFor(() => expect(runAllBtn.textContent).toBe("Started"));
   });
 
-  it("Stop all posts to /api/stop-all and flashes Stopped on SSE completion", async () => {
+  it("Stop all requires confirmation before one POST and then follows the existing SSE flow", async () => {
     const fetchSpy = vi
       .spyOn(globalThis, "fetch")
       .mockImplementation((input: Request | string | URL) => {
@@ -315,19 +416,37 @@ describe("DashboardScreen — Stop button", () => {
         }
         return Promise.reject(new Error(`unexpected fetch: ${url}`));
       });
-    const { findAllByRole } = render(<DashboardScreen />);
+    const { findAllByRole, getByTestId, queryByTestId } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
       expect(buttons.length).toBe(4);
     });
     const buttons = await findAllByRole("button");
+    const runAllBtn = buttons[0] as HTMLButtonElement;
     const stopAllBtn = buttons[1] as HTMLButtonElement;
 
     fireEvent.click(stopAllBtn);
+    expect((getByTestId("dashboard-stop-all-confirm") as HTMLDialogElement).open).toBe(true);
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/stop-all")).toHaveLength(0);
+
+    fireEvent.click(getByTestId("dashboard-stop-all-confirm-cancel"));
+    expect(queryByTestId("dashboard-stop-all-confirm")).toBeNull();
+    expect(fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/stop-all")).toHaveLength(0);
+
+    fireEvent.click(stopAllBtn);
+    fireEvent.click(getByTestId("dashboard-stop-all-confirm-confirm"));
+    await waitFor(() => {
+      expect(fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/stop-all")).toHaveLength(1);
+    });
     expect(fetchSpy).toHaveBeenCalledWith(
       "/api/stop-all",
       expect.objectContaining({ method: "POST" }),
     );
+    expect(queryByTestId("dashboard-stop-all-confirm")).toBeNull();
+    await waitFor(() => {
+      expect(runAllBtn.disabled).toBe(true);
+      expect(stopAllBtn.disabled).toBe(true);
+    });
 
     dispatchSse("bulk-action", { phase: "started", action: "stop" });
     await waitFor(() => expect(stopAllBtn.textContent).toBe("Stopping…"));
@@ -609,7 +728,7 @@ describe("DashboardScreen — Stop button", () => {
     });
     vi.spyOn(console, "error").mockImplementation(() => {});
 
-    const { findAllByRole } = render(<DashboardScreen />);
+    const { findAllByRole, getByTestId } = render(<DashboardScreen />);
     await waitFor(async () => {
       const buttons = await findAllByRole("button");
       expect(buttons.length).toBe(4);
@@ -628,6 +747,7 @@ describe("DashboardScreen — Stop button", () => {
     // stale outcome (which is restart=done). New error MUST win;
     // prior `Started` flash on Run all gets cleared.
     fireEvent.click(stopAllBtn);
+    fireEvent.click(getByTestId("dashboard-stop-all-confirm-confirm"));
     await waitFor(() => expect(stopAllBtn.textContent).toBe("Failed"));
     // Run all button should NOT still show "Started" — outcome is now
     // for stop, so it falls back to idle.
@@ -1584,6 +1704,60 @@ describe("DashboardScreen — expanded-card metrics (Uptime + RAM)", () => {
       expect(buttons.length).toBe(4);
     });
   });
+});
+
+describe("DashboardScreen — recent failures delivery", () => {
+  beforeEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    cleanup();
+  });
+
+  it("retains a positive snapshot through an ordinary SSE delta, then clears it on a full zero snapshot", async () => {
+    let statusCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation((input: Request | string | URL) => {
+      const url = typeof input === "string" ? input : input.toString();
+      if (url === "/api/status") {
+        statusCalls++;
+        return Promise.resolve(statusResponse([
+          { ...runningRow, crashes_in_window: statusCalls === 1 ? 2 : 0 },
+        ]));
+      }
+      return Promise.reject(new Error(`unexpected fetch: ${url}`));
+    });
+
+    const view = render(<DashboardScreen />);
+    await view.findByText("Port");
+    const metric = view.getByText("Recent failures:");
+    expect(metric.closest(".card-kv")?.textContent).toBe("Recent failures:2");
+
+    act(() => dispatchSse("daemon-state", {
+      server: runningRow.server,
+      daemon: runningRow.daemon,
+      state: "Running",
+    }));
+    expect(view.getByText("Recent failures:").closest(".card-kv")?.textContent).toBe("Recent failures:2");
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(statusCalls).toBe(2);
+    expect(view.queryByText("Recent failures:")).toBeNull();
+  });
+
+  it.each([undefined, 0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1.5])(
+    "omits absent or invalid failure count %s without asserting a healthy zero",
+    async (count) => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(statusResponse([
+        count === undefined ? { ...runningRow } : { ...runningRow, crashes_in_window: count },
+      ]));
+      const view = render(<DashboardScreen />);
+      await view.findByText("Port");
+      expect(view.queryByText("Recent failures:")).toBeNull();
+    },
+  );
 });
 
 // Flowbite-Card metric cards (Feature 3): each daemon card now carries a

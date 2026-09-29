@@ -8,7 +8,7 @@
 //
 // PHASE 1 was strictly READ-ONLY and composed two endpoints client-side.
 // PHASE 3b (this file) switches the data source to the SINGLE GET /api/projects
-// aggregate (design decision 6) and wires the IMMEDIATE per-row toggle
+// aggregate (design decision 6) and wires the per-row toggle
 // (work-items/decisions/2026-06-27-per-project-gui-p3b-uxdesign.md):
 //   - LIST view (#/projects) is still fed from the same projects[] (now derived
 //     from the aggregate, not /api/workspaces).
@@ -22,8 +22,9 @@
 // lib/project-toggle.ts `scopeForToggle`; the backend clients.ProjectToggleOwner
 // turns (client, scope) into the actual writer.
 //
-// PER-ROW IMMEDIATE TOGGLE (decision 8 — the INVERSE of Servers.tsx; NO
-// dirty-map/Apply): optimistic flip + per-row spinner → on 200 reconcile to
+// PER-ROW MUTATION (decision 8 — the INVERSE of Servers.tsx; NO dirty-map/Apply):
+// workspace-LSP asks for confirmation first; other scopes stay immediate.
+// Once submitted: optimistic flip + per-row spinner → on 200 reconcile to
 // response.enabled (NOT intent) + ✓ flash + quiet warnings → on non-2xx REVERT +
 // row-scoped inline error (§3.1 code→copy map) + Retry. mountedRef-guards every
 // post-await setState; double-click is debounced by disabling the in-flight
@@ -62,6 +63,14 @@ import {
 } from "../lib/project-toggle";
 import { ReadinessPanel, readinessBlockerCount } from "../components/ReadinessPanel";
 import { AddSecretModal } from "../components/AddSecretModal";
+import { ConfirmModal } from "../components/ConfirmModal";
+import {
+  AdoptionActionError,
+  AdoptionFlowModal,
+  adoptionActionKey,
+  useAdoptionFlow,
+  type AdoptionFlowController,
+} from "../components/AdoptionFlow";
 
 // canonicalProjectKey is the SINGLE owner of the project join key (this file).
 // A workspace_path is normalized into a canonical key used both to (a)
@@ -483,7 +492,7 @@ function useToggleRow(
   return { st, toggle };
 }
 
-// ToggleControl renders the immediate per-row toggle + its feedback (spinner, ✓
+// ToggleControl renders the per-row toggle + its feedback (spinner, ✓
 // flash, row-scoped inline error + Retry, quiet warnings). data-testid is keyed
 // by scope + server per the spec (projects-toggle-<scope>-<server>).
 function ToggleControl({
@@ -492,6 +501,7 @@ function ToggleControl({
   server,
   st,
   label,
+  ariaLabel,
   disabled,
   title,
   onToggle,
@@ -502,12 +512,13 @@ function ToggleControl({
   server: string;
   st: RowToggleState;
   label?: string;
+  ariaLabel?: string;
   disabled?: boolean;
   // title is a hover/aria-description surfaced on the checkbox itself — used for
   // the object-member disable-affordance warning (FIX 6: "Disabling removes this
   // entry; re-enabling will require re-adding it.").
   title?: string;
-  onToggle: (next: boolean) => void;
+  onToggle: (next: boolean, input: HTMLInputElement) => void;
   onRetry: () => void;
 }): preact.JSX.Element {
   // PROJECT_TOGGLE_UNSUPPORTED hides the control (managed in the client).
@@ -529,9 +540,13 @@ function ToggleControl({
           checked={st.enabled}
           disabled={disabled || st.busy}
           aria-busy={st.busy}
+          aria-label={ariaLabel}
           title={title}
           aria-description={title}
-          onChange={(e) => onToggle((e.target as HTMLInputElement).checked)}
+          onChange={(e) => {
+            const input = e.target as HTMLInputElement;
+            onToggle(input.checked, input);
+          }}
         />
         {label ? <span class="text-xs">{label}</span> : null}
         {st.busy && (
@@ -1128,9 +1143,18 @@ function WorkspaceToggleCell({
 }): preact.JSX.Element {
   const { st, toggle } = useToggleRow(initialEnabled, mountedRef);
   const lastIntentRef = useRef<boolean>(initialEnabled);
-  function doToggle(next: boolean): void {
+  const [pendingIntent, setPendingIntent] = useState<boolean | null>(null);
+  function proposeToggle(next: boolean, input?: HTMLInputElement): void {
+    // The browser changes a checkbox before onChange; keep the displayed value
+    // authoritative until the operator confirms and useToggleRow owns the write.
+    if (input) input.checked = st.enabled;
     lastIntentRef.current = next;
-    void toggle(next, (en) => buildRequest(en));
+    setPendingIntent(next);
+  }
+  async function confirmToggle(): Promise<void> {
+    if (pendingIntent === null) return;
+    await toggle(pendingIntent, buildRequest);
+    if (mountedRef.current) setPendingIntent(null);
   }
   return (
     <>
@@ -1139,8 +1163,27 @@ function WorkspaceToggleCell({
         scope={scope}
         server={language}
         st={st}
-        onToggle={doToggle}
-        onRetry={() => doToggle(lastIntentRef.current)}
+        ariaLabel={`${language} workspace tool`}
+        onToggle={proposeToggle}
+        onRetry={() => proposeToggle(lastIntentRef.current)}
+      />
+      <ConfirmModal
+        open={pendingIntent !== null}
+        title={`${pendingIntent ? "Enable" : "Disable"} ${language} workspace tool?`}
+        body={
+          <p>
+            {pendingIntent
+              ? `Register the ${language} workspace tool for this project?`
+              : `Remove the ${language} workspace tool registration for this project?`}
+          </p>
+        }
+        confirmLabel={pendingIntent ? "Enable workspace tool" : "Disable workspace tool"}
+        danger={pendingIntent === false}
+        onConfirm={confirmToggle}
+        onCancel={() => setPendingIntent(null)}
+        testId={pendingIntent === null
+          ? `projects-workspace-toggle-idle-${language}`
+          : "projects-workspace-toggle-confirm"}
       />
       {st.error?.copy.reload && (
         <button
@@ -1186,6 +1229,11 @@ function SectionProjectConfig({
   const claudeEntries = entriesForClient(entries, "claude-code");
   const cursorEntries = entriesForClient(entries, "cursor");
   const vscodeEntries = entriesForClient(entries, "vscode");
+  const codexEntries = entriesForClient(entries, "codex-cli").filter((entry) => {
+    const presence = entry.client_presence?.["codex-cli"];
+    return presence?.transport === "stdio" && presence.disabled !== true;
+  });
+  const adoption = useAdoptionFlow({ onSuccess: onReload, mountedRef });
   // A claude Local-only project (FIX 4): the backend sets ProjectScope
   // (local_servers / approval arrays) INDEPENDENTLY of the scan entries, so a
   // project whose ONLY project config is the claude Local scope has zero scan
@@ -1203,6 +1251,7 @@ function SectionProjectConfig({
     claudeEntries.length === 0 &&
     cursorEntries.length === 0 &&
     vscodeEntries.length === 0 &&
+    codexEntries.length === 0 &&
     !hasClaudeLocalScope;
 
   return (
@@ -1229,6 +1278,9 @@ function SectionProjectConfig({
         </p>
       ) : (
         <>
+          {codexEntries.length > 0 && (
+            <CodexProjectCard entries={codexEntries} root={root} adoption={adoption} />
+          )}
           <ClaudeBothScopesCard
             entries={claudeEntries}
             projectScope={projectScope}
@@ -1254,8 +1306,56 @@ function SectionProjectConfig({
             onReload={onReload}
             mountedRef={mountedRef}
           />
+          <AdoptionFlowModal flow={adoption} />
         </>
       )}
+    </div>
+  );
+}
+
+function CodexProjectCard({
+  entries,
+  root,
+  adoption,
+}: {
+  entries: ScanEntry[];
+  root: string;
+  adoption: AdoptionFlowController;
+}): preact.JSX.Element {
+  return (
+    <div class="projects-client-card" data-testid="projects-client-codex-cli">
+      <div class="projects-client-card-head flex items-center justify-between gap-2">
+        <span class="text-sm font-medium text-app-text">Codex CLI</span>
+        <span class="text-xs text-app-muted">direct stdio</span>
+      </div>
+      <ul class="projects-server-list m-0 list-none p-0">
+        {entries.map((entry) => {
+          const key = adoptionActionKey(entry.name, root);
+          const planning = adoption.busyKey === key;
+          return (
+            <li key={entry.name} class="projects-server-row py-1.5" data-server={entry.name}>
+              <span class="text-sm text-app-text">{entry.name}</span>{" "}
+              <button
+                type="button"
+                class="adopt btn btn-primary"
+                data-action="adopt"
+                disabled={adoption.busyKey !== null}
+                aria-busy={planning ? "true" : undefined}
+                onClick={() =>
+                  void adoption.start({
+                    entry: entry.name,
+                    client: "codex-cli",
+                    projectSourceRoot: root,
+                  })
+                }
+              >
+                {planning ? "Planning..." : "Adopt into hub"}
+              </button>
+              {adoption.actionError?.key === key && <AdoptionActionError flow={adoption} />}
+            </li>
+          );
+        })}
+      </ul>
     </div>
   );
 }

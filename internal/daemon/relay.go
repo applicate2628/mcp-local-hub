@@ -11,7 +11,6 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -38,8 +37,8 @@ type HTTPToStdioRelay struct {
 
 	// sessionID is minted by the server on the first POST response
 	// (InitializeResult) and echoed on every subsequent request.
-	// Stored as atomic.Value for lock-free reads from both goroutines.
-	sessionID atomic.Value // string; "" until minted
+	sessionMu sync.Mutex
+	sessionID string // "" until minted
 
 	// stdoutMu serializes writes from both stdin-pump and sse-listener
 	// goroutines so interleaved JSON lines never corrupt the wire.
@@ -398,7 +397,7 @@ func (r *HTTPToStdioRelay) pipeSSE(ctx context.Context, body io.Reader) error {
 // header. Failures are logged and ignored — relay is shutting down
 // regardless.
 func (r *HTTPToStdioRelay) terminateSession() {
-	sid := r.getSessionID()
+	sid := r.takeSessionID()
 	if sid == "" {
 		return
 	}
@@ -458,18 +457,27 @@ func (r *HTTPToStdioRelay) logErr(format string, args ...any) {
 }
 
 func (r *HTTPToStdioRelay) getSessionID() string {
-	if v := r.sessionID.Load(); v != nil {
-		return v.(string)
-	}
-	return ""
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	return r.sessionID
 }
 
 func (r *HTTPToStdioRelay) setSessionID(sid string) {
 	// Only store the first session id; rotation would happen via
 	// explicit re-initialize which is out of v1 scope.
-	if r.getSessionID() == "" {
-		r.sessionID.Store(sid)
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	if r.sessionID == "" {
+		r.sessionID = sid
 	}
+}
+
+func (r *HTTPToStdioRelay) takeSessionID() string {
+	r.sessionMu.Lock()
+	defer r.sessionMu.Unlock()
+	sid := r.sessionID
+	r.sessionID = ""
+	return sid
 }
 
 // readJSONRPCLine reads up to the next newline from r and returns the

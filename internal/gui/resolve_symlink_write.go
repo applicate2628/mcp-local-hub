@@ -330,9 +330,8 @@ func registerResolveSymlinkWriteRoutes(s *Server) {
 
 // writeResolveSymlinkError maps the typed errors to HTTP status + code. The
 // strict-mode refusal and any other secure-write failure fall through to 500 /
-// WRITE_REFUSED carrying the underlying (path-bearing but non-secret) message
-// so the GUI can render an actionable diagnostic — identical posture to
-// init_client_config.go's INIT_FAILED.
+// WRITE_REFUSED with an opaque response; the exact cause stays in the server
+// log under this route's context.
 func writeResolveSymlinkError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, errUnknownClient):
@@ -344,8 +343,8 @@ func writeResolveSymlinkError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errConfigChanged):
 		writeAPIError(w, err, http.StatusConflict, "CONFIG_CHANGED")
 	default:
-		// Strict-mode refusal and other secure-write failures. The message
-		// carries the canonical strict-mode hint when applicable.
-		writeAPIError(w, err, http.StatusInternalServerError, "WRITE_REFUSED")
+		// Strict-mode refusal and other secure-write failures remain
+		// diagnosable in the server log without exposing their paths.
+		writeAPIErrorRedacted(w, err, http.StatusInternalServerError, "WRITE_REFUSED", "/api/resolve-symlink-and-write")
 	}
 }

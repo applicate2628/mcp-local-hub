@@ -10,12 +10,18 @@ import (
 )
 
 type fakeDismisser struct {
-	got []string
-	err error
+	got         []string
+	undismissed []string
+	err         error
 }
 
 func (f *fakeDismisser) DismissUnknown(name string) error {
 	f.got = append(f.got, name)
+	return f.err
+}
+
+func (f *fakeDismisser) UndismissUnknown(name string) error {
+	f.undismissed = append(f.undismissed, name)
 	return f.err
 }
 
@@ -128,6 +134,109 @@ func TestDismissHandler_RejectsCrossOrigin(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("want 403, got %d", w.Code)
 	}
+}
+
+func TestUndismissHandler_Contract(t *testing.T) {
+	request := func(t *testing.T, fake *fakeDismisser, method, body, fetchSite string) *httptest.ResponseRecorder {
+		t.Helper()
+		s := NewServer(Config{Port: 0})
+		s.dismisser = fake
+		req := httptest.NewRequest(method, "/api/dismiss", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		if fetchSite != "" {
+			req.Header.Set("Sec-Fetch-Site", fetchSite)
+		}
+		w := httptest.NewRecorder()
+		s.mux.ServeHTTP(w, req)
+		return w
+	}
+
+	t.Run("delete trims and forwards once", func(t *testing.T) {
+		fake := &fakeDismisser{}
+		w := request(t, fake, http.MethodDelete, `{"server":"  fetch  "}`, "same-origin")
+		if w.Code != http.StatusNoContent {
+			t.Fatalf("want 204, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(fake.undismissed) != 1 || fake.undismissed[0] != "fetch" {
+			t.Fatalf("undismissed=%v, want [fetch]", fake.undismissed)
+		}
+		if len(fake.got) != 0 {
+			t.Fatalf("DELETE called DismissUnknown with %v", fake.got)
+		}
+	})
+
+	invalidBodies := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{name: "whitespace server", body: `{"server":"   "}`, wantStatus: http.StatusBadRequest},
+		{name: "missing server", body: `{}`, wantStatus: http.StatusBadRequest},
+		{name: "malformed json", body: `{`, wantStatus: http.StatusBadRequest},
+		{name: "trailing json", body: `{"server":"fetch"}{}`, wantStatus: http.StatusBadRequest},
+		{
+			name:       "oversized json",
+			body:       `{"server":"` + strings.Repeat("A", int(maxControlBodyBytes)+4096) + `"}`,
+			wantStatus: http.StatusRequestEntityTooLarge,
+		},
+	}
+	for _, tc := range invalidBodies {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &fakeDismisser{}
+			w := request(t, fake, http.MethodDelete, tc.body, "same-origin")
+			if w.Code != tc.wantStatus {
+				t.Fatalf("want %d, got %d: %s", tc.wantStatus, w.Code, w.Body.String())
+			}
+			if len(fake.undismissed) != 0 {
+				t.Fatalf("invalid request reached UndismissUnknown with %v", fake.undismissed)
+			}
+		})
+	}
+
+	t.Run("cross origin is rejected before owner call", func(t *testing.T) {
+		fake := &fakeDismisser{}
+		w := request(t, fake, http.MethodDelete, `{"server":"fetch"}`, "cross-site")
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("want 403, got %d: %s", w.Code, w.Body.String())
+		}
+		if len(fake.undismissed) != 0 {
+			t.Fatalf("cross-origin request reached UndismissUnknown with %v", fake.undismissed)
+		}
+	})
+
+	t.Run("backend failure is typed and redacted", func(t *testing.T) {
+		fake := &fakeDismisser{err: errStub(`disk full at C:\private\gui-dismissed.json`)}
+		w := request(t, fake, http.MethodDelete, `{"server":"fetch"}`, "same-origin")
+		if w.Code != http.StatusInternalServerError {
+			t.Fatalf("want 500, got %d: %s", w.Code, w.Body.String())
+		}
+		var response struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+			t.Fatalf("decode error response: %v", err)
+		}
+		if response.Code != "UNDISMISS_FAILED" {
+			t.Fatalf("code=%q, want UNDISMISS_FAILED", response.Code)
+		}
+		if strings.Contains(w.Body.String(), `C:\private`) {
+			t.Fatalf("backend path leaked in response: %s", w.Body.String())
+		}
+	})
+
+	t.Run("unsupported method advertises post and delete", func(t *testing.T) {
+		fake := &fakeDismisser{}
+		w := request(t, fake, http.MethodPatch, `{}`, "same-origin")
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Fatalf("want 405, got %d: %s", w.Code, w.Body.String())
+		}
+		if allow := w.Header().Get("Allow"); allow != "POST, DELETE" {
+			t.Fatalf("Allow=%q, want POST, DELETE", allow)
+		}
+		if len(fake.got) != 0 || len(fake.undismissed) != 0 {
+			t.Fatalf("unsupported method reached owner: dismiss=%v undismiss=%v", fake.got, fake.undismissed)
+		}
+	})
 }
 
 // GET /api/dismissed tests

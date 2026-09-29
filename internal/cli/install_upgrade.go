@@ -16,16 +16,20 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"time"
 
 	"mcp-local-hub/internal/api"
+	"mcp-local-hub/internal/process"
 )
 
 // UpgradeDeps is the dependency-injection surface for RunInstallUpgrade.
@@ -77,6 +81,73 @@ const (
 // platform adapters when the recorded supervisor is proven absent. It lets the
 // transaction distinguish "already gone" from an actual force-kill.
 var errUpgradeSupervisorAlreadyExited = errors.New("supervisor already exited")
+
+var ErrRetainedGenerationImageMismatch = errors.New("E_RETAINED_GENERATION_IMAGE_MISMATCH")
+var ErrRetainedGenerationParentMismatch = errors.New("E_RETAINED_GENERATION_PARENT_MISMATCH")
+var ErrRetainedGenerationArgvMismatch = errors.New("E_RETAINED_GENERATION_ARGV_MISMATCH")
+var ErrRetainedGenerationPortPopulationMismatch = errors.New("E_RETAINED_GENERATION_PORT_POPULATION_MISMATCH")
+var ErrRetainedGenerationProtocolUnsupported = errors.New("E_RETAINED_GENERATION_PROTOCOL_UNSUPPORTED")
+var ErrRetainedGenerationChanged = errors.New("E_RETAINED_GENERATION_CHANGED")
+var ErrRetainedGenerationQuiesceUnsettled = errors.New("E_RETAINED_GENERATION_QUIESCE_UNSETTLED")
+
+type retainedGenerationPortObservationV1 struct {
+	TaskName          string
+	Port              int
+	State             windowsProductPortStateV1
+	PID               int
+	StartedAt         string
+	ParentPID         int
+	ObservedImagePath string
+	ArgvSHA256        string
+}
+
+type retainedGenerationObservationV1 struct {
+	ReceiptID               string
+	CanonicalCLIPath        string
+	CanonicalWindowlessPath string
+	SupervisorPID           int
+	SupervisorStartedAt     string
+	SupervisorImagePath     string
+	SupervisorCommandSHA256 string
+	GUIOwner                string
+	CurrentPairReceipt      windowsProductPreimageV1
+	Ports                   []retainedGenerationPortObservationV1
+	ObservedAtUTC           time.Time
+}
+
+type retainedGenerationIPCExchangeV1 struct {
+	Request  api.IPCRequest
+	Hello    api.IPCHello
+	Response api.IPCResponse
+}
+
+type retainedGenerationSettledPortEventV1 struct {
+	TaskName        string
+	Port            int
+	PID             int
+	StartedAt       string
+	ImagePathSHA256 string
+	ArgvSHA256      string
+}
+
+type retainedGenerationSettledEventV1 struct {
+	ReasonID                string
+	ObservationSHA256       string
+	SupervisorPID           int
+	SupervisorStartedAt     string
+	SupervisorImageSHA256   string
+	SupervisorCommandSHA256 string
+	Ports                   []retainedGenerationSettledPortEventV1
+	SettledAtUTC            time.Time
+}
+
+type retainedGenerationLifecycleHooks struct {
+	RequestVersion int
+	Observe        func(context.Context, string, string, []windowsProductIntentPortV1) (*retainedGenerationObservationV1, error)
+	HoldSupervisor func(int) (process.HeldPIDGeneration, error)
+	Send           func(context.Context, api.SupervisorLockOwner, int, string, map[string]any, int) (retainedGenerationIPCExchangeV1, error)
+	PublishSettled func(retainedGenerationSettledEventV1) (string, error)
+}
 
 // UpgradeCandidateV1 is the immutable identity admitted for one upgrade.
 // Build metadata describes the running product build whose exact bytes were
@@ -146,15 +217,24 @@ type UpgradeReceiptV1 struct {
 //     each method to its real implementation (see file-level
 //     docstring binding table).
 type UpgradeOpts struct {
-	// WindowsProductPair selects the role-aware two-artifact transaction. When
-	// present it is the sole mutation/receipt owner; none of the historical
-	// single-binary callbacks below are invoked.
-	WindowsProductPair *WindowsProductPairTxn
-	BinaryPath         string
-	NewBinary          string
-	PipePath           string
-	QuiesceTimeoutMs   int
-	ExitTimeoutMs      int
+	// WindowsProduct is the sole one-artifact Product/V3 transaction.
+	WindowsProduct *WindowsProductTxn
+	// GUIOwnedPending means Prepare already wrote the live GUI-owned V3 preimage
+	// before the caller stopped the exact GUI/tray generation.
+	GUIOwnedPending bool
+	// OnProductPrepared reports a durably read-back V3 prepared journal before
+	// any supervisor reap or canonical/task mutation. Nil changes no behavior.
+	OnProductPrepared func() error
+	// WindowsProductPairLifecycle is the private Windows-only proof producer
+	// consumed when the pair transaction would replace either canonical target.
+	// Nil leaves legacy single-binary upgrades unchanged and cannot authorize a
+	// product-pair replacement.
+	WindowsProductPairLifecycle *windowsProductPairLifecycleHooks
+	BinaryPath                  string
+	NewBinary                   string
+	PipePath                    string
+	QuiesceTimeoutMs            int
+	ExitTimeoutMs               int
 	// ExpectedPorts is the list of listening ports the prior
 	// supervisor's daemon children were bound to (read from
 	// supervisor-intent.json before invoking RunInstallUpgrade).
@@ -273,8 +353,16 @@ const (
 // matches the spec's stated budgets without forcing every caller to
 // repeat them.
 func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
-	if opts.WindowsProductPair != nil {
-		defer func() { retErr = errors.Join(retErr, opts.WindowsProductPair.Close()) }()
+	productRunEntered := false
+	if opts.GUIOwnedPending {
+		defer func() {
+			if retErr != nil && !productRunEntered && opts.WindowsProduct != nil && opts.WindowsProduct.prepared != nil {
+				retErr = opts.WindowsProduct.rollback(retErr)
+			}
+		}()
+	}
+	if opts.WindowsProduct != nil {
+		defer func() { retErr = errors.Join(retErr, opts.WindowsProduct.Close()) }()
 	}
 	callerQuiesceTimeoutMs := opts.QuiesceTimeoutMs
 	callerExitTimeoutMs := opts.ExitTimeoutMs
@@ -286,6 +374,7 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	if opts.ExitTimeoutMs == 0 {
 		opts.ExitTimeoutMs = defaultExitTimeoutMs
 	}
+	handoffTimeout := effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, opts.QuiesceTimeoutMs, opts.ExitTimeoutMs)
 	if opts.Deps == nil {
 		return errors.New("upgrade dependencies are required")
 	}
@@ -310,28 +399,133 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 		}
 	}
 
+	var pairPreflight *windowsProductPairPreflightV1
+	var pairObservation *windowsProductQuiescenceObservationV1
+	var retainedInitial *retainedGenerationObservationV1
+	pairKnownAbsent := false
+	pairRetainedSettled := false
+	if opts.WindowsProduct != nil {
+		preflight, err := inspectWindowsProductPreflight(opts.WindowsProduct)
+		if err != nil {
+			return fmt.Errorf("pre-mutation Windows product inspection failed: %w", err)
+		}
+		pairPreflight = &preflight
+		opts.WindowsProduct.Opts.ReplacementAuthority = windowsProductReplacementAuthority{Disposition: preflight.Disposition}
+		lifecycle := opts.WindowsProductPairLifecycle
+		if lifecycle == nil {
+			return ErrWindowsProductPairSupervisorUnsettled
+		}
+		if err := validateWindowsProductFrozenPorts(lifecycle.FrozenPorts, opts.ExpectedPorts); err != nil {
+			return fmt.Errorf("%w: %v", ErrWindowsProductPairSupervisorUnsettled, err)
+		}
+		if !opts.GUIOwnedPending && lifecycle.Retained != nil && lifecycle.Retained.Observe != nil {
+			paths := opts.WindowsProduct.Opts
+			retainedInitial, err = lifecycle.Retained.Observe(ctx, paths.ProductPath, paths.LegacyWindowlessPath, append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...))
+			if err != nil {
+				return err
+			}
+			if retainedInitial != nil {
+				if err := validateRetainedGenerationObservation(*retainedInitial, lifecycle.FrozenPorts, paths.ProductPath, paths.LegacyWindowlessPath); err != nil {
+					return err
+				}
+				pairObservation = retainedGenerationPreSettlement(*retainedInitial, lifecycle.Retained.RequestVersion)
+			}
+		}
+		if pairObservation == nil {
+			if lifecycle.Observe == nil {
+				return ErrWindowsProductPairSupervisorUnsettled
+			}
+			observation, err := lifecycle.Observe(ctx, opts.BinaryPath, append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...))
+			if err != nil {
+				return fmt.Errorf("%w: %v", ErrWindowsProductPairSupervisorUnsettled, err)
+			}
+			if err := validateWindowsProductQuiescenceObservation(observation, lifecycle.FrozenPorts); err != nil {
+				return fmt.Errorf("%w: %v", ErrWindowsProductPairSupervisorUnsettled, err)
+			}
+			pairObservation = &observation
+			pairKnownAbsent = observation.Supervisor.State == windowsProductSupervisorKnownAbsent
+		}
+		opts.WindowsProduct.Opts.FrozenPorts = append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...)
+		if opts.GUIOwnedPending {
+			prepared := opts.WindowsProduct.prepared
+			if prepared == nil || prepared.journal.Phase != WindowsProductRecoveryGUIOwnedStopPending || prepared.journal.PreSettlement == nil ||
+				prepared.journal.PreSettlement.GUIOwner != windowsProductGUIOwnerConfirmedPresent {
+				return fmt.Errorf("%w: GUI-owned V3 preimage was not prepared before exit", ErrWindowsProductRecoveryPending)
+			}
+			original := prepared.journal.PreSettlement
+			if !pairKnownAbsent {
+				live := pairObservation.Supervisor.Generation
+				recorded := original.Supervisor.Generation
+				if live == nil || recorded == nil || live.PID != recorded.PID || live.StartedAt != recorded.StartedAt {
+					return fmt.Errorf("%w: post-GUI supervisor is not the held original generation", ErrWindowsProductRecoveryPending)
+				}
+			}
+			pairObservation = &windowsProductQuiescenceObservationV1{
+				Supervisor: original.Supervisor, Ports: append([]windowsProductPortSettlementV1(nil), original.Ports...),
+				GUIOwner: windowsProductGUIOwnerConfirmedAbsent,
+			}
+		} else {
+			opts.WindowsProduct.Opts.PreSettlement = pairObservation
+			if err := opts.WindowsProduct.Prepare(); err != nil {
+				return fmt.Errorf("prepare Windows product recovery before lifecycle mutation: %w", err)
+			}
+		}
+		if opts.OnProductPrepared != nil {
+			if err := opts.OnProductPrepared(); err != nil {
+				return fmt.Errorf("report prepared Product before lifecycle mutation: %w", err)
+			}
+		}
+		if retainedInitial != nil {
+			settled, err := settleRetainedGenerationFromObservation(ctx, opts, lifecycle, handoffTimeout, retainedInitial)
+			if err != nil {
+				return err
+			}
+			pairObservation = settled
+			pairRetainedSettled = settled != nil
+		}
+	}
+
 	// The shared API owner contains the full quiesce -> graceful exit ->
 	// identity-gated force fallback decision. Upgrade retains lock/port
 	// settlement and rollback because those are transaction-specific.
-	if err := api.ReapSupervisor(ctx, api.SupervisorReapOpts{
-		PipePath:         opts.PipePath,
-		QuiesceTimeoutMs: opts.QuiesceTimeoutMs,
-		ExitTimeoutMs:    opts.ExitTimeoutMs,
-		IsAlreadyExited:  isAlreadyExitedError,
-		Deps:             opts.Deps,
-	}); err != nil {
-		if errors.Is(err, api.ErrSupervisorReapForceKill) {
-			// Preserve the established upgrade-facing failure contract while the
-			// shared reap owner retains its typed lifecycle classification and the
-			// platform force-kill cause for callers that need to inspect it.
-			return fmt.Errorf("force-kill supervisor failed: %w", err)
+	var pairReap *windowsProductPairReapRecorder
+	if !pairKnownAbsent && !pairRetainedSettled {
+		reapDeps := api.SupervisorReapDeps(opts.Deps)
+		if pairObservation != nil {
+			pairReap = &windowsProductPairReapRecorder{UpgradeDeps: opts.Deps}
+			reapDeps = pairReap
 		}
-		return fmt.Errorf("reap prior supervisor for upgrade: %w", err)
+		if err := api.ReapSupervisor(ctx, api.SupervisorReapOpts{
+			PipePath:         opts.PipePath,
+			QuiesceTimeoutMs: opts.QuiesceTimeoutMs,
+			ExitTimeoutMs:    opts.ExitTimeoutMs,
+			IsAlreadyExited:  isAlreadyExitedError,
+			Deps:             reapDeps,
+		}); err != nil {
+			if errors.Is(err, api.ErrSupervisorReapForceKill) {
+				// Preserve the established upgrade-facing failure contract while the
+				// shared reap owner retains its typed lifecycle classification and the
+				// platform force-kill cause for callers that need to inspect it.
+				return fmt.Errorf("force-kill supervisor failed: %w", err)
+			}
+			return fmt.Errorf("reap prior supervisor for upgrade: %w", err)
+		}
 	}
 
-	handoffTimeout := effectiveSupervisorHandoffTimeout(callerQuiesceTimeoutMs, callerExitTimeoutMs, opts.QuiesceTimeoutMs, opts.ExitTimeoutMs)
-	if opts.WaitSupervisorLockReleased != nil {
+	pairForceFallback := pairReap != nil && pairReap.forceKillCalled
+	if pairForceFallback {
+		if opts.WaitSupervisorLockReleased == nil {
+			return fmt.Errorf("%w: pair force fallback requires supervisor lock release proof", ErrWindowsProductPairSupervisorUnsettled)
+		}
+		if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound == nil {
+			return fmt.Errorf("%w: pair force fallback requires expected port release proof", ErrWindowsProductPairSupervisorUnsettled)
+		}
+	}
+	if !pairKnownAbsent && !pairRetainedSettled && opts.WaitSupervisorLockReleased != nil {
 		if err := opts.WaitSupervisorLockReleased(ctx, handoffTimeout); err != nil {
+			if pairForceFallback {
+				return fmt.Errorf("%w: pair force fallback lock release proof failed: %v", ErrWindowsProductPairSupervisorUnsettled, err)
+			}
 			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("prior supervisor did not release supervisor.lock within %s after upgrade exit request: %w", handoffTimeout, err))
 		}
@@ -341,10 +535,54 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// This runs on BOTH clean graceful-exit and force-kill paths: exit{graceful}
 	// ACKs before the supervisor's shutdown path releases children, so the clean
 	// path has the same zombie-listener race as the force path.
-	if len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
+	if !pairKnownAbsent && !pairRetainedSettled && len(opts.ExpectedPorts) > 0 && opts.VerifyPortsUnbound != nil {
 		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+			if pairForceFallback {
+				return fmt.Errorf("%w: pair force fallback expected port release proof failed: %v", ErrWindowsProductPairSupervisorUnsettled, err)
+			}
 			return recoverUnpromotedAfterReleaseFailure(ctx, opts, handoffTimeout, priorSHA256,
 				fmt.Errorf("port-unbound verification failed after prior-supervisor exit: %w", err))
+		}
+	}
+	if pairForceFallback {
+		return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, ErrWindowsProductPairSupervisorUnsettled)
+	}
+	if pairObservation != nil && (!pairKnownAbsent || opts.GUIOwnedPending) && !pairRetainedSettled {
+		pairObservation.SupervisorLockReleased = true
+		for i := range pairObservation.Ports {
+			pairObservation.Ports[i].PostUnbound = true
+		}
+	}
+	if pairObservation != nil && pairPreflight != nil &&
+		(opts.WindowsProduct != nil || windowsProductPairDispositionNeedsReplacement(pairPreflight.Disposition)) {
+		receipt, err := mintWindowsProductQuiescenceReceipt(
+			opts.WindowsProduct.Opts.ProductPath,
+			opts.WindowsProduct.Opts.LegacyWindowlessPath,
+			*pairPreflight, *pairObservation, opts.WindowsProductPairLifecycle.Now,
+		)
+		if err != nil {
+			cause := fmt.Errorf("%w: %v", ErrWindowsProductPairSupervisorUnsettled, err)
+			if pairKnownAbsent {
+				return cause
+			}
+			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, cause)
+		}
+		if pairRetainedSettled {
+			publisher := opts.WindowsProductPairLifecycle.Retained.PublishSettled
+			if publisher == nil {
+				return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, errors.New("retained-generation settled event publisher is unavailable"))
+			}
+			event := retainedGenerationSettledEvent(*pairObservation.Retained, receipt.ObservationSHA256, receipt.SettledAtUTC)
+			if _, err := publisher(event); err != nil {
+				return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, fmt.Errorf("publish retained-generation settlement: %w", err))
+			}
+		}
+		if opts.GUIOwnedPending {
+			if err := opts.WindowsProduct.SettleGUIOwnedStop(receipt); err != nil {
+				return err
+			}
+		} else {
+			opts.WindowsProduct.Opts.ReplacementAuthority.Quiescence = &receipt
 		}
 	}
 
@@ -368,15 +606,16 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 				fmt.Errorf("prior canonical drifted after fleet release and before promotion: %w", err))
 		}
 	}
-	if opts.WindowsProductPair != nil {
-		_, err := opts.WindowsProductPair.Run(ctx)
+	if opts.WindowsProduct != nil {
+		opts.WindowsProduct.Opts.PriorFleetReaped = pairObservation != nil && !pairKnownAbsent
+		productRunEntered = true
+		_, err := opts.WindowsProduct.Run(ctx)
 		var prePromotion *WindowsProductPairPrePromotionError
 		if errors.As(err, &prePromotion) {
 			return recoverUnpromotedUpgrade(ctx, opts, handoffTimeout, priorSHA256, err)
 		}
 		return err
 	}
-
 	// Promotion occurs only after candidate admission and complete old-fleet
 	// release have both been proven.
 	promotion, err := opts.Deps.RenameAsideBinary(opts.BinaryPath, opts.NewBinary)
@@ -470,6 +709,433 @@ func RunInstallUpgrade(ctx context.Context, opts UpgradeOpts) (retErr error) {
 	// wires WaitSupervisorReady, the orchestrator observes this via IPC status
 	// before reporting success; operator-facing follow-up remains `mcphub status`.
 	return nil
+}
+
+type windowsProductPairReapRecorder struct {
+	UpgradeDeps
+	forceKillCalled bool
+}
+
+func (d *windowsProductPairReapRecorder) ForceKillSupervisor(pipePath string) error {
+	d.forceKillCalled = true
+	return d.UpgradeDeps.ForceKillSupervisor(pipePath)
+}
+
+func validateWindowsProductFrozenPorts(frozen []windowsProductIntentPortV1, expected []int) error {
+	if len(frozen) != len(expected) {
+		return errors.New("frozen intent-port population differs from upgrade port population")
+	}
+	seen := make(map[string]struct{}, len(frozen))
+	wantPorts := make(map[int]int, len(expected))
+	for _, port := range expected {
+		if port < 1 || port > 65535 {
+			return errors.New("invalid expected upgrade port")
+		}
+		wantPorts[port]++
+	}
+	for _, row := range frozen {
+		if strings.TrimSpace(row.TaskName) == "" || row.Port < 1 || row.Port > 65535 {
+			return errors.New("invalid frozen intent-port row")
+		}
+		key := fmt.Sprintf("%s\x00%d", row.TaskName, row.Port)
+		if _, exists := seen[key]; exists {
+			return errors.New("duplicate frozen intent-port row")
+		}
+		seen[key] = struct{}{}
+		if wantPorts[row.Port] == 0 {
+			return errors.New("frozen intent port is absent from upgrade port population")
+		}
+		wantPorts[row.Port]--
+	}
+	for _, remaining := range wantPorts {
+		if remaining != 0 {
+			return errors.New("upgrade port is absent from frozen intent population")
+		}
+	}
+	return nil
+}
+
+func validateWindowsProductQuiescenceObservation(observation windowsProductQuiescenceObservationV1, frozen []windowsProductIntentPortV1) error {
+	if observation.GUIOwner != windowsProductGUIOwnerConfirmedAbsent || len(observation.Ports) != len(frozen) {
+		return errors.New("incomplete Windows product pair lifecycle observation")
+	}
+	want := make(map[string]struct{}, len(frozen))
+	for _, row := range frozen {
+		want[fmt.Sprintf("%s\x00%d", row.TaskName, row.Port)] = struct{}{}
+	}
+	allUnbound := true
+	for _, row := range observation.Ports {
+		key := fmt.Sprintf("%s\x00%d", row.TaskName, row.Port)
+		if _, exists := want[key]; !exists {
+			return errors.New("observed port population differs from frozen intent")
+		}
+		delete(want, key)
+		switch row.PreState {
+		case windowsProductPortUnbound:
+			if row.PrePID != 0 {
+				return errors.New("unbound observed port has a PID")
+			}
+		case windowsProductPortCanonicalOwned:
+			allUnbound = false
+			if row.PrePID <= 0 {
+				return errors.New("owned observed port lacks a PID")
+			}
+		default:
+			return errors.New("normal upgrade observation has unsupported port owner state")
+		}
+	}
+	if len(want) != 0 {
+		return errors.New("observed port population is incomplete")
+	}
+	switch observation.Supervisor.State {
+	case windowsProductSupervisorKnownAbsent:
+		if observation.Supervisor.Generation != nil || !observation.SupervisorLockReleased || !allUnbound {
+			return errors.New("known-absent observation is contradictory")
+		}
+		for _, row := range observation.Ports {
+			if !row.PostUnbound {
+				return errors.New("known-absent port lacks positive unbound proof")
+			}
+		}
+	case windowsProductSupervisorGracefullySettled:
+		generation := observation.Supervisor.Generation
+		if observation.SupervisorLockReleased || generation == nil || generation.PID <= 0 || strings.TrimSpace(generation.StartedAt) == "" || (generation.IPCRequestVersion != 0 && generation.IPCRequestVersion != 1) {
+			return errors.New("graceful supervisor generation observation is invalid")
+		}
+		for _, row := range observation.Ports {
+			if row.PostUnbound {
+				return errors.New("graceful observation claims settlement before lifecycle execution")
+			}
+		}
+	default:
+		return errors.New("supervisor lifecycle state is unknown")
+	}
+	return nil
+}
+
+func mintWindowsProductQuiescenceReceipt(productPath, legacyWindowlessPath string, preflight windowsProductPairPreflightV1, observation windowsProductQuiescenceObservationV1, now func() time.Time) (windowsProductQuiescenceReceiptV1, error) {
+	settledAt := time.Now().UTC()
+	if now != nil {
+		settledAt = now()
+	}
+	receipt := windowsProductQuiescenceReceiptV1{
+		Scope:                   windowsProductQuiescenceScopeV1,
+		CanonicalCLIPath:        productPath,
+		CanonicalWindowlessPath: legacyWindowlessPath,
+		PriorCLI:                preflight.PriorCLI,
+		PriorWindowless:         preflight.PriorWindowless,
+		Supervisor:              observation.Supervisor,
+		Ports:                   append([]windowsProductPortSettlementV1(nil), observation.Ports...),
+		GUIOwner:                observation.GUIOwner,
+		SupervisorLockReleased:  observation.SupervisorLockReleased,
+		SettledAtUTC:            settledAt,
+	}
+	projection, err := json.Marshal(struct {
+		Scope                   string
+		CanonicalCLIPath        string
+		CanonicalWindowlessPath string
+		PriorCLI                windowsProductPreimageV1
+		PriorWindowless         windowsProductPreimageV1
+		Supervisor              windowsProductSupervisorSettlementV1
+		Ports                   []windowsProductPortSettlementV1
+		GUIOwner                string
+		SupervisorLockReleased  bool
+		SettledAtUTC            time.Time
+	}{receipt.Scope, receipt.CanonicalCLIPath, receipt.CanonicalWindowlessPath, receipt.PriorCLI, receipt.PriorWindowless, receipt.Supervisor, receipt.Ports, receipt.GUIOwner, receipt.SupervisorLockReleased, receipt.SettledAtUTC})
+	if err != nil {
+		return windowsProductQuiescenceReceiptV1{}, err
+	}
+	digest := observation.ObservationSHA256
+	if digest == "" {
+		digest = fmt.Sprintf("%x", sha256.Sum256(projection))
+	}
+	receipt.ObservationSHA256 = digest
+	receipt.ReceiptID = "q-" + digest
+	if err := validateWindowsProductQuiescenceReceipt(receipt); err != nil {
+		return windowsProductQuiescenceReceiptV1{}, err
+	}
+	return receipt, nil
+}
+
+func settleRetainedGenerationFromObservation(ctx context.Context, opts UpgradeOpts, lifecycle *windowsProductPairLifecycleHooks, handoffTimeout time.Duration, initial *retainedGenerationObservationV1) (result *windowsProductQuiescenceObservationV1, retErr error) {
+	if lifecycle == nil || lifecycle.Retained == nil || lifecycle.Retained.Observe == nil {
+		return nil, nil
+	}
+	hooks := lifecycle.Retained
+	frozen := append([]windowsProductIntentPortV1(nil), lifecycle.FrozenPorts...)
+	cliPath, windowlessPath := "", ""
+	if opts.WindowsProduct != nil {
+		cliPath, windowlessPath = opts.WindowsProduct.Opts.ProductPath, opts.WindowsProduct.Opts.LegacyWindowlessPath
+	}
+	observation := initial
+	if observation == nil {
+		var err error
+		observation, err = hooks.Observe(ctx, cliPath, windowlessPath, frozen)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if observation == nil {
+		return nil, nil
+	}
+	if err := validateRetainedGenerationObservation(*observation, frozen, cliPath, windowlessPath); err != nil {
+		return nil, err
+	}
+	if hooks.HoldSupervisor == nil || hooks.Send == nil {
+		return nil, fmt.Errorf("%w: retained lifecycle dependencies are incomplete", ErrRetainedGenerationChanged)
+	}
+	held, err := hooks.HoldSupervisor(observation.SupervisorPID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: hold supervisor generation: %v", ErrRetainedGenerationChanged, err)
+	}
+	defer func() { retErr = errors.Join(retErr, held.Close()) }()
+	if held.PID() != observation.SupervisorPID {
+		return nil, fmt.Errorf("%w: held PID differs from observation", ErrRetainedGenerationChanged)
+	}
+	if err := held.VerifyIdentity(process.PIDIdentityProof{PID: observation.SupervisorPID, ExecutablePath: observation.SupervisorImagePath, StartedAt: observation.SupervisorStartedAt}); err != nil {
+		return nil, fmt.Errorf("%w: held supervisor identity: %v", ErrRetainedGenerationChanged, err)
+	}
+	reobserved, err := hooks.Observe(ctx, cliPath, windowlessPath, frozen)
+	if err != nil {
+		return nil, fmt.Errorf("%w: re-observe retained generation: %v", ErrRetainedGenerationChanged, err)
+	}
+	if reobserved == nil {
+		return nil, fmt.Errorf("%w: retained generation disappeared during re-probe", ErrRetainedGenerationChanged)
+	}
+	if err := validateRetainedGenerationObservation(*reobserved, frozen, cliPath, windowlessPath); err != nil {
+		return nil, err
+	}
+	if !sameRetainedGenerationObservation(*observation, *reobserved) {
+		if observation.SupervisorPID != reobserved.SupervisorPID || observation.SupervisorStartedAt != reobserved.SupervisorStartedAt || !samePath(observation.SupervisorImagePath, reobserved.SupervisorImagePath) || observation.SupervisorCommandSHA256 != reobserved.SupervisorCommandSHA256 || observation.CurrentPairReceipt != reobserved.CurrentPairReceipt {
+			return nil, ErrRetainedGenerationChanged
+		}
+		return nil, ErrRetainedGenerationPortPopulationMismatch
+	}
+
+	owner := api.SupervisorLockOwner{PID: observation.SupervisorPID, StartedAt: observation.SupervisorStartedAt}
+	quiesce, err := hooks.Send(ctx, owner, hooks.RequestVersion, "quiesce-timers", map[string]any{"timeout_ms": opts.QuiesceTimeoutMs}, opts.QuiesceTimeoutMs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: quiesce-timers transport: %v", ErrRetainedGenerationProtocolUnsupported, err)
+	}
+	if err := validateRetainedGenerationIPCExchange(owner, hooks.RequestVersion, "quiesce-timers", quiesce); err != nil {
+		return nil, err
+	}
+	exit, err := hooks.Send(ctx, owner, hooks.RequestVersion, "exit", map[string]any{"graceful": true, "timeout_ms": opts.ExitTimeoutMs}, opts.ExitTimeoutMs)
+	if err != nil {
+		return nil, fmt.Errorf("%w: exit transport: %v", ErrRetainedGenerationProtocolUnsupported, err)
+	}
+	if err := validateRetainedGenerationIPCExchange(owner, hooks.RequestVersion, "exit", exit); err != nil {
+		return nil, err
+	}
+	if opts.WaitSupervisorLockReleased == nil {
+		return nil, fmt.Errorf("%w: supervisor lock release verifier is unavailable", ErrRetainedGenerationQuiesceUnsettled)
+	}
+	if err := opts.WaitSupervisorLockReleased(ctx, handoffTimeout); err != nil {
+		return nil, fmt.Errorf("%w: supervisor lock remains held: %v", ErrRetainedGenerationQuiesceUnsettled, err)
+	}
+	if len(frozen) != 0 {
+		if opts.VerifyPortsUnbound == nil {
+			return nil, fmt.Errorf("%w: port settlement verifier is unavailable", ErrRetainedGenerationQuiesceUnsettled)
+		}
+		if err := opts.VerifyPortsUnbound(opts.ExpectedPorts, defaultPostForceKillPortVerifyTimeout); err != nil {
+			return nil, fmt.Errorf("%w: frozen intent ports remain bound: %v", ErrRetainedGenerationQuiesceUnsettled, err)
+		}
+	}
+	ports := make([]windowsProductPortSettlementV1, 0, len(observation.Ports))
+	for _, row := range observation.Ports {
+		ports = append(ports, windowsProductPortSettlementV1{TaskName: row.TaskName, Port: row.Port, PreState: row.State, PrePID: row.PID, PostUnbound: true})
+	}
+	return &windowsProductQuiescenceObservationV1{
+		Supervisor: windowsProductSupervisorSettlementV1{
+			State:      windowsProductSupervisorGracefullySettled,
+			Generation: &windowsProductSupervisorGenerationV1{PID: observation.SupervisorPID, StartedAt: observation.SupervisorStartedAt, IPCRequestVersion: hooks.RequestVersion},
+		},
+		Ports:                  ports,
+		GUIOwner:               observation.GUIOwner,
+		SupervisorLockReleased: true,
+		ObservationSHA256:      retainedGenerationObservationSHA256(*observation),
+		Retained:               observation,
+	}, nil
+}
+
+func retainedGenerationSettledEvent(observation retainedGenerationObservationV1, observationSHA256 string, settledAt time.Time) retainedGenerationSettledEventV1 {
+	ports := make([]retainedGenerationSettledPortEventV1, 0, len(observation.Ports))
+	for _, row := range observation.Ports {
+		imageDigest := ""
+		if row.ObservedImagePath != "" {
+			imageDigest = hashWindowsProductPath(row.ObservedImagePath)
+		}
+		ports = append(ports, retainedGenerationSettledPortEventV1{
+			TaskName: row.TaskName, Port: row.Port, PID: row.PID, StartedAt: row.StartedAt,
+			ImagePathSHA256: imageDigest, ArgvSHA256: row.ArgvSHA256,
+		})
+	}
+	return retainedGenerationSettledEventV1{
+		ReasonID: "retained-generation-gracefully-settled", ObservationSHA256: observationSHA256,
+		SupervisorPID: observation.SupervisorPID, SupervisorStartedAt: observation.SupervisorStartedAt,
+		SupervisorImageSHA256: hashWindowsProductPath(observation.SupervisorImagePath), SupervisorCommandSHA256: observation.SupervisorCommandSHA256,
+		Ports: ports, SettledAtUTC: settledAt,
+	}
+}
+
+func validateRetainedGenerationObservation(observation retainedGenerationObservationV1, frozen []windowsProductIntentPortV1, cliPath, windowlessPath string) error {
+	if strings.TrimSpace(observation.ReceiptID) == "" || observation.CanonicalCLIPath != cliPath || observation.CanonicalWindowlessPath != windowlessPath || !cleanAbsolutePath(observation.CanonicalCLIPath) || !cleanAbsolutePath(observation.CanonicalWindowlessPath) {
+		return fmt.Errorf("%w: retained observation target identity is invalid", ErrRetainedGenerationChanged)
+	}
+	if observation.GUIOwner != windowsProductGUIOwnerConfirmedAbsent {
+		return errors.New("E_UPGRADE_GUI_OWNER_PRESENT: retained-generation GUI owner absence is unverified")
+	}
+	if observation.SupervisorPID <= 0 || strings.TrimSpace(observation.SupervisorStartedAt) == "" || !cleanAbsolutePath(observation.SupervisorImagePath) || samePath(observation.SupervisorImagePath, observation.CanonicalCLIPath) || !validLowerHexSHA256(observation.SupervisorCommandSHA256) || !validWindowsProductPreimage(observation.CurrentPairReceipt) || observation.ObservedAtUTC.IsZero() || observation.ObservedAtUTC.Location() != time.UTC {
+		return fmt.Errorf("%w: retained supervisor observation is invalid", ErrRetainedGenerationChanged)
+	}
+	supervisorStarted, err := time.Parse(time.RFC3339Nano, observation.SupervisorStartedAt)
+	if err != nil {
+		return fmt.Errorf("%w: supervisor start identity is invalid", ErrRetainedGenerationChanged)
+	}
+	if len(observation.Ports) != len(frozen) {
+		return ErrRetainedGenerationPortPopulationMismatch
+	}
+	want := make(map[string]windowsProductIntentPortV1, len(frozen))
+	for _, row := range frozen {
+		if !validLowerHexSHA256(row.ArgvSHA256) {
+			return fmt.Errorf("%w: frozen argv digest is invalid", ErrRetainedGenerationArgvMismatch)
+		}
+		key := fmt.Sprintf("%s\x00%d", row.TaskName, row.Port)
+		if _, exists := want[key]; exists {
+			return ErrRetainedGenerationPortPopulationMismatch
+		}
+		want[key] = row
+	}
+	retainedCount := 0
+	for _, row := range observation.Ports {
+		key := fmt.Sprintf("%s\x00%d", row.TaskName, row.Port)
+		expected, exists := want[key]
+		if !exists {
+			return ErrRetainedGenerationPortPopulationMismatch
+		}
+		delete(want, key)
+		if row.State == windowsProductPortUnbound {
+			if row.PID != 0 || row.ParentPID != 0 || row.StartedAt != "" || row.ObservedImagePath != "" || row.ArgvSHA256 != "" {
+				return ErrRetainedGenerationPortPopulationMismatch
+			}
+			continue
+		}
+		if row.PID <= 0 || row.ParentPID <= 0 || strings.TrimSpace(row.StartedAt) == "" || !cleanAbsolutePath(row.ObservedImagePath) || !validLowerHexSHA256(row.ArgvSHA256) {
+			return ErrRetainedGenerationPortPopulationMismatch
+		}
+		if row.ParentPID != observation.SupervisorPID {
+			return ErrRetainedGenerationParentMismatch
+		}
+		if row.ArgvSHA256 != expected.ArgvSHA256 {
+			return ErrRetainedGenerationArgvMismatch
+		}
+		started, err := time.Parse(time.RFC3339Nano, row.StartedAt)
+		if err != nil || started.Before(supervisorStarted) || started.After(observation.ObservedAtUTC) {
+			return fmt.Errorf("%w: port process start identity is outside the supervisor observation", ErrRetainedGenerationChanged)
+		}
+		switch {
+		case samePath(row.ObservedImagePath, observation.CanonicalCLIPath):
+			if row.State != windowsProductPortCanonicalOwned {
+				return ErrRetainedGenerationImageMismatch
+			}
+		case samePath(row.ObservedImagePath, observation.SupervisorImagePath):
+			if row.State != windowsProductPortRetainedOwned {
+				return ErrRetainedGenerationImageMismatch
+			}
+			retainedCount++
+		default:
+			return ErrRetainedGenerationImageMismatch
+		}
+	}
+	if len(want) != 0 || retainedCount == 0 {
+		return ErrRetainedGenerationPortPopulationMismatch
+	}
+	return nil
+}
+
+func sameRetainedGenerationObservation(left, right retainedGenerationObservationV1) bool {
+	return left.CanonicalCLIPath == right.CanonicalCLIPath &&
+		left.CanonicalWindowlessPath == right.CanonicalWindowlessPath &&
+		left.SupervisorPID == right.SupervisorPID &&
+		left.SupervisorStartedAt == right.SupervisorStartedAt &&
+		samePath(left.SupervisorImagePath, right.SupervisorImagePath) &&
+		left.SupervisorCommandSHA256 == right.SupervisorCommandSHA256 &&
+		left.GUIOwner == right.GUIOwner &&
+		left.CurrentPairReceipt == right.CurrentPairReceipt &&
+		reflect.DeepEqual(left.Ports, right.Ports)
+}
+
+func validateRetainedGenerationIPCExchange(owner api.SupervisorLockOwner, version int, command string, exchange retainedGenerationIPCExchangeV1) error {
+	invalid := func(detail string) error {
+		return fmt.Errorf("%w: %s", ErrRetainedGenerationProtocolUnsupported, detail)
+	}
+	if version != 0 && version != 1 {
+		return invalid("request version is unsupported")
+	}
+	if command != "quiesce-timers" && command != "exit" {
+		return invalid("command is unsupported")
+	}
+	if exchange.Request.Version != version || exchange.Request.ID <= 0 || exchange.Request.Cmd != command || api.ValidateRequestEnvelope(exchange.Request) != nil {
+		return invalid("request envelope differs from the retained lifecycle command")
+	}
+	timeoutValue, timeoutOK := exchange.Request.Args["timeout_ms"].(int)
+	if !timeoutOK || timeoutValue <= 0 {
+		return invalid("request timeout is missing or invalid")
+	}
+	if command == "quiesce-timers" {
+		if len(exchange.Request.Args) != 1 {
+			return invalid("quiesce-timers arguments differ")
+		}
+	} else if graceful, ok := exchange.Request.Args["graceful"].(bool); len(exchange.Request.Args) != 2 || !ok || !graceful {
+		return invalid("exit arguments differ")
+	}
+	if exchange.Hello.Version != 1 || !api.ValidateHandshake(exchange.Hello, owner) {
+		return invalid("supervisor hello generation differs")
+	}
+	response := exchange.Response
+	if response.ID != exchange.Request.ID || !response.OK || response.Error != nil || !response.Final {
+		return invalid("final response envelope is not exact")
+	}
+	result, ok := response.Result.(map[string]any)
+	if !ok {
+		return invalid("command result is malformed")
+	}
+	switch command {
+	case "quiesce-timers":
+		still, ok := result["still_running"].([]any)
+		if !ok || len(still) != 0 {
+			return invalid("quiesce-timers did not settle every reported transient")
+		}
+	case "exit":
+		if initiated, ok := result["graceful_exit_initiated"].(bool); !ok || !initiated {
+			return invalid("graceful exit was not initiated")
+		}
+	}
+	return nil
+}
+
+func retainedGenerationObservationSHA256(observation retainedGenerationObservationV1) string {
+	raw, _ := json.Marshal(observation)
+	return fmt.Sprintf("%x", sha256.Sum256(raw))
+}
+
+func retainedGenerationPreSettlement(observation retainedGenerationObservationV1, requestVersion int) *windowsProductQuiescenceObservationV1 {
+	ports := make([]windowsProductPortSettlementV1, 0, len(observation.Ports))
+	for _, row := range observation.Ports {
+		ports = append(ports, windowsProductPortSettlementV1{
+			TaskName: row.TaskName, Port: row.Port, PreState: row.State, PrePID: row.PID,
+		})
+	}
+	return &windowsProductQuiescenceObservationV1{
+		Supervisor: windowsProductSupervisorSettlementV1{
+			State: windowsProductSupervisorGracefullySettled,
+			Generation: &windowsProductSupervisorGenerationV1{
+				PID: observation.SupervisorPID, StartedAt: observation.SupervisorStartedAt,
+				IPCRequestVersion: requestVersion,
+			},
+		},
+		Ports: ports, GUIOwner: observation.GUIOwner,
+	}
 }
 
 func recoverUnpromotedUpgrade(ctx context.Context, opts UpgradeOpts, timeout time.Duration, priorSHA256 string, trigger error) error {

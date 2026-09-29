@@ -70,6 +70,18 @@ func StartWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 // exported legacy path deliberately supplies no standard handles; the strict
 // runner supplies all three and receives an allowlisted child handle set.
 func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) (int, error) {
+	return startWithJobFilesObserved(job, cmd, stdin, stdout, stderr, nil)
+}
+
+// startWithJobFilesObserved extends only the at-create owner; nil options
+// follow the ordinary launch path without retaining any additional handle.
+type startWithJobObserverOptions struct {
+	retainOriginal func(windows.Handle, uint32) error
+	findProcess    func(int) (*os.Process, error)
+	childHandles   []windows.Handle
+}
+
+func startWithJobFilesObserved(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File, observer *startWithJobObserverOptions) (int, error) {
 	if job == nil {
 		return 0, startWithJobError(StartWithJobContainment, errors.New("StartWithJob: nil job"))
 	}
@@ -98,7 +110,7 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 	// Allocate a one-attribute thread-attribute list via x/sys helper.
 	// The container owns the LocalAlloc'd buffer; Delete frees it.
 	attributeCount := 1
-	if stdin != nil {
+	if stdin != nil || (observer != nil && len(observer.childHandles) != 0) {
 		attributeCount++
 	}
 	attrList, err := windows.NewProcThreadAttributeList(uint32(attributeCount))
@@ -136,10 +148,16 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 				_ = windows.CloseHandle(handle)
 			}
 		}()
+	}
+	allowedHandles := childHandles
+	if observer != nil && len(observer.childHandles) != 0 {
+		allowedHandles = append(append([]windows.Handle(nil), childHandles...), observer.childHandles...)
+	}
+	if len(allowedHandles) != 0 {
 		if err := attrList.Update(
 			windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-			unsafe.Pointer(&childHandles[0]),
-			uintptr(len(childHandles))*unsafe.Sizeof(childHandles[0]),
+			unsafe.Pointer(&allowedHandles[0]),
+			uintptr(len(allowedHandles))*unsafe.Sizeof(allowedHandles[0]),
 		); err != nil {
 			return 0, startWithJobError(StartWithJobLaunch, fmt.Errorf("ProcThreadAttributeList.Update(HANDLE_LIST): %w", err))
 		}
@@ -183,22 +201,30 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 	// padding. Verified against windows.StartupInfoEx struct definition in
 	// golang.org/x/sys/windows.
 	if err := windows.CreateProcess(
-		nil,             // lpApplicationName (NULL → use cmd line argv[0])
-		commandLine,     // lpCommandLine
-		nil,             // lpProcessAttributes
-		nil,             // lpThreadAttributes
-		stdin != nil,    // bInheritHandles; HANDLE_LIST restricts inheritance
-		creationFlags,   // dwCreationFlags
-		envPtr,          // lpEnvironment
-		cwdPtr,          // lpCurrentDirectory
-		&si.StartupInfo, // lpStartupInfo (see comment above)
-		&pi,             // lpProcessInformation
+		nil,                      // lpApplicationName (NULL → use cmd line argv[0])
+		commandLine,              // lpCommandLine
+		nil,                      // lpProcessAttributes
+		nil,                      // lpThreadAttributes
+		len(allowedHandles) != 0, // bInheritHandles; HANDLE_LIST restricts inheritance
+		creationFlags,            // dwCreationFlags
+		envPtr,                   // lpEnvironment
+		cwdPtr,                   // lpCurrentDirectory
+		&si.StartupInfo,          // lpStartupInfo (see comment above)
+		&pi,                      // lpProcessInformation
 	); err != nil {
 		return 0, startWithJobError(StartWithJobLaunch, fmt.Errorf("CreateProcess: %w", err))
 	}
 
 	// Close the thread handle; we don't need it for orchestration.
 	_ = windows.CloseHandle(pi.Thread)
+	retainedOriginal := false
+	if observer != nil && observer.retainOriginal != nil {
+		if retainErr := observer.retainOriginal(pi.Process, pi.ProcessId); retainErr != nil {
+			_ = windows.CloseHandle(pi.Process)
+			return int(pi.ProcessId), startWithJobError(StartWithJobLaunch, fmt.Errorf("%w: retain original process handle: %v", ErrSpawnPostCreate, retainErr))
+		}
+		retainedOriginal = true
+	}
 
 	// Populate cmd.Process so callers can use Wait()/Kill() through
 	// the standard os/exec surface. NOTE: this constructs an
@@ -208,7 +234,14 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 	// unexported os.Process.handle field. Caller workflows that
 	// already use exec.Cmd.Wait() will go through os.FindProcess,
 	// which is the expected path.
-	p, err := os.FindProcess(int(pi.ProcessId))
+	findProcess := os.FindProcess
+	if observer != nil && observer.findProcess != nil {
+		findProcess = observer.findProcess
+	}
+	p, err := findProcess(int(pi.ProcessId))
+	if p == nil && err == nil {
+		err = errors.New("FindProcess returned nil process")
+	}
 	if err != nil {
 		// Post-create orphan case: CreateProcess succeeded, the kernel
 		// allocated PID pi.ProcessId, and the child is alive in the
@@ -220,7 +253,9 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 		// would otherwise spawn duplicate daemons.
 		//
 		// Closes bot finding on PR #236 1c0ea09 (P2 #5).
-		_ = windows.CloseHandle(pi.Process)
+		if !retainedOriginal {
+			_ = windows.CloseHandle(pi.Process)
+		}
 		if stdin != nil {
 			_ = job.TerminateAll(1)
 			_ = job.Close()
@@ -232,8 +267,10 @@ func startWithJobFiles(job *Job, cmd *exec.Cmd, stdin, stdout, stderr *os.File) 
 	// We opened our own handle via FindProcess; close the duplicate
 	// returned by CreateProcess to avoid leaking it for the lifetime
 	// of the supervisor.
-	_ = windows.CloseHandle(pi.Process)
-	runtime.KeepAlive(childHandles)
+	if !retainedOriginal {
+		_ = windows.CloseHandle(pi.Process)
+	}
+	runtime.KeepAlive(allowedHandles)
 
 	return int(pi.ProcessId), nil
 }

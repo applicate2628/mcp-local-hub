@@ -832,6 +832,93 @@ func TestHandleRespawnIdleDoesNotSpawnBeforeStoppedSettlement(t *testing.T) {
 	}
 }
 
+func TestSettleStopBatchTargetsQuarantinedPIDZeroUsesExistingPortFence(t *testing.T) {
+	const taskName = `\mcp-local-hub-graphify-project-671a9214-default`
+	const port = 9307
+	tests := []struct {
+		name       string
+		configure  func(*DaemonRuntimeTracker)
+		portOwners map[int]int
+		wantState  api.StoppedSettlementState
+		wantReason string
+	}{
+		{
+			name: "quarantined pid zero and free port settles",
+			configure: func(tracker *DaemonRuntimeTracker) {
+				tracker.HydrateFromState(&api.SupervisorStateFile{Daemons: map[string]api.SupervisorDaemonState{
+					taskName: {State: daemonRuntimeStateIdle, CurrentPID: 0, PIDGeneration: 68},
+				}})
+				tracker.MarkQuarantined(taskName)
+			},
+			wantState: api.StoppedSettlementStopped, wantReason: api.StoppedSettlementReasonStopped,
+		},
+		{
+			name: "quarantined nonzero pid refuses",
+			configure: func(tracker *DaemonRuntimeTracker) {
+				setStopSettlementTestEntry(tracker, taskName, daemonRuntimeStateQuarantine, 4812, 68)
+			},
+			wantState: api.StoppedSettlementFailed, wantReason: api.StoppedSettlementReasonProcessAlive,
+		},
+		{
+			name: "quarantined pid zero occupied port refuses",
+			configure: func(tracker *DaemonRuntimeTracker) {
+				setStopSettlementTestEntry(tracker, taskName, daemonRuntimeStateQuarantine, 0, 68)
+			},
+			portOwners: map[int]int{port: 4812},
+			wantState:  api.StoppedSettlementFailed, wantReason: api.StoppedSettlementReasonListenerAlive,
+		},
+		{name: "starting pid zero refuses", configure: func(tracker *DaemonRuntimeTracker) {
+			setStopSettlementTestEntry(tracker, taskName, "starting", 0, 68)
+		}, wantState: api.StoppedSettlementFailed, wantReason: api.StoppedSettlementReasonProcessAlive},
+		{name: "backoff pid zero refuses", configure: func(tracker *DaemonRuntimeTracker) {
+			setStopSettlementTestEntry(tracker, taskName, daemonRuntimeStateBackoff, 0, 68)
+		}, wantState: api.StoppedSettlementFailed, wantReason: api.StoppedSettlementReasonProcessAlive},
+		{name: "failed pid zero refuses", configure: func(tracker *DaemonRuntimeTracker) {
+			setStopSettlementTestEntry(tracker, taskName, "failed", 0, 68)
+		}, wantState: api.StoppedSettlementFailed, wantReason: api.StoppedSettlementReasonProcessAlive},
+		{name: "unknown pid zero refuses", configure: func(tracker *DaemonRuntimeTracker) {
+			setStopSettlementTestEntry(tracker, taskName, "future-state", 0, 68)
+		}, wantState: api.StoppedSettlementFailed, wantReason: api.StoppedSettlementReasonProcessAlive},
+		{name: "missing tracker row refuses", configure: func(*DaemonRuntimeTracker) {}, wantState: api.StoppedSettlementIncomplete},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tracker := NewDaemonRuntimeTracker()
+			tc.configure(tracker)
+			intent := &api.SupervisorIntentFile{Daemons: []api.SupervisorDaemon{{TaskName: taskName, Server: "graphify-project-671a9214", Daemon: "default", Port: port}}}
+			loop := api.NewEventLoop(4)
+			loop.RegisterHandler(func(event api.LoopEvent) {
+				if event.Kind == evControllerBarrier {
+					close(event.Body[controllerBarrierResultBodyKey].(chan struct{}))
+				}
+			})
+			loopCtx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go loop.Run(loopCtx)
+			ctrl := &supervisorController{
+				intentCache: newIntentCache(), eventLoop: loop, tracker: tracker,
+				stoppedSettlementPortOwnersSnapshot: func(context.Context) (map[int]int, error) { return tc.portOwners, nil },
+				stoppedSettlementWait:               func(context.Context) error { return context.DeadlineExceeded },
+			}
+			ctrl.intentCache.Refresh(intent)
+			got := ctrl.settleStopBatchTargets(context.Background(), []api.StopBatchTargetV1{{TaskName: taskName, ExpectedPort: port}})[0]
+			if got.State != tc.wantState || (tc.wantReason != "" && got.Reason != tc.wantReason) {
+				t.Fatalf("settlement = %+v, want state=%s reason=%s", got, tc.wantState, tc.wantReason)
+			}
+		})
+	}
+}
+
+func setStopSettlementTestEntry(tracker *DaemonRuntimeTracker, taskName, state string, pid, generation int) {
+	tracker.mu.Lock()
+	defer tracker.mu.Unlock()
+	entry := DaemonRuntimeEntry{State: state, CurrentPID: pid, PIDGeneration: generation}
+	if pid > 0 {
+		entry.StartedAt = time.Date(2026, 9, 20, 1, 2, 3, 0, time.UTC)
+	}
+	tracker.entries[canonicalSupervisorTaskName(taskName)] = entry
+}
+
 func TestAdmitCreateProcessRejectsEveryPendingReceiptUntilCommitRemoval(t *testing.T) {
 	statePath := filepath.Join(t.TempDir(), "supervisor-state.json")
 	const taskName = `\mcp-local-hub-time-default`

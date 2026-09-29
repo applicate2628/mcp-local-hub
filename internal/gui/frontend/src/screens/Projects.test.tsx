@@ -1,7 +1,7 @@
 // screens/Projects.test.tsx — component tests for the per-project lens.
 //
 // PHASE 3b switched the data source to the SINGLE GET /api/projects aggregate
-// (design decision 6) and wired the IMMEDIATE per-row toggle. These tests cover
+// (design decision 6) and wired the per-row toggle. These tests cover
 // the new behaviors:
 //   - canonicalProjectKey pure-fn normalization (the join key, single owner);
 //   - LIST render from the aggregate (one card per project + summary counts);
@@ -9,6 +9,7 @@
 //   - DETAIL lens (#/projects?path=<key>) 4 mechanism sections;
 //   - the per-row toggle state machine (optimistic flip → reconcile-to-response,
 //     error revert + §3.1 plain copy, per-row isolation);
+//   - workspace-LSP confirmation before either direction and a confirmed Retry;
 //   - both-scopes claude card (Project toggle uses the claude-local-membership
 //     APPROVAL ARRAY-MOVE — FIX 1 — / Local read-only / shadow once);
 //   - the decision-5 invariant (claude Project disable → array-move scope, NEVER
@@ -20,9 +21,17 @@
 // Mirrors Servers.test.tsx's fetch-router idiom (a declarative URL→response map)
 // + happy-dom EventSource stub conventions.
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, waitFor, cleanup, screen, fireEvent } from "@testing-library/preact";
+import { render, waitFor, cleanup, screen, fireEvent, within } from "@testing-library/preact";
 import { ProjectsScreen, canonicalProjectKey } from "./Projects";
 import type { RouterState } from "../hooks/useRouter";
+
+const fixtureRoots = {
+  dev1: "C:\\dev\\test",
+  dev2: "C:/dev/test",
+  dev3: "C:/Dev/Test",
+  home1: "/home/TEST",
+  home2: "/home/test",
+} as const;
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -78,17 +87,41 @@ function scanEntry(name: string, presence: Record<string, unknown>, over: Record
   return { name, client_presence: presence, manifest_exists: true, can_migrate: true, ...over };
 }
 
+const SYNTHETIC_PROJECT_PREIMAGE_A = "a".repeat(64);
+const SYNTHETIC_PROJECT_PREIMAGE_B = "b".repeat(64);
+
+function adoptPlan(
+  entry: string,
+  manifest = entry,
+  preview = SYNTHETIC_PROJECT_PREIMAGE_A,
+) {
+  return {
+    EntryName: entry,
+    SourceClient: "codex-cli",
+    ManifestName: manifest,
+    Port: 9325,
+    AdoptClients: ["codex-cli"],
+    AlsoPresent: [],
+    SignatureMismatches: [],
+    DisabledSameName: [],
+    SecretRoutedKeys: [],
+    ManifestYAML: `name: ${manifest}\n`,
+    symlink_targets: [],
+    project_source_preimage_token: preview,
+  };
+}
+
 describe("canonicalProjectKey", () => {
   it("forward-slash-normalizes backslashes and strips trailing slash", () => {
-    expect(canonicalProjectKey("C:\\dev\\proj\\")).toBe("C:/dev/proj");
+    expect(canonicalProjectKey(`${fixtureRoots.dev1}\\`)).toBe(`${fixtureRoots.dev2}`);
   });
   it("collapses . and .. segments (filepath-clean)", () => {
     expect(canonicalProjectKey("/a/b/../c/./d")).toBe("/a/c/d");
     expect(canonicalProjectKey("a//b///c")).toBe("a/b/c");
   });
   it("PRESERVES case (no browser-OS case-fold)", () => {
-    expect(canonicalProjectKey("C:/Dev/Proj")).toBe("C:/Dev/Proj");
-    expect(canonicalProjectKey("/home/A/Repo")).not.toBe(canonicalProjectKey("/home/a/repo"));
+    expect(canonicalProjectKey(`${fixtureRoots.dev3}`)).toBe(`${fixtureRoots.dev3}`);
+    expect(canonicalProjectKey(`${fixtureRoots.home1}/Repo`)).not.toBe(canonicalProjectKey(`${fixtureRoots.home2}/repo`));
   });
   it("preserves the double leading slash of a UNC path", () => {
     expect(canonicalProjectKey("\\\\server\\share\\proj")).toBe("//server/share/proj");
@@ -214,6 +247,444 @@ describe("ProjectsScreen — detail lens (sections + toggles)", () => {
     expect(screen.getByTestId("projects-toggle-group-servers-serena")).toBeTruthy();
     // tools_hidden security-fence note kept.
     expect(screen.getByTestId("projects-group-hidden-note-g1").textContent).toContain("not");
+  });
+
+  it("workspace toggle restores the native checkbox and requires confirmation for disable and enable", async () => {
+    const requests: Array<Record<string, unknown>> = [];
+    mountDetail(
+      proj({
+        entries: [
+          { workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t", lifecycle: "failed" },
+          { workspace_key: "k", workspace_path: "/home/x/proj", language: "python", backend: "mcp-language-server", port: 0, task_name: "t2", lifecycle: "active" },
+        ],
+      }),
+      [],
+      (init) => {
+        const body = JSON.parse(String(init?.body ?? "{}"));
+        requests.push(body);
+        return jsonResponse(200, { scope: "workspace-lsp", server: "go", enabled: body.enable });
+      },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    const toggle = await screen.findByTestId("projects-toggle-workspace-lsp-go") as HTMLInputElement;
+    const otherToggle = screen.getByTestId("projects-toggle-workspace-lsp-python") as HTMLInputElement;
+    expect(toggle.checked).toBe(true); // Failed registrations are still registered.
+    expect(toggle.getAttribute("aria-label")).toBe("go workspace tool");
+    expect(otherToggle.checked).toBe(true);
+    expect(screen.queryByTestId("projects-workspace-toggle-confirm")).toBeNull();
+
+    fireEvent.change(toggle, { target: { checked: false } });
+    let modal = await screen.findByTestId("projects-workspace-toggle-confirm") as HTMLDialogElement;
+    await waitFor(() => expect(modal.open).toBe(true));
+    expect(toggle.checked).toBe(true);
+    expect(otherToggle.checked).toBe(true);
+    expect(requests).toHaveLength(0);
+    expect(modal.textContent).toContain("go");
+    fireEvent.click(within(modal).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByTestId("projects-workspace-toggle-confirm")).toBeNull());
+    expect(toggle.checked).toBe(true);
+    expect(requests).toHaveLength(0);
+
+    fireEvent.change(toggle, { target: { checked: false } });
+    modal = await screen.findByTestId("projects-workspace-toggle-confirm") as HTMLDialogElement;
+    await waitFor(() => expect(modal.open).toBe(true));
+    fireEvent(modal, new Event("cancel", { cancelable: true }));
+    await waitFor(() => expect(screen.queryByTestId("projects-workspace-toggle-confirm")).toBeNull());
+    expect(toggle.checked).toBe(true);
+    expect(requests).toHaveLength(0);
+
+    fireEvent.change(toggle, { target: { checked: false } });
+    modal = await screen.findByTestId("projects-workspace-toggle-confirm") as HTMLDialogElement;
+    fireEvent.click(within(modal).getByRole("button", { name: "Disable workspace tool" }));
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(requests[0]).toEqual({ root: "/home/x/proj", scope: "workspace-lsp", server: "go", enable: false, languages: ["go"] });
+    await waitFor(() => expect(toggle.checked).toBe(false));
+
+    fireEvent.change(toggle, { target: { checked: true } });
+    modal = await screen.findByTestId("projects-workspace-toggle-confirm") as HTMLDialogElement;
+    expect(toggle.checked).toBe(false);
+    expect(requests).toHaveLength(1);
+    expect(modal.textContent).toContain("go");
+    fireEvent.click(within(modal).getByRole("button", { name: "Enable workspace tool" }));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[1]).toEqual({ root: "/home/x/proj", scope: "workspace-lsp", server: "go", enable: true, languages: ["go"] });
+  });
+
+  it("workspace toggle Retry preserves the row error until a fresh confirmation", async () => {
+    let requests = 0;
+    mountDetail(
+      proj({ entries: [{ workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t" }] }),
+      [],
+      () => {
+        requests += 1;
+        return jsonResponse(500, { error: "disk full", code: "PROJECT_TOGGLE_FAILED" });
+      },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    const toggle = await screen.findByTestId("projects-toggle-workspace-lsp-go") as HTMLInputElement;
+    fireEvent.change(toggle, { target: { checked: false } });
+    let modal = await screen.findByTestId("projects-workspace-toggle-confirm");
+    fireEvent.click(within(modal).getByRole("button", { name: "Disable workspace tool" }));
+    await waitFor(() => expect(screen.queryByTestId("projects-toggle-error-workspace-lsp-go")).toBeTruthy());
+    expect(requests).toBe(1);
+    expect(toggle.checked).toBe(true);
+
+    fireEvent.click(screen.getByTestId("projects-toggle-retry-workspace-lsp-go"));
+    modal = await screen.findByTestId("projects-workspace-toggle-confirm");
+    expect(requests).toBe(1);
+    expect(screen.getByTestId("projects-toggle-error-workspace-lsp-go").textContent).toContain("couldn't be saved");
+    fireEvent.click(within(modal).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByTestId("projects-workspace-toggle-confirm")).toBeNull());
+    expect(requests).toBe(1);
+    expect(screen.getByTestId("projects-toggle-error-workspace-lsp-go")).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("projects-toggle-retry-workspace-lsp-go"));
+    modal = await screen.findByTestId("projects-workspace-toggle-confirm");
+    fireEvent.click(within(modal).getByRole("button", { name: "Disable workspace tool" }));
+    await waitFor(() => expect(requests).toBe(2));
+  });
+
+  it("workspace toggle keeps one request busy and reconciles to response with warnings", async () => {
+    let resolveRequest: ((response: Response) => void) | undefined;
+    const response = new Promise<Response>((resolve) => { resolveRequest = resolve; });
+    let requests = 0;
+    mountDetail(
+      proj({ entries: [{ workspace_key: "k", workspace_path: "/home/x/proj", language: "go", backend: "mcp-language-server", port: 0, task_name: "t" }] }),
+      [],
+      () => { requests += 1; return response; },
+    );
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    const toggle = await screen.findByTestId("projects-toggle-workspace-lsp-go") as HTMLInputElement;
+    fireEvent.change(toggle, { target: { checked: false } });
+    const modal = await screen.findByTestId("projects-workspace-toggle-confirm");
+    expect(toggle.checked).toBe(true);
+    expect(requests).toBe(0);
+    const confirm = within(modal).getByRole("button", { name: "Disable workspace tool" }) as HTMLButtonElement;
+    fireEvent.click(confirm);
+    await waitFor(() => expect(requests).toBe(1));
+    expect(toggle.disabled).toBe(true);
+    expect(screen.getByTestId("projects-toggle-spinner-workspace-lsp-go")).toBeTruthy();
+    expect(confirm.disabled).toBe(true);
+    fireEvent.click(confirm);
+    expect(requests).toBe(1);
+
+    resolveRequest!(jsonResponse(200, { scope: "workspace-lsp", server: "go", enabled: true, warnings: ["Registration remains active"] }));
+    await waitFor(() => expect(screen.queryByTestId("projects-workspace-toggle-confirm")).toBeNull());
+    expect(toggle.checked).toBe(true); // Response clamps the requested disable.
+    expect(toggle.disabled).toBe(false);
+    expect(screen.getByTestId("projects-toggle-warn-workspace-lsp-go").textContent).toContain("Registration remains active");
+    expect(requests).toBe(1);
+  });
+
+  it("keeps project scan/open read-only, then carries the selected root through plan/apply and reloads the aggregate", async () => {
+    const planRequests: unknown[] = [];
+    const applyRequests: unknown[] = [];
+    let aggregateCalls = 0;
+    const fetchMock = fetchRouter({
+      "/api/adopt/plan": (init) => {
+        planRequests.push(JSON.parse(String(init?.body ?? "{}")));
+        return jsonResponse(200, adoptPlan("graphify"));
+      },
+      "/api/adopt": (init) => {
+        applyRequests.push(JSON.parse(String(init?.body ?? "{}")));
+        return jsonResponse(201, { name: "graphify", port: 9325 });
+      },
+      "/api/projects": () => {
+        aggregateCalls += 1;
+        return jsonResponse(
+          200,
+          aggregate({
+            projects: [
+              proj({
+                scan: {
+                  at: "now",
+                  entries:
+                    aggregateCalls === 1
+                      ? [
+                          scanEntry("graphify", { "codex-cli": { transport: "stdio" } }),
+                          scanEntry("remote-only", {
+                            "codex-cli": { transport: "http", endpoint: "https://example.invalid/mcp" },
+                          }),
+                        ]
+                      : [
+                          scanEntry("graphify", {
+                            "codex-cli": { transport: "http", endpoint: "http://127.0.0.1:9325/mcp" },
+                          }),
+                        ],
+                },
+              }),
+            ],
+          }),
+        );
+      },
+      "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(fetchMock as unknown as typeof fetch);
+
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    const connect = await screen.findByRole("button", { name: "Adopt into hub" });
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(0);
+    expect(screen.queryByText("remote-only")).toBeNull();
+
+    fireEvent.click(connect);
+    const modal = await screen.findByTestId("adopt-confirm-modal");
+    await waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    expect(planRequests).toEqual([
+      { entry: "graphify", client: "codex-cli", project_source_root: "/home/x/proj" },
+    ]);
+    fireEvent.click(within(modal).getByRole("button", { name: "Adopt into hub" }));
+
+    await waitFor(() => expect(applyRequests).toHaveLength(1));
+    expect(applyRequests[0]).toEqual({
+      entry: "graphify",
+      client: "codex-cli",
+      clients: ["codex-cli"],
+      name: "graphify",
+      port: 9325,
+      project_source_root: "/home/x/proj",
+      project_source_preimage_token: SYNTHETIC_PROJECT_PREIMAGE_A,
+      symlink_consent: [],
+    });
+    await waitFor(() => expect(aggregateCalls).toBe(2));
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Adopt into hub" })).toBeNull(),
+    );
+  });
+
+  it("shows the stable project-adopt failure code with Retry and performs no apply", async () => {
+    let planCalls = 0;
+    let applyCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/adopt/plan": () => {
+          planCalls += 1;
+          return jsonResponse(409, {
+            code: "PROJECT_ADOPT_REPEAT_STATE_INCONSISTENT",
+            error: "The recorded project adoption state is incomplete.",
+          });
+        },
+        "/api/adopt": () => {
+          applyCalls += 1;
+          return jsonResponse(201, { name: "graphify", port: 9325 });
+        },
+        "/api/projects": () =>
+          jsonResponse(
+            200,
+            aggregate({
+              projects: [
+                proj({
+                  scan: {
+                    at: "now",
+                    entries: [scanEntry("graphify", { "codex-cli": { transport: "stdio" } })],
+                  },
+                }),
+              ],
+            }),
+          ),
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Adopt into hub" }));
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(
+        "PROJECT_ADOPT_REPEAT_STATE_INCONSISTENT",
+      ),
+    );
+    expect(applyCalls).toBe(0);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(planCalls).toBe(2));
+    expect(applyCalls).toBe(0);
+  });
+
+  it("echoes the project preview token and replans a changed source without auto-confirming", async () => {
+    let planCalls = 0;
+    const applyRequests: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/adopt/plan": () => {
+          planCalls += 1;
+          return jsonResponse(
+            200,
+            adoptPlan(
+              "graphify",
+              "graphify",
+              planCalls === 1
+                ? SYNTHETIC_PROJECT_PREIMAGE_A
+                : SYNTHETIC_PROJECT_PREIMAGE_B,
+            ),
+          );
+        },
+        "/api/adopt": (init) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+          applyRequests.push(body);
+          if (applyRequests.length === 1) {
+            return jsonResponse(409, {
+              code: "CODEX_PROJECT_SOURCE_CHANGED",
+              error: "The project source changed after preview.",
+            });
+          }
+          return jsonResponse(201, { name: "graphify", port: 9325 });
+        },
+        "/api/projects": () =>
+          jsonResponse(
+            200,
+            aggregate({
+              projects: [
+                proj({
+                  scan: {
+                    at: "now",
+                    entries: [scanEntry("graphify", { "codex-cli": { transport: "stdio" } })],
+                  },
+                }),
+              ],
+            }),
+          ),
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Adopt into hub" }));
+    const modal = await screen.findByTestId("adopt-confirm-modal");
+    await waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    fireEvent.click(within(modal).getByRole("button", { name: "Adopt into hub" }));
+
+    await waitFor(() =>
+      expect(within(modal).getByRole("alert").textContent).toContain(
+        "CODEX_PROJECT_SOURCE_CHANGED",
+      ),
+    );
+    expect(planCalls).toBe(1);
+    expect(applyRequests).toHaveLength(1);
+    expect(applyRequests[0].project_source_preimage_token).toBe(
+      SYNTHETIC_PROJECT_PREIMAGE_A,
+    );
+
+    fireEvent.click(within(modal).getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(planCalls).toBe(2));
+    expect(applyRequests).toHaveLength(1);
+    const confirmAgain = await within(modal).findByRole("button", { name: "Adopt into hub" });
+    fireEvent.click(confirmAgain);
+
+    await waitFor(() => expect(applyRequests).toHaveLength(2));
+    expect(applyRequests[1].project_source_preimage_token).toBe(
+      SYNTHETIC_PROJECT_PREIMAGE_B,
+    );
+  });
+
+  it("refuses project apply when the plan has no source preview token", async () => {
+    let applyCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/adopt/plan": () =>
+          jsonResponse(200, {
+            ...adoptPlan("graphify"),
+            project_source_preimage_token: undefined,
+          }),
+        "/api/adopt": () => {
+          applyCalls += 1;
+          return jsonResponse(201, { name: "graphify", port: 9325 });
+        },
+        "/api/projects": () =>
+          jsonResponse(
+            200,
+            aggregate({
+              projects: [
+                proj({
+                  scan: {
+                    at: "now",
+                    entries: [scanEntry("graphify", { "codex-cli": { transport: "stdio" } })],
+                  },
+                }),
+              ],
+            }),
+          ),
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ProjectsScreen route={routeWithPath("/home/x/proj")} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Adopt into hub" }));
+    const modal = await screen.findByTestId("adopt-confirm-modal");
+    await waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    fireEvent.click(within(modal).getByRole("button", { name: "Adopt into hub" }));
+
+    await waitFor(() =>
+      expect(within(modal).getByRole("alert").textContent).toContain(
+        "CODEX_PROJECT_SOURCE_PREVIEW_REQUIRED",
+      ),
+    );
+    expect(applyCalls).toBe(0);
+    expect(within(modal).getByRole("button", { name: "Retry" })).toBeTruthy();
+  });
+
+  it("isolates same-name project busy/modal state and ignores the unmounted stale plan", async () => {
+    let resolveA: ((response: Response) => void) | undefined;
+    const planA = new Promise<Response>((resolve) => {
+      resolveA = resolve;
+    });
+    const planRequests: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/adopt/plan": (init) => {
+          const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+          planRequests.push(body);
+          return body.project_source_root === "/project/a"
+            ? planA
+            : jsonResponse(200, adoptPlan("graphify", "graphify-b"));
+        },
+        "/api/projects": () =>
+          jsonResponse(
+            200,
+            aggregate({
+              projects: [
+                proj({
+                  key: "/project/a",
+                  workspace_path: "/project/a",
+                  scan: {
+                    at: "now",
+                    entries: [scanEntry("graphify", { "codex-cli": { transport: "stdio" } })],
+                  },
+                }),
+                proj({
+                  key: "/project/b",
+                  workspace_path: "/project/b",
+                  scan: {
+                    at: "now",
+                    entries: [scanEntry("graphify", { "codex-cli": { transport: "stdio" } })],
+                  },
+                }),
+              ],
+            }),
+          ),
+        "/api/server/readiness": () => jsonResponse(404, { error: "not found" }),
+      }) as unknown as typeof fetch,
+    );
+
+    const view = render(<ProjectsScreen route={routeWithPath("/project/a")} />);
+    const projectAButton = await screen.findByRole("button", { name: "Adopt into hub" });
+    fireEvent.click(projectAButton);
+    await waitFor(() => expect(projectAButton.textContent).toBe("Planning..."));
+
+    view.rerender(<ProjectsScreen route={routeWithPath("/project/b")} />);
+    const projectBButton = await screen.findByRole("button", { name: "Adopt into hub" });
+    expect(projectBButton).not.toBe(projectAButton);
+    expect(projectBButton.textContent).toBe("Adopt into hub");
+    expect((projectBButton as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(projectBButton);
+
+    const modal = await screen.findByTestId("adopt-confirm-modal");
+    await waitFor(() => expect((modal as HTMLDialogElement).open).toBe(true));
+    expect(within(modal).getByText("Manifest: graphify-b")).toBeTruthy();
+    resolveA?.(jsonResponse(200, adoptPlan("graphify", "graphify-a")));
+    await Promise.resolve();
+    expect(within(modal).getByText("Manifest: graphify-b")).toBeTruthy();
+    expect(planRequests.map((request) => request.project_source_root)).toEqual([
+      "/project/a",
+      "/project/b",
+    ]);
   });
 
   it("toggle reconciles to response.enabled, not the requested intent (clamp)", async () => {

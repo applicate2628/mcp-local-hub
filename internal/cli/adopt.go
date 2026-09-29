@@ -25,6 +25,7 @@ func newAdoptCmdWithDeps(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner,
 func newAdoptCmdWithDepsAndPlanBuilder(newAPI func() *api.API, leaseOwner api.AdoptLeaseOwner, receivingVerifier api.AdoptReceivingVerifier, buildPlan func(*api.API, api.AdoptOpts) (*api.AdoptPlan, error)) *cobra.Command {
 	var clientFlag string
 	var providerPluginFlag string
+	var projectSourceFlag string
 	var nameFlag string
 	var clientsFlag string
 	var compatibilityProfileFlag string
@@ -40,6 +41,14 @@ func newAdoptCmdWithDepsAndPlanBuilder(newAPI func() *api.API, leaseOwner api.Ad
 			if strings.TrimSpace(clientFlag) == "" {
 				return fmt.Errorf("--client is required (%s)", strings.Join(api.AdoptSupportedClients(), " | "))
 			}
+			if projectSourceFlag != "" {
+				if clientFlag != "codex-cli" {
+					return fmt.Errorf("--project-source requires --client codex-cli")
+				}
+				if cmd.Flags().Changed("provider-plugin") {
+					return fmt.Errorf("--project-source cannot be combined with --provider-plugin")
+				}
+			}
 			include, err := parseInstallClientsFlag(clientsFlag, false)
 			if err != nil {
 				return err
@@ -54,6 +63,7 @@ func newAdoptCmdWithDepsAndPlanBuilder(newAPI func() *api.API, leaseOwner api.Ad
 				MCPProtocolCompatibilityProfile:         compatibilityProfileFlag,
 				MCPProtocolCompatibilityProfileExplicit: cmd.Flags().Changed("mcp-protocol-compatibility-profile"),
 				ProviderPluginRef:                       providerPluginFlag,
+				CodexProjectSourceRoot:                  projectSourceFlag,
 			}
 			builder := buildPlan
 			if builder == nil {
@@ -79,6 +89,7 @@ func newAdoptCmdWithDepsAndPlanBuilder(newAPI func() *api.API, leaseOwner api.Ad
 	}
 	cmd.Flags().StringVar(&clientFlag, "client", "", "source client ("+strings.Join(api.AdoptSupportedClients(), " | ")+")")
 	cmd.Flags().StringVar(&providerPluginFlag, "provider-plugin", "", "explicit provider-owned plugin reference")
+	cmd.Flags().StringVar(&projectSourceFlag, "project-source", "", "absolute project root containing the Codex source entry")
 	cmd.Flags().StringVar(&nameFlag, "name", "", "manifest name (default: entry name; v1 requires it to match)")
 	cmd.Flags().IntVar(&portFlag, "port", 0, "hub daemon port (default: first free 9300-9399)")
 	cmd.Flags().StringVar(&clientsFlag, "clients", "", "comma-separated clients to repoint (default: every same-name direct entry found)")

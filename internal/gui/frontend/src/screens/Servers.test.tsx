@@ -15,9 +15,19 @@ import {
   act,
 } from "@testing-library/preact";
 import { ServersScreen } from "./Servers";
+import { resolveClientSymlink, SymlinkWriteError } from "../api";
 import { ALL_CLIENTS, CORE_CLIENTS } from "../lib/routing";
 import { installMemoryLocalStorage } from "../lib/test-local-storage";
 import type { ScanResult, DaemonStatus } from "../types";
+
+const fixtureRoots = {
+  winHome1: "C:/Users/test",
+  dev1: "D:/dev/test",
+  dev2: "D:/dev/example",
+  dev3: "D:/dev/user",
+  winHome2: "C:\\Users\\example",
+  home1: "/home/test",
+} as const;
 
 // happy-dom 20.9.0's globalThis.localStorage is a bare object with no
 // Storage methods; the column-visibility feature persists through it, so
@@ -28,12 +38,24 @@ const ls = installMemoryLocalStorage();
 // /api/events for the tray rescan-clients event; the stub matches
 // other screen tests' minimal shape.
 class StubEventSource {
+  static current: StubEventSource | null = null;
   url: string;
+  private listeners = new Map<string, Set<(ev: MessageEvent) => void>>();
   constructor(url: string) {
     this.url = url;
+    StubEventSource.current = this;
   }
-  addEventListener(_t: string, _l: (ev: MessageEvent) => void): void {}
-  removeEventListener(_t: string, _l: (ev: MessageEvent) => void): void {}
+  addEventListener(name: string, listener: (ev: MessageEvent) => void): void {
+    const listeners = this.listeners.get(name) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(name, listeners);
+  }
+  removeEventListener(name: string, listener: (ev: MessageEvent) => void): void {
+    this.listeners.get(name)?.delete(listener);
+  }
+  emit(name: string): void {
+    for (const listener of this.listeners.get(name) ?? []) listener(new MessageEvent(name));
+  }
   close(): void {}
 }
 (globalThis as unknown as { EventSource: typeof StubEventSource }).EventSource =
@@ -231,7 +253,7 @@ describe("ServersScreen — Initialize button (v0.4.5)", () => {
           if (init?.body) initBodies.push(init.body as string);
           return jsonResponse(200, {
             client: "vscode",
-            path: "C:/Users/foo/AppData/Roaming/Code/User/mcp.json",
+            path: `${fixtureRoots.winHome1}/AppData/Roaming/Code/User/mcp.json`,
             created: true,
           });
         },
@@ -477,7 +499,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [],
@@ -527,13 +549,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -599,13 +621,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -665,13 +687,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -720,7 +742,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             clients: [
               {
                 client: "codex-cli",
-                config_path: "D:/dev/codex/config.toml",
+                config_path: `${fixtureRoots.dev2}/config.toml`,
                 disabled: true,
                 missing_entries: ["mcp-language-server-python"],
               },
@@ -731,13 +753,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -789,7 +811,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [],
@@ -798,12 +820,12 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
-            workspace: "D:/dev/project",
+            workspace: `${fixtureRoots.dev1}`,
             workspace_key: "default",
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "go",
                 backend: "gopls-mcp",
                 port: 9201,
@@ -828,7 +850,7 @@ describe("ServersScreen — LSP matrix rows", () => {
       expect(registerBodies).toHaveLength(1);
     });
     expect(registerBodies[0]).toEqual({
-      workspace_path: "D:/dev/project",
+      workspace_path: `${fixtureRoots.dev1}`,
       language: "go",
     });
     const message = await screen.findByTestId("lsp-register-msg");
@@ -842,7 +864,7 @@ describe("ServersScreen — LSP matrix rows", () => {
   it("existing workspace surfaces cleanup warnings", async () => {
     const harness = mountExistingWorkspaceRegistration(() =>
       jsonResponse(200, {
-        workspace: "D:/dev/project",
+        workspace: `${fixtureRoots.dev1}`,
         workspace_key: "default",
         entries: [],
         warnings: [" cleanup preserved\nlegacy entry "],
@@ -869,7 +891,7 @@ describe("ServersScreen — LSP matrix rows", () => {
   it("unconfirmed registration response is an error", async () => {
     const harness = mountExistingWorkspaceRegistration(() =>
       jsonResponse(200, {
-        workspace: "D:/dev/project",
+        workspace: `${fixtureRoots.dev1}`,
         workspace_key: "default",
         entries: [],
         warnings: [" unrelated result\nwas ignored "],
@@ -894,7 +916,7 @@ describe("ServersScreen — LSP matrix rows", () => {
   it("requested-language registration error stays error without refresh", async () => {
     const harness = mountExistingWorkspaceRegistration(() =>
       jsonResponse(207, {
-        workspace: "D:/dev/project",
+        workspace: `${fixtureRoots.dev1}`,
         workspace_key: "default",
         entries: [],
         warnings: [" cleanup\tpreserved "],
@@ -952,11 +974,11 @@ describe("ServersScreen — LSP matrix rows", () => {
           return workspacesCallCount === 1
             ? jsonResponse(200, { workspaces: [], entries: [] })
             : jsonResponse(200, {
-                workspaces: [{ workspace_key: "my-project", workspace_path: "D:/dev/my-project" }],
+                workspaces: [{ workspace_key: "my-project", workspace_path: `${fixtureRoots.dev3}` }],
                 entries: [
                   {
                     workspace_key: "my-project",
-                    workspace_path: "D:/dev/my-project",
+                    workspace_path: `${fixtureRoots.dev3}`,
                     language: "python",
                     backend: "mcp-language-server",
                     port: 9202,
@@ -968,12 +990,12 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
-            workspace: "D:/dev/my-project",
+            workspace: `${fixtureRoots.dev3}`,
             workspace_key: "my-project",
             entries: [
               {
                 workspace_key: "my-project",
-                workspace_path: "D:/dev/my-project",
+                workspace_path: `${fixtureRoots.dev3}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9202,
@@ -1006,7 +1028,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     // Submit is disabled until a path is entered.
     expect(submit.disabled).toBe(true);
 
-    fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
+    fireEvent.input(pathInput, { target: { value: `${fixtureRoots.dev3}` } });
     fireEvent.change(langSelect, { target: { value: "python" } });
     expect(submit.disabled).toBe(false);
     const callsBeforeRegister = workspacesCallCount;
@@ -1017,11 +1039,11 @@ describe("ServersScreen — LSP matrix rows", () => {
       expect(registerBodies).toHaveLength(1);
     });
     expect(registerBodies[0]).toEqual({
-      workspace_path: "D:/dev/my-project",
+      workspace_path: `${fixtureRoots.dev3}`,
       language: "python",
     });
     const message = await screen.findByTestId("lsp-register-msg");
-    expect(message.textContent).toBe("Registered python for D:/dev/my-project. Refreshing…");
+    expect(message.textContent).toBe(`Registered python for ${fixtureRoots.dev3}. Refreshing…`);
     // After a successful register the workspace list reloads exactly once.
     await waitFor(() => {
       expect(workspacesCallCount).toBe(callsBeforeRegister + 1);
@@ -1048,7 +1070,7 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/lsp/register": (init?: RequestInit) => {
           registerBodies.push(JSON.parse(String(init?.body ?? "{}")));
           return jsonResponse(200, {
-            workspace: "D:/dev/my-project",
+            workspace: `${fixtureRoots.dev3}`,
             workspace_key: "my-project",
             entries: [],
             warnings: [" cleanup preserved\nlegacy entry "],
@@ -1068,7 +1090,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     const submit = screen.getByTestId(
       "lsp-register-workspace-submit",
     ) as HTMLButtonElement;
-    fireEvent.input(pathInput, { target: { value: "D:/dev/my-project" } });
+    fireEvent.input(pathInput, { target: { value: `${fixtureRoots.dev3}` } });
     fireEvent.change(langSelect, { target: { value: "python" } });
     const callsBeforeRegister = workspacesCallCount;
     fireEvent.click(submit);
@@ -1078,7 +1100,7 @@ describe("ServersScreen — LSP matrix rows", () => {
     expect(message.textContent).toContain("Partial success registering python");
     expect(message.textContent).toContain("cleanup preserved legacy entry");
     expect(message.textContent).not.toContain(
-      "Registered python for D:/dev/my-project. Refreshing…",
+      `Registered python for ${fixtureRoots.dev3}. Refreshing…`,
     );
     expect(message.classList.contains("lsp-register-warning")).toBe(true);
     expect(message.getAttribute("role")).toBe("status");
@@ -1169,13 +1191,13 @@ describe("ServersScreen — LSP matrix rows", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -1250,11 +1272,11 @@ describe("ServersScreen — LSP matrix rows", () => {
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/workspaces": () =>
           jsonResponse(200, {
-            workspaces: [{ workspace_key: "b133f336", workspace_path: "D:/dev/project" }],
+            workspaces: [{ workspace_key: "b133f336", workspace_path: `${fixtureRoots.dev1}` }],
             entries: [
               {
                 workspace_key: "b133f336",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -1329,13 +1351,13 @@ describe("ServersScreen — LSP matrix rows", () => {
       workspaces: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
         },
       ],
       entries: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
           language: "python",
           backend: "mcp-language-server",
           port: 9200,
@@ -1366,7 +1388,7 @@ describe("ServersScreen — LSP matrix rows", () => {
                   ...currentEntry.client_presence,
                   zed: {
                     transport: "relay",
-                    endpoint: "C:\\Users\\u\\.local\\bin\\mcphub.exe",
+                    endpoint: `${fixtureRoots.winHome2}\\.local\\bin\\mcphub.exe`,
                     relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
                   },
                 },
@@ -1519,7 +1541,7 @@ describe("ServersScreen — LSP matrix rows", () => {
             },
             zed: {
               transport: "relay",
-              endpoint: "C:\\Users\\u\\.local\\bin\\mcphub.exe",
+              endpoint: `${fixtureRoots.winHome2}\\.local\\bin\\mcphub.exe`,
               relay_url: "http://127.0.0.1:9200/lsp/python/mcp",
             },
           },
@@ -1965,6 +1987,7 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
 
   beforeEach(() => {
     cleanup();
+    StubEventSource.current = null;
     vi.restoreAllMocks();
     vi.useFakeTimers();
     // Reset visibility to "visible" each test (a prior test may have left
@@ -2033,6 +2056,31 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     await vi.waitFor(() => expect(scanCalls).toBe(before + 1));
   });
 
+  it("shows a scan failure and retries it once into recovered Servers rows", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 1
+            ? jsonResponse(500, { error: "internal error", code: "SCAN_FAILED" })
+            : jsonResponse(200, viaHubScan("recovered-memory"));
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.getByText("Failed to load: /api/scan: internal error")).toBeTruthy());
+    expect(scanCalls).toBe(1);
+    expect(screen.getByRole("alert").textContent).toBe("Failed to load: /api/scan: internal error");
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await vi.waitFor(() => expect(screen.getByText("recovered-memory")).toBeTruthy());
+    expect(scanCalls).toBe(2);
+    expect(screen.queryByText("Failed to load: /api/scan: internal error")).toBeNull();
+  });
+
 
   it("ignores an older overlapping refresh that resolves after a newer one", async () => {
     const olderScan = deferred<Response>();
@@ -2060,6 +2108,12 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
       await Promise.resolve();
     });
     await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
+
+    await act(async () => {
+      vi.advanceTimersByTime(4_000);
+    });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
 
     await act(async () => {
       olderScan.resolve(jsonResponse(200, viaHubScan("stale-memory")));
@@ -2069,6 +2123,56 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
     });
     await vi.waitFor(() => expect(screen.queryByText("stale-memory")).toBeNull());
     expect(screen.queryByText("fresh-memory")).toBeTruthy();
+    await act(async () => { vi.advanceTimersByTime(1_000); });
+    const age = screen.getByTestId("scan-updated-ago").textContent ?? "";
+    expect(Number(age.match(/updated (\d+)s ago/)?.[1])).toBeGreaterThanOrEqual(3);
+  });
+
+  it("resets age when an SSE-triggered direct reload publishes a new scan", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => jsonResponse(200, viaHubScan(++scanCalls === 1 ? "first-memory" : "fresh-memory")),
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.queryByText("first-memory")).toBeTruthy());
+    await act(async () => { vi.advanceTimersByTime(4_000); });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText("fresh-memory")).toBeTruthy());
+    expect(scanCalls).toBe(2);
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
+  });
+
+  it("keeps the failed SSE reload error-only and resets age on accepted recovery", async () => {
+    let scanCalls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCalls += 1;
+          return scanCalls === 2
+            ? jsonResponse(500, { error: "scan unavailable" })
+            : jsonResponse(200, viaHubScan(scanCalls === 1 ? "first-memory" : "recovered-memory"));
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await vi.waitFor(() => expect(screen.queryByText("first-memory")).toBeTruthy());
+    await act(async () => { vi.advanceTimersByTime(4_000); });
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated 3s ago");
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText(/Failed to load:.*scan unavailable/)).toBeTruthy());
+    expect(screen.queryByTestId("scan-updated-ago")).toBeNull();
+
+    await act(async () => { StubEventSource.current?.emit("clients-rescan"); });
+    await vi.waitFor(() => expect(screen.queryByText("recovered-memory")).toBeTruthy());
+    expect(scanCalls).toBe(3);
+    expect(screen.getByTestId("scan-updated-ago").textContent).toBe("updated just now");
   });
 
   it("pauses auto-refresh and disables Rescan while a dirty cell is pending — and does NOT clobber the edit", async () => {
@@ -2149,13 +2253,13 @@ describe("ServersScreen — auto-refresh + Rescan no-clobber", () => {
             workspaces: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
               },
             ],
             entries: [
               {
                 workspace_key: "default",
-                workspace_path: "D:/dev/project",
+                workspace_path: `${fixtureRoots.dev1}`,
                 language: "python",
                 backend: "mcp-language-server",
                 port: 9200,
@@ -2411,7 +2515,7 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
         "/api/resolve-symlink-and-write": () =>
           jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
+            original_path: `${fixtureRoots.home1}/.codex/config.toml`,
             resolved_target: "/e/env/Agents/.codex/config.toml",
             pinned_real_path: "/e/env/Agents/.codex",
             content_hash: "deadbeef",
@@ -2450,14 +2554,14 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
           if (body.confirm) {
             return jsonResponse(200, {
               client: "codex-cli",
-              original_path: "/home/u/.codex/config.toml",
+              original_path: `${fixtureRoots.home1}/.codex/config.toml`,
               written_path: "/e/env/Agents/.codex/config.toml",
               written: true,
             });
           }
           return jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
+            original_path: `${fixtureRoots.home1}/.codex/config.toml`,
             resolved_target: "/e/env/Agents/.codex/config.toml",
             pinned_real_path: "/e/env/Agents/.codex",
             content_hash: "deadbeef",
@@ -2503,7 +2607,7 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
           bodies.push(init?.body as string);
           return jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
+            original_path: `${fixtureRoots.home1}/.codex/config.toml`,
             resolved_target: "/e/env/Agents/.codex/config.toml",
             pinned_real_path: "/e/env/Agents/.codex",
             content_hash: "deadbeef",
@@ -2528,25 +2632,39 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
     expect(bodies.map((b) => JSON.parse(b)).some((b) => b.confirm === true)).toBe(false);
   });
 
-  it("surfaces a WRITE_REFUSED error (e.g. strict mode) without rescanning away the cell", async () => {
+  it("keeps a refused write pending, hides old-server paths, and retries with the same pin", async () => {
+    let scanCount = 0;
+    let writeRefused = true;
+    const writeBodies: Array<Record<string, unknown>> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(
       fetchRouter({
-        "/api/scan": () => jsonResponse(200, scanSymlink()),
+        "/api/scan": () => {
+          scanCount += 1;
+          return jsonResponse(200, scanCount === 1 ? scanSymlink() : scanWith({ "codex-cli": "ok" }));
+        },
         "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
         "/api/resolve-symlink-and-write": (init) => {
           const body = JSON.parse((init?.body as string) ?? "{}");
           if (body.confirm) {
-            return jsonResponse(500, {
-              error:
-                "write codex-cli via consent: secure write: strict mode is active (via MCPHUB_REQUIRE_SINGLE_USER_HOME=1)",
-              code: "WRITE_REFUSED",
-            });
+            writeBodies.push(body);
+            return writeRefused
+              ? jsonResponse(500, {
+                  error:
+                    "write <user-home>/config.toml and <target-root>/config.toml: strict mode is active (raw diagnostic)",
+                  code: "WRITE_REFUSED",
+                })
+              : jsonResponse(200, {
+                  client: "codex-cli",
+                  original_path: "<user-home>/config.toml",
+                  written_path: "<target-root>/config.toml",
+                  written: true,
+                });
           }
           return jsonResponse(200, {
             client: "codex-cli",
-            original_path: "/home/u/.codex/config.toml",
-            resolved_target: "/e/env/Agents/.codex/config.toml",
-            pinned_real_path: "/e/env/Agents/.codex",
+            original_path: "<user-home>/config.toml",
+            resolved_target: "<target-root>/config.toml",
+            pinned_real_path: "<target-root>",
             content_hash: "deadbeef",
             is_symlink: true,
           });
@@ -2567,7 +2685,91 @@ describe("ServersScreen — symlink-consent affordance (A3 PR-2)", () => {
     });
     const errEl = screen.getByTestId("resolve-symlink-error-codex-cli");
     expect(errEl.textContent).toContain("WRITE_REFUSED");
-    expect(errEl.textContent).toContain("MCPHUB_REQUIRE_SINGLE_USER_HOME");
+    expect(errEl.textContent).toContain("Check the local Hub log for the exact cause");
+    expect(errEl.textContent).toContain("target directory permissions");
+    expect(errEl.textContent).toContain("retry this action");
+    expect(errEl.textContent).not.toContain("<user-home>");
+    expect(errEl.textContent).not.toContain("<target-root>");
+    expect(errEl.textContent).not.toContain("raw diagnostic");
+    expect(errEl.getAttribute("role")).toBe("alert");
+    expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeTruthy();
+    expect(scanCount).toBe(1);
+    expect(writeBodies).toEqual([{
+      client: "codex-cli",
+      confirm: true,
+      pinned_real_path: "<target-root>",
+      content_hash: "deadbeef",
+    }]);
+
+    writeRefused = false;
+    fireEvent.click(screen.getByTestId("resolve-symlink-confirm-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeNull();
+      expect(scanCount).toBe(2);
+    });
+    expect(writeBodies).toHaveLength(2);
+    expect(writeBodies[1]).toEqual(writeBodies[0]);
+  });
+
+  it("shows recovery guidance for a redacted resolve refusal and leaves Resolve available", async () => {
+    let scanCount = 0;
+    const bodies: Array<Record<string, unknown>> = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      fetchRouter({
+        "/api/scan": () => {
+          scanCount += 1;
+          return jsonResponse(200, scanSymlink());
+        },
+        "/api/status": () => jsonResponse(200, [] as DaemonStatus[]),
+        "/api/resolve-symlink-and-write": (init) => {
+          bodies.push(JSON.parse((init?.body as string) ?? "{}"));
+          return jsonResponse(500, { error: "internal error", code: "WRITE_REFUSED" });
+        },
+      }) as unknown as typeof fetch,
+    );
+    render(<ServersScreen />);
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-codex-cli")).toBeTruthy();
+    });
+    fireEvent.click(screen.getByTestId("resolve-symlink-codex-cli"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("resolve-symlink-error-codex-cli")).toBeTruthy();
+    });
+    const errEl = screen.getByTestId("resolve-symlink-error-codex-cli");
+    expect(errEl.textContent).toContain("WRITE_REFUSED");
+    expect(errEl.textContent).toContain("Check the local Hub log for the exact cause");
+    expect(errEl.textContent).toContain("target directory permissions");
+    expect(errEl.getAttribute("role")).toBe("alert");
+    expect(screen.queryByTestId("resolve-symlink-modal-codex-cli")).toBeNull();
+    expect((screen.getByTestId("resolve-symlink-codex-cli") as HTMLButtonElement).disabled).toBe(false);
+    expect(scanCount).toBe(1);
+    expect(bodies).toEqual([{ client: "codex-cli", confirm: false }]);
+  });
+
+  it.each([
+    { status: 500, code: "WRITE_REFUSED", error: "private write cause", redacted: true },
+    { status: 409, code: "SYMLINK_REPOINTED", error: "target changed; rescan and retry" },
+    { status: 409, code: "WRITE_REFUSED", error: "conflict details remain visible" },
+    { status: 500, code: "OTHER_FAILURE", error: "other failure remains visible" },
+  ])("preserves the $status $code SymlinkWriteError contract", async ({ status, code, error, redacted }) => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(jsonResponse(status, { error, code }));
+    let caught: unknown;
+    try {
+      await resolveClientSymlink("codex-cli");
+    } catch (cause) {
+      caught = cause;
+    }
+    expect(caught).toBeInstanceOf(SymlinkWriteError);
+    const typed = caught as SymlinkWriteError;
+    expect(typed.status).toBe(status);
+    expect(typed.code).toBe(code);
+    if (redacted) {
+      expect(typed.message).not.toContain(error);
+      expect(typed.message).toContain("Check the local Hub log for the exact cause");
+    } else {
+      expect(typed.message).toContain(error);
+      expect(typed.message).not.toContain("Check the local Hub log for the exact cause");
+    }
   });
 });
 
@@ -2686,11 +2888,11 @@ describe("ServersScreen — optional LSP router status fetch (P2 isolation)", ()
 
   function workspacesResponse() {
     return {
-      workspaces: [{ workspace_key: "default", workspace_path: "D:/dev/project" }],
+      workspaces: [{ workspace_key: "default", workspace_path: `${fixtureRoots.dev1}` }],
       entries: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
           language: "python",
           backend: "mcp-language-server",
           port: 9200,
@@ -2782,7 +2984,7 @@ describe("ServersScreen — optional LSP router status fetch (P2 isolation)", ()
             clients: [
               {
                 client: "codex-cli",
-                config_path: "D:/dev/codex/config.toml",
+                config_path: `${fixtureRoots.dev2}/config.toml`,
                 disabled: true,
               },
             ],
@@ -2826,11 +3028,11 @@ describe("ServersScreen — LSP opt-out reachability across entry shapes", () =>
 
   function workspacesResponse() {
     return {
-      workspaces: [{ workspace_key: "default", workspace_path: "D:/dev/project" }],
+      workspaces: [{ workspace_key: "default", workspace_path: `${fixtureRoots.dev1}` }],
       entries: [
         {
           workspace_key: "default",
-          workspace_path: "D:/dev/project",
+          workspace_path: `${fixtureRoots.dev1}`,
           language: "python",
           backend: "mcp-language-server",
           port: 9200,

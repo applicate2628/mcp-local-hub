@@ -69,33 +69,13 @@ func RenameAsideReplaceWithResult(target, newSrc string) (RenameAsideResult, err
 		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 newSrc: %w", err)
 	}
 
-	// Step 1: move the running binary to a collision-free retained path. An
-	// immediate rollback can pass the just-created retained path as newSrc in
-	// the same second, so reusing that timestamp would overwrite the bytes being
-	// restored. Probe successive timestamp identities and never replace one.
-	base := time.Now().UTC()
-	var oldPath string
-	var oldW *uint16
-	for attempt := 0; attempt < 120; attempt++ {
-		candidate := target + ".old-" + base.Add(time.Duration(attempt)*time.Second).Format(renameAsideTimestampLayout)
-		if strings.EqualFold(candidate, newSrc) {
-			continue
-		}
-		candidateW, utfErr := windows.UTF16PtrFromString(candidate)
-		if utfErr != nil {
-			return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("utf16 old: %w", utfErr)
-		}
-		moveErr := windows.MoveFileEx(targetW, candidateW, 0)
-		if moveErr == nil {
-			oldPath, oldW = candidate, candidateW
-			break
-		}
-		if moveErr != windows.ERROR_ALREADY_EXISTS && moveErr != windows.ERROR_FILE_EXISTS {
-			return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx target→old (%s → %s): %w", target, candidate, moveErr)
-		}
+	oldPath, err := retainBinaryTargetAside(target, newSrc)
+	if err != nil {
+		return RenameAsideResult{PriorCanonical: true}, err
 	}
-	if oldPath == "" {
-		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx target→old (%s): no collision-free retained path", target)
+	oldW, err := windows.UTF16PtrFromString(oldPath)
+	if err != nil {
+		return RenameAsideResult{RetainedPrior: oldPath}, fmt.Errorf("utf16 retained prior: %w", err)
 	}
 	// Step 2: move new binary into place.
 	if err := windows.MoveFileEx(newSrcW, targetW, 0); err != nil {
@@ -108,6 +88,39 @@ func RenameAsideReplaceWithResult(target, newSrc string) (RenameAsideResult, err
 		return RenameAsideResult{PriorCanonical: true}, fmt.Errorf("MoveFileEx newSrc→target (%s → %s): %w", newSrc, target, err)
 	}
 	return RenameAsideResult{Promoted: true, RetainedPrior: oldPath}, nil
+}
+
+// RetainBinaryTargetAside moves one exact target to the same collision-free
+// generated aside namespace used by RenameAsideReplaceWithResult. It never
+// installs replacement bytes at the target.
+func RetainBinaryTargetAside(target string) (string, error) {
+	return retainBinaryTargetAside(target, "")
+}
+
+func retainBinaryTargetAside(target, excluded string) (string, error) {
+	targetW, err := windows.UTF16PtrFromString(target)
+	if err != nil {
+		return "", fmt.Errorf("utf16 target: %w", err)
+	}
+	base := time.Now().UTC()
+	for attempt := 0; attempt < 120; attempt++ {
+		candidate := target + ".old-" + base.Add(time.Duration(attempt)*time.Second).Format(renameAsideTimestampLayout)
+		if excluded != "" && strings.EqualFold(candidate, excluded) {
+			continue
+		}
+		candidateW, utfErr := windows.UTF16PtrFromString(candidate)
+		if utfErr != nil {
+			return "", fmt.Errorf("utf16 old: %w", utfErr)
+		}
+		moveErr := windows.MoveFileEx(targetW, candidateW, 0)
+		if moveErr == nil {
+			return candidate, nil
+		}
+		if moveErr != windows.ERROR_ALREADY_EXISTS && moveErr != windows.ERROR_FILE_EXISTS {
+			return "", fmt.Errorf("MoveFileEx target→old (%s → %s): %w", target, candidate, moveErr)
+		}
+	}
+	return "", fmt.Errorf("MoveFileEx target→old (%s): no collision-free retained path", target)
 }
 
 func RenameAsideReplace(target, newSrc string) error {

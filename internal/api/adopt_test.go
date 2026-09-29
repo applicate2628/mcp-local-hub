@@ -62,7 +62,7 @@ func setupAdoptTestEnv(t *testing.T, entryName, body string) (codexPath, manifes
 		t.Fatalf("seed codex config: %v", err)
 	}
 
-	manifestRoot = defaultManifestDir()
+	manifestRoot = mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(manifestRoot, 0o700); err != nil {
 		t.Fatalf("mkdir default manifest dir: %v", err)
 	}
@@ -1220,7 +1220,7 @@ func TestPickNextFreeAdoptPortSkipsDiskEmbedIntentAndBoundPorts(t *testing.T) {
 		used[embedPort] = true
 	}
 	t.Cleanup(func() { collectEmbeddedManifestPortsFn = prevEmbeddedCollector })
-	manifestRoot := defaultManifestDir()
+	manifestRoot := mustCanonicalManifestDir(t)
 	if err := os.MkdirAll(manifestRoot, 0o700); err != nil {
 		t.Fatalf("mkdir default manifest dir: %v", err)
 	}
@@ -1468,7 +1468,7 @@ func isolateAdoptPortAllocatorForTest(t *testing.T) string {
 	}
 	t.Setenv("MCPHUB_MANIFEST_DIR_OVERRIDE", manifestRoot)
 	prevManifestDir := adoptManifestDirFn
-	adoptManifestDirFn = func() string { return manifestRoot }
+	adoptManifestDirFn = func() (string, error) { return manifestRoot, nil }
 	t.Cleanup(func() { adoptManifestDirFn = prevManifestDir })
 	prevEmbeddedCollector := collectEmbeddedManifestPortsFn
 	collectEmbeddedManifestPortsFn = func(map[int]bool) {}

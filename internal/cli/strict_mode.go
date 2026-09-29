@@ -259,7 +259,7 @@ func defaultStrictModeDeps() (StrictModeDeps, error) {
 	if err != nil {
 		return StrictModeDeps{}, fmt.Errorf("state dir: %w", err)
 	}
-	backend, err := autostart.New()
+	backend, err := autostartBackendFactoryFn()
 	if err != nil {
 		return StrictModeDeps{}, fmt.Errorf("autostart backend: %w", err)
 	}

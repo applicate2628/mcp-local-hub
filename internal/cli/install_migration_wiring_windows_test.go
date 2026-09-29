@@ -21,7 +21,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net"
 	"os"
@@ -283,7 +282,7 @@ func TestRunV5UpgradeWindows_UnreadableIntentAbortsUpgrade(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.SetOut(io.Discard)
 	cmd.SetErr(io.Discard)
-	exe := writeAdmissionProductPairFixture(t, "UNREADABLE-INTENT")
+	exe := writeAdmissionProductFixture(t, "UNREADABLE-INTENT")
 	target := filepath.Join(t.TempDir(), "mcphub.exe")
 
 	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
@@ -314,121 +313,6 @@ func TestRunV5UpgradeWindows_ExistingLivenessTickBlocksBeforeStaging(t *testing.
 	}
 	if _, statErr := os.Stat(target + ".new"); !os.IsNotExist(statErr) {
 		t.Fatalf("staged candidate exists before fence acquisition: stat=%v", statErr)
-	}
-}
-
-func TestRunV5UpgradeWindows_HoldsFenceAcrossPrePromotionAndRollbackBarrier(t *testing.T) {
-	stateDir := withTempStateDir(t)
-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
-		t.Fatalf("seed supervisor intent: %v", err)
-	}
-
-	originalRun := runInstallUpgradeWindowsFn
-	originalFactory := newWindowsProductPairTxnFn
-	t.Cleanup(func() {
-		runInstallUpgradeWindowsFn = originalRun
-		newWindowsProductPairTxnFn = originalFactory
-	})
-	newWindowsProductPairTxnFn = func(windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
-		return &WindowsProductPairTxn{}, nil
-	}
-	var relaunches int
-	restoreRelaunch := setLivenessRelaunchFnForTest(func() error { relaunches++; return nil })
-	t.Cleanup(restoreRelaunch)
-	restoreStandalone := setStandaloneRelaunchFnForTest(func() error { relaunches++; return nil })
-	t.Cleanup(restoreStandalone)
-
-	phaseOutputs := make([]string, 0, 2)
-	runInstallUpgradeWindowsFn = func(context.Context, UpgradeOpts) error {
-		for _, phase := range []string{"pre-promotion", "rollback-kill-restore"} {
-			out := &strings.Builder{}
-			if err := runEnsureAlive(stateDir, out); err != nil {
-				t.Fatalf("ensure-alive during %s: %v", phase, err)
-			}
-			phaseOutputs = append(phaseOutputs, out.String())
-		}
-		return errors.New("synthetic post-rollback transaction failure")
-	}
-
-	cmd := &cobra.Command{}
-	cmd.SetOut(io.Discard)
-	exe := writeAdmissionProductPairFixture(t, "FENCE-HOLD")
-	target := filepath.Join(t.TempDir(), "mcphub.exe")
-	err := runV5UpgradeWindowsWithPaths(cmd, exe, target)
-	if err == nil || !strings.Contains(err.Error(), "synthetic post-rollback") {
-		t.Fatalf("upgrade error = %v", err)
-	}
-	for i, output := range phaseOutputs {
-		if !strings.Contains(output, "liveness-suppressed-upgrade-in-progress") {
-			t.Fatalf("phase %d output = %q, want upgrade suppression", i, output)
-		}
-	}
-	if relaunches != 0 {
-		t.Fatalf("liveness relaunches during transaction = %d, want 0", relaunches)
-	}
-	lease, acquired, acquireErr := api.TryAcquireUpgradeFence(context.Background(), stateDir)
-	if acquireErr != nil || !acquired {
-		t.Fatalf("fence after failed transaction = acquired=%v err=%v", acquired, acquireErr)
-	}
-	if err := lease.Release(); err != nil {
-		t.Fatalf("release reacquired fence: %v", err)
-	}
-}
-
-func TestRunV5UpgradeWindowsStagesRoleCorrectPairAndWiresSolePairOwner(t *testing.T) {
-	stateDir := withTempStateDir(t)
-	if err := api.WriteSupervisorIntent(filepath.Join(stateDir, "supervisor-intent.json"), &api.SupervisorIntentFile{Version: 1}); err != nil {
-		t.Fatalf("seed supervisor intent: %v", err)
-	}
-
-	sourceDir := t.TempDir()
-	cliSource := filepath.Join(sourceDir, "mcphub.exe")
-	windowlessSource := filepath.Join(sourceDir, "mcphub-windowless.exe")
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsCUISubsystem, "PAIR-CLI"), cliSource)
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, "PAIR-WINDOWLESS"), windowlessSource)
-	target := filepath.Join(t.TempDir(), "mcphub.exe")
-
-	originalFactory := newWindowsProductPairTxnFn
-	originalRun := runInstallUpgradeWindowsFn
-	t.Cleanup(func() {
-		newWindowsProductPairTxnFn = originalFactory
-		runInstallUpgradeWindowsFn = originalRun
-	})
-	var request windowsProductPairTxnRequest
-	stagedBytesPreserved := false
-	txn := &WindowsProductPairTxn{}
-	newWindowsProductPairTxnFn = func(got windowsProductPairTxnRequest) (*WindowsProductPairTxn, error) {
-		request = got
-		cliSame, cliErr := sameFileContents(cliSource, got.StagedCLI)
-		windowlessSame, windowlessErr := sameFileContents(windowlessSource, got.StagedWindowless)
-		if cliErr != nil || windowlessErr != nil || !cliSame || !windowlessSame {
-			return nil, fmt.Errorf("staged pair bytes differ: cli_same=%v cli_err=%v windowless_same=%v windowless_err=%v", cliSame, cliErr, windowlessSame, windowlessErr)
-		}
-		stagedBytesPreserved = true
-		return txn, nil
-	}
-	var gotOpts UpgradeOpts
-	runInstallUpgradeWindowsFn = func(_ context.Context, opts UpgradeOpts) error {
-		gotOpts = opts
-		return nil
-	}
-
-	cmd := &cobra.Command{}
-	cmd.SetOut(io.Discard)
-	if err := runV5UpgradeWindowsWithPaths(cmd, cliSource, target); err != nil {
-		t.Fatalf("runV5UpgradeWindowsWithPaths: %v", err)
-	}
-	if gotOpts.WindowsProductPair != txn {
-		t.Fatal("legacy upgrade seam did not receive the sole pair owner")
-	}
-	if gotOpts.NewBinary != "" || gotOpts.AdmitStaged != nil || gotOpts.VerifyCanonical != nil || gotOpts.WriteReceipt != nil {
-		t.Fatalf("parallel single-binary mutation callbacks remain wired: %+v", gotOpts)
-	}
-	if request.CLIPath != target || request.WindowlessPath != filepath.Join(filepath.Dir(target), "mcphub-windowless.exe") {
-		t.Fatalf("installed paths = %q/%q", request.CLIPath, request.WindowlessPath)
-	}
-	if !stagedBytesPreserved {
-		t.Fatal("staged product pair bytes were not preserved before pair construction")
 	}
 }
 
@@ -486,14 +370,12 @@ func copyAdmissionPEFixture(t *testing.T, src, dst string) {
 	}
 }
 
-func writeAdmissionProductPairFixture(t *testing.T, tag string) string {
+func writeAdmissionProductFixture(t *testing.T, tag string) string {
 	t.Helper()
 	dir := t.TempDir()
-	cli := filepath.Join(dir, "mcphub.exe")
-	windowless := filepath.Join(dir, "mcphub-windowless.exe")
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsCUISubsystem, tag+"-CLI"), cli)
-	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, tag+"-WINDOWLESS"), windowless)
-	return cli
+	product := filepath.Join(dir, "mcphub.exe")
+	copyAdmissionPEFixture(t, writeAdmissionPEFixtureWithTag(t, binaryadmission.WindowsGUISubsystem, tag), product)
+	return product
 }
 
 // ---------------------------------------------------------------------------

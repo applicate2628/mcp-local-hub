@@ -15,6 +15,8 @@
 //   - RAM        — d.ram_bytes, humanized by formatBytes ("48 MB"); the
 //                  row is omitted when absent (non-Windows host, port-
 //                  stale/Idle daemon, or PID-recycled lookup miss).
+//   - Recent failures — d.crashes_in_window, the supervisor's current
+//                  backoff/quarantine failure budget (not a lifetime count).
 //   - Cannot start — d.spawn_hold_reason (pre-spawn existence gate, P1.1):
 //                  the supervisor is HOLDING this daemon because a path it
 //                  needs is absent. Plain-language cause + remedy, because the
@@ -66,6 +68,8 @@ export function DaemonMetrics({ daemon: d }: { daemon: DaemonStatus }) {
   // uptime; RAM is absent on non-Windows hosts / when the lookup failed).
   const uptimeText = formatUptime(d.uptime_sec);
   const ramText = formatBytes(d.ram_bytes);
+  const recentFailures = d.crashes_in_window;
+  const showRecentFailures = typeof recentFailures === "number" && Number.isInteger(recentFailures) && recentFailures > 0;
 
   return (
     <>
@@ -77,6 +81,12 @@ export function DaemonMetrics({ daemon: d }: { daemon: DaemonStatus }) {
         <span>PID</span>
         <span>{d.pid ?? "—"}</span>
       </div>
+      {showRecentFailures ? (
+        <div class="card-kv">
+          <span>Recent failures:</span>
+          <span>{recentFailures}</span>
+        </div>
+      ) : null}
       {d.spawn_hold_reason ? (
         <div class="card-kv card-kv-hold" data-testid="spawn-hold-row" data-hold-reason={d.spawn_hold_reason}>
           <span>Cannot start</span>

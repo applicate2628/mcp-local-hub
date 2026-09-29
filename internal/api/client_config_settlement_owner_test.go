@@ -1,7 +1,9 @@
 package api
 
 import (
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"mcp-local-hub/internal/clients"
@@ -18,6 +20,38 @@ func TestClientConfigSettlementOwnerRejectsPartialLowerResult(t *testing.T) {
 	}
 	if row != (ClientConfigSettlementV1{}) {
 		t.Fatalf("Accept row = %#v, want zero row", row)
+	}
+}
+
+func TestClientConfigSettlementOwnerAcceptsPathFreeProjectV2(t *testing.T) {
+	fingerprint := strings.Repeat("a", 64)
+	var emitted ClientConfigSettlementV1
+	owner := ClientConfigSettlementOwnerV1{emit: func(row ClientConfigSettlementV1) error {
+		emitted = row
+		return nil
+	}}
+	row, err := owner.AcceptProject(ClientConfigOperationAdopt, clients.CodexHTTPRelocationResult{
+		LogicalSource: "graphify", TargetEntry: "graphify", WriteTarget: "codex_project",
+		DesiredTransport: clients.CodexTransportHTTP, Action: "replace",
+		Outcome: clients.CodexHTTPRelocationCommitted, Readback: clients.CodexHTTPRelocationReadbackExact,
+	}, fingerprint)
+	if err != nil {
+		t.Fatalf("AcceptProject: %v", err)
+	}
+	if row.SchemaVersion != clientConfigSettlementSchemaV2 || row.ProjectIdentitySHA256 != fingerprint ||
+		row.WriteTarget != "codex_project" || row.Action != "replace" || row.CollisionReason != "" || !row.IsCommittedWrite() {
+		t.Fatalf("project settlement = %#v", row)
+	}
+	if emitted != row {
+		t.Fatalf("emitted = %#v, want %#v", emitted, row)
+	}
+	encoded, err := json.Marshal(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes := string(encoded); strings.Contains(bytes, "project_root") || strings.Contains(bytes, "config.toml") ||
+		!strings.Contains(bytes, `"project_identity_sha256":"`+fingerprint+`"`) {
+		t.Fatalf("project settlement wire shape = %s", bytes)
 	}
 }
 

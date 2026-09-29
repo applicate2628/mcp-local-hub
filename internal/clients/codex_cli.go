@@ -3,6 +3,7 @@ package clients
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -43,7 +44,9 @@ func resolveCodexHome() (string, error) {
 }
 
 type codexCLI struct {
-	path string
+	path                  string
+	projectIdentitySHA256 string
+	projectLogicalEntry   string
 }
 
 // CodexTransport identifies the transport fields a Codex MCP table contributes.
@@ -125,14 +128,20 @@ type CodexHTTPRelocationReadback string
 const CodexHTTPRelocationReadbackExact CodexHTTPRelocationReadback = "exact"
 
 // CodexHTTPRelocation is the one-file mutation request accepted by the Codex
-// adapter. The caller must have already authorized the old global table through
-// its captured source/provenance ownership. This type intentionally contains no
-// project path: project config files are never writer targets.
+// adapter. The caller must have already authorized the old table through its
+// captured source/provenance ownership. This type intentionally contains no
+// config path: the adapter binding alone owns whether the fixed target is the
+// global config or one validated project config.
 type CodexHTTPRelocation struct {
 	SourceEntryName string
 	TargetEntryName string
 	Entry           MCPEntry
 	ExpectedSource  CodexTransport
+	// ExpectedConfigSHA256 is mandatory for project-bound adapters and must
+	// match the full config bytes observed inside the config lock immediately
+	// before mutation. Global adapters preserve their existing behavior when it
+	// is empty.
+	ExpectedConfigSHA256 string
 	// SourceSnapshot is required on a source-absent repeat. It is the exact
 	// source table returned by the first committed transaction and later pinned
 	// by provenance; a target shape alone never authorizes repeat ownership.
@@ -428,20 +437,44 @@ func recheckCodexConfigPathComponents(components []codexConfigPathComponent) err
 	return nil
 }
 
-// RelocateHTTPEntry removes an approved old global table and writes the HTTP
-// hub table under its frozen target id. The caller normally reaches this through
-// lockingClient; keeping the body here lets the lock owner execute precisely one
-// read-modify-write transaction.
+// RelocateHTTPEntry replaces or relocates one approved table in this adapter's
+// bound config. A global adapter retains alias relocation; a project adapter
+// permits only its constructor-bound logical name as a same-name replacement.
+// The caller normally reaches this through lockingClient; keeping the body here
+// lets the lock owner execute precisely one read-modify-write transaction.
 func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocationResult, error) {
 	var result CodexHTTPRelocationResult
 	if req.SourceEntryName == "" || req.TargetEntryName == "" || req.Entry.URL == "" {
 		return result, fmt.Errorf("%w: relocation requires source, target, and URL", ErrCodexLayerCollisionUnowned)
 	}
-	originalBytes, err := os.ReadFile(c.path)
+	projectBound := c.isProjectBound()
+	if projectBound {
+		if req.SourceEntryName != c.projectLogicalEntry || req.SourceEntryName != req.TargetEntryName || req.Entry.Name != req.TargetEntryName {
+			return result, fmt.Errorf("%w: project relocation requires one same-name source and target", ErrCodexLayerCollisionUnowned)
+		}
+		if req.ExpectedConfigSHA256 == "" {
+			return result, fmt.Errorf("%w: expected project config fingerprint is required", ErrCodexProjectSourceChanged)
+		}
+	}
+	originalBytes, err := c.readRelocationConfigBytes()
 	if err != nil {
+		if projectBound {
+			return result, err
+		}
 		return result, fmt.Errorf("%w: read global snapshot: %v", ErrCodexLayerCollisionUnowned, err)
 	}
-	before, err := c.readTOML()
+	if projectBound {
+		actualFingerprint := fmt.Sprintf("%x", sha256.Sum256(originalBytes))
+		if actualFingerprint != req.ExpectedConfigSHA256 {
+			return result, fmt.Errorf("%w: project config fingerprint differs", ErrCodexProjectSourceChanged)
+		}
+	}
+	var before map[string]any
+	if projectBound {
+		before, err = decodeCodexTOMLBytes(originalBytes)
+	} else {
+		before, err = c.readTOML()
+	}
 	if err != nil {
 		return result, err
 	}
@@ -467,7 +500,7 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 				return result, matchErr
 			}
 			if len(req.SourceSnapshot) != 0 && matches {
-				return codexRelocationResult(req, CodexHTTPRelocationAlreadyConfigured, nil), nil
+				return c.codexRelocationResult(req, CodexHTTPRelocationAlreadyConfigured, nil), nil
 			}
 			if len(req.SourceSnapshot) == 0 {
 				return result, fmt.Errorf("%w: target global table %q has no caller-proven source snapshot", ErrCodexLayerCollisionUnowned, req.TargetEntryName)
@@ -477,14 +510,14 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 		return result, fmt.Errorf("%w: source global table %q is absent", ErrCodexLayerCollisionUnowned, req.SourceEntryName)
 	}
 	if !exists {
-		return result, fmt.Errorf("%w: source global table %q is absent or malformed", ErrCodexLayerCollisionUnowned, req.SourceEntryName)
+		return result, fmt.Errorf("%w: source %s table %q is absent or malformed", ErrCodexLayerCollisionUnowned, c.codexConfigScope(), req.SourceEntryName)
 	}
 	actual, _, classifyErr := codexTransportOfEntry(raw, req.SourceEntryName)
 	if classifyErr != nil {
 		return result, classifyErr
 	}
 	if actual != req.ExpectedSource {
-		return result, fmt.Errorf("%w: source global table %q transport is %s, expected %s", ErrCodexLayerCollisionUnowned, req.SourceEntryName, actual, req.ExpectedSource)
+		return result, fmt.Errorf("%w: source %s table %q transport is %s, expected %s", ErrCodexLayerCollisionUnowned, c.codexConfigScope(), req.SourceEntryName, actual, req.ExpectedSource)
 	}
 	sourceSnapshot := cloneCodexRawEntry(raw)
 	if req.TargetEntryName != req.SourceEntryName {
@@ -512,14 +545,64 @@ func (c *codexCLI) RelocateHTTPEntry(req CodexHTTPRelocation) (CodexHTTPRelocati
 	if err := c.writeTOMLWithWriter(expected, req.WriteConfig); err != nil {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("CODEX_CLIENT_CONFIG_WRITE_FAILED: %w", err))
 	}
-	readback, err := c.readTOML()
+	readback, err := c.readRelocationTOML()
 	if err != nil {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: %v", ErrCodexConfigReadbackFailed, err))
 	}
 	if !reflect.DeepEqual(readback, expected) {
 		return result, c.rollbackCodexSnapshot(originalBytes, fmt.Errorf("%w: semantic readback differs", ErrCodexConfigReadbackFailed))
 	}
-	return codexRelocationResult(req, CodexHTTPRelocationCommitted, sourceSnapshot), nil
+	return c.codexRelocationResult(req, CodexHTTPRelocationCommitted, sourceSnapshot), nil
+}
+
+func (c *codexCLI) readRelocationConfigBytes() ([]byte, error) {
+	if !c.isProjectBound() {
+		return os.ReadFile(c.path)
+	}
+	return c.readProjectConfigBytes()
+}
+
+// readProjectConfigBytes is the single physical read owner for a project-bound
+// Codex adapter. It returns only bytes read through the no-link/no-reparse path
+// walk; callers must not follow it with an os.ReadFile of c.path.
+func (c *codexCLI) readProjectConfigBytes() ([]byte, error) {
+	data, present, err := readCodexConfigNoReparse(c.path)
+	if err != nil {
+		return nil, fmt.Errorf("%w: project config validation failed: %v", ErrCodexProjectSourceRootInvalid, err)
+	}
+	if !present {
+		return nil, fmt.Errorf("%w: project Codex config is absent", ErrCodexProjectSourceRootInvalid)
+	}
+	return data, nil
+}
+
+func decodeCodexTOMLBytes(data []byte) (map[string]any, error) {
+	var document map[string]any
+	if err := toml.Unmarshal(data, &document); err != nil {
+		return nil, fmt.Errorf("%w: parse Codex config", ErrCodexLayerParseFailed)
+	}
+	if document == nil {
+		document = map[string]any{}
+	}
+	return document, nil
+}
+
+func (c *codexCLI) readRelocationTOML() (map[string]any, error) {
+	if !c.isProjectBound() {
+		return c.readTOML()
+	}
+	data, err := c.readRelocationConfigBytes()
+	if err != nil {
+		return nil, err
+	}
+	return decodeCodexTOMLBytes(data)
+}
+
+func (c *codexCLI) codexConfigScope() string {
+	if c.isProjectBound() {
+		return "project"
+	}
+	return "global"
 }
 
 // codexDecodedHeaderMap constructs the same map shape readTOML returns after
@@ -533,14 +616,20 @@ func codexDecodedHeaderMap(headers map[string]string) map[string]any {
 	return decoded
 }
 
-func codexRelocationResult(req CodexHTTPRelocation, outcome CodexHTTPRelocationOutcome, sourceSnapshot map[string]any) CodexHTTPRelocationResult {
-	return CodexHTTPRelocationResult{
+func (c *codexCLI) codexRelocationResult(req CodexHTTPRelocation, outcome CodexHTTPRelocationOutcome, sourceSnapshot map[string]any) CodexHTTPRelocationResult {
+	result := CodexHTTPRelocationResult{
 		LogicalSource: req.SourceEntryName, TargetEntry: req.TargetEntryName,
 		WriteTarget: "codex_global", DesiredTransport: CodexTransportHTTP,
 		CollisionReason: "cross_layer_opposite_transport", Action: "relocate",
 		Outcome: outcome, SourceSnapshot: cloneCodexRawEntry(sourceSnapshot),
 		Readback: CodexHTTPRelocationReadbackExact,
 	}
+	if c.isProjectBound() {
+		result.WriteTarget = "codex_project"
+		result.CollisionReason = ""
+		result.Action = "replace"
+	}
+	return result
 }
 
 func cloneCodexDocument(document map[string]any) map[string]any {
@@ -574,8 +663,11 @@ func (c *codexCLI) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (Co
 	if req.SourceEntryName == "" || req.TargetEntryName == "" || req.Target.URL == "" || len(req.SourceSnapshot) == 0 {
 		return result, fmt.Errorf("%w: inverse relocation requires source, target, hub entry, and source snapshot", ErrCodexLayerCollisionUnowned)
 	}
-	originalBytes, err := os.ReadFile(c.path)
+	originalBytes, err := c.readRelocationConfigBytes()
 	if err != nil {
+		if c.isProjectBound() {
+			return result, err
+		}
 		return result, fmt.Errorf("%w: read global snapshot: %v", ErrCodexLayerCollisionUnowned, err)
 	}
 	m, err := c.readTOML()
@@ -627,11 +719,11 @@ func (c *codexCLI) RestoreRelocatedHTTPEntry(req CodexHTTPInverseRelocation) (Co
 
 func (c *codexCLI) rollbackCodexSnapshot(snapshot []byte, cause error) error {
 	if rollbackErr := writeConfigFileWith(nil, c.path, snapshot); rollbackErr != nil {
-		return errors.Join(cause, fmt.Errorf("%w: restore global config snapshot: %v", ErrCodexConfigRollbackIncomplete, rollbackErr))
+		return errors.Join(cause, fmt.Errorf("%w: restore %s config snapshot: %v", ErrCodexConfigRollbackIncomplete, c.codexConfigScope(), rollbackErr))
 	}
-	actual, readErr := os.ReadFile(c.path)
+	actual, readErr := c.readRelocationConfigBytes()
 	if readErr != nil || !bytes.Equal(actual, snapshot) {
-		return errors.Join(cause, fmt.Errorf("%w: restore global config snapshot readback", ErrCodexConfigRollbackIncomplete))
+		return errors.Join(cause, fmt.Errorf("%w: restore %s config snapshot readback", ErrCodexConfigRollbackIncomplete, c.codexConfigScope()))
 	}
 	return cause
 }
@@ -725,15 +817,25 @@ func codexTimeoutEqualsTen(value any) bool {
 func (c *codexCLI) IsRelayStdio() bool { return false }
 
 func (c *codexCLI) Exists() bool {
+	if c.isProjectBound() {
+		_, err := c.readProjectConfigBytes()
+		return err == nil
+	}
 	_, err := os.Stat(c.path)
 	return err == nil
 }
 
 func (c *codexCLI) Backup() (string, error) {
+	if c.isProjectBound() {
+		return "", ErrCodexProjectLegacyBackupUnsupported
+	}
 	return writeBackup(c.path, c.Name(), 0)
 }
 
 func (c *codexCLI) BackupKeep(keepN int) (string, error) {
+	if c.isProjectBound() {
+		return "", ErrCodexProjectLegacyBackupUnsupported
+	}
 	return writeBackup(c.path, c.Name(), keepN)
 }
 
@@ -745,10 +847,19 @@ func (c *codexCLI) BackupKeep(keepN int) (string, error) {
 // because InitEmpty fires only when the file is missing, no
 // user-authored configuration can be clobbered.
 func (c *codexCLI) InitEmpty() (created bool, err error) {
+	if c.isProjectBound() {
+		if _, err := c.readProjectConfigBytes(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 	return EnsureClientConfigStub(c.path, []byte("[mcp_servers]\n"))
 }
 
 func (c *codexCLI) Restore(backupPath string) error {
+	if c.isProjectBound() {
+		return ErrCodexProjectLegacyBackupUnsupported
+	}
 	// Route the live-config rewrite through WriteConfigFile so
 	// production restores inherit the SecureWriteClientConfig pipeline.
 	data, err := os.ReadFile(backupPath)
@@ -760,6 +871,13 @@ func (c *codexCLI) Restore(backupPath string) error {
 
 // readTOML / writeTOML round-trip through map[string]any so unknown sections survive.
 func (c *codexCLI) readTOML() (map[string]any, error) {
+	if c.isProjectBound() {
+		data, err := c.readProjectConfigBytes()
+		if err != nil {
+			return nil, err
+		}
+		return decodeCodexTOMLBytes(data)
+	}
 	data, err := os.ReadFile(c.path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -941,6 +1059,9 @@ func (c *codexCLI) CompareAndSetProviderMCPActivation(_ context.Context, req Pro
 
 // LatestBackupPath delegates to the shared helper.
 func (c *codexCLI) LatestBackupPath() (string, bool, error) {
+	if c.isProjectBound() {
+		return "", false, ErrCodexProjectLegacyBackupUnsupported
+	}
 	return latestBackup(c.path, c.Name())
 }
 
@@ -978,6 +1099,9 @@ func (c *codexCLI) restoreEntryFromBackup(backupPath, name string, allowHubEntry
 }
 
 func (c *codexCLI) restoreEntryFromBackupWithWriter(backupPath, name string, allowHubEntry bool, writer WriteConfigFileFunc) error {
+	if c.isProjectBound() {
+		return ErrCodexProjectLegacyBackupUnsupported
+	}
 	backupData, err := os.ReadFile(backupPath)
 	if err != nil {
 		return fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -1124,6 +1248,9 @@ func (c *codexCLI) FindStdioLanguageServerEntries() ([]LanguageServerStdioEntry,
 // BackupContainsEntry reports whether the backup file at backupPath
 // has an [mcp_servers.<name>] table.
 func (c *codexCLI) BackupContainsEntry(backupPath, name string) (bool, error) {
+	if c.isProjectBound() {
+		return false, ErrCodexProjectLegacyBackupUnsupported
+	}
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)
@@ -1151,6 +1278,9 @@ func (c *codexCLI) BackupContainsEntry(backupPath, name string) (bool, error) {
 // TOML backup at backupPath is in Codex CLI's hub-HTTP shape (loopback
 // `url` present, `command` absent). See Client.BackupEntryIsHubManaged.
 func (c *codexCLI) BackupEntryIsHubManaged(backupPath, name string) (bool, error) {
+	if c.isProjectBound() {
+		return false, ErrCodexProjectLegacyBackupUnsupported
+	}
 	data, err := os.ReadFile(backupPath)
 	if err != nil {
 		return false, fmt.Errorf("read backup %s: %w", backupPath, err)

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -94,9 +95,8 @@ func TestProductionSpawnFn_NoOverlayRowStillEmitsAppliedMarker(t *testing.T) {
 	defer events.Close()
 
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	// Global-shape descriptor with NO d.Env (manifest env empty) and NO
@@ -196,9 +196,8 @@ func TestProductionSpawnFn_NoOverlayRowNeutralizesInheritedKeys(t *testing.T) {
 	defer events.Close()
 
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	descriptor := api.SupervisorDaemon{
@@ -295,9 +294,8 @@ func TestProductionSpawnFn_NoOverlayRowImmuneToInheritedOverlayControlVars(t *te
 	defer events.Close()
 
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	// Global-shape (NON-serena) descriptor, NO d.Env, NO overlay row.
@@ -384,9 +382,8 @@ func TestProductionSpawnFn_SerenaProxyTrustedOverlayPathBeatsInheritedSpoof(t *t
 	wantTrustedPath := filepath.Join(tmpHome, overlayBaseName)
 
 	crashCh := make(chan crashEvent, 8)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), statePath, nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), statePath, nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	// Serena-proxy-shaped descriptor: Args[0..1] = `daemon serena-proxy` so

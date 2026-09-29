@@ -27,7 +27,7 @@ func TestWindowsRestartNoConsole(t *testing.T) {
 		t.Fatalf("supervisor environment unexpectedly rewritten: %q", supervisor.Env)
 	}
 
-	replacementGUI := newRestartV3GUICmd("mcphub", []string{"gui", "--foreground"}, []string{"FOO=bar"})
+	replacementGUI := newDetachedGUICmd("mcphub", []string{"gui", "--foreground"}, []string{"FOO=bar"})
 	assertRestartCommandNoConsole(t, replacementGUI)
 	if !reflect.DeepEqual(replacementGUI.Args, []string{"mcphub", "gui", "--foreground"}) {
 		t.Fatalf("replacement GUI argv=%q, want exact supplied argv", replacementGUI.Args)

@@ -1157,7 +1157,8 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.ErrOrStderr(),
 				"serena-router: registry load warning (will retry lazily on first call): %v\n", err)
 		}
-		resolver := serena_routing.NewWorkspaceResolver(reg, registryPath)
+		registryObserver := api.NewRegistrySnapshotObserver(reg, registryPath, false)
+		resolver := serena_routing.NewWorkspaceResolverWithObserver(registryObserver, registryPath)
 		sessions := serena_routing.NewSessionRouter()
 		s.SetSerenaRouterProduction(resolver, sessions)
 		if rawManifest, err := api.NewAPI().ManifestGet("mcp-language-server"); err != nil {
@@ -1167,15 +1168,9 @@ func startGuiServerWithStartup(cmd *cobra.Command, ctx context.Context, stop con
 			fmt.Fprintf(cmd.ErrOrStderr(),
 				"lsp-router: manifest parse failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
 		} else {
-			// Separate registry handle for the LSP resolver: it refreshes
-			// (reg.Load() + LSPEntries()) under its own RWMutex, independently
-			// of the serena resolver above. *api.Registry has no in-process
-			// mutex, so sharing one object would let the two resolvers' caches
-			// race on the Workspaces slice after a registry mtime change — a
-			// data race under concurrent /serena/mcp + /lsp/<lang>/mcp traffic
-			// (bot PR #266 r5).
-			lspReg := api.NewRegistry(registryPath)
-			lspResolver := lsp_routing.NewWorkspaceResolver(lspReg, registryPath, m.Languages)
+			// The observer serializes both projections without sharing a mutable
+			// Registry.Load receiver between concurrent routing calls.
+			lspResolver := lsp_routing.NewWorkspaceResolverWithObserver(registryObserver, m.Languages)
 			lspSessions := lsp_routing.NewSessionRouter()
 			s.SetLSPRouterProduction(lspResolver, lspSessions, m.Languages)
 			go runLSPSessionCleanupTicker(ctx, lspSessions, sessionCleanupInterval, lsp_routing.DefaultSessionTTL)

@@ -414,7 +414,7 @@ export function ServersScreen() {
   // a poll tick can't even fire mid-edit; and because each CellView's
   // visible checkbox folds `dirty` over the baseline (effectiveChecked), a
   // baseline-only refresh can never visually drop a pending toggle.
-  const loadScan = useCallback(async () => {
+  const loadScan = useCallback(async (markScanAccepted: () => void) => {
     const requestId = latestScanRequestRef.current + 1;
     latestScanRequestRef.current = requestId;
     const isLatest = () => latestScanRequestRef.current === requestId;
@@ -500,6 +500,7 @@ export function ServersScreen() {
       // must NOT be cleared here — they remain visible until
       // the user starts a new Apply cycle.
       setApplyMsg((msg) => (msg === "Applied. Refreshing…" ? "" : msg));
+      markScanAccepted();
     } catch (err) {
       if (isLatest()) setError((err as Error).message);
     }
@@ -513,7 +514,7 @@ export function ServersScreen() {
   const hasUnsavedEdits = dirty.size > 0;
   const hasLspRouterToggleInFlight = Object.keys(lspRouterBusy).length > 0;
   const autoScanPaused = hasUnsavedEdits || hasLspRouterToggleInFlight;
-  const { rescan, agoSeconds } = useAutoScan(loadScan, autoScanPaused);
+  const { rescan, markScanAccepted, agoSeconds } = useAutoScan(loadScan, autoScanPaused);
 
   // reloadToken-driven refetch for Apply / Initialize / LSP register / SSE.
   // useAutoScan already issues the initial mount fetch, so this effect
@@ -523,8 +524,8 @@ export function ServersScreen() {
   // even though the auto-poll is paused while dirty.
   useEffect(() => {
     if (reloadToken === 0) return;
-    void loadScan();
-  }, [reloadToken, loadScan]);
+    void loadScan(markScanAccepted);
+  }, [reloadToken, loadScan, markScanAccepted]);
 
   async function initializeClient(client: string) {
     if (initBusy[client]) return;
@@ -882,7 +883,8 @@ export function ServersScreen() {
     return (
       <div>
         <h1>Servers</h1>
-        <p class="error">Failed to load: {error}</p>
+        <p class="error" role="alert">Failed to load: {error}</p>
+        <button type="button" class="btn" onClick={rescan}>Retry</button>
       </div>
     );
   }
@@ -1896,7 +1898,7 @@ function RegisterWorkspacePanel(props: {
             type="text"
             class="field-ctl"
             data-testid="lsp-register-workspace-path"
-            placeholder="Workspace folder, e.g. D:\\dev\\my-project"
+            placeholder="Workspace folder path"
             value={pathValue}
             disabled={busy}
             onInput={(ev) => onPathInput((ev.currentTarget as HTMLInputElement).value)}

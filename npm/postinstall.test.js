@@ -30,6 +30,7 @@
 const { test } = require("node:test");
 const assert = require("node:assert");
 const { spawnSync } = require("node:child_process");
+const crypto = require("node:crypto");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -62,7 +63,7 @@ function materializePackage(pkgDir, name = SELF_NAME) {
   // CommonJS regardless of any ancestor package.json on the test host.
   fs.writeFileSync(
     path.join(pkgDir, "package.json"),
-    JSON.stringify({ name, type: "commonjs" }) + "\n",
+    JSON.stringify({ ...require("./package.json"), name }) + "\n",
   );
   fs.mkdirSync(path.join(pkgDir, "lib"));
   fs.mkdirSync(path.join(pkgDir, "scripts"));
@@ -359,24 +360,35 @@ function buildForcedWindowsFixture() {
   const platformPkg = PACKAGE_BY_PLATFORM["win32-x64"];
   const platformBin = path.join(pkgDir, "node_modules", ...platformPkg.split("/"), "bin");
   fs.mkdirSync(platformBin, { recursive: true });
-  fs.writeFileSync(path.join(platformBin, "mcphub.exe"), "candidate fixture\n");
-  fs.writeFileSync(path.join(platformBin, "mcphub-windowless.exe"), "windowless fixture\n");
-  fs.writeFileSync(path.join(platformBin, "mcphub-pe-admit.exe"), "adapter fixture\n");
+  const candidatePath = path.join(platformBin, "mcphub.exe");
+  const candidateBytes = Buffer.from("candidate fixture\n");
+  fs.writeFileSync(candidatePath, candidateBytes);
+  fs.writeFileSync(
+    path.join(platformBin, "windows-product-identity.json"),
+    JSON.stringify({
+      schema: "windows-product-identity-v1",
+      role: "product",
+      filename: "mcphub.exe",
+      subsystem: 2,
+      machine: 0x8664,
+      version: "0.4.37",
+      commit: "0123456789abcdef0123456789abcdef01234567",
+      build_date: "2026-09-11T00:00:00Z",
+      sha256: crypto.createHash("sha256").update(candidateBytes).digest("hex"),
+    }) + "\n",
+  );
 
   const tracePath = path.join(base, "spawn-trace.jsonl");
   const preloadPath = path.join(base, "spawn-preload.cjs");
   fs.writeFileSync(
     preloadPath,
     `Object.defineProperty(process, "platform", {value: "win32"});\n` +
-      `Object.defineProperty(process, "arch", {value: "x64"});\n` +
+      `Object.defineProperty(process, "arch", {value: process.env.MCPHUB_TEST_ARCH || "x64"});\n` +
       `const fs = require("node:fs");\n` +
-      `const path = require("node:path");\n` +
       `const cp = require("node:child_process");\n` +
       `cp.spawnSync = (file, args, opts) => {\n` +
       `  fs.appendFileSync(process.env.MCPHUB_TEST_SPAWN_TRACE, JSON.stringify({file,args,stdio:opts.stdio,shell:opts.shell,windowsHide:opts.windowsHide,hasEnv:Object.prototype.hasOwnProperty.call(opts,"env")}) + "\\n");\n` +
-      `  const leaf = path.basename(file).toLowerCase();\n` +
-      `  const role = leaf === "mcphub-pe-admit.exe" ? args[0] : "candidate";\n` +
-      `  const status = role === "cli" ? Number(process.env.MCPHUB_TEST_ADMIT_CLI_STATUS || 0) : role === "windowless" ? Number(process.env.MCPHUB_TEST_ADMIT_WINDOWLESS_STATUS || 0) : Number(process.env.MCPHUB_TEST_CANDIDATE_STATUS || 0);\n` +
+      `  const status = Number(process.env.MCPHUB_TEST_CANDIDATE_STATUS || 0);\n` +
       `  return {status, signal:null, error:null};\n` +
       `};\n`,
   );
@@ -404,70 +416,84 @@ function readSpawnTrace(fixture) {
     .map((line) => JSON.parse(line));
 }
 
-test("Windows platform payload includes PE adapter", () => {
-  for (const target of ["win32-x64", "win32-arm64"]) {
-    const manifest = require(`./packages/${target}/package.json`);
+test("Windows platform payload has one PE plus the identity manifest and no bin owner", () => {
+  for (const target of ["win32-x64"]) {
+    const manifest = require("./packages/" + target + "/package.json");
     assert.deepStrictEqual(
       [...manifest.files].sort(),
       [
         "bin/mcphub.exe",
-        "bin/mcphub-windowless.exe",
-        "bin/mcphub-pe-admit.exe",
+        "bin/windows-product-identity.json",
         "README.md",
       ].sort(),
     );
-    assert.deepStrictEqual(manifest.bin, { mcphub: "bin/mcphub.exe" });
+    assert.strictEqual(Object.hasOwn(manifest, "bin"), false);
   }
 });
 
-test("Non-Windows platform payload excludes PE adapter", () => {
-  for (const target of ["darwin-x64", "darwin-arm64", "linux-x64", "linux-arm64"]) {
-    const manifest = require(`./packages/${target}/package.json`);
-    assert.strictEqual(manifest.files.some((p) => p.endsWith(".exe") || p.includes("mcphub-pe-admit")), false);
-  }
-});
-
-test("Postinstall role-admits the complete Windows pair before canonicalize", () => {
+test("Postinstall verifies the Windows identity manifest before canonicalize", () => {
   const fixture = buildForcedWindowsFixture();
   try {
     const script = path.join(fixture.pkgDir, "scripts", "postinstall.js");
-    const rejected = spawnSync(process.execPath, [script], {
+    const identityPath = path.join(
+      fixture.pkgDir,
+      "node_modules",
+      ...PACKAGE_BY_PLATFORM["win32-x64"].split("/"),
+      "bin",
+      "windows-product-identity.json",
+    );
+    const originalIdentity = fs.readFileSync(identityPath, "utf8");
+
+    fs.rmSync(identityPath);
+    const missing = spawnSync(process.execPath, [script], {
       encoding: "utf8",
       cwd: fixture.pkgDir,
-      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_CLI_STATUS: "17" }),
+      env: forcedWindowsEnv(fixture),
     });
-    assert.strictEqual(rejected.status, 0, rejected.stderr);
-    assert.match(rejected.stderr, /PE admission rejected.*left as-is/);
+    assert.strictEqual(missing.status, 0, missing.stderr);
+    assert.match(missing.stderr, /identity manifest is missing.*left as-is/);
     let trace = readSpawnTrace(fixture);
-    assert.strictEqual(trace.length, 1, `rejected trace=${JSON.stringify(trace)}`);
-    assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub-pe-admit.exe");
-    assert.deepStrictEqual(
-      [trace[0].args[0], path.basename(trace[0].args[1]).toLowerCase()],
-      ["cli", "mcphub.exe"],
-    );
-    assert.strictEqual(trace[0].windowsHide, true);
-    assert.strictEqual(trace[0].shell, false);
-    assert.strictEqual(trace[0].hasEnv, false);
+    assert.strictEqual(trace.length, 0, "missing-manifest trace=" + JSON.stringify(trace));
 
-    fs.rmSync(fixture.tracePath, { force: true });
-    const windowlessRejected = spawnSync(process.execPath, [script], {
+    fs.writeFileSync(
+      identityPath,
+      originalIdentity.replace("windows-product-identity-v1", "unknown-schema"),
+    );
+    const unknownSchema = spawnSync(process.execPath, [script], {
       encoding: "utf8",
       cwd: fixture.pkgDir,
-      env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ADMIT_WINDOWLESS_STATUS: "19" }),
+      env: forcedWindowsEnv(fixture),
     });
-    assert.strictEqual(windowlessRejected.status, 0, windowlessRejected.stderr);
-    assert.match(windowlessRejected.stderr, /PE admission rejected.*left as-is/);
+    assert.strictEqual(unknownSchema.status, 0, unknownSchema.stderr);
+    assert.match(unknownSchema.stderr, /identity manifest.*schema.*left as-is/);
     trace = readSpawnTrace(fixture);
-    assert.strictEqual(trace.length, 2, `windowless rejected trace=${JSON.stringify(trace)}`);
-    assert.deepStrictEqual(
-      trace.slice(0, 2).map((row) => [row.args[0], path.basename(row.args[1]).toLowerCase()]),
-      [
-        ["cli", "mcphub.exe"],
-        ["windowless", "mcphub-windowless.exe"],
-      ],
-    );
+    assert.strictEqual(trace.length, 0, "unknown-schema trace=" + JSON.stringify(trace));
 
-    fs.rmSync(fixture.tracePath, { force: true });
+    const wrongRole = JSON.parse(originalIdentity);
+    wrongRole.role = "windowless";
+    fs.writeFileSync(identityPath, JSON.stringify(wrongRole) + "\n");
+    const unknownRole = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      cwd: fixture.pkgDir,
+      env: forcedWindowsEnv(fixture),
+    });
+    assert.strictEqual(unknownRole.status, 0, unknownRole.stderr);
+    assert.match(unknownRole.stderr, /identity manifest fields are invalid.*left as-is/);
+    trace = readSpawnTrace(fixture);
+    assert.strictEqual(trace.length, 0, "unknown-role trace=" + JSON.stringify(trace));
+
+    fs.writeFileSync(identityPath, originalIdentity.replace(/[0-9a-f]{64}/, "0".repeat(64)));
+    const hashRejected = spawnSync(process.execPath, [script], {
+      encoding: "utf8",
+      cwd: fixture.pkgDir,
+      env: forcedWindowsEnv(fixture),
+    });
+    assert.strictEqual(hashRejected.status, 0, hashRejected.stderr);
+    assert.match(hashRejected.stderr, /identity manifest.*SHA-256.*left as-is/);
+    trace = readSpawnTrace(fixture);
+    assert.strictEqual(trace.length, 0, "hash-rejected trace=" + JSON.stringify(trace));
+
+    fs.writeFileSync(identityPath, originalIdentity);
     const admitted = spawnSync(process.execPath, [script], {
       encoding: "utf8",
       cwd: fixture.pkgDir,
@@ -475,20 +501,42 @@ test("Postinstall role-admits the complete Windows pair before canonicalize", ()
     });
     assert.strictEqual(admitted.status, 0, admitted.stderr);
     trace = readSpawnTrace(fixture);
-    assert.strictEqual(trace.length, 3, `admitted trace=${JSON.stringify(trace)}`);
-    assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub-pe-admit.exe");
-    assert.deepStrictEqual(
-      trace.slice(0, 2).map((row) => [row.args[0], path.basename(row.args[1]).toLowerCase()]),
-      [
-        ["cli", "mcphub.exe"],
-        ["windowless", "mcphub-windowless.exe"],
-      ],
+    assert.strictEqual(trace.length, 1, "admitted trace=" + JSON.stringify(trace));
+    assert.strictEqual(path.basename(trace[0].file).toLowerCase(), "mcphub.exe");
+    assert.deepStrictEqual(trace[0].args, ["canonicalize"]);
+    assert.strictEqual(trace[0].windowsHide, true);
+    assert.strictEqual(trace[0].stdio, "inherit");
+    assert.strictEqual(trace[0].shell, false);
+    assert.strictEqual(trace[0].hasEnv, false);
+  } finally {
+    fs.rmSync(fixture.base, { recursive: true, force: true });
+  }
+});
+
+test("global postinstall on deferred Windows arm64 never canonicalizes an older package", () => {
+  const fixture = buildForcedWindowsFixture();
+  try {
+    const older = path.join(
+      fixture.pkgDir,
+      "node_modules",
+      "@applicate2628",
+      "mcp-local-hub-win32-arm64",
+      "bin",
     );
-    assert.strictEqual(path.basename(trace[2].file).toLowerCase(), "mcphub.exe");
-    assert.deepStrictEqual(trace[2].args, ["canonicalize"]);
-    assert.strictEqual(trace[2].windowsHide, true);
-    assert.strictEqual(trace[2].stdio, "inherit");
-    assert.strictEqual(trace[2].hasEnv, false);
+    fs.mkdirSync(older, { recursive: true });
+    fs.writeFileSync(path.join(older, "mcphub.exe"), "older native payload");
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixture.pkgDir, "scripts", "postinstall.js")],
+      {
+        encoding: "utf8",
+        cwd: fixture.pkgDir,
+        env: forcedWindowsEnv(fixture, { MCPHUB_TEST_ARCH: "arm64" }),
+      },
+    );
+    assert.strictEqual(result.status, 0, result.stderr);
+    assert.match(result.stderr, /no platform binary for "win32-arm64"/);
+    assert.deepStrictEqual(readSpawnTrace(fixture), []);
   } finally {
     fs.rmSync(fixture.base, { recursive: true, force: true });
   }

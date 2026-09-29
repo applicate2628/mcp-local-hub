@@ -134,6 +134,7 @@ type fakeInstallAutostartBackend struct {
 	enableErr    error
 	enableCalls  int
 	enableOpts   []autostart.Options
+	statusOpts   []autostart.Options
 }
 
 func (f *fakeInstallAutostartBackend) Enable(opts autostart.Options) error {
@@ -145,6 +146,7 @@ func (f *fakeInstallAutostartBackend) Enable(opts autostart.Options) error {
 func (f *fakeInstallAutostartBackend) Disable() error { return nil }
 
 func (f *fakeInstallAutostartBackend) Status(opts autostart.Options) (autostart.State, error) {
+	f.statusOpts = append(f.statusOpts, opts)
 	return f.statusReturn, f.statusErr
 }
 
@@ -2224,6 +2226,9 @@ func TestInstallPlanCore_GlobalInstall_AutostartAlreadyEnabledNoops(t *testing.T
 // never applied.
 func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath(t *testing.T) {
 	canonical := filepath.Join(t.TempDir(), MCPHubBinaryName())
+	if err := os.WriteFile(canonical, []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(SetTestCanonicalMcphubPath(canonical))
 	fb := &fakeInstallAutostartBackend{statusReturn: autostart.StateDrifted}
 	installFakeAutostartBackend(t, fb)
@@ -2233,8 +2238,9 @@ func TestEnsureGlobalInstallAutostartOwner_RecreatesDriftedShimWithCanonicalPath
 	if fb.enableCalls != 1 {
 		t.Fatalf("autostart Enable calls = %d, want 1 for drifted owner", fb.enableCalls)
 	}
-	if got := fb.enableOpts[0].MCPHubPath; got != canonical {
-		t.Fatalf("autostart Enable MCPHubPath = %q, want canonical %q", got, canonical)
+	want := canonical
+	if got := fb.enableOpts[0].MCPHubPath; got != want {
+		t.Fatalf("autostart Enable MCPHubPath = %q, want canonical product %q", got, want)
 	}
 	if !fb.enableOpts[0].StrictMode {
 		t.Fatalf("autostart Enable opts = %+v, want StrictMode=true", fb.enableOpts[0])

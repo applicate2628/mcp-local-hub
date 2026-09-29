@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io/fs"
 	"os"
@@ -28,13 +29,8 @@ func manifestDirForTests() string {
 
 // Manifest-source abstraction.
 //
-// Before this file existed, read-side API calls (ManifestList,
-// ManifestGet, Install, scan) resolved manifests through defaultManifestDir()
-// — a heuristic that searches for a `servers/` directory next to the
-// running binary. The daemon (cli/daemon.go) read manifests from the
-// servers.Manifests embed instead. Two sources of truth → split-brain:
-// canonical ~/.local/bin/mcphub.exe saw 0 servers from disk when invoked
-// from %TEMP% even though 10 were embedded in the binary.
+// Read-side API calls prefer the embedded manifest set and use the canonical
+// installation manifest directory only for disk fallback.
 //
 // Fix: all read paths go through embeddedManifestNames /
 // loadManifestYAMLEmbedFirst, which prefer the embed FS (the source of
@@ -136,16 +132,25 @@ func IsEmbeddedManifestName(name string) bool {
 // manifest changes nothing — the embed read serving instead of the disk read
 // is unobservable — so warning about it is pure noise. The dominant producer
 // of identical copies is a dev checkout / built binary sitting next to the
-// source `servers/` tree, where defaultManifestDir() resolves to the source
-// tree and EVERY shipped server would otherwise warn on every install --all
+// canonical `servers/` tree, where every shipped server would otherwise warn
+// on every install --all
 // and every scan. Only a DIFFERING disk copy (the operator actually edited
 // something the embed read silently discards) warns.
-func embeddedDiskShadowWarning(name, manifestDir string) string {
+// DiskShadowWarningObservation is the raw snapshot of an embedded manifest
+// shadow that a long-lived caller may deduplicate. Identity changes whenever
+// the name, embedded bytes, or disk bytes change.
+type DiskShadowWarningObservation struct {
+	Name     string
+	Message  string
+	Identity [sha256.Size]byte
+}
+
+func embeddedDiskShadowObservation(name, manifestDir string) (DiskShadowWarningObservation, bool) {
 	if !isEmbeddedManifestName(name) {
-		return ""
+		return DiskShadowWarningObservation{}, false
 	}
 	if manifestDir == "" {
-		return ""
+		return DiskShadowWarningObservation{}, false
 	}
 	// isEmbeddedManifestName(name) == true implies `name` literally matched an
 	// embed FS directory entry, so it is join-safe by construction (no
@@ -154,18 +159,31 @@ func embeddedDiskShadowWarning(name, manifestDir string) string {
 	// about — same no-warn outcome the earlier stat-based check produced.
 	diskBytes, err := os.ReadFile(filepath.Join(manifestDir, name, "manifest.yaml"))
 	if err != nil {
-		return ""
+		return DiskShadowWarningObservation{}, false
 	}
 	// Identical bytes → pure noise, skip (see header). An embed read failure
 	// cannot really happen for a name proven in the embed set; if it somehow
 	// does, fall through to the truthful warn (conservative).
 	if embedBytes, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml"); err == nil && bytes.Equal(diskBytes, embedBytes) {
-		return ""
+		return DiskShadowWarningObservation{}, false
 	}
-	return fmt.Sprintf(
+	message := fmt.Sprintf(
 		"disk manifest for shipped server %q is ignored; the shipped built-in manifest is what installs — rename your copy (e.g. %q) to install a customized version",
 		name, name+"-custom",
 	)
+	embedBytes, _ := fs.ReadFile(servers.Manifests, name+"/manifest.yaml")
+	identity := sha256.Sum256(bytes.Join([][]byte{[]byte(name), embedBytes, diskBytes}, []byte{0}))
+	return DiskShadowWarningObservation{Name: name, Message: message, Identity: identity}, true
+}
+
+// embeddedDiskShadowWarning retains the existing one-shot string projection
+// used by install and direct callers.
+func embeddedDiskShadowWarning(name, manifestDir string) string {
+	observation, ok := embeddedDiskShadowObservation(name, manifestDir)
+	if !ok {
+		return ""
+	}
+	return observation.Message
 }
 
 // loadManifestYAMLEmbedFirst returns the raw YAML bytes for the named
@@ -181,19 +199,38 @@ func embeddedDiskShadowWarning(name, manifestDir string) string {
 // status_enrich, secrets_scan, migrate) that compose `name` straight
 // into the loader without their own pre-load check.
 func loadManifestYAMLEmbedFirst(name string) ([]byte, error) {
+	data, handled, err := loadManifestEmbeddedOrOverride(name)
+	if handled {
+		return data, err
+	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return nil, fmt.Errorf("load manifest %s: %w", name, err)
+	}
+	return os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+}
+
+func loadManifestYAMLEmbedFirstFromDir(name, diskDir string) ([]byte, error) {
+	data, handled, err := loadManifestEmbeddedOrOverride(name)
+	if handled {
+		return data, err
+	}
+	return os.ReadFile(filepath.Join(diskDir, name, "manifest.yaml"))
+}
+
+func loadManifestEmbeddedOrOverride(name string) ([]byte, bool, error) {
 	if err := checkManifestName(name); err != nil {
-		return nil, err
+		return nil, true, err
 	}
 	if dir := manifestDirForTests(); dir != "" {
 		// Test-only override: skip the embed FS entirely.
-		return os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+		data, err := os.ReadFile(filepath.Join(dir, name, "manifest.yaml"))
+		return data, true, err
 	}
 	if data, err := fs.ReadFile(servers.Manifests, name+"/manifest.yaml"); err == nil {
-		return data, nil
+		return data, true, nil
 	}
-	// Disk fallback for dev flow (e.g. brand-new manifest not yet compiled in).
-	path := filepath.Join(defaultManifestDir(), name, "manifest.yaml")
-	return os.ReadFile(path)
+	return nil, false, nil
 }
 
 // listManifestNamesEmbedFirst returns the set of available server
@@ -219,24 +256,32 @@ func listManifestNamesEmbedFirst() ([]string, error) {
 		sort.Strings(names)
 		return names, nil
 	}
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return nil, fmt.Errorf("list manifests: %w", err)
+	}
+	return listManifestNamesEmbedFirstFromDir(dir)
+}
+
+func listManifestNamesEmbedFirstFromDir(dir string) ([]string, error) {
 	// Production path: union embed + disk.
 	seen := map[string]bool{}
 	for _, n := range embeddedManifestNames() {
 		seen[n] = true
 	}
-	// Union with disk so dev-created manifests appear before they are
-	// compiled into the binary.
-	entries, err := os.ReadDir(defaultManifestDir())
+	// Union with canonical disk state so dev-created manifests appear before
+	// they are compiled into the binary.
+	entries, err := os.ReadDir(dir)
 	if err != nil && !os.IsNotExist(err) {
 		// Disk read failure is non-fatal — return what we have from embed.
 		// The common case on an installed binary with no source tree is
-		// that defaultManifestDir() does not exist.
+		// that the canonical manifest directory does not exist.
 	}
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(defaultManifestDir(), e.Name(), "manifest.yaml")); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, e.Name(), "manifest.yaml")); err == nil {
 			seen[e.Name()] = true
 		}
 	}
@@ -261,7 +306,11 @@ func listManifestNamesEmbedFirstStrict() ([]string, error) {
 		for _, name := range embeddedManifestNames() {
 			seen[name] = true
 		}
-		dir = defaultManifestDir()
+		var err error
+		dir, err = CanonicalManifestDir()
+		if err != nil {
+			return nil, fmt.Errorf("list manifests strictly: %w", err)
+		}
 	}
 
 	entries, err := deAdoptManifestReadDir(dir)

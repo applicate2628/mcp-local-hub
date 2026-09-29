@@ -985,9 +985,12 @@ func ensureGlobalInstallAutostartOwner(w io.Writer, strictMode bool, ownerMode O
 		return
 	}
 	opts := autostart.Options{StrictMode: strictMode, OwnerMode: ownerMode}
-	if canonical, err := canonicalMcphubPath(); err == nil {
-		opts.MCPHubPath = canonical
+	entrypoint, err := CanonicalAutostartEntrypoint()
+	if err != nil {
+		warnAutostartOwner(w, "resolve canonical entrypoint", err)
+		return
 	}
+	opts.MCPHubPath = entrypoint
 	state, err := backend.Status(opts)
 	if err != nil {
 		warnAutostartOwner(w, "read status", err)

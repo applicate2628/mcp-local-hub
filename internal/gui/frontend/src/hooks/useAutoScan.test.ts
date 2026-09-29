@@ -155,8 +155,30 @@ describe("useAutoScan", () => {
     expect(run).toHaveBeenCalledTimes(3); // full period after rescan
   });
 
-  it("exposes a live 'ago' elapsed-seconds value", async () => {
+  it("does not stamp a completed run without an accepted scan", async () => {
     const run = vi.fn(async () => {});
+    const { result } = renderHook(() => useAutoScan(run, false));
+    await act(async () => {});
+    expect(result.current.lastScanAt).toBeNull();
+    expect(result.current.agoSeconds).toBeNull();
+
+    await act(async () => {
+      result.current.rescan();
+    });
+    expect(result.current.lastScanAt).toBeNull();
+  });
+
+  it("does not stamp a handled failed run without an accepted scan", async () => {
+    const run = vi.fn(async () => {
+      await Promise.reject(new Error("scan failed")).catch(() => {});
+    });
+    const { result } = renderHook(() => useAutoScan(run, false));
+    await act(async () => {});
+    expect(result.current.lastScanAt).toBeNull();
+  });
+
+  it("timestamps explicit acceptance and advances the live 'ago' value", async () => {
+    const run = vi.fn(async (markScanAccepted: () => void) => markScanAccepted());
     const { result } = renderHook(() => useAutoScan(run, false));
     await act(async () => {});
     // First scan just resolved → agoSeconds ~0.
@@ -167,6 +189,19 @@ describe("useAutoScan", () => {
       vi.advanceTimersByTime(3_000);
     });
     expect(result.current.agoSeconds).toBe(3);
+  });
+
+  it("ignores an acceptance callback invoked after unmount", async () => {
+    let accept: (() => void) | undefined;
+    const run = vi.fn(async (markScanAccepted: () => void) => {
+      accept = markScanAccepted;
+    });
+    const { unmount } = renderHook(() => useAutoScan(run, false));
+    await act(async () => {});
+    unmount();
+    const nowSpy = vi.spyOn(Date, "now");
+    act(() => accept?.());
+    expect(nowSpy).not.toHaveBeenCalled();
   });
 
   it("clears the interval and visibility listener on unmount", async () => {

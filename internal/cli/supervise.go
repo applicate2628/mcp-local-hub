@@ -32,6 +32,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -436,6 +437,10 @@ func (g *gracefulCounter) InProgress() bool { return g.n.Load() > 0 }
 type ipcDispatchDeps struct {
 	stateDir string
 	events   *api.SupervisorEventLog
+	// Per-invocation test barrier at the accept-result boundary. Production
+	// leaves this nil; it has no effect on the IPC wire or event policy.
+	afterAccept       func(net.Conn, error)
+	beforeHandlerDone func(net.Conn)
 	// stallDump arms the goroutine-stack capture when a connection's
 	// accept-to-hello interval crosses the stall threshold. nil disables
 	// the automatic arm entirely (every method is nil-receiver safe), which
@@ -492,7 +497,76 @@ type ipcDispatchDeps struct {
 	// allowDirectRespawnForTest exists only for isolated handler fixtures that do
 	// not construct a controller. Production leaves it false: every respawn is
 	// controller-routed or returns a retryable not-ready response.
-	allowDirectRespawnForTest bool
+	allowDirectRespawnForTest       bool
+	mcpFrontRouteActivationRecovery *mcpFrontRouteActivationRecoveryDriver
+}
+
+const mcpFrontRouteActivationRecoveryTimeout = 30 * time.Second
+
+// mcpFrontRouteActivationRecoveryDriver owns one joined worker. Triggers are
+// non-blocking and coalesce while one recovery pass is already queued; the
+// worker runs every pass under its own finite child deadline and stops on the
+// supervisor context before runSupervise returns.
+type mcpFrontRouteActivationRecoveryDriver struct {
+	ctx       context.Context
+	cancel    context.CancelFunc
+	triggerCh chan struct{}
+	done      chan struct{}
+	run       func(context.Context)
+	stopOnce  sync.Once
+}
+
+func startMCPFrontRouteActivationRecoveryDriver(parent context.Context, events *api.SupervisorEventLog, run func(context.Context)) *mcpFrontRouteActivationRecoveryDriver {
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	driver := &mcpFrontRouteActivationRecoveryDriver{
+		ctx: ctx, cancel: cancel, triggerCh: make(chan struct{}, 1), done: make(chan struct{}), run: run,
+	}
+	go func() {
+		defer guardSupervisorGoroutine(events, "mcp-front-route-activation-recovery", "")
+		defer close(driver.done)
+		for {
+			select {
+			case <-driver.ctx.Done():
+				return
+			case <-driver.triggerCh:
+				if driver.run == nil {
+					continue
+				}
+				recoveryCtx, recoveryCancel := context.WithTimeout(driver.ctx, mcpFrontRouteActivationRecoveryTimeout)
+				driver.run(recoveryCtx)
+				recoveryCancel()
+			}
+		}
+	}()
+	return driver
+}
+
+func (d *mcpFrontRouteActivationRecoveryDriver) Trigger() {
+	if d == nil {
+		return
+	}
+	select {
+	case <-d.ctx.Done():
+		return
+	default:
+	}
+	select {
+	case d.triggerCh <- struct{}{}:
+	default:
+	}
+}
+
+func (d *mcpFrontRouteActivationRecoveryDriver) Stop() {
+	if d == nil {
+		return
+	}
+	d.stopOnce.Do(func() {
+		d.cancel()
+		<-d.done
+	})
 }
 
 // emitSerenaIntentRepairOutcome records the result of a
@@ -579,12 +653,80 @@ type runningProcessIdentity struct {
 // Phase-6 scope: lock → audit log → event loop → IPC listener → wait
 // for signal → cancel loop → return. Reconciliation, IPC dispatch,
 // and quiesce-drain are wired in later tasks.
-// The return is NAMED so the stderr-sink exit hook (releaseOnExit, deferred
-// below) can observe a non-nil error return and record it into the sink
+// The inner body's return is NAMED so the stderr-sink exit hook (releaseOnExit,
+// deferred below) can observe a non-nil error return and record it into the sink
 // before restoring stderr — cobra prints the returned error only AFTER this
 // function returns, by which point the restore has already sent it to the
 // detached void.
-func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) (err error) {
+type ipcRunOptions struct {
+	afterAccept         func(net.Conn, error)
+	beforeHandlerDone   func(net.Conn)
+	afterStopSeal       func()
+	beforeHeartbeatEmit func()
+}
+
+// ipcSession owns only the IPC producers created by one runSupervise call.
+// Admission and shutdown share mu, so a handler is counted before launch or
+// its connection is rejected after shutdown begins.
+type ipcSession struct {
+	listener      *SupervisorIPCListener
+	afterStopSeal func()
+	mu            sync.Mutex
+	stopping      bool
+	conns         map[net.Conn]struct{}
+	handlers      sync.WaitGroup
+	acceptDone    chan struct{}
+}
+
+func newIPCSession(listener *SupervisorIPCListener, afterStopSeal func()) *ipcSession {
+	return &ipcSession{listener: listener, afterStopSeal: afterStopSeal, conns: make(map[net.Conn]struct{})}
+}
+
+func (s *ipcSession) register(conn net.Conn) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.stopping {
+		return false
+	}
+	s.conns[conn] = struct{}{}
+	s.handlers.Add(1)
+	return true
+}
+
+func (s *ipcSession) finish(conn net.Conn) {
+	s.mu.Lock()
+	delete(s.conns, conn)
+	s.mu.Unlock()
+	s.handlers.Done()
+}
+
+func (s *ipcSession) stop() {
+	s.mu.Lock()
+	s.stopping = true
+	conns := make([]net.Conn, 0, len(s.conns))
+	for conn := range s.conns {
+		conns = append(conns, conn)
+	}
+	s.mu.Unlock()
+	if s.afterStopSeal != nil {
+		s.afterStopSeal()
+	}
+
+	_ = s.listener.Close()
+	for _, conn := range conns {
+		_ = conn.Close()
+	}
+	if s.acceptDone != nil {
+		<-s.acceptDone // includes the existing ipc-accept-exit emission
+	}
+	s.handlers.Wait() // no more Add calls after the accept loop has settled
+}
+
+func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool) error {
+	return runSuperviseWithIPCOptions(ctx, noIPC, strictMode, strictJobProtectionFlag, ipcRunOptions{})
+}
+
+func runSuperviseWithIPCOptions(ctx context.Context, noIPC bool, strictMode bool, strictJobProtectionFlag bool, options ipcRunOptions) (err error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -1039,6 +1181,11 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// Closure-capture pattern (same as triggerGracefulExit below):
 	// the closure reads the variable's CURRENT value each call.
 	var ctrl *supervisorController
+	recoveryOps := newMCPFrontRouteActivationRecoveryOps(api.NewAPI(), stateDir, events)
+	mcpFrontRecoveryDriver := startMCPFrontRouteActivationRecoveryDriver(loopCtx, events, func(recoveryCtx context.Context) {
+		_ = recoverMCPFrontRouteActivation(recoveryCtx, stateDir, recoveryOps)
+	})
+	defer mcpFrontRecoveryDriver.Stop()
 
 	// IPC listener. `--no-ipc` keeps tests fast (lock+events+loop only).
 	// Production callers always pass --no-ipc=false; the listener owns
@@ -1054,7 +1201,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		if lerr != nil {
 			return fmt.Errorf("ipc listener: %w", lerr)
 		}
-		defer func() { _ = listener.Close() }()
+		ipc := newIPCSession(listener, options.afterStopSeal)
+		defer ipc.stop()
 		_ = events.Emit(api.SupervisorEvent{
 			Severity: "info",
 			Source:   "ipc",
@@ -1092,6 +1240,8 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 		deps := ipcDispatchDeps{
 			stateDir:           stateDir,
 			events:             events,
+			afterAccept:        options.afterAccept,
+			beforeHandlerDone:  options.beforeHandlerDone,
 			stallDump:          stallDump,
 			runtimeTracker:     runtimeTracker,
 			statusCoalescer:    newStatusPortOwnersCoalescer(runtimeTracker),
@@ -1105,20 +1255,22 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 				default:
 				}
 			},
-			overlay:            overlay,
-			intent:             intent,
-			respawnLate:        respawnLate,
-			controllerProvider: func() *supervisorController { return ctrl },
+			overlay:                         overlay,
+			intent:                          intent,
+			respawnLate:                     respawnLate,
+			controllerProvider:              func() *supervisorController { return ctrl },
+			mcpFrontRouteActivationRecovery: mcpFrontRecoveryDriver,
 		}
 
-		// Spawn the accept goroutine. It runs until listener.Close()
-		// causes Accept to return an error (the deferred Close above
-		// is the exit signal during the graceful-exit flow). Each
+		// Spawn the accept goroutine. The session closes the listener
+		// and joins this goroutine during every post-bind return. Each
 		// accepted connection gets its own handler goroutine so a slow
 		// client never blocks the next Accept.
+		ipc.acceptDone = make(chan struct{})
 		go func() {
+			defer close(ipc.acceptDone)
 			defer guardSupervisorGoroutine(events, "ipc-accept-loop", "")
-			acceptIPCConnections(listener, deps)
+			acceptIPCConnectionsWithSession(listener, deps, ipc)
 		}()
 	}
 
@@ -1166,7 +1318,7 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	oneAPIInj := buildOneAPIInjector(events)
 	spawnFn := reconcileSpawnFn
 	if spawnFn == nil {
-		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx.Done(), oneAPIInj, strictJobProtection)
+		spawnFn = makeProductionSpawnFnWithStatePath(events, runtimeTracker, statePath, overlay, filepath.Join(stateDir, "daemon-env-overrides.yaml"), crashCh, loopCtx, oneAPIInj, strictJobProtection)
 	}
 	terminateFn := reconcileTerminateFn
 	var terminateOutcomeFn terminationOutcomeFunc
@@ -1523,6 +1675,10 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 			"intent_files_loaded": intentFilesLoaded.Load(),
 		},
 	})
+	// Recover a surviving pre-activation phase once the same reconcile/event
+	// driver used by live requests is ready. The driver deduplicates this startup
+	// signal with any concurrent post-response reconcile signal.
+	mcpFrontRecoveryDriver.Trigger()
 
 	// Phase 9: production maintenance timer scheduler wiring.
 	// Constructed locally in runSupervise so v0.5.0 keeps the
@@ -1560,10 +1716,16 @@ func runSupervise(ctx context.Context, noIPC bool, strictMode bool, strictJobPro
 	// bounded detection latency; see supervisorHeartbeatInterval for the
 	// interval argument. Decision-inert: no restart, backoff, quarantine, or
 	// spawn path reads it.
+	heartbeatDone := make(chan struct{})
+	defer func() {
+		loopCancel()
+		<-heartbeatDone
+	}()
 	go func() {
+		defer close(heartbeatDone)
 		defer guardSupervisorGoroutine(events, "supervisor-heartbeat", "")
-		runSupervisorHeartbeat(loopCtx.Done(), events, runtimeTracker, stderrSink.path,
-			time.Now().UTC(), supervisorHeartbeatInterval)
+		runSupervisorHeartbeatWithHook(loopCtx.Done(), events, runtimeTracker, stderrSink.path,
+			time.Now().UTC(), supervisorHeartbeatInterval, options.beforeHeartbeatEmit)
 	}()
 
 	shutdownMaintenance := func(reason string) {
@@ -1813,8 +1975,8 @@ func defaultPipePath(stateDir string) string {
 }
 
 // acceptIPCConnections is the listener accept loop. Runs in its own
-// goroutine spawned from runSupervise; exits when listener.Close()
-// (deferred in runSupervise) causes Accept to return net.ErrClosed.
+// goroutine spawned from runSupervise; exits when the IPC session closes
+// the listener and Accept returns net.ErrClosed.
 //
 // Per spec §"Wire format": each accepted connection is a long-lived
 // newline-delimited-JSON channel. Multiple connections from the same
@@ -1880,6 +2042,10 @@ func acceptIPCConnections(
 	listener ipcAcceptor,
 	deps ipcDispatchDeps,
 ) {
+	acceptIPCConnectionsWithSession(listener, deps, nil)
+}
+
+func acceptIPCConnectionsWithSession(listener ipcAcceptor, deps ipcDispatchDeps, session *ipcSession) {
 	consecErrs := 0
 	for {
 		// Both stamps are taken on THIS goroutine so the measured
@@ -1888,6 +2054,9 @@ func acceptIPCConnections(
 		enteredAccept := time.Now()
 		conn, err := listener.Accept()
 		acceptedAt := time.Now()
+		if deps.afterAccept != nil {
+			deps.afterAccept(conn, err)
+		}
 		if err != nil {
 			// listener.Close() returns net.ErrClosed via Accept on
 			// graceful exit. That is the ONE error that signals
@@ -1942,8 +2111,18 @@ func acceptIPCConnections(
 			continue
 		}
 		consecErrs = 0
+		if session != nil && !session.register(conn) {
+			_ = conn.Close()
+			continue
+		}
 		go func() {
+			if session != nil {
+				defer session.finish(conn)
+			}
 			defer guardSupervisorGoroutine(deps.events, "ipc-connection-handler", "")
+			if deps.beforeHandlerDone != nil {
+				defer deps.beforeHandlerDone(conn)
+			}
 			serveIPCConn(conn, listener, deps, ipcAcceptTiming{
 				acceptedAt:  acceptedAt,
 				acceptDwell: acceptedAt.Sub(enteredAccept),
@@ -2180,9 +2359,18 @@ func dispatchIPCRequest(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps)
 		// EvIntentUpdate per drift entry so the SM drives Run/Stop/Delete
 		// transitions WITHOUT a supervisor cold-restart. See
 		// supervise_reconcile_ipc.go for the handler body.
-		return handleReconcile(conn, req, deps)
+		err := handleReconcile(conn, req, deps)
+		if err == nil {
+			args, parseErr := parseReconcileArgs(req.Args)
+			if parseErr == nil && args.Apply {
+				deps.mcpFrontRouteActivationRecovery.Trigger()
+			}
+		}
+		return err
 	case "commit_serena_activity":
 		return handleCommitSerenaActivity(conn, req, deps)
+	case "commit_lazy_proxy_readiness":
+		return handleCommitLazyProxyReadiness(conn, req, deps)
 	case "restart", "reload":
 		// Legacy alias surface preserved for v0.4.x clients. Task 4.1
 		// adds the canonical `respawn` verb above; restart/reload still
@@ -2379,7 +2567,7 @@ func handleExit(conn net.Conn, req api.IPCRequest, deps ipcDispatchDeps) error {
 	})
 
 	// Write the response BEFORE triggering exit. If we triggered first,
-	// the supervisor's deferred listener.Close() could race the response
+	// the supervisor's deferred IPC session stop could race the response
 	// write and the client would observe a connection drop instead of
 	// the acknowledgement frame.
 	if err := writeIPCFrame(conn, api.IPCResponse{
@@ -3550,7 +3738,7 @@ func resolveSpawnOverlayChannelPath(statePath string) (string, error) {
 // PR #241 (separator comment between the two doc blocks meant godoc
 // rendered only the second).
 func makeProductionSpawnFn(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker) SpawnFunc {
-	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, nil, nil, false)
+	return makeProductionSpawnFnWithStatePath(events, tracker, "", nil, "", nil, context.Background(), nil, false)
 }
 
 // crashEvent is what the spawn fn posts to the respawn dispatcher
@@ -3574,6 +3762,15 @@ type crashEvent struct {
 	StartedAt time.Time
 	ExitCode  int
 	WaitErr   error
+}
+
+// spawnWorkerObserver is an optional, per-factory fixture boundary. Production
+// callers pass nil; the returned SpawnFunc and its child policy are unchanged.
+type spawnWorkerObserver interface {
+	childStarted(*os.Process)
+	childWaited(*os.Process)
+	workerDone()
+	beforeChildExitEmit()
 }
 
 // makeProductionSpawnFnWithStatePath constructs the production spawn
@@ -3601,7 +3798,15 @@ type crashEvent struct {
 // without orphan-protection). When true the closure refuses the spawn
 // BEFORE cmd.Start and returns errSpawnJobProtectionRefused so the
 // controller quarantines the daemon directly. ROADMAP §11.3.
-func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, crashShutdown <-chan struct{}, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
+
+func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, supervisorCtx context.Context, oneAPIInj *oneAPIInjector, strictJobProtection bool) SpawnFunc {
+	return makeProductionSpawnFnWithWorkers(events, tracker, statePath, overlay, overlayPath, crashCh, supervisorCtx, oneAPIInj, strictJobProtection, nil)
+}
+
+func makeProductionSpawnFnWithWorkers(events *api.SupervisorEventLog, tracker *DaemonRuntimeTracker, statePath string, overlay *daemon_env_overlay.Overlay, overlayPath string, crashCh chan<- crashEvent, supervisorCtx context.Context, oneAPIInj *oneAPIInjector, strictJobProtection bool, workers spawnWorkerObserver) SpawnFunc {
+	if supervisorCtx == nil {
+		supervisorCtx = context.Background()
+	}
 	return func(d api.SupervisorDaemon) error {
 		// NOTE (bot PR #246 r2 P2): the legacy nil-RuntimeSpec serena-proxy SKIP
 		// no longer lives here. r1 expressed it as `return nil` inside this
@@ -4134,9 +4339,15 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		// instead of clearing the CURRENT child's tracking / driving an SM
 		// transition (P1a generation-stamped exit attribution).
 		spawnGen := tracker.MarkSpawned(d.TaskName, pid, startedAt)
+		if workers != nil {
+			workers.childStarted(cmd.Process) // count both workers before either launch
+		}
 		go func(descriptor api.SupervisorDaemon, generation, childPID int, childStartedAt time.Time) {
+			if workers != nil {
+				defer workers.workerDone()
+			}
 			defer guardSupervisorGoroutine(events, "daemon-readiness-observer", descriptor.TaskName)
-			observeSupervisorReadiness(tracker, events, descriptor, generation, childPID, childStartedAt)
+			observeSupervisorReadiness(supervisorCtx, tracker, events, descriptor, generation, childPID, childStartedAt)
 		}(d, spawnGen, pid, startedAt)
 		taskName := d.TaskName
 		spawnedPID := pid
@@ -4177,7 +4388,10 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 		handedOff = true
 		jobForWait := daemonJob // capture before goroutine launch
 		go func() {
-			// Guard FIRST so it is the outermost defer (LIFO): a panic in
+			if workers != nil {
+				defer workers.workerDone()
+			}
+			// Guard runs before the fixture completion defer (LIFO): a panic in
 			// the Job-handle release, the exit-code classification, or the
 			// crash-channel post below would otherwise kill the supervisor
 			// with no attribution. TaskName is carried so the row names the
@@ -4188,6 +4402,9 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			if jobForWait != nil {
 				_ = closeDaemonJobAfterWaitFn(jobForWait)
 				jobForWait = nil
+			}
+			if workers != nil {
+				workers.childWaited(cmd.Process)
 			}
 			// Diagnostic emit: without this, a wrapper that exits
 			// immediately (e.g. uvx fails to fetch package, port
@@ -4211,6 +4428,9 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			}
 			if waitErr != nil {
 				body["wait_err"] = waitErr.Error()
+			}
+			if workers != nil {
+				workers.beforeChildExitEmit()
 			}
 			_ = events.Emit(api.SupervisorEvent{
 				Severity: severity,
@@ -4293,16 +4513,15 @@ func makeProductionSpawnFnWithStatePath(events *api.SupervisorEventLog, tracker 
 			// (c.spawn launches the next wait goroutine and returns;
 			// c.terminate issues a kill syscall and returns), so there is no
 			// dependency cycle and back-pressure always drains. The only
-			// abandon path is supervisor shutdown: once crashShutdown is
+			// abandon path is supervisor shutdown: once supervisorCtx is
 			// closed the bridge has stopped draining crashCh, so a blocking
-			// send would leak this goroutine — select on crashShutdown to
-			// abandon cleanly instead. crashShutdown is nil for the
-			// compat/test wrapper, which makes that case a pure blocking
-			// send (the historical behavior when no shutdown signal exists).
+			// send would leak this goroutine — select on supervisorCtx.Done to
+			// abandon cleanly instead. The compatibility wrapper supplies a
+			// background context, preserving the historical pure blocking send.
 			if crashCh != nil {
 				select {
 				case crashCh <- crashEvent{Daemon: d, PID: spawnedPID, PIDGeneration: spawnGen, StartedAt: startedAt, ExitCode: exitCode, WaitErr: waitErr}:
-				case <-crashShutdown:
+				case <-supervisorCtx.Done():
 					// Supervisor is shutting down; the bridge has stopped
 					// draining crashCh. Abandon the send so this wait
 					// goroutine does not leak. Audit-log so the abandoned

@@ -45,9 +45,9 @@ type ClassifyVerdict = EntryClassification
 // snapshot OVER the operator's fresh edit (silent data loss). Each CAS method
 // instead does the whole re-read -> check -> mutate under ONE held lock.
 //
-// LOCK OWNERSHIP (design P3). The lockingClient FORWARDER holds
-// withConfigMutationLock(ConfigPath) across the whole call (type-assert-inside-
-// lock, mirroring lockingClient.AddEntryWithConfigWriter). The concrete
+// LOCK OWNERSHIP (design P3). The lockingClient FORWARDER holds the selected
+// global or project-identity mutation lock across the whole call (type-assert-
+// inside-lock, mirroring lockingClient.AddEntryWithConfigWriter). The concrete
 // method bodies below run UNDER that held lock and are themselves LOCK-FREE:
 // perPathMutex is non-reentrant, so a concrete body calling either config-lock
 // wrapper would self-deadlock. They call only the LOCK-FREE concrete reads/writes
@@ -197,14 +197,14 @@ func (m *directCleanupMutator) CaptureDirectCleanupTarget(identity DirectCleanup
 	if m == nil || m.client == nil || strings.TrimSpace(identity.Name) == "" {
 		return nil, fmt.Errorf("%w: invalid cleanup target", ErrCASConflict)
 	}
-	err = withConfigReadLock(m.client.Client.ConfigPath(), func() error {
+	err = m.client.withReadLock(func() error {
 		if _, ok := m.client.Client.(CASEntryMutator); !ok {
 			return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCASConflict, m.client.Client.Name())
 		}
 		if identityErr := verifyDirectCleanupIdentity(m.client.Client, identity); identityErr != nil {
 			return identityErr
 		}
-		configBytes, readErr := readRawConfig(m.client.Client.ConfigPath())
+		configBytes, readErr := m.client.readConfigBytesForLockedOperation()
 		if readErr != nil {
 			return fmt.Errorf("capture cleanup target %q: %w", identity.Name, readErr)
 		}
@@ -230,11 +230,11 @@ func (m *directCleanupMutator) CleanupDirectEntryAtomically(
 	if m == nil || m.client == nil || target == nil || target.physicalToken == nil || target.identity.Name == "" {
 		return "", fmt.Errorf("%w: invalid cleanup target", ErrCASConflict)
 	}
-	err = withConfigMutationLock(m.client.Client.ConfigPath(), func() error {
+	err = m.client.withMutationLock(func() error {
 		if _, ok := m.client.Client.(CASEntryMutator); !ok {
 			return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCASConflict, m.client.Client.Name())
 		}
-		configBytes, readErr := readRawConfig(m.client.Client.ConfigPath())
+		configBytes, readErr := m.client.readConfigBytesForLockedOperation()
 		if readErr != nil {
 			return fmt.Errorf("re-read cleanup target %q: %w", target.identity.Name, readErr)
 		}
@@ -330,14 +330,14 @@ func (r *directCleanupReceipt) Restore() error {
 	if r == nil || r.mutator == nil || r.target == nil {
 		return fmt.Errorf("%w: invalid cleanup receipt", ErrCleanupRestoreConflict)
 	}
-	return withConfigMutationLock(r.mutator.client.Client.ConfigPath(), r.restoreUnderLock)
+	return r.mutator.client.withMutationLock(r.restoreUnderLock)
 }
 
 func (r *directCleanupReceipt) restoreUnderLock() error {
 	if _, ok := r.mutator.client.Client.(CASEntryMutator); !ok {
 		return fmt.Errorf("%w: client %s no longer supports cleanup CAS", ErrCleanupRestoreConflict, r.mutator.client.Client.Name())
 	}
-	configBytes, readErr := readRawConfig(r.mutator.client.Client.ConfigPath())
+	configBytes, readErr := r.mutator.client.readConfigBytesForLockedOperation()
 	if readErr != nil {
 		return fmt.Errorf("%w: read current target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, readErr)
 	}
@@ -358,7 +358,7 @@ func (r *directCleanupReceipt) restoreUnderLock() error {
 	if writeErr := writeConfigFileWith(r.mutator.writer, r.mutator.client.Client.ConfigPath(), restoredConfig); writeErr != nil {
 		return fmt.Errorf("restore cleanup target %q: %w", r.target.identity.Name, writeErr)
 	}
-	restoredBytes, readErr := readRawConfig(r.mutator.client.Client.ConfigPath())
+	restoredBytes, readErr := r.mutator.client.readConfigBytesForLockedOperation()
 	if readErr != nil {
 		return fmt.Errorf("%w: verify restored target %q: %w", ErrCleanupRestoreConflict, r.target.identity.Name, readErr)
 	}
@@ -470,6 +470,23 @@ func casRestoreFromBytes(
 	higherLayerDefined func(string) (bool, error),
 	allowHubEntry bool,
 ) error {
+	return casRestoreFromBytesWithWriter(entryName, match, snapshotBytes, getEntry,
+		entryPresentInBytes, restoreFromBytes, higherLayerDefined, allowHubEntry, nil)
+}
+
+// casRestoreFromBytesWithWriter retains the same compare and restore owner.
+// Only the admitted MiMoCode attachment rollback supplies a scoped writer.
+func casRestoreFromBytesWithWriter(
+	entryName string,
+	match func(*MCPEntry) bool,
+	snapshotBytes []byte,
+	getEntry func(string) (*MCPEntry, error),
+	entryPresentInBytes func([]byte, string) (bool, error),
+	restoreFromBytes func([]byte, string, bool, WriteConfigFileFunc) error,
+	higherLayerDefined func(string) (bool, error),
+	allowHubEntry bool,
+	writer WriteConfigFileFunc,
+) error {
 	if match == nil {
 		return fmt.Errorf("%w: nil recognizer for entry %q (fail-closed)", ErrCASConflict, entryName)
 	}
@@ -511,15 +528,15 @@ func casRestoreFromBytes(
 		// CASGuardedRemoveEntry's job alone; design B5).
 		return fmt.Errorf("%w: snapshot bytes do not contain entry %q — refusing (fail-closed; restore never removes)", ErrCASConflict, entryName)
 	}
-	// Compose the shipped restore core with the guarded (allowHubEntry=false)
-	// polarity, and no scoped writer (default hardened write — single entry, one
-	// client, one lock).
+	// Compose the shipped restore core with the guarded ordinary polarity or
+	// rollback polarity. Ordinary callers pass nil; attachment rollback alone
+	// supplies an operation-scoped no-follow writer under this same CAS lock.
 	//
 	// NOTE for the FUTURE Phase-5/de-adopt classifier: this core surfaces its OWN
 	// refusals as ErrBackupEntryAlreadyMigrated (a hub-shaped snapshot entry), NOT
 	// ErrCASConflict. That is fail-closed and correct; a downstream refusal classifier
 	// must NOT assume every CAS refusal is ErrCASConflict.
-	return restoreFromBytes(snapshotBytes, entryName, allowHubEntry, nil)
+	return restoreFromBytes(snapshotBytes, entryName, allowHubEntry, writer)
 }
 
 // casGuardedRemove is the SINGLE owner of the CAS remove gate. Same lock/injection
@@ -582,10 +599,21 @@ func classifyEntryFromPhysicalBytes(
 	if err != nil {
 		return ClassifyUnreadable, fmt.Errorf("classify entry %q: read write target %s: %w", name, configPath, err)
 	}
+	return classifyEntryFromBytes(configBytes, configPath, name, match, snapshotSubtree, extract, project)
+}
 
+func classifyEntryFromBytes(
+	configBytes []byte,
+	configLabel string,
+	name string,
+	match func(*MCPEntry) bool,
+	snapshotSubtree any,
+	extract func([]byte, string) (any, bool, error),
+	project func(string, map[string]any) (*MCPEntry, error),
+) (EntryClassification, error) {
 	liveSubtree, present, err := extract(configBytes, name)
 	if err != nil {
-		return ClassifyUnreadable, fmt.Errorf("classify entry %q: parse write target %s: %w", name, configPath, err)
+		return ClassifyUnreadable, fmt.Errorf("classify entry %q: parse write target %s: %w", name, configLabel, err)
 	}
 	if !present {
 		// A missing live entry is RestoreDone only when the original snapshot
@@ -738,6 +766,21 @@ func (c *codexCLI) EntryRawSubtree(configBytes []byte, name string) (any, bool, 
 	return tomlEntryRawSubtree(configBytes, "mcp_servers", name)
 }
 func (c *codexCLI) ClassifyEntryUnderLock(name string, match func(*MCPEntry) bool, snapshotSubtree any) (EntryClassification, error) {
+	if c.isProjectBound() {
+		configBytes, err := c.readProjectConfigBytes()
+		if err != nil {
+			return ClassifyUnreadable, fmt.Errorf("classify entry %q: read project write target: %w", name, err)
+		}
+		return classifyEntryFromBytes(configBytes, "project config", name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
+			entry := classifyURLRawEntry(name, raw, "url", "http_headers")
+			toolTimeoutSec, err := codexToolTimeoutSec(raw)
+			if err != nil {
+				return nil, err
+			}
+			entry.ToolTimeoutSec = toolTimeoutSec
+			return entry, nil
+		})
+	}
 	return classifyEntryFromPhysicalBytes(c.path, name, match, snapshotSubtree, c.EntryRawSubtree, func(name string, raw map[string]any) (*MCPEntry, error) {
 		entry := classifyURLRawEntry(name, raw, "url", "http_headers")
 		toolTimeoutSec, err := codexToolTimeoutSec(raw)
@@ -817,6 +860,12 @@ func (o *mimoCodeClient) CASRestoreEntryFromBytes(name string, match func(*MCPEn
 }
 func (o *mimoCodeClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
 	return casRestoreFromBytes(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined, true)
+}
+func (o *mimoCodeClient) CASRestoreEntryFromBytesForRollbackWithConfigWriter(name string, match func(*MCPEntry) bool, snapshotBytes []byte, writer WriteConfigFileFunc) error {
+	if writer == nil {
+		return o.CASRestoreEntryFromBytesForRollback(name, match, snapshotBytes)
+	}
+	return casRestoreFromBytesWithWriter(name, match, snapshotBytes, o.casWriteTargetEntry, o.EntryPresentInBytes, o.restoreEntryFromBytes, o.casHigherLayerDefined, true, writer)
 }
 func (o *mimoCodeClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
 	return casGuardedRemove(name, match, o.casWriteTargetEntry, o.RemoveEntry, o.casHigherLayerRetainsServer)
@@ -955,9 +1004,10 @@ func (a *antigravityClient) CASGuardedRemoveEntry(name string, match func(*MCPEn
 
 // ---- lockingClient forwarders ----
 //
-// CAS mutation forwarders hold withConfigMutationLock. ClassifyEntryUnderLock
-// holds the read-selection withConfigReadLock. EntryRawSubtree is a pure
-// lock-free bytes forward, matching EntryPresentInBytes.
+// CAS mutation forwarders hold the selected global or project-identity mutation
+// lock. ClassifyEntryUnderLock holds the corresponding read lock.
+// EntryRawSubtree is a pure lock-free bytes forward, matching
+// EntryPresentInBytes.
 
 func (l *lockingClient) EntryRawSubtree(configBytes []byte, name string) (any, bool, error) {
 	m, ok := l.Client.(CASEntryMutator)
@@ -982,7 +1032,7 @@ func (l *lockingClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry
 	// config creation is therefore a benign point-in-time TOCTOU; this verdict is
 	// only point-in-time proof, and the CAS act re-verifies under its own flock so
 	// a stale verdict fails safe.
-	err = withConfigReadLock(l.Client.ConfigPath(), func() error {
+	err = l.withReadLock(func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {
 			return fmt.Errorf("client %s does not support entry classification", l.Client.Name())
@@ -995,7 +1045,7 @@ func (l *lockingClient) ClassifyEntryUnderLock(name string, match func(*MCPEntry
 }
 
 func (l *lockingClient) CASRestoreEntryFromBytes(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	return l.withMutationLock(func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {
 			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())
@@ -1005,7 +1055,7 @@ func (l *lockingClient) CASRestoreEntryFromBytes(name string, match func(*MCPEnt
 }
 
 func (l *lockingClient) CASRestoreEntryFromBytesForRollback(name string, match func(*MCPEntry) bool, snapshotBytes []byte) error {
-	return withConfigLock(l.Client.ConfigPath(), func() error {
+	return l.withPlainMutationLock(func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {
 			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())
@@ -1014,12 +1064,35 @@ func (l *lockingClient) CASRestoreEntryFromBytesForRollback(name string, match f
 	})
 }
 
+// CASRollbackConfigWriter is an optional operation-scoped restore capability.
+// It is deliberately absent from CASEntryMutator so other adapters keep their
+// ordinary CAS behavior and cannot accidentally receive an attach writer.
+type CASRollbackConfigWriter interface {
+	CASRestoreEntryFromBytesForRollbackWithConfigWriter(string, func(*MCPEntry) bool, []byte, WriteConfigFileFunc) error
+}
+
+func (l *lockingClient) CASRestoreEntryFromBytesForRollbackWithConfigWriter(name string, match func(*MCPEntry) bool, snapshotBytes []byte, writer WriteConfigFileFunc) error {
+	if _, ok := l.Client.(*mimoCodeClient); !ok {
+		return errors.New("scoped CAS rollback writer unsupported by client")
+	}
+	return l.withPlainMutationLock(func() error {
+		return l.Client.(*mimoCodeClient).CASRestoreEntryFromBytesForRollbackWithConfigWriter(name, match, snapshotBytes, writer)
+	})
+}
+
 func (l *lockingClient) CASGuardedRemoveEntry(name string, match func(*MCPEntry) bool) error {
-	return withConfigMutationLock(l.Client.ConfigPath(), func() error {
+	return l.withMutationLock(func() error {
 		m, ok := l.Client.(CASEntryMutator)
 		if !ok {
 			return fmt.Errorf("client %s does not support CAS entry mutation", l.Client.Name())
 		}
 		return m.CASGuardedRemoveEntry(name, match)
 	})
+}
+
+func (l *lockingClient) readConfigBytesForLockedOperation() ([]byte, error) {
+	if codex, projectBound := l.projectCodex(); projectBound {
+		return codex.readProjectConfigBytes()
+	}
+	return readRawConfig(l.Client.ConfigPath())
 }

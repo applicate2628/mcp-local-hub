@@ -252,24 +252,19 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 		return nil, nil, fmt.Errorf("resolve registry path: %w", regErr)
 	}
 	reg := api.NewRegistry(registryPath)
-	// finding 1 (adversarial cross-family review round 3): every registry
-	// Load() this process performs (this call and every later reload inside
-	// serena_routing.WorkspaceResolver.refresh()) must never fall back to
-	// the shared api.LogHubMcpEvent sink on a default-relax parent-DACL
-	// read — that would write the GUI-owned hub-mcp.log from this
-	// read-only daemon exactly as surely as a registry mutation would. Set
-	// BEFORE the first Load() so no read on this *Registry ever reaches
-	// the default sink.
+	// The initial Registry.Load and every later secure read by the shared
+	// observer must route parent-DACL fallback diagnostics to route stderr,
+	// never the GUI-owned hub-mcp.log. Install the sink before either reader.
 	reg.SetAuditSink(api.RouteReadOnlyStderrSink)
 	if err := reg.Load(); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"route: registry load warning (will retry lazily on first call): %v\n", err)
 	}
-	// P2-3 fix (adversarial cross-family review): the read-only constructor
-	// (never takes Registry.Lock(), the cross-process exclusive flock the
-	// GUI's own writers need) — see
-	// serena_routing.NewReadOnlyWorkspaceResolver's doc comment.
-	resolver := serena_routing.NewReadOnlyWorkspaceResolver(reg, registryPath)
+	// Route's observer mode never takes Registry.Lock or writes state; GUI mode
+	// retains that lock. Equal metadata still gets an exact-byte check every
+	// 32 registry-dependent lookups while the file remains readable.
+	registryObserver := api.NewRegistrySnapshotObserver(reg, registryPath, true)
+	resolver := serena_routing.NewWorkspaceResolverWithObserver(registryObserver, registryPath)
 	sessions := serena_routing.NewSessionRouter()
 	// Restricted wiring keeps AutoRegisterFn nil while allowing only the
 	// reason-guarded idle wake owner; see SetSerenaRouterReadOnly's contract.
@@ -283,21 +278,9 @@ func buildRouteServer(cmd *cobra.Command, port int) (*gui.Server, *routeSessionS
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"route: lsp manifest parse failed; /lsp/<language>/mcp will return errors until next restart: %v\n", err)
 	} else {
-		// Separate registry handle mirrors internal/cli/gui.go's GUI wiring:
-		// the serena resolver and the LSP resolver each refresh independently
-		// under their own RWMutex, so sharing one *api.Registry object would
-		// race the two resolvers' caches under concurrent /serena/mcp +
-		// /lsp/<lang>/mcp traffic (the data race gui.go's comment documents at
-		// its own registry-construction site).
-		lspReg := api.NewRegistry(registryPath)
-		// finding 1: same reasoning as the serena registry's SetAuditSink
-		// call above — this resolver's refresh() also calls Load() on this
-		// SAME *Registry.
-		lspReg.SetAuditSink(api.RouteReadOnlyStderrSink)
-		// P2-3 fix: the read-only constructor — see
-		// serena_routing.NewReadOnlyWorkspaceResolver's doc comment (the LSP
-		// resolver's NewReadOnlyWorkspaceResolver mirrors the same argument).
-		lspResolver := lsp_routing.NewReadOnlyWorkspaceResolver(lspReg, registryPath, m.Languages)
+		// Both projections observe one complete in-process content generation.
+		// The observer owns its mutex; route mode never acquires a file lock.
+		lspResolver := lsp_routing.NewWorkspaceResolverWithObserver(registryObserver, m.Languages)
 		lspSessions := lsp_routing.NewSessionRouter()
 		// Read-only wiring (F1): nils AutoRegisterFn — see
 		// gui.Server.SetLSPRouterReadOnly's doc comment and the file header.

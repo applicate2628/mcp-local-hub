@@ -34,6 +34,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,6 +47,109 @@ import (
 )
 
 const reconcileWiringTestTaskName = `\mcp-local-hub-memory-default`
+
+// fixtureSpawnWorkers owns only children started by the fixture's factory.
+// Each successful spawn registers both worker completions before either starts.
+type fixtureSpawnWorkers struct {
+	mu         sync.Mutex
+	children   map[*os.Process]struct{}
+	workers    sync.WaitGroup
+	beforeEmit func()
+}
+
+func (f *fixtureSpawnWorkers) childStarted(p *os.Process) {
+	f.mu.Lock()
+	if f.children == nil {
+		f.children = make(map[*os.Process]struct{})
+	}
+	f.children[p] = struct{}{}
+	f.workers.Add(2)
+	f.mu.Unlock()
+}
+
+func (f *fixtureSpawnWorkers) childWaited(p *os.Process) {
+	f.mu.Lock()
+	delete(f.children, p)
+	f.mu.Unlock()
+}
+
+func (f *fixtureSpawnWorkers) workerDone() { f.workers.Done() }
+
+func (f *fixtureSpawnWorkers) beforeChildExitEmit() {
+	if f.beforeEmit != nil {
+		f.beforeEmit()
+	}
+}
+
+func (f *fixtureSpawnWorkers) stop(cancel context.CancelFunc) {
+	cancel()
+	f.mu.Lock()
+	children := make([]*os.Process, 0, len(f.children))
+	for p := range f.children {
+		children = append(children, p)
+	}
+	f.mu.Unlock()
+	for _, p := range children {
+		_ = p.Kill() // exact process handle owned by this fixture
+	}
+	f.workers.Wait() // both producers, including their panic guards, have settled
+}
+
+func settleFixtureSpawnWorkers(t *testing.T, f *fixtureSpawnWorkers, cancel context.CancelFunc) {
+	t.Helper()
+	settled := make(chan struct{})
+	go func() {
+		f.stop(cancel)
+		close(settled)
+	}()
+	select {
+	case <-settled:
+	case <-time.After(5 * time.Second):
+		t.Error("fixture workers did not settle within watchdog")
+		<-settled // do not let TempDir cleanup overtake an owned writer
+	}
+}
+
+func requireFixtureWaitsForExitEmit(t *testing.T, f *fixtureSpawnWorkers, cancel context.CancelFunc, held <-chan struct{}, release func(), logPath, taskName string) {
+	t.Helper()
+	settled := make(chan struct{})
+	go func() {
+		f.stop(cancel)
+		close(settled)
+	}()
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		release()
+		t.Error("child waiter did not reach daemon-exited pre-emit barrier")
+		<-settled
+		return
+	}
+	returnedEarly := false
+	select {
+	case <-settled:
+		returnedEarly = true
+	case <-time.After(200 * time.Millisecond):
+	}
+	release()
+	select {
+	case <-settled:
+	case <-time.After(5 * time.Second):
+		t.Error("fixture workers did not settle after emit release")
+		<-settled
+		return
+	}
+	if returnedEarly {
+		t.Fatal("fixture cleanup returned before held daemon-exited emit")
+	}
+	body, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"event":"daemon-exited"`) || !strings.Contains(string(body), `"task_name":`+strconv.Quote(taskName)) {
+		t.Fatalf("joined daemon-exited row missing at fixture settlement: %s", body)
+	}
+}
 
 func assertLSPRegistrySnapshotUnavailableEvent(t *testing.T, phase string, snapshotUsable bool) {
 	t.Helper()
@@ -245,6 +349,55 @@ func TestRunSupervise_NoIntentNoSpawn(t *testing.T) {
 
 	if spawnCalled.Load() != 0 {
 		t.Fatalf("fake spawn must NOT fire on empty intent; got %d call(s)", spawnCalled.Load())
+	}
+}
+
+func TestRunSupervise_ReconcileReadyTriggersPersistedMCPFrontRecovery(t *testing.T) {
+	tmpHome := apitest.HardenedTempDir(t)
+	t.Setenv("MCPHUB_STATE_DIR_OVERRIDE", tmpHome)
+	defer setBuiltinRouteSeedingDisabledForTest()()
+
+	report := validMCPFrontRouteActivationReport()
+	report.RouteActivation.Phase = "invalid-startup-phase"
+	if err := writeMCPFrontReconcileReport(filepath.Join(tmpHome, mcpFrontReconcileSerenaReportLeaf), report); err != nil {
+		t.Fatalf("seed persisted route activation: %v", err)
+	}
+	exitCh := make(chan struct{}, 1)
+	cleanupExit := setSuperviseTestExitCh(exitCh)
+	defer cleanupExit()
+
+	cmd := newSuperviseCmd()
+	cmd.SetArgs([]string{"--no-ipc"})
+	done := make(chan error, 1)
+	go func() { done <- cmd.Execute() }()
+
+	eventsPath := filepath.Join(tmpHome, "supervisor-events.log")
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		raw, _ := os.ReadFile(eventsPath)
+		if strings.Contains(string(raw), `"event":"mcp-front-route-activation-recovery-failed"`) && strings.Contains(string(raw), `"reason":"decode-version-refusal"`) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	raw, _ := os.ReadFile(eventsPath)
+	if !strings.Contains(string(raw), `"event":"mcp-front-route-activation-recovery-failed"`) {
+		exitCh <- struct{}{}
+		<-done
+		t.Fatalf("startup-ready did not invoke persisted MCP-front recovery:\n%s", raw)
+	}
+	exitCh <- struct{}{}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("supervise exited with err: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervise did not join startup recovery on exit")
+	}
+	decoded, err := readMCPFrontReconcileReport(filepath.Join(tmpHome, mcpFrontReconcileSerenaReportLeaf))
+	if err == nil || decoded != nil {
+		t.Fatalf("invalid startup phase was not retained as a strict refusal: report=%+v err=%v", decoded, err)
 	}
 }
 
@@ -1628,9 +1781,8 @@ func TestProductionSpawnFn_BlockingCrashSendNeverDropsExit(t *testing.T) {
 	const crashChCap = 4 // intentionally << numChildren so the buffer fills
 
 	crashCh := make(chan crashEvent, crashChCap)
-	shutdown := make(chan struct{}) // never closed in this test
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	command, args := portableNoopCommand()
@@ -1709,9 +1861,8 @@ func TestProductionSpawnFn_ClosesJobBeforeBlockingCrashSend(t *testing.T) {
 	t.Cleanup(func() { closeDaemonJobAfterWaitFn = prevClose })
 
 	crashCh := make(chan crashEvent)
-	shutdown := make(chan struct{})
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, context.Background(), nil, false,
 	)
 
 	command, args := portableNoopCommand()
@@ -1763,9 +1914,10 @@ func TestProductionSpawnFn_CrashSendAbandonsOnShutdown(t *testing.T) {
 	// goroutine's send blocks immediately and can only proceed by
 	// abandoning on shutdown.
 	crashCh := make(chan crashEvent)
-	shutdown := make(chan struct{})
+	shutdownCtx, cancelShutdown := context.WithCancel(context.Background())
+	defer cancelShutdown()
 	spawnFn := makeProductionSpawnFnWithStatePath(
-		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdown, nil, false,
+		events, NewDaemonRuntimeTracker(), "", nil, "", crashCh, shutdownCtx, nil, false,
 	)
 
 	command, args := portableNoopCommand()
@@ -1784,7 +1936,7 @@ func TestProductionSpawnFn_CrashSendAbandonsOnShutdown(t *testing.T) {
 	// blocking send (where it parks, since crashCh has no reader), then
 	// trigger shutdown.
 	time.Sleep(300 * time.Millisecond)
-	close(shutdown)
+	cancelShutdown()
 
 	deadline := time.Now().Add(10 * time.Second)
 	var logStr string
@@ -1809,10 +1961,22 @@ func TestProductionSpawnFn_UpdatesTracker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open event log: %v", err)
 	}
-	defer events.Close()
-
+	ctx, cancel := context.WithCancel(context.Background())
+	held := make(chan struct{})
+	releaseEmit := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseEmit) }) }
+	workers := &fixtureSpawnWorkers{beforeEmit: func() {
+		close(held)
+		<-releaseEmit
+	}}
+	t.Cleanup(func() {
+		release()
+		settleFixtureSpawnWorkers(t, workers, cancel)
+		_ = events.Close()
+	})
 	tracker := NewDaemonRuntimeTracker()
-	spawnFn := makeProductionSpawnFn(events, tracker)
+	spawnFn := makeProductionSpawnFnWithWorkers(events, tracker, "", nil, "", nil, ctx, nil, false, workers)
 	descriptor := api.SupervisorDaemon{
 		TaskName: reconcileWiringTestTaskName,
 		Server:   "memory",
@@ -1832,18 +1996,7 @@ func TestProductionSpawnFn_UpdatesTracker(t *testing.T) {
 	if entry.State != daemonRuntimeStateRunning || entry.CurrentPID <= 0 || entry.PIDGeneration != 1 || entry.StartedAt.IsZero() {
 		t.Fatalf("tracker entry after spawn success = %+v, want running pid>0 generation=1 started_at", entry)
 	}
-	pid := entry.CurrentPID
-	t.Cleanup(func() {
-		_ = process.TerminatePID(pid)
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			if !process.IsPidAlive(pid) {
-				return
-			}
-			time.Sleep(20 * time.Millisecond)
-		}
-		t.Errorf("helper child pid %d still alive after cleanup terminate", pid)
-	})
+	requireFixtureWaitsForExitEmit(t, workers, cancel, held, release, eventsPath, reconcileWiringTestTaskName)
 }
 
 func TestProductionSpawnFn_ReapsExitedChildProcess(t *testing.T) {

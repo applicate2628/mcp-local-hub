@@ -188,6 +188,7 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 	}
 
 	daemonStates := tracker.Snapshot()
+	statusNow := time.Now().UTC()
 
 	// Perf: take ONE OS port-owner snapshot for the whole refresh and resolve
 	// every daemon against it, instead of letting each daemon's liveness check
@@ -351,17 +352,18 @@ func supervisorStatusDaemons(stateDir string, tracker *DaemonRuntimeTracker, coa
 		// that no consumer (GUI, mcphub status CLI, health.go) ever read, so
 		// they were dropped with the persisted fields (audit P3).
 		row := map[string]any{
-			"task_name":      taskName,
-			"server":         server,
-			"daemon":         daemon,
-			"command":        d.Command,
-			"args":           args,
-			"workspace":      d.Workspace,
-			"port":           port,
-			"state":          stateText,
-			"current_pid":    runtimeState.CurrentPID,
-			"started_at":     daemonRuntimeStartedAt(runtimeState.StartedAt),
-			"is_maintenance": isSupervisorMaintenanceTask(taskName),
+			"task_name":         taskName,
+			"server":            server,
+			"daemon":            daemon,
+			"command":           d.Command,
+			"args":              args,
+			"workspace":         d.Workspace,
+			"port":              port,
+			"state":             stateText,
+			"current_pid":       runtimeState.CurrentPID,
+			"started_at":        daemonRuntimeStartedAt(runtimeState.StartedAt),
+			"is_maintenance":    isSupervisorMaintenanceTask(taskName),
+			"crashes_in_window": tracker.CrashCountInWindow(taskName, statusNow, respawnFailureWindow),
 		}
 		if stopPending {
 			// A receipt is a durable in-progress/failure fact, not a liveness

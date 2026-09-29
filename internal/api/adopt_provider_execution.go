@@ -16,10 +16,18 @@ import (
 )
 
 type providerTransactionDeps struct {
-	observer providerDirectProcessObserver
-	source   clients.ProviderMCPSourceV1
-	stop     func(context.Context, SupervisorDaemon) (StoppedSettlement, error)
-	close    func(string) error
+	observer   providerDirectProcessObserver
+	source     clients.ProviderMCPSourceV1
+	stop       func(context.Context, SupervisorDaemon) (StoppedSettlement, error)
+	close      func(string) error
+	loadIntent func() (*SupervisorIntentFile, error)
+}
+
+func (d providerTransactionDeps) supervisorIntent() (*SupervisorIntentFile, error) {
+	if d.loadIntent != nil {
+		return d.loadIntent()
+	}
+	return loadSupervisorOwnedIntent()
 }
 
 func (d providerTransactionDeps) stopManaged(ctx context.Context, api *API, frozen SupervisorDaemon) (StoppedSettlement, error) {
@@ -72,17 +80,26 @@ func frozenProviderAdoptDaemon(rec *AdoptProvenanceRecord) (SupervisorDaemon, er
 // settled rollback recovery
 // and hash-deletes any exact adopt manifest; it is not a read-only predicate.
 // Missing or started install history cannot authorize that recovery claim.
-func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord) (bool, error) {
+// An optional dependency preserves the old branch's deterministic intent-read
+// failure seam without changing the production owner.
+func providerAdoptDaemonAbsent(rec *AdoptProvenanceRecord, deps ...providerTransactionDeps) (bool, error) {
 	if rec == nil {
 		return false, fmt.Errorf("E_PROVIDER_SOURCE_CHANGED")
 	}
+	loadIntent := loadSupervisorOwnedIntent
+	if len(deps) != 0 {
+		loadIntent = deps[0].supervisorIntent
+	}
 	if rec.ProviderSource != nil && rec.ProviderSource.DeAdoptPhase == "" {
-		unmanaged, err := claimProviderUnmanagedRecovery(rec)
-		if err != nil || !unmanaged {
+		unmanaged, err := claimProviderUnmanagedRecoveryWithIntentLoader(rec, loadIntent)
+		if err != nil {
+			return false, err
+		}
+		if !unmanaged {
 			return false, fmt.Errorf("E_PROVIDER_LIFECYCLE_UNSUPPORTED")
 		}
 	}
-	return providerRecoveryOwnershipAbsent(rec)
+	return providerRecoveryOwnershipAbsentWithIntentLoader(rec, loadIntent)
 }
 
 // providerRecoveryStopManagedFn is a narrow test seam for the late-row recovery

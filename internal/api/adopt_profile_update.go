@@ -99,6 +99,14 @@ func buildAdoptProfileUpdatePlan(manifestName, profile string) (*AdoptProfileUpd
 		}
 		return nil, adoptProfileFailure(AdoptProfileUpdateInvalidProfile, "plan", err)
 	}
+	manifestDir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return nil, adoptProfileFailure(AdoptProfileUpdateIdentity, "manifest-root", err)
+	}
+	return buildAdoptProfileUpdatePlanInDir(manifestName, profile, manifestDir)
+}
+
+func buildAdoptProfileUpdatePlanInDir(manifestName, profile, manifestDir string) (*AdoptProfileUpdatePlan, error) {
 	rec, found, err := ReadAdoptProvenance(manifestName)
 	if err != nil {
 		return nil, adoptProfileFailure(AdoptProfileUpdateNotAdopted, "provenance-read", err)
@@ -106,7 +114,7 @@ func buildAdoptProfileUpdatePlan(manifestName, profile string) (*AdoptProfileUpd
 	if !found || rec.OperationState != AdoptOperationStateAdopted {
 		return nil, adoptProfileFailure(AdoptProfileUpdateNotAdopted, "provenance-read", errors.New("no adopted provenance row"))
 	}
-	old, err := os.ReadFile(filepath.Join(adoptCommittedManifestDir(), manifestName, "manifest.yaml"))
+	old, err := os.ReadFile(filepath.Join(manifestDir, manifestName, "manifest.yaml"))
 	if err != nil {
 		return nil, adoptProfileFailure(AdoptProfileUpdateIdentity, "manifest-read", err)
 	}
@@ -129,6 +137,10 @@ func (a *API) ExecuteAdoptProfileUpdate(plan *AdoptProfileUpdatePlan, opts Adopt
 	if plan == nil {
 		return adoptProfileFailure(AdoptProfileUpdateIdentity, "plan", errors.New("nil plan"))
 	}
+	manifestDir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return adoptProfileFailure(AdoptProfileUpdateRecovery, "manifest-root", err)
+	}
 	owner := opts.LeaseOwner
 	if owner == nil {
 		owner = NewAdoptLeaseOwner()
@@ -146,10 +158,10 @@ func (a *API) ExecuteAdoptProfileUpdate(plan *AdoptProfileUpdatePlan, opts Adopt
 		}
 	}()
 
-	if err := a.recoverAdoptProfileUpdateUnderLease(plan.ManifestName); err != nil {
+	if err := a.recoverAdoptProfileUpdateUnderLeaseInDir(plan.ManifestName, manifestDir); err != nil {
 		return asAdoptProfileFailure(AdoptProfileUpdateRecovery, "recovery", err)
 	}
-	fresh, err := buildAdoptProfileUpdatePlan(plan.ManifestName, plan.Profile)
+	fresh, err := buildAdoptProfileUpdatePlanInDir(plan.ManifestName, plan.Profile, manifestDir)
 	if err != nil {
 		return err
 	}
@@ -160,7 +172,7 @@ func (a *API) ExecuteAdoptProfileUpdate(plan *AdoptProfileUpdatePlan, opts Adopt
 		return nil
 	}
 
-	oldManifest, err := os.ReadFile(filepath.Join(adoptCommittedManifestDir(), fresh.ManifestName, "manifest.yaml"))
+	oldManifest, err := os.ReadFile(filepath.Join(manifestDir, fresh.ManifestName, "manifest.yaml"))
 	if err != nil {
 		return adoptProfileFailure(AdoptProfileUpdateIdentity, "manifest-read", err)
 	}
@@ -184,15 +196,15 @@ func (a *API) ExecuteAdoptProfileUpdate(plan *AdoptProfileUpdatePlan, opts Adopt
 	if err := beginAdoptProfileUpdateJournal(fresh.ManifestName, j); err != nil {
 		return asAdoptProfileFailure(AdoptProfileUpdateRecovery, "journal", err)
 	}
-	if err := a.finishAdoptProfileUpdateForwardUnderLease(fresh.ManifestName, j, receipt); err != nil {
-		rollbackErr := a.rollbackAdoptProfileUpdateUnderLease(fresh.ManifestName, j)
+	if err := a.finishAdoptProfileUpdateForwardUnderLease(fresh.ManifestName, j, receipt, manifestDir); err != nil {
+		rollbackErr := a.rollbackAdoptProfileUpdateUnderLease(fresh.ManifestName, j, manifestDir)
 		return errors.Join(err, rollbackErr)
 	}
 	return nil
 }
 
-func (a *API) finishAdoptProfileUpdateForwardUnderLease(manifestName string, j *AdoptProfileUpdateJournal, receipt InstallMutationReceiptV1) error {
-	if _, err := a.ManifestEditInWithHash(adoptCommittedManifestDir(), manifestName, j.NewManifestYAML, j.OldManifestHash); err != nil {
+func (a *API) finishAdoptProfileUpdateForwardUnderLease(manifestName string, j *AdoptProfileUpdateJournal, receipt InstallMutationReceiptV1, manifestDir string) error {
+	if _, err := a.manifestEditInWithHashUnderLease(manifestDir, manifestName, j.NewManifestYAML, j.OldManifestHash); err != nil {
 		if errors.Is(err, ErrManifestHashMismatch) {
 			return adoptProfileFailure(AdoptProfileUpdateManifestCAS, "manifest-cas", err)
 		}
@@ -212,11 +224,19 @@ func (a *API) finishAdoptProfileUpdateForwardUnderLease(manifestName string, j *
 }
 
 func (a *API) recoverAdoptProfileUpdateUnderLease(manifestName string) error {
+	manifestDir, err := adoptCommittedManifestDir()
+	if err != nil {
+		return adoptProfileFailure(AdoptProfileUpdateRecovery, "manifest-root", err)
+	}
+	return a.recoverAdoptProfileUpdateUnderLeaseInDir(manifestName, manifestDir)
+}
+
+func (a *API) recoverAdoptProfileUpdateUnderLeaseInDir(manifestName, manifestDir string) error {
 	j, err := readAdoptProfileUpdateJournal(manifestName)
 	if err != nil || j == nil {
 		return asAdoptProfileFailure(AdoptProfileUpdateRecovery, "recovery-journal", err)
 	}
-	actual, err := os.ReadFile(filepath.Join(adoptCommittedManifestDir(), manifestName, "manifest.yaml"))
+	actual, err := os.ReadFile(filepath.Join(manifestDir, manifestName, "manifest.yaml"))
 	if err != nil {
 		return adoptProfileFailure(AdoptProfileUpdateRecovery, "recovery-read", err)
 	}
@@ -228,7 +248,7 @@ func (a *API) recoverAdoptProfileUpdateUnderLease(manifestName string) error {
 	if j.Rollback {
 		switch {
 		case manifestHash == j.NewManifestHash && rec.ExpectedManifestHash == j.NewManifestHash:
-			return a.rollbackAdoptProfileUpdateUnderLease(manifestName, j)
+			return a.rollbackAdoptProfileUpdateUnderLease(manifestName, j, manifestDir)
 		case manifestHash == j.OldManifestHash && rec.ExpectedManifestHash == j.NewManifestHash:
 			if _, err := ensureInstallSupervisorIntentTarget(j.NewTarget, j.OldTarget, InstallMutationReceiptV1{}); err != nil {
 				return adoptProfileFailure(AdoptProfileUpdateRecovery, "recovery-rollback-intent", err)
@@ -246,7 +266,7 @@ func (a *API) recoverAdoptProfileUpdateUnderLease(manifestName string) error {
 	switch {
 	case manifestHash == j.OldManifestHash && rec.ExpectedManifestHash == j.OldManifestHash:
 		receipt := InstallMutationReceiptV1{Committed: true}
-		return a.finishAdoptProfileUpdateForwardUnderLease(manifestName, j, receipt)
+		return a.finishAdoptProfileUpdateForwardUnderLease(manifestName, j, receipt, manifestDir)
 	case manifestHash == j.NewManifestHash && rec.ExpectedManifestHash == j.OldManifestHash:
 		receipt := InstallMutationReceiptV1{Committed: true}
 		if actual, refreshErr := ensureInstallSupervisorIntentTarget(j.OldTarget, j.NewTarget, receipt); refreshErr != nil || !actual.Committed || len(actual.ClientConfigSettlements) != 0 {
@@ -266,16 +286,16 @@ func (a *API) recoverAdoptProfileUpdateUnderLease(manifestName string) error {
 	}
 }
 
-func (a *API) rollbackAdoptProfileUpdateUnderLease(manifestName string, j *AdoptProfileUpdateJournal) error {
+func (a *API) rollbackAdoptProfileUpdateUnderLease(manifestName string, j *AdoptProfileUpdateJournal, manifestDir string) error {
 	if err := markAdoptProfileUpdateRollback(manifestName); err != nil {
 		return asAdoptProfileFailure(AdoptProfileUpdateRecovery, "rollback-journal", err)
 	}
-	actual, err := os.ReadFile(filepath.Join(adoptCommittedManifestDir(), manifestName, "manifest.yaml"))
+	actual, err := os.ReadFile(filepath.Join(manifestDir, manifestName, "manifest.yaml"))
 	if err != nil {
 		return adoptProfileFailure(AdoptProfileUpdateRecovery, "rollback-read", err)
 	}
 	if ManifestHashContent(actual) == j.NewManifestHash {
-		if _, err := a.ManifestEditInWithHash(adoptCommittedManifestDir(), manifestName, j.OldManifestYAML, j.NewManifestHash); err != nil {
+		if _, err := a.manifestEditInWithHashUnderLease(manifestDir, manifestName, j.OldManifestYAML, j.NewManifestHash); err != nil {
 			return adoptProfileFailure(AdoptProfileUpdateManifestCAS, "rollback-manifest", err)
 		}
 	} else if ManifestHashContent(actual) != j.OldManifestHash {

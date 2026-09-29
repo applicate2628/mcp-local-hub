@@ -64,7 +64,8 @@ type scanner interface {
 }
 
 type realScanner struct {
-	guiPort func() int
+	guiPort        func() int
+	shadowWarnings *api.DiskShadowWarningTracker
 }
 
 func (r realScanner) Scan() (*api.ScanResult, error) {
@@ -78,10 +79,11 @@ func (r realScanner) Scan() (*api.ScanResult, error) {
 		return nil, err
 	}
 	return a.ScanFrom(api.ScanOpts{
-		ConfigPaths:   api.DefaultScanConfigPaths(),
-		ManifestDir:   "",
-		GUIPort:       guiPort,
-		ReadinessRows: readinessRows,
+		ConfigPaths:          api.DefaultScanConfigPaths(),
+		ManifestDir:          "",
+		GUIPort:              guiPort,
+		ReadinessRows:        readinessRows,
+		ShadowWarningTracker: r.shadowWarnings,
 	})
 }
 
@@ -254,14 +256,14 @@ func (realDemigrater) Demigrate(servers, clients []string) (*api.DemigrateReport
 	})
 }
 
-// dismisser is the narrow interface both /api/dismiss (POST) and
+// dismisser is the narrow interface both /api/dismiss (POST/DELETE) and
 // /api/dismissed (GET) need. One interface for both directions keeps
 // the injection shape small; the POST handler uses DismissUnknown,
-// the GET handler uses ListDismissedUnknown.
-// realDismisser forwards to api.DismissUnknown / api.ListDismissedUnknown
-// (persistent JSON file).
+// the DELETE handler uses UndismissUnknown, and the GET handler uses
+// ListDismissedUnknown. realDismisser forwards to the persistent JSON owner.
 type dismisser interface {
 	DismissUnknown(name string) error
+	UndismissUnknown(name string) error
 	ListDismissedUnknown() (map[string]struct{}, error)
 }
 
@@ -269,6 +271,10 @@ type realDismisser struct{}
 
 func (realDismisser) DismissUnknown(name string) error {
 	return api.DismissUnknown(name)
+}
+
+func (realDismisser) UndismissUnknown(name string) error {
+	return api.UndismissUnknown(name)
 }
 
 func (realDismisser) ListDismissedUnknown() (map[string]struct{}, error) {
@@ -932,7 +938,7 @@ func NewServer(cfg Config) *Server {
 	s.api = api.NewAPI()
 	s.adoptLeaseOwner = cfg.AdoptLeaseOwner
 	s.adoptReceivingVerifier = cfg.AdoptReceivingVerifier
-	s.scanner = realScanner{guiPort: s.Port}
+	s.scanner = realScanner{guiPort: s.Port, shadowWarnings: api.NewDiskShadowWarningTracker()}
 	s.status = realStatusProvider{}
 	s.health = realHealthBackend{api: s.api}
 	s.migrator = realMigrator{guiPort: s.Port}

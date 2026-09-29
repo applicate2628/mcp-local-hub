@@ -653,6 +653,9 @@ func (h *StdioHost) Stop() error {
 		return nil
 	}
 	h.stopped = true
+	h.sessionMu.Lock()
+	h.sessions = nil
+	h.sessionMu.Unlock()
 	close(h.done) // unblock any pending HTTP handlers waiting on the subprocess
 	_ = h.stdin.Close()
 	if h.cmd != nil && h.cmd.Process != nil {
@@ -1301,6 +1304,11 @@ func (h *StdioHost) writeStdioJSONResponse(
 }
 
 func (h *StdioHost) createSession(protocolVersion string) (string, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.stopped {
+		return "", errors.New("host stopped")
+	}
 	for attempt := 0; attempt < 4; attempt++ {
 		sid, err := randomSessionID()
 		if err != nil {

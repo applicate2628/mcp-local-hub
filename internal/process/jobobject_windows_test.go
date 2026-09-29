@@ -3,11 +3,13 @@
 package process
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
 	"testing"
 	"time"
+	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
@@ -188,6 +190,534 @@ func TestJob_TerminateAllZeroTimeoutSkipsWait(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
 		t.Errorf("TerminateAll(0) took %v; want near-instant return (regression: zero-timeout path is waiting when it should not)", elapsed)
+	}
+}
+
+func TestJob_TerminateAllTimedNilOrClosedRejects(t *testing.T) {
+	var nilJob *Job
+	if err := nilJob.TerminateAll(1); err == nil {
+		t.Fatal("timed nil Job falsely proved settlement")
+	}
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := job.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := job.TerminateAll(1); err == nil {
+		t.Fatal("timed closed Job falsely proved settlement")
+	}
+}
+
+func TestJob_TerminateAllTimedObservationFaultsNeverProveEmpty(t *testing.T) {
+	if os.Getenv("MCPHUB_JOB_PROOF_CHILD") == "1" {
+		time.Sleep(time.Minute)
+		return
+	}
+	queryReal := func(j *Job) (jobObjectBasicAccountingInformation, error) {
+		var info jobObjectBasicAccountingInformation
+		var used uint32
+		err := windows.QueryInformationJobObject(j.Handle(), windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&info)), uint32(unsafe.Sizeof(info)), &used)
+		return info, err
+	}
+	fault := errors.New("test-only Job observation fault")
+	for _, tc := range []struct {
+		name, stage string
+		configure   func(*jobTerminationOps, uint32)
+		wantTimeout bool
+		timeoutMs   uint32
+	}{
+		{name: "enumeration_error", stage: "member_list", configure: func(o *jobTerminationOps, _ uint32) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{}, fault }
+		}},
+		{name: "partial_list", stage: "member_list", configure: func(o *jobTerminationOps, p uint32) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{Assigned: 2, PIDs: []uint32{p}}, nil }
+		}},
+		{name: "malformed_zero_pid", stage: "member_list", configure: func(o *jobTerminationOps, _ uint32) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{Assigned: 1, PIDs: []uint32{0}}, nil }
+		}},
+		{name: "empty_list", stage: "member_list", configure: func(o *jobTerminationOps, _ uint32) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{}, nil }
+		}},
+		{name: "duplicate_pid", stage: "member_list", configure: func(o *jobTerminationOps, p uint32) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{Assigned: 2, PIDs: []uint32{p, p}}, nil }
+		}},
+		{name: "member_open", stage: "member_handle", configure: func(o *jobTerminationOps, _ uint32) {
+			o.openProcess = func(uint32) (windows.Handle, error) { return 0, fault }
+		}},
+		{name: "member_identity_error", stage: "member_identity", configure: func(o *jobTerminationOps, _ uint32) {
+			o.isMember = func(windows.Handle, *Job) (bool, error) { return false, fault }
+		}},
+		{name: "member_nonmember", stage: "member_identity", configure: func(o *jobTerminationOps, _ uint32) {
+			o.isMember = func(windows.Handle, *Job) (bool, error) { return false, nil }
+		}},
+		{name: "wait_error", stage: "member_wait", configure: func(o *jobTerminationOps, _ uint32) {
+			o.wait = func(windows.Handle) (uint32, error) { return uint32(windows.WAIT_FAILED), fault }
+		}},
+		{name: "wait_unexpected", stage: "member_wait", configure: func(o *jobTerminationOps, _ uint32) {
+			o.wait = func(windows.Handle) (uint32, error) { return uint32(windows.WAIT_ABANDONED), nil }
+		}},
+		{name: "initial_accounting", stage: "snapshot", configure: func(o *jobTerminationOps, _ uint32) {
+			o.accounting = func(*Job) (jobObjectBasicAccountingInformation, error) {
+				return jobObjectBasicAccountingInformation{}, fault
+			}
+		}},
+		{name: "final_accounting", stage: "accounting", configure: func(o *jobTerminationOps, _ uint32) {
+			calls := 0
+			o.accounting = func(j *Job) (jobObjectBasicAccountingInformation, error) {
+				calls++
+				if calls > 1 {
+					return jobObjectBasicAccountingInformation{}, fault
+				}
+				return queryReal(j)
+			}
+		}},
+		{name: "lifetime_total_drift", stage: "membership_changed", configure: func(o *jobTerminationOps, _ uint32) {
+			calls := 0
+			o.accounting = func(*Job) (jobObjectBasicAccountingInformation, error) {
+				calls++
+				if calls == 1 {
+					return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 1}, nil
+				}
+				return jobObjectBasicAccountingInformation{TotalProcesses: 2, ActiveProcesses: 0}, nil
+			}
+		}},
+		{name: "handle_close", stage: "handle_close", timeoutMs: 5000, configure: func(o *jobTerminationOps, _ uint32) {
+			o.closeProcess = func(h windows.Handle) error { _ = windows.CloseHandle(h); return fault }
+		}},
+		{name: "zero_accounting_unsignaled_handle", stage: "member_wait", wantTimeout: true, configure: func(o *jobTerminationOps, _ uint32) {
+			calls := 0
+			o.accounting = func(*Job) (jobObjectBasicAccountingInformation, error) {
+				calls++
+				if calls == 1 {
+					return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 1}, nil
+				}
+				return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 0}, nil
+			}
+			o.terminate = func(*Job) error { return nil }
+			o.wait = func(windows.Handle) (uint32, error) { return uint32(windows.WAIT_TIMEOUT), nil }
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(os.Args[0], "-test.run=^TestJob_TerminateAllTimedObservationFaultsNeverProveEmpty$")
+			cmd.Env = append(os.Environ(), "MCPHUB_JOB_PROOF_CHILD=1")
+			if _, err := StartWithJob(job, cmd); err != nil {
+				_ = job.Close()
+				t.Fatal(err)
+			}
+			defer func() {
+				_ = job.Close()
+				_ = cmd.Wait()
+				if cmd.Process != nil && IsPidAlive(cmd.Process.Pid) {
+					t.Errorf("test child %d survived", cmd.Process.Pid)
+				}
+			}()
+			pids, err := job.processIDs()
+			if err != nil || len(pids) != 1 {
+				t.Fatalf("owned Job members=%v err=%v", pids, err)
+			}
+			ops := &jobTerminationOps{}
+			kills, opens, closes := 0, 0, 0
+			ops.terminate = func(j *Job) error { return windows.TerminateJobObject(j.Handle(), 1) }
+			ops.openProcess = func(pid uint32) (windows.Handle, error) {
+				opens++
+				return windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+			}
+			ops.closeProcess = func(h windows.Handle) error { return windows.CloseHandle(h) }
+			tc.configure(ops, pids[0])
+			terminate := ops.terminate
+			ops.terminate = func(j *Job) error { kills++; return terminate(j) }
+			closeProcess := ops.closeProcess
+			ops.closeProcess = func(h windows.Handle) error { closes++; return closeProcess(h) }
+			job.terminationOps = ops
+			timeoutMs := tc.timeoutMs
+			if timeoutMs == 0 {
+				timeoutMs = 1
+			}
+			err = job.TerminateAll(timeoutMs)
+			var proof *JobTerminationProofError
+			if !errors.As(err, &proof) || proof.Stage != tc.stage {
+				t.Fatalf("fault=%s error=%v want stage=%s", tc.name, err, tc.stage)
+			}
+			if tc.name == "handle_close" && !errors.Is(err, fault) {
+				t.Fatalf("injected handle-close cause was lost: %v", err)
+			}
+			if tc.wantTimeout && !errors.Is(err, ErrCleanupTimeout) {
+				t.Fatalf("lost cleanup-timeout identity: %v", err)
+			}
+			if kills != 1 {
+				t.Fatalf("observation fault skipped Job termination attempt: kills=%d", kills)
+			}
+			if tc.name != "member_open" && tc.name != "initial_accounting" && tc.name != "partial_list" && tc.name != "malformed_zero_pid" && tc.name != "empty_list" && tc.name != "duplicate_pid" && opens != closes {
+				t.Fatalf("owned member handles not closed: opens=%d closes=%d", opens, closes)
+			}
+		})
+	}
+}
+
+func TestJob_ContainedCurrentTreeDoesNotGrantStrictLifetimeProof(t *testing.T) {
+	if os.Getenv("MCPHUB_JOB_CURRENT_TREE_CHILD") == "root" {
+		return
+	} else if os.Getenv("MCPHUB_JOB_CURRENT_TREE_CHILD") == "member" {
+		time.Sleep(time.Minute)
+		return
+	}
+	for _, strict := range []bool{false, true} {
+		name := "contained"
+		if strict {
+			name = "public_strict"
+		}
+		t.Run(name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			var member *exec.Cmd
+			defer func() {
+				_ = job.Close()
+				if member != nil && member.Process != nil {
+					_ = member.Wait()
+					if IsPidAlive(member.Process.Pid) {
+						t.Errorf("test member %d survived", member.Process.Pid)
+					}
+				}
+			}()
+			root := exec.Command(os.Args[0], "-test.run=^TestJob_ContainedCurrentTreeDoesNotGrantStrictLifetimeProof$")
+			root.Env = append(os.Environ(), "MCPHUB_JOB_CURRENT_TREE_CHILD=root")
+			if _, err := StartWithJob(job, root); err != nil {
+				t.Fatal(err)
+			}
+			rootWaited := false
+			defer func() {
+				if !rootWaited {
+					_ = root.Wait()
+				}
+			}()
+			borrowed, err := windows.OpenProcess(windows.SYNCHRONIZE|windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(root.Process.Pid))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer windows.CloseHandle(borrowed)
+			if err := root.Wait(); err != nil {
+				t.Fatal(err)
+			}
+			rootWaited = true
+			member = exec.Command(os.Args[0], "-test.run=^TestJob_ContainedCurrentTreeDoesNotGrantStrictLifetimeProof$")
+			member.Env = append(os.Environ(), "MCPHUB_JOB_CURRENT_TREE_CHILD=member")
+			if _, err := StartWithJob(job, member); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			job.terminationOps = &jobTerminationOps{
+				accounting: func(*Job) (jobObjectBasicAccountingInformation, error) {
+					calls++
+					active := uint32(0)
+					if calls == 1 {
+						active = 1
+					}
+					return jobObjectBasicAccountingInformation{TotalProcesses: 3, ActiveProcesses: active}, nil
+				},
+				listMembers: func(*Job) (jobProcessIDList, error) {
+					return jobProcessIDList{Assigned: 1, PIDs: []uint32{uint32(member.Process.Pid)}}, nil
+				},
+			}
+			if strict {
+				err = job.TerminateAll(5000)
+				var proof *JobTerminationProofError
+				if !errors.As(err, &proof) || proof.Stage != "membership_changed" {
+					t.Fatalf("public strict err=%v", err)
+				}
+			} else {
+				err = job.terminateForContained(5000, containedJobOriginal{job: job, handle: borrowed, pid: uint32(root.Process.Pid), atCreate: true})
+				if err != nil {
+					t.Fatalf("contained current tree err=%v", err)
+				}
+			}
+			if calls < 3 {
+				t.Fatalf("missing final Job accounting: %d", calls)
+			}
+		})
+	}
+}
+
+func TestJob_ContainedCurrentTreeFaultsDoNotProveExit(t *testing.T) {
+	fault := errors.New("test-only current-tree observation fault")
+	for _, tc := range []struct {
+		name, stage string
+		configure   func(*jobTerminationOps)
+		noOriginal  bool
+	}{
+		{name: "missing_original", stage: "borrowed_handle", noOriginal: true},
+		{name: "empty_without_original", stage: "borrowed_handle", noOriginal: true, configure: func(o *jobTerminationOps) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{}, nil }
+		}},
+		{name: "member_list", stage: "member_list", configure: func(o *jobTerminationOps) {
+			o.listMembers = func(*Job) (jobProcessIDList, error) { return jobProcessIDList{}, fault }
+		}},
+		{name: "member_open", stage: "member_handle", configure: func(o *jobTerminationOps) { o.openProcess = func(uint32) (windows.Handle, error) { return 0, fault } }},
+		{name: "member_identity", stage: "member_identity", configure: func(o *jobTerminationOps) {
+			o.isMember = func(windows.Handle, *Job) (bool, error) { return false, fault }
+		}},
+		{name: "member_wait", stage: "member_wait", configure: func(o *jobTerminationOps) { o.wait = func(windows.Handle) (uint32, error) { return 0, fault } }},
+		{name: "handle_close", stage: "handle_close", configure: func(o *jobTerminationOps) {
+			o.closeProcess = func(h windows.Handle) error { _ = windows.CloseHandle(h); return fault }
+		}},
+		{name: "active_stays_nonzero", stage: "member_wait", configure: func(o *jobTerminationOps) {
+			o.accounting = func(*Job) (jobObjectBasicAccountingInformation, error) {
+				return jobObjectBasicAccountingInformation{TotalProcesses: 3, ActiveProcesses: 1}, nil
+			}
+		}},
+		{name: "total_drifts", stage: "membership_changed", configure: func(o *jobTerminationOps) {
+			n := 0
+			o.accounting = func(*Job) (jobObjectBasicAccountingInformation, error) {
+				n++
+				total := uint32(3)
+				if n > 1 {
+					total = 4
+				}
+				return jobObjectBasicAccountingInformation{TotalProcesses: total, ActiveProcesses: 0}, nil
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer job.Close()
+			borrowed, err := windows.CreateEvent(nil, 1, 1, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer windows.CloseHandle(borrowed)
+			member, err := windows.CreateEvent(nil, 1, 1, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			memberOwned := true
+			defer func() {
+				if memberOwned {
+					_ = windows.CloseHandle(member)
+				}
+			}()
+			calls, kills := 0, 0
+			ops := &jobTerminationOps{
+				accounting: func(*Job) (jobObjectBasicAccountingInformation, error) {
+					calls++
+					active := uint32(0)
+					if calls == 1 {
+						active = 1
+					}
+					return jobObjectBasicAccountingInformation{TotalProcesses: 3, ActiveProcesses: active}, nil
+				},
+				listMembers: func(*Job) (jobProcessIDList, error) { return jobProcessIDList{Assigned: 1, PIDs: []uint32{42}}, nil },
+				openProcess: func(uint32) (windows.Handle, error) { memberOwned = false; return member, nil },
+				isMember:    func(windows.Handle, *Job) (bool, error) { return true, nil },
+				terminate:   func(*Job) error { kills++; return nil },
+			}
+			if tc.configure != nil {
+				tc.configure(ops)
+			}
+			job.terminationOps = ops
+			original := containedJobOriginal{job: job, handle: borrowed, pid: 7, atCreate: true}
+			if tc.noOriginal {
+				original = containedJobOriginal{}
+			}
+			err = job.terminateForContained(20, original)
+			var proof *JobTerminationProofError
+			if !errors.As(err, &proof) || proof.Stage != tc.stage {
+				t.Fatalf("err=%v want stage=%s", err, tc.stage)
+			}
+			if kills != 1 {
+				t.Fatalf("Job kill attempts=%d", kills)
+			}
+		})
+	}
+}
+
+func TestJob_TerminateAllLateRealHandleSignalNeverProves(t *testing.T) {
+	job, err := NewKillOnCloseJob()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestJob_TerminateAllTimedObservationFaultsNeverProveEmpty$")
+	cmd.Env = append(os.Environ(), "MCPHUB_JOB_PROOF_CHILD=1")
+	if _, err := StartWithJob(job, cmd); err != nil {
+		_ = job.Close()
+		t.Fatal(err)
+	}
+	defer func() { _ = job.Close(); _ = cmd.Wait() }()
+	observedRealSignal := false
+	job.terminationOps = &jobTerminationOps{wait: func(h windows.Handle) (uint32, error) {
+		time.Sleep(5 * time.Millisecond)
+		status, waitErr := windows.WaitForSingleObject(h, 2000)
+		if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+			observedRealSignal = true
+		}
+		return status, waitErr
+	}}
+	err = job.TerminateAll(1)
+	var proof *JobTerminationProofError
+	if !observedRealSignal {
+		t.Fatalf("test never observed the real original handle signal: %v", err)
+	}
+	if !errors.As(err, &proof) || proof.Stage != "member_wait" || !errors.Is(err, ErrCleanupTimeout) {
+		t.Fatalf("late real handle signal falsely certified timed termination: %v", err)
+	}
+	if err := job.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Wait(); err == nil {
+		t.Fatal("test child unexpectedly exited cleanly")
+	}
+	if cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+		t.Fatalf("test child survived: %v", cmd.Process)
+	}
+}
+
+func TestJob_TerminateAllRechecksAccountingAfterOriginalHandleSignal(t *testing.T) {
+	fault := errors.New("final accounting observation failed")
+	for _, tc := range []struct {
+		name, stage string
+		finalErr    error
+		finalTotal  uint32
+	}{
+		{name: "lifetime_drift", stage: "membership_changed", finalTotal: 2},
+		{name: "query_error", stage: "accounting", finalErr: fault},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(os.Args[0], "-test.run=^TestJob_TerminateAllTimedObservationFaultsNeverProveEmpty$")
+			cmd.Env = append(os.Environ(), "MCPHUB_JOB_PROOF_CHILD=1")
+			if _, err := StartWithJob(job, cmd); err != nil {
+				_ = job.Close()
+				t.Fatal(err)
+			}
+			defer func() { _ = job.Close(); _ = cmd.Wait() }()
+			queries, closed := 0, 0
+			observedReal := false
+			job.terminationOps = &jobTerminationOps{
+				accounting: func(*Job) (jobObjectBasicAccountingInformation, error) {
+					queries++
+					if queries == 1 {
+						return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 1}, nil
+					}
+					if queries == 2 {
+						return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 0}, nil
+					}
+					if tc.finalErr != nil {
+						return jobObjectBasicAccountingInformation{}, tc.finalErr
+					}
+					return jobObjectBasicAccountingInformation{TotalProcesses: tc.finalTotal, ActiveProcesses: 0}, nil
+				},
+				wait: func(h windows.Handle) (uint32, error) {
+					status, waitErr := windows.WaitForSingleObject(h, 2000)
+					if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+						observedReal = true
+					}
+					return status, waitErr
+				},
+				closeProcess: func(h windows.Handle) error { closed++; return windows.CloseHandle(h) },
+			}
+			err = job.TerminateAll(5000)
+			var proof *JobTerminationProofError
+			if !observedReal || queries < 3 || !errors.As(err, &proof) || proof.Stage != tc.stage {
+				t.Fatalf("post-signal final account not enforced: real=%v queries=%d err=%v", observedReal, queries, err)
+			}
+			if tc.finalErr != nil && !errors.Is(err, tc.finalErr) {
+				t.Fatalf("final query cause lost: %v", err)
+			}
+			if closed != 1 {
+				t.Fatalf("original handle close count=%d want=1", closed)
+			}
+			if err := job.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_ = cmd.Wait()
+			if cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+				t.Fatalf("owned child survived: %v", cmd.Process)
+			}
+		})
+	}
+}
+
+func TestJob_TerminateAllAdaptiveShortWindowObservesRealHandle(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		signalAt  time.Duration
+		wantProof bool
+	}{
+		{name: "signal_by_10ms", signalAt: 10 * time.Millisecond, wantProof: true},
+		{name: "signal_after_100ms", signalAt: 100 * time.Millisecond, wantProof: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			job, err := NewKillOnCloseJob()
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(os.Args[0], "-test.run=^TestJob_TerminateAllTimedObservationFaultsNeverProveEmpty$")
+			cmd.Env = append(os.Environ(), "MCPHUB_JOB_PROOF_CHILD=1")
+			if _, err := StartWithJob(job, cmd); err != nil {
+				_ = job.Close()
+				t.Fatal(err)
+			}
+			defer func() { _ = job.Close(); _ = cmd.Wait() }()
+			virtual := time.Unix(0, 0)
+			start := virtual
+			queries, sleeps, closes := 0, 0, 0
+			realSignal := false
+			job.terminationOps = &jobTerminationOps{
+				now:   func() time.Time { return virtual },
+				sleep: func(d time.Duration) { virtual = virtual.Add(d); sleeps++ },
+				accounting: func(*Job) (jobObjectBasicAccountingInformation, error) {
+					queries++
+					if queries == 1 {
+						return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 1}, nil
+					}
+					return jobObjectBasicAccountingInformation{TotalProcesses: 1, ActiveProcesses: 0}, nil
+				},
+				wait: func(h windows.Handle) (uint32, error) {
+					if virtual.Sub(start) < tc.signalAt {
+						return uint32(windows.WAIT_TIMEOUT), nil
+					}
+					status, waitErr := windows.WaitForSingleObject(h, 2000)
+					if waitErr == nil && status == uint32(windows.WAIT_OBJECT_0) {
+						realSignal = true
+					}
+					return status, waitErr
+				},
+				closeProcess: func(h windows.Handle) error { closes++; return windows.CloseHandle(h) },
+			}
+			err = job.TerminateAll(50)
+			if tc.wantProof {
+				if err != nil || !realSignal || virtual.Sub(start) >= 50*time.Millisecond || queries < 4 {
+					t.Fatalf("fast genuine signal lacked bounded proof: err=%v real=%v elapsed=%v queries=%d", err, realSignal, virtual.Sub(start), queries)
+				}
+			} else {
+				var proof *JobTerminationProofError
+				if !errors.As(err, &proof) || proof.Stage != "member_wait" || !errors.Is(err, ErrCleanupTimeout) || realSignal {
+					t.Fatalf("slow signal falsely proved: %v real=%v", err, realSignal)
+				}
+			}
+			if queries > 12 || sleeps > 10 || closes != 1 {
+				t.Fatalf("poll/handle bounds queries=%d sleeps=%d closes=%d", queries, sleeps, closes)
+			}
+			if err := job.Close(); err != nil {
+				t.Fatal(err)
+			}
+			_ = cmd.Wait()
+			if cmd.Process == nil || IsPidAlive(cmd.Process.Pid) {
+				t.Fatalf("owned child survived: %v", cmd.Process)
+			}
+		})
 	}
 }
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -43,42 +44,108 @@ var lookupProcessBatch func(ports []int) map[int]struct {
 // get their Port and the 5-state lifecycle fields from the workspace
 // registry when registryPath is non-empty; pass "" in tests that do not
 // need the workspace-scoped overlay.
-func enrichStatus(rows []DaemonStatus, manifestDir string) {
-	enrichStatusWithRegistry(rows, manifestDir, "")
+func enrichStatus(rows []DaemonStatus, manifestDir string) error {
+	return enrichStatusWithRegistry(rows, manifestDir, "")
 }
 
-// enrichStatusWithRegistry is the richer variant used by StatusWithHealth.
+// WorkspaceStatusMetadataMismatchID is the stable failure discriminator for a
+// status row and registry entry that name the same workspace task but disagree
+// on their already-known nonzero ports.
+const WorkspaceStatusMetadataMismatchID = "WORKSPACE_STATUS_METADATA_MISMATCH"
+
+// WorkspaceStatusMetadataMismatchError reports a cross-snapshot task/port
+// contradiction. Callers must discard the result rather than combine metadata
+// from a registry entry with a status row that identifies another port.
+type WorkspaceStatusMetadataMismatchError struct {
+	TaskName     string
+	StatusPort   int
+	RegistryPort int
+}
+
+func (e *WorkspaceStatusMetadataMismatchError) Error() string {
+	if e == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s: task=%q status_port=%d registry_port=%d", WorkspaceStatusMetadataMismatchID, e.TaskName, e.StatusPort, e.RegistryPort)
+}
+
+// applyWorkspaceRegistryMetadata overlays historical registry metadata onto
+// exact lazy-proxy task matches. It performs a complete validation pass before
+// mutating any row, so a later port contradiction cannot leave a partial join.
+// Process identity, structural classification, and current readiness remain
+// owned by their existing status/IPC producers and are never changed here.
+func applyWorkspaceRegistryMetadata(rows []DaemonStatus, entries []WorkspaceEntry) error {
+	entriesByTask := make(map[string]WorkspaceEntry, len(entries))
+	for _, entry := range entries {
+		entriesByTask[strings.TrimPrefix(entry.TaskName, "\\")] = entry
+	}
+
+	for i := range rows {
+		if !IsLazyProxyTaskName(rows[i].TaskName) {
+			continue
+		}
+		entry, ok := entriesByTask[strings.TrimPrefix(rows[i].TaskName, "\\")]
+		if !ok {
+			continue
+		}
+		if rows[i].Port != 0 && entry.Port != 0 && rows[i].Port != entry.Port {
+			return &WorkspaceStatusMetadataMismatchError{
+				TaskName:     rows[i].TaskName,
+				StatusPort:   rows[i].Port,
+				RegistryPort: entry.Port,
+			}
+		}
+	}
+
+	for i := range rows {
+		if !IsLazyProxyTaskName(rows[i].TaskName) {
+			continue
+		}
+		entry, ok := entriesByTask[strings.TrimPrefix(rows[i].TaskName, "\\")]
+		if !ok {
+			continue
+		}
+		rows[i].Workspace = entry.WorkspacePath
+		rows[i].Language = entry.Language
+		rows[i].Backend = entry.Backend
+		rows[i].Lifecycle = entry.Lifecycle
+		rows[i].LastMaterializedAt = entry.LastMaterializedAt
+		rows[i].LastToolsCallAt = entry.LastToolsCallAt
+		rows[i].LastError = entry.LastError
+		if rows[i].Port == 0 {
+			rows[i].Port = entry.Port
+		}
+	}
+	return nil
+}
+
+// enrichStatusWithRegistry is the richer variant used by StatusWithOpts.
 // registryPath, when non-empty, points at the workspace registry YAML; rows
 // whose TaskName matches the lazy-proxy pattern are enriched with
 // Workspace, Language, Backend, Lifecycle, and the LastMaterializedAt /
 // LastToolsCallAt / LastError fields. Empty registryPath (or a missing
 // file) skips the overlay silently so existing global-daemon callers see
 // stable output.
-func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath string) {
+func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath string) error {
 	ports := manifestPortMap(manifestDir)
 
 	// Workspace-scoped overlay: preload the registry once so we don't reload
 	// per-row. Keys are normalized by trimming the scheduler's leading '\'
 	// so rows emitted as `\mcp-...` still match registry entries stored as
 	// `mcp-...`.
-	var wsEntries map[string]WorkspaceEntry
+	var wsEntries []WorkspaceEntry
 	if registryPath != "" {
 		reg := NewRegistry(registryPath)
 		if err := reg.Load(); err == nil {
-			wsEntries = make(map[string]WorkspaceEntry, len(reg.Workspaces))
-			for _, e := range reg.Workspaces {
-				wsEntries[strings.TrimPrefix(e.TaskName, "\\")] = e
-			}
+			wsEntries = reg.Workspaces
 		}
 	}
 
 	// First pass: populate Server/Daemon/Port.
-	var wantedPorts []int
 	for i := range rows {
-		// Workspace-scoped row? Populate lifecycle overlay from registry and
-		// short-circuit the manifest-port lookup (workspace-scoped ports live
-		// in the registry, not the manifest). The manifest-port lookup would
-		// miss anyway since "lsp-<key>" is not a real server slug.
+		// Workspace-scoped row? Populate structural fields and short-circuit
+		// the manifest-port lookup (workspace-scoped ports live in the registry,
+		// not the manifest). The shared metadata helper runs after this pass.
 		if wsKey, lang, ok := parseLazyProxyTaskName(rows[i].TaskName); ok {
 			// Mark the row with the structural workspace-scoped flag BEFORE
 			// the registry overlay so consumers (notably the GUI Logs
@@ -88,26 +155,6 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 			rows[i].IsWorkspaceScoped = true
 			rows[i].Server = "mcp-language-server"
 			rows[i].Daemon = "lsp-" + wsKey + "-" + lang
-			if wsEntries != nil {
-				// Task Scheduler emits names with a leading '\'; the registry
-				// stores them without. Normalize both when looking up.
-				normalized := strings.TrimPrefix(rows[i].TaskName, "\\")
-				if e, had := wsEntries[normalized]; had {
-					rows[i].Workspace = e.WorkspacePath
-					rows[i].Language = e.Language
-					rows[i].Backend = e.Backend
-					rows[i].Lifecycle = e.Lifecycle
-					rows[i].LastMaterializedAt = e.LastMaterializedAt
-					rows[i].LastToolsCallAt = e.LastToolsCallAt
-					rows[i].LastError = e.LastError
-					if e.Port != 0 {
-						rows[i].Port = e.Port
-					}
-				}
-			}
-			if rows[i].Port != 0 {
-				wantedPorts = append(wantedPorts, rows[i].Port)
-			}
 			continue
 		}
 		srv, dmn := parseTaskName(rows[i].TaskName)
@@ -131,6 +178,12 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 		} else if p, ok := ports[srv]["default"]; ok {
 			rows[i].Port = p
 		}
+	}
+	if err := applyWorkspaceRegistryMetadata(rows, wsEntries); err != nil {
+		return err
+	}
+	var wantedPorts []int
+	for i := range rows {
 		if rows[i].Port != 0 {
 			wantedPorts = append(wantedPorts, rows[i].Port)
 		}
@@ -223,6 +276,7 @@ func enrichStatusWithRegistry(rows []DaemonStatus, manifestDir, registryPath str
 		rows[i].DisplayName = ComputeDaemonDisplayName(
 			rows[i].TaskName, rows[i].Server, rows[i].Daemon, rows[i].Workspace)
 	}
+	return nil
 }
 
 // deriveState maps (raw scheduler task state, daemon port-listening?, NextRun text)

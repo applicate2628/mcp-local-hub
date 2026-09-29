@@ -1,15 +1,11 @@
 package lsp_routing
 
 import (
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
-	"time"
 
 	"mcp-local-hub/internal/api"
 	"mcp-local-hub/internal/config"
@@ -39,54 +35,29 @@ type ResolveResult struct {
 // above the input path, the nearest .git ancestor is used as a universal VCS
 // fallback.
 //
-// Concurrency: exported methods are safe for parallel use. Registry snapshots
-// are refreshed when the registry file mtime advances, mirroring the serena
-// resolver's best-effort reload behavior.
+// Registry-dependent lookups consume the API-owned content-generation observer.
 type WorkspaceResolver struct {
-	reg          *api.Registry
-	registryPath string
-	markers      map[string][]string
-	// readOnly, when true, makes refresh() reload the registry WITHOUT ever
-	// taking Registry.Lock() (the cross-process exclusive flock, which also
-	// CREATES <registry>.lock + the state directory on first acquire). See
-	// NewReadOnlyWorkspaceResolver's doc comment (serena_routing package) for
-	// the safety argument and the P2-3 finding this closes.
-	readOnly bool
-
-	mu        sync.RWMutex
-	lastMtime time.Time
-	loaded    bool
-	cached    []api.WorkspaceEntry
-
-	// refreshMu serializes the reload-and-publish critical section across
-	// concurrent refresh() calls (A2 fix, architecture-adversarial-
-	// reverify.md + qa-adversarial-falsifiers.md, work-items/active/2026-07-
-	// 25-mcp-front-daemon/). See serena_routing.WorkspaceResolver's own
-	// refreshMu doc comment for the full mechanism/safety argument — this
-	// is the LSP twin of the identical fix. It is a purely in-process
-	// mutex and does NOT reintroduce the cross-process Registry.Lock()
-	// flock the read-only variant avoids.
-	refreshMu sync.Mutex
+	observer *api.RegistrySnapshotObserver
+	markers  map[string][]string
 }
-
-// refreshLoadedHookForTest is the LSP twin of
-// serena_routing.refreshLoadedHookForTest — see its doc comment. Always nil
-// in production.
-var refreshLoadedHookForTest func(entries []api.WorkspaceEntry)
 
 // NewWorkspaceResolver returns a resolver bound to reg, registryPath, and the
 // manifest language specs that define project markers.
 func NewWorkspaceResolver(reg *api.Registry, registryPath string, languages []config.LanguageSpec) *WorkspaceResolver {
+	return NewWorkspaceResolverWithObserver(api.NewRegistrySnapshotObserver(reg, registryPath, false), languages)
+}
+
+// NewWorkspaceResolverWithObserver injects the same snapshot owner as Serena.
+func NewWorkspaceResolverWithObserver(observer *api.RegistrySnapshotObserver, languages []config.LanguageSpec) *WorkspaceResolver {
 	return &WorkspaceResolver{
-		reg:          reg,
-		registryPath: registryPath,
-		markers:      markerMap(languages),
+		observer: observer,
+		markers:  markerMap(languages),
 	}
 }
 
 // NewReadOnlyWorkspaceResolver is the LSP twin of
 // serena_routing.NewReadOnlyWorkspaceResolver: a resolver identical to
-// NewWorkspaceResolver except its refresh NEVER takes Registry.Lock() — for
+// NewWorkspaceResolver except its observer NEVER takes Registry.Lock() — for
 // the standalone `mcphub route` front daemon (internal/cli/route.go), which
 // must never contend with the GUI's own registry writers for the SAME
 // cross-process exclusive lock (P2-3 finding). See the serena_routing
@@ -95,12 +66,7 @@ func NewWorkspaceResolver(reg *api.Registry, registryPath string, languages []co
 // concurrent reader always sees a complete pre- or post-write snapshot,
 // never a torn file).
 func NewReadOnlyWorkspaceResolver(reg *api.Registry, registryPath string, languages []config.LanguageSpec) *WorkspaceResolver {
-	return &WorkspaceResolver{
-		reg:          reg,
-		registryPath: registryPath,
-		markers:      markerMap(languages),
-		readOnly:     true,
-	}
+	return NewWorkspaceResolverWithObserver(api.NewRegistrySnapshotObserver(reg, registryPath, true), languages)
 }
 
 // NewDefaultWorkspaceResolver constructs a resolver using api.DefaultRegistryPath.
@@ -248,12 +214,12 @@ func markerExists(path string) bool {
 }
 
 func (r *WorkspaceResolver) matchRegistration(workspaceKey, language string) (api.WorkspaceEntry, bool) {
-	snapshot := r.snapshotRegistry()
+	snapshot := r.snapshotView()
 	return matchRegistrationInSnapshot(snapshot, workspaceKey, language)
 }
 
 func (r *WorkspaceResolver) matchRegistrationForResolvedWorkspace(workspaceKey, language, canonicalRoot, discoveredRoot string) (api.WorkspaceEntry, bool) {
-	snapshot := r.snapshotRegistry()
+	snapshot := r.snapshotView()
 	if entry, ok := matchRegistrationInSnapshot(snapshot, workspaceKey, language); ok {
 		return entry, true
 	}
@@ -269,16 +235,17 @@ func (r *WorkspaceResolver) matchRegistrationForResolvedWorkspace(workspaceKey, 
 	return matchRegistrationByWorkspacePathInSnapshot(snapshot, language, canonicalRoot, legacyRoot)
 }
 
-func matchRegistrationInSnapshot(snapshot *api.Registry, workspaceKey, language string) (api.WorkspaceEntry, bool) {
-	for _, e := range snapshot.ListByWorkspaceLSP(workspaceKey) {
-		if e.Language == language {
-			return e, true
+func matchRegistrationInSnapshot(snapshot api.RegistrySnapshotView, workspaceKey, language string) (api.WorkspaceEntry, bool) {
+	for i := 0; i < snapshot.LSPCount(); i++ {
+		candidate, _ := snapshot.LSPCandidate(i)
+		if candidate.WorkspaceKey == workspaceKey && candidate.Language == language {
+			return snapshot.Materialize(candidate)
 		}
 	}
 	return api.WorkspaceEntry{}, false
 }
 
-func matchRegistrationByWorkspacePathInSnapshot(snapshot *api.Registry, language string, workspacePaths ...string) (api.WorkspaceEntry, bool) {
+func matchRegistrationByWorkspacePathInSnapshot(snapshot api.RegistrySnapshotView, language string, workspacePaths ...string) (api.WorkspaceEntry, bool) {
 	pathSet := make(map[string]bool, len(workspacePaths))
 	for _, p := range workspacePaths {
 		if key := workspacePathMatchKey(p); key != "" {
@@ -289,22 +256,26 @@ func matchRegistrationByWorkspacePathInSnapshot(snapshot *api.Registry, language
 		return api.WorkspaceEntry{}, false
 	}
 
-	var found api.WorkspaceEntry
+	var found api.RegistrySnapshotCandidate
 	matched := false
-	for _, e := range snapshot.LSPEntries() {
-		if e.Language != language || e.WorkspacePath == "" {
+	for i := 0; i < snapshot.LSPCount(); i++ {
+		candidate, _ := snapshot.LSPCandidate(i)
+		if candidate.Language != language || candidate.WorkspacePath == "" {
 			continue
 		}
-		if !pathSet[workspacePathMatchKey(e.WorkspacePath)] {
+		if !pathSet[workspacePathMatchKey(candidate.WorkspacePath)] {
 			continue
 		}
 		if matched {
 			return api.WorkspaceEntry{}, false
 		}
-		found = e
+		found = candidate
 		matched = true
 	}
-	return found, matched
+	if !matched {
+		return api.WorkspaceEntry{}, false
+	}
+	return snapshot.Materialize(found)
 }
 
 func workspacePathMatchKey(path string) string {
@@ -319,113 +290,12 @@ func workspacePathMatchKey(path string) string {
 	return path
 }
 
-func (r *WorkspaceResolver) snapshotRegistry() *api.Registry {
-	if r == nil {
-		return &api.Registry{}
+func (r *WorkspaceResolver) snapshotView() api.RegistrySnapshotView {
+	if r == nil || r.observer == nil {
+		return api.RegistrySnapshotView{}
 	}
-	r.refresh()
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]api.WorkspaceEntry, len(r.cached))
-	copy(out, r.cached)
-	return &api.Registry{Workspaces: out}
-}
-
-// refresh re-reads the registry file when its mtime has advanced past the last
-// observed value. Reload failures preserve the previous cache.
-//
-// Locking: the cheap "nothing changed" check (staleness()) is unserialized
-// so the common no-change path stays lock-light. An actual reload is
-// serialized end-to-end (Load through publish) under refreshMu — see the
-// struct's own refreshMu doc comment for why this is required (A2 fix) and
-// why it does not reintroduce the cross-process registry lock the
-// read-only variant avoids.
-func (r *WorkspaceResolver) refresh() {
-	if r == nil || r.reg == nil || r.registryPath == "" {
-		return
-	}
-	if stale, _, _ := r.staleness(); !stale {
-		return
-	}
-
-	r.refreshMu.Lock()
-	defer r.refreshMu.Unlock()
-
-	// Re-check now that we hold refreshMu: another goroutine may have
-	// already completed an equivalent-or-newer reload while we waited for
-	// the lock.
-	stale, fi, statErr := r.staleness()
-	if !stale {
-		return
-	}
-
-	if statErr != nil {
-		if errors.Is(statErr, fs.ErrNotExist) {
-			r.mu.Lock()
-			r.cached = nil
-			r.lastMtime = time.Time{}
-			r.loaded = false
-			r.mu.Unlock()
-			return
-		}
-		fmt.Fprintf(os.Stderr, "lsp_routing: stat registry %s: %v; preserving cached snapshot\n", r.registryPath, statErr)
-		return
-	}
-
-	mtime := fi.ModTime()
-
-	if r.readOnly {
-		// P2-3 fix: never take Registry.Lock() (see
-		// NewReadOnlyWorkspaceResolver's doc comment for the safety
-		// argument). Load() alone performs no locking and creates no
-		// directory/lock file of its own.
-		if err := r.reg.Load(); err != nil {
-			return
-		}
-	} else {
-		unlock, err := r.reg.Lock()
-		if err != nil {
-			return
-		}
-		defer func() {
-			if releaseErr := unlock(); releaseErr != nil {
-				fmt.Fprintf(os.Stderr, "lsp_routing: release registry lock %s: %v; the lock stays held until this process exits\n", r.registryPath, releaseErr)
-			}
-		}()
-		if err := r.reg.Load(); err != nil {
-			return
-		}
-	}
-	entries := r.reg.LSPEntries()
-
-	if refreshLoadedHookForTest != nil {
-		refreshLoadedHookForTest(entries)
-	}
-
-	r.mu.Lock()
-	r.cached = entries
-	r.loaded = true
-	r.lastMtime = mtime
-	r.mu.Unlock()
-}
-
-// staleness reports whether the registry file's current mtime differs from
-// the resolver's last-observed generation (or nothing has ever loaded
-// successfully), alongside the stat result that produced the answer so a
-// caller does not have to re-stat to act on it.
-func (r *WorkspaceResolver) staleness() (stale bool, fi os.FileInfo, statErr error) {
-	fi, statErr = os.Stat(r.registryPath)
-	r.mu.RLock()
-	lastMtime := r.lastMtime
-	cacheEmpty := !r.loaded
-	r.mu.RUnlock()
-	if statErr != nil {
-		return true, fi, statErr
-	}
-	if !cacheEmpty && fi.ModTime().Equal(lastMtime) {
-		return false, fi, nil
-	}
-	return true, fi, nil
+	view, _, _ := r.observer.ObserveView()
+	return view
 }
 
 func isWindowsUNCPath(path string) bool {

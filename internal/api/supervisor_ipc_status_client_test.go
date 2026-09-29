@@ -372,6 +372,43 @@ func TestDecodeSupervisorIPCStatusResult_PreservesStalePID(t *testing.T) {
 	}
 }
 
+func TestDecodeSupervisorIPCStatusResult_PreservesCrashesInWindow(t *testing.T) {
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Running","crashes_in_window":2}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].CrashesInWindow != 2 {
+		t.Fatalf("CrashesInWindow = %d, want 2", rows[0].CrashesInWindow)
+	}
+}
+
+func TestDecodeSupervisorIPCStatusResult_LegacyMissingCrashesInWindowDefaultsZero(t *testing.T) {
+	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Running"}]}`)
+
+	rows, err := decodeSupervisorIPCStatusResult(raw)
+	if err != nil {
+		t.Fatalf("decodeSupervisorIPCStatusResult: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("rows len = %d, want 1", len(rows))
+	}
+	if rows[0].CrashesInWindow != 0 {
+		t.Fatalf("legacy missing CrashesInWindow = %d, want 0", rows[0].CrashesInWindow)
+	}
+	encoded, err := json.Marshal(rows[0])
+	if err != nil {
+		t.Fatalf("marshal DaemonStatus: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"crashes_in_window":0`) {
+		t.Fatalf("zero-valued DaemonStatus omitted crashes_in_window: %s", encoded)
+	}
+}
+
 func TestDecodeSupervisorIPCStatusResult_PreservesStopSettlementDiagnostic(t *testing.T) {
 	raw := json.RawMessage(`{"state":"running","daemons":[{"task_name":"\\mcp-local-hub-memory-default","server":"memory","daemon":"default","state":"Stopping","current_pid":4812,"stop_settlement":{"version":1,"task_name":"\\mcp-local-hub-memory-default","epoch":41,"owned_pid":4812,"started_at":"2026-08-31T12:00:00Z","pid_generation":7,"revision":2,"phase":"exit_observed","observed_port_owner_pid":4812}}]}`)
 	rows, err := decodeSupervisorIPCStatusResult(raw)

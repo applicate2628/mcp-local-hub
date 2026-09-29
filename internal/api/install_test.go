@@ -712,9 +712,9 @@ func TestBuildPlan_NoFilter_FullInstall(t *testing.T) {
 	}
 }
 
-func TestBuildPlanWindowsSchedulerUsesWindowlessEntrypointAndIntentKeepsCUI(t *testing.T) {
+func TestBuildPlanWindowsSchedulerAndIntentUseCanonicalProduct(t *testing.T) {
 	if runtime.GOOS != "windows" {
-		t.Skip("Windows product-pair entrypoint contract")
+		t.Skip("Windows product entrypoint contract")
 	}
 	original := testCanonicalMcphubPathOverride
 	canonical := filepath.Join(t.TempDir(), "mcphub.exe")
@@ -724,15 +724,15 @@ func TestBuildPlanWindowsSchedulerUsesWindowlessEntrypointAndIntentKeepsCUI(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	wantTask := scheduler.WindowsOwnedEntrypointPath(canonical)
+	wantTask := canonical
 	for _, task := range plan.SchedulerTasks {
 		if task.Command != wantTask {
-			t.Fatalf("scheduled task %q command=%q want windowless %q", task.Name, task.Command, wantTask)
+			t.Fatalf("scheduled task %q command=%q want canonical product %q", task.Name, task.Command, wantTask)
 		}
 	}
 	for _, intent := range plan.SupervisorIntent {
 		if intent.Command != canonical {
-			t.Fatalf("supervisor intent %q command=%q want CUI %q", intent.Name, intent.Command, canonical)
+			t.Fatalf("supervisor intent %q command=%q want canonical product %q", intent.Name, intent.Command, canonical)
 		}
 	}
 }

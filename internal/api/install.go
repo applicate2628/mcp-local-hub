@@ -78,6 +78,20 @@ func canonicalMcphubPath() (string, error) {
 	return filepath.Join(home, ".local", "bin", mcphubShortName), nil
 }
 
+// CanonicalManifestDir returns the single default disk-manifest root shared by
+// every product process context. It derives only from the canonical installed
+// product path and performs no filesystem access or directory creation.
+func CanonicalManifestDir() (string, error) {
+	canonicalExecutable, err := canonicalMcphubPath()
+	if err != nil {
+		return "", fmt.Errorf("resolve canonical manifest root: %w", err)
+	}
+	if canonicalExecutable == "" || !filepath.IsAbs(canonicalExecutable) || filepath.Clean(canonicalExecutable) != canonicalExecutable {
+		return "", fmt.Errorf("resolve canonical manifest root: canonical product path must be clean and absolute")
+	}
+	return filepath.Join(filepath.Dir(canonicalExecutable), "servers"), nil
+}
+
 func ensureCanonicalMcphubPresent() (string, error) {
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
@@ -87,6 +101,19 @@ func ensureCanonicalMcphubPresent() (string, error) {
 		return "", fmt.Errorf("%s not present — run `mcphub setup` once to install the canonical binary: %w", canonicalPath, err)
 	}
 	return canonicalPath, nil
+}
+
+// CanonicalAutostartEntrypoint returns the installed executable entrypoint
+// owned by setup for the current platform without mutating it.
+func CanonicalAutostartEntrypoint() (string, error) {
+	canonical, err := ensureCanonicalMcphubPresent()
+	if err != nil {
+		return "", err
+	}
+	if runtime.GOOS == "windows" {
+		return canonical, nil
+	}
+	return canonical, nil
 }
 
 // Plan describes the side effects that `mcp install --server X` would produce.
@@ -381,11 +408,15 @@ func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, r
 	if w == nil {
 		w = os.Stderr
 	}
+	manifestDir, err := CanonicalManifestDir()
+	if err != nil {
+		return fmt.Errorf("install: %w", err)
+	}
 	// Surface a PRE-EXISTING embed-vs-disk collision (a disk manifest shadowing a
 	// shipped server name that the embed-first read below ignores). Warn only —
 	// never delete the operator's file; NEW such files are refused at
 	// ManifestCreateIn.
-	if warn := embeddedDiskShadowWarning(opts.Server, installShadowWarnDir()); warn != "" {
+	if warn := embeddedDiskShadowWarning(opts.Server, manifestDir); warn != "" {
 		fmt.Fprintf(w, "warning: %s\n", warn)
 	}
 	// 1. Load manifest (embed FS first, disk fallback for dev flow).
@@ -393,7 +424,7 @@ func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, r
 	//    embedded FS so an install launched from any cwd finds the same
 	//    18 manifests the daemon sees — previously install opened disk
 	//    and failed or saw a stale subset.
-	data, err := loadManifestYAMLEmbedFirst(opts.Server)
+	data, err := loadManifestYAMLEmbedFirstFromDir(opts.Server, manifestDir)
 	if err != nil {
 		return fmt.Errorf("load manifest %s: %w", opts.Server, err)
 	}
@@ -430,7 +461,11 @@ func (a *API) installWithAdoptLeaseHeld(ctx context.Context, opts InstallOpts, r
 // installFrozenPlanCore applies one already-frozen plan and returns its exact
 // mutation receipt to the caller. A committed client-config row is evidence of
 // its lower transaction only; it never promotes the wider install outcome.
-func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1)) (err error) {
+func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1)) error {
+	return a.installFrozenPlanCoreWithManagedDeps(ctx, m, plan, opts, authorityRequest, w, receipt, productionManagedRegistrationInstallDeps(a))
+}
+
+func (a *API) installFrozenPlanCoreWithManagedDeps(ctx context.Context, m *config.ServerManifest, plan *Plan, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, w io.Writer, receipt func(InstallMutationReceiptV1), deps managedRegistrationInstallCompositionDeps) (err error) {
 	// Freeze task and client identities from the exact plan before apply. The
 	// receiving port re-reads every client after commit; no post-write
 	// observation can become the expected identity.
@@ -451,22 +486,35 @@ func (a *API) installFrozenPlanCore(ctx context.Context, m *config.ServerManifes
 	if err := admitFrozenStdioBridgeBeforeMutation(ctx, m, plan, opts); err != nil {
 		return err
 	}
-	if receipt != nil && len(plan.ClientUpdates) > 0 {
+	var allClients map[string]clients.Client
+	var clientConstructionFailures []string
+	needsBindingExpectations := receipt != nil && len(plan.ClientUpdates) > 0 && !opts.SkipClientConfigWrites
+	needsManagedRegistration := !opts.DryRun && !opts.SkipClientConfigWrites && len(plan.ClientUpdates) > 0
+	if needsBindingExpectations || needsManagedRegistration {
+		if deps.Clients == nil {
+			return fmt.Errorf("managed registration client population is unavailable")
+		}
+		allClients, clientConstructionFailures = deps.Clients()
+	}
+	if needsBindingExpectations || needsManagedRegistration {
 		if err := freezeInstallRelayExePath(plan); err != nil {
 			return err
 		}
-		expectations, expectationErr := freezeInstallBindingExpectations(plan, m.Name, plan.installRelayExePath)
+	}
+	if needsBindingExpectations {
+		expectations, expectationErr := freezeInstallBindingExpectationsFromClients(plan, m.Name, plan.installRelayExePath, allClients)
 		if expectationErr != nil {
 			return expectationErr
 		}
 		frozen.bindingExpectations = expectations
 		frozen.RequireBindings = len(expectations) > 0
 	}
-	// 4. Dry-run + audit-first + execute via the shared core. v0.6 Phase F:
-	// global daemons spawn from supervisor-intent.json (installPlanCore writes
-	// the descriptor rows + defers the spawn to the supervisor reconcile loop)
-	// rather than from per-daemon scheduler tasks.
-	err = a.installPlanCoreWithRoutingTargetLease(ctx, m, plan, opts, authorityRequest, w)
+	// 4. Execute the PR core exactly once. Managed registration runs only after
+	// that core commits and may verify/journal/project without a second write.
+	materializationCommitted, err := a.executeManagedRegistrationInstall(ctx, m, plan, opts, authorityRequest, w, allClients, clientConstructionFailures, deps)
+	if materializationCommitted && !opts.DryRun {
+		frozen.Committed = true
+	}
 	// The rollback proof is produced under inner locks. Consume it only after
 	// their deferred releases have settled, while every caller still holds the
 	// canonical manifest lease (ordinary Install, bulk install, and adopt).
@@ -592,14 +640,6 @@ func (a *API) InstallAllFrom(opts InstallAllOpts) []InstallResult {
 	return results
 }
 
-// installShadowWarnDir resolves the disk-fallback dir the pre-existing
-// embed-vs-disk collision warn (embeddedDiskShadowWarning) inspects at the
-// Install / installUsingEmbedFirst emit sites. Package var following the
-// statusInternalDialFn / forceMaterializeProbe seam idiom: production stays
-// on defaultManifestDir (exe-location-derived, not seedable from a test);
-// emit-site tests point it at a temp dir and restore via t.Cleanup.
-var installShadowWarnDir = defaultManifestDir
-
 // EmbeddedDiskShadowWarning returns the operator-facing pre-existing
 // embed-vs-disk collision warning for a server (empty when there is none),
 // computed against the SAME dir + byte-compare the Install / installUsingEmbedFirst
@@ -610,7 +650,11 @@ var installShadowWarnDir = defaultManifestDir
 // idiom mirroring IsEmbeddedManifestName. The CLI Install path keeps its own
 // stderr warn for `mcphub install` operators.
 func EmbeddedDiskShadowWarning(server string) string {
-	return embeddedDiskShadowWarning(server, installShadowWarnDir())
+	dir, err := CanonicalManifestDir()
+	if err != nil {
+		return ""
+	}
+	return embeddedDiskShadowWarning(server, dir)
 }
 
 // installUsingEmbedFirst is the install entry that loads the manifest
@@ -719,6 +763,10 @@ func (a *API) installPlanCoreWithRoutingTargetLease(
 	run := func() error {
 		return a.installPlanCoreWithSymlinkConsents(ctx, m, plan, opts.DaemonFilter, opts.DryRun, w, opts.SymlinkConsents)
 	}
+	return a.withInstallRoutingTargetLease(ctx, m, opts, authorityRequest, run)
+}
+
+func (a *API) withInstallRoutingTargetLease(ctx context.Context, m *config.ServerManifest, opts InstallOpts, authorityRequest ClientRoutingAuthorityRequest, run func() error) error {
 	if opts.DryRun || !IsSerenaServer(m.Name) || !installOptsMayWriteClients(opts) {
 		return run()
 	}
@@ -833,6 +881,9 @@ func (a *API) statusInternal(ctx context.Context) ([]DaemonStatus, error) {
 	reg := NewRegistry(regPath)
 	if regErr := reg.Load(); regErr != nil {
 		return nil, regErr
+	}
+	if err := applyWorkspaceRegistryMetadata(rows, reg.Workspaces); err != nil {
+		return nil, err
 	}
 	projection, projectionErr := a.ProjectSerenaWorkspaceSnapshotHeld(ctx, reg.Workspaces, SerenaWorkspaceProjectionModeSnapshot, rows, readiness)
 	if projectionErr != nil {
@@ -1017,7 +1068,9 @@ func (a *API) StatusWithOptsDetailed(opts StatusOpts) (StatusWithOptsResult, err
 	// lookup only overwrites when the manifest actually has a matching port).
 	mergeSupervisorOnlyDaemonRows(&result, seen)
 	enrichStatusWithSpawnHolds(result)
-	enrichStatusWithRegistry(result, "", regPath)
+	if err := enrichStatusWithRegistry(result, "", regPath); err != nil {
+		return StatusWithOptsResult{}, err
+	}
 	finalizeRegistryOnlyWorkspaceStates(result, registryOnlyLive)
 	if opts.ProbeHealth {
 		probeDaemonHealth(result)
@@ -1528,7 +1581,7 @@ const maxHealthProbeResponseBytes = 1 << 20 // 1 MiB
 const healthProbeSessionCleanupTimeout = 3 * time.Second
 
 var healthProbeHTTPClient = func() *http.Client {
-	return &http.Client{Timeout: 3 * time.Second}
+	return &http.Client{Timeout: MCPReadinessProbeBudget}
 }
 
 func cleanupHealthProbeSession(client *http.Client, url, sessionID string) error {
@@ -1544,7 +1597,7 @@ func singleHealthProbe(port int) *HealthProbe {
 // while allowing a caller-owned cancellation boundary (such as a provisional
 // install admission) to abort the HTTP exchange and reap its process tree.
 func singleHealthProbeContext(parent context.Context, port int) (probe *HealthProbe) {
-	ctx, cancel := context.WithTimeout(parent, 3*time.Second)
+	ctx, cancel := context.WithTimeout(parent, MCPReadinessProbeBudget)
 	defer cancel()
 	url := clients.HubLoopbackURL(port, "/mcp")
 	client := healthProbeHTTPClient()
@@ -2094,16 +2147,13 @@ func BuildPlanWithOpts(m *config.ServerManifest, opts BuildPlanOpts) (*Plan, err
 	if err != nil {
 		return nil, err
 	}
-	// Direct supervisor intent remains bound to canonical CUI product logic;
-	// Windows Scheduler actions enter through its exact windowless sibling.
+	// Both direct supervisor intent and Windows Scheduler actions remain bound
+	// to the canonical one-executable product.
 	canonicalPath, err := canonicalMcphubPath()
 	if err != nil {
 		return nil, err
 	}
 	taskCommand := canonicalPath
-	if runtime.GOOS == "windows" {
-		taskCommand = scheduler.WindowsOwnedEntrypointPath(canonicalPath)
-	}
 	workDir := filepath.Dir(canonicalPath)
 	p := &Plan{Server: m.Name, CanMigrate: canMigrateServer(m.Name), FullInstall: opts.DaemonFilter == ""}
 	// Scheduler tasks — one per daemon (global) or lazy (workspace-scoped).

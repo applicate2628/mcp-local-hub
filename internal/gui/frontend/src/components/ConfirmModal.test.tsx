@@ -9,6 +9,37 @@ beforeEach(() => {
 });
 
 describe("ConfirmModal", () => {
+  it("gives concurrent dialogs distinct accessible names from their headings", () => {
+    render(
+      <>
+        <ConfirmModal
+          open
+          title="Restart supervisor?"
+          body={<>Restart managed services.</>}
+          confirmLabel="Restart"
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+          testId="restart-dialog"
+        />
+        <ConfirmModal
+          open
+          title="Delete backup?"
+          body={<>Delete this backup.</>}
+          confirmLabel="Delete"
+          onConfirm={vi.fn()}
+          onCancel={vi.fn()}
+          testId="delete-dialog"
+        />
+      </>,
+    );
+
+    const restart = screen.getByRole("dialog", { name: "Restart supervisor?" });
+    const deletion = screen.getByRole("dialog", { name: "Delete backup?" });
+    expect(restart).toBe(screen.getByTestId("restart-dialog"));
+    expect(deletion).toBe(screen.getByTestId("delete-dialog"));
+    expect(restart.getAttribute("aria-labelledby")).not.toBe(deletion.getAttribute("aria-labelledby"));
+  });
+
   it("renders title + body + confirm label", () => {
     render(
       <ConfirmModal

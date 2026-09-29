@@ -6,6 +6,7 @@ import { SectionAdvancedDiagnostics } from "./SectionAdvancedDiagnostics";
 import { SectionFooter } from "./SectionAppearance";
 import { useSectionSaveFlow } from "./useSectionSaveFlow";
 import { InfoTip } from "../InfoTip";
+import { ConfirmModal } from "../ConfirmModal";
 import { SettingsCard } from "./SettingsCard";
 
 export type SectionAdvancedProps = {
@@ -208,6 +209,7 @@ export function SectionAdvanced({
   // restartSupervisor() helper (POST /api/supervisor/restart) so operators
   // don't have to leave the Settings screen.
   const [supRestartBusy, setSupRestartBusy] = useState(false);
+  const [restartConfirmOpen, setRestartConfirmOpen] = useState(false);
   const [supRestartMsg, setSupRestartMsg] = useState<{ kind: "ok" | "error"; text: string } | null>(null);
   async function restartSupervisorNow() {
     if (
@@ -344,7 +346,7 @@ export function SectionAdvanced({
         <div class="mt-2 flex flex-wrap items-center gap-3">
           <button
             type="button"
-            onClick={() => void restartSupervisorNow()}
+            onClick={() => setRestartConfirmOpen(true)}
             disabled={portActionPhase !== "clean" || flow.dirty || flow.busy || supRestartBusy}
             data-testid="advanced-restart-supervisor"
           >
@@ -360,6 +362,20 @@ export function SectionAdvanced({
             </span>
           )}
         </div>
+        {restartConfirmOpen && (
+          <ConfirmModal
+            open
+            title="Restart supervisor?"
+            body={<>Managed services may be briefly interrupted.</>}
+            confirmLabel="Restart"
+            onConfirm={async () => {
+              await restartSupervisorNow();
+              setRestartConfirmOpen(false);
+            }}
+            onCancel={() => setRestartConfirmOpen(false)}
+            testId="advanced-restart-confirm"
+          />
+        )}
       </div>
 
       <div class="mt-5 border-t border-app-border/60 pt-4">

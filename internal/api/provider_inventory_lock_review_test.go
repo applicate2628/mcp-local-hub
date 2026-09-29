@@ -202,7 +202,11 @@ func TestProviderInventoryLockReviewRechecksFinalGuards(t *testing.T) {
 							t.Fatal(err)
 						}
 					case "manifest":
-						path := filepath.Join(adoptCommittedManifestDir(), rec.ManifestName, "manifest.yaml")
+						manifestDir, manifestDirErr := adoptCommittedManifestDir()
+						if manifestDirErr != nil {
+							t.Fatal(manifestDirErr)
+						}
+						path := filepath.Join(manifestDir, rec.ManifestName, "manifest.yaml")
 						if err := os.WriteFile(path, deAdoptManagedManifest(rec.ManifestName, 0), 0o600); err != nil {
 							t.Fatal(err)
 						}

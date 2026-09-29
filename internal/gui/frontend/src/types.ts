@@ -86,6 +86,9 @@ export interface DaemonStatus {
   // could not be determined (non-Windows host, port-stale/Idle daemon, PID
   // recycled); the Dashboard renders "RAM: 48 MB" only when > 0.
   ram_bytes?: number;
+  // Supervisor backoff/quarantine failures in its current in-memory window;
+  // not necessarily process crashes. Absent/zero is not a health assertion.
+  crashes_in_window?: number;
   state: string;
   task_name?: string;
   // Human-readable label computed server-side (api.ComputeDaemonDisplayName):
