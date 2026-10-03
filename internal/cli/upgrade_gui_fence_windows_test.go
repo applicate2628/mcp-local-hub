@@ -529,18 +529,20 @@ func TestUpgradeGUIHeldGenerationAuthority(t *testing.T) {
 		}, wantGUI: 1, wantID: "UPGRADE_GUI_IDENTITY_AMBIGUOUS"},
 		{name: "GUI role contradicts held metadata", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, target string, _ time.Time) {
 			old := in.CommandIdentity
-			in.CommandIdentity = func(pid int) (process.ProcessIdentity, error) {
+			in.CommandIdentity = func(ctx context.Context, pid int) (process.ProcessIdentity, error) {
 				if pid == 101 {
 					return process.ProcessIdentity{PID: 101, ExecutablePath: target, CommandLine: target + " daemon", CreationDateUnix: time.Date(2026, 9, 28, 8, 0, 0, 0, time.UTC).Unix()}, nil
 				}
-				return old(pid)
+				return old(ctx, pid)
 			}
 		}, wantGUI: 1, wantID: "UPGRADE_GUI_IDENTITY_AMBIGUOUS"},
 		{name: "GUI SID contradicts held metadata", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
 			in.SIDMatches = func(pid int) (bool, error) { return pid != 101, nil }
 		}, wantGUI: 1, wantID: "UPGRADE_GUI_IDENTITY_AMBIGUOUS"},
 		{name: "cancelled metadata after GUI hold", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
-			in.CommandIdentity = func(int) (process.ProcessIdentity, error) { return process.ProcessIdentity{}, context.Canceled }
+			in.CommandIdentity = func(context.Context, int) (process.ProcessIdentity, error) {
+				return process.ProcessIdentity{}, context.Canceled
+			}
 		}, wantGUI: 1, wantID: "UPGRADE_GUI_IDENTITY_AMBIGUOUS"},
 		{name: "tray parent contradicts held metadata", mutate: func(in *upgradeGUIObservationInputs, _, _ *upgradeGUIAuthorityHold, _ *upgradeGUIAuthorityJobHold, _ string, _ time.Time) {
 			in.ParentPID = func(int) (int, error) { return 999, nil }
@@ -620,7 +622,7 @@ func TestUpgradeGUIHeldGenerationAuthority(t *testing.T) {
 					}
 					return id, nil
 				},
-				CommandIdentity: func(pid int) (process.ProcessIdentity, error) {
+				CommandIdentity: func(_ context.Context, pid int) (process.ProcessIdentity, error) {
 					id, ok := base[pid]
 					if !ok {
 						return process.ProcessIdentity{}, os.ErrNotExist

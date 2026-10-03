@@ -108,7 +108,7 @@ type upgradeGUIObservationInputs struct {
 	HoldTermination  func(int) (process.HeldPIDGeneration, error)
 	HoldJob          func(int) (process.HeldPIDJobObservation, error)
 	CurrentIdentity  func(int) (process.PIDHandleIdentity, error)
-	CommandIdentity  func(int) (process.ProcessIdentity, error)
+	CommandIdentity  func(context.Context, int) (process.ProcessIdentity, error)
 	SIDMatches       func(int) (bool, error)
 	ParentPID        func(int) (int, error)
 	SupervisorOwner  func(string) (api.SupervisorLockOwner, error)
@@ -135,7 +135,7 @@ func productionUpgradeGUIObservationInputs() upgradeGUIObservationInputs {
 		HoldTermination: process.HoldPIDForTermination,
 		HoldJob:         process.HoldPIDForJobObservation,
 		CurrentIdentity: process.LookupPIDHandleIdentity,
-		CommandIdentity: process.LookupProcessIdentity,
+		CommandIdentity: process.LookupProcessIdentityContext,
 		SIDMatches:      process.ProcessOwnerSIDMatchesCurrent,
 		ParentPID:       retainedGenerationParentPID,
 		SupervisorOwner: api.ReadSupervisorLockOwner,
@@ -179,6 +179,19 @@ func captureUpgradeGUITaskActions(ctx context.Context, target string) ([]upgrade
 }
 
 func captureUpgradeGUIPortOwners(ctx context.Context, stateDir, target string, supervisorPID int) ([32]byte, []windowsProductIntentPortV1, []upgradeGUIPortOwner, error) {
+	return captureUpgradeGUIPortOwnersWithInputs(ctx, stateDir, target, supervisorPID, productionUpgradeGUIObservationInputs(), api.LoopbackPortOwnerPIDContext, process.LookupProcessIdentitiesContext)
+}
+
+func captureUpgradeGUIPortOwnersWithInputs(ctx context.Context, stateDir, target string, supervisorPID int, in upgradeGUIObservationInputs, portOwner func(context.Context, int) (int, bool, error), commandIdentities func(context.Context, []int) (map[int]process.ProcessIdentity, error)) ([32]byte, []windowsProductIntentPortV1, []upgradeGUIPortOwner, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return [32]byte{}, nil, nil, err
+	}
+	if in.CurrentIdentity == nil || in.ParentPID == nil || in.SIDMatches == nil || portOwner == nil || commandIdentities == nil {
+		return [32]byte{}, nil, nil, errors.New("managed capture observation inputs unavailable")
+	}
 	intentPath := filepath.Join(stateDir, "supervisor-intent.json")
 	intent, err := api.ReadSupervisorIntent(intentPath)
 	if err != nil || intent == nil || len(intent.Daemons) == 0 {
@@ -194,7 +207,27 @@ func captureUpgradeGUIPortOwners(ctx context.Context, stateDir, target string, s
 			frozen = append(frozen, windowsProductIntentPortV1{TaskName: daemon.TaskName, Port: port, ArgvSHA256: windowsProductArgvSHA256(append([]string{daemon.Command}, daemon.Args...))})
 		}
 	}
-	observed, err := observeWindowsProductIntentPorts(ctx, target, frozen, false)
+	observed, anchors, err := observeWindowsProductIntentPortsWithInputs(ctx, target, frozen, false, portOwner, in.CurrentIdentity)
+	if err != nil {
+		return [32]byte{}, nil, nil, err
+	}
+	pids := make([]int, 0, len(observed))
+	seen := make(map[int]struct{}, len(observed))
+	for _, row := range observed {
+		if row.PrePID > 0 {
+			if _, exists := seen[row.PrePID]; !exists {
+				seen[row.PrePID] = struct{}{}
+				pids = append(pids, row.PrePID)
+			}
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return [32]byte{}, nil, nil, err
+	}
+	identities, err := commandIdentities(ctx, pids)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return [32]byte{}, nil, nil, ctxErr
+	}
 	if err != nil {
 		return [32]byte{}, nil, nil, err
 	}
@@ -202,29 +235,62 @@ func captureUpgradeGUIPortOwners(ctx context.Context, stateDir, target string, s
 	for i, row := range observed {
 		owner := upgradeGUIPortOwner{TaskName: frozen[i].TaskName, Port: frozen[i].Port, PID: row.PrePID}
 		if row.PrePID > 0 {
-			identity, err := processLookupIdentityFn(row.PrePID)
-			if err != nil {
+			if err := ctx.Err(); err != nil {
 				return [32]byte{}, nil, nil, err
+			}
+			identity, present := identities[row.PrePID]
+			if !present {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d owner absent: %w", owner.Port, process.ErrProcessNotFound)
 			}
 			owner.ArgvSHA256 = windowsProductArgvSHA256(process.TokenizeWindowsCommandLine(identity.CommandLine))
 			if owner.ArgvSHA256 != frozen[i].ArgvSHA256 {
 				return [32]byte{}, nil, nil, fmt.Errorf("foreign listener command on managed port %d", owner.Port)
 			}
-			handleID, err := process.LookupPIDHandleIdentity(row.PrePID)
-			if err != nil || !samePath(handleID.ExecutablePath, target) {
-				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d generation unverifiable: %v", owner.Port, err)
+			if err := ctx.Err(); err != nil {
+				return [32]byte{}, nil, nil, err
+			}
+			handleID, err := in.CurrentIdentity(row.PrePID)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return [32]byte{}, nil, nil, ctxErr
+			}
+			if err != nil {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d generation unverifiable: %w", owner.Port, err)
+			}
+			if handleID.PID != row.PrePID || handleID.StartedAt.IsZero() || !samePath(handleID.ExecutablePath, target) || !samePath(handleID.ExecutablePath, anchors[i].ExecutablePath) || !handleID.StartedAt.Equal(anchors[i].StartedAt) || identity.CreationDateUnix != handleID.StartedAt.Unix() {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d generation unverifiable", owner.Port)
 			}
 			owner.StartedAt = handleID.StartedAt
-			owner.ParentPID, err = retainedGenerationParentPID(row.PrePID)
-			if err != nil || owner.ParentPID != supervisorPID {
-				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d parent differs: %v", owner.Port, err)
+			if err := ctx.Err(); err != nil {
+				return [32]byte{}, nil, nil, err
 			}
-			sameUser, err := process.ProcessOwnerSIDMatchesCurrent(row.PrePID)
-			if err != nil || !sameUser {
-				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d user identity differs: %v", owner.Port, err)
+			owner.ParentPID, err = in.ParentPID(row.PrePID)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return [32]byte{}, nil, nil, ctxErr
+			}
+			if err != nil {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d parent differs: %w", owner.Port, err)
+			}
+			if owner.ParentPID != supervisorPID {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d parent differs", owner.Port)
+			}
+			if err := ctx.Err(); err != nil {
+				return [32]byte{}, nil, nil, err
+			}
+			sameUser, err := in.SIDMatches(row.PrePID)
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return [32]byte{}, nil, nil, ctxErr
+			}
+			if err != nil {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d user identity differs: %w", owner.Port, err)
+			}
+			if !sameUser {
+				return [32]byte{}, nil, nil, fmt.Errorf("managed port %d user identity differs", owner.Port)
 			}
 		}
 		owners = append(owners, owner)
+	}
+	if err := ctx.Err(); err != nil {
+		return [32]byte{}, nil, nil, err
 	}
 	return sha256.Sum256(raw), frozen, owners, nil
 }
@@ -249,7 +315,10 @@ func heldUpgradeGUIIdentity(held any, pid int, target string, startedAt time.Tim
 	return verifyUpgradeGUIHeldIdentity(reader, pid, target, startedAt, lookupCurrent)
 }
 
-func holdUpgradeGUIRole(pid int, target string, startedAt time.Time, role string, in upgradeGUIObservationInputs) (result upgradeGUIProcessIdentity, held process.HeldPIDGeneration, retErr error) {
+func holdUpgradeGUIRole(ctx context.Context, pid int, target string, startedAt time.Time, role string, in upgradeGUIObservationInputs) (result upgradeGUIProcessIdentity, held process.HeldPIDGeneration, retErr error) {
+	if err := ctx.Err(); err != nil {
+		return result, nil, err
+	}
 	held, err := in.HoldTermination(pid)
 	if err != nil {
 		return result, nil, err
@@ -264,13 +333,25 @@ func holdUpgradeGUIRole(pid int, target string, startedAt time.Time, role string
 			held = nil
 		}
 	}()
+	if err := ctx.Err(); err != nil {
+		return result, nil, err
+	}
 	handleID, err := heldUpgradeGUIIdentity(held, pid, target, startedAt, in.CurrentIdentity)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return result, nil, fmt.Errorf("%s kernel image identity: %w", role, ctxErr)
+	}
 	if err != nil {
 		return result, nil, fmt.Errorf("%s kernel image identity: %w", role, err)
 	}
-	observed, err := in.CommandIdentity(pid)
-	if err != nil || !samePath(observed.ExecutablePath, target) || observed.CreationDateUnix != handleID.StartedAt.Unix() {
-		return result, nil, fmt.Errorf("%s command generation differs: %v", role, err)
+	observed, err := in.CommandIdentity(ctx, pid)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return result, nil, fmt.Errorf("%s command generation differs: %w", role, ctxErr)
+	}
+	if err != nil {
+		return result, nil, fmt.Errorf("%s command generation differs: %w", role, err)
+	}
+	if !samePath(observed.ExecutablePath, target) || observed.CreationDateUnix != handleID.StartedAt.Unix() {
+		return result, nil, fmt.Errorf("%s command generation differs", role)
 	}
 	actualRole := supervisorCommandLineSubcommand(observed.CommandLine)
 	if role == "gui" {
@@ -281,10 +362,16 @@ func holdUpgradeGUIRole(pid int, target string, startedAt time.Time, role string
 		return result, nil, fmt.Errorf("%s command role differs", role)
 	}
 	sameUser, err := in.SIDMatches(pid)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return result, nil, fmt.Errorf("%s user identity differs: %w", role, ctxErr)
+	}
 	if err != nil || !sameUser {
 		return result, nil, fmt.Errorf("%s user identity differs: %v", role, err)
 	}
 	if _, err := heldUpgradeGUIIdentity(held, pid, target, handleID.StartedAt, in.CurrentIdentity); err != nil {
+		return result, nil, err
+	}
+	if err := ctx.Err(); err != nil {
 		return result, nil, err
 	}
 	return upgradeGUIProcessIdentity{PID: pid, Role: actualRole, Image: handleID.ExecutablePath, StartedAt: handleID.StartedAt, SameUser: true}, held, nil
@@ -332,7 +419,7 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 		}
 	}()
 	held.Identity.Target = target
-	held.Identity.GUI, held.GUI, err = holdUpgradeGUIRole(record.PID, target, record.StartTime, "gui", in)
+	held.Identity.GUI, held.GUI, err = holdUpgradeGUIRole(ctx, record.PID, target, record.StartTime, "gui", in)
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: hold GUI: %w", err)
 	}
@@ -361,7 +448,7 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 	if trayPID <= 0 {
 		return nil, errors.New("UPGRADE_GUI_IDENTITY_AMBIGUOUS: bound tray process is missing")
 	}
-	held.Identity.Tray, held.Tray, err = holdUpgradeGUIRole(trayPID, target, trayStartedAt, "tray", in)
+	held.Identity.Tray, held.Tray, err = holdUpgradeGUIRole(ctx, trayPID, target, trayStartedAt, "tray", in)
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: hold tray: %w", err)
 	}
@@ -392,9 +479,18 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor kernel identity: %w", err)
 	}
-	detail, err := in.CommandIdentity(owner.PID)
-	if err != nil || supervisorCommandLineSubcommand(detail.CommandLine) != "supervise" || !samePath(detail.ExecutablePath, target) || detail.CreationDateUnix != supervisorID.StartedAt.Unix() {
-		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %v", err)
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %w", err)
+	}
+	detail, err := in.CommandIdentity(ctx, owner.PID)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %w", ctxErr)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role: %w", err)
+	}
+	if supervisorCommandLineSubcommand(detail.CommandLine) != "supervise" || !samePath(detail.ExecutablePath, target) || detail.CreationDateUnix != supervisorID.StartedAt.Unix() {
+		return nil, errors.New("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role differs")
 	}
 	sameUser, err := in.SIDMatches(owner.PID)
 	if err != nil || !sameUser {
@@ -430,6 +526,9 @@ func observeUpgradeGUIHeldTopologyWithInputsMode(ctx context.Context, stateDir, 
 		return nil, fmt.Errorf("UPGRADE_GUI_TASK_DRIFT: pre-exit task actions: %w", err)
 	}
 	held.IntentHash, held.FrozenPorts, held.PortOwners, err = in.PortOwners(ctx, stateDir, target, owner.PID)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners: %w", ctxErr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed listener preimage: %w", err)
 	}
@@ -469,9 +568,18 @@ func recheckUpgradeGUISupervisorAndInputs(ctx context.Context, held *upgradeGUIH
 			return err
 		}
 	}
-	detail, err := in.CommandIdentity(owner.PID)
-	if err != nil || supervisorCommandLineSubcommand(detail.CommandLine) != "supervise" || !samePath(detail.ExecutablePath, held.Identity.Target) || detail.CreationDateUnix != held.Identity.Supervisor.StartedAt.Unix() {
-		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %v", err)
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %w", err)
+	}
+	detail, err := in.CommandIdentity(ctx, owner.PID)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %w", ctxErr)
+	}
+	if err != nil {
+		return fmt.Errorf("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed: %w", err)
+	}
+	if supervisorCommandLineSubcommand(detail.CommandLine) != "supervise" || !samePath(detail.ExecutablePath, held.Identity.Target) || detail.CreationDateUnix != held.Identity.Supervisor.StartedAt.Unix() {
+		return errors.New("UPGRADE_GUI_SUPERVISOR_INDEPENDENCE_UNPROVEN: supervisor role changed")
 	}
 	if _, err := heldUpgradeGUIIdentity(held.Supervisor, owner.PID, held.Identity.Target, held.Identity.Supervisor.StartedAt, in.CurrentIdentity); err != nil {
 		return err
@@ -481,8 +589,14 @@ func recheckUpgradeGUISupervisorAndInputs(ctx context.Context, held *upgradeGUIH
 		return fmt.Errorf("UPGRADE_GUI_TASK_DRIFT: exact task actions changed: %v", err)
 	}
 	intentHash, frozen, ports, err := in.PortOwners(ctx, held.StateDir, held.Identity.Target, owner.PID)
-	if err != nil || intentHash != held.IntentHash || !reflect.DeepEqual(frozen, held.FrozenPorts) || !reflect.DeepEqual(ports, held.PortOwners) {
-		return fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed: %v", err)
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed: %w", ctxErr)
+	}
+	if err != nil {
+		return fmt.Errorf("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed: %w", err)
+	}
+	if intentHash != held.IntentHash || !reflect.DeepEqual(frozen, held.FrozenPorts) || !reflect.DeepEqual(ports, held.PortOwners) {
+		return errors.New("UPGRADE_GUI_IDENTITY_AMBIGUOUS: managed intent/listeners changed")
 	}
 	return nil
 }
@@ -1883,32 +1997,66 @@ func observeWindowsProductPairQuiescence(ctx context.Context, stateDir, target s
 }
 
 func observeWindowsProductIntentPorts(ctx context.Context, target string, frozen []windowsProductIntentPortV1, requireUnbound bool) ([]windowsProductPortSettlementV1, error) {
+	rows, _, err := observeWindowsProductIntentPortsWithInputs(ctx, target, frozen, requireUnbound, api.LoopbackPortOwnerPIDContext, process.LookupPIDHandleIdentity)
+	return rows, err
+}
+
+// Exact native anchors are local observation data, not persisted settlements or
+// termination authority. Every image-only sibling uses this one ordered loop.
+func observeWindowsProductIntentPortsWithInputs(ctx context.Context, target string, frozen []windowsProductIntentPortV1, requireUnbound bool, portOwner func(context.Context, int) (int, bool, error), nativeIdentity func(int) (process.PIDHandleIdentity, error)) ([]windowsProductPortSettlementV1, []process.PIDHandleIdentity, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if portOwner == nil || nativeIdentity == nil {
+		return nil, nil, errors.New("image-only observation inputs unavailable")
+	}
 	rows := make([]windowsProductPortSettlementV1, 0, len(frozen))
+	anchors := make([]process.PIDHandleIdentity, 0, len(frozen))
 	for _, intent := range frozen {
-		pid, bound, err := api.LoopbackPortOwnerPIDContext(ctx, intent.Port)
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		pid, bound, err := portOwner(ctx, intent.Port)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		if err != nil {
-			return nil, fmt.Errorf("probe frozen intent port %s/%d: %w", intent.TaskName, intent.Port, err)
+			return nil, nil, fmt.Errorf("probe frozen intent port %s/%d: %w", intent.TaskName, intent.Port, err)
 		}
 		if !bound {
 			rows = append(rows, windowsProductPortSettlementV1{TaskName: intent.TaskName, Port: intent.Port, PreState: windowsProductPortUnbound, PostUnbound: requireUnbound})
+			anchors = append(anchors, process.PIDHandleIdentity{})
 			continue
 		}
 		if requireUnbound {
-			return nil, fmt.Errorf("known-absent supervisor has bound frozen intent port %s/%d owned by PID %d", intent.TaskName, intent.Port, pid)
+			return nil, nil, fmt.Errorf("known-absent supervisor has bound frozen intent port %s/%d owned by PID %d", intent.TaskName, intent.Port, pid)
 		}
 		if pid <= 0 {
-			return nil, fmt.Errorf("frozen intent port %s/%d returned an invalid owner PID %d", intent.TaskName, intent.Port, pid)
+			return nil, nil, fmt.Errorf("frozen intent port %s/%d returned an invalid owner PID %d", intent.TaskName, intent.Port, pid)
 		}
-		identity, err := processLookupIdentityFn(pid)
+		if err := ctx.Err(); err != nil {
+			return nil, nil, err
+		}
+		identity, err := nativeIdentity(pid)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, nil, ctxErr
+		}
 		if err != nil {
-			return nil, fmt.Errorf("resolve frozen intent port %s/%d owner PID %d: %w", intent.TaskName, intent.Port, pid, err)
+			return nil, nil, fmt.Errorf("resolve frozen intent port %s/%d owner PID %d: %w", intent.TaskName, intent.Port, pid, err)
+		}
+		if identity.PID != pid || identity.StartedAt.IsZero() {
+			return nil, nil, fmt.Errorf("frozen intent port %s/%d owner generation unavailable", intent.TaskName, intent.Port)
 		}
 		if !samePath(identity.ExecutablePath, target) {
-			return nil, fmt.Errorf("frozen intent port %s/%d owner PID %d image %s differs from canonical target %s", intent.TaskName, intent.Port, pid, identity.ExecutablePath, target)
+			return nil, nil, fmt.Errorf("frozen intent port %s/%d owner PID %d image %s differs from canonical target %s", intent.TaskName, intent.Port, pid, identity.ExecutablePath, target)
 		}
 		rows = append(rows, windowsProductPortSettlementV1{TaskName: intent.TaskName, Port: intent.Port, PreState: windowsProductPortCanonicalOwned, PrePID: pid})
+		anchors = append(anchors, identity)
 	}
-	return rows, nil
+	if err := ctx.Err(); err != nil {
+		return nil, nil, err
+	}
+	return rows, anchors, nil
 }
 
 func admitV5UpgradeCandidate(path string) (UpgradeCandidateV1, error) {
