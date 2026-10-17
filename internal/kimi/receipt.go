@@ -124,7 +124,7 @@ func parseProviderReceipt(record []byte, requestedEffort string, capabilityChoic
 	if len(envelope.LaunchFlags) == 0 || json.Unmarshal(envelope.LaunchFlags, &flags) != nil || len(flags) != 0 {
 		return providerReceipt{}, errReceiptInvalid
 	}
-	if err := validatePrimaryOutcome(envelope.PrimaryOutcome); err != nil {
+	if err := validatePrimaryOutcome(envelope.PrimaryOutcome, *envelope.ExitCode, envelope.Status, envelope.Gate); err != nil {
 		return providerReceipt{}, errReceiptInvalid
 	}
 	if err := validateCapabilityEvidence(envelope.Selected, envelope.Observed); err != nil {
@@ -153,9 +153,10 @@ func validateNoneCapabilityBinding(selectedRaw, observedRaw json.RawMessage) boo
 		len(observed.ToolCalls) == 0 && len(observed.PermissionDecisions) == 0 && observed.ObservationsOmitted == nil
 }
 
-func validatePrimaryOutcome(raw json.RawMessage) error {
+func validatePrimaryOutcome(raw json.RawMessage, exitCode int, status, gate string) error {
 	var primary receiptPrimaryOutcome
-	if len(raw) == 0 || json.Unmarshal(raw, &primary) != nil || primary.ExitCode == nil || primary.Status == "" || primary.Gate == "" {
+	if len(raw) == 0 || json.Unmarshal(raw, &primary) != nil || primary.ExitCode == nil || primary.Status == "" || primary.Gate == "" ||
+		*primary.ExitCode != exitCode || primary.Status != status || primary.Gate != gate {
 		return errReceiptInvalid
 	}
 	return nil
