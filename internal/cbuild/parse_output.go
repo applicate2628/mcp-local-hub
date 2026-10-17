@@ -371,37 +371,10 @@ func (b *builder) settleConfiguredCache(sourceDir, preset, output string) (map[s
 	return cacheSummary(cache), nil
 }
 
-func findConfiguredCache(ctx context.Context, sourceDir string) (string, error) {
-	var candidates []string
-	err := filepath.WalkDir(sourceDir, func(path string, entry os.DirEntry, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if entry.IsDir() || entry.Name() != "CMakeCache.txt" {
-			return nil
-		}
-		cacheDir, _, err := validateConfiguredCache(sourceDir, filepath.Dir(path))
-		if err == nil {
-			candidates = append(candidates, cacheDir)
-		}
-		return nil
-	})
-	if err != nil {
+func (b *builder) configuredCacheDir(ctx context.Context, sourceDir, preset string) (string, error) {
+	if err := ctx.Err(); err != nil {
 		return "", err
 	}
-	if len(candidates) == 0 {
-		return "", fmt.Errorf("no CMake-configured build tree for source/preset")
-	}
-	if len(candidates) > 1 {
-		return "", fmt.Errorf("multiple CMake-configured build trees; configure the requested preset first")
-	}
-	return candidates[0], nil
-}
-
-func (b *builder) configuredCacheDir(ctx context.Context, sourceDir, preset string) (string, error) {
 	source, err := canonicalExistingDir(sourceDir)
 	if err != nil {
 		return "", err
@@ -411,13 +384,11 @@ func (b *builder) configuredCacheDir(ctx context.Context, sourceDir, preset stri
 	cacheDir := b.configured[key]
 	b.configuredMu.Unlock()
 	if cacheDir == "" {
-		cacheDir, err = findConfiguredCache(ctx, source)
-		if err != nil {
-			return "", err
-		}
-		b.configuredMu.Lock()
-		b.configured[key] = cacheDir
-		b.configuredMu.Unlock()
+		// A cache identifies its source and binary directory, not the preset
+		// that produced it. Even a unique cache cannot establish this binding.
+		// Let CMake resolve presets during an explicit configure; never guess
+		// or implicitly reconfigure as a side effect of a destructive clean.
+		return "", fmt.Errorf("no verified build directory for configure preset %q; run cmake_configure for this preset in the current server before cleaning", preset)
 	}
 	validated, _, err := validateConfiguredCache(source, cacheDir)
 	if err != nil {

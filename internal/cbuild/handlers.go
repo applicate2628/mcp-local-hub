@@ -581,14 +581,14 @@ func (b *builder) cmakeWorkflow() mcp.Tool {
 func (b *builder) cmakeClean() mcp.Tool {
 	schema := objSchema(map[string]any{
 		"working_dir":     workingDirProp(),
-		"preset":          strProp("Configure preset whose build tree to clean (required — resolves the build directory)."),
+		"preset":          strProp("Configure preset successfully configured through cmake_configure in the current server (required)."),
 		"purge_build_dir": boolProp("Instead of `--target clean`, delete the entire resolved build directory. Refused unless the directory is strictly inside the project (path-escape guard)."),
 		"timeout_sec":     intProp("Per-call timeout in seconds (default 300; hard-capped at 60 min)."),
 	}, "preset")
 	return &funcTool{
 		name:        "cmake_clean",
 		title:       "CMake clean",
-		description: "Clean a build tree identified by a successful CMake configure. By default runs `cmake --build <validated build dir> --target clean`. With purge_build_dir it removes that directory only after cache identity and strict containment checks.",
+		description: "Clean a build tree bound to this preset by a successful cmake_configure in the current server. After restart or without that binding, fails closed and requires cmake_configure first. By default runs `cmake --build <validated build dir> --target clean`. With purge_build_dir it removes that directory only after cache identity and strict containment checks.",
 		schema:      schema,
 		handler: func(ctx context.Context, raw json.RawMessage) (any, error) {
 			var a cleanArgs

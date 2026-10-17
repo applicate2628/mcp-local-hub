@@ -239,7 +239,12 @@ func TestPresetArgvWiring(t *testing.T) {
 			t.Errorf("%s argv = %q, want exactly --preset=-weird", tc.tool, tail)
 		}
 	}
-	tail := rawTailOf(t, toolNamed(t, "cmake_clean"), map[string]any{"preset": "-weird", "working_dir": dir})
+	// Clean requires a preset-specific settlement, not discovery of any cache.
+	b := &builder{configured: make(map[configuredCacheKey]string)}
+	if _, err := b.settleConfiguredCache(dir, "-weird", "-- Build files have been written to: "+buildDir); err != nil {
+		t.Fatal(err)
+	}
+	tail := rawTailOf(t, b.cmakeClean(), map[string]any{"preset": "-weird", "working_dir": dir})
 	canonicalBuildDir, err := canonicalExistingDir(buildDir)
 	if err != nil {
 		t.Fatalf("canonical build directory: %v", err)
