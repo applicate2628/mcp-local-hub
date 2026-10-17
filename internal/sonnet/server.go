@@ -349,6 +349,11 @@ func (s *Server) Start(ctx context.Context, req StartRequest) (StartResponse, er
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Close may have released the store lease while the project was copied.
+	// Revalidate admission under the same lock used for worker registration.
+	if s.closed {
+		return StartResponse{}, s.cleanupPreTransferWork(work, errors.New("SONNET_RUN_OWNER_CLOSED"))
+	}
 	if req.IdempotencyKey != "" {
 		if id := s.keys[req.IdempotencyKey]; id != "" {
 			r := s.runs[id]
