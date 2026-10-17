@@ -182,6 +182,7 @@ type Server struct {
 	markActive     func(string) (func(), error)
 	removeWork     func(string) error
 	afterCopy      func()
+	beforeOutput   func() // test barrier; set before starting workers
 }
 
 func NewServer(c Config) *Server {
@@ -488,6 +489,14 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 	}
 	s.mu.Unlock()
 	out, err := s.driver.Run(ctx, em, filepath.Join(r.workspace, "work", filepath.FromSlash(r.ProjectFile)))
+	// Workspace, project file and baseline are immutable after admission.
+	// Keep the worker/lease alive, but do not block status, cancellation or
+	// shutdown admission while hashing potentially large output trees.
+	if s.beforeOutput != nil {
+		s.beforeOutput()
+	}
+	manifest, manifestErr := compareOutput(filepath.Join(r.workspace, "work"), r.Baseline)
+	summary := summarizeRunLog(filepath.Join(r.workspace, "work"), r.ProjectFile)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	r.Stdout = string(out.Stdout)
@@ -528,13 +537,12 @@ func (s *Server) run(ctx context.Context, r *record, em string) {
 		r.Reportable = true
 	}
 	r.Phase = "settled"
-	manifest, manifestErr := compareOutput(filepath.Join(r.workspace, "work"), r.Baseline)
 	r.OutputManifest = manifest
 	if manifestErr != nil || !manifest.Reportable {
 		r.Reportable = false
 		r.FailureID = "SONNET_OUTPUT_UNATTRIBUTABLE"
 	}
-	r.RunSummary = summarizeRunLog(filepath.Join(r.workspace, "work"), r.ProjectFile)
+	r.RunSummary = summary
 	r.UpdatedAt = now()
 	r.Generation++
 	if err := s.persist(r); err != nil {

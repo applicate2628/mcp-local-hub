@@ -15,6 +15,15 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if os.Getenv("MCP_CBUILD_FAKE_CTEST") != "" {
+		fmt.Println("1/2 Test #1: first .................. Passed 0.01 sec")
+		if os.Getenv("MCP_CBUILD_FAKE_CTEST") == "large" {
+			fmt.Println(strings.Repeat("x", maxCapturedOutput+1))
+		}
+		fmt.Println("2/2 Test #2: last ................... Passed 0.01 sec")
+		fmt.Println("100% tests passed, 0 tests failed out of 2")
+		os.Exit(0)
+	}
 	if os.Getenv("MCP_CBUILD_PROTOCOL_FAKE_CMAKE") == "1" {
 		for _, arg := range os.Args[1:] {
 			switch arg {
