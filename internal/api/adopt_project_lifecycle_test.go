@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -235,6 +236,14 @@ func TestProjectAdoptExactRepeatIsVerificationOnly(t *testing.T) {
 		t.Fatalf("project settlement = %#v", settlement)
 	}
 
+	// Windows repeat must use the same identity despite a different spelling.
+	// The rest of this test verifies the repeat stays verification-only.
+	if runtime.GOOS == "windows" {
+		opts.CodexProjectSourceRoot = strings.ToUpper(fixture.projectRoot)
+		if opts.CodexProjectSourceRoot == fixture.projectRoot {
+			opts.CodexProjectSourceRoot = strings.ToLower(fixture.projectRoot)
+		}
+	}
 	repeat, err := NewAPI().BuildAdoptPlan(opts)
 	if err != nil {
 		t.Fatalf("BuildAdoptPlan repeat: %v", err)
