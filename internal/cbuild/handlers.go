@@ -3,6 +3,7 @@ package cbuild
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -681,9 +682,9 @@ func (b *builder) cmakeClean() mcp.Tool {
 				timeout = hardCapTimeout
 			}
 			waitCtx, cancelWait := context.WithTimeout(ctx, timeout)
+			defer cancelWait()
 			deadline, _ := waitCtx.Deadline()
 			unlock, err := b.lockProjectOperation(waitCtx, dir)
-			cancelWait()
 			if err != nil {
 				return nil, err
 			}
@@ -692,7 +693,7 @@ func (b *builder) cmakeClean() mcp.Tool {
 			if timeout <= 0 {
 				return nil, context.DeadlineExceeded
 			}
-			buildDir, err := b.configuredCacheDir(ctx, dir, a.Preset)
+			buildDir, err := b.configuredCacheDir(waitCtx, dir, a.Preset)
 			if err != nil {
 				return nil, err
 			}
@@ -702,11 +703,16 @@ func (b *builder) cmakeClean() mcp.Tool {
 				if err != nil {
 					return nil, err
 				}
-				if err := ctx.Err(); err != nil {
+				if err := waitCtx.Err(); err != nil {
 					return nil, err
 				}
 				if err := os.RemoveAll(safe); err != nil {
 					return nil, fmt.Errorf("purge build dir %q: %w", safe, err)
+				}
+				// RemoveAll itself is synchronous and cannot be interrupted. Do not
+				// report an on-time success if deletion outlasted the budget.
+				if err := waitCtx.Err(); err != nil {
+					return cleanResult{Success: false, Purged: true, RemovedDir: safe, TimedOut: errors.Is(err, context.DeadlineExceeded)}, nil
 				}
 				return cleanResult{Success: true, Purged: true, RemovedDir: safe}, nil
 			}
@@ -718,6 +724,13 @@ func (b *builder) cmakeClean() mcp.Tool {
 				return nil, err
 			}
 			argv := []string{"--build", buildDir, "--target", "clean"}
+			if err := waitCtx.Err(); err != nil {
+				return nil, err
+			}
+			timeout = time.Until(deadline)
+			if timeout <= 0 {
+				return nil, context.DeadlineExceeded
+			}
 			res, err := b.runTool(ctx, timeout, dir, cmakeBin, argv)
 			if err != nil {
 				return nil, err
